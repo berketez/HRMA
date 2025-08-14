@@ -801,16 +801,42 @@ function askAI() {
     const aiData = prepareAIData(currentResults);
     
     // Create prompt
-    const prompt = `Please analyze this hybrid rocket motor design and provide insights:
+    const prompt = `Please analyze this comprehensive hybrid rocket motor design data and provide detailed engineering insights:
 
 ${JSON.stringify(aiData, null, 2)}
 
-Please provide:
-1. Performance assessment (Is this design efficient?)
-2. Safety considerations
-3. Optimization suggestions
-4. Comparison to typical hybrid rocket motors
-5. Any potential issues or concerns`;
+As an expert aerospace engineer, please provide detailed analysis in the following areas:
+
+**PERFORMANCE ANALYSIS:**
+1. Evaluate the specific impulse and thrust efficiency
+2. Assess the O/F ratio optimization  
+3. Review combustion chamber and nozzle design effectiveness
+4. Comment on propellant utilization efficiency
+
+**SAFETY & STRUCTURAL ASSESSMENT:**
+1. Review the calculated hoop stress and wall thickness recommendations
+2. Evaluate the safety factors and design margins
+3. Assess thermal management and cooling requirements
+4. Identify any critical failure modes or risks
+
+**DESIGN OPTIMIZATION:**
+1. Suggest improvements for better performance
+2. Recommend material selections based on thermal/structural analysis
+3. Optimize injector design for better mixing
+4. Propose nozzle geometry refinements
+
+**COMPARATIVE ANALYSIS:**
+1. Compare this design to typical hybrid rockets in its class
+2. Benchmark against industry standards and best practices
+3. Assess manufacturability and cost considerations
+
+**RISK ASSESSMENT:**
+1. Evaluate the identified risk factors
+2. Suggest mitigation strategies
+3. Recommend testing protocols
+4. Identify compliance with safety standards
+
+Please provide specific numerical recommendations where applicable and explain the engineering rationale behind your suggestions.`;
     
     // Copy to clipboard
     navigator.clipboard.writeText(prompt).then(() => {
@@ -888,7 +914,7 @@ function getFuelTypeDisplayName(fuelType) {
         'al2o3': 'Aluminum Oxide (Al2O3)'
     };
     
-    return fuelNames[fuelType] || fuelType.toUpperCase();
+    return fuelNames[fuelType] || (fuelType ? fuelType.toUpperCase() : 'Unknown Fuel');
 }
 
 // Prepare AI-friendly data
@@ -896,25 +922,47 @@ function prepareAIData(results) {
     return {
         analysis_type: "Hybrid Rocket Motor Design",
         timestamp: new Date().toISOString(),
+        schema_version: "1.0",
+        units_system: "SI_mixed", // Note: Mixed units used (bar for pressure, mm for dimensions)
+        generator: "HRMA v2.0",
+        run_id: generateRunId(),
         
         input_parameters: {
-            thrust: results.motor.thrust,
-            burn_time: results.motor.burn_time,
-            total_impulse: results.motor.total_impulse,
-            of_ratio: results.motor.of_ratio,
-            chamber_pressure: results.motor.chamber_pressure,
+            thrust_N: results.motor.thrust,
+            burn_time_s: results.motor.burn_time,
+            total_impulse_Ns: results.motor.total_impulse,
+            of_ratio_dimensionless: results.motor.of_ratio,
+            chamber_pressure_bar: results.motor.chamber_pressure, // CRITICAL: Unit assumed as bar
             fuel_type: getFuelTypeDisplayName(results.motor.fuel_type),
-            oxidizer: 'N2O'
+            oxidizer: 'N2O',
+            reference_conditions: {
+                ambient_pressure_Pa: 101325,
+                ambient_temperature_K: 293.15,
+                performance_basis: "sea_level_standard"
+            }
         },
         
         performance_results: {
-            specific_impulse_sec: results.motor.isp,
+            specific_impulse_sec: {
+                value: results.motor.isp,
+                derived_from: "c_star_and_cf",
+                reference: "sea_level_standard"
+            },
             c_star_m_s: results.motor.c_star,
-            thrust_coefficient: results.motor.cf,
+            thrust_coefficient_dimensionless: results.motor.cf,
             total_mass_flow_kg_s: results.motor.mdot_total,
             oxidizer_flow_kg_s: results.motor.mdot_ox,
             fuel_flow_kg_s: results.motor.mdot_f,
-            propellant_mass_kg: results.motor.propellant_mass_total
+            propellant_mass_kg: {
+                value: results.motor.propellant_mass_total,
+                derived_from: "mass_flow_and_burn_time",
+                calculation_method: "mdot_total * burn_time"
+            },
+            thrust_to_weight_ratio: {
+                value: results.motor.thrust / (results.motor.propellant_mass_total * 9.81),
+                reference_mass_kg: results.motor.propellant_mass_total,
+                description: "thrust / (propellant_mass * g0)"
+            }
         },
         
         geometry: {
@@ -922,30 +970,256 @@ function prepareAIData(results) {
             chamber_length_mm: results.motor.chamber_length * 1000,
             throat_diameter_mm: results.motor.throat_diameter * 1000,
             exit_diameter_mm: results.motor.exit_diameter * 1000,
-            expansion_ratio: results.motor.expansion_ratio,
+            expansion_ratio_dimensionless: results.motor.expansion_ratio,
             port_diameter_initial_mm: results.motor.port_diameter_initial * 1000,
-            port_diameter_final_mm: results.motor.port_diameter_final * 1000
+            port_diameter_final_mm: results.motor.port_diameter_final * 1000,
+            
+            // Geometry validation and anomaly detection
+            l_over_d_ratio: (results.motor.chamber_length * 1000) / (results.motor.chamber_diameter * 1000),
+            geometry_anomalies: detectGeometryAnomalies(results.motor),
+            
+            nozzle_geometry: {
+                convergent_angle_deg: results.motor.convergent_angle || 15.0,
+                divergent_angle_deg: results.motor.divergent_angle || 12.0,
+                angle_definition: "half_angles_from_centerline",
+                nozzle_type: "conical_assumed"
+            }
         },
         
         injector_design: {
             type: results.injector.type,
             exit_velocity_m_s: results.injector.exit_velocity,
             pressure_drop_bar: results.injector.pressure_drop,
-            reynolds_number: results.injector.reynolds_number,
+            reynolds_number: {
+                value: results.injector.reynolds_number,
+                reference_diameter: "injector_hole_diameter",
+                fluid: "oxidizer",
+                calculation_note: "Re = ρvd/μ for oxidizer flow"
+            },
+            discharge_coefficient: 0.65, // Assumed typical value
             ...(results.injector.type === 'showerhead' && {
                 holes_count: results.injector.n_holes,
-                hole_diameter_mm: results.injector.hole_diameter
-            })
+                hole_diameter_mm: results.injector.hole_diameter,
+                l_over_d_ratio: 2.0, // Assumed typical value
+                plate_thickness_mm: 3.0 // Assumed
+            }),
+            flow_characteristics: {
+                oxidizer_inlet_temperature_K: 293.15,
+                inlet_pressure_bar: (results.motor.chamber_pressure || 20) + (results.injector.pressure_drop || 5),
+                flash_boiling_risk: results.injector.pressure_drop < 3.0 ? "HIGH" : "LOW",
+                cavitation_index: calculateCavitationIndex(results.injector)
+            }
         },
         
-        warnings: results.injector.warnings || [],
+        warnings: structurizeWarnings(results.injector.warnings || []),
         
         efficiency_metrics: {
             combustion_efficiency_estimate: 0.95,
             nozzle_efficiency_estimate: 0.98,
             overall_efficiency_estimate: 0.93
+        },
+        
+        thermal_analysis: {
+            chamber_temperature_K: results.motor.chamber_temperature || 3000,
+            nozzle_angles: {
+                convergent_angle_deg: results.motor.convergent_angle || 15.0,
+                divergent_angle_deg: results.motor.divergent_angle || 12.0
+            },
+            material_properties: {
+                recommended_materials: ['Steel 4130', 'Inconel 718', 'Aluminum 6061'],
+                thermal_considerations: {
+                    max_wall_temperature_K: 1200,
+                    cooling_required: results.motor.chamber_temperature > 2500
+                }
+            }
+        },
+        
+        structural_analysis: {
+            design_pressure_bar: (results.motor.chamber_pressure * 1.5) || 30,
+            safety_factors: {
+                chamber_wall: 4.0,
+                nozzle: 3.0,
+                injector: 4.0
+            },
+            stress_analysis: {
+                hoop_stress_estimate_MPa: calculateHoopStress(results.motor),
+                wall_thickness_recommendation_mm: calculateWallThickness(results.motor),
+                burst_pressure_factor: 4.0
+            }
+        },
+        
+        safety_considerations: {
+            critical_parameters: {
+                chamber_pressure_limit_bar: 50,
+                of_ratio_range: [2.0, 8.0],
+                thrust_to_weight_ratio: results.motor.thrust / (results.motor.propellant_mass_total * 9.81)
+            },
+            risk_factors: identifyRiskFactors(results),
+            recommended_testing: [
+                'Cold flow tests',
+                'Static fire tests',
+                'Burst pressure testing',
+                'Thermal cycling tests'
+            ]
+        },
+        
+        manufacturing_data: {
+            tolerances: {
+                chamber_diameter_mm: {
+                    type: "bilateral",
+                    plus: 0.1,
+                    minus: 0.1,
+                    unit: "mm",
+                    grade: "IT7"
+                },
+                throat_diameter_mm: {
+                    type: "bilateral", 
+                    plus: 0.05,
+                    minus: 0.05,
+                    unit: "mm",
+                    grade: "IT6",
+                    critical: true
+                },
+                surface_finish: {
+                    parameter: "Ra",
+                    value: 3.2,
+                    unit: "μm",
+                    measurement_standard: "ISO4287"
+                }
+            },
+            machining_requirements: {
+                chamber: {
+                    method: "CNC turning",
+                    material_removal_rate: "conservative",
+                    heat_treatment: "stress_relief_required"
+                },
+                nozzle: {
+                    method: "CNC machining + EDM finish",
+                    throat_fabrication: "wire_EDM_preferred",
+                    convergent_divergent_matching: "±0.02mm"
+                },
+                injector: {
+                    method: "precision_drilling + EDM",
+                    hole_pattern_tolerance: "±0.02mm",
+                    flow_testing_required: true
+                }
+            }
         }
     };
+}
+
+// Helper calculation functions for AI data
+
+function generateRunId() {
+    return 'RUN_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
+}
+
+function detectGeometryAnomalies(motorData) {
+    const anomalies = [];
+    
+    // L/D ratio check
+    const lOverD = (motorData.chamber_length * 1000) / (motorData.chamber_diameter * 1000);
+    if (lOverD < 0.1) {
+        anomalies.push({
+            type: "SCALE_ANOMALY",
+            severity: "HIGH", 
+            message: `Extremely low L/D ratio: ${lOverD.toFixed(3)}`,
+            likely_cause: "Unit conversion error or data entry mistake"
+        });
+    }
+    
+    // Port diameter vs chamber check
+    const portFinalMm = motorData.port_diameter_final * 1000;
+    const chamberMm = motorData.chamber_diameter * 1000;
+    const minWallThickness = 5; // mm minimum wall
+    
+    if (portFinalMm > (chamberMm - 2 * minWallThickness)) {
+        anomalies.push({
+            type: "WALL_THICKNESS_VIOLATION",
+            severity: "CRITICAL",
+            message: `Final port diameter too large for safe wall thickness`,
+            values: {port_final_mm: portFinalMm, chamber_mm: chamberMm, min_wall_mm: minWallThickness}
+        });
+    }
+    
+    return anomalies;
+}
+
+function structurizeWarnings(warningStrings) {
+    return warningStrings.map((warning, index) => ({
+        id: `WARN_${index + 1}`,
+        code: warning.includes('flash') ? 'FLASH_BOILING' : 'GENERAL',
+        severity: warning.includes('flash') ? 'HIGH' : 'MEDIUM',
+        message: warning,
+        timestamp: new Date().toISOString(),
+        path: 'injector_design'
+    }));
+}
+
+function calculateCavitationIndex(injectorData) {
+    // Simplified cavitation index calculation
+    const pressureDrop = injectorData.pressure_drop || 5;
+    const inletPressure = 25; // Assumed tank pressure in bar
+    return pressureDrop / inletPressure;
+}
+
+function calculateHoopStress(motorData) {
+    // Hoop stress calculation: σ = PD/(2t)
+    // Assuming 5mm wall thickness for estimation
+    const pressure = (motorData.chamber_pressure || 20) * 1e5; // Pa
+    const diameter = (motorData.chamber_diameter || 0.1) * 1000; // mm  
+    const thickness = 5; // mm, estimated
+    
+    const hoopStress = (pressure * diameter) / (2 * thickness * 1e6); // Convert to MPa
+    return Math.round(hoopStress * 100) / 100;
+}
+
+function calculateWallThickness(motorData) {
+    // Wall thickness calculation based on pressure vessel design
+    // t = PD/(2σ) * SF
+    const pressure = (motorData.chamber_pressure || 20) * 1e5; // Pa
+    const diameter = (motorData.chamber_diameter || 0.1) * 1000; // mm
+    const allowableStress = 200e6; // Pa, steel yield strength / safety factor
+    const safetyFactor = 4.0;
+    
+    const thickness = (pressure * diameter) / (2 * allowableStress) * safetyFactor;
+    return Math.max(3.0, Math.round(thickness * 100) / 100); // Minimum 3mm
+}
+
+function identifyRiskFactors(results) {
+    const risks = [];
+    
+    // High pressure risk
+    if (results.motor.chamber_pressure > 40) {
+        risks.push('HIGH_PRESSURE: Chamber pressure exceeds 40 bar - requires robust design');
+    }
+    
+    // O/F ratio risks
+    const ofRatio = results.motor.of_ratio;
+    if (ofRatio < 2.0) {
+        risks.push('RICH_MIXTURE: Low O/F ratio may cause incomplete combustion');
+    } else if (ofRatio > 8.0) {
+        risks.push('LEAN_MIXTURE: High O/F ratio may cause overheating');
+    }
+    
+    // Thrust density risk
+    const thrustDensity = results.motor.thrust / (Math.PI * Math.pow(results.motor.chamber_diameter/2, 2));
+    if (thrustDensity > 5000000) { // N/m²
+        risks.push('HIGH_THRUST_DENSITY: May cause thermal stress issues');
+    }
+    
+    // Expansion ratio risk
+    if (results.motor.expansion_ratio > 20) {
+        risks.push('HIGH_EXPANSION_RATIO: Risk of flow separation in nozzle');
+    }
+    
+    // Port diameter risk
+    const portRatio = results.motor.port_diameter_final / results.motor.port_diameter_initial;
+    if (portRatio > 3.0) {
+        risks.push('EXCESSIVE_REGRESSION: Large port growth may affect performance');
+    }
+    
+    return risks.length > 0 ? risks : ['LOW_RISK: Design parameters within normal ranges'];
 }
 
 // Show AI data in modal

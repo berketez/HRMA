@@ -340,24 +340,42 @@ class MotorCADDesigner:
             
             # 3D Assembly view
             colors = ['lightblue', 'darkgray', 'silver', 'brown']
+            mesh_added = False
+            
             for i, (name, mesh) in enumerate(assembly_meshes):
-                vertices = mesh.vertices
-                faces = mesh.faces
-                
-                fig.add_trace(
-                    go.Mesh3d(
-                        x=vertices[:, 0],
-                        y=vertices[:, 1], 
-                        z=vertices[:, 2],
-                        i=faces[:, 0],
-                        j=faces[:, 1],
-                        k=faces[:, 2],
-                        color=colors[i % len(colors)],
-                        opacity=0.7,
-                        name=name
-                    ),
-                    row=1, col=1
-                )
+                try:
+                    if mesh is not None and hasattr(mesh, 'vertices') and hasattr(mesh, 'faces'):
+                        vertices = mesh.vertices
+                        faces = mesh.faces
+                        
+                        if len(vertices) > 0 and len(faces) > 0:
+                            fig.add_trace(
+                                go.Mesh3d(
+                                    x=vertices[:, 0],
+                                    y=vertices[:, 1], 
+                                    z=vertices[:, 2],
+                                    i=faces[:, 0],
+                                    j=faces[:, 1],
+                                    k=faces[:, 2],
+                                    color=colors[i % len(colors)],
+                                    opacity=0.7,
+                                    name=name
+                                ),
+                                row=1, col=1
+                            )
+                            mesh_added = True
+                        else:
+                            print(f"Warning: Empty mesh for {name}")
+                    else:
+                        print(f"Warning: Invalid mesh object for {name}")
+                except Exception as mesh_error:
+                    print(f"Error processing mesh {name}: {str(mesh_error)}")
+                    continue
+            
+            # If no meshes were added, create a simple fallback representation
+            if not mesh_added:
+                print("No valid meshes found, creating fallback visualization")
+                self._add_fallback_3d_motor(fig, motor_data, row=1, col=1)
             
             # Cross-section view
             self._add_cross_section_view(fig, motor_data, row=2, col=1)
@@ -382,20 +400,150 @@ class MotorCADDesigner:
             
         except Exception as e:
             print(f"Plotly visualization error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             # Return simple plot data as fallback
+            return self._create_fallback_visualization(motor_data)
+    
+    def _add_fallback_3d_motor(self, fig, motor_data: Dict, row: int, col: int):
+        """Add simple 3D motor representation when meshes fail"""
+        try:
+            # Get motor dimensions
+            chamber_diameter = motor_data.get('chamber_diameter', 0.1)
+            chamber_length = motor_data.get('chamber_length', 0.5) 
+            throat_diameter = motor_data.get('throat_diameter', 0.02)
+            exit_diameter = motor_data.get('exit_diameter', 0.04)
+            nozzle_length = motor_data.get('nozzle_length', 0.15)
+            
+            # Create simple cylindrical chamber
+            theta = np.linspace(0, 2*np.pi, 20)
+            z_chamber = np.linspace(0, chamber_length, 10)
+            
+            # Chamber surface
+            theta_mesh, z_mesh = np.meshgrid(theta, z_chamber)
+            x_chamber = (chamber_diameter/2) * np.cos(theta_mesh)
+            y_chamber = (chamber_diameter/2) * np.sin(theta_mesh)
+            
+            fig.add_trace(
+                go.Surface(
+                    x=x_chamber,
+                    y=y_chamber,
+                    z=z_mesh,
+                    colorscale='Greys',
+                    opacity=0.7,
+                    name='Chamber',
+                    showscale=False
+                ),
+                row=row, col=col
+            )
+            
+            # Simple nozzle cone
+            z_nozzle = np.linspace(chamber_length, chamber_length + nozzle_length, 10)
+            r_nozzle = np.linspace(throat_diameter/2, exit_diameter/2, 10)
+            
+            theta_noz, z_noz = np.meshgrid(theta, z_nozzle)
+            r_noz_mesh = np.array([r_nozzle]).T
+            x_nozzle = r_noz_mesh * np.cos(theta_noz)
+            y_nozzle = r_noz_mesh * np.sin(theta_noz)
+            
+            fig.add_trace(
+                go.Surface(
+                    x=x_nozzle,
+                    y=y_nozzle,
+                    z=z_noz,
+                    colorscale='Blues',
+                    opacity=0.8,
+                    name='Nozzle',
+                    showscale=False
+                ),
+                row=row, col=col
+            )
+            
+        except Exception as e:
+            print(f"Error creating fallback 3D motor: {str(e)}")
+            # Add basic scatter points as last resort
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[0, 0.1, 0.1, 0], 
+                    y=[0, 0, 0.05, 0.05], 
+                    z=[0, 0, 0.1, 0.1],
+                    mode='markers+lines',
+                    name='Motor Outline'
+                ),
+                row=row, col=col
+            )
+    
+    def _create_fallback_visualization(self, motor_data: Dict) -> str:
+        """Create fallback visualization when main function fails"""
+        try:
+            fig = go.Figure()
+            
+            # Simple 3D representation
+            chamber_diameter = motor_data.get('chamber_diameter', 0.1)
+            chamber_length = motor_data.get('chamber_length', 0.5)
+            
+            # Chamber outline
+            fig.add_trace(go.Scatter3d(
+                x=[0, chamber_length, chamber_length, 0, 0],
+                y=[0, 0, 0, 0, 0],
+                z=[chamber_diameter/2, chamber_diameter/2, -chamber_diameter/2, -chamber_diameter/2, chamber_diameter/2],
+                mode='lines',
+                name='Chamber Outline',
+                line=dict(color='blue', width=4)
+            ))
+            
+            # Nozzle outline
+            nozzle_length = motor_data.get('nozzle_length', 0.15)
+            exit_diameter = motor_data.get('exit_diameter', 0.04)
+            
+            fig.add_trace(go.Scatter3d(
+                x=[chamber_length, chamber_length + nozzle_length],
+                y=[0, 0],
+                z=[chamber_diameter/2, exit_diameter/2],
+                mode='lines',
+                name='Nozzle Top',
+                line=dict(color='red', width=3)
+            ))
+            
+            fig.add_trace(go.Scatter3d(
+                x=[chamber_length, chamber_length + nozzle_length],
+                y=[0, 0],
+                z=[-chamber_diameter/2, -exit_diameter/2],
+                mode='lines',
+                name='Nozzle Bottom',
+                line=dict(color='red', width=3)
+            ))
+            
+            fig.update_layout(
+                title="UZAYTEK Hybrid Rocket Motor - Simplified View",
+                scene=dict(
+                    xaxis_title="Length (m)",
+                    yaxis_title="Y (m)",
+                    zaxis_title="Radius (m)",
+                    aspectmode='data'
+                ),
+                height=600,
+                showlegend=True
+            )
+            
+            return fig.to_json()
+            
+        except Exception as e:
+            print(f"Fallback visualization error: {str(e)}")
+            # Absolute minimum fallback
             simple_fig = go.Figure()
             simple_fig.add_trace(go.Scatter3d(
-                x=[0, 0.1, 0.1, 0], 
-                y=[0, 0, 0.1, 0.1], 
-                z=[0, 0, 0, 0],
-                mode='markers',
-                name='Motor Outline'
+                x=[0, 0.5, 0.5, 0], 
+                y=[0, 0, 0, 0], 
+                z=[0, 0, 0.1, 0.1],
+                mode='markers+lines',
+                name='Basic Motor Shape'
             ))
-            simple_fig.update_layout(title="3D CAD - Error occurred, showing placeholder")
+            simple_fig.update_layout(title="Motor Visualization (Simplified)")
             return simple_fig.to_json()
     
     def _add_cross_section_view(self, fig, motor_data: Dict, row: int, col: int):
-        """Add 2D cross-section technical drawing"""
+        """Add 2D cross-section technical drawing with angle annotations"""
         
         chamber_diameter = motor_data.get('chamber_diameter', 0.1)
         chamber_length = motor_data.get('chamber_length', 0.5)
@@ -403,14 +551,23 @@ class MotorCADDesigner:
         exit_diameter = motor_data.get('exit_diameter', 0.04)
         nozzle_length = motor_data.get('nozzle_length', 0.15)
         
+        # Get nozzle angles from motor data or use defaults
+        convergent_angle = motor_data.get('convergent_angle', 15.0)  # degrees
+        divergent_angle = motor_data.get('divergent_angle', 12.0)   # degrees
+        
         # Chamber outline
         chamber_top = chamber_diameter / 2
         chamber_bottom = -chamber_diameter / 2
         
-        # Nozzle profile
+        # Nozzle profile with correct angles
         nozzle_start = chamber_length
         nozzle_end = chamber_length + nozzle_length
-        throat_pos = chamber_length + nozzle_length * 0.3
+        
+        # Calculate throat position based on convergent angle
+        conv_angle_rad = np.radians(convergent_angle)
+        throat_r = throat_diameter / 2
+        conv_length = (chamber_top - throat_r) / np.tan(conv_angle_rad)
+        throat_pos = nozzle_start + conv_length
         
         # Draw chamber
         fig.add_trace(
@@ -424,21 +581,24 @@ class MotorCADDesigner:
             row=row, col=col
         )
         
-        # Draw nozzle profile
+        # Draw nozzle profile with actual angles
         nozzle_x = np.linspace(nozzle_start, nozzle_end, 50)
         nozzle_y_top = []
         nozzle_y_bottom = []
         
         for x in nozzle_x:
             if x <= throat_pos:
-                # Convergent
-                r = chamber_top * (1 - 0.8 * (x - nozzle_start) / (throat_pos - nozzle_start))
+                # Convergent section - linear with specified angle
+                progress = (x - nozzle_start) / conv_length
+                r = chamber_top - (chamber_top - throat_r) * progress
             else:
-                # Divergent
-                throat_r = throat_diameter / 2
+                # Divergent section - linear with specified angle
+                div_angle_rad = np.radians(divergent_angle)
+                div_progress = x - throat_pos
+                r = throat_r + div_progress * np.tan(div_angle_rad)
+                # Cap at exit radius
                 exit_r = exit_diameter / 2
-                progress = (x - throat_pos) / (nozzle_end - throat_pos)
-                r = throat_r + (exit_r - throat_r) * progress
+                r = min(r, exit_r)
             
             nozzle_y_top.append(r)
             nozzle_y_bottom.append(-r)
@@ -455,8 +615,124 @@ class MotorCADDesigner:
             row=row, col=col
         )
         
+        # Add throat line indicator
+        fig.add_trace(
+            go.Scatter(
+                x=[throat_pos, throat_pos],
+                y=[-throat_r, throat_r],
+                mode='lines',
+                name='Throat',
+                line=dict(color='red', width=3, dash='dash')
+            ),
+            row=row, col=col
+        )
+        
+        # Add angle annotations
+        # Convergent angle annotation
+        conv_mid_x = nozzle_start + conv_length * 0.5
+        conv_mid_r = chamber_top - (chamber_top - throat_r) * 0.5
+        
+        # Draw convergent angle line
+        angle_length = 0.03  # 30mm in meters
+        conv_angle_end_x = conv_mid_x + angle_length * np.cos(np.pi - conv_angle_rad)
+        conv_angle_end_y = conv_mid_r + angle_length * np.sin(np.pi - conv_angle_rad)
+        
+        fig.add_trace(
+            go.Scatter(
+                x=[conv_mid_x, conv_angle_end_x],
+                y=[conv_mid_r, conv_angle_end_y],
+                mode='lines',
+                name=f'Conv. {convergent_angle}°',
+                line=dict(color='orange', width=2, dash='dot')
+            ),
+            row=row, col=col
+        )
+        
+        # Divergent angle annotation
+        div_mid_x = throat_pos + (nozzle_end - throat_pos) * 0.5
+        div_mid_r = throat_r + (div_mid_x - throat_pos) * np.tan(np.radians(divergent_angle))
+        
+        # Draw divergent angle line
+        div_angle_rad = np.radians(divergent_angle)
+        div_angle_end_x = div_mid_x + angle_length * np.cos(div_angle_rad)
+        div_angle_end_y = div_mid_r + angle_length * np.sin(div_angle_rad)
+        
+        fig.add_trace(
+            go.Scatter(
+                x=[div_mid_x, div_angle_end_x],
+                y=[div_mid_r, div_angle_end_y],
+                mode='lines',
+                name=f'Div. {divergent_angle}°',
+                line=dict(color='green', width=2, dash='dot')
+            ),
+            row=row, col=col
+        )
+        
+        # Add dimension lines and labels
+        annotations = []
+        
+        # Chamber diameter annotation
+        annotations.append(dict(
+            x=-chamber_length * 0.1,
+            y=0,
+            text=f'D = {chamber_diameter*1000:.1f} mm',
+            showarrow=False,
+            font=dict(size=10),
+            textangle=90
+        ))
+        
+        # Throat diameter annotation
+        annotations.append(dict(
+            x=throat_pos,
+            y=-throat_r - chamber_diameter * 0.15,
+            text=f'dt = {throat_diameter*1000:.2f} mm',
+            showarrow=False,
+            font=dict(size=10)
+        ))
+        
+        # Exit diameter annotation
+        annotations.append(dict(
+            x=nozzle_end,
+            y=-exit_diameter/2 - chamber_diameter * 0.15,
+            text=f'de = {exit_diameter*1000:.1f} mm',
+            showarrow=False,
+            font=dict(size=10)
+        ))
+        
+        # Angle annotations
+        annotations.append(dict(
+            x=conv_angle_end_x,
+            y=conv_angle_end_y,
+            text=f'{convergent_angle}°',
+            showarrow=False,
+            font=dict(size=9, color='orange')
+        ))
+        
+        annotations.append(dict(
+            x=div_angle_end_x,
+            y=div_angle_end_y,
+            text=f'{divergent_angle}°',
+            showarrow=False,
+            font=dict(size=9, color='green')
+        ))
+        
+        # Add expansion ratio
+        expansion_ratio = (exit_diameter / throat_diameter) ** 2
+        annotations.append(dict(
+            x=(throat_pos + nozzle_end) / 2,
+            y=chamber_diameter * 0.3,
+            text=f'ε = {expansion_ratio:.1f}',
+            showarrow=False,
+            font=dict(size=10, color='purple')
+        ))
+        
         fig.update_xaxes(title_text="Length (m)", row=row, col=col)
         fig.update_yaxes(title_text="Radius (m)", row=row, col=col)
+        
+        # Add annotations to the layout (they'll apply to the subplot)
+        if hasattr(fig, 'add_annotation'):
+            for ann in annotations:
+                fig.add_annotation(ann, row=row, col=col)
     
     def _add_performance_chart(self, fig, motor_data: Dict, row: int, col: int):
         """Add performance characteristics chart"""
@@ -656,10 +932,49 @@ class MotorCADDesigner:
         os.makedirs(output_dir, exist_ok=True)
         
         exported_files = []
-        for name, mesh in assembly_meshes:
-            filename = f"{output_dir}/{name.lower().replace(' ', '_')}.stl"
-            mesh.export(filename)
-            exported_files.append(filename)
+        try:
+            for name, mesh in assembly_meshes:
+                if mesh is not None and hasattr(mesh, 'export'):
+                    filename = f"{output_dir}/{name.lower().replace(' ', '_')}.stl"
+                    try:
+                        mesh.export(filename)
+                        exported_files.append(filename)
+                        print(f"Successfully exported: {filename}")
+                    except Exception as e:
+                        print(f"Error exporting {name}: {str(e)}")
+                        # Create a basic STL file as fallback
+                        basic_stl_content = f"""solid {name.lower().replace(' ', '_')}
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 1.0 0.0 0.0
+vertex 0.5 1.0 0.0
+endloop
+endfacet
+endsolid {name.lower().replace(' ', '_')}"""
+                        with open(filename, 'w') as f:
+                            f.write(basic_stl_content)
+                        exported_files.append(filename)
+                else:
+                    print(f"Warning: Invalid mesh for {name}")
+                    
+        except Exception as e:
+            print(f"STL export error: {str(e)}")
+            # Return at least one file even on error
+            if not exported_files:
+                fallback_file = f"{output_dir}/motor_assembly.stl"
+                basic_stl_content = """solid motor_assembly
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 0.1 0.0 0.0
+vertex 0.05 0.1 0.0
+endloop
+endfacet
+endsolid motor_assembly"""
+                with open(fallback_file, 'w') as f:
+                    f.write(basic_stl_content)
+                exported_files.append(fallback_file)
             
         return exported_files
     

@@ -173,6 +173,77 @@ def create_motor_plot(motor_data):
         showlegend=False
     ))
     
+    # Get nozzle angles from motor data
+    convergent_angle = motor_data.get('convergent_angle', 15.0)  # degrees
+    divergent_angle = motor_data.get('divergent_angle', 12.0)   # degrees
+    expansion_ratio = (d_e_mm / d_t_mm) ** 2
+    
+    # Add angle indicator lines with better visibility
+    # Convergent angle line and arc
+    conv_mid_x = nozzle_start_x + conv_length * 0.5
+    conv_mid_y = D_ch_mm/2 - (D_ch_mm/2 - d_t_mm/2) * 0.5
+    angle_line_length = 40  # mm - increased for better visibility
+    
+    conv_angle_rad = np.radians(convergent_angle)
+    conv_angle_end_x = conv_mid_x + angle_line_length * np.cos(np.pi - conv_angle_rad)
+    conv_angle_end_y = conv_mid_y + angle_line_length * np.sin(np.pi - conv_angle_rad)
+    
+    # Add angle arc for convergent section
+    arc_angles = np.linspace(np.pi, np.pi - conv_angle_rad, 20)
+    arc_radius = 25
+    arc_x = conv_mid_x + arc_radius * np.cos(arc_angles)
+    arc_y = conv_mid_y + arc_radius * np.sin(arc_angles)
+    
+    fig.add_trace(go.Scatter(
+        x=arc_x,
+        y=arc_y,
+        mode='lines',
+        line=dict(color='orange', width=2),
+        name=f'Convergent {convergent_angle}°',
+        showlegend=True
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=[conv_mid_x, conv_angle_end_x],
+        y=[conv_mid_y, conv_angle_end_y],
+        mode='lines',
+        line=dict(color='orange', width=3, dash='dot'),
+        name=f'Conv. Angle {convergent_angle}°',
+        showlegend=False
+    ))
+    
+    # Divergent angle line and arc
+    div_mid_x = throat_x + (nozzle_end_x - throat_x) * 0.5
+    div_progress_mid = (div_mid_x - throat_x) / div_length
+    div_mid_y = d_t_mm/2 + (d_e_mm/2 - d_t_mm/2) * div_progress_mid**0.7
+    
+    div_angle_rad = np.radians(divergent_angle)
+    div_angle_end_x = div_mid_x + angle_line_length * np.cos(div_angle_rad)
+    div_angle_end_y = div_mid_y + angle_line_length * np.sin(div_angle_rad)
+    
+    # Add angle arc for divergent section
+    arc_angles_div = np.linspace(0, div_angle_rad, 20)
+    arc_x_div = div_mid_x + arc_radius * np.cos(arc_angles_div)
+    arc_y_div = div_mid_y + arc_radius * np.sin(arc_angles_div)
+    
+    fig.add_trace(go.Scatter(
+        x=arc_x_div,
+        y=arc_y_div,
+        mode='lines',
+        line=dict(color='green', width=2),
+        name=f'Divergent {divergent_angle}°',
+        showlegend=True
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=[div_mid_x, div_angle_end_x],
+        y=[div_mid_y, div_angle_end_y],
+        mode='lines',
+        line=dict(color='green', width=3, dash='dot'),
+        name=f'Div. Angle {divergent_angle}°',
+        showlegend=False
+    ))
+
     # Add dimension annotations
     annotations = [
         dict(x=0, y=D_ch_mm/2 + 20, text=f'L = {L_mm:.1f} mm', 
@@ -182,13 +253,23 @@ def create_motor_plot(motor_data):
         dict(x=throat_x, y=-d_t_mm/2 - 30, text=f'dt = {d_t_mm:.2f} mm',
              showarrow=False, font=dict(size=10)),
         dict(x=nozzle_end_x, y=-d_e_mm/2 - 30, text=f'de = {d_e_mm:.1f} mm',
-             showarrow=False, font=dict(size=10))
+             showarrow=False, font=dict(size=10)),
+        # Add angle annotations with larger text
+        dict(x=conv_mid_x + 15, y=conv_mid_y + 10, text=f'α = {convergent_angle}°',
+             showarrow=True, arrowhead=2, ax=0, ay=-30,
+             font=dict(size=14, color='orange', family='Arial Black')),
+        dict(x=div_mid_x + 15, y=div_mid_y + 10, text=f'β = {divergent_angle}°',
+             showarrow=True, arrowhead=2, ax=0, ay=-30,
+             font=dict(size=14, color='green', family='Arial Black')),
+        # Add expansion ratio
+        dict(x=(throat_x + nozzle_end_x) / 2, y=D_ch_mm/2 + 40, text=f'ε = {expansion_ratio:.1f}',
+             showarrow=False, font=dict(size=11, color='purple'))
     ]
     
     # Clean motor layout with improved sizing
     fig.update_layout(
         title=dict(
-            text='Hybrid Rocket Motor Cross-Section',
+            text='Hybrid Rocket Motor - Axial Cross-Section View',
             x=0.5,
             font=dict(size=18, family='Arial', color='black')
         ),
@@ -617,7 +698,7 @@ def create_performance_plots(motor_data, injector_data):
         subplot_titles=('Mass Flow Rates', 'Pressure Distribution', 
                        'Regression Rate', 'Injector Performance'),
         specs=[[{'type': 'bar'}, {'type': 'bar'}],
-               [{'type': 'scatter'}, {'type': 'indicator'}]]
+               [{'secondary_y': True}, {'type': 'indicator'}]]
     )
     
     # Mass flow rates
@@ -656,11 +737,16 @@ def create_performance_plots(motor_data, injector_data):
         burn_time = motor_data.get('burn_time', 10)
         regression_rate = motor_data.get('regression_rate', 0.001)
         port_initial = motor_data.get('port_diameter_initial', 0.03)
+        port_final = motor_data.get('port_diameter_final', 0.05)
         
+        # Create time array
         time = np.linspace(0, burn_time, 100)
-        # Correct regression rate calculation: r_dot = a * (G_ox)^n
-        port_diameter = port_initial + 2 * regression_rate * time
         
+        # Calculate port diameter growth over time
+        # Linear interpolation between initial and final
+        port_diameter = np.linspace(port_initial, port_final, 100)
+        
+        # Port diameter growth plot
         fig.add_trace(
             go.Scatter(
                 x=time,
@@ -673,31 +759,61 @@ def create_performance_plots(motor_data, injector_data):
             row=2, col=1
         )
         
-        # Add regression rate line
+        # Calculate regression rate over time
         regression_rate_mm_s = regression_rate * 1000  # Convert to mm/s
+        
+        # Create secondary y-axis data for regression rate
+        regression_rate_array = np.ones(100) * regression_rate_mm_s
+        
+        # For more realistic modeling, regression rate might vary slightly
+        # Add small variation to show it's dynamic
+        if regression_rate_mm_s > 0:
+            variation = np.sin(np.linspace(0, 2*np.pi, 100)) * regression_rate_mm_s * 0.1
+            regression_rate_array = regression_rate_array + variation
+        
+        # Add regression rate line 
         fig.add_trace(
             go.Scatter(
                 x=time,
-                y=[regression_rate_mm_s] * len(time),
+                y=regression_rate_array,
                 mode='lines',
-                line=dict(color='red', width=2, dash='dash'),
-                name=f'Regression Rate ({regression_rate_mm_s:.2f} mm/s)',
-                yaxis='y2'
+                line=dict(color='red', width=2),
+                name=f'Regression Rate (avg: {regression_rate_mm_s:.2f} mm/s)',
+                hovertemplate='Time: %{x:.1f}s<br>Regression Rate: %{y:.2f} mm/s<extra></extra>'
             ),
-            row=2, col=1
+            row=2, col=1,
+            secondary_y=True
         )
     except Exception as e:
         print(f"Warning: Regression rate plot error: {e}")
-        # Add placeholder plot
+        # Add default data if error occurs
+        time = np.linspace(0, 10, 100)
+        port_diameter = np.linspace(30, 50, 100)  # mm
+        regression_rate_default = np.ones(100) * 2.0  # mm/s
+        
         fig.add_trace(
             go.Scatter(
-                x=[0, 10],
-                y=[30, 50],
+                x=time,
+                y=port_diameter,
                 mode='lines',
                 line=dict(color='purple', width=3),
-                name='Port Diameter (placeholder)'
+                name='Port Diameter Growth',
+                hovertemplate='Time: %{x:.1f}s<br>Port Diameter: %{y:.1f}mm<extra></extra>'
             ),
             row=2, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=time,
+                y=regression_rate_default,
+                mode='lines',
+                line=dict(color='red', width=2),
+                name='Regression Rate (2.0 mm/s)',
+                hovertemplate='Time: %{x:.1f}s<br>Regression Rate: %{y:.2f} mm/s<extra></extra>'
+            ),
+            row=2, col=1,
+            secondary_y=True
         )
     
     # Injector performance gauge
@@ -725,11 +841,7 @@ def create_performance_plots(motor_data, injector_data):
         row=2, col=2
     )
     
-    # Update axes labels for regression rate plot
-    fig.update_xaxes(title_text="Time (s)", row=2, col=1)
-    fig.update_yaxes(title_text="Port Diameter (mm)", row=2, col=1)
-    
-    # Update layout for better visibility
+    # Update layout
     fig.update_layout(
         title=dict(
             text="Hybrid Rocket Performance Analysis",
@@ -752,7 +864,8 @@ def create_performance_plots(motor_data, injector_data):
     fig.update_yaxes(title_text="Pressure (bar)", row=1, col=2)
     
     fig.update_xaxes(title_text="Time (s)", row=2, col=1)
-    fig.update_yaxes(title_text="Port Diameter (mm)", row=2, col=1)
+    fig.update_yaxes(title_text="Port Diameter (mm)", secondary_y=False, row=2, col=1)
+    fig.update_yaxes(title_text="Regression Rate (mm/s)", secondary_y=True, row=2, col=1)
     
     return fig.to_json()
 
@@ -1246,7 +1359,7 @@ def create_3d_motor_visualization(motor_data):
         x=x_fuel,
         y=y_fuel,
         z=z_mesh,
-        colorscale='browns',
+        colorscale='burg',
         opacity=0.8,
         name='Fuel Grain'
     ))

@@ -943,16 +943,85 @@ def advanced_analysis():
 
 @app.route('/api/oxidizer-properties', methods=['POST'])
 def get_live_oxidizer_properties():
-    """Get oxidizer properties from NIST WebBook"""
+    """Get oxidizer properties with proper data for different oxidizers"""
     try:
         data = request.json
-        oxidizer_type = data.get('oxidizer_type')
+        oxidizer_type = data.get('oxidizer_type', 'n2o')
         temperature = data.get('temperature', 293.15)
         
-        result = db_manager.get_oxidizer_properties(oxidizer_type, temperature)
-        return jsonify(result)
+        print(f"OXIDIZER REQUEST: {oxidizer_type} at {temperature}K")
+        
+        # Define comprehensive oxidizer properties
+        oxidizer_properties = {
+            'n2o': {
+                'density': get_oxidizer_density('n2o', temperature),
+                'viscosity': 2.8e-4,
+                'formula': 'N2O',
+                'molecular_weight': 44.013,
+                'boiling_point': 184.67,
+                'vapor_pressure_20c': 5.17e6,  # Pa
+                'enthalpy_formation': -82.05,  # kJ/mol
+                'name': 'Nitrous Oxide',
+                'phase_at_stp': 'gas',
+                'storage_pressure': 5.17e6  # Pa, self-pressurizing
+            },
+            'lox': {
+                'density': get_oxidizer_density('lox', temperature),
+                'viscosity': 1.95e-4,
+                'formula': 'O2',
+                'molecular_weight': 31.998,
+                'boiling_point': 90.15,
+                'vapor_pressure_20c': 0,  # Cryogenic
+                'enthalpy_formation': 0.0,
+                'name': 'Liquid Oxygen',
+                'phase_at_stp': 'liquid',
+                'storage_pressure': 3.5e5  # Pa, typical tank pressure
+            },
+            'h2o2': {
+                'density': 1450 - 1.5 * (temperature - 293.15),  # Temperature dependent
+                'viscosity': 1.2e-3,
+                'formula': 'H2O2',
+                'molecular_weight': 34.015,
+                'boiling_point': 423.35,
+                'vapor_pressure_20c': 200,  # Pa
+                'enthalpy_formation': -187.78,  # kJ/mol
+                'name': 'Hydrogen Peroxide',
+                'phase_at_stp': 'liquid',
+                'storage_pressure': 1.5e5  # Pa
+            },
+            'air': {
+                'density': 1.225 * (293.15 / temperature) * (101325 / 101325),  # Ideal gas
+                'viscosity': 1.8e-5,
+                'formula': 'Air',
+                'molecular_weight': 28.97,
+                'boiling_point': 78.8,  # N2 dominant
+                'vapor_pressure_20c': 101325,  # Pa
+                'enthalpy_formation': 0.0,
+                'name': 'Compressed Air',
+                'phase_at_stp': 'gas',
+                'storage_pressure': 2.0e7  # Pa, high pressure
+            }
+        }
+        
+        if oxidizer_type in oxidizer_properties:
+            properties = oxidizer_properties[oxidizer_type]
+            
+            print(f"OXIDIZER RESPONSE: {oxidizer_type} - density: {properties['density']:.1f} kg/m³")
+            
+            return jsonify({
+                'status': 'success',
+                'properties': properties,
+                'source': 'HRMA Oxidizer Database',
+                'temperature': temperature
+            })
+        else:
+            return jsonify({
+                'status': 'error', 
+                'error': f'Unknown oxidizer type: {oxidizer_type}'
+            })
         
     except Exception as e:
+        print(f"Oxidizer properties error: {str(e)}")
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 @app.route('/api/validate-fuel', methods=['POST'])
@@ -2126,72 +2195,6 @@ def validate_fuel():
             'error': f'NASA CEA Database Error: {str(e)}'
         }), 500
 
-@app.route('/api/oxidizer-properties', methods=['POST'])
-def get_real_time_oxidizer_properties():
-    try:
-        data = request.json
-        oxidizer_type = data.get('oxidizer_type', 'lox')
-        temperature = data.get('temperature', 293.15)
-        
-        print(f"FETCHING NIST DATA: {oxidizer_type} at {temperature}K")
-        
-        # Try to get from chemical database first
-        oxidizer_mapping = {
-            'lox': 'O2',
-            'n2o4': 'N2O4', 
-            'n2o': 'N2O',
-            'h2o2': 'H2O2'
-        }
-        
-        species_name = oxidizer_mapping.get(oxidizer_type, 'O2')
-        species = chemical_db.get_species(species_name)
-        
-        if species:
-            # Calculate thermodynamic properties
-            cp = chemical_db.calculate_cp(species_name, temperature)
-            enthalpy = chemical_db.calculate_enthalpy(species_name, temperature)
-            
-            properties = {
-                'density': get_oxidizer_density(oxidizer_type, temperature),
-                'viscosity': get_oxidizer_viscosity(oxidizer_type, temperature),
-                'heat_capacity': cp / (species.molecular_weight * 1000),  # J/kg/K
-                'thermal_conductivity': get_oxidizer_conductivity(oxidizer_type, temperature),
-                'formula': species.formula,
-                'molecular_weight': species.molecular_weight,
-                'enthalpy_formation': species.enthalpy_formation / 1000,
-                'source': f"{species.source} + NIST correlations",
-                'temperature': temperature,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            print(f"NIST HYBRID RESPONSE: {species_name} - density: {properties['density']:.1f} kg/m3")
-            
-            return jsonify({
-                'status': 'success',
-                'properties': sanitize_json_values(properties),
-                'source': 'NASA CEA + NIST Correlations',
-                'real_time': True
-            })
-        
-        # Fallback to cached data
-        properties = get_cached_oxidizer_properties(oxidizer_type, temperature)
-        
-        print(f"USING CACHED DATA: {oxidizer_type} - density: {properties['density']:.1f} kg/m³")
-        
-        return jsonify({
-            'status': 'success',
-            'properties': sanitize_json_values(properties),
-            'source': 'Cached Database',
-            'real_time': False
-        })
-        
-    except Exception as e:
-        print(f"NIST ERROR: {str(e)}")
-        return jsonify({
-            'status': 'error', 
-            'error': f'Property calculation error: {str(e)}',
-            'fallback_used': True
-        }), 500
 
 def get_cached_fuel_properties(fuel_type, temperature):
     """Get cached fuel properties"""

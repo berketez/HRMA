@@ -49,8 +49,8 @@ def create_improved_motor_cross_section(motor_data):
         fillcolor='rgba(128, 128, 128, 0.3)',
         mode='lines',
         line=dict(color='black', width=3),
-        name='Kamara Duvarı',
-        hovertemplate='Kamara<br>Çap: %.1f mm<br>Uzunluk: %.1f mm' % (D_ch_mm, L_mm)
+        name='Chamber Wall',
+        hovertemplate='Chamber<br>Diameter: %.1f mm<br>Length: %.1f mm' % (D_ch_mm, L_mm)
     ))
     
     # 2. YAKIT GRAİNİ (Dairesel halka)
@@ -103,8 +103,8 @@ def create_improved_motor_cross_section(motor_data):
         fillcolor='rgba(139, 69, 19, 0.6)',
         mode='lines',
         line=dict(color='saddlebrown', width=2),
-        name='Yakıt Graini',
-        hovertemplate='Yakıt Graini<br>Uzunluk: %.1f mm<br>İlk Port: %.1f mm<br>Son Port: %.1f mm' % 
+        name='Fuel Grain',
+        hovertemplate='Fuel Grain<br>Length: %.1f mm<br>Initial Port: %.1f mm<br>Final Port: %.1f mm' % 
                      (grain_length, D_port_i_mm, D_port_f_mm)
     ))
     
@@ -135,11 +135,15 @@ def create_improved_motor_cross_section(motor_data):
         hovertemplate='Son Port: %.1f mm' % D_port_f_mm
     ))
     
-    # 3. NOZZLE GEOMETRİSİ (Düzgün convergent-divergent)
+    # 3. NOZZLE GEOMETRY (Proper convergent-divergent)
     nozzle_start = L_mm/2
     convergent_length = 40  # mm
     throat_length = 10  # mm
     divergent_length = 80  # mm
+    
+    # Get nozzle angles from motor data
+    convergent_angle = motor_data.get('convergent_angle', 15.0)  # degrees
+    divergent_angle = motor_data.get('divergent_angle', 12.0)   # degrees
     
     # Convergent bölüm (kamara -> kısık)
     conv_x = []
@@ -184,7 +188,7 @@ def create_improved_motor_cross_section(motor_data):
         mode='lines',
         line=dict(color='black', width=2),
         name='Nozzle',
-        hovertemplate='Nozzle<br>Kısık: %.1f mm<br>Çıkış: %.1f mm<br>Genişleme Oranı: %.1f' % 
+        hovertemplate='Nozzle<br>Throat: %.1f mm<br>Exit: %.1f mm<br>Expansion Ratio: %.1f' % 
                      (d_t_mm, d_e_mm, (d_e_mm/d_t_mm)**2)
     ))
     
@@ -194,10 +198,10 @@ def create_improved_motor_cross_section(motor_data):
         y=[0],
         mode='markers+text',
         marker=dict(size=8, color='orange'),
-        text=['Kısık'],
+        text=['Throat'],
         textposition='top center',
-        name='Kısık Konumu',
-        hovertemplate='Kısık<br>Çap: %.2f mm<br>Alan: %.2f mm²' % (d_t_mm, np.pi*(d_t_mm/2)**2)
+        name='Throat Location',
+        hovertemplate='Throat<br>Diameter: %.2f mm<br>Area: %.2f mm²' % (d_t_mm, np.pi*(d_t_mm/2)**2)
     ))
     
     # 4. İNJEKTÖR BAŞLIĞI
@@ -211,9 +215,64 @@ def create_improved_motor_cross_section(motor_data):
         fillcolor='rgba(100, 100, 200, 0.5)',
         mode='lines',
         line=dict(color='darkblue', width=2),
-        name='İnjektör Başlığı',
-        hovertemplate='İnjektör Başlığı'
+        name='Injector Head',
+        hovertemplate='Injector Head'
     ))
+    
+    # Add nozzle angle indicators
+    throat_x = nozzle_start + convergent_length + throat_length/2
+    
+    # Convergent angle arc
+    conv_mid_x = nozzle_start + convergent_length * 0.5
+    conv_mid_y = D_ch_mm/2 - (D_ch_mm/2 - d_t_mm/2) * 0.5
+    angle_radius = 25
+    
+    conv_angle_rad = np.radians(convergent_angle)
+    arc_angles_conv = np.linspace(np.pi, np.pi - conv_angle_rad, 15)
+    arc_x_conv = conv_mid_x + angle_radius * np.cos(arc_angles_conv)
+    arc_y_conv = conv_mid_y + angle_radius * np.sin(arc_angles_conv)
+    
+    fig.add_trace(go.Scatter(
+        x=arc_x_conv.tolist(), y=arc_y_conv.tolist(),
+        mode='lines',
+        line=dict(color='orange', width=3),
+        name=f'α={convergent_angle}°',
+        showlegend=True,
+        hovertemplate=f'Convergent Angle: {convergent_angle}°'
+    ))
+    
+    # Divergent angle arc
+    div_mid_x = throat_x + divergent_length * 0.5
+    div_mid_y = d_t_mm/2 + (d_e_mm/2 - d_t_mm/2) * 0.5
+    
+    div_angle_rad = np.radians(divergent_angle)
+    arc_angles_div = np.linspace(0, div_angle_rad, 15)
+    arc_x_div = div_mid_x + angle_radius * np.cos(arc_angles_div)
+    arc_y_div = div_mid_y + angle_radius * np.sin(arc_angles_div)
+    
+    fig.add_trace(go.Scatter(
+        x=arc_x_div.tolist(), y=arc_y_div.tolist(),
+        mode='lines',
+        line=dict(color='green', width=3),
+        name=f'β={divergent_angle}°',
+        showlegend=True,
+        hovertemplate=f'Divergent Angle: {divergent_angle}°'
+    ))
+    
+    # Angle text annotations
+    fig.add_annotation(
+        x=conv_mid_x + 10, y=conv_mid_y + 15,
+        text=f'<b>α = {convergent_angle}°</b>',
+        showarrow=False,
+        font=dict(size=12, color='orange')
+    )
+    
+    fig.add_annotation(
+        x=div_mid_x + 10, y=div_mid_y + 15,
+        text=f'<b>β = {divergent_angle}°</b>',
+        showarrow=False,
+        font=dict(size=12, color='green')
+    )
     
     # 5. EKSEN ÇİZGİSİ
     fig.add_trace(go.Scatter(
@@ -246,12 +305,12 @@ def create_improved_motor_cross_section(motor_data):
     # Düzen
     fig.update_layout(
         title=dict(
-            text='Hibrit Roket Motoru - Eksenel Kesit Görünümü',
+            text='Hybrid Rocket Motor - Axial Cross-Section View',
             x=0.5,
             font=dict(size=16, family='Arial Black')
         ),
         xaxis=dict(
-            title='Eksenel Konum (mm)',
+            title='Axial Position (mm)',
             showgrid=True,
             gridcolor='rgba(200, 200, 200, 0.3)',
             zeroline=False,
@@ -259,7 +318,7 @@ def create_improved_motor_cross_section(motor_data):
             scaleratio=1
         ),
         yaxis=dict(
-            title='Radyal Konum (mm)',
+            title='Radial Position (mm)',
             showgrid=True,
             gridcolor='rgba(200, 200, 200, 0.3)',
             zeroline=False
@@ -457,10 +516,10 @@ def create_showerhead_with_tooltips(injector_data):
     fig.add_annotation(
         x=0, y=plate_diameter/2 + 20,
         text=(
-            f'<b>SHOWERHEAD İNJEKTÖR</b><br>'
-            f'{n_holes} Delik × ⌀{hole_diameter:.2f} mm<br>'
-            f'Toplam Alan: {total_area:.1f} mm²<br>'
-            f'Basınç Düşümü: {injector_data.get("pressure_drop", 5):.1f} bar'
+            f'<b>SHOWERHEAD INJECTOR</b><br>'
+            f'{n_holes} Holes × ⌀{hole_diameter:.2f} mm<br>'
+            f'Total Area: {total_area:.1f} mm²<br>'
+            f'Pressure Drop: {injector_data.get("pressure_drop", 5):.1f} bar'
         ),
         showarrow=False,
         font=dict(size=11),
@@ -472,16 +531,16 @@ def create_showerhead_with_tooltips(injector_data):
     
     # DÜZEN
     fig.update_layout(
-        title='Showerhead İnjektör - Ön Görünüm',
+        title='Showerhead Injector - Front View',
         xaxis=dict(
-            title='X Konumu (mm)',
+            title='X Position (mm)',
             scaleanchor='y',
             scaleratio=1,
             showgrid=True,
             gridcolor='rgba(200, 200, 200, 0.3)'
         ),
         yaxis=dict(
-            title='Y Konumu (mm)',
+            title='Y Position (mm)',
             showgrid=True,
             gridcolor='rgba(200, 200, 200, 0.3)'
         ),

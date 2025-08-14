@@ -1656,7 +1656,7 @@
                             <button class="btn btn-primary" onclick="generateCAD()" id="generateCADBtn" disabled>
                                 <i class="fas fa-cube"></i> Generate 3D Model
                             </button>
-                            <button class="btn btn-secondary" onclick="exportSTL()" id="exportSTLBtn">
+                            <button class="btn btn-secondary" onclick="exportSTL()" id="exportSTLBtn" disabled>
                                 <i class="fas fa-download"></i> Export STL Files
                             </button>
                         </div>
@@ -1967,6 +1967,7 @@
         // Initialize combustion parameters visibility
         document.addEventListener('DOMContentLoaded', function() {
             updateCombustionParams();
+            updateOxidizerProperties(); // Initialize oxidizer form state
             
             // Add event listeners for thrust and burn time to auto-update calculated impulse
             const thrustInput = document.getElementById('thrust');
@@ -2564,8 +2565,35 @@
             const viscosityInput = document.getElementById('oxidizer_viscosity');
             const temperature = parseFloat(document.getElementById('oxidizer_temp').value);
             
+            console.log('updateOxidizerProperties called with:', oxType);
+            console.log('densityInput found:', !!densityInput);
+            console.log('viscosityInput found:', !!viscosityInput);
+            
             if (oxType === 'custom') {
+                console.log('CUSTOM OXIDIZER SELECTED - processing...');
+                
+                // Enable manual input for custom oxidizer
+                densityInput.disabled = false;
+                viscosityInput.disabled = false;
+                densityInput.style.backgroundColor = '#fff3cd';
+                viscosityInput.style.backgroundColor = '#fff3cd';
+                
+                console.log('Fields enabled, colors set');
+                
+                // Always set custom defaults when switching to custom
+                densityInput.value = '1000';
+                viscosityInput.value = '0.001';
+                
+                console.log('Default values set - density:', densityInput.value, 'viscosity:', viscosityInput.value);
+                
+                showMessage('Custom oxidizer selected - enter your own properties', 'info');
                 return; // Don't fetch for custom oxidizers
+            } else {
+                // Disable manual input for predefined oxidizers  
+                densityInput.disabled = true;
+                viscosityInput.disabled = true;
+                densityInput.style.backgroundColor = '#f8f9fa';
+                viscosityInput.style.backgroundColor = '#f8f9fa';
             }
             
             showMessage('Fetching live oxidizer properties from NIST WebBook...', 'info');
@@ -3292,6 +3320,7 @@
             // Enable export buttons after successful calculation
             document.getElementById('downloadEngBtn').disabled = false;
             document.getElementById('exportSTLBtn').disabled = false;
+            document.getElementById('generateCADBtn').disabled = false;
             
             console.log('displayResults completed successfully');
             
@@ -3915,13 +3944,34 @@
 
         async function exportSTL() {
             if (!currentResults || !currentResults.motor) {
-                showMessage('Please run analysis and generate 3D model first', 'error');
+                showMessage('Please run analysis first', 'error');
                 return;
             }
             
-            showMessage('Exporting STL files...', 'info');
+            showMessage('Generating and exporting STL files...', 'info');
             
             try {
+                // First generate the CAD if not already done
+                const cadResponse = await fetch('/api/generate-cad', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        motor_data: currentResults.motor,
+                        motor_type: document.getElementById('motor_type').value || 'hybrid'
+                    })
+                });
+                
+                if (!cadResponse.ok) {
+                    throw new Error(`CAD generation failed: ${cadResponse.status}`);
+                }
+                
+                const cadResult = await cadResponse.json();
+                
+                if (!cadResult.success) {
+                    throw new Error(cadResult.error || 'CAD generation failed');
+                }
+                
+                // Now export the STL
                 const response = await fetch('/api/export-stl', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -3938,7 +3988,7 @@
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${currentResults.motor.motor_name || 'UZAYTEK_motor'}.stl`;
+                a.download = `${currentResults.motor.motor_name || 'HRMA_motor'}.stl`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
