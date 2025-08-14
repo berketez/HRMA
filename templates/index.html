@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motor Analysis - Rocket Motor Design Tool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #f5f6fa;
+            color: #2c3e50;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: relative;
+            z-index: 10;
+        }
+        
+        .header h1 {
+            font-size: 42px;
+            font-weight: 300;
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+            color: #ffffff;
+        }
+        
+        .header p {
+            font-size: 18px;
+            color: rgba(255,255,255,0.9);
+        }
+        
+        .container {
+            flex: 1;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 20px;
+            width: 100%;
+            position: relative;
+            z-index: 5;
+        }
+        
+        .motor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+        
+        .motor-card {
+            background: #ffffff;
+            border: 2px solid #e1e8ed;
+            border-radius: 10px;
+            padding: 40px 30px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .motor-card:before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, transparent 0%, rgba(0,123,255,0.05) 100%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .motor-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(52, 152, 219, 0.2);
+            border-color: #3498db;
+        }
+        
+        .motor-card:hover:before {
+            opacity: 1;
+        }
+        
+        .motor-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            display: block;
+            opacity: 1 !important;
+        }
+        
+        .hybrid { color: #28a745; }
+        .solid { color: #dc3545; }
+        .liquid { color: #007bff; }
+        
+        .motor-card h2 {
+            font-size: 28px;
+            margin-bottom: 15px;
+            font-weight: 500;
+            color: #2c3e50 !important;
+        }
+        
+        .motor-card p {
+            font-size: 16px;
+            color: #5a6c7d !important;
+            line-height: 1.6;
+            margin-bottom: 25px;
+        }
+        
+        .motor-features {
+            text-align: left;
+            margin: 20px 0;
+            font-size: 14px;
+            color: #5a6c7d !important;
+        }
+        
+        .motor-features li {
+            list-style: none;
+            padding: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .motor-features li:before {
+            content: '▸';
+            position: absolute;
+            left: 0;
+            color: currentColor;
+        }
+        
+        .btn-enter {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 10px;
+        }
+        
+        .btn-enter:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 123, 255, 0.3);
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: #7f8c8d;
+            font-size: 14px;
+            border-top: 1px solid #ecf0f1;
+            background: #ffffff;
+        }
+        
+        @media (max-width: 768px) {
+            .motor-grid {
+                grid-template-columns: 1fr;
+            }
+            .header h1 {
+                font-size: 32px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>UZAYTEK MOTOR ANALYSIS</h1>
+        <p>Professional Rocket Motor Design & Analysis Tool</p>
+    </div>
+    
+    <div class="container">
+        <div class="motor-grid">
+            <!-- Hybrid Motor Card -->
+            <div class="motor-card" onclick="window.location.href='/hybrid'">
+                <span class="motor-icon hybrid">H</span>
+                <h2>Hybrid Motors</h2>
+                <p>Design and analyze hybrid rocket motors with liquid oxidizer and solid fuel combinations</p>
+                <ul class="motor-features">
+                    <li>HTPB, Paraffin, ABS fuels</li>
+                    <li>N2O, LOX, H2O2 oxidizers</li>
+                    <li>Injector design optimization</li>
+                    <li>Regression rate analysis</li>
+                </ul>
+                <a href="/hybrid" class="btn-enter">Design Hybrid Motor</a>
+            </div>
+            
+            <!-- Solid Motor Card -->
+            <div class="motor-card" onclick="window.location.href='/solid'">
+                <span class="motor-icon solid">S</span>
+                <h2>Solid Motors</h2>
+                <p>Analyze solid propellant rocket motors with various grain geometries and propellants</p>
+                <ul class="motor-features">
+                    <li>BATES, Star, Wagon wheel grains</li>
+                    <li>APCP, Black powder, Sugar</li>
+                    <li>Burn rate calculations</li>
+                    <li>Progressive/Regressive thrust</li>
+                </ul>
+                <a href="/solid" class="btn-enter">Design Solid Motor</a>
+            </div>
+            
+            <!-- Liquid Motor Card -->
+            <div class="motor-card" onclick="window.location.href='/liquid'">
+                <span class="motor-icon liquid">L</span>
+                <h2>Liquid Motors</h2>
+                <p>Design liquid bipropellant rocket engines with advanced cooling and injection systems</p>
+                <ul class="motor-features">
+                    <li>LOX/RP-1, LOX/LH2, Hypergolics</li>
+                    <li>Regenerative cooling design</li>
+                    <li>Turbopump specifications</li>
+                    <li>Combustion instability analysis</li>
+                </ul>
+                <a href="/liquid" class="btn-enter">Design Liquid Motor</a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>UZAYTEK Motor Analysis v2.0 | Developed by: Berke Tezgöçen | Idea & Testing: Ayberk Cem Aksoy | Professional Rocket Propulsion Design Tool</p>
+    </div>
+    
+    <script>
+        // Add floating animation
+        document.querySelectorAll('.motor-card').forEach((card, index) => {
+            card.style.animation = `fadeIn 0.5s ease ${index * 0.1}s forwards`;
+            card.style.opacity = '0';
+        });
+        
+        // CSS animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>

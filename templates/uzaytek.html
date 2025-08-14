@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UZAYTEK - Hybrid Rocket Motor Analysis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; }
+        
+        .header { 
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); 
+            color: white; 
+            padding: 20px; 
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 { font-size: 28px; font-weight: 300; margin-bottom: 5px; }
+        .header .subtitle { font-size: 14px; opacity: 0.9; }
+        
+        .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+        
+        .panel { 
+            background: white; 
+            margin: 15px 0; 
+            padding: 25px; 
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 4px solid #2a5298;
+        }
+        .panel h2 { 
+            color: #1e3c72; 
+            font-size: 20px; 
+            margin-bottom: 20px; 
+            border-bottom: 2px solid #e9ecef; 
+            padding-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+        .panel h2:before {
+            content: "▶";
+            margin-right: 10px;
+            color: #2a5298;
+        }
+        
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { 
+            display: block; 
+            font-weight: 600; 
+            margin-bottom: 5px; 
+            color: #495057;
+        }
+        .form-group input, .form-group select, .form-group textarea { 
+            width: 100%; 
+            padding: 10px; 
+            border: 2px solid #e9ecef; 
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { 
+            border-color: #2a5298; 
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.1);
+        }
+        .form-group .unit { 
+            font-size: 12px; 
+            color: #6c757d; 
+            margin-left: 5px;
+        }
+        
+        .tooltip-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            background: #6c757d;
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 8px;
+            cursor: help;
+            position: relative;
+            line-height: 16px;
+        }
+        
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 300px;
+            background-color: #2c3e50;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 12px;
+            position: absolute;
+            z-index: 1000;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -150px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 13px;
+            line-height: 1.4;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .tooltip .tooltiptext::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #2c3e50 transparent transparent transparent;
+        }
+        
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        .tooltip .tooltiptext strong {
+            color: #3498db;
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .btn { 
+            background: linear-gradient(135deg, #2a5298 0%, #1e3c72 100%); 
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 6px;
+            cursor: pointer; 
+            margin: 8px; 
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(42, 82, 152, 0.3);
+        }
+        .btn-success { background: linear-gradient(135deg, #28a745 0%, #20c997 100%); }
+        .btn-warning { background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%); }
+        
+        .results { display: none; }
+        .results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin: 10px 0;
+        }
+        .metric-value { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
+        .metric-label { font-size: 14px; opacity: 0.9; }
+        
+        .data-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin: 15px 0;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .data-table th { 
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); 
+            color: white;
+            padding: 12px; 
+            text-align: left;
+            font-weight: 600;
+        }
+        .data-table td { 
+            padding: 12px; 
+            border-bottom: 1px solid #e9ecef;
+        }
+        .data-table tr:nth-child(even) { background: #f8f9fa; }
+        
+        .plot-container { 
+            min-height: 400px; 
+            border: 2px solid #e9ecef; 
+            border-radius: 8px;
+            margin: 15px 0; 
+            background: white;
+            padding: 10px;
+        }
+        
+        .alert { 
+            padding: 15px; 
+            margin: 15px 0; 
+            border-radius: 6px;
+            border-left: 4px solid;
+        }
+        .alert-warning { 
+            background: #fff3cd; 
+            border-left-color: #ffc107; 
+            color: #856404; 
+        }
+        .alert-danger { 
+            background: #f8d7da; 
+            border-left-color: #dc3545; 
+            color: #721c24; 
+        }
+        .alert-success { 
+            background: #d1edff; 
+            border-left-color: #28a745; 
+            color: #155724; 
+        }
+        
+        .loading { 
+            text-align: center; 
+            padding: 40px;
+            color: #6c757d;
+        }
+        .spinner { 
+            display: inline-block; 
+            width: 30px; 
+            height: 30px; 
+            border: 3px solid #f3f3f3; 
+            border-top: 3px solid #2a5298; 
+            border-radius: 50%; 
+            animation: spin 1s linear infinite; 
+            margin-bottom: 10px;
+        }
+        @keyframes spin { 
+            0% { transform: rotate(0deg); } 
+            100% { transform: rotate(360deg); } 
+        }
+
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 5px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px 15px;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .tab.active {
+            background: linear-gradient(135deg, #2a5298 0%, #1e3c72 100%);
+            color: white;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .parametric-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+    </style>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 UZAYTEK - Hybrid Rocket Motor Analysis</h1>
+        <div class="subtitle">Uzay Teknolojileri Takımı - Profesyonel Hibrit Roket Motoru Analiz Yazılımı</div>
+    </div>
+    
+    <div class="container">
+        <!-- Motor Info Panel -->
+        <div class="panel">
+            <h2>Motor Bilgileri</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Motor Adı
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Motor Identification</strong>
+                                Unique identifier for this motor design. Use a systematic naming convention (e.g., company-type-version). This name will appear in reports and documentation.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="text" id="motor_name" placeholder="örn: UZAYTEK-HRM-001">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Açıklama
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Motor Description</strong>
+                                Detailed description of motor purpose, intended use, special features, or design notes. This information will be included in generated reports.
+                            </span>
+                        </span>
+                    </label>
+                    <textarea id="motor_description" rows="3" placeholder="Motor hakkında kısa açıklama..."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Basic Parameters Panel -->
+        <div class="panel">
+            <h2>Temel Parametreler</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>İtki (N) <span class="unit">Newton</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Thrust Force</strong>
+                                The total propulsive force generated by the motor. This is the main force that propels the rocket upward. Used as target value in calculations and motor dimensions are optimized according to this value.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="thrust" value="1000" step="0.1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>Yanma Süresi (s) <span class="unit">saniye</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Burn Time</strong>
+                                Total duration during which the motor actively produces thrust. Time elapsed until solid fuel is depleted. This parameter is critical for total impulse and average thrust calculations.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="burn_time" value="10" step="0.1" min="0.1">
+                </div>
+                <div class="form-group">
+                    <label>O/F Oranı <span class="unit">oksitleyici/yakıt</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Oxidizer/Fuel Mass Ratio</strong>
+                                Ratio of oxidizer mass flow rate to fuel mass flow rate. Directly affects combustion efficiency and specific impulse value. Optimal value for HTPB+N2O is typically between 2.0-3.5.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="of_ratio" value="2.5" step="0.1" min="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Yanma Odası Basıncı (bar) <span class="unit">absolut</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Chamber Pressure</strong>
+                                Absolute pressure value in the combustion chamber. Higher pressure provides better performance but increases structural requirements. 15-30 bar range is typical for hybrid motors.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="chamber_pressure" value="20" step="0.1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>Tank Basıncı (bar) <span class="unit">absolut</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Tank Pressure</strong>
+                                Pressure in the oxidizer tank. Should be 2-3 times higher than chamber pressure to overcome injector pressure drop. Safety factor should also be considered.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="tank_pressure" value="50" step="0.1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>Ortam Basıncı (bar) <span class="unit">irtifa için</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Ambient Pressure</strong>
+                                Atmospheric pressure at the altitude where rocket flies. Sea level: 1.013 bar, 3000m: 0.69 bar, 10000m: 0.26 bar. Critical for nozzle optimization.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="ambient_pressure" value="1.013" step="0.001" min="0.001">
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Parameters Panel -->
+        <div class="panel">
+            <h2>Gelişmiş Parametreler</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>L* Değeri (m) <span class="unit">karakteristik uzunluk</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Characteristic Length (L*)</strong>
+                                Ratio of combustion chamber volume to throat area. Determines residence time required for complete combustion. Typical value for HTPB is 0.8-1.5m. Low value causes incomplete combustion, high value creates unnecessary weight.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="l_star" value="1.0" step="0.1" min="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Ae/At Oranı <span class="unit">genişleme oranı, 0=otomatik</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Expansion Ratio (Ae/At)</strong>
+                                Ratio of nozzle exit area to throat area. Higher value provides better performance but increases nozzle size. Sea level: 4-8, high altitude: 15-25. Value 0 automatically calculates optimal value.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="expansion_ratio" value="0" step="0.1" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Nozzle Tipi
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Nozzle Type</strong>
+                                Conical: Simple cone shape, easier to manufacture. Bell: Optimized contour for better performance but more complex manufacturing. Bell nozzles provide 1-2% higher specific impulse.
+                            </span>
+                        </span>
+                    </label>
+                    <select id="nozzle_type">
+                        <option value="conical">Konik Nozzle</option>
+                        <option value="bell">Bell Nozzle</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Yanma Tipi
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Combustion Type</strong>
+                                Infinite Area: Assumes unlimited combustion area (conservative). Finite Area: Considers actual port surface area for more accurate results. Use finite for detailed analysis.
+                            </span>
+                        </span>
+                    </label>
+                    <select id="combustion_type">
+                        <option value="infinite">Infinite Area Combustion</option>
+                        <option value="finite">Finite Area Combustion</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Yanma Odası Çapı (mm) <span class="unit">0=otomatik</span>
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Chamber Diameter</strong>
+                                Inner diameter of the combustion chamber. Determines the outer diameter of solid fuel grain. Together with L* value and throat diameter, determines chamber length. Value 0 automatically calculates with L*.
+                            </span>
+                        </span>
+                    </label>
+                    <input type="number" id="chamber_diameter_input" value="0" step="0.1" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Katı Yakıt Türü
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Solid Fuel Type</strong>
+                                HTPB: Hydroxyl-terminated polybutadiene, most common hybrid fuel. PE: Polyethylene, good performance. PMMA: Polymethyl methacrylate, transparent fuel with good regression rate. Each has different regression rate characteristics.
+                            </span>
+                        </span>
+                    </label>
+                    <select id="fuel_type">
+                        <option value="htpb">HTPB</option>
+                        <option value="pe">Polyethylene</option>
+                        <option value="pmma">PMMA (Plexiglas)</option>
+                        <option value="custom">Özel Yakıt</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Injector Panel -->
+        <div class="panel">
+            <h2>Enjektör Konfigürasyonu</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Enjektör Tipi
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Injector Type</strong>
+                                Showerhead: Multiple small holes, simple design. Pintle: Central post injection, good mixing. Swirl: Tangential injection creates swirl, excellent atomization. Each affects mixing quality and pressure drop.
+                            </span>
+                        </span>
+                    </label>
+                    <select id="injector_type" onchange="updateInjectorParams()">
+                        <option value="showerhead">Showerhead</option>
+                        <option value="pintle">Pintle</option>
+                        <option value="swirl">Swirl</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Oksitleyici Fazı
+                        <span class="tooltip">
+                            <span class="tooltip-icon">?</span>
+                            <span class="tooltiptext">
+                                <strong>Oxidizer Phase</strong>
+                                Liquid: Higher density, self-pressurizing systems possible (N2O). Gas: Lower density but simpler injection. Phase affects injector design, pressure drop, and atomization quality.
+                            </span>
+                        </span>
+                    </label>
+                    <select id="oxidizer_phase">
+                        <option value="liquid">Sıvı (N2O)</option>
+                        <option value="gas">Gaz</option>
+                    </select>
+                </div>
+            </div>
+            
+            <!-- Dynamic Parameters -->
+            <div id="dynamic_params">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Hedef Hız (m/s)</label>
+                        <input type="number" id="target_velocity" value="30">
+                    </div>
+                    <div class="form-group">
+                        <label>Min Delik Çapı (mm)</label>
+                        <input type="number" id="hole_diameter_min" value="0.3" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Delik Çapı (mm)</label>
+                        <input type="number" id="hole_diameter_max" value="2.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Plaka Kalınlığı (mm)</label>
+                        <input type="number" id="plate_thickness" value="3.0" step="0.1">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analysis Type Panel -->
+        <div class="panel">
+            <h2>Analiz Tipi</h2>
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('single')">Tekil Analiz</button>
+                <button class="tab" onclick="switchTab('parametric')">Parametrik Analiz</button>
+                <button class="tab" onclick="switchTab('trajectory')">Trajectory Analiz</button>
+            </div>
+            
+            <div id="single_tab" class="tab-content active">
+                <div class="form-group">
+                    <button class="btn" onclick="calculate()">Hesapla</button>
+                    <button class="btn btn-success" onclick="optimize()">⚡ Optimize Et</button>
+                    <button class="btn btn-warning" onclick="exportResults()">Sonuçları Dışa Aktar</button>
+                </div>
+            </div>
+            
+            <div id="parametric_tab" class="tab-content">
+                <div class="parametric-grid">
+                    <div>
+                        <div class="form-group">
+                            <label>
+                                Parametre Tipi
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>Parameter Type for Sweep</strong>
+                                        Choose which parameter to vary in parametric analysis. This will generate performance curves showing how motor characteristics change with the selected parameter.
+                                    </span>
+                                </span>
+                            </label>
+                            <select id="param_type">
+                                <option value="of_ratio">O/F Oranı</option>
+                                <option value="chamber_pressure">Yanma Odası Basıncı</option>
+                                <option value="expansion_ratio">Genişleme Oranı</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                Başlangıç Değeri
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>Start Value</strong>
+                                        Initial value for parameter sweep. Choose a reasonable lower bound for the parameter being varied. Results will include this value as the first data point.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="param_start" value="1.5" step="0.1">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                Bitiş Değeri
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>End Value</strong>
+                                        Final value for parameter sweep. Choose a reasonable upper bound for the parameter being varied. Results will include this value as the last data point.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="param_end" value="4.0" step="0.1">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                Adım Sayısı
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>Number of Steps</strong>
+                                        Number of calculation points between start and end values. More steps provide smoother curves but take longer to compute. 10-20 steps usually sufficient for most analyses.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="param_steps" value="10" min="3" max="50">
+                        </div>
+                        <button class="btn" onclick="calculateParametric()">Parametrik Analiz</button>
+                    </div>
+                    <div id="parametric_plot" class="plot-container"></div>
+                </div>
+            </div>
+            
+            <div id="trajectory_tab" class="tab-content">
+                <div class="parametric-grid">
+                    <div>
+                        <div class="form-group">
+                            <label>
+                                İlk Kütle (kg)
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>Initial Mass</strong>
+                                        Total rocket mass at ignition including propellant, structure, and payload. Used for trajectory simulation and performance calculations.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="initial_mass" value="50" step="1" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                Son Kütle (kg)
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>Final Mass</strong>
+                                        Rocket mass after burnout (dry mass). Difference between initial and final mass represents propellant mass consumed during burn.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="final_mass" value="20" step="1" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                Drag Katsayısı (Cd)
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>Drag Coefficient</strong>
+                                        Aerodynamic drag coefficient. Typical values: 0.3-0.6 for well-designed rockets, 0.6-1.0 for simple designs. Affects maximum altitude and trajectory.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="drag_coefficient" value="0.5" step="0.1" min="0.1" max="2.0">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                Referans Alanı (m²)
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltiptext">
+                                        <strong>Reference Area</strong>
+                                        Cross-sectional area of rocket for drag calculation. Usually maximum body cross-section area. Calculated as π×(diameter/2)².
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="reference_area" value="0.01" step="0.001" min="0.001">
+                        </div>
+                        <button class="btn" onclick="calculateTrajectory()">Trajectory Analiz</button>
+                    </div>
+                    <div id="trajectory_plot" class="plot-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Hesaplama yapılıyor...</p>
+        </div>
+
+        <!-- Messages -->
+        <div id="messages"></div>
+
+        <!-- Results -->
+        <div id="results" class="results">
+            <!-- Performance Metrics -->
+            <div class="panel">
+                <h2>Performans Özetı</h2>
+                <div id="performance_metrics"></div>
+            </div>
+
+            <!-- Results Grid -->
+            <div class="results-grid">
+                <!-- Motor Design -->
+                <div class="panel">
+                    <h2>Motor Tasarımı</h2>
+                    <table class="data-table" id="motor_table">
+                        <thead>
+                            <tr><th>Parametre</th><th>Değer</th><th>Birim</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <!-- Injector Design -->
+                <div class="panel">
+                    <h2>Enjektör Tasarımı</h2>
+                    <table class="data-table" id="injector_table">
+                        <thead>
+                            <tr><th>Parametre</th><th>Değer</th><th>Birim</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Plots -->
+            <div class="results-grid">
+                <div class="panel">
+                    <h2>Motor Kesiti</h2>
+                    <div id="motor_plot" class="plot-container"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>Enjektör Tasarımı</h2>
+                    <div id="injector_plot" class="plot-container"></div>
+                </div>
+                <div class="panel">
+                    <h2>Performans Analizi</h2>
+                    <div id="performance_plots" class="plot-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentResults = null;
+
+        function switchTab(tabName) {
+            // Remove active class from all tabs and contents
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            // Add active class to selected tab and content
+            event.target.classList.add('active');
+            document.getElementById(tabName + '_tab').classList.add('active');
+        }
+
+        function updateInjectorParams() {
+            const type = document.getElementById('injector_type').value;
+            const paramsDiv = document.getElementById('dynamic_params');
+            
+            let html = '<div class="form-grid">';
+            
+            if (type === 'showerhead') {
+                html += `
+                    <div class="form-group">
+                        <label>
+                            Hedef Hız (m/s)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Target Injection Velocity</strong>
+                                    Desired velocity of oxidizer through injection holes. Higher velocities improve atomization and mixing but increase pressure drop. Typical range: 20-50 m/s.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="target_velocity" value="30">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            Min Delik Çapı (mm)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Minimum Hole Diameter</strong>
+                                    Smallest acceptable injection hole diameter. Too small holes may clog or create excessive pressure drop. Minimum typically 0.2-0.5mm for manufacturing reasons.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="hole_diameter_min" value="0.3" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            Max Delik Çapı (mm)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Maximum Hole Diameter</strong>
+                                    Largest acceptable injection hole diameter. Larger holes reduce pressure drop but may worsen mixing quality. Maximum typically 2-5mm for good atomization.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="hole_diameter_max" value="2.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            Plaka Kalınlığı (mm)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Injector Plate Thickness</strong>
+                                    Thickness of injection plate. Affects L/D ratio of holes and pressure drop characteristics. Typical range: 2-10mm. Thicker plates provide better flow characteristics.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="plate_thickness" value="3.0" step="0.1">
+                    </div>
+                `;
+            } else if (type === 'pintle') {
+                html += `
+                    <div class="form-group">
+                        <label>
+                            Dış Çap (mm)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Outer Diameter</strong>
+                                    External diameter of pintle injector assembly. Determines overall size constraint and must fit within chamber diameter with clearance for mounting.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="outer_diameter" value="50">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            Pintle Çapı (mm)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Pintle Diameter</strong>
+                                    Diameter of central pintle post. Controls annular gap area for oxidizer flow. Pintle creates momentum flux ratio for improved mixing. Typical pintle-to-outer ratio: 0.4-0.7.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="pintle_diameter" value="25">
+                    </div>
+                `;
+            } else if (type === 'swirl') {
+                html += `
+                    <div class="form-group">
+                        <label>
+                            Slot Sayısı
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Number of Swirl Slots</strong>
+                                    Number of tangential injection slots that create swirl motion. More slots provide better flow distribution but increase manufacturing complexity. Typical range: 4-12 slots.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="n_slots" value="6">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            Slot Genişliği (mm, 0=otomatik)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Slot Width</strong>
+                                    Width of each tangential slot. Controls flow area and pressure drop. Leave 0 for automatic calculation based on flow requirements. Manual entry allows custom optimization.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="slot_width" value="0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            Slot Yüksekliği (mm, 0=otomatik)
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltiptext">
+                                    <strong>Slot Height</strong>
+                                    Height of each tangential slot. Together with width determines slot area. Leave 0 for automatic calculation. Height-to-width ratio affects swirl characteristics.
+                                </span>
+                            </span>
+                        </label>
+                        <input type="number" id="slot_height" value="0" step="0.1">
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            paramsDiv.innerHTML = html;
+        }
+
+        function getFormData() {
+            const data = {
+                // Motor info
+                motor_name: document.getElementById('motor_name').value || 'UZAYTEK-HRM-001',
+                motor_description: document.getElementById('motor_description').value || '',
+                
+                // Basic parameters
+                thrust: parseFloat(document.getElementById('thrust').value),
+                burn_time: parseFloat(document.getElementById('burn_time').value),
+                of_ratio: parseFloat(document.getElementById('of_ratio').value),
+                chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value),
+                tank_pressure: parseFloat(document.getElementById('tank_pressure').value),
+                atmospheric_pressure: parseFloat(document.getElementById('ambient_pressure').value),
+                
+                // Advanced parameters
+                l_star: parseFloat(document.getElementById('l_star').value),
+                expansion_ratio: parseFloat(document.getElementById('expansion_ratio').value),
+                nozzle_type: document.getElementById('nozzle_type').value,
+                combustion_type: document.getElementById('combustion_type').value,
+                chamber_diameter_input: parseFloat(document.getElementById('chamber_diameter_input').value),
+                fuel_type: document.getElementById('fuel_type').value,
+                
+                // Injector parameters
+                injector_type: document.getElementById('injector_type').value,
+                oxidizer_phase: document.getElementById('oxidizer_phase').value,
+                oxidizer_density: document.getElementById('oxidizer_phase').value === 'liquid' ? 1220 : 1.8,
+                oxidizer_viscosity: document.getElementById('oxidizer_phase').value === 'liquid' ? 0.0002 : 0.000018
+            };
+
+            // Add injector-specific parameters
+            const injectorType = document.getElementById('injector_type').value;
+            if (injectorType === 'showerhead') {
+                data.target_velocity = parseFloat(document.getElementById('target_velocity').value || 30);
+                data.hole_diameter_min = parseFloat(document.getElementById('hole_diameter_min').value || 0.3);
+                data.hole_diameter_max = parseFloat(document.getElementById('hole_diameter_max').value || 2.0);
+                data.plate_thickness = parseFloat(document.getElementById('plate_thickness').value || 3.0);
+            } else if (injectorType === 'pintle') {
+                data.outer_diameter = parseFloat(document.getElementById('outer_diameter').value || 50);
+                data.pintle_diameter = parseFloat(document.getElementById('pintle_diameter').value || 25);
+            } else if (injectorType === 'swirl') {
+                data.n_slots = parseInt(document.getElementById('n_slots').value || 6);
+                data.slot_width = parseFloat(document.getElementById('slot_width').value || 0);
+                data.slot_height = parseFloat(document.getElementById('slot_height').value || 0);
+            }
+
+            return data;
+        }
+
+        async function calculate() {
+            const data = getFormData();
+            
+            showLoading(true);
+            showMessage('', 'clear');
+            
+            try {
+                const response = await fetch('/calculate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const results = await response.json();
+                
+                if (results.error) {
+                    throw new Error(results.error);
+                }
+                
+                currentResults = results;
+                displayResults(results);
+                showMessage('Hesaplama başarıyla tamamlandı!', 'success');
+                
+            } catch (error) {
+                showMessage('Hata: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function displayResults(results) {
+            document.getElementById('results').style.display = 'block';
+            
+            // Performance metrics cards
+            const metricsDiv = document.getElementById('performance_metrics');
+            const metrics = [
+                { label: 'Özgül İtki', value: results.motor.isp.toFixed(1), unit: 's', color: '#667eea' },
+                { label: 'İtki', value: results.motor.thrust.toFixed(0), unit: 'N', color: '#764ba2' },
+                { label: 'Yanma Odası Basıncı', value: results.motor.chamber_pressure.toFixed(1), unit: 'bar', color: '#f093fb' },
+                { label: 'Toplam Kütle Akış Hızı', value: results.motor.mdot_total.toFixed(3), unit: 'kg/s', color: '#f5576c' }
+            ];
+            
+            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
+            metrics.forEach(metric => {
+                html += `
+                    <div class="metric-card" style="background: linear-gradient(135deg, ${metric.color} 0%, ${metric.color}aa 100%);">
+                        <div class="metric-value">${metric.value}</div>
+                        <div class="metric-label">${metric.label} (${metric.unit})</div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            metricsDiv.innerHTML = html;
+
+            // Motor table (convert to mm where appropriate)
+            const motorTable = document.getElementById('motor_table').getElementsByTagName('tbody')[0];
+            motorTable.innerHTML = '';
+            const motorData = [
+                ['Boğaz Çapı', (results.motor.throat_diameter * 1000).toFixed(2), 'mm'],
+                ['Çıkış Çapı', (results.motor.exit_diameter * 1000).toFixed(2), 'mm'],
+                ['Yanma Odası Çapı', (results.motor.chamber_diameter * 1000).toFixed(2), 'mm'],
+                ['Yanma Odası Uzunluğu', (results.motor.chamber_length * 1000).toFixed(2), 'mm'],
+                ['Genişleme Oranı (Ae/At)', results.motor.expansion_ratio.toFixed(2), '-'],
+                ['İlk Port Çapı', (results.motor.port_diameter_initial * 1000).toFixed(2), 'mm'],
+                ['Son Port Çapı', (results.motor.port_diameter_final * 1000).toFixed(2), 'mm'],
+                ['Regresyon Hızı', (results.motor.regression_rate * 1000).toFixed(3), 'mm/s'],
+                ['C* Hızı', results.motor.c_star.toFixed(1), 'm/s'],
+                ['İtki Katsayısı (CF)', results.motor.cf.toFixed(3), '-']
+            ];
+            motorData.forEach(row => {
+                const tr = motorTable.insertRow();
+                row.forEach(cell => {
+                    const td = tr.insertCell();
+                    td.textContent = cell;
+                });
+            });
+
+            // Injector table
+            const injTable = document.getElementById('injector_table').getElementsByTagName('tbody')[0];
+            injTable.innerHTML = '';
+            const injData = [
+                ['Tip', results.injector.type.charAt(0).toUpperCase() + results.injector.type.slice(1), '-'],
+                ['Çıkış Hızı', results.injector.exit_velocity.toFixed(1), 'm/s'],
+                ['Reynolds Sayısı', results.injector.reynolds_number.toFixed(0), '-'],
+                ['Basınç Düşümü', results.injector.pressure_drop.toFixed(2), 'bar']
+            ];
+            
+            // Add type-specific data
+            if (results.injector.type === 'showerhead') {
+                injData.push(['Delik Sayısı', results.injector.n_holes, 'adet']);
+                injData.push(['Delik Çapı', results.injector.hole_diameter.toFixed(3), 'mm']);
+                injData.push(['L/D Oranı', results.injector.L_D_ratio.toFixed(2), '-']);
+            } else if (results.injector.type === 'pintle') {
+                injData.push(['Dış Çap', results.injector.outer_diameter.toFixed(2), 'mm']);
+                injData.push(['Boşluk', results.injector.gap.toFixed(3), 'mm']);
+            } else if (results.injector.type === 'swirl') {
+                injData.push(['Slot Sayısı', results.injector.n_slots, 'adet']);
+                injData.push(['Slot Genişliği', results.injector.slot_width.toFixed(3), 'mm']);
+                injData.push(['Slot Yüksekliği', results.injector.slot_height.toFixed(3), 'mm']);
+            }
+            
+            injData.forEach(row => {
+                const tr = injTable.insertRow();
+                row.forEach(cell => {
+                    const td = tr.insertCell();
+                    td.textContent = cell;
+                });
+            });
+
+            // Display plots safely
+            function safePlotCreate(elementId, plotData) {
+                const element = document.getElementById(elementId);
+                if (element && plotData) {
+                    try {
+                        const parsedData = JSON.parse(plotData);
+                        Plotly.newPlot(elementId, parsedData.data, parsedData.layout, {responsive: true});
+                    } catch (e) {
+                        console.warn(`Failed to create plot for ${elementId}:`, e);
+                        element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Grafik verisi mevcut değil</div>';
+                    }
+                } else if (element) {
+                    element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Veri mevcut değil</div>';
+                }
+            }
+            
+            if (results.plots) {
+                safePlotCreate('motor_plot', results.plots.motor);
+                safePlotCreate('injector_plot', results.plots.injector);
+                safePlotCreate('performance_plots', results.plots.performance);
+            }
+
+            // Show warnings
+            if (results.injector.warnings && results.injector.warnings.length > 0) {
+                let warningText = '⚠️ Uyarılar: ' + results.injector.warnings.join('; ');
+                showMessage(warningText, 'warning');
+            }
+        }
+
+        async function calculateParametric() {
+            showMessage('Parametrik analiz başlatıldı...', 'success');
+            // Placeholder for parametric analysis
+            showMessage('Parametrik analiz özelliği geliştirme aşamasında!', 'warning');
+        }
+
+        async function calculateTrajectory() {
+            showMessage('Trajectory analiz başlatıldı...', 'success');
+            // Placeholder for trajectory analysis
+            showMessage('Trajectory analiz özelliği geliştirme aşamasında!', 'warning');
+        }
+
+        function optimize() {
+            showMessage('Optimizasyon özelliği yakında eklenecek!', 'warning');
+        }
+
+        function exportResults() {
+            if (!currentResults) {
+                showMessage('Dışa aktarılacak sonuç bulunamadı', 'error');
+                return;
+            }
+            
+            const motorName = document.getElementById('motor_name').value || 'UZAYTEK-HRM-001';
+            const description = document.getElementById('motor_description').value || '';
+            
+            let report = `UZAYTEK - HİBRİT ROKET MOTORU ANALİZ RAPORU\n`;
+            report += `===============================================\n\n`;
+            report += `Motor Adı: ${motorName}\n`;
+            report += `Açıklama: ${description}\n`;
+            report += `Analiz Tarihi: ${new Date().toLocaleDateString('tr-TR')}\n\n`;
+            
+            report += `PERFORMANS ÖZETİ:\n`;
+            report += `Özgül İtki: ${currentResults.motor.isp.toFixed(1)} s\n`;
+            report += `İtki: ${currentResults.motor.thrust.toFixed(0)} N\n`;
+            report += `Yanma Odası Basıncı: ${currentResults.motor.chamber_pressure.toFixed(1)} bar\n`;
+            report += `Toplam Kütle Akış Hızı: ${currentResults.motor.mdot_total.toFixed(3)} kg/s\n\n`;
+            
+            report += `MOTOR TASARIMI:\n`;
+            report += `Boğaz Çapı: ${(currentResults.motor.throat_diameter * 1000).toFixed(2)} mm\n`;
+            report += `Çıkış Çapı: ${(currentResults.motor.exit_diameter * 1000).toFixed(2)} mm\n`;
+            report += `Yanma Odası Çapı: ${(currentResults.motor.chamber_diameter * 1000).toFixed(2)} mm\n`;
+            report += `Yanma Odası Uzunluğu: ${(currentResults.motor.chamber_length * 1000).toFixed(2)} mm\n\n`;
+            
+            report += `ENJEKTÖR TASARIMI:\n`;
+            report += `Tip: ${currentResults.injector.type}\n`;
+            report += `Çıkış Hızı: ${currentResults.injector.exit_velocity.toFixed(1)} m/s\n`;
+            report += `Reynolds Sayısı: ${currentResults.injector.reynolds_number.toFixed(0)}\n`;
+            report += `Basınç Düşümü: ${currentResults.injector.pressure_drop.toFixed(2)} bar\n\n`;
+            
+            if (currentResults.injector.warnings && currentResults.injector.warnings.length > 0) {
+                report += `UYARILAR:\n`;
+                currentResults.injector.warnings.forEach(warning => {
+                    report += `• ${warning}\n`;
+                });
+                report += `\n`;
+            }
+            
+            report += `---\nUZAYTEK Hibrit Roket Motoru Analiz Yazılımı ile oluşturulmuştur.\n`;
+            
+            const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${motorName}_analiz_raporu.txt`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+            
+            showMessage('Rapor başarıyla dışa aktarıldı!', 'success');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showMessage(text, type) {
+            const messagesDiv = document.getElementById('messages');
+            if (type === 'clear') {
+                messagesDiv.innerHTML = '';
+                return;
+            }
+            
+            const div = document.createElement('div');
+            div.className = `alert alert-${type === 'error' ? 'danger' : type}`;
+            div.textContent = text;
+            messagesDiv.innerHTML = '';
+            messagesDiv.appendChild(div);
+            
+            // Auto hide after 5 seconds
+            setTimeout(() => {
+                div.style.opacity = '0';
+                setTimeout(() => div.remove(), 300);
+            }, 5000);
+        }
+
+        // Initialize
+        updateInjectorParams();
+    </script>
+</body>
+</html>

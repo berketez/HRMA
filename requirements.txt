@@ -1,0 +1,46 @@
+# UZAYTEK HRMA Dependencies
+# Core web framework
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Visualization
+plotly>=5.18.0
+matplotlib>=3.7.0
+
+# Data analysis
+pandas>=2.0.0
+
+# 3D CAD and geometry
+trimesh>=3.20.0
+
+# Image processing
+Pillow>=10.0.0
+
+# Web scraping and HTTP requests (for live propellant data)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+aiohttp>=3.9.0
+
+# XML processing
+lxml>=4.9.0
+
+# NASA CEA calculations (optional - for enhanced accuracy)
+rocketcea>=1.2.0
+
+# Thermodynamic properties (NIST RefProp tabanlı)
+CoolProp>=6.5.0
+
+# Web servers
+gunicorn>=21.2.0;platform_system!="Windows"
+waitress>=2.1.0;platform_system=="Windows"
+
+# Build tools (for creating executables)
+pyinstaller>=5.13.0
+
+# Development tools (optional)
+black>=23.0.0
+flake8>=6.0.0

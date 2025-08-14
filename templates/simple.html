@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hybrid Rocket Motor Analysis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        
+        .header { background: #2c3e50; color: white; padding: 15px; text-align: center; }
+        .header h1 { font-size: 24px; font-weight: normal; }
+        
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+        
+        .panel { background: white; margin: 15px 0; padding: 20px; border: 1px solid #ddd; }
+        .panel h2 { color: #2c3e50; font-size: 18px; margin-bottom: 15px; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+        
+        .form-row { margin: 10px 0; }
+        .form-row label { display: inline-block; width: 200px; font-weight: bold; }
+        .form-row input, .form-row select { width: 150px; padding: 5px; border: 1px solid #ccc; }
+        
+        .btn { background: #3498db; color: white; padding: 10px 20px; border: none; cursor: pointer; margin: 5px; }
+        .btn:hover { background: #2980b9; }
+        .btn-success { background: #27ae60; }
+        .btn-success:hover { background: #229954; }
+        
+        .results { display: none; }
+        .results table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        .results th, .results td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .results th { background: #f8f9fa; font-weight: bold; }
+        
+        .plot-area { min-height: 300px; border: 1px solid #ddd; margin: 10px 0; background: white; }
+        
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; margin: 10px 0; color: #856404; }
+        .error { background: #f8d7da; border: 1px solid #f5c2c7; padding: 10px; margin: 10px 0; color: #721c24; }
+        .success { background: #d1edff; border: 1px solid #bee5eb; padding: 10px; margin: 10px 0; color: #0c5460; }
+        
+        .loading { text-align: center; padding: 20px; }
+        .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>Hybrid Rocket Motor Analysis Tool</h1>
+    </div>
+    
+    <div class="container">
+        <!-- Input Panel -->
+        <div class="panel">
+            <h2>Motor Parameters</h2>
+            <div class="form-row">
+                <label>Thrust (N):</label>
+                <input type="number" id="thrust" value="1000" step="0.1">
+            </div>
+            <div class="form-row">
+                <label>Burn Time (s):</label>
+                <input type="number" id="burn_time" value="10" step="0.1">
+            </div>
+            <div class="form-row">
+                <label>O/F Ratio:</label>
+                <input type="number" id="of_ratio" value="2.5" step="0.1">
+            </div>
+            <div class="form-row">
+                <label>Chamber Pressure (bar):</label>
+                <input type="number" id="chamber_pressure" value="20" step="0.1">
+            </div>
+            <div class="form-row">
+                <label>Tank Pressure (bar):</label>
+                <input type="number" id="tank_pressure" value="50" step="0.1">
+            </div>
+        </div>
+
+        <!-- Injector Panel -->
+        <div class="panel">
+            <h2>Injector Configuration</h2>
+            <div class="form-row">
+                <label>Injector Type:</label>
+                <select id="injector_type" onchange="updateInjectorParams()">
+                    <option value="showerhead">Showerhead</option>
+                    <option value="pintle">Pintle</option>
+                    <option value="swirl">Swirl</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Oxidizer Phase:</label>
+                <select id="oxidizer_phase">
+                    <option value="liquid">Liquid (N2O)</option>
+                    <option value="gas">Gas</option>
+                </select>
+            </div>
+            
+            <!-- Dynamic Parameters -->
+            <div id="dynamic_params">
+                <div class="form-row">
+                    <label>Target Velocity (m/s):</label>
+                    <input type="number" id="target_velocity" value="30">
+                </div>
+                <div class="form-row">
+                    <label>Min Hole Diameter (mm):</label>
+                    <input type="number" id="hole_diameter_min" value="0.3" step="0.1">
+                </div>
+                <div class="form-row">
+                    <label>Max Hole Diameter (mm):</label>
+                    <input type="number" id="hole_diameter_max" value="2.0" step="0.1">
+                </div>
+            </div>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="panel">
+            <button class="btn" onclick="calculate()">Calculate</button>
+            <button class="btn btn-success" onclick="optimize()">Optimize</button>
+            <button class="btn" onclick="exportResults()">Export</button>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Calculating...</p>
+        </div>
+
+        <!-- Messages -->
+        <div id="messages"></div>
+
+        <!-- Results -->
+        <div id="results" class="results">
+            <!-- Performance Summary -->
+            <div class="panel">
+                <h2>Performance Summary</h2>
+                <table id="performance_table">
+                    <thead>
+                        <tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <!-- Motor Design -->
+            <div class="panel">
+                <h2>Motor Design</h2>
+                <table id="motor_table">
+                    <thead>
+                        <tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <!-- Injector Design -->
+            <div class="panel">
+                <h2>Injector Design</h2>
+                <table id="injector_table">
+                    <thead>
+                        <tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <!-- Plots -->
+            <div class="panel">
+                <h2>Motor Cross-Section</h2>
+                <div id="motor_plot" class="plot-area"></div>
+            </div>
+
+            <div class="panel">
+                <h2>Injector Design</h2>
+                <div id="injector_plot" class="plot-area"></div>
+            </div>
+            <div class="panel">
+                <h2>Performance Analysis</h2>
+                <div id="performance_plots" class="plot-area"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentResults = null;
+
+        function updateInjectorParams() {
+            const type = document.getElementById('injector_type').value;
+            const paramsDiv = document.getElementById('dynamic_params');
+            
+            let html = '';
+            if (type === 'showerhead') {
+                html = `
+                    <div class="form-row">
+                        <label>Target Velocity (m/s):</label>
+                        <input type="number" id="target_velocity" value="30">
+                    </div>
+                    <div class="form-row">
+                        <label>Min Hole Diameter (mm):</label>
+                        <input type="number" id="hole_diameter_min" value="0.3" step="0.1">
+                    </div>
+                    <div class="form-row">
+                        <label>Max Hole Diameter (mm):</label>
+                        <input type="number" id="hole_diameter_max" value="2.0" step="0.1">
+                    </div>
+                `;
+            } else if (type === 'pintle') {
+                html = `
+                    <div class="form-row">
+                        <label>Outer Diameter (mm):</label>
+                        <input type="number" id="outer_diameter" value="50">
+                    </div>
+                    <div class="form-row">
+                        <label>Pintle Diameter (mm):</label>
+                        <input type="number" id="pintle_diameter" value="25">
+                    </div>
+                `;
+            } else if (type === 'swirl') {
+                html = `
+                    <div class="form-row">
+                        <label>Number of Slots:</label>
+                        <input type="number" id="n_slots" value="6">
+                    </div>
+                    <div class="form-row">
+                        <label>Slot Width (mm, 0=auto):</label>
+                        <input type="number" id="slot_width" value="0" step="0.1">
+                    </div>
+                    <div class="form-row">
+                        <label>Slot Height (mm, 0=auto):</label>
+                        <input type="number" id="slot_height" value="0" step="0.1">
+                    </div>
+                `;
+            }
+            paramsDiv.innerHTML = html;
+        }
+
+        function getFormData() {
+            const data = {
+                thrust: parseFloat(document.getElementById('thrust').value),
+                burn_time: parseFloat(document.getElementById('burn_time').value),
+                of_ratio: parseFloat(document.getElementById('of_ratio').value),
+                chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value),
+                tank_pressure: parseFloat(document.getElementById('tank_pressure').value),
+                injector_type: document.getElementById('injector_type').value,
+                oxidizer_phase: document.getElementById('oxidizer_phase').value,
+                oxidizer_density: document.getElementById('oxidizer_phase').value === 'liquid' ? 1220 : 1.8,
+                oxidizer_viscosity: document.getElementById('oxidizer_phase').value === 'liquid' ? 0.0002 : 0.000018
+            };
+
+            // Add injector-specific parameters
+            const injectorType = document.getElementById('injector_type').value;
+            if (injectorType === 'showerhead') {
+                data.target_velocity = parseFloat(document.getElementById('target_velocity').value || 30);
+                data.hole_diameter_min = parseFloat(document.getElementById('hole_diameter_min').value || 0.3);
+                data.hole_diameter_max = parseFloat(document.getElementById('hole_diameter_max').value || 2.0);
+                data.plate_thickness = 3.0;
+            } else if (injectorType === 'pintle') {
+                data.outer_diameter = parseFloat(document.getElementById('outer_diameter').value || 50);
+                data.pintle_diameter = parseFloat(document.getElementById('pintle_diameter').value || 25);
+            } else if (injectorType === 'swirl') {
+                data.n_slots = parseInt(document.getElementById('n_slots').value || 6);
+                data.slot_width = parseFloat(document.getElementById('slot_width').value || 0);
+                data.slot_height = parseFloat(document.getElementById('slot_height').value || 0);
+            }
+
+            return data;
+        }
+
+        async function calculate() {
+            const data = getFormData();
+            
+            showLoading(true);
+            showMessage('', 'clear');
+            
+            try {
+                const response = await fetch('/calculate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const results = await response.json();
+                
+                if (results.error) {
+                    throw new Error(results.error);
+                }
+                
+                currentResults = results;
+                displayResults(results);
+                showMessage('Calculation completed successfully!', 'success');
+                
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function displayResults(results) {
+            document.getElementById('results').style.display = 'block';
+            
+            // Performance table
+            const perfTable = document.getElementById('performance_table').getElementsByTagName('tbody')[0];
+            perfTable.innerHTML = '';
+            const perfData = [
+                ['Specific Impulse', results.motor.isp.toFixed(1), 's'],
+                ['Thrust', results.motor.thrust.toFixed(0), 'N'],
+                ['Chamber Pressure', results.motor.chamber_pressure.toFixed(1), 'bar'],
+                ['Mass Flow Rate', results.motor.mdot_total.toFixed(3), 'kg/s']
+            ];
+            perfData.forEach(row => {
+                const tr = perfTable.insertRow();
+                row.forEach(cell => {
+                    const td = tr.insertCell();
+                    td.textContent = cell;
+                });
+            });
+
+            // Motor table
+            const motorTable = document.getElementById('motor_table').getElementsByTagName('tbody')[0];
+            motorTable.innerHTML = '';
+            const motorData = [
+                ['Throat Diameter', (results.motor.throat_diameter * 1000).toFixed(1), 'mm'],
+                ['Exit Diameter', (results.motor.exit_diameter * 1000).toFixed(1), 'mm'],
+                ['Chamber Diameter', (results.motor.chamber_diameter * 1000).toFixed(1), 'mm'],
+                ['Chamber Length', (results.motor.chamber_length * 1000).toFixed(1), 'mm'],
+                ['Expansion Ratio', results.motor.expansion_ratio.toFixed(1), '-']
+            ];
+            motorData.forEach(row => {
+                const tr = motorTable.insertRow();
+                row.forEach(cell => {
+                    const td = tr.insertCell();
+                    td.textContent = cell;
+                });
+            });
+
+            // Injector table
+            const injTable = document.getElementById('injector_table').getElementsByTagName('tbody')[0];
+            injTable.innerHTML = '';
+            const injData = [
+                ['Type', results.injector.type.charAt(0).toUpperCase() + results.injector.type.slice(1), '-'],
+                ['Exit Velocity', results.injector.exit_velocity.toFixed(1), 'm/s'],
+                ['Reynolds Number', results.injector.reynolds_number.toFixed(0), '-'],
+                ['Pressure Drop', results.injector.pressure_drop.toFixed(2), 'bar']
+            ];
+            
+            // Add type-specific data
+            if (results.injector.type === 'showerhead') {
+                injData.push(['Number of Holes', results.injector.n_holes, '-']);
+                injData.push(['Hole Diameter', results.injector.hole_diameter.toFixed(2), 'mm']);
+            } else if (results.injector.type === 'pintle') {
+                injData.push(['Outer Diameter', results.injector.outer_diameter.toFixed(1), 'mm']);
+                injData.push(['Gap', results.injector.gap.toFixed(2), 'mm']);
+            } else if (results.injector.type === 'swirl') {
+                injData.push(['Number of Slots', results.injector.n_slots, '-']);
+                injData.push(['Slot Width', results.injector.slot_width.toFixed(2), 'mm']);
+            }
+            
+            injData.forEach(row => {
+                const tr = injTable.insertRow();
+                row.forEach(cell => {
+                    const td = tr.insertCell();
+                    td.textContent = cell;
+                });
+            });
+
+            // Display plots safely
+            function safePlotCreate(elementId, plotData) {
+                const element = document.getElementById(elementId);
+                if (element && plotData) {
+                    try {
+                        const parsedData = JSON.parse(plotData);
+                        Plotly.newPlot(elementId, parsedData.data, parsedData.layout, {responsive: true});
+                    } catch (e) {
+                        console.warn(`Failed to create plot for ${elementId}:`, e);
+                        element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Plot data unavailable</div>';
+                    }
+                } else if (element) {
+                    element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No data available</div>';
+                }
+            }
+            
+            if (results.plots) {
+                safePlotCreate('motor_plot', results.plots.motor);
+                safePlotCreate('injector_plot', results.plots.injector);
+                safePlotCreate('performance_plots', results.plots.performance);
+            }
+
+            // Show warnings
+            if (results.injector.warnings && results.injector.warnings.length > 0) {
+                let warningText = 'Warnings: ' + results.injector.warnings.join('; ');
+                showMessage(warningText, 'warning');
+            }
+        }
+
+        function optimize() {
+            showMessage('Optimization feature coming soon!', 'warning');
+        }
+
+        function exportResults() {
+            if (!currentResults) {
+                showMessage('No results to export', 'error');
+                return;
+            }
+            
+            let report = 'HYBRID ROCKET MOTOR ANALYSIS REPORT\\n';
+            report += '=====================================\\n\\n';
+            report += `Thrust: ${currentResults.motor.thrust} N\\n`;
+            report += `Isp: ${currentResults.motor.isp.toFixed(1)} s\\n`;
+            report += `Chamber Pressure: ${currentResults.motor.chamber_pressure} bar\\n`;
+            
+            const blob = new Blob([report], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'rocket_analysis.txt';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showMessage(text, type) {
+            const messagesDiv = document.getElementById('messages');
+            if (type === 'clear') {
+                messagesDiv.innerHTML = '';
+                return;
+            }
+            
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = text;
+            messagesDiv.innerHTML = '';
+            messagesDiv.appendChild(div);
+        }
+
+        // Initialize
+        updateInjectorParams();
+    </script>
+</body>
+</html>

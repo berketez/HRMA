@@ -1,0 +1,3518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liquid Motor Analysis - Motor Analysis Tool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; }
+        
+        .navbar {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .navbar h1 {
+            font-size: 24px;
+            font-weight: 300;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            transition: background 0.3s;
+        }
+        
+        .nav-links a:hover, .nav-links a.active {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+        
+        .panel { 
+            background: white; 
+            margin: 15px 0; 
+            padding: 25px; 
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .panel h2 { 
+            color: #1e3c72; 
+            font-size: 20px; 
+            margin-bottom: 20px; 
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { 
+            display: block; 
+            font-weight: 600; 
+            margin-bottom: 5px; 
+            color: #495057;
+            font-size: 14px;
+        }
+        .form-group input, .form-group select { 
+            width: 100%; 
+            padding: 8px 12px; 
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+        }
+        .unit { color: #6c757d; font-size: 12px; font-weight: normal; }
+        
+        .chart-explanation {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .chart-explanation p {
+            margin: 0 0 10px 0;
+            font-weight: 500;
+            color: #2a5298;
+        }
+        
+        .chart-explanation ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        .chart-explanation li {
+            margin-bottom: 5px;
+            color: #495057;
+        }
+        
+        .chart-explanation li strong {
+            color: #2a5298;
+            font-weight: 600;
+        }
+        
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 5px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 172, 254, 0.4);
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .results { display: none; }
+        
+        .metric-card {
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+            color: white;
+            margin-bottom: 15px;
+        }
+        .metric-value { font-size: 32px; font-weight: 300; }
+        .metric-label { font-size: 14px; opacity: 0.9; }
+        .metric-unit { font-size: 12px; opacity: 0.7; }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .propellant-preview {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 2px solid #dee2e6;
+        }
+        
+        .propellant-item {
+            text-align: center;
+            margin: 0 20px;
+        }
+        
+        .propellant-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        
+        .plus-sign {
+            font-size: 36px;
+            color: #6c757d;
+            margin: 0 20px;
+        }
+        
+        .subsystem-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .subsystem-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #4facfe;
+        }
+        
+        .subsystem-card h3 {
+            color: #1e3c72;
+            margin-bottom: 15px;
+        }
+        
+        .spec-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        
+        .spec-table td {
+            padding: 8px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .spec-table td:first-child {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        /* Tooltip Styles */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            margin-left: 5px;
+        }
+        
+        .tooltip-icon {
+            width: 16px;
+            height: 16px;
+            background: #6c757d;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: help;
+            transition: background 0.3s;
+        }
+        
+        .tooltip-icon:hover {
+            background: #4facfe;
+        }
+        
+        .tooltip-text {
+            visibility: hidden;
+            width: 280px;
+            background: #2c3e50;
+            color: white;
+            text-align: left;
+            border-radius: 6px;
+            padding: 12px;
+            position: absolute;
+            z-index: 1000;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -140px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 13px;
+            line-height: 1.4;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .tooltip-text::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #2c3e50 transparent transparent transparent;
+        }
+        
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        .form-group label {
+            display: flex;
+            align-items: center;
+        }
+        
+        /* Analysis Tabs Styles */
+        .analysis-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        .tab-button {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 12px 24px;
+            border-radius: 6px 6px 0 0;
+            cursor: pointer;
+            font-weight: 600;
+            color: #495057;
+            transition: all 0.3s;
+            border-bottom: none;
+        }
+        
+        .tab-button:hover {
+            background: #e9ecef;
+        }
+        
+        .tab-button.active {
+            background: #4facfe;
+            color: white;
+            border-color: #4facfe;
+        }
+        
+        .analysis-tab-content {
+            display: none;
+        }
+        
+        .analysis-tab-content.active {
+            display: block;
+        }
+        
+        .analysis-subtabs {
+            display: flex;
+            gap: 8px;
+            margin: 15px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .subtab-button, .sub-subtab-button {
+            background: white;
+            border: 1px solid #dee2e6;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #495057;
+            transition: all 0.3s;
+        }
+        
+        .subtab-button:hover, .sub-subtab-button:hover {
+            background: #e9ecef;
+        }
+        
+        .subtab-button.active, .sub-subtab-button.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .subtab-content, .sub-subtab-content {
+            display: none;
+        }
+        
+        .subtab-content.active, .sub-subtab-content.active {
+            display: block;
+        }
+        
+        .metrics-section, .specs-section, .subsystems-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .metrics-section h3, .specs-section h3, .subsystems-section h3 {
+            color: #1e3c72;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <h1>MOTOR ANALYSIS - Liquid Bipropellant</h1>
+        <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/hybrid">Hybrid</a>
+            <a href="/solid">Solid</a>
+            <a href="/liquid" class="active">Liquid</a>
+            <a href="/formulas">Formulas</a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <!-- 1. Propellant Data -->
+        <div class="panel">
+            <h2>1. Propellant Data (Fuel + Oxidizer)</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Fuel Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">The liquid fuel component. RP-1: refined kerosene (810 kg/m³), high density, room temperature storable. LH2: cryogenic liquid hydrogen (71 kg/m³), highest specific impulse, complex handling. Methane: storable at moderate pressure (422 kg/m³), Mars missions. MMH/UDMH: hypergolic fuels for spacecraft.</span>
+                        </div>
+                    </label>
+                    <select id="fuel_type" onchange="updatePropellantPreview()">
+                        <option value="rp1">RP-1 (Kerosene)</option>
+                        <option value="lh2">LH2 (Liquid Hydrogen)</option>
+                        <option value="methane">Methane (CH4)</option>
+                        <option value="mmh">MMH (Monomethylhydrazine)</option>
+                        <option value="udmh">UDMH (Unsymmetrical Dimethylhydrazine)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Oxidizer Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">The liquid oxidizer component. LOX: cryogenic liquid oxygen (1141 kg/m³), high performance, requires insulation. N2O4: storable nitrogen tetroxide (1443 kg/m³), hypergolic with hydrazine fuels, toxic but widely used in spacecraft.</span>
+                        </div>
+                    </label>
+                    <select id="oxidizer_type" onchange="updatePropellantPreview()">
+                        <option value="lox">LOX (Liquid Oxygen)</option>
+                        <option value="n2o4">N2O4 (Nitrogen Tetroxide)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Density ρf <span class="unit">(kg/m³)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel density at operating temperature. RP-1: 810, LH2: 71, Methane: 422, MMH: 874, UDMH: 791. Lower density fuels require larger tanks but may offer higher performance.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_density" value="810" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Oxidizer Density ρox <span class="unit">(kg/m³)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Oxidizer density at operating temperature. LOX: 1141, N2O4: 1443. Higher density oxidizers reduce tank volume and vehicle size, critical for spacecraft design.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="oxidizer_density" value="1141" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Boiling Point <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel boiling point at 1 atm. Critical for storage system design. RP-1: ~500K (room temp storable), LH2: 20.3K (cryogenic), Methane: 111.7K (moderate cryogenic), MMH: 360K, UDMH: 336K.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_boiling_point" value="500" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Oxidizer Boiling Point <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Oxidizer boiling point at 1 atm. LOX: 90.2K (cryogenic, requires active cooling), N2O4: 294K (room temperature storable). Affects ground support equipment complexity.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="oxidizer_boiling_point" value="90.2" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Freezing Point <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel freezing point. Important for minimum operating temperature. RP-1: ~200K, LH2: 14K, Methane: 90.7K, MMH: 220K, UDMH: 216K. Must stay above this temperature during all operations.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_freezing_point" value="200" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Oxidizer Freezing Point <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Oxidizer freezing point. LOX: 54.4K, N2O4: 262K. Critical for thermal management system design and minimum operating temperature limits.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="oxidizer_freezing_point" value="54.4" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Viscosity <span class="unit">(Pa·s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel dynamic viscosity at operating temperature. Affects injection pressure drop and atomization. RP-1: 0.0012, LH2: 0.000013, Methane: 0.00011, MMH: 0.00085. Lower viscosity improves injection.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_viscosity" value="0.0012" step="0.00001">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Oxidizer Viscosity <span class="unit">(Pa·s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Oxidizer dynamic viscosity at operating temperature. LOX: 0.00019, N2O4: 0.00042. Higher viscosity increases injection pressure requirements and affects atomization quality.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="oxidizer_viscosity" value="0.00019" step="0.00001">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Heat of Combustion <span class="unit">(MJ/kg)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Energy released per unit mass of fuel burned. RP-1: 43.1, LH2: 120.0, Methane: 50.0, MMH: 19.5, UDMH: 17.8. Higher values indicate more energetic fuel, contributing to specific impulse.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_heat_combustion" value="43.1" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Heat Capacity Cp <span class="unit">(J/kg·K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel specific heat capacity. Important for regenerative cooling calculations. RP-1: 2090, LH2: 14300, Methane: 3480. Higher Cp provides better cooling capacity.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_heat_capacity" value="2090" step="10">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Thermal Conductivity λf <span class="unit">(W/m·K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel thermal conductivity for heat transfer analysis. RP-1: 0.145, LH2: 0.18, Methane: 0.19. Higher conductivity improves heat transfer in cooling circuits.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_thermal_conductivity" value="0.145" step="0.001">
+                </div>
+            </div>
+            
+            <div class="propellant-preview" id="propellant_preview">
+                <div class="propellant-item">
+                    <div class="propellant-icon">🛢️</div>
+                    <div><strong>RP-1</strong></div>
+                    <div style="font-size: 12px; color: #6c757d;">Kerosene</div>
+                </div>
+                <div class="plus-sign">+</div>
+                <div class="propellant-item">
+                    <div class="propellant-icon">❄️</div>
+                    <div><strong>LOX</strong></div>
+                    <div style="font-size: 12px; color: #6c757d;">Liquid Oxygen</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 2. O/F Optimization Data -->
+        <div class="panel">
+            <h2>2. O/F Optimization Data</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Target Mixture Ratio (O/F)
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Mass ratio of oxidizer to fuel flow rates. Each propellant combination has an optimal ratio for maximum Isp. LOX/RP-1: 2.5-2.8, LOX/LH2: 5.5-6.0, LOX/Methane: 3.6-3.8. Engine can be optimized for different mission phases.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="mixture_ratio" value="2.5" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Stoichiometric O/F
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Theoretical perfect combustion ratio where all fuel and oxidizer are consumed. LOX/RP-1: 3.4, LOX/LH2: 8.0, LOX/Methane: 4.0. Actual engines run fuel-rich for cooling and performance.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="stoichiometric_of" value="3.4" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        O/F for Max Isp
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Mixture ratio that maximizes specific impulse. Usually slightly fuel-rich from stoichiometric. LOX/RP-1: 2.77, LOX/LH2: 6.0, LOX/Methane: 3.8. Used for upper stage optimization.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="of_max_isp" value="2.77" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>
+                        O/F for Max Thrust
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Mixture ratio that maximizes thrust (mass flow × exhaust velocity). Usually more fuel-rich than max Isp ratio. LOX/RP-1: 2.27, LOX/LH2: 5.5, LOX/Methane: 3.2. Used for booster applications.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="of_max_thrust" value="2.27" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>
+                        O/F Range Minimum
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Minimum operational mixture ratio for stable combustion. Below this ratio, combustion becomes unstable or incomplete. Typically 70-80% of optimal ratio.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="of_min" value="2.0" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        O/F Range Maximum
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Maximum operational mixture ratio before excessive oxidizer causes performance loss and thermal issues. Typically 120-130% of optimal ratio.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="of_max" value="3.2" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Throttling O/F Strategy
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">How mixture ratio changes during throttling. Constant: maintain ratio (complex), Fuel-rich: reduce fuel flow (simple), Oxidizer-rich: reduce oxidizer flow (cooling limited).</span>
+                        </div>
+                    </label>
+                    <select id="throttling_of_strategy">
+                        <option value="constant">Constant O/F</option>
+                        <option value="fuel_rich">Fuel-Rich Throttling</option>
+                        <option value="oxidizer_rich">Oxidizer-Rich Throttling</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Combustion Efficiency ηc <span class="unit">(%)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Percentage of theoretical combustion achieved. Accounts for incomplete mixing, finite reaction time, heat losses. Well-designed engines: 95-99%. Affects c* and Isp directly.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="combustion_efficiency" value="97" step="0.1">
+                </div>
+            </div>
+        </div>
+        
+        <!-- 3. Feed System / Engine Cycle -->
+        <div class="panel">
+            <h2>3. Feed System / Engine Cycle</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Engine Cycle Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Turbopump drive method. Pressure-fed: simple, limited performance. Gas Generator: reliable, moderate performance. Staged Combustion: high performance, complex. Expander: LH2 only, high efficiency.</span>
+                        </div>
+                    </label>
+                    <select id="engine_cycle">
+                        <option value="pressure_fed">Pressure-Fed</option>
+                        <option value="gas_generator">Gas Generator</option>
+                        <option value="staged_combustion">Staged Combustion</option>
+                        <option value="expander">Expander Cycle</option>
+                        <option value="tap_off">Tap-Off Cycle</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Target Thrust <span class="unit">(N)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Target thrust level for the liquid engine. Small thrusters: 10-1000N, Medium engines: 1-100kN, Large boosters: 100kN-2MN (F-1). Determines engine size, mass flow, and cooling requirements.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="thrust" value="10000" step="100">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Chamber Pressure Pc <span class="unit">(bar)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Combustion chamber operating pressure. Higher pressure improves Isp but increases complexity. Pressure-fed: 5-50 bar, Gas Generator: 50-150 bar, Staged Combustion: 150-300 bar.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="chamber_pressure" value="100" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Feed System Pressure <span class="unit">(bar)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Pressure at turbopump exit or tank pressure for pressure-fed systems. Must overcome chamber pressure plus injection losses. Typically 1.2-1.5x chamber pressure.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="feed_pressure" value="130" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Turbopump Efficiency ηtp <span class="unit">(%)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Combined efficiency of turbine and pump. Modern turbopumps: 65-85%. Higher efficiency reduces power requirements and improves overall engine performance.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="turbopump_efficiency" value="75" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Generator Gas Temperature <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Gas generator or preburner operating temperature for turbine drive. Affects turbine material requirements and efficiency. Typical range: 800-1200K for gas generators, 800-900K for staged combustion.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="generator_gas_temp" value="1000" step="10">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Turbine Inlet Pressure <span class="unit">(bar)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Pressure of hot gas entering turbine. For gas generators: 10-50% higher than pump discharge. For staged combustion: similar to main chamber pressure.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="turbine_inlet_pressure" value="150" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Turbine Expansion Ratio
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Pressure ratio across turbine (inlet/exit). Higher ratios extract more energy but require more complex turbine design. Typical range: 2-8 for rocket turbines.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="turbine_expansion_ratio" value="4" step="0.1">
+                </div>
+            </div>
+        </div>
+        
+        <!-- 4. Injector System Parameters -->
+        <div class="panel">
+            <h2>4. Injector System Parameters</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Injector Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel and oxidizer mixing method. Impinging: jets collide for atomization, simple, proven. Coaxial: concentric streams, excellent for cryogenics, smooth combustion. Showerhead: many small holes, uniform distribution. Pintle: single point, throttleable.</span>
+                        </div>
+                    </label>
+                    <select id="injector_type">
+                        <option value="impinging">Like-on-Like Impinging</option>
+                        <option value="unlike_impinging">Unlike Impinging</option>
+                        <option value="coaxial">Coaxial Swirl</option>
+                        <option value="showerhead">Showerhead</option>
+                        <option value="pintle">Pintle</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Number of Injector Elements
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Total number of injection element pairs. More elements provide better mixing and shorter chamber length but increase complexity. Typical: 50-500 for large engines, 5-50 for small engines.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="injector_elements" value="100" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Injection Velocity <span class="unit">(m/s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Fuel velocity at injection. Higher velocity improves atomization and mixing but increases pressure drop. Typical range: 15-50 m/s. Limited by cavitation and pressure drop considerations.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_injection_velocity" value="25" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Oxidizer Injection Velocity <span class="unit">(m/s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Oxidizer velocity at injection. Typically higher than fuel velocity for good momentum mixing. Range: 20-80 m/s. Velocity ratio affects mixing quality and combustion stability.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="oxidizer_injection_velocity" value="40" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Fuel Orifice Diameter <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Diameter of fuel injection orifices. Smaller orifices provide better atomization but are prone to clogging. Typical: 0.5-5mm. Manufacturing tolerances critical for performance uniformity.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="fuel_orifice_diameter" value="2.0" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Oxidizer Orifice Diameter <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Diameter of oxidizer injection orifices. Sized to achieve desired mixture ratio with given pressure drops. Usually larger than fuel orifices due to higher flow rates.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="oxidizer_orifice_diameter" value="2.5" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Injector Pressure Drop ΔP <span class="unit">(% of Pc)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Pressure drop across injector as percentage of chamber pressure. Higher ΔP improves mixing and stability but requires higher feed pressure. Typical: 15-25% for good performance.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="injector_pressure_drop" value="20" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Discharge Coefficient Cd
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Accounts for real flow effects in orifices. Sharp-edged orifices: 0.6-0.65, Well-rounded: 0.8-0.85. Higher Cd reduces required pressure drop for given flow rate.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="discharge_coefficient" value="0.7" step="0.01">
+                </div>
+            </div>
+        </div>
+        
+        <!-- 5. Combustion Chamber Design -->
+        <div class="panel">
+            <h2>5. Combustion Chamber Design</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Chamber Diameter Dc <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Internal diameter of combustion chamber. Larger chambers provide more residence time but increase weight. Typically sized for L* requirements and structural constraints.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="chamber_diameter" value="200" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Characteristic Length L* <span class="unit">(m)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">L* = Vc/At, where Vc is chamber volume and At is throat area. Indicates combustion residence time. LOX/RP-1: 1.0-1.5m, LOX/LH2: 0.5-1.0m, LOX/Methane: 0.8-1.2m. Higher L* improves combustion efficiency.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="characteristic_length" value="1.2" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Contraction Ratio εc
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Chamber area to throat area ratio (Ac/At). Higher ratios reduce chamber velocity and heat transfer but increase length. Typical range: 2-8. Higher for high chamber pressure engines.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="contraction_ratio" value="4" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Chamber Wall Thickness <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Structural wall thickness for pressure loads. Must handle chamber pressure with safety factor. Thicker walls increase thermal mass but provide strength. Typical: 2-10mm depending on size.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="chamber_wall_thickness" value="5" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Chamber Material
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Structural material for chamber walls. Steel: cheap, heavy. Aluminum: light, limited temperature. Inconel: high temperature, expensive. Copper: excellent heat transfer for cooling.</span>
+                        </div>
+                    </label>
+                    <select id="chamber_material">
+                        <option value="steel_304">Stainless Steel 304</option>
+                        <option value="steel_316">Stainless Steel 316</option>
+                        <option value="inconel_718">Inconel 718</option>
+                        <option value="aluminum_6061">Aluminum 6061</option>
+                        <option value="copper_c101">Copper C101</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Chamber Surface Roughness <span class="unit">(μm Ra)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Internal surface roughness affects heat transfer and flow. Smooth surfaces (Ra < 1.6) reduce heat transfer but improve flow. Rougher surfaces enhance cooling but increase losses.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="chamber_roughness" value="3.2" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Combustion Stability Margin
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Design margin for combustion instability. Passive: relies on injector design. Acoustic: damping devices. Active: feedback control. Higher margins increase reliability.</span>
+                        </div>
+                    </label>
+                    <select id="stability_margin">
+                        <option value="passive">Passive Design Only</option>
+                        <option value="acoustic_damping">Acoustic Damping</option>
+                        <option value="active_control">Active Instability Control</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Ignition System Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Method for initial combustion. Hypergolic: spontaneous ignition, simple. Torch: external flame source. Spark: electric ignition. Pyrotechnic: solid igniter charge.</span>
+                        </div>
+                    </label>
+                    <select id="ignition_system">
+                        <option value="hypergolic">Hypergolic (Spontaneous)</option>
+                        <option value="torch_igniter">Torch Igniter</option>
+                        <option value="spark_igniter">Spark Igniter</option>
+                        <option value="pyrotechnic">Pyrotechnic Igniter</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 6. Nozzle & Cooling System -->
+        <div class="panel">
+            <h2>6. Nozzle & Cooling System</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Cooling Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Method for managing high chamber temperatures (3000K+). Regenerative: fuel/coolant channels, best performance, complex. Ablative: sacrificial liner, simpler, limited reuse. Film: propellant film cooling. Radiation: space engines only.</span>
+                        </div>
+                    </label>
+                    <select id="cooling_type">
+                        <option value="regenerative">Regenerative (Fuel Cooling)</option>
+                        <option value="ablative">Ablative Liner</option>
+                        <option value="film_cooling">Film Cooling</option>
+                        <option value="radiative">Radiation Cooling</option>
+                        <option value="dump_cooling">Dump Cooling</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Nozzle Expansion Ratio εe
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Exit area to throat area ratio (Ae/At). Higher ratios increase vacuum Isp but reduce sea-level performance. Sea level: 10-50, Vacuum: 50-400. Limited by nozzle length and over-expansion.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="nozzle_expansion_ratio" value="50" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Nozzle Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Nozzle geometry type. Conical: simple, 15° half-angle. Bell: optimized contour, shorter. Aerospike: altitude compensation, complex. Dual-bell: two expansion ratios. Extendable: deployable for space.</span>
+                        </div>
+                    </label>
+                    <select id="nozzle_type">
+                        <option value="conical">Conical (15° half-angle)</option>
+                        <option value="bell_80">Bell Nozzle (80% length)</option>
+                        <option value="bell_60">Bell Nozzle (60% length)</option>
+                        <option value="aerospike">Aerospike</option>
+                        <option value="dual_bell">Dual-Bell</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Nozzle Throat Diameter <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Diameter at nozzle throat (minimum area). Calculated from mass flow and c*. Critical dimension that determines engine performance. Must be precisely manufactured and maintained.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="throat_diameter" value="50" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Cooling Channel Count
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Number of regenerative cooling channels around chamber circumference. More channels provide better heat transfer but increase manufacturing complexity. Typical: 50-200 for large engines.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="cooling_channels" value="80" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Coolant Flow Rate <span class="unit">(% of fuel flow)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Percentage of total fuel flow used for regenerative cooling. 100% means all fuel passes through cooling channels. Lower percentages use bypass flow. Typical: 80-100% for efficiency.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="coolant_flow_percent" value="100" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Coolant Inlet Temperature <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Temperature of coolant entering cooling system. Usually close to fuel storage temperature. Cryogenic fuels: near boiling point. Storable fuels: ambient temperature. Affects cooling capacity.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="coolant_inlet_temp" value="300" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Maximum Wall Temperature <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Maximum allowable hot-side wall temperature. Limited by material properties and coking (for hydrocarbon fuels). Steel: 800K, Inconel: 1200K, Copper: 700K. Critical for engine life.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="max_wall_temp" value="800" step="10">
+                </div>
+            </div>
+        </div>
+        
+        <!-- 7. Startup & Transient Analysis -->
+        <div class="panel">
+            <h2>7. Startup & Transient Analysis</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Startup Sequence Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Method for engine startup. Hypergolic: instant ignition, simple. Torch: external igniter first. Spin-start: turbopumps spun up first. Bleed-start: uses stored high-pressure gas.</span>
+                        </div>
+                    </label>
+                    <select id="startup_sequence">
+                        <option value="hypergolic">Hypergolic Ignition</option>
+                        <option value="torch_ignition">Torch Igniter Start</option>
+                        <option value="spin_start">Turbopump Spin-Start</option>
+                        <option value="bleed_start">Bleed-Cycle Start</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Engine Start Time <span class="unit">(s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Time from ignition command to full thrust. Hypergolic: 0.1-0.5s, Gas generator: 1-3s, Staged combustion: 3-6s. Faster starts reduce gravity losses but increase stress.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="engine_start_time" value="2.0" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Shutdown Time <span class="unit">(s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Time from shutdown command to zero thrust. Controlled by valve closure rates and system inertia. Faster shutdown improves precision but may cause water hammer effects.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="engine_shutdown_time" value="1.5" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Throttle Range <span class="unit">(% of max thrust)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Minimum throttle level as percentage of maximum thrust. Deep throttling enables precision maneuvers and landing. Gas generators: 40-100%, Staged combustion: 20-100%. Limited by combustion stability.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="min_throttle" value="40" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Throttle Response Time <span class="unit">(s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Time constant for thrust changes during throttling. Faster response improves control authority but may cause instability. Limited by system dynamics and valve response.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="throttle_response" value="0.5" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Restart Capability
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Engine's ability to restart in space. Critical for upper stages and spacecraft. Hypergolic engines excel at multiple restarts. Cryogenic engines need ullage thrust and careful thermal management.</span>
+                        </div>
+                    </label>
+                    <select id="restart_capability">
+                        <option value="multiple">Multiple Restarts (≥50)</option>
+                        <option value="limited">Limited Restarts (5-10)</option>
+                        <option value="few">Few Restarts (2-5)</option>
+                        <option value="single_use">Single Use Only</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Chill-Down Time <span class="unit">(s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Time required to cool down hot components before restart (cryogenic engines). Prevents propellant vaporization in lines. LOX/LH2: 10-60s, LOX/RP-1: 5-30s. Affects mission timeline.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="chill_down_time" value="30" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Maximum Burn Duration <span class="unit">(s)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Maximum continuous operation time. Limited by cooling system capacity, ablative liner life, or propellant supply. Regeneratively cooled: 300-600s, Ablative: 30-300s, affects mission design.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="max_burn_duration" value="400" step="10">
+                </div>
+            </div>
+        </div>
+        
+        <!-- 8. Mass & Structural Parameters -->
+        <div class="panel">
+            <h2>8. Mass & Structural Parameters</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Target Thrust-to-Weight T/W
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Engine thrust divided by engine mass. Higher T/W reduces vehicle structural mass. Gas generators: 40-80, Staged combustion: 60-120, Pressure-fed: 20-50. Critical for launch vehicle performance.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="target_thrust_to_weight" value="60" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Structural Safety Factor
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Design margin for structural loads. Higher factors increase reliability but add mass. Human-rated: 4.0, Unmanned: 2.5-3.0, Expendable: 1.4-2.0. Covers pressure, thermal, and dynamic loads.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="safety_factor" value="2.5" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Engine Mount Type
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Method of attaching engine to vehicle. Gimbal: provides thrust vector control, heavier. Fixed: lighter, requires separate control system. Determines TVC capability and mass.</span>
+                        </div>
+                    </label>
+                    <select id="engine_mount">
+                        <option value="gimbal_2axis">2-Axis Gimbal Mount</option>
+                        <option value="gimbal_1axis">1-Axis Gimbal Mount</option>
+                        <option value="fixed_mount">Fixed Mount</option>
+                        <option value="flex_joint">Flexible Joint</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Gimbal Range <span class="unit">(± degrees)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Maximum engine deflection angle for thrust vector control. Larger angles provide better control authority but increase complexity. Typical: ±5° to ±15°. Limited by plumbing flexibility.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="gimbal_range" value="8" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Actuator Response Time <span class="unit">(ms)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Time for gimbal actuators to respond to control commands. Faster response improves vehicle stability and control precision. Hydraulic: 10-50ms, Electric: 50-200ms.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="actuator_response" value="50" step="10">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Expected Engine Life <span class="unit">(cycles)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Number of start/stop cycles before refurbishment. Reusable engines need higher life. Expendable: 1-2 cycles, Reusable booster: 10-100 cycles, Spacecraft: 50-1000 cycles.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="engine_life_cycles" value="10" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Vibration Environment
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Expected vibration levels during operation. Affects component design and mounting. Launch: high vibration, Space: low vibration. Determines structural requirements and instrument sensitivity.</span>
+                        </div>
+                    </label>
+                    <select id="vibration_environment">
+                        <option value="launch_high">Launch Vehicle (High Vibration)</option>
+                        <option value="upper_stage">Upper Stage (Medium Vibration)</option>
+                        <option value="spacecraft">Spacecraft (Low Vibration)</option>
+                        <option value="test_stand">Ground Test (Controlled)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Acoustic Environment <span class="unit">(dB)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Sound pressure level during operation. High levels stress components and affect nearby systems. Large boosters: 180+ dB, Medium engines: 150-180 dB, Small thrusters: 100-150 dB.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="acoustic_level" value="165" step="1">
+                </div>
+            </div>
+        </div>
+        
+        <!-- 9. Environment & Test Conditions -->
+        <div class="panel">
+            <h2>9. Environment & Test Conditions</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        Operating Altitude Range
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Altitude range for engine operation. Sea level: full atmosphere, Space: vacuum. Affects nozzle design and performance optimization. Over-expansion at sea level reduces efficiency.</span>
+                        </div>
+                    </label>
+                    <select id="altitude_range">
+                        <option value="sea_level">Sea Level to 10 km</option>
+                        <option value="booster">Sea Level to 50 km</option>
+                        <option value="upper_stage">50 km to 400 km</option>
+                        <option value="space_only">Space Only (>400 km)</option>
+                        <option value="all_altitudes">All Altitudes</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Ambient Temperature Range <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Operating temperature range. Earth surface: 200-350K, Space: 4-400K (sun/shade). Affects propellant conditioning, seals, electronics. Wide ranges require thermal management.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="temp_range_min" value="200" step="10" placeholder="Min (K)">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Max Ambient Temperature <span class="unit">(K)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Maximum operating temperature. Limits component materials and affects cooling requirements. Desert launch: 320K, Spacecraft: 400K+ in sunlight.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="temp_range_max" value="350" step="10">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Storage Duration <span class="unit">(months)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Maximum storage time before use. Affects seal materials, propellant stability, component degradation. Launch vehicles: 3-12 months, Spacecraft: 12-60 months on orbit.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="storage_duration" value="12" step="1">
+                </div>
+                <div class="form-group">
+                    <label>
+                        Contamination Sensitivity
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Tolerance to foreign particles and contamination. LOX systems very sensitive to hydrocarbons. Storable propellants more tolerant. Affects cleaning and handling procedures.</span>
+                        </div>
+                    </label>
+                    <select id="contamination_sensitivity">
+                        <option value="very_high">Very High (LOX systems)</option>
+                        <option value="high">High (Cryogenic systems)</option>
+                        <option value="medium">Medium (Storable propellants)</option>
+                        <option value="low">Low (Hypergolic systems)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Test Fire Requirements
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Ground testing requirements before flight. Acceptance: brief functional test, Qualification: full duration, Life: multiple cycles. More testing increases reliability but adds cost.</span>
+                        </div>
+                    </label>
+                    <select id="test_requirements">
+                        <option value="acceptance">Acceptance Test Only</option>
+                        <option value="qualification">Qualification Testing</option>
+                        <option value="life_test">Life Cycle Testing</option>
+                        <option value="flight_proven">Flight-Proven Heritage</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Ground Support Equipment
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Required support systems. Simple: basic plumbing, Complex: cryogenic handling, conditioning systems. Affects launch site requirements and operational costs.</span>
+                        </div>
+                    </label>
+                    <select id="ground_support">
+                        <option value="simple">Simple (Storable propellants)</option>
+                        <option value="moderate">Moderate (Semi-cryogenic)</option>
+                        <option value="complex">Complex (Full cryogenic)</option>
+                        <option value="specialized">Specialized (Advanced cycles)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Hazard Classification
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Safety hazard level for ground operations. Affects facility requirements, personnel training, emergency procedures. Higher hazards increase operational complexity and costs.</span>
+                        </div>
+                    </label>
+                    <select id="hazard_classification">
+                        <option value="low">Low Hazard (Pressure-fed, storable)</option>
+                        <option value="moderate">Moderate Hazard (Cryogenic)</option>
+                        <option value="high">High Hazard (Hypergolic)</option>
+                        <option value="extreme">Extreme Hazard (Exotic propellants)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Calculate Button -->
+        <div style="text-align: center; margin: 30px 0;">
+            <button class="btn btn-primary" onclick="calculateLiquid()">Calculate Engine Performance</button>
+            <button class="btn btn-secondary" onclick="resetForm()">Reset</button>
+            <button class="btn btn-primary" onclick="exportCAD()" style="background: linear-gradient(135deg, #28a745, #20c997);">
+                💾 Export CAD Design
+            </button>
+        </div>
+        
+        <!-- Loading indicator -->
+        <div id="loading" class="loading">
+            <div style="font-size: 24px; color: #4facfe;">Calculating...</div>
+        </div>
+        
+        <!-- Results Section -->
+        <div id="results" class="results">
+            <!-- AI Analysis Button -->
+            <div style="text-align: center; margin: 20px 0;">
+                <button type="button" class="btn btn-ai" onclick="askAI()" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 12px 30px; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">
+                    Ask AI to Analyze Results
+                </button>
+            </div>
+            
+            <!-- PDF Export Buttons -->
+            <div style="text-align: center; margin: 20px 0; display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                <button type="button" class="btn btn-pdf" onclick="exportPDF('summary')" style="background: linear-gradient(135deg, #ff7b7b 0%, #ff416c 100%); color: white; padding: 10px 25px; border: none; border-radius: 5px; font-size: 14px; cursor: pointer;">
+                    PDF Summary Report
+                </button>
+                <button type="button" class="btn btn-pdf" onclick="exportPDF('technical')" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 10px 25px; border: none; border-radius: 5px; font-size: 14px; cursor: pointer;">
+                    PDF Technical Report
+                </button>
+                <button type="button" class="btn btn-pdf" onclick="exportPDF('complete')" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 10px 25px; border: none; border-radius: 5px; font-size: 14px; cursor: pointer;">
+                    PDF Complete Report
+                </button>
+            </div>
+            
+            <!-- Analysis Type Tabs -->
+            <div class="panel">
+                <h2>Analysis Results</h2>
+                <div class="analysis-tabs">
+                    <button class="tab-button active" onclick="showAnalysisTab('single_point')">Single Point Analysis</button>
+                    <button class="tab-button" onclick="showAnalysisTab('parametric')">Parametric Analysis</button>
+                    <button class="tab-button" onclick="showAnalysisTab('trajectory')">Trajectory Analysis</button>
+                </div>
+                
+                <!-- Single Point Analysis Tab -->
+                <div id="single_point_tab" class="analysis-tab-content active">
+                    <div class="analysis-subtabs">
+                        <button class="subtab-button active" onclick="showSubTab('thrust_time')">Thrust & Time</button>
+                        <button class="subtab-button" onclick="showSubTab('total_impulse')">Total Impulse</button>
+                    </div>
+                    
+                    <div id="thrust_time_content" class="subtab-content active">
+                        <!-- Performance Metrics -->
+                        <div class="metrics-section">
+                            <h3>Performance Summary</h3>
+                            <div id="performanceMetrics"></div>
+                        </div>
+                        
+                        <!-- Engine Specifications -->
+                        <div class="specs-section">
+                            <h3>Engine Specifications</h3>
+                            <div id="designReport"></div>
+                        </div>
+                    </div>
+                    
+                    <div id="total_impulse_content" class="subtab-content">
+                        <!-- Subsystems -->
+                        <div class="subsystems-section">
+                            <h3>Engine Subsystems</h3>
+                            <div class="subsystem-grid" id="subsystemsGrid"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Parametric Analysis Tab -->
+                <div id="parametric_tab" class="analysis-tab-content">
+                    <div class="analysis-subtabs">
+                        <button class="subtab-button active" onclick="showSubTab('single_altitude')">Single Altitude</button>
+                        <button class="subtab-button" onclick="showSubTab('altitude_profile')">Altitude Profile</button>
+                    </div>
+                    
+                    <div id="single_altitude_content" class="subtab-content active">
+                        <div class="chart-explanation">
+                            <p><strong>What this shows:</strong> Parametric analysis across different mixture ratios and chamber pressures</p>
+                            <ul>
+                                <li><strong>X-axis:</strong> Mixture Ratio (O/F) - oxidizer to fuel mass ratio</li>
+                                <li><strong>Y-axis:</strong> Performance metrics (Thrust, Isp, chamber pressure)</li>
+                                <li><strong>Blue line:</strong> Thrust (N) - maximum thrust output</li>
+                                <li><strong>Red line:</strong> Specific Impulse (s) - fuel efficiency metric</li>
+                                <li><strong>Peak markers:</strong> Optimal operating points for maximum performance</li>
+                                <li><strong>Optimal range:</strong> LOX/RP-1: 2.5-2.8, LOX/LH2: 5.5-6.0, LOX/CH4: 3.6-3.8</li>
+                            </ul>
+                        </div>
+                        <div id="altitude_analysis_plot" style="height: 400px; margin: 20px 0;"></div>
+                    </div>
+                    
+                    <div id="altitude_profile_content" class="subtab-content">
+                        <div class="chart-explanation">
+                            <p><strong>What this shows:</strong> Engine performance variation with operating altitude</p>
+                            <ul>
+                                <li><strong>X-axis:</strong> Altitude (km) - from sea level to vacuum conditions</li>
+                                <li><strong>Y-axis:</strong> Performance parameters (Thrust, Isp, efficiency)</li>
+                                <li><strong>Blue curve:</strong> Thrust (kN) - decreases with altitude due to back pressure</li>
+                                <li><strong>Red curve:</strong> Specific Impulse (s) - increases toward vacuum Isp</li>
+                                <li><strong>Green curve:</strong> Nozzle efficiency - expansion efficiency at altitude</li>
+                                <li><strong>Reference lines:</strong> Sea level and vacuum performance markers</li>
+                            </ul>
+                        </div>
+                        <div id="altitude_profile_plot" style="height: 400px; margin: 20px 0;"></div>
+                    </div>
+                </div>
+                
+                <!-- Trajectory Analysis Tab -->
+                <div id="trajectory_tab" class="analysis-tab-content">
+                    <div class="analysis-subtabs">
+                        <button class="subtab-button active" onclick="showSubTab('single_trajectory')">Single Point Analysis</button>
+                        <button class="subtab-button" onclick="showSubTab('parametric_trajectory')">Parametric Analysis</button>
+                        <button class="subtab-button" onclick="showSubTab('trajectory_comparison')">Trajectory Analysis</button>
+                    </div>
+                    
+                    <div id="single_trajectory_content" class="subtab-content active">
+                        <div class="analysis-subtabs">
+                            <button class="sub-subtab-button active" onclick="showSubSubTab('thrust_time_traj')">Thrust & Time</button>
+                            <button class="sub-subtab-button" onclick="showSubSubTab('total_impulse_traj')">Total Impulse</button>
+                        </div>
+                        
+                        <div id="thrust_time_traj_content" class="sub-subtab-content active">
+                            <div class="chart-explanation">
+                                <p><strong>What this shows:</strong> 3D CAD visualization of liquid rocket engine assembly</p>
+                                <ul>
+                                    <li><strong>Gray components:</strong> Engine structure, turbopumps, and plumbing</li>
+                                    <li><strong>Blue/Cyan:</strong> Propellant tanks with internal anti-vortex baffles</li>
+                                    <li><strong>Red/Orange:</strong> Combustion chamber and injector assembly</li>
+                                    <li><strong>Purple gradient:</strong> Nozzle expansion cone with cooling channels</li>
+                                    <li><strong>Interactive:</strong> Rotate (drag), zoom (scroll), pan (shift+drag)</li>
+                                    <li><strong>Export options:</strong> STEP/STL files for CATIA/SolidWorks compatibility</li>
+                                </ul>
+                            </div>
+                            
+                            <!-- CAD Control Buttons -->
+                            <div style="text-align: center; margin: 15px 0;">
+                                <button type="button" onclick="generateBasicCAD()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 0 10px; cursor: pointer;">
+                                    Basic CAD View
+                                </button>
+                                <button type="button" onclick="generateDetailedCAD()" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 0 10px; cursor: pointer;">
+                                    Engineering CAD View
+                                </button>
+                            </div>
+                            
+                            <div id="cad_visualization" style="height: 500px; margin: 20px 0; border: 1px solid #ddd; border-radius: 8px;">
+                                <!-- CAD Visualization will be inserted here -->
+                            </div>
+                        </div>
+                        
+                        <div id="total_impulse_traj_content" class="sub-subtab-content">
+                            <div class="chart-explanation">
+                                <p><strong>What this shows:</strong> 3D engine assembly and component breakdown</p>
+                                <ul>
+                                    <li><strong>Exploded view:</strong> Individual engine components separated for clarity</li>
+                                    <li><strong>Color coding:</strong> Components grouped by subsystem (feed, ignition, cooling)</li>
+                                    <li><strong>Flow paths:</strong> Propellant flow lines and cooling circuits</li>
+                                    <li><strong>Mass breakdown:</strong> Component mass distribution and center of gravity</li>
+                                    <li><strong>Manufacturing:</strong> Material specifications and assembly sequence</li>
+                                    <li><strong>Quality control:</strong> Critical dimensions and tolerance requirements</li>
+                                </ul>
+                            </div>
+                            <div id="engine_diagram" style="height: 400px; margin: 20px 0;"></div>
+                        </div>
+                    </div>
+                    
+                    <div id="parametric_trajectory_content" class="subtab-content">
+                        <div class="chart-explanation">
+                            <p><strong>What this shows:</strong> Parametric trajectory analysis for different engine configurations</p>
+                            <ul>
+                                <li><strong>X-axis:</strong> Parameter variation (chamber pressure, expansion ratio, etc.)</li>
+                                <li><strong>Y-axis:</strong> Mission performance metrics (delta-V, payload capacity)</li>
+                                <li><strong>Blue surfaces:</strong> Performance envelopes for different configurations</li>
+                                <li><strong>Optimal points:</strong> Peak performance combinations highlighted</li>
+                                <li><strong>Constraint lines:</strong> Design limits (thermal, structural, manufacturing)</li>
+                                <li><strong>Trade-offs:</strong> Performance vs complexity analysis</li>
+                            </ul>
+                        </div>
+                        <div id="parametric_plots" style="height: 400px; margin: 20px 0;"></div>
+                    </div>
+                    
+                    <div id="trajectory_comparison_content" class="subtab-content">
+                        <div class="chart-explanation">
+                            <p><strong>What this shows:</strong> Mission trajectory analysis and optimization</p>
+                            <ul>
+                                <li><strong>X-axis:</strong> Time (s) from launch to orbit insertion</li>
+                                <li><strong>Y-axes:</strong> Multiple trajectory parameters (altitude, velocity, acceleration)</li>
+                                <li><strong>Blue line:</strong> Altitude profile (km) showing ascent trajectory</li>
+                                <li><strong>Red line:</strong> Velocity (km/s) build-up to orbital velocity</li>
+                                <li><strong>Green line:</strong> Acceleration (g) loading on vehicle and payload</li>
+                                <li><strong>Critical points:</strong> Stage separation, MECO, orbit insertion events</li>
+                            </ul>
+                        </div>
+                        <div id="trajectory_plots" style="height: 400px; margin: 20px 0;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentResults = null;
+        
+        // UI Feedback Functions
+        function showMessage(message, type = 'info') {
+            const alertClass = type === 'error' ? 'alert-danger' : 
+                             type === 'success' ? 'alert-success' : 
+                             type === 'warning' ? 'alert-warning' : 'alert-info';
+            
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert ${alertClass} alert-dismissible fade show`;
+            alertDiv.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="close" onclick="this.parentElement.remove()">
+                    <span>&times;</span>
+                </button>
+            `;
+            
+            document.body.appendChild(alertDiv);
+            setTimeout(() => alertDiv.remove(), 5000);
+        }
+        
+        function showError(message) {
+            showMessage(message, 'error');
+        }
+        
+        function showSuccess(message) {
+            showMessage(message, 'success');
+        }
+        
+        function showWarning(message) {
+            showMessage(message, 'warning');
+        }
+        
+        function showInfo(message) {
+            showMessage(message, 'info');
+        }
+        
+        function showLoading(show) {
+            const existingLoader = document.getElementById('loading-overlay');
+            if (show) {
+                if (!existingLoader) {
+                    const loader = document.createElement('div');
+                    loader.id = 'loading-overlay';
+                    loader.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 9998;';
+                    loader.innerHTML = '<div class="spinner-border text-light" role="status"><span class="sr-only">Loading...</span></div>';
+                    document.body.appendChild(loader);
+                }
+            } else {
+                if (existingLoader) {
+                    existingLoader.remove();
+                }
+            }
+        }
+        
+        function updatePropellantPreview() {
+            const fuelType = document.getElementById('fuel_type').value;
+            const oxType = document.getElementById('oxidizer_type').value;
+            
+            const fuelData = {
+                'rp1': { name: 'RP-1', desc: 'Kerosene', icon: '🛢️' },
+                'lh2': { name: 'LH2', desc: 'Liquid Hydrogen', icon: '⚡' },
+                'methane': { name: 'CH4', desc: 'Methane', icon: '🔥' },
+                'mmh': { name: 'MMH', desc: 'Monomethylhydrazine', icon: '☠️' },
+                'udmh': { name: 'UDMH', desc: 'Dimethylhydrazine', icon: '☠️' }
+            };
+            
+            const oxData = {
+                'lox': { name: 'LOX', desc: 'Liquid Oxygen', icon: '❄️' },
+                'n2o4': { name: 'N2O4', desc: 'Nitrogen Tetroxide', icon: '🟤' }
+            };
+            
+            const fuel = fuelData[fuelType];
+            const ox = oxData[oxType];
+            
+            document.getElementById('propellant_preview').innerHTML = `
+                <div class="propellant-item">
+                    <div class="propellant-icon">${fuel.icon}</div>
+                    <div><strong>${fuel.name}</strong></div>
+                    <div style="font-size: 12px; color: #6c757d;">${fuel.desc}</div>
+                    <div style="font-size: 11px; color: #007bff; margin-top: 5px;">
+                        <span id="fuel-properties-${fuelType}">Loading properties...</span>
+                    </div>
+                </div>
+                <div class="plus-sign">+</div>
+                <div class="propellant-item">
+                    <div class="propellant-icon">${ox.icon}</div>
+                    <div><strong>${ox.name}</strong></div>
+                    <div style="font-size: 12px; color: #6c757d;">${ox.desc}</div>
+                    <div style="font-size: 11px; color: #007bff; margin-top: 5px;">
+                        <span id="ox-properties-${oxType}">Loading properties...</span>
+                    </div>
+                </div>
+            `;
+            
+            // Load real-time properties from NIST WebBook
+            loadPropellantProperties(fuelType, oxType);
+        }
+        
+        async function loadPropellantProperties(fuelType, oxType) {
+            try {
+                // Show loading indicators
+                const fuelSpan = document.getElementById(`fuel-properties-${fuelType}`);
+                const oxSpan = document.getElementById(`ox-properties-${oxType}`);
+                
+                if (fuelSpan) fuelSpan.innerHTML = '<div style="color: #007bff;">Loading from databases...</div>';
+                if (oxSpan) oxSpan.innerHTML = '<div style="color: #007bff;">Loading from databases...</div>';
+                
+                // Fetch REAL fuel properties
+                const fuelResponse = await fetch('/api/get-propellant-properties', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        propellant_type: 'liquid_fuel',
+                        propellant_name: fuelType
+                    })
+                });
+                
+                if (fuelResponse.ok) {
+                    const fuelData = await fuelResponse.json();
+                    console.log('Fuel Data:', fuelData); // Debug log
+                    
+                    if (fuelData.status === 'success' && fuelSpan) {
+                        const props = fuelData.properties;
+                        fuelSpan.innerHTML = `
+                            <div style="font-weight: 600; color: #28a745;">Real-time Data</div>
+                            <div style="font-size: 10px;">Density: ${props.density?.toFixed(1) || 'N/A'} kg/m³</div>
+                            <div style="font-size: 10px;">Viscosity: ${props.viscosity?.toExponential(2) || 'N/A'} Pa·s</div>
+                            <div style="font-size: 10px;">MW: ${typeof props.molecular_weight === 'number' ? props.molecular_weight.toFixed(1) : props.molecular_weight || 'N/A'} g/mol</div>
+                            <div style="font-size: 9px; color: #6c757d;">Source: ${fuelData.source || 'API'}</div>
+                        `;
+                        
+                        // Update form fields if they exist
+                        if (props.density && document.getElementById('fuel_density')) {
+                            document.getElementById('fuel_density').value = props.density;
+                        }
+                        if (props.viscosity && document.getElementById('fuel_viscosity')) {
+                            document.getElementById('fuel_viscosity').value = props.viscosity;
+                        }
+                    } else {
+                        fuelSpan.innerHTML = `<div style="color: #ffc107;">Using cached data</div>`;
+                    }
+                } else {
+                    if (fuelSpan) fuelSpan.innerHTML = `<div style="color: #dc3545;">Connection Failed</div><div style="font-size: 9px;">Using cached data</div>`;
+                }
+                
+                // Fetch REAL oxidizer properties
+                const oxResponse = await fetch('/api/get-propellant-properties', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        propellant_type: 'oxidizer',
+                        propellant_name: oxType
+                    })
+                });
+                
+                if (oxResponse.ok) {
+                    const oxData = await oxResponse.json();
+                    console.log('Oxidizer Data:', oxData); // Debug log
+                    
+                    if (oxData.status === 'success' && oxSpan) {
+                        const props = oxData.properties;
+                        oxSpan.innerHTML = `
+                            <div style="font-weight: 600; color: #28a745;">Real-time Data</div>
+                            <div style="font-size: 10px;">Density: ${props.density?.toFixed(1) || 'N/A'} kg/m³</div>
+                            <div style="font-size: 10px;">Viscosity: ${props.viscosity?.toExponential(2) || 'N/A'} Pa·s</div>
+                            <div style="font-size: 10px;">MW: ${typeof props.molecular_weight === 'number' ? props.molecular_weight.toFixed(1) : props.molecular_weight || 'N/A'} g/mol</div>
+                            <div style="font-size: 9px; color: #6c757d;">Source: ${oxData.source || 'API'}</div>
+                        `;
+                        
+                        // Update form fields if they exist
+                        if (props.density && document.getElementById('oxidizer_density')) {
+                            document.getElementById('oxidizer_density').value = props.density;
+                        }
+                        if (props.viscosity && document.getElementById('oxidizer_viscosity')) {
+                            document.getElementById('oxidizer_viscosity').value = props.viscosity;
+                        }
+                    } else {
+                        oxSpan.innerHTML = `<div style="color: #ffc107;">Using cached data</div>`;
+                    }
+                } else {
+                    if (oxSpan) oxSpan.innerHTML = `<div style="color: #dc3545;">Connection Failed</div><div style="font-size: 9px;">Using cached data</div>`;
+                }
+                
+            } catch (error) {
+                console.error('Real-time property loading error:', error);
+                
+                // Show detailed error and fallback
+                const fuelSpan = document.getElementById(`fuel-properties-${fuelType}`);
+                const oxSpan = document.getElementById(`ox-properties-${oxType}`);
+                
+                if (fuelSpan) {
+                    fuelSpan.innerHTML = `
+                        <div style="color: #ffc107;">Connection Failed</div>
+                        <div style="font-size: 10px;">Using cached NASA data</div>
+                        <div style="font-size: 10px;">Error: ${error.message}</div>
+                    `;
+                }
+                
+                if (oxSpan) {
+                    oxSpan.innerHTML = `
+                        <div style="color: #ffc107;">NIST Unavailable</div>
+                        <div style="font-size: 10px;">Using cached properties</div>
+                        <div style="font-size: 10px;">Error: ${error.message}</div>
+                    `;
+                }
+            }
+        }
+        
+        function getFuelProperties(fuelType) {
+            const fuelProperties = {
+                'rp1': { density: 810, heating_value: 43.0, formula: 'C12H23' },
+                'lh2': { density: 71, heating_value: 120.0, formula: 'H2' },
+                'methane': { density: 423, heating_value: 50.0, formula: 'CH4' },
+                'mmh': { density: 874, heating_value: 19.3, formula: 'CH6N2' },
+                'udmh': { density: 791, heating_value: 20.1, formula: 'C2H8N2' }
+            };
+            return fuelProperties[fuelType] || { density: 800, heating_value: 30.0, formula: 'Unknown' };
+        }
+        
+        async function calculateLiquid() {
+            const data = {
+                fuel_type: document.getElementById('fuel_type').value,
+                oxidizer_type: document.getElementById('oxidizer_type').value,
+                thrust: parseFloat(document.getElementById('thrust').value),
+                chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value),
+                mixture_ratio: parseFloat(document.getElementById('mixture_ratio').value),
+                cooling_type: document.getElementById('cooling_type').value,
+                injector_type: document.getElementById('injector_type').value
+            };
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/calculate_liquid', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(collectAllParameters())
+                });
+                
+                const results = await response.json();
+                
+                if (results.error) {
+                    throw new Error(results.error);
+                }
+                
+                currentResults = results;
+                displayResults(results);
+                
+            } catch (error) {
+                showError('Error: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displayResults(results) {
+            document.getElementById('results').style.display = 'block';
+            
+            // Performance metrics
+            const metricsDiv = document.getElementById('performanceMetrics');
+            const metrics = [
+                { label: 'Sea Level Isp', value: results.isp_sea_level.toFixed(1), unit: 's', color: '#4facfe' },
+                { label: 'Vacuum Isp', value: results.isp_vacuum.toFixed(1), unit: 's', color: '#667eea' },
+                { label: 'Space Optimized Isp', value: results.isp_vacuum_optimized.toFixed(1), unit: 's', color: '#f093fb' },
+                { label: 'Vacuum Thrust', value: (results.thrust_vacuum / 1000).toFixed(1), unit: 'kN', color: '#f5576c' }
+            ];
+            
+            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
+            metrics.forEach(metric => {
+                html += `
+                    <div class="metric-card" style="background: ${metric.color};">
+                        <div class="metric-value">${metric.value}</div>
+                        <div class="metric-label">${metric.label}</div>
+                        <div class="metric-unit">${metric.unit}</div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            metricsDiv.innerHTML = html;
+            
+            // Generate CAD Visualization
+            generateCADVisualization(results);
+            
+            // Display detailed analysis results
+            displayDetailedAnalysis(results);
+            
+            // Subsystems
+            const subsystemsDiv = document.getElementById('subsystemsGrid');
+            subsystemsDiv.innerHTML = `
+                <div class="subsystem-card">
+                    <h3>Cooling System</h3>
+                    <table class="spec-table">
+                        <tr><td>Type:</td><td>${results.cooling_type}</td></tr>
+                        <tr><td>Heat Load:</td><td>${results.cooling_system.total_heat_load.toFixed(0)} kW</td></tr>
+                        <tr><td>Chamber Heat:</td><td>${results.cooling_system.chamber_heat_load.toFixed(0)} kW</td></tr>
+                        <tr><td>Coolant Flow:</td><td>${results.cooling_system.coolant_flow_rate.toFixed(2)} kg/s</td></tr>
+                        ${results.feed_system.feed_lines.cooling_lines && results.feed_system.feed_lines.cooling_lines.length > 0 ? 
+                            `<tr><td>Channels:</td><td>${results.feed_system.feed_lines.cooling_lines.length}</td></tr>
+                             <tr><td>Channel Size:</td><td>${(results.feed_system.feed_lines.cooling_lines[0].width * 1000).toFixed(1)}×${(results.feed_system.feed_lines.cooling_lines[0].height * 1000).toFixed(1)} mm</td></tr>` : 
+                            ''
+                        }
+                        <tr><td>Wall Temp:</td><td>${results.cooling_system.wall_temperature_hot.toFixed(0)} K</td></tr>
+                    </table>
+                </div>
+                
+                <div class="subsystem-card">
+                    <h3>Injection System</h3>
+                    <table class="spec-table">
+                        <tr><td>Type:</td><td>${results.injection_system.injector_type}</td></tr>
+                        <tr><td>Fuel Vel:</td><td>${results.injection_system.fuel_injection_velocity} m/s</td></tr>
+                        <tr><td>Ox Vel:</td><td>${results.injection_system.ox_injection_velocity} m/s</td></tr>
+                        <tr><td>Fuel ΔP:</td><td>${results.injection_system.fuel_pressure_drop.toFixed(1)} bar</td></tr>
+                    </table>
+                </div>
+                
+                <div class="subsystem-card">
+                    <h3>Feed System</h3>
+                    <table class="spec-table">
+                        <tr><td>Type:</td><td>${results.feed_system.type}</td></tr>
+                        <tr><td>Ox Flow:</td><td>${results.feed_system.mass_flow_rates.oxidizer.toFixed(2)} kg/s</td></tr>
+                        <tr><td>Fuel Flow:</td><td>${results.feed_system.mass_flow_rates.fuel.toFixed(2)} kg/s</td></tr>
+                        <tr><td>Ox Tank:</td><td>${results.feed_system.tanks.oxidizer_tank.volume.toFixed(1)} m³</td></tr>
+                        <tr><td>Fuel Tank:</td><td>${results.feed_system.tanks.fuel_tank.volume.toFixed(1)} m³</td></tr>
+                        <tr><td>Valves:</td><td>${results.feed_system.pressurization.pressure_regulators + results.feed_system.pressurization.relief_valves}</td></tr>
+                        <tr><td>Total Mass:</td><td>${results.feed_system.total_mass.toFixed(0)} kg</td></tr>
+                    </table>
+                </div>
+                
+                ${results.feed_system.turbopump ? `
+                <div class="subsystem-card">
+                    <h3>Turbopump System</h3>
+                    <table class="spec-table">
+                        <tr><td>Cycle:</td><td>${results.feed_system.turbopump.type}</td></tr>
+                        <tr><td>Ox Pump Power:</td><td>${results.feed_system.turbopump.oxidizer_pump.power.toFixed(1)} kW</td></tr>
+                        <tr><td>Fuel Pump Power:</td><td>${results.feed_system.turbopump.fuel_pump.power.toFixed(1)} kW</td></tr>
+                        <tr><td>Turbine Power:</td><td>${results.feed_system.turbopump.turbine.power.toFixed(1)} kW</td></tr>
+                        <tr><td>RPM:</td><td>${results.feed_system.turbopump.oxidizer_pump.rpm.toLocaleString()}</td></tr>
+                        <tr><td>Reliability:</td><td>${(results.feed_system.turbopump.reliability * 100).toFixed(1)}%</td></tr>
+                    </table>
+                </div>
+                ` : ''}
+            `;
+            
+            // Altitude Performance Plot
+            if (results.altitude_performance && results.altitude_performance.length > 0) {
+                const altitudeIspTrace = {
+                    x: results.altitude_performance.map(p => p.altitude / 1000), // Convert to km
+                    y: results.altitude_performance.map(p => p.specific_impulse),
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'Isp vs Altitude',
+                    line: { color: '#4facfe', width: 3 },
+                    marker: { size: 6 },
+                    yaxis: 'y'
+                };
+                
+                const altitudeThrustTrace = {
+                    x: results.altitude_performance.map(p => p.altitude / 1000),
+                    y: results.altitude_performance.map(p => p.thrust / 1000), // Convert to kN
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'Thrust vs Altitude',
+                    line: { color: '#f093fb', width: 3 },
+                    marker: { size: 6 },
+                    yaxis: 'y2'
+                };
+                
+                const altitudeLayout = {
+                    title: 'Engine Performance vs Altitude',
+                    xaxis: { title: 'Altitude (km)' },
+                    yaxis: { 
+                        title: 'Specific Impulse (s)',
+                        titlefont: { color: '#4facfe' },
+                        tickfont: { color: '#4facfe' }
+                    },
+                    yaxis2: {
+                        title: 'Thrust (kN)',
+                        titlefont: { color: '#f093fb' },
+                        tickfont: { color: '#f093fb' },
+                        overlaying: 'y',
+                        side: 'right'
+                    },
+                    showlegend: true
+                };
+                
+                // Create altitude plot container if it doesn't exist
+                if (!document.getElementById('altitude_plot')) {
+                    const altitudePlotDiv = document.createElement('div');
+                    altitudePlotDiv.id = 'altitude_plot';
+                    altitudePlotDiv.className = 'plot-container';
+                    
+                    const altitudePanel = document.createElement('div');
+                    altitudePanel.className = 'panel';
+                    altitudePanel.innerHTML = '<h2>Altitude Performance Analysis</h2>';
+                    altitudePanel.appendChild(altitudePlotDiv);
+                    
+                    document.getElementById('designReport').parentNode.insertAdjacentElement('beforebegin', altitudePanel);
+                }
+                
+                Plotly.newPlot('altitude_plot', [altitudeIspTrace, altitudeThrustTrace], altitudeLayout);
+            }
+            
+            // Design report
+            const reportDiv = document.getElementById('designReport');
+            reportDiv.innerHTML = `
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Propellants:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.propellant_name}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Mixture Ratio:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.mixture_ratio} (Optimal: ${results.optimal_mixture_ratio})</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>MR Efficiency:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.mixture_ratio_efficiency.toFixed(1)}%</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Mass Flow:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.total_mass_flow.toFixed(2)} kg/s</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Throat Diameter:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.throat_diameter.toFixed(1)} mm</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Expansion Ratio:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.expansion_ratio.toFixed(1)}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Chamber Temperature:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.chamber_temperature} K</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Vacuum Expansion Ratio:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.expansion_ratio_vacuum.toFixed(1)}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Space Application:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">Multi-altitude optimized design</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Data Sources:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-size: 11px;">
+                            <div>✓ NASA CEA Database</div>
+                            <div>✓ NIST Thermophysical Properties</div>
+                            <div>✓ Flight Heritage Data</div>
+                            <div style="color: #28a745;">Real-time propellant data integration</div>
+                        </td>
+                    </tr>
+                </table>
+            `;
+        }
+        
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+        
+        function resetForm() {
+            // Propellant data
+            document.getElementById('fuel_type').value = 'rp1';
+            document.getElementById('oxidizer_type').value = 'lox';
+            document.getElementById('fuel_density').value = '810';
+            document.getElementById('oxidizer_density').value = '1141';
+            document.getElementById('fuel_boiling_point').value = '500';
+            document.getElementById('oxidizer_boiling_point').value = '90.2';
+            document.getElementById('fuel_freezing_point').value = '200';
+            document.getElementById('oxidizer_freezing_point').value = '54.4';
+            document.getElementById('fuel_viscosity').value = '0.0012';
+            document.getElementById('oxidizer_viscosity').value = '0.00019';
+            document.getElementById('fuel_heat_combustion').value = '43.1';
+            document.getElementById('fuel_heat_capacity').value = '2090';
+            document.getElementById('fuel_thermal_conductivity').value = '0.145';
+            
+            // O/F optimization
+            document.getElementById('mixture_ratio').value = '2.5';
+            document.getElementById('stoichiometric_of').value = '3.4';
+            document.getElementById('of_max_isp').value = '2.77';
+            document.getElementById('of_max_thrust').value = '2.27';
+            document.getElementById('of_min').value = '2.0';
+            document.getElementById('of_max').value = '3.2';
+            document.getElementById('throttling_of_strategy').value = 'constant';
+            document.getElementById('combustion_efficiency').value = '97';
+            
+            // Feed system
+            document.getElementById('engine_cycle').value = 'pressure_fed';
+            document.getElementById('thrust').value = '10000';
+            document.getElementById('chamber_pressure').value = '100';
+            document.getElementById('feed_pressure').value = '130';
+            document.getElementById('turbopump_efficiency').value = '75';
+            document.getElementById('generator_gas_temp').value = '1000';
+            document.getElementById('turbine_inlet_pressure').value = '150';
+            document.getElementById('turbine_expansion_ratio').value = '4';
+            
+            // Injector system
+            document.getElementById('injector_type').value = 'impinging';
+            document.getElementById('injector_elements').value = '100';
+            document.getElementById('fuel_injection_velocity').value = '25';
+            document.getElementById('oxidizer_injection_velocity').value = '40';
+            document.getElementById('fuel_orifice_diameter').value = '2.0';
+            document.getElementById('oxidizer_orifice_diameter').value = '2.5';
+            document.getElementById('injector_pressure_drop').value = '20';
+            document.getElementById('discharge_coefficient').value = '0.7';
+            
+            // Chamber design
+            document.getElementById('chamber_diameter').value = '200';
+            document.getElementById('characteristic_length').value = '1.2';
+            document.getElementById('contraction_ratio').value = '4';
+            document.getElementById('chamber_wall_thickness').value = '5';
+            document.getElementById('chamber_material').value = 'steel_304';
+            document.getElementById('chamber_roughness').value = '3.2';
+            document.getElementById('stability_margin').value = 'passive';
+            document.getElementById('ignition_system').value = 'hypergolic';
+            
+            // Nozzle & cooling
+            document.getElementById('cooling_type').value = 'regenerative';
+            document.getElementById('nozzle_expansion_ratio').value = '50';
+            document.getElementById('nozzle_type').value = 'conical';
+            document.getElementById('throat_diameter').value = '50';
+            document.getElementById('cooling_channels').value = '80';
+            document.getElementById('coolant_flow_percent').value = '100';
+            document.getElementById('coolant_inlet_temp').value = '300';
+            document.getElementById('max_wall_temp').value = '800';
+            
+            // Startup & transient
+            document.getElementById('startup_sequence').value = 'hypergolic';
+            document.getElementById('engine_start_time').value = '2.0';
+            document.getElementById('engine_shutdown_time').value = '1.5';
+            document.getElementById('min_throttle').value = '40';
+            document.getElementById('throttle_response').value = '0.5';
+            document.getElementById('restart_capability').value = 'multiple';
+            document.getElementById('chill_down_time').value = '30';
+            document.getElementById('max_burn_duration').value = '400';
+            
+            // Mass & structural
+            document.getElementById('target_thrust_to_weight').value = '60';
+            document.getElementById('safety_factor').value = '2.5';
+            document.getElementById('engine_mount').value = 'gimbal_2axis';
+            document.getElementById('gimbal_range').value = '8';
+            document.getElementById('actuator_response').value = '50';
+            document.getElementById('engine_life_cycles').value = '10';
+            document.getElementById('vibration_environment').value = 'launch_high';
+            document.getElementById('acoustic_level').value = '165';
+            
+            // Environment & test
+            document.getElementById('altitude_range').value = 'sea_level';
+            document.getElementById('temp_range_min').value = '200';
+            document.getElementById('temp_range_max').value = '350';
+            document.getElementById('storage_duration').value = '12';
+            document.getElementById('contamination_sensitivity').value = 'very_high';
+            document.getElementById('test_requirements').value = 'acceptance';
+            document.getElementById('ground_support').value = 'simple';
+            document.getElementById('hazard_classification').value = 'low';
+            
+            document.getElementById('results').style.display = 'none';
+            updatePropellantPreview();
+        }
+        
+        function displayDetailedAnalysis(results) {
+            // Update tabs with detailed analysis data
+            console.log('Displaying detailed analysis:', results);
+            
+            // Performance Maps Tab Content
+            if (results.performance_maps) {
+                updatePerformanceMapsTab(results.performance_maps);
+            }
+            
+            // Feed System Analysis
+            if (results.detailed_feed_system) {
+                updateFeedSystemTab(results.detailed_feed_system);
+            }
+            
+            // Combustion Analysis
+            if (results.combustion_analysis) {
+                updateCombustionTab(results.combustion_analysis);
+            }
+            
+            // Efficiency Breakdown
+            if (results.efficiency_breakdown) {
+                updateEfficiencyTab(results.efficiency_breakdown);
+            }
+            
+            // Manufacturing Analysis
+            if (results.manufacturing_analysis) {
+                updateManufacturingTab(results.manufacturing_analysis);
+            }
+            
+            // Propellant Tanks
+            if (results.propellant_tanks) {
+                displayPropellantTanks(results.propellant_tanks);
+            }
+        }
+        
+        function updatePerformanceMapsTab(performanceMaps) {
+            // Create performance optimization charts
+            if (performanceMaps.mixture_ratio_optimization) {
+                createMixtureRatioChart(performanceMaps.mixture_ratio_optimization);
+            }
+            
+            if (performanceMaps.altitude_performance) {
+                createAltitudePerformanceChart(performanceMaps.altitude_performance);
+            }
+        }
+        
+        function createMixtureRatioChart(mrData) {
+            const chartDiv = document.getElementById('mrOptChart') || createChartDiv('mrOptChart', 'Mixture Ratio Optimization');
+            
+            const trace1 = {
+                x: mrData.mr_range,
+                y: mrData.isp_vs_mr,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Specific Impulse',
+                line: { color: '#4facfe', width: 3 }
+            };
+            
+            const layout = {
+                title: 'Performance vs Mixture Ratio',
+                xaxis: { title: 'Mixture Ratio (O/F)' },
+                yaxis: { title: 'Specific Impulse (s)' },
+                showlegend: true
+            };
+            
+            Plotly.newPlot(chartDiv, [trace1], layout);
+        }
+        
+        function createAltitudePerformanceChart(altData) {
+            const chartDiv = document.getElementById('altChart') || createChartDiv('altChart', 'Altitude Performance');
+            
+            const trace1 = {
+                x: altData.altitude_range.map(alt => alt/1000), // Convert to km
+                y: altData.isp_vs_altitude,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Specific Impulse',
+                line: { color: '#667eea', width: 3 }
+            };
+            
+            const layout = {
+                title: 'Engine Performance vs Altitude',
+                xaxis: { title: 'Altitude (km)' },
+                yaxis: { title: 'Specific Impulse (s)' },
+                showlegend: true
+            };
+            
+            Plotly.newPlot(chartDiv, [trace1], layout);
+        }
+        
+        function createChartDiv(id, title) {
+            // Try different container IDs based on chart type
+            let container = null;
+            
+            if (id.includes('alt') || id.includes('altitude')) {
+                container = document.getElementById('altitude_analysis_plot') || 
+                           document.getElementById('altitude_profile_plot');
+            } else if (id.includes('mr') || id.includes('mixture')) {
+                container = document.getElementById('single_altitude_content') ||
+                           document.getElementById('parametric_plots');
+            } else if (id.includes('turbopump')) {
+                container = document.getElementById('parametric_plots') ||
+                           document.getElementById('thrust_time_content');
+            } else {
+                // Default containers
+                container = document.getElementById('single_altitude_content') || 
+                           document.getElementById('parametric_plots') ||
+                           document.getElementById('thrust_time_content');
+            }
+            
+            if (container) {
+                // Clear existing content if it's a plot container
+                if (container.id.includes('plot')) {
+                    container.innerHTML = '';
+                    container.id = id; // Change the container ID to the chart ID
+                    return container;
+                }
+                
+                // Otherwise create new div inside container
+                const chartDiv = document.createElement('div');
+                chartDiv.id = id;
+                chartDiv.style.width = '100%';
+                chartDiv.style.height = '400px';
+                chartDiv.style.margin = '20px 0';
+                
+                const titleEl = document.createElement('h3');
+                titleEl.textContent = title;
+                titleEl.style.textAlign = 'center';
+                titleEl.style.marginBottom = '10px';
+                
+                container.appendChild(titleEl);
+                container.appendChild(chartDiv);
+                return chartDiv;
+            }
+            return null;
+        }
+        
+        function updateFeedSystemTab(feedSystem) {
+            // Add detailed turbopump analysis
+            console.log('Feed system data:', feedSystem);
+            
+            // Update subsystem display with turbopump curves
+            if (feedSystem.turbopump_analysis) {
+                displayTurbopumpAnalysis(feedSystem.turbopump_analysis);
+            }
+        }
+        
+        function displayTurbopumpAnalysis(turbopump) {
+            // Create turbopump performance curves
+            if (turbopump.oxidizer_pump && turbopump.oxidizer_pump.head_curve) {
+                createTurbopumpChart(turbopump.oxidizer_pump);
+            }
+        }
+        
+        function createTurbopumpChart(pumpData) {
+            const chartDiv = document.getElementById('turbopumpChart') || createChartDiv('turbopumpChart', 'Turbopump Performance');
+            
+            if (!chartDiv) return;
+            
+            const trace1 = {
+                x: pumpData.flow_range,
+                y: pumpData.head_curve,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Head (m)',
+                yaxis: 'y1',
+                line: { color: '#f5576c', width: 3 }
+            };
+            
+            const trace2 = {
+                x: pumpData.flow_range,
+                y: pumpData.efficiency_curve,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Efficiency (%)',
+                yaxis: 'y2',
+                line: { color: '#4facfe', width: 3 }
+            };
+            
+            const layout = {
+                title: 'Turbopump Performance Map',
+                xaxis: { title: 'Flow Rate (kg/s)' },
+                yaxis: { title: 'Head (m)', side: 'left', color: '#f5576c' },
+                yaxis2: { 
+                    title: 'Efficiency (%)', 
+                    side: 'right', 
+                    overlaying: 'y',
+                    color: '#4facfe'
+                },
+                showlegend: true
+            };
+            
+            Plotly.newPlot(chartDiv, [trace1, trace2], layout);
+        }
+        
+        function updateCombustionTab(combustionData) {
+            console.log('Combustion analysis data:', combustionData);
+            
+            // Display combustion chamber geometry and efficiency
+            if (combustionData.chamber_geometry) {
+                displayCombustionGeometry(combustionData.chamber_geometry);
+            }
+            
+            if (combustionData.combustion_analysis) {
+                displayCombustionEfficiency(combustionData.combustion_analysis);
+            }
+        }
+        
+        function displayCombustionGeometry(geometry) {
+            // Add combustion chamber specifications to results
+            const container = document.getElementById('subsystemsGrid');
+            if (!container) return;
+            
+            const combustionCard = document.createElement('div');
+            combustionCard.className = 'subsystem-card';
+            combustionCard.innerHTML = `
+                <h3>Combustion Chamber</h3>
+                <table class="spec-table">
+                    <tr><td>Diameter:</td><td>${geometry.diameter.toFixed(1)} mm</td></tr>
+                    <tr><td>Length:</td><td>${geometry.length.toFixed(1)} mm</td></tr>
+                    <tr><td>Volume:</td><td>${geometry.volume.toFixed(0)} cm³</td></tr>
+                    <tr><td>L*:</td><td>${geometry.l_star.toFixed(2)} m</td></tr>
+                    <tr><td>Contraction Ratio:</td><td>${geometry.contraction_ratio.toFixed(1)}</td></tr>
+                </table>
+            `;
+            container.appendChild(combustionCard);
+        }
+        
+        function displayCombustionEfficiency(analysis) {
+            // Create combustion efficiency chart
+            const chartDiv = document.getElementById('combustionChart') || createChartDiv('combustionChart', 'Combustion Analysis');
+            
+            if (!chartDiv) return;
+            
+            const efficiencies = [
+                analysis.mixing_efficiency,
+                analysis.combustion_efficiency,
+                analysis.mixing_efficiency * analysis.combustion_efficiency / 100
+            ];
+            
+            const trace = {
+                x: ['Mixing', 'Combustion', 'Overall'],
+                y: efficiencies,
+                type: 'bar',
+                marker: {
+                    color: ['#4facfe', '#667eea', '#f093fb']
+                }
+            };
+            
+            const layout = {
+                title: 'Combustion Efficiency Breakdown',
+                yaxis: { title: 'Efficiency (%)' },
+                showlegend: false
+            };
+            
+            Plotly.newPlot(chartDiv, [trace], layout);
+        }
+        
+        function updateEfficiencyTab(efficiencyData) {
+            console.log('Efficiency breakdown:', efficiencyData);
+            
+            if (efficiencyData.loss_breakdown) {
+                createEfficiencyBreakdownChart(efficiencyData);
+            }
+        }
+        
+        function createEfficiencyBreakdownChart(effData) {
+            const chartDiv = document.getElementById('efficiencyChart') || createChartDiv('efficiencyChart', 'Efficiency Breakdown');
+            
+            if (!chartDiv) return;
+            
+            const lossNames = Object.keys(effData.loss_breakdown);
+            const lossValues = Object.values(effData.loss_breakdown);
+            
+            const trace = {
+                labels: lossNames.map(name => name.replace('_', ' ').toUpperCase()),
+                values: lossValues,
+                type: 'pie',
+                hole: 0.4,
+                textinfo: 'label+percent',
+                textposition: 'outside'
+            };
+            
+            const layout = {
+                title: `Performance Losses (Overall Efficiency: ${effData.overall_efficiency.toFixed(1)}%)`,
+                showlegend: true
+            };
+            
+            Plotly.newPlot(chartDiv, [trace], layout);
+        }
+        
+        function updateManufacturingTab(manufacturingData) {
+            console.log('Manufacturing analysis:', manufacturingData);
+            
+            // Add manufacturing information to a dedicated section
+            if (manufacturingData.manufacturing_processes) {
+                displayManufacturingInfo(manufacturingData);
+            }
+        }
+        
+        function displayManufacturingInfo(mfgData) {
+            const container = document.getElementById('subsystemsGrid');
+            if (!container) return;
+            
+            const mfgCard = document.createElement('div');
+            mfgCard.className = 'subsystem-card';
+            mfgCard.innerHTML = `
+                <h3>Manufacturing & Production</h3>
+                <table class="spec-table">
+                    <tr><td>Chamber Process:</td><td>${mfgData.manufacturing_processes.chamber}</td></tr>
+                    <tr><td>Nozzle Process:</td><td>${mfgData.manufacturing_processes.nozzle}</td></tr>
+                    <tr><td>Injector Process:</td><td>${mfgData.manufacturing_processes.injector}</td></tr>
+                    <tr><td>Development Cost:</td><td>${mfgData.estimated_costs.development}</td></tr>
+                    <tr><td>Production Unit:</td><td>${mfgData.estimated_costs.production_unit}</td></tr>
+                    <tr><td>Design Phase:</td><td>${mfgData.production_timeline.design_phase}</td></tr>
+                </table>
+            `;
+            container.appendChild(mfgCard);
+        }
+        
+        function displayPropellantTanks(tankData) {
+            console.log('Propellant tank data:', tankData);
+            
+            // Add tank specifications to subsystems
+            const container = document.getElementById('subsystemsGrid');
+            if (!container) return;
+            
+            // Oxidizer Tank Card
+            const oxTankCard = document.createElement('div');
+            oxTankCard.className = 'subsystem-card';
+            oxTankCard.innerHTML = `
+                <h3>Oxidizer Tank (${tankData.oxidizer_tank.propellant_type})</h3>
+                <table class="spec-table">
+                    <tr><td>Diameter:</td><td>${tankData.oxidizer_tank.dimensions.diameter.toFixed(0)} mm</td></tr>
+                    <tr><td>Length:</td><td>${tankData.oxidizer_tank.dimensions.length.toFixed(0)} mm</td></tr>
+                    <tr><td>Volume:</td><td>${tankData.oxidizer_tank.dimensions.volume.toFixed(0)} L</td></tr>
+                    <tr><td>Wall Thickness:</td><td>${tankData.oxidizer_tank.dimensions.wall_thickness.toFixed(1)} mm</td></tr>
+                    <tr><td>Propellant Mass:</td><td>${tankData.oxidizer_tank.propellant_data.mass.toFixed(0)} kg</td></tr>
+                    <tr><td>Tank Mass:</td><td>${tankData.oxidizer_tank.structural.tank_mass.toFixed(0)} kg</td></tr>
+                    <tr><td>Pressure Rating:</td><td>${tankData.oxidizer_tank.structural.pressure_rating.toFixed(1)} bar</td></tr>
+                    <tr><td>Material:</td><td>${tankData.oxidizer_tank.structural.material}</td></tr>
+                </table>
+            `;
+            container.appendChild(oxTankCard);
+            
+            // Fuel Tank Card
+            const fuelTankCard = document.createElement('div');
+            fuelTankCard.className = 'subsystem-card';
+            fuelTankCard.innerHTML = `
+                <h3>Fuel Tank (${tankData.fuel_tank.propellant_type})</h3>
+                <table class="spec-table">
+                    <tr><td>Diameter:</td><td>${tankData.fuel_tank.dimensions.diameter.toFixed(0)} mm</td></tr>
+                    <tr><td>Length:</td><td>${tankData.fuel_tank.dimensions.length.toFixed(0)} mm</td></tr>
+                    <tr><td>Volume:</td><td>${tankData.fuel_tank.dimensions.volume.toFixed(0)} L</td></tr>
+                    <tr><td>Wall Thickness:</td><td>${tankData.fuel_tank.dimensions.wall_thickness.toFixed(1)} mm</td></tr>
+                    <tr><td>Propellant Mass:</td><td>${tankData.fuel_tank.propellant_data.mass.toFixed(0)} kg</td></tr>
+                    <tr><td>Tank Mass:</td><td>${tankData.fuel_tank.structural.tank_mass.toFixed(0)} kg</td></tr>
+                    <tr><td>Pressure Rating:</td><td>${tankData.fuel_tank.structural.pressure_rating.toFixed(1)} bar</td></tr>
+                    <tr><td>Material:</td><td>${tankData.fuel_tank.structural.material}</td></tr>
+                    ${tankData.fuel_tank.structural.insulation !== 'None' ? 
+                        `<tr><td>Insulation:</td><td>${tankData.fuel_tank.structural.insulation}</td></tr>` : ''}
+                </table>
+            `;
+            container.appendChild(fuelTankCard);
+            
+            // Tank Internals Card
+            const internalsCard = document.createElement('div');
+            internalsCard.className = 'subsystem-card';
+            internalsCard.innerHTML = `
+                <h3>Tank Internal Structures</h3>
+                <table class="spec-table">
+                    <tr><td>Slosh Baffles:</td><td>${tankData.oxidizer_tank.internal_structures.slosh_baffles.length} perforated rings</td></tr>
+                    <tr><td>Anti-Vortex:</td><td>${tankData.oxidizer_tank.internal_structures.anti_vortex_device.vane_count} radial vanes</td></tr>
+                    <tr><td>Level Sensors:</td><td>${tankData.oxidizer_tank.internal_structures.instrumentation.level_sensors.count} capacitive probes</td></tr>
+                    <tr><td>Baffle Mass:</td><td>${tankData.oxidizer_tank.internal_structures.mass_breakdown.baffles.toFixed(1)} kg</td></tr>
+                    <tr><td>Total Internal Mass:</td><td>${tankData.oxidizer_tank.internal_structures.mass_breakdown.total_mass.toFixed(1)} kg</td></tr>
+                    <tr><td>Relief Valve:</td><td>${tankData.oxidizer_tank.internal_structures.instrumentation.relief_valve.diameter} mm Ø</td></tr>
+                </table>
+            `;
+            container.appendChild(internalsCard);
+            
+            // System Summary Card
+            const summaryCard = document.createElement('div');
+            summaryCard.className = 'subsystem-card';
+            summaryCard.innerHTML = `
+                <h3>Tank System Summary</h3>
+                <table class="spec-table">
+                    <tr><td>Total Propellant:</td><td>${tankData.system_summary.total_propellant_mass.toFixed(0)} kg</td></tr>
+                    <tr><td>Total Tank Mass:</td><td>${tankData.system_summary.total_tank_mass.toFixed(0)} kg</td></tr>
+                    <tr><td>Total Volume:</td><td>${tankData.system_summary.total_volume.toFixed(0)} L</td></tr>
+                    <tr><td>Mass Fraction:</td><td>${(tankData.system_summary.overall_mass_fraction * 100).toFixed(1)}%</td></tr>
+                    <tr><td>Burn Time:</td><td>${tankData.system_summary.burn_time} s</td></tr>
+                    <tr><td>Safety Margin:</td><td>${tankData.system_summary.safety_margin.toFixed(1)}%</td></tr>
+                </table>
+            `;
+            container.appendChild(summaryCard);
+            
+            // Create 3D Tank Visualization
+            createTankVisualization(tankData);
+            
+            // Add CAD Export Button
+            const exportButton = document.createElement('button');
+            exportButton.className = 'btn btn-primary';
+            exportButton.innerHTML = 'Export Tank CAD Files (STEP/STL)';
+            exportButton.style.margin = '10px';
+            exportButton.onclick = () => exportTankCAD(tankData);
+            container.appendChild(exportButton);
+        }
+        
+        function createTankVisualization(tankData) {
+            // Create 3D visualization of propellant tanks
+            const chartDiv = document.getElementById('tankVisualization') || createChartDiv('tankVisualization', 'Propellant Tank 3D CAD');
+            
+            if (!chartDiv) return;
+            
+            const oxTank = tankData.oxidizer_tank;
+            const fuelTank = tankData.fuel_tank;
+            
+            // Convert dimensions to meters for visualization
+            const oxD = oxTank.dimensions.diameter / 1000;
+            const oxL = oxTank.dimensions.length / 1000;
+            const fuelD = fuelTank.dimensions.diameter / 1000;
+            const fuelL = fuelTank.dimensions.length / 1000;
+            
+            // Oxidizer tank (cylinder)
+            const oxTankTrace = createCylinderTrace(0, 0, 0, oxD/2, oxL, 'Oxidizer Tank', '#4facfe', 0.7);
+            
+            // Fuel tank (positioned next to oxidizer tank)
+            const spacing = Math.max(oxD, fuelD) * 1.2;
+            const fuelTankTrace = createCylinderTrace(spacing, 0, 0, fuelD/2, fuelL, 'Fuel Tank', '#f5576c', 0.7);
+            
+            // Internal structures visualization
+            const baffleTraces = [];
+            
+            // Add slosh baffles for oxidizer tank
+            oxTank.internal_structures.slosh_baffles.forEach((baffle, index) => {
+                const baffleZ = (baffle.position / 1000) - oxL/2; // Convert to m and center
+                const baffleTraceSet = createRingTrace(0, 0, baffleZ, 
+                    baffle.outer_diameter / 2000, baffle.inner_diameter / 2000, 
+                    `Baffle ${index + 1}`, '#667eea', 0.9);
+                
+                // baffleTraceSet is an array, so spread it
+                baffleTraces.push(...baffleTraceSet);
+            });
+            
+            // Add anti-vortex device
+            const antiVortex = oxTank.internal_structures.anti_vortex_device;
+            const antiVortexTrace = createCylinderTrace(0, 0, -oxL/2 + 0.05, 
+                antiVortex.diameter / 2000, antiVortex.height / 1000, 
+                'Anti-Vortex Device', '#f093fb', 0.8);
+            
+            // Add inlet and outlet pipes
+            const inletTrace = createCylinderTrace(0, 0, oxL/2 - 0.1, 
+                0.05, 0.2, 'Inlet Pipe', '#00f2fe', 0.7); // 100mm diameter inlet
+            const outletTrace = createCylinderTrace(0, 0, -oxL/2 + 0.05, 
+                0.075, 0.1, 'Outlet Pipe', '#ff6b6b', 0.7); // 150mm diameter outlet
+            
+            // Combine all traces
+            const allTraces = [oxTankTrace, fuelTankTrace, antiVortexTrace, 
+                              inletTrace, outletTrace, ...baffleTraces];
+            
+            const layout = {
+                title: 'Propellant Tank System - 3D CAD View',
+                scene: {
+                    xaxis: { title: 'X (m)' },
+                    yaxis: { title: 'Y (m)' },
+                    zaxis: { title: 'Z (m)' },
+                    aspectmode: 'data'
+                },
+                showlegend: true,
+                width: 800,
+                height: 600
+            };
+            
+            Plotly.newPlot(chartDiv, allTraces, layout);
+        }
+        
+        function createCylinderTrace(x, y, z, radius, height, name, color, opacity) {
+            // Create solid cylindrical tank geometry using mesh3d
+            const vertices = [];
+            const faces = [];
+            
+            const nPoints = 30; // Higher resolution for smoother appearance
+            const nRings = 20;
+            
+            // Generate cylinder vertices
+            for (let ring = 0; ring <= nRings; ring++) {
+                const zVal = z + (ring / nRings) * height - height/2;
+                for (let point = 0; point <= nPoints; point++) {
+                    const angle = (point / nPoints) * 2 * Math.PI;
+                    const xVal = x + radius * Math.cos(angle);
+                    const yVal = y + radius * Math.sin(angle);
+                    vertices.push([xVal, yVal, zVal]);
+                }
+            }
+            
+            // Generate cylinder faces (triangles)
+            const triangles = [];
+            for (let ring = 0; ring < nRings; ring++) {
+                for (let point = 0; point < nPoints; point++) {
+                    const curr = ring * (nPoints + 1) + point;
+                    const next = ring * (nPoints + 1) + ((point + 1) % (nPoints + 1));
+                    const currNext = (ring + 1) * (nPoints + 1) + point;
+                    const nextNext = (ring + 1) * (nPoints + 1) + ((point + 1) % (nPoints + 1));
+                    
+                    // Two triangles per quad
+                    triangles.push([curr, next, currNext]);
+                    triangles.push([next, nextNext, currNext]);
+                }
+            }
+            
+            // Add end caps
+            const centerBottom = vertices.length;
+            vertices.push([x, y, z - height/2]);
+            const centerTop = vertices.length;
+            vertices.push([x, y, z + height/2]);
+            
+            // Bottom cap triangles
+            for (let point = 0; point < nPoints; point++) {
+                const curr = point;
+                const next = (point + 1) % (nPoints + 1);
+                triangles.push([centerBottom, next, curr]);
+            }
+            
+            // Top cap triangles
+            const topRing = nRings * (nPoints + 1);
+            for (let point = 0; point < nPoints; point++) {
+                const curr = topRing + point;
+                const next = topRing + ((point + 1) % (nPoints + 1));
+                triangles.push([centerTop, curr, next]);
+            }
+            
+            // Extract coordinates
+            const xCoords = vertices.map(v => v[0]);
+            const yCoords = vertices.map(v => v[1]);
+            const zCoords = vertices.map(v => v[2]);
+            
+            // Extract triangle indices
+            const iIndices = triangles.map(t => t[0]);
+            const jIndices = triangles.map(t => t[1]);
+            const kIndices = triangles.map(t => t[2]);
+            
+            return {
+                type: 'mesh3d',
+                x: xCoords,
+                y: yCoords,
+                z: zCoords,
+                i: iIndices,
+                j: jIndices,
+                k: kIndices,
+                color: color,
+                opacity: opacity,
+                name: name,
+                lighting: {
+                    ambient: 0.18,
+                    diffuse: 1,
+                    fresnel: 0.1,
+                    specular: 1,
+                    roughness: 0.1,
+                    facenormalsepsilon: 1e-15,
+                    vertexnormalsepsilon: 1e-15
+                },
+                lightposition: {
+                    x: 100,
+                    y: 200,
+                    z: 0
+                }
+            };
+        }
+        
+        function createRingTrace(x, y, z, outerR, innerR, name, color, opacity) {
+            // Create solid ring baffle geometry
+            const vertices = [];
+            const triangles = [];
+            const nPoints = 24; // High resolution for smooth appearance
+            const thickness = 0.002; // 2mm thickness
+            
+            // Generate ring vertices (top and bottom surfaces)
+            for (let surface = 0; surface <= 1; surface++) {
+                const zOffset = z + (surface - 0.5) * thickness;
+                
+                // Outer ring vertices
+                for (let i = 0; i <= nPoints; i++) {
+                    const angle = (i / nPoints) * 2 * Math.PI;
+                    vertices.push([
+                        x + outerR * Math.cos(angle),
+                        y + outerR * Math.sin(angle),
+                        zOffset
+                    ]);
+                }
+                
+                // Inner ring vertices
+                for (let i = 0; i <= nPoints; i++) {
+                    const angle = (i / nPoints) * 2 * Math.PI;
+                    vertices.push([
+                        x + innerR * Math.cos(angle),
+                        y + innerR * Math.sin(angle),
+                        zOffset
+                    ]);
+                }
+            }
+            
+            const pointsPerSurface = (nPoints + 1) * 2; // Outer + inner rings
+            
+            // Create top and bottom surfaces
+            for (let surface = 0; surface < 2; surface++) {
+                const baseIdx = surface * pointsPerSurface;
+                const outerStart = baseIdx;
+                const innerStart = baseIdx + (nPoints + 1);
+                
+                // Connect outer and inner rings with triangles
+                for (let i = 0; i < nPoints; i++) {
+                    const outerCurr = outerStart + i;
+                    const outerNext = outerStart + i + 1;
+                    const innerCurr = innerStart + i;
+                    const innerNext = innerStart + i + 1;
+                    
+                    if (surface === 0) { // Bottom surface (normal pointing down)
+                        triangles.push([outerCurr, innerCurr, outerNext]);
+                        triangles.push([innerCurr, innerNext, outerNext]);
+                    } else { // Top surface (normal pointing up)
+                        triangles.push([outerCurr, outerNext, innerCurr]);
+                        triangles.push([innerCurr, outerNext, innerNext]);
+                    }
+                }
+            }
+            
+            // Create side walls
+            // Outer wall
+            for (let i = 0; i < nPoints; i++) {
+                const bottomCurr = i;
+                const bottomNext = i + 1;
+                const topCurr = pointsPerSurface + i;
+                const topNext = pointsPerSurface + i + 1;
+                
+                triangles.push([bottomCurr, topCurr, bottomNext]);
+                triangles.push([topCurr, topNext, bottomNext]);
+            }
+            
+            // Inner wall
+            for (let i = 0; i < nPoints; i++) {
+                const bottomCurr = (nPoints + 1) + i;
+                const bottomNext = (nPoints + 1) + i + 1;
+                const topCurr = pointsPerSurface + (nPoints + 1) + i;
+                const topNext = pointsPerSurface + (nPoints + 1) + i + 1;
+                
+                triangles.push([bottomCurr, bottomNext, topCurr]);
+                triangles.push([topCurr, bottomNext, topNext]);
+            }
+            
+            // Add holes for propellant flow
+            const holeRadius = 0.025; // 25mm holes
+            const holesPerRing = 6;
+            const holeTraces = [];
+            
+            for (let hole = 0; hole < holesPerRing; hole++) {
+                const holeAngle = (hole / holesPerRing) * 2 * Math.PI;
+                const holeDistance = (outerR + innerR) / 2; // Middle of ring
+                const holeX = x + holeDistance * Math.cos(holeAngle);
+                const holeY = y + holeDistance * Math.sin(holeAngle);
+                
+                const holeTrace = createCylinderTrace(holeX, holeY, z, holeRadius, thickness * 2, 
+                    `${name} Hole ${hole + 1}`, '#ffffff', 1.0);
+                holeTraces.push(holeTrace);
+            }
+            
+            // Extract coordinates
+            const xCoords = vertices.map(v => v[0]);
+            const yCoords = vertices.map(v => v[1]);
+            const zCoords = vertices.map(v => v[2]);
+            
+            // Extract triangle indices
+            const iIndices = triangles.map(t => t[0]);
+            const jIndices = triangles.map(t => t[1]);
+            const kIndices = triangles.map(t => t[2]);
+            
+            const baffleTrace = {
+                type: 'mesh3d',
+                x: xCoords,
+                y: yCoords,
+                z: zCoords,
+                i: iIndices,
+                j: jIndices,
+                k: kIndices,
+                color: color,
+                opacity: opacity,
+                name: name,
+                lighting: {
+                    ambient: 0.15,
+                    diffuse: 0.8,
+                    fresnel: 0.02,
+                    specular: 0.5,
+                    roughness: 0.2,
+                    facenormalsepsilon: 1e-15,
+                    vertexnormalsepsilon: 1e-15
+                },
+                lightposition: {
+                    x: 100,
+                    y: 200,
+                    z: 0
+                }
+            };
+            
+            return [baffleTrace, ...holeTraces];
+        }
+        
+        function exportTankCAD(tankData) {
+            // Show loading state
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.innerHTML = 'Generating CAD Files...';
+            button.disabled = true;
+            
+            // Send tank data to backend for CAD generation
+            fetch('/export_tank_cad', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    tank_data: tankData
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // Create download link
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `propellant_tanks_cad_${new Date().getTime()}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showSuccess('CAD Files Generated Successfully! ' +
+                      'Downloaded files include:\n' +
+                      '• STEP files (CATIA/SolidWorks compatible)\n' +
+                      '• STL files (3D printing ready)\n' +
+                      '• Engineering drawings (JSON format)\n' +
+                      '• Manufacturing specifications\n' +
+                      '• Geometry definitions\n\n' +
+                      'Check your downloads folder.');
+            })
+            .catch(error => {
+                console.error('CAD export error:', error);
+                showError('Error generating CAD files: ' + error.message + ' ' +
+                      'Please check console for details.');
+            })
+            .finally(() => {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            });
+        }
+        
+        // CAD Export Function
+        function exportCAD() {
+            if (!currentResults) {
+                showWarning('Please calculate engine performance first before exporting CAD design.');
+                return;
+            }
+            
+            // Show loading
+            const originalText = event.target.innerHTML;
+            event.target.innerHTML = '🔄 Generating CAD...';
+            event.target.disabled = true;
+            
+            // Prepare CAD export data
+            fetch('/export_liquid_cad', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    results: currentResults,
+                    design_parameters: collectAllParameters()
+                })
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                // Create download link
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `liquid_engine_cad_${new Date().getTime()}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                
+                showSuccess('CAD files exported successfully! Check your downloads folder.');
+            })
+            .catch(error => {
+                console.error('CAD export error:', error);
+                showError('CAD export failed. Please try again.');
+            })
+            .finally(() => {
+                event.target.innerHTML = originalText;
+                event.target.disabled = false;
+            });
+        }
+        
+        function collectAllParameters() {
+            return {
+                // Propellant data
+                fuel_type: document.getElementById('fuel_type').value,
+                oxidizer_type: document.getElementById('oxidizer_type').value,
+                fuel_density: parseFloat(document.getElementById('fuel_density').value) || 810,
+                oxidizer_density: parseFloat(document.getElementById('oxidizer_density').value) || 1141,
+                fuel_boiling_point: parseFloat(document.getElementById('fuel_boiling_point').value) || 500,
+                oxidizer_boiling_point: parseFloat(document.getElementById('oxidizer_boiling_point').value) || 90.2,
+                fuel_freezing_point: parseFloat(document.getElementById('fuel_freezing_point').value) || 200,
+                oxidizer_freezing_point: parseFloat(document.getElementById('oxidizer_freezing_point').value) || 54.4,
+                fuel_viscosity: parseFloat(document.getElementById('fuel_viscosity').value) || 0.0012,
+                oxidizer_viscosity: parseFloat(document.getElementById('oxidizer_viscosity').value) || 0.00019,
+                fuel_heat_combustion: parseFloat(document.getElementById('fuel_heat_combustion').value) || 43.1,
+                fuel_heat_capacity: parseFloat(document.getElementById('fuel_heat_capacity').value) || 2090,
+                fuel_thermal_conductivity: parseFloat(document.getElementById('fuel_thermal_conductivity').value) || 0.145,
+                
+                // O/F optimization
+                mixture_ratio: parseFloat(document.getElementById('mixture_ratio').value) || 2.5,
+                stoichiometric_of: parseFloat(document.getElementById('stoichiometric_of').value) || 3.4,
+                of_max_isp: parseFloat(document.getElementById('of_max_isp').value) || 2.77,
+                of_max_thrust: parseFloat(document.getElementById('of_max_thrust').value) || 2.27,
+                of_min: parseFloat(document.getElementById('of_min').value) || 2.0,
+                of_max: parseFloat(document.getElementById('of_max').value) || 3.2,
+                throttling_of_strategy: document.getElementById('throttling_of_strategy').value,
+                combustion_efficiency: parseFloat(document.getElementById('combustion_efficiency').value) || 97,
+                
+                // Feed system
+                engine_cycle: document.getElementById('engine_cycle').value,
+                thrust: parseFloat(document.getElementById('thrust').value) || 10000,
+                chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value) || 100,
+                feed_pressure: parseFloat(document.getElementById('feed_pressure').value) || 130,
+                turbopump_efficiency: parseFloat(document.getElementById('turbopump_efficiency').value) || 75,
+                generator_gas_temp: parseFloat(document.getElementById('generator_gas_temp').value) || 1000,
+                turbine_inlet_pressure: parseFloat(document.getElementById('turbine_inlet_pressure').value) || 150,
+                turbine_expansion_ratio: parseFloat(document.getElementById('turbine_expansion_ratio').value) || 4,
+                
+                // Injector system
+                injector_type: document.getElementById('injector_type').value,
+                injector_elements: parseFloat(document.getElementById('injector_elements').value) || 100,
+                fuel_injection_velocity: parseFloat(document.getElementById('fuel_injection_velocity').value) || 25,
+                oxidizer_injection_velocity: parseFloat(document.getElementById('oxidizer_injection_velocity').value) || 40,
+                fuel_orifice_diameter: parseFloat(document.getElementById('fuel_orifice_diameter').value) || 2.0,
+                oxidizer_orifice_diameter: parseFloat(document.getElementById('oxidizer_orifice_diameter').value) || 2.5,
+                injector_pressure_drop: parseFloat(document.getElementById('injector_pressure_drop').value) || 20,
+                discharge_coefficient: parseFloat(document.getElementById('discharge_coefficient').value) || 0.7,
+                
+                // Chamber design
+                chamber_diameter: parseFloat(document.getElementById('chamber_diameter').value) || 200,
+                characteristic_length: parseFloat(document.getElementById('characteristic_length').value) || 1.2,
+                contraction_ratio: parseFloat(document.getElementById('contraction_ratio').value) || 4,
+                chamber_wall_thickness: parseFloat(document.getElementById('chamber_wall_thickness').value) || 5,
+                chamber_material: document.getElementById('chamber_material').value,
+                chamber_roughness: parseFloat(document.getElementById('chamber_roughness').value) || 3.2,
+                stability_margin: document.getElementById('stability_margin').value,
+                ignition_system: document.getElementById('ignition_system').value,
+                
+                // Nozzle & cooling
+                cooling_type: document.getElementById('cooling_type').value,
+                nozzle_expansion_ratio: parseFloat(document.getElementById('nozzle_expansion_ratio').value) || 50,
+                nozzle_type: document.getElementById('nozzle_type').value,
+                throat_diameter: parseFloat(document.getElementById('throat_diameter').value) || 50,
+                cooling_channels: parseFloat(document.getElementById('cooling_channels').value) || 80,
+                coolant_flow_percent: parseFloat(document.getElementById('coolant_flow_percent').value) || 100,
+                coolant_inlet_temp: parseFloat(document.getElementById('coolant_inlet_temp').value) || 300,
+                max_wall_temp: parseFloat(document.getElementById('max_wall_temp').value) || 800,
+                
+                // Startup & transient
+                startup_sequence: document.getElementById('startup_sequence').value,
+                engine_start_time: parseFloat(document.getElementById('engine_start_time').value) || 2.0,
+                engine_shutdown_time: parseFloat(document.getElementById('engine_shutdown_time').value) || 1.5,
+                min_throttle: parseFloat(document.getElementById('min_throttle').value) || 40,
+                throttle_response: parseFloat(document.getElementById('throttle_response').value) || 0.5,
+                restart_capability: document.getElementById('restart_capability').value,
+                chill_down_time: parseFloat(document.getElementById('chill_down_time').value) || 30,
+                max_burn_duration: parseFloat(document.getElementById('max_burn_duration').value) || 400,
+                
+                // Mass & structural
+                target_thrust_to_weight: parseFloat(document.getElementById('target_thrust_to_weight').value) || 60,
+                safety_factor: parseFloat(document.getElementById('safety_factor').value) || 2.5,
+                engine_mount: document.getElementById('engine_mount').value,
+                gimbal_range: parseFloat(document.getElementById('gimbal_range').value) || 8,
+                actuator_response: parseFloat(document.getElementById('actuator_response').value) || 50,
+                engine_life_cycles: parseFloat(document.getElementById('engine_life_cycles').value) || 10,
+                vibration_environment: document.getElementById('vibration_environment').value,
+                acoustic_level: parseFloat(document.getElementById('acoustic_level').value) || 165,
+                
+                // Environment & test
+                altitude_range: document.getElementById('altitude_range').value,
+                temp_range_min: parseFloat(document.getElementById('temp_range_min').value) || 200,
+                temp_range_max: parseFloat(document.getElementById('temp_range_max').value) || 350,
+                storage_duration: parseFloat(document.getElementById('storage_duration').value) || 12,
+                contamination_sensitivity: document.getElementById('contamination_sensitivity').value,
+                test_requirements: document.getElementById('test_requirements').value,
+                ground_support: document.getElementById('ground_support').value,
+                hazard_classification: document.getElementById('hazard_classification').value
+            };
+        }
+        
+        // Ask AI Analysis
+        function askAI() {
+            if (!currentResults) {
+                showWarning('No results to analyze. Please run calculations first.');
+                return;
+            }
+            
+            // Prepare AI-friendly JSON for liquid engine
+            const aiData = {
+                analysis_type: "Liquid Bipropellant Rocket Engine Design",
+                timestamp: new Date().toISOString(),
+                
+                input_parameters: {
+                    propellant_combination: currentResults.propellant_name,
+                    fuel_type: currentResults.fuel_type,
+                    oxidizer_type: currentResults.oxidizer_type,
+                    thrust_n: currentResults.thrust,
+                    chamber_pressure_bar: currentResults.chamber_pressure,
+                    mixture_ratio: currentResults.mixture_ratio,
+                    cooling_type: currentResults.cooling_type,
+                    injector_type: currentResults.injection_system.injector_type
+                },
+                
+                performance_results: {
+                    isp_sea_level_sec: currentResults.isp_sea_level,
+                    isp_vacuum_sec: currentResults.isp_vacuum,
+                    c_star_ms: currentResults.c_star,
+                    chamber_temperature_k: currentResults.chamber_temperature,
+                    thrust_to_weight_ratio: currentResults.thrust_to_weight,
+                    mixture_ratio_efficiency_percent: currentResults.mixture_ratio_efficiency,
+                    total_mass_flow_kgs: currentResults.total_mass_flow
+                },
+                
+                engine_geometry: {
+                    throat_diameter_mm: currentResults.throat_diameter,
+                    exit_diameter_mm: currentResults.exit_diameter,
+                    expansion_ratio: currentResults.expansion_ratio,
+                    chamber_diameter_mm: currentResults.chamber_diameter,
+                    chamber_length_mm: currentResults.chamber_length
+                },
+                
+                subsystems: {
+                    cooling_system: {
+                        type: currentResults.cooling_type,
+                        total_heat_load_kw: currentResults.cooling_system.total_heat_load,
+                        coolant_flow_rate_kgs: currentResults.cooling_system.coolant_flow_rate
+                    },
+                    injection_system: {
+                        type: currentResults.injection_system.injector_type,
+                        fuel_velocity_ms: currentResults.injection_system.fuel_injection_velocity,
+                        ox_velocity_ms: currentResults.injection_system.ox_injection_velocity,
+                        pressure_drops_bar: {
+                            fuel: currentResults.injection_system.fuel_pressure_drop,
+                            oxidizer: currentResults.injection_system.ox_pressure_drop
+                        }
+                    },
+                    feed_system: {
+                        turbopumps_required: currentResults.turbopump_system.turbopumps_required,
+                        total_pump_power_kw: currentResults.turbopump_system.total_pump_power || 0
+                    }
+                },
+                
+                propellant_properties: {
+                    fuel_density_kgm3: currentResults.fuel_density,
+                    oxidizer_density_kgm3: currentResults.oxidizer_density,
+                    molecular_weight_gmol: currentResults.molecular_weight,
+                    gamma: currentResults.gamma
+                }
+            };
+            
+            // Create prompt
+            const prompt = `Please analyze this liquid bipropellant rocket engine design and provide insights:
+
+${JSON.stringify(aiData, null, 2)}
+
+Please provide:
+1. Performance assessment (Isp efficiency, thrust-to-weight ratio)
+2. Propellant combination analysis and optimization suggestions
+3. Cooling system adequacy and recommendations
+4. Injection system design evaluation
+5. Feed system (tank-fed vs turbopump) recommendations
+6. Operational considerations (ignition, throttling, restart capability)
+7. Manufacturing complexity and cost considerations
+8. Comparison to existing engines (F-1, Merlin, RS-25, etc.)`;
+            
+            // Copy to clipboard
+            navigator.clipboard.writeText(prompt).then(() => {
+                showSuccess('Liquid engine analysis data copied to clipboard! Paste it into your favorite AI assistant.');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                showError('Failed to copy data. Check console for details.');
+            });
+        }
+        
+        // Tab Management Functions
+        function showAnalysisTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.analysis-tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '_tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        function showSubTab(subtabName) {
+            // Get parent tab content
+            const parentTab = event.target.closest('.analysis-tab-content');
+            
+            // Hide all subtab contents in this parent
+            parentTab.querySelectorAll('.subtab-content').forEach(subtab => {
+                subtab.classList.remove('active');
+            });
+            
+            // Remove active class from all subtab buttons in this parent
+            parentTab.querySelectorAll('.subtab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected subtab
+            document.getElementById(subtabName + '_content').classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        function showSubSubTab(subsubtabName) {
+            // Get parent subtab content
+            const parentSubtab = event.target.closest('.subtab-content');
+            
+            // Hide all sub-subtab contents in this parent
+            parentSubtab.querySelectorAll('.sub-subtab-content').forEach(subsubtab => {
+                subsubtab.classList.remove('active');
+            });
+            
+            // Remove active class from all sub-subtab buttons in this parent
+            parentSubtab.querySelectorAll('.sub-subtab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected sub-subtab
+            document.getElementById(subsubtabName + '_content').classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        // CAD Visualization Function
+        function generateCADVisualization(results) {
+            // Create 3D engine visualization
+            const cadContainer = document.getElementById('cad_visualization');
+            if (!cadContainer) return;
+            
+            // Engine dimensions from results
+            const chamberDiameter = results.chamber_diameter || 200; // mm
+            const chamberLength = results.chamber_length || 300; // mm
+            const throatDiameter = results.throat_diameter || 50; // mm
+            const exitDiameter = results.exit_diameter || 150; // mm
+            const nozzleLength = results.nozzle_length || 200; // mm
+            
+            console.log('CAD Visualization - Dimensions:', {
+                chamberDiameter, chamberLength, throatDiameter, exitDiameter, nozzleLength
+            });
+            
+            // Create chamber geometry
+            const chamberTrace = {
+                type: 'mesh3d',
+                x: [0, chamberLength, chamberLength, 0, 0, chamberLength, chamberLength, 0],
+                y: [-chamberDiameter/2, -chamberDiameter/2, chamberDiameter/2, chamberDiameter/2, -chamberDiameter/2, -chamberDiameter/2, chamberDiameter/2, chamberDiameter/2],
+                z: [-chamberDiameter/2, -chamberDiameter/2, -chamberDiameter/2, -chamberDiameter/2, chamberDiameter/2, chamberDiameter/2, chamberDiameter/2, chamberDiameter/2],
+                i: [7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2],
+                j: [3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3],
+                k: [0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6],
+                opacity: 0.7,
+                color: 'lightblue',
+                name: 'Combustion Chamber'
+            };
+            
+            // Create nozzle geometry (simplified)
+            const nozzleX = [];
+            const nozzleY = [];
+            const nozzleZ = [];
+            const steps = 20;
+            
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const x = chamberLength + t * nozzleLength;
+                const radius = throatDiameter/2 + t * (exitDiameter - throatDiameter)/2;
+                
+                // Create circular cross-section
+                for (let j = 0; j < 8; j++) {
+                    const angle = (j / 8) * 2 * Math.PI;
+                    nozzleX.push(x);
+                    nozzleY.push(radius * Math.cos(angle));
+                    nozzleZ.push(radius * Math.sin(angle));
+                }
+            }
+            
+            const nozzleTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: nozzleX,
+                y: nozzleY,
+                z: nozzleZ,
+                marker: {
+                    size: 3,
+                    color: 'darkgray',
+                    opacity: 0.8
+                },
+                name: 'Nozzle'
+            };
+            
+            // Create injector
+            const injectorTrace = {
+                type: 'mesh3d',
+                x: [-20, 0, 0, -20, -20, 0, 0, -20],
+                y: [-chamberDiameter/2, -chamberDiameter/2, chamberDiameter/2, chamberDiameter/2, -chamberDiameter/2, -chamberDiameter/2, chamberDiameter/2, chamberDiameter/2],
+                z: [-chamberDiameter/2, -chamberDiameter/2, -chamberDiameter/2, -chamberDiameter/2, chamberDiameter/2, chamberDiameter/2, chamberDiameter/2, chamberDiameter/2],
+                i: [7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2],
+                j: [3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3],
+                k: [0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6],
+                opacity: 0.6,
+                color: 'silver',
+                name: 'Injector'
+            };
+            
+            const layout = {
+                title: {
+                    text: `LIQUID ENGINE 3D CAD - ${results.propellant_name || 'LOX/RP-1'}`,
+                    font: { size: 16 }
+                },
+                scene: {
+                    xaxis: { title: 'Length (mm)' },
+                    yaxis: { title: 'Width (mm)' },
+                    zaxis: { title: 'Height (mm)' },
+                    camera: {
+                        eye: { x: 1.5, y: 1.5, z: 1.5 }
+                    },
+                    aspectmode: 'cube'
+                },
+                showlegend: true,
+                margin: { l: 0, r: 0, t: 40, b: 0 }
+            };
+            
+            // Create the plot
+            if (typeof Plotly !== 'undefined') {
+                Plotly.newPlot(cadContainer, [chamberTrace, nozzleTrace, injectorTrace], layout);
+            } else {
+                cadContainer.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f8f9fa; border-radius: 8px; flex-direction: column;">
+                        <div style="font-size: 48px; margin-bottom: 20px;">🚀</div>
+                        <h3 style="color: #1e3c72; margin-bottom: 10px;">3D Engine Visualization</h3>
+                        <p style="color: #6c757d; text-align: center;">Chamber: ${chamberDiameter}mm × ${chamberLength}mm<br>
+                        Throat: ${throatDiameter}mm | Exit: ${exitDiameter}mm<br>
+                        Propellant: ${results.propellant_name || 'LOX/RP-1'}</p>
+                        <div style="margin-top: 20px; padding: 15px; background: white; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <strong>Engine Specifications:</strong><br>
+                            • Thrust: ${(results.thrust/1000).toFixed(1)} kN<br>
+                            • Isp (vac): ${results.isp_vacuum?.toFixed(1) || 'N/A'} s<br>
+                            • Chamber Pressure: ${results.chamber_pressure} bar<br>
+                            • Expansion Ratio: ${results.expansion_ratio?.toFixed(1) || 'N/A'}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Generate parametric plots
+            generateParametricPlots(results);
+        }
+        
+        function generateParametricPlots(results) {
+            // Altitude performance plot
+            const altitudePlotDiv = document.getElementById('altitude_analysis_plot');
+            if (altitudePlotDiv && typeof Plotly !== 'undefined') {
+                const altitudes = [0, 5, 10, 15, 20, 30, 50, 80, 120];
+                const ispValues = altitudes.map(alt => {
+                    const seaLevelIsp = results.isp_sea_level || 300;
+                    const vacuumIsp = results.isp_vacuum || 350;
+                    return seaLevelIsp + (vacuumIsp - seaLevelIsp) * Math.min(alt / 50, 1);
+                });
+                
+                const trace = {
+                    x: altitudes,
+                    y: ispValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'Specific Impulse',
+                    line: { color: '#4facfe', width: 3 },
+                    marker: { size: 8 }
+                };
+                
+                const layout = {
+                    title: 'Engine Performance vs Altitude',
+                    xaxis: { title: 'Altitude (km)' },
+                    yaxis: { title: 'Specific Impulse (s)' },
+                    margin: { l: 60, r: 40, t: 60, b: 60 }
+                };
+                
+                Plotly.newPlot(altitudePlotDiv, [trace], layout);
+            }
+        }
+        
+        // PDF Export Function
+        async function exportPDF(reportType) {
+            try {
+                // Show loading message
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = 'Generating PDF...';
+                btn.disabled = true;
+                
+                // Collect motor data
+                const motorData = {
+                    motor_name: document.getElementById('motor_name').value || 'Liquid_Motor',
+                    motor_type: 'liquid',
+                    oxidizer_type: document.getElementById('oxidizer_type').value,
+                    fuel_type: document.getElementById('fuel_type').value,
+                    chamber_diameter: parseFloat(document.getElementById('chamber_diameter').value),
+                    chamber_length: parseFloat(document.getElementById('chamber_length').value),
+                    throat_diameter: parseFloat(document.getElementById('throat_diameter').value),
+                    exit_diameter: parseFloat(document.getElementById('exit_diameter').value),
+                    chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value),
+                    of_ratio: parseFloat(document.getElementById('of_ratio').value),
+                    expansion_ratio: parseFloat(document.getElementById('exit_diameter').value) / parseFloat(document.getElementById('throat_diameter').value)
+                };
+                
+                // Collect analysis results (if available)
+                const analysisResults = window.currentResults || {};
+                
+                // Collect chart data (if any plots exist)
+                const charts = [];
+                const plotDivs = ['thrust_plot', 'efficiency_plot', 'cad_visualization'];
+                
+                for (const plotId of plotDivs) {
+                    const plotDiv = document.getElementById(plotId);
+                    if (plotDiv && plotDiv._fullLayout) {
+                        try {
+                            const plotData = plotDiv.data;
+                            const plotLayout = plotDiv.layout;
+                            const chartJson = JSON.stringify({ data: plotData, layout: plotLayout });
+                            charts.push(chartJson);
+                        } catch (e) {
+                            console.log(`Could not capture chart: ${plotId}`);
+                        }
+                    }
+                }
+                
+                // Prepare request data
+                const requestData = {
+                    motor_data: motorData,
+                    analysis_results: analysisResults,
+                    charts: charts
+                };
+                
+                // Make API call
+                const response = await fetch(`/api/export-pdf/${reportType}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
+                if (response.ok) {
+                    // Download the PDF
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `liquid_motor_${reportType}_${Date.now()}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    showSuccess('PDF report downloaded successfully!');
+                } else {
+                    const errorData = await response.json();
+                    alert(`PDF export failed: ${errorData.error}`);
+                }
+                
+            } catch (error) {
+                console.error('PDF export error:', error);
+                alert(`PDF export failed: ${error.message}`);
+            } finally {
+                // Restore button
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+        
+        // CAD Generation Functions
+        function generateBasicCAD() {
+            // Use the existing CAD visualization
+            if (window.currentResults) {
+                generateCADVisualization(window.currentResults);
+                updateCadDescription('basic');
+            } else {
+                alert('Please run motor analysis first to generate CAD visualization.');
+            }
+        }
+        
+        async function generateDetailedCAD() {
+            try {
+                // Show loading message
+                const cadContainer = document.getElementById('cad_visualization');
+                cadContainer.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; font-size: 18px; color: #666;">Generating detailed engineering CAD...</div>';
+                
+                // Collect motor data
+                const motorData = {
+                    motor_name: document.getElementById('motor_name').value || 'Liquid_Motor',
+                    chamber_diameter: parseFloat(document.getElementById('chamber_diameter').value),
+                    chamber_length: parseFloat(document.getElementById('chamber_length').value),
+                    throat_diameter: parseFloat(document.getElementById('throat_diameter').value),
+                    exit_diameter: parseFloat(document.getElementById('exit_diameter').value),
+                    nozzle_length: parseFloat(document.getElementById('chamber_length').value) * 0.75,
+                    injector_type: 'unlike_impinging',
+                    injector_holes: 24,
+                    chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value),
+                    thrust: window.currentResults ? window.currentResults.thrust : 5000,
+                    isp: window.currentResults ? window.currentResults.isp_vacuum : 320
+                };
+                
+                // Make API call for detailed CAD
+                const response = await fetch('/api/detailed-cad/liquid', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(motorData)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    // Parse and display the detailed CAD
+                    const plotData = JSON.parse(result.cad_data);
+                    
+                    if (typeof Plotly !== 'undefined') {
+                        Plotly.newPlot(cadContainer, plotData.data, plotData.layout);
+                        updateCadDescription('detailed', result.component_details);
+                    } else {
+                        cadContainer.innerHTML = '<div style="padding: 20px; text-align: center;">Plotly library required for detailed CAD visualization</div>';
+                    }
+                    
+                } else {
+                    const errorData = await response.json();
+                    cadContainer.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">Detailed CAD generation failed: ${errorData.error}</div>`;
+                }
+                
+            } catch (error) {
+                console.error('Detailed CAD error:', error);
+                const cadContainer = document.getElementById('cad_visualization');
+                cadContainer.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function updateCadDescription(cadType, componentDetails) {
+            const explanationDiv = document.querySelector('#thrust_time_traj_content .chart-explanation');
+            
+            if (cadType === 'detailed' && componentDetails) {
+                explanationDiv.innerHTML = `
+                    <p><strong>Engineering CAD View:</strong> Detailed engineering visualization with cross-section</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 15px 0;">
+                        <div>
+                            <h4>Component Details:</h4>
+                            <ul>
+                                <li><strong>Injector:</strong> ${componentDetails.injector.type} (${componentDetails.injector.hole_count} holes)</li>
+                                <li><strong>Cooling:</strong> ${componentDetails.cooling.type} (${componentDetails.cooling.channel_count} channels)</li>
+                                <li><strong>Coolant:</strong> ${componentDetails.cooling.coolant}</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4>Materials:</h4>
+                            <ul>
+                                <li><strong>Chamber:</strong> ${componentDetails.materials.chamber}</li>
+                                <li><strong>Nozzle:</strong> ${componentDetails.materials.nozzle}</li>
+                                <li><strong>Injector:</strong> ${componentDetails.materials.injector}</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                        <strong>Views:</strong> Left - External Assembly | Right - Internal Cross-Section
+                    </div>
+                `;
+            } else {
+                explanationDiv.innerHTML = `
+                    <p><strong>Basic CAD View:</strong> 3D CAD visualization of liquid rocket engine assembly</p>
+                    <ul>
+                        <li><strong>Gray components:</strong> Engine structure, turbopumps, and plumbing</li>
+                        <li><strong>Blue/Cyan:</strong> Propellant tanks with internal anti-vortex baffles</li>
+                        <li><strong>Red/Orange:</strong> Combustion chamber and injector assembly</li>
+                        <li><strong>Purple gradient:</strong> Nozzle expansion cone with cooling channels</li>
+                        <li><strong>Interactive:</strong> Rotate (drag), zoom (scroll), pan (shift+drag)</li>
+                    </ul>
+                `;
+            }
+        }
+        
+        // Initialize
+        updatePropellantPreview();
+    </script>
+    
+    <!-- Include Plotly for 3D visualization -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</body>
+</html>

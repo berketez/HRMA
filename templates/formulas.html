@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rocket Motor Formulas - UZAYTEK</title>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            }
+        };
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #f8f9fa; 
+            line-height: 1.6;
+        }
+        
+        .navbar {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .navbar h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        
+        .nav-links a:hover, .nav-links a.active {
+            background-color: rgba(255,255,255,0.2);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 40px 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 36px;
+            color: #1e3c72;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 18px;
+            color: #666;
+        }
+        
+        .toc {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .toc h3 {
+            color: #1e3c72;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        .toc ul {
+            list-style: none;
+        }
+        
+        .toc li {
+            margin-bottom: 8px;
+        }
+        
+        .toc a {
+            color: #2a5298;
+            text-decoration: none;
+            font-size: 16px;
+            display: block;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            transition: color 0.3s;
+        }
+        
+        .toc a:hover {
+            color: #1e3c72;
+            background-color: #f8f9fa;
+        }
+        
+        .section {
+            background: white;
+            margin-bottom: 30px;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .section h2 {
+            color: #1e3c72;
+            font-size: 28px;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #2a5298;
+            padding-bottom: 10px;
+        }
+        
+        .section h3 {
+            color: #2a5298;
+            font-size: 22px;
+            margin: 30px 0 15px 0;
+        }
+        
+        .section p {
+            color: #555;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        
+        .formula-box {
+            background: #f8f9ff;
+            border: 2px solid #e6e9ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+            font-size: 18px;
+        }
+        
+        .variable-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .variable-table th {
+            background: #2a5298;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        .variable-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .variable-table tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .variable-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-top: 40px;
+        }
+        
+        .footer p {
+            margin-bottom: 10px;
+            color: #666;
+        }
+        
+        .footer strong {
+            color: #1e3c72;
+        }
+        
+        @media (max-width: 768px) {
+            .navbar {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .header h1 {
+                font-size: 28px;
+            }
+            
+            .section {
+                padding: 20px;
+            }
+            
+            .variable-table {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <h1>MOTOR ANALYSIS - Formulas</h1>
+        <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/hybrid">Hybrid</a>
+            <a href="/solid">Solid</a>
+            <a href="/liquid">Liquid</a>
+            <a href="/formulas" class="active">Formulas</a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🚀 Rocket Motor Analysis Formulas</h1>
+            <p>Mathematical Expressions Used in Solid, Liquid and Hybrid Rocket Motors</p>
+        </div>
+        
+        <!-- Table of Contents -->
+        <div class="toc">
+            <h3>📋 Table of Contents</h3>
+            <ul>
+                <li><a href="#fundamental-performance">1. Fundamental Performance Parameters</a></li>
+                <li><a href="#nozzle-design">2. Nozzle Design</a></li>
+                <li><a href="#combustion-analysis">3. Combustion Analysis</a></li>
+                <li><a href="#solid-propellant">4. Solid Propellant Motors</a></li>
+                <li><a href="#liquid-propellant">5. Liquid Propellant Motors</a></li>
+                <li><a href="#hybrid-motors">6. Hybrid Motors</a></li>
+                <li><a href="#heat-transfer">7. Heat Transfer</a></li>
+                <li><a href="#structural-analysis">8. Structural Analysis</a></li>
+                <li><a href="#trajectory-analysis">9. Trajectory Analysis</a></li>
+                <li><a href="#safety-analysis">10. Safety Analysis</a></li>
+                <li><a href="#manufacturing-analysis">11. Manufacturing Analysis</a></li>
+                <li><a href="#cost-analysis">12. Cost Analysis</a></li>
+                <li><a href="#advanced-analysis">13. Advanced Analysis</a></li>
+            </ul>
+        </div>
+        
+        <!-- Section 1: Fundamental Performance Parameters -->
+        <div class="section" id="fundamental-performance">
+            <h2>1. Fundamental Performance Parameters</h2>
+            <p>These fundamental equations define the basic performance characteristics of rocket motors.</p>
+            
+            <h3>1.1 Specific Impulse</h3>
+            <div class="formula-box">
+                $I_{sp} = \frac{F}{\dot{m} \cdot g_0} = \frac{v_e}{g_0}$
+            </div>
+            <div class="formula-box">
+                $I_{sp} = \frac{c^*}{\sqrt{\gamma}} \sqrt{\frac{2\gamma}{\gamma-1}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}} \sqrt{1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}}$
+            </div>
+            <p><strong>Description:</strong> Specific impulse is the fundamental performance metric in rocket propulsion, quantifying the efficiency of propellant utilization. It represents the thrust generated per unit weight flow rate of propellant consumed per second. Physically, it measures how long one pound of propellant can produce one pound of thrust. Higher specific impulse indicates more efficient propellant use and better rocket performance. This parameter is critical for mission planning, propellant loading calculations, and comparing different propulsion systems. In practice, it determines the rocket's capability to achieve desired velocity increments and payload capacity.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$I_{sp}$</td><td>Specific impulse</td><td>s</td><td>200-450</td></tr>
+                <tr><td>$F$</td><td>Thrust</td><td>N</td><td>100-10⁷</td></tr>
+                <tr><td>$\dot{m}$</td><td>Mass flow rate</td><td>kg/s</td><td>0.1-1000</td></tr>
+                <tr><td>$v_e$</td><td>Exhaust velocity</td><td>m/s</td><td>2000-4500</td></tr>
+                <tr><td>$g_0$</td><td>Standard gravity</td><td>m/s²</td><td>9.807</td></tr>
+            </table>
+            
+            <h3>1.2 Characteristic Velocity</h3>
+            <div class="formula-box">
+                $c^* = \frac{p_c A_t}{\dot{m}} = \sqrt{\frac{\gamma R T_c}{\gamma}} \left(\frac{\gamma+1}{2}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
+            </div>
+            <div class="formula-box">
+                $c^* = \frac{\sqrt{R T_c}}{\Gamma}$ where $\Gamma = \sqrt{\gamma} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
+            </div>
+            <p><strong>Description:</strong> Characteristic velocity (c*) is a fundamental combustion chamber parameter that characterizes the efficiency of the chemical energy release process, independent of nozzle expansion. It serves as a "signature" of the propellant combination and combustion conditions. c* is particularly valuable because it isolates combustion performance from nozzle effects, allowing engineers to evaluate injector design, mixing efficiency, and heat losses separately. A higher c* indicates more complete combustion and better energy release. This parameter is essential for combustor design optimization, propellant selection, and diagnosing performance issues in rocket engines during development testing.</p>
+            <div class="info">
+                <strong>Physical Meaning:</strong> c* represents the velocity gas would achieve if expanded isentropically from chamber pressure to zero pressure.
+            </div>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$c^*$</td><td>Characteristic velocity</td><td>m/s</td><td>1200-2000</td></tr>
+                <tr><td>$p_c$</td><td>Chamber pressure</td><td>Pa</td><td>10⁶-10⁸</td></tr>
+                <tr><td>$A_t$</td><td>Throat area</td><td>m²</td><td>10⁻⁶-10⁻²</td></tr>
+                <tr><td>$\gamma$</td><td>Specific heat ratio</td><td>-</td><td>1.15-1.35</td></tr>
+                <tr><td>$R$</td><td>Specific gas constant</td><td>J/kg·K</td><td>200-500</td></tr>
+            </table>
+            
+            <h3>1.3 Thrust Coefficient</h3>
+            <div class="formula-box">
+                $C_F = \frac{F}{p_c A_t} = \sqrt{\frac{2\gamma^2}{\gamma-1}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{\gamma-1}} \sqrt{1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}} + \frac{(p_e-p_a)A_e}{p_c A_t}$
+            </div>
+            <div class="formula-box">
+                $C_F = C_{F,vac} - \frac{p_a A_e}{p_c A_t}$ (atmospheric correction)
+            </div>
+            <p><strong>Description:</strong> The thrust coefficient is a dimensionless parameter that quantifies nozzle expansion efficiency by relating actual thrust to the product of chamber pressure and throat area. It represents the effectiveness of converting chamber pressure into thrust through gas expansion. The thrust coefficient increases with expansion ratio until optimal expansion is reached, where exit pressure equals ambient pressure. Beyond this point, overexpansion or underexpansion reduces efficiency. This parameter is crucial for nozzle design optimization, altitude compensation analysis, and performance prediction across different operating conditions. Engineers use CF to compare nozzle designs and determine optimal expansion ratios for specific missions.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$C_F$</td><td>Thrust coefficient</td><td>-</td><td>1.2-2.0</td></tr>
+                <tr><td>$p_e$</td><td>Exit pressure</td><td>Pa</td><td>10³-10⁵</td></tr>
+                <tr><td>$p_a$</td><td>Ambient pressure</td><td>Pa</td><td>10⁵</td></tr>
+                <tr><td>$A_e$</td><td>Exit area</td><td>m²</td><td>10⁻⁵-10⁻¹</td></tr>
+            </table>
+            
+            <h3>1.4 Total Impulse and Burn Time</h3>
+            <div class="formula-box">
+                $I_{total} = \int_0^{t_b} F(t) dt = \bar{F} \cdot t_b$
+            </div>
+            <div class="formula-box">
+                $I_{total} = I_{sp} \cdot g_0 \cdot m_{prop}$
+            </div>
+            <div class="formula-box">
+                $t_b = \frac{m_{prop}}{\dot{m}_{avg}}$
+            </div>
+            <p><strong>Description:</strong> Total impulse quantifies the cumulative momentum transfer capability of a rocket motor throughout its entire operating duration. It represents the integral of thrust over time and directly correlates to the total velocity change (delta-V) the motor can impart to a vehicle. This parameter is fundamental for mission planning, determining payload capacity, and sizing propellant tanks. Total impulse classifications (A through O) standardize motor performance for comparative analysis. Engineers use this metric to calculate orbital insertion capabilities, interplanetary trajectory requirements, and stage performance in multi-stage vehicles. It's the key parameter for matching motor selection to mission requirements.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$I_{total}$</td><td>Total impulse</td><td>N·s</td><td>10³-10⁹</td></tr>
+                <tr><td>$t_b$</td><td>Burn time</td><td>s</td><td>1-600</td></tr>
+                <tr><td>$\bar{F}$</td><td>Average thrust</td><td>N</td><td>100-10⁷</td></tr>
+                <tr><td>$m_{prop}$</td><td>Propellant mass</td><td>kg</td><td>1-10⁶</td></tr>
+            </table>
+            
+            <h3>1.5 Mass Flow Rate Relations</h3>
+            <div class="formula-box">
+                $\dot{m} = \rho^* A_t \sqrt{\gamma} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
+            </div>
+            <div class="formula-box">
+                $\rho^* = \frac{p_c}{R T_c} \left(\frac{2}{\gamma+1}\right)^{\frac{1}{\gamma-1}}$ (throat density)
+            </div>
+            <div class="formula-box">
+                $\dot{m} = C_d A_t \sqrt{\frac{2\gamma p_c}{\gamma+1}} \left(\frac{\gamma+1}{R T_c}\right)^{\frac{1}{2}}$
+            </div>
+            <p><strong>Description:</strong> This equation governs the mass flow rate through the nozzle throat when sonic conditions (choked flow) are achieved. At the throat, the flow velocity equals the local speed of sound, creating a flow limitation that makes the mass flow rate independent of downstream pressure variations. This choked condition is essential for stable rocket motor operation and thrust control. The throat acts as a "flow meter" that precisely controls propellant consumption rate. Understanding this relationship is crucial for throat sizing, chamber pressure prediction, and ensuring proper pressure drop across injectors in liquid systems.</p>
+            <div class="info">
+                <strong>Note:</strong> The discharge coefficient $C_d$ accounts for real gas effects and typically ranges from 0.95-0.99.
+            </div>
+        </div>
+
+        <!-- Section 3: Combustion Analysis -->
+        <div class="section" id="combustion-analysis">
+            <h2>3. Combustion Analysis</h2>
+            <p>Chemical reactions and thermodynamic calculations within the combustion chamber determine rocket motor performance.</p>
+            
+            <h3>3.1 Stoichiometric Combustion</h3>
+            <div class="formula-box">
+                $\nu_F F + \nu_O O \rightarrow \nu_P P$
+            </div>
+            <p><strong>Description:</strong> The stoichiometric combustion equation represents the ideal chemical balance between fuel and oxidizer molecules, defining the theoretical perfect mixture ratio for complete combustion. This fundamental relationship determines the optimal propellant combination that maximizes energy release while minimizing unreacted species. Understanding stoichiometry is essential for propellant selection, mixture ratio optimization, and predicting combustion products. Deviations from stoichiometric ratios (fuel-rich or oxidizer-rich combustion) are often intentionally used to optimize specific impulse, control combustion temperature, or provide film cooling. This equation forms the foundation for all combustion analysis in rocket motors.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\nu_F, \nu_O, \nu_P$</td><td>Stoichiometric coefficients</td><td>-</td><td>1-4</td></tr>
+                <tr><td>$F$</td><td>Fuel molecule</td><td>-</td><td>RP-1, CH₄, H₂</td></tr>
+                <tr><td>$O$</td><td>Oxidizer molecule</td><td>-</td><td>LOX, N₂O₄, H₂O₂</td></tr>
+            </table>
+            
+            <h3>3.2 Mixture Ratio</h3>
+            <div class="formula-box">
+                $O/F = \frac{\dot{m}_o}{\dot{m}_f}$
+            </div>
+            <div class="formula-box">
+                $r = \frac{O/F}{(O/F)_{stoic}}$
+            </div>
+            <p><strong>Description:</strong> The mixture ratio (O/F) and equivalence ratio quantify the actual propellant combination relative to the stoichiometric ideal. The mixture ratio directly affects combustion temperature, specific impulse, and exhaust gas composition. Most rocket engines operate slightly off-stoichiometric to optimize performance - typically fuel-rich for maximum specific impulse or oxidizer-rich for cooling and combustion stability. The equivalence ratio normalizes this comparison, making it easier to evaluate different propellant combinations. These parameters are critical for injector design, performance prediction, and operational optimization. They directly influence thrust vectoring, cooling requirements, and exhaust plume characteristics.</p>
+            <div class="info">
+                <strong>Note:</strong> r > 1 for oxidizer-rich combustion, r < 1 for fuel-rich combustion.
+            </div>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$O/F$</td><td>Mixture ratio</td><td>-</td><td>1.5-8.0</td></tr>
+                <tr><td>$\dot{m}_o$</td><td>Oxidizer mass flow</td><td>kg/s</td><td>1-1000</td></tr>
+                <tr><td>$\dot{m}_f$</td><td>Fuel mass flow</td><td>kg/s</td><td>0.5-200</td></tr>
+                <tr><td>$r$</td><td>Equivalence ratio</td><td>-</td><td>0.8-1.2</td></tr>
+            </table>
+            
+            <h3>3.3 Combustion Temperature</h3>
+            <div class="formula-box">
+                $T_c = \frac{\sum \Delta H_f^0 - \sum \Delta H_f^0_{products}}{\sum n_i C_{p,i}}$
+            </div>
+            <div class="formula-box">
+                $T_{flame} = T_0 + \frac{Q_{combustion}}{\dot{m} C_p}$
+            </div>
+            <p><strong>Description:</strong> Adiabatic combustion temperature represents the theoretical maximum temperature achievable when propellants burn completely with no heat loss to surroundings. This temperature directly influences specific impulse, chamber pressure capability, and cooling requirements. It's calculated using enthalpy of formation data and specific heat capacities of reactants and products. The flame temperature equation includes the sensible heat contribution from preheated reactants. Real combustion chambers operate below adiabatic temperature due to heat transfer, incomplete mixing, and dissociation effects. Engineers use these calculations to predict material requirements, design cooling systems, and optimize injector patterns for temperature management.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$T_c$</td><td>Chamber temperature</td><td>K</td><td>2800-3800</td></tr>
+                <tr><td>$\Delta H_f^0$</td><td>Standard formation enthalpy</td><td>kJ/mol</td><td>-400 to +50</td></tr>
+                <tr><td>$C_p$</td><td>Specific heat capacity</td><td>kJ/kg·K</td><td>1.2-4.5</td></tr>
+                <tr><td>$Q_{combustion}$</td><td>Heat of combustion</td><td>MJ/kg</td><td>8-45</td></tr>
+            </table>
+            
+            <h3>3.4 Combustion Efficiency</h3>
+            <div class="formula-box">
+                $\eta_c = \frac{c^*_{actual}}{c^*_{theoretical}}$
+            </div>
+            <div class="formula-box">
+                $\eta_c = 1 - \frac{T_{wall} - T_{gas}}{T_{adiabatic}}$
+            </div>
+            <p><strong>Description:</strong> Combustion efficiency quantifies how closely real-world combustion approaches the theoretical ideal, accounting for incomplete mixing, finite reaction kinetics, heat losses, and non-uniform temperature distributions. This parameter is crucial for evaluating injector designs, chamber geometry, and operating conditions. Poor combustion efficiency manifests as reduced c* performance, incomplete propellant utilization, and potential combustion instability. The efficiency varies significantly between propulsion system types due to different mixing mechanisms and residence times. Engineers use efficiency measurements to optimize injector patterns, chamber length, and operating pressure for maximum performance while maintaining stability margins.</p>
+            <div class="info">
+                <strong>Typical Values:</strong> Liquid motors 95-99%, solid motors 92-97%, hybrid motors 85-95%
+            </div>
+            
+            <h3>3.5 Chemical Equilibrium</h3>
+            <div class="formula-box">
+                $K_p = \prod_{i} (P_i)^{\nu_i} = \exp\left(-\frac{\Delta G^0}{RT}\right)$
+            </div>
+            <div class="formula-box">
+                $\sum \nu_i = 0$ (mass conservation)
+            </div>
+            <p><strong>Description:</strong> Chemical equilibrium calculations determine the final composition of combustion products at high temperatures where dissociation and recombination reactions occur simultaneously. The equilibrium constant relates product and reactant activities at thermodynamic equilibrium, governing species concentrations in the exhaust flow. At high combustion temperatures, molecules like H₂O and CO₂ partially dissociate into simpler species, affecting gas properties and performance. Understanding chemical equilibrium is essential for accurate performance prediction, exhaust plume modeling, and environmental impact assessment. These calculations become increasingly important for high-performance engines operating at extreme temperatures where dissociation effects significantly impact molecular weight and specific heat ratios.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$K_p$</td><td>Equilibrium constant</td><td>-</td><td>10⁻⁶-10⁶</td></tr>
+                <tr><td>$P_i$</td><td>Component partial pressure</td><td>Pa</td><td>10⁴-10⁷</td></tr>
+                <tr><td>$\Delta G^0$</td><td>Standard Gibbs energy</td><td>kJ/mol</td><td>-800 to +200</td></tr>
+            </table>
+        </div>
+
+        <!-- Section 2: Nozzle Design -->
+        <div class="section" id="nozzle-design">
+            <h2>2. Nozzle Design</h2>
+            <p>Nozzle design is the critical interface between high-pressure combustion gases and the external environment, converting thermal and pressure energy into directed kinetic energy for thrust generation. The nozzle must efficiently accelerate combustion products from subsonic velocities in the chamber to supersonic exhaust velocities while maintaining stable flow conditions. Design parameters include expansion ratio, contour shape, length optimization, and thermal management. Proper nozzle design maximizes momentum extraction while minimizing weight, length, and heat transfer. The interaction between gas dynamics, thermodynamics, and structural considerations makes nozzle design one of the most complex aspects of rocket propulsion.</p>
+            
+            <h3>2.1 Area Ratio and Expansion</h3>
+            <div class="formula-box">
+                $\varepsilon = \frac{A_e}{A_t} = \frac{1}{M_e} \left[\frac{2}{\gamma+1}\left(1+\frac{\gamma-1}{2}M_e^2\right)\right]^{\frac{\gamma+1}{2(\gamma-1)}}$
+            </div>
+            <div class="formula-box">
+                $\frac{p_e}{p_c} = \left(1+\frac{\gamma-1}{2}M_e^2\right)^{-\frac{\gamma}{\gamma-1}}$
+            </div>
+            <p><strong>Description:</strong> The area expansion ratio is the fundamental nozzle design parameter that governs the degree of gas expansion and final exhaust conditions. This ratio determines exit Mach number, exit pressure, exit temperature, and ultimately the exhaust velocity achieved. The relationship between area ratio and Mach number is derived from one-dimensional compressible flow theory, assuming isentropic expansion. Optimal expansion occurs when exit pressure equals ambient pressure, maximizing specific impulse. Underexpansion (high exit pressure) wastes pressure energy, while overexpansion (low exit pressure) can cause flow separation and thrust losses. The area ratio directly impacts nozzle weight, length, and cooling requirements, making it a critical optimization parameter in rocket design.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\varepsilon$</td><td>Area expansion ratio</td><td>-</td><td>5-100</td></tr>
+                <tr><td>$M_e$</td><td>Exit Mach number</td><td>-</td><td>2-5</td></tr>
+                <tr><td>$A_e$</td><td>Exit area</td><td>m²</td><td>10⁻⁵-10⁻¹</td></tr>
+                <tr><td>$A_t$</td><td>Throat area</td><td>m²</td><td>10⁻⁶-10⁻²</td></tr>
+            </table>
+            
+            <h3>2.2 Nozzle Length and Contour</h3>
+            <div class="formula-box">
+                $L_{con} = \frac{(R_e - R_t)}{\tan(\alpha)} = \frac{R_t(\sqrt{\varepsilon} - 1)}{\tan(\alpha)}$
+            </div>
+            <div class="formula-box">
+                $\lambda = \frac{L_{con}}{R_t} = \frac{\sqrt{\varepsilon} - 1}{\tan(\alpha)}$ (length factor)
+            </div>
+            <p><strong>Description:</strong> Conical nozzle geometry provides a simple, manufacturable approach to gas expansion with predictable performance characteristics. The half-angle and length factor determine the nozzle's physical dimensions and expansion efficiency. Smaller half-angles provide better performance through more gradual expansion but increase nozzle length and weight. The length factor (λ) relates nozzle length to throat radius, affecting both performance and structural design. Typical conical nozzles use 12°-18° half-angles as a compromise between efficiency and practicality. These geometric relationships are fundamental for preliminary design, weight estimation, and manufacturing cost analysis. Conical nozzles are often preferred for solid rocket motors due to their simplicity and ease of manufacturing with composite materials.</p>
+            <div class="info">
+                <strong>Typical Values:</strong> Half-angle α = 12°-18° for conical nozzles, λ = 0.8-1.5
+            </div>
+            
+            <h3>2.3 Bell Nozzle Design</h3>
+            <div class="formula-box">
+                $L_{bell} = 0.8 L_{con}$ (approximately)
+            </div>
+            <div class="formula-box">
+                $\theta_n = \arcsin\left(\frac{1}{M_e}\right)$ (Mach angle)
+            </div>
+            <p><strong>Description:</strong> Bell nozzles (also called contoured or parabolic nozzles) represent an advanced design that achieves near-optimal expansion in a shorter, lighter package compared to conical nozzles. The bell contour is mathematically optimized to provide uniform, parallel flow at the exit plane, minimizing expansion losses. The initial rapid expansion near the throat transitions to gradual expansion toward the exit, following method-of-characteristics solutions for ideal nozzle contours. Bell nozzles typically achieve 98-99% of ideal performance while being 20-40% shorter than equivalent conical designs. This length reduction provides significant weight and structural advantages, making bell nozzles standard for high-performance liquid rocket engines despite their manufacturing complexity.</p>
+            
+            <h3>2.4 Nozzle Efficiency</h3>
+            <div class="formula-box">
+                $\eta_{nozzle} = \frac{C_{F,actual}}{C_{F,ideal}} = \frac{1 + \cos(\alpha)}{2}$ (conical)
+            </div>
+            <div class="formula-box">
+                $\eta_{nozzle} = 0.98$ (typical bell nozzle)
+            </div>
+            <p><strong>Description:</strong> Nozzle efficiency quantifies the reduction in thrust due to non-axial velocity components in the exhaust flow. In conical nozzles, the diverging flow creates radial velocity components that don't contribute to axial thrust, resulting in a cosine loss proportional to the half-angle. Bell nozzles minimize this loss through contoured expansion that turns the flow nearly parallel to the axis at the exit. Efficiency also accounts for boundary layer effects, flow separation, and viscous losses. Real nozzles experience additional losses from heat transfer, manufacturing tolerances, and off-design operation. Understanding nozzle efficiency is crucial for accurate thrust prediction and optimization of the expansion process for maximum momentum extraction.</p>
+            
+            <h3>2.5 Throat Conditions</h3>
+            <div class="formula-box">
+                $M_t = 1$ (sonic conditions)
+            </div>
+            <div class="formula-box">
+                $\frac{T_t}{T_c} = \frac{2}{\gamma+1}$, $\frac{p_t}{p_c} = \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma}{\gamma-1}}$
+            </div>
+            <div class="formula-box">
+                $a_t = \sqrt{\gamma R T_t}$ (sonic velocity at throat)
+            </div>
+            <p><strong>Description:</strong> Throat conditions represent the critical point where gas flow transitions from subsonic to supersonic, establishing the fundamental flow control mechanism in rocket nozzles. At sonic conditions (Mach = 1), the throat acts as a flow-limiting orifice that regulates mass flow regardless of downstream pressure variations. The pressure and temperature ratios are fixed by thermodynamic relationships for isentropic flow, making throat design crucial for proper nozzle operation. The sonic velocity determines the maximum possible mass flux through the throat area. Understanding throat conditions is essential for nozzle sizing, predicting flow choking behavior, and ensuring stable operation across varying ambient conditions. These relationships form the foundation for all compressible flow analysis in rocket nozzles.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$T_t/T_c$</td><td>Throat/chamber temperature ratio</td><td>-</td><td>0.83-0.87</td></tr>
+                <tr><td>$p_t/p_c$</td><td>Throat/chamber pressure ratio</td><td>-</td><td>0.53-0.58</td></tr>
+                <tr><td>$a_t$</td><td>Sonic velocity at throat</td><td>m/s</td><td>800-1200</td></tr>
+            </table>
+            
+            <h3>2.6 Exit Velocity Calculation</h3>
+            <div class="formula-box">
+                $v_e = \sqrt{\frac{2\gamma R T_c}{\gamma-1}\left[1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}\right]}$
+            </div>
+            <div class="formula-box">
+                $v_e = c^* \sqrt{\frac{2\gamma}{\gamma-1}\left[1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}\right]}$
+            </div>
+            <p><strong>Description:</strong> Exit velocity calculation determines the final momentum-carrying capability of the exhaust flow after expansion through the nozzle, directly establishing thrust generation potential. The isentropic expansion assumption provides the theoretical maximum velocity achievable for given chamber conditions and expansion ratio. Real nozzles approach but never quite achieve ideal isentropic performance due to boundary layers, heat transfer, and flow non-uniformities. The relationship between chamber conditions, pressure ratio, and exit velocity guides nozzle design optimization and performance prediction. The alternative formulation using characteristic velocity separates combustion effects (c*) from expansion effects, enabling independent optimization of these processes.</p>
+            <div class="info">
+                <strong>Optimum Expansion:</strong> Maximum $I_{sp}$ occurs when $p_e = p_a$ (ambient pressure)
+            </div>
+        </div>
+
+        <!-- Section 4: Solid Propellant Motors -->
+        <div class="section" id="solid-propellant">
+            <h2>4. Solid Propellant Motors</h2>
+            <p>Solid propellant motors represent the simplest and most reliable form of rocket propulsion, storing fuel and oxidizer in a single, stable solid matrix that burns in a predictable manner. These systems offer exceptional thrust-to-weight ratios, long-term storage capability, and operational simplicity with no moving parts or complex feed systems. However, they sacrifice controllability and specific impulse for reliability and simplicity. Solid motors cannot be throttled or shut down once ignited, making grain design critical for achieving desired performance profiles. They are widely used for boosters, tactical missiles, and applications where reliability and quick response are paramount.</p>
+            
+            <h3>4.1 Burn Rate Law (Saint Robert's Law)</h3>
+            <div class="formula-box">
+                $\dot{r} = a P_c^n$
+            </div>
+            <div class="formula-box">
+                $\dot{r} = a_0 P_c^n \exp\left(-\frac{E_a}{RT_s}\right)$ (temperature dependent)
+            </div>
+            <p><strong>Description:</strong> Saint Robert's burn rate law is the fundamental empirical relationship governing solid propellant consumption, discovered through extensive experimental work. The burn rate directly controls thrust magnitude and duration, making it the primary design parameter for solid motors. The pressure exponent (n) typically ranges from 0.3-0.8, with lower values providing more stable combustion and higher values giving more responsive pressure coupling. Temperature sensitivity affects ignition characteristics, altitude performance, and thermal conditioning requirements. Understanding burn rate behavior is essential for grain design, pressure prediction, ballistic optimization, and ensuring stable combustion across operating conditions. The exponential temperature term becomes critical for motors operating in extreme thermal environments.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\dot{r}$</td><td>Burn rate</td><td>m/s</td><td>10⁻⁴-10⁻²</td></tr>
+                <tr><td>$a$</td><td>Burn rate coefficient</td><td>m/s·Pa⁻ⁿ</td><td>10⁻⁵-10⁻³</td></tr>
+                <tr><td>$n$</td><td>Pressure exponent</td><td>-</td><td>0.3-0.8</td></tr>
+                <tr><td>$E_a$</td><td>Activation energy</td><td>J/mol</td><td>10⁴-10⁵</td></tr>
+            </table>
+            
+            <h3>4.2 Grain Regression Analysis</h3>
+            <div class="formula-box">
+                $A_b(t) = A_{b0} + \alpha \cdot \dot{r} \cdot t$
+            </div>
+            <div class="formula-box">
+                $\alpha = \frac{dA_b}{dr}$ (grain geometry factor)
+            </div>
+            <p><strong>Description:</strong> Grain regression analysis predicts how the burning surface area changes as the propellant burns, directly determining the thrust-time profile of the motor. The geometry factor (α) characterizes the grain design: positive values create progressive burning (increasing thrust), zero gives neutral burning (constant thrust), and negative values produce regressive burning (decreasing thrust). This analysis is fundamental for achieving desired thrust profiles, optimizing volumetric loading, and ensuring structural margins throughout burn. Different grain geometries (cylindrical, star, wagon wheel, finocyl) provide varying α values to meet mission requirements. Accurate regression modeling is essential for predicting burnout conditions, avoiding pressure excursions, and optimizing motor performance across the entire operating envelope.</p>
+            <div class="info">
+                <strong>Grain Types:</strong> Progressive (α > 0), neutral (α = 0), regressive (α < 0)
+            </div>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$A_b(t)$</td><td>Burn surface area</td><td>m²</td><td>0.01-10</td></tr>
+                <tr><td>$A_{b0}$</td><td>Initial burn area</td><td>m²</td><td>0.01-10</td></tr>
+                <tr><td>$\alpha$</td><td>Grain geometry factor</td><td>m⁻¹</td><td>-5 to +5</td></tr>
+            </table>
+            
+            <h3>4.3 Pressure Equilibrium</h3>
+            <div class="formula-box">
+                $\rho_p A_b \dot{r} = \dot{m}_{nozzle} = C_d A_t \sqrt{\frac{2\gamma p_c}{\gamma+1}} \sqrt{\frac{\gamma+1}{RT_c}}$
+            </div>
+            <div class="formula-box">
+                $p_c = \left(\frac{\rho_p A_b a}{C_d A_t \sqrt{\frac{2\gamma}{\gamma+1}} \sqrt{\frac{\gamma+1}{RT_c}}}\right)^{\frac{1}{1-n}}$
+            </div>
+            <p><strong>Description:</strong> The pressure equilibrium equation represents the fundamental balance between propellant gas generation and nozzle mass flow, determining the operating pressure of the motor. This balance point defines the steady-state operating condition where gas production equals gas consumption through the nozzle. The equation couples burn rate physics with nozzle flow dynamics, making chamber pressure a function of grain geometry, propellant properties, and nozzle throat area. Understanding this relationship is crucial for pressure prediction, throat sizing, grain design optimization, and ensuring stable operation. Deviations from equilibrium create pressure oscillations that can lead to combustion instability or structural failure, making this balance critical for safe motor operation.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\rho_p$</td><td>Propellant density</td><td>kg/m³</td><td>1500-1900</td></tr>
+                <tr><td>$C_d$</td><td>Discharge coefficient</td><td>-</td><td>0.95-0.99</td></tr>
+            </table>
+            
+            <h3>4.4 Motor Performance Integration</h3>
+            <div class="formula-box">
+                $F(t) = \dot{m}(t) v_e + (p_e - p_a) A_e$
+            </div>
+            <div class="formula-box">
+                $I_{total} = \int_0^{t_b} F(t) dt = \rho_p I_{sp} g_0 V_{prop}$
+            </div>
+            <p><strong>Description:</strong> Motor performance integration combines instantaneous thrust calculations with burn time predictions to determine total impulse and overall motor capability. The thrust-time integral accounts for varying chamber pressure, changing burn area, and propellant mass consumption throughout the burn. This analysis is essential for mission planning, trajectory calculation, and vehicle sizing. The relationship between propellant volume, density, and specific impulse provides a direct link between motor physical design and performance capability. Accurate performance integration requires coupling burn rate models, pressure equilibrium, and nozzle flow analysis throughout the entire operating duration, accounting for transient effects during startup and burnout.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$V_{prop}$</td><td>Propellant volume</td><td>m³</td><td>10⁻⁴-10</td></tr>
+                <tr><td>$t_b$</td><td>Burn time</td><td>s</td><td>1-200</td></tr>
+            </table>
+            
+            <h3>4.5 Grain Design Formulas</h3>
+            <div class="formula-box">
+                $K_n = \frac{A_b}{A_t}$ (BATES grain)
+            </div>
+            <div class="formula-box">
+                $A_b = 2\pi r L + 2\pi r^2$ (cylindrical grain, both ends burning)
+            </div>
+            <div class="formula-box">
+                $A_b = \pi D L + n \pi d L$ (star grain, n points)
+            </div>
+            <p><strong>Description:</strong> Grain design formulas provide the mathematical foundation for calculating burning surface areas of different propellant grain configurations, directly determining thrust-time profiles and motor performance characteristics. The grain factor (Kn) represents the ratio of burning area to throat area, controlling chamber pressure and thrust magnitude. Different grain geometries serve specific mission requirements: cylindrical grains provide simple, predictable burning; star grains offer progressive thrust profiles; wagon wheel designs maximize propellant loading; and finocyl configurations provide neutral burning with high volumetric efficiency. These calculations are essential for optimizing propellant utilization, achieving desired thrust profiles, maintaining structural margins, and ensuring complete propellant consumption. Grain design directly impacts motor weight, packaging efficiency, and manufacturing complexity.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$K_n$</td><td>Grain factor</td><td>-</td><td>100-2000</td></tr>
+                <tr><td>$D, d$</td><td>Outer/inner diameter</td><td>m</td><td>0.01-2.0</td></tr>
+                <tr><td>$L$</td><td>Grain length</td><td>m</td><td>0.05-5.0</td></tr>
+            </table>
+        </div>
+
+        <!-- Section 5: Liquid Propellant Motors -->
+        <div class="section" id="liquid-propellant">
+            <h2>5. Liquid Propellant Motors</h2>
+            <p>Liquid propellant rocket motors represent the pinnacle of rocket propulsion technology, offering unmatched performance, throttling capability, restart capability, and precise thrust control. These systems separate fuel and oxidizer storage, enabling optimized propellant combinations and sophisticated engine cycles. The complexity of liquid systems stems from the need to inject, atomize, mix, and combust propellants under extreme conditions while managing heat transfer, structural loads, and combustion stability. Liquid engines require intricate feed systems, precision manufacturing, and sophisticated controls, but reward this complexity with superior specific impulse, throttling range, and operational flexibility essential for demanding missions.</p>
+            
+            <h3>5.1 Injector Pressure Drop</h3>
+            <div class="formula-box">
+                $\Delta P = \frac{\dot{m}^2}{2\rho A^2 C_d^2}$
+            </div>
+            <div class="formula-box">
+                $C_d = f(Re, \text{geometry})$
+            </div>
+            <p><strong>Description:</strong> Injector pressure drop is the fundamental design parameter controlling propellant atomization, mixing quality, and combustion efficiency in liquid rocket engines. Higher pressure drops create finer droplets and better mixing but require more robust feed systems and higher tank pressures. The discharge coefficient accounts for real flow effects including viscosity, turbulence, and geometric factors. Optimal injector design balances pressure drop requirements with system weight, complexity, and feed system capabilities. Different injector types (impinging, coaxial, pintle) require specific pressure drop relationships to achieve proper atomization and mixing. This parameter directly affects combustion efficiency, cooling requirements, and overall engine performance, making it critical for liquid engine optimization.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\Delta P$</td><td>Pressure drop</td><td>Pa</td><td>0.1-2.0 MPa</td></tr>
+                <tr><td>$\rho$</td><td>Fluid density</td><td>kg/m³</td><td>800-1400</td></tr>
+                <tr><td>$A$</td><td>Injector area</td><td>m²</td><td>10⁻⁶-10⁻³</td></tr>
+                <tr><td>$C_d$</td><td>Discharge coefficient</td><td>-</td><td>0.6-0.9</td></tr>
+            </table>
+            
+            <h3>5.2 Turbopump System</h3>
+            <div class="formula-box">
+                $P_{pump} = \frac{\dot{m} \Delta P}{\rho \eta_{pump}}$
+            </div>
+            <div class="formula-box">
+                $\eta_{pump} = \eta_{hydraulic} \cdot \eta_{volumetric} \cdot \eta_{mechanical}$
+            </div>
+            <div class="formula-box">
+                $NPSH_r = \frac{v_1^2}{2g} + \frac{P_1 - P_{vapor}}{\rho g}$
+            </div>
+            <p><strong>Description:</strong> Turbopump systems represent the heart of high-performance liquid rocket engines, providing the pressure rise necessary to inject propellants into high-pressure combustion chambers. These systems must operate reliably under extreme conditions including cryogenic temperatures, high rotational speeds (10,000-50,000 RPM), and corrosive propellants. The power calculation determines turbine requirements and affects engine cycle efficiency. Net Positive Suction Head (NPSH) prevents cavitation that could destroy the pump, making it critical for feed system design and tank pressurization requirements. Pump efficiency directly impacts engine performance and affects turbine power requirements. Understanding turbopump operation is essential for engine cycle analysis, feed system design, and ensuring reliable high-pressure propellant delivery throughout the operating envelope.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$P_{pump}$</td><td>Pump power</td><td>W</td><td>10⁴-10⁸</td></tr>
+                <tr><td>$\eta_{pump}$</td><td>Pump efficiency</td><td>-</td><td>0.65-0.85</td></tr>
+                <tr><td>$NPSH_r$</td><td>Net positive suction head</td><td>m</td><td>5-50</td></tr>
+                <tr><td>$P_{vapor}$</td><td>Vapor pressure</td><td>Pa</td><td>10³-10⁵</td></tr>
+            </table>
+            
+            <h3>5.3 Cooling System</h3>
+            <div class="formula-box">
+                $q = h(T_{gas} - T_{wall})$
+            </div>
+            <div class="formula-box">
+                $h = 0.023 \frac{k}{D} Re^{0.8} Pr^{0.4}$
+            </div>
+            <div class="formula-box">
+                $\dot{Q}_{cooling} = \dot{m}_{coolant} C_p \Delta T$
+            </div>
+            <p><strong>Description:</strong> Regenerative cooling systems protect liquid rocket engines from extreme heat fluxes (often exceeding 10 MW/m²) by circulating fuel through cooling channels machined into the chamber and nozzle walls. This approach serves dual purposes: cooling the hot-gas-side wall and preheating the fuel before injection, improving combustion efficiency. The heat transfer analysis determines channel sizing, coolant flow rates, and wall temperature distributions. Proper cooling design prevents structural failure while minimizing pressure losses and maintaining adequate cooling margins. The Reynolds and Prandtl number relationships govern convective heat transfer efficiency. Regenerative cooling is essential for sustained operation of high-performance engines and represents one of the most challenging heat transfer applications in engineering, requiring careful balance between cooling effectiveness and system complexity.</p>
+            <div class="info">
+                <strong>Note:</strong> Turbulent flow (Re > 10⁴) is required in cooling channels.
+            </div>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$q$</td><td>Heat flux</td><td>W/m²</td><td>10⁵-10⁷</td></tr>
+                <tr><td>$h$</td><td>Heat transfer coefficient</td><td>W/m²K</td><td>10³-10⁵</td></tr>
+                <tr><td>$Re$</td><td>Reynolds number</td><td>-</td><td>10⁴-10⁶</td></tr>
+                <tr><td>$Pr$</td><td>Prandtl number</td><td>-</td><td>0.7-7.0</td></tr>
+            </table>
+            
+            <h3>5.4 Stability Analysis</h3>
+            <div class="formula-box">
+                $\omega_n = \sqrt{\frac{\gamma P_c}{L \rho}}$ (acoustic)
+            </div>
+            <div class="formula-box">
+                $\tau_{injection} = \frac{L_{mix}}{v_{injection}}$
+            </div>
+            <div class="formula-box">
+                $\alpha = \frac{\omega \tau_{injection}}{2\pi}$ (stability parameter)
+            </div>
+            <p><strong>Description:</strong> Combustion instability represents one of the most dangerous phenomena in liquid rocket engines, capable of destroying hardware within milliseconds through acoustic coupling between combustion processes and chamber acoustics. The natural frequency calculation identifies resonant modes that can couple with combustion oscillations. Injection time delay represents the finite time required for propellant mixing and reaction, creating phase relationships that can either damp or amplify pressure oscillations. The stability parameter quantifies the likelihood of unstable operation and guides injector design for stable combustion. Understanding these relationships is crucial for preventing catastrophic engine failure, optimizing injector patterns for stability, and designing damping systems. Stability analysis involves complex interactions between fluid dynamics, acoustics, and combustion chemistry, making it one of the most challenging aspects of liquid engine development.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\omega_n$</td><td>Natural frequency</td><td>Hz</td><td>1000-10000</td></tr>
+                <tr><td>$\tau_{injection}$</td><td>Injection time delay</td><td>s</td><td>10⁻⁵-10⁻³</td></tr>
+                <tr><td>$L$</td><td>Chamber length</td><td>m</td><td>0.1-2.0</td></tr>
+                <tr><td>$\alpha$</td><td>Stability index</td><td>-</td><td>0.1-1.0</td></tr>
+            </table>
+        </div>
+
+        <!-- Section 6: Hybrid Motors -->
+        <div class="section" id="hybrid-motors">
+            <h2>6. Hybrid Motors</h2>
+            <p>Hybrid rocket motors represent an innovative propulsion approach combining the advantages of both solid and liquid systems while mitigating many of their disadvantages. By using solid fuel grains with liquid oxidizers, hybrids offer throttling capability, restart capability, and improved safety through separate fuel and oxidizer storage. The solid fuel eliminates the complexity of fuel injection systems while the liquid oxidizer provides control authority. However, hybrids face unique challenges including low regression rates, shifting mixture ratios during burn, and complex combustion processes involving boundary layer interactions. These systems are particularly attractive for applications requiring safety, simplicity, and moderate performance requirements.</p>
+            
+            <h3>6.1 Regression Rate</h3>
+            <div class="formula-box">
+                $\dot{r} = a G_{ox}^n$
+            </div>
+            <div class="formula-box">
+                $G_{ox} = \frac{\dot{m}_{ox}}{A_{port}}$
+            </div>
+            <div class="formula-box">
+                $\dot{r}_{avg} = \frac{a G_{ox}^n}{1-n} \left[1 - \left(\frac{r_0}{r_f}\right)^{1-n}\right]$
+            </div>
+            <p><strong>Description:</strong> Hybrid motor regression rate analysis governs the fundamental combustion process where solid fuel is pyrolyzed and gasified by convective heat transfer from the boundary layer above the fuel surface. Unlike solid motors where burn rate depends primarily on pressure, hybrid regression rates are controlled by oxidizer mass flux and heat transfer mechanisms. The power-law relationship reflects the complex interaction between turbulent boundary layer heat transfer, fuel pyrolysis chemistry, and oxidizer flow dynamics. The regression exponent (typically 0.5-0.8) indicates that regression rate increases sublinearly with oxidizer flux, creating challenges for maintaining constant mixture ratios. Understanding this relationship is essential for predicting fuel consumption rates, optimizing port design, and achieving desired performance throughout the burn duration.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\dot{r}$</td><td>Regression rate</td><td>m/s</td><td>10⁻⁴-10⁻²</td></tr>
+                <tr><td>$G_{ox}$</td><td>Oxidizer mass flux</td><td>kg/m²s</td><td>50-500</td></tr>
+                <tr><td>$a$</td><td>Regression coefficient</td><td>-</td><td>10⁻⁵-10⁻³</td></tr>
+                <tr><td>$n$</td><td>Regression exponent</td><td>-</td><td>0.5-0.8</td></tr>
+            </table>
+            
+            <h3>6.2 Port Diameter Evolution</h3>
+            <div class="formula-box">
+                $\frac{dr}{dt} = \dot{r} = a \left(\frac{\dot{m}_{ox}}{\pi r^2}\right)^n$
+            </div>
+            <div class="formula-box">
+                $r(t) = \left[r_0^{2(1-n)} + \frac{2a(1-n)\dot{m}_{ox}^n}{\pi^n} t\right]^{\frac{1}{2(1-n)}}$
+            </div>
+            <p><strong>Description:</strong> Port diameter evolution analysis is fundamental to hybrid motor design as it determines how fuel consumption and mixture ratios change throughout the burn. As the port diameter increases, the oxidizer mass flux decreases (constant oxidizer flow through larger area), leading to reduced regression rates and shifting O/F ratios. This coupling creates complex feedback mechanisms that affect combustion efficiency, thrust profiles, and complete fuel utilization. The time-dependent port geometry directly impacts heat transfer patterns, pressure drop characteristics, and combustion zone locations. Understanding port evolution is crucial for predicting performance degradation, optimizing initial port sizing, designing multi-port configurations, and ensuring acceptable mixture ratios throughout the operational envelope. This analysis drives many fundamental hybrid motor design decisions.</p>
+            <div class="info">
+                <strong>Note:</strong> For n < 1, port diameter increases with time, O/F ratio decreases.
+            </div>
+            
+            <h3>6.3 Mixture Ratio Evolution</h3>
+            <div class="formula-box">
+                $O/F(t) = \frac{\dot{m}_{ox}}{\dot{m}_f(t)} = \frac{\dot{m}_{ox}}{\rho_f \cdot 2\pi r(t) L \cdot \dot{r}(t)}$
+            </div>
+            <div class="formula-box">
+                $\dot{m}_f(t) = \rho_f A_{burn}(t) \dot{r}(t)$
+            </div>
+            <p><strong>Description:</strong> Mixture ratio evolution represents one of the fundamental challenges in hybrid motor design, as the O/F ratio continuously shifts during operation due to changing port geometry and regression rate characteristics. This variation directly affects specific impulse, combustion temperature, and exhaust composition throughout the burn. The decreasing O/F ratio (fuel-rich shift) can reduce performance and create incomplete combustion issues if not properly managed. The analysis requires coupling regression rate models with port geometry evolution and mass balance equations. Understanding mixture ratio evolution is essential for performance prediction, grain design optimization, throttling strategies, and ensuring acceptable combustion efficiency. Design solutions include multiple ports, oxidizer flow programming, or grain geometry tailoring to minimize mixture ratio variations.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\rho_f$</td><td>Fuel density</td><td>kg/m³</td><td>900-1400</td></tr>
+                <tr><td>$A_{burn}$</td><td>Burn surface area</td><td>m²</td><td>0.01-1.0</td></tr>
+                <tr><td>$L$</td><td>Fuel grain length</td><td>m</td><td>0.1-2.0</td></tr>
+            </table>
+            
+            <h3>6.4 Injector Design</h3>
+            <div class="formula-box">
+                $C_d = \frac{\dot{m}_{actual}}{\dot{m}_{ideal}} = \frac{\dot{m}}{A_{inj}\sqrt{2\rho\Delta P}}$
+            </div>
+            <div class="formula-box">
+                $L^* = \frac{V_c A_t}{\dot{m} c^*}$ (characteristic length)
+            </div>
+            <p><strong>Description:</strong> Hybrid motor injector design must efficiently distribute oxidizer into the fuel port while maintaining proper atomization and mixing with gasified fuel products. The injector system directly affects regression rate uniformity, combustion efficiency, and motor performance. Unlike liquid engines, hybrid injectors operate into a relatively low-pressure environment with significant gas cross-flow from fuel pyrolysis. The characteristic length (L*) represents the combustion chamber residence time, affecting mixing quality and combustion completeness. Proper injector design ensures uniform oxidizer distribution, prevents local hot spots that could damage fuel grains, and maintains adequate penetration depth for complete mixing. The discharge coefficient accounts for real flow effects and geometric constraints unique to hybrid motor configurations.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$C_d$</td><td>Discharge coefficient</td><td>-</td><td>0.6-0.85</td></tr>
+                <tr><td>$A_{inj}$</td><td>Total injector area</td><td>m²</td><td>10⁻⁶-10⁻⁴</td></tr>
+                <tr><td>$L^*$</td><td>Characteristic length</td><td>m</td><td>0.5-2.5</td></tr>
+            </table>
+        </div>
+
+        <!-- Section 7: Heat Transfer -->
+        <div class="section" id="heat-transfer">
+            <h2>7. Heat Transfer</h2>
+            <p>Heat transfer analysis is absolutely critical in rocket motor design due to the extreme thermal environment created by high-temperature combustion (2800-3800K) occurring in close proximity to structural materials with much lower temperature limits. The challenge lies in protecting motor components while minimizing cooling system weight and complexity. Heat transfer governs material selection, cooling system design, thermal barrier requirements, and operational limitations. Understanding the mechanisms of convective, radiative, and conductive heat transfer enables engineers to predict temperature distributions, prevent thermal failure, and optimize cooling strategies. Effective thermal management is essential for motor reliability, performance maintenance, and structural integrity throughout the operating envelope.</p>
+            
+            <h3>7.1 Convective Heat Transfer</h3>
+            <div class="formula-box">
+                $q = h(T_{gas} - T_{wall})$
+            </div>
+            <div class="formula-box">
+                $h = \frac{k}{D} Nu = \frac{k}{D} \cdot 0.023 Re^{0.8} Pr^{0.4}$
+            </div>
+            <div class="formula-box">
+                $St = \frac{h}{\rho u C_p} = \frac{Nu}{Re \cdot Pr}$ (Stanton number)
+            </div>
+            <p><strong>Description:</strong> Convective heat transfer dominates the thermal loading in most rocket motor applications, driven by high-temperature, high-velocity combustion gases flowing past chamber and nozzle walls. The heat transfer coefficient quantifies the convective heat flux intensity and depends strongly on gas properties, flow velocity, and surface geometry. The Nusselt number correlation provides the foundation for predicting heat transfer coefficients in turbulent gas flows. Reynolds and Prandtl numbers characterize the flow regime and fluid property effects. The Stanton number relates heat transfer to momentum transfer, providing insight into boundary layer behavior. Understanding convective heat transfer is essential for predicting wall temperatures, designing cooling systems, selecting materials, and ensuring thermal protection adequate for mission requirements while minimizing system weight.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$q$</td><td>Heat flux</td><td>W/m²</td><td>10⁵-10⁷</td></tr>
+                <tr><td>$h$</td><td>Heat transfer coefficient</td><td>W/m²K</td><td>10³-10⁵</td></tr>
+                <tr><td>$Nu$</td><td>Nusselt number</td><td>-</td><td>100-10000</td></tr>
+                <tr><td>$St$</td><td>Stanton number</td><td>-</td><td>0.001-0.01</td></tr>
+            </table>
+            
+            <h3>7.2 Radiative Heat Transfer</h3>
+            <div class="formula-box">
+                $q_{rad} = \epsilon \sigma (T_1^4 - T_2^4)$
+            </div>
+            <div class="formula-box">
+                $\epsilon_{gas} = 1 - \exp(-\kappa L)$ (gas emissivity)
+            </div>
+            <div class="formula-box">
+                $\kappa = \kappa_{CO_2} + \kappa_{H_2O} + \kappa_{soot}$
+            </div>
+            <p><strong>Description:</strong> Radiative heat transfer becomes increasingly important at the high temperatures encountered in rocket motors, following the fourth power temperature relationship of the Stefan-Boltzmann law. Unlike convection, radiation can transfer significant energy across gas spaces and through transparent media, making it critical for predicting heat loads on downstream components and nozzle exit regions. Gas radiation from CO₂, H₂O, and particulates (soot, aluminum oxide) contributes significantly to overall heat transfer in many propellant combinations. The exponential absorption law governs radiation interaction with combustion gases, while emissivity depends on surface conditions and temperature. Understanding radiative heat transfer is essential for thermal protection system design, predicting plume heating effects, and analyzing heat loads in large motors where gas radiation can exceed convective heating.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\epsilon$</td><td>Emissivity</td><td>-</td><td>0.1-0.9</td></tr>
+                <tr><td>$\sigma$</td><td>Stefan-Boltzmann constant</td><td>W/m²K⁴</td><td>5.67×10⁻⁸</td></tr>
+                <tr><td>$\kappa$</td><td>Absorption coefficient</td><td>m⁻¹</td><td>0.1-10</td></tr>
+            </table>
+            
+            <h3>7.3 Conduction and Cooling</h3>
+            <div class="formula-box">
+                $q = -k \frac{dT}{dx}$ (Fourier's law)
+            </div>
+            <div class="formula-box">
+                $\frac{\partial T}{\partial t} = \alpha \nabla^2 T$ (heat equation)
+            </div>
+            <div class="formula-box">
+                $\alpha = \frac{k}{\rho C_p}$ (thermal diffusivity)
+            </div>
+            <p><strong>Description:</strong> Conductive heat transfer governs temperature distributions within solid components including chamber walls, nozzles, fuel grains, and thermal protection systems. Fourier's law provides the fundamental relationship between temperature gradients and heat flux, while the heat equation describes transient temperature evolution during motor operation. Thermal diffusivity characterizes how quickly temperature changes propagate through materials, affecting thermal response times and temperature gradients. Understanding conduction is crucial for predicting component temperatures, designing thermal barriers, analyzing thermal stress development, and determining cooling requirements. The interaction between conduction and surface heat transfer boundary conditions determines the overall thermal response of motor components throughout the mission timeline.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$k$</td><td>Thermal conductivity</td><td>W/mK</td><td>10-400</td></tr>
+                <tr><td>$\alpha$</td><td>Thermal diffusivity</td><td>m²/s</td><td>10⁻⁶-10⁻⁴</td></tr>
+            </table>
+        </div>
+
+        <!-- Section 8: Structural Analysis -->
+        <div class="section" id="structural-analysis">
+            <h2>8. Structural Analysis</h2>
+            <p>Structural analysis of rocket motor casings represents one of the most demanding applications in pressure vessel design, combining extreme internal pressures, high temperatures, dynamic loading, and stringent weight constraints. Motor casings must contain pressures from 1-100 MPa while minimizing weight and maintaining structural integrity under thermal cycling, vibration, and handling loads. The analysis must account for material property variations with temperature, stress concentrations at interfaces, and potential failure modes including burst, fatigue, and thermal distortion. Composite casings add complexity through anisotropic properties and layered construction. Understanding structural mechanics is essential for safe motor design, weight optimization, and ensuring adequate safety margins throughout the operational envelope.</p>
+            
+            <h3>8.1 Cylindrical Casing Stresses</h3>
+            <div class="formula-box">
+                $\sigma_{hoop} = \frac{Pr}{t}$ (hoop stress)
+            </div>
+            <div class="formula-box">
+                $\sigma_{axial} = \frac{Pr}{2t}$ (axial stress)
+            </div>
+            <div class="formula-box">
+                $\sigma_{radial} = -P$ (radial stress)
+            </div>
+            <p><strong>Description:</strong> Cylindrical pressure vessel analysis provides the foundation for rocket motor casing design, with hoop stress typically being the dominant loading condition due to internal pressure. The 2:1 ratio between hoop and axial stress reflects the geometric effects of cylindrical pressure containment and drives material utilization efficiency. Radial stress is typically small compared to hoop stress in thin-walled vessels. These stress relationships form the basis for determining wall thickness, material selection, and safety factor applications. Understanding principal stress distributions is crucial for identifying potential failure locations, optimizing casing geometry, and applying appropriate safety factors. The analysis becomes more complex with thick walls, composite materials, and non-cylindrical geometries, but the thin-wall approximation provides essential design guidance for most rocket motor applications.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\sigma_{hoop}$</td><td>Hoop stress</td><td>Pa</td><td>10⁷-10⁹</td></tr>
+                <tr><td>$P$</td><td>Internal pressure</td><td>Pa</td><td>10⁶-10⁸</td></tr>
+                <tr><td>$r$</td><td>Radius</td><td>m</td><td>0.05-0.5</td></tr>
+                <tr><td>$t$</td><td>Wall thickness</td><td>m</td><td>0.003-0.05</td></tr>
+            </table>
+            
+            <h3>8.2 Safety Factor</h3>
+            <div class="formula-box">
+                $SF = \frac{\sigma_{ultimate}}{\sigma_{working}}$
+            </div>
+            <div class="formula-box">
+                $\sigma_{von Mises} = \sqrt{\sigma_1^2 + \sigma_2^2 - \sigma_1\sigma_2}$
+            </div>
+            <p><strong>Description:</strong> Safety factor analysis ensures adequate structural margins against material failure under the combined effects of pressure, thermal, and mechanical loading. The safety factor represents the ratio between material ultimate strength and actual working stress, providing margin for uncertainties in loading, material properties, and analysis methods. Von Mises stress analysis combines principal stresses into an equivalent stress for comparing against material yield strength, particularly important for multiaxial stress states in rocket motor casings. Safety factors must account for consequences of failure, loading uncertainties, material variability, and inspection capabilities. Rocket motors typically use higher safety factors than commercial pressure vessels due to catastrophic failure consequences and difficulty of thorough inspection after manufacturing.</p>
+            <div class="info">
+                <strong>Typical SF Values:</strong> Static loads 1.5-2.0, dynamic loads 2.0-4.0
+            </div>
+            
+            <h3>8.3 Thermal Stresses</h3>
+            <div class="formula-box">
+                $\sigma_{thermal} = E \alpha \Delta T$ (free expansion)
+            </div>
+            <div class="formula-box">
+                $\sigma_{total} = \sigma_{pressure} \pm \sigma_{thermal}$
+            </div>
+            <p><strong>Description:</strong> Thermal stress analysis becomes critical in rocket motors due to severe temperature gradients between hot combustion gases and cooler structural materials. Thermal expansion mismatch creates stresses that can equal or exceed pressure-induced stresses, particularly during transient heating and cooling phases. The fundamental thermal stress relationship shows that stress is proportional to the elastic modulus, thermal expansion coefficient, and temperature change, making material selection crucial for thermal stress management. Combined thermal and pressure stresses require superposition analysis to determine total stress states. Understanding thermal stress is essential for predicting component distortion, designing thermal expansion joints, selecting compatible materials, and ensuring structural integrity throughout thermal cycling experienced during motor operation.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$E$</td><td>Elastic modulus</td><td>Pa</td><td>10¹⁰-10¹¹</td></tr>
+                <tr><td>$\alpha$</td><td>Thermal expansion coefficient</td><td>1/K</td><td>10⁻⁶-10⁻⁵</td></tr>
+            </table>
+        </div>
+
+        <!-- Section 9: Trajectory Analysis -->
+        <div class="section" id="trajectory-analysis">
+            <h2>9. Trajectory Analysis</h2>
+            <p>Trajectory analysis represents the culmination of rocket motor design, translating propulsion system performance into mission capability through orbital mechanics and flight dynamics. This analysis determines whether a rocket system can successfully deliver payloads to desired orbits while accounting for gravitational, atmospheric, and guidance effects that reduce effective performance. Understanding trajectory mechanics is essential for mission feasibility assessment, launch vehicle sizing, flight profile optimization, and performance verification. The complex interaction between propulsion system characteristics, vehicle design parameters, and flight environment determines ultimate mission success and payload delivery capability.</p>
+            
+            <h3>9.1 Tsiolkovsky Rocket Equation</h3>
+            <div class="formula-box">
+                $\Delta v = v_e \ln\left(\frac{m_0}{m_f}\right) = I_{sp} g_0 \ln\left(\frac{m_0}{m_f}\right)$
+            </div>
+            <div class="formula-box">
+                $MR = \frac{m_0}{m_f} = \exp\left(\frac{\Delta v}{I_{sp} g_0}\right)$
+            </div>
+            <p><strong>Description:</strong> The Tsiolkovsky rocket equation is the cornerstone of astronautics, relating the velocity change capability of a rocket to its propulsion system performance and mass distribution. This equation demonstrates the exponential relationship between mass ratio and achievable delta-V, explaining why multi-stage rockets are necessary for high-energy missions. The logarithmic nature means that small improvements in specific impulse or mass ratio provide significant performance benefits. This fundamental relationship governs all aspects of rocket design, from propellant selection to structural optimization. Understanding this equation is essential for mission analysis, trajectory planning, and determining the feasibility of space missions. It directly links propulsion technology limits to mission capability boundaries.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\Delta v$</td><td>Velocity increment</td><td>m/s</td><td>1000-15000</td></tr>
+                <tr><td>$v_e$</td><td>Exhaust velocity</td><td>m/s</td><td>2000-4500</td></tr>
+                <tr><td>$MR$</td><td>Mass ratio</td><td>-</td><td>1.5-20</td></tr>
+                <tr><td>$m_0/m_f$</td><td>Initial/final mass</td><td>kg</td><td>100-10⁶</td></tr>
+            </table>
+            
+            <h3>9.2 Orbital Velocity</h3>
+            <div class="formula-box">
+                $v_{orbit} = \sqrt{\frac{\mu}{r}}$ (circular orbit)
+            </div>
+            <div class="formula-box">
+                $v_{escape} = \sqrt{\frac{2\mu}{r}} = \sqrt{2} v_{orbit}$
+            </div>
+            <div class="formula-box">
+                $\mu = GM = 3.986 \times 10^{14}$ m³/s² (Earth)
+            </div>
+            <p><strong>Description:</strong> Orbital velocity calculations determine the minimum speeds required to achieve stable orbits at various altitudes, forming the basis for launch vehicle performance requirements. Circular orbital velocity represents the balance between gravitational attraction and centrifugal force, while escape velocity defines the threshold for leaving Earth's gravitational influence entirely. These velocities establish the fundamental energy requirements for space missions and directly determine launch vehicle sizing. The gravitational parameter μ encapsulates planetary characteristics affecting orbital mechanics. Understanding these relationships is crucial for mission planning, determining launch windows, calculating fuel requirements, and establishing the minimum performance capabilities needed for successful orbital insertion and interplanetary trajectories.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$v_{orbit}$</td><td>Orbital velocity</td><td>m/s</td><td>7400-11200</td></tr>
+                <tr><td>$v_{escape}$</td><td>Escape velocity</td><td>m/s</td><td>11200</td></tr>
+                <tr><td>$r$</td><td>Orbital radius</td><td>m</td><td>6.57×10⁶-4.22×10⁷</td></tr>
+                <tr><td>$\mu$</td><td>Standard gravitational parameter</td><td>m³/s²</td><td>3.986×10¹⁴</td></tr>
+            </table>
+            
+            <h3>9.3 Gravity Losses</h3>
+            <div class="formula-box">
+                $\Delta v_{gravity} = g_0 t_{burn} \cos(\theta)$
+            </div>
+            <div class="formula-box">
+                $\Delta v_{drag} = \int_0^{t_{burn}} \frac{\frac{1}{2}\rho v^2 C_d A}{m(t)} dt$
+            </div>
+            <div class="formula-box">
+                $\Delta v_{steering} = \int_0^{t_{burn}} |\dot{\theta}| v dt$
+            </div>
+            <p><strong>Description:</strong> Gravity and atmospheric losses represent the "tax" that Earth's environment imposes on rocket performance, reducing the effective delta-V available for orbital insertion. Gravity losses occur because thrust must work against gravitational acceleration throughout the powered flight, with longer burn times and lower thrust-to-weight ratios creating larger losses. Atmospheric drag losses depend on vehicle aerodynamics, flight profile, and atmospheric density variations with altitude. Steering losses result from trajectory optimization requirements and guidance corrections. These losses typically consume 1.5-2.0 km/s of a rocket's delta-V capability, significantly impacting payload capacity. Understanding and minimizing these losses through optimal trajectory design and vehicle configuration is crucial for maximizing launch vehicle performance and reducing mission costs.</p>
+            <div class="info">
+                <strong>Typical Losses:</strong> Gravity: 1200-1800 m/s, Drag: 100-200 m/s, Steering: 50-150 m/s
+            </div>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$t_{burn}$</td><td>Burn time</td><td>s</td><td>100-600</td></tr>
+                <tr><td>$\theta$</td><td>Flight angle</td><td>rad</td><td>0-π/2</td></tr>
+                <tr><td>$C_d$</td><td>Drag coefficient</td><td>-</td><td>0.3-0.8</td></tr>
+            </table>
+            
+            <h3>9.4 Multi-Stage Rocket</h3>
+            <div class="formula-box">
+                $\Delta v_{total} = \sum_{i=1}^{n} v_{e,i} \ln\left(\frac{m_{i-1}}{m_i}\right)$
+            </div>
+            <div class="formula-box">
+                $\Delta v_{ideal} = v_{e1} \ln(MR_1) + v_{e2} \ln(MR_2) + ...$
+            </div>
+            <div class="formula-box">
+                $MR_{optimum} = \sqrt[n]{MR_{total}}$ (equal stages)
+            </div>
+            <p><strong>Description:</strong> Multi-stage rocket analysis extends the basic rocket equation to systems where empty mass is jettisoned during flight, dramatically improving performance over single-stage vehicles. Each stage contributes its delta-V according to its individual mass ratio and specific impulse, with the total capability being the sum of individual stage contributions. Stage optimization involves balancing mass ratios across stages to maximize total performance while meeting structural and operational constraints. The staging principle explains why space launch vehicles universally employ multiple stages and guides decisions about optimal stage sizes, propellant types, and separation sequences. This analysis is fundamental to launch vehicle architecture selection and performance optimization for high-energy missions requiring large total delta-V.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$n$</td><td>Number of stages</td><td>-</td><td>2-4</td></tr>
+                <tr><td>$MR_i$</td><td>i-th stage mass ratio</td><td>-</td><td>3-15</td></tr>
+                <tr><td>$\Delta v_{total}$</td><td>Total velocity increment</td><td>m/s</td><td>9000-15000</td></tr>
+            </table>
+            
+            <h3>9.5 Thrust-to-Weight Ratio</h3>
+            <div class="formula-box">
+                $TWR = \frac{F}{m g} = \frac{\dot{m} v_e}{m g}$
+            </div>
+            <div class="formula-box">
+                $a_{net} = \frac{F}{m} - g \cos(\theta)$
+            </div>
+            <div class="formula-box">
+                $TWR_{min} = \frac{1}{\cos(\theta)}$ (for liftoff)
+            </div>
+            <p><strong>Description:</strong> Thrust-to-weight ratio represents the fundamental measure of a rocket's ability to accelerate against gravitational forces and achieve useful motion. TWR directly determines whether a vehicle can lift off, how quickly it can accelerate, and how efficiently it can climb out of the gravity well. Values below 1.0 cannot achieve liftoff, while higher ratios enable faster acceleration but at the cost of structural mass and propellant consumption. The minimum TWR for various flight phases depends on flight path angle and gravitational losses. Understanding TWR requirements is crucial for engine sizing, structural design, and trajectory optimization. The relationship between thrust, vehicle mass, and acceleration governs all aspects of launch vehicle design from initial sizing through operational flight profiles.</p>
+            <div class="info">
+                <strong>Minimum TWR:</strong> Vertical liftoff > 1.2, Horizontal flight > 0.3
+            </div>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$TWR$</td><td>Thrust-to-weight ratio</td><td>-</td><td>1.2-3.0</td></tr>
+                <tr><td>$a_{net}$</td><td>Net acceleration</td><td>m/s²</td><td>2-30</td></tr>
+            </table>
+        </div>
+        
+        <!-- Section 10: Safety Analysis -->
+        <div class="section" id="safety-analysis">
+            <h2>10. Safety Analysis</h2>
+            <p>Critical safety calculations for rocket motor design and operation.</p>
+            
+            <h3>10.1 Safety Factor Calculations</h3>
+            <div class="formula-box">
+                $SF = \frac{\sigma_{yield}}{P_{max} \cdot K_{stress}}$
+            </div>
+            <div class="formula-box">
+                $SF_{pressure} = \frac{P_{burst}}{P_{operating}}$
+            </div>
+            <p><strong>Description:</strong> Safety factors provide design margins against structural failure and operational hazards. The stress-based safety factor compares material yield strength to maximum operating stress, while pressure safety factor relates burst pressure to operating pressure. Industry standards typically require SF ≥ 2.0 for amateur motors and SF ≥ 4.0 for manned systems.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$SF$</td><td>Safety factor</td><td>-</td><td>2.0-4.0</td></tr>
+                <tr><td>$\sigma_{yield}$</td><td>Material yield strength</td><td>MPa</td><td>200-800</td></tr>
+                <tr><td>$K_{stress}$</td><td>Stress concentration factor</td><td>-</td><td>1.5-3.0</td></tr>
+                <tr><td>$P_{burst}$</td><td>Burst pressure</td><td>MPa</td><td>10-100</td></tr>
+            </table>
+            
+            <h3>10.2 Hazard Distance Calculations</h3>
+            <div class="formula-box">
+                $D_{safe} = K_{hazard} \sqrt[3]{m_{explosive}}$
+            </div>
+            <div class="formula-box">
+                $P_{overpressure} = \frac{K_{blast}}{D^3} \cdot m_{TNT}$
+            </div>
+            <p><strong>Description:</strong> Safety distances protect personnel and equipment from explosion hazards. The cube-root scaling law relates explosive mass to safe distance, while overpressure calculations determine blast effects at various distances. These formulas are essential for test site planning and safety zone establishment.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$D_{safe}$</td><td>Safe distance</td><td>m</td><td>30-300</td></tr>
+                <tr><td>$K_{hazard}$</td><td>Hazard scaling constant</td><td>m/kg^(1/3)</td><td>10-40</td></tr>
+                <tr><td>$m_{explosive}$</td><td>Explosive mass equivalent</td><td>kg</td><td>0.1-1000</td></tr>
+            </table>
+            
+            <h3>10.3 Failure Probability Analysis</h3>
+            <div class="formula-box">
+                $P_{failure} = 1 - \prod_{i=1}^{n} (1 - P_{i})$
+            </div>
+            <div class="formula-box">
+                $MTBF = \frac{1}{\lambda}$ where $\lambda$ is failure rate
+            </div>
+            <p><strong>Description:</strong> Reliability engineering principles applied to rocket systems. Component failure probabilities combine to determine overall system reliability. Mean Time Between Failures (MTBF) quantifies component longevity and maintenance requirements.</p>
+        </div>
+
+        <!-- Section 11: Manufacturing Analysis -->
+        <div class="section" id="manufacturing-analysis">
+            <h2>11. Manufacturing Analysis</h2>
+            <p>Precision manufacturing calculations for rocket motor components.</p>
+            
+            <h3>11.1 Dimensional Tolerances</h3>
+            <div class="formula-box">
+                $\text{Tolerance} = \pm \sqrt{T_1^2 + T_2^2 + ... + T_n^2}$
+            </div>
+            <div class="formula-box">
+                $C_p = \frac{USL - LSL}{6\sigma}$ (Process capability)
+            </div>
+            <p><strong>Description:</strong> Statistical tolerance analysis ensures proper fit and function of manufactured components. Root-sum-square tolerance stacking accounts for manufacturing variations, while process capability indices quantify manufacturing quality. Critical dimensions like throat diameter require Cp ≥ 1.33.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$T_i$</td><td>Individual tolerance</td><td>mm</td><td>±0.01 to ±0.5</td></tr>
+                <tr><td>$C_p$</td><td>Process capability</td><td>-</td><td>1.0-2.0</td></tr>
+                <tr><td>$USL, LSL$</td><td>Upper/Lower spec limits</td><td>mm</td><td>Various</td></tr>
+                <tr><td>$\sigma$</td><td>Process standard deviation</td><td>mm</td><td>0.001-0.1</td></tr>
+            </table>
+            
+            <h3>11.2 Surface Finish Requirements</h3>
+            <div class="formula-box">
+                $Ra = \frac{1}{L} \int_0^L |y(x)| dx$
+            </div>
+            <div class="formula-box">
+                $C_f = f(\text{Re}, \frac{\varepsilon}{D})$ where $\varepsilon$ = surface roughness
+            </div>
+            <p><strong>Description:</strong> Surface roughness affects flow characteristics and heat transfer. Ra (roughness average) quantifies surface texture, while friction coefficient depends on Reynolds number and relative roughness. Nozzle throats typically require Ra < 0.8 μm.</p>
+            
+            <h3>11.3 Manufacturing Cost Models</h3>
+            <div class="formula-box">
+                $C_{total} = C_{material} + C_{labor} + C_{overhead} + C_{tooling}$
+            </div>
+            <div class="formula-box">
+                $C_{machining} = \frac{V_{material}}{MRR} \cdot R_{labor}$
+            </div>
+            <p><strong>Description:</strong> Cost modeling enables economic optimization of manufacturing processes. Material removal rate (MRR) and labor rates determine machining costs, while overhead factors account for facility and equipment expenses.</p>
+        </div>
+
+        <!-- Section 12: Cost Analysis -->
+        <div class="section" id="cost-analysis">
+            <h2>12. Cost Analysis</h2>
+            <p>Economic modeling for rocket motor development and production.</p>
+            
+            <h3>12.1 Development Cost Models</h3>
+            <div class="formula-box">
+                $C_{dev} = C_{design} + C_{testing} + C_{tooling} + C_{certification}$
+            </div>
+            <div class="formula-box">
+                $C_{testing} = N_{tests} \cdot (C_{hardware} + C_{facility} + C_{instrumentation})$
+            </div>
+            <p><strong>Description:</strong> Development costs include all non-recurring expenses to bring a motor from concept to production. Testing costs scale with test quantity and complexity, while certification expenses depend on regulatory requirements and safety standards.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$C_{dev}$</td><td>Development cost</td><td>$1000</td><td>100-10,000</td></tr>
+                <tr><td>$N_{tests}$</td><td>Number of tests</td><td>-</td><td>5-50</td></tr>
+                <tr><td>$C_{hardware}$</td><td>Hardware cost per test</td><td>$1000</td><td>1-100</td></tr>
+            </table>
+            
+            <h3>12.2 Production Cost Scaling</h3>
+            <div class="formula-box">
+                $C_{unit} = C_{materials} + \frac{C_{labor}}{Q^{\alpha}}$
+            </div>
+            <div class="formula-box">
+                $\alpha = \frac{\ln(C_2/C_1)}{\ln(Q_1/Q_2)}$ (Learning curve exponent)
+            </div>
+            <p><strong>Description:</strong> Unit costs decrease with production quantity due to learning effects and economies of scale. The learning curve exponent α typically ranges from 0.1-0.3, indicating 10-30% cost reduction for each doubling of production volume.</p>
+            
+            <h3>12.3 Life Cycle Cost Analysis</h3>
+            <div class="formula-box">
+                $LCC = C_{dev} + Q \cdot C_{unit} + C_{operations} + C_{disposal}$
+            </div>
+            <div class="formula-box">
+                $NPV = \sum_{t=0}^{n} \frac{CF_t}{(1+r)^t}$
+            </div>
+            <p><strong>Description:</strong> Life cycle costing includes all expenses from development through disposal. Net Present Value (NPV) analysis accounts for time value of money in multi-year programs, enabling economic comparison of design alternatives.</p>
+        </div>
+
+        <!-- Section 13: Advanced Analysis -->
+        <div class="section" id="advanced-analysis">
+            <h2>13. Advanced Analysis</h2>
+            <p>Sophisticated modeling techniques for complex rocket motor behavior.</p>
+            
+            <h3>13.1 Combustion Instability Analysis</h3>
+            <div class="formula-box">
+                $\omega_n = \frac{n\pi c}{L}$ (Acoustic modes)
+            </div>
+            <div class="formula-box">
+                $\alpha = \frac{1}{2\omega_n} \frac{d\omega_n}{dt}$ (Growth rate)
+            </div>
+            <p><strong>Description:</strong> Combustion instability occurs when acoustic waves couple with combustion processes, potentially causing destructive oscillations. Natural frequency calculations identify resonant modes, while growth rate analysis determines stability margins.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\omega_n$</td><td>Natural frequency</td><td>Hz</td><td>100-10,000</td></tr>
+                <tr><td>$c$</td><td>Speed of sound</td><td>m/s</td><td>300-1000</td></tr>
+                <tr><td>$L$</td><td>Chamber length</td><td>m</td><td>0.1-5.0</td></tr>
+                <tr><td>$\alpha$</td><td>Instability growth rate</td><td>1/s</td><td>-1000 to +1000</td></tr>
+            </table>
+            
+            <h3>13.2 Multi-Phase Flow Analysis</h3>
+            <div class="formula-box">
+                $\phi = \frac{\dot{m}_{particles}}{\dot{m}_{gas}}$ (Loading ratio)
+            </div>
+            <div class="formula-box">
+                $\eta_{2-phase} = \eta_{gas} \cdot \left(1 - \frac{\phi}{1+\phi} \cdot \frac{1-\xi}{\xi^2}\right)$
+            </div>
+            <p><strong>Description:</strong> Two-phase flow occurs when solid particles (alumina) are suspended in exhaust gases. Loading ratio quantifies particle concentration, while two-phase efficiency accounts for momentum transfer between phases. This reduces specific impulse by 2-5%.</p>
+            
+            <h3>13.3 Transient Analysis</h3>
+            <div class="formula-box">
+                $\frac{dp_c}{dt} = \frac{\gamma R T_c}{V_c} \left(\dot{m}_{gen} - \dot{m}_{nozzle}\right)$
+            </div>
+            <div class="formula-box">
+                $\tau_{response} = \frac{V_c}{A_t c^*}$ (Response time constant)
+            </div>
+            <p><strong>Description:</strong> Transient analysis models time-dependent behavior during startup, shutdown, and throttling. Chamber pressure response depends on mass generation rate versus nozzle flow rate, with response time constant determining settling time.</p>
+            
+            <h3>13.4 Optimization Theory</h3>
+            <div class="formula-box">
+                $\max f(x)$ subject to $g_i(x) \leq 0$ and $h_j(x) = 0$
+            </div>
+            <div class="formula-box">
+                $\nabla f = \sum \lambda_i \nabla g_i + \sum \mu_j \nabla h_j$ (Lagrange conditions)
+            </div>
+            <p><strong>Description:</strong> Mathematical optimization enables systematic design improvement. Objective functions (maximize Isp, minimize mass) are optimized subject to constraints (pressure limits, size restrictions). Lagrange multipliers identify optimal operating points.</p>
+        </div>
+
+        <!-- Section 14: NASA Standards Based Advanced Analysis -->
+        <div class="section" id="nasa-standards">
+            <h2>14. NASA Standards Based Advanced Analysis</h2>
+            <p>Professional-grade analysis methods based on validated NASA standards and documents.</p>
+            
+            <h3>14.1 Chamber Pressure-Mixture Ratio 3D Response Surface (NASA SP-125)</h3>
+            <div class="formula-box">
+                $I_{sp}(P_c, O/F) = I_{sp,base} \cdot f_{pressure}(P_c) \cdot f_{mixture}(O/F)$
+            </div>
+            <div class="formula-box">
+                $f_{pressure}(P_c) = 1 + 0.15 \ln\left(\frac{P_c}{20}\right) \exp\left(-\frac{(P_c - 50)^2}{800}\right)$
+            </div>
+            <div class="formula-box">
+                $f_{mixture}(O/F) = 1 - 0.3 \left(\frac{O/F - O/F_{opt}}{O/F_{opt}}\right)^2$
+            </div>
+            <p><strong>Description:</strong> NASA SP-125 correlation shows optimal performance occurs around 50-70 bar chamber pressure. Combustion instability regions exist at high pressure with low O/F ratios (Pc > 80 bar, O/F < 2.0) and low pressure with high O/F ratios (Pc < 15 bar, O/F > 5.0).</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$P_c$</td><td>Chamber pressure</td><td>bar</td><td>10-100</td></tr>
+                <tr><td>$O/F$</td><td>Oxidizer/Fuel mass ratio</td><td>-</td><td>1.0-6.0</td></tr>
+                <tr><td>$I_{sp,base}$</td><td>Base specific impulse</td><td>s</td><td>250-350</td></tr>
+                <tr><td>$O/F_{opt}$</td><td>Optimal mixture ratio</td><td>-</td><td>2.5-4.0</td></tr>
+            </table>
+            
+            <h3>14.2 Nozzle Mach-Area Ratio Relations (NASA-STD-5012)</h3>
+            <div class="formula-box">
+                $\frac{A}{A^*} = \frac{1}{M}\left[\frac{2}{\gamma+1}\left(1 + \frac{\gamma-1}{2}M^2\right)\right]^{\frac{\gamma+1}{2(\gamma-1)}}$
+            </div>
+            <div class="formula-box">
+                $M_{exit} = \sqrt{\frac{2}{\gamma-1}\left[\left(\frac{P_c}{P_e}\right)^{\frac{\gamma-1}{\gamma}} - 1\right]}$
+            </div>
+            <div class="formula-box">
+                $M_{shock} = M_1 \sqrt{\frac{(\gamma-1)M_1^2 + 2}{2\gamma M_1^2 - (\gamma-1)}}$ (Normal shock)
+            </div>
+            <p><strong>Description:</strong> NASA-STD-5012 provides isentropic flow relations for nozzle design. Shock formation occurs when exit pressure deviates from design conditions. Over-expansion (Pe < Pa) causes external shocks, while under-expansion (Pe > Pa) reduces performance.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$A/A^*$</td><td>Area ratio</td><td>-</td><td>1-50</td></tr>
+                <tr><td>$M$</td><td>Mach number</td><td>-</td><td>1-5</td></tr>
+                <tr><td>$P_c/P_e$</td><td>Pressure ratio</td><td>-</td><td>10-1000</td></tr>
+                <tr><td>$\gamma$</td><td>Specific heat ratio</td><td>-</td><td>1.15-1.4</td></tr>
+            </table>
+            
+            <h3>14.3 Wall Heat Flux Analysis (NASA SP-8124)</h3>
+            <div class="formula-box">
+                $q_w(x,t) = q_{base} \cdot f_{axial}(x) \cdot f_{temporal}(t)$
+            </div>
+            <div class="formula-box">
+                $f_{axial}(x) = 1 + 2\exp\left(-\frac{(x-x_{throat})^2}{L_{ref}^2}\right)$
+            </div>
+            <div class="formula-box">
+                $f_{temporal}(t) = \left(1 + 0.5(1-e^{-t/\tau})\right)$
+            </div>
+            <div class="formula-box">
+                $Nu = 0.023 Re^{0.8} Pr^{0.4}$ (Dittus-Boelter correlation)
+            </div>
+            <p><strong>Description:</strong> NASA SP-8124 thermal criteria show heat flux peaks at throat location with temporal buildup. Thermal runaway occurs when qw > 5 MW/m². Cooling system design must handle 150-200% of steady-state flux during transients.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$q_w$</td><td>Wall heat flux</td><td>MW/m²</td><td>1-10</td></tr>
+                <tr><td>$q_{base}$</td><td>Base heat flux</td><td>MW/m²</td><td>2-5</td></tr>
+                <tr><td>$x_{throat}$</td><td>Throat axial position</td><td>m</td><td>0.1-2.0</td></tr>
+                <tr><td>$\tau$</td><td>Thermal time constant</td><td>s</td><td>3-10</td></tr>
+                <tr><td>$Nu$</td><td>Nusselt number</td><td>-</td><td>100-10000</td></tr>
+            </table>
+            
+            <h3>14.4 Combustion Instability Criteria (NASA SP-125)</h3>
+            <div class="formula-box">
+                $\omega_n = \frac{n\pi c}{L_{chamber}}$ (Longitudinal modes)
+            </div>
+            <div class="formula-box">
+                $St = \frac{f \cdot D_{port}}{V_{mean}}$ (Strouhal number)
+            </div>
+            <div class="formula-box">
+                $\alpha_{growth} = \frac{\gamma-1}{2c} \frac{dq/dt}{q/T}$ (Rayleigh criterion)
+            </div>
+            <p><strong>Description:</strong> Instability occurs when acoustic oscillations (100-10,000 Hz) couple with combustion. Critical Strouhal numbers (0.2-0.3) indicate vortex shedding. Positive growth rates lead to destructive oscillations requiring damping systems.</p>
+            
+            <h3>14.5 Pressure Drop Analysis (NASA-STD-5012)</h3>
+            <div class="formula-box">
+                $\Delta P_{total} = \Delta P_{injection} + \Delta P_{acceleration} + \Delta P_{friction}$
+            </div>
+            <div class="formula-box">
+                $\Delta P_{inj} = \frac{\rho V^2}{2} \cdot K_{loss}$ (Injection losses)
+            </div>
+            <div class="formula-box">
+                $\Delta P_{accel} = \rho V \frac{dV}{dx}$ (Momentum change)
+            </div>
+            <p><strong>Description:</strong> Total pressure drop includes injection losses (K = 0.5-2.0), acceleration due to heat addition, and friction losses. Design margins require 20-30% above calculated values for system reliability.</p>
+            
+            <h3>14.6 Performance Degradation Factors</h3>
+            <div class="formula-box">
+                $\eta_{total} = \eta_{combustion} \cdot \eta_{nozzle} \cdot \eta_{kinetic} \cdot \eta_{mixing}$
+            </div>
+            <div class="formula-box">
+                $\eta_{combustion} = 1 - \frac{T_{adiabatic} - T_{actual}}{T_{adiabatic}}$
+            </div>
+            <div class="formula-box">
+                $\eta_{nozzle} = 1 - \frac{K_{losses}}{C_f}$ (Nozzle efficiency)
+            </div>
+            <p><strong>Description:</strong> Total efficiency is product of individual efficiency factors. Combustion efficiency (85-98%), nozzle efficiency (92-98%), kinetic efficiency (95-99%), and mixing efficiency (90-95%) determine overall system performance.</p>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>🚀 <strong>UZAYTEK Motor Analysis v2.0</strong> | Developed by: Berke Tezgöçen | Idea & Testing: Ayberk Cem Aksoy</p>
+            <p>Professional Rocket Propulsion Mathematical Reference</p>
+            <p><em>"Science is the poetry of reality" - Richard Dawkins</em></p>
+            
+            <div class="warning" style="margin-top: 20px;">
+                <strong>⚠️ Warning:</strong> Rocket motor design can be dangerous. These formulas are for educational and 
+                research purposes only. Professional engineering consultation is required for actual motor production.
+            </div>
+        </div>
+    </div>
+</body>
+</html>

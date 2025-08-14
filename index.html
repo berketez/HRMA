@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solid Roket Motor Analiz (SRMA)</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Solid Roket Motor Analiz Sistemi (SRMA)</h1>
+            <p>Detaylı solid roket motor performans hesaplama ve analiz aracı</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="openTab(event, 'propellant-tab')">Yakıt Özellikleri</button>
+            <button class="tab-button" onclick="openTab(event, 'grain-tab')">Tane Geometrisi</button>
+            <button class="tab-button" onclick="openTab(event, 'chamber-tab')">Yanma Odası</button>
+            <button class="tab-button" onclick="openTab(event, 'nozzle-tab')">Nozul</button>
+            <button class="tab-button" onclick="openTab(event, 'efficiency-tab')">Verimlilik</button>
+            <button class="tab-button" onclick="openTab(event, 'conditions-tab')">Başlangıç Koşulları</button>
+            <button class="tab-button" onclick="openTab(event, 'mass-tab')">Kütle Dökümü</button>
+            <button class="tab-button" onclick="openTab(event, 'measurement-tab')">Test Donanımı</button>
+            <button class="tab-button" onclick="openTab(event, 'results-tab')">Sonuçlar</button>
+        </div>
+
+        <!-- Yakıt Özellikleri -->
+        <div id="propellant-tab" class="tab-content active">
+            <h2>1. Yakıt (İtici) Özellikleri</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="propellant-name">Propellant Adı/Formülasyonu:</label>
+                    <input type="text" id="propellant-name" placeholder="KNSU, APCP vb.">
+                </div>
+                
+                <div class="input-group">
+                    <label for="density">Yoğunluk ρp (kg/m³):</label>
+                    <input type="number" id="density" step="0.1" placeholder="1800">
+                </div>
+                
+                <div class="input-group">
+                    <label for="heat-value">Isı Değeri ΔHc (kJ/kg):</label>
+                    <input type="number" id="heat-value" step="0.1" placeholder="2500">
+                </div>
+                
+                <div class="input-group">
+                    <label for="flame-temp">Adiabatik Alev Sıcaklığı Tc (K):</label>
+                    <input type="number" id="flame-temp" step="0.1" placeholder="3200">
+                </div>
+                
+                <div class="input-group">
+                    <label for="molecular-weight">Moleküler Ağırlık M (g/mol):</label>
+                    <input type="number" id="molecular-weight" step="0.001" placeholder="28.5">
+                </div>
+                
+                <div class="input-group">
+                    <label for="gamma">Spesifik Isı Oranı γ:</label>
+                    <input type="number" id="gamma" step="0.001" placeholder="1.25">
+                </div>
+                
+                <div class="input-group">
+                    <label for="char-velocity">Karakteristik Hız c* (m/s):</label>
+                    <input type="number" id="char-velocity" step="0.1" placeholder="1550">
+                    <button type="button" onclick="calculateCharVelocity()">Hesapla</button>
+                </div>
+                
+                <div class="input-group">
+                    <label for="erosive-k">Erosive Burning k:</label>
+                    <input type="number" id="erosive-k" step="0.0001" placeholder="0.0002">
+                </div>
+                
+                <div class="input-group">
+                    <label for="erosive-m">Erosive Burning m:</label>
+                    <input type="number" id="erosive-m" step="0.01" placeholder="0.8">
+                </div>
+                
+                <div class="input-group">
+                    <label for="temp-coeff">Sıcaklık Katsayısı σ (1/K):</label>
+                    <input type="number" id="temp-coeff" step="0.0001" placeholder="0.002">
+                </div>
+                
+                <div class="input-group">
+                    <label for="burn-rate-coeff">Yanma Hızı Katsayısı a (mm/s):</label>
+                    <input type="number" id="burn-rate-coeff" step="0.001" placeholder="8.2">
+                </div>
+                
+                <div class="input-group">
+                    <label for="burn-rate-exp">Yanma Hızı Üssü n:</label>
+                    <input type="number" id="burn-rate-exp" step="0.001" placeholder="0.35">
+                </div>
+            </div>
+        </div>
+
+        <!-- Tane Geometrisi -->
+        <div id="grain-tab" class="tab-content">
+            <h2>2. Tane (Grain) Geometrisi</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="grain-count">Tane Sayısı N:</label>
+                    <input type="number" id="grain-count" min="1" placeholder="3">
+                </div>
+                
+                <div class="input-group">
+                    <label for="web-thickness">Web Kalınlığı (mm):</label>
+                    <input type="number" id="web-thickness" step="0.1" placeholder="25">
+                </div>
+                
+                <div class="input-group">
+                    <label for="grain-type">Tane Tipi:</label>
+                    <select id="grain-type" onchange="toggleGrainParameters()">
+                        <option value="cylindrical">Silindirik</option>
+                        <option value="star">Yıldız</option>
+                        <option value="finocyl">Finocyl</option>
+                        <option value="slotted">Slotted</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="outer-diameter">Dış Çap (mm):</label>
+                    <input type="number" id="outer-diameter" step="0.1" placeholder="100">
+                </div>
+                
+                <div class="input-group">
+                    <label for="inner-diameter">İç Çap (mm):</label>
+                    <input type="number" id="inner-diameter" step="0.1" placeholder="30">
+                </div>
+                
+                <div class="input-group">
+                    <label for="grain-length">Tane Boyu (mm):</label>
+                    <input type="number" id="grain-length" step="0.1" placeholder="200">
+                </div>
+                
+                <!-- Yıldız Konfigürasyonu -->
+                <div id="star-config" class="config-section" style="display: none;">
+                    <h3>Yıldız Konfigürasyonu</h3>
+                    <div class="input-group">
+                        <label for="star-points">Köşe Sayısı:</label>
+                        <input type="number" id="star-points" min="3" placeholder="6">
+                    </div>
+                    <div class="input-group">
+                        <label for="star-radius">Köşe Yarıçapı (mm):</label>
+                        <input type="number" id="star-radius" step="0.1" placeholder="15">
+                    </div>
+                    <div class="input-group">
+                        <label for="star-fillet">Fillet Yarıçapı (mm):</label>
+                        <input type="number" id="star-fillet" step="0.1" placeholder="2">
+                    </div>
+                </div>
+                
+                <!-- Finocyl Konfigürasyonu -->
+                <div id="finocyl-config" class="config-section" style="display: none;">
+                    <h3>Finocyl Konfigürasyonu</h3>
+                    <div class="input-group">
+                        <label for="fin-count">Fin Sayısı:</label>
+                        <input type="number" id="fin-count" min="2" placeholder="4">
+                    </div>
+                    <div class="input-group">
+                        <label for="fin-width">Fin Genişliği (mm):</label>
+                        <input type="number" id="fin-width" step="0.1" placeholder="8">
+                    </div>
+                    <div class="input-group">
+                        <label for="fin-length">Fin Uzunluğu (mm):</label>
+                        <input type="number" id="fin-length" step="0.1" placeholder="20">
+                    </div>
+                </div>
+                
+                <!-- Inhibitör Ayarları -->
+                <h3>İnhibitör Kaplama</h3>
+                <div class="checkbox-group">
+                    <label><input type="checkbox" id="inhibit-front" checked> Ön Yüz</label>
+                    <label><input type="checkbox" id="inhibit-rear" checked> Arka Yüz</label>
+                    <label><input type="checkbox" id="inhibit-outer"> Dış Yüzey</label>
+                </div>
+                
+                <div class="input-group">
+                    <label for="grain-gap">Tane Arası Boşluk (mm):</label>
+                    <input type="number" id="grain-gap" step="0.1" placeholder="2">
+                </div>
+                
+                <div class="input-group">
+                    <label for="insulation-thickness">İzolasyon Kalınlığı (mm):</label>
+                    <input type="number" id="insulation-thickness" step="0.1" placeholder="3">
+                </div>
+            </div>
+        </div>
+
+        <!-- Yanma Odası ve Muhafaza -->
+        <div id="chamber-tab" class="tab-content">
+            <h2>3. Yanma Odası ve Muhafaza</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="chamber-volume">Kasa İç Hacmi (L):</label>
+                    <input type="number" id="chamber-volume" step="0.001" placeholder="2.5">
+                </div>
+                
+                <div class="input-group">
+                    <label for="case-material">Kasa Malzemesi:</label>
+                    <select id="case-material">
+                        <option value="steel">Çelik</option>
+                        <option value="aluminum">Alüminyum</option>
+                        <option value="composite">Kompozit</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="yield-strength">Akma Dayanımı σy (MPa):</label>
+                    <input type="number" id="yield-strength" step="0.1" placeholder="250">
+                </div>
+                
+                <div class="input-group">
+                    <label for="safety-factor">Emniyet Katsayısı FoS:</label>
+                    <input type="number" id="safety-factor" step="0.1" placeholder="2.5">
+                </div>
+                
+                <div class="input-group">
+                    <label for="liner-thickness">Astar Kalınlığı (mm):</label>
+                    <input type="number" id="liner-thickness" step="0.1" placeholder="2">
+                </div>
+                
+                <div class="input-group">
+                    <label for="liner-density">Astar Yoğunluğu (kg/m³):</label>
+                    <input type="number" id="liner-density" step="0.1" placeholder="1200">
+                </div>
+                
+                <div class="input-group">
+                    <label for="initial-temp">Başlangıç Sıcaklığı (K):</label>
+                    <input type="number" id="initial-temp" step="0.1" placeholder="298">
+                </div>
+                
+                <div class="input-group">
+                    <label for="case-thickness">Kasa Duvar Kalınlığı (mm):</label>
+                    <input type="number" id="case-thickness" step="0.1" placeholder="8">
+                </div>
+            </div>
+        </div>
+
+        <!-- Nozul -->
+        <div id="nozzle-tab" class="tab-content">
+            <h2>4. Nozul</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="throat-diameter">Boğaz Çapı Dt (mm):</label>
+                    <input type="number" id="throat-diameter" step="0.1" placeholder="15">
+                </div>
+                
+                <div class="input-group">
+                    <label for="exit-diameter">Çıkış Çapı De (mm):</label>
+                    <input type="number" id="exit-diameter" step="0.1" placeholder="35">
+                </div>
+                
+                <div class="input-group">
+                    <label for="expansion-ratio">Genişleme Oranı ε:</label>
+                    <input type="number" id="expansion-ratio" step="0.1" readonly>
+                </div>
+                
+                <div class="input-group">
+                    <label for="convergent-angle">Konverjan Açısı (°):</label>
+                    <input type="number" id="convergent-angle" step="0.1" placeholder="45">
+                </div>
+                
+                <div class="input-group">
+                    <label for="divergent-angle">Diverjan Açısı (°):</label>
+                    <input type="number" id="divergent-angle" step="0.1" placeholder="15">
+                </div>
+                
+                <div class="input-group">
+                    <label for="nozzle-efficiency">Nozul Verimi ηn:</label>
+                    <input type="number" id="nozzle-efficiency" step="0.001" placeholder="0.95">
+                </div>
+                
+                <div class="input-group">
+                    <label for="erosion-factor">Erozyon Faktörü (mm/s):</label>
+                    <input type="number" id="erosion-factor" step="0.0001" placeholder="0.001">
+                </div>
+                
+                <div class="input-group">
+                    <label for="nozzle-material">Nozul Malzemesi:</label>
+                    <select id="nozzle-material">
+                        <option value="graphite">Grafit</option>
+                        <option value="phenolic">Fenolik</option>
+                        <option value="tungsten">Tungsten</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Verimlilik -->
+        <div id="efficiency-tab" class="tab-content">
+            <h2>5. Verimlilik ve Empirik Katsayılar</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="combustion-efficiency">Yanma Verimi ηc:</label>
+                    <input type="number" id="combustion-efficiency" step="0.001" placeholder="0.95">
+                </div>
+                
+                <div class="input-group">
+                    <label for="cf-efficiency">Nozul Boşluk Verimi (Cf):</label>
+                    <input type="number" id="cf-efficiency" step="0.001" placeholder="0.98">
+                </div>
+                
+                <div class="input-group">
+                    <label for="overall-efficiency">Toplam İtki Verimi ηoverall:</label>
+                    <input type="number" id="overall-efficiency" step="0.001" placeholder="0.92">
+                </div>
+                
+                <div class="input-group">
+                    <label for="discharge-coeff">Deşarj Katsayısı Cd:</label>
+                    <input type="number" id="discharge-coeff" step="0.001" placeholder="0.98">
+                </div>
+                
+                <div class="input-group">
+                    <label for="kinetic-efficiency">Kinetik Verim:</label>
+                    <input type="number" id="kinetic-efficiency" step="0.001" placeholder="0.97">
+                </div>
+                
+                <div class="input-group">
+                    <label for="divergence-loss">Diverjans Kayıp Katsayısı:</label>
+                    <input type="number" id="divergence-loss" step="0.001" placeholder="0.02">
+                </div>
+                
+                <div class="input-group">
+                    <label for="two-phase-loss">2-Faz Kayıp Katsayısı:</label>
+                    <input type="number" id="two-phase-loss" step="0.001" placeholder="0.98">
+                </div>
+            </div>
+        </div>
+
+        <!-- Başlangıç & Çevre Koşulları -->
+        <div id="conditions-tab" class="tab-content">
+            <h2>6. Başlangıç & Çevre Koşulları</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="ignition-delay">Ateşleme Gecikme (ms):</label>
+                    <input type="number" id="ignition-delay" step="0.1" placeholder="50">
+                </div>
+                
+                <div class="input-group">
+                    <label for="atm-pressure">Atmosfer Basıncı (kPa):</label>
+                    <input type="number" id="atm-pressure" step="0.1" placeholder="101.325">
+                </div>
+                
+                <div class="input-group">
+                    <label for="test-altitude">Test İrtifası (m):</label>
+                    <input type="number" id="test-altitude" step="1" placeholder="0">
+                </div>
+                
+                <div class="input-group">
+                    <label for="ambient-temp">Ortam Sıcaklığı (K):</label>
+                    <input type="number" id="ambient-temp" step="0.1" placeholder="298">
+                </div>
+                
+                <div class="input-group">
+                    <label for="humidity">Nem Oranı (%):</label>
+                    <input type="number" id="humidity" step="0.1" placeholder="60">
+                </div>
+                
+                <div class="input-group">
+                    <label for="wind-speed">Rüzgar Hızı (m/s):</label>
+                    <input type="number" id="wind-speed" step="0.1" placeholder="0">
+                </div>
+                
+                <div class="input-group">
+                    <label for="chamber-pressure">Hedef Hazne Basıncı (MPa):</label>
+                    <input type="number" id="chamber-pressure" step="0.1" placeholder="7">
+                </div>
+            </div>
+        </div>
+
+        <!-- Kütle & Ağırlık Dökümü -->
+        <div id="mass-tab" class="tab-content">
+            <h2>7. Kütle & Ağırlık Dökümü</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="propellant-mass">Propellant Kütlesi (kg):</label>
+                    <input type="number" id="propellant-mass" step="0.001" readonly>
+                    <button type="button" onclick="calculatePropellantMass()">Hesapla</button>
+                </div>
+                
+                <div class="input-group">
+                    <label for="case-mass">Kasa Kütlesi (kg):</label>
+                    <input type="number" id="case-mass" step="0.001" placeholder="2.5">
+                </div>
+                
+                <div class="input-group">
+                    <label for="nozzle-mass">Nozul Kütlesi (kg):</label>
+                    <input type="number" id="nozzle-mass" step="0.001" placeholder="0.5">
+                </div>
+                
+                <div class="input-group">
+                    <label for="insulation-mass">İzolasyon Kütlesi (kg):</label>
+                    <input type="number" id="insulation-mass" step="0.001" placeholder="0.3">
+                </div>
+                
+                <div class="input-group">
+                    <label for="avionics-mass">Aviyonik Kütlesi (kg):</label>
+                    <input type="number" id="avionics-mass" step="0.001" placeholder="0.2">
+                </div>
+                
+                <div class="input-group">
+                    <label for="closure-mass">Baş Tapa Kütlesi (kg):</label>
+                    <input type="number" id="closure-mass" step="0.001" placeholder="0.8">
+                </div>
+                
+                <div class="input-group">
+                    <label for="dry-mass">Toplam Kuru Kütle (kg):</label>
+                    <input type="number" id="dry-mass" step="0.001" readonly>
+                </div>
+                
+                <div class="input-group">
+                    <label for="wet-mass">Toplam Islak Kütle (kg):</label>
+                    <input type="number" id="wet-mass" step="0.001" readonly>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Donanımı -->
+        <div id="measurement-tab" class="tab-content">
+            <h2>8. Ölçüm / Test Donanımı</h2>
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="pressure-sensor-range">Basınç Sensörü Aralığı (MPa):</label>
+                    <input type="number" id="pressure-sensor-range" step="0.1" placeholder="10">
+                </div>
+                
+                <div class="input-group">
+                    <label for="sampling-freq">Örnekleme Frekansı (Hz):</label>
+                    <input type="number" id="sampling-freq" step="1" placeholder="1000">
+                </div>
+                
+                <div class="input-group">
+                    <label for="load-cell-capacity">Yük Hücresi Kapasitesi (N):</label>
+                    <input type="number" id="load-cell-capacity" step="1" placeholder="5000">
+                </div>
+                
+                <div class="input-group">
+                    <label for="calibration-factor">Kalibrasyon Faktörü:</label>
+                    <input type="number" id="calibration-factor" step="0.0001" placeholder="1.0">
+                </div>
+                
+                <div class="input-group">
+                    <label for="data-collection-time">Veri Toplama Süresi (s):</label>
+                    <input type="number" id="data-collection-time" step="0.1" placeholder="10">
+                </div>
+                
+                <div class="input-group">
+                    <label for="filter-cutoff">Filtre Kesim Frekansı (Hz):</label>
+                    <input type="number" id="filter-cutoff" step="1" placeholder="100">
+                </div>
+                
+                <div class="input-group">
+                    <label for="uncertainty-level">Belirsizlik Seviyesi (%):</label>
+                    <input type="number" id="uncertainty-level" step="0.1" placeholder="2">
+                </div>
+            </div>
+        </div>
+
+        <!-- Sonuçlar -->
+        <div id="results-tab" class="tab-content">
+            <h2>9. Analiz Sonuçları</h2>
+            <div class="results-container">
+                <div class="calculate-section">
+                    <button id="calculate-btn" onclick="performAnalysis()">Analizi Başlat</button>
+                    <button id="monte-carlo-btn" onclick="runMonteCarloAnalysis()">Monte Carlo Analizi</button>
+                </div>
+                
+                <div class="results-grid">
+                    <div class="result-section">
+                        <h3>Temel Performans</h3>
+                        <div class="result-item">
+                            <label>Toplam İtki (N·s):</label>
+                            <span id="total-impulse">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Maksimum İtki (N):</label>
+                            <span id="max-thrust">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Ortalama İtki (N):</label>
+                            <span id="avg-thrust">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Spesifik İmpuls (s):</label>
+                            <span id="specific-impulse">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Yanma Süresi (s):</label>
+                            <span id="burn-time">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Maksimum Basınç (MPa):</label>
+                            <span id="max-pressure">-</span>
+                        </div>
+                    </div>
+                    
+                    <div class="result-section">
+                        <h3>Performans Katsayıları</h3>
+                        <div class="result-item">
+                            <label>İtki/Ağırlık Oranı:</label>
+                            <span id="thrust-weight-ratio">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Yükleme Yoğunluğu (%):</label>
+                            <span id="loading-density">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Karakteristik Hız c* (m/s):</label>
+                            <span id="calculated-cstar">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>İtki Katsayısı Cf:</label>
+                            <span id="thrust-coefficient">-</span>
+                        </div>
+                    </div>
+                    
+                    <div class="result-section">
+                        <h3>Güvenlik Analizi</h3>
+                        <div class="result-item">
+                            <label>Kasa Gerilimi (MPa):</label>
+                            <span id="case-stress">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Güvenlik Faktörü:</label>
+                            <span id="actual-safety-factor">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Nozul Erozyonu (mm):</label>
+                            <span id="nozzle-erosion">-</span>
+                        </div>
+                    </div>
+                    
+                    <div class="result-section">
+                        <h3>Monte Carlo İstatistikleri</h3>
+                        <div class="result-item">
+                            <label>İtki Std. Sapma (%):</label>
+                            <span id="thrust-std-dev">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Güven Aralığı (95%):</label>
+                            <span id="confidence-interval">-</span>
+                        </div>
+                        <div class="result-item">
+                            <label>Başarı Oranı (%):</label>
+                            <span id="success-rate">-</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <canvas id="thrust-curve" width="800" height="400"></canvas>
+                    <canvas id="pressure-curve" width="800" height="400"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

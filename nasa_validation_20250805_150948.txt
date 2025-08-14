@@ -1,0 +1,11 @@
+🚀 NASA REAL-TIME VALIDATION REPORT
+==================================================
+Generated: 2025-08-05 15:09:47
+
+Motor: RS-25
+------------------------------
+❌ NASA CEA Data: Failed to fetch
+
+Motor: F-1
+------------------------------
+❌ NASA CEA Data: Failed to fetch
