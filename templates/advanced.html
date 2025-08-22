@@ -254,19 +254,47 @@
             min-height: 500px; 
             border: 2px solid #e9ecef; 
             border-radius: 8px;
-            margin: 15px 0; 
+            margin: 20px 0; 
             background: white;
             padding: 20px;
             width: 100%;
             box-sizing: border-box;
             overflow: visible;
             position: relative;
+            z-index: 1;
+            clear: both;
         }
         
-        /* Ensure Plotly charts fit container */
         .plot-container .plotly {
             width: 100% !important;
             height: 100% !important;
+        }
+        
+        #motor_3d_plot {
+            min-height: 600px;
+            margin: 20px 0;
+            clear: both;
+        }
+        
+        #injector_plot {
+            min-height: 800px;
+            width: 100%;
+            background: white;
+        }
+        
+        /* Fix overlapping issues */
+        .panel + .panel {
+            margin-top: 30px;
+        }
+        
+        /* Ensure Export STL button is properly styled */
+        #exportSTLBtn {
+            cursor: pointer;
+        }
+        
+        #exportSTLBtn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
         
         /* Improve plot visibility */
@@ -310,6 +338,10 @@
             background: #f8f9fa;
             border-radius: 8px;
             text-align: center;
+            margin: 30px 0;
+            clear: both;
+            position: relative;
+            z-index: 1;
         }
         
         .export-section h3 {
@@ -321,6 +353,20 @@
         .export-section button {
             width: 100%;
             margin: 10px 0;
+        }
+        
+        .btn-group-export {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 15px 0;
+        }
+        
+        .btn-group-export button {
+            width: auto;
+            min-width: 160px;
+            margin: 5px;
         }
         
         .status-message {
@@ -1219,7 +1265,7 @@
                 <div class="form-group">
                     <button type="button" class="btn" onclick="calculate()">Calculate</button>
                     <button type="button" class="btn btn-success" onclick="switchTab('parametric')">Parametric Analysis</button>
-                    <button type="button" class="btn btn-warning" onclick="exportResults()" id="exportResultsBtn" disabled>Export Results</button>
+                    <button type="button" class="btn btn-warning" onclick="exportReport()" id="exportResultsBtn" disabled>Export Results</button>
                     <button type="button" class="btn btn-info" onclick="generate3DCAD()" id="cadButton" style="display:none;">3D CAD Design</button>
                 </div>
             </div>
@@ -1472,22 +1518,22 @@
                             <li><strong>Reference:</strong> Optimized geometry based on thrust requirements and O/F ratio</li>
                         </ul>
                     </div>
-                    <div id="motor_plot" class="plot-container"></div>
+                    <div id="motor_plot" class="plot-container" style="min-height: 500px;"></div>
                 </div>
 
                 <div class="panel" style="width: 100%;">
-                    <h2>Injector Design</h2>
+                    <h2>Performance Analysis Dashboard</h2>
                     <div class="chart-explanation">
-                        <p><strong>What this shows:</strong> Detailed injector geometry and flow characteristics</p>
+                        <p><strong>What this shows:</strong> Comprehensive motor performance metrics</p>
                         <ul>
-                            <li><strong>Cross-sectional view:</strong> Injector plate with hole patterns (showerhead/pintle/swirl)</li>
-                            <li><strong>Flow arrows:</strong> Oxidizer injection velocity and direction</li>
-                            <li><strong>Pressure contours:</strong> Pressure drop across injector orifices</li>
-                            <li><strong>Units:</strong> Dimensions in mm, velocities in m/s, pressures in bar</li>
-                            <li><strong>Design criteria:</strong> Ensures proper atomization and mixing (Re > 4000, ΔP > 20% Pc)</li>
+                            <li><strong>Mass Flow Rates:</strong> Total, oxidizer, and fuel flow rates (kg/s)</li>
+                            <li><strong>Pressure Distribution:</strong> Chamber, tank, and injector pressure drop (bar)</li>
+                            <li><strong>Regression Rate:</strong> Fuel grain burn rate over time (mm/s) with port diameter growth</li>
+                            <li><strong>Injector Performance:</strong> Exit velocity gauge showing injection effectiveness (m/s)</li>
+                            <li><strong>Design validation:</strong> All parameters optimized for stable combustion</li>
                         </ul>
                     </div>
-                    <div id="injector_plot" class="plot-container"></div>
+                    <div id="injector_plot" class="plot-container" style="min-height: 800px; margin-bottom: 100px;"></div>
                 </div>
                 
                 <div class="panel" style="width: 100%;">
@@ -1504,7 +1550,65 @@
                             <li><strong>Optimal ranges:</strong> Isp > 200s, O/F = 6-8 for N2O/HTPB</li>
                         </ul>
                     </div>
-                    <div id="performance_plots" class="plot-container" style="min-height: 800px;"></div>
+                    <div id="performance_plots" class="plot-container" style="min-height: 800px; margin-bottom: 100px;"></div>
+                </div>
+            </div>
+            
+            <!-- Export/CAD Actions Panel -->
+            <div id="exportActionsPanel" class="panel" style="display: none; margin-top: 150px; clear: both;">
+                <h2>Export & CAD Options</h2>
+                <div class="export-grid">
+                    <div class="export-section">
+                        <h3>3D CAD Design</h3>
+                        <div class="btn-group-export">
+                            <button class="btn btn-primary" onclick="showDesignConfig()">
+                                <i class="fas fa-cog"></i> Configure Design
+                            </button>
+                            <button class="btn btn-primary" onclick="generateCAD()" id="generateCADBtn" disabled>
+                                <i class="fas fa-cube"></i> Generate 3D Model
+                            </button>
+                        </div>
+                        <div id="cadStatus" class="status-message"></div>
+                    </div>
+                    
+                    <div class="export-section">
+                        <h3>Regression Analysis</h3>
+                        <div class="btn-group-export">
+                            <button class="btn btn-info" onclick="performRegressionAnalysis()" id="regressionBtn" disabled>
+                                <i class="fas fa-chart-line"></i> Analyze Regression Rate
+                            </button>
+                            <button class="btn btn-secondary" onclick="exportRegressionData()" id="exportRegressionBtn" disabled>
+                                <i class="fas fa-download"></i> Export Analysis
+                            </button>
+                        </div>
+                        <div id="regressionResults" class="analysis-results" style="display: none;">
+                            <div id="regressionChart"></div>
+                            <div id="regressionData"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="export-section">
+                        <h3>Motor Export</h3>
+                        <div class="btn-group-export">
+                            <button class="btn btn-primary" onclick="downloadEngFile()" id="downloadEngBtn" disabled>
+                                <i class="fas fa-download"></i> Download Motor File (.eng)
+                            </button>
+                            <button class="btn btn-secondary" onclick="exportSTL()" id="exportSTLBtn" disabled>
+                                <i class="fas fa-cube"></i> Export STL Files
+                            </button>
+                        </div>
+                        <div id="openrocketStatus" class="status-message"></div>
+                    </div>
+                    
+                    <div class="export-section">
+                        <h3>Complete Package</h3>
+                        <div class="btn-group-export">
+                            <button class="btn btn-success" onclick="generateCompletePackage()">
+                                <i class="fas fa-archive"></i> Generate All Files
+                            </button>
+                        </div>
+                        <div id="packageStatus" class="status-message"></div>
+                    </div>
                 </div>
             </div>
             
@@ -1643,50 +1747,8 @@
                 </div>
             </div>
             
-            <!-- Export/CAD Actions Panel -->
-            <div id="exportActionsPanel" class="panel" style="display: none;">
-                <h2>Export & CAD Options</h2>
-                <div class="export-grid">
-                    <div class="export-section">
-                        <h3>3D CAD Design</h3>
-                        <div class="btn-group-export">
-                            <button class="btn btn-primary" onclick="showDesignConfig()">
-                                <i class="fas fa-cog"></i> Configure Design
-                            </button>
-                            <button class="btn btn-primary" onclick="generateCAD()" id="generateCADBtn" disabled>
-                                <i class="fas fa-cube"></i> Generate 3D Model
-                            </button>
-                            <button class="btn btn-secondary" onclick="exportSTL()" id="exportSTLBtn" disabled>
-                                <i class="fas fa-download"></i> Export STL Files
-                            </button>
-                        </div>
-                        <div id="cadStatus" class="status-message"></div>
-                    </div>
-                    
-                    <div class="export-section">
-                        <h3>Motor Export</h3>
-                        <div class="btn-group-export">
-                            <button class="btn btn-primary" onclick="downloadEngFile()" id="downloadEngBtn">
-                                <i class="fas fa-download"></i> Download Motor File (.eng)
-                            </button>
-                        </div>
-                        <div id="openrocketStatus" class="status-message"></div>
-                    </div>
-                    
-                    <div class="export-section">
-                        <h3>Complete Package</h3>
-                        <div class="btn-group-export">
-                            <button class="btn btn-success" onclick="generateCompletePackage()">
-                                <i class="fas fa-archive"></i> Generate All Files
-                            </button>
-                        </div>
-                        <div id="packageStatus" class="status-message"></div>
-                    </div>
-                </div>
-            </div>
-            
             <!-- 3D Visualization Panel -->
-            <div id="cad3DPanel" class="panel" style="display: none;">
+            <div id="cad3DPanel" class="panel" style="display: none; margin-top: 20px; clear: both;">
                 <h2>3D Motor Visualization</h2>
                 <div class="chart-explanation">
                     <p><strong>What this shows:</strong> Interactive 3D model of the complete rocket motor assembly</p>
@@ -1698,7 +1760,7 @@
                         <li><strong>Scale:</strong> True proportional dimensions for manufacturing reference</li>
                     </ul>
                 </div>
-                <div id="motor_3d_plot" class="plot-container" style="min-height: 600px;"></div>
+                <div id="motor_3d_plot" class="plot-container"></div>
                 <div class="cad-controls">
                     <button class="btn btn-small" onclick="rotate3DView()">Rotate View</button>
                     <button class="btn btn-small" onclick="reset3DView()">Reset View</button>
@@ -2234,11 +2296,11 @@
         function previewAltProfile() {
             const previewDiv = document.getElementById('altitude_preview');
             
-            // Toggle görünürlük
+            // Toggle visibility
             if (previewDiv.style.display === 'block') {
-                // Grafik görünürse kapat
+                // Close if chart is visible
                 previewDiv.style.display = 'none';
-                // Plotly grafiğini temizle
+                // Clear Plotly chart
                 Plotly.purge('altitude_preview');
                 return;
             }
@@ -2273,10 +2335,10 @@
                 margin: { t: 40, b: 40, l: 60, r: 20 }
             };
             
-            // Önce mevcut grafiği temizle
+            // First clear existing chart
             Plotly.purge('altitude_preview');
             
-            // Yeni grafik oluştur
+            // Create new chart
             Plotly.newPlot('altitude_preview', [trace], layout, {responsive: true});
             previewDiv.style.display = 'block';
         }
@@ -2555,7 +2617,7 @@
         }
 
         function updateOxidizerDensityFromTemp() {
-            // Temperature değiştiğinde API çağrısı yaparak gerçek NIST verilerini al
+            // Make API call to get real NIST data when temperature changes
             updateOxidizerProperties();
         }
 
@@ -2611,7 +2673,7 @@
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    // Backend'ten gelen response yapısına göre düzenlendi
+                    // Adjusted according to response structure from backend
                     const properties = result.properties || result.data;
                     
                     if (properties.density) {
@@ -3069,8 +3131,10 @@
 
         function displayResults(results) {
             console.log('displayResults called with:', results);
+            console.log('Regression rate value:', results.motor?.regression_rate);
+            console.log('Regression rate avg:', results.motor?.regression_rate_avg);
             try {
-                const resultsDiv = document.getElementById('results');
+                const resultsDiv = document.getElementById('resultsPanel');
                 if (!resultsDiv) {
                     console.error('Results div not found!');
                     return;
@@ -3126,6 +3190,7 @@
                 ['Initial Port Diameter', safeFixed(results.motor.port_diameter_initial * 1000, 2), 'mm'],
                 ['Final Port Diameter', safeFixed(results.motor.port_diameter_final * 1000, 2), 'mm'],
                 ['Regression Rate', safeFixed(results.motor.regression_rate * 1000, 3), 'mm/s'],
+                ['Avg Regression Rate', safeFixed(results.motor.regression_rate_avg * 1000, 3), 'mm/s'],
                 ['C* Velocity', safeFixed(results.motor.c_star, 1), 'm/s'],
                 ['Thrust Coefficient (CF)', safeFixed(results.motor.cf, 3), '-']
             ];
@@ -3175,14 +3240,23 @@
                 Plotly.newPlot('motor_plot', motorPlotData.data, motorPlotData.layout, {responsive: true});
             }
 
-            if (results.plots && results.plots.injector) {
+            // Performance plots now contains the regression rate and injector performance
+            // This should go to injector_plot div which is visible
+            if (results.plots && results.plots.performance) {
+                const performancePlotData = JSON.parse(results.plots.performance);
+                console.log('Rendering performance plots with regression rate...');
+                Plotly.newPlot('injector_plot', performancePlotData.data, performancePlotData.layout, {responsive: true});
+            }
+            
+            // Also render the old injector plot if it exists (for backward compatibility)
+            if (results.plots && results.plots.injector && !results.plots.performance) {
                 const injectorPlotData = JSON.parse(results.plots.injector);
                 Plotly.newPlot('injector_plot', injectorPlotData.data, injectorPlotData.layout, {responsive: true});
             }
             
-            // Display performance plots
-            if (results.plots && results.plots.performance) {
-                const performancePlotData = JSON.parse(results.plots.performance);
+            // If there's separate performance data for the second panel
+            if (results.plots && results.plots.performance_secondary) {
+                const performancePlotData = JSON.parse(results.plots.performance_secondary);
                 Plotly.newPlot('performance_plots', performancePlotData.data, performancePlotData.layout, {responsive: true});
             }
             
@@ -3321,6 +3395,7 @@
             document.getElementById('downloadEngBtn').disabled = false;
             document.getElementById('exportSTLBtn').disabled = false;
             document.getElementById('generateCADBtn').disabled = false;
+            document.getElementById('regressionBtn').disabled = false;
             
             console.log('displayResults completed successfully');
             
@@ -3942,7 +4017,7 @@
             showMessage('Toggling wireframe...', 'info');
         }
 
-        async function exportSTL() {
+        async function exportMotorSTL() {
             if (!currentResults || !currentResults.motor) {
                 showMessage('Please run analysis first', 'error');
                 return;
@@ -3967,7 +4042,7 @@
                 
                 const cadResult = await cadResponse.json();
                 
-                if (!cadResult.success) {
+                if (cadResult.status !== 'success') {
                     throw new Error(cadResult.error || 'CAD generation failed');
                 }
                 
@@ -4001,6 +4076,171 @@
             }
         }
 
+        async function performRegressionAnalysis() {
+            if (!currentResults || !currentResults.motor) {
+                showMessage('Please run motor analysis first', 'error');
+                return;
+            }
+            
+            showMessage('Performing regression rate analysis...', 'info');
+            
+            try {
+                const response = await fetch('/api/regression-analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        motor_data: currentResults.motor,
+                        analysis_type: 'detailed'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    displayRegressionResults(result);
+                    document.getElementById('exportRegressionBtn').disabled = false;
+                    showMessage('Regression analysis completed successfully', 'success');
+                } else {
+                    throw new Error(result.error || 'Regression analysis failed');
+                }
+                
+            } catch (error) {
+                showMessage('Error performing regression analysis: ' + error.message, 'error');
+                console.error('Regression Analysis Error:', error);
+            }
+        }
+        
+        function displayRegressionResults(results) {
+            const regressionResultsDiv = document.getElementById('regressionResults');
+            const chartDiv = document.getElementById('regressionChart');
+            const dataDiv = document.getElementById('regressionData');
+            
+            // Show results section
+            const resultsPanelDiv = document.getElementById('resultsPanel');
+            if (resultsPanelDiv) {
+                resultsPanelDiv.style.display = 'block';
+            }
+            
+            // Show export actions panel
+            const exportPanel = document.getElementById('exportActionsPanel');
+            if (exportPanel) {
+                exportPanel.style.display = 'block';
+            }
+            
+            // Display chart if available
+            if (results.regression_plot) {
+                chartDiv.innerHTML = '';
+                try {
+                    const plotData = JSON.parse(results.regression_plot);
+                    Plotly.newPlot(chartDiv, plotData.data, plotData.layout, {responsive: true});
+                } catch (e) {
+                    chartDiv.innerHTML = '<p>Chart data could not be loaded</p>';
+                }
+            }
+            
+            // Display data summary
+            if (results.regression_data) {
+                const data = results.regression_data;
+                dataDiv.innerHTML = `
+                    <div class="regression-summary">
+                        <h4>Regression Rate Analysis Summary</h4>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>Initial Regression Rate:</strong> ${(data.initial_rate * 1000).toFixed(3)} mm/s<br>
+                                <strong>Final Regression Rate:</strong> ${(data.final_rate * 1000).toFixed(3)} mm/s<br>
+                                <strong>Average Regression Rate:</strong> ${(data.average_rate * 1000).toFixed(3)} mm/s
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Port Diameter Growth:</strong> ${((data.final_diameter - data.initial_diameter) * 1000).toFixed(2)} mm<br>
+                                <strong>Burn Surface Area Change:</strong> ${((data.final_area - data.initial_area) * 100).toFixed(1)}%<br>
+                                <strong>O/F Ratio Shift:</strong> ${data.of_ratio_change.toFixed(2)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Store results for export
+            window.regressionResults = results;
+        }
+        
+        function exportRegressionData() {
+            if (!window.regressionResults) {
+                showMessage('No regression analysis data to export', 'error');
+                return;
+            }
+            
+            const data = window.regressionResults;
+            const exportData = {
+                timestamp: new Date().toISOString(),
+                motor_name: currentResults.motor.motor_name || 'HRMA_Motor',
+                regression_analysis: data.regression_data,
+                settings: {
+                    fuel_type: currentResults.motor.fuel_type,
+                    oxidizer_type: currentResults.motor.oxidizer_type,
+                    of_ratio: currentResults.motor.of_ratio,
+                    chamber_pressure: currentResults.motor.chamber_pressure
+                }
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: 'application/json'});
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `regression_analysis_${exportData.motor_name}_${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            showMessage('Regression analysis data exported successfully', 'success');
+        }
+
+        async function exportSTL() {
+            if (!currentResults || !currentResults.motor) {
+                showMessage('Please run analysis first before exporting STL files', 'error');
+                return;
+            }
+            
+            showMessage('Generating STL files...', 'info');
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/api/export-stl', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        motor_data: currentResults.motor,
+                        motor_name: document.getElementById('motor_name').value || 'UZAYTEK_Motor'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${currentResults.motor.motor_name || 'UZAYTEK_Motor'}_CAD_files.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showMessage('STL files exported successfully', 'success');
+            } catch (error) {
+                showMessage('Error exporting STL files: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
         async function exportOpenRocket() {
             showMessage('Generating OpenRocket .eng file...', 'info');
             

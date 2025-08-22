@@ -208,15 +208,15 @@ class HybridRocketEngine:
             fuel_composition, 'N2O', self.OF, self.P_c, self.T_c
         )
         
-        # Cantera'dan gelen gerçek termodinamik değerleri kullan
+        # Use real thermodynamic values from Cantera
         if 'conditions' in combustion_results and 'chamber' in combustion_results['conditions']:
             chamber_data = combustion_results['conditions']['chamber']
             if 'gamma' in chamber_data:
-                self.gamma = chamber_data['gamma']  # Gerçek gamma değeri
+                self.gamma = chamber_data['gamma']  # Real gamma value
             if 'molecular_weight' in chamber_data:
-                self.R = self.combustion_analyzer.R_universal / chamber_data['molecular_weight']  # Gerçek gaz sabiti
+                self.R = self.combustion_analyzer.R_universal / chamber_data['molecular_weight']  # Real gas constant
             if 'temperature' in chamber_data:
-                self.T_c = chamber_data['temperature']  # Gerçek kamara sıcaklığı
+                self.T_c = chamber_data['temperature']  # Real chamber temperature
         
         # Advanced nozzle design
         nozzle_results = self.nozzle_designer.design_nozzle(
@@ -290,9 +290,9 @@ class HybridRocketEngine:
     
     def _calculate_c_star(self):
         """Calculate characteristic velocity using real-time NASA CEA data"""
-        print(f"NASA CEA'dan gerçek zamanlı yanma verileri çekiliyor... (O/F={self.OF:.2f}, P={self.P_c:.1f} bar)")
+        print(f"Fetching real-time combustion data from NASA CEA... (O/F={self.OF:.2f}, P={self.P_c:.1f} bar)")
         
-        # Gerçek zamanlı NASA CEA verisi çek
+        # Fetch real-time NASA CEA data
         cea_data = data_fetcher.fetch_cea_combustion_data(
             fuel_type=self.fuel_type,
             oxidizer_type='n2o', 
@@ -303,46 +303,46 @@ class HybridRocketEngine:
         # Veri validasyonu
         is_valid, msg = data_fetcher.validate_data(cea_data, 'combustion')
         if not is_valid:
-            warnings.warn(f"NASA CEA verisi geçersiz: {msg}")
-            print(f"UYARI - Veri geçersizliği: {msg}")
+            warnings.warn(f"NASA CEA data invalid: {msg}")
+            print(f"WARNING - Data invalidity: {msg}")
         
-        # Alınan verilerden termodinamik özellikler
+        # Thermodynamic properties from received data
         gamma_eff = cea_data.get('gamma', 1.22)
         R_eff = cea_data.get('gas_constant', 385)  # J/kg·K
         T_c_eff = cea_data.get('temperature', 3100)  # K
         
-        # Veri kaynağını logla
+        # Log data source
         data_source = cea_data.get('data_source', 'nasa_cea')
-        print(f"Veri kaynağı: {data_source.upper()}")
+        print(f"Data source: {data_source.upper()}")
         print(f"   γ = {gamma_eff:.3f}")
         print(f"   R = {R_eff:.0f} J/kg·K") 
         print(f"   Tc = {T_c_eff:.0f} K")
         
-        # Basınç düzeltmesi (düşük basınçta disosiyasyon etkisi)
+        # Pressure correction (dissociation effect at low pressure)
         if self.P_c < 10:
             pressure_factor = 0.95 - 0.02 * (10 - self.P_c) / 10
-            print(f"UYARI - Düşük basınç düzeltmesi uygulandı: {pressure_factor:.3f}")
+            print(f"WARNING - Low pressure correction applied: {pressure_factor:.3f}")
         else:
             pressure_factor = 1.0
         
-        # NASA CEA standart C* formülü - DÜZELTILMIŞ
+        # NASA CEA standard C* formula - CORRECTED
         # C* = sqrt(gamma * R * Tc) / (gamma * sqrt((2/(gamma+1))^((gamma+1)/(gamma-1))))
         numerator = np.sqrt(gamma_eff * R_eff * T_c_eff)
         denominator = gamma_eff * np.sqrt((2 / (gamma_eff + 1))**((gamma_eff + 1) / (gamma_eff - 1)))
         
         c_star = (numerator / denominator) * pressure_factor
         
-        # Gerçek değerleri sınıf değişkenlerine aktar
+        # Transfer real values to class variables
         self.gamma = gamma_eff
         self.R = R_eff
         self.T_c = T_c_eff
         
         # C* validasyonu
         if not (1200 < c_star < 1800):
-            warnings.warn(f"Anormal C* değeri: {c_star:.0f} m/s")
-            print(f"UYARI - C* = {c_star:.0f} m/s (normal: 1400-1600)")
+            warnings.warn(f"Abnormal C* value: {c_star:.0f} m/s")
+            print(f"WARNING - C* = {c_star:.0f} m/s (normal: 1400-1600)")
         else:
-            print(f"OK - C* = {c_star:.0f} m/s (doğrulandı)")
+            print(f"OK - C* = {c_star:.0f} m/s (validated)")
         
         return c_star
     
@@ -351,24 +351,24 @@ class HybridRocketEngine:
         pressure_ratio = self.P_c / self.P_a  # Pc/Pe
         gamma = self.gamma
         
-        # Doğru isentropik formül: Pe = Pa için optimum genişleme
-        # Mach sayısını basınç oranından hesapla: Pc/Pe = [1 + (γ-1)/2 * Me²]^(γ/(γ-1))
-        # Sonra alan oranını: ε = (1/Me) * [(2/(γ+1)) * (1 + (γ-1)/2 * Me²)]^((γ+1)/(2*(γ-1)))
+        # Correct isentropic formula: optimal expansion for Pe = Pa
+        # Calculate Mach number from pressure ratio: Pc/Pe = [1 + (γ-1)/2 * Me²]^(γ/(γ-1))
+        # Then area ratio: ε = (1/Me) * [(2/(γ+1)) * (1 + (γ-1)/2 * Me²)]^((γ+1)/(2*(γ-1)))
         
-        # İteratif çözüm: Mach sayısını bul
+        # Iterative solution: find Mach number
         from scipy.optimize import fsolve
         
         def pressure_mach_relation(M):
             return (1 + (gamma - 1) / 2 * M**2)**(gamma / (gamma - 1)) - pressure_ratio
         
-        # İlk tahmin: yüksek Mach sayısı
+        # Initial guess: high Mach number
         M_exit_guess = np.sqrt(2 / (gamma - 1) * (pressure_ratio**((gamma - 1) / gamma) - 1))
         M_exit = fsolve(pressure_mach_relation, max(1.1, M_exit_guess))[0]
         
-        # Alan oranını hesapla (doğru isentropik formül)
+        # Calculate area ratio (correct isentropic formula)
         epsilon = (1 / M_exit) * ((2 / (gamma + 1)) * (1 + (gamma - 1) / 2 * M_exit**2))**((gamma + 1) / (2 * (gamma - 1)))
         
-        # Fiziksel sınırlar: minimum 4, maksimum 250 (vakum nozulları için)
+        # Physical limits: minimum 4, maximum 250 (for vacuum nozzles)
         return max(4, min(epsilon, 250))
     
     def _calculate_thrust_coefficient(self):
@@ -378,35 +378,35 @@ class HybridRocketEngine:
         elif self.nozzle_type == 'parabolic':
             lambda_eff = 0.975  # Parabolik nozzle verimi
         else:
-            lambda_eff = 0.955  # Konik nozzle verimi (15° half-angle için)
+            lambda_eff = 0.955  # Conical nozzle efficiency (for 15° half-angle)
         
-        # Doğru CF formülü (Sutton, Rocket Propulsion Elements)
+        # Correct CF formula (Sutton, Rocket Propulsion Elements)
         gamma = self.gamma
         
-        # Perfect expansion için çıkış basıncı
+        # Exit pressure for perfect expansion
         Pe = self.P_a  # Perfect expansion assumption
         
-        # Momentum terimi - doğru CF formülü
+        # Momentum term - correct CF formula
         gamma_term = 2 * gamma**2 / (gamma - 1)
         isentropic_term = (2 / (gamma + 1))**((gamma + 1) / (gamma - 1))
         pressure_term = 1 - (Pe / self.P_c)**((gamma - 1) / gamma)
         
         CF_momentum = lambda_eff * np.sqrt(gamma_term * isentropic_term * pressure_term)
         
-        # Basınç terimi (birim tutarlılığı sağlandı)
-        CF_pressure = (Pe - self.P_a) * self.epsilon / self.P_c  # Tüm basınçlar bar cinsinde
+        # Pressure term (unit consistency ensured)
+        CF_pressure = (Pe - self.P_a) * self.epsilon / self.P_c  # All pressures in bar
         
         return CF_momentum + CF_pressure
     
     def _design_fuel_grain(self):
         """Design fuel grain geometry using correct hybrid rocket equations"""
-        # Daha hassas oksitleyici akı hesabı - basınca bağlı enjeksiyon hızı
+        # More precise oxidizer flow calculation - pressure-dependent injection velocity
         # Typical range: 50-500 kg/m²·s for N2O/HTPB
-        # P_injection = P_c + delta_P (basınç düşümü hesabı)
-        delta_P = 0.2 * self.P_c  # %20 basınç düşümü (tipik değer)
+        # P_injection = P_c + delta_P (pressure drop calculation)
+        delta_P = 0.2 * self.P_c  # 20% pressure drop (typical value)
         injection_velocity = np.sqrt(2 * delta_P * 1e5 / 1220)  # Bernoulli denklemi
         rho_ox = 1220 if self.OF > 1 else 1.8  # kg/m³ (liquid N2O vs gaseous)
-        G_ox_initial = rho_ox * injection_velocity  # Daha gerçekçi hesaplama
+        G_ox_initial = rho_ox * injection_velocity  # More realistic calculation
         
         # Initial port area from oxidizer mass flow
         A_port_initial = self.mdot_ox / G_ox_initial
@@ -418,12 +418,12 @@ class HybridRocketEngine:
         self.r_dot_initial = self.a * G_ox_initial**self.n
         self.r_dot = self.r_dot_initial  # For compatibility
         
-        # Port diameter growth - daha doğru hibrit roket formülü
-        # Klasik hibrit roket regresyon denklemi: r_dot = a * G_ox^n
-        # Entegre edilmiş form: r = (2*a*mdot_ox^n * t^(n+1)) / ((n+1) * (rho_f * pi)^n * (D0^(2n) + 4*r*D0^(2n-2)))
+        # Port diameter growth - more accurate hybrid rocket formula
+        # Classical hybrid rocket regression equation: r_dot = a * G_ox^n
+        # Integrated form: r = (2*a*mdot_ox^n * t^(n+1)) / ((n+1) * (rho_f * pi)^n * (D0^(2n) + 4*r*D0^(2n-2)))
         
-        # Sutton & Biblarz Eq. 12-22 kullanarak doğru hesaplama
-        num_steps = 10  # Daha hassas hesaplama için daha fazla adım
+        # Correct calculation using Sutton & Biblarz Eq. 12-22
+        num_steps = 10  # More steps for more precise calculation
         dt = self.t_b / num_steps
         D_port = self.D_port_initial
         

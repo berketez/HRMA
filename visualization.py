@@ -696,9 +696,11 @@ def create_performance_plots(motor_data, injector_data):
     fig = make_subplots(
         rows=2, cols=2,
         subplot_titles=('Mass Flow Rates', 'Pressure Distribution', 
-                       'Regression Rate', 'Injector Performance'),
+                       'Regression Rate & Port Growth', 'Injector Performance'),
         specs=[[{'type': 'bar'}, {'type': 'bar'}],
-               [{'secondary_y': True}, {'type': 'indicator'}]]
+               [{'secondary_y': True}, {'type': 'indicator'}]],
+        vertical_spacing=0.20,
+        horizontal_spacing=0.15
     )
     
     # Mass flow rates
@@ -845,15 +847,15 @@ def create_performance_plots(motor_data, injector_data):
     fig.update_layout(
         title=dict(
             text="Hybrid Rocket Performance Analysis",
-            font=dict(size=20, family='Arial', color='black'),
+            font=dict(size=22, family='Arial', color='black'),
             x=0.5
         ),
-        showlegend=False,
-        height=1000,
-        width=1400,
+        showlegend=True,
+        height=850,
+        width=1300,
         plot_bgcolor='white',
         paper_bgcolor='white',
-        margin=dict(t=100, b=80, l=80, r=80)
+        margin=dict(t=120, b=100, l=100, r=100)
     )
     
     # Update axes

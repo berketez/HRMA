@@ -526,7 +526,8 @@ function displayDesignReport(motorData, injectorData) {
                     <tr><td>Chamber Volume</td><td>${(motorData.chamber_volume * 1e6).toFixed(1)} cm³</td></tr>
                     <tr><td>Initial Port Diameter</td><td>${(motorData.port_diameter_initial * 1000).toFixed(1)} mm</td></tr>
                     <tr><td>Final Port Diameter</td><td>${(motorData.port_diameter_final * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>Regression Rate</td><td>${(motorData.regression_rate * 1000).toFixed(2)} mm/s</td></tr>
+                    <tr><td>Regression Rate</td><td>${motorData.regression_rate ? (motorData.regression_rate * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
+                    <tr><td>Avg Regression Rate</td><td>${motorData.regression_rate_avg ? (motorData.regression_rate_avg * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
                 </tbody>
             </table>
         </div>
@@ -694,6 +695,10 @@ function exportReport() {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+}
+
+function exportRegressionData() {
+    alert('Export regression data functionality is not implemented yet.');
 }
 
 // Advanced Error Handler

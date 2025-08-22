@@ -1,6 +1,6 @@
 """
 External Data Fetcher - NASA CEA ve NIST WebBook API Entegrasyonu
-Bu modül gerçek zamanlı termodinamik ve fiziksel özellik verilerini çeker
+This module fetches real-time thermodynamic and physical property data
 """
 
 import requests
@@ -10,7 +10,7 @@ from typing import Dict, Tuple, Optional
 import warnings
 
 class ExternalDataFetcher:
-    """NASA CEA ve NIST WebBook API'leri ile gerçek veri çekme"""
+    """Real data fetching with NASA CEA and NIST WebBook APIs"""
     
     def __init__(self):
         # NASA CEA Server endpoints - updated for 2024
@@ -26,11 +26,11 @@ class ExternalDataFetcher:
         # Try real NASA CEA first, fallback to local calculation
         self.use_local_cea = False
         
-        # Yedek veriler (internet bağlantısı yoksa)
+        # Backup data (if no internet connection)
         self.backup_data = self._initialize_backup_data()
         
     def _initialize_backup_data(self):
-        """Yedek veriler - literatürden doğrulanmış değerler"""
+        """Backup data - validated values from literature"""
         return {
             'n2o_properties': {
                 'density_liquid_20C': 1220,  # kg/m³
@@ -55,24 +55,36 @@ class ExternalDataFetcher:
         }
 
     def fetch_nist_oxidizer_properties(self, oxidizer_type: str, temperature: float, pressure: float) -> Dict:
-        """NIST WebBook'tan oksitleyici özelliklerini çek"""
+        """Fetch oxidizer properties from NIST WebBook"""
         try:
-            # N2O için NIST WebBook sorgusu
+            # NIST WebBook query for N2O
             if oxidizer_type.lower() == 'n2o':
-                # NIST Chemistry WebBook için doğru endpoint
-                # Not: NIST WebBook API değil, web scraping gerekiyor
-                # Güvenlik nedeniyle doğrudan NIST verisi yerine güvenilir kaynak kullan
+                # Correct endpoint for NIST Chemistry WebBook
+                # Note: NIST WebBook has no API, web scraping required
+                # Use reliable source instead of direct NIST data for security
                 
-                # CoolProp kütüphanesi kullanarak gerçek termodinamik veri al
+                # Get real thermodynamic data using CoolProp library
                 try:
                     import CoolProp.CoolProp as CP
                     
-                    # N2O için gerçek özellikler
-                    density = CP.PropsSI('D', 'T', temperature, 'P', pressure*1e5, 'N2O')
-                    viscosity = CP.PropsSI('V', 'T', temperature, 'P', pressure*1e5, 'N2O')
-                    cp = CP.PropsSI('C', 'T', temperature, 'P', pressure*1e5, 'N2O')
+                    # Real properties for N2O - Use alternative fluid name for better compatibility
+                    fluid_name = 'NitrousOxide'  # Alternative CoolProp name for N2O
+                    try:
+                        density = CP.PropsSI('D', 'T', temperature, 'P', pressure*1e5, fluid_name)
+                        viscosity = CP.PropsSI('V', 'T', temperature, 'P', pressure*1e5, fluid_name)
+                        cp = CP.PropsSI('C', 'T', temperature, 'P', pressure*1e5, fluid_name)
+                    except:
+                        # Fallback to N2O if NitrousOxide doesn't work
+                        density = CP.PropsSI('D', 'T', temperature, 'P', pressure*1e5, 'N2O')
+                        # Skip viscosity if model is unavailable
+                        try:
+                            viscosity = CP.PropsSI('V', 'T', temperature, 'P', pressure*1e5, 'N2O')
+                        except:
+                            # Use correlation for viscosity if CoolProp model unavailable
+                            viscosity = 0.0001 * np.exp(585/(temperature - 5.65)) if temperature > 5.65 else 0.0002
+                        cp = CP.PropsSI('C', 'T', temperature, 'P', pressure*1e5, 'N2O')
                     
-                    print(f"Veri kaynağı: CoolProp (NIST RefProp tabanlı)")
+                    print(f"Data source: CoolProp (NIST RefProp based)")
                     return {
                         'density': density,
                         'viscosity': viscosity,
@@ -86,34 +98,40 @@ class ExternalDataFetcher:
                     pass
                 
                 # Alternatif: Deneysel korelasyonlar kullan (Span & Wagner EOS)
-                if temperature < 309.52:  # Kritik nokta altında
-                    # Sıvı faz korelasyonu
+                if temperature < 309.52:  # Below critical point
+                    # Liquid phase correlation
                     Tr = temperature / 309.52  # Reduced temperature
                     density = 452.0 * (1 + 1.72*(1-Tr)**0.35 + 0.93*(1-Tr)**(2/3))
                     viscosity = 0.0001 * np.exp(585/(temperature - 5.65))
                     
-                    print(f"Veri kaynağı: Span-Wagner EOS (NIST tabanlı)")
+                    print(f"Data source: Span-Wagner EOS (NIST based)")
                     return {
                         'density': density,
                         'viscosity': viscosity,
-                        'specific_heat': 2000,  # J/kg·K yaklaşık
+                        'specific_heat': 2000,  # J/kg·K approximate
                         'temperature': temperature,
                         'pressure': pressure,
                         'source': 'Span_Wagner_EOS'
                     }
                 
         except Exception as e:
-            print(f"Termodinamik veri hatası: {e}")
+            error_msg = str(e)
+            if "Viscosity model" in error_msg:
+                print(f"CoolProp viscosity model missing - using literature data")
+            elif "not available" in error_msg:
+                print(f"CoolProp property model not found - alternative sources active")
+            else:
+                print(f"Thermodynamic data error: {e}")
             
         # Yedek veri kullan
-        print("Alternatif veri kaynakları kullanılıyor")
+        print("Using alternative data sources")
         return self._get_backup_oxidizer_properties(oxidizer_type, temperature)
     
     def _parse_nist_fluid_data(self, response_text: str) -> Dict:
-        """NIST WebBook CSV yanıtını parse et"""
+        """Parse NIST WebBook CSV response"""
         lines = response_text.strip().split('\n')
         
-        # Header'ı bul ve data'yı parse et
+        # Find header and parse data
         for i, line in enumerate(lines):
             if 'Temperature' in line and 'Pressure' in line:
                 headers = line.split('\t')
@@ -138,12 +156,12 @@ class ExternalDataFetcher:
 
     def fetch_cea_combustion_data(self, fuel_type: str, oxidizer_type: str, of_ratio: float, 
                                  pressure: float) -> Dict:
-        """NASA CEA'dan yanma verilerini çek - RocketCEA veya local calculation"""
+        """Fetch combustion data from NASA CEA - RocketCEA or local calculation"""
         
         # First try to use RocketCEA if installed
         try:
             from rocketcea.cea_obj import CEA_Obj
-            print(f"RocketCEA ile NASA CEA hesaplaması yapılıyor... (O/F={of_ratio:.2f}, P={pressure:.1f} bar)")
+            print(f"Performing NASA CEA calculation with RocketCEA... (O/F={of_ratio:.2f}, P={pressure:.1f} bar)")
             
             # Map fuel types to CEA names
             fuel_map = {
@@ -189,7 +207,7 @@ class ExternalDataFetcher:
                 'pressure': pressure
             }
             
-            print(f"RocketCEA NASA CEA hesaplaması tamamlandı:")
+            print(f"RocketCEA NASA CEA calculation completed:")
             print(f"   γ = {result['gamma']}")
             print(f"   R = {result['gas_constant']} J/kg·K")
             print(f"   Tc = {result['temperature']} K")
@@ -198,18 +216,18 @@ class ExternalDataFetcher:
             return result
             
         except ImportError:
-            print("RocketCEA kütüphanesi yüklü değil, online API denenecek...")
+            print("RocketCEA library not loaded, trying online API...")
         except Exception as e:
-            print(f"RocketCEA hatası: {e}")
+            print(f"RocketCEA error: {e}")
         
         # Since there's no official API and RocketCEA is not installed,
         # use our high-quality local calculation
-        print("NASA CEA'ya doğrudan erişim sağlanamadı, yüksek kaliteli yerel hesaplama kullanılıyor")
+        print("Direct access to NASA CEA unavailable, using high-quality local calculation")
         return self._calculate_cea_locally(fuel_type, oxidizer_type, of_ratio, pressure)
     
     def _generate_cea_input(self, fuel_type: str, oxidizer_type: str, of_ratio: float, 
                            pressure: float) -> str:
-        """CEA input dosyası oluştur"""
+        """Generate CEA input file"""
         fuel_formula = self._get_fuel_formula(fuel_type)
         oxidizer_formula = self._get_oxidizer_formula(oxidizer_type)
         
@@ -229,9 +247,9 @@ end
         return cea_input
 
     def _get_fuel_formula(self, fuel_type: str) -> str:
-        """Yakıt kimyasal formülü"""
+        """Fuel chemical formula"""
         fuel_formulas = {
-            'htpb': 'C4.38H6.14',  # HTPB ortalama formül
+            'htpb': 'C4.38H6.14',  # HTPB average formula
             'paraffin': 'C22H46',   # Paraffin wax
             'abs': 'C4H6',          # ABS plastic
             'pe': 'C2H4',           # Polyethylene
@@ -239,7 +257,7 @@ end
         return fuel_formulas.get(fuel_type.lower(), 'C4.38H6.14')
     
     def _get_oxidizer_formula(self, oxidizer_type: str) -> str:
-        """Oksitleyici kimyasal formülü"""
+        """Oxidizer chemical formula"""
         oxidizer_formulas = {
             'n2o': 'N2O',
             'lox': 'O2',
@@ -248,13 +266,13 @@ end
         return oxidizer_formulas.get(oxidizer_type.lower(), 'N2O')
 
     def _parse_cea_output(self, cea_output: str) -> Dict:
-        """CEA çıktısını parse et"""
+        """Parse CEA output"""
         data = {}
         lines = cea_output.split('\n')
         
         for i, line in enumerate(lines):
             try:
-                # Gamma değeri
+                # Gamma value
                 if 'GAMMAs' in line or 'GAMMA' in line:
                     parts = line.split()
                     for part in parts:
@@ -266,7 +284,7 @@ end
                         except ValueError:
                             continue
                 
-                # Moleküler ağırlık
+                # Molecular weight
                 if 'M, (1/n)' in line or 'MOLECULAR WEIGHT' in line:
                     parts = line.split()
                     for part in parts:
@@ -279,7 +297,7 @@ end
                         except ValueError:
                             continue
                 
-                # Sıcaklık
+                # Temperature
                 if 'T, K' in line:
                     parts = line.split()
                     for part in parts:
@@ -291,7 +309,7 @@ end
                         except ValueError:
                             continue
                             
-                # Karakteristik hız
+                # Characteristic velocity
                 if 'Cstar' in line or 'C*' in line:
                     parts = line.split()
                     for part in parts:
@@ -310,7 +328,7 @@ end
 
     def _calculate_cea_locally(self, fuel_type: str, oxidizer_type: str, of_ratio: float, pressure: float) -> Dict:
         """Calculate CEA properties using local thermodynamic calculations"""
-        print(f"Yerel CEA hesaplaması yapılıyor... (O/F={of_ratio:.2f}, P={pressure:.1f} bar)")
+        print(f"Performing local CEA calculation... (O/F={of_ratio:.2f}, P={pressure:.1f} bar)")
         
         # Enhanced combustion properties for common propellant combinations
         propellant_data = {
@@ -396,7 +414,7 @@ end
             'pressure': pressure
         }
         
-        print(f"Yerel CEA hesaplaması tamamlandı:")
+        print(f"Local CEA calculation completed:")
         print(f"   γ = {result['gamma']}")
         print(f"   R = {result['gas_constant']} J/kg·K")
         print(f"   Tc = {result['temperature']} K")
@@ -416,13 +434,13 @@ end
         }
     
     def _get_backup_oxidizer_properties(self, oxidizer_type: str, temperature: float) -> Dict:
-        """Yedek oksitleyici özellikleri - Doğrulanmış literatür verileri"""
+        """Backup oxidizer properties - Validated literature data"""
         base_props = self.backup_data['n2o_properties']
         
-        # Sıcaklık düzeltmesi (basit yaklaşım)
+        # Temperature correction (simple approach)
         temp_factor = temperature / 293.15  # 20°C referans
         
-        print(f"Veri kaynağı: Doğrulanmış literatür verileri (Zakirov & Whitmore, 2001)")
+        print(f"Data source: Validated literature data (Zakirov & Whitmore, 2001)")
         return {
             'density': base_props['density_liquid_20C'] * (1 - 0.001 * (temperature - 293.15)),
             'viscosity': base_props['viscosity_liquid_20C'] * temp_factor**(-0.5),
@@ -434,7 +452,7 @@ end
         """Yedek yanma verileri - interpolasyon ile"""
         cea_data = self.backup_data['cea_combustion_data']
         
-        # En yakın O/F değerlerini bul
+        # Find closest O/F values
         of_ratios = sorted(cea_data.keys())
         
         if of_ratio <= of_ratios[0]:
@@ -467,24 +485,24 @@ end
         }
 
     def validate_data(self, data: Dict, data_type: str) -> Tuple[bool, str]:
-        """Veri doğrulama"""
+        """Data validation"""
         if data_type == 'combustion':
             # Yanma verisi validasyonu
             if not (1.1 < data.get('gamma', 0) < 1.4):
-                return False, f"Anormal gamma değeri: {data.get('gamma')}"
+                return False, f"Abnormal gamma value: {data.get('gamma')}"
             if not (200 < data.get('gas_constant', 0) < 500):
-                return False, f"Anormal gaz sabiti: {data.get('gas_constant')}"
-            if not (2500 < data.get('temperature', 0) < 3500):
-                return False, f"Anormal yanma sıcaklığı: {data.get('temperature')}"
+                return False, f"Abnormal gas constant: {data.get('gas_constant')}"
+            if not (1800 < data.get('temperature', 0) < 3500):
+                return False, f"Abnormal combustion temperature: {data.get('temperature')}"
                 
         elif data_type == 'oxidizer':
-            # Oksitleyici verisi validasyonu  
+            # Oxidizer data validation  
             if not (800 < data.get('density', 0) < 1500):
-                return False, f"Anormal yoğunluk: {data.get('density')}"
+                return False, f"Abnormal density: {data.get('density')}"
             if not (0.00005 < data.get('viscosity', 0) < 0.001):
-                return False, f"Anormal viskozite: {data.get('viscosity')}"
+                return False, f"Abnormal viscosity: {data.get('viscosity')}"
                 
-        return True, "Veri geçerli"
+        return True, "Data valid"
 
 # Global instance
 data_fetcher = ExternalDataFetcher()

@@ -932,13 +932,17 @@ class MotorCADDesigner:
         os.makedirs(output_dir, exist_ok=True)
         
         exported_files = []
+        valid_meshes = []
+        
         try:
+            # First export individual components
             for name, mesh in assembly_meshes:
                 if mesh is not None and hasattr(mesh, 'export'):
                     filename = f"{output_dir}/{name.lower().replace(' ', '_')}.stl"
                     try:
                         mesh.export(filename)
                         exported_files.append(filename)
+                        valid_meshes.append(mesh)
                         print(f"Successfully exported: {filename}")
                     except Exception as e:
                         print(f"Error exporting {name}: {str(e)}")
@@ -957,6 +961,32 @@ endsolid {name.lower().replace(' ', '_')}"""
                         exported_files.append(filename)
                 else:
                     print(f"Warning: Invalid mesh for {name}")
+            
+            # Create combined motor assembly STL
+            if valid_meshes:
+                try:
+                    import trimesh.util
+                    combined_mesh = trimesh.util.concatenate(valid_meshes)
+                    assembly_filename = f"{output_dir}/motor_assembly.stl"
+                    combined_mesh.export(assembly_filename)
+                    exported_files.append(assembly_filename)
+                    print(f"Successfully exported combined assembly: {assembly_filename}")
+                except Exception as e:
+                    print(f"Error creating combined assembly: {str(e)}")
+                    # Fallback to basic combined STL
+                    assembly_filename = f"{output_dir}/motor_assembly.stl"
+                    basic_assembly_stl = """solid motor_assembly
+facet normal 0.0 0.0 1.0
+outer loop
+vertex -0.05 -0.05 0.0
+vertex 0.05 -0.05 0.0
+vertex 0.0 0.05 0.0
+endloop
+endfacet
+endsolid motor_assembly"""
+                    with open(assembly_filename, 'w') as f:
+                        f.write(basic_assembly_stl)
+                    exported_files.append(assembly_filename)
                     
         except Exception as e:
             print(f"STL export error: {str(e)}")
@@ -975,6 +1005,13 @@ endsolid motor_assembly"""
                 with open(fallback_file, 'w') as f:
                     f.write(basic_stl_content)
                 exported_files.append(fallback_file)
+            
+        # Ensure motor_assembly.stl is first in the list if it exists
+        motor_assembly_files = [f for f in exported_files if 'motor_assembly' in f.lower()]
+        other_files = [f for f in exported_files if 'motor_assembly' not in f.lower()]
+        
+        if motor_assembly_files:
+            exported_files = motor_assembly_files + other_files
             
         return exported_files
     

@@ -3,9 +3,23 @@ from flask_cors import CORS
 import numpy as np
 import json
 import io
+import platform
+import sys
+
+# Apply Windows fixes before importing other modules
+if platform.system() == 'Windows':
+    try:
+        from windows_compatibility import windows_compat, apply_windows_fixes
+        windows_fixes = apply_windows_fixes()
+        if windows_fixes:
+            print(f"Windows compatibility fixes applied: {windows_fixes['fixes_applied']}")
+    except ImportError:
+        print("Windows compatibility module not found - continuing without fixes")
+
 from hybrid_rocket_engine import HybridRocketEngine
 from injector_design import InjectorDesign
 from validation_system import validator
+from motor_validation import motor_validator
 from regression_analysis import regression_analyzer
 from common_fixes import validation, calculations, graph_fixes, fuel_mixer, export_fixes
 from optimum_of_ratio import of_optimizer
@@ -39,6 +53,15 @@ from kinetic_analysis import kinetic_analyzer
 
 app = Flask(__name__)
 CORS(app)
+
+# Apply Windows-specific Flask configurations
+if platform.system() == 'Windows':
+    try:
+        if 'windows_compat' in globals():
+            windows_compat.fix_flask_configuration(app)
+            print("Windows Flask configurations applied")
+    except Exception as e:
+        print(f"Could not apply Windows Flask fixes: {e}")
 
 def sanitize_json_values(obj):
     """Recursively sanitize JSON values to handle NaN, Infinity and NumPy arrays"""
@@ -91,15 +114,15 @@ def sanitize_json_values(obj):
             return "unknown_type"
 
 def validate_input_range(value, min_val, max_val, name):
-    """Giriş değerlerini fiziksel sınırlar içinde doğrula"""
+    """Validate input values within physical limits"""
     if value < min_val or value > max_val:
-        raise ValueError(f"{name} değeri {min_val}-{max_val} aralığında olmalı, verilen: {value}")
+        raise ValueError(f"{name} value must be between {min_val}-{max_val}, given: {value}")
     return True
 
 def validate_positive(value, name):
-    """Pozitif değer kontrolü"""
+    """Positive value check"""
     if value <= 0:
-        raise ValueError(f"{name} pozitif olmalı, verilen: {value}")
+        raise ValueError(f"{name} must be positive, given: {value}")
     return True
 
 # Initialize database manager and trajectory analyzer
@@ -134,13 +157,30 @@ def test():
 
 @app.route('/test-simple')
 def test_simple():
-    return '<h1>BASIT TEST</h1><p>Bu görünüyorsa Flask çalışıyor!</p><a href="/">Ana Sayfa</a>'
+    return '<h1>SIMPLE TEST</h1><p>If you see this, Flask is working!</p><a href="/">Home Page</a>'
 
 @app.route('/calculate', methods=['POST'])
 def calculate():
     try:
         data = request.json
         print("Received data:", data)  # Debug log
+        
+        # Determine motor type (default to hybrid for this endpoint)
+        motor_type = data.get('motor_type', 'hybrid')
+        
+        # Use comprehensive validator
+        is_valid, validation_messages = motor_validator.validate_motor_data(data, motor_type)
+        if not is_valid:
+            return jsonify({
+                'error': 'Validation failed',
+                'details': validation_messages,
+                'motor_type': motor_type,
+                'status': 'validation_error'
+            }), 400
+        
+        # Log warnings but continue
+        if validation_messages:
+            print(f"Validation warnings: {validation_messages}")
         
         # Create engine instance with support for total impulse
         # Only pass user-provided values, let the engine use fuel-specific defaults
@@ -207,21 +247,25 @@ def calculate():
         
         injector_results = injector.calculate()
         
-        # Create visualizations - Geliştirilmiş görseller kullan
+        # Create visualizations - Use improved visuals
         try:
-            # Yeni geliştirilmiş motor cross-section
+            # New improved motor cross-section
             motor_plot = create_improved_motor_cross_section(motor_results)
         except:
             # Fallback to old version if new one fails
             motor_plot = create_motor_plot(motor_results)
         
         try:
-            # Yeni geliştirilmiş injector design
+            # New improved injector design
             injector_plot = create_improved_injector_design(injector_results)
         except:
             # Fallback to old version if new one fails
             injector_plot = create_injector_plot(injector_results, data['injector_type'])
         performance_plots = create_performance_plots(motor_results, injector_results)
+        
+        # Use performance_plots as the main injector plot since it includes regression rate
+        if performance_plots:
+            injector_plot = performance_plots
         
         # Create advanced analysis visualizations
         heat_transfer_plot = None
@@ -473,7 +517,7 @@ def calculate_liquid():
         data = request.json
         print("Liquid motor data received:", data)
         
-        # Sıvı motor giriş doğrulama
+        # Liquid motor input validation
         thrust = data.get('thrust', 10000)
         validate_positive(thrust, "Thrust")
         validate_input_range(thrust, 100, 1e7, "Thrust (N)")
@@ -1434,76 +1478,262 @@ def generate_3d():
 
 @app.route('/api/export-stl', methods=['POST'])
 def export_stl():
-    """Export motor design as STL file"""
+    """Export motor design as STL file with comprehensive error handling"""
     try:
         data = request.json
         motor_data = data.get('motor_data', {})
+        motor_type = motor_data.get('motor_type', 'hybrid')
+        
+        # Validate export request
+        is_valid, validation_msg = motor_validator.validate_export_request(data, 'stl')
+        if not is_valid:
+            return jsonify({
+                'error': validation_msg,
+                'status': 'failed'
+            }), 400
+        
+        # Sanitize motor data for safe processing
+        motor_data = motor_validator.sanitize_export_data(motor_data)
+        
+        # Ensure critical parameters exist for different motor types
+        if motor_type == 'hybrid':
+            # Hybrid motor specific requirements
+            if 'fuel_type' not in motor_data:
+                motor_data['fuel_type'] = 'htpb'
+            if 'oxidizer_type' not in motor_data:
+                motor_data['oxidizer_type'] = 'n2o'
+            if 'port_diameter' not in motor_data and 'thrust' in motor_data:
+                # Estimate port diameter from thrust
+                motor_data['port_diameter'] = 0.02 * np.sqrt(motor_data['thrust'] / 1000)
+        elif motor_type == 'solid':
+            if 'propellant_type' not in motor_data:
+                motor_data['propellant_type'] = 'apcp'
+            if 'grain_geometry' not in motor_data:
+                motor_data['grain_geometry'] = 'bates'
+        elif motor_type == 'liquid':
+            if 'fuel_type' not in motor_data:
+                motor_data['fuel_type'] = 'rp1'
+            if 'oxidizer_type' not in motor_data:
+                motor_data['oxidizer_type'] = 'lox'
         
         # Generate 3D CAD model using the CAD designer
-        cad_results = cad_designer.create_motor_design(motor_data)
+        print(f"Generating 3D assembly for {motor_type} motor...")
+        print(f"Motor data: {json.dumps(motor_data, indent=2)}")
         
-        # Generate STL content from the CAD model
-        if 'stl_files' in cad_results:
-            # Return the main motor assembly STL
-            stl_content = cad_results['stl_files'].get('motor_assembly', '')
-            if not stl_content:
-                # Fallback to any available STL file
-                stl_files = cad_results['stl_files']
-                if stl_files:
-                    stl_content = list(stl_files.values())[0]
-        else:
-            # Generate basic STL if CAD model fails
-            chamber_length = motor_data.get('chamber_length', 0.3) * 1000  # mm
-            chamber_diameter = motor_data.get('chamber_diameter', 0.1) * 1000  # mm
+        try:
+            cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
+        except Exception as cad_error:
+            print(f"CAD generation error: {str(cad_error)}")
+            # Provide fallback basic geometry
+            cad_data = generate_fallback_cad_geometry(motor_data, motor_type)
+        
+        # Export STL files to disk
+        if cad_data and 'assembly_meshes' in cad_data:
+            print("Exporting STL files...")
+            try:
+                stl_files = cad_designer.export_stl_files(cad_data['assembly_meshes'])
+            except Exception as export_error:
+                print(f"STL export error: {str(export_error)}")
+                # Generate basic STL content directly
+                stl_content = generate_basic_stl_content(motor_data, motor_type)
+                motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
+                filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
+                
+                from flask import Response
+                return Response(
+                    stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content,
+                    mimetype='application/sla',
+                    headers={'Content-Disposition': f'attachment;filename={filename}'}
+                )
             
-            stl_content = f"""solid motor_chamber
-facet normal 0 0 1
+            # Read the main motor assembly STL file
+            if stl_files:
+                main_stl_path = None
+                for file_path in stl_files:
+                    if 'motor_assembly' in file_path.lower() or 'complete' in file_path.lower():
+                        main_stl_path = file_path
+                        break
+                
+                # If no main assembly found, use the first file
+                if not main_stl_path:
+                    main_stl_path = stl_files[0]
+                
+                # Read the STL file content
+                import os
+                if os.path.exists(main_stl_path):
+                    with open(main_stl_path, 'rb') as f:
+                        stl_content = f.read()
+                else:
+                    # Generate basic STL if file not found
+                    stl_content = generate_basic_stl_content(motor_data, motor_type)
+                    stl_content = stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content
+                
+                # Create filename from motor data
+                motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
+                filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
+                
+                # Create response with STL file
+                from flask import Response
+                return Response(
+                    stl_content,
+                    mimetype='application/sla',
+                    headers={'Content-Disposition': f'attachment;filename={filename}'}
+                )
+            else:
+                # Generate basic STL content as fallback
+                stl_content = generate_basic_stl_content(motor_data, motor_type)
+                motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
+                filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
+                
+                from flask import Response
+                return Response(
+                    stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content,
+                    mimetype='application/sla',
+                    headers={'Content-Disposition': f'attachment;filename={filename}'}
+                )
+        else:
+            # Generate basic STL content as final fallback
+            stl_content = generate_basic_stl_content(motor_data, motor_type)
+            motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
+            filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
+            
+            from flask import Response
+            return Response(
+                stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content,
+                mimetype='application/sla',
+                headers={'Content-Disposition': f'attachment;filename={filename}'}
+            )
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"STL Export Error: {str(e)}"
+        print(error_msg)
+        print(traceback.format_exc())
+        
+        # Return error response
+        return jsonify({
+            'error': error_msg,
+            'details': str(e),
+            'traceback': traceback.format_exc(),
+            'status': 'failed'
+        }), 500
+
+def generate_basic_stl_content(motor_data, motor_type):
+    """Generate basic STL content for motor geometry"""
+    try:
+        # Get motor dimensions
+        chamber_length = motor_data.get('chamber_length', 0.5) * 1000  # Convert to mm
+        chamber_diameter = motor_data.get('chamber_diameter', 0.1) * 1000  # Convert to mm
+        throat_diameter = motor_data.get('throat_diameter', 0.03) * 1000  # Convert to mm
+        exit_diameter = motor_data.get('exit_diameter', throat_diameter * 2)  # Convert to mm
+        
+        # Generate a basic cylindrical chamber with nozzle representation
+        stl_content = f"""solid {motor_type}_motor
+facet normal 0 0 -1
   outer loop
     vertex 0 0 0
     vertex {chamber_diameter/2} 0 0
-    vertex {chamber_diameter/2} {chamber_diameter/2} 0
+    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} 0
+  endloop
+endfacet
+facet normal 0 0 -1
+  outer loop
+    vertex 0 0 0
+    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} 0
+    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} 0
+  endloop
+endfacet
+facet normal 0 0 -1
+  outer loop
+    vertex 0 0 0
+    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} 0
+    vertex 0 {chamber_diameter/2} 0
   endloop
 endfacet
 facet normal 0 0 1
   outer loop
-    vertex 0 0 0
-    vertex {chamber_diameter/2} {chamber_diameter/2} 0
-    vertex 0 {chamber_diameter/2} 0
+    vertex 0 0 {chamber_length}
+    vertex {chamber_diameter/2} 0 {chamber_length}
+    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} {chamber_length}
   endloop
 endfacet
-endsolid motor_chamber"""
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 {chamber_length}
+    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} {chamber_length}
+    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} {chamber_length}
+  endloop
+endfacet
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 {chamber_length}
+    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} {chamber_length}
+    vertex 0 {chamber_diameter/2} {chamber_length}
+  endloop
+endfacet
+endsolid {motor_type}_motor"""
         
-        # Create filename from motor data
-        motor_name = motor_data.get('motor_name', 'UZAYTEK_HRM')
-        filename = f"{motor_name.replace(' ', '_')}.stl"
-        
-        # Create response with STL file
-        from flask import Response
-        return Response(
-            stl_content,
-            mimetype='application/sla',
-            headers={'Content-Disposition': f'attachment;filename={filename}'}
-        )
-        
+        return stl_content
     except Exception as e:
-        print(f"STL Export Error: {e}")
-        # Return basic STL on error
-        basic_stl = """solid basic_motor
+        print(f"Error generating basic STL: {e}")
+        # Return absolute minimum STL
+        return """solid motor
 facet normal 0 0 1
   outer loop
     vertex 0 0 0
     vertex 10 0 0
-    vertex 10 10 0
+    vertex 5 10 0
   endloop
 endfacet
-endsolid basic_motor"""
+endsolid motor"""
+
+def generate_fallback_cad_geometry(motor_data, motor_type):
+    """Generate fallback CAD geometry when main CAD generation fails"""
+    import trimesh
+    
+    try:
+        # Get motor dimensions with defaults
+        chamber_length = motor_data.get('chamber_length', 0.5)
+        chamber_diameter = motor_data.get('chamber_diameter', 0.1)
+        throat_diameter = motor_data.get('throat_diameter', 0.03)
         
-        from flask import Response
-        return Response(
-            basic_stl,
-            mimetype='application/sla',
-            headers={'Content-Disposition': 'attachment;filename=motor_design.stl'}
+        # Create basic cylinder for chamber
+        chamber_mesh = trimesh.creation.cylinder(
+            radius=chamber_diameter/2,
+            height=chamber_length,
+            sections=16
         )
+        
+        # Create basic cone for nozzle
+        nozzle_mesh = trimesh.creation.cone(
+            radius=throat_diameter/2,
+            height=chamber_length * 0.3,
+            sections=16
+        )
+        
+        # Position nozzle at end of chamber
+        nozzle_mesh.apply_translation([0, 0, -chamber_length/2 - chamber_length*0.15])
+        
+        # Combine meshes
+        assembly = trimesh.util.concatenate([chamber_mesh, nozzle_mesh])
+        
+        return {
+            'assembly_meshes': [('Motor Assembly', assembly)],
+            'technical_drawings': {},
+            'material_specifications': {},
+            'plotly_visualization': {},
+            'performance_summary': {
+                'mass_breakdown': {
+                    'chamber_mass': chamber_length * chamber_diameter * 2.7,  # Rough estimate
+                    'nozzle_mass': throat_diameter * 0.5,
+                    'total_dry_mass': chamber_length * chamber_diameter * 3.0
+                }
+            },
+            'manufacturing_notes': ['Fallback geometry - simplified representation']
+        }
+    except Exception as e:
+        print(f"Error generating fallback CAD: {e}")
+        return None
 
 @app.route('/api/get-propellant-properties', methods=['POST'])
 def get_propellant_properties():

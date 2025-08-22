@@ -191,7 +191,7 @@ class SolidRocketMotorAnalyzer {
     // Main analysis function
     async performAnalysis() {
         try {
-            document.getElementById('calculate-btn').innerHTML = '<div class="loading"></div> Hesaplanıyor...';
+            document.getElementById('calculate-btn').innerHTML = '<div class="loading"></div> Calculating...';
             
             // Collect all input parameters
             const params = this.collectParameters();
@@ -210,12 +210,12 @@ class SolidRocketMotorAnalyzer {
             // Generate curves
             this.generateCurves(params, results);
             
-            document.getElementById('calculate-btn').innerHTML = 'Analizi Başlat';
+            document.getElementById('calculate-btn').innerHTML = 'Start Analysis';
             
         } catch (error) {
             console.error('Analysis error:', error);
-            alert('Analiz hatası: ' + error.message);
-            document.getElementById('calculate-btn').innerHTML = 'Analizi Başlat';
+            alert('Analysis error: ' + error.message);
+            document.getElementById('calculate-btn').innerHTML = 'Start Analysis';
         }
     }
 
@@ -322,7 +322,7 @@ class SolidRocketMotorAnalyzer {
         }
         
         if (params.propellantMass <= 0) {
-            alert('Yakıt kütlesi hesaplanmalı veya girilmelidir!');
+            alert('Fuel mass must be calculated or entered!');
             return false;
         }
         
@@ -767,7 +767,7 @@ class SolidRocketMotorAnalyzer {
     // Monte Carlo Analysis
     async runMonteCarloAnalysis() {
         try {
-            document.getElementById('monte-carlo-btn').innerHTML = '<div class="loading"></div> Monte Carlo Analizi...';
+            document.getElementById('monte-carlo-btn').innerHTML = '<div class="loading"></div> Monte Carlo Analysis...';
             
             const params = this.collectParameters();
             const results = [];
@@ -800,12 +800,12 @@ class SolidRocketMotorAnalyzer {
             const statistics = this.calculateStatistics(results);
             this.displayMonteCarloResults(statistics);
             
-            document.getElementById('monte-carlo-btn').innerHTML = 'Monte Carlo Analizi';
+            document.getElementById('monte-carlo-btn').innerHTML = 'Monte Carlo Analysis';
             
         } catch (error) {
             console.error('Monte Carlo analysis error:', error);
-            alert('Monte Carlo analiz hatası: ' + error.message);
-            document.getElementById('monte-carlo-btn').innerHTML = 'Monte Carlo Analizi';
+            alert('Monte Carlo analysis error: ' + error.message);
+            document.getElementById('monte-carlo-btn').innerHTML = 'Monte Carlo Analysis';
         }
     }
 
