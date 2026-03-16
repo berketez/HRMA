@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.pkl
+.DS_Store
+propellant_cache/
+data/propellant_cache/
+cad_exports/
+*.spec
+.claude/

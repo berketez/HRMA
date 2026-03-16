@@ -1,0 +1,58 @@
+# Windows-specific requirements for HRMA
+# Use: pip install -r requirements_windows.txt
+
+# Core dependencies with Windows-compatible versions
+Flask==2.3.3
+Flask-CORS==4.0.0
+Werkzeug==2.3.7
+
+# Scientific computing - Windows compatible versions
+numpy==1.24.3
+scipy==1.10.1
+matplotlib==3.7.2
+pandas==2.0.3
+
+# Plotting - Use Agg backend on Windows
+plotly==5.15.0
+kaleido==0.2.1  # For static image export
+
+# 3D and CAD
+trimesh==3.23.5
+pyglet==2.0.9  # OpenGL for Windows
+Pillow==10.0.0
+
+# PDF generation
+reportlab==4.0.4
+PyPDF2==3.0.1
+
+# Windows-specific helpers
+pywin32==306  # Windows API access
+colorama==0.4.6  # Colored terminal output on Windows
+
+# Database
+sqlalchemy==2.0.19
+
+# Threading and performance
+numba==0.57.1  # JIT compilation, Windows compatible
+
+# File handling
+watchdog==3.0.0  # File system events
+
+# Testing
+pytest==7.4.0
+pytest-cov==4.1.0
+
+# Optional but recommended for Windows
+python-dotenv==1.0.0  # Environment variables
+psutil==5.9.5  # System monitoring
+
+# Cantera - if available for Windows
+# Uncomment if you have Cantera installed
+# Cantera>=2.6.0
+
+# RocketCEA - if available
+# Uncomment if you have RocketCEA installed  
+# rocketcea>=1.1.0
+
+# Note: Some packages may require Visual C++ Build Tools
+# Download from: https://visualstudio.microsoft.com/visual-cpp-build-tools/
