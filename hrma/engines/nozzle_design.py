@@ -6,12 +6,15 @@ Detailed nozzle geometry calculations including contour design
 import numpy as np
 import json
 from typing import Dict, List, Tuple, Optional
+from scipy.optimize import brentq
+
+from hrma.constants import G_0
 
 class NozzleDesigner:
     """Advanced nozzle design and analysis"""
     
     def __init__(self):
-        self.g0 = 9.81  # m/s²
+        self.g0 = G_0  # m/s^2 (BIPM standart, hrma.constants'tan import)
     
     def design_nozzle(self, throat_area: float, expansion_ratio: float, 
                      chamber_pressure: float, exit_pressure: float,
@@ -280,12 +283,41 @@ class NozzleDesigner:
         expansion_ratio = nozzle_data['basic_dimensions']['expansion_ratio']
         
         # Calculate exit Mach number from area ratio
-        def mach_from_area_ratio(epsilon, gamma):
-            """Calculate exit Mach number from area ratio using iterative method"""
-            # Simplified approximation for supersonic flow
-            M_e = np.sqrt(2 / (gamma - 1) * ((epsilon)**(2 * (gamma - 1) / (gamma + 1)) - 1))
-            return max(M_e, 1.01)  # Ensure supersonic
-        
+        # H-2 duzeltmesi: eski formul (P_c/P_e -> M) izentropik basinc-Mach
+        # iliskisiydi, alan-Mach iliskisi DEGIL. Dogrusu implicit denklem:
+        # A_e/A_t = (1/M) * [ (2/(gamma+1)) * (1 + (gamma-1)/2 * M^2) ] ^ ((gamma+1)/(2*(gamma-1)))
+        # Brent's method ile sayisal kok bulunur (epsilon >= 1 supersonic dali).
+        def mach_from_area_ratio(epsilon: float, gamma: float) -> float:
+            """Izentropik alan-Mach iliskisinden cikis Mach'ini cozer.
+
+            Sutton & Biblarz, "Rocket Propulsion Elements" Eq. 3-14.
+            Supersonic dal (M > 1) icin brentq ile cozulur.
+            """
+            if epsilon <= 1.0:
+                return 1.0
+            exponent = (gamma + 1.0) / (2.0 * (gamma - 1.0))
+
+            def area_ratio(M: float) -> float:
+                return (1.0 / M) * (
+                    (2.0 / (gamma + 1.0)) * (1.0 + 0.5 * (gamma - 1.0) * M * M)
+                ) ** exponent
+
+            # f(M) = A/A* (M) - epsilon
+            def f(M: float) -> float:
+                return area_ratio(M) - epsilon
+
+            # Supersonic dalda M=1.01 ile M=50 arasi guvenli bracket
+            try:
+                M_e = brentq(f, 1.001, 50.0, xtol=1e-8, maxiter=200)
+            except ValueError:
+                # Bracket disinda kalirsa fallback: yakin yaklasiklik
+                M_e = np.sqrt(
+                    2.0 / (gamma - 1.0)
+                    * (epsilon ** (2.0 * (gamma - 1.0) / (gamma + 1.0)) - 1.0)
+                )
+                M_e = max(M_e, 1.01)
+            return max(float(M_e), 1.001)
+
         M_exit = mach_from_area_ratio(expansion_ratio, gamma)
         
         # Calculate exit pressure from Mach number

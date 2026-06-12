@@ -5,6 +5,7 @@ from hrma.engines.nozzle_design import NozzleDesigner
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
 from hrma.analysis.structural_analysis import StructuralAnalyzer
 from hrma.data.external_data_fetcher import data_fetcher
+from hrma.constants import G_0, LAMBDA_BELL, LAMBDA_PARABOLIC, LAMBDA_CONICAL_15DEG
 import warnings
 
 class HybridRocketEngine:
@@ -56,7 +57,7 @@ class HybridRocketEngine:
         self.motor_name = motor_name
         self.motor_description = motor_description
         
-        self.g0 = 9.81  # m/s²
+        self.g0 = G_0  # m/s^2 (BIPM standart, hrma.constants)
         
         # Initialize advanced analysis modules
         self.combustion_analyzer = CombustionAnalyzer()
@@ -378,12 +379,19 @@ class HybridRocketEngine:
         then Pe is computed from isentropic pressure relation.  The old code set
         Pe = Pa (perfect expansion) which zeroed out the pressure thrust term.
         """
+        # Diverjans duzeltme faktorleri (hrma.constants'tan):
+        #   bell      -> 0.985 (Rao optimize)
+        #   parabolic -> 0.975
+        #   conical   -> 0.983 (15 deg, (1+cos(15°))/2 = 0.98296)
+        # Onceki kodda conical icin 0.955 yaziliyordu; bu 30 deg'lik kabaca bir
+        # degerdi ve (1+cos(15°))/2 formuluyle uyumsuzdu. Sutton & Biblarz 9th ed.
+        # Tablo 3-3 ile uyumlu olarak 0.983 kullanilir.
         if self.nozzle_type == 'bell':
-            lambda_eff = 0.985  # Optimum Bell nozzle efficiency
+            lambda_eff = LAMBDA_BELL
         elif self.nozzle_type == 'parabolic':
-            lambda_eff = 0.975  # Parabolic nozzle efficiency
+            lambda_eff = LAMBDA_PARABOLIC
         else:
-            lambda_eff = 0.955  # Conical nozzle efficiency (15 deg half-angle)
+            lambda_eff = LAMBDA_CONICAL_15DEG
 
         # Store for results output
         self.lambda_eff = lambda_eff

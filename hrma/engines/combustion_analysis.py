@@ -9,12 +9,14 @@ from typing import Dict, List, Tuple, Optional
 from scipy.optimize import minimize_scalar, fsolve
 import cantera as ct
 
+from hrma.constants import G_0, R_UNIVERSAL
+
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
     
     def __init__(self):
-        # Gas constant (NIST 2018 değeri - maksimum hassasiyet)
-        self.R_universal = 8314.462618  # J/(kmol·K) - CODATA 2018
+        # Gas constant (CODATA 2018) - merkezi sabit modulunden
+        self.R_universal = R_UNIVERSAL  # J/(kmol·K)
         
         # Cantera gaz objesi - NASA-CEA veritabanı kullanarak
         try:
@@ -461,13 +463,17 @@ class CombustionAnalyzer:
         
         # Throat velocity (choked)
         v_throat = np.sqrt(gamma * R_t * T_t)
+
+        # Exit velocity (Sutton Eq. 3-15 / paper line 151):
+        # v_e = sqrt( 2*gamma/(gamma-1) * R * T_c * [1 - (P_e/P_c)^((gamma-1)/gamma)] )
+        # T_c (chamber stagnation) kullanilir, T_e (exit static) DEGIL.
+        # Daha once T_e kullaniliyordu -> H-9 hatasi (paper ile celisiyordu).
+        # R_c (chamber gas constant) tutarliligi acisindan dogru tercihtir,
+        # cunku stagnation kosulu chamber kimyasi/MW'sine baglidir.
+        v_exit = np.sqrt(2 * gamma * R_c * T_c / (gamma - 1) * (1 - (P_e/P_c)**((gamma-1)/gamma)))
         
-        # Exit velocity
-        v_exit = np.sqrt(2 * gamma * R_e * T_e / (gamma - 1) * (1 - (P_e/P_c)**((gamma-1)/gamma)))
-        
-        # Specific impulse
-        g0 = 9.81
-        isp = v_exit / g0
+        # Specific impulse (g_0 = 9.80665 m/s^2, BIPM standart)
+        isp = v_exit / G_0
         
         # Thrust coefficient
         cf = v_exit / c_star
@@ -535,7 +541,7 @@ class CombustionAnalyzer:
                                (1 - (P / P_c)**((gamma - 1) / gamma)))
                 
                 cf = v_exit / motor_data['performance']['c_star']
-                isp = v_exit / 9.81
+                isp = v_exit / G_0
                 thrust = motor_data.get('mdot_total', 1.0) * v_exit
             else:
                 # Under-expanded
@@ -567,28 +573,47 @@ class CombustionAnalyzer:
         
         # Standard enthalpies and entropies (simplified NASA polynomials)
         def calc_enthalpy(composition: Dict, temperature: float) -> float:
-            """Calculate mixture enthalpy in kJ/kg"""
-            h_mix = 0
-            total_mass_frac = 0
-            
+            """Karisim entalpisini kJ/kg cinsinden hesaplar.
+
+            H-5 duzeltmesi: Eski kodda kJ/mol (h_f) ile kJ/kg (cp*dT) toplaniyor,
+            sonra yanlis carpan ile mass-weighted aliniyordu (boyut karmasasi).
+
+            Dogru formul (her tur SI/kJ/kg cinsinden tek tip):
+              h_f_per_kg = h_f [kJ/mol] / MW [g/mol] * 1000   ->  kJ/kg
+                         = h_f * 1000 / MW
+              h_sensible = cp [kJ/(kg*K)] * (T - 298.15) [K]   ->  kJ/kg
+              h_species  = h_f_per_kg + h_sensible             ->  kJ/kg
+              h_mix      = sum(mass_frac_i * h_species_i)      ->  kJ/kg
+            """
+            h_mix = 0.0  # kJ/kg
+            total_mass_frac = 0.0
+
             for species, mass_frac in composition.items():
                 if species in self.species_data and mass_frac > 0:
-                    # Simplified enthalpy calculation using temperature dependence
-                    h_f = self.species_data[species]['Hf']  # Formation enthalpy at 298K
-                    
-                    # Temperature correction (simplified)
+                    # NIST formation enthalpy (kJ/mol)
+                    h_f_kJ_per_mol = self.species_data[species]['Hf']
+                    # Molekuler agirlik (g/mol = kg/kmol)
+                    MW_g_per_mol = self.species_data[species]['MW']
+
+                    # Sicaklik bagimli ozgul isi (kJ/(kg*K), basitlestirilmis)
                     if species in ['CO2', 'H2O', 'N2']:
-                        cp = 1.0  # kJ/kg·K (simplified)
+                        cp_kJ_per_kg_K = 1.0
                     elif species in ['CO', 'H2']:
-                        cp = 1.4
+                        cp_kJ_per_kg_K = 1.4
                     else:
-                        cp = 1.2
-                    
-                    # Enthalpy = formation + sensible
-                    h_species = h_f + cp * (temperature - 298.15)
-                    h_mix += mass_frac * h_species / self.species_data[species]['MW'] * 1000
+                        cp_kJ_per_kg_K = 1.2
+
+                    # h_f [kJ/mol] / MW [g/mol] = kJ/g -> *1000 = kJ/kg... HAYIR.
+                    # Dogrusu: kJ/mol / (g/mol) = kJ/g, sonra *1 (kJ/g = MJ/kg) ->
+                    # ya da *1000 ile J/g = J/g != kJ/kg. Net: 1 kJ/g = 1000 kJ/kg.
+                    # h_f [kJ/mol] / MW [g/mol] * 1000 = kJ/kg dogrusu.
+                    h_formation_per_kg = h_f_kJ_per_mol * 1000.0 / MW_g_per_mol  # kJ/kg
+                    h_sensible = cp_kJ_per_kg_K * (temperature - 298.15)         # kJ/kg
+                    h_species = h_formation_per_kg + h_sensible                  # kJ/kg
+
+                    h_mix += mass_frac * h_species  # kJ/kg
                     total_mass_frac += mass_frac
-            
+
             return h_mix / max(total_mass_frac, 0.001)  # kJ/kg
         
         def calc_entropy(composition: Dict, temperature: float, pressure: float) -> float:
@@ -711,7 +736,7 @@ class CombustionAnalyzer:
         # Base performance at sea level
         base_isp = motor_data['performance']['isp']
         base_thrust = total_impulse / motor_data.get('burn_time', 10)  # Default 10s burn
-        base_mdot = base_thrust / (base_isp * 9.81)
+        base_mdot = base_thrust / (base_isp * G_0)
         
         for altitude in altitudes:
             # Standard atmosphere
@@ -735,7 +760,7 @@ class CombustionAnalyzer:
                                (1 - (P / P_c)**((gamma - 1) / gamma)))
                 
                 # Specific impulse at altitude
-                isp_alt = v_exit / 9.81
+                isp_alt = v_exit / G_0
                 
                 # Thrust at altitude (constant mass flow rate)
                 thrust_alt = base_mdot * v_exit

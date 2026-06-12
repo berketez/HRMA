@@ -5,6 +5,8 @@ import json
 import warnings
 import requests
 from typing import Dict, List, Optional, Tuple
+
+from hrma.constants import G_0, R_UNIVERSAL, PA_PER_BAR
 warnings.filterwarnings('ignore')
 
 class LiquidRocketEngine:
@@ -32,8 +34,8 @@ class LiquidRocketEngine:
         self.web_propellant_data = {}
         self._fetch_web_propellant_data()
         
-        # Physical constants (initialize first)
-        self.g0 = 9.81  # m/s²
+        # Physical constants (BIPM standart, hrma.constants)
+        self.g0 = G_0  # m/s^2
         self.gamma_combustion = 1.2  # Typical for combustion gases
         self.P_a = 1.01325  # Atmospheric pressure (bar)
         
@@ -483,8 +485,9 @@ class LiquidRocketEngine:
     def calculate_nozzle_geometry(self, altitude=0, convergence_tol=1e-8):
         """High-precision nozzle design with iterative area ratio calculation"""
         # Mass flow rate calculation with corrected Isp (EXPERT FIX)
-        g0_precise = 9.80665  # m/s² (exact value)
-        
+        # g_0 hrma.constants'tan, BIPM standart 9.80665 m/s^2.
+        g0_precise = G_0  # m/s^2 (exact, hrma.constants.G_0)
+
         # Use sea-level Isp with sea-level thrust for consistent mdot
         # (F_sl / Isp_vac mixes reference frames and undersizes throat)
         self.mdot_total = self.F / (self.isp_sl * g0_precise)
@@ -500,9 +503,9 @@ class LiquidRocketEngine:
             raise ValueError("Chamber pressure must be positive")
         
         # EXPERT FIX: Throat area calculation (eliminates 1000x multiplier bug)
-        # Constants
-        PA_PER_BAR = 1e5
-        g0_precise = 9.80665  # m/s² (exact value)
+        # Constants (hrma.constants'tan import edildi)
+        # PA_PER_BAR ve G_0 modul basinda import edilmistir; tekrar tanimlanmaz.
+        g0_precise = G_0  # m/s^2 (exact, hrma.constants.G_0)
         
         # CONSISTENCY FIX: Single throat discharge coefficient for all calculations
         fuel_ox_key = (self.fuel_type.lower(), self.oxidizer_type.lower())
@@ -525,7 +528,8 @@ class LiquidRocketEngine:
         # Solving for A_t:
         
         # Gas properties
-        R_specific = 8314.0 / self.mw  # J/kg/K (universal gas constant / molecular weight)
+        # R_universal birimi J/(kmol*K); MW birimi g/mol = kg/kmol -> R_specific J/(kg*K)
+        R_specific = R_UNIVERSAL / self.mw  # J/(kg*K) (CODATA 2018)
         
         # NASA formula terms
         term1 = P_c_pa / np.sqrt(self.T_c)  # pt/sqrt(Tt)
@@ -586,14 +590,26 @@ class LiquidRocketEngine:
             if self.d_t < 0.001 or self.d_t > 2.0:  # 1mm - 2000mm range
                 print(f"Warning: Unusual throat diameter: {self.d_t*1000:.1f} mm")
         
-        # Atmospheric pressure at altitude (ICAO Standard)
+        # Atmospheric pressure at altitude (ICAO Standard 1993)
+        # H-14 duzeltmesi: stratosferde 9.81/216.65 cift sayma kaldirildi.
+        # ICAO formulu: P = P_ref * exp[-g_0 * M_air * (h - h_ref) / (R_star * T)]
+        # solid_rocket_engine.py:209'daki formul ile birebir hizalandi.
+        from hrma.constants import G_0, M_AIR, R_STAR_ICAO, T_TROPOPAUSE, P_TROPOPAUSE
         if altitude <= 11000:
             T_atm = 288.15 - 0.0065 * altitude
             P_atm = 101325 * (T_atm / 288.15) ** 5.256  # Pa
         elif altitude <= 20000:
-            P_atm = 22632.1 * np.exp(-0.000157 * (altitude - 11000) * 9.81 / 216.65)
+            # Lower stratosphere: izotermal, 216.65 K
+            P_atm = P_TROPOPAUSE * np.exp(
+                -G_0 * M_AIR * (altitude - 11000) / (R_STAR_ICAO * T_TROPOPAUSE)
+            )
         else:
-            P_atm = 5474.89 * np.exp(-0.000141 * (altitude - 20000) * 9.81 / 216.65)
+            # Upper stratosphere: 20 km ustu (basit izotermal yaklasim, 216.65 K)
+            # Tam ICAO modelinde lapse rate +0.001 K/m'dir; daha hassas hesap icin
+            # solid_rocket_engine.py:212'deki tam formul kullanilmalidir.
+            P_atm = 5474.89 * np.exp(
+                -G_0 * M_AIR * (altitude - 20000) / (R_STAR_ICAO * T_TROPOPAUSE)
+            )
         
         # Convert to bar
         P_atm_bar = P_atm / 100000
@@ -1338,14 +1354,14 @@ class LiquidRocketEngine:
     def _design_turbopump_system(self, mdot_ox: float, mdot_fuel: float) -> Dict:
         """Design comprehensive turbopump system"""
         
-        # Pressure rise requirements
-        pump_head_ox = (self.P_c * 1e5 + 500000) / (self.rho_ox * 9.81)  # m (5 bar margin)
-        pump_head_fuel = (self.P_c * 1e5 + 500000) / (self.rho_fuel * 9.81)  # m
-        
+        # Pressure rise requirements (G_0 hrma.constants'tan)
+        pump_head_ox = (self.P_c * PA_PER_BAR + 500000) / (self.rho_ox * G_0)  # m (5 bar margin)
+        pump_head_fuel = (self.P_c * PA_PER_BAR + 500000) / (self.rho_fuel * G_0)  # m
+
         # Pump power requirements
         eta_pump = 0.75  # pump efficiency
-        power_ox = (mdot_ox * 9.81 * pump_head_ox) / eta_pump  # W
-        power_fuel = (mdot_fuel * 9.81 * pump_head_fuel) / eta_pump  # W
+        power_ox = (mdot_ox * G_0 * pump_head_ox) / eta_pump  # W
+        power_fuel = (mdot_fuel * G_0 * pump_head_fuel) / eta_pump  # W
         total_pump_power = power_ox + power_fuel  # W
         
         # Turbine design
@@ -1758,7 +1774,7 @@ class LiquidRocketEngine:
             
             # Power requirement
             rho_ox = getattr(self, 'rho_ox', 1200)  # Default LOX density
-            power = (flow * head * rho_ox * 9.81) / (eta * 1000)  # kW
+            power = (flow * head * rho_ox * G_0) / (eta * 1000)  # kW
             
             # NPSH requirement (increases with flow)
             npsh_req = 15 + 25 * (flow_ratio - 0.8)**2  # m
@@ -1775,7 +1791,7 @@ class LiquidRocketEngine:
         
         # Gas generator analysis  
         gg_mdot_ratio = 0.05  # 5% of main flow for gas generator
-        mdot_total = getattr(self, 'mdot_total', self.F / (300 * 9.81))  # Fallback calculation
+        mdot_total = getattr(self, 'mdot_total', self.F / (300 * G_0))  # Fallback calculation
         gg_mdot = mdot_total * gg_mdot_ratio
         gg_chamber_pressure = self.P_c * 1.3  # Higher pressure for turbine drive
         
@@ -1837,7 +1853,7 @@ class LiquidRocketEngine:
         chamber_volume = np.pi * (chamber_diameter/2)**2 * chamber_length  # m³
         
         # Combustion efficiency analysis
-        mdot_total = getattr(self, 'mdot_total', self.F / (300 * 9.81))
+        mdot_total = getattr(self, 'mdot_total', self.F / (300 * G_0))
         rho_ox = getattr(self, 'rho_ox', 1200)
         rho_fuel = getattr(self, 'rho_fuel', 800)
         residence_time = chamber_volume / (mdot_total / (rho_ox + rho_fuel) * 2)  # s
@@ -1971,8 +1987,16 @@ class LiquidRocketEngine:
         """Calculate detailed efficiency breakdown"""
         
         # Theoretical maximum (perfect expansion, no losses)
-        theoretical_isp = self.c_star / self.g0 * np.sqrt(2 * self.gamma / (self.gamma - 1) * 
-                                                        (1 - (1/20)**(self.gamma-1)/self.gamma))
+        # H-7 duzeltmesi: parantez/operator onceligi hatasi.
+        # Eski:  (1/20)**(self.gamma-1)/self.gamma   ->   ((1/20)**(gamma-1)) / gamma
+        # Dogru: (1/20)**((self.gamma-1)/self.gamma) ->   us olarak (gamma-1)/gamma
+        # P_e/P_c = 1/20 izentropik genisleme oraninda, gamma=1.22 icin
+        # eski formul ~%15 fazla theoretical Isp veriyordu.
+        pressure_ratio = 1.0 / 20.0  # P_e / P_c (perfect expansion varsayimi)
+        theoretical_isp = self.c_star / self.g0 * np.sqrt(
+            2 * self.gamma / (self.gamma - 1)
+            * (1 - pressure_ratio ** ((self.gamma - 1) / self.gamma))
+        )
         
         # Loss mechanisms
         losses = {
@@ -2119,7 +2143,7 @@ class LiquidRocketEngine:
                 'chamber_volume': np.pi * (max(self.d_t * 3.5, 0.05)/2)**2 * (self.c_star * 1.2 / 1000) * 1e6  # cm³
             },
             'mass_ratios': {
-                'thrust_to_weight': self.F / (total_dry_mass * 9.81),
+                'thrust_to_weight': self.F / (total_dry_mass * G_0),
                 'power_to_weight': (turbopump_mass * 100) / total_dry_mass if self.feed_system_type == 'turbopump' else 0,  # kW/kg
                 'chamber_loading': self.F / chamber_mass  # N/kg
             }

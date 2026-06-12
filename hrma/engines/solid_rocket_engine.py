@@ -4,6 +4,8 @@ from scipy.optimize import fsolve, newton
 from scipy.interpolate import interp1d
 import json
 import warnings
+
+from hrma.constants import G_0, vacuum_isp_ratio
 warnings.filterwarnings('ignore')
 
 class SolidRocketEngine:
@@ -32,8 +34,8 @@ class SolidRocketEngine:
         # Set propellant properties
         self._set_propellant_properties()
         
-        # Physical constants
-        self.g0 = 9.81  # m/s²
+        # Physical constants (BIPM standart yerce kimi, hrma.constants)
+        self.g0 = G_0  # m/s^2
         
     def _set_propellant_properties(self):
         """NASA CEA verified propellant properties (99.5% accuracy)"""
@@ -1351,9 +1353,17 @@ class SolidRocketEngine:
         # Sea level specific impulse
         isp_sea_level = total_impulse / (propellant_mass * self.g0)
         
-        # Vakum özgül itki (mükemmel genişleme nedeniyle yüksek)
-        # Fiziksel doğrulama: vakumda %10-20 artış normal
-        vacuum_thrust_multiplier = 1.15  # Tipik %15 artış
+        # Vakum ozgul itki (mukemmel genisleme nedeniyle yuksek)
+        # Onceden sabit 1.15 carpan kullaniliyordu; bu kucuk motorlar (eps~5)
+        # ve buyuk motorlar (eps~100) icin yanlis sonuc verir.
+        # Dogru yaklasim: oran epsilon (genisleme orani) ve gamma'ya baglidir.
+        # Sutton & Biblarz Tablo 3-2 ile kalibre edilmis ampirik formul
+        # hrma.constants.vacuum_isp_ratio() icinde tanimlandi.
+        try:
+            epsilon_for_vac = self._estimate_expansion_ratio()
+        except Exception:
+            epsilon_for_vac = 10.0  # makul fallback
+        vacuum_thrust_multiplier = vacuum_isp_ratio(epsilon_for_vac, self.gamma)
         isp_vacuum = isp_sea_level * vacuum_thrust_multiplier
         
         # Değer doğrulama
