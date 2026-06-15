@@ -8,6 +8,49 @@ import json
 import requests
 from typing import Dict, Optional, List
 
+# ---------------------------------------------------------------------------
+# Hibrit yakıt regresyon katsayıları — TEK TANIM NOKTASI (magic-number kuralı)
+#
+# Bağıntı (SI birimler): r_dot [m/s] = a * (G_ox [kg/m²·s])^n
+#
+# Literatür tabloları çoğunlukla r [mm/s], G_ox [g/cm²·s] biriminde verir;
+# SI dönüşümü: a_SI = a_tablo * 1e-3 * 10^(-n)   (1 g/cm²·s = 10 kg/m²·s)
+#
+# Bu tablo hybrid_rocket_engine.py ve regression_analysis.py tarafından
+# import edilir; değerleri başka dosyaya KOPYALAMAYIN.
+# ---------------------------------------------------------------------------
+HYBRID_REGRESSION_COEFFICIENTS = {
+    # Doran et al., AIAA 2007-5352 (HTPB/N2O):
+    # r[mm/s] = 0.132 * (G_ox[g/cm²·s])^0.555  ->  a_SI = 0.132e-3 * 10^-0.555
+    'htpb': {'a': 3.68e-5, 'n': 0.555},
+    # Karabeyoglu et al., J. Propulsion and Power 20(6), 2004 (SP-1a parafin);
+    # Zilliac & Karabeyoglu, AIAA 2006-4504, Tablo 2: a=0.488, n=0.62
+    # (r mm/s, G g/cm²·s)  ->  a_SI = 0.488e-3 * 10^-0.62
+    'paraffin': {'a': 1.17e-4, 'n': 0.62},
+    # HDPE/O2, Zilliac & Karabeyoglu, AIAA 2006-4504, Tablo 2: a=0.132, n=0.498
+    # ->  a_SI = 0.132e-3 * 10^-0.498
+    'pe': {'a': 4.19e-5, 'n': 0.498},
+    # PMMA/O2 (Greiner & Federick verisi), Zilliac & Karabeyoglu,
+    # AIAA 2006-4504, Tablo 2: a=0.087, n=0.615  ->  a_SI = 0.087e-3 * 10^-0.615
+    'pmma': {'a': 2.11e-5, 'n': 0.615},
+    # ABS/N2O regresyonu HTPB/N2O ile yakın ölçülmüştür (Whitmore & Peterson,
+    # J. Propulsion and Power 29(3), 2013) — HTPB/N2O katsayıları kullanılır.
+    'abs': {'a': 3.68e-5, 'n': 0.555},
+    # Aşağıdaki yakıtlar için yayınlanmış, hakemli bir korelasyon bulunamadı;
+    # önceki kod değerleri DOĞRULANMAMIŞ olarak korunur (tasarım için kullanmayın).
+    'pla': {'a': 1.2e-4, 'n': 0.52},
+    'carbon': {'a': 8.0e-5, 'n': 0.45},
+    'aluminum': {'a': 5.0e-5, 'n': 0.40},
+    'al2o3': {'a': 3.0e-5, 'n': 0.35},
+}
+
+# N2O doygun sıvı yoğunluğu [kg/m³] @ 298.15 K (25°C) — NIST WebBook
+# (Lemmon & Span 2006 EOS; CoolProp aynı EOS ile 742.9 kg/m³ verir).
+# Not: 293.15 K'de (20°C) doygun sıvı ~785 kg/m³'tür; 1220 kg/m³ ise yalnızca
+# normal kaynama noktasında (184.7 K, −88.5°C) geçerlidir ve besleme koşulunu
+# TEMSİL ETMEZ (denetim bulgusu #2).
+N2O_LIQUID_DENSITY_SAT_25C = 745.0
+
 class PropellantDatabase:
     """Central database for all propellant properties"""
     
@@ -20,8 +63,9 @@ class PropellantDatabase:
                 'formula': 'C7H10O2',
                 'density': 920,  # kg/m³
                 'heat_of_formation': -105.0,  # kJ/mol
-                'regression_a': 0.0003,
-                'regression_n': 0.5,
+                # Doran et al., AIAA 2007-5352 (HTPB/N2O), SI — merkezi tablodan
+                'regression_a': HYBRID_REGRESSION_COEFFICIENTS['htpb']['a'],
+                'regression_n': HYBRID_REGRESSION_COEFFICIENTS['htpb']['n'],
                 'combustion_temp': 3200,  # K
                 'molecular_weight': 54.09,  # g/mol
                 'specific_heat': 1.8,  # kJ/kg·K
@@ -36,8 +80,9 @@ class PropellantDatabase:
                 'formula': 'CnH2n+2 (n≈25)',
                 'density': 900,
                 'heat_of_formation': -300.0,
-                'regression_a': 0.0008,
-                'regression_n': 0.8,
+                # Karabeyoglu et al., JPP 20(6) 2004 (SP-1a), SI — merkezi tablodan
+                'regression_a': HYBRID_REGRESSION_COEFFICIENTS['paraffin']['a'],
+                'regression_n': HYBRID_REGRESSION_COEFFICIENTS['paraffin']['n'],
                 'combustion_temp': 3100,
                 'molecular_weight': 352,
                 'specific_heat': 2.14,
@@ -51,8 +96,9 @@ class PropellantDatabase:
                 'formula': '(C2H4)n',
                 'density': 960,
                 'heat_of_formation': -84.7,
-                'regression_a': 0.0005,
-                'regression_n': 0.8,
+                # HDPE/O2, Zilliac & Karabeyoglu AIAA 2006-4504, SI — merkezi tablodan
+                'regression_a': HYBRID_REGRESSION_COEFFICIENTS['pe']['a'],
+                'regression_n': HYBRID_REGRESSION_COEFFICIENTS['pe']['n'],
                 'combustion_temp': 3150,
                 'molecular_weight': 28.05,
                 'specific_heat': 1.9,
@@ -65,8 +111,9 @@ class PropellantDatabase:
                 'formula': 'C5H8O2',
                 'density': 1180,
                 'heat_of_formation': -360.0,
-                'regression_a': 0.0004,
-                'regression_n': 0.65,
+                # PMMA/O2, Zilliac & Karabeyoglu AIAA 2006-4504, SI — merkezi tablodan
+                'regression_a': HYBRID_REGRESSION_COEFFICIENTS['pmma']['a'],
+                'regression_n': HYBRID_REGRESSION_COEFFICIENTS['pmma']['n'],
                 'combustion_temp': 3000,
                 'molecular_weight': 100.12,
                 'specific_heat': 1.42,
@@ -79,8 +126,9 @@ class PropellantDatabase:
                 'formula': 'C15H17N',
                 'density': 1050,
                 'heat_of_formation': -200.0,
-                'regression_a': 0.0003,
-                'regression_n': 0.7,
+                # ABS/N2O ≈ HTPB/N2O (Whitmore & Peterson, JPP 2013) — merkezi tablodan
+                'regression_a': HYBRID_REGRESSION_COEFFICIENTS['abs']['a'],
+                'regression_n': HYBRID_REGRESSION_COEFFICIENTS['abs']['n'],
                 'combustion_temp': 2950,
                 'molecular_weight': 211.3,
                 'specific_heat': 1.3,
@@ -202,8 +250,10 @@ class PropellantDatabase:
                 'formula': 'KNO3 + C12H22O11',
                 'density': 1840,
                 'heat_of_formation': -485.0,
-                'combustion_temp': 1850,
-                'molecular_weight': 101.1,  # KNO3
+                # NASA CEA (KNO3/sakaroz 65/35) + Nakka ~1720 K ile tutarlı;
+                # solid_rocket_engine.py 'knsu' (T_c=1719) ile aynı kaynak.
+                'combustion_temp': 1719,
+                'molecular_weight': 101.1,  # KNO3 ham madde (egzoz MW ~37, motor modülü)
                 'burn_rate_a': 0.009,
                 'burn_rate_n': 0.5,
                 'specific_impulse': 135,
@@ -229,7 +279,9 @@ class PropellantDatabase:
             'n2o': {
                 'name': 'Nitrous Oxide',
                 'formula': 'N2O',
-                'density': 1220,  # kg/m³ (liquid at 20°C, 50 bar)
+                # Doygun sıvı, 298.15 K (25°C) — NIST WebBook (Lemmon & Span 2006 EOS).
+                # Eski 1220 kg/m³ değeri NBP (−88.5°C) yoğunluğuydu (denetim bulgusu #2).
+                'density': N2O_LIQUID_DENSITY_SAT_25C,  # kg/m³
                 'heat_of_formation': 82.05,
                 'boiling_point': 184.7,  # K at 1 atm
                 'critical_temp': 309.6,  # K

@@ -9,3 +9,10 @@ data/propellant_cache/
 cad_exports/
 *.spec
 .claude/
+
+# İç çalışma / paper dosyaları (public repo'ya gitmez)
+paper/
+teknik_dokuman/
+docs/bolum*.md
+validation_results.json
+*.docx

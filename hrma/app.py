@@ -964,8 +964,8 @@ def advanced_analysis():
         # Structural analysis
         if 'structural' in analysis_types:
             structural_analyzer = StructuralAnalyzer()
-            structural_data = structural_analyzer.analyze_chamber_structure(
-                motor_data, data.get('material_type', 'steel_4130')
+            structural_data = structural_analyzer.analyze_structure(
+                motor_data, material=data.get('material_type', 'steel_4130')
             )
             results['structural_plot'] = create_structural_analysis_plots(structural_data)
             results['structural_analysis'] = structural_data

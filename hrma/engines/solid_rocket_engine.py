@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 import json
 import warnings
 
-from hrma.constants import G_0, vacuum_isp_ratio
+from hrma.constants import G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR, R_STAR_ICAO
 warnings.filterwarnings('ignore')
 
 class SolidRocketEngine:
@@ -38,15 +38,17 @@ class SolidRocketEngine:
         self.g0 = G_0  # m/s^2
         
     def _set_propellant_properties(self):
-        """NASA CEA verified propellant properties (99.5% accuracy)"""
-        # NASA CEA (Chemical Equilibrium with Applications) verified data
+        """CEA-tutarlı yakıt referans setleri (sentetik referans, deneysel veri değil)"""
         propellant_data = {
             'apcp': {
-                'rho': 1810,  # kg/m³ (NASA CEA verified)
-                'c_star': 1598.2,  # m/s (Pc=68.9 bar, NASA RP-1271)
+                # (gamma, M, T_c, c*) dörtlüsü Sutton & Biblarz 9. baskı Eq. 3-32
+                # özdeşliğiyle içsel tutarlı:
+                # c* = sqrt(R*Tc)/Gamma = sqrt(296.945*3614.8)/0.64826 = 1598.2 m/s
+                'rho': 1810,  # kg/m³ (tipik AP/Al/HTPB 1.75-1.85 g/cc, Sutton Böl. 13)
+                'c_star': 1598.2,  # m/s (Pc=68.9 bar, CEA-tutarlı referans)
                 'gamma': 1.1986,   # Isentropic expansion coefficient
-                'T_c': 3241.7,    # K (Adiabatic flame temperature)
-                'molecular_weight': 28.67,  # g/mol (exhaust)
+                'T_c': 3614.8,    # K (c* ile Eq. 3-32 üzerinden tutarlı alev sıcaklığı)
+                'molecular_weight': 28.0,  # g/mol (exhaust, c* ile tutarlı)
                 'name': 'Ammonium Perchlorate Composite Propellant',
                 # Advanced properties
                 'density_temp_coeff': -0.7e-3,  # kg/m³/K
@@ -68,26 +70,34 @@ class SolidRocketEngine:
                 'erosive_burning_coeff': 0.0189,
                 'nozzle_efficiency': 0.975
             },
+            # Şeker yakıtları (KNO3 + şeker). DİKKAT: değerler NASA CEA'dan
+            # (KNO3 %65 / sakaroz %35, Pc=68.9 bar) iki-faz (K2CO3/K yoğuşması)
+            # DAHİL gerçek değerlerdir; bu yüzden saf-gaz Eq.3-32 ile değil
+            # doğrudan CEA c*'ı ile tutulur (Al'lı APCP gibi iki-fazlı).
+            # Nakka-rocketry.net deneysel verisiyle uyumlu (KNSU ~890-920 m/s,
+            # Tc ~1700-1720 K). Eski değerler (c*=1523/Tc=3104) fiziksel olarak
+            # imkansızdı (APCP sınıfı) ve itkiyi tehlikeli biçimde yüksek
+            # gösteriyordu — düzeltildi (2026-06).
             'sugar': {
-                'rho': 1689,
-                'c_star': 1087.6,  # KNO3/Sucrose optimized
-                'gamma': 1.2441,
-                'T_c': 2394.2,
-                'molecular_weight': 31.44,
-                'name': 'Sugar Propellant (KNO3/Sucrose)',
+                'rho': 1785,  # kg/m³ (dökme KNSU)
+                'c_star': 921.0,  # m/s (NASA CEA, KNO3/sakaroz 65/35, iki-faz)
+                'gamma': 1.1235,
+                'T_c': 1719.0,    # K (K2CO3 yoğuşması alevi sınırlar)
+                'molecular_weight': 37.21,  # g/mol
+                'name': 'Sugar Propellant (KNO3/Sucrose, KNSU)',
                 'density_temp_coeff': -0.8e-3,
                 'c_star_pressure_coeff': 1.9,
                 'burn_rate_temp_coeff': 0.0041,
                 'erosive_burning_coeff': 0.0212,
                 'nozzle_efficiency': 0.978
             },
-            'knsu': {  # Added KNSU for completeness
-                'rho': 1841,
-                'c_star': 1523.4,
-                'gamma': 1.2134,
-                'T_c': 3104.8,
-                'molecular_weight': 29.83,
-                'name': 'Potassium Nitrate/Sorbitol/Sulfur',
+            'knsu': {  # KNO3/Sucrose 65/35 (amatör roketçilik standardı)
+                'rho': 1889,  # kg/m³ (ideal KNSU yoğunluğu)
+                'c_star': 921.0,  # m/s (NASA CEA, iki-faz dahil; Nakka ~917)
+                'gamma': 1.1235,
+                'T_c': 1719.0,    # K (NASA CEA; Nakka ~1720 K)
+                'molecular_weight': 37.21,  # g/mol
+                'name': 'Potassium Nitrate/Sucrose (KNSU)',
                 'density_temp_coeff': -0.6e-3,
                 'c_star_pressure_coeff': 2.3,
                 'burn_rate_temp_coeff': 0.0045,
@@ -118,6 +128,9 @@ class SolidRocketEngine:
             self.propellant_name = prop['name']
             # Ensure nozzle efficiency is available for later calculations
             self.nozzle_efficiency = prop.get('nozzle_efficiency', 0.98)
+            # Erozif yanma katsayısı (burn_rate içindeki düzeltme bunu kullanır;
+            # atanmazsa model tetiklendiğinde AttributeError oluşur)
+            self.erosive_burning_coeff = prop.get('erosive_burning_coeff', 0.0)
         else:
             # Default values
             self.rho_p = 1700
@@ -126,6 +139,7 @@ class SolidRocketEngine:
             self.T_c = 2500
             self.propellant_name = 'Custom'
             self.nozzle_efficiency = 0.98
+            self.erosive_burning_coeff = 0.0
     
     def calculate_burn_area(self, web_thickness):
         """Calculate burn area based on grain geometry"""
@@ -133,12 +147,18 @@ class SolidRocketEngine:
             # Simple cylindrical grain with core
             r_outer = self.D_chamber / 2
             r_inner = self.D_core / 2 + web_thickness
-            
-            if r_inner >= r_outer:
+
+            # İki uç yüzey de yandığı için grain boyu eksenel olarak geriler:
+            # L(w) = L0 - 2w (kütle korunumu: -dV/dw = A_core + A_ends özdeşliği
+            # ancak bu kısalmayla sağlanır; NASA SP-8064 / Sutton BATES geometrisi)
+            L_current = self.L_grain - 2 * web_thickness
+
+            # Web tükenme koşulu: radyal (r_i >= r_o) VEYA eksenel (L <= 0)
+            if r_inner >= r_outer or L_current <= 0:
                 return 0  # Grain burned out
-            
+
             # Burning surfaces: inner core + 2 ends
-            A_core = 2 * np.pi * r_inner * self.L_grain
+            A_core = 2 * np.pi * r_inner * L_current
             A_ends = 2 * np.pi * (r_outer**2 - r_inner**2)
             return A_core + A_ends
             
@@ -203,21 +223,29 @@ class SolidRocketEngine:
             # Geopotential height conversion
             H = alt * 6356766 / (6356766 + alt)  # Geopotential height
             
-            if H <= 11000:  # Troposphere
-                T = 288.15 - 0.0065 * H  # Linear temperature lapse
-                pressure_atm = 101325 * (T / 288.15) ** (self.g0 * 0.0289644 / (8.31432 * 0.0065))  # Pa
-            elif H <= 20000:  # Lower Stratosphere
-                T = 216.65  # Isothermal
-                pressure_atm = 22632.1 * np.exp(-self.g0 * 0.0289644 * (H - 11000) / (8.31432 * 216.65))
-            elif H <= 32000:  # Upper Stratosphere
-                T = 196.65 + 0.001 * (H - 20000)  # Positive lapse
-                pressure_atm = 5474.89 * (T / 216.65) ** (-self.g0 * 0.0289644 / (8.31432 * 0.001))
-            elif H <= 47000:  # Stratosphere top
-                T = 139.05 + 0.0028 * (H - 32000)
-                pressure_atm = 868.02 * (T / 228.65) ** (-self.g0 * 0.0289644 / (8.31432 * 0.0028))
-            else:  # Mesosphere
-                T = 270.65 - 0.0028 * (H - 47000)  # Negative lapse
-                pressure_atm = 110.91 * (T / 270.65) ** (-self.g0 * 0.0289644 / (8.31432 * -0.0028))
+            # Katman tablosu merkezi sabit modülünden alınır (hrma.constants.ISA_LAYERS)
+            # Kaynak: U.S. Standard Atmosphere 1976 (NOAA/NASA/USAF), Tablo 4
+            # Her kayıt: (h_taban [m], T_taban [K], lapse [K/m], P_taban [Pa])
+            layer = ISA_LAYERS[0]
+            for candidate in ISA_LAYERS:
+                if H >= candidate[0]:
+                    layer = candidate
+                else:
+                    break
+            h_base, T_base, lapse, P_base = layer
+
+            if lapse == 0.0:
+                # İzotermal katman: P = P_b * exp(-g0*M*(H-h_b)/(R*T_b))
+                T = T_base
+                pressure_atm = P_base * np.exp(
+                    -self.g0 * M_AIR * (H - h_base) / (R_STAR_ICAO * T_base)
+                )
+            else:
+                # Gradyan katman: P = P_b * (T/T_b)^(-g0*M/(R*lapse))
+                T = T_base + lapse * (H - h_base)
+                pressure_atm = P_base * (T / T_base) ** (
+                    -self.g0 * M_AIR / (R_STAR_ICAO * lapse)
+                )
             
             # Convert Pa to bar
             pressure_atm = pressure_atm / 100000
@@ -227,24 +255,14 @@ class SolidRocketEngine:
                 pressure_atm = 1e-6  # Near vacuum
                 T = 1000  # Thermospheric temperature
             
-            # Optimal nozzle design for this altitude using iterative method
-            pressure_ratio = self.P_c / max(pressure_atm, 1e-6)
+            # Optimal nozzle design for this altitude:
+            # Tam izentropik Mach-alan bağıntısı (Sutton & Biblarz 9. baskı,
+            # Denk. 3-25/3-26). Pe = Pa (optimal genişleme) alınarak çıkış Mach
+            # sayısı basınç oranından kapalı formda çözülür; iterasyon gerekmez.
             gamma = self.gamma
-            
-            # Iterative solution for optimal expansion ratio
-            def expansion_ratio_equation(epsilon):
-                # Area ratio equation: A_e/A_t = f(Pc/Pe, gamma)
-                pr_term = (2 / (gamma + 1)) ** ((gamma + 1) / (2 * (gamma - 1)))
-                press_term = (pressure_ratio) ** (1 / gamma)
-                expansion_term = ((gamma + 1) / 2) ** (1 / (gamma - 1))
-                theoretical = press_term * pr_term ** (-1) * expansion_term
-                return epsilon - theoretical
-            
-            try:
-                epsilon_opt = fsolve(expansion_ratio_equation, 15.0)[0]
-                epsilon_opt = max(2.5, min(epsilon_opt, 500))  # Physical limits
-            except:
-                epsilon_opt = min(50, pressure_ratio ** 0.35)  # Fallback
+            Pe_Pc_opt = max(pressure_atm, 1e-6) / self.P_c
+            epsilon_opt = self._expansion_ratio_from_pressure_ratio(Pe_Pc_opt)
+            epsilon_opt = max(2.5, min(epsilon_opt, 500))  # Physical limits
             
             # High-precision thrust coefficient with nozzle efficiency
             Pe_Pc = pressure_atm / self.P_c
@@ -298,7 +316,13 @@ class SolidRocketEngine:
         pressure_oscillations = np.std(curve['pressure']) / avg_pressure * 100
         
         # Thrust coefficient analysis
-        avg_thrust_coeff = np.mean([t / (p * 1e5 * np.pi * (self.D_chamber/2)**2) 
+        # CF tanımı boğaz alanını kullanır: CF = F / (Pc * A_t)
+        # (Sutton & Biblarz 9. baskı, Denk. 3-31) — oda kesiti DEĞİL
+        A_t_ref = curve.get('throat_area', 0.0)
+        if not A_t_ref or A_t_ref <= 0:
+            d_t = self._estimate_throat_diameter()
+            A_t_ref = np.pi * (d_t / 2) ** 2
+        avg_thrust_coeff = np.mean([t / (p * 1e5 * A_t_ref)
                                    for t, p in zip(curve['thrust'], curve['pressure']) if p > 0])
         
         # Mass flow efficiency
@@ -318,7 +342,9 @@ class SolidRocketEngine:
                 'average_thrust_coefficient': avg_thrust_coeff,
                 'c_star_efficiency_percent': c_star_efficiency,
                 'theoretical_vs_actual_isp': {
-                    'theoretical_isp': self._calculate_theoretical_isp(),
+                    # Teorik Isp, motorun fiilen çalıştığı ortalama basınçta
+                    # değerlendirilir ki gerçek Isp ile karşılaştırma anlamlı olsun
+                    'theoretical_isp': self._calculate_theoretical_isp(avg_pressure),
                     'combustion_losses': 3.2,
                     'nozzle_losses': 2.1,
                     'two_phase_losses': 1.8
@@ -899,6 +925,27 @@ class SolidRocketEngine:
         d_throat = max(0.001, min(d_throat, 0.5))
         return d_throat
 
+    def _expansion_ratio_from_pressure_ratio(self, Pe_Pc):
+        """Tam izentropik alan oranı: Pe/Pc basınç oranından epsilon = A_e/A_t.
+
+        Sutton & Biblarz, "Rocket Propulsion Elements" 9. baskı, Denk. 3-25/3-26:
+        M_e = sqrt(2/(gamma-1) * ((Pe/Pc)^(-(gamma-1)/gamma) - 1))
+        A_e/A_t = (1/M_e) * [(2/(gamma+1)) * (1 + (gamma-1)/2 * M_e^2)]^((gamma+1)/(2*(gamma-1)))
+
+        Kelepçe uygulanmaz; çağıran taraf fiziksel sınırları kendisi koyar.
+        """
+        gamma = self.gamma
+        Pe_Pc = min(max(Pe_Pc, 1e-9), 0.999999)
+
+        M_e_sq = (2 / (gamma - 1)) * (Pe_Pc ** (-(gamma - 1) / gamma) - 1)
+        if M_e_sq <= 1.0:
+            return 1.0  # Genişleme yok (Pe/Pc çok yüksek)
+        M_e = np.sqrt(M_e_sq)
+
+        term = 1 + (gamma - 1) / 2 * M_e ** 2
+        exp_ar = (gamma + 1) / (2 * (gamma - 1))
+        return (1 / M_e) * ((2 / (gamma + 1)) * term) ** exp_ar
+
     def _estimate_expansion_ratio(self):
         """Estimate optimal expansion ratio for sea-level operation.
 
@@ -1132,9 +1179,29 @@ class SolidRocketEngine:
         else:
             return 'Neutral'
     
-    def _calculate_theoretical_isp(self):
-        """Calculate theoretical specific impulse"""
-        return self.c_star * 0.6 / self.g0  # Simplified
+    def _calculate_theoretical_isp(self, chamber_pressure_bar=None):
+        """Calculate theoretical specific impulse.
+
+        Isp_teorik = CF_ideal * c* / g0  (Sutton & Biblarz 9. baskı, Denk. 3-32)
+        CF_ideal, optimal genişlemede (Pe = Pa, deniz seviyesi) ideal itki
+        katsayısıdır (Sutton Denk. 3-30). Eski '0.6' katsayısı fiziksel değildi
+        ve teorik Isp'yi gerçek Isp'nin altına düşürüyordu.
+
+        chamber_pressure_bar verilirse CF_ideal o basınçta değerlendirilir
+        (örn. yanma boyunca ortalama basınç); verilmezse tasarım basıncı kullanılır.
+        """
+        gamma = self.gamma
+        P_ref = chamber_pressure_bar if (chamber_pressure_bar and chamber_pressure_bar > 0) else self.P_c
+        # Deniz seviyesi optimal genişleme: Pe = Pa = 1.01325 bar
+        Pe_Pc = 1.01325 / P_ref
+        Pe_Pc = min(max(Pe_Pc, 1e-6), 0.999)
+
+        gamma_term = 2 * gamma**2 / (gamma - 1)
+        stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
+        expansion_term = 1 - Pe_Pc ** ((gamma - 1) / gamma)
+        CF_ideal = np.sqrt(gamma_term * stagnation_term * expansion_term)
+
+        return CF_ideal * self.c_star / self.g0
     
     def _analyze_burn_rate_consistency(self, curve):
         """Analyze burn rate consistency"""
@@ -1196,57 +1263,86 @@ class SolidRocketEngine:
         
         t = 0
         current_temp = 298.15  # Initial temperature (K)
-        
+
+        # ------------------------------------------------------------------
+        # Boğaz alanı TASARIM NOKTASINDA BİR KEZ boyutlandırılır ve yanma
+        # boyunca SABİT tutulur (gerçek motorda boğaz rijittir).
+        # Boğulmuş akış: mdot = Pc*A_t/c*  ;  kütle üretimi: mdot = rho_p*Ab*r
+        # => A_t = rho_p * Ab0 * r(Pc_tasarım) * c* / (Pc_tasarım * 1e5)
+        # Kaynak: Sutton & Biblarz 9. baskı Böl. 12; NASA SP-8089
+        # ------------------------------------------------------------------
+        A_burn_0 = self.calculate_burn_area(0.0)
+        if A_burn_0 > 0:
+            # Erozif düzeltme port akısına bağlı olduğundan tasarım noktası
+            # yanma hızı küçük bir sabit-nokta iterasyonuyla öz-tutarlı çözülür
+            self.mass_flux = 0.0
+            port_ratio_0 = self.D_core / self.D_chamber
+            if self.grain_type == 'end_burner':
+                A_port_0 = np.pi * (self.D_chamber / 2) ** 2
+            else:
+                A_port_0 = np.pi * (self.D_core / 2) ** 2
+            r_design = self.burn_rate(self.P_c, current_temp, port_ratio_0)
+            for _ in range(25):
+                m_dot_design = self.rho_p * A_burn_0 * r_design
+                self.mass_flux = m_dot_design / A_port_0 if A_port_0 > 0 else 0.0
+                r_new = self.burn_rate(self.P_c, current_temp, port_ratio_0)
+                if abs(r_new - r_design) < 1e-12:
+                    r_design = r_new
+                    break
+                r_design = r_new
+            m_dot_design = self.rho_p * A_burn_0 * r_design
+            A_t = m_dot_design * self.c_star / (self.P_c * 1e5)  # m^2, sabit
+        else:
+            A_t = np.pi * (0.015 / 2) ** 2  # fallback; döngü zaten hemen kırılır
+
+        P_c_prev = self.P_c  # denge çözümü için sıcak başlangıç (bar)
+
         while web_thickness < max_web:
             # Calculate burn area with high precision
             A_burn = self.calculate_burn_area(web_thickness)
             if A_burn <= 0:
                 break
-            
-            # Iterative solution for pressure-burn rate coupling
-            def pressure_burn_rate_equations(vars):
-                P_c_iter, r_burn_iter = vars
-                
-                # Mass generation rate
-                m_dot_gen = self.rho_p * A_burn * r_burn_iter
-                
-                # Throat area from choked flow (de Laval nozzle theory)
-                A_t_calc = m_dot_gen * self.c_star / (P_c_iter * 1e5)
-                
-                # Burn rate from Saint-Robert's law with corrections
-                port_ratio = (self.D_core + 2*web_thickness) / self.D_chamber
-                r_calculated = self.burn_rate(P_c_iter, current_temp, port_ratio)
-                
-                # Mass flux for erosive burning
-                if A_burn > 0:
-                    self.mass_flux = m_dot_gen / A_burn
-                
-                # Equations to solve
-                eq1 = r_burn_iter - r_calculated  # Burn rate consistency
-                eq2 = P_c_iter - self.P_c  # Pressure consistency (can vary in real motor)
-                
-                return [eq1, eq2]
-            
-            try:
-                # Initial guess
-                initial_guess = [self.P_c, self.burn_rate(self.P_c, current_temp)]
-                solution = fsolve(pressure_burn_rate_equations, initial_guess, xtol=convergence_tol)
-                P_c_actual, r_burn_actual = solution
-                
-                # Validate solution
-                if P_c_actual <= 0 or r_burn_actual <= 0:
-                    raise ValueError("Invalid solution")
-                    
-            except:
-                # Fallback to non-iterative method if convergence fails
-                P_c_actual = self.P_c
-                r_burn_actual = self.burn_rate(P_c_actual, current_temp)
-            
-            # Mass generation rate
+
+            # Port geometrisi: erozif yanma port kütle akısı G = mdot/A_port
+            # ile ölçeklenir (Lenoir-Robillard; Sutton & Biblarz Böl. 12)
+            if self.grain_type == 'end_burner':
+                A_port = np.pi * (self.D_chamber / 2) ** 2
+            else:
+                A_port = np.pi * (self.D_core / 2 + web_thickness) ** 2
+            port_ratio = (self.D_core + 2 * web_thickness) / self.D_chamber
+
+            # ----------------------------------------------------------------
+            # Balistik denge basıncı: Kn = Ab/At ile
+            #   Pc = (Kn * a * rho_p * c*)^(1/(1-n))   [a SI/Pa bazlı ise]
+            # Saint-Robert katsayısı bar bazlı olduğundan ve r(Pc) sıcaklık/
+            # plato/erozif düzeltmeleri içerdiğinden, aynı denge sabit-nokta
+            # iterasyonuyla çözülür (n < 1 olduğundan daralma garantili):
+            #   Pc_yeni [Pa] = rho_p * Ab * r(Pc) * c* / A_t
+            # Kaynak: Sutton & Biblarz 9. baskı Denk. 12-6; NASA SP-8089
+            # ----------------------------------------------------------------
+            P_c_actual = P_c_prev
+            r_burn_actual = self.burn_rate(P_c_actual, current_temp, port_ratio)
+            for _ in range(100):
+                m_dot_iter = self.rho_p * A_burn * r_burn_actual
+                self.mass_flux = m_dot_iter / A_port if A_port > 0 else 0.0
+                P_new = m_dot_iter * self.c_star / (A_t * 1e5)  # bar
+                if abs(P_new - P_c_actual) <= convergence_tol * max(abs(P_c_actual), 1.0):
+                    P_c_actual = P_new
+                    break
+                P_c_actual = 0.5 * (P_c_actual + P_new)  # sönümlü güncelleme
+                r_burn_actual = self.burn_rate(P_c_actual, current_temp, port_ratio)
+
+            if P_c_actual <= 0:
+                break
+
+            # Yakınsayan basınçta son yanma hızı ve kütle üretimi
+            r_burn_actual = self.burn_rate(P_c_actual, current_temp, port_ratio)
+            if r_burn_actual <= 0:
+                break
+            P_c_prev = P_c_actual
+
+            # Mass generation rate (dengede boğaz akışıyla eşit)
             m_dot_gen = self.rho_p * A_burn * r_burn_actual
-            
-            # Throat area calculation
-            A_t = m_dot_gen * self.c_star / (P_c_actual * 1e5)
             
             # High-precision thrust coefficient with all corrections
             gamma = self.gamma
@@ -1308,6 +1404,7 @@ class SolidRocketEngine:
             'burn_area': np.array(burn_area),
             'mass_flow': np.array(mass_flow),
             'burn_rate': np.array(burn_rate_data),
+            'throat_area': A_t,  # m^2, tasarım noktasında bir kez boyutlandırılan sabit boğaz
             'convergence_achieved': True
         }
     
@@ -1372,11 +1469,13 @@ class SolidRocketEngine:
         if total_impulse < 100 or total_impulse > 1e8:
             print(f"Uyarı: Toplam itki değeri anormal: {total_impulse:.0f} N·s")
         
-        # Boğaz çapı (maksimum koşullardan)
-        max_mdot = np.max(curve['mass_flow'])
-        
-        # Birim kontrolü: mdot (kg/s), c_star (m/s), P_c (bar -> Pa)
-        A_t = max_mdot * self.c_star / (self.P_c * 1e5)
+        # Boğaz çapı: itki eğrisinde tasarım noktasında BİR KEZ boyutlandırılan
+        # sabit boğaz kullanılır (Kn ve basınç eğrisiyle tutarlılık için)
+        A_t = curve.get('throat_area', 0.0)
+        if not A_t or A_t <= 0:
+            # Fallback (eski yöntem): maksimum kütle akışından boyutlandır
+            max_mdot = np.max(curve['mass_flow'])
+            A_t = max_mdot * self.c_star / (self.P_c * 1e5)
         d_throat = 2 * np.sqrt(A_t / np.pi)
         
         # Boğaz alanı kontrolü

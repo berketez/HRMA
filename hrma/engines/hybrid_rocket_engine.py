@@ -4,7 +4,12 @@ from hrma.engines.combustion_analysis import CombustionAnalyzer
 from hrma.engines.nozzle_design import NozzleDesigner
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
 from hrma.analysis.structural_analysis import StructuralAnalyzer
+from hrma.analysis.regression_analysis import RegressionAnalyzer
 from hrma.data.external_data_fetcher import data_fetcher
+from hrma.data.propellant_database import (
+    HYBRID_REGRESSION_COEFFICIENTS,
+    N2O_LIQUID_DENSITY_SAT_25C,
+)
 from hrma.constants import G_0, LAMBDA_BELL, LAMBDA_PARABOLIC, LAMBDA_CONICAL_15DEG
 import warnings
 
@@ -16,7 +21,9 @@ class HybridRocketEngine:
                  thrust_coefficient=0, regression_a=None,
                  regression_n=None, fuel_density=None, 
                  combustion_type='infinite', chamber_diameter_input=0,
-                 fuel_type='htpb', motor_name='', motor_description=''):
+                 fuel_type='htpb', motor_name='', motor_description='',
+                 initial_gox=None, flux_mode='total', track_performance=True,
+                 oxidizer_type='n2o'):
         
         # Handle thrust/burn_time vs total_impulse input
         if total_impulse is not None:
@@ -40,6 +47,17 @@ class HybridRocketEngine:
         self.P_c = chamber_pressure  # bar
         self.P_a = atmospheric_pressure  # bar
         self.fuel_type = fuel_type  # Set fuel_type early
+        self.oxidizer_type = oxidizer_type  # 'n2o' | 'lox' | 'h2o2' ...
+
+        # Regresyon akı modu (denetim bulgusu #1): 'total' = Marxman
+        # G_total = G_ox + G_fuel (VARSAYILAN); 'ox' = eski G_ox-only (geriye
+        # uyum). Marxman & Gilbert (1963); Sutton & Biblarz 9th ed., Böl. 16.
+        self.flux_mode = flux_mode if flux_mode in ('total', 'ox') else 'total'
+        # O/F kayması -> anlık c*/Isp izleme (denetim bulgusu #2). False ise
+        # performans tasarım O/F'sinde donar (eski hızlı davranış).
+        self.track_performance = bool(track_performance)
+        # Anlık O/F->c*/Isp tablo önbelleği (pahalı denge çözümünü tekrarlamaz)
+        self._perf_cache = {}
         
         # Use None as marker for default values to be set by fuel type
         self.T_c = chamber_temperature  # K
@@ -56,6 +74,22 @@ class HybridRocketEngine:
         self.chamber_diameter_input = chamber_diameter_input / 1000 if chamber_diameter_input > 0 else 0  # Convert mm to m
         self.motor_name = motor_name
         self.motor_description = motor_description
+
+        # Başlangıç port oksitleyici kütle akısı G_ox [kg/m²·s] — TASARIM
+        # parametresidir (denetim bulgusu #1): port kesit alanı bu akıdan
+        # boyutlandırılır (A_port = mdot_ox / G_ox). Enjektör orifis akısıyla
+        # KARIŞTIRILMAZ. Tipik N2O/HTPB başlangıç değeri 100-500 kg/m²·s,
+        # flooding sınırı ~600-700 kg/m²·s (Sutton & Biblarz, Rocket Propulsion
+        # Elements 9. baskı, Böl. 16 — hibrit itki).
+        if initial_gox is not None and initial_gox > 0:
+            self.G_ox_design = float(initial_gox)
+            if self.G_ox_design > 600:
+                warnings.warn(
+                    f"G_ox = {self.G_ox_design:.0f} kg/m²·s flooding sınırına "
+                    "(~600-700 kg/m²·s) yakın/üstünde — Sutton & Biblarz 9. baskı, Böl. 16"
+                )
+        else:
+            self.G_ox_design = 350.0  # kg/m²·s — tipik tasarım orta noktası
         
         self.g0 = G_0  # m/s^2 (BIPM standart, hrma.constants)
         
@@ -69,84 +103,75 @@ class HybridRocketEngine:
         self._set_fuel_properties()
     
     def _set_fuel_properties(self):
-        """Set fuel-specific regression rate parameters and density"""
+        """Set fuel-specific regression rate parameters and density
+
+        Regresyon katsayıları (a, n) merkezi tablodan gelir:
+        hrma/data/propellant_database.py -> HYBRID_REGRESSION_COEFFICIENTS
+        (SI birimler: r [m/s] = a * (G_ox [kg/m²·s])^n; kaynak atıfları orada).
+        """
         # Default properties for different fuel types
         fuel_properties = {
             'htpb': {
                 'density': 920,  # kg/m³
-                'regression_a': 0.0003,
-                'regression_n': 0.5,
                 'combustion_temp': 3200,  # K
                 'gas_constant': 415  # J/kg·K
             },
             'pe': {  # Polyethylene
                 'density': 950,
-                'regression_a': 0.00025,
-                'regression_n': 0.62,
                 'combustion_temp': 3100,
                 'gas_constant': 420
             },
             'pmma': {  # PMMA
                 'density': 1180,
-                'regression_a': 0.00015,
-                'regression_n': 0.55,
                 'combustion_temp': 2900,
                 'gas_constant': 380
             },
             'paraffin': {
                 'density': 900,
-                'regression_a': 0.0005,  # Higher regression rate
-                'regression_n': 0.62,
                 'combustion_temp': 3000,
                 'gas_constant': 450
             },
             'abs': {
                 'density': 1040,
-                'regression_a': 0.00018,
-                'regression_n': 0.58,
                 'combustion_temp': 2800,
                 'gas_constant': 390
             },
             'pla': {
                 'density': 1250,
-                'regression_a': 0.00012,
-                'regression_n': 0.52,
                 'combustion_temp': 2700,
                 'gas_constant': 370
             },
             'carbon': {
                 'density': 2200,
-                'regression_a': 0.00008,
-                'regression_n': 0.45,
                 'combustion_temp': 3500,
                 'gas_constant': 350
             },
             'aluminum': {
                 'density': 2700,
-                'regression_a': 0.00005,
-                'regression_n': 0.4,
                 'combustion_temp': 3800,
                 'gas_constant': 320
             },
             'al2o3': {
                 'density': 3950,
-                'regression_a': 0.00003,
-                'regression_n': 0.35,
                 'combustion_temp': 3400,
                 'gas_constant': 300
             }
         }
-        
+
         # Get properties for selected fuel type (default to HTPB if not found)
-        props = fuel_properties.get(self.fuel_type.lower(), fuel_properties['htpb'])
-        
+        fuel_key = self.fuel_type.lower()
+        props = fuel_properties.get(fuel_key, fuel_properties['htpb'])
+        regression = HYBRID_REGRESSION_COEFFICIENTS.get(
+            fuel_key, HYBRID_REGRESSION_COEFFICIENTS['htpb']
+        )
+
         # Set properties - use fuel-specific values if user didn't provide them
         if self.rho_f is None:
             self.rho_f = props['density']
         if self.a is None:
-            self.a = props['regression_a']
+            self.a = regression['a']
         if self.n is None:
-            self.n = props['regression_n']
+            self.n = regression['n']
         if self.T_c is None:
             self.T_c = props['combustion_temp']
         if self.R is None:
@@ -196,32 +221,47 @@ class HybridRocketEngine:
             self.D_ch = self.chamber_diameter_input
         else:
             self.D_ch = self.D_port_final * 1.5
-        self.L = 4 * self.V_c / (np.pi * self.D_ch**2)
-        
+        # Kamara boyu: L* tabanlı kalış-süresi boyu ile grain boyunun büyüğü —
+        # kamara, yakıt üretim kapanışından çözülen grain'i fiziksel olarak
+        # içerebilmelidir (denetim bulgusu #6; grain boyu artık L* haznesinden
+        # türetilmiyor).
+        self.L = max(4 * self.V_c / (np.pi * self.D_ch**2), self.L_grain)
+
         # Calculate propellant masses
         self.m_ox = self.mdot_ox * self.t_b
-        self.m_f = self.mdot_f * self.t_b
+        # Yakıt kütlesi grain geometrisinden (denetim bulgusu #6):
+        # m_f = rho_f · (π/4) · (D_final² − D_initial²) · L_grain.
+        # Eski mdot_f·t_b değeri grain'in fiilen ürettiği kütleyle
+        # eşitlenmiyordu (3-4 kat tutarsızlık).
+        self.m_f = self.m_f_grain
         self.m_total = self.m_ox + self.m_f
         
-        # Advanced combustion analysis with Cantera
+        # Advanced combustion analysis with Cantera (kendi yanma çözücümüz)
         fuel_composition = {self.fuel_type: 100.0}  # Simplified for now
+        ox = getattr(self, 'oxidizer_type', None) or 'N2O'
         combustion_results = self.combustion_analyzer.analyze_combustion(
-            fuel_composition, 'N2O', self.OF, self.P_c, self.T_c
+            fuel_composition, ox, self.OF, self.P_c, None
         )
-        
-        # Use real thermodynamic values from Cantera
-        if 'conditions' in combustion_results and 'chamber' in combustion_results['conditions']:
-            chamber_data = combustion_results['conditions']['chamber']
+
+        # Gerçek termodinamik değerler CombustionAnalyzer denge çözümünden alınır.
+        # DİKKAT: gamma/MW/sıcaklık 'compositions'->'chamber' altındadır
+        # ('conditions'->'chamber' yalnızca {'P','T'} içerir; eski kod yanlış
+        # anahtara baktığı için bu güncelleme hiç çalışmıyordu).
+        if 'compositions' in combustion_results and 'chamber' in combustion_results['compositions']:
+            chamber_data = combustion_results['compositions']['chamber']
             if 'gamma' in chamber_data:
-                self.gamma = chamber_data['gamma']  # Real gamma value
+                self.gamma = chamber_data['gamma']  # shifting-equilibrium isentropik üs
             if 'molecular_weight' in chamber_data:
-                self.R = self.combustion_analyzer.R_universal / chamber_data['molecular_weight']  # Real gas constant
+                self.R = self.combustion_analyzer.R_universal / chamber_data['molecular_weight']
             if 'temperature' in chamber_data:
-                self.T_c = chamber_data['temperature']  # Real chamber temperature
+                self.T_c = chamber_data['temperature']  # HP dengesinden alev sıcaklığı
         
-        # Advanced nozzle design
+        # Advanced nozzle design — gerçek yanma değerlerini (gamma, R, T_c)
+        # geçir; aksi halde design_nozzle eski hardcoded 1.25/300/3000'e düşer
+        # ve CF/Isp motorun geri kalanıyla tutarsız olur (entegrasyon gap fix).
         nozzle_results = self.nozzle_designer.design_nozzle(
-            self.At, self.epsilon, self.P_c, self.P_a, self.nozzle_type
+            self.At, self.epsilon, self.P_c, self.P_a, self.nozzle_type,
+            gamma=self.gamma, R_specific=self.R, T_chamber=self.T_c
         )
         
         # Altitude performance
@@ -271,16 +311,24 @@ class HybridRocketEngine:
             cooling_type='natural'
         )
         
-        # Structural analysis
+        # Structural analysis — chamber_temperature GEÇİLMELİ; aksi halde
+        # structural modülü ortam (300 K) varsayıp termal gerilme=0 ve
+        # mukavemet deratingi=yok ile çalışır, emniyet faktörünü tehlikeli
+        # şekilde yüksek gösterir (entegrasyon gap fix). Mümkünse ısı transferi
+        # modülünün hesapladığı gerçek cidar sıcaklıklarını geçir; yoksa T_c'den
+        # konservatif tahmin yapılır.
+        struct_input = {
+            'chamber_pressure': self.P_c,
+            'chamber_temperature': self.T_c,
+            'ambient_temperature': 300.0,
+            'chamber_diameter': self.D_ch,
+            'chamber_length': self.L,
+            'throat_diameter': self.d_t,
+            'nozzle_type': self.nozzle_type,
+            'burn_time': self.t_b
+        }
         structural_results = self.structural_analyzer.analyze_structure(
-            {
-                'chamber_pressure': self.P_c,
-                'chamber_diameter': self.D_ch,
-                'chamber_length': self.L,
-                'throat_diameter': self.d_t,
-                'nozzle_type': self.nozzle_type,
-                'burn_time': self.t_b
-            },
+            struct_input,
             material='steel_4130',
             design_pressure_factor=1.5
         )
@@ -290,62 +338,73 @@ class HybridRocketEngine:
                                    heat_transfer_results, structural_results)
     
     def _calculate_c_star(self):
-        """Calculate characteristic velocity using real-time NASA CEA data"""
-        print(f"Fetching real-time combustion data from NASA CEA... (O/F={self.OF:.2f}, P={self.P_c:.1f} bar)")
-        
-        # Fetch real-time NASA CEA data
-        cea_data = data_fetcher.fetch_cea_combustion_data(
-            fuel_type=self.fuel_type,
-            oxidizer_type='n2o', 
-            of_ratio=self.OF,
-            pressure=self.P_c
+        """Karakteristik hızı (c*) KENDİ yanma çözücümüzle hesaplar.
+
+        Hibrit motor termokimyası CombustionAnalyzer (Cantera gri30 dengesi +
+        shifting-equilibrium isentropik üs) ile çözülür. NASA CEA'ya BAĞLI
+        DEĞİLDİR — kod kendi kimyasal dengesini kurar; CEA yalnızca bağımsız
+        doğrulama referansıdır. Bu çözücünün c*'ı N2O/LOX/H2O2 ile HTPB,
+        paraffin, PE, PMMA, ABS, PLA için NASA CEA'ya %0-1.5 içinde doğrulanmıştır
+        (tasarım O/F bandı, Pc=20 bar). Eski sürüm RocketCEA'yı doğrudan çağırıp
+        sonucu c* olarak alıyordu (CEA bağımlılığı) — bu kaldırıldı.
+        """
+        fuel_composition = {self.fuel_type: 100.0}
+        ox = getattr(self, 'oxidizer_type', None) or 'n2o'
+
+        # T_c=None geçilir ki CombustionAnalyzer adyabatik alev sıcaklığını
+        # KENDİ HP dengesinden hesaplasın (sabit tablo değeri yerine).
+        results = self.combustion_analyzer.analyze_combustion(
+            fuel_composition, ox, self.OF, self.P_c, None
         )
-        
-        # Veri validasyonu
-        is_valid, msg = data_fetcher.validate_data(cea_data, 'combustion')
-        if not is_valid:
-            warnings.warn(f"NASA CEA data invalid: {msg}")
-            print(f"WARNING - Data invalidity: {msg}")
-        
-        # Thermodynamic properties from received data
-        gamma_eff = cea_data.get('gamma', 1.22)
-        R_eff = cea_data.get('gas_constant', 385)  # J/kg·K
-        T_c_eff = cea_data.get('temperature', 3100)  # K
-        
-        # Log data source
-        data_source = cea_data.get('data_source', 'nasa_cea')
-        print(f"Data source: {data_source.upper()}")
-        print(f"   γ = {gamma_eff:.3f}")
-        print(f"   R = {R_eff:.0f} J/kg·K") 
-        print(f"   Tc = {T_c_eff:.0f} K")
-        
-        # Pressure correction (dissociation effect at low pressure)
-        if self.P_c < 10:
-            pressure_factor = 0.95 - 0.02 * (10 - self.P_c) / 10
-            print(f"WARNING - Low pressure correction applied: {pressure_factor:.3f}")
-        else:
-            pressure_factor = 1.0
-        
-        # NASA CEA standard C* formula - CORRECTED
-        # C* = sqrt(gamma * R * Tc) / (gamma * sqrt((2/(gamma+1))^((gamma+1)/(gamma-1))))
-        numerator = np.sqrt(gamma_eff * R_eff * T_c_eff)
-        denominator = gamma_eff * np.sqrt((2 / (gamma_eff + 1))**((gamma_eff + 1) / (gamma_eff - 1)))
-        
-        c_star = (numerator / denominator) * pressure_factor
-        
-        # Transfer real values to class variables
-        self.gamma = gamma_eff
-        self.R = R_eff
-        self.T_c = T_c_eff
-        
-        # C* validasyonu
-        if not (1200 < c_star < 1800):
-            warnings.warn(f"Abnormal C* value: {c_star:.0f} m/s")
-            print(f"WARNING - C* = {c_star:.0f} m/s (normal: 1400-1600)")
-        else:
-            print(f"OK - C* = {c_star:.0f} m/s (validated)")
-        
+        perf = results['performance']
+        chamber = results['compositions']['chamber']
+
+        # Gerçek denge değerlerini sınıfa aktar (shifting-eq. gamma, doğru T_c, MW)
+        self.gamma = chamber['gamma']
+        self.R = self.combustion_analyzer.R_universal / chamber['molecular_weight']
+        self.T_c = chamber['temperature']
+
+        c_star = perf['c_star']
+
+        # c* validasyonu (fiziksel bant; hibrit yakıt/oksitleyici aralığı)
+        if not (1000 < c_star < 1900):
+            warnings.warn(f"Anormal c* değeri: {c_star:.0f} m/s (beklenen ~1300-1850)")
+
         return c_star
+
+    def _instantaneous_performance(self, of_ratio):
+        """Anlık O/F'den anlık (c*, Isp) döndürür (denetim bulgusu #2).
+
+        O/F kayması performansa yansıtılır: yanma çözücü her O/F için c*'ı
+        verir; Isp ise mevcut CF (nozul geometrisi sabit) ile c*'tan ölçeklenir
+        (Isp = CF · c* / g0). CF burada O/F ile küçük değiştiği için tasarım
+        CF'si kullanılır — bu, c*'taki (çok daha büyük) O/F duyarlılığını
+        yakalamak için yeterlidir ve nozul yeniden çözümünden kaçınır.
+
+        O/F değerleri 0.05 çözünürlükte yuvarlanıp önbelleğe alınır
+        (Cantera denge çözümünü her time-marching adımında tekrarlamamak için).
+        """
+        of_key = round(float(of_ratio) / 0.05) * 0.05
+        if of_key in self._perf_cache:
+            return self._perf_cache[of_key]
+
+        try:
+            fuel_composition = {self.fuel_type: 100.0}
+            ox = getattr(self, 'oxidizer_type', None) or 'n2o'
+            results = self.combustion_analyzer.analyze_combustion(
+                fuel_composition, ox, max(of_key, 0.1), self.P_c, None
+            )
+            cstar_inst = results['performance']['c_star']
+        except Exception:
+            cstar_inst = getattr(self, 'C_star', 1500.0)
+
+        # CF tasarım değeri (calculate() önce CF'yi hesaplar); yoksa nominal.
+        cf = getattr(self, 'CF', None)
+        if cf is None or not np.isfinite(cf):
+            cf = 1.5  # tipik hibrit deniz seviyesi CF (Sutton & Biblarz 9th ed.)
+        isp_inst = cf * cstar_inst / self.g0
+        self._perf_cache[of_key] = (cstar_inst, isp_inst)
+        return cstar_inst, isp_inst
     
     def _calculate_expansion_ratio(self):
         """Calculate optimal expansion ratio using correct isentropic formula"""
@@ -369,8 +428,13 @@ class HybridRocketEngine:
         # Calculate area ratio (correct isentropic formula)
         epsilon = (1 / M_exit) * ((2 / (gamma + 1)) * (1 + (gamma - 1) / 2 * M_exit**2))**((gamma + 1) / (2 * (gamma - 1)))
         
-        # Physical limits: minimum 4, maximum 250 (for vacuum nozzles)
-        return max(4, min(epsilon, 250))
+        # Eslenik (matched, Pe = Pa) genlesme orani oldugu gibi kullanilir
+        # (denetim bulgusu #8): eski max(4, ...) tabani, Pc/Pa orani kucuk
+        # motorlarda nozulu tasarim noktasinda asiri genlesmis hale getiriyordu.
+        # Alt sinir yalnizca matematiksel gecerlilik icindir (suporsonik nozul
+        # icin Ae/At > 1); ust sinir 250 vakum nozullari icin pratik limittir.
+        # Kullanici epsilon verirse bu fonksiyon zaten cagrilmaz (calculate()).
+        return max(1.01, min(epsilon, 250))
     
     def _calculate_thrust_coefficient(self):
         """Calculate thrust coefficient using isentropic nozzle flow (Sutton Eq. 3-30).
@@ -438,66 +502,215 @@ class HybridRocketEngine:
 
         return CF_momentum + CF_pressure
     
+    def _get_oxidizer_density(self):
+        """Sıvı N2O besleme yoğunluğu [kg/m³].
+
+        Faz, O/F oranından DEĞİL besleme (tank) koşulundan belirlenir
+        (denetim bulgusu #2): bu modül self-pressurized sıvı N2O beslemesi
+        varsayar (referans tank sıcaklığı 25°C). Gaz enjeksiyonu için ayrıca
+        sıkıştırılabilir orifis modeli gerekir ve burada modellenmemiştir.
+
+        Birincil kaynak: external_data_fetcher (CoolProp/NIST, yoksa
+        Span-Wagner EOS korelasyonu). Erişilemezse literatür sabiti
+        N2O_LIQUID_DENSITY_SAT_25C kullanılır (NIST WebBook,
+        Lemmon & Span 2006 EOS: 298.15 K doygun sıvı ≈ 743 kg/m³).
+        """
+        T_tank = 298.15  # K — 25°C referans tank sıcaklığı (yer işletmesi)
+        # Doygunluk basıncının (~56.6 bar @ 298 K) üzerinde bir besleme basıncı
+        # verilir ki CoolProp sıvı dalı çözsün; sıvı sıkıştırılabilirliği düşük
+        # olduğundan yoğunluk doygun sıvıya çok yakındır.
+        P_feed = max(1.2 * self.P_c, 60.0)  # bar
+        try:
+            props = data_fetcher.fetch_nist_oxidizer_properties(
+                'n2o', temperature=T_tank, pressure=P_feed
+            )
+            rho = float(props.get('density', 0.0))
+            # Sıvı faz makulluk penceresi: doygun sıvı N2O 25°C'de ~743,
+            # 20°C'de ~785 kg/m³ (NIST WebBook). Pencere dışı → fallback.
+            if 500.0 < rho < 1000.0:
+                return rho
+        except Exception:
+            pass
+        return N2O_LIQUID_DENSITY_SAT_25C  # kg/m³ — NIST WebBook (Lemmon & Span 2006)
+
     def _design_fuel_grain(self):
-        """Design fuel grain geometry using correct hybrid rocket equations"""
-        # More precise oxidizer flow calculation - pressure-dependent injection velocity
-        # Typical range: 50-500 kg/m²·s for N2O/HTPB
-        # P_injection = P_c + delta_P (pressure drop calculation)
-        delta_P = 0.2 * self.P_c  # 20% pressure drop (typical value)
-        injection_velocity = np.sqrt(2 * delta_P * 1e5 / 1220)  # Bernoulli denklemi
-        rho_ox = 1220 if self.OF > 1 else 1.8  # kg/m³ (liquid N2O vs gaseous)
+        """Design fuel grain geometry using correct hybrid rocket equations.
+
+        Port oksitleyici akısı G_ox = mdot_ox / A_port bir TASARIM
+        parametresidir ve enjektör orifis akısından (rho·v_enjeksiyon)
+        tamamen ayrıdır (denetim bulgusu #1). Grain boyu, yakıt üretim
+        kapanışından çözülür: mdot_f = rho_f · π · D_port · L · r_dot
+        (Sutton & Biblarz 9. baskı, Böl. 16, yakıt üretim denklemi).
+        """
+        # --- Enjektör parametreleri (YALNIZ enjektör tasarımı için) ---
+        delta_P = 0.2 * self.P_c  # bar — tipik %20 enjektör basınç düşümü (Sutton & Biblarz 9. baskı, Böl. 8)
+        rho_ox = self._get_oxidizer_density()  # kg/m³ — sıvı N2O besleme yoğunluğu
+        # Bernoulli: v = sqrt(2·ΔP/ρ) — yoğunluk, akan akışkanın yoğunluğuyla
+        # TUTARLI (denetim bulgusu #3; eski kodda 1220 hardcoded idi)
+        injection_velocity = np.sqrt(2 * delta_P * 1e5 / rho_ox)  # m/s
 
         # Store injector parameters for results output
         self._inj_delta_P = delta_P          # bar
         self._inj_velocity = injection_velocity  # m/s
         self._inj_rho_ox = rho_ox            # kg/m³
-        G_ox_initial = rho_ox * injection_velocity  # More realistic calculation
-        
-        # Initial port area from oxidizer mass flow
+
+        # --- Port boyutlandırma: tasarım akısından (bulgu #1 düzeltmesi) ---
+        # G_ox = mdot_ox / A_port  =>  A_port = mdot_ox / G_ox_design
+        G_ox_initial = self.G_ox_design  # kg/m²·s
         A_port_initial = self.mdot_ox / G_ox_initial
         self.D_port_initial = 2 * np.sqrt(A_port_initial / np.pi)
-        
-        # Regression rate using correct hybrid formula: r = a * (G_ox)^n
-        # Where G_ox varies along port due to mass addition
-        # For average calculation, use geometric mean
-        self.r_dot_initial = self.a * G_ox_initial**self.n
+
+        # --- Regresyon hızı: Marxman toplam-akı bağıntısı (denetim bulgusu) ---
+        # r = a · G_total^n, G_total = G_ox + G_fuel (Marxman & Gilbert 1963;
+        # Sutton & Biblarz 9th ed., Böl. 16). Yalnız G_ox kullanmak (eski kod)
+        # yakıt akısının önemli olduğu düşük-O/F rejiminde r'yi DÜŞÜK tahmin
+        # eder -> web tükenme süresini iyimser gösterir (güvenli olmayan yön).
+        # G_fuel, r'ye bağlı olduğundan iteratif kapanış yapılır.
+        # flux_mode='ox' verilirse eski davranış (geriye uyum).
+        # Not: ilk grain boyu tahmini gerektiğinden, L_grain'i önce mdot_f
+        # hedefinden (tasarım O/F) türetip sonra Marxman ile tutarlılaştırırız.
+        # Başlangıç L_grain tahmini (yalnız G_ox ile, alt sınır):
+        r_dot_ox_only = self.a * G_ox_initial ** self.n
+        self.L_grain = self.mdot_f / (
+            self.rho_f * np.pi * self.D_port_initial * r_dot_ox_only
+        )
+
+        # Marxman G_total ile başlangıç regresyon hızı (iteratif).
+        reg0 = RegressionAnalyzer.regression_rate(
+            self.a, self.n, G_ox_initial,
+            rho_f=self.rho_f, port_diameter=self.D_port_initial,
+            grain_length=self.L_grain, flux_mode=self.flux_mode
+        )
+        self.r_dot_initial = reg0['r_dot']
         self.r_dot = self.r_dot_initial  # For compatibility
-        
-        # Port diameter growth - more accurate hybrid rocket formula
-        # Classical hybrid rocket regression equation: r_dot = a * G_ox^n
-        # Integrated form: r = (2*a*mdot_ox^n * t^(n+1)) / ((n+1) * (rho_f * pi)^n * (D0^(2n) + 4*r*D0^(2n-2)))
-        
-        # Correct calculation using Sutton & Biblarz Eq. 12-22
-        num_steps = 10  # More steps for more precise calculation
+        self.G_total_initial = reg0['G_total']
+
+        # L_grain'i Marxman r_dot ile yeniden tutarlılaştır: hedef yakıt
+        # debisi (tasarım O/F'den mdot_f) Marxman regresyonuyla sağlanmalı.
+        # mdot_f = rho_f·π·D·L·r_dot_marxman  =>  L_grain (güncel)
+        self.L_grain = self.mdot_f / (
+            self.rho_f * np.pi * self.D_port_initial * self.r_dot_initial
+        )
+
+        # --- Euler time-marching (denetim bulgusu #5 düzeltmesi) ---
+        # Sabit 10 adım yerine dt = t_b/200 taban çözünürlüğü; ek olarak ilk
+        # adımdaki çap artışı başlangıç çapının %1'ini geçmeyecek şekilde adım
+        # sayısı artırılır (ilk adım sıçraması koruması).
+        num_steps = max(
+            200,
+            int(np.ceil(self.t_b * 2 * self.r_dot_initial / (0.01 * self.D_port_initial)))
+        )
         dt = self.t_b / num_steps
         D_port = self.D_port_initial
-        
+
+        # Fiziksel sınır: port çapı kamara çapının %80'ini geçmemeli.
+        # Eski koddaki hasattr(self, 'D_ch') kontrolü İLK çağrıda her zaman
+        # False idi (D_ch grain tasarımından SONRA atanıyor) → ölü kod; ikinci
+        # çağrıda ise bayat D_ch kullanılıyordu. Düzeltme: sınır yalnızca
+        # kullanıcı kamara çapı verdiyse uygulanabilir; verilmediyse kamara
+        # çapı port sonundan türetildiği için (D_ch = 1.5·D_port_final,
+        # yani D_port_final ≈ 0.67·D_ch < 0.8·D_ch) sınır kendiliğinden sağlanır.
+        if self.chamber_diameter_input > 0:
+            max_port = 0.8 * self.chamber_diameter_input
+            if max_port <= self.D_port_initial:
+                warnings.warn(
+                    f"Kamara çapı ({self.chamber_diameter_input*1000:.1f} mm) başlangıç "
+                    f"portu ({self.D_port_initial*1000:.1f} mm) için çok küçük — "
+                    "port sınırı uygulanamıyor, kamara çapını büyütün"
+                )
+                max_port = np.inf
+        else:
+            max_port = np.inf
+
+        # O/F kayması izleme: anlık mdot_f / O/F / c* / Isp her adımda.
+        # Anlık c*/Isp, anlık O/F'den combustion analyzer ile hesaplanır
+        # (denetim bulgusu #2): O/F kayması performansa YANSITILIR; eski kod
+        # c*/Isp'yi tasarım O/F'sinde donduruyordu. Pahalı denge çözümünü her
+        # adımda tekrarlamamak için O/F->c*/Isp tablosu önbelleğe alınır
+        # (track_performance=True ise).
+        web_exhausted = False
+        self._of_history = []
+        self._cstar_history = []
+        self._isp_history = []
+        self._time_history = []
+
         for i in range(num_steps):
+            t_now = i * dt
             A_port = np.pi * (D_port / 2)**2
             G_ox = self.mdot_ox / A_port  # kg/m²·s oksitleyici akış yoğunluğu
-            
-            # Doğru regresyon hızı formülü (Altman & Holzman 2007)
-            # Tipik HTPB/N2O değerleri: a = 0.0003, n = 0.5 (doğrulandı)
-            r_dot = self.a * (G_ox ** self.n)  # m/s
-            
-            # Port yarıçapını artır
-            D_port += 2 * r_dot * dt  # Çap artışı = 2 * yarıçap artışı
-            
-            # Fiziksel sınırlar - port çapı kamara çapının %80'ini geçmemeli
-            max_port = self.D_ch * 0.8 if hasattr(self, 'D_ch') and self.D_ch > 0 else D_port
-            D_port = min(D_port, max_port)
-        
+
+            # Marxman regresyon hızı: r = a · G_total^n (G_total iteratif).
+            reg = RegressionAnalyzer.regression_rate(
+                self.a, self.n, G_ox,
+                rho_f=self.rho_f, port_diameter=D_port,
+                grain_length=self.L_grain, flux_mode=self.flux_mode
+            )
+            r_dot = reg['r_dot']  # m/s
+
+            # Anlık yakıt üretimi ve O/F (kayma izleme)
+            mdot_f_inst = self.rho_f * np.pi * D_port * self.L_grain * r_dot
+            of_inst = self.mdot_ox / mdot_f_inst if mdot_f_inst > 0 else self.OF
+
+            # Anlık c*/Isp (O/F shift -> performans, bulgu #2). Tablo
+            # önbelleği ile (track_performance açıkken).
+            if self.track_performance:
+                cstar_inst, isp_inst = self._instantaneous_performance(of_inst)
+                self._of_history.append(of_inst)
+                self._cstar_history.append(cstar_inst)
+                self._isp_history.append(isp_inst)
+                self._time_history.append(t_now)
+
+            # Port yarıçapını artır (çap artışı = 2 · yarıçap artışı)
+            D_port += 2 * r_dot * dt
+
+            if D_port >= max_port:
+                D_port = max_port
+                web_exhausted = True
+                warnings.warn(
+                    "Port çapı 0.8·D_kamara sınırına ulaştı — web yanma süresi "
+                    "bitmeden tükendi, grain tasarımını gözden geçirin"
+                )
+                break
+
         self.D_port_final = D_port
-        
+
         # Final oxidizer flux hesaplama
         A_port_final = np.pi * (self.D_port_final / 2)**2
         self.G_ox_final = self.mdot_ox / A_port_final
-        
-        # Zaman-ortalamalı regresyon oranı (integral yaklaşımı)
+
+        # Yanma sonu Marxman regresyonu ve anlık yakıt debisi / O/F (bulgu #6)
+        reg_final = RegressionAnalyzer.regression_rate(
+            self.a, self.n, self.G_ox_final,
+            rho_f=self.rho_f, port_diameter=self.D_port_final,
+            grain_length=self.L_grain, flux_mode=self.flux_mode
+        )
+        r_dot_final = reg_final['r_dot']
+        self.G_total_final = reg_final['G_total']
+        self.mdot_f_final = self.rho_f * np.pi * self.D_port_final * self.L_grain * r_dot_final
+        self.OF_final = self.mdot_ox / self.mdot_f_final if self.mdot_f_final > 0 else self.OF
+
+        # Zaman-ortalamalı regresyon oranı (Marxman, port-ortalama G_ox).
+        # G_total iterasyonu ortalama G_ox'ta tekrar çözülür ki ortalama r
+        # tutarlı olsun (yalnız uç noktaların aritmetik ortalaması değil).
         G_ox_avg = (G_ox_initial + self.G_ox_final) / 2  # Aritmetik ortalama daha stabil
-        self.r_dot_avg = self.a * G_ox_avg**self.n
-        
-        # Store for results  
+        reg_avg = RegressionAnalyzer.regression_rate(
+            self.a, self.n, G_ox_avg,
+            rho_f=self.rho_f, port_diameter=(self.D_port_initial + self.D_port_final) / 2,
+            grain_length=self.L_grain, flux_mode=self.flux_mode
+        )
+        self.r_dot_avg = reg_avg['r_dot']
+
+        # Grain'in fiilen ürettiği yakıt kütlesi (denetim bulgusu #6):
+        # m_f = rho_f · (V_grain_initial − V_grain_final)
+        #     = rho_f · (π/4) · (D_final² − D_initial²) · L_grain
+        self.m_f_grain = (
+            self.rho_f * (np.pi / 4.0)
+            * (self.D_port_final**2 - self.D_port_initial**2)
+            * self.L_grain
+        )
+        self._web_exhausted = web_exhausted
+
+        # Store for results
         self.G_ox_initial = G_ox_initial
     
     def _compile_results(self, combustion_results=None, nozzle_results=None, 
@@ -544,8 +757,40 @@ class HybridRocketEngine:
             'chamber_pressure': self.P_c,
             'chamber_temperature': self.T_c,
             'burn_time': self.t_b,
-            'of_ratio': self.OF
+            'of_ratio': self.OF,
+
+            # O/F kayması (denetim bulgusu #6): port büyüdükçe mdot_f değişir;
+            # başlangıç O/F tasarım değeridir, yanma sonu O/F time-marching
+            # içindeki anlık mdot_f'den gelir.
+            'of_ratio_initial': self.OF,
+            'of_ratio_final': self.OF_final,
+            'fuel_mass_flow_final': self.mdot_f_final,
+            'grain_length': self.L_grain,
+            'g_ox_design': self.G_ox_design,
+
+            # Marxman toplam akı (denetim bulgusu #1): regresyon G_total ile
+            # hesaplanır; G_ox-only'ye göre düşük-O/F rejiminde daha yüksek
+            # (konservatif) r verir.
+            'regression_flux_mode': self.flux_mode,
+            'g_total_initial': getattr(self, 'G_total_initial', self.G_ox_initial),
+            'g_total_final': getattr(self, 'G_total_final', self.G_ox_final),
         }
+
+        # O/F kaymasının performansa etkisi (denetim bulgusu #2): time-marching
+        # boyunca anlık O/F'den hesaplanan c*/Isp dizileri ve zaman-ortalamaları.
+        if self.track_performance and getattr(self, '_cstar_history', None):
+            cstar_hist = self._cstar_history
+            isp_hist = self._isp_history
+            basic_results['of_shift_performance'] = {
+                'time': list(self._time_history),
+                'of_ratio': list(self._of_history),
+                'c_star': list(cstar_hist),
+                'isp': list(isp_hist),
+                'c_star_time_avg': float(np.mean(cstar_hist)) if cstar_hist else self.C_star,
+                'isp_time_avg': float(np.mean(isp_hist)) if isp_hist else self.Isp,
+                'c_star_design_of': self.C_star,
+                'isp_design_of': self.Isp,
+            }
         
         # --- 1. Nozzle Angles ---
         nozzle_type = self.nozzle_type
@@ -557,7 +802,9 @@ class HybridRocketEngine:
         }
 
         # --- 2. Grain Design ---
-        fuel_length = self.L  # grain length = chamber length
+        # Grain boyu yakıt üretim kapanışından gelir (denetim bulgusu #6),
+        # kamara boyundan DEĞİL: mdot_f = rho_f·π·D_port·L_grain·r_dot
+        fuel_length = self.L_grain
         chamber_diameter = self.D_ch
         basic_results['grain_design'] = {
             'grain_type': 'cylindrical_bore',

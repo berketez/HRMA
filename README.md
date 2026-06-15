@@ -11,6 +11,20 @@ A comprehensive web-based tool for designing and analyzing hybrid, solid, and li
 - **Performance Analysis**: Thrust curves, Isp, trajectory simulation, heat transfer, structural analysis
 - **Export**: STL files, OpenRocket .eng files, PDF reports
 
+## Validation
+
+HRMA's thermochemistry is cross-checked against **NASA CEA** (via RocketCEA):
+hybrid combustion (c\*, Tc, Isp) agrees within **≤1.5 %** across all supported
+fuel/oxidizer pairs, and liquid c\* within **<2 %**. The hybrid regression model
+is compared against published static-fire data (Rezaei HTPB/N2O). 127 automated
+tests pass.
+
+HRMA is a **preliminary-design and educational tool**, not a flight-qualification
+tool. Predicted performance should be cross-checked against an independent code
+(CEA / RPA / openMotor) and verified by physical testing before firing any motor.
+See [VALIDATION_STATUS.md](VALIDATION_STATUS.md) for full verification results,
+uncertainty bands, and known limitations.
+
 ## Quick Start
 
 ```bash

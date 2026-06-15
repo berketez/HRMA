@@ -432,54 +432,43 @@ class LiquidRocketEngine:
             self.dissociation_temp = 3000
     
     def _calculate_mixture_ratio_effects(self):
-        """Calculate O/F ratio dependent performance (high precision)"""
-        # Polynomial evaluation for mixture ratio effects
+        """Calculate O/F ratio dependent performance (high precision)
+
+        DENETIM DUZELTMESI (Bulgu 2 ve 3):
+        - Eski 'correct_c_star_values' override'i kaldirildi: LH2/LOX icin 1580 m/s
+          fiziksel olarak imkansizdi (kimyasal yakitlarin en yuksek c*'i ~2356 m/s,
+          bu dosyanin kendi CEA tablosu). c* artik CEA referans tablosundan geliyor.
+        - Eski Isp(O/F) polinomlari kendi CEA referanslarini asiyordu (RP1/LOX
+          optimal MR'da 341.8 s vs CEA 311.8 s) ve MR'a gore monoton artiyordu.
+          Polinomlar, CEA tablo degerine demirlenmis MR-sapma cezali interpolasyon
+          ile degistirildi: deger optimal MR'da tablo referansina esit, sapmada
+          kuadratik ceza ile azaliyor — referansi asla asmaz.
+        """
         mr = self.MR
-        
+
         # Ensure mixture ratio is within reasonable bounds
         mr_bounded = max(0.5, min(mr, 10.0))
-        
-        # Calculate Isp as function of O/F using polynomial fit
-        isp_poly = np.poly1d(self.isp_coeffs[::-1])  # Reverse for numpy convention
-        self.isp_sl = max(100, isp_poly(mr_bounded))
-        
-        # Calculate gamma as function of O/F
+
+        # Calculate gamma as function of O/F (polinom referansla uyumlu: rp1/lox
+        # optimal MR'da 1.2158 vs CEA 1.2165)
         gamma_poly = np.poly1d(self.gamma_coeffs[::-1])
         self.gamma = max(1.1, min(1.4, gamma_poly(mr_bounded)))
-        
-        # EXPERT FIX: Use correct c_star values for known propellant combinations
-        # Override incorrect reference data with NASA verified values
-        fuel_ox_key = (self.fuel_type.lower(), self.oxidizer_type.lower())
-        correct_c_star_values = {
-            ('lh2', 'lox'): 1580.0,  # RS-25 NASA verified
-            ('rp1', 'lox'): 1715.0,  # F-1 NASA verified (calculated from geometry)  
-            ('ch4', 'lox'): 1600.0,  # Raptor class
-        }
-        
-        if fuel_ox_key in correct_c_star_values:
-            self.c_star = correct_c_star_values[fuel_ox_key]
-            print(f"Using NASA verified c_star: {self.c_star} m/s for {fuel_ox_key}")
-        else:
-            # Fallback to reference data
-            self.c_star = self.c_star_ref
-        
-        # Vacuum performance (accounts for better expansion)
-        isp_improvement = (self.isp_vac_ref / self.isp_sl_ref)
-        self.isp_vac = self.isp_sl * isp_improvement
-        
-        # Mixture ratio efficiency factor
-        mr_deviation = abs(mr - self.optimal_mr) / self.optimal_mr
+
+        # Mixture ratio efficiency factor (kuadratik ceza, optimumda 1.0)
+        mr_deviation = abs(mr_bounded - self.optimal_mr) / self.optimal_mr
         self.mr_efficiency = 1.0 - 0.15 * mr_deviation**2  # Quadratic penalty
         self.mr_efficiency = max(0.7, self.mr_efficiency)  # Minimum 70% efficiency
-        
-        # Apply mixture ratio efficiency
-        self.isp_sl *= self.mr_efficiency
-        self.isp_vac *= self.mr_efficiency
-        self.c_star *= self.mr_efficiency
-        
+
+        # CEA tablo interpolasyonu: referans degerler optimal MR'daki CEA
+        # cozumleridir (NASA RP-1311 / CEA); MR sapmasi kuadratik ceza ile
+        # uygulanir. Boylece Isp ve c* hicbir MR'da CEA referansini asamaz.
+        self.isp_sl = self.isp_sl_ref * self.mr_efficiency
+        self.isp_vac = self.isp_vac_ref * self.mr_efficiency
+        self.c_star = self.c_star_ref * self.mr_efficiency
+
         # CONSISTENCY FIX: Store effective C* for all throat calculations
         self.c_star_effective = self.c_star
-        
+
         print(f"Effective C* set: {self.c_star_effective:.1f} m/s")
     
     def calculate_nozzle_geometry(self, altitude=0, convergence_tol=1e-8):
@@ -512,7 +501,9 @@ class LiquidRocketEngine:
         motor_discharge_coeffs = {
             ('lh2', 'lox'): 0.98,      # RS-25 NASA standard
             ('rp1', 'lox'): 0.98,      # F-1 NASA standard
-            ('ch4', 'lox'): 0.95,      # Raptor class
+            # DENETIM DUZELTMESI (Bulgu 2): anahtar 'ch4' idi ama sinifin yakit
+            # adi her yerde 'methane' — eslesme hic gerceklesmiyordu.
+            ('methane', 'lox'): 0.95,  # Raptor class
         }
         self.CD_throat = motor_discharge_coeffs.get(fuel_ox_key, 0.98)  # Store for consistency
         
@@ -594,7 +585,11 @@ class LiquidRocketEngine:
         # H-14 duzeltmesi: stratosferde 9.81/216.65 cift sayma kaldirildi.
         # ICAO formulu: P = P_ref * exp[-g_0 * M_air * (h - h_ref) / (R_star * T)]
         # solid_rocket_engine.py:209'daki formul ile birebir hizalandi.
-        from hrma.constants import G_0, M_AIR, R_STAR_ICAO, T_TROPOPAUSE, P_TROPOPAUSE
+        # NOT: G_0 modul seviyesinde import edilmistir; fonksiyon icinde tekrar
+        # import edilirse Python G_0'i fonksiyon lokali sayar ve fonksiyonun
+        # basindaki g0_precise = G_0 satiri UnboundLocalError verir (gizli bug
+        # duzeltildi — G_0 import listesinden cikarildi).
+        from hrma.constants import M_AIR, R_STAR_ICAO, T_TROPOPAUSE, P_TROPOPAUSE
         if altitude <= 11000:
             T_atm = 288.15 - 0.0065 * altitude
             P_atm = 101325 * (T_atm / 288.15) ** 5.256  # Pa
@@ -682,37 +677,39 @@ class LiquidRocketEngine:
         # Advanced heat transfer calculations based on Bartz correlation
         
         # Engine geometry
-        chamber_length = self.c_star * 1.2 / 1000  # L* based chamber length (m)
+        # DENETIM DUZELTMESI (Bulgu 5): eski kod chamber_length = c_star*1.2/1000
+        # ile karakteristik HIZ c* (m/s) ile karakteristik UZUNLUK L*'i (m)
+        # karistiriyordu (boyutsal olarak gecersiz, ~21x fazla uzunluk).
+        # Dogru yontem: V_c = L* * A_t; L_chamber = V_c / A_c.
+        # L* = 1.2 m: LOX/hidrokarbon icin tipik 1.02-1.27 m
+        # (Sutton & Biblarz, Rocket Propulsion Elements 9th ed., Table 8-1)
+        L_star = 1.2  # m, karakteristik uzunluk (Sutton & Biblarz 9th ed., Table 8-1)
         chamber_diameter = max(self.d_t * 3.5, 0.05)  # Conservative sizing (m)
+        A_throat = np.pi * (self.d_t**2) / 4  # m²
+        A_chamber_cross = np.pi * (chamber_diameter**2) / 4  # m² (hazne kesiti)
+        chamber_volume = L_star * A_throat  # m³ (V_c = L* * A_t)
+        chamber_length = chamber_volume / A_chamber_cross  # m
         nozzle_length = getattr(self, 'L_nozzle', (self.d_e - self.d_t) / (2 * np.tan(np.radians(15))))
-        
-        # Chamber heat transfer (Bartz correlation with corrections)
-        # h_g = (0.026 / D_t^0.2) * (mu^0.2 * cp / Pr^0.6) * (Pc / c*)^0.8 * (D_t / R_c)^0.1
-        
+
+        # Chamber heat transfer — tam Bartz korelasyonu (Bartz 1957; Sutton &
+        # Biblarz 9th ed., Eq. 8-23):
+        # h_g = (0.026/D_t^0.2)(mu^0.2 cp/Pr^0.6)(Pc/c*)^0.8(D_t/R_curv)^0.1(A_t/A)^0.9 * sigma
+
         # Gas properties at chamber conditions
         mu_g = self.mu_chamber  # Dynamic viscosity
         cp_g = self.cp_chamber  # Specific heat
         Pr_g = self.pr_chamber  # Prandtl number
-        
+
         # Bartz correlation coefficients
         D_t = self.d_t  # Throat diameter
-        R_c = chamber_diameter / 2  # Chamber radius
+        # DENETIM DUZELTMESI (Bulgu 6): R parametresi Bartz'da bogaz egrilik
+        # yaricapidir, hazne yaricapi degil. Bogaz giris egrilik yaricapi
+        # tipik 1.5*R_t alinir (Huzel & Huang, "Modern Engineering for Design
+        # of Liquid-Propellant Rocket Engines", boğaz konturu pratiği).
+        R_curv = 1.5 * (D_t / 2)  # m, bogaz egrilik yaricapi
         Pc_atm = self.P_c * 1e5  # Chamber pressure in Pa
-        
-        # Heat transfer coefficient at throat (highest heat flux)
-        h_g_throat = (0.026 / (D_t**0.2)) * ((mu_g**0.2 * cp_g) / (Pr_g**0.6)) * \
-                     ((Pc_atm / self.c_star)**0.8) * ((D_t / R_c)**0.1)
-        
-        # Heat transfer coefficient variation along nozzle
-        # h_g(x) = h_g_throat * (A_t / A(x))^0.9 * (T_c / T(x))^0.68
-        
-        # Chamber heat transfer area and load
-        A_chamber = np.pi * chamber_diameter * chamber_length
-        
-        # Chamber heat transfer coefficient (reduced from throat)
-        h_g_chamber = h_g_throat * 0.7  # Typical reduction factor
-        
-        # Wall temperature calculation (iterative)
+
+        # Wall temperature calculation (sigma faktoru icin once duvar sicakligi)
         if self.cooling_type == 'regenerative':
             T_wall_hot = 800  # K (cooled wall)
             T_wall_cold = 350  # K (coolant side)
@@ -722,8 +719,42 @@ class LiquidRocketEngine:
         else:  # radiative
             T_wall_hot = 1800  # K (radiative equilibrium)
             T_wall_cold = T_wall_hot  # No cooling
-        
-        # Chamber heat flux
+
+        # DENETIM DUZELTMESI (Bulgu 6): Bartz sinir tabakasi ozellik duzeltme
+        # faktoru sigma eklendi (Bartz 1957, Eq. 7; Sutton 9th ed. Eq. 8-23):
+        # sigma = 1 / { [0.5(T_w/T_0)(1+(g-1)/2 M^2)+0.5]^0.68 [1+(g-1)/2 M^2]^0.12 }
+        gamma_g = self.gamma
+        Tw_T0 = T_wall_hot / self.T_c
+
+        def bartz_sigma(mach):
+            """Bartz sınır tabakası özellik düzeltme faktörü (Bartz 1957)."""
+            m_term = 1.0 + (gamma_g - 1.0) / 2.0 * mach**2
+            return 1.0 / ((0.5 * Tw_T0 * m_term + 0.5)**0.68 * m_term**0.12)
+
+        sigma_throat = bartz_sigma(1.0)   # bogazda M=1
+        sigma_chamber = bartz_sigma(0.0)  # haznede M~0
+
+        # Heat transfer coefficient at throat (highest heat flux)
+        h_g_throat = (0.026 / (D_t**0.2)) * ((mu_g**0.2 * cp_g) / (Pr_g**0.6)) * \
+                     ((Pc_atm / self.c_star)**0.8) * ((D_t / R_curv)**0.1) * sigma_throat
+
+        # Heat transfer coefficient variation along nozzle
+        # h_g(x) = h_g_throat * (A_t / A(x))^0.9  (Bartz alan olceklemesi)
+
+        # Chamber heat transfer area and load
+        A_chamber = np.pi * chamber_diameter * chamber_length
+
+        # DENETIM DUZELTMESI (Bulgu 6): hazne katsayisi sabit 0.7 yerine Bartz
+        # alan olceklemesi (A_t/A_c)^0.9 (daralma orani 12.25 icin ~0.105).
+        h_g_chamber = h_g_throat * ((A_throat / A_chamber_cross)**0.9) * \
+                      (sigma_chamber / sigma_throat)
+
+        # DENETIM DUZELTMESI (Bulgu 6): surucu sicaklik statik T degil adyabatik
+        # duvar (recovery) sicakligi olmali. Haznede M~0 oldugundan T_aw ~ T_c.
+        # Recovery faktoru r = Pr^(1/3) (turbulent; Bartz 1957 / NASA SP-8124).
+        r_recovery = Pr_g ** (1.0 / 3.0)
+
+        # Chamber heat flux (haznede T_aw ~ T_c, M~0)
         q_dot_chamber = h_g_chamber * (self.T_c - T_wall_hot)  # W/m²
         Q_chamber = q_dot_chamber * A_chamber  # W
         
@@ -754,13 +785,20 @@ class LiquidRocketEngine:
                 T_local = self.T_c  # Upstream of throat
             
             # Local heat transfer coefficient
+            # DENETIM DUZELTMESI (Bulgu 6): Bartz eksenel olcekleme (A_t/A)^0.9
+            # (Bartz 1957; Sutton 9th ed. Eq. 8-23). Eski (T_c/T)^0.68 carpani
+            # Bartz formunda yoktur; sicaklik etkisi sigma icinde tasinir.
             area_ratio = (np.pi * (D_t**2) / 4) / A_local
-            temp_ratio = self.T_c / T_local
-            h_g_local = h_g_throat * (area_ratio**0.9) * (temp_ratio**0.68)
-            
+            h_g_local = h_g_throat * (area_ratio**0.9)
+
+            # DENETIM DUZELTMESI (Bulgu 6): surucu sicaklik statik T degil
+            # adyabatik duvar (recovery) sicakligi (Bartz 1957 / NASA SP-8124):
+            # T_aw = T + r*(T_c - T), r = Pr^(1/3) ~ 0.9 -> bogazda T_aw ~ 0.9*T_c
+            T_aw_local = T_local + r_recovery * (self.T_c - T_local)
+
             # Local heat flux and load
             dA = np.pi * D_local * (nozzle_length / n_segments)
-            q_dot_local = h_g_local * (T_local - T_wall_hot)
+            q_dot_local = h_g_local * (T_aw_local - T_wall_hot)
             Q_nozzle += q_dot_local * dA
             A_nozzle_total += dA
         
@@ -916,31 +954,6 @@ class LiquidRocketEngine:
             v_ox_base = 25
             pressure_drop_factor = 0.20
         
-        # Weber number optimization for atomization
-        # We = ρ_l * v_rel² * D / σ (surface tension)
-        surface_tension = 0.02  # N/m typical for cryogenics
-        
-        # Relative velocity for atomization
-        v_relative = abs(v_ox_base - v_fuel_base)
-        
-        # Optimize for Weber number > 12 (good atomization)
-        target_weber = 20
-        droplet_diameter = self.rho_ox * (v_relative**2) / (target_weber * surface_tension)
-        droplet_diameter = max(droplet_diameter, 50e-6)  # Minimum 50 microns
-        
-        # Injection areas with high precision
-        A_fuel = self.mdot_fuel / (self.rho_fuel * v_fuel_base)
-        A_ox = self.mdot_ox / (self.rho_ox * v_ox_base)
-        
-        # Validation
-        if A_fuel <= 0 or A_ox <= 0:
-            raise ValueError("Injection areas must be positive")
-        if A_fuel > 0.1 or A_ox > 0.1:  # Large area warning
-            print(f"Warning: Large injection areas: Fuel={A_fuel*1e4:.1f} cm², Ox={A_ox*1e4:.1f} cm²")
-        
-        # Advanced pressure drop calculation
-        # ΔP = ρ * v² / (2 * Cd²) where Cd is discharge coefficient
-        
         # Discharge coefficients based on injector type
         if self.injector_type == 'impinging':
             Cd_fuel = 0.7   # Sharp-edged orifices
@@ -954,15 +967,51 @@ class LiquidRocketEngine:
         else:
             Cd_fuel = 0.75  # Default
             Cd_ox = 0.75
-        
-        # Pressure drops with discharge coefficient correction
-        delta_P_fuel = (self.rho_fuel * (v_fuel_base**2)) / (2 * (Cd_fuel**2) * 1e5)  # bar
-        delta_P_ox = (self.rho_ox * (v_ox_base**2)) / (2 * (Cd_ox**2) * 1e5)  # bar
-        
-        # Add pressure drop factor for additional losses
-        delta_P_fuel *= (1 + pressure_drop_factor)
-        delta_P_ox *= (1 + pressure_drop_factor)
-        
+
+        # DENETIM DUZELTMESI (Bulgu 8): enjektor basinc dusumu hazne basincina
+        # baglanmalidir. NASA SP-8089 (Liquid Rocket Engine Injectors) ve Sutton
+        # 9th ed.: chug kararliligi icin dP_inj = %15-25 * Pc. Eski kod sabit
+        # enjeksiyon hizlarindan dP hesapliyordu (Pc=100 bar'da sadece %3),
+        # yuksek Pc'de kararlilik fiziksel olarak saglanamiyordu.
+        # pressure_drop_factor (0.15-0.28) artik dogru anlaminda, dP/Pc orani
+        # olarak kullaniliyor.
+        delta_P_fuel = pressure_drop_factor * self.P_c  # bar (NASA SP-8089)
+        delta_P_ox = pressure_drop_factor * self.P_c    # bar (NASA SP-8089)
+
+        # Enjeksiyon hizlari bu dP'den turetilir: v = Cd * sqrt(2*dP/rho)
+        # (orifis denklemi; A_inj = mdot/(rho*v) ile tutarli zincir).
+        # Yukaridaki heritage tabanli sabit hizlar dP/Pc gereksinimini
+        # saglamadigindan referans olarak birakildi, hesapta kullanilmiyor.
+        v_fuel_base = Cd_fuel * np.sqrt(2.0 * delta_P_fuel * PA_PER_BAR / self.rho_fuel)
+        v_ox_base = Cd_ox * np.sqrt(2.0 * delta_P_ox * PA_PER_BAR / self.rho_ox)
+
+        # Weber number optimization for atomization
+        # We = rho * v_rel^2 * D / sigma  ->  D = We_crit * sigma / (rho * v_rel^2)
+        surface_tension = 0.02  # N/m typical for cryogenics
+
+        # Relative velocity for atomization
+        v_relative = max(abs(v_ox_base - v_fuel_base), 1.0)  # m/s (sifira bolunme korumasi)
+
+        # DENETIM DUZELTMESI (Bulgu 7): eski kod D = rho*v^2/(We*sigma) ile
+        # formulu ters yazmisti (285 km 'damlacik' uretiyordu). Dogrusu
+        # We tanimindan: D = We_crit * sigma / (rho * v_rel^2).
+        # We_crit ~ 12: dusuk viskoziteli sivi damlacik parcalanma esigi
+        # (Lefebvre & McDonell, "Atomization and Sprays", 2nd ed.)
+        target_weber = 12
+        droplet_diameter = target_weber * surface_tension / (self.rho_ox * (v_relative**2))
+        # Makul fiziksel sinirlar: 10-500 mikron (tipik enjektor sprey araligi)
+        droplet_diameter = min(max(droplet_diameter, 10e-6), 500e-6)
+
+        # Injection areas with high precision
+        A_fuel = self.mdot_fuel / (self.rho_fuel * v_fuel_base)
+        A_ox = self.mdot_ox / (self.rho_ox * v_ox_base)
+
+        # Validation
+        if A_fuel <= 0 or A_ox <= 0:
+            raise ValueError("Injection areas must be positive")
+        if A_fuel > 0.1 or A_ox > 0.1:  # Large area warning
+            print(f"Warning: Large injection areas: Fuel={A_fuel*1e4:.1f} cm², Ox={A_ox*1e4:.1f} cm²")
+
         # Feed system pressure requirements
         P_tank_fuel = self.P_c + delta_P_fuel + 8  # +8 bar safety margin
         P_tank_ox = self.P_c + delta_P_ox + 8
@@ -1027,10 +1076,20 @@ class LiquidRocketEngine:
         """Calculate turbopump specifications (if required)"""
         # Check if turbopumps are needed (high pressure engines)
         if self.P_c > 50:  # bar
-            # Turbopump design
-            fuel_head = 200  # Typical fuel pump head (m)
-            ox_head = 300    # Typical oxidizer pump head (m)
-            
+            # DENETIM DUZELTMESI (Bulgu 8): pompa head'i Pc'den bagimsiz sabit
+            # 200/300 m idi (Pc=100 bar icin gereken ~1300+ m; guc ~6.5x dusuk
+            # raporlaniyordu). Head artik gercek basinc yukselmesinden:
+            # H = (Pc + dP_enjektor + dP_hat/marj) / (rho * g)
+            # (_design_turbopump_system ile ayni yaklasim; Huzel & Huang Ch. 6)
+            injector = self.calculate_injector_design()
+            delta_P_inj_fuel = injector['fuel_pressure_drop'] * PA_PER_BAR  # Pa
+            delta_P_inj_ox = injector['ox_pressure_drop'] * PA_PER_BAR     # Pa
+            delta_P_lines = 5e5  # Pa, besleme hatti kayiplari + marj (5 bar tipik)
+
+            P_c_pa = self.P_c * PA_PER_BAR
+            fuel_head = (P_c_pa + delta_P_inj_fuel + delta_P_lines) / (self.rho_fuel * self.g0)  # m
+            ox_head = (P_c_pa + delta_P_inj_ox + delta_P_lines) / (self.rho_ox * self.g0)        # m
+
             # Pump efficiencies
             eta_fuel_pump = 0.75
             eta_ox_pump = 0.80
@@ -1063,63 +1122,135 @@ class LiquidRocketEngine:
             }
     
     def calculate_altitude_performance(self, altitudes):
-        """High-precision altitude performance with detailed nozzle optimization"""
+        """High-precision altitude performance with detailed nozzle optimization
+
+        DENETIM DUZELTMESI (Bulgu 1): fonksiyonun sonuc blogu literal '\\n'
+        kacislariyla tek yorum satirina hapsolmustu ve fonksiyon None donuyordu.
+        Blok canli koda cevrildi; fonksiyon her irtifa icin CF, Isp ve itki
+        iceren sozluk listesi dondurur.
+
+        DENETIM DUZELTMESI (Bulgu 4): yanlis ISA katman taban sicakliklari
+        (20-32 km icin 196.65 K, 32-47 km icin 139.05 K; basinci 23x-432x
+        sisiriyordu) kaldirildi. Atmosfer modeli artik hrma.constants.ISA_LAYERS
+        tablosu (US Standard Atmosphere 1976, Tablo 4) + barometrik formul ile
+        hesaplaniyor.
+        """
+        from hrma.constants import ISA_LAYERS, M_AIR, R_STAR_ICAO
+
         altitude_data = []
-        
-        # ICAO Standard Atmosphere (high precision)
+
         for alt in altitudes:
-            # Geopotential height
+            # Geopotential height (US Standard Atmosphere 1976)
             H = alt * 6356766 / (6356766 + alt)
-            
-            # Detailed atmospheric layers
-            if H <= 11000:  # Troposphere
-                T = 288.15 - 0.0065 * H
-                P = 101325 * (T / 288.15) ** (9.80665 * 0.0289644 / (8.31432 * 0.0065))
-            elif H <= 20000:  # Lower Stratosphere  
-                T = 216.65
-                P = 22632.1 * np.exp(-9.80665 * 0.0289644 * (H - 11000) / (8.31432 * 216.65))
-            elif H <= 32000:  # Upper Stratosphere
-                T = 196.65 + 0.001 * (H - 20000)
-                P = 5474.89 * (T / 216.65) ** (-9.80665 * 0.0289644 / (8.31432 * 0.001))
-            elif H <= 47000:  # Stratosphere top
-                T = 139.05 + 0.0028 * (H - 32000)
-                P = 868.02 * (T / 228.65) ** (-9.80665 * 0.0289644 / (8.31432 * 0.0028))
-            else:  # Mesosphere
-                T = 270.65 - 0.0028 * (H - 47000)
-                P = 110.91 * (T / 270.65) ** (-9.80665 * 0.0289644 / (8.31432 * -0.0028))
-            
+
+            # Katman secimi: taban yuksekligi H'yi asmayan son katman
+            # (hrma.constants.ISA_LAYERS: (h_taban, T_taban, lapse, P_taban))
+            layer = ISA_LAYERS[0]
+            for candidate in ISA_LAYERS:
+                if H >= candidate[0]:
+                    layer = candidate
+                else:
+                    break
+            h_base, T_base, lapse, P_base = layer
+
+            # Barometrik formul (US Standard Atmosphere 1976, Eq. 33a/33b)
+            if abs(lapse) > 1e-12:
+                T = T_base + lapse * (H - h_base)
+                P = P_base * (T / T_base) ** (-G_0 * M_AIR / (R_STAR_ICAO * lapse))
+            else:
+                T = T_base
+                P = P_base * np.exp(-G_0 * M_AIR * (H - h_base) / (R_STAR_ICAO * T_base))
+
             pressure_atm = P / 100000  # Convert Pa to bar
-            
+
             # Space vacuum conditions
             if alt >= 100000:
                 pressure_atm = 1e-6
                 T = 1000  # Thermospheric temperature
-            
+
             # Calculate optimal nozzle for this altitude
             nozzle_geom = self.calculate_nozzle_geometry(altitude=alt)
             epsilon_opt = nozzle_geom['expansion_ratio']
-            
+
             # High-precision thrust coefficient calculation
             gamma = self.gamma
             Pe_Pc = pressure_atm / self.P_c
             Pe_Pc = max(Pe_Pc, 1e-8)  # Prevent numerical issues
-            
-            # Ideal thrust coefficient
+
+            # Ideal thrust coefficient (matched expansion; Sutton & Biblarz
+            # 9th ed., Eq. 3-30)
             gamma_term = 2 * gamma**2 / (gamma - 1)
             stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
             expansion_term = 1 - Pe_Pc ** ((gamma - 1) / gamma)
-            
             CF_ideal = np.sqrt(gamma_term * stagnation_term * expansion_term)
-            
-            # Nozzle efficiency corrections for altitude
-            # 1. Divergence loss (15° half-angle conical nozzle)
+
+            # Deniz seviyesi (tasarim noktasi) ideal CF — zincir demiri
+            Pe_Pc_sl = max(self.P_a / self.P_c, 1e-8)
+            CF_ideal_sl = np.sqrt(
+                gamma_term * stagnation_term
+                * (1 - Pe_Pc_sl ** ((gamma - 1) / gamma))
+            )
+
+            # Nozzle efficiency corrections (bilgilendirme amacli rapor edilir;
+            # teslim Isp'si CEA tablosuna demirli oldugundan ikinci kez uygulanmaz)
+            # 1. Divergence loss (15 deg half-angle conical nozzle)
             eta_divergence = (1 + np.cos(np.radians(15))) / 2
-            
+
             # 2. Boundary layer correction (altitude dependent)
             Re_throat = (self.mdot_total * 4) / (np.pi * self.d_t * self.mu_chamber)
             eta_boundary_layer = 1 - 0.002 * (1e6 / max(Re_throat, 1e4))**0.2
-            
-            # 3. Heat transfer loss (reduces with altitude)\n            density_ratio = pressure_atm / 1.01325\n            eta_heat_transfer = 1 - 0.003 * density_ratio  # Less loss at altitude\n            \n            # 4. Kinetic loss (finite reaction rate)\n            if self.frozen_performance:\n                eta_kinetic = 0.96  # Frozen flow penalty\n            else:\n                eta_kinetic = 0.99  # Equilibrium flow\n            \n            # Combined nozzle efficiency\n            eta_nozzle = eta_divergence * eta_boundary_layer * eta_heat_transfer * eta_kinetic\n            \n            # Actual thrust coefficient\n            CF_actual = CF_ideal * eta_nozzle\n            \n            # Specific impulse at altitude\n            isp_altitude = CF_actual * self.c_star / self.g0\n            \n            # Thrust at altitude (constant mass flow)\n            thrust_altitude = CF_actual * self.P_c * 1e5 * (np.pi * (self.d_t**2) / 4)\n            \n            # Performance ratios\n            isp_ratio = isp_altitude / self.isp_sl\n            thrust_ratio = thrust_altitude / self.F\n            \n            # Exit conditions\n            exit_mach = np.sqrt(2 / (gamma - 1) * ((self.P_c / pressure_atm)**((gamma-1)/gamma) - 1))\n            exit_velocity = exit_mach * np.sqrt(gamma * 287 * T)  # Approximate\n            \n            altitude_data.append({\n                'altitude': alt,\n                'temperature': T,\n                'pressure': pressure_atm,\n                'expansion_ratio': epsilon_opt,\n                'thrust_coefficient': CF_actual,\n                'nozzle_efficiency': eta_nozzle,\n                'specific_impulse': isp_altitude,\n                'thrust': thrust_altitude,\n                'isp_ratio': isp_ratio,\n                'thrust_ratio': thrust_ratio,\n                'exit_mach_number': exit_mach,\n                'exit_velocity': exit_velocity,\n                'reynolds_number': Re_throat\n            })\n        \n        return altitude_data
+
+            # 3. Heat transfer loss (reduces with altitude)
+            density_ratio = pressure_atm / 1.01325
+            eta_heat_transfer = 1 - 0.003 * density_ratio  # Less loss at altitude
+
+            # 4. Kinetic loss (finite reaction rate)
+            if self.frozen_performance:
+                eta_kinetic = 0.96  # Frozen flow penalty
+            else:
+                eta_kinetic = 0.99  # Equilibrium flow
+
+            # Combined nozzle efficiency
+            eta_nozzle = eta_divergence * eta_boundary_layer * eta_heat_transfer * eta_kinetic
+
+            # DENETIM DUZELTMESI (Bulgu 3): Isp-c*-CF zinciri tutarli hale
+            # getirildi. Isp, teslim edilen deniz seviyesi Isp'sine (CEA tablo)
+            # demirlenir ve ideal CF orani ile irtifaya tasinir. Boylece deniz
+            # seviyesinde thrust = CF*Pc*A_t = komuta edilen itki (birebir) ve
+            # hicbir irtifada CEA vakum referansi (isp_vac) asilmaz.
+            isp_altitude = min(self.isp_sl * CF_ideal / CF_ideal_sl, self.isp_vac)
+
+            # Thrust at altitude (constant mass flow)
+            thrust_altitude = self.mdot_total * isp_altitude * self.g0
+
+            # Actual thrust coefficient (zincirle tutarli: CF = F / (Pc * A_t))
+            CF_actual = thrust_altitude / (self.P_c * 1e5 * self.A_t)
+
+            # Performance ratios
+            isp_ratio = isp_altitude / self.isp_sl
+            thrust_ratio = thrust_altitude / self.F
+
+            # Exit conditions
+            exit_mach = np.sqrt(2 / (gamma - 1) * ((self.P_c / pressure_atm)**((gamma-1)/gamma) - 1))
+            exit_velocity = exit_mach * np.sqrt(gamma * 287 * T)  # Approximate
+
+            altitude_data.append({
+                'altitude': alt,
+                'temperature': T,
+                'pressure': pressure_atm,
+                'expansion_ratio': epsilon_opt,
+                'thrust_coefficient': CF_actual,
+                'nozzle_efficiency': eta_nozzle,
+                'specific_impulse': isp_altitude,
+                'thrust': thrust_altitude,
+                'isp_ratio': isp_ratio,
+                'thrust_ratio': thrust_ratio,
+                'exit_mach_number': exit_mach,
+                'exit_velocity': exit_velocity,
+                'reynolds_number': Re_throat
+            })
+
+        return altitude_data
     
     def calculate_performance(self):
         """Calculate overall engine performance"""
@@ -1846,11 +1977,19 @@ class LiquidRocketEngine:
         """Detailed combustion chamber analysis with mixing efficiency"""
         
         # Chamber geometry
+        # DENETIM DUZELTMESI (Bulgu 5): eski kod chamber_length = c_star*1.2/1000
+        # ile karakteristik HIZ c* (m/s) ile karakteristik UZUNLUK L*'i (m)
+        # karistiriyordu (~21x fazla uzunluk; l_star raporu 25 m cikiyordu).
+        # Dogru yontem: V_c = L* * A_t; L_c = V_c / A_c.
         d_t = getattr(self, 'd_t', 0.03)  # Default throat diameter
-        c_star = getattr(self, 'c_star', 1800)  # Default c*
         chamber_diameter = max(d_t * 3.5, 0.05)  # m
-        chamber_length = c_star * 1.2 / 1000  # L* = 1.2m typical for liquid rockets
-        chamber_volume = np.pi * (chamber_diameter/2)**2 * chamber_length  # m³
+        # L* = 1.2 m: LOX/hidrokarbon icin tipik 1.02-1.27 m
+        # (Sutton & Biblarz, Rocket Propulsion Elements 9th ed., Table 8-1)
+        L_star = 1.2  # m, karakteristik uzunluk
+        A_throat = np.pi * (d_t**2) / 4  # m²
+        A_chamber_cross = np.pi * (chamber_diameter**2) / 4  # m²
+        chamber_volume = L_star * A_throat  # m³ (V_c = L* * A_t)
+        chamber_length = chamber_volume / A_chamber_cross  # m
         
         # Combustion efficiency analysis
         mdot_total = getattr(self, 'mdot_total', self.F / (300 * G_0))
@@ -1993,7 +2132,14 @@ class LiquidRocketEngine:
         # P_e/P_c = 1/20 izentropik genisleme oraninda, gamma=1.22 icin
         # eski formul ~%15 fazla theoretical Isp veriyordu.
         pressure_ratio = 1.0 / 20.0  # P_e / P_c (perfect expansion varsayimi)
-        theoretical_isp = self.c_star / self.g0 * np.sqrt(
+        # DENETIM DUZELTMESI (bonus): Vandenkerckhove faktoru eksikti.
+        # Isp_ideal = CF * c* / g0; CF = Gamma_vdk * sqrt(2g/(g-1)*(1-PR^((g-1)/g)))
+        # Gamma_vdk = sqrt(g) * (2/(g+1))^((g+1)/(2(g-1)))
+        # (Sutton & Biblarz 9th ed., Eq. 3-30 ve c* tanimi Eq. 3-32)
+        gamma_vdk = np.sqrt(self.gamma) * (
+            2.0 / (self.gamma + 1.0)
+        ) ** ((self.gamma + 1.0) / (2.0 * (self.gamma - 1.0)))
+        theoretical_isp = self.c_star / self.g0 * gamma_vdk * np.sqrt(
             2 * self.gamma / (self.gamma - 1)
             * (1 - pressure_ratio ** ((self.gamma - 1) / self.gamma))
         )
@@ -2140,7 +2286,10 @@ class LiquidRocketEngine:
                 'overall_length': 2.5,  # m
                 'maximum_diameter': max(self.d_t * 3.5, 0.05) * 1000,  # mm
                 'nozzle_length': (self.d_e - self.d_t) / (2 * np.tan(np.radians(15))) * 1000,  # mm
-                'chamber_volume': np.pi * (max(self.d_t * 3.5, 0.05)/2)**2 * (self.c_star * 1.2 / 1000) * 1e6  # cm³
+                # DENETIM DUZELTMESI (Bulgu 5): hazne hacmi V_c = L* * A_t
+                # (L* = 1.2 m, Sutton & Biblarz 9th ed., Table 8-1); eski kod
+                # c* (m/s) ile L* (m) karistiriyordu.
+                'chamber_volume': (1.2 * np.pi * (self.d_t**2) / 4) * 1e6  # cm³ (V_c = L*·A_t)
             },
             'mass_ratios': {
                 'thrust_to_weight': self.F / (total_dry_mass * G_0),

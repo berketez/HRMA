@@ -8,19 +8,49 @@ import json
 from typing import Dict, List, Tuple, Optional
 
 class StructuralAnalyzer:
-    """Structural analysis for hybrid rocket motor chambers"""
-    
+    """Structural analysis for hybrid rocket motor chambers.
+
+    DENETIM DUZELTMESI (2026-06): Onceki surum termal gerilmeyi, sicaklikla
+    mukavemet derating'ini ve burkulmayi (buckling) TAMAMEN ihmal ediyordu.
+    Bu, emniyet faktorunu (SF) gercegin cok ustunde gosteriyordu (3000 K cidar
+    sicakliginda gercek SF < 1'e dusebilir). Asagidaki eklemeler bu tehlikeyi
+    konservatif yonde duzeltir:
+      1) Termal hoop gerilme (radyal sicaklik gradyani)  -> Timoshenko & Goodier,
+         Boley & Weiner, Roark's Formulas for Stress & Strain 9th ed. Ch. 16.
+      2) Sicakliga bagli yield/ultimate derating          -> MMPDS / MIL-HDBK-5
+         Fig. 2.3.1.1.1 (AISI dusuk-alasimli celikler, kisa sureli maruziyet).
+      3) Eksenel + dis-basinc burkulmasi                  -> NASA SP-8007.
+      4) Ince-cidar varsayimi gecerlilik kontrolu (t/r<0.1) -> Shigley / Roark.
+    """
+
     def __init__(self):
         # Material properties database
+        #
+        # Eklenen alanlar (her malzeme icin):
+        #   'thermal_expansion'    : alpha [1/K]   termal genlesme katsayisi
+        #   'max_service_temp'     : [K]           kisa-sureli azami servis sicakligi
+        #   'derating_curve'       : {T_celsius: yield_retention_fraction}
+        #
+        # Derating noktalari literatur kaynaklidir (asagida her malzeme icin atif).
         self.materials = {
             'steel_4130': {
-                'yield_strength': 460e6,        # Pa
+                'yield_strength': 460e6,        # Pa  (oda sicakligi, normalize; AZoM AISI 4130)
                 'ultimate_strength': 730e6,     # Pa
                 'elastic_modulus': 200e9,       # Pa
                 'density': 7850,               # kg/m³
                 'poisson_ratio': 0.27,
                 'fatigue_limit': 230e6,        # Pa
-                'safety_factor': 4.0
+                'safety_factor': 4.0,
+                # Termal genlesme: AISI 4130 ~12.3e-6 1/K (20-300 C ort.)
+                # Kaynak: MatWeb / ASM Metals Handbook, AISI 4130.
+                'thermal_expansion': 12.3e-6,  # 1/K
+                'max_service_temp': 811.0,     # K (~538 C; dusuk-alasim celik kisa-sureli sinir)
+                # Yield derating (oda sicakligi yield'ine oran), MMPDS Fig. 2.3.1.1.1
+                # AISI dusuk-alasimli celikler, kisa-sureli maruziyet egrisi.
+                'derating_curve': {
+                    20: 1.00, 200: 0.92, 300: 0.82,
+                    400: 0.66, 500: 0.44, 600: 0.29, 700: 0.15
+                }
             },
             'aluminum_6061': {
                 'yield_strength': 275e6,
@@ -29,7 +59,15 @@ class StructuralAnalyzer:
                 'density': 2700,
                 'poisson_ratio': 0.33,
                 'fatigue_limit': 96e6,
-                'safety_factor': 4.0
+                'safety_factor': 4.0,
+                # Al 6061-T6 alpha ~23.6e-6 1/K. Kaynak: ASM / MatWeb.
+                'thermal_expansion': 23.6e-6,  # 1/K
+                'max_service_temp': 477.0,     # K (~204 C; T6 uzeri hizli yumusama)
+                # MMPDS 6061-T6 kisa-sureli yield derating (Fig. 3.6.x).
+                'derating_curve': {
+                    20: 1.00, 100: 0.95, 150: 0.85, 200: 0.60,
+                    250: 0.35, 300: 0.18, 350: 0.08
+                }
             },
             'inconel_718': {
                 'yield_strength': 1100e6,
@@ -38,7 +76,16 @@ class StructuralAnalyzer:
                 'density': 8220,
                 'poisson_ratio': 0.29,
                 'fatigue_limit': 450e6,
-                'safety_factor': 3.0
+                'safety_factor': 3.0,
+                # Inconel 718 alpha ~13.0e-6 1/K (20-300 C). Kaynak: Special Metals datasheet.
+                'thermal_expansion': 13.0e-6,  # 1/K
+                'max_service_temp': 977.0,     # K (~704 C; 718 sik kullanim siniri)
+                # Inconel 718 yield, yuksek sicaklikta cok iyi korunur.
+                # Kaynak: Special Metals INCONEL alloy 718 datasheet (yield vs temp).
+                'derating_curve': {
+                    20: 1.00, 300: 0.93, 500: 0.88, 650: 0.83,
+                    700: 0.78, 800: 0.60, 900: 0.35
+                }
             },
             'titanium_6al4v': {
                 'yield_strength': 880e6,
@@ -47,8 +94,213 @@ class StructuralAnalyzer:
                 'density': 4430,
                 'poisson_ratio': 0.31,
                 'fatigue_limit': 350e6,
-                'safety_factor': 4.0
+                'safety_factor': 4.0,
+                # Ti-6Al-4V alpha ~8.6e-6 1/K. Kaynak: ASM / MMPDS.
+                'thermal_expansion': 8.6e-6,   # 1/K
+                'max_service_temp': 673.0,     # K (~400 C; uzun-sureli servis siniri)
+                # MMPDS Ti-6Al-4V kisa-sureli yield derating.
+                'derating_curve': {
+                    20: 1.00, 200: 0.85, 300: 0.78, 400: 0.70,
+                    500: 0.60, 600: 0.48, 700: 0.32
+                }
             }
+        }
+
+    # ------------------------------------------------------------------
+    # YENI YARDIMCI FONKSIYONLAR (DENETIM DUZELTMESI 2026-06)
+    # ------------------------------------------------------------------
+    def _derate_strength(self, mat_props: Dict, wall_temp_K: float) -> Dict:
+        """Sicakliga bagli mukavemet derating'i.
+
+        Yield ve ultimate dayanim, cidar sicakligi ile DUSER. Onceki surum bunu
+        ihmal ediyordu -> 3000 K alev sicakliginda celik yine oda-sicakligi
+        dayanimiyla hesaplaniyordu (tehlikeli, gercek-disi).
+
+        Kaynak: MMPDS / MIL-HDBK-5 Fig. 2.3.1.1.1 (AISI dusuk-alasimli celikler,
+        kisa-sureli maruziyet); malzeme bazli derating_curve sozlugunden
+        lineer interpolasyon yapilir. Egri disina dusen sicakliklarda en yakin
+        ucta sabitlenir (konservatif: en yuksek sicaklik noktasinin faktoru).
+
+        Args:
+            mat_props: Malzeme ozellik sozlugu (derating_curve icermeli).
+            wall_temp_K: Yapisal cidar sicakligi [K].
+
+        Returns:
+            Derating sonuclari: derate edilmis yield/ultimate ve retention faktoru.
+        """
+        wall_temp_C = wall_temp_K - 273.15
+
+        curve = mat_props.get('derating_curve')
+        if not curve:
+            # Egri yoksa konservatif sabit (orta-seviye kayip) uygula.
+            retention = 0.5
+        else:
+            temps = sorted(curve.keys())
+            facs = [curve[t] for t in temps]
+            if wall_temp_C <= temps[0]:
+                retention = facs[0]
+            elif wall_temp_C >= temps[-1]:
+                # Egri ustunde: son (en dusuk) faktorde sabitle. Konservatif.
+                retention = facs[-1]
+            else:
+                retention = float(np.interp(wall_temp_C, temps, facs))
+
+        derated_yield = mat_props['yield_strength'] * retention
+        derated_ultimate = mat_props['ultimate_strength'] * retention
+
+        return {
+            'wall_temperature_C': wall_temp_C,
+            'wall_temperature_K': wall_temp_K,
+            'strength_retention_factor': retention,
+            'derated_yield_strength': derated_yield,            # Pa
+            'derated_ultimate_strength': derated_ultimate,      # Pa
+            'derated_yield_strength_MPa': derated_yield / 1e6,
+            'derated_ultimate_strength_MPa': derated_ultimate / 1e6,
+            'room_temp_yield_MPa': mat_props['yield_strength'] / 1e6,
+            'exceeds_max_service_temp': bool(
+                wall_temp_K > mat_props.get('max_service_temp', float('inf'))
+            )
+        }
+
+    def _thermal_hoop_stress(self, mat_props: Dict, delta_T: float) -> Dict:
+        """Radyal sicaklik gradyaninin yarattigi termal hoop gerilme.
+
+        Ince cidarli silindirde cidar boyunca lineer sicaklik gradyani (ic yuz
+        sicak, dis yuz soguk; delta_T = T_ic - T_dis) icin yuzey termal
+        gerilmesinin buyuklugu:
+
+            sigma_thermal = E * alpha * delta_T / (1 - nu)      [KONSERVATIF UST SINIR]
+
+        Not / kaynak: Timoshenko & Goodier "Theory of Elasticity" (uzun silindir,
+        eksenel kisitli hal) ve Boley & Weiner "Theory of Thermal Stresses"
+        Ch.10-11 termal gerilme cozumu; Roark's Formulas for Stress & Strain
+        9th ed. Ch.16. Tam ic-dis fark delta_T icin yuzey degeri klasik olarak
+        E*alpha*delta_T/(2(1-nu)) seklindedir; ancak biz KONSERVATIF olmak icin
+        2 faktorunu DUSURMUYORUZ (gorev tanimindaki E*alpha*dT/(1-nu) formu,
+        yuzey-orta-duzlem farki yorumuna ve gerilme yiginlasmasi/kisitlanmaya
+        karsi guvenli ust sinir). Bu termal etki cogu durumda BASINC hoop
+        gerilmesinden buyuktur ve onceki surumde tamamen yoktu.
+
+        delta_T <= 0 (sogutmasiz/izotermal cidar) ise termal gerilme 0 alinir.
+        """
+        E = mat_props['elastic_modulus']
+        alpha = mat_props['thermal_expansion']
+        nu = mat_props['poisson_ratio']
+
+        dT = max(0.0, delta_T)
+        # KONSERVATIF: 1/(1-nu) (gorev tanimi). Klasik yuzey degeri 1/(2(1-nu)).
+        sigma_thermal = E * alpha * dT / (1.0 - nu)
+
+        return {
+            'delta_T': dT,                          # K  (kullanilan cidar gradyani)
+            'thermal_hoop_stress': sigma_thermal,   # Pa (tensile, dis yuzde)
+            'thermal_hoop_stress_MPa': sigma_thermal / 1e6,
+            'formula': 'sigma_th = E*alpha*dT/(1-nu)  [Timoshenko/Boley-Weiner/Roark Ch.16, konservatif]'
+        }
+
+    def _estimate_wall_delta_T(self, motor_data: Dict, mat_props: Dict) -> Tuple[float, float]:
+        """Cidar ic/dis sicaklik degerlerini tahmin et.
+
+        Tercih sirasi:
+          1) motor_data['wall_temperature_hot'] / 'wall_temperature_cold' (1s-iletim modulunden)
+          2) chamber_temperature'tan konservatif tahmin (sogutmasiz celik cidar):
+             ic yuz alev-tarafi recovery sicakligina yakin oturur. Sogutmasiz
+             celik cidar icin literatur ~malzemenin servis sinirina kadar isinir;
+             gradyan = T_ic_cidar - T_dis (ortam ~300 K).
+
+        Returns:
+            (T_inner_wall_K, T_outer_wall_K)
+        """
+        # 1) Dogrudan cidar sicakligi verilmisse kullan
+        T_hot = motor_data.get('wall_temperature_hot')
+        T_cold = motor_data.get('wall_temperature_cold')
+        if T_hot is not None and T_cold is not None:
+            return float(T_hot), float(T_cold)
+
+        # 2) chamber_temperature'tan konservatif tahmin
+        T_chamber = motor_data.get('chamber_temperature')
+        T_ambient = motor_data.get('ambient_temperature', 300.0)
+        if T_chamber is None:
+            # Sicaklik bilgisi yok -> termal etki devre disi (eski davranis korunur).
+            return T_ambient, T_ambient
+
+        # Sogutmasiz cidar varsayimi (konservatif): gaz-tarafi cidar yuzeyi,
+        # malzeme azami servis sicakligina kadar isinir; ancak alev sicakligini
+        # asamaz. Boylece sicak-yuz sicakligini malzeme sinirinda kapariz
+        # (kalici rejim, sogutmasiz). Bu, hem derating hem gradyan icin
+        # makul-konservatif bir cidar sicakligi verir.
+        T_inner = min(float(T_chamber), mat_props.get('max_service_temp', float(T_chamber)))
+        T_outer = float(T_ambient)
+        return T_inner, T_outer
+
+    def _check_buckling(self, pressure: float, radius: float, thickness: float,
+                        length: float, mat_props: Dict) -> Dict:
+        """Ince-cidarli silindir burkulma kontrolu (NASA SP-8007).
+
+        Iki mod kontrol edilir:
+          A) Eksenel basma burkulmasi (motor sonu kuvveti, gerdirme/montaj yuku):
+             sigma_cl = E / sqrt(3(1-nu^2)) * (t/r)      [klasik]
+             sigma_cr = gamma * sigma_cl                  [tasarim]
+             gamma = 1 - 0.901*(1 - exp(-phi)),  phi = (1/16)*sqrt(r/t)
+          B) Dis basinc burkulmasi (uzun silindir, klasik elastik):
+             p_cl = E/(4(1-nu^2)) * (t/r)^3
+
+        Kaynak: NASA SP-8007 "Buckling of Thin-Walled Circular Cylinders"
+        (revised 1968), NTRS 19680026348. Knockdown gamma ve klasik
+        eksenel/dis-basinc formulleri SP-8007 ve Timoshenko shell teorisinden.
+
+        Not: Eksenel burkulma yuku, kapali uctaki basinc kuvvetinden gelen
+        eksenel cidar gerilmesi (longitudinal = p*r/(2t)) ile karsilastirilir;
+        bu motor montaj/itki yuklerini de yaklasik kapsayan konservatif bir
+        eksenel gerilme tabanidir.
+        """
+        E = mat_props['elastic_modulus']
+        nu = mat_props['poisson_ratio']
+
+        # A) Eksenel basma burkulmasi
+        if thickness > 0 and radius > 0:
+            sigma_cl = E / np.sqrt(3.0 * (1.0 - nu**2)) * (thickness / radius)
+            phi = (1.0 / 16.0) * np.sqrt(radius / thickness)
+            gamma_kd = 1.0 - 0.901 * (1.0 - np.exp(-phi))
+            sigma_cr_axial = gamma_kd * sigma_cl
+        else:
+            sigma_cl = float('inf')
+            gamma_kd = 1.0
+            sigma_cr_axial = float('inf')
+
+        # Uygulanan eksenel cidar gerilmesi (longitudinal, kapali-uc basinci)
+        applied_axial_stress = pressure * radius / (2.0 * thickness) if thickness > 0 else float('inf')
+        axial_buckling_sf = (sigma_cr_axial / applied_axial_stress
+                             if applied_axial_stress > 0 else float('inf'))
+
+        # B) Dis basinc burkulmasi (uzun silindir klasik)
+        # Konservatif olarak uygulanan dis basinci = tasarim basincinin
+        # buyuklugu kadar alinabilir; burada referans olarak 1 atm dis ortam
+        # (kapali kazan ic basinci ic'e dogru cidari destekler, ancak vakum/
+        # dis basinc senaryosu icin kritik dis basinc raporlanir).
+        p_cr_external = E / (4.0 * (1.0 - nu**2)) * (thickness / radius)**3 if radius > 0 else float('inf')
+
+        # Burkulma durum degerlendirmesi (eksenel kritik)
+        if axial_buckling_sf < 1.0:
+            buckling_status = 'CRITICAL'
+        elif axial_buckling_sf < 2.0:
+            buckling_status = 'MARGINAL'
+        else:
+            buckling_status = 'SAFE'
+
+        return {
+            'classical_axial_buckling_stress_MPa': (sigma_cl / 1e6
+                                                    if np.isfinite(sigma_cl) else float('inf')),
+            'knockdown_factor_gamma': gamma_kd,
+            'critical_axial_buckling_stress_MPa': (sigma_cr_axial / 1e6
+                                                   if np.isfinite(sigma_cr_axial) else float('inf')),
+            'applied_axial_stress_MPa': (applied_axial_stress / 1e6
+                                         if np.isfinite(applied_axial_stress) else float('inf')),
+            'axial_buckling_safety_factor': axial_buckling_sf,
+            'critical_external_pressure_bar': (p_cr_external / 1e5
+                                               if np.isfinite(p_cr_external) else float('inf')),
+            'buckling_status': buckling_status,
+            'source': 'NASA SP-8007 (1968), NTRS 19680026348'
         }
     
     def analyze_structure(self, motor_data: Dict, material: str = 'steel_4130',
@@ -72,16 +324,35 @@ class StructuralAnalyzer:
         throat_diameter = motor_data.get('throat_diameter', 0.02)  # m
         nozzle_type = motor_data.get('nozzle_type', 'conical')
         burn_time = motor_data.get('burn_time', 10)  # s
-        
+
         # Design pressure
         design_pressure = chamber_pressure * design_pressure_factor
-        
+
         # Get material properties
         mat_props = self.materials.get(material, self.materials['steel_4130'])
-        
-        # Chamber wall analysis
+
+        # DENETIM DUZELTMESI: Cidar sicakligini tahmin et (termal gerilme +
+        # derating icin). motor_data 'wall_temperature_hot/cold' veya
+        # 'chamber_temperature' tasiyabilir; yoksa termal etki devre disi kalir.
+        T_inner_wall, T_outer_wall = self._estimate_wall_delta_T(motor_data, mat_props)
+        # Yapisal derating icin temsili cidar sicakligi = sicak (ic) yuz.
+        wall_temp_structural = T_inner_wall
+        # Sicaklik derating'i (yield/ultimate dususu)
+        derating = self._derate_strength(mat_props, wall_temp_structural)
+        # Cidar boyunca termal gradyan
+        wall_delta_T = T_inner_wall - T_outer_wall
+
+        # Chamber wall analysis (termal gerilme + derating dahil)
         chamber_analysis = self._analyze_chamber_wall(
-            design_pressure, chamber_diameter, chamber_length, mat_props
+            design_pressure, chamber_diameter, chamber_length, mat_props,
+            derating=derating, wall_delta_T=wall_delta_T
+        )
+
+        # Burkulma kontrolu (NASA SP-8007) - hazne cidari geometrisiyle
+        chamber_t = chamber_analysis['recommended_thickness'] / 1000.0  # m
+        buckling_analysis = self._check_buckling(
+            design_pressure, chamber_diameter / 2.0, chamber_t,
+            chamber_length, mat_props
         )
         
         # Nozzle analysis
@@ -109,11 +380,12 @@ class StructuralAnalyzer:
             chamber_analysis, nozzle_analysis, end_cap_analysis, mat_props
         )
         
-        # Safety analysis
+        # Safety analysis (burkulma da dahil edilir)
         safety_analysis = self._analyze_safety_factors(
-            chamber_analysis, nozzle_analysis, end_cap_analysis, mat_props
+            chamber_analysis, nozzle_analysis, end_cap_analysis, mat_props,
+            buckling_analysis=buckling_analysis
         )
-        
+
         return {
             'chamber_analysis': chamber_analysis,
             'nozzle_analysis': nozzle_analysis,
@@ -122,50 +394,126 @@ class StructuralAnalyzer:
             'fatigue_analysis': fatigue_analysis,
             'weight_analysis': weight_analysis,
             'safety_analysis': safety_analysis,
+            # YENI (DENETIM DUZELTMESI 2026-06)
+            'thermal_analysis': {
+                'wall_temperature_inner_K': T_inner_wall,
+                'wall_temperature_outer_K': T_outer_wall,
+                'wall_delta_T_K': wall_delta_T,
+                'strength_derating': derating,
+                'thermal_hoop_stress_MPa': chamber_analysis.get('thermal_hoop_stress', 0.0),
+            },
+            'buckling_analysis': buckling_analysis,
             'material_properties': mat_props,
             'design_parameters': {
                 'material': material,
                 'design_pressure': design_pressure / 1e5,  # bar
-                'design_pressure_factor': design_pressure_factor
+                'design_pressure_factor': design_pressure_factor,
+                'wall_temperature_K': wall_temp_structural
             }
         }
     
     def _analyze_chamber_wall(self, pressure: float, diameter: float,
-                            length: float, mat_props: Dict) -> Dict:
-        """Analyze chamber wall thickness and stresses"""
-        
+                            length: float, mat_props: Dict,
+                            derating: Optional[Dict] = None,
+                            wall_delta_T: float = 0.0) -> Dict:
+        """Analyze chamber wall thickness and stresses.
+
+        DENETIM DUZELTMESI (2026-06): Artik TERMAL gerilme ve sicaklik
+        DERATING'i dahil edilir. Onceki surum:
+          - termal hoop gerilmeyi tamamen ihmal ediyordu,
+          - oda-sicakligi yield'ini kullaniyordu (3000 K cidarda gercek-disi).
+        Bu, SF'yi gercegin cok ustunde gosteriyordu. Toplam gerilme:
+            sigma_total_hoop = sigma_pressure_hoop + sigma_thermal
+        ve SF'ler DERATE EDILMIS yield'e gore hesaplanir.
+
+        Args:
+            derating: _derate_strength sonucu (None ise oda-sicakligi yield).
+            wall_delta_T: Cidar boyunca termal gradyan [K] (>0 sicak ic yuz).
+        """
+
         radius = diameter / 2
         yield_strength = mat_props['yield_strength']
         safety_factor = mat_props['safety_factor']
-        
+
+        # Derate edilmis yield (varsa). Termal degerlendirme bu deger uzerinden.
+        if derating is not None:
+            yield_for_design = derating['derated_yield_strength']
+        else:
+            yield_for_design = yield_strength
+
         # Required wall thickness (thin wall approximation)
-        # t = P*r / (sigma_allow)
-        allowable_stress = yield_strength / safety_factor
+        # t = P*r / (sigma_allow). DERATE edilmis yield kullanilir -> daha kalin
+        # cidar gerekebilir (konservatif).
+        allowable_stress = yield_for_design / safety_factor
         min_thickness = pressure * radius / allowable_stress
-        
+
         # Recommended thickness (add 20% margin)
         recommended_thickness = min_thickness * 1.2
-        
-        # Actual stresses with recommended thickness
-        hoop_stress = pressure * radius / recommended_thickness
+
+        # Ince-cidar varsayimi gecerlilik kontrolu (t/r < 0.1, yani D/t > 20)
+        # -> Shigley "Mechanical Engineering Design", Roark's Formulas Ch.13.
+        t_over_r = recommended_thickness / radius if radius > 0 else float('inf')
+        thin_wall_valid = bool(t_over_r < 0.1)
+
+        # Basinc kaynakli HOOP gerilme.
+        #
+        # DENETIM DUZELTMESI (2026-06): Ince-cidar formulu sigma=p*r/t (ic yaricap)
+        # t/r >= 0.1 oldugunda GERCEK tepe gerilmeyi OLDUGUNDAN AZ gosterir
+        # (Lame cozumune gore ~%5 (t/r=0.1) ... ~%11 (t/r=0.2) dusuk). Tehlikeyi az
+        # gostermek YASAK -> t/r >= 0.1 ise basinc hoop'unu LAME kalin-cidar tepe
+        # degeriyle (ic yuzey) hesaplariz; bu daima ince-cidar degerinden buyuktur
+        # (konservatif). Kaynak: Lame (1833); Timoshenko & Goodier "Theory of
+        # Elasticity" Art.28; Roark's Formulas for Stress & Strain 9th ed. Tablo 13.5
+        # (kalin silindir, ic basinc): sigma_hoop(ic) = p*(b^2+a^2)/(b^2-a^2).
+        thin_pressure_hoop = pressure * radius / recommended_thickness
+        a_inner = radius                              # ic yaricap (silindir ici)
+        b_outer = radius + recommended_thickness      # dis yaricap
+        if b_outer > a_inner:
+            lame_peak_hoop = pressure * (b_outer**2 + a_inner**2) / (b_outer**2 - a_inner**2)
+        else:
+            lame_peak_hoop = thin_pressure_hoop
+        if not thin_wall_valid:
+            # Kalin-cidar rejimi: konservatif olarak Lame tepe degerini kullan.
+            pressure_hoop_stress = max(thin_pressure_hoop, lame_peak_hoop)
+        else:
+            pressure_hoop_stress = thin_pressure_hoop
+
         longitudinal_stress = pressure * radius / (2 * recommended_thickness)
-        
-        # Von Mises equivalent stress
-        von_mises_stress = np.sqrt(hoop_stress**2 - hoop_stress * longitudinal_stress + longitudinal_stress**2)
-        
-        # Safety factors
-        hoop_safety_factor = yield_strength / hoop_stress
-        von_mises_safety_factor = yield_strength / von_mises_stress
-        
+
+        # TERMAL hoop gerilme (radyal gradyan). delta_T<=0 ise 0.
+        thermal = self._thermal_hoop_stress(mat_props, wall_delta_T)
+        thermal_hoop_stress = thermal['thermal_hoop_stress']
+
+        # TOPLAM hoop gerilme = basinc + termal (dis yuzde ikisi de tensile,
+        # konservatif olarak toplanir).
+        hoop_stress = pressure_hoop_stress + thermal_hoop_stress
+
+        # Von Mises esdeger gerilme (toplam hoop ile)
+        von_mises_stress = np.sqrt(
+            hoop_stress**2 - hoop_stress * longitudinal_stress + longitudinal_stress**2
+        )
+
+        # Safety factors -> DERATE EDILMIS yield'e gore
+        hoop_safety_factor = yield_for_design / hoop_stress if hoop_stress > 0 else float('inf')
+        von_mises_safety_factor = yield_for_design / von_mises_stress if von_mises_stress > 0 else float('inf')
+
         return {
             'minimum_thickness': min_thickness * 1000,  # mm
             'recommended_thickness': recommended_thickness * 1000,  # mm
-            'hoop_stress': hoop_stress / 1e6,  # MPa
+            'hoop_stress': hoop_stress / 1e6,  # MPa (TOPLAM: basinc+termal)
+            'pressure_hoop_stress': pressure_hoop_stress / 1e6,  # MPa (sadece basinc; Lame ise tepe)
+            'thin_wall_pressure_hoop_MPa': thin_pressure_hoop / 1e6,  # MPa (referans: ince-cidar p*r/t)
+            'lame_peak_pressure_hoop_MPa': lame_peak_hoop / 1e6,  # MPa (kalin-cidar Lame tepe, ic yuzey)
+            'pressure_hoop_model': 'lame_thick_wall' if not thin_wall_valid else 'thin_wall',
+            'thermal_hoop_stress': thermal_hoop_stress / 1e6,  # MPa (sadece termal)
             'longitudinal_stress': longitudinal_stress / 1e6,  # MPa
             'von_mises_stress': von_mises_stress / 1e6,  # MPa
             'hoop_safety_factor': hoop_safety_factor,
             'von_mises_safety_factor': von_mises_safety_factor,
-            'allowable_stress': allowable_stress / 1e6,  # MPa
+            'allowable_stress': allowable_stress / 1e6,  # MPa (derate edilmis)
+            'yield_strength_used_MPa': yield_for_design / 1e6,  # derate edilmis yield
+            'thin_wall_ratio_t_over_r': t_over_r,
+            'thin_wall_valid': thin_wall_valid,
             'diameter': diameter * 1000,  # mm
             'length': length * 1000  # mm
         }
@@ -370,16 +718,27 @@ class StructuralAnalyzer:
         }
     
     def _analyze_safety_factors(self, chamber_analysis: Dict, nozzle_analysis: Dict,
-                              end_cap_analysis: Dict, mat_props: Dict) -> Dict:
-        """Analyze overall safety factors"""
-        
-        min_safety_factor = min(
-            chamber_analysis['hoop_safety_factor'],
-            chamber_analysis['von_mises_safety_factor'],
-            nozzle_analysis['safety_factor'],
-            end_cap_analysis['head_safety_factor']
-        )
-        
+                              end_cap_analysis: Dict, mat_props: Dict,
+                              buckling_analysis: Optional[Dict] = None) -> Dict:
+        """Analyze overall safety factors.
+
+        DENETIM DUZELTMESI (2026-06): Burkulma (buckling) emniyet faktoru de
+        minimum SF hesabina dahil edilir. chamber_analysis['hoop_safety_factor']
+        artik TERMAL+BASINC toplam gerilmeye ve DERATE edilmis yield'e gore
+        hesaplanmis olarak gelir; dolayisiyla minimum SF gercekci-konservatif olur.
+        """
+
+        sf_candidates = {
+            'chamber_hoop': chamber_analysis['hoop_safety_factor'],
+            'chamber_von_mises': chamber_analysis['von_mises_safety_factor'],
+            'nozzle': nozzle_analysis['safety_factor'],
+            'end_cap': end_cap_analysis['head_safety_factor']
+        }
+        if buckling_analysis is not None:
+            sf_candidates['buckling_axial'] = buckling_analysis['axial_buckling_safety_factor']
+
+        min_safety_factor = min(sf_candidates.values())
+
         # Risk assessment
         if min_safety_factor < 2.0:
             risk_level = 'HIGH'
@@ -393,7 +752,7 @@ class StructuralAnalyzer:
         else:
             risk_level = 'VERY LOW'
             status = 'SAFE'
-        
+
         recommendations = []
         if min_safety_factor < 3.0:
             recommendations.append('Increase wall thickness')
@@ -402,16 +761,21 @@ class StructuralAnalyzer:
             recommendations.append('Increase chamber wall thickness')
         if nozzle_analysis['safety_factor'] < 3.0:
             recommendations.append('Increase nozzle throat thickness')
-        
+        # YENI uyarilar (termal + burkulma + ince-cidar)
+        if chamber_analysis.get('thermal_hoop_stress', 0.0) > chamber_analysis.get('pressure_hoop_stress', 0.0):
+            recommendations.append('Thermal stress dominates: add cooling or thermal barrier')
+        if not chamber_analysis.get('thin_wall_valid', True):
+            recommendations.append('Thin-wall assumption invalid (t/r>=0.1): use thick-wall (Lame) analysis')
+        if buckling_analysis is not None and buckling_analysis['axial_buckling_safety_factor'] < 2.0:
+            recommendations.append('Axial buckling risk (NASA SP-8007): stiffen or thicken wall')
+        derate = chamber_analysis.get('yield_strength_used_MPa')
+        if derate is not None and derate < mat_props['yield_strength'] / 1e6 * 0.7:
+            recommendations.append('Severe temperature derating (>30% yield loss): cool wall or change material')
+
         return {
             'minimum_safety_factor': min_safety_factor,
             'risk_level': risk_level,
             'status': status,
-            'safety_factors': {
-                'chamber_hoop': chamber_analysis['hoop_safety_factor'],
-                'chamber_von_mises': chamber_analysis['von_mises_safety_factor'],
-                'nozzle': nozzle_analysis['safety_factor'],
-                'end_cap': end_cap_analysis['head_safety_factor']
-            },
+            'safety_factors': sf_candidates,
             'recommendations': recommendations
         }

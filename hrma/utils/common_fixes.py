@@ -165,11 +165,14 @@ class FuelMixtureSystem:
     """
     
     def __init__(self):
+        # Regresyon katsayıları merkezi tablodan gelir (magic-number kuralı):
+        # hrma/data/propellant_database.py HYBRID_REGRESSION_COEFFICIENTS
+        from hrma.data.propellant_database import HYBRID_REGRESSION_COEFFICIENTS as _RC
         self.base_fuels = {
-            'htpb': {'density': 920, 'a': 0.0003, 'n': 0.5},
-            'paraffin': {'density': 900, 'a': 0.0008, 'n': 0.8},
-            'carbon': {'density': 2200, 'a': 0.0001, 'n': 0.3},
-            'aluminum_oxide': {'density': 3950, 'a': 0.0002, 'n': 0.4}
+            'htpb': {'density': 920, 'a': _RC['htpb']['a'], 'n': _RC['htpb']['n']},
+            'paraffin': {'density': 900, 'a': _RC['paraffin']['a'], 'n': _RC['paraffin']['n']},
+            'carbon': {'density': 2200, 'a': _RC['carbon']['a'], 'n': _RC['carbon']['n']},
+            'aluminum_oxide': {'density': 3950, 'a': _RC['al2o3']['a'], 'n': _RC['al2o3']['n']}
         }
     
     def create_mixture(self, components: Dict[str, float]) -> Dict:

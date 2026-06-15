@@ -5,36 +5,62 @@ NASA CEA-style chemical equilibrium and performance calculations with Cantera in
 
 import numpy as np
 import json
+import logging
 from typing import Dict, List, Tuple, Optional
 from scipy.optimize import minimize_scalar, fsolve
-import cantera as ct
+
+# Cantera opsiyonel bağımlılık (paper: "where available").
+# Kurulu değilse modül import edilebilir kalır ve ampirik yola düşer.
+try:
+    import cantera as ct
+    CANTERA_AVAILABLE = True
+except ImportError:
+    ct = None
+    CANTERA_AVAILABLE = False
 
 from hrma.constants import G_0, R_UNIVERSAL
 
+logger = logging.getLogger(__name__)
+
+# Kuru hava O2/N2 KÜTLE kesirleri (Ar ve eser gazlar N2'ye katılmıştır).
+# Kaynak: US Standard Atmosphere 1976 hacimsel bileşiminden
+# (x_O2=0.2095, M_hava=28.9645 g/mol) -> Y_O2 = 0.2095*31.9988/28.9645 = 0.2314
+AIR_O2_MASS_FRACTION = 0.2314
+AIR_N2_MASS_FRACTION = 0.7686
+
+# Kuru hava O2/N2 MOL kesirleri (US Standard Atmosphere 1976; Ar N2'ye dahil)
+AIR_O2_MOLE_FRACTION = 0.21
+AIR_N2_MOLE_FRACTION = 0.79
+
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
-    
+
     def __init__(self):
         # Gas constant (CODATA 2018) - merkezi sabit modulunden
         self.R_universal = R_UNIVERSAL  # J/(kmol·K)
-        
+
         # Cantera gaz objesi - NASA-CEA veritabanı kullanarak
-        try:
-            # Önce NASA-CEA veritabanını dene
-            self.gas = ct.Solution('nasa_gas.yaml')
-            self.cantera_available = True
-        except:
+        self.gas = None
+        self.cantera_available = False
+        if CANTERA_AVAILABLE:
             try:
-                # GRI-Mech 3.0 detaylı kimya
-                self.gas = ct.Solution('gri30.yaml')
+                # Önce NASA-CEA veritabanını dene
+                self.gas = ct.Solution('nasa_gas.yaml')
                 self.cantera_available = True
-            except:
+            except Exception:
                 try:
-                    # H2/O2 basit mekanizma
-                    self.gas = ct.Solution('h2o2.yaml')
+                    # GRI-Mech 3.0 detaylı kimya
+                    self.gas = ct.Solution('gri30.yaml')
                     self.cantera_available = True
-                except:
-                    self.cantera_available = False
+                except Exception:
+                    try:
+                        # H2/O2 basit mekanizma
+                        self.gas = ct.Solution('h2o2.yaml')
+                        self.cantera_available = True
+                    except Exception:
+                        self.cantera_available = False
+        else:
+            logger.warning("Cantera kurulu değil; CombustionAnalyzer ampirik modellerle çalışacak.")
         
         # N2O/HTPB hibrit roket için özel propellant tanımları
         self.propellant_specs = {
@@ -55,6 +81,35 @@ class CombustionAnalyzer:
                 'molecular_weight': 170.33,  # g/mol
                 'density': 900,  # kg/m³
                 'enthalpy_formation': -290.0  # kJ/mol
+            },
+            # Aşağıdaki polimer ΔHf° değerleri KATI faz, tekrar birimi başına
+            # (kJ/mol). Monomer-gaz değerleriyle KARIŞTIRILMAMALIDIR (ör. etilen
+            # gazı +52 kJ/mol ama katı PE -54 kJ/mol). Değerler monomer ΔHf° +
+            # polimerleşme ısısı yolundan türetilip yanma ısısı (HHV) kalorimetri
+            # verisiyle %0-2 içinde çapraz-doğrulandı (Polymer Handbook; NIST).
+            'pe': {
+                'formula': 'C2H4',  # Polietilen tekrar birimi
+                'molecular_weight': 28.05,  # g/mol
+                'density': 940,  # kg/m³ (HDPE)
+                'enthalpy_formation': -54.3  # kJ/mol (katı PE; NBS bomba kal. / CEA deck std)
+            },
+            'pmma': {
+                'formula': 'C5H8O2',  # PMMA tekrar birimi
+                'molecular_weight': 100.12,  # g/mol
+                'density': 1180,  # kg/m³
+                'enthalpy_formation': -446.3  # kJ/mol (MMA(l) -388.8 + polimerleşme -57.5)
+            },
+            'abs': {
+                'formula': 'C8H8',  # Kodun ABS yaklaşımı (~stiren); ΔHf° polistiren değeri
+                'molecular_weight': 104.15,  # g/mol
+                'density': 1050,  # kg/m³
+                'enthalpy_formation': 33.8  # kJ/mol (amorf PS; stiren(l) +103.8 + polim. -70.0)
+            },
+            'pla': {
+                'formula': 'C3H4O2',  # PLA tekrar birimi
+                'molecular_weight': 72.06,  # g/mol
+                'density': 1240,  # kg/m³
+                'enthalpy_formation': -409.6  # kJ/mol (laktid(s) -792.0 üzerinden ROP)
             }
         }
         
@@ -84,19 +139,29 @@ class CombustionAnalyzer:
             'HTPB': {'Hf': -125.0, 'MW': 54.0, 'phase': 'solid'},  # Approximation C4H6
         }
     
-    def analyze_combustion(self, fuel_composition: Dict, oxidizer_type: str, 
-                          of_ratio: float, chamber_pressure: float, 
-                          chamber_temperature: float = None) -> Dict:
+    def analyze_combustion(self, fuel_composition: Dict, oxidizer_type: str,
+                          of_ratio: float, chamber_pressure: float,
+                          chamber_temperature: float = None,
+                          eta_c_star: Optional[float] = None) -> Dict:
         """
         Comprehensive combustion analysis
-        
+
         Args:
             fuel_composition: {'formula': percentage} dict
             oxidizer_type: 'N2O', 'LOX', etc.
             of_ratio: Oxidizer/Fuel mass ratio
             chamber_pressure: Chamber pressure in bar
             chamber_temperature: Optional chamber temperature in K
-            
+            eta_c_star: Opsiyonel c* (yanma) verimi. None => teorik (ideal denge)
+                varsayımı korunur. Verilirse performance['c_star_delivered'] =
+                eta_c_star * c_star_teorik olarak raporlanır; teorik
+                performance['c_star'] DEĞİŞMEZ. Gerçek hibrit motorlarda
+                ölçülen c* verimi tipik olarak 0.90-0.97'dir (eksik karışma,
+                sonlu kalış süresi, duvar ısı kaybı; Chiaverini & Kuo,
+                "Fundamentals of Hybrid Rocket Combustion and Propulsion",
+                AIAA Prog. Astro. & Aero. Vol. 218, 2007, Bölüm 1 ve 10;
+                ayrıca Sutton & Biblarz 9. baskı, Eş. 3-31 c*-verimi tanımı).
+
         Returns:
             Complete combustion analysis results
         """
@@ -109,34 +174,40 @@ class CombustionAnalyzer:
         
         # Calculate chemical equilibrium
         if chamber_temperature is None:
-            chamber_temperature = self._estimate_flame_temperature(elements, chamber_pressure)
-        
+            chamber_temperature = self._estimate_flame_temperature(
+                elements, chamber_pressure,
+                fuel_composition=fuel_composition,
+                oxidizer_type=oxidizer_type,
+                of_ratio=of_ratio
+            )
+
         # Calculate species concentrations at different stations using Cantera
         chamber_composition = self._calculate_equilibrium_composition(
             elements, chamber_pressure, chamber_temperature, 'chamber'
         )
-        
+
         # Cantera'dan gerçek termodinamik değerleri al
         if self.cantera_available and isinstance(chamber_composition, dict) and 'gamma' in chamber_composition:
             chamber_temperature = chamber_composition['temperature']
             gamma_chamber = chamber_composition['gamma']
-            molecular_weight = chamber_composition['molecular_weight']
-            gas_constant = self.R_universal / molecular_weight  # J/kg·K
         else:
-            # Fallback değerler
+            # Fallback: tipik yanma gazı gamma'sı (Sutton & Biblarz 9. baskı, Bölüm 3)
             gamma_chamber = 1.25
-            molecular_weight = 25.0  # Typical for combustion gases
-            gas_constant = self.R_universal / molecular_weight
-        
-        throat_pressure = chamber_pressure / 1.89  # Typical choked flow pressure ratio
-        throat_temperature = chamber_temperature * 0.85  # Typical expansion cooling
+
+        # Boğaz (kritik/choked) koşulları hesaplanan gamma'dan türetilir:
+        # P_c/P_t = ((gamma+1)/2)^(gamma/(gamma-1)), T_t/T_c = 2/(gamma+1)
+        # Sutton & Biblarz 9th ed., Eq. 3-20 ve 3-22
+        throat_pressure = chamber_pressure / (
+            ((gamma_chamber + 1.0) / 2.0) ** (gamma_chamber / (gamma_chamber - 1.0))
+        )
+        throat_temperature = chamber_temperature * 2.0 / (gamma_chamber + 1.0)
         throat_composition = self._calculate_equilibrium_composition(
             elements, throat_pressure, throat_temperature, 'throat'
         )
-        
+
         exit_pressure = 1.0  # Sea level
         exit_temperature = self._calculate_exit_temperature(
-            chamber_temperature, chamber_pressure, exit_pressure
+            chamber_temperature, chamber_pressure, exit_pressure, gamma=gamma_chamber
         )
         exit_composition = self._calculate_equilibrium_composition(
             elements, exit_pressure, exit_temperature, 'exit'
@@ -148,7 +219,40 @@ class CombustionAnalyzer:
             chamber_pressure, throat_pressure, exit_pressure,
             chamber_temperature, throat_temperature, exit_temperature
         )
-        
+
+        # Frozen vs shifting-equilibrium genişleme (NASA CEA "frozen" / "equilibrium"
+        # ayrımı). Tek-gamma izentropik bağıntısı tüm lüleye ODA gamma'sını
+        # uyguladığından (chamber gamma egzoz gazında düşüktür) çıkış hızını
+        # sistematik olarak yanlış verir; doğru yöntem ENERJİ denklemidir:
+        #   v_e = sqrt(2 * (h_oda - h_çıkış))     (Sutton & Biblarz 9. baskı, Eş. 3-15b;
+        #   NASA RP-1311 Part I, lüle hız denklemi). h_çıkış izentropik genişlemeyle
+        #   (s sabit) çıkış basıncında alınır:
+        #     - frozen: çıkış bileşimi oda bileşimine DONDURULUR,
+        #     - shifting: çıkış basıncında denge YENİDEN çözülür (gamma çıkış
+        #       dengesinden gelir, böylece tek-gamma fazla-genişleme hatası giderilir).
+        isp_frozen, isp_shifting, v_exit_shifting = self._calculate_frozen_shifting_isp(
+            elements, chamber_temperature, chamber_pressure, exit_pressure
+        )
+        if isp_shifting is not None:
+            performance['isp_frozen'] = isp_frozen
+            performance['isp_shifting'] = isp_shifting
+            # Mevcut 'isp' anahtarı gerçeğe daha yakın olan shifting-equilibrium
+            # değerine güncellenir; eski tek-gamma değeri çıkış gamma'sını
+            # kullanmadığından sistematik hatalıydı. Cf ve çıkış hızı da
+            # tutarlı kalsın diye aynı v_exit'ten türetilir.
+            performance['isp'] = isp_shifting
+            performance['velocities']['exit'] = v_exit_shifting
+            if performance['c_star'] > 0:
+                performance['cf'] = v_exit_shifting / performance['c_star']
+
+        # c* (yanma) verimi: teorik c_star KORUNUR, ayrı bir anahtarla teslim
+        # edilen (gerçekçi) c* raporlanır. eta_c_star None ise teorik = teslim.
+        performance['eta_c_star'] = eta_c_star
+        if eta_c_star is not None:
+            performance['c_star_delivered'] = eta_c_star * performance['c_star']
+        else:
+            performance['c_star_delivered'] = performance['c_star']
+
         return {
             'stoichiometric_of': of_stoich,
             'equivalence_ratio': of_stoich / of_ratio,
@@ -222,9 +326,11 @@ class CombustionAnalyzer:
             elements['H'] += oxidizer_mass_fraction * 2 * 1.01 / 34.01
             elements['O'] += oxidizer_mass_fraction * 2 * 16.00 / 34.01
         elif oxidizer_type.lower() == 'air':
-            # Air (simplified as 21% O2, 79% N2)
-            elements['O'] += oxidizer_mass_fraction * 0.21 * 2 * 16.00 / 32.00
-            elements['N'] += oxidizer_mass_fraction * 0.79 * 2 * 14.01 / 28.01
+            # Hava: elemental KÜTLE dengesi için KÜTLE kesirleri kullanılır
+            # (Y_O2=0.2314, Y_N2=0.7686; US Standard Atmosphere 1976 bileşiminden).
+            # Eski kodda mol kesirleri (0.21/0.79) kütle kesri gibi kullanılıyordu.
+            elements['O'] += oxidizer_mass_fraction * AIR_O2_MASS_FRACTION * 2 * 16.00 / 32.00
+            elements['N'] += oxidizer_mass_fraction * AIR_N2_MASS_FRACTION * 2 * 14.01 / 28.01
         
         return elements
     
@@ -270,43 +376,143 @@ class CombustionAnalyzer:
             # Pure oxygen
             oxidizer_required = oxygen_required
         elif oxidizer_type.lower() == 'h2o2':
-            # H2O2 contains 94.12% oxygen by mass
-            oxidizer_required = oxygen_required / 0.9412
+            # H2O2'de yakıt oksidasyonu için KULLANILABİLİR oksijen:
+            # 2 H2O2 -> 2 H2O + O2  =>  32.00 g O2 / (2 x 34.0147 g H2O2) = 0.4704
+            # (Toplam O kütle içeriği 0.9412'dir ama H, bir O atomunu H2O olarak
+            # bağladığından yakıta gitmez — eski 0.9412 katsayısı bu yüzden yanlıştı.)
+            oxidizer_required = oxygen_required / 0.4704
         elif oxidizer_type.lower() == 'air':
-            # Air contains 23.14% oxygen by mass
-            oxidizer_required = oxygen_required / 0.2314
+            # Hava O2 kütle kesri (US Standard Atmosphere 1976 bileşiminden)
+            oxidizer_required = oxygen_required / AIR_O2_MASS_FRACTION
         else:
             oxidizer_required = oxygen_required  # Default assumption
         
         return oxidizer_required
     
-    def _estimate_flame_temperature(self, elements: Dict, pressure: float) -> float:
-        """Calculate adiabatic flame temperature using Cantera"""
+    def _estimate_flame_temperature(self, elements: Dict, pressure: float,
+                                    fuel_composition: Optional[Dict] = None,
+                                    oxidizer_type: Optional[str] = None,
+                                    of_ratio: Optional[float] = None) -> float:
+        """Adyabatik alev sıcaklığını hesaplar (NASA CEA yaklaşımı).
+
+        Gerçek reaktan karışımının (yakıt + oksitleyici, doğru oranlarla)
+        oluşum entalpisi sabit tutularak equilibrate('HP') ile çözülür.
+        Eski kod serbest atomlardan (devasa oluşum entalpileri) HP dengesi
+        kuruyordu — termodinamik olarak yanlış referans durumu; Cantera
+        yakınsamıyor ve bare except hep 3000 K döndürüyordu.
+
+        Cantera yoksa veya çözüm başarısız olursa ampirik modele düşülür
+        ve durum loglanır.
+        """
         if not self.cantera_available:
-            # Fallback basit model
-            base_temp = 3200  # K
-            if elements['AL'] > 0.1:
-                base_temp += 500
-            if elements['H'] > 0.1:
-                base_temp += 200
-            return base_temp * (1.0 + 0.05 * np.log(pressure))
-        
+            return self._empirical_flame_temperature(elements, pressure)
+
+        h_reactants = self._calculate_reactant_enthalpy(
+            fuel_composition, oxidizer_type, of_ratio
+        )
+        if h_reactants is None:
+            logger.warning(
+                "Reaktan oluşum entalpisi hesaplanamadı (eksik Hf verisi); "
+                "ampirik alev sıcaklığı modeli kullanılıyor."
+            )
+            return self._empirical_flame_temperature(elements, pressure)
+
         try:
-            # Cantera ile adiabatic flame temperature hesaplama
-            self.gas.TPX = 298.15, pressure * 1e5, self._elements_to_cantera_composition(elements)
-            self.gas.equilibrate('HP')  # Adiabatic (constant enthalpy and pressure)
-            return self.gas.T
-        except:
-            # Hata durumunda fallback
-            return 3000.0  # Realistic default for hybrid rockets
-    
+            comp_str = self._elements_to_cantera_composition(elements)
+            # 1) Elemental KÜTLE kesirleri atomik türlerin kütle kesri olarak
+            #    atanır (TPY) ve TP dengesiyle moleküler ürün karışımına
+            #    getirilir (HP çözümü için iyi bir başlangıç durumu).
+            self.gas.TPY = 3000.0, pressure * 1e5, comp_str
+            self.gas.equilibrate('TP')
+            # 2) Karışım entalpisi, reaktanların 298.15 K'deki oluşum
+            #    entalpisine sabitlenir ve HP dengesi çözülür (NASA CEA
+            #    adyabatik alev sıcaklığı tanımı).
+            self.gas.HP = h_reactants, pressure * 1e5
+            self.gas.equilibrate('HP')
+            T_ad = float(self.gas.T)
+            if not (200.0 < T_ad < 6000.0):
+                raise ValueError(f"Fiziksel olmayan alev sıcaklığı: {T_ad:.1f} K")
+            return T_ad
+        except Exception as exc:
+            logger.warning(
+                "Cantera HP denge çözümü başarısız (%s); "
+                "ampirik alev sıcaklığı modeli kullanılıyor.", exc
+            )
+            return self._empirical_flame_temperature(elements, pressure)
+
+    def _empirical_flame_temperature(self, elements: Dict, pressure: float) -> float:
+        """Ampirik alev sıcaklığı modeli (Cantera yokken / başarısızken)."""
+        base_temp = 3200  # K
+        if elements.get('AL', 0) > 0.1:
+            base_temp += 500
+        if elements.get('H', 0) > 0.1:
+            base_temp += 200
+        return base_temp * (1.0 + 0.05 * np.log(pressure))
+
+    def _calculate_reactant_enthalpy(self, fuel_composition: Optional[Dict],
+                                     oxidizer_type: Optional[str],
+                                     of_ratio: Optional[float]) -> Optional[float]:
+        """Reaktan karışımının kütle bazlı oluşum entalpisini döndürür (J/kg, 298.15 K).
+
+        h = Y_yakit * sum(w_i * Hf_i/MW_i) + Y_oks * Hf_oks/MW_oks
+        (Hf [kJ/mol], MW [g/mol] -> J/kg dönüşümü: *1e6/MW)
+
+        Eksik veri varsa None döner (çağıran ampirik yola düşer).
+        """
+        if not fuel_composition or not oxidizer_type or not of_ratio:
+            return None
+
+        ox_key = oxidizer_type.lower()
+        if ox_key == 'n2o':
+            spec = self.propellant_specs['n2o']
+            hf_ox, mw_ox = spec['enthalpy_formation'], spec['molecular_weight']
+        elif ox_key == 'lox':
+            # O2 referans hali Hf = 0 (NIST-JANAF); kriyojenik sıvının
+            # duyulur entalpi farkı ihmal edilmiştir (CEA'da ~ -0.4 MJ/kg).
+            hf_ox, mw_ox = 0.0, 31.9988
+        elif ox_key == 'h2o2':
+            # Sıvı H2O2: Hf = -187.78 kJ/mol (NIST Chemistry WebBook)
+            hf_ox, mw_ox = -187.78, 34.0147
+        elif ox_key == 'air':
+            # N2 ve O2 referans halleri, Hf = 0
+            hf_ox, mw_ox = 0.0, 28.9645  # M_hava: US Standard Atmosphere 1976
+        else:
+            return None
+
+        h_fuel = 0.0  # J/kg yakıt
+        for fuel_type, percentage in fuel_composition.items():
+            key = fuel_type.lower()
+            spec = self.propellant_specs.get(key)
+            if spec and 'enthalpy_formation' in spec and 'molecular_weight' in spec:
+                h_fuel += (percentage / 100.0) * spec['enthalpy_formation'] * 1e6 / spec['molecular_weight']
+            else:
+                # Bu yakıt için Hf verisi yok -> güvenilir HP dengesi kurulamaz
+                return None
+
+        total_mass = 1.0 + of_ratio
+        y_fuel = 1.0 / total_mass
+        y_ox = of_ratio / total_mass
+
+        h_ox = hf_ox * 1e6 / mw_ox  # J/kg oksitleyici
+        return y_fuel * h_fuel + y_ox * h_ox
+
     def _elements_to_cantera_composition(self, elements: Dict) -> str:
-        """Convert elemental composition to Cantera format"""
-        # Cantera composition string formatında döndür
+        """Elemental KÜTLE kesirlerini Cantera atomik tür kütle-kesri string'ine çevirir.
+
+        DİKKAT: Dönen değerler KÜTLE kesirleridir; Cantera'ya TPY/HPY gibi
+        Y-tabanlı atamayla verilmelidir. Eski kod bu string'i TPX'e (mol
+        kesri) veriyordu — atom ağırlıkları farklı olduğundan element mol
+        oranları bozuluyordu (örn. HTPB/N2O'da C/H mol oranı ~12x hatalı).
+        """
         comp_parts = []
-        for element, moles in elements.items():
-            if moles > 1e-10:  # Çok küçük değerleri filtrele
-                comp_parts.append(f"{element}:{moles:.6f}")
+        species_names = set(self.gas.species_names) if self.gas is not None else set()
+        for element, mass_frac in elements.items():
+            if mass_frac > 1e-10:  # Çok küçük değerleri filtrele
+                if species_names and element not in species_names:
+                    # Mekanizmada bu atomik tür yoksa (örn. AL gri30'da yok)
+                    # denge çözülemez -> çağıran fallback'e düşsün
+                    raise ValueError(f"Mekanizmada '{element}' türü tanımlı değil")
+                comp_parts.append(f"{element}:{mass_frac:.6f}")
         return ",".join(comp_parts)
     
     def _calculate_equilibrium_composition(self, elements: Dict, pressure: float, 
@@ -318,9 +524,12 @@ class CombustionAnalyzer:
             return self._fallback_equilibrium_composition(elements, pressure, temperature, station)
         
         try:
-            # Cantera ile kimyasal denge hesaplama
+            # Cantera ile kimyasal denge hesaplama.
+            # Elemental KÜTLE kesirleri atomik türlerin kütle kesri olarak
+            # atanır -> TPY kullanılır (TPX mol kesri ister; eski TPX
+            # kullanımı element oranlarını ~atom ağırlığı kadar bozuyordu).
             comp_str = self._elements_to_cantera_composition(elements)
-            self.gas.TPX = temperature, pressure * 1e5, comp_str
+            self.gas.TPY = temperature, pressure * 1e5, comp_str
             self.gas.equilibrate('TP')  # Constant temperature and pressure
             
             # Sonuçları çıkar
@@ -335,22 +544,61 @@ class CombustionAnalyzer:
                         'mole_fraction': mole_fractions[i],
                         'mass_fraction': mass_fractions[i]
                     }
-            
+
+            # Denge durumu skalerlerini SP pertürbasyonundan ÖNCE oku
+            T0 = self.gas.T
+            P0 = self.gas.P
+            rho0 = self.gas.density
+            mw0 = self.gas.mean_molecular_weight
+            cp0 = self.gas.cp
+            cv0 = self.gas.cv
+            h0 = self.gas.enthalpy_mass
+            s0 = self.gas.entropy_mass
+            Y0 = self.gas.Y
+
+            # Isentropik üs (gamma): NASA CEA c*'ı "shifting equilibrium"
+            # üssüyle hesaplar. Frozen cp/cv yüksek sıcaklıkta disosiyasyonu
+            # (CO2<->CO+1/2 O2, H2O<->OH+1/2 H2 vb.) yok sayıp gamma'yı ~%7-9
+            # fazla, dolayısıyla c*'ı ~%4 düşük verir. Sabit-entropili küçük
+            # bir basınç pertürbasyonunda denge yeniden çözülerek
+            # n_s = dlnP/dln(rho)|_s,eq hesaplanır (Gordon & McBride, NASA
+            # RP-1311). Yakınsamazsa frozen cp/cv değerine düşülür.
+            gamma_frozen = cp0 / cv0
+            gamma_eq = gamma_frozen
+            try:
+                self.gas.SP = s0, P0 * 1.01
+                self.gas.equilibrate('SP')
+                P1 = self.gas.P
+                rho1 = self.gas.density
+                n_s = np.log(P1 / P0) / np.log(rho1 / rho0)
+                if 1.05 < n_s < 1.70:  # fiziksel yanma gazı bandı
+                    gamma_eq = n_s
+            except Exception:
+                gamma_eq = gamma_frozen
+            finally:
+                # Gaz durumunu denge bileşimine geri yükle (sonraki çağrılar için)
+                self.gas.TPY = T0, P0, Y0
+
             return {
                 'species': composition,
-                'temperature': self.gas.T,
-                'pressure': self.gas.P / 1e5,  # bar cinsinden
-                'density': self.gas.density,
-                'molecular_weight': self.gas.mean_molecular_weight,
-                'cp': self.gas.cp,
-                'cv': self.gas.cv,
-                'gamma': self.gas.cp / self.gas.cv,
-                'enthalpy': self.gas.enthalpy_mass,
-                'entropy': self.gas.entropy_mass
+                'temperature': T0,
+                'pressure': P0 / 1e5,  # bar cinsinden
+                'density': rho0,
+                'molecular_weight': mw0,
+                'cp': cp0,
+                'cv': cv0,
+                'gamma': gamma_eq,             # shifting-equilibrium isentropik üs
+                'gamma_frozen': gamma_frozen,  # referans (frozen cp/cv)
+                'enthalpy': h0,
+                'entropy': s0
             }
             
         except Exception as e:
-            # Hata durumunda fallback
+            # Hata durumunda fallback (durumu logla — sessiz yutma yok)
+            logger.warning(
+                "Cantera TP denge çözümü başarısız (istasyon=%s): %s; "
+                "ampirik bileşim modeline düşülüyor.", station, e
+            )
             return self._fallback_equilibrium_composition(elements, pressure, temperature, station)
     
     def _fallback_equilibrium_composition(self, elements: Dict, pressure: float, 
@@ -408,13 +656,105 @@ class CombustionAnalyzer:
         
         return composition
     
-    def _calculate_exit_temperature(self, T_chamber: float, P_chamber: float, P_exit: float) -> float:
-        """Calculate exit temperature using isentropic expansion"""
-        gamma = 1.25  # Average specific heat ratio
+    def _calculate_exit_temperature(self, T_chamber: float, P_chamber: float, P_exit: float,
+                                    gamma: Optional[float] = None) -> float:
+        """Calculate exit temperature using isentropic expansion.
+
+        gamma verilmezse fallback olarak 1.25 kullanılır (tipik yanma gazı,
+        Sutton & Biblarz 9. baskı); Cantera mevcutken çağıran, hesaplanan
+        oda gamma'sını geçirir (akış zincirinde tek gamma tutarlılığı).
+        """
+        if gamma is None:
+            gamma = 1.25  # Fallback: tipik yanma gazı gamma'sı
         pressure_ratio = P_chamber / P_exit
         return T_chamber / (pressure_ratio ** ((gamma - 1) / gamma))
-    
-    def _calculate_performance_parameters(self, chamber_comp: Dict, throat_comp: Dict, 
+
+    def _calculate_frozen_shifting_isp(self, elements: Dict, T_c: float,
+                                       P_c: float, P_e: float
+                                       ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """Frozen ve shifting-equilibrium özgül itki (Isp) ile shifting çıkış hızını hesaplar.
+
+        Yöntem: enerji denklemiyle çıkış hızı (Sutton & Biblarz 9. baskı,
+        Eş. 3-15b: v_e = sqrt(2 (h_0 - h_e)); NASA RP-1311 Part I lüle hız
+        denklemi). Oda durağan entalpisi h_0 sabit, çıkış statik entalpisi
+        h_e izentropik (s = s_oda) genişlemeyle P_e'de alınır:
+
+          * SHIFTING: çıkış basıncında kimyasal denge YENİDEN çözülür
+            (Cantera equilibrate('SP')). Çıkış gamma'sı çıkış dengesinden
+            gelir -> tek-gamma fazla-genişleme hatası ortadan kalkar.
+            Yüksek sıcaklıkta ayrışan türlerin (CO+1/2 O2->CO2, H+OH->H2O, ...)
+            genişlerken yeniden birleşme entalpisi geri kazanılır; bu yüzden
+            shifting Isp her zaman frozen'dan büyüktür.
+          * FROZEN: bileşim oda değerine DONDURULUR (Cantera SP, equilibrate
+            YOK -> sadece T ayarlanır); ayrışma entalpisi geri kazanılmaz.
+
+        Bu, NASA CEA'nın frozen/equilibrium ayrımıyla aynı fiziktir. Doğru
+        karşılaştırma referansı CEA'nın Pamb=P_e'deki basınç-eşleşmiş (optimum
+        genişleme) Isp'idir; bu, RocketCEA'da estimate_Ambient_Isp(Pamb=P_e)
+        çağrısıdır ve sayısal olarak M_çıkış * a_çıkış / g0 'a eşittir (yani
+        v_e/g0). DİKKAT: RocketCEA get_Isp(eps) varsayılan olarak VAKUM Isp'i
+        (sonsuz genişleme basınç-itki terimiyle) döndürür; v_e/g0 ile doğrudan
+        kıyaslanmamalıdır.
+
+        Doğrulama (tests/test_combustion_cea_validation.py, Pc=20 bar):
+          N2O/HTPB  O/F=6.0:  frozen -3.1%, shifting -2.4% (CEA'ya göre)
+          LOX/RP-1  O/F=2.5:  frozen +0.5%, shifting +2.2%
+        Frozen/shifting genişleme MANTIĞI CEA tanımıyla birebir uyumludur;
+        kalan ~%2-3 sapma oda (chamber) denge çözümünün c*/T_c belirsizliğinin
+        (gri30 mekanizması fuel-rich N2O/HTPB için T_c'yi ~%3.4 düşük verir;
+        c* zaten yalnızca %0-1.5 içinde doğrulanmıştır) Isp'e taşınmasıdır;
+        Isp ~ sqrt(T_c) olduğundan -%3.4 T_c ~ -%1.7 Isp tabanı yaratır. T_c'yi
+        DÜŞÜK vermek motor boyutlandırmada KONSERVATİF (güvenli) yöndür. Bu
+        nedenle Isp testleri %3.5 toleransla, oda c* doğruluğu ise %2.5 ile
+        denetlenir.
+
+        Cantera yoksa veya denge çözülemezse (None, None, None) döner ve
+        çağıran mevcut tek-gamma Isp değerini korur.
+        """
+        if not self.cantera_available or self.gas is None:
+            return None, None, None
+        try:
+            comp_str = self._elements_to_cantera_composition(elements)
+            gas = self.gas
+            # Oda denge durumu (durağan koşul) — h_0, s_0, bileşim okunur.
+            gas.TPY = T_c, P_c * 1e5, comp_str
+            gas.equilibrate('TP')
+            h_0 = gas.enthalpy_mass      # J/kg, durağan entalpi (Hf dahil)
+            s_0 = gas.entropy_mass       # J/(kg·K)
+            T_0 = gas.T
+            Y_0 = gas.Y                  # oda denge bileşimi (frozen referans)
+
+            # SHIFTING: çıkış basıncında dengeyi yeniden çöz.
+            gas.SP = s_0, P_e * 1e5
+            gas.equilibrate('SP')
+            h_e_shift = gas.enthalpy_mass
+            v_shift = float(np.sqrt(2.0 * max(h_0 - h_e_shift, 0.0)))
+
+            # FROZEN: oda bileşimine dön, izentropik (equilibrate YOK).
+            gas.TPY = T_0, P_c * 1e5, Y_0
+            gas.SP = s_0, P_e * 1e5
+            h_e_froz = gas.enthalpy_mass
+            v_froz = float(np.sqrt(2.0 * max(h_0 - h_e_froz, 0.0)))
+
+            # Gaz durumunu oda dengesine geri yükle (sonraki çağrılar için temiz başlangıç).
+            gas.TPY = T_0, P_c * 1e5, Y_0
+            gas.equilibrate('TP')
+
+            isp_froz = v_froz / G_0
+            isp_shift = v_shift / G_0
+            # Fiziksel tutarlılık: shifting >= frozen olmalı; aksi halde
+            # yakınsama bozulmuştur -> sessizce güvenli tarafa (None) düş.
+            if not (isp_shift >= isp_froz > 0):
+                return None, None, None
+            return isp_froz, isp_shift, v_shift
+        except Exception as exc:
+            logger.warning(
+                "Frozen/shifting Isp hesabı başarısız (%s); tek-gamma Isp korunuyor.",
+                exc,
+            )
+            return None, None, None
+
+    def _calculate_performance_parameters(self, chamber_comp: Dict, throat_comp: Dict,
                                         exit_comp: Dict, P_c: float, P_t: float, P_e: float,
                                         T_c: float, T_t: float, T_e: float) -> Dict:
         """Calculate performance parameters"""
@@ -426,13 +766,20 @@ class CombustionAnalyzer:
                 if 'molecular_weight' in composition:
                     return composition['molecular_weight']
                 elif 'species' in composition:
-                    # Species bazlı hesaplama
-                    mw = 0
+                    # Species bazlı hesaplama — KÜTLE kesirleriyle doğru karışım
+                    # MW formülü harmonik ortalamadır: MW_mix = 1 / sum(Y_i/MW_i).
+                    # (sum(Y_i*MW_i) yalnızca MOL kesirleriyle geçerlidir.)
+                    inv_mw_sum = 0.0
+                    y_total = 0.0
                     for species, data in composition['species'].items():
                         if isinstance(data, dict) and 'mass_fraction' in data:
                             if species in self.species_data:
-                                mw += data['mass_fraction'] * self.species_data[species]['MW']
-                    return max(mw, 25.0)  # Minimum MW
+                                inv_mw_sum += data['mass_fraction'] / self.species_data[species]['MW']
+                                y_total += data['mass_fraction']
+                    if inv_mw_sum > 0:
+                        # Kapsanmayan türler için y_total ile renormalize edilir
+                        return y_total / inv_mw_sum
+                    return 25.0  # Veri yoksa tipik yanma gazı MW'si
                 else:
                     # Eski format
                     mw = 0
@@ -571,6 +918,21 @@ class CombustionAnalyzer:
                                           P_c: float, P_t: float, P_e: float) -> Dict:
         """Calculate detailed thermodynamic properties"""
         
+        def _species_mass_fractions(composition: Dict) -> Dict:
+            """Bileşim sözlüğünden {tür: kütle_kesri} çıkarır.
+
+            Cantera formatı iç içedir: {'species': {tür: {'mass_fraction': ...}},
+            'temperature': ..., 'gamma': ...}. Eski düz format ise doğrudan
+            {tür: kesir}. Eski kod düz format varsaydığından Cantera yolunda
+            hiçbir tür eşleşmiyor ve h = s = 0 dönüyordu (Bulgu 6).
+            """
+            if isinstance(composition.get('species'), dict):
+                return {sp: d.get('mass_fraction', 0.0)
+                        for sp, d in composition['species'].items()
+                        if isinstance(d, dict)}
+            return {sp: fr for sp, fr in composition.items()
+                    if isinstance(fr, (int, float))}
+
         # Standard enthalpies and entropies (simplified NASA polynomials)
         def calc_enthalpy(composition: Dict, temperature: float) -> float:
             """Karisim entalpisini kJ/kg cinsinden hesaplar.
@@ -585,10 +947,16 @@ class CombustionAnalyzer:
               h_species  = h_f_per_kg + h_sensible             ->  kJ/kg
               h_mix      = sum(mass_frac_i * h_species_i)      ->  kJ/kg
             """
+            # Cantera çözümü varsa gerçek karışım entalpisini doğrudan kullan
+            # (gas.enthalpy_mass, J/kg -> kJ/kg). Oluşum entalpisi dahildir,
+            # aşağıdaki basitleştirilmiş toplamla aynı referans tabanındadır.
+            if 'enthalpy' in composition and isinstance(composition.get('species'), dict):
+                return composition['enthalpy'] / 1000.0
+
             h_mix = 0.0  # kJ/kg
             total_mass_frac = 0.0
 
-            for species, mass_frac in composition.items():
+            for species, mass_frac in _species_mass_fractions(composition).items():
                 if species in self.species_data and mass_frac > 0:
                     # NIST formation enthalpy (kJ/mol)
                     h_f_kJ_per_mol = self.species_data[species]['Hf']
@@ -617,29 +985,53 @@ class CombustionAnalyzer:
             return h_mix / max(total_mass_frac, 0.001)  # kJ/kg
         
         def calc_entropy(composition: Dict, temperature: float, pressure: float) -> float:
-            """Calculate mixture entropy in kJ/kg·K"""
-            s_mix = 0
-            total_mass_frac = 0
-            
-            for species, mass_frac in composition.items():
+            """Karışım entropisini kJ/(kg·K) cinsinden hesaplar.
+
+            Birim zinciri TEK birimde tutulur: tüm terimler J/(kg·K) olarak
+            toplanır, sonda kJ/(kg·K)'ye çevrilir. Eski kodda s0 değerleri
+            kJ/(mol·K), basınç terimi J/(kg·K), etiket kJ/(kg·K) idi —
+            üç farklı birim toplanıyordu (Bulgu 5).
+            """
+            # Cantera çözümü varsa gerçek karışım entropisini doğrudan kullan
+            # (gas.entropy_mass, J/(kg·K) -> kJ/(kg·K))
+            if 'entropy' in composition and isinstance(composition.get('species'), dict):
+                return composition['entropy'] / 1000.0
+
+            # Standart MOLAR entropiler s0 [J/(mol·K)], 298.15 K ve 1 bar
+            # Kaynak: NIST-JANAF Thermochemical Tables, 4. baskı (1998)
+            s0_molar = {
+                'CO2': 213.79, 'CO': 197.66, 'H2O': 188.84, 'H2': 130.68,
+                'N2': 191.61, 'O2': 205.15, 'OH': 183.74, 'NO': 210.76
+            }
+
+            s_mix = 0.0  # J/(kg·K)
+            total_mass_frac = 0.0
+
+            for species, mass_frac in _species_mass_fractions(composition).items():
                 if species in self.species_data and mass_frac > 0:
-                    # Standard entropy at 298K and 1 bar (simplified values)
-                    s0_values = {
-                        'CO2': 0.214, 'CO': 0.198, 'H2O': 0.189, 'H2': 0.131,
-                        'N2': 0.192, 'O2': 0.205, 'OH': 0.184, 'NO': 0.211
-                    }
-                    
-                    s0 = s0_values.get(species, 0.2)  # kJ/kg·K
-                    
-                    # Temperature and pressure corrections
-                    cp = 1.2  # Simplified
-                    s_species = s0 + cp * np.log(temperature / 298.15) - \
-                               self.R_universal / self.species_data[species]['MW'] * np.log(pressure)
-                    
+                    MW = self.species_data[species]['MW']  # g/mol = kg/kmol
+
+                    # Molar -> kütle bazı: [J/(mol·K)] * 1000 [mol/kmol] / MW [kg/kmol]
+                    s0_mass = s0_molar.get(species, 200.0) * 1000.0 / MW  # J/(kg·K)
+
+                    # Tür bazlı cp (calc_enthalpy ile aynı basitleştirilmiş set, J/(kg·K))
+                    if species in ['CO2', 'H2O', 'N2']:
+                        cp_J = 1000.0
+                    elif species in ['CO', 'H2']:
+                        cp_J = 1400.0
+                    else:
+                        cp_J = 1200.0
+
+                    # s(T,P) = s0 + cp*ln(T/298.15) - (R_u/MW)*ln(P/P0), P0 = 1 bar
+                    # R_u/MW birimi J/(kg·K) — artık s0 ve cp ile aynı birimde.
+                    s_species = (s0_mass
+                                 + cp_J * np.log(temperature / 298.15)
+                                 - (self.R_universal / MW) * np.log(pressure / 1.0))
+
                     s_mix += mass_frac * s_species
                     total_mass_frac += mass_frac
-            
-            return s_mix / max(total_mass_frac, 0.001)
+
+            return (s_mix / max(total_mass_frac, 0.001)) / 1000.0  # kJ/(kg·K)
         
         def calc_gibbs_energy(enthalpy: float, entropy: float, temperature: float) -> float:
             """Calculate Gibbs free energy"""
@@ -658,23 +1050,36 @@ class CombustionAnalyzer:
             h = calc_enthalpy(comp, T)
             s = calc_entropy(comp, T, P)
             g = calc_gibbs_energy(h, s, T)
-            
-            # Specific heat capacity (simplified, unit-consistent)
-            # Use cp, cv in J/kg·K for internal calculations, then store in kJ/kg·K
-            cp_j = 1200.0  # J/kg·K (equivalent to 1.2 kJ/kg·K)
-            cv_j = cp_j - self.R_universal / 30.0  # J/kg·K
-            # Guard against non-physical negative cv
-            cv_j = max(cv_j, 1e-3)
-            gamma_local = cp_j / cv_j
-            
+
+            if isinstance(comp, dict) and all(k in comp for k in ('cp', 'cv', 'gamma', 'molecular_weight')):
+                # Cantera denge çözümünden GERÇEK termodinamik değerler.
+                # Eski kod bunları hesaplayıp atıyor, her istasyonda sabit
+                # cp=1200 / gamma=1.3003 kullanıyordu (Bulgu 4).
+                cp_j = comp['cp']                 # J/(kg·K) (frozen, rapor için)
+                cv_j = max(comp['cv'], 1e-3)      # J/(kg·K), negatif koruması
+                # Isentropik üs: denge çözümünden gelen shifting-equilibrium
+                # değeri (comp['gamma']) kullanılır. cp_j/cv_j (frozen) yüksek
+                # sıcaklıkta disosiyasyonu yok sayıp gamma'yı ~%7-9 fazla verir
+                # ve c*'ı ~%4 düşük çıkarır (NASA CEA shifting-eq. kullanır).
+                gamma_local = comp.get('gamma', cp_j / cv_j)
+                R_mix = self.R_universal / comp['molecular_weight']  # J/(kg·K)
+                rho = comp.get('density', P * 1e5 / (R_mix * max(T, 1.0)))  # kg/m³
+            else:
+                # Fallback (Cantera yokken): ideal gaz tutarlı set —
+                # MW=30 kg/kmol ve gamma=1.25 (tipik yanma gazı,
+                # Sutton & Biblarz 9. baskı, Bölüm 3) ile cp = gamma*R/(gamma-1).
+                # Böylece akış zincirindeki tüm fallback'ler TEK gamma kullanır.
+                MW_fallback = 30.0  # kg/kmol
+                R_mix = self.R_universal / MW_fallback  # J/(kg·K)
+                gamma_local = 1.25
+                cp_j = gamma_local * R_mix / (gamma_local - 1.0)  # ~1385.7 J/(kg·K)
+                cv_j = cp_j - R_mix
+                rho = P * 1e5 / (R_mix * max(T, 1.0))  # kg/m³
+
             # Speed of sound (güvenli sqrt)
-            R_mix = self.R_universal / 30.0  # J/kg·K - approximate mixture gas constant
             T_safe = max(T, 300)  # Minimum 300K sıcaklık sınırı
             a = np.sqrt(gamma_local * R_mix * T_safe)
-            
-            # Density (from ideal gas law)
-            rho = P * 1e5 / (R_mix * T)  # kg/m³
-            
+
             properties[station_name] = {
                 'enthalpy': h,  # kJ/kg
                 'entropy': s,   # kJ/kg·K
@@ -715,8 +1120,12 @@ class CombustionAnalyzer:
         h_actual = properties['chamber']['enthalpy'] - properties['exit']['enthalpy']
         
         # Isentropic enthalpy drop (simplified calculation)
+        # Üs (gamma-1)/gamma hesaplanan oda gamma'sından türetilir; eski kod
+        # gamma=1.4 (hava) değerine karşılık gelen sabit 0.286 kullanıyordu.
         T_c = properties['chamber']['temperature']
-        T_e_isentropic = T_c * (properties['exit']['pressure'] / properties['chamber']['pressure'])**0.286
+        gamma_c = properties['chamber'].get('gamma', 1.25)
+        T_e_isentropic = T_c * (properties['exit']['pressure'] /
+                                properties['chamber']['pressure'])**((gamma_c - 1.0) / gamma_c)
         
         # Simplified isentropic enthalpy
         cp_avg = properties['chamber']['cp']

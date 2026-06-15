@@ -43,6 +43,19 @@ T_TROPOPAUSE = 216.65  # K -- 11 km'de sabit sıcaklık
 P_TROPOPAUSE = 22632.1  # Pa -- 11 km'de basınç
 H_TROPOPAUSE = 11000.0  # m
 
+# US Standard Atmosphere 1976 / ICAO katman tablosu (0-84.852 km geopotansiyel)
+# Her kayıt: (h_taban [m], T_taban [K], lapse [K/m], P_taban [Pa])
+# Kaynak: U.S. Standard Atmosphere 1976 (NOAA/NASA/USAF), Tablo 4
+ISA_LAYERS = [
+    (0.0,     288.15, -0.0065, 101325.0),
+    (11000.0, 216.65,  0.0,    22632.1),
+    (20000.0, 216.65,  0.001,  5474.89),
+    (32000.0, 228.65,  0.0028, 868.019),
+    (47000.0, 270.65,  0.0,    110.906),
+    (51000.0, 270.65, -0.0028, 66.9389),
+    (71000.0, 214.65, -0.002,  3.95642),
+]
+
 # -----------------------------------------------------------------------------
 # Birim Çevirim Sabitleri
 # -----------------------------------------------------------------------------
@@ -92,5 +105,6 @@ def vacuum_isp_ratio(epsilon: float, gamma: float = 1.22) -> float:
     """
     import numpy as np
     eps = max(float(epsilon), 1.0)
-    # Logaritmik artış (Sutton 3-30'a uyumlu yaklaşıklık)
-    return float(1.0 + 0.04 * np.log(eps) + 0.005 * (gamma - 1.2))
+    # Docstring'deki Sutton Tablo 3-2 kalibrasyon noktalarına en küçük kareler
+    # fiti: ratio = 0.953 + 0.0405*ln(eps) (maks sapma 0.004, tablo ±0.01 içinde)
+    return float(0.953 + 0.0405 * np.log(eps) + 0.005 * (gamma - 1.2))

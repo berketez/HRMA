@@ -149,13 +149,30 @@ class ValidationSystem:
         """Sutton & Biblarz kitabından kritik tasarım kriterleri"""
         warnings_list = []
         
-        # Kısık oranı kontrol (Throat Loading)
+        # Kısık yüklenmesi tutarlılık kontrolü:
+        # F/At ≡ CF·Pc özdeşliği geçerlidir (Sutton & Biblarz 9. baskı, Denk. 3-31).
+        # Eski sabit "2.0 N/mm²" eşiği fiziksel bir tasarım kriteri değildi:
+        # CF≈1.5 için Pc > ~13 bar olan her normal motoru hatalı biçimde KRITIK
+        # işaretliyordu. Bunun yerine ima edilen itki katsayısı
+        # CF_ima = (F/At)/Pc hesaplanır ve teorik sınırlarla karşılaştırılır.
+        # Üst sınır: gamma=1.2 için sonsuz genleşmeli vakum CF limiti ≈ 2.246
+        # (Sutton & Biblarz 9. baskı, Denk. 3-30 limiti / Şekil 3-6).
         thrust = data.get('thrust', 0)
         throat_area = data.get('throat_area', 0)
-        if thrust > 0 and throat_area > 0:
-            throat_loading = thrust / (throat_area * 1e6)  # N/mm²
-            if throat_loading > 2.0:
-                warnings_list.append(f"KRITIK: Kısık yüklenmesi = {throat_loading:.2f} N/mm² (max: 2.0)")
+        chamber_pressure_bar = data.get('chamber_pressure', 0)  # bar
+        if thrust > 0 and throat_area > 0 and chamber_pressure_bar > 0:
+            throat_loading = thrust / (throat_area * 1e6)  # N/mm² (= MPa)
+            implied_cf = throat_loading / (chamber_pressure_bar * 0.1)  # Pc: bar → MPa
+            if implied_cf > 2.25:
+                warnings_list.append(
+                    f"KRITIK: İma edilen CF = F/(Pc·At) = {implied_cf:.2f} > 2.25 "
+                    f"(teorik vakum CF üst sınırı, Sutton & Biblarz 9. baskı Şekil 3-6) "
+                    f"— itki/boğaz alanı/Pc verileri tutarsız")
+            elif implied_cf < 0.8:
+                warnings_list.append(
+                    f"UYARI: İma edilen CF = F/(Pc·At) = {implied_cf:.2f} < 0.8 "
+                    f"(pratik nozullarda CF tipik 0.8-2.0 aralığındadır, Sutton Şekil 3-6) "
+                    f"— nozul performansı anormal düşük veya veriler tutarsız")
         
         # L* kontrolü (Karakteristik uzunluk)
         l_star = data.get('l_star', 0)

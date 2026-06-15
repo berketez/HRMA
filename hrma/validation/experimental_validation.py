@@ -1,6 +1,13 @@
 """
 Experimental Validation Framework
 Test data integration and validation system for rocket motor analysis
+
+NOTE ON DATA PROVENANCE: The built-in reference database below is SYNTHETIC.
+The reference points are literature-inspired but are NOT traceable to real
+published test campaigns, and the time series are generated (sinusoid +
+seeded Gaussian noise). All entries are explicitly labelled as synthetic;
+statistics derived from them (R², RMSE, success rate) characterize internal
+consistency only and must NOT be reported as experimental validation.
 """
 
 import numpy as np
@@ -121,9 +128,16 @@ class ExperimentalValidation:
         conn.close()
     
     def load_literature_data(self):
-        """Load experimental data from published literature"""
-        
-        # AIAA Papers and Journal Articles
+        """Load SYNTHETIC literature-inspired reference cases.
+
+        These are NOT experimental measurements: the operating points are
+        plausible literature-style values and the time series are generated
+        (sinusoid + seeded Gaussian noise, deterministic). They are labelled
+        accordingly in source/paper_doi/notes.
+        """
+        # Deterministik sentetik gürültü: sabit seed (her çalıştırmada aynı seri)
+        rng = np.random.default_rng(20260612)
+
         literature_tests = [
             # Hybrid rocket tests
             TestData(
@@ -131,7 +145,7 @@ class ExperimentalValidation:
                 motor_type="hybrid",
                 propellant_combination="N2O/HTPB",
                 test_date="2019-03-15",
-                facility="Stanford University",
+                facility="Synthetic (university-scale archetype)",
                 chamber_pressure=25.0,
                 chamber_temperature=3200.0,
                 thrust=1250.0,
@@ -140,17 +154,17 @@ class ExperimentalValidation:
                 isp=235.0,
                 measured_data={
                     "time": list(np.linspace(0, 8.5, 170)),
-                    "pressure": list(25.0 + 2.0*np.sin(np.linspace(0, 8.5, 170)) + np.random.normal(0, 0.5, 170)),
-                    "thrust": list(1250.0 + 50.0*np.sin(2*np.linspace(0, 8.5, 170)) + np.random.normal(0, 20, 170))
+                    "pressure": list(25.0 + 2.0*np.sin(np.linspace(0, 8.5, 170)) + rng.normal(0, 0.5, 170)),
+                    "thrust": list(1250.0 + 50.0*np.sin(2*np.linspace(0, 8.5, 170)) + rng.normal(0, 20, 170))
                 },
                 injector_type="showerhead",
                 nozzle_type="conical",
                 grain_geometry="cylindrical",
                 of_ratio=6.5,
                 uncertainties={"thrust": 0.03, "pressure": 0.02, "isp": 0.04},
-                source="AIAA Journal of Propulsion and Power",
-                paper_doi="10.2514/1.B37543",
-                notes="University scale hybrid motor with HTPB fuel grain"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC reference case styled after university-scale N2O/HTPB hybrid motors; time series generated (sine + seeded noise)"
             ),
             
             TestData(
@@ -158,7 +172,7 @@ class ExperimentalValidation:
                 motor_type="hybrid", 
                 propellant_combination="N2O/Paraffin",
                 test_date="2020-07-22",
-                facility="Utah State University",
+                facility="Synthetic (university-scale archetype)",
                 chamber_pressure=20.0,
                 chamber_temperature=3100.0,
                 thrust=890.0,
@@ -167,17 +181,17 @@ class ExperimentalValidation:
                 isp=245.0,
                 measured_data={
                     "time": list(np.linspace(0, 12.0, 240)),
-                    "pressure": list(20.0 + 1.5*np.sin(np.linspace(0, 12.0, 240)) + np.random.normal(0, 0.4, 240)),
-                    "thrust": list(890.0 + 40.0*np.sin(1.5*np.linspace(0, 12.0, 240)) + np.random.normal(0, 15, 240))
+                    "pressure": list(20.0 + 1.5*np.sin(np.linspace(0, 12.0, 240)) + rng.normal(0, 0.4, 240)),
+                    "thrust": list(890.0 + 40.0*np.sin(1.5*np.linspace(0, 12.0, 240)) + rng.normal(0, 15, 240))
                 },
                 injector_type="pintle",
                 nozzle_type="bell",
                 grain_geometry="cylindrical",
                 of_ratio=7.2,
                 uncertainties={"thrust": 0.025, "pressure": 0.02, "isp": 0.035},
-                source="AIAA Propulsion and Energy Forum",
-                paper_doi="10.2514/6.2020-3815",
-                notes="Paraffin fuel with enhanced regression rate"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC reference case styled after N2O/paraffin hybrid motors; time series generated (sine + seeded noise)"
             ),
             
             # Liquid rocket tests
@@ -186,7 +200,7 @@ class ExperimentalValidation:
                 motor_type="liquid",
                 propellant_combination="LOX/RP-1",
                 test_date="2018-11-10",
-                facility="JPL/NASA",
+                facility="Synthetic (LOX/RP-1 archetype)",
                 chamber_pressure=70.0,
                 chamber_temperature=3600.0,
                 thrust=4450.0,
@@ -195,17 +209,17 @@ class ExperimentalValidation:
                 isp=311.0,
                 measured_data={
                     "time": list(np.linspace(0, 15.0, 300)),
-                    "pressure": list(70.0 + 1.0*np.sin(np.linspace(0, 15.0, 300)) + np.random.normal(0, 0.3, 300)),
-                    "thrust": list(4450.0 + 80.0*np.sin(3*np.linspace(0, 15.0, 300)) + np.random.normal(0, 25, 300))
+                    "pressure": list(70.0 + 1.0*np.sin(np.linspace(0, 15.0, 300)) + rng.normal(0, 0.3, 300)),
+                    "thrust": list(4450.0 + 80.0*np.sin(3*np.linspace(0, 15.0, 300)) + rng.normal(0, 25, 300))
                 },
                 injector_type="showerhead",
                 nozzle_type="bell",
                 grain_geometry="N/A",
                 of_ratio=2.56,
                 uncertainties={"thrust": 0.015, "pressure": 0.01, "isp": 0.02},
-                source="NASA Technical Publication",
-                paper_doi="NASA-TP-2018-220456",
-                notes="High performance LOX/RP-1 engine test"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC LOX/RP-1 reference case; note Isp=311 s is vacuum-class for this cycle, NOT a sea-level measurement at 70 bar (sea-level gas-generator LOX/RP-1 is typically ~260-285 s); time series generated"
             ),
             
             TestData(
@@ -213,7 +227,7 @@ class ExperimentalValidation:
                 motor_type="liquid",
                 propellant_combination="LOX/LCH4",
                 test_date="2017-09-14",
-                facility="SpaceX McGregor",
+                facility="Synthetic (subscale LOX/CH4 archetype)",
                 chamber_pressure=100.0,
                 chamber_temperature=3520.0,
                 thrust=3050.0,
@@ -222,17 +236,17 @@ class ExperimentalValidation:
                 isp=334.0,
                 measured_data={
                     "time": list(np.linspace(0, 20.0, 400)),
-                    "pressure": list(100.0 + 0.8*np.sin(np.linspace(0, 20.0, 400)) + np.random.normal(0, 0.2, 400)),
-                    "thrust": list(3050.0 + 60.0*np.sin(2.5*np.linspace(0, 20.0, 400)) + np.random.normal(0, 20, 400))
+                    "pressure": list(100.0 + 0.8*np.sin(np.linspace(0, 20.0, 400)) + rng.normal(0, 0.2, 400)),
+                    "thrust": list(3050.0 + 60.0*np.sin(2.5*np.linspace(0, 20.0, 400)) + rng.normal(0, 20, 400))
                 },
                 injector_type="pintle",
                 nozzle_type="bell",
                 grain_geometry="N/A",
                 of_ratio=3.6,
                 uncertainties={"thrust": 0.01, "pressure": 0.008, "isp": 0.015},
-                source="SpaceX Published Data",
-                paper_doi="SpaceX-2017-Raptor-Dev",
-                notes="Raptor engine development test data"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC subscale LOX/CH4 reference case. NOT Raptor test data (real Raptor: ~2.2 MN thrust, ~300 bar chamber pressure); time series generated"
             ),
             
             # Solid rocket tests
@@ -241,7 +255,7 @@ class ExperimentalValidation:
                 motor_type="solid",
                 propellant_combination="APCP",
                 test_date="2016-05-18",
-                facility="ATK (Northrop Grumman)",
+                facility="Synthetic (large solid motor archetype)",
                 chamber_pressure=68.0,
                 chamber_temperature=3400.0,
                 thrust=2200.0,
@@ -250,17 +264,17 @@ class ExperimentalValidation:
                 isp=265.0,
                 measured_data={
                     "time": list(np.linspace(0, 85.0, 850)),
-                    "pressure": list(68.0 + 2.0*np.exp(-np.linspace(0, 85.0, 850)/30) + np.random.normal(0, 0.6, 850)),
-                    "thrust": list(2200.0 + 100.0*np.exp(-np.linspace(0, 85.0, 850)/40) + np.random.normal(0, 30, 850))
+                    "pressure": list(68.0 + 2.0*np.exp(-np.linspace(0, 85.0, 850)/30) + rng.normal(0, 0.6, 850)),
+                    "thrust": list(2200.0 + 100.0*np.exp(-np.linspace(0, 85.0, 850)/40) + rng.normal(0, 30, 850))
                 },
                 injector_type="N/A",
                 nozzle_type="conical",
                 grain_geometry="BATES",
                 of_ratio=0.0,  # Solid propellant
                 uncertainties={"thrust": 0.02, "pressure": 0.015, "isp": 0.025},
-                source="AIAA Solid Rocket Technology",
-                paper_doi="10.2514/6.2016-4760",
-                notes="Large scale solid rocket motor static test"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC APCP static-test reference case; time series generated (exponential decay + seeded noise)"
             ),
             
             TestData(
@@ -268,7 +282,7 @@ class ExperimentalValidation:
                 motor_type="solid",
                 propellant_combination="AP/Al/HTPB",
                 test_date="2019-02-28",
-                facility="University Research",
+                facility="Synthetic (university-scale archetype)",
                 chamber_pressure=45.0,
                 chamber_temperature=3300.0,
                 thrust=580.0,
@@ -277,17 +291,17 @@ class ExperimentalValidation:
                 isp=268.0,
                 measured_data={
                     "time": list(np.linspace(0, 12.0, 240)),
-                    "pressure": list(45.0 + 1.5*np.sin(np.linspace(0, 12.0, 240)) + np.random.normal(0, 0.8, 240)),
-                    "thrust": list(580.0 + 25.0*np.sin(1.8*np.linspace(0, 12.0, 240)) + np.random.normal(0, 12, 240))
+                    "pressure": list(45.0 + 1.5*np.sin(np.linspace(0, 12.0, 240)) + rng.normal(0, 0.8, 240)),
+                    "thrust": list(580.0 + 25.0*np.sin(1.8*np.linspace(0, 12.0, 240)) + rng.normal(0, 12, 240))
                 },
                 injector_type="N/A",
                 nozzle_type="bell",
                 grain_geometry="Star",
                 of_ratio=0.0,
                 uncertainties={"thrust": 0.035, "pressure": 0.025, "isp": 0.04},
-                source="University Research Paper",
-                paper_doi="10.1016/j.combustflame.2019.05.023",
-                notes="Star grain geometry with aluminum additive"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC star-grain AP/Al/HTPB reference case; time series generated (sine + seeded noise)"
             )
         ]
         
@@ -297,8 +311,10 @@ class ExperimentalValidation:
             self._store_test_in_db(test)
     
     def load_university_test_data(self):
-        """Load test data from university research programs"""
-        
+        """Load SYNTHETIC university-scale reference cases (NOT experimental data)."""
+        # Deterministik sentetik gürültü: sabit seed (her çalıştırmada aynı seri)
+        rng = np.random.default_rng(20260613)
+
         university_tests = [
             # Additional university hybrid tests
             TestData(
@@ -306,7 +322,7 @@ class ExperimentalValidation:
                 motor_type="hybrid",
                 propellant_combination="GOX/PE",
                 test_date="2020-04-12",
-                facility="MIT Rocket Team",
+                facility="Synthetic (student-scale archetype)",
                 chamber_pressure=18.0,
                 chamber_temperature=2950.0,
                 thrust=320.0,
@@ -315,17 +331,17 @@ class ExperimentalValidation:
                 isp=185.0,
                 measured_data={
                     "time": list(np.linspace(0, 6.5, 130)),
-                    "pressure": list(18.0 + 1.0*np.sin(np.linspace(0, 6.5, 130)) + np.random.normal(0, 0.5, 130)),
-                    "thrust": list(320.0 + 15.0*np.sin(2*np.linspace(0, 6.5, 130)) + np.random.normal(0, 8, 130))
+                    "pressure": list(18.0 + 1.0*np.sin(np.linspace(0, 6.5, 130)) + rng.normal(0, 0.5, 130)),
+                    "thrust": list(320.0 + 15.0*np.sin(2*np.linspace(0, 6.5, 130)) + rng.normal(0, 8, 130))
                 },
                 injector_type="simple_orifice",
                 nozzle_type="conical",
                 grain_geometry="cylindrical",
                 of_ratio=2.8,
                 uncertainties={"thrust": 0.05, "pressure": 0.04, "isp": 0.06},
-                source="MIT Student Research",
-                paper_doi="MIT-2020-AeroAstro-HybridRocket",
-                notes="Student-built hybrid rocket motor test"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC student-scale GOX/PE hybrid reference case; time series generated (sine + seeded noise)"
             ),
             
             TestData(
@@ -333,7 +349,7 @@ class ExperimentalValidation:
                 motor_type="liquid",
                 propellant_combination="N2O4/MMH",
                 test_date="2018-08-05",
-                facility="Caltech GALCIT",
+                facility="Synthetic (hypergolic archetype)",
                 chamber_pressure=35.0,
                 chamber_temperature=3150.0,
                 thrust=890.0,
@@ -342,17 +358,17 @@ class ExperimentalValidation:
                 isp=295.0,
                 measured_data={
                     "time": list(np.linspace(0, 8.0, 160)),
-                    "pressure": list(35.0 + 0.8*np.sin(np.linspace(0, 8.0, 160)) + np.random.normal(0, 0.3, 160)),
-                    "thrust": list(890.0 + 25.0*np.sin(2.2*np.linspace(0, 8.0, 160)) + np.random.normal(0, 12, 160))
+                    "pressure": list(35.0 + 0.8*np.sin(np.linspace(0, 8.0, 160)) + rng.normal(0, 0.3, 160)),
+                    "thrust": list(890.0 + 25.0*np.sin(2.2*np.linspace(0, 8.0, 160)) + rng.normal(0, 12, 160))
                 },
                 injector_type="swirl",
                 nozzle_type="bell",
                 grain_geometry="N/A",
                 of_ratio=1.6,
                 uncertainties={"thrust": 0.02, "pressure": 0.018, "isp": 0.03},
-                source="Caltech Research",
-                paper_doi="10.2514/1.B36852",
-                notes="Hypergolic propellant combination test"
+                source="Synthetic reference (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC N2O4/MMH hypergolic reference case; time series generated (sine + seeded noise)"
             )
         ]
         
@@ -361,16 +377,16 @@ class ExperimentalValidation:
             self._store_test_in_db(test)
     
     def load_industry_benchmark_data(self):
-        """Load benchmark data from industry sources"""
-        
-        # Industry standard benchmark cases
+        """Load SYNTHETIC benchmark reference points (NOT industry test data)."""
+
+        # Synthetic benchmark cases (typical textbook-level operating points)
         benchmark_tests = [
             TestData(
                 test_id="BENCHMARK_Hybrid_Standard",
                 motor_type="hybrid",
                 propellant_combination="N2O/HTPB",
                 test_date="2021-01-01",
-                facility="Industry Standard",
+                facility="Synthetic benchmark",
                 chamber_pressure=30.0,
                 chamber_temperature=3250.0,
                 thrust=1500.0,
@@ -383,9 +399,9 @@ class ExperimentalValidation:
                 grain_geometry="cylindrical",
                 of_ratio=6.8,
                 uncertainties={"thrust": 0.01, "pressure": 0.005, "isp": 0.015},
-                source="Industry Benchmark",
-                paper_doi="N/A",
-                notes="Standard benchmark case for hybrid rocket validation"
+                source="Synthetic benchmark (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC benchmark point for hybrid rocket consistency checks (not a measured test)"
             ),
             
             TestData(
@@ -393,7 +409,7 @@ class ExperimentalValidation:
                 motor_type="liquid",
                 propellant_combination="LOX/RP-1",
                 test_date="2021-01-01",
-                facility="Industry Standard",
+                facility="Synthetic benchmark",
                 chamber_pressure=70.0,
                 chamber_temperature=3600.0,
                 thrust=4450.0,
@@ -406,9 +422,9 @@ class ExperimentalValidation:
                 grain_geometry="N/A",
                 of_ratio=2.56,
                 uncertainties={"thrust": 0.005, "pressure": 0.003, "isp": 0.01},
-                source="Industry Benchmark",
-                paper_doi="N/A",
-                notes="Standard benchmark case for liquid rocket validation"
+                source="Synthetic benchmark (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC benchmark point for liquid rocket consistency checks (not a measured test)"
             ),
             
             TestData(
@@ -416,7 +432,7 @@ class ExperimentalValidation:
                 motor_type="solid",
                 propellant_combination="APCP",
                 test_date="2021-01-01",
-                facility="Industry Standard",
+                facility="Synthetic benchmark",
                 chamber_pressure=70.0,
                 chamber_temperature=3400.0,
                 thrust=2200.0,
@@ -429,9 +445,9 @@ class ExperimentalValidation:
                 grain_geometry="BATES",
                 of_ratio=0.0,
                 uncertainties={"thrust": 0.008, "pressure": 0.005, "isp": 0.012},
-                source="Industry Benchmark",
-                paper_doi="N/A",
-                notes="Standard benchmark case for solid rocket validation"
+                source="Synthetic benchmark (not experimental)",
+                paper_doi="N/A (synthetic)",
+                notes="SYNTHETIC benchmark point for solid rocket consistency checks (not a measured test)"
             )
         ]
         
@@ -479,21 +495,32 @@ class ExperimentalValidation:
         finally:
             conn.close()
     
-    def validate_hrma_predictions(self, motor_engine, test_ids: List[str] = None) -> Dict:
-        """Validate HRMA predictions against experimental data"""
-        
+    def validate_hrma_predictions(self, motor_engine, test_ids: List[str] = None,
+                                  validation_params: List[str] = None) -> Dict:
+        """Validate HRMA predictions against reference data.
+
+        Not: 'thrust' ve 'chamber_pressure' motor kurulumunda GİRDİ olarak
+        verildiği için (bkz. _run_hrma_prediction) bunlar 'tahmin' değildir;
+        kendileriyle karşılaştırmak döngüsel doğrulamadır (hata tanım gereği
+        ≈ 0 çıkar ve success_rate yapay şişer). Varsayılan parametre listesi
+        bu yüzden yalnız motor tarafından bağımsız hesaplanan büyüklüklerle
+        sınırlıdır. Eski davranış gerekiyorsa validation_params açıkça
+        verilebilir.
+        """
+
         if test_ids is None:
             test_ids = list(self.test_database.keys())
-        
+
         validation_results = {
             'summary': {},
             'detailed_results': {},
             'statistical_analysis': {},
             'failed_validations': []
         }
-        
-        # Validation parameters to check
-        validation_params = ['thrust', 'isp', 'chamber_pressure', 'mass_flow_rate']
+
+        # Validation parameters to check (yalnız bağımsız hesaplanan çıktılar)
+        if validation_params is None:
+            validation_params = ['isp', 'mass_flow_rate']
         
         # Store results for each parameter
         param_errors = {param: [] for param in validation_params}
