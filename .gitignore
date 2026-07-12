@@ -16,3 +16,4 @@ teknik_dokuman/
 docs/bolum*.md
 validation_results.json
 *.docx
+dist/

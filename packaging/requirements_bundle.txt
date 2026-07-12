@@ -1,0 +1,34 @@
+# HRMA kurulum paketi bağımlılıkları — Berke'nin test edilmiş ortamına pinli (2026-07-13)
+# numpy<2 zorunlu (requirements.txt notu), kaleido 0.2.1 + plotly 6.0.1 çifti test edilmiş
+# build123d BURADA DEĞİL: numpy>=2 deklare ediyor ama 1.26.4 ile çalışıyor → 2. aşamada --no-deps
+flask==3.1.0
+flask-cors==6.0.1
+numpy==1.26.4
+scipy==1.13.1
+plotly==6.0.1
+matplotlib==3.10.0
+pandas==2.2.3
+trimesh==4.7.1
+manifold3d==3.2.0
+ezdxf==1.4.4
+kaleido==0.2.1
+pillow==10.4.0
+requests==2.32.3
+beautifulsoup4==4.12.3
+aiohttp==3.9.1
+lxml==5.3.0
+coolprop==6.8.0
+waitress==3.0.2
+# build123d bağımlılık zinciri (import anında hepsi yükleniyor)
+cadquery-ocp-novtk==7.9.3.1.1
+ocpsvg==0.6.0
+# ocp-gordon BURADA DEĞİL: o da numpy>=2 deklare ediyor → 2. aşamada --no-deps
+svgpathtools==1.7.2
+anytree==2.13.0
+trianglesolver==1.2
+sympy==1.14.0
+scikit-learn==1.6.1
+webcolors==24.8.0
+lib3mf==2.5.0
+typing_extensions==4.15.0
+ipython==8.30.0

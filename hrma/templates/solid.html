@@ -1121,7 +1121,6 @@
         <!-- Calculate Button -->
         <div style="text-align: center; margin: 30px 0;">
             <button class="btn btn-primary" onclick="calculateSolid()">Calculate Motor Performance</button>
-            <button class="btn" onclick="runMonteCarloAnalysis()" style="background: linear-gradient(135deg, #e67e22, #d35400); color: white; margin-left: 10px;">Monte Carlo Analysis</button>
             <button class="btn btn-secondary" onclick="resetForm()">Reset</button>
         </div>
         
@@ -1157,7 +1156,36 @@
                 <h2>Performance Summary</h2>
                 <div id="performanceMetrics"></div>
             </div>
-            
+
+            <!-- Motor Tasarımı (hibrit sayfası paritesi) -->
+            <div class="panel">
+                <h2>Motor Tasarımı</h2>
+                <table style="width: 100%; border-collapse: collapse; font-size: 14px;" id="solid_motor_table">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; padding: 6px; border-bottom: 2px solid var(--hd-line, rgba(0,229,255,0.14));">Parametre</th>
+                            <th style="text-align: right; padding: 6px; border-bottom: 2px solid var(--hd-line, rgba(0,229,255,0.14));">Değer</th>
+                            <th style="text-align: left; padding: 6px; border-bottom: 2px solid var(--hd-line, rgba(0,229,255,0.14));">Birim</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <!-- Motor Kesiti (hibrit sayfası paritesi) — plots.motor yoksa gizli kalır -->
+            <div class="panel" id="solid_motor_kesit_panel" style="display: none;">
+                <h2>Motor Kesiti</h2>
+                <div class="chart-explanation">
+                    <p><strong>Ne gösterir:</strong> Çözücü çıktısından üretilen motorun 2B eksenel kesiti</p>
+                    <ul>
+                        <li><strong>Kamara:</strong> Yanma odası ve grain zarfı</li>
+                        <li><strong>Boğaz / Nozul:</strong> Minimum akış alanı ve genişleyen koni</li>
+                        <li><strong>Ölçüler:</strong> Milimetre (mm) cinsinden</li>
+                    </ul>
+                </div>
+                <div id="solid_motor_kesit" class="plot-container" style="min-height: 500px;"></div>
+            </div>
+
             <!-- Thrust Curve -->
             <div class="panel">
                 <h2>Thrust Curve</h2>
@@ -1212,6 +1240,9 @@
                     </button>
                     <button class="btn" onclick="show3DVisualization()" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; margin: 5px;">
                         🎯 3D Visualization
+                    </button>
+                    <button class="btn" onclick="downloadSolidEng()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; margin: 5px;">
+                        🚀 OpenRocket .eng İndir
                     </button>
                 </div>
                 <div id="cad_visualization" class="plot-container"></div>
@@ -1434,42 +1465,6 @@
             preview.innerHTML = svgs[grainType] || svgs['bates'];
         }
 
-        // Monte Carlo Analysis
-        async function runMonteCarloAnalysis() {
-            const btn = document.querySelector('button[onclick="runMonteCarloAnalysis()"]');
-            const originalText = btn.innerHTML;
-            
-            try {
-                btn.innerHTML = '<div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid #d35400; border-radius: 50%; animation: spin 1s linear infinite;"></div> Monte Carlo Analysis...';
-                
-                // Collect comprehensive parameters
-                const data = collectAllParameters();
-                data.analysis_type = 'monte_carlo';
-                data.monte_carlo_runs = 10000;
-                
-                const response = await fetch('/calculate_solid', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(data)
-                });
-                
-                const results = await response.json();
-                
-                if (results.error) {
-                    throw new Error(results.error);
-                }
-                
-                displayMonteCarloResults(results);
-                
-            } catch (error) {
-                showError('Monte Carlo Analysis Error: ' + error.message);
-            } finally {
-                btn.innerHTML = originalText;
-            }
-        }
-
         function collectAllParameters() {
             return {
                 // Propellant properties
@@ -1603,6 +1598,74 @@
             }
         }
         
+        // Hibrit sayfası paritesi: sayısal değeri güvenli biçimlendirir.
+        // Sonlu sayı değilse '—' döner (eksik alanlarda tablo kırılmaz).
+        function fmtNum(v, digits) {
+            return (typeof v === 'number' && isFinite(v)) ? v.toFixed(digits) : '—';
+        }
+
+        // "Motor Tasarımı" tablosunu currentResults'tan doldurur.
+        // Kaynaklar: üst düzey (mm) + grain_design + nozzle_angles + design_summary.
+        function populateMotorDesignTable(results) {
+            const tbody = document.querySelector('#solid_motor_table tbody');
+            if (!tbody) return;
+
+            const r  = results || {};
+            const ds = (r.design_summary && r.design_summary.key_dimensions) || {};
+            const gd = r.grain_design || {};
+            const nz = r.nozzle_angles || {};
+
+            // Motor uzunluğu: kasa uzunluğu (motor_length_mm), yoksa toplam uzunluk
+            const motorLen = (typeof ds.motor_length_mm === 'number' && isFinite(ds.motor_length_mm))
+                ? ds.motor_length_mm : ds.total_length_mm;
+
+            const rows = [
+                ['Boğaz Çapı',         fmtNum(r.throat_diameter, 2),          'mm'],
+                ['Çıkış Çapı',         fmtNum(r.exit_diameter, 2),            'mm'],
+                ['Genişleme Oranı',    fmtNum(r.expansion_ratio, 2),          ''],
+                ['Kasa İç Çapı',       fmtNum(r.chamber_diameter, 1),         'mm'],
+                ['Motor Uzunluğu',     fmtNum(motorLen, 1),                   'mm'],
+                ['Grain Dış Çapı',     fmtNum(gd.outer_diameter_mm, 1),       'mm'],
+                ['Çekirdek Çapı',      fmtNum(gd.inner_diameter_mm, 1),       'mm'],
+                ['Grain Boyu',         fmtNum(gd.grain_length_mm, 1),         'mm'],
+                ['Web Kalınlığı',      fmtNum(gd.web_thickness_mm, 1),        'mm'],
+                ['Kn (başlangıç)',     fmtNum(gd.Kn_initial, 0),              ''],
+                ['Kn (son)',           fmtNum(gd.Kn_final, 0),                ''],
+                ['C*',                 fmtNum(r.c_star, 0),                   'm/s'],
+                ['Nozul Uzunluğu',     fmtNum(nz.nozzle_length_mm, 1),        'mm'],
+                ['Yakınsak Yarı Açı',  fmtNum(nz.convergent_half_angle_deg, 1), '°'],
+                ['Iraksak Yarı Açı',   fmtNum(nz.divergent_half_angle_deg, 1),  '°']
+            ];
+
+            const cellBase = 'padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));';
+            tbody.innerHTML = rows.map(function (row) {
+                return '<tr>' +
+                    '<td style="' + cellBase + '"><strong>' + row[0] + '</strong></td>' +
+                    '<td style="' + cellBase + ' text-align: right;">' + row[1] + '</td>' +
+                    '<td style="' + cellBase + ' color: #7d97a5;">' + row[2] + '</td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        // "Motor Kesiti" panelini results.plots.motor (Plotly figure JSON string)
+        // ile çizer. plots.motor yoksa/parse edilemezse panel gizli kalır.
+        function renderSolidMotorKesit(results) {
+            const panel = document.getElementById('solid_motor_kesit_panel');
+            if (!panel) return;
+
+            if (results && results.plots && results.plots.motor) {
+                try {
+                    const fig = JSON.parse(results.plots.motor);
+                    panel.style.display = 'block';
+                    Plotly.newPlot('solid_motor_kesit', fig.data, fig.layout, { responsive: true });
+                    return;
+                } catch (e) {
+                    console.error('Motor kesiti çizilemedi:', e);
+                }
+            }
+            panel.style.display = 'none';   // veri yok → yalan panel gösterme
+        }
+
         function displayResults(results) {
             document.getElementById('results').style.display = 'block';
             
@@ -1631,7 +1694,11 @@
             });
             html += '</div>';
             metricsDiv.innerHTML = html;
-            
+
+            // Hibrit paritesi: Motor Tasarımı tablosu + Motor Kesiti (plots.motor)
+            populateMotorDesignTable(results);
+            renderSolidMotorKesit(results);
+
             // Thrust curve
             const thrustTrace = {
                 x: results.thrust_curve.time,
@@ -1811,7 +1878,10 @@
         
         function resetForm() {
             document.getElementById('grain_type').value = 'bates';
-            document.getElementById('propellant_type').value = 'apcp';
+            // Sayfada #propellant_type yok (yalnız #propellant_name var) →
+            // opsiyonel/guard, aksi halde TypeError Reset'i çökertir.
+            const pn = document.getElementById('propellant_name');
+            if (pn) pn.value = 'APCP';
             document.getElementById('chamber_diameter').value = '100';
             document.getElementById('grain_length').value = '500';
             document.getElementById('core_diameter').value = '30';
@@ -2179,31 +2249,36 @@ Please provide:
             btn.innerHTML = '<div style="display: inline-block; width: 16px; height: 16px; border: 2px solid #f3f3f3; border-top: 2px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite;"></div> CAD Export...';
             
             try {
+                // Endpoint artık binary ZIP döndürüyor (STEP + STL + README);
+                // hata durumunda JSON {error}. content-type'a göre ayır.
                 const response = await fetch('/export_solid_motor_cad', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        motor_data: currentResults
+                        results: currentResults
                     })
                 });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    const cad = result.cad_package;
-                    showSuccess(`${result.message} ` +
-                          `Toplam ${cad.total_files} dosya (${cad.package_size})\\n\\n` +
-                          `STEP Dosyaları: ${cad.files_included.step_files.length} adet\\n` +
-                          `STL Dosyaları: ${cad.files_included.stl_files.length} adet\\n` +
-                          `Teknik Resimler: ${cad.files_included.technical_drawings.length} adet\\n` +
-                          `Üretim Dokümanları: ${cad.files_included.manufacturing_docs.length} adet\\n\\n` +
-                          `Uyumlu CAD Yazılımları:\\n${cad.format_compatibility.join(', ')}`);
+
+                const contentType = response.headers.get('content-type') || '';
+                if (response.ok && contentType.includes('zip')) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'UZAYTEK_SOLID_CAD.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showSuccess('CAD paketi (STEP + STL) indirildi');
                 } else {
-                    throw new Error(result.message || 'CAD export failed');
+                    let msg = `HTTP ${response.status}`;
+                    try { msg = (await response.json()).error || msg; } catch (e) {}
+                    throw new Error(msg);
                 }
-                
+
             } catch (error) {
                 showError('CAD Export Error: ' + error.message);
             } finally {
@@ -2587,58 +2662,89 @@ Please provide:
             };
         }
         
-        function generateDrawings() {
+        // Gerçek teknik çizim PDF'i: /api/export-drawings-pdf'e motor_geometry
+        // gönderir, dönen PDF'i blob olarak indirir (hata → json.error).
+        async function generateDrawings() {
             if (!currentResults) {
                 showWarning('Please perform calculations first!');
                 return;
             }
-            
-            alert('📋 Teknik Resimler Hazırlandı!\\n\\n' +
-                  'Aşağıdaki teknik resimler oluşturuldu:\\n\\n' +
-                  '• Motor Montaj Resmi (1:5 ölçek)\\n' +
-                  '• Kasa Detay Resmi (1:2 ölçek)\\n' +
-                  '• Grain Geometri Resmi (1:1 ölçek)\\n' +
-                  '• Nozzle Profil Resmi (2:1 ölçek)\\n' +
-                  '• Kesit Görünüm Resmi\\n' +
-                  '• Tolerans ve Ölçü Tabloları\\n\\n' +
-                  'Tüm resimler DXF ve PDF formatında hazır!');
+
+            showInfo('Teknik çizim PDF üretiliyor...');
+            try {
+                const response = await fetch('/api/export-drawings-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ motor_data: currentResults.motor_geometry })
+                });
+
+                const contentType = response.headers.get('content-type') || '';
+                if (response.ok && contentType.includes('pdf')) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'UZAYTEK_SOLID_technical_drawings.pdf';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showSuccess('Teknik çizim PDF indirildi');
+                } else {
+                    let msg = `HTTP ${response.status}`;
+                    try { msg = (await response.json()).error || msg; } catch (e) {}
+                    throw new Error(msg);
+                }
+            } catch (error) {
+                showError('Teknik çizim hatası: ' + error.message);
+            }
         }
 
-        function displayMonteCarloResults(results) {
-            // Add Monte Carlo specific results display
-            const resultsDiv = document.getElementById('results');
-            
-            // Create Monte Carlo results panel if it doesn't exist
-            let monteCarloPanel = document.getElementById('monte-carlo-results');
-            if (!monteCarloPanel) {
-                monteCarloPanel = document.createElement('div');
-                monteCarloPanel.id = 'monte-carlo-results';
-                monteCarloPanel.className = 'panel';
-                monteCarloPanel.innerHTML = '<h2>Monte Carlo Analysis Results</h2><div id="monte-carlo-content"></div>';
-                resultsDiv.appendChild(monteCarloPanel);
+        // OpenRocket .eng dosyası: /api/export-eng'e sadeleştirilmiş motor_data
+        // gönderir, dönen {filename, content} metnini text blob olarak indirir.
+        async function downloadSolidEng() {
+            if (!currentResults) {
+                showWarning('Please perform calculations first!');
+                return;
             }
-            
-            const content = document.getElementById('monte-carlo-content');
-            content.innerHTML = `
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                    <div class="metric-card" style="background: #28a745;">
-                        <div class="metric-value">${results.success_rate?.toFixed(1) || 'N/A'}%</div>
-                        <div class="metric-label">Success Rate</div>
-                    </div>
-                    <div class="metric-card" style="background: #17a2b8;">
-                        <div class="metric-value">${results.thrust_std_dev?.toFixed(1) || 'N/A'}%</div>
-                        <div class="metric-label">Thrust Std. Dev</div>
-                    </div>
-                    <div class="metric-card" style="background: #6f42c1;">
-                        <div class="metric-value">${results.confidence_interval || 'N/A'}</div>
-                        <div class="metric-label">Confidence Interval (95%)</div>
-                    </div>
-                    <div class="metric-card" style="background: #fd7e14;">
-                        <div class="metric-value">${results.reliability_factor?.toFixed(2) || 'N/A'}</div>
-                        <div class="metric-label">Reliability Factor</div>
-                    </div>
-                </div>
-            `;
+
+            const motorData = {
+                motor_name: 'UZAYTEK-SOLID',
+                total_impulse: currentResults.total_impulse,
+                thrust: currentResults.average_thrust,
+                burn_time: currentResults.burn_time,
+                isp: currentResults.specific_impulse,
+                propellant_mass_total: currentResults.propellant_mass,
+                throat_diameter: currentResults.motor_geometry?.throat_diameter,
+                chamber_pressure: currentResults.chamber_pressure
+            };
+
+            showInfo('OpenRocket .eng dosyası üretiliyor...');
+            try {
+                const response = await fetch('/api/export-eng', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ motor_data: motorData })
+                });
+
+                const result = await response.json();
+                if (response.ok && result.status === 'success' && result.content) {
+                    const blob = new Blob([result.content], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = result.filename || 'UZAYTEK-SOLID.eng';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showSuccess('.eng dosyası indirildi');
+                } else {
+                    throw new Error(result.error || '.eng üretilemedi');
+                }
+            } catch (error) {
+                showError('.eng export hatası: ' + error.message);
+            }
         }
 
         // Initialize page
@@ -2685,11 +2791,14 @@ Please provide:
                 btn.disabled = true;
                 
                 // Collect motor data
+                // NOT: sayfada #motor_name / #propellant_type YOK → opsiyonel
+                // zincir + varsayılan (aksi halde TypeError hesabı düşürür).
+                const motorName = document.getElementById('motor_name')?.value || 'UZAYTEK-SOLID';
                 const motorData = {
-                    motor_name: document.getElementById('motor_name').value || 'Solid_Motor',
+                    motor_name: motorName,
                     motor_type: 'solid',
-                    propellant_type: document.getElementById('propellant_type').value,
-                    grain_type: document.getElementById('grain_type').value,
+                    propellant_type: document.getElementById('propellant_name')?.value || 'APCP',
+                    grain_type: document.getElementById('grain_type')?.value,
                     chamber_diameter: parseFloat(document.getElementById('outer_diameter').value),
                     chamber_length: parseFloat(document.getElementById('grain_length').value),
                     throat_diameter: parseFloat(document.getElementById('throat_diameter').value),
@@ -2703,8 +2812,11 @@ Please provide:
                 const analysisResults = window.currentResults || {};
                 
                 // Collect chart data (if any plots exist)
+                // Sayfadaki GERÇEK Plotly div id'leri (eski 'thrustPlot' vb.
+                // yoktu → hiç grafik yakalanmıyordu). _fullLayout kontrolü
+                // Plotly olmayan/boş div'leri güvenle atlar.
                 const charts = [];
-                const plotDivs = ['thrustPlot', 'pressurePlot', 'cadVisualization'];
+                const plotDivs = ['thrust_plot', 'pressure_plot', 'solid_motor_kesit', 'cad_visualization', 'altitude_plot'];
                 
                 for (const plotId of plotDivs) {
                     const plotDiv = document.getElementById(plotId);

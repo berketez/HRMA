@@ -1857,7 +1857,7 @@ def create_wall_heat_flux_waterfall_plot(thermal_data: Dict) -> str:
 # Improved Visualization Functions (merged from visualization_improved.py)
 # ============================================================
 
-def create_improved_motor_cross_section(motor_data):
+def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     """Çözücü geometrisinden mühendislik eksenel kesit çizimi.
 
     Kamara duvarı + baş kapak, fenolik liner, yakıt grain'i (başlangıç ve
@@ -1865,7 +1865,14 @@ def create_improved_motor_cross_section(motor_data):
     Rao boğaz yayı, konik doğru ya da bell Bézier diverjan) tek kesitte,
     çift oklu ölçü çizgileriyle gösterilir. Tüm boyutlar motor_results'tan
     okunur; eksikler güvenli varsayılanlara düşer.
+
+    motor_type bileşen seçimini belirler:
+      'hybrid' → grain + liner + enjektör (varsayılan, eski davranış)
+      'solid'  → grain + liner var, enjektör YOK (port = çekirdek/core)
+      'liquid' → grain/liner YOK, enjektör var
     """
+    has_grain = motor_type in ('hybrid', 'solid')
+    has_injector = motor_type in ('hybrid', 'liquid')
 
     def _num(v, fb):
         try:
@@ -1957,35 +1964,37 @@ def create_improved_motor_cross_section(motor_data):
     mirrored(case_z, case_r, C_CASE, 'Kamara duvarı',
              f'Kamara duvarı<br>Et: {wall_case:.1f} mm<br>Øiç: {D_ch:.1f} mm')
 
-    # Fenolik liner
-    liner_z = [2, 2, L - 2, L - 2]
-    liner_r = [r_go, rc - 0.2, rc - 0.2, r_go]
-    mirrored(liner_z, liner_r, C_LINER, 'Liner (yalıtım)',
-             f'Fenolik liner<br>Et: {liner_t:.1f} mm')
+    if has_grain:
+        # Fenolik liner
+        liner_z = [2, 2, L - 2, L - 2]
+        liner_r = [r_go, rc - 0.2, rc - 0.2, r_go]
+        mirrored(liner_z, liner_r, C_LINER, 'Liner (yalıtım)',
+                 f'Fenolik liner<br>Et: {liner_t:.1f} mm')
 
-    # Yakıt grain'i
-    grain_z = [zg0, zg0, zg1, zg1]
-    grain_r = [r_p0, r_go, r_go, r_p0]
-    mirrored(grain_z, grain_r, C_GRAIN, 'Yakıt grain',
-             (f'Yakıt grain<br>Boy: {L_g:.1f} mm<br>Port (başlangıç): Ø{2*r_p0:.1f} mm'
-              f'<br>Port (son): Ø{2*r_pf:.1f} mm<br>Web: {r_pf - r_p0:.1f} mm'))
+        # Yakıt grain'i (katıda port = çekirdek/core, son port = grain dışı)
+        grain_z = [zg0, zg0, zg1, zg1]
+        grain_r = [r_p0, r_go, r_go, r_p0]
+        mirrored(grain_z, grain_r, C_GRAIN, 'Yakıt grain',
+                 (f'Yakıt grain<br>Boy: {L_g:.1f} mm<br>Port (başlangıç): Ø{2*r_p0:.1f} mm'
+                  f'<br>Port (son): Ø{2*r_pf:.1f} mm<br>Web: {r_pf - r_p0:.1f} mm'))
 
     # Enjektör plakası (ekseni geçen tek dikdörtgen) + orifis işaretleri
-    inj_t = min(max(0.9 * cap_t, 6.0), 24.0)
-    fig.add_trace(go.Scatter(
-        x=[4, 4, 4 + inj_t, 4 + inj_t, 4],
-        y=[-(rc - 0.4), rc - 0.4, rc - 0.4, -(rc - 0.4), -(rc - 0.4)],
-        fill='toself', fillcolor=C_INJ, mode='lines',
-        line=dict(color='#8a6a34', width=1.4), name='Enjektör plakası',
-        hoverinfo='text', hoveron='fills',
-        hovertext='Enjektör plakası (showerhead)'))
-    n_ori = int(_num((motor_data.get('injector_design') or {}).get('number_of_orifices'), 12))
-    ori_y = np.linspace(-0.62 * rc, 0.62 * rc, max(3, min(n_ori // 2 + 1, 9)))
-    fig.add_trace(go.Scatter(
-        x=[4 + inj_t] * len(ori_y), y=ori_y.tolist(), mode='markers',
-        marker=dict(size=5, color='#10151a', symbol='circle'),
-        name='Orifisler', showlegend=False,
-        hovertemplate=f'Orifis deseni: {n_ori} delik<extra></extra>'))
+    if has_injector:
+        inj_t = min(max(0.9 * cap_t, 6.0), 24.0)
+        fig.add_trace(go.Scatter(
+            x=[4, 4, 4 + inj_t, 4 + inj_t, 4],
+            y=[-(rc - 0.4), rc - 0.4, rc - 0.4, -(rc - 0.4), -(rc - 0.4)],
+            fill='toself', fillcolor=C_INJ, mode='lines',
+            line=dict(color='#8a6a34', width=1.4), name='Enjektör plakası',
+            hoverinfo='text', hoveron='fills',
+            hovertext='Enjektör plakası (showerhead)'))
+        n_ori = int(_num((motor_data.get('injector_design') or {}).get('number_of_orifices'), 12))
+        ori_y = np.linspace(-0.62 * rc, 0.62 * rc, max(3, min(n_ori // 2 + 1, 9)))
+        fig.add_trace(go.Scatter(
+            x=[4 + inj_t] * len(ori_y), y=ori_y.tolist(), mode='markers',
+            marker=dict(size=5, color='#10151a', symbol='circle'),
+            name='Orifisler', showlegend=False,
+            hovertemplate=f'Orifis deseni: {n_ori} delik<extra></extra>'))
 
     # Nozul duvarı (iç kontur + duvar ofseti)
     noz_wall_z = list(noz_z) + list(noz_z[::-1])
@@ -1995,12 +2004,13 @@ def create_improved_motor_cross_section(motor_data):
               f'<br>Genişleme oranı: {(re/rt)**2:.1f}<br>Et: {wall_noz:.1f} mm'))
 
     # Son port çapı (kesikli) — eksenel kesitte yatay çizgi çifti
-    for sgn, show in ((1, True), (-1, False)):
-        fig.add_trace(go.Scatter(
-            x=[zg0, zg1], y=[sgn * r_pf, sgn * r_pf], mode='lines',
-            line=dict(color='#d1495b', width=2, dash='dash'),
-            name=f'Son port Ø{2*r_pf:.1f} mm', showlegend=show,
-            hovertemplate=f'Yanma sonu port: Ø{2*r_pf:.1f} mm<extra></extra>'))
+    if has_grain:
+        for sgn, show in ((1, True), (-1, False)):
+            fig.add_trace(go.Scatter(
+                x=[zg0, zg1], y=[sgn * r_pf, sgn * r_pf], mode='lines',
+                line=dict(color='#d1495b', width=2, dash='dash'),
+                name=f'Son port Ø{2*r_pf:.1f} mm', showlegend=show,
+                hovertemplate=f'Yanma sonu port: Ø{2*r_pf:.1f} mm<extra></extra>'))
 
     # Merkez ekseni (dash-dot, mühendislik konvansiyonu)
     fig.add_trace(go.Scatter(
@@ -2047,7 +2057,8 @@ def create_improved_motor_cross_section(motor_data):
                            xshift=side * 14, font=dict(size=11, color=DIM))
 
     dim_h(0, L, r_out + 16, f'L<sub>kamara</sub> = {L:.0f} mm')
-    dim_h(zg0, zg1, r_out + 42, f'Grain = {L_g:.0f} mm')
+    if has_grain:
+        dim_h(zg0, zg1, r_out + 42, f'Grain = {L_g:.0f} mm')
     dim_h(-cap_t, z_exit, -(max(r_out, re + wall_noz) + 30),
           f'L<sub>toplam</sub> = {z_exit + cap_t:.0f} mm', above=False)
     dim_v(-cap_t - 18, -rc, rc, f'Ø<sub>c</sub> = {D_ch:.1f} mm', side=-1)

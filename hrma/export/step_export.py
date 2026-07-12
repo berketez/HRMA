@@ -67,9 +67,15 @@ def _revolve_profile(points_rz):
     return part.part
 
 
-def generate_step_assembly(motor_results, out_dir=None):
-    """Motor bileşenlerini STEP olarak üretir; dosya yolu listesi döner."""
+def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
+    """Motor bileşenlerini STEP olarak üretir; dosya yolu listesi döner.
+
+    motor_type: 'hybrid' (grain+enjektör), 'solid' (grain var, enjektör yok),
+    'liquid' (enjektör var, grain yok).
+    """
     _require()
+    has_grain = motor_type in ('hybrid', 'solid')
+    has_injector = motor_type in ('hybrid', 'liquid')
 
     md = motor_results or {}
     name = md.get('motor_name') or 'HRMA_MOTOR'
@@ -118,38 +124,40 @@ def generate_step_assembly(motor_results, out_dir=None):
     solids.append(nozzle)
 
     # ---- Yakıt grain'i: portlu halka silindir ----
-    r_go = rc - liner
-    zg0 = 0.35 * max(4.0, L - L_g)
-    with BuildPart() as grain_bp:
-        with Locations((zg0 + L_g / 2, 0, 0)):
-            Cylinder(radius=r_go, height=L_g, rotation=(0, 90, 0))
-            Cylinder(radius=max(r_p0, 1.0), height=L_g + 2,
-                     rotation=(0, 90, 0), mode=Mode.SUBTRACT)
-    grain = grain_bp.part
-    files['fuel_grain'] = os.path.join(out_dir, f'{name}_fuel_grain.step')
-    export_step(grain, files['fuel_grain'])
-    solids.append(grain)
+    if has_grain:
+        r_go = rc - liner
+        zg0 = 0.35 * max(4.0, L - L_g)
+        with BuildPart() as grain_bp:
+            with Locations((zg0 + L_g / 2, 0, 0)):
+                Cylinder(radius=r_go, height=L_g, rotation=(0, 90, 0))
+                Cylinder(radius=max(r_p0, 1.0), height=L_g + 2,
+                         rotation=(0, 90, 0), mode=Mode.SUBTRACT)
+        grain = grain_bp.part
+        files['fuel_grain'] = os.path.join(out_dir, f'{name}_fuel_grain.step')
+        export_step(grain, files['fuel_grain'])
+        solids.append(grain)
 
     # ---- Enjektör plakası: gerçek orifis delikleri ----
-    inj = md.get('injector_design') or md.get('injector') or {}
-    n_ori = int(_num(inj.get('number_of_orifices') or inj.get('n_holes'), 12))
-    d_ori = _num(inj.get('orifice_diameter_mm') or inj.get('hole_diameter'), 1.5)
-    t_inj = min(max(0.9 * cap, 6.0), 24.0)
-    with BuildPart() as inj_bp:
-        with Locations((4 + t_inj / 2, 0, 0)):
-            Cylinder(radius=rc - 0.5, height=t_inj, rotation=(0, 90, 0))
-        ring_r = 0.7 * rc
-        k = max(n_ori, 1)
-        for i in range(k):
-            a = 2 * np.pi * i / k
-            with Locations((4 + t_inj / 2, ring_r * np.cos(a),
-                           ring_r * np.sin(a))):
-                Cylinder(radius=max(d_ori / 2, 0.25), height=t_inj + 2,
-                         rotation=(0, 90, 0), mode=Mode.SUBTRACT)
-    injector = inj_bp.part
-    files['injector'] = os.path.join(out_dir, f'{name}_injector.step')
-    export_step(injector, files['injector'])
-    solids.append(injector)
+    if has_injector:
+        inj = md.get('injector_design') or md.get('injector') or {}
+        n_ori = int(_num(inj.get('number_of_orifices') or inj.get('n_holes'), 12))
+        d_ori = _num(inj.get('orifice_diameter_mm') or inj.get('hole_diameter'), 1.5)
+        t_inj = min(max(0.9 * cap, 6.0), 24.0)
+        with BuildPart() as inj_bp:
+            with Locations((4 + t_inj / 2, 0, 0)):
+                Cylinder(radius=rc - 0.5, height=t_inj, rotation=(0, 90, 0))
+            ring_r = 0.7 * rc
+            k = max(n_ori, 1)
+            for i in range(k):
+                a = 2 * np.pi * i / k
+                with Locations((4 + t_inj / 2, ring_r * np.cos(a),
+                               ring_r * np.sin(a))):
+                    Cylinder(radius=max(d_ori / 2, 0.25), height=t_inj + 2,
+                             rotation=(0, 90, 0), mode=Mode.SUBTRACT)
+        injector = inj_bp.part
+        files['injector'] = os.path.join(out_dir, f'{name}_injector.step')
+        export_step(injector, files['injector'])
+        solids.append(injector)
 
     # ---- Assembly (tek dosya) ----
     assembly = Compound(children=solids)

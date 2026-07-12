@@ -1371,7 +1371,28 @@
                     PDF Complete Report
                 </button>
             </div>
-            
+
+            <!-- Motor Tasarımı (hibrit sayfası paritesi) -->
+            <div class="panel">
+                <h2>Motor Tasarımı</h2>
+                <table class="spec-table" id="liquid_motor_table" style="width:100%; border-collapse:collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left; padding:8px; color:#4facfe; border-bottom:2px solid var(--hd-line, rgba(0,229,255,0.14));">Parametre</th>
+                            <th style="text-align:right; padding:8px; color:#4facfe; border-bottom:2px solid var(--hd-line, rgba(0,229,255,0.14));">Değer</th>
+                            <th style="text-align:left; padding:8px; color:#4facfe; border-bottom:2px solid var(--hd-line, rgba(0,229,255,0.14));">Birim</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <!-- Motor Kesiti (hibrit sayfası paritesi) — results.plots.motor yoksa gizli -->
+            <div class="panel" id="liquid_motor_kesit_panel" style="display:none;">
+                <h2>Motor Kesiti</h2>
+                <div id="liquid_motor_kesit" style="min-height:420px; margin:10px 0;"></div>
+            </div>
+
             <!-- Analysis Type Tabs -->
             <div class="panel">
                 <h2>Analysis Results</h2>
@@ -1824,7 +1845,10 @@
             });
             html += '</div>';
             metricsDiv.innerHTML = html;
-            
+
+            // Motor Tasarımı tablosu + Motor Kesiti çizimi (hibrit sayfası paritesi)
+            displayMotorDesign(results);
+
             // Generate CAD Visualization
             generateCADVisualization(results);
             
@@ -2000,6 +2024,59 @@
             `;
         }
         
+        // Hibrit sayfası paritesi: Motor Tasarımı tablosu + Motor Kesiti Plotly çizimi
+        function displayMotorDesign(results) {
+            // '—' korumalı sayı biçimleyici (null/undefined/NaN → '—')
+            const num = (v, d = 2) => (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toFixed(d);
+
+            const tbody = document.querySelector('#liquid_motor_table tbody');
+            if (tbody) {
+                // Birim tuzağı: throat/exit METRE (×1000 → mm); chamber_diameter/length zaten MM
+                const rows = [
+                    ['Boğaz Çapı', num(results?.throat_diameter * 1000, 2), 'mm'],
+                    ['Çıkış Çapı', num(results?.exit_diameter * 1000, 2), 'mm'],
+                    ['Genişleme Oranı (Ae/At)', num(results?.expansion_ratio, 2), '-'],
+                    ['Vakum Genişleme Oranı', num(results?.expansion_ratio_vacuum, 2), '-'],
+                    ['Kamara Çapı', num(results?.chamber_diameter, 1), 'mm'],
+                    ['Kamara Uzunluğu', num(results?.chamber_length, 1), 'mm'],
+                    ['Nozul Uzunluğu', num(results?.nozzle_angles?.nozzle_length_mm, 1), 'mm'],
+                    ['Konverjan Yarı Açısı', num(results?.nozzle_angles?.convergent_half_angle_deg, 1), '°'],
+                    ['Diverjan Yarı Açısı', num(results?.nozzle_angles?.divergent_half_angle_deg, 1), '°'],
+                    ['Karakteristik Hız (C*)', num(results?.c_star, 1), 'm/s'],
+                    ['İtki/Ağırlık Oranı (T/W)', num(results?.thrust_to_weight, 1), '-'],
+                    ['Motor Kütle Tahmini', num(results?.engine_mass_estimate, 1), 'kg']
+                ];
+                tbody.innerHTML = '';
+                rows.forEach(([label, value, unit]) => {
+                    const tr = tbody.insertRow();
+                    const tdL = tr.insertCell(); tdL.textContent = label;
+                    const tdV = tr.insertCell(); tdV.textContent = value;
+                    tdV.style.textAlign = 'right';
+                    tdV.style.fontFamily = "'JetBrains Mono', monospace";
+                    const tdU = tr.insertCell(); tdU.textContent = unit;
+                });
+            }
+
+            // Motor Kesiti: results.plots.motor Plotly figure JSON STRING'i
+            const kesitPanel = document.getElementById('liquid_motor_kesit_panel');
+            const motorFig = results?.plots?.motor;
+            if (kesitPanel) {
+                if (motorFig && typeof Plotly !== 'undefined') {
+                    try {
+                        const fig = JSON.parse(motorFig);
+                        Plotly.newPlot('liquid_motor_kesit', fig.data, fig.layout, { responsive: true });
+                        kesitPanel.style.display = 'block';
+                    } catch (e) {
+                        console.warn('Motor kesiti çizilemedi:', e);
+                        kesitPanel.style.display = 'none';
+                    }
+                } else {
+                    // plots.motor yoksa panel gizli
+                    kesitPanel.style.display = 'none';
+                }
+            }
+        }
+
         function showLoading(show) {
             document.getElementById('loading').style.display = show ? 'block' : 'none';
         }
@@ -2865,50 +2942,63 @@
             });
         }
         
-        // CAD Export Function
+        // CAD Export Function — /export_liquid_cad (YENİ route): başarıda ZIP, hatada JSON {error}
         function exportCAD() {
             if (!currentResults) {
-                showWarning('Please calculate engine performance first before exporting CAD design.');
+                showWarning('CAD tasarımını dışa aktarmadan önce lütfen motor performansını hesaplayın.');
                 return;
             }
-            
-            // Show loading
-            const originalText = event.target.innerHTML;
-            event.target.innerHTML = '🔄 Generating CAD...';
-            event.target.disabled = true;
-            
-            // Prepare CAD export data
+
+            // event.target'i senkron yakala (async then/finally içinde global event güvenilmez)
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '🔄 CAD Oluşturuluyor...';
+            btn.disabled = true;
+
+            // Backend sözleşmesi: body {results: currentResults}
             fetch('/export_liquid_cad', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    results: currentResults,
-                    design_parameters: collectAllParameters()
+                    results: currentResults
                 })
             })
-            .then(response => response.blob())
-            .then(blob => {
-                // Create download link
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = `liquid_engine_cad_${new Date().getTime()}.zip`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                
-                showSuccess('CAD files exported successfully! Check your downloads folder.');
+            .then(async (resp) => {
+                const ctype = resp.headers.get('content-type') || '';
+                // Yalnızca resp.ok VE zip içerik tipi ise blob indir (404/hata JSON'unu zip diye indirme)
+                if (resp.ok && ctype.includes('zip')) {
+                    const blob = await resp.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = `liquid_engine_cad_${new Date().getTime()}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showSuccess('CAD dosyaları başarıyla dışa aktarıldı! İndirilenler klasörünü kontrol edin.');
+                } else {
+                    // Hata: JSON {error} bekleniyor
+                    let msg = 'CAD dışa aktarma başarısız oldu.';
+                    try {
+                        const err = await resp.json();
+                        if (err && err.error) msg = 'CAD dışa aktarma başarısız: ' + err.error;
+                    } catch (e) {
+                        msg = `CAD dışa aktarma başarısız (HTTP ${resp.status}).`;
+                    }
+                    showError(msg);
+                }
             })
             .catch(error => {
                 console.error('CAD export error:', error);
-                showError('CAD export failed. Please try again.');
+                showError('CAD dışa aktarma başarısız: ' + error.message);
             })
             .finally(() => {
-                event.target.innerHTML = originalText;
-                event.target.disabled = false;
+                btn.innerHTML = originalText;
+                btn.disabled = false;
             });
         }
         
@@ -3396,27 +3486,30 @@ Please provide:
                 btn.textContent = 'Generating PDF...';
                 btn.disabled = true;
                 
-                // Collect motor data
+                // Sayfada OLMAYAN input'lar (motor_name, chamber_length, exit_diameter, of_ratio)
+                // currentResults'tan / güvenli fallback'lerle alınır. Aksi halde null.value TypeError
+                // fetch'e ulaşmadan patlıyordu. Birim tuzağı: exit_diameter METRE → ×1000 = mm.
+                const cr = window.currentResults || {};
                 const motorData = {
-                    motor_name: document.getElementById('motor_name').value || 'Liquid_Motor',
+                    motor_name: document.getElementById('motor_name')?.value || 'UZAYTEK-LIQUID',
                     motor_type: 'liquid',
-                    oxidizer_type: document.getElementById('oxidizer_type').value,
-                    fuel_type: document.getElementById('fuel_type').value,
-                    chamber_diameter: parseFloat(document.getElementById('chamber_diameter').value),
-                    chamber_length: parseFloat(document.getElementById('chamber_length').value),
-                    throat_diameter: parseFloat(document.getElementById('throat_diameter').value),
-                    exit_diameter: parseFloat(document.getElementById('exit_diameter').value),
-                    chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value),
-                    of_ratio: parseFloat(document.getElementById('of_ratio').value),
-                    expansion_ratio: parseFloat(document.getElementById('exit_diameter').value) / parseFloat(document.getElementById('throat_diameter').value)
+                    oxidizer_type: document.getElementById('oxidizer_type')?.value,
+                    fuel_type: document.getElementById('fuel_type')?.value,
+                    chamber_diameter: parseFloat(document.getElementById('chamber_diameter')?.value),
+                    chamber_length: cr.chamber_length,
+                    throat_diameter: parseFloat(document.getElementById('throat_diameter')?.value),
+                    exit_diameter: (cr.exit_diameter != null) ? cr.exit_diameter * 1000 : undefined,
+                    chamber_pressure: parseFloat(document.getElementById('chamber_pressure')?.value),
+                    of_ratio: cr.mixture_ratio,
+                    expansion_ratio: cr.expansion_ratio
                 };
-                
+
                 // Collect analysis results (if available)
                 const analysisResults = window.currentResults || {};
-                
-                // Collect chart data (if any plots exist)
+
+                // Collect chart data (if any plots exist) — bu sayfadaki GERÇEK plot ID'leri
                 const charts = [];
-                const plotDivs = ['thrust_plot', 'efficiency_plot', 'cad_visualization'];
+                const plotDivs = ['liquid_motor_kesit', 'altitude_plot', 'altitude_analysis_plot', 'altitude_profile_plot', 'cad_visualization'];
                 
                 for (const plotId of plotDivs) {
                     const plotDiv = document.getElementById(plotId);
@@ -3493,19 +3586,21 @@ Please provide:
                 const cadContainer = document.getElementById('cad_visualization');
                 cadContainer.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; font-size: 18px; color: #666;">Generating detailed engineering CAD...</div>';
                 
-                // Collect motor data
+                // Sayfada OLMAYAN input'lar (motor_name, chamber_length, exit_diameter) aynı
+                // fallback'lerle currentResults'tan alınır — aksi halde TypeError. exit_diameter METRE → ×1000 mm.
+                const cr = window.currentResults || {};
                 const motorData = {
-                    motor_name: document.getElementById('motor_name').value || 'Liquid_Motor',
-                    chamber_diameter: parseFloat(document.getElementById('chamber_diameter').value),
-                    chamber_length: parseFloat(document.getElementById('chamber_length').value),
-                    throat_diameter: parseFloat(document.getElementById('throat_diameter').value),
-                    exit_diameter: parseFloat(document.getElementById('exit_diameter').value),
-                    nozzle_length: parseFloat(document.getElementById('chamber_length').value) * 0.75,
+                    motor_name: document.getElementById('motor_name')?.value || 'UZAYTEK-LIQUID',
+                    chamber_diameter: parseFloat(document.getElementById('chamber_diameter')?.value),
+                    chamber_length: cr.chamber_length,
+                    throat_diameter: parseFloat(document.getElementById('throat_diameter')?.value),
+                    exit_diameter: (cr.exit_diameter != null) ? cr.exit_diameter * 1000 : undefined,
+                    nozzle_length: (cr.chamber_length != null) ? cr.chamber_length * 0.75 : undefined,
                     injector_type: 'unlike_impinging',
                     injector_holes: 24,
-                    chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value),
-                    thrust: window.currentResults ? window.currentResults.thrust : 5000,
-                    isp: window.currentResults ? window.currentResults.isp_vacuum : 320
+                    chamber_pressure: parseFloat(document.getElementById('chamber_pressure')?.value),
+                    thrust: (cr.thrust != null) ? cr.thrust : 5000,
+                    isp: (cr.isp_vacuum != null) ? cr.isp_vacuum : 320
                 };
                 
                 // Make API call for detailed CAD

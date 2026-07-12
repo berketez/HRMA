@@ -62,6 +62,10 @@ from hrma.visualization.visualization import (
     create_improved_motor_cross_section,
     create_improved_injector_design
 )
+from hrma.export.motor_geometry import (
+    solid_results_to_motor_geometry,
+    liquid_results_to_motor_geometry,
+)
 from hrma.visualization.advanced_results import (
     create_cea_style_results, create_altitude_performance_plot,
     create_mass_fractions_plot, create_thrust_altitude_plot
@@ -782,10 +786,19 @@ def calculate_solid():
         
         # Calculate motor performance
         results = motor.calculate_performance()
-        
+
         # Sanitize results
         sanitized_results = sanitize_json_values(results)
-        
+
+        # Hibrit paritesi: motor kesiti + ortak geometri (2026-07-13)
+        try:
+            geo = solid_results_to_motor_geometry(sanitized_results)
+            sanitized_results['motor_geometry'] = sanitize_json_values(geo)
+            sanitized_results.setdefault('plots', {})['motor'] = \
+                create_improved_motor_cross_section(geo, motor_type='solid')
+        except Exception:
+            traceback.print_exc()  # kesit çizimi hesabı düşürmesin
+
         print("Solid motor calculation successful!")
         return jsonify(sanitized_results)
         
@@ -835,10 +848,19 @@ def calculate_liquid():
         
         # Calculate engine performance
         results = engine.calculate_performance()
-        
+
         # Sanitize results
         sanitized_results = sanitize_json_values(results)
-        
+
+        # Hibrit paritesi: motor kesiti + ortak geometri (2026-07-13)
+        try:
+            geo = liquid_results_to_motor_geometry(sanitized_results)
+            sanitized_results['motor_geometry'] = sanitize_json_values(geo)
+            sanitized_results.setdefault('plots', {})['motor'] = \
+                create_improved_motor_cross_section(geo, motor_type='liquid')
+        except Exception:
+            traceback.print_exc()  # kesit çizimi hesabı düşürmesin
+
         print("Liquid motor calculation successful!")
         return jsonify(sanitized_results)
         
@@ -884,21 +906,76 @@ def export_tank_cad():
         print(f"CAD export error: {str(e)}")
         return jsonify({'error': f'CAD export error: {str(e)}'}), 500
 
+def _motor_cad_zip_response(geo, motor_type, default_name):
+    """Ortak CAD paket üreticisi: STEP (varsa) + STL'leri ZIP'ler.
+
+    STEP build123d yoksa paket STL-only iner; MANIFEST durumu açıkça yazar
+    (sessiz eksilme yasak). Enjektör katısı katıda, grain katısı sıvıda üretilmez.
+    """
+    name = geo.get('motor_name') or default_name
+    arc = {}
+    manifest = [f'HRMA CAD paketi — {name} ({motor_type})', '']
+
+    # STEP (gerçek parametrik katılar)
+    try:
+        from hrma.export.step_export import generate_step_assembly
+        step_files = generate_step_assembly(geo, motor_type=motor_type)
+        for key, path in step_files.items():
+            arc[f'step/{name}_{key}.step'] = path
+        manifest.append(f'STEP: {len(step_files)} dosya (AP214, mm)')
+    except Exception as e:
+        manifest.append(f'STEP: FAILED ({e})')
+
+    # STL (mesh'ler) — motor tipine uymayan bileşenler filtrelenir
+    try:
+        cad_data = cad_designer.generate_3d_motor_assembly(geo)
+        meshes = cad_data.get('assembly_meshes') or []
+        skip = {'solid': {'Injector'}, 'liquid': {'Fuel Grain'}}.get(motor_type, set())
+        meshes = [(n, m) for n, m in meshes if n not in skip]
+        stl_files = cad_designer.export_stl_files(meshes) if meshes else []
+        for p in stl_files:
+            arc[f'stl/{os.path.basename(p)}'] = p
+        manifest.append(f'STL: {len(stl_files)} dosya (mm, 3D baskı/CAM)')
+    except Exception as e:
+        manifest.append(f'STL: FAILED ({e})')
+
+    if not arc:
+        return jsonify({'status': 'error',
+                        'error': 'CAD üretilemedi: ' + ' | '.join(manifest)}), 500
+
+    buf = _zip_files(arc, readme_text='\n'.join(manifest) + '\n')
+    return send_file(buf, as_attachment=True,
+                     download_name=f'{name}_CAD_package.zip',
+                     mimetype='application/zip')
+
+
 @app.route('/export_solid_motor_cad', methods=['POST'])
 def export_solid_motor_cad():
-    """Export CAD files for solid rocket motor"""
+    """Katı motor CAD paketi: STEP + STL (kamara, nozul, grain)."""
     try:
-        data = request.get_json()
-        motor_data = data.get('motor_data')
-        
-        if not motor_data:
+        data = request.get_json() or {}
+        # JS ya ham /calculate_solid sonucunu ('results') ya da eski sözleşmeyle
+        # 'motor_data' gönderir — ikisi de katı sonuç sözlüğü kabul edilir
+        results = data.get('results') or data.get('motor_data')
+        if not results:
             return jsonify({'error': 'Motor data not found'}), 400
-        
-        return jsonify({
-            'status': 'not_implemented',
-            'message': 'Solid motor CAD export is not yet implemented. Use STL export for 3D models.'
-        }), 501
-        
+        geo = solid_results_to_motor_geometry(results)
+        return _motor_cad_zip_response(geo, 'solid', 'UZAYTEK_SOLID')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': f'CAD export error: {str(e)}'}), 500
+
+
+@app.route('/export_liquid_cad', methods=['POST'])
+def export_liquid_cad():
+    """Sıvı motor CAD paketi: STEP + STL (kamara, nozul, enjektör)."""
+    try:
+        data = request.get_json() or {}
+        results = data.get('results') or data.get('motor_data')
+        if not results:
+            return jsonify({'error': 'Motor data not found'}), 400
+        geo = liquid_results_to_motor_geometry(results)
+        return _motor_cad_zip_response(geo, 'liquid', 'UZAYTEK_LIQUID')
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': f'CAD export error: {str(e)}'}), 500

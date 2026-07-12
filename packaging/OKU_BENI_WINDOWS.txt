@@ -1,0 +1,34 @@
+HRMA — UZAYTEK Hibrit Roket Motor Analizi (Windows Kurulumu)
+=============================================================
+
+KURULUM:
+
+1) "HRMA-Kurulum-1.0.0.exe" dosyasına çift tıklayın.
+
+2) Mavi "Windows bilgisayarınızı korudu" penceresi çıkarsa:
+   - "Ek bilgi" yazısına tıklayın
+   - "Yine de çalıştır" düğmesine basın
+   (Bu uyarı, kurulum dosyası dijital imzasız olduğu için çıkar; normaldir.)
+
+3) Kurulum sihirbazında İleri → İleri → Kur → Son.
+   İnternet bağlantısı GEREKMEZ, yönetici şifresi GEREKMEZ.
+
+4) Kurulum bitince masaüstünde HRMA simgesi oluşur.
+
+
+KULLANIM:
+
+- HRMA simgesine çift tıklayın.
+- Önce siyah bir pencere açılır, 10-30 saniye içinde tarayıcınızda
+  HRMA arayüzü görünür (adres: http://127.0.0.1:8080).
+- Siyah pencereyi KAPATMAYIN, küçültün. O pencere kapanırsa
+  program da kapanır.
+- CAD ve çizim çıktılarınız Belgeler\HRMA klasörüne kaydedilir.
+
+KALDIRMA:
+
+Ayarlar → Uygulamalar → HRMA → Kaldır
+(veya Başlat menüsü → HRMA → HRMA Kaldır)
+
+Sorun yaşarsanız siyah penceredeki yazıların fotoğrafını çekip
+UZAYTEK ekibine iletin.
