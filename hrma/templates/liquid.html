@@ -6,7 +6,7 @@
     <title>Liquid Motor Analysis - Motor Analysis Tool</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--hd-inset, #0a1524); }
         
         .navbar {
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
@@ -43,7 +43,7 @@
         .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
         
         .panel { 
-            background: white; 
+            background: var(--hd-panel-solid, #0a1524); 
             margin: 15px 0; 
             padding: 25px; 
             border-radius: 8px;
@@ -82,7 +82,7 @@
         .unit { color: #6c757d; font-size: 12px; font-weight: normal; }
         
         .chart-explanation {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border: 1px solid #dee2e6;
             border-radius: 6px;
             padding: 15px;
@@ -159,7 +159,7 @@
             align-items: center;
             margin: 20px 0;
             padding: 20px;
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border-radius: 8px;
             border: 2px solid #dee2e6;
         }
@@ -188,7 +188,7 @@
         }
         
         .subsystem-card {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             padding: 20px;
             border-radius: 8px;
             border-left: 4px solid #4facfe;
@@ -207,7 +207,7 @@
         
         .spec-table td {
             padding: 8px;
-            border-bottom: 1px solid #dee2e6;
+            border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));
         }
         
         .spec-table td:first-child {
@@ -292,7 +292,7 @@
         }
         
         .tab-button {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border: 1px solid #dee2e6;
             padding: 12px 24px;
             border-radius: 6px 6px 0 0;
@@ -326,12 +326,12 @@
             gap: 8px;
             margin: 15px 0;
             padding: 10px;
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border-radius: 6px;
         }
         
         .subtab-button, .sub-subtab-button {
-            background: white;
+            background: var(--hd-panel-solid, #0a1524);
             border: 1px solid #dee2e6;
             padding: 8px 16px;
             border-radius: 4px;
@@ -362,7 +362,7 @@
         .metrics-section, .specs-section, .subsystems-section {
             margin: 20px 0;
             padding: 20px;
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border-radius: 8px;
         }
         
@@ -1952,44 +1952,44 @@
             reportDiv.innerHTML = `
                 <table style="width: 100%; border-collapse: collapse;">
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Propellants:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.propellant_name}</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Propellants:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.propellant_name}</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Mixture Ratio:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.mixture_ratio} (Optimal: ${results.optimal_mixture_ratio})</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Mixture Ratio:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.mixture_ratio} (Optimal: ${results.optimal_mixture_ratio})</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>MR Efficiency:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.mixture_ratio_efficiency.toFixed(1)}%</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>MR Efficiency:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.mixture_ratio_efficiency.toFixed(1)}%</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Mass Flow:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.total_mass_flow.toFixed(2)} kg/s</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Mass Flow:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.total_mass_flow.toFixed(2)} kg/s</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Throat Diameter:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${(results.throat_diameter * 1000).toFixed(1)} mm</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Throat Diameter:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(results.throat_diameter * 1000).toFixed(1)} mm</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Expansion Ratio:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.expansion_ratio.toFixed(1)}</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Expansion Ratio:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.expansion_ratio.toFixed(1)}</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Chamber Temperature:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.chamber_temperature} K</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Chamber Temperature:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.chamber_temperature} K</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Vacuum Expansion Ratio:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.expansion_ratio_vacuum.toFixed(1)}</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Vacuum Expansion Ratio:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.expansion_ratio_vacuum.toFixed(1)}</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Space Application:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">Multi-altitude optimized design</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Space Application:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">Multi-altitude optimized design</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Data Sources:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6; font-size: 11px;">
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Data Sources:</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14)); font-size: 11px;">
                             <div>✓ NASA CEA Database</div>
                             <div>✓ NIST Thermophysical Properties</div>
                             <div>✓ Flight Heritage Data</div>
@@ -3334,13 +3334,13 @@ Please provide:
                 Plotly.newPlot(cadContainer, [chamberTrace, nozzleTrace, injectorTrace], layout);
             } else {
                 cadContainer.innerHTML = `
-                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f8f9fa; border-radius: 8px; flex-direction: column;">
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: var(--hd-inset, #0a1524); border-radius: 8px; flex-direction: column;">
                         <div style="font-size: 48px; margin-bottom: 20px;">🚀</div>
                         <h3 style="color: #1e3c72; margin-bottom: 10px;">3D Engine Visualization</h3>
                         <p style="color: #6c757d; text-align: center;">Chamber: ${chamberDiameter}mm × ${chamberLength}mm<br>
                         Throat: ${throatDiameter}mm | Exit: ${exitDiameter}mm<br>
                         Propellant: ${results.propellant_name || 'LOX/RP-1'}</p>
-                        <div style="margin-top: 20px; padding: 15px; background: white; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="margin-top: 20px; padding: 15px; background: var(--hd-panel-solid, #0a1524); border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                             <strong>Engine Specifications:</strong><br>
                             • Thrust: ${(results.thrust/1000).toFixed(1)} kN<br>
                             • Isp (vac): ${results.isp_vacuum?.toFixed(1) || 'N/A'} s<br>
@@ -3566,7 +3566,7 @@ Please provide:
                             </ul>
                         </div>
                     </div>
-                    <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                    <div style="background: var(--hd-inset, #0a1524); padding: 10px; border-radius: 5px; margin: 10px 0;">
                         <strong>Views:</strong> Left - External Assembly | Right - Internal Cross-Section
                     </div>
                 `;

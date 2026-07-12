@@ -6,7 +6,7 @@
     <title>Solid Motor Analysis - Motor Analysis Tool</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--hd-inset, #0a1524); }
         
         .navbar {
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
@@ -43,7 +43,7 @@
         .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
         
         .panel { 
-            background: white; 
+            background: var(--hd-panel-solid, #0a1524); 
             margin: 15px 0; 
             padding: 25px; 
             border-radius: 8px;
@@ -112,7 +112,7 @@
         }
         
         .chart-explanation {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border: 1px solid #dee2e6;
             border-radius: 6px;
             padding: 15px;
@@ -235,7 +235,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
         }
     </style>
     <script src="https://cdn.plot.ly/plotly-1.58.5.min.js"></script>
@@ -448,7 +448,7 @@
             </div>
 
             <!-- Star Configuration -->
-            <div id="star_config" class="config-section" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <div id="star_config" class="config-section" style="display: none; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 6px; margin: 15px 0;">
                 <h3 style="color: #e74c3c; margin-bottom: 15px;">Star Configuration</h3>
                 <div class="form-grid">
                     <div class="form-group">
@@ -485,7 +485,7 @@
             </div>
 
             <!-- Finocyl Configuration -->
-            <div id="finocyl_config" class="config-section" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <div id="finocyl_config" class="config-section" style="display: none; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 6px; margin: 15px 0;">
                 <h3 style="color: #e74c3c; margin-bottom: 15px;">Finocyl Configuration</h3>
                 <div class="form-grid">
                     <div class="form-group">
@@ -1716,7 +1716,7 @@
             
             reportDiv.innerHTML = `
                 <div class="tabs-container">
-                    <div class="tabs-header" style="display: flex; background: #f8f9fa; border-radius: 8px 8px 0 0; margin-bottom: 0;">
+                    <div class="tabs-header" style="display: flex; background: var(--hd-inset, #0a1524); border-radius: 8px 8px 0 0; margin-bottom: 0;">
                         <button class="tab-button active" onclick="showTab('specifications')" style="flex: 1; padding: 12px; border: none; background: none; cursor: pointer; font-weight: 600;">Spesifikasyonlar</button>
                         <button class="tab-button" onclick="showTab('performance')" style="flex: 1; padding: 12px; border: none; background: none; cursor: pointer;">Performans Analizi</button>
                         <button class="tab-button" onclick="showTab('structural')" style="flex: 1; padding: 12px; border: none; background: none; cursor: pointer;">Yapısal Analiz</button>
@@ -1727,7 +1727,7 @@
                         <button class="tab-button" onclick="showTab('cad')" style="flex: 1; padding: 12px; border: none; background: none; cursor: pointer;">CAD Tasarım</button>
                     </div>
                     
-                    <div class="tab-content" style="background: white; border: 1px solid #e9ecef; border-top: none; border-radius: 0 0 8px 8px; padding: 20px;">
+                    <div class="tab-content" style="background: var(--hd-panel-solid, #0a1524); border: 1px solid #e9ecef; border-top: none; border-radius: 0 0 8px 8px; padding: 20px;">
                         
                         <!-- Specifications Tab -->
                         <div id="tab-specifications" class="tab-panel">
@@ -1736,23 +1736,23 @@
                                 <div>
                                     <h4 style="color: #495057; margin-bottom: 10px;">Temel Parametreler</h4>
                                     <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yanıcı Tipi:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.propellant_name}</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Grain Tipi:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.grain_type.toUpperCase()}</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Oda Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.chamber_diameter.toFixed(1)} mm</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Grain Uzunluğu:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.grain_length.toFixed(1)} mm</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Çekirdek Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.core_diameter.toFixed(1)} mm</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yanıcı Kütlesi:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.propellant_mass.toFixed(3)} kg</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yanıcı Tipi:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.propellant_name}</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Grain Tipi:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.grain_type.toUpperCase()}</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Oda Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.chamber_diameter.toFixed(1)} mm</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Grain Uzunluğu:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.grain_length.toFixed(1)} mm</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Çekirdek Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.core_diameter.toFixed(1)} mm</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yanıcı Kütlesi:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.propellant_mass.toFixed(3)} kg</td></tr>
                                     </table>
                                 </div>
                                 <div>
                                     <h4 style="color: #495057; margin-bottom: 10px;">Nozzle Parametreleri</h4>
                                     <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Boğaz Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.throat_diameter.toFixed(1)} mm</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Çıkış Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.exit_diameter.toFixed(1)} mm</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Genişleme Oranı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.expansion_ratio.toFixed(1)}</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Vakum Genişleme:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.expansion_ratio_vacuum.toFixed(1)}</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>C* Hızı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.c_star.toFixed(0)} m/s</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Oda Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${results.chamber_pressure.toFixed(1)} bar</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Boğaz Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.throat_diameter.toFixed(1)} mm</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Çıkış Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.exit_diameter.toFixed(1)} mm</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Genişleme Oranı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.expansion_ratio.toFixed(1)}</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Vakum Genişleme:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.expansion_ratio_vacuum.toFixed(1)}</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>C* Hızı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.c_star.toFixed(0)} m/s</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Oda Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.chamber_pressure.toFixed(1)} bar</td></tr>
                                     </table>
                                 </div>
                             </div>
@@ -1915,7 +1915,7 @@ Please provide:
             
             // Activate selected button
             event.target.classList.add('active');
-            event.target.style.background = 'white';
+            event.target.style.background = 'var(--hd-panel-solid, #0a1524)';
             event.target.style.fontWeight = '600';
         }
 
@@ -1930,19 +1930,19 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Thrust Profil Analizi</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Thrust Profil Tipi:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${thrustProfile.thrust_curve_type || 'Neutral'}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Thrust Stabilite:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(thrustProfile.thrust_stability || 95).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Basınç Salınımları:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(thrustProfile.pressure_oscillations_percent || 2.5).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yanma Düzgünlüğü:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(thrustProfile.combustion_smoothness || 97.5).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Thrust Profil Tipi:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${thrustProfile.thrust_curve_type || 'Neutral'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Thrust Stabilite:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(thrustProfile.thrust_stability || 95).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Basınç Salınımları:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(thrustProfile.pressure_oscillations_percent || 2.5).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yanma Düzgünlüğü:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(thrustProfile.combustion_smoothness || 97.5).toFixed(1)}%</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Performans Metrikleri</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Ortalama Thrust Katsayısı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(performance.average_thrust_coefficient || 1.65).toFixed(2)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>C* Verimliliği:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(performance.c_star_efficiency_percent || 96).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yanma Kayıpları:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(performance.theoretical_vs_actual_isp?.combustion_losses || 3.2).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Nozzle Kayıpları:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(performance.theoretical_vs_actual_isp?.nozzle_losses || 2.1).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Ortalama Thrust Katsayısı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.average_thrust_coefficient || 1.65).toFixed(2)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>C* Verimliliği:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.c_star_efficiency_percent || 96).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yanma Kayıpları:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.theoretical_vs_actual_isp?.combustion_losses || 3.2).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Nozzle Kayıpları:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.theoretical_vs_actual_isp?.nozzle_losses || 2.1).toFixed(1)}%</td></tr>
                         </table>
                     </div>
                 </div>
@@ -1959,20 +1959,20 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Kasa Analizi</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Hoop Stress:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseAnalysis.hoop_stress_mpa || 120).toFixed(1)} MPa</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Boyuna Stress:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseAnalysis.longitudinal_stress_mpa || 60).toFixed(1)} MPa</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Güvenlik Faktörü:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseAnalysis.safety_factor || 2.1).toFixed(1)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Malzeme Kullanımı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseAnalysis.material_utilization_percent || 65).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Önerilen Duvar Kalınlığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseAnalysis.recommended_wall_thickness_mm || 8.5).toFixed(1)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Hoop Stress:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.hoop_stress_mpa || 120).toFixed(1)} MPa</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Boyuna Stress:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.longitudinal_stress_mpa || 60).toFixed(1)} MPa</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Güvenlik Faktörü:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.safety_factor || 2.1).toFixed(1)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Malzeme Kullanımı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.material_utilization_percent || 65).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Önerilen Duvar Kalınlığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.recommended_wall_thickness_mm || 8.5).toFixed(1)} mm</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Grain Yapısal Analizi</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Maksimum Grain Stress:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(grainStructural.max_grain_stress_mpa || 3.2).toFixed(1)} MPa</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yapısal Verimlilik:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(grainStructural.structural_efficiency || 92).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Çatlak Yayılma Riski:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${grainStructural.crack_propagation_risk || 'Düşük'}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Termal Genişleme Uyumluluğu:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${grainStructural.thermal_expansion_compatibility || 'İyi'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Maksimum Grain Stress:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainStructural.max_grain_stress_mpa || 3.2).toFixed(1)} MPa</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yapısal Verimlilik:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainStructural.structural_efficiency || 92).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Çatlak Yayılma Riski:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${grainStructural.crack_propagation_risk || 'Düşük'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Termal Genişleme Uyumluluğu:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${grainStructural.thermal_expansion_compatibility || 'İyi'}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -1989,18 +1989,18 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Yanma Termal Analizi</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Alev Sıcaklığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(combustionThermal.flame_temperature_k || 3200).toFixed(0)} K</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Isı Salınım Oranı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(combustionThermal.heat_release_rate_mw || 15.2).toFixed(1)} MW</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Termal Verimlilik:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(combustionThermal.thermal_efficiency_percent || 85.2).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Alev Sıcaklığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(combustionThermal.flame_temperature_k || 3200).toFixed(0)} K</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Isı Salınım Oranı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(combustionThermal.heat_release_rate_mw || 15.2).toFixed(1)} MW</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Termal Verimlilik:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(combustionThermal.thermal_efficiency_percent || 85.2).toFixed(1)}%</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Isı Transfer Analizi</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Konvektif Isı Akısı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(heatTransfer.convective_heat_flux_kw_m2 || 6.4).toFixed(1)} kW/m²</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Kasa Sıcaklığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(heatTransfer.case_temperature_k || 425).toFixed(0)} K</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>İzolasyon Etkinliği:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(heatTransfer.insulation_effectiveness || 94.8).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Termal Koruma Değerlendirmesi:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${heatTransfer.thermal_protection_rating || 'Mükemmel'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Konvektif Isı Akısı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(heatTransfer.convective_heat_flux_kw_m2 || 6.4).toFixed(1)} kW/m²</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Kasa Sıcaklığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(heatTransfer.case_temperature_k || 425).toFixed(0)} K</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>İzolasyon Etkinliği:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(heatTransfer.insulation_effectiveness || 94.8).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Termal Koruma Değerlendirmesi:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${heatTransfer.thermal_protection_rating || 'Mükemmel'}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -2017,19 +2017,19 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Yanıcı Karışım Gereksinimleri</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Oksitleyici:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(mixingReqs.oxidizer_percent || 68).toFixed(0)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yakıt:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(mixingReqs.fuel_percent || 18).toFixed(0)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Bağlayıcı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(mixingReqs.binder_percent || 12).toFixed(0)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Katkı Maddeleri:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(mixingReqs.additives_percent || 2).toFixed(0)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Oksitleyici:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.oxidizer_percent || 68).toFixed(0)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yakıt:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.fuel_percent || 18).toFixed(0)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Bağlayıcı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.binder_percent || 12).toFixed(0)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Katkı Maddeleri:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.additives_percent || 2).toFixed(0)}%</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Kürlenme Süreci</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Sıcaklık:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${((propellantManuf.curing_process?.temperature_k || 333) - 273).toFixed(0)}°C</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Süre:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(propellantManuf.curing_process?.time_hours || 24).toFixed(0)} saat</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Basınç:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">Atmosferik</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Nem Kontrolü:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">Gerekli</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Sıcaklık:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${((propellantManuf.curing_process?.temperature_k || 333) - 273).toFixed(0)}°C</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Süre:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(propellantManuf.curing_process?.time_hours || 24).toFixed(0)} saat</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Basınç:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">Atmosferik</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Nem Kontrolü:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">Gerekli</td></tr>
                         </table>
                     </div>
                 </div>
@@ -2046,19 +2046,19 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Basınç Güvenliği</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Maksimum İşletme Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(pressureSafety.max_operating_pressure_bar || 40).toFixed(1)} bar</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Tasarım Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(pressureSafety.design_pressure_bar || 100).toFixed(0)} bar</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Patlama Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(pressureSafety.burst_pressure_bar || 150).toFixed(0)} bar</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Güvenlik Faktörü:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(pressureSafety.safety_factor || 2.5).toFixed(1)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Maksimum İşletme Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.max_operating_pressure_bar || 40).toFixed(1)} bar</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Tasarım Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.design_pressure_bar || 100).toFixed(0)} bar</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Patlama Basıncı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.burst_pressure_bar || 150).toFixed(0)} bar</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Güvenlik Faktörü:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.safety_factor || 2.5).toFixed(1)}</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Ateşleme Güvenliği</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Ateşleme Sistemi:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${ignitionSafety.ignition_system || 'Elektrik kibrit'}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Güvenli Mesafe:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(ignitionSafety.minimum_safe_distance_m || 30).toFixed(0)} m</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Kişisel Koruyucu Donanım:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">Gerekli</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yangın Söndürme:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">CO₂ sistemi önerilir</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Ateşleme Sistemi:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${ignitionSafety.ignition_system || 'Elektrik kibrit'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Güvenli Mesafe:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(ignitionSafety.minimum_safe_distance_m || 30).toFixed(0)} m</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Kişisel Koruyucu Donanım:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">Gerekli</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yangın Söndürme:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">CO₂ sistemi önerilir</td></tr>
                         </table>
                     </div>
                 </div>
@@ -2075,24 +2075,24 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Malzeme Maliyetleri (USD)</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yanıcı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(materialCosts.propellant || 45).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Kasa Malzemeleri:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(materialCosts.case_materials || 120).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Nozzle:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(materialCosts.nozzle || 35).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>İzolasyon:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(materialCosts.insulation || 15).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Donanım:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(materialCosts.hardware || 25).toFixed(0)}</td></tr>
-                            <tr style="background: #f8f9fa;"><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Toplam Malzeme:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>$${(materialCosts.total_materials || 240).toFixed(0)}</strong></td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yanıcı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.propellant || 45).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Kasa Malzemeleri:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.case_materials || 120).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Nozzle:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.nozzle || 35).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>İzolasyon:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.insulation || 15).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Donanım:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.hardware || 25).toFixed(0)}</td></tr>
+                            <tr style="background: var(--hd-inset, #0a1524);"><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Toplam Malzeme:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>$${(materialCosts.total_materials || 240).toFixed(0)}</strong></td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Üretim Maliyetleri (USD)</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yanıcı Karıştırma:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(manufacturingCosts.propellant_mixing || 20).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Döküm:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(manufacturingCosts.casting || 15).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Kürlenme:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(manufacturingCosts.curing || 10).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>İşleme:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(manufacturingCosts.machining || 45).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Montaj:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(manufacturingCosts.assembly || 25).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Test:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">$${(manufacturingCosts.testing || 35).toFixed(0)}</td></tr>
-                            <tr style="background: #f8f9fa;"><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Toplam Üretim:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>$${(manufacturingCosts.total_manufacturing || 150).toFixed(0)}</strong></td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yanıcı Karıştırma:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.propellant_mixing || 20).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Döküm:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.casting || 15).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Kürlenme:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.curing || 10).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>İşleme:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.machining || 45).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Montaj:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.assembly || 25).toFixed(0)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Test:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.testing || 35).toFixed(0)}</td></tr>
+                            <tr style="background: var(--hd-inset, #0a1524);"><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Toplam Üretim:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>$${(manufacturingCosts.total_manufacturing || 150).toFixed(0)}</strong></td></tr>
                         </table>
                     </div>
                 </div>
@@ -2111,19 +2111,19 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Motor Montaj Özellikleri</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Toplam Uzunluk:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(motorAssembly.overall_length * 1000 || 650).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Maksimum Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(motorAssembly.maximum_diameter * 1000 || 116).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Kuru Kütle:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(motorAssembly.dry_mass_kg || 4.2).toFixed(1)} kg</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yaş Kütle:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(motorAssembly.wet_mass_kg || 8.5).toFixed(1)} kg</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Toplam Uzunluk:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.overall_length * 1000 || 650).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Maksimum Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.maximum_diameter * 1000 || 116).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Kuru Kütle:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.dry_mass_kg || 4.2).toFixed(1)} kg</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yaş Kütle:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.wet_mass_kg || 8.5).toFixed(1)} kg</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Kasa Tasarımı</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Dış Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseDesign.outer_diameter || 116).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>İç Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseDesign.inner_diameter || 100).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Duvar Kalınlığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(caseDesign.wall_thickness || 8).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Malzeme:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${caseDesign.material || 'AISI 4130 Steel'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Dış Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseDesign.outer_diameter || 116).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>İç Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseDesign.inner_diameter || 100).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Duvar Kalınlığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseDesign.wall_thickness || 8).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Malzeme:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${caseDesign.material || 'AISI 4130 Steel'}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -2132,21 +2132,21 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Grain Geometrisi</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Tip:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${grainGeometry.type || 'BATES (Cylindrical)'}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Dış Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(grainGeometry.outer_diameter || 100).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Çekirdek Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(grainGeometry.core_diameter || 30).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Web Kalınlığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(grainGeometry.web_thickness || 35).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Yanıcı Kütlesi:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(grainGeometry.propellant_mass || 4.3).toFixed(2)} kg</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Tip:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${grainGeometry.type || 'BATES (Cylindrical)'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Dış Çap:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.outer_diameter || 100).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Çekirdek Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.core_diameter || 30).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Web Kalınlığı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.web_thickness || 35).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Yanıcı Kütlesi:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.propellant_mass || 4.3).toFixed(2)} kg</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">Nozzle Tasarımı</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Tip:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${nozzleDesign.type || 'De Laval Nozzle'}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Boğaz Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(nozzleDesign.throat_diameter || 15).toFixed(1)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Çıkış Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(nozzleDesign.exit_diameter || 75).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Genişleme Oranı:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${(nozzleDesign.expansion_ratio || 25).toFixed(0)}:1</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid #dee2e6;"><strong>Malzeme:</strong></td><td style="padding: 6px; border-bottom: 1px solid #dee2e6;">${nozzleDesign.material || 'Graphite'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Tip:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${nozzleDesign.type || 'De Laval Nozzle'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Boğaz Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(nozzleDesign.throat_diameter || 15).toFixed(1)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Çıkış Çapı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(nozzleDesign.exit_diameter || 75).toFixed(0)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Genişleme Oranı:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(nozzleDesign.expansion_ratio || 25).toFixed(0)}:1</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Malzeme:</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${nozzleDesign.material || 'Graphite'}</td></tr>
                         </table>
                     </div>
                 </div>

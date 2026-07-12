@@ -6,7 +6,7 @@
     <title>Hybrid Motor Analysis - Motor Analysis Tool</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--hd-inset, #0a1524); }
         
         @keyframes pulse {
             0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(42, 82, 152, 0.7); }
@@ -49,7 +49,7 @@
         .container { max-width: 1600px; margin: 20px auto; padding: 0 20px; }
         
         .panel { 
-            background: white; 
+            background: var(--hd-panel-solid, #0a1524); 
             margin: 15px 0; 
             padding: 25px; 
             border-radius: 8px;
@@ -232,7 +232,7 @@
             width: 100%; 
             border-collapse: collapse; 
             margin: 15px 0;
-            background: white;
+            background: var(--hd-panel-solid, #0a1524);
             border-radius: 8px;
             overflow: hidden;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -248,14 +248,14 @@
             padding: 12px; 
             border-bottom: 1px solid #e9ecef;
         }
-        .data-table tr:nth-child(even) { background: #f8f9fa; }
+        .data-table tr:nth-child(even) { background: var(--hd-inset, #0a1524); }
         
         .plot-container { 
             min-height: 500px; 
             border: 2px solid #e9ecef; 
             border-radius: 8px;
             margin: 20px 0; 
-            background: white;
+            background: var(--hd-panel-solid, #0a1524);
             padding: 20px;
             width: 100%;
             box-sizing: border-box;
@@ -278,7 +278,7 @@
         #injector_plot {
             min-height: 800px;
             width: 100%;
-            background: white;
+            background: var(--hd-panel-solid, #0a1524);
         }
         
         /* Fix overlapping issues */
@@ -305,7 +305,7 @@
         
         /* Panel styling for better separation */
         .panel {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border: 1px solid #dee2e6;
             border-radius: 8px;
             padding: 20px;
@@ -331,7 +331,7 @@
         
         .export-section {
             padding: 20px;
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border-radius: 8px;
             text-align: center;
             margin: 30px 0;
@@ -396,7 +396,7 @@
         .tab-content {
             margin-top: 20px;
             padding: 20px;
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border-radius: 8px;
             display: none;
         }
@@ -425,7 +425,7 @@
             border-left: 4px solid;
         }
         .alert-warning { 
-            background: #fff3cd; 
+            background: rgba(255, 140, 51, 0.10); 
             border-left-color: #ffc107; 
             color: #856404; 
         }
@@ -446,7 +446,7 @@
         }
         
         .chart-explanation {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border: 1px solid #dee2e6;
             border-radius: 6px;
             padding: 15px;
@@ -478,7 +478,7 @@
         
         /* Safety Analysis Styles */
         .safety-analysis-container {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border-radius: 8px;
             padding: 20px;
         }
@@ -517,7 +517,7 @@
         .safety-tab-content {
             display: none;
             padding: 15px;
-            background: white;
+            background: var(--hd-panel-solid, #0a1524);
             border-radius: 6px;
             border: 1px solid #dee2e6;
         }
@@ -561,7 +561,7 @@
         }
         
         .safety-metric.marginal {
-            background: #fff3cd;
+            background: rgba(255, 140, 51, 0.10);
             color: #856404;
             border: 1px solid #ffeaa7;
         }
@@ -594,7 +594,7 @@
 
         .tabs {
             display: flex;
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             border-radius: 8px;
             padding: 5px;
             margin-bottom: 20px;
@@ -623,14 +623,14 @@
         }
 
         .altitude-profile {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             padding: 15px;
             border-radius: 6px;
             margin: 10px 0;
         }
 
         .composition-editor {
-            background: #f8f9fa;
+            background: var(--hd-inset, #0a1524);
             padding: 15px;
             border-radius: 6px;
             margin: 10px 0;
@@ -844,7 +844,7 @@
                         <div class="help-text">Leave empty to auto-calculate burn time</div>
                     </div>
                 </div>
-                <div class="help-text" style="margin-top: 10px; background: #fff3cd; padding: 10px; border-radius: 4px;">
+                <div class="help-text" style="margin-top: 10px; background: rgba(255, 140, 51, 0.10); padding: 10px; border-radius: 4px;">
                     <strong>Mode:</strong> Specify total impulse (N⋅s) and optionally thrust or burn time. The system will calculate the missing parameter.
                 </div>
             </div>
@@ -975,7 +975,7 @@
                                onchange="updateFiniteParams('mass_flux')">
                         <div class="help-text">Oxidizer mass flux through chamber (leave 0 to calculate from contraction ratio)</div>
                     </div>
-                    <div style="margin-top: 10px; padding: 10px; background: #f0f8ff; border-radius: 4px; font-size: 12px;">
+                    <div style="margin-top: 10px; padding: 10px; background: var(--hd-inset, #0a1524); border-radius: 4px; font-size: 12px;">
                         <strong>Note:</strong> Fill only ONE parameter. The other will be calculated automatically.
                     </div>
                 </div>
@@ -1076,7 +1076,7 @@
                         </div>
                     </div>
                     
-                    <div class="mixture-summary" style="margin-top: 15px; padding: 10px; background: #f0f4f8; border-radius: 4px;">
+                    <div class="mixture-summary" style="margin-top: 15px; padding: 10px; background: var(--hd-inset, #0a1524); border-radius: 4px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                             <strong>Total Mass Fraction:</strong>
                             <span id="mixture_total" style="font-weight: bold;">100%</span>
@@ -1807,7 +1807,7 @@
             <!-- CEA Style Results -->
             <div id="cea_results_panel" class="panel" style="display: none;">
                 <h2>NASA CEA Style Analysis Results</h2>
-                <div id="cea_output" style="background: #f8f9fa; padding: 15px; border-radius: 4px; max-height: 600px; overflow-y: auto;"></div>
+                <div id="cea_output" style="background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px; max-height: 600px; overflow-y: auto;"></div>
             </div>
             
             <!-- Advanced Analysis Plots -->
@@ -1862,13 +1862,13 @@
             <!-- Heat Transfer Analysis -->
             <div id="heat_transfer_panel" class="panel" style="display: none;">
                 <h2>Heat Transfer Analysis</h2>
-                <div id="heat_transfer_results" style="font-family: monospace; background: #f8f9fa; padding: 15px; border-radius: 4px;"></div>
+                <div id="heat_transfer_results" style="font-family: monospace; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px;"></div>
             </div>
             
             <!-- Structural Analysis -->
             <div id="structural_panel" class="panel" style="display: none;">
                 <h2>Structural Analysis</h2>
-                <div id="structural_results" style="font-family: monospace; background: #f8f9fa; padding: 15px; border-radius: 4px;"></div>
+                <div id="structural_results" style="font-family: monospace; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px;"></div>
             </div>
             
             <!-- Comprehensive Safety Analysis -->
@@ -1940,10 +1940,10 @@
                     </div>
                     <div class="form-group">
                         <h4>Flight Profile</h4>
-                        <div id="flight_profile_summary" style="background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace;"></div>
+                        <div id="flight_profile_summary" style="background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px; font-family: monospace;"></div>
                     </div>
                 </div>
-                <div id="openrocket_details" style="margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace;"></div>
+                <div id="openrocket_details" style="margin-top: 20px; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px; font-family: monospace;"></div>
             </div>
         </div>
     </div>
@@ -2238,7 +2238,7 @@
                 warningDiv.style.color = '#ff9800';
                 
                 document.getElementById('tank_pressure').style.borderColor = '#ff9800';
-                document.getElementById('tank_pressure').style.backgroundColor = '#fff3e0';
+                document.getElementById('tank_pressure').style.backgroundColor = 'rgba(255, 140, 51, 0.10)';
             } else {
                 // All good
                 warningDiv.style.display = 'none';
@@ -2676,8 +2676,8 @@
                 // Enable manual input for custom oxidizer
                 densityInput.disabled = false;
                 viscosityInput.disabled = false;
-                densityInput.style.backgroundColor = '#fff3cd';
-                viscosityInput.style.backgroundColor = '#fff3cd';
+                densityInput.style.backgroundColor = 'rgba(255, 140, 51, 0.10)';
+                viscosityInput.style.backgroundColor = 'rgba(255, 140, 51, 0.10)';
                 
                 console.log('Fields enabled, colors set');
                 
@@ -2693,8 +2693,8 @@
                 // Disable manual input for predefined oxidizers  
                 densityInput.disabled = true;
                 viscosityInput.disabled = true;
-                densityInput.style.backgroundColor = '#f8f9fa';
-                viscosityInput.style.backgroundColor = '#f8f9fa';
+                densityInput.style.backgroundColor = 'var(--hd-inset, #0a1524)';
+                viscosityInput.style.backgroundColor = 'var(--hd-inset, #0a1524)';
             }
             
             showMessage('Fetching live oxidizer properties from NIST WebBook...', 'info');
@@ -3620,13 +3620,14 @@
                         <html>
                         <head>
                             <title>UZAYTEK 3D CAD Design</title>
+                            <!-- Koyu doküman teması: hd_doc.css (theme.css'in popup çekirdeği) -->
+                            <link rel="stylesheet" href="${window.location.origin}/static/css/hd_doc.css">
                             <style>
-                                body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-                                .header { background: #1e3c72; color: white; padding: 15px; margin: -20px -20px 20px -20px; }
-                                .visualization { width: 100%; height: 600px; border: 1px solid #ddd; }
-                                .specs { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-                                .spec-panel { background: #f8f9fa; padding: 15px; border-radius: 5px; }
-                                .spec-panel h3 { margin-top: 0; color: #1e3c72; }
+                                /* Yalnız yerleşim; renkler hd_doc.css'ten */
+                                .visualization { width: 100%; height: 600px; }
+                                .specs { grid-template-columns: 1fr 1fr; }
+                                .spec-panel pre { color: var(--hd-ink); font-family: var(--hd-mono); font-size: 0.78rem; white-space: pre-wrap; }
+                                .spec-panel h3 { margin-top: 0; color: var(--hd-cyan); }
                             </style>
                         </head>
                         <body>
@@ -3937,19 +3938,8 @@
 <html>
 <head>
     <title>UZAYTEK - Complete Motor Design Package</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; margin: -20px -20px 20px -20px; }
-        .section { background: white; margin: 20px 0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .specs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
-        .spec-item { background: #f8f9fa; padding: 10px; border-radius: 4px; }
-        .spec-label { font-weight: bold; color: #2a5298; }
-        .materials-list { list-style-type: none; padding: 0; }
-        .materials-list li { padding: 8px; margin: 4px 0; background: #e3f2fd; border-left: 4px solid #2196f3; }
-        .download-btn { background: #4caf50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
-        .download-btn:hover { background: #45a049; }
-        .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 4px; margin: 10px 0; }
-    </style>
+    <!-- Koyu doküman teması: hd_doc.css (theme.css'in popup çekirdeği) -->
+    <link rel="stylesheet" href="${window.location.origin}/static/css/hd_doc.css">
 </head>
 <body>
     <div class="header">
