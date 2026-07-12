@@ -4019,17 +4019,17 @@
             <div class="spec-item">
                 <div class="spec-label">Chamber Assembly</div>
                 <div>${cadData.technical_drawings.chamber_drawing}</div>
-                <button class="download-btn" onclick="alert('Chamber drawing download ready')">Download DWG</button>
+                <button class="download-btn" onclick="window.opener && window.opener.exportDXF ? window.opener.exportDXF() : alert('Ana sayfa kapali')">Download DXF</button>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Nozzle Assembly</div>
                 <div>${cadData.technical_drawings.nozzle_drawing}</div>
-                <button class="download-btn" onclick="alert('Nozzle drawing download ready')">Download DWG</button>
+                <button class="download-btn" onclick="window.opener && window.opener.exportDXF ? window.opener.exportDXF() : alert('Ana sayfa kapali')">Download DXF</button>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Injector Assembly</div>
                 <div>${cadData.technical_drawings.injector_drawing}</div>
-                <button class="download-btn" onclick="alert('Injector drawing download ready')">Download DWG</button>
+                <button class="download-btn" onclick="window.opener && window.opener.exportDrawingsPDF ? window.opener.exportDrawingsPDF() : alert('Ana sayfa kapali')">Download Drawing PDF</button>
             </div>
         </div>
     </div>
@@ -4054,10 +4054,10 @@
     </div>
     
     <scr` + `ipt>
-        function downloadSTL() { alert('STL files package ready for download'); }
-        function downloadCAD() { alert('CAD files package ready for download'); }
-        function downloadDrawings() { alert('Technical drawings package ready for download'); }
-        function downloadSpecs() { alert('Complete specifications ready for download'); }
+        function downloadSTL() { window.opener && window.opener.exportSTLZip ? window.opener.exportSTLZip() : alert('Ana sayfa kapali'); }
+        function downloadCAD() { window.opener && window.opener.exportSTEP ? window.opener.exportSTEP() : alert('Ana sayfa kapali'); }
+        function downloadDrawings() { window.opener && window.opener.exportDrawingsPDF ? window.opener.exportDrawingsPDF() : alert('Ana sayfa kapali'); }
+        function downloadSpecs() { window.opener && window.opener.exportCompleteZip ? window.opener.exportCompleteZip() : alert('Ana sayfa kapali'); }
     </scr` + `ipt>
 </body>
 </html>
@@ -4569,8 +4569,22 @@
             showMessage('Generating STL files...', 'info');
             showLoading(true);
             
+            // Çok dosyalı gerçek ZIP (bileşen STL'leri + assembly + README)
+            await _downloadExport('/api/export-stl-zip',
+                `${currentResults.motor.motor_name || 'UZAYTEK_Motor'}_STL_package.zip`,
+                'STL package');
+            showLoading(false);
+        }
+
+        // ---- Ortak export indirici: POST currentResults.motor → blob kaydet ----
+        async function _downloadExport(endpoint, filename, label) {
+            if (!currentResults || !currentResults.motor) {
+                showMessage('Please run analysis first', 'error');
+                return;
+            }
+            showMessage(`Generating ${label}...`, 'info');
             try {
-                const response = await fetch('/api/export-stl', {
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4578,28 +4592,51 @@
                         motor_name: document.getElementById('motor_name').value || 'UZAYTEK_Motor'
                     })
                 });
-                
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    let msg = `HTTP ${response.status}`;
+                    try { msg = (await response.json()).error || msg; } catch (e) {}
+                    throw new Error(msg);
                 }
-                
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${currentResults.motor.motor_name || 'UZAYTEK_Motor'}_CAD_files.zip`;
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-                
-                showMessage('STL files exported successfully', 'success');
+                showMessage(`${label} downloaded`, 'success');
             } catch (error) {
-                showMessage('Error exporting STL files: ' + error.message, 'error');
-            } finally {
-                showLoading(false);
+                showMessage(`${label} export failed: ` + error.message, 'error');
             }
         }
+
+        function _motorName() {
+            return (currentResults && currentResults.motor &&
+                    currentResults.motor.motor_name) || 'UZAYTEK_Motor';
+        }
+        // Popup butonlarının da (window.opener üzerinden) çağırdığı gerçek exportlar
+        function exportDXF() {
+            return _downloadExport('/api/export-dxf', _motorName() + '_profile.dxf', 'DXF drawing');
+        }
+        function exportDrawingsPDF() {
+            return _downloadExport('/api/export-drawings-pdf', _motorName() + '_technical_drawings.pdf', 'Technical drawings PDF');
+        }
+        function exportSTEP() {
+            return _downloadExport('/api/export-step', _motorName() + '_STEP_package.zip', 'STEP package');
+        }
+        function exportSTLZip() { return exportSTL(); }
+        function exportCompleteZip() {
+            return _downloadExport('/api/export-complete-zip', _motorName() + '_complete_package.zip', 'Complete design package');
+        }
+        function exportSpecsPDF() {
+            // Tam rapor: mevcut client-side rapor + teknik çizim PDF'i
+            return exportDrawingsPDF();
+        }
+        // Eski butonlarda referans verilen ama hiç tanımlanmamış fonksiyonlar
+        function exportEngFile() { return downloadEngFile(); }
+        function exportSimulation() { return exportCompleteZip(); }
         
         async function exportOpenRocket() {
             showMessage('Generating OpenRocket .eng file...', 'info');
@@ -4637,7 +4674,9 @@
             showMessage('Generating OpenRocket motor file...', 'info');
             
             try {
-                const response = await fetch('/api/export/openrocket', {
+                // DÜZELTME: eski path '/api/export/openrocket' 404'tü (route
+                // '/api/export-openrocket') ve yanıt şeması yanlış okunuyordu
+                const response = await fetch('/api/export-openrocket', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4645,25 +4684,25 @@
                         motor_name: document.getElementById('motor_name').value || 'UZAYTEK_Motor'
                     })
                 });
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                
+
                 const result = await response.json();
-                
-                if (result.status === 'success') {
-                    // Download the .eng file
-                    const blob = new Blob([result.eng_file_content], { type: 'text/plain' });
+
+                if (result.status === 'success' && result.content) {
+                    // Download the .eng file (transient koşulduysa gerçek eğri)
+                    const blob = new Blob([result.content], { type: 'text/plain' });
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = result.download_filename;
+                    a.download = _motorName() + '.eng';
                     document.body.appendChild(a);
                     a.click();
                     window.URL.revokeObjectURL(url);
                     document.body.removeChild(a);
-                    
+
                     showMessage('OpenRocket motor file downloaded successfully', 'success');
                 } else {
                     throw new Error(result.error || 'Failed to generate motor file');
@@ -4677,11 +4716,11 @@
 
         async function generateCompletePackage() {
             showMessage('Generating complete package...', 'info');
-            
-            // Generate all exports
+
+            // Rapor popup'ı + GERÇEK indirilebilir ZIP (STL+DXF+PDF+STEP+.eng)
             await generateCAD();
-            await exportOpenRocket();
-            
+            await exportCompleteZip();
+
             showMessage('Complete package generated successfully', 'success');
         }
 

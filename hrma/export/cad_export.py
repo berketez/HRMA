@@ -304,13 +304,36 @@ class TankCADGenerator:
         
         # Generate simple STL approximation
         self._generate_simple_stl(tank_data, output_dir)
-        
+
         # Generate engineering drawings
         self._generate_drawings(tank_data, output_dir)
-        
+
         # Generate manufacturing specs
         self._generate_manufacturing_specs(tank_data, output_dir)
-        
+
+        # GERÇEK STEP (2026-07-13): FreeCAD'e gerek kalmadan build123d/OCC
+        # ile tank katıları. Buton yıllardır "STEP/STL" diyordu ama STEP hiç
+        # üretilmiyordu; artık kuruluysa üretir, değilse notunu pakete yazar.
+        try:
+            from hrma.export.step_export import generate_tank_step
+            step_files = generate_tank_step({
+                'fuel_tank': {
+                    'diameter': tank_data['fuel_tank']['dimensions'].get('diameter', 0.3),
+                    'length': tank_data['fuel_tank']['dimensions'].get('length', 0.8),
+                },
+                'oxidizer_tank': {
+                    'diameter': tank_data['oxidizer_tank']['dimensions'].get('diameter', 0.3),
+                    'length': tank_data['oxidizer_tank']['dimensions'].get('length', 0.8),
+                },
+            }, out_dir=output_dir)
+            exported_files.extend(step_files.values())
+        except Exception as exc:
+            note = os.path.join(output_dir, 'STEP_NOT_AVAILABLE.txt')
+            with open(note, 'w') as f:
+                f.write(f'STEP üretilemedi: {exc}\n'
+                        f'Kurulum: pip install build123d "numpy<2"\n')
+            exported_files.append(note)
+
         return self._create_zip_package(output_dir, exported_files)
     
     def _generate_cad_instructions(self, tank_config: Dict) -> Dict:

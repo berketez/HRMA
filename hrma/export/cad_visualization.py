@@ -1046,20 +1046,12 @@ class MotorCADDesigner:
                         valid_meshes.append(mesh)
                         print(f"Successfully exported: {filename}")
                     except Exception as e:
-                        print(f"Error exporting {name}: {str(e)}")
-                        # Create a basic STL file as fallback
-                        basic_stl_content = f"""solid {name.lower().replace(' ', '_')}
-facet normal 0.0 0.0 1.0
-outer loop
-vertex 0.0 0.0 0.0
-vertex 1.0 0.0 0.0
-vertex 0.5 1.0 0.0
-endloop
-endfacet
-endsolid {name.lower().replace(' ', '_')}"""
-                        with open(filename, 'w') as f:
-                            f.write(basic_stl_content)
-                        exported_files.append(filename)
+                        # OPUS DENETİM DÜZELTMESİ: eski kod hata durumunda
+                        # SESSİZCE tek-üçgenlik sahte STL yazıyordu — bozuk
+                        # çıktı geçerli exportmuş gibi pakete giriyordu.
+                        # Artık hata yükseltilir; endpoint kullanıcıya raporlar.
+                        raise RuntimeError(
+                            f"{name} STL export başarısız: {e}") from e
                 else:
                     print(f"Warning: Invalid mesh for {name}")
 
@@ -1073,39 +1065,20 @@ endsolid {name.lower().replace(' ', '_')}"""
                     exported_files.append(assembly_filename)
                     print(f"Successfully exported combined assembly: {assembly_filename}")
                 except Exception as e:
+                    # Birleşik assembly üretilemezse sahte STL YAZILMAZ —
+                    # bileşen dosyaları geçerliyse onlarla devam edilir,
+                    # hiçbiri yoksa hata yükseltilir (aşağıda).
                     print(f"Error creating combined assembly: {str(e)}")
-                    # Fallback to basic combined STL
-                    assembly_filename = f"{output_dir}/motor_assembly.stl"
-                    basic_assembly_stl = """solid motor_assembly
-facet normal 0.0 0.0 1.0
-outer loop
-vertex -0.05 -0.05 0.0
-vertex 0.05 -0.05 0.0
-vertex 0.0 0.05 0.0
-endloop
-endfacet
-endsolid motor_assembly"""
-                    with open(assembly_filename, 'w') as f:
-                        f.write(basic_assembly_stl)
-                    exported_files.append(assembly_filename)
 
+        except RuntimeError:
+            raise
         except Exception as e:
-            print(f"STL export error: {str(e)}")
-            # Return at least one file even on error
-            if not exported_files:
-                fallback_file = f"{output_dir}/motor_assembly.stl"
-                basic_stl_content = """solid motor_assembly
-facet normal 0.0 0.0 1.0
-outer loop
-vertex 0.0 0.0 0.0
-vertex 0.1 0.0 0.0
-vertex 0.05 0.1 0.0
-endloop
-endfacet
-endsolid motor_assembly"""
-                with open(fallback_file, 'w') as f:
-                    f.write(basic_stl_content)
-                exported_files.append(fallback_file)
+            # OPUS DENETİM DÜZELTMESİ: eski catch-all, tek-üçgenlik sahte
+            # STL yazıp başarı gibi dönüyordu. Bozuk çıktı üretmek yasak.
+            raise RuntimeError(f"STL export başarısız: {e}") from e
+
+        if not exported_files:
+            raise RuntimeError("STL export başarısız: geçerli mesh üretilemedi")
 
         # Ensure motor_assembly.stl is first in the list if it exists
         motor_assembly_files = [f for f in exported_files if 'motor_assembly' in f.lower()]

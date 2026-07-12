@@ -3,6 +3,7 @@ from flask_cors import CORS
 import numpy as np
 import json
 import io
+import os
 import platform
 import sys
 
@@ -1393,6 +1394,186 @@ def export_eng_file():
         
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# GERÇEK export uçları (2026-07-13): DXF / çizim PDF'i / STEP / STL zip /
+# komple paket. Eski popup butonları alert'ten ibaretti; artık her buton
+# gerçek dosya indirir. Üreticiler: hrma/export/drawing_generator.py (kaleido
+# + ezdxf + reportlab) ve hrma/export/step_export.py (build123d/OCC).
+# ---------------------------------------------------------------------------
+
+def _zip_files(file_map, readme_text=None):
+    """{arşiv_adı: dosya_yolu} sözlüğünü bellekte ZIP'ler; BytesIO döner."""
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for arcname, path in file_map.items():
+            if path and os.path.exists(path):
+                zf.write(path, arcname)
+        if readme_text:
+            zf.writestr('README.txt', readme_text)
+    buf.seek(0)
+    return buf
+
+
+@app.route('/api/export-dxf', methods=['POST'])
+def export_dxf():
+    """2D imalat çizimi (DXF): iç akış konturu + kamara + grain profili."""
+    try:
+        from hrma.export.drawing_generator import generate_dxf
+        motor_data = (request.json or {}).get('motor_data', {})
+        path = generate_dxf(motor_data)
+        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        return send_file(path, as_attachment=True,
+                         download_name=f'{name}_profile.dxf',
+                         mimetype='application/dxf')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/export-drawings-pdf', methods=['POST'])
+def export_drawings_pdf():
+    """Antetli çok sayfalı teknik çizim PDF'i (kesit + enjektör + tablo)."""
+    try:
+        from hrma.export.drawing_generator import generate_drawing_pdf
+        motor_data = (request.json or {}).get('motor_data', {})
+        path = generate_drawing_pdf(motor_data)
+        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        return send_file(path, as_attachment=True,
+                         download_name=f'{name}_technical_drawings.pdf',
+                         mimetype='application/pdf')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/export-step', methods=['POST'])
+def export_step_files():
+    """Gerçek STEP katıları (build123d): bileşenler + assembly, ZIP olarak."""
+    try:
+        from hrma.export.step_export import generate_step_assembly
+        motor_data = (request.json or {}).get('motor_data', {})
+        files = generate_step_assembly(motor_data)
+        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        arc = {f'{name}_{k}.step': p for k, p in files.items()}
+        buf = _zip_files(arc, readme_text=(
+            'HRMA STEP export (AP214)\n'
+            'Solver-generated parametric solids: chamber, nozzle (true contour),\n'
+            'fuel grain, injector plate (drilled orifices) + assembly.\n'
+            'Units: millimetres.\n'))
+        return send_file(buf, as_attachment=True,
+                         download_name=f'{name}_STEP_package.zip',
+                         mimetype='application/zip')
+    except RuntimeError as e:
+        # build123d yok — kullanıcıya açık mesaj (sessiz düşüş yasak)
+        return jsonify({'status': 'error', 'error': str(e)}), 501
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/export-stl-zip', methods=['POST'])
+def export_stl_zip():
+    """Tüm bileşen STL'leri + birleşik assembly tek ZIP'te."""
+    try:
+        motor_data = (request.json or {}).get('motor_data', {})
+        cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
+        if not cad_data or 'assembly_meshes' not in cad_data:
+            return jsonify({'status': 'error',
+                            'error': 'CAD montajı üretilemedi'}), 500
+        stl_files = cad_designer.export_stl_files(cad_data['assembly_meshes'])
+        if not stl_files:
+            return jsonify({'status': 'error',
+                            'error': 'STL üretilemedi'}), 500
+        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        arc = {os.path.basename(p): p for p in stl_files}
+        buf = _zip_files(arc, readme_text=(
+            'HRMA STL export\n'
+            'Watertight closed-profile revolve solids from solver geometry.\n'
+            'motor_assembly.stl = combined single-file model.\n'
+            'Units: millimetres. Suitable for 3D printing / CAM import.\n'))
+        return send_file(buf, as_attachment=True,
+                         download_name=f'{name}_STL_package.zip',
+                         mimetype='application/zip')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/export-complete-zip', methods=['POST'])
+def export_complete_zip():
+    """Komple tasarım paketi: STL + DXF + çizim PDF'i + STEP + .eng + geometri.
+
+    Her alt üretici bağımsız denenir; başaramayanlar MANIFEST'te 'FAILED'
+    olarak raporlanır (paket sessizce eksilmez).
+    """
+    try:
+        motor_data = (request.json or {}).get('motor_data', {})
+        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        arc = {}
+        manifest = []
+
+        def attempt(label, fn):
+            try:
+                fn()
+                manifest.append(f'[OK]     {label}')
+            except Exception as exc:
+                manifest.append(f'[FAILED] {label}: {exc}')
+
+        def add_stl():
+            cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
+            for p in cad_designer.export_stl_files(cad_data['assembly_meshes']):
+                arc[f'stl/{os.path.basename(p)}'] = p
+
+        def add_dxf():
+            from hrma.export.drawing_generator import generate_dxf
+            arc[f'drawings/{name}_profile.dxf'] = generate_dxf(motor_data)
+
+        def add_drawpdf():
+            from hrma.export.drawing_generator import generate_drawing_pdf
+            arc[f'drawings/{name}_technical_drawings.pdf'] = \
+                generate_drawing_pdf(motor_data)
+
+        def add_step():
+            from hrma.export.step_export import generate_step_assembly
+            for k, p in generate_step_assembly(motor_data).items():
+                arc[f'step/{name}_{k}.step'] = p
+
+        eng_holder = {}
+
+        def add_eng():
+            eng_holder['content'] = openrocket_exporter.export_motor_file(motor_data)
+
+        attempt('STL solids', add_stl)
+        attempt('DXF manufacturing profile', add_dxf)
+        attempt('Technical drawing PDF', add_drawpdf)
+        attempt('STEP solids (build123d)', add_step)
+        attempt('OpenRocket .eng (real thrust curve if transient present)', add_eng)
+
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for arcname, path in arc.items():
+                if path and os.path.exists(path):
+                    zf.write(path, arcname)
+            if eng_holder.get('content'):
+                zf.writestr(f'openrocket/{name}.eng', eng_holder['content'])
+            zf.writestr('geometry/motor_geometry.json',
+                        json.dumps(sanitize_json_values(motor_data), indent=2))
+            zf.writestr('MANIFEST.txt',
+                        'HRMA COMPLETE DESIGN PACKAGE\n'
+                        + datetime.now().strftime('%Y-%m-%d %H:%M') + '\n\n'
+                        + '\n'.join(manifest) + '\n')
+        buf.seek(0)
+        return send_file(buf, as_attachment=True,
+                         download_name=f'{name}_complete_package.zip',
+                         mimetype='application/zip')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 
 @app.route('/api/export-cad', methods=['POST'])
 def export_cad_files():
