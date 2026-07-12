@@ -1777,6 +1777,8 @@
                         <button class="viz-btn warn" id="viz_btn_heat" onclick="vizToggleHeat(this)">Heat Map</button>
                         <button class="viz-btn warn" id="viz_btn_design" onclick="vizToggleDesign(this)">Design Mode</button>
                         <button class="viz-btn" id="viz_btn_rot" onclick="vizToggle('autoRotate', this)">Orbit</button>
+                        <button class="viz-btn" onclick="vizCycleCam(this)" id="viz_btn_cam">Cam: Iso</button>
+                        <button class="viz-btn" onclick="vizToggleQuality(this)" id="viz_btn_quality">HQ</button>
                         <button class="viz-btn" onclick="vizCycleSpeed(this)" id="viz_btn_speed">1&times;</button>
                         <button class="viz-btn" onclick="reset3DView()">Reset View</button>
                     </div>
@@ -1823,6 +1825,7 @@
                     <div class="viz-chip" id="viz_chip_of"><div class="k">O/F Ratio</div><div class="v" id="viz_v_of">—</div></div>
                     <div class="viz-chip" id="viz_chip_isp"><div class="k">Isp</div><div class="v" id="viz_v_isp">—</div></div>
                     <div class="viz-chip" id="viz_chip_thrust"><div class="k">Thrust</div><div class="v" id="viz_v_thrust">—</div></div>
+                    <div class="viz-chip" id="viz_chip_pc" style="display:none;"><div class="k">P<sub>c</sub>(t)</div><div class="v" id="viz_v_pc">—</div></div>
                 </div>
                 <!-- Three.js yüklenemezse eski Plotly 3D buraya düşer -->
                 <div id="motor_3d_plot" style="display: none;"></div>
@@ -4111,6 +4114,26 @@
             if (btn) btn.classList.toggle('active', next);
         }
 
+        // Kamera preset döngüsü: Iso → Side → Nozzle → Injector
+        function vizCycleCam(btn) {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            const name = v.cycleCameraPreset();
+            if (btn && name) btn.textContent = 'Cam: ' + name.charAt(0).toUpperCase() + name.slice(1);
+        }
+
+        // Kalite anahtarı: HQ (tam) ↔ PERF (düşük pixelRatio + az partikül)
+        function vizToggleQuality(btn) {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            const mode = (btn && btn.textContent === 'HQ') ? 'perf' : 'high';
+            v.setQuality(mode);
+            if (btn) {
+                btn.textContent = mode === 'perf' ? 'PERF' : 'HQ';
+                btn.classList.toggle('active', mode === 'perf');
+            }
+        }
+
         function vizPlayPause() {
             const v = window.MotorViz3D && MotorViz3D.get();
             if (!v) return;
@@ -4162,6 +4185,16 @@
             setVizChip('viz_v_isp', s.isp ? s.isp.toFixed(1) : '—', 's', s.burning, 'viz_chip_isp');
             const thrustTxt = s.thrust >= 1000 ? (s.thrust / 1000).toFixed(2) : s.thrust.toFixed(0);
             setVizChip('viz_v_thrust', s.thrust > 0 ? thrustTxt : '0', s.thrust >= 1000 ? 'kN' : 'N', s.burning, 'viz_chip_thrust');
+            // Transient bağlıysa anlık kamara basıncı chip'i görünür olur
+            const pcChip = document.getElementById('viz_chip_pc');
+            if (pcChip) {
+                if (s.pc !== null && s.pc !== undefined) {
+                    pcChip.style.display = '';
+                    setVizChip('viz_v_pc', (s.pc / 1e5).toFixed(1), 'bar', s.burning, 'viz_chip_pc');
+                } else {
+                    pcChip.style.display = 'none';
+                }
+            }
         }
 
         function setVizChip(valueId, val, unit, hot, chipId) {

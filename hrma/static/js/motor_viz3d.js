@@ -1107,7 +1107,11 @@
         var col = geo.attributes.color.array;
         var st = this._pState;
         var zExit = this._nozzleInfo.zExit;
-        var active = Math.floor(this._plumeN * clamp(intensity, 0, 1));
+        // Kalite anahtarı (perf modu) partikül tavanını düşürür
+        var qf = this._qualityFactor || 1.0;
+        var active = Math.floor(this._plumeN * qf * clamp(intensity, 0, 1));
+        // İtkiyle orantılı jet: eksenel hız ve plume boyu intensity ile ölçeklenir
+        var velScale = 0.55 + 0.45 * clamp(intensity, 0, 1);
         for (var i = 0; i < this._plumeN; i++) {
             var o5 = i * 5, o3 = i * 3;
             if (i >= active) { col[o3] = col[o3 + 1] = col[o3 + 2] = 0; continue; }
@@ -1120,7 +1124,7 @@
                 pos[o3 + 2] = rs * Math.cos(st[o5 + 2]);
             }
             var f = st[o5 + 3] / st[o5 + 4]; // 0..1 yaşam oranı
-            pos[o3 + 1] += st[o5 + 0] * dt;
+            pos[o3 + 1] += st[o5 + 0] * dt * velScale;
             var vr = st[o5 + 1] * dt * (0.4 + f * 1.6);
             pos[o3 + 0] += Math.sin(st[o5 + 2]) * vr;
             pos[o3 + 2] += Math.cos(st[o5 + 2]) * vr;
@@ -1255,7 +1259,36 @@
             if (st.time >= d.burnTime) { st.time = d.burnTime; st.playing = false; }
         }
         var burning = st.playing && st.time < d.burnTime;
-        var throttle = burning ? 1 : 0;
+        // Throttle artık İKİLİ DEĞİL: transient eğri verildiyse plume/ışıklar
+        // anlık itkiyle orantılı (F(t)/F_max); yoksa eski tam-gaz davranışı.
+        var thrustNow = null, pcNow = null;
+        if (this._transient) {
+            thrustNow = sampleSeries(this._transient.time, this._transient.thrust,
+                Math.min(st.time, this._transient.tEnd));
+            if (this._transient.pc) {
+                pcNow = sampleSeries(this._transient.time, this._transient.pc,
+                    Math.min(st.time, this._transient.tEnd));
+            }
+        }
+        var throttle = 0;
+        if (burning) {
+            throttle = (thrustNow !== null && this._transient.thrustMax > 0)
+                ? clamp(thrustNow / this._transient.thrustMax, 0.05, 1)
+                : 1;
+        }
+
+        // Isı haritası zaman modülasyonu: q ∝ Pc^0.8 (Bartz) — vertex
+        // renklerini yeniden hesaplamadan materyal parlaklığıyla uygulanır.
+        if (this.state.heatMap && this._heatMat) {
+            var amp = 1.0;
+            if (burning && pcNow !== null && this._transient.pc0 > 0) {
+                amp = clamp(Math.pow(pcNow / this._transient.pc0, 0.8), 0.35, 1.15);
+            } else if (!burning && this._transient) {
+                amp = 0.35; // yanma yok → soğuyan duvar görünümü
+            }
+            this._heatMat.color.setScalar(amp);
+            this._heatMatCut.color.setScalar(amp);
+        }
 
         // Port regresyonu
         var rP = portRadiusAt(d, st.time);
@@ -1314,7 +1347,12 @@
                 webRemaining: clamp((d.rGrainOut - rP) / Math.max(d.rGrainOut - d.rPort0, 1e-6), 0, 1),
                 of: ofNow !== null ? ofNow : d.of0,
                 isp: ispNow !== null ? ispNow : d.isp,
-                thrust: st.time < d.burnTime ? d.thrust : 0,
+                // Transient eğri varsa GERÇEK anlık itki; yoksa tasarım sabiti
+                thrust: thrustNow !== null
+                    ? (st.time < d.burnTime ? thrustNow : 0)
+                    : (st.time < d.burnTime ? d.thrust : 0),
+                pc: pcNow,                      // Pa (transient varsa) | null
+                throttle: throttle,
                 burning: burning
             });
         }
@@ -1398,6 +1436,55 @@
         this.controls.target.set(0, 0, 0);
         this._introT = 1;
     };
+    // Transient veri bağla: {time[], thrust[] (N), chamber_pressure[] (Pa)?}
+    // Plume/ışıklar F(t)/F_max ile, ısı haritası (Pc/Pc0)^0.8 ile modüle edilir;
+    // HUD anlık itki/Pc yayınlar. null geçilirse eski sabit davranışa döner.
+    MotorScene.prototype.setTransient = function (tr) {
+        if (!tr || !tr.time || !tr.thrust || tr.time.length < 3) {
+            this._transient = null;
+            return;
+        }
+        var tmax = 0;
+        for (var i = 0; i < tr.thrust.length; i++) tmax = Math.max(tmax, tr.thrust[i]);
+        this._transient = {
+            time: tr.time,
+            thrust: tr.thrust,
+            pc: tr.chamber_pressure || null,
+            pc0: tr.chamber_pressure ? tr.chamber_pressure[0] : 0,
+            thrustMax: tmax,
+            tEnd: tr.time[tr.time.length - 1]
+        };
+        // Yanma süresi timeline'ı gerçek transient süresine oturt
+        this.dims.burnTime = this._transient.tEnd;
+    };
+    // Kamera preset'leri: iso (ana), side (tam yan), nozzle (egzoz arkası),
+    // injector (baş taraf). Mesafe _camHome yarıçapından türetilir.
+    MotorScene.prototype.setCameraPreset = function (name) {
+        var r = this._camHome.length();
+        var presets = {
+            iso: this._camHome.clone(),
+            side: new THREE.Vector3(0, 0, r),
+            nozzle: new THREE.Vector3(r * 0.85, -r * 0.25, r * 0.35),
+            injector: new THREE.Vector3(-r * 0.85, r * 0.25, r * 0.35)
+        };
+        var p = presets[name] || presets.iso;
+        this.camera.position.copy(p);
+        this.controls.target.set(0, 0, 0);
+        this._introT = 1;
+        return name;
+    };
+    MotorScene.prototype.cycleCameraPreset = function () {
+        var order = ['iso', 'side', 'nozzle', 'injector'];
+        this._camPresetIdx = ((this._camPresetIdx || 0) + 1) % order.length;
+        return this.setCameraPreset(order[this._camPresetIdx]);
+    };
+    // Kalite anahtarı: 'high' (varsayılan) | 'perf' — pixelRatio + partikül tavanı
+    MotorScene.prototype.setQuality = function (mode) {
+        var perf = mode === 'perf';
+        this._qualityFactor = perf ? 0.45 : 1.0;
+        this.renderer.setPixelRatio(perf ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+        return perf ? 'perf' : 'high';
+    };
     MotorScene.prototype.dispose = function () {
         this._disposed = true;
         if (this._raf) cancelAnimationFrame(this._raf);
@@ -1444,6 +1531,11 @@
             if (viz) viz.update(motorData);
             return viz;
         },
+        // Transient itki/basınç eğrisini canlı sahneye bağla
+        setTransient: function (tr) { if (viz) viz.setTransient(tr); },
+        setCameraPreset: function (name) { return viz ? viz.setCameraPreset(name) : null; },
+        cycleCameraPreset: function () { return viz ? viz.cycleCameraPreset() : null; },
+        setQuality: function (mode) { return viz ? viz.setQuality(mode) : null; },
         get: function () { return viz; },
         dispose: function () { if (viz) { viz.dispose(); viz = null; } }
     };

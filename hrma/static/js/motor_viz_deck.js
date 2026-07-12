@@ -56,6 +56,8 @@
                 : '') +
             '      <button class="viz-btn warn" id="' + p + '_btn_heat">Heat Map</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_rot">Orbit</button>' +
+            '      <button class="viz-btn" id="' + p + '_btn_cam">Cam: Iso</button>' +
+            '      <button class="viz-btn" id="' + p + '_btn_quality">HQ</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_reset">Reset View</button>' +
             '    </div>' +
             '  </div>' +
@@ -166,6 +168,21 @@
         toggleBtn(p + '_btn_rot', 'autoRotate', viz.setAutoRotate);
         var resetBtn = el(p + '_btn_reset');
         if (resetBtn) resetBtn.onclick = function () { viz.resetCamera(); };
+
+        // Kamera preset döngüsü (Iso → Side → Nozzle → Injector)
+        var camBtn = el(p + '_btn_cam');
+        if (camBtn) camBtn.onclick = function () {
+            var name = viz.cycleCameraPreset();
+            if (name) camBtn.textContent = 'Cam: ' + name.charAt(0).toUpperCase() + name.slice(1);
+        };
+        // Kalite anahtarı: HQ ↔ PERF (düşük pixelRatio + az partikül)
+        var qBtn = el(p + '_btn_quality');
+        if (qBtn) qBtn.onclick = function () {
+            var mode = qBtn.textContent === 'HQ' ? 'perf' : 'high';
+            viz.setQuality(mode);
+            qBtn.textContent = mode === 'perf' ? 'PERF' : 'HQ';
+            qBtn.classList.toggle('active', mode === 'perf');
+        };
 
         var portBtn = el(p + '_btn_portshape');
         if (portBtn) portBtn.onclick = function () { viz.cyclePortShape(); syncPortBtn(); };
