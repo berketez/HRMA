@@ -664,6 +664,30 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="/static/js/motor_viz3d.js"></script>
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/transient_panel.js"></script>
+    <script src="/static/js/sixdof_panel.js"></script>
+    <script>
+        // Transient + 6-DOF panelleri (yeni fizik katmanlarının UI'ı)
+        document.addEventListener('DOMContentLoaded', function () {
+            TransientPanel.init({ anchorId: 'trajectoryPanel' });
+            SixDofPanel.init({
+                anchorId: 'trajectoryPanel',
+                thrustProvider: function () {
+                    // Öncelik: transient eğrisi → tasarım sabit itkisi
+                    const tr = TransientPanel.result;
+                    if (tr && tr.transient && tr.transient.time.length > 3) {
+                        return { thrust_curve: { time: tr.transient.time,
+                                                 thrust: tr.transient.thrust } };
+                    }
+                    if (window.currentResults && currentResults.motor) {
+                        return { thrust: currentResults.motor.thrust,
+                                 burn_time: currentResults.motor.burn_time };
+                    }
+                    return null;
+                },
+            });
+        });
+    </script>
 </head>
 <body>
     <!-- Navigation Bar -->

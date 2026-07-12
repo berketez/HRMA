@@ -2764,5 +2764,23 @@ Please provide:
             }
         }
     </script>
+    <script src="/static/js/sixdof_panel.js"></script>
+    <script>
+        // 6-DOF uçuş paneli — katı motorun GERÇEK itki eğrisiyle zincirlenir
+        document.addEventListener('DOMContentLoaded', function () {
+            SixDofPanel.init({
+                thrustProvider: function () {
+                    if (window.currentResults && currentResults.thrust_curve &&
+                        currentResults.thrust_curve.time &&
+                        currentResults.thrust_curve.time.length > 3) {
+                        return { thrust_curve: {
+                            time: currentResults.thrust_curve.time,
+                            thrust: currentResults.thrust_curve.thrust } };
+                    }
+                    return null;
+                },
+            });
+        });
+    </script>
 </body>
 </html>

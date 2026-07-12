@@ -3596,5 +3596,21 @@ Please provide:
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="/static/js/motor_viz3d.js"></script>
     <script src="/static/js/motor_viz_deck.js"></script>
+    <script src="/static/js/sixdof_panel.js"></script>
+    <script>
+        // 6-DOF uçuş paneli — sıvı motorda sabit itki (sürekli rejim)
+        document.addEventListener('DOMContentLoaded', function () {
+            SixDofPanel.init({
+                thrustProvider: function () {
+                    if (window.currentResults && currentResults.thrust) {
+                        return { thrust: currentResults.thrust,
+                                 burn_time: parseFloat(
+                                     (document.getElementById('sd_burn') || {}).value) || 10 };
+                    }
+                    return null;
+                },
+            });
+        });
+    </script>
 </body>
 </html>
