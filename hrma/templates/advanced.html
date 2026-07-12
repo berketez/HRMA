@@ -3067,7 +3067,8 @@
                 
                 // Advanced parameters
                 l_star: parseFloat(document.getElementById('l_star').value || 1.0),
-                expansion_ratio: parseFloat(document.getElementById('expansion_ratio').value || 16) || 16,
+                // 0 = auto (backend optimum genişleme hesaplar); "|| 16" fallback'i 0'ı eziyordu
+                expansion_ratio: Math.max(0, parseFloat(document.getElementById('expansion_ratio').value) || 0),
                 nozzle_type: document.getElementById('nozzle_type').value || 'conical',
                 combustion_type: document.getElementById('combustion_type').value || 'infinite',
                 chamber_diameter_input: parseFloat(document.getElementById('chamber_diameter_input').value || 0),
@@ -3965,7 +3966,7 @@
             </div>
             <div class="spec-item">
                 <div class="spec-label">Specific Impulse</div>
-                <div>${cadData.performance_summary.isp || 250} s</div>
+                <div>${Number(cadData.performance_summary.isp || 250).toFixed(1)} s</div>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Burn Time</div>

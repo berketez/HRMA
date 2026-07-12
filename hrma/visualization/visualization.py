@@ -2064,16 +2064,35 @@ def create_improved_motor_cross_section(motor_data):
                        showarrow=False, font=dict(size=11, color=INK))
 
     # ---------------- Yerleşim (dijital blueprint) ----------------
+    # Eksen aralıkları AÇIKÇA verilir; scaleanchor KULLANILMAZ. Plotly
+    # 1.58.5'te scaleanchor+autorange gizli konteynerde aralığı yüz binlere
+    # şişiriyor, constrain='domain' ile de domain'i sıfıra çökertiyordu
+    # (tutarlı ~185x hata). 1:1 ölçek yerine, x aralığı nominal çizim alanı
+    # en-boy oranına (~3.9) eşitlenerek yaklaşık gerçek ölçek elde edilir —
+    # deterministik, patlamaz.
+    x_min = -cap_t - 45
+    x_max = z_exit + 60
+    y_max = max(r_out + 62, re + wall_noz + 48)
+    ASPECT = 3.9  # nominal iç çizim alanı (genişlik/yükseklik), height=520+marj
+    x_span_needed = 2.0 * y_max * ASPECT
+    x_span = x_max - x_min
+    if x_span < x_span_needed:
+        pad = 0.5 * (x_span_needed - x_span)
+        x_min -= pad
+        x_max += pad
+    else:
+        y_max = 0.5 * x_span / ASPECT
     fig.update_layout(
         title=dict(text='MOTOR EKSENEL KESİTİ — ÇÖZÜCÜ GEOMETRİSİ',
                    x=0.5, font=dict(size=15, color='#eaf7fb')),
         xaxis=dict(title='Eksenel konum (mm)', showgrid=True,
                    gridcolor='rgba(0,229,255,0.07)', zeroline=False,
-                   scaleanchor='y', scaleratio=1,
+                   range=[x_min, x_max],
                    tickfont=dict(color='#7d97a5'),
                    title_font=dict(color='#7d97a5')),
         yaxis=dict(title='Yarıçap (mm)', showgrid=True,
                    gridcolor='rgba(0,229,255,0.07)', zeroline=False,
+                   range=[-y_max, y_max],
                    tickfont=dict(color='#7d97a5'),
                    title_font=dict(color='#7d97a5')),
         plot_bgcolor='rgba(8,16,28,0.35)', paper_bgcolor='rgba(0,0,0,0)',

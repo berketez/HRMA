@@ -432,13 +432,14 @@ function displayPlots(plots) {
                         parsedData.layout.margin = { l: 60, r: 30, t: 60, b: 60 };
                     }
                     // Yükseklik: layout'taki değeri konteynere sabitle ki panel
-                    // içeriğe göre büyüsün (SVG taşması / panel çakışması önlenir)
+                    // içeriğe göre büyüsün (SVG taşması / panel çakışması önlenir).
+                    // layout.height SİLİNMEZ: autosize gizli/animasyonlu konteyneri
+                    // ~140px ölçüp iç çizim alanını 2px'e eziyordu (motor_plot bugı).
+                    // Genişlik responsive kalır (width=undefined), yükseklik sabit.
                     if (parsedData.layout.height) {
                         element.style.height = parsedData.layout.height + 'px';
                     }
-                    // Genişlik responsive kalır
                     parsedData.layout.width = undefined;
-                    parsedData.layout.height = undefined;
                 }
                 
                 Plotly.newPlot(elementId, parsedData.data, parsedData.layout, config);
