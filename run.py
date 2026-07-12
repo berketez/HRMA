@@ -22,10 +22,26 @@ def open_browser():
     except:
         pass  # Ignore browser opening errors
 
+def check_python_version():
+    """Desteklenen Python aralığını doğrula (3.10–3.13; önerilen 3.12).
+
+    3.14+ desteklenmez: Cantera / CoolProp / RocketCEA gibi derlenmiş
+    bağımlılıkların 3.14 wheel'leri yok.
+    """
+    v = sys.version_info
+    if v < (3, 10):
+        print(f"Error: Python {v.major}.{v.minor} detected. Python 3.10+ is required (3.12 recommended).")
+        sys.exit(1)
+    if v >= (3, 14):
+        print(f"Error: Python {v.major}.{v.minor} is not supported yet (compiled dependencies "
+              f"such as Cantera/CoolProp lack 3.14 wheels). Please use Python 3.12.")
+        sys.exit(1)
+
 def run_server():
     """Run the web server with platform-specific settings"""
+    check_python_version()
     from hrma.app import app
-    
+
     print("=" * 60)
     print("  HYBRID ROCKET MOTOR ANALYSIS WEB TOOL")
     print("  http://localhost:8080")

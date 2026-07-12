@@ -1,13 +1,17 @@
-# HRMA - Hybrid Rocket Motor Analysis
+# HRMA - High-Fidelity Rocket Motor Analysis
 
-A comprehensive web-based tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and 3D visualizations.
+A comprehensive web-based tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D digital twin of your motor.
 
 ## Features
 
 - **Three Motor Types**: Hybrid (HTPB/N2O, etc.), Solid (APCP, KNSB, etc.), Liquid (RP-1/LOX, LH2/LOX, etc.)
 - **Optimal Design Output**: Nozzle angles, grain geometry, injector sizing, wall thickness — all calculated from first principles
-- **3D Visualization**: Interactive Plotly-based motor assembly views
-- **NASA CEA Integration**: Real thermochemical data via RocketCEA
+- **3D Digital Twin (Three.js/WebGL)**: Parametric motor simulation built live from solver output — cutaway view, burn animation driven by the computed port regression history, exploded view, dimension labels, and exhaust plume
+- **Interactive Design Mode**: Chamber diameter / L* / expansion ratio sliders with ~1 s geometry recompute (`/api/quick-geometry`); 3D model and 2D cross-section update live
+- **Grain Port Cross-Sections**: Circular, star, multi-port, and finocyl port shapes (area-equivalent visualization; ballistics solved with the circular-equivalent port)
+- **Wall Heat-Flux Map**: Chamber/nozzle surface colored by Bartz-distributed heat flux with real q and T_wall anchors from the heat transfer module
+- **Real-Geometry CAD Export**: STL solids revolved from the same nozzle contour used by the solver and the 2D drawing (watertight, single source of truth)
+- **NASA CEA Integration**: Real thermochemical data via RocketCEA; hybrid thermochemistry computed by the built-in Cantera equilibrium solver
 - **Performance Analysis**: Thrust curves, Isp, trajectory simulation, heat transfer, structural analysis
 - **Export**: STL files, OpenRocket .eng files, PDF reports
 
@@ -71,7 +75,7 @@ HRMA/
 │   ├── visualization/      # Plotly charts & dashboards
 │   ├── utils/              # Helpers & utilities
 │   ├── templates/          # HTML templates
-│   └── static/             # CSS & JS
+│   └── static/             # Dark theme CSS + JS (Three.js motor viz, Plotly wrappers)
 ├── data/                   # Runtime databases & cache
 ├── tests/                  # Test suite
 └── docs/                   # Documentation
@@ -79,7 +83,7 @@ HRMA/
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10–3.13 (**3.12 recommended**; 3.14 not supported yet — compiled dependencies lack wheels)
 - Flask, NumPy, SciPy, Plotly, Matplotlib
 - RocketCEA (NASA CEA wrapper)
 - CoolProp (thermodynamic properties)
@@ -94,8 +98,8 @@ HRMA/
    - Grain geometry (web thickness, segments, Kn range)
    - Injector sizing (orifice diameter, pressure drop)
    - Performance metrics (Isp, c*, CF, thrust curve)
-   - 3D motor visualization
-   - Exportable STL/CAD files
+   - Interactive 3D digital twin (cutaway, burn animation, heat map)
+   - Exportable STL/CAD files generated from the real solver geometry
 
 ## Key Equations
 
@@ -117,11 +121,11 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## Version
 
-**HRMA v2.0**
+**HRMA v2.1**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - Professional Rocket Propulsion Design Tool
-- Last Updated: 2026
+- Last Updated: July 2026 (dark mission-control UI, Three.js digital twin, interactive design mode)
 
 ## Ready to Design?
 

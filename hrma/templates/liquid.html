@@ -1969,7 +1969,7 @@
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Throat Diameter:</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${results.throat_diameter.toFixed(1)} mm</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${(results.throat_diameter * 1000).toFixed(1)} mm</td>
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Expansion Ratio:</strong></td>
@@ -3045,8 +3045,9 @@
                 },
                 
                 engine_geometry: {
-                    throat_diameter_mm: currentResults.throat_diameter,
-                    exit_diameter_mm: currentResults.exit_diameter,
+                    // throat/exit backend'den METRE gelir, chamber mm (bkz. buildLiquidVizData notu)
+                    throat_diameter_mm: currentResults.throat_diameter * 1000,
+                    exit_diameter_mm: currentResults.exit_diameter * 1000,
                     expansion_ratio: currentResults.expansion_ratio,
                     chamber_diameter_mm: currentResults.chamber_diameter,
                     chamber_length_mm: currentResults.chamber_length
@@ -3236,11 +3237,13 @@ Please provide:
             if (!cadContainer) return;
 
             // Engine dimensions from results
+            // DİKKAT: /calculate_liquid KARIŞIK birim döner — chamber mm,
+            // throat/exit/nozzle_length METRE (bkz. buildLiquidVizData notu).
             const chamberDiameter = results.chamber_diameter || 200; // mm
             const chamberLength = results.chamber_length || 300; // mm
-            const throatDiameter = results.throat_diameter || 50; // mm
-            const exitDiameter = results.exit_diameter || 150; // mm
-            const nozzleLength = results.nozzle_length || 200; // mm
+            const throatDiameter = (typeof results.throat_diameter === 'number' && isFinite(results.throat_diameter)) ? results.throat_diameter * 1000 : 50; // m → mm
+            const exitDiameter = (typeof results.exit_diameter === 'number' && isFinite(results.exit_diameter)) ? results.exit_diameter * 1000 : 150; // m → mm
+            const nozzleLength = (typeof results.nozzle_length === 'number' && isFinite(results.nozzle_length)) ? results.nozzle_length * 1000 : 200; // m → mm
             
             console.log('CAD Visualization - Dimensions:', {
                 chamberDiameter, chamberLength, throatDiameter, exitDiameter, nozzleLength
@@ -3586,7 +3589,7 @@ Please provide:
     </script>
     
     <!-- Include Plotly for 3D visualization -->
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-1.58.5.min.js"></script>
     <script src="/static/js/plotly_dark.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls + parametrik motor simülasyon güvertesi -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>

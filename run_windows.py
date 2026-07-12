@@ -172,9 +172,15 @@ def main():
     """Main function with error handling"""
     clear_screen()
     
-    # Check Python version
-    if sys.version_info < (3, 7):
-        print("✗ Python 3.7 or higher is required")
+    # Check Python version (3.10–3.13 desteklenir, 3.12 önerilir; 3.14+ wheel'siz)
+    if sys.version_info < (3, 10):
+        print("✗ Python 3.10 or higher is required (3.12 recommended)")
+        print(f"Current version: {sys.version}")
+        input("Press Enter to exit...")
+        return
+    if sys.version_info >= (3, 14):
+        print("✗ Python 3.14+ is not supported yet (Cantera/CoolProp/RocketCEA lack wheels)")
+        print("  Please use Python 3.12.")
         print(f"Current version: {sys.version}")
         input("Press Enter to exit...")
         return

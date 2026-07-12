@@ -11,11 +11,16 @@ import subprocess
 import importlib.util
 
 def check_python_version():
-    """Check if Python version is adequate"""
+    """Check if Python version is adequate (3.10–3.13 supported, 3.12 recommended)"""
     version = sys.version_info
-    if version.major < 3 or (version.major == 3 and version.minor < 7):
+    if version.major < 3 or (version.major == 3 and version.minor < 10):
         print(f"Error: Python {version.major}.{version.minor} detected.")
-        print("Python 3.7 or higher is required.")
+        print("Python 3.10 or higher is required (3.12 recommended).")
+        return False
+    if (version.major, version.minor) >= (3, 14):
+        print(f"Error: Python {version.major}.{version.minor} detected.")
+        print("Python 3.14+ is not supported yet: compiled dependencies (Cantera,")
+        print("CoolProp, RocketCEA) do not ship 3.14 wheels. Please use Python 3.12.")
         return False
     print(f"✓ Python {version.major}.{version.minor}.{version.micro} detected")
     return True

@@ -657,7 +657,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/theme.css">
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-1.58.5.min.js"></script>
     <script src="/static/js/plotly_dark.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls: 3D motor simülasyonu için -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -1028,8 +1028,8 @@
                             <span class="tooltip-text">Empirical constant in regression rate equation r = a × G^n, where G is oxidizer mass flux. Material-specific value obtained from ballistic testing. Higher values indicate faster-burning fuels.</span>
                         </div>
                     </label>
-                    <input type="number" id="regression_a" value="0.0003" step="0.0001" min="0.0001" max="0.01">
-                    <div class="help-text">Empirical coefficient for r = a × G^n</div>
+                    <input type="number" id="regression_a" value="0.0000368" step="any" min="0.000001" max="0.01">
+                    <div class="help-text">Empirical coefficient for r = a × G^n (SI). Literature values: HTPB 3.68e-5 (Doran), paraffin 1.17e-4 (Karabeyoglu)</div>
                 </div>
                 <div class="form-group">
                     <label>
@@ -1039,8 +1039,8 @@
                             <span class="tooltip-text">Power law exponent in regression rate equation r = a × G^n. Determines sensitivity to oxidizer mass flux. Lower values (0.3-0.5) provide more stable combustion, higher values (0.6-0.8) are more mass flux sensitive.</span>
                         </div>
                     </label>
-                    <input type="number" id="regression_n" value="0.5" step="0.1" min="0.1" max="1.0">
-                    <div class="help-text">Typical values: HTPB=0.5, PE=0.8, PMMA=0.65</div>
+                    <input type="number" id="regression_n" value="0.555" step="any" min="0.1" max="1.0">
+                    <div class="help-text">Typical values: HTPB=0.555, PE=0.498, PMMA=0.615, paraffin=0.62</div>
                 </div>
             </div>
             
@@ -2387,19 +2387,21 @@
             const regressionA = document.getElementById('regression_a');
             const regressionN = document.getElementById('regression_n');
             
-            // Default fuel properties - matching backend values
+            // Varsayılan yakıt özellikleri — hrma/data/propellant_database.py
+            // HYBRID_REGRESSION_COEFFICIENTS (SI, literatür kaynaklı) ile AYNI olmalı.
+            // Değer değişikliği ORADA yapılır, buraya kopyalanır (magic-number kuralı).
             const fuelProperties = {
-                'htpb': { density: 920, a: 0.0003, n: 0.5, description: 'Hydroxyl-terminated polybutadiene' },
-                'pe': { density: 950, a: 0.00025, n: 0.62, description: 'Polyethylene' },
-                'pmma': { density: 1180, a: 0.00015, n: 0.55, description: 'Polymethyl methacrylate' },
-                'paraffin': { density: 900, a: 0.0005, n: 0.62, description: 'Paraffin wax - high regression rate' },
-                'abs': { density: 1040, a: 0.00018, n: 0.58, description: 'ABS plastic' },
-                'pla': { density: 1250, a: 0.00012, n: 0.52, description: 'PLA plastic' },
-                'carbon': { density: 2200, a: 0.00008, n: 0.45, description: 'Carbon/Graphite' },
-                'aluminum': { density: 2700, a: 0.00005, n: 0.4, description: 'Aluminum powder' },
-                'al2o3': { density: 3950, a: 0.00003, n: 0.35, description: 'Aluminum oxide' },
-                'mixture': { density: 920, a: 0.0003, n: 0.5, description: 'Custom mixture' },
-                'custom': { density: 920, a: 0.0003, n: 0.5, description: 'Custom composition' }
+                'htpb': { density: 920, a: 3.68e-5, n: 0.555, description: 'Hydroxyl-terminated polybutadiene (Doran, AIAA 2007-5352)' },
+                'pe': { density: 960, a: 4.19e-5, n: 0.498, description: 'Polyethylene (Zilliac & Karabeyoglu, AIAA 2006-4504)' },
+                'pmma': { density: 1180, a: 2.11e-5, n: 0.615, description: 'Polymethyl methacrylate (Zilliac & Karabeyoglu, AIAA 2006-4504)' },
+                'paraffin': { density: 900, a: 1.17e-4, n: 0.62, description: 'Paraffin wax - high regression rate (Karabeyoglu, JPP 2004)' },
+                'abs': { density: 1040, a: 3.68e-5, n: 0.555, description: 'ABS plastic (≈HTPB/N2O; Whitmore & Peterson, JPP 2013)' },
+                'pla': { density: 1250, a: 1.2e-4, n: 0.52, description: 'PLA plastic (unverified correlation)' },
+                'carbon': { density: 2200, a: 8.0e-5, n: 0.45, description: 'Carbon/Graphite (unverified correlation)' },
+                'aluminum': { density: 2700, a: 5.0e-5, n: 0.4, description: 'Aluminum powder (unverified correlation)' },
+                'al2o3': { density: 3950, a: 3.0e-5, n: 0.35, description: 'Aluminum oxide (unverified correlation)' },
+                'mixture': { density: 920, a: 3.68e-5, n: 0.555, description: 'Custom mixture' },
+                'custom': { density: 920, a: 3.68e-5, n: 0.555, description: 'Custom composition' }
             };
             
             // Hide all custom sections first
@@ -2549,28 +2551,29 @@
             document.getElementById('fuel_density').value = weightedDensity.toFixed(0);
             
             // Estimate regression rate based on mixture
-            let regressionA = 0.0003; // Default HTPB value
-            let regressionN = 0.5;
-            
-            // Weighted average for regression parameters
+            // Bileşen katsayıları HYBRID_REGRESSION_COEFFICIENTS (SI) ile uyumlu
+            let regressionA = 3.68e-5; // Default HTPB value (Doran, AIAA 2007-5352)
+            let regressionN = 0.555;
+
+            // Weighted average for regression parameters (kaba yaklaşım)
             if (total > 0) {
-                regressionA = (paraffin * 0.0008 + 
-                              carbon * 0.00001 + 
-                              al2o3 * 0.000001 + 
-                              aluminum * 0.00005 + 
-                              htpb * 0.0003 + 
-                              other * 0.0002) / total;
-                              
-                regressionN = (paraffin * 0.5 + 
-                              carbon * 0.3 + 
-                              al2o3 * 0.2 + 
-                              aluminum * 0.4 + 
-                              htpb * 0.5 + 
-                              other * 0.5) / total;
+                regressionA = (paraffin * 1.17e-4 +
+                              carbon * 8.0e-5 +
+                              al2o3 * 3.0e-5 +
+                              aluminum * 5.0e-5 +
+                              htpb * 3.68e-5 +
+                              other * 3.68e-5) / total;
+
+                regressionN = (paraffin * 0.62 +
+                              carbon * 0.45 +
+                              al2o3 * 0.35 +
+                              aluminum * 0.40 +
+                              htpb * 0.555 +
+                              other * 0.555) / total;
             }
-            
-            document.getElementById('regression_a').value = regressionA.toFixed(6);
-            document.getElementById('regression_n').value = regressionN.toFixed(2);
+
+            document.getElementById('regression_a').value = regressionA.toExponential(3);
+            document.getElementById('regression_n').value = regressionN.toFixed(3);
             
             // Update regression estimate text
             let regressionText = 'Custom mixture properties';
@@ -3076,8 +3079,8 @@
                 // Fuel
                 fuel_type: document.getElementById('fuel_type').value || 'htpb',
                 fuel_density: parseFloat(document.getElementById('fuel_density').value || 920),
-                regression_a: parseFloat(document.getElementById('regression_a').value || 0.0003),
-                regression_n: parseFloat(document.getElementById('regression_n').value || 0.5),
+                regression_a: parseFloat(document.getElementById('regression_a').value || 3.68e-5),
+                regression_n: parseFloat(document.getElementById('regression_n').value || 0.555),
                 
                 // Oxidizer
                 oxidizer_type: document.getElementById('oxidizer_type').value || 'n2o',

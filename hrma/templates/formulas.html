@@ -378,86 +378,6 @@
             </div>
         </div>
 
-        <!-- Section 3: Combustion Analysis -->
-        <div class="section" id="combustion-analysis">
-            <h2>3. Combustion Analysis</h2>
-            <p>Chemical reactions and thermodynamic calculations within the combustion chamber determine rocket motor performance.</p>
-            
-            <h3>3.1 Stoichiometric Combustion</h3>
-            <div class="formula-box">
-                $\nu_F F + \nu_O O \rightarrow \nu_P P$
-            </div>
-            <p><strong>Description:</strong> The stoichiometric combustion equation represents the ideal chemical balance between fuel and oxidizer molecules, defining the theoretical perfect mixture ratio for complete combustion. This fundamental relationship determines the optimal propellant combination that maximizes energy release while minimizing unreacted species. Understanding stoichiometry is essential for propellant selection, mixture ratio optimization, and predicting combustion products. Deviations from stoichiometric ratios (fuel-rich or oxidizer-rich combustion) are often intentionally used to optimize specific impulse, control combustion temperature, or provide film cooling. This equation forms the foundation for all combustion analysis in rocket motors.</p>
-            <table class="variable-table">
-                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
-                <tr><td>$\nu_F, \nu_O, \nu_P$</td><td>Stoichiometric coefficients</td><td>-</td><td>1-4</td></tr>
-                <tr><td>$F$</td><td>Fuel molecule</td><td>-</td><td>RP-1, CH₄, H₂</td></tr>
-                <tr><td>$O$</td><td>Oxidizer molecule</td><td>-</td><td>LOX, N₂O₄, H₂O₂</td></tr>
-            </table>
-            
-            <h3>3.2 Mixture Ratio</h3>
-            <div class="formula-box">
-                $O/F = \frac{\dot{m}_o}{\dot{m}_f}$
-            </div>
-            <div class="formula-box">
-                $r = \frac{O/F}{(O/F)_{stoic}}$
-            </div>
-            <p><strong>Description:</strong> The mixture ratio (O/F) and equivalence ratio quantify the actual propellant combination relative to the stoichiometric ideal. The mixture ratio directly affects combustion temperature, specific impulse, and exhaust gas composition. Most rocket engines operate slightly off-stoichiometric to optimize performance - typically fuel-rich for maximum specific impulse or oxidizer-rich for cooling and combustion stability. The equivalence ratio normalizes this comparison, making it easier to evaluate different propellant combinations. These parameters are critical for injector design, performance prediction, and operational optimization. They directly influence thrust vectoring, cooling requirements, and exhaust plume characteristics.</p>
-            <div class="info">
-                <strong>Note:</strong> r > 1 for oxidizer-rich combustion, r < 1 for fuel-rich combustion.
-            </div>
-            <table class="variable-table">
-                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
-                <tr><td>$O/F$</td><td>Mixture ratio</td><td>-</td><td>1.5-8.0</td></tr>
-                <tr><td>$\dot{m}_o$</td><td>Oxidizer mass flow</td><td>kg/s</td><td>1-1000</td></tr>
-                <tr><td>$\dot{m}_f$</td><td>Fuel mass flow</td><td>kg/s</td><td>0.5-200</td></tr>
-                <tr><td>$r$</td><td>Equivalence ratio</td><td>-</td><td>0.8-1.2</td></tr>
-            </table>
-            
-            <h3>3.3 Combustion Temperature</h3>
-            <div class="formula-box">
-                $T_c = \frac{\sum n_i \, \Delta H^0_{f,\,reactants} - \sum n_j \, \Delta H^0_{f,\,products}}{\sum n_j \, C_{p,j}}$
-            </div>
-            <div class="formula-box">
-                $T_{flame} = T_0 + \frac{Q_{combustion}}{\dot{m} C_p}$
-            </div>
-            <p><strong>Description:</strong> Adiabatic combustion temperature represents the theoretical maximum temperature achievable when propellants burn completely with no heat loss to surroundings. This temperature directly influences specific impulse, chamber pressure capability, and cooling requirements. It's calculated using enthalpy of formation data and specific heat capacities of reactants and products. The flame temperature equation includes the sensible heat contribution from preheated reactants. Real combustion chambers operate below adiabatic temperature due to heat transfer, incomplete mixing, and dissociation effects. Engineers use these calculations to predict material requirements, design cooling systems, and optimize injector patterns for temperature management.</p>
-            <table class="variable-table">
-                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
-                <tr><td>$T_c$</td><td>Chamber temperature</td><td>K</td><td>2800-3800</td></tr>
-                <tr><td>$\Delta H_f^0$</td><td>Standard formation enthalpy</td><td>kJ/mol</td><td>-400 to +50</td></tr>
-                <tr><td>$C_p$</td><td>Specific heat capacity</td><td>kJ/kg·K</td><td>1.2-4.5</td></tr>
-                <tr><td>$Q_{combustion}$</td><td>Heat of combustion</td><td>MJ/kg</td><td>8-45</td></tr>
-            </table>
-            
-            <h3>3.4 Combustion Efficiency</h3>
-            <div class="formula-box">
-                $\eta_c = \frac{c^*_{actual}}{c^*_{theoretical}}$
-            </div>
-            <div class="formula-box">
-                $\eta_c = 1 - \frac{T_{wall} - T_{gas}}{T_{adiabatic}}$
-            </div>
-            <p><strong>Description:</strong> Combustion efficiency quantifies how closely real-world combustion approaches the theoretical ideal, accounting for incomplete mixing, finite reaction kinetics, heat losses, and non-uniform temperature distributions. This parameter is crucial for evaluating injector designs, chamber geometry, and operating conditions. Poor combustion efficiency manifests as reduced c* performance, incomplete propellant utilization, and potential combustion instability. The efficiency varies significantly between propulsion system types due to different mixing mechanisms and residence times. Engineers use efficiency measurements to optimize injector patterns, chamber length, and operating pressure for maximum performance while maintaining stability margins.</p>
-            <div class="info">
-                <strong>Typical Values:</strong> Liquid motors 95-99%, solid motors 92-97%, hybrid motors 85-95%
-            </div>
-            
-            <h3>3.5 Chemical Equilibrium</h3>
-            <div class="formula-box">
-                $K_p = \prod_{i} (P_i)^{\nu_i} = \exp\left(-\frac{\Delta G^0}{RT}\right)$
-            </div>
-            <div class="formula-box">
-                $\sum \nu_i = 0$ (mass conservation)
-            </div>
-            <p><strong>Description:</strong> Chemical equilibrium calculations determine the final composition of combustion products at high temperatures where dissociation and recombination reactions occur simultaneously. The equilibrium constant relates product and reactant activities at thermodynamic equilibrium, governing species concentrations in the exhaust flow. At high combustion temperatures, molecules like H₂O and CO₂ partially dissociate into simpler species, affecting gas properties and performance. Understanding chemical equilibrium is essential for accurate performance prediction, exhaust plume modeling, and environmental impact assessment. These calculations become increasingly important for high-performance engines operating at extreme temperatures where dissociation effects significantly impact molecular weight and specific heat ratios.</p>
-            <table class="variable-table">
-                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
-                <tr><td>$K_p$</td><td>Equilibrium constant</td><td>-</td><td>10⁻⁶-10⁶</td></tr>
-                <tr><td>$P_i$</td><td>Component partial pressure</td><td>Pa</td><td>10⁴-10⁷</td></tr>
-                <tr><td>$\Delta G^0$</td><td>Standard Gibbs energy</td><td>kJ/mol</td><td>-800 to +200</td></tr>
-            </table>
-        </div>
-
         <!-- Section 2: Nozzle Design -->
         <div class="section" id="nozzle-design">
             <h2>2. Nozzle Design</h2>
@@ -538,6 +458,86 @@
             <div class="info">
                 <strong>Optimum Expansion:</strong> Maximum $I_{sp}$ occurs when $p_e = p_a$ (ambient pressure)
             </div>
+        </div>
+
+        <!-- Section 3: Combustion Analysis -->
+        <div class="section" id="combustion-analysis">
+            <h2>3. Combustion Analysis</h2>
+            <p>Chemical reactions and thermodynamic calculations within the combustion chamber determine rocket motor performance.</p>
+            
+            <h3>3.1 Stoichiometric Combustion</h3>
+            <div class="formula-box">
+                $\nu_F F + \nu_O O \rightarrow \nu_P P$
+            </div>
+            <p><strong>Description:</strong> The stoichiometric combustion equation represents the ideal chemical balance between fuel and oxidizer molecules, defining the theoretical perfect mixture ratio for complete combustion. This fundamental relationship determines the optimal propellant combination that maximizes energy release while minimizing unreacted species. Understanding stoichiometry is essential for propellant selection, mixture ratio optimization, and predicting combustion products. Deviations from stoichiometric ratios (fuel-rich or oxidizer-rich combustion) are often intentionally used to optimize specific impulse, control combustion temperature, or provide film cooling. This equation forms the foundation for all combustion analysis in rocket motors.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$\nu_F, \nu_O, \nu_P$</td><td>Stoichiometric coefficients</td><td>-</td><td>1-4</td></tr>
+                <tr><td>$F$</td><td>Fuel molecule</td><td>-</td><td>RP-1, CH₄, H₂</td></tr>
+                <tr><td>$O$</td><td>Oxidizer molecule</td><td>-</td><td>LOX, N₂O₄, H₂O₂</td></tr>
+            </table>
+            
+            <h3>3.2 Mixture Ratio</h3>
+            <div class="formula-box">
+                $O/F = \frac{\dot{m}_o}{\dot{m}_f}$
+            </div>
+            <div class="formula-box">
+                $r = \frac{O/F}{(O/F)_{stoic}}$
+            </div>
+            <p><strong>Description:</strong> The mixture ratio (O/F) and equivalence ratio quantify the actual propellant combination relative to the stoichiometric ideal. The mixture ratio directly affects combustion temperature, specific impulse, and exhaust gas composition. Most rocket engines operate slightly off-stoichiometric to optimize performance - typically fuel-rich for maximum specific impulse or oxidizer-rich for cooling and combustion stability. The equivalence ratio normalizes this comparison, making it easier to evaluate different propellant combinations. These parameters are critical for injector design, performance prediction, and operational optimization. They directly influence thrust vectoring, cooling requirements, and exhaust plume characteristics.</p>
+            <div class="info">
+                <strong>Note:</strong> r > 1 for oxidizer-rich combustion, r < 1 for fuel-rich combustion.
+            </div>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$O/F$</td><td>Mixture ratio</td><td>-</td><td>1.5-8.0</td></tr>
+                <tr><td>$\dot{m}_o$</td><td>Oxidizer mass flow</td><td>kg/s</td><td>1-1000</td></tr>
+                <tr><td>$\dot{m}_f$</td><td>Fuel mass flow</td><td>kg/s</td><td>0.5-200</td></tr>
+                <tr><td>$r$</td><td>Equivalence ratio</td><td>-</td><td>0.8-1.2</td></tr>
+            </table>
+            
+            <h3>3.3 Combustion Temperature</h3>
+            <div class="formula-box">
+                $T_c = \frac{\sum n_i \, \Delta H^0_{f,\,reactants} - \sum n_j \, \Delta H^0_{f,\,products}}{\sum n_j \, C_{p,j}}$
+            </div>
+            <div class="formula-box">
+                $T_{flame} = T_0 + \frac{Q_{combustion}}{\dot{m} C_p}$
+            </div>
+            <p><strong>Description:</strong> Adiabatic combustion temperature represents the theoretical maximum temperature achievable when propellants burn completely with no heat loss to surroundings. This temperature directly influences specific impulse, chamber pressure capability, and cooling requirements. It's calculated using enthalpy of formation data and specific heat capacities of reactants and products. The flame temperature equation includes the sensible heat contribution from preheated reactants. Real combustion chambers operate below adiabatic temperature due to heat transfer, incomplete mixing, and dissociation effects. Engineers use these calculations to predict material requirements, design cooling systems, and optimize injector patterns for temperature management.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$T_c$</td><td>Chamber temperature</td><td>K</td><td>2800-3800</td></tr>
+                <tr><td>$\Delta H_f^0$</td><td>Standard formation enthalpy</td><td>kJ/mol</td><td>-400 to +50</td></tr>
+                <tr><td>$C_p$</td><td>Specific heat capacity</td><td>kJ/kg·K</td><td>1.2-4.5</td></tr>
+                <tr><td>$Q_{combustion}$</td><td>Heat of combustion</td><td>MJ/kg</td><td>8-45</td></tr>
+            </table>
+            
+            <h3>3.4 Combustion Efficiency</h3>
+            <div class="formula-box">
+                $\eta_c = \frac{c^*_{actual}}{c^*_{theoretical}}$
+            </div>
+            <div class="formula-box">
+                $\eta_c = 1 - \frac{T_{wall} - T_{gas}}{T_{adiabatic}}$
+            </div>
+            <p><strong>Description:</strong> Combustion efficiency quantifies how closely real-world combustion approaches the theoretical ideal, accounting for incomplete mixing, finite reaction kinetics, heat losses, and non-uniform temperature distributions. This parameter is crucial for evaluating injector designs, chamber geometry, and operating conditions. Poor combustion efficiency manifests as reduced c* performance, incomplete propellant utilization, and potential combustion instability. The efficiency varies significantly between propulsion system types due to different mixing mechanisms and residence times. Engineers use efficiency measurements to optimize injector patterns, chamber length, and operating pressure for maximum performance while maintaining stability margins.</p>
+            <div class="info">
+                <strong>Typical Values:</strong> Liquid motors 95-99%, solid motors 92-97%, hybrid motors 85-95%
+            </div>
+            
+            <h3>3.5 Chemical Equilibrium</h3>
+            <div class="formula-box">
+                $K_p = \prod_{i} (P_i)^{\nu_i} = \exp\left(-\frac{\Delta G^0}{RT}\right)$
+            </div>
+            <div class="formula-box">
+                $\sum \nu_i = 0$ (mass conservation)
+            </div>
+            <p><strong>Description:</strong> Chemical equilibrium calculations determine the final composition of combustion products at high temperatures where dissociation and recombination reactions occur simultaneously. The equilibrium constant relates product and reactant activities at thermodynamic equilibrium, governing species concentrations in the exhaust flow. At high combustion temperatures, molecules like H₂O and CO₂ partially dissociate into simpler species, affecting gas properties and performance. Understanding chemical equilibrium is essential for accurate performance prediction, exhaust plume modeling, and environmental impact assessment. These calculations become increasingly important for high-performance engines operating at extreme temperatures where dissociation effects significantly impact molecular weight and specific heat ratios.</p>
+            <table class="variable-table">
+                <tr><th>Variable</th><th>Description</th><th>Unit</th><th>Typical Values</th></tr>
+                <tr><td>$K_p$</td><td>Equilibrium constant</td><td>-</td><td>10⁻⁶-10⁶</td></tr>
+                <tr><td>$P_i$</td><td>Component partial pressure</td><td>Pa</td><td>10⁴-10⁷</td></tr>
+                <tr><td>$\Delta G^0$</td><td>Standard Gibbs energy</td><td>kJ/mol</td><td>-800 to +200</td></tr>
+            </table>
         </div>
 
         <!-- Section 4: Solid Propellant Motors -->
