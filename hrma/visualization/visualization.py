@@ -5,6 +5,8 @@ import json
 from scipy.interpolate import griddata
 from typing import Dict, List, Tuple, Optional
 
+from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+
 def create_motor_plot(motor_data):
     """Create professional motor cross-section plot"""
     
@@ -1856,317 +1858,233 @@ def create_wall_heat_flux_waterfall_plot(thermal_data: Dict) -> str:
 # ============================================================
 
 def create_improved_motor_cross_section(motor_data):
-    """Gercekci dairesel kesit motor gorsellestirmesi"""
+    """Çözücü geometrisinden mühendislik eksenel kesit çizimi.
 
-    # Boyutlari al (m cinsinden)
-    L = motor_data.get('chamber_length', 0.3)
-    D_ch = motor_data.get('chamber_diameter', 0.1)
-    D_port_i = motor_data.get('port_diameter_initial', 0.03)
-    D_port_f = motor_data.get('port_diameter_final', 0.05)
-    d_t = motor_data.get('throat_diameter', 0.02)
-    d_e = motor_data.get('exit_diameter', 0.08)
+    Kamara duvarı + baş kapak, fenolik liner, yakıt grain'i (başlangıç ve
+    son port), enjektör plakası ve GERÇEK nozul konturu (kosinüs konverjan,
+    Rao boğaz yayı, konik doğru ya da bell Bézier diverjan) tek kesitte,
+    çift oklu ölçü çizgileriyle gösterilir. Tüm boyutlar motor_results'tan
+    okunur; eksikler güvenli varsayılanlara düşer.
+    """
 
-    # mm'ye cevir
-    L_mm = L * 1000
-    D_ch_mm = D_ch * 1000
-    D_port_i_mm = D_port_i * 1000
-    D_port_f_mm = D_port_f * 1000
-    d_t_mm = d_t * 1000
-    d_e_mm = d_e * 1000
+    def _num(v, fb):
+        try:
+            f = float(v)
+            return f if np.isfinite(f) else fb
+        except (TypeError, ValueError):
+            return fb
 
+    # ---------------- Boyutlar (mm) ----------------
+    L = _num(motor_data.get('chamber_length'), 0.3) * 1000
+    D_ch = _num(motor_data.get('chamber_diameter'), 0.1) * 1000
+    d_t = _num(motor_data.get('throat_diameter'), 0.02) * 1000
+    d_e = _num(motor_data.get('exit_diameter'), 0.08) * 1000
+    rc, rt, re = D_ch / 2, d_t / 2, d_e / 2
+
+    contour = motor_data.get('nozzle_contour') or {}
+    div = contour.get('divergent') or {}
+    angles = motor_data.get('nozzle_angles') or {}
+    gd = motor_data.get('grain_design') or {}
+    struct = motor_data.get('structural_analysis') or {}
+
+    noz_type = div.get('type') or angles.get('nozzle_type') or 'conical'
+    theta_n = _num(div.get('throat_angle'), 30.0)
+    theta_e = _num(div.get('exit_angle'), 8.0)
+    # Açı alt sınırı 1°: bozuk/sıfır girdide tan(0) bölme-sıfır → inf/null
+    # koordinat üretmesin (hakem bulgusu — production akışı 15/30° üretir)
+    half_angle = max(1.0, _num(div.get('half_angle'),
+                               _num(angles.get('divergent_half_angle_deg'), 15.0)))
+    # (Kontur uzunlukları/yayı sample_nozzle_inner_contour içinde hesaplanır;
+    # burada yalnız açı etiketlerinde kullanılan değerler tutulur)
+
+    wall_noz = _num((motor_data.get('nozzle_geometry') or {}).get('wall_thickness'),
+                    max(3.0, 0.1 * d_t))
+    wall_case = _num((struct.get('chamber_analysis') or {}).get('recommended_thickness'),
+                     0.045 * D_ch)
+    wall_case = min(max(wall_case, 3.0), 0.12 * D_ch)
+    liner_t = min(max(0.02 * D_ch, 1.5), 5.0)
+    cap_t = min(max(1.6 * wall_case, 8.0), 0.3 * rc + 8.0)
+
+    L_g = _num(gd.get('grain_length_mm'),
+               _num(motor_data.get('grain_length'), 0.8 * L / 1000) * 1000)
+    L_g = min(L_g, 0.92 * L)
+    r_p0 = _num(gd.get('port_diameter_initial_mm'),
+                _num(motor_data.get('port_diameter_initial'), 0.03) * 1000) / 2
+    r_pf = _num(gd.get('port_diameter_final_mm'),
+                _num(motor_data.get('port_diameter_final'), 0.05) * 1000) / 2
+    r_go = rc - liner_t
+    r_pf = min(r_pf, r_go - 1.0)
+    r_p0 = min(r_p0, r_pf)
+
+    # Eksen: z=0 baş kapak iç yüzü; grain önünde %35 ön oda payı
+    slack = max(4.0, L - L_g)
+    zg0, zg1 = 0.35 * slack, 0.35 * slack + L_g
+
+    # ---------------- Nozul iç konturu (ortak örnekleyici) ----------------
+    # Geometri tek kaynaktan: 2D kesit, 3D görselleştirme ve CAD aynı konturu
+    # kullanır (hrma.engines.nozzle_design.sample_nozzle_inner_contour)
+    noz_pts, noz_meta = sample_nozzle_inner_contour(motor_data)
+    noz_z = np.array([L + zz for zz, _ in noz_pts])
+    noz_r = np.array([rr for _, rr in noz_pts])
+    z_throat = L + noz_meta['z_throat']
+    z_exit = L + noz_meta['z_exit']
+
+    # ---------------- Çizim ----------------
     fig = go.Figure()
 
-    # DAIRESEL KESIT - GERCEK ROCKET MOTOR GEOMETRISI
+    # Dijital blueprint paleti (koyu tema — sayfa geneliyle uyumlu)
+    INK = '#d7e3ee'
+    DIM = '#22d3ee'
+    C_CASE, C_LINER = 'rgba(148,163,180,0.85)', 'rgba(96,104,114,0.95)'
+    C_GRAIN, C_INJ = 'rgba(178,116,68,0.92)', 'rgba(210,177,116,0.95)'
+    C_NOZ = 'rgba(122,136,150,0.9)'
 
-    # 1. KAMARA DUVARI (Dairesel)
-    chamber_outer_x = []
-    chamber_outer_y = []
-    for i in range(101):
-        x = -L_mm/2 + i * L_mm / 100
-        chamber_outer_x.append(x)
-        chamber_outer_y.append(D_ch_mm/2)
-    for i in range(101):
-        x = L_mm/2 - i * L_mm / 100
-        chamber_outer_x.append(x)
-        chamber_outer_y.append(-D_ch_mm/2)
+    def poly(z_pts, r_pts, fill, name, hover, legend=True, lg=None):
+        fig.add_trace(go.Scatter(
+            x=list(z_pts) + [z_pts[0]], y=list(r_pts) + [r_pts[0]],
+            fill='toself', fillcolor=fill, mode='lines',
+            line=dict(color=INK, width=1.4),
+            name=name, legendgroup=lg or name, showlegend=legend,
+            hoverinfo='text', hovertext=hover, hoveron='fills'))
 
+    def mirrored(z_pts, r_pts, fill, name, hover, lg=None):
+        poly(z_pts, r_pts, fill, name, hover, legend=True, lg=lg)
+        poly(z_pts, [-r for r in r_pts], fill, name, hover, legend=False, lg=lg)
+
+    # Kamara duvarı + baş kapak (tek katı)
+    case_z = [-cap_t, -cap_t, L, L, 0, 0]
+    case_r = [0, rc + wall_case, rc + wall_case, rc, rc, 0]
+    mirrored(case_z, case_r, C_CASE, 'Kamara duvarı',
+             f'Kamara duvarı<br>Et: {wall_case:.1f} mm<br>Øiç: {D_ch:.1f} mm')
+
+    # Fenolik liner
+    liner_z = [2, 2, L - 2, L - 2]
+    liner_r = [r_go, rc - 0.2, rc - 0.2, r_go]
+    mirrored(liner_z, liner_r, C_LINER, 'Liner (yalıtım)',
+             f'Fenolik liner<br>Et: {liner_t:.1f} mm')
+
+    # Yakıt grain'i
+    grain_z = [zg0, zg0, zg1, zg1]
+    grain_r = [r_p0, r_go, r_go, r_p0]
+    mirrored(grain_z, grain_r, C_GRAIN, 'Yakıt grain',
+             (f'Yakıt grain<br>Boy: {L_g:.1f} mm<br>Port (başlangıç): Ø{2*r_p0:.1f} mm'
+              f'<br>Port (son): Ø{2*r_pf:.1f} mm<br>Web: {r_pf - r_p0:.1f} mm'))
+
+    # Enjektör plakası (ekseni geçen tek dikdörtgen) + orifis işaretleri
+    inj_t = min(max(0.9 * cap_t, 6.0), 24.0)
     fig.add_trace(go.Scatter(
-        x=chamber_outer_x,
-        y=chamber_outer_y,
-        fill='toself',
-        fillcolor='rgba(128, 128, 128, 0.3)',
-        mode='lines',
-        line=dict(color='black', width=3),
-        name='Chamber Wall',
-        hovertemplate='Chamber<br>Diameter: %.1f mm<br>Length: %.1f mm' % (D_ch_mm, L_mm)
-    ))
-
-    # 2. YAKIT GRAINI (Dairesel halka)
-    grain_length = L_mm * 0.85
-    grain_start = -grain_length/2
-    grain_end = grain_length/2
-
-    fuel_outer_radius = D_ch_mm/2 - 5  # 5mm duvar kalinligi
-
-    initial_port_x = []
-    initial_port_y = []
-    for i in range(101):
-        angle = i * 2 * np.pi / 100
-        initial_port_x.append(grain_start + grain_length/2 + (D_port_i_mm/2) * np.cos(angle))
-        initial_port_y.append((D_port_i_mm/2) * np.sin(angle))
-
-    fuel_x_upper = []
-    fuel_y_upper = []
-    for i in range(51):
-        x = grain_start + i * grain_length / 50
-        fuel_x_upper.append(x)
-        fuel_y_upper.append(fuel_outer_radius)
-
-    fuel_x_lower = []
-    fuel_y_lower = []
-    for i in range(51):
-        x = grain_end - i * grain_length / 50
-        fuel_x_lower.append(x)
-        fuel_y_lower.append(D_port_i_mm/2)
-
-    for i in range(51):
-        x = grain_end - i * grain_length / 50
-        fuel_x_upper.append(x)
-        fuel_y_upper.append(-fuel_outer_radius)
-
-    for i in range(51):
-        x = grain_start + i * grain_length / 50
-        fuel_x_lower.append(x)
-        fuel_y_lower.append(-D_port_i_mm/2)
-
+        x=[4, 4, 4 + inj_t, 4 + inj_t, 4],
+        y=[-(rc - 0.4), rc - 0.4, rc - 0.4, -(rc - 0.4), -(rc - 0.4)],
+        fill='toself', fillcolor=C_INJ, mode='lines',
+        line=dict(color='#8a6a34', width=1.4), name='Enjektör plakası',
+        hoverinfo='text', hoveron='fills',
+        hovertext='Enjektör plakası (showerhead)'))
+    n_ori = int(_num((motor_data.get('injector_design') or {}).get('number_of_orifices'), 12))
+    ori_y = np.linspace(-0.62 * rc, 0.62 * rc, max(3, min(n_ori // 2 + 1, 9)))
     fig.add_trace(go.Scatter(
-        x=fuel_x_upper,
-        y=fuel_y_upper,
-        fill='toself',
-        fillcolor='rgba(139, 69, 19, 0.6)',
-        mode='lines',
-        line=dict(color='saddlebrown', width=2),
-        name='Fuel Grain',
-        hovertemplate='Fuel Grain<br>Length: %.1f mm<br>Initial Port: %.1f mm<br>Final Port: %.1f mm' %
-                     (grain_length, D_port_i_mm, D_port_f_mm)
-    ))
+        x=[4 + inj_t] * len(ori_y), y=ori_y.tolist(), mode='markers',
+        marker=dict(size=5, color='#10151a', symbol='circle'),
+        name='Orifisler', showlegend=False,
+        hovertemplate=f'Orifis deseni: {n_ori} delik<extra></extra>'))
 
-    # Port (merkez delik)
+    # Nozul duvarı (iç kontur + duvar ofseti)
+    noz_wall_z = list(noz_z) + list(noz_z[::-1])
+    noz_wall_r = list(noz_r) + list((noz_r + wall_noz)[::-1])
+    mirrored(noz_wall_z, noz_wall_r, C_NOZ, 'Nozul',
+             (f'Nozul ({noz_type})<br>Boğaz: Ø{d_t:.1f} mm<br>Çıkış: Ø{d_e:.1f} mm'
+              f'<br>Genişleme oranı: {(re/rt)**2:.1f}<br>Et: {wall_noz:.1f} mm'))
+
+    # Son port çapı (kesikli) — eksenel kesitte yatay çizgi çifti
+    for sgn, show in ((1, True), (-1, False)):
+        fig.add_trace(go.Scatter(
+            x=[zg0, zg1], y=[sgn * r_pf, sgn * r_pf], mode='lines',
+            line=dict(color='#d1495b', width=2, dash='dash'),
+            name=f'Son port Ø{2*r_pf:.1f} mm', showlegend=show,
+            hovertemplate=f'Yanma sonu port: Ø{2*r_pf:.1f} mm<extra></extra>'))
+
+    # Merkez ekseni (dash-dot, mühendislik konvansiyonu)
     fig.add_trace(go.Scatter(
-        x=[grain_start, grain_end],
-        y=[0, 0],
-        mode='lines',
-        line=dict(color='white', width=D_port_i_mm),
-        name='Port',
-        showlegend=False
-    ))
+        x=[-cap_t - 22, z_exit + 15], y=[0, 0], mode='lines',
+        line=dict(color='#5f7c8c', width=1, dash='dashdot'),
+        name='Eksen', showlegend=False, hoverinfo='skip'))
 
-    # Son port capi (kesikli cizgi)
-    theta = np.linspace(0, 2*np.pi, 50)
-    final_port_x = []
-    final_port_y = []
-    for t in theta:
-        final_port_x.append((grain_start + grain_end)/2 + (D_port_f_mm/2) * np.cos(t))
-        final_port_y.append((D_port_f_mm/2) * np.sin(t))
-
+    # Boğaz istasyonu
     fig.add_trace(go.Scatter(
-        x=final_port_x,
-        y=final_port_y,
-        mode='lines',
-        line=dict(color='red', width=2, dash='dash'),
-        name='Son Port Capi',
-        hovertemplate='Son Port: %.1f mm' % D_port_f_mm
-    ))
+        x=[z_throat, z_throat], y=[-rt, rt],
+        mode='lines', line=dict(color=DIM, width=1, dash='dot'),
+        name='Boğaz', showlegend=False,
+        hovertemplate=f'Boğaz istasyonu<br>Ø{d_t:.1f} mm<extra></extra>'))
 
-    # 3. NOZZLE GEOMETRY (Proper convergent-divergent)
-    nozzle_start = L_mm/2
-    convergent_length = 40  # mm
-    throat_length = 10  # mm
-    divergent_length = 80  # mm
+    # ---------------- Ölçü çizgileri ----------------
+    r_out = rc + wall_case
 
-    convergent_angle = motor_data.get('convergent_angle', 15.0)
-    divergent_angle = motor_data.get('divergent_angle', 12.0)
+    def dim_h(x0, x1, y, label, above=True):
+        fig.add_trace(go.Scatter(
+            x=[x0, x1], y=[y, y], mode='lines',
+            line=dict(color=DIM, width=1), showlegend=False, hoverinfo='skip'))
+        for xe in (x0, x1):  # uzatma çizgileri
+            fig.add_trace(go.Scatter(
+                x=[xe, xe], y=[y - 4, y + 4], mode='lines',
+                line=dict(color=DIM, width=1), showlegend=False, hoverinfo='skip'))
+        xm = (x0 + x1) / 2
+        for xe in (x0, x1):  # çift ok
+            fig.add_annotation(x=xe, y=y, ax=xm, ay=y, axref='x', ayref='y',
+                               text='', showarrow=True, arrowhead=2,
+                               arrowsize=1, arrowwidth=1.2, arrowcolor=DIM)
+        fig.add_annotation(x=xm, y=y + (9 if above else -9), text=label,
+                           showarrow=False, font=dict(size=11, color=DIM))
 
-    conv_x = []
-    conv_y_upper = []
-    conv_y_lower = []
-    for i in range(21):
-        x = nozzle_start + i * convergent_length / 20
-        progress = i / 20
-        radius = D_ch_mm/2 - (D_ch_mm/2 - d_t_mm/2) * progress
-        conv_x.append(x)
-        conv_y_upper.append(radius)
-        conv_y_lower.append(-radius)
+    def dim_v(x, y0, y1, label, side=1):
+        fig.add_trace(go.Scatter(
+            x=[x, x], y=[y0, y1], mode='lines',
+            line=dict(color=DIM, width=1), showlegend=False, hoverinfo='skip'))
+        ym = (y0 + y1) / 2
+        for ye in (y0, y1):
+            fig.add_annotation(x=x, y=ye, ax=x, ay=ym, axref='x', ayref='y',
+                               text='', showarrow=True, arrowhead=2,
+                               arrowsize=1, arrowwidth=1.2, arrowcolor=DIM)
+        fig.add_annotation(x=x, y=ym, text=label, showarrow=False, textangle=-90,
+                           xshift=side * 14, font=dict(size=11, color=DIM))
 
-    throat_x = [nozzle_start + convergent_length, nozzle_start + convergent_length + throat_length]
-    throat_y_upper = [d_t_mm/2, d_t_mm/2]
-    throat_y_lower = [-d_t_mm/2, -d_t_mm/2]
+    dim_h(0, L, r_out + 16, f'L<sub>kamara</sub> = {L:.0f} mm')
+    dim_h(zg0, zg1, r_out + 42, f'Grain = {L_g:.0f} mm')
+    dim_h(-cap_t, z_exit, -(max(r_out, re + wall_noz) + 30),
+          f'L<sub>toplam</sub> = {z_exit + cap_t:.0f} mm', above=False)
+    dim_v(-cap_t - 18, -rc, rc, f'Ø<sub>c</sub> = {D_ch:.1f} mm', side=-1)
+    dim_v(z_throat, -rt, rt, f'Ø<sub>t</sub> = {d_t:.1f} mm', side=1)
+    dim_v(z_exit + 12, -re, re, f'Ø<sub>e</sub> = {d_e:.1f} mm', side=1)
 
-    div_x = []
-    div_y_upper = []
-    div_y_lower = []
-    for i in range(41):
-        x = nozzle_start + convergent_length + throat_length + i * divergent_length / 40
-        progress = i / 40
-        radius = d_t_mm/2 + (d_e_mm/2 - d_t_mm/2) * (progress**0.7)
-        div_x.append(x)
-        div_y_upper.append(radius)
-        div_y_lower.append(-radius)
+    # Diverjan açı etiketi
+    if noz_type == 'conical':
+        angle_txt = f'Konik diverjan: α = {half_angle:.0f}°'
+    else:
+        angle_txt = f'{noz_type.capitalize()} kontur: θ<sub>n</sub> = {theta_n:.0f}° → θ<sub>e</sub> = {theta_e:.0f}°'
+    fig.add_annotation(x=z_throat + 0.55 * (z_exit - z_throat),
+                       y=(rt + re) / 2 + wall_noz + 14, text=angle_txt,
+                       showarrow=False, font=dict(size=11, color=INK))
 
-    nozzle_x = conv_x + throat_x + div_x + div_x[::-1] + throat_x[::-1] + conv_x[::-1]
-    nozzle_y = conv_y_upper + throat_y_upper + div_y_upper + div_y_lower[::-1] + throat_y_lower[::-1] + conv_y_lower[::-1]
-
-    fig.add_trace(go.Scatter(
-        x=nozzle_x,
-        y=nozzle_y,
-        fill='toself',
-        fillcolor='rgba(192, 192, 192, 0.7)',
-        mode='lines',
-        line=dict(color='black', width=2),
-        name='Nozzle',
-        hovertemplate='Nozzle<br>Throat: %.1f mm<br>Exit: %.1f mm<br>Expansion Ratio: %.1f' %
-                     (d_t_mm, d_e_mm, (d_e_mm/d_t_mm)**2)
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=[nozzle_start + convergent_length + throat_length/2],
-        y=[0],
-        mode='markers+text',
-        marker=dict(size=8, color='orange'),
-        text=['Throat'],
-        textposition='top center',
-        name='Throat Location',
-        hovertemplate='Throat<br>Diameter: %.2f mm<br>Area: %.2f mm2' % (d_t_mm, np.pi*(d_t_mm/2)**2)
-    ))
-
-    # 4. INJEKTOR BASLIGI
-    injector_x = [-L_mm/2 - 30, -L_mm/2 - 30, -L_mm/2, -L_mm/2]
-    injector_y = [-D_ch_mm/2, D_ch_mm/2, D_ch_mm/2, -D_ch_mm/2]
-
-    fig.add_trace(go.Scatter(
-        x=injector_x,
-        y=injector_y,
-        fill='toself',
-        fillcolor='rgba(100, 100, 200, 0.5)',
-        mode='lines',
-        line=dict(color='darkblue', width=2),
-        name='Injector Head',
-        hovertemplate='Injector Head'
-    ))
-
-    # Nozzle angle indicators
-    throat_x = nozzle_start + convergent_length + throat_length/2
-
-    conv_mid_x = nozzle_start + convergent_length * 0.5
-    conv_mid_y = D_ch_mm/2 - (D_ch_mm/2 - d_t_mm/2) * 0.5
-    angle_radius = 25
-
-    conv_angle_rad = np.radians(convergent_angle)
-    arc_angles_conv = np.linspace(np.pi, np.pi - conv_angle_rad, 15)
-    arc_x_conv = conv_mid_x + angle_radius * np.cos(arc_angles_conv)
-    arc_y_conv = conv_mid_y + angle_radius * np.sin(arc_angles_conv)
-
-    fig.add_trace(go.Scatter(
-        x=arc_x_conv.tolist(), y=arc_y_conv.tolist(),
-        mode='lines',
-        line=dict(color='orange', width=3),
-        name=f'alpha={convergent_angle} deg',
-        showlegend=True,
-        hovertemplate=f'Convergent Angle: {convergent_angle} deg'
-    ))
-
-    div_mid_x = throat_x + divergent_length * 0.5
-    div_mid_y = d_t_mm/2 + (d_e_mm/2 - d_t_mm/2) * 0.5
-
-    div_angle_rad = np.radians(divergent_angle)
-    arc_angles_div = np.linspace(0, div_angle_rad, 15)
-    arc_x_div = div_mid_x + angle_radius * np.cos(arc_angles_div)
-    arc_y_div = div_mid_y + angle_radius * np.sin(arc_angles_div)
-
-    fig.add_trace(go.Scatter(
-        x=arc_x_div.tolist(), y=arc_y_div.tolist(),
-        mode='lines',
-        line=dict(color='green', width=3),
-        name=f'beta={divergent_angle} deg',
-        showlegend=True,
-        hovertemplate=f'Divergent Angle: {divergent_angle} deg'
-    ))
-
-    fig.add_annotation(
-        x=conv_mid_x + 10, y=conv_mid_y + 15,
-        text=f'<b>alpha = {convergent_angle} deg</b>',
-        showarrow=False,
-        font=dict(size=12, color='orange')
-    )
-
-    fig.add_annotation(
-        x=div_mid_x + 10, y=div_mid_y + 15,
-        text=f'<b>beta = {divergent_angle} deg</b>',
-        showarrow=False,
-        font=dict(size=12, color='green')
-    )
-
-    # 5. EKSEN CIZGISI
-    fig.add_trace(go.Scatter(
-        x=[-L_mm/2 - 50, nozzle_start + convergent_length + throat_length + divergent_length],
-        y=[0, 0],
-        mode='lines',
-        line=dict(color='gray', width=1, dash='dashdot'),
-        name='Merkez Ekseni',
-        showlegend=False
-    ))
-
-    # 6. OLCU OKLAR VE ETIKETLER
-    annotations = [
-        dict(x=0, y=D_ch_mm/2 + 15, text=f'L = {L_mm:.0f} mm',
-             showarrow=False, font=dict(size=11, color='black')),
-        dict(x=-L_mm/2 - 25, y=0, text=f'D = {D_ch_mm:.0f} mm',
-             showarrow=False, font=dict(size=11, color='black'), textangle=90),
-        dict(x=nozzle_start + convergent_length, y=-d_t_mm/2 - 15,
-             text=f'd<sub>t</sub> = {d_t_mm:.1f} mm',
-             showarrow=False, font=dict(size=10, color='orange')),
-        dict(x=nozzle_start + convergent_length + throat_length + divergent_length - 10,
-             y=-d_e_mm/2 - 15, text=f'd<sub>e</sub> = {d_e_mm:.1f} mm',
-             showarrow=False, font=dict(size=10, color='green'))
-    ]
-
+    # ---------------- Yerleşim (dijital blueprint) ----------------
     fig.update_layout(
-        title=dict(
-            text='Hybrid Rocket Motor - Axial Cross-Section View',
-            x=0.5,
-            font=dict(size=16, family='Arial Black')
-        ),
-        xaxis=dict(
-            title='Axial Position (mm)',
-            showgrid=True,
-            gridcolor='rgba(200, 200, 200, 0.3)',
-            zeroline=False,
-            scaleanchor='y',
-            scaleratio=1
-        ),
-        yaxis=dict(
-            title='Radial Position (mm)',
-            showgrid=True,
-            gridcolor='rgba(200, 200, 200, 0.3)',
-            zeroline=False
-        ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        showlegend=True,
-        legend=dict(
-            orientation='v',
-            yanchor='top',
-            y=1,
-            xanchor='left',
-            x=1.02,
-            bgcolor='rgba(255, 255, 255, 0.9)',
-            bordercolor='black',
-            borderwidth=1
-        ),
-        annotations=annotations,
+        title=dict(text='MOTOR EKSENEL KESİTİ — ÇÖZÜCÜ GEOMETRİSİ',
+                   x=0.5, font=dict(size=15, color='#eaf7fb')),
+        xaxis=dict(title='Eksenel konum (mm)', showgrid=True,
+                   gridcolor='rgba(0,229,255,0.07)', zeroline=False,
+                   scaleanchor='y', scaleratio=1,
+                   tickfont=dict(color='#7d97a5'),
+                   title_font=dict(color='#7d97a5')),
+        yaxis=dict(title='Yarıçap (mm)', showgrid=True,
+                   gridcolor='rgba(0,229,255,0.07)', zeroline=False,
+                   tickfont=dict(color='#7d97a5'),
+                   title_font=dict(color='#7d97a5')),
+        plot_bgcolor='rgba(8,16,28,0.35)', paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#cfe8f2'),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02,
+                    xanchor='center', x=0.5, font=dict(size=11, color='#7d97a5'),
+                    bgcolor='rgba(6,13,24,0.7)',
+                    bordercolor='rgba(0,229,255,0.2)'),
         hovermode='closest',
-        width=1000,
-        height=500
+        margin=dict(l=70, r=40, t=90, b=60),
+        height=520,
     )
 
     return fig.to_json()

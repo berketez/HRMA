@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rocket Motor Formulas - UZAYTEK</title>
-    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script>
         MathJax = {
@@ -241,6 +240,10 @@
             }
         }
     </style>
+    <!-- HRMA tasarım sistemi: inline stillerden SONRA yüklenir, onları ezer -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/theme.css">
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -413,7 +416,7 @@
             
             <h3>3.3 Combustion Temperature</h3>
             <div class="formula-box">
-                $T_c = \frac{\sum \Delta H_f^0 - \sum \Delta H_f^0_{products}}{\sum n_i C_{p,i}}$
+                $T_c = \frac{\sum n_i \, \Delta H^0_{f,\,reactants} - \sum n_j \, \Delta H^0_{f,\,products}}{\sum n_j \, C_{p,j}}$
             </div>
             <div class="formula-box">
                 $T_{flame} = T_0 + \frac{Q_{combustion}}{\dot{m} C_p}$
@@ -1265,11 +1268,7 @@
             <p>🚀 <strong>UZAYTEK Motor Analysis v2.0</strong> | Developed by: Berke Tezgöçen | Idea & Testing: Ayberk Cem Aksoy</p>
             <p>Professional Rocket Propulsion Mathematical Reference</p>
             <p><em>"Science is the poetry of reality" - Richard Dawkins</em></p>
-            
-            <div class="warning" style="margin-top: 20px;">
-                <strong>⚠️ Warning:</strong> Rocket motor design can be dangerous. These formulas are for educational and 
-                research purposes only. Professional engineering consultation is required for actual motor production.
-            </div>
+
         </div>
     </div>
 </body>

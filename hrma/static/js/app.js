@@ -431,18 +431,20 @@ function displayPlots(plots) {
                     if (!parsedData.layout.margin) {
                         parsedData.layout.margin = { l: 60, r: 30, t: 60, b: 60 };
                     }
-                    // Ensure proper sizing
+                    // Yükseklik: layout'taki değeri konteynere sabitle ki panel
+                    // içeriğe göre büyüsün (SVG taşması / panel çakışması önlenir)
+                    if (parsedData.layout.height) {
+                        element.style.height = parsedData.layout.height + 'px';
+                    }
+                    // Genişlik responsive kalır
                     parsedData.layout.width = undefined;
                     parsedData.layout.height = undefined;
                 }
                 
                 Plotly.newPlot(elementId, parsedData.data, parsedData.layout, config);
-                
-                // Force resize on window resize
-                window.addEventListener('resize', () => {
-                    Plotly.Plots.resize(elementId);
-                });
-                
+                // Yeniden boyutlandırmayı config.responsive üstlenir; her
+                // çağrıda window listener eklemek sızıntıya yol açıyordu
+
             } catch (e) {
                 console.warn(`Failed to create plot for ${elementId}:`, e);
                 element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Plot data unavailable</div>';
@@ -461,12 +463,22 @@ function displayPlots(plots) {
     // Performance plots
     safePlotCreate('performance_plots', plots.performance);
     
-    // 3D Motor visualization
-    if (plots.motor_3d && !plots.motor_3d.error) {
+    // 3D Motor simülasyonu: önce Three.js dijital ikiz (MotorViz3D),
+    // yüklenemezse backend'in Plotly 3D çıktısına düş
+    let viz3dMounted = false;
+    if (typeof mountMotorViz === 'function' && window.currentResults && currentResults.motor) {
+        try {
+            viz3dMounted = mountMotorViz(currentResults.motor);
+        } catch (e) {
+            console.warn('MotorViz3D mount failed, falling back to Plotly 3D:', e);
+        }
+    }
+    if (!viz3dMounted && plots.motor_3d && !plots.motor_3d.error) {
         const motor3DElement = document.getElementById('motor_3d_plot');
         if (motor3DElement) {
             try {
                 const plot3D = typeof plots.motor_3d === 'string' ? JSON.parse(plots.motor_3d) : plots.motor_3d;
+                motor3DElement.style.display = 'block';
                 Plotly.newPlot('motor_3d_plot', plot3D.data, plot3D.layout, {
                     responsive: true,
                     displayModeBar: true,
@@ -482,7 +494,7 @@ function displayPlots(plots) {
                 motor3DElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">3D visualization unavailable</div>';
             }
         }
-    } else if (plots.motor_3d && plots.motor_3d.error) {
+    } else if (!viz3dMounted && plots.motor_3d && plots.motor_3d.error) {
         console.warn('3D motor plot error:', plots.motor_3d.error);
     }
     

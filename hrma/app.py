@@ -504,6 +504,59 @@ def calculate():
             'error_type': type(e).__name__
         }), 400
 
+@app.route('/api/quick-geometry', methods=['POST'])
+def quick_geometry():
+    """İnteraktif tasarım modu: yalnız motor çözücüsü + 2D kesit.
+
+    /calculate'in ağır adımları (yörünge, CAD, OpenRocket, tüm grafikler)
+    atlanır; 3D dijital ikiz ile kesitin slider'la canlı güncellenmesi için
+    ~1 sn içinde geometri döndürür. Motor sözlüğü /calculate'teki
+    results['motor'] ile aynı şemadadır (port_history ve
+    heat_transfer_analysis dahil).
+    """
+    try:
+        data = request.json or {}
+        engine = HybridRocketEngine(
+            thrust=data.get('thrust'),
+            burn_time=data.get('burn_time'),
+            total_impulse=data.get('total_impulse'),
+            of_ratio=data.get('of_ratio', 1.0),
+            chamber_pressure=data.get('chamber_pressure', 20.0),
+            atmospheric_pressure=data.get('atmospheric_pressure', 1.0),
+            chamber_temperature=data.get('chamber_temperature'),
+            gamma=data.get('gamma', 1.25),
+            gas_constant=data.get('gas_constant'),
+            l_star=data.get('l_star', 1.0),
+            expansion_ratio=data.get('expansion_ratio', 0),
+            nozzle_type=data.get('nozzle_type', 'conical'),
+            thrust_coefficient=data.get('thrust_coefficient', 0),
+            regression_a=data.get('regression_a'),
+            regression_n=data.get('regression_n'),
+            fuel_density=data.get('fuel_density'),
+            combustion_type=data.get('combustion_type', 'infinite'),
+            chamber_diameter_input=data.get('chamber_diameter_input', 0),
+            fuel_type=data.get('fuel_type', 'htpb'),
+            motor_name=data.get('motor_name', ''),
+            motor_description=data.get('motor_description', '')
+        )
+        motor_results = engine.calculate()
+
+        try:
+            motor_plot = create_improved_motor_cross_section(motor_results)
+        except Exception as plot_err:
+            print(f"Quick geometry cross-section error: {plot_err}")
+            motor_plot = None
+
+        return jsonify(sanitize_json_values({
+            'status': 'success',
+            'motor': motor_results,
+            'plots': {'motor': motor_plot}
+        }))
+    except Exception as e:
+        print(f"Quick geometry error: {e}")
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+
+
 @app.route('/calculate_solid', methods=['POST'])
 def calculate_solid():
     try:

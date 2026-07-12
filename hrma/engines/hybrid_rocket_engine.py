@@ -633,9 +633,15 @@ class HybridRocketEngine:
         self._cstar_history = []
         self._isp_history = []
         self._time_history = []
+        # Port çapı zaman serisi: 3D yanma animasyonu D_port(t)'yi buradan okur
+        # (track_performance'dan bağımsız tutulur — geometri her zaman lazım)
+        self._port_time_history = []
+        self._port_diameter_history = []
 
         for i in range(num_steps):
             t_now = i * dt
+            self._port_time_history.append(t_now)
+            self._port_diameter_history.append(D_port)
             A_port = np.pi * (D_port / 2)**2
             G_ox = self.mdot_ox / A_port  # kg/m²·s oksitleyici akış yoğunluğu
 
@@ -673,6 +679,9 @@ class HybridRocketEngine:
                 break
 
         self.D_port_final = D_port
+        # Seriye son noktayı ekle (erken web tükenmesinde son adım zamanı)
+        self._port_time_history.append(t_now + dt if web_exhausted else self.t_b)
+        self._port_diameter_history.append(D_port)
 
         # Final oxidizer flux hesaplama
         A_port_final = np.pi * (self.D_port_final / 2)**2
@@ -791,7 +800,21 @@ class HybridRocketEngine:
                 'c_star_design_of': self.C_star,
                 'isp_design_of': self.Isp,
             }
-        
+
+        # Port çapı zaman serisi (3D yanma animasyonu için, metre + saniye).
+        # Yanıt boyutunu sınırlamak için ~200 noktaya seyreltilir.
+        if getattr(self, '_port_diameter_history', None):
+            pt = self._port_time_history
+            pd = self._port_diameter_history
+            stride = max(1, len(pt) // 200)
+            idx = list(range(0, len(pt), stride))
+            if idx[-1] != len(pt) - 1:
+                idx.append(len(pt) - 1)
+            basic_results['port_history'] = {
+                'time': [float(pt[i]) for i in idx],
+                'port_diameter': [float(pd[i]) for i in idx],
+            }
+
         # --- 1. Nozzle Angles ---
         nozzle_type = self.nozzle_type
         basic_results['nozzle_angles'] = {

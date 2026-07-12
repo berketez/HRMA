@@ -549,3 +549,94 @@ class NozzleDesigner:
                 'exit': expansion_ratio
             }
         }
+
+
+def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26):
+    """Nozul iç akış yolu örneklemesi — 2D kesit, 3D görselleştirme ve CAD
+    üretimi için TEK ortak geometri kaynağı.
+
+    Kontur: kosinüs geçişli konverjan (gerçek kamara yarıçapından boğaza,
+    uzunluk design_summary'den) + Rao boğaz çıkış yayı (Rn=0.382·rt) +
+    konik doğru ya da bell kuadratik Bézier (teğet θn → θe).
+
+    Döndürür: (points, meta)
+      points: [(z_mm, r_mm), ...] — z=0 konverjan başlangıcı (kamara çıkışı)
+      meta: {'z_throat': mm, 'z_exit': mm, 'r_throat': mm, 'r_exit': mm,
+             'noz_type': str}
+    Not: nozzle_contour.convergent.length KULLANILMAZ — NozzleDesigner'ın
+    kendi daralma oranı oda yarıçapından (≈1.5·rt) türediği için hibrit
+    kamara çapıyla tutarsızdır (dikey duvar görünümü yaratır).
+    """
+
+    def _num(v, fb):
+        try:
+            f = float(v)
+            return f if np.isfinite(f) else fb
+        except (TypeError, ValueError):
+            return fb
+
+    md = motor_results or {}
+    contour = md.get('nozzle_contour') or {}
+    conv = contour.get('convergent') or {}
+    div = contour.get('divergent') or {}
+    ds_noz = (md.get('design_summary') or {}).get('nozzle') or {}
+    angles = md.get('nozzle_angles') or {}
+
+    D_ch = _num(md.get('chamber_diameter'), 0.1) * 1000
+    d_t = _num(md.get('throat_diameter'), 0.02) * 1000
+    d_e = _num(md.get('exit_diameter'), 0.08) * 1000
+    rc, rt, re = D_ch / 2, d_t / 2, d_e / 2
+
+    noz_type = div.get('type') or angles.get('nozzle_type') or 'conical'
+    theta_n = _num(div.get('throat_angle'), 30.0)
+    theta_e = _num(div.get('exit_angle'), 8.0)
+    # Açı alt sınırı 1°: tan(0) bölme-sıfır koruması
+    half_angle = max(1.0, _num(div.get('half_angle'),
+                               _num(angles.get('divergent_half_angle_deg'), 15.0)))
+    conv_angle = max(1.0, _num(angles.get('convergent_half_angle_deg'), 30.0))
+    L_conv = _num(ds_noz.get('convergent_length_mm'),
+                  (rc - rt) / np.tan(np.radians(conv_angle)))
+    L_div = _num(div.get('length'),
+                 _num(ds_noz.get('divergent_length_mm'),
+                      (re - rt) / np.tan(np.radians(half_angle))))
+    Rn = _num(conv.get('throat_radius_curvature'), 0.382 * rt)
+
+    pts = []
+    for i in range(n_conv):  # konverjan: iki uçta sıfır eğimli kosinüs
+        s = i / (n_conv - 1)
+        pts.append((L_conv * s,
+                    rt + (rc - rt) * (0.5 + 0.5 * np.cos(np.pi * s))))
+    z_throat = L_conv
+
+    theta_max = np.radians(half_angle if noz_type == 'conical' else theta_n)
+    arc_z, arc_r = z_throat, rt
+    for i in range(1, n_arc + 1):  # Rao boğaz çıkış yayı
+        a = theta_max * i / n_arc
+        arc_z = z_throat + Rn * np.sin(a)
+        arc_r = rt + Rn * (1 - np.cos(a))
+        pts.append((arc_z, arc_r))
+
+    if noz_type == 'conical':
+        z_exit = arc_z + (re - arc_r) / np.tan(theta_max)
+        pts.append((z_exit, re))
+    else:  # bell: kuadratik Bézier, teğet θn → θe
+        t0, t1 = np.tan(theta_max), np.tan(np.radians(theta_e))
+        p0z, p0r = arc_z, arc_r
+        p2z, p2r = z_throat + L_div, re
+        den = t0 - t1
+        if abs(den) > 1e-9:
+            zc = (p2r - p0r + t0 * p0z - t1 * p2z) / den
+        else:  # paralel teğetler: orta nokta
+            zc = 0.5 * (p0z + p2z)
+        zc = min(max(zc, p0z + 0.05 * (p2z - p0z)), p2z - 0.05 * (p2z - p0z))
+        p1z, p1r = zc, p0r + t0 * (zc - p0z)
+        for i in range(1, n_div + 1):
+            u = i / n_div
+            v = 1 - u
+            pts.append((v * v * p0z + 2 * v * u * p1z + u * u * p2z,
+                        v * v * p0r + 2 * v * u * p1r + u * u * p2r))
+        z_exit = p2z
+
+    meta = {'z_throat': z_throat, 'z_exit': z_exit,
+            'r_throat': rt, 'r_exit': pts[-1][1], 'noz_type': noz_type}
+    return pts, meta

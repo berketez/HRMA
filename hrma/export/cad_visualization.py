@@ -9,6 +9,8 @@ MotorCADDesigner also uses trimesh for mesh-based geometry.
 
 import numpy as np
 import trimesh
+
+from hrma.engines.nozzle_design import sample_nozzle_inner_contour
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import plotly.graph_objects as go
@@ -25,6 +27,20 @@ from io import BytesIO
 # MotorCADDesigner - 3D Motor Assembly (trimesh + Plotly)
 # Originally from cad_design.py
 # =============================================================================
+
+def _real_nested(d, path):
+    """İç içe dict'ten sonlu pozitif float çek (yoksa None)."""
+    cur = d
+    for k in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(k)
+    try:
+        v = float(cur)
+    except (TypeError, ValueError):
+        return None
+    return v if (np.isfinite(v) and v > 0) else None
+
 
 class MotorCADDesigner:
     """Professional 3D CAD design for hybrid rocket motors"""
@@ -61,6 +77,11 @@ class MotorCADDesigner:
     def generate_3d_motor_assembly(self, motor_data: Dict) -> Dict:
         """Generate complete 3D motor assembly with all components"""
 
+        # Yerel kopyada çalış: aşağıdaki motor_data.update(...) çağrıcının
+        # motor_results sözlüğünü YERİNDE değiştiriyordu (chamber_length'i
+        # kaba L* kuralıyla ezip /calculate yanıtını bozuyordu)
+        motor_data = dict(motor_data)
+
         try:
             # Extract motor parameters from calculation results
             chamber_diameter = motor_data.get('chamber_diameter', 0.1)  # m
@@ -74,98 +95,115 @@ class MotorCADDesigner:
             motor_config = design_config.get('motor', {})
             injector_config = design_config.get('injector', {})
 
-            # Calculate reasonable dimensions based on motor performance
+            # ---- GERÇEK ÇÖZÜCÜ GEOMETRİSİ ----
+            # Önce motor_results'taki hesaplanmış değerler; anahtar yoksa eski
+            # kaba kurallara düşülür. (Eski davranış: port=0.4·D, L=f(L*) gibi
+            # kurallar çözücü çıktısını YOK SAYIYORDU — STL çıktısı analizle
+            # tutarsızdı.)
+            def _real(key, lo, hi):
+                v = motor_data.get(key)
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    return None
+                return v if (np.isfinite(v) and lo < v < hi) else None
+
             total_impulse = motor_data.get('total_impulse', 10000)
             thrust = motor_data.get('thrust', 1000)
             burn_time = motor_data.get('burn_time', 10)
+            l_star = motor_data.get('l_star', 1.0)
 
-            # Auto-calculate chamber length based on L* and throat area
-            l_star = motor_data.get('l_star', 1.0)  # m
-            throat_area = 3.14159 * (throat_diameter/2)**2
-            chamber_volume = l_star * throat_area
-            chamber_length = chamber_volume / (3.14159 * (chamber_diameter/2)**2)
-            chamber_length = max(0.3, min(2.0, chamber_length))  # Reasonable limits
-
-            # Override with user config if provided
+            chamber_length = _real('chamber_length', 0.02, 5.0)
+            if chamber_length is None:
+                # Eski L* kuralı (yalnız gerçek değer yoksa)
+                throat_area = np.pi * (throat_diameter / 2) ** 2
+                chamber_length = (l_star * throat_area) / (np.pi * (chamber_diameter / 2) ** 2)
+                chamber_length = max(0.3, min(2.0, chamber_length))
             if motor_config.get('chamber_length_override'):
-                chamber_length = motor_config['chamber_length_override'] / 1000  # Convert mm to m
+                chamber_length = motor_config['chamber_length_override'] / 1000.0
 
-            # Auto-calculate nozzle length based on expansion ratio
-            expansion_ratio = motor_data.get('expansion_ratio', 16)
-            if expansion_ratio <= 1:
-                expansion_ratio = (exit_diameter / throat_diameter)**2
+            # Nozul konturu: 2D kesit ve 3D görselleştirmeyle AYNI kaynak
+            noz_pts_mm, noz_meta = sample_nozzle_inner_contour(motor_data)
+            nozzle_length = noz_meta['z_exit'] / 1000.0
 
-            # Nozzle length typically 3-5 times throat diameter
-            nozzle_length = max(0.1, min(0.3, throat_diameter * 4))
+            # Duvar kalınlıkları
+            struct = motor_data.get('structural_analysis') or {}
+            wall_case = _real_nested(struct, ('chamber_analysis', 'recommended_thickness'))
+            wall_case = (wall_case / 1000.0) if wall_case else max(0.004, 0.045 * chamber_diameter)
+            wall_case = min(wall_case, 0.12 * chamber_diameter)
+            noz_geo = motor_data.get('nozzle_geometry') or {}
+            wall_noz = noz_geo.get('wall_thickness')
+            wall_noz = (wall_noz / 1000.0) if wall_noz else max(0.003, 0.1 * throat_diameter)
 
-            # Auto-calculate port diameter (typically 30-60% of chamber diameter)
-            port_diameter = chamber_diameter * 0.4
+            # Grain: gerçek port + gerçek boy
+            port_diameter = _real('port_diameter_initial', 1e-4, 2.0) or chamber_diameter * 0.4
+            grain_length = _real('grain_length', 0.005, 5.0) or (chamber_length - 0.05)
+            grain_length = min(grain_length, 0.98 * chamber_length)
+            liner = min(max(0.02 * chamber_diameter, 0.0015), 0.005)
 
-            # Auto-calculate injector parameters based on mass flow rate
-            mdot_ox = motor_data.get('mdot_ox', 1.0)  # kg/s
-            injector_velocity = injector_config.get('injection_velocity', 30)  # m/s
-            orifice_area_total = mdot_ox / (motor_data.get('oxidizer_density', 1200) * injector_velocity)
-
-            # Calculate number of orifices (4-12 typical for small motors)
-            if injector_config.get('n_holes_override'):
+            # Enjektör: gerçek orifis sayısı/çapı
+            inj = motor_data.get('injector_design') or {}
+            injector_orifices = inj.get('number_of_orifices')
+            if injector_orifices:
+                injector_orifices = int(round(injector_orifices))
+            elif injector_config.get('n_holes_override'):
                 injector_orifices = injector_config['n_holes_override']
             else:
-                if total_impulse < 5000:
-                    injector_orifices = 4
-                elif total_impulse < 15000:
-                    injector_orifices = 6
-                elif total_impulse < 30000:
-                    injector_orifices = 8
-                else:
-                    injector_orifices = 12
+                injector_orifices = 8
+            injector_orifices = max(1, min(injector_orifices, 16))  # boolean kararlılığı
+            ori_mm = inj.get('orifice_diameter_mm')
+            if ori_mm:
+                orifice_diameter = max(0.0005, min(0.01, ori_mm / 1000.0))
+            else:
+                mdot_ox = motor_data.get('mdot_ox', 1.0)
+                inj_v = injector_config.get('injection_velocity', 30)
+                a_tot = mdot_ox / (motor_data.get('oxidizer_density', 1200) * inj_v)
+                orifice_diameter = max(0.001, min(0.01, 2 * (a_tot / injector_orifices / np.pi) ** 0.5))
 
-            # Calculate individual orifice diameter
-            orifice_area_each = orifice_area_total / injector_orifices
-            orifice_diameter = 2 * (orifice_area_each / 3.14159)**0.5
-            orifice_diameter = max(0.001, min(0.01, orifice_diameter))  # 1-10mm limits
-
-            # Store calculated dimensions for use in geometry creation
+            # Türetilen boyutları KOPYAYA yaz (çağıranın dict'i korunur)
             motor_data.update({
                 'chamber_length': chamber_length,
                 'nozzle_length': nozzle_length,
                 'port_diameter': port_diameter,
                 'injector_orifices': injector_orifices,
                 'orifice_diameter': orifice_diameter,
-                'design_config': design_config  # Pass config to other functions
+                'design_config': design_config
             })
 
-            # Generate individual components
+            # ---- Bileşen katıları (kapalı profil revolve — boolean'sız, watertight) ----
             print("CAD Debug - Creating chamber mesh...")
-            chamber_mesh = self._create_combustion_chamber(chamber_diameter, chamber_length)
+            cap_t = min(max(1.6 * wall_case, 0.008), 0.3 * chamber_diameter / 2 + 0.008)
+            chamber_mesh = self._chamber_solid(chamber_diameter, chamber_length, wall_case, cap_t)
 
             print("CAD Debug - Creating nozzle mesh...")
-            nozzle_mesh = self._create_nozzle(throat_diameter, exit_diameter, nozzle_length, motor_data)
+            nozzle_mesh = self._nozzle_solid(noz_pts_mm, wall_noz)
 
             print("CAD Debug - Creating injector mesh...")
             injector_mesh = self._create_injector_head(chamber_diameter, motor_data)
 
             print("CAD Debug - Creating fuel grain mesh...")
-            fuel_grain_mesh = self._create_fuel_grain(chamber_diameter, chamber_length, motor_data)
+            slack = max(0.004, chamber_length - grain_length)
+            zg0 = 0.35 * slack
+            fuel_grain_mesh = self._grain_solid(
+                chamber_diameter / 2 - liner, port_diameter / 2, zg0, zg0 + grain_length
+            )
 
-            # Position components
+            # ---- Yerleşim: z=0 kapak iç yüzü, kamara [0, L], nozul [L, L+Ln] ----
             assembly_meshes = []
 
-            # Chamber at origin
-            chamber_mesh.visual.face_colors = [200, 200, 200, 100]  # Light gray
+            chamber_mesh.visual.face_colors = [200, 200, 200, 100]
             assembly_meshes.append(('Chamber', chamber_mesh))
 
-            # Nozzle at end of chamber
             nozzle_mesh.apply_translation([0, 0, chamber_length])
-            nozzle_mesh.visual.face_colors = [50, 50, 50, 255]  # Dark gray
+            nozzle_mesh.visual.face_colors = [50, 50, 50, 255]
             assembly_meshes.append(('Nozzle', nozzle_mesh))
 
-            # Injector at start of chamber
-            injector_mesh.apply_translation([0, 0, -0.05])
-            injector_mesh.visual.face_colors = [150, 150, 150, 200]  # Medium gray
+            # Enjektör plakası kamara içinde, kapak iç yüzüne yakın
+            injector_mesh.apply_translation([0, 0, 0.006 + 0.015])
+            injector_mesh.visual.face_colors = [150, 150, 150, 200]
             assembly_meshes.append(('Injector', injector_mesh))
 
-            # Fuel grain inside chamber
-            fuel_grain_mesh.visual.face_colors = [139, 69, 19, 150]  # Brown/orange
+            fuel_grain_mesh.visual.face_colors = [139, 69, 19, 150]
             assembly_meshes.append(('Fuel Grain', fuel_grain_mesh))
 
             print("CAD Debug - Creating plotly visualization...")
@@ -202,6 +240,58 @@ class MotorCADDesigner:
                 'manufacturing_notes': [],
                 'performance_summary': {}
             }
+
+
+    @staticmethod
+    def _fix_solid(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+        """Revolve çıktısını STL'e uygun hale getir: dejenere üçgenleri at,
+        normal yönünü dışa çevir (negatif hacim = ters sarım)."""
+        mesh.update_faces(mesh.nondegenerate_faces())
+        mesh.remove_unreferenced_vertices()
+        mesh.merge_vertices()
+        if mesh.volume < 0:
+            mesh.invert()
+        return mesh
+
+    def _chamber_solid(self, diameter: float, length: float,
+                       wall: float, cap_t: float) -> trimesh.Trimesh:
+        """Baş kapak + silindirik tüp tek kapalı profil revolve katısı (m)."""
+        r_in = diameter / 2
+        r_out = r_in + wall
+        profile = np.array([
+            [0.0, -cap_t],
+            [r_out, -cap_t],
+            [r_out, length],
+            [r_in, length],
+            [r_in, 0.0],
+            [0.0, 0.0],
+            [0.0, -cap_t],
+        ])
+        return self._fix_solid(trimesh.creation.revolve(profile))
+
+    def _nozzle_solid(self, inner_pts_mm, wall: float) -> trimesh.Trimesh:
+        """Gerçek iç konturdan duvarlı nozul katısı.
+
+        inner_pts_mm: sample_nozzle_inner_contour çıktısı [(z_mm, r_mm), ...]
+        (z=0 konverjan başlangıcı). Dönen katı z=0'dan başlar (metre).
+        """
+        inner = [(r / 1000.0, z / 1000.0) for z, r in inner_pts_mm]
+        outer = [(r + wall, z) for r, z in reversed(inner)]
+        profile = np.array(inner + outer + [inner[0]])
+        return self._fix_solid(trimesh.creation.revolve(profile))
+
+    def _grain_solid(self, r_outer: float, r_port: float,
+                     z0: float, z1: float) -> trimesh.Trimesh:
+        """Silindirik delikli yakıt grain'i — halka profil revolve (m)."""
+        r_port = min(max(r_port, 1e-4), r_outer - 5e-4)
+        profile = np.array([
+            [r_port, z0],
+            [r_outer, z0],
+            [r_outer, z1],
+            [r_port, z1],
+            [r_port, z0],
+        ])
+        return self._fix_solid(trimesh.creation.revolve(profile))
 
     def _create_combustion_chamber(self, diameter: float, length: float) -> trimesh.Trimesh:
         """Create combustion chamber geometry"""

@@ -267,7 +267,6 @@
         
         .plot-container .plotly {
             width: 100% !important;
-            height: 100% !important;
         }
         
         #motor_3d_plot {
@@ -297,14 +296,11 @@
             cursor: not-allowed;
         }
         
-        /* Improve plot visibility */
+        /* Grafik div'i akış içinde kalır; yükseklik JS'te layout'tan sabitlenir
+           (eski height:100%%!important + overflow:visible hack'i panel taşmasına
+           yol açıyordu) */
         .js-plotly-plot {
             width: 100% !important;
-            height: 100% !important;
-        }
-        
-        .main-svg {
-            overflow: visible !important;
         }
         
         /* Panel styling for better separation */
@@ -657,7 +653,16 @@
         .status-connected { background: #d4edda; color: #155724; }
         .status-disconnected { background: #f8d7da; color: #721c24; }
     </style>
+    <!-- HRMA tasarım sistemi: inline stillerden SONRA yüklenir, onları ezer -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/theme.css">
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="/static/js/plotly_dark.js"></script>
+    <!-- Three.js (sabit sürüm) + OrbitControls: 3D motor simülasyonu için -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="/static/js/motor_viz3d.js"></script>
     <script src="/static/js/app.js"></script>
 </head>
 <body>
@@ -1533,14 +1538,14 @@
                             <li><strong>Design validation:</strong> All parameters optimized for stable combustion</li>
                         </ul>
                     </div>
-                    <div id="injector_plot" class="plot-container" style="min-height: 800px; margin-bottom: 100px;"></div>
+                    <div id="injector_plot" class="plot-container" style="min-height: 800px;"></div>
                 </div>
                 
                 <!-- Performance Analysis panel removed: duplicate of Performance Analysis Dashboard above -->
             </div>
             
             <!-- Export/CAD Actions Panel -->
-            <div id="exportActionsPanel" class="panel" style="display: none; margin-top: 150px; clear: both;">
+            <div id="exportActionsPanel" class="panel" style="display: none; margin-top: 20px; clear: both;">
                 <h2>Export & CAD Options</h2>
                 <div class="export-grid">
                     <div class="export-section">
@@ -1732,25 +1737,71 @@
                 </div>
             </div>
             
-            <!-- 3D Visualization Panel -->
-            <div id="cad3DPanel" class="panel" style="display: none; margin-top: 20px; clear: both;">
-                <h2>3D Motor Visualization</h2>
-                <div class="chart-explanation">
-                    <p><strong>What this shows:</strong> Interactive 3D model of the complete rocket motor assembly</p>
-                    <ul>
-                        <li><strong>Gray components:</strong> Motor case and structural elements</li>
-                        <li><strong>Red/Orange:</strong> Fuel grain with internal port geometry</li>
-                        <li><strong>Blue gradient:</strong> Nozzle throat and expansion cone</li>
-                        <li><strong>Controls:</strong> Rotate (click+drag), Zoom (scroll), Pan (shift+drag)</li>
-                        <li><strong>Scale:</strong> True proportional dimensions for manufacturing reference</li>
-                    </ul>
+            <!-- 3D Motor Simulation Deck (stiller theme.css: .viz-*) -->
+            <div id="cad3DPanel" class="viz-deck" style="display: none; margin-top: 20px; clear: both;">
+                <div class="viz-head">
+                    <div>
+                        <div class="viz-title"><span class="viz-dot"></span>MOTOR SIMULATION</div>
+                        <div class="viz-sub">PARAMETRIC DIGITAL TWIN — LIVE GEOMETRY FROM SOLVER OUTPUT</div>
+                    </div>
+                    <div class="viz-toolbar">
+                        <button class="viz-btn active" id="viz_btn_cut" onclick="vizToggle('cutaway', this)">Cutaway</button>
+                        <button class="viz-btn active" id="viz_btn_dim" onclick="vizToggle('labels', this)">Dimensions</button>
+                        <button class="viz-btn warn active" id="viz_btn_plume" onclick="vizToggle('plume', this)">Exhaust</button>
+                        <button class="viz-btn" id="viz_btn_exp" onclick="vizToggle('exploded', this)">Exploded</button>
+                        <button class="viz-btn" id="viz_btn_port" onclick="vizCyclePort(this)">Port: Circular</button>
+                        <button class="viz-btn warn" id="viz_btn_heat" onclick="vizToggleHeat(this)">Heat Map</button>
+                        <button class="viz-btn warn" id="viz_btn_design" onclick="vizToggleDesign(this)">Design Mode</button>
+                        <button class="viz-btn" id="viz_btn_rot" onclick="vizToggle('autoRotate', this)">Orbit</button>
+                        <button class="viz-btn" onclick="vizCycleSpeed(this)" id="viz_btn_speed">1&times;</button>
+                        <button class="viz-btn" onclick="reset3DView()">Reset View</button>
+                    </div>
                 </div>
-                <div id="motor_3d_plot" class="plot-container"></div>
-                <div class="cad-controls">
-                    <button class="btn btn-small" onclick="rotate3DView()">Rotate View</button>
-                    <button class="btn btn-small" onclick="reset3DView()">Reset View</button>
-                    <button class="btn btn-small" onclick="toggleWireframe()">Toggle Wireframe</button>
+                <div class="viz-stage">
+                    <div id="motor_viz3d_viewport"></div>
+                    <div class="viz-corner tl"></div><div class="viz-corner tr"></div>
+                    <div class="viz-corner bl"></div><div class="viz-corner br"></div>
+                    <div class="viz-status" id="viz_status">STANDBY</div>
+                    <div class="viz-heatlegend" id="viz_heat_legend" style="display: none;">
+                        <div>WALL HEAT FLUX — BARTZ (A<sub>t</sub>/A)<sup>0.9</sup></div>
+                        <div class="bar"></div>
+                        <div class="lbl"><span id="viz_hl_min">—</span><span id="viz_hl_max">—</span></div>
+                        <div class="tw" id="viz_hl_wall">—</div>
+                    </div>
                 </div>
+                <div class="viz-design" id="viz_design_panel" style="display: none;">
+                    <div class="viz-dctrl">
+                        <div class="dk"><span>Chamber &Oslash;</span><b id="viz_dv_dch">—</b></div>
+                        <input type="range" id="viz_ds_dch" min="0" max="1000" value="500"
+                               oninput="vizDesignInput()">
+                    </div>
+                    <div class="viz-dctrl">
+                        <div class="dk"><span>L* (characteristic length)</span><b id="viz_dv_lstar">—</b></div>
+                        <input type="range" id="viz_ds_lstar" min="0" max="1000" value="500"
+                               oninput="vizDesignInput()">
+                    </div>
+                    <div class="viz-dctrl">
+                        <div class="dk"><span>Expansion Ratio &epsilon;</span><b id="viz_dv_eps">—</b></div>
+                        <input type="range" id="viz_ds_eps" min="0" max="1000" value="500"
+                               oninput="vizDesignInput()">
+                    </div>
+                    <div class="viz-dstatus" id="viz_design_status">PREVIEW — adjust sliders; geometry recomputed live. Run CALCULATE for the full analysis.</div>
+                </div>
+                <div class="viz-timeline">
+                    <button class="viz-play" id="viz_play" onclick="vizPlayPause()" title="Yanma simülasyonu">&#9654;</button>
+                    <input type="range" id="viz_slider" min="0" max="1000" value="0"
+                           oninput="vizScrub(this.value)">
+                    <div class="viz-clock" id="viz_clock">t = 0.00 s / — s</div>
+                </div>
+                <div class="viz-telemetry">
+                    <div class="viz-chip" id="viz_chip_port"><div class="k">Port &Oslash;</div><div class="v" id="viz_v_port">—</div></div>
+                    <div class="viz-chip" id="viz_chip_web"><div class="k">Web Remaining</div><div class="v" id="viz_v_web">—</div></div>
+                    <div class="viz-chip" id="viz_chip_of"><div class="k">O/F Ratio</div><div class="v" id="viz_v_of">—</div></div>
+                    <div class="viz-chip" id="viz_chip_isp"><div class="k">Isp</div><div class="v" id="viz_v_isp">—</div></div>
+                    <div class="viz-chip" id="viz_chip_thrust"><div class="k">Thrust</div><div class="v" id="viz_v_thrust">—</div></div>
+                </div>
+                <!-- Three.js yüklenemezse eski Plotly 3D buraya düşer -->
+                <div id="motor_3d_plot" style="display: none;"></div>
             </div>
             
             <!-- CEA Style Results -->
@@ -3798,22 +3849,26 @@
             document.getElementById('cadStatus').textContent = 'Generating full motor design...';
             
             try {
-                // First generate 3D visualization
-                const response3d = await fetch('/api/generate-3d', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        motor_data: currentResults.motor,
-                        injector_data: currentResults.injector
-                    })
-                });
-                
-                const result3d = await response3d.json();
-                
-                if (result3d.status === 'success' && result3d.plot_data) {
-                    const plotData = JSON.parse(result3d.plot_data);
-                    Plotly.newPlot('motor_3d_plot', plotData.data, plotData.layout, {responsive: true});
-                    document.getElementById('cad3DPanel').style.display = 'block';
+                // 3D simülasyon: geometri zaten currentResults.motor içinde,
+                // Three.js modülü parametrik modeli istemci tarafında kurar
+                if (!mountMotorViz(currentResults.motor)) {
+                    // WebGL/Three.js yoksa eski Plotly 3D'ye düş
+                    const response3d = await fetch('/api/generate-3d', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            motor_data: currentResults.motor,
+                            injector_data: currentResults.injector
+                        })
+                    });
+                    const result3d = await response3d.json();
+                    if (result3d.status === 'success' && result3d.plot_data) {
+                        const plotData = JSON.parse(result3d.plot_data);
+                        const fb = document.getElementById('motor_3d_plot');
+                        if (fb) fb.style.display = 'block';
+                        Plotly.newPlot('motor_3d_plot', plotData.data, plotData.layout, {responsive: true});
+                        document.getElementById('cad3DPanel').style.display = 'block';
+                    }
                 }
                 
                 // Then generate complete CAD package
@@ -3988,19 +4043,287 @@
 `);
         }
 
+        // ===== 3D Motor Simülasyonu kontrolleri (MotorViz3D) =====
+        let vizHudLast = 0;
+
+        function mountMotorViz(motorData) {
+            const panel = document.getElementById('cad3DPanel');
+            if (!panel) return false;
+            if (!(window.MotorViz3D && MotorViz3D.isSupported())) return false;
+            panel.style.display = 'block';
+            MotorViz3D.mount('motor_viz3d_viewport', motorData, { onTick: vizOnTick });
+            // Buton durumlarını modülün varsayılan state'iyle eşle
+            const v = MotorViz3D.get();
+            if (v) {
+                syncVizBtn('viz_btn_cut', v.state.cutaway);
+                syncVizBtn('viz_btn_dim', v.state.labels);
+                syncVizBtn('viz_btn_plume', v.state.plume);
+                syncVizBtn('viz_btn_exp', v.state.exploded);
+                syncVizBtn('viz_btn_rot', v.state.autoRotate);
+                // Yeni hesapla gelen taze sahne: port/ısı/tasarım durumlarını sıfırla
+                const pb = document.getElementById('viz_btn_port');
+                if (pb) { pb.textContent = 'Port: Circular'; pb.classList.remove('active'); }
+                syncVizBtn('viz_btn_heat', false);
+                const hl = document.getElementById('viz_heat_legend');
+                if (hl) hl.style.display = 'none';
+                const dp = document.getElementById('viz_design_panel');
+                if (dp) dp.style.display = 'none';
+                syncVizBtn('viz_btn_design', false);
+                vizDesignBase = null;
+                clearTimeout(vizDesignTimer);
+                vizDesignTimer = null;
+            }
+            return true;
+        }
+
+        function syncVizBtn(id, on) {
+            const b = document.getElementById(id);
+            if (b) b.classList.toggle('active', !!on);
+        }
+
+        function vizToggle(prop, btn) {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            const next = !v.state[prop];
+            if (prop === 'cutaway') v.setCutaway(next);
+            else if (prop === 'labels') v.setLabels(next);
+            else if (prop === 'plume') v.setPlume(next);
+            else if (prop === 'exploded') v.setExploded(next);
+            else if (prop === 'autoRotate') v.setAutoRotate(next);
+            if (btn) btn.classList.toggle('active', next);
+        }
+
+        function vizPlayPause() {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            if (v.state.playing) v.pause(); else v.play();
+        }
+
+        function vizScrub(sliderVal) {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            v.pause();
+            v.setTime((sliderVal / 1000) * v.dims.burnTime);
+        }
+
+        function vizCycleSpeed(btn) {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            const s = v.cycleSpeed();
+            if (btn) btn.innerHTML = (s % 1 === 0 ? s : s.toFixed(1)) + '&times;';
+        }
+
+        function vizOnTick(s) {
+            // HUD'u ~12 Hz ile güncelle (her karede DOM yazma yok)
+            const now = performance.now();
+            if (now - vizHudLast < 80) return;
+            vizHudLast = now;
+
+            const playBtn = document.getElementById('viz_play');
+            const slider = document.getElementById('viz_slider');
+            const clock = document.getElementById('viz_clock');
+            const status = document.getElementById('viz_status');
+            if (!playBtn || !slider) return;
+
+            playBtn.innerHTML = s.playing ? '&#10074;&#10074;' : '&#9654;';
+            playBtn.classList.toggle('burning', s.burning);
+            const p = (s.time / s.burnTime) * 1000;
+            slider.value = p;
+            slider.style.setProperty('--p', (p / 10) + '%');
+            clock.innerHTML = 't = <b>' + s.time.toFixed(2) + '</b> s / ' + s.burnTime.toFixed(2) + ' s';
+
+            if (status) {
+                if (s.burning) { status.textContent = 'COMBUSTION ACTIVE'; status.classList.add('burning'); }
+                else if (s.time >= s.burnTime - 1e-3) { status.textContent = 'BURNOUT'; status.classList.remove('burning'); }
+                else { status.textContent = 'STANDBY'; status.classList.remove('burning'); }
+            }
+
+            setVizChip('viz_v_port', (s.portDiameter).toFixed(1), 'mm', s.burning, 'viz_chip_port');
+            setVizChip('viz_v_web', (s.webRemaining * 100).toFixed(0), '%', s.burning, 'viz_chip_web');
+            setVizChip('viz_v_of', s.of ? s.of.toFixed(2) : '—', '', s.burning, 'viz_chip_of');
+            setVizChip('viz_v_isp', s.isp ? s.isp.toFixed(1) : '—', 's', s.burning, 'viz_chip_isp');
+            const thrustTxt = s.thrust >= 1000 ? (s.thrust / 1000).toFixed(2) : s.thrust.toFixed(0);
+            setVizChip('viz_v_thrust', s.thrust > 0 ? thrustTxt : '0', s.thrust >= 1000 ? 'kN' : 'N', s.burning, 'viz_chip_thrust');
+        }
+
+        function setVizChip(valueId, val, unit, hot, chipId) {
+            const el = document.getElementById(valueId);
+            if (el) el.innerHTML = val + (unit ? '<small>' + unit + '</small>' : '');
+            const chip = document.getElementById(chipId);
+            if (chip) chip.classList.toggle('hot', !!hot);
+        }
+
+        // ===== Port kesit şekli / Isı haritası / Tasarım modu =====
+        const PORT_LABELS = {
+            circular: 'Circular', star: 'Star',
+            multiport: 'Multi-Port', finocyl: 'Finocyl'
+        };
+
+        function vizCyclePort(btn) {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            const shape = v.cyclePortShape();
+            if (btn) {
+                btn.textContent = 'Port: ' + PORT_LABELS[shape];
+                btn.classList.toggle('active', shape !== 'circular');
+                btn.title = shape === 'circular' ? '' :
+                    'Görsel gösterim — balistik, alan-eşdeğer dairesel portla çözülür';
+            }
+        }
+
+        function vizToggleHeat(btn) {
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (!v) return;
+            const info = v.getHeatInfo();
+            if (!info) {
+                showMessage('Isıl analiz verisi yok (heat_transfer_analysis) — önce Calculate çalıştırın', 'error');
+                return;
+            }
+            const on = v.setHeatMap(!v.state.heatMap);
+            if (btn) btn.classList.toggle('active', on);
+            const legend = document.getElementById('viz_heat_legend');
+            if (legend) {
+                legend.style.display = on ? 'block' : 'none';
+                if (on) {
+                    const fmt = q => q >= 1e6 ? (q / 1e6).toFixed(2) + ' MW/m²'
+                                              : (q / 1e3).toFixed(0) + ' kW/m²';
+                    document.getElementById('viz_hl_min').textContent = fmt(info.qChamber);
+                    document.getElementById('viz_hl_max').textContent = fmt(info.qThroat);
+                    document.getElementById('viz_hl_wall').textContent =
+                        (info.tWallInner ? 'T_wall iç ' + info.tWallInner.toFixed(0) + ' K' : '') +
+                        (info.tWallOuter ? ' / dış ' + info.tWallOuter.toFixed(0) + ' K' : '');
+                }
+            }
+        }
+
+        // --- Tasarım modu: slider -> /api/quick-geometry -> canlı güncelleme ---
+        let vizDesignBase = null;   // slider aralıklarının kurulduğu referans
+        let vizDesignTimer = null;
+        let vizDesignBusy = false;
+
+        function vizToggleDesign(btn) {
+            const panel = document.getElementById('viz_design_panel');
+            if (!panel) return;
+            const open = panel.style.display === 'none';
+            if (open && !(currentResults && currentResults.motor)) {
+                showMessage('Önce Calculate çalıştırın', 'error');
+                return;
+            }
+            panel.style.display = open ? 'flex' : 'none';
+            if (btn) btn.classList.toggle('active', open);
+            if (open) vizDesignInit();
+        }
+
+        function vizDesignInit() {
+            const m = currentResults.motor;
+            const dchMm = (m.chamber_diameter || 0.1) * 1000;
+            const lstar = parseFloat(document.getElementById('l_star')?.value) || 1.0;
+            const eps = m.expansion_ratio || 8;
+            vizDesignBase = {
+                dch: [dchMm * 0.6, dchMm * 1.4, dchMm],
+                lstar: [0.4, 3.0, Math.min(Math.max(lstar, 0.4), 3.0)],
+                eps: [2, 30, Math.min(Math.max(eps, 2), 30)]
+            };
+            setSlider('viz_ds_dch', vizDesignBase.dch);
+            setSlider('viz_ds_lstar', vizDesignBase.lstar);
+            setSlider('viz_ds_eps', vizDesignBase.eps);
+            vizDesignReadouts();
+        }
+
+        function setSlider(id, [lo, hi, val]) {
+            const el = document.getElementById(id);
+            if (el) el.value = Math.round(((val - lo) / (hi - lo)) * 1000);
+        }
+
+        function sliderVal(id, [lo, hi]) {
+            const el = document.getElementById(id);
+            return lo + (hi - lo) * (parseFloat(el.value) / 1000);
+        }
+
+        function vizDesignValues() {
+            return {
+                dch_mm: sliderVal('viz_ds_dch', vizDesignBase.dch),
+                lstar: sliderVal('viz_ds_lstar', vizDesignBase.lstar),
+                eps: sliderVal('viz_ds_eps', vizDesignBase.eps)
+            };
+        }
+
+        function vizDesignReadouts() {
+            if (!vizDesignBase) return;
+            const v = vizDesignValues();
+            document.getElementById('viz_dv_dch').textContent = v.dch_mm.toFixed(1) + ' mm';
+            document.getElementById('viz_dv_lstar').textContent = v.lstar.toFixed(2) + ' m';
+            document.getElementById('viz_dv_eps').textContent = v.eps.toFixed(1);
+        }
+
+        function vizDesignInput() {
+            vizDesignReadouts();
+            clearTimeout(vizDesignTimer);
+            vizDesignTimer = setTimeout(vizDesignApply, 450);
+        }
+
+        async function vizDesignApply() {
+            if (!vizDesignBase) return; // panel kapandı/remount — yeniden zamanlama YOK
+            if (vizDesignBusy) {
+                // meşgulken gelen istek: bitince en son değerlerle tekrar dene
+                clearTimeout(vizDesignTimer);
+                vizDesignTimer = setTimeout(vizDesignApply, 300);
+                return;
+            }
+            vizDesignBusy = true;
+            const status = document.getElementById('viz_design_status');
+            if (status) status.textContent = 'COMPUTING GEOMETRY…';
+            try {
+                const dv = vizDesignValues();
+                const payload = getFormData();
+                payload.chamber_diameter_input = dv.dch_mm; // motor mm bekler (engine /1000 çevirir)
+                payload.l_star = dv.lstar;
+                payload.expansion_ratio = dv.eps;
+                const resp = await fetch('/api/quick-geometry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const r = await resp.json();
+                if (r.status === 'success' && r.motor) {
+                    if (window.MotorViz3D && MotorViz3D.get()) MotorViz3D.update(r.motor);
+                    // 2D kesiti de senkron güncelle
+                    if (r.plots && r.plots.motor) {
+                        try {
+                            const pd = JSON.parse(r.plots.motor);
+                            const el = document.getElementById('motor_plot');
+                            if (el) {
+                                if (pd.layout && pd.layout.height) el.style.height = pd.layout.height + 'px';
+                                pd.layout.autosize = true;
+                                pd.layout.width = undefined; pd.layout.height = undefined;
+                                Plotly.newPlot('motor_plot', pd.data, pd.layout, { responsive: true, displaylogo: false });
+                            }
+                        } catch (e) { console.warn('design mode 2D update:', e); }
+                    }
+                    if (status) status.textContent =
+                        'PREVIEW UPDATED — thrust ' + (r.motor.thrust || 0).toFixed(0) + ' N, Isp ' +
+                        (r.motor.isp || 0).toFixed(1) + ' s. Run CALCULATE for the full analysis.';
+                } else {
+                    if (status) status.textContent = 'SOLVER ERROR: ' + (r.error || 'bilinmeyen');
+                }
+            } catch (e) {
+                if (status) status.textContent = 'REQUEST FAILED: ' + e.message;
+            } finally {
+                vizDesignBusy = false;
+            }
+        }
+
         function rotate3DView() {
-            // Implementation for rotating 3D view
-            showMessage('Rotating view...', 'info');
+            vizToggle('autoRotate', document.getElementById('viz_btn_rot'));
         }
 
         function reset3DView() {
-            // Implementation for resetting 3D view
-            showMessage('Resetting view...', 'info');
+            const v = window.MotorViz3D && MotorViz3D.get();
+            if (v) v.resetCamera();
         }
 
         function toggleWireframe() {
-            // Implementation for toggling wireframe
-            showMessage('Toggling wireframe...', 'info');
+            vizToggle('cutaway', document.getElementById('viz_btn_cut'));
         }
 
         async function exportMotorSTL() {

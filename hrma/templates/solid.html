@@ -239,6 +239,17 @@
         }
     </style>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="/static/js/plotly_dark.js"></script>
+    <!-- Three.js (sabit sürüm) + OrbitControls + MotorViz3D simülasyon güvertesi.
+         Sıra önemli: three -> OrbitControls -> viz3d -> viz_deck -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="/static/js/motor_viz3d.js"></script>
+    <script src="/static/js/motor_viz_deck.js"></script>
+    <!-- HRMA tasarım sistemi: inline stillerden SONRA yüklenir, onları ezer -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/theme.css">
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -567,8 +578,8 @@
             <div class="grain-preview" id="grain_preview">
                 <svg width="180" height="180" viewBox="0 0 180 180">
                     <!-- BATES grain default -->
-                    <circle cx="90" cy="90" r="80" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="25" fill="white" stroke="#495057" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="25" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
                 </svg>
             </div>
         </div>
@@ -1376,47 +1387,47 @@
             
             const svgs = {
                 'bates': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="25" fill="white" stroke="#495057" stroke-width="2"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#495057">BATES</text>
+                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="25" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">BATES</text>
                 </svg>`,
                 'star': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
                     <path d="M90,30 l15,45 h40 l-30,25 l10,40 l-35,-25 l-35,25 l10,-40 l-30,-25 h40 z" 
-                          fill="white" stroke="#495057" stroke-width="2"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#495057">Star</text>
+                          fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">Star</text>
                 </svg>`,
                 'finocyl': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="25" fill="white" stroke="#495057" stroke-width="2"/>
-                    <rect x="70" y="25" width="8" height="40" fill="white" stroke="#495057" stroke-width="1"/>
-                    <rect x="102" y="25" width="8" height="40" fill="white" stroke="#495057" stroke-width="1"/>
-                    <rect x="70" y="115" width="8" height="40" fill="white" stroke="#495057" stroke-width="1"/>
-                    <rect x="102" y="115" width="8" height="40" fill="white" stroke="#495057" stroke-width="1"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#495057">Finocyl</text>
+                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="25" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <rect x="70" y="25" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
+                    <rect x="102" y="25" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
+                    <rect x="70" y="115" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
+                    <rect x="102" y="115" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
+                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">Finocyl</text>
                 </svg>`,
                 'slotted': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="25" fill="white" stroke="#495057" stroke-width="2"/>
-                    <rect x="85" y="10" width="10" height="30" fill="white" stroke="#495057" stroke-width="1"/>
-                    <rect x="85" y="140" width="10" height="30" fill="white" stroke="#495057" stroke-width="1"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#495057">Slotted</text>
+                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="25" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <rect x="85" y="10" width="10" height="30" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
+                    <rect x="85" y="140" width="10" height="30" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
+                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">Slotted</text>
                 </svg>`,
                 'wagon_wheel': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="15" fill="white" stroke="#495057" stroke-width="2"/>
-                    <circle cx="90" cy="50" r="10" fill="white" stroke="#495057" stroke-width="2"/>
-                    <circle cx="120" cy="70" r="10" fill="white" stroke="#495057" stroke-width="2"/>
-                    <circle cx="120" cy="110" r="10" fill="white" stroke="#495057" stroke-width="2"/>
-                    <circle cx="90" cy="130" r="10" fill="white" stroke="#495057" stroke-width="2"/>
-                    <circle cx="60" cy="110" r="10" fill="white" stroke="#495057" stroke-width="2"/>
-                    <circle cx="60" cy="70" r="10" fill="white" stroke="#495057" stroke-width="2"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#495057">Wagon Wheel</text>
+                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="15" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="90" cy="50" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="120" cy="70" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="120" cy="110" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="90" cy="130" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="60" cy="110" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <circle cx="60" cy="70" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
+                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">Wagon Wheel</text>
                 </svg>`,
                 'end_burner': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
+                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
                     <line x1="90" y1="10" x2="90" y2="90" stroke="#f093fb" stroke-width="4"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#495057">End Burner</text>
+                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">End Burner</text>
                 </svg>`
             };
             
@@ -2200,18 +2211,127 @@ Please provide:
             }
         }
         
+        // Grain geometri seçimini MotorViz3D port kesit şekline eşle.
+        // (viz kesiti yalnız görseldir; balistik dairesel-eşdeğer portla çözülür)
+        function solidPortShape(grainType) {
+            switch ((grainType || 'bates').toLowerCase()) {
+                case 'star':        return 'star';
+                case 'wagon_wheel': return 'multiport';
+                case 'finocyl':
+                case 'slotted':     return 'finocyl';
+                case 'bates':
+                case 'end_burner':
+                default:            return 'circular';
+            }
+        }
+
+        // Katı motor hesap sonucundan MotorViz3D girdi sözlüğü üretir.
+        // ÖNEMLİ: MotorViz3D tüm boyutları SI-METRE bekler; sonuç nesnesindeki
+        // üst düzey çap/uzunluk anahtarları ise MİLİMETRE'dir (solid engine).
+        function buildSolidVizData(results) {
+            var r = results || {};
+            var cad = r.cad_design || {};
+            var caseDesign = cad.case_design || {};
+            var grainGeometry = cad.grain_geometry || {};
+
+            // mm -> m; sayısal değilse null döndür (fallback zincirine düşsün)
+            function mm2m(v) {
+                return (typeof v === 'number' && isFinite(v)) ? v / 1000 : null;
+            }
+            // İlk geçerli (sonlu sayı) argümanı döndürür
+            function firstNum() {
+                for (var i = 0; i < arguments.length; i++) {
+                    var v = arguments[i];
+                    if (typeof v === 'number' && isFinite(v)) return v;
+                }
+                return null;
+            }
+
+            // Oda çapı (m): sonuç mm ya da kasa iç çapı mm
+            var chamberDiaM = firstNum(mm2m(r.chamber_diameter),
+                                       mm2m(caseDesign.inner_diameter), 0.1);
+            // Oda uzunluğu (m): kasa iç uzunluğu (grain + kapaklar) mm;
+            // yoksa grain uzunluğunun /0.9'u (grain oda·0.9 ilişkisinin tersi)
+            var chamberLenM = firstNum(mm2m(caseDesign.length),
+                                       (mm2m(r.grain_length) !== null ? mm2m(r.grain_length) / 0.9 : null),
+                                       0.3);
+            // Grain uzunluğu (m): sonuçtan; yoksa oda uzunluğunun %90'ı
+            var grainLenM = firstNum(mm2m(r.grain_length),
+                                     mm2m(grainGeometry.length),
+                                     chamberLenM * 0.9);
+            // Grain dış çapı (m): grain_geometry.outer_diameter ya da oda çapı
+            var grainOuterDiaM = firstNum(mm2m(grainGeometry.outer_diameter), chamberDiaM);
+            // Başlangıç port çapı (m) = çekirdek çapı (core bore)
+            var portInitM = firstNum(mm2m(r.core_diameter),
+                                     mm2m(grainGeometry.core_diameter),
+                                     grainOuterDiaM * 0.3);
+            // Son port çapı (m): sonuçta yok → grain dış çapının %90'ı
+            // (yanma sonunda ince bir grain kabuğu görünsün diye 0.95 değil 0.9)
+            var portFinalM = grainOuterDiaM * 0.9;
+            if (!(portFinalM > portInitM)) {
+                portFinalM = Math.min(grainOuterDiaM * 0.95, portInitM * 1.6);
+            }
+
+            return {
+                viz_motor_type: 'solid',            // enjektör + oks. girişini gizler
+                chamber_diameter: chamberDiaM,      // m
+                chamber_length: chamberLenM,        // m
+                throat_diameter: firstNum(mm2m(r.throat_diameter), 0.02),  // m
+                exit_diameter: firstNum(mm2m(r.exit_diameter), 0.08),      // m
+                grain_length: grainLenM,            // m
+                port_diameter_initial: portInitM,   // m
+                port_diameter_final: portFinalM,    // m
+                burn_time: firstNum(r.burn_time, 10),                      // s
+                thrust: firstNum(r.average_thrust, r.max_thrust, 1000),    // N
+                isp: firstNum(r.specific_impulse, r.isp_sea_level, 200),   // s
+                chamber_pressure: firstNum(r.chamber_pressure, 20),        // bar
+                // MotorViz3D'nin doğrudan okuduğu opsiyonel alt nesneler
+                // (nozzle_angles konik yarı açıları/tipi sağlar; diğerleri
+                // uyumlu anahtar yoksa güvenle yok sayılır)
+                nozzle_angles: r.nozzle_angles || null,
+                design_summary: r.design_summary || null,
+                grain_design: r.grain_design || null
+                // NOT: heat_transfer_analysis bilinçli olarak geçilmiyor —
+                // katı motor thermal_analysis'i viz'in beklediği gas_side/
+                // wall şemasına sahip değil ve ısı akısı basitleştirilmiş
+                // (T_c*0.002) bir yer tutucu; ısı haritasını yanıltıcı
+                // değerlerle doldurmamak için "veri yok" fallback'i bırakıldı.
+            };
+        }
+
         function show3DVisualization() {
             if (!currentResults) {
                 showWarning('Please perform calculations first!');
                 return;
             }
-            
+
             const cadView = document.getElementById('cad_3d_view');
             cadView.style.display = 'block';
-            
-            // Generate 3D motor visualization
+
+            const grainType = currentResults.grain_type ||
+                (document.getElementById('grain_type') || {}).value || 'bates';
+            const portShape = solidPortShape(grainType);
+
+            // Yeni Three.js simülasyon güvertesi destekleniyorsa onu kur.
+            if (window.MotorVizDeck && window.MotorViz3D && MotorViz3D.isSupported()) {
+                // Konteyner daha önce Plotly grafiği barındırdıysa temizle
+                if (window.Plotly) { try { Plotly.purge('cad_3d_view'); } catch (e) {} }
+                // Güverte kendi yüksekliğini yönetsin (580px sahne + HUD şeritleri)
+                cadView.style.height = 'auto';
+                const deck = MotorVizDeck.create('cad_3d_view',
+                    buildSolidVizData(currentResults), {
+                        title: 'SOLID MOTOR SIMULATION',
+                        subtitle: 'PARAMETRIC DIGITAL TWIN — LIVE GEOMETRY FROM SOLVER OUTPUT',
+                        motorType: 'solid',
+                        portShape: portShape
+                    });
+                if (deck) return;               // başarıyla kuruldu
+                // deck null (WebGL yok) → eski Plotly yoluna düş
+                cadView.style.height = '400px';
+            }
+
+            // --- Fallback: eski Plotly 3D CAD görünümü (Three yoksa/WebGL yoksa) ---
             const motorVisualization = create3DMotorVisualization(currentResults);
-            
             Plotly.newPlot('cad_3d_view', motorVisualization.data, motorVisualization.layout, {
                 displayModeBar: true,
                 displaylogo: false,

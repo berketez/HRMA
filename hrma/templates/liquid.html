@@ -372,6 +372,10 @@
             font-size: 18px;
         }
     </style>
+    <!-- HRMA tasarım sistemi: inline stillerden SONRA yüklenir, onları ezer -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/theme.css">
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -1482,7 +1486,7 @@
                                 </button>
                             </div>
                             
-                            <div id="cad_visualization" style="height: 500px; margin: 20px 0; border: 1px solid #ddd; border-radius: 8px;">
+                            <div id="cad_visualization" style="min-height: 500px; margin: 20px 0; border: 1px solid #ddd; border-radius: 8px;">
                                 <!-- CAD Visualization will be inserted here -->
                             </div>
                         </div>
@@ -3156,12 +3160,81 @@ Please provide:
             event.target.classList.add('active');
         }
         
+        // Sıvı motor hesap sonucunu MotorViz3D sözlüğüne (SI-metre) çevirir.
+        // DİKKAT — /calculate_liquid yanıtı KARIŞIK birimlidir:
+        //   chamber_diameter, chamber_length  → mm  (motor tarafı ×1000 yapıyor)
+        //   throat_diameter,  exit_diameter   → metre ("EXPERT FIX: return in meters")
+        // MotorViz3D tüm boyutları METRE bekleyip içeride ×1000 yaptığından,
+        // mm gelenleri /1000 ile metreye indiriyoruz, metre olanları aynen geçiyoruz.
+        function buildLiquidVizData(results) {
+            results = results || {};
+            const inj = results.injector_design || {};
+            const num = (v, d) => (typeof v === 'number' && isFinite(v)) ? v : d;
+
+            const data = {
+                viz_motor_type: 'liquid',
+                // mm → m
+                chamber_diameter: num(results.chamber_diameter, 100) / 1000,
+                chamber_length: num(results.chamber_length, 300) / 1000,
+                // zaten metre
+                throat_diameter: num(results.throat_diameter, 0.05),
+                exit_diameter: num(results.exit_diameter, 0.15),
+                // performans: N / s / bar
+                thrust: num(results.thrust, 1000),
+                isp: num(results.isp_vacuum, 300),
+                chamber_pressure: num(results.chamber_pressure, 100),
+                // sıvı motor sürekli rejimdedir (grain yanma süresi yok);
+                // zaman çizelgesi için nominal yanma süresi
+                burn_time: 10,
+                // bell nozul açıları/tipi (varsa) kontur doğruluğu için geçir
+                nozzle_angles: results.nozzle_angles
+            };
+
+            // Enjektör orifis bilgisi (enjektör plakası deseni için) — varsa geçir
+            const nOrifices = num(inj.number_of_elements, null);
+            const orificeDia = num(inj.fuel_orifice_diameter_mm,
+                                   num(inj.oxidizer_orifice_diameter_mm, null));
+            if (nOrifices !== null || orificeDia !== null) {
+                data.injector_design = {};
+                if (nOrifices !== null) data.injector_design.number_of_orifices = nOrifices;
+                if (orificeDia !== null) data.injector_design.orifice_diameter_mm = orificeDia;
+            }
+
+            return data;
+        }
+
         // CAD Visualization Function
+        // Öncelik: Three.js simülasyon güvertesi (MotorVizDeck). WebGL yoksa
+        // ya da güverte null dönerse eski Plotly 3D CAD'ine düşer.
         function generateCADVisualization(results) {
+            const cadContainer = document.getElementById('cad_visualization');
+            if (!cadContainer) return;
+
+            // Yeni Three.js parametrik dijital ikizi
+            if (window.MotorVizDeck && window.MotorViz3D && MotorViz3D.isSupported()) {
+                const deck = MotorVizDeck.create('cad_visualization', buildLiquidVizData(results), {
+                    title: 'LIQUID ENGINE SIMULATION',
+                    subtitle: 'PARAMETRIC DIGITAL TWIN — LIVE GEOMETRY FROM SOLVER OUTPUT',
+                    motorType: 'liquid'
+                });
+                if (deck) {
+                    // Güverte kuruldu; yardımcı parametrik grafikleri de üret
+                    generateParametricPlots(results);
+                    return;
+                }
+                // deck null (konteyner/WebGL sorunu) → eski Plotly yoluna düş
+            }
+
+            // Fallback: eski Plotly 3D CAD görselleştirmesi
+            generateCADVisualizationPlotly(results);
+        }
+
+        // Eski Plotly tabanlı 3D CAD görselleştirmesi (WebGL yoksa fallback).
+        function generateCADVisualizationPlotly(results) {
             // Create 3D engine visualization
             const cadContainer = document.getElementById('cad_visualization');
             if (!cadContainer) return;
-            
+
             // Engine dimensions from results
             const chamberDiameter = results.chamber_diameter || 200; // mm
             const chamberLength = results.chamber_length || 300; // mm
@@ -3514,5 +3587,11 @@ Please provide:
     
     <!-- Include Plotly for 3D visualization -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="/static/js/plotly_dark.js"></script>
+    <!-- Three.js (sabit sürüm) + OrbitControls + parametrik motor simülasyon güvertesi -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="/static/js/motor_viz3d.js"></script>
+    <script src="/static/js/motor_viz_deck.js"></script>
 </body>
 </html>
