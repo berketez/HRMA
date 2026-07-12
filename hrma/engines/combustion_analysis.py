@@ -601,11 +601,29 @@ class CombustionAnalyzer:
             )
             return self._fallback_equilibrium_composition(elements, pressure, temperature, station)
     
-    def _fallback_equilibrium_composition(self, elements: Dict, pressure: float, 
+    # Fallback yolunda kullanılan tür molekül ağırlıkları [kg/kmol] — NIST-JANAF
+    _FALLBACK_SPECIES_MW = {
+        'CO2': 44.01, 'CO': 28.01, 'H2O': 18.015, 'H2': 2.016,
+        'N2': 28.014, 'OH': 17.007, 'H': 1.008, 'O': 15.999,
+        'NO': 30.006, 'AL2O3_l': 101.96, 'AL2O3_s': 101.96,
+    }
+
+    def _fallback_equilibrium_composition(self, elements: Dict, pressure: float,
                                         temperature: float, station: str) -> Dict:
-        """Fallback equilibrium model for when Cantera is not available"""
+        """Fallback equilibrium model for when Cantera is not available.
+
+        DİKKAT — SÖZLEŞME: Cantera yolu (_calculate_equilibrium_composition)
+        ile AYNI şekilde dönmelidir: {'species', 'temperature', 'pressure',
+        'density', 'molecular_weight', 'cp', 'cv', 'gamma', 'gamma_frozen',
+        'enthalpy', 'entropy'}. Eski sürüm yalnız düz tür-kesri sözlüğü
+        döndürüyordu; tüketiciler comp['gamma'] okuduğu için Cantera'sız
+        makinelerde /calculate KeyError('gamma') ile 400 dönüyordu
+        (2026-07-12 saha hatası). Termodinamik skalarlar burada ideal-gaz +
+        tipik yanma gazı yaklaşımlarıyla KABA tahmindir; doğruluk için
+        Cantera kurulmalıdır (fallback'e düşüş zaten loglanıyor).
+        """
         composition = {}
-        
+
         if station == 'chamber':
             # High temperature, major species
             composition = {
@@ -653,8 +671,52 @@ class CombustionAnalyzer:
         total = sum(composition.values())
         if total > 0:
             composition = {species: frac/total for species, frac in composition.items()}
-        
-        return composition
+
+        # ---- Cantera sözleşmesiyle aynı şekle getir ----
+        # Karışım molekül ağırlığı: MW = Σ X_i·M_i (mol kesirleri üzerinden)
+        mw_mix = sum(x * self._FALLBACK_SPECIES_MW.get(sp, 28.0)
+                     for sp, x in composition.items())
+        mw_mix = max(mw_mix, 2.0)  # sayısal güvenlik
+
+        # Kütle kesirleri: Y_i = X_i·M_i / MW
+        species = {
+            sp: {
+                'mole_fraction': x,
+                'mass_fraction': x * self._FALLBACK_SPECIES_MW.get(sp, 28.0) / mw_mix,
+            }
+            for sp, x in composition.items() if x > 1e-10
+        }
+
+        # Kaba, sıcaklığa bağlı izentropik üs tahmini (tipik yanma gazı:
+        # ~1.25 @ 2000 K, ~1.21 @ 3000 K; Sutton & Biblarz 9. baskı Böl. 3
+        # mertebeleriyle uyumlu). [1.18, 1.33] bandına kırpılır.
+        gamma_est = min(1.33, max(1.18, 1.33 - 4.0e-5 * temperature))
+
+        R_specific = self.R_universal / mw_mix          # J/(kg·K)
+        cp_mass = gamma_est * R_specific / (gamma_est - 1.0)
+        cv_mass = cp_mass / gamma_est
+        p_pa = pressure * 1e5
+        rho = p_pa / (R_specific * temperature)         # ideal gaz
+        # Duyulur entalpi/entropi (298.15 K referanslı) — istasyonlar arası
+        # FARKLAR anlamlıdır; mutlak değerler kaba tahmindir.
+        h_mass = cp_mass * (temperature - 298.15)
+        s_mass = (cp_mass * np.log(temperature / 298.15)
+                  - R_specific * np.log(max(pressure, 1e-6) / 1.01325))
+
+        return {
+            'species': species,
+            'temperature': temperature,
+            'pressure': pressure,               # bar
+            'density': rho,
+            'molecular_weight': mw_mix,
+            'cp': cp_mass,
+            'cv': cv_mass,
+            'gamma': gamma_est,
+            'gamma_frozen': gamma_est,
+            'enthalpy': h_mass,
+            'entropy': s_mass,
+            'source': 'empirical_fallback',
+        }
     
     def _calculate_exit_temperature(self, T_chamber: float, P_chamber: float, P_exit: float,
                                     gamma: Optional[float] = None) -> float:
