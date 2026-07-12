@@ -4,7 +4,9 @@ flask>=3.0.0
 flask-cors>=4.0.0
 
 # Scientific computing
-numpy>=1.24.0
+# numpy<2 pini ZORUNLU: anaconda tabanlı kurulumlarda numpy 2.x, pandas/sklearn
+# binary uyumunu kırıyor (2026-07-12 kurulum kazası — dtype size mismatch)
+numpy>=1.24.0,<2
 scipy>=1.11.0
 
 # Visualization
@@ -16,6 +18,13 @@ pandas>=2.0.0
 
 # 3D CAD and geometry
 trimesh>=3.20.0
+manifold3d>=2.0.0      # trimesh boolean backend (enjektör orifis delikleri)
+build123d>=0.11.0      # gerçek STEP export (OCC tabanlı, ~500 MB)
+ezdxf>=1.1.0           # DXF imalat çizimleri
+
+# Static chart export (teknik çizim PDF'leri)
+# 0.2.1 pini: kaleido 1.x, plotly<6.1.1 ile write_image üretemiyor
+kaleido==0.2.1
 
 # Image processing
 Pillow>=10.0.0

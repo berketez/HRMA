@@ -736,20 +736,32 @@ def create_performance_plots(motor_data, injector_data):
         row=1, col=2
     )
     
-    # Regression rate over time - Fixed calculation
+    # Regresyon/port evrimi — GERÇEK çözücü serisinden (Opus/keşif düzeltmesi).
+    # Eski kod lineer interpolasyon + yapay sinüs dalgacığı çiziyordu; Euler
+    # marşının ürettiği port_history (zaman, çap) artık doğrudan kullanılır,
+    # regresyon hızı da bu serinin türevinden gelir (r = (dD/dt)/2).
     try:
         burn_time = motor_data.get('burn_time', 10)
-        regression_rate = motor_data.get('regression_rate', 0.001)
-        port_initial = motor_data.get('port_diameter_initial', 0.03)
-        port_final = motor_data.get('port_diameter_final', 0.05)
-        
-        # Create time array
-        time = np.linspace(0, burn_time, 100)
-        
-        # Calculate port diameter growth over time
-        # Linear interpolation between initial and final
-        port_diameter = np.linspace(port_initial, port_final, 100)
-        
+        ph = motor_data.get('port_history') or {}
+        t_ph = ph.get('time')
+        d_ph = ph.get('port_diameter')
+
+        if t_ph and d_ph and len(t_ph) == len(d_ph) and len(t_ph) >= 3:
+            time = np.asarray(t_ph, dtype=float)
+            port_diameter = np.asarray(d_ph, dtype=float)  # m
+            regression_rate_array = np.gradient(port_diameter, time) / 2.0 * 1000.0  # mm/s
+            reg_label = (f'Regression Rate (avg: '
+                         f'{float(np.mean(regression_rate_array)):.2f} mm/s)')
+        else:
+            # port_history yoksa (eski kayıt/yabancı veri) eski davranışa düş
+            regression_rate = motor_data.get('regression_rate', 0.001)
+            port_initial = motor_data.get('port_diameter_initial', 0.03)
+            port_final = motor_data.get('port_diameter_final', 0.05)
+            time = np.linspace(0, burn_time, 100)
+            port_diameter = np.linspace(port_initial, port_final, 100)
+            regression_rate_array = np.ones(100) * regression_rate * 1000.0
+            reg_label = f'Regression Rate (avg: {regression_rate*1000:.2f} mm/s)'
+
         # Port diameter growth plot
         fig.add_trace(
             go.Scatter(
@@ -762,27 +774,15 @@ def create_performance_plots(motor_data, injector_data):
             ),
             row=2, col=1
         )
-        
-        # Calculate regression rate over time
-        regression_rate_mm_s = regression_rate * 1000  # Convert to mm/s
-        
-        # Create secondary y-axis data for regression rate
-        regression_rate_array = np.ones(100) * regression_rate_mm_s
-        
-        # For more realistic modeling, regression rate might vary slightly
-        # Add small variation to show it's dynamic
-        if regression_rate_mm_s > 0:
-            variation = np.sin(np.linspace(0, 2*np.pi, 100)) * regression_rate_mm_s * 0.1
-            regression_rate_array = regression_rate_array + variation
-        
-        # Add regression rate line 
+
+        # Add regression rate line
         fig.add_trace(
             go.Scatter(
                 x=time,
                 y=regression_rate_array,
                 mode='lines',
                 line=dict(color='red', width=2),
-                name=f'Regression Rate (avg: {regression_rate_mm_s:.2f} mm/s)',
+                name=reg_label,
                 hovertemplate='Time: %{x:.1f}s<br>Regression Rate: %{y:.2f} mm/s<extra></extra>'
             ),
             row=2, col=1,

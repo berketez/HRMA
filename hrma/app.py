@@ -146,6 +146,48 @@ def validate_positive(value, name):
         raise ValueError(f"{name} must be positive, given: {value}")
     return True
 
+
+def build_time_history(motor_results):
+    """Gerçek zaman serilerinden dashboard time_history sözlüğü kurar.
+
+    OPUS/keşif düzeltmesi: eski kod motor_results['time_history'] okuyordu —
+    böyle bir anahtar hiç üretilmiyor, dashboard'un alt 3 paneli hep boş
+    kalıyordu. Gerçek seriler port_history'de (Euler marşından, ~200 nokta).
+
+    Dönen şema (create_real_time_dashboard beklentisi):
+      {'time': [s], 'propellant_mass': [kg], 'burn_rate': [mm/s],
+       'port_diameter': [mm]}
+    Yakıt tüketimi D² oranıyla ölçeklenir (m_f·(D²−D0²)/(Df²−D0²)) —
+    grain geometrisi kütle bütçesiyle aynı kaynaktan, ek anahtar gerekmez.
+    """
+    ph = (motor_results or {}).get('port_history') or {}
+    t = ph.get('time')
+    D = ph.get('port_diameter')
+    if not t or not D or len(t) < 3 or len(t) != len(D):
+        return None
+    t = np.asarray(t, dtype=float)
+    D = np.asarray(D, dtype=float)
+
+    m_ox = float(motor_results.get('oxidizer_mass', 0.0) or 0.0)
+    m_f = float(motor_results.get('fuel_mass', 0.0) or 0.0)
+    t_b = float(motor_results.get('burn_time', t[-1]) or t[-1])
+    D0, Df = D[0], D[-1]
+
+    ox_consumed = m_ox * np.clip(t / max(t_b, 1e-9), 0.0, 1.0)
+    denom = max(Df ** 2 - D0 ** 2, 1e-12)
+    fuel_consumed = m_f * np.clip((D ** 2 - D0 ** 2) / denom, 0.0, 1.0)
+    propellant_mass = (m_ox + m_f) - ox_consumed - fuel_consumed
+
+    # Yanma hızı: r = (dD/dt)/2 [m/s] → mm/s
+    burn_rate = np.gradient(D, t) / 2.0 * 1000.0
+
+    return {
+        'time': t.tolist(),
+        'propellant_mass': np.maximum(propellant_mass, 0.0).tolist(),
+        'burn_rate': np.maximum(burn_rate, 0.0).tolist(),
+        'port_diameter': (D * 1000.0).tolist(),  # mm
+    }
+
 # Initialize database manager and trajectory analyzer
 db_manager = DatabaseManager()
 trajectory_analyzer = TrajectoryAnalyzer() 
@@ -347,7 +389,9 @@ def calculate():
         # Generate real-time dashboard
         if data.get('include_realtime_dashboard', True):
             try:
-                time_data = motor_results.get('time_history', None)
+                # Gerçek port_history serilerinden kur (eski 'time_history'
+                # anahtarı hiç üretilmiyordu — alt 3 panel hep boştu)
+                time_data = build_time_history(motor_results)
                 real_time_dashboard_plot = create_real_time_dashboard(motor_results, time_data)
             except Exception as e:
                 print(f"Real-time dashboard error: {e}")
@@ -1170,7 +1214,7 @@ def advanced_analysis():
         
         # Real-time dashboard
         if 'realtime_dashboard' in analysis_types:
-            time_data = motor_data.get('time_history', None)
+            time_data = build_time_history(motor_data)
             results['dashboard_plot'] = create_real_time_dashboard(motor_data, time_data)
         
         return jsonify({
