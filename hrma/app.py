@@ -557,6 +557,147 @@ def quick_geometry():
         return jsonify({'status': 'error', 'error': str(e)}), 400
 
 
+@app.route('/api/transient-analysis', methods=['POST'])
+def transient_analysis():
+    """Zaman-çözümlü iç balistik: gerçek Pc(t) ve F(t) eğrileri.
+
+    Girdi: /calculate ile aynı motor parametreleri + opsiyonel:
+      feed_mode: 'regulated' (varsayılan) | 'blowdown'
+      tank_temperature: blowdown tank başlangıç sıcaklığı [K, vars. 293.15]
+      liquid_fill_fraction: tank sıvı doluluk oranı [vars. 0.85]
+
+    Çıktı: time/thrust/chamber_pressure/of_ratio/port_diameter dizileri,
+    blowdown'da tank basınç-sıcaklık geçmişi, durdurma olayı ve uyarılar.
+    """
+    try:
+        data = request.json or {}
+        engine = HybridRocketEngine(
+            thrust=data.get('thrust'),
+            burn_time=data.get('burn_time'),
+            total_impulse=data.get('total_impulse'),
+            of_ratio=data.get('of_ratio', 1.0),
+            chamber_pressure=data.get('chamber_pressure', 20.0),
+            atmospheric_pressure=data.get('atmospheric_pressure', 1.0),
+            l_star=data.get('l_star', 1.0),
+            expansion_ratio=data.get('expansion_ratio', 0),
+            nozzle_type=data.get('nozzle_type', 'conical'),
+            regression_a=data.get('regression_a'),
+            regression_n=data.get('regression_n'),
+            fuel_density=data.get('fuel_density'),
+            chamber_diameter_input=data.get('chamber_diameter_input', 0),
+            fuel_type=data.get('fuel_type', 'htpb'),
+            oxidizer_type=data.get('oxidizer_type', 'n2o'),
+        )
+        engine.calculate()
+
+        from hrma.analysis.transient_ballistics import TransientBallistics
+        solver = TransientBallistics(
+            engine,
+            feed_mode=data.get('feed_mode', 'regulated'),
+            tank_temperature=float(data.get('tank_temperature', 293.15)),
+            liquid_fill_fraction=float(data.get('liquid_fill_fraction', 0.85)),
+        )
+        tr = solver.solve()
+
+        # Dizileri JSON'a uygun listelere çevir (sanitize NaN/Inf'i halleder)
+        payload = {k: (v.tolist() if hasattr(v, 'tolist') else v)
+                   for k, v in tr.items()}
+        return jsonify(sanitize_json_values({
+            'status': 'success',
+            'transient': payload,
+            'design_point': {
+                'thrust': engine.F,
+                'chamber_pressure_bar': engine.P_c,
+                'burn_time': engine.t_b,
+                'total_impulse_design': engine.F * engine.t_b,
+            },
+        }))
+    except ValueError as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/six-dof-analysis', methods=['POST'])
+def six_dof_analysis():
+    """6-DOF rijit gövde uçuş analizi (Barrowman stabilite + weathercock).
+
+    Girdi (JSON):
+      Araç: body_diameter, body_length, nose_length [m], nose_type,
+            dry_mass, propellant_mass [kg], cd0
+      Kanat: fin_count, fin_root_chord, fin_tip_chord, fin_span,
+             fin_sweep [m], fin_position (ops.)
+      İtki: thrust [N] + burn_time [s] YA DA thrust_curve {time, thrust}
+            (/api/transient-analysis çıktısı doğrudan verilebilir)
+      Atış: launch_elevation_deg, launch_azimuth_deg, rail_length,
+            wind_speed [m/s], wind_direction_deg (rüzgârın geldiği yön)
+      CG:   x_cg_full, x_cg_empty [m, burundan] (ops.)
+
+    Çıktı: apoje, maks hız/Mach/α, statik marj (dolu/boş), stabilite
+    hükmü, yörünge zaman serileri (seyreltilmiş).
+    """
+    try:
+        data = request.json or {}
+        from hrma.analysis.six_dof_trajectory import (
+            BarrowmanAero, SixDOFTrajectory)
+        aero = BarrowmanAero(
+            body_diameter=float(data.get('body_diameter', 0.1)),
+            nose_length=float(data.get('nose_length', 0.3)),
+            body_length=float(data.get('body_length', 2.0)),
+            nose_type=data.get('nose_type', 'ogive'),
+            fin_count=int(data.get('fin_count', 4)),
+            fin_root_chord=float(data.get('fin_root_chord', 0.15)),
+            fin_tip_chord=float(data.get('fin_tip_chord', 0.075)),
+            fin_span=float(data.get('fin_span', 0.1)),
+            fin_sweep=float(data.get('fin_sweep', 0.05)),
+            fin_position=data.get('fin_position'),
+        )
+        solver = SixDOFTrajectory(
+            aero=aero,
+            dry_mass=float(data.get('dry_mass', 20.0)),
+            propellant_mass=float(data.get('propellant_mass', 10.0)),
+            thrust_curve=data.get('thrust_curve'),
+            thrust=data.get('thrust'),
+            burn_time=data.get('burn_time'),
+            x_cg_full=data.get('x_cg_full'),
+            x_cg_empty=data.get('x_cg_empty'),
+            cd0=float(data.get('cd0', 0.5)),
+            wind_speed=float(data.get('wind_speed', 0.0)),
+            wind_direction_deg=float(data.get('wind_direction_deg', 0.0)),
+            launch_elevation_deg=float(data.get('launch_elevation_deg', 90.0)),
+            launch_azimuth_deg=float(data.get('launch_azimuth_deg', 0.0)),
+            rail_length=float(data.get('rail_length', 5.0)),
+        )
+        res = solver.solve(t_max=float(data.get('t_max', 400.0)))
+
+        # Zaman serilerini ~300 noktaya seyrelt
+        import numpy as _np
+        n = len(res['time'])
+        idx = _np.linspace(0, n - 1, min(300, n)).astype(int)
+        series = {
+            'time': res['time'][idx].tolist(),
+            'altitude': res['altitude'][idx].tolist(),
+            'north': res['position'][0][idx].tolist(),
+            'east': res['position'][1][idx].tolist(),
+            'speed': res['speed'][idx].tolist(),
+            'mach': res['mach'][idx].tolist(),
+            'alpha_deg': res['alpha_deg'][idx].tolist(),
+        }
+        summary = {k: res[k] for k in (
+            'apogee', 'apogee_time', 'max_speed', 'max_mach',
+            'max_alpha_deg', 'static_margin_full', 'static_margin_empty',
+            'stable', 'cn_alpha', 'x_cp', 'end_reason',
+            'lateral_drift_at_end')}
+        return jsonify(sanitize_json_values({
+            'status': 'success', 'summary': summary, 'series': series}))
+    except ValueError as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
 @app.route('/calculate_solid', methods=['POST'])
 def calculate_solid():
     try:

@@ -168,9 +168,11 @@ class TestThinWallValidityAndLame:
         assert ca['pressure_hoop_model'] == 'thin_wall'
 
     def test_thick_wall_uses_lame_and_is_conservative(self, analyzer):
-        # Referans vaka kalin cidar uretir (t/r>0.1). Lame tepe >= ince-cidar.
+        # Kalin cidar (t/r>0.1) vakasi: senaryo-ayrimli termal modelde
+        # (2026-07-12) referans vaka ince cidara dustugu icin kalin rejim
+        # yuksek tasarim faktoruyle zorlanir. Lame tepe >= ince-cidar.
         res = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',
-                                         design_pressure_factor=1.5)
+                                         design_pressure_factor=4.0)
         ca = res['chamber_analysis']
         assert ca['thin_wall_valid'] is False
         assert ca['pressure_hoop_model'] == 'lame_thick_wall'
@@ -227,21 +229,42 @@ class TestThermalEffectOnSafetyFactor:
             ca['pressure_hoop_stress'] + ca['thermal_hoop_stress'], rel=1e-6)
 
     def test_derated_yield_below_room_temperature(self, analyzer):
+        """Senaryo-ayrimli termal model (Opus denetimi 2026-07-12):
+        eski kod sicak-soak deratingini soguk-gradyan gerilmesiyle
+        YIGIYORDU (fiziksel celiski). Artik iki tutarli senaryo ayri
+        cozulur; yoneten senaryonun yield'i raporlanir."""
         res = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',
                                          design_pressure_factor=1.5)
         mat = analyzer.materials['steel_4130']
-        used = res['chamber_analysis']['yield_strength_used_MPa']
+        ca = res['chamber_analysis']
+        used = ca['yield_strength_used_MPa']
         room = mat['yield_strength'] / 1e6
-        assert used < room  # derate edilmis yield oda-sicakligindan dusuk
-        # 538 C civari -> retention ~0.38 -> kullanilan yield buna yakin.
-        assert used == pytest.approx(room * 0.383, rel=0.05)
+        # Yoneten senaryo yield'i: oda-sicakligindan dusuk, tam-sicak (0.383)
+        # deratinginden yuksek (ortalama-cidar sicakliginda derate edilir).
+        assert used < room
+        assert used > room * 0.383
+        # Iki senaryo da raporlanmali; hot_soak derating ic-yuz sicakliginda.
+        scen = ca['thermal_scenarios']
+        assert set(scen) == {'hot_soak', 'cooled_gradient'}
+        assert scen['hot_soak']['derating_temp_K'] == pytest.approx(811.0, abs=1.0)
+        # Yoneten senaryo, dusuk von Mises SF'li oland ir.
+        gov = ca['governing_thermal_scenario']
+        assert scen[gov]['von_mises_safety_factor'] == pytest.approx(
+            min(s['von_mises_safety_factor'] for s in scen.values()), rel=1e-9)
+        # Guvenlik ozelligi korunur: sicak sogutmasiz motor hala UNSAFE (<1).
+        assert ca['von_mises_safety_factor'] < 1.0
 
     def test_recommendations_flag_thermal_and_thin_wall(self, analyzer):
         res = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',
                                          design_pressure_factor=1.5)
         recs = ' '.join(res['safety_analysis']['recommendations']).lower()
         assert 'thermal' in recs            # termal gerilme uyarisi
-        assert 'thin-wall' in recs or 'thick-wall' in recs  # kalin-cidar uyarisi
+        # Kalin-cidar uyarisi kalin rejimde gelmeli (senaryo-ayrimli modelde
+        # referans vaka ince cidara dustugunden 4x faktorle zorlanir)
+        res4 = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',
+                                          design_pressure_factor=4.0)
+        recs4 = ' '.join(res4['safety_analysis']['recommendations']).lower()
+        assert 'thin-wall' in recs4 or 'thick-wall' in recs4
 
     def test_buckling_included_in_minimum_safety_factor(self, analyzer):
         res = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',

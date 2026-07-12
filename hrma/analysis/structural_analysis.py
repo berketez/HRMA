@@ -335,18 +335,47 @@ class StructuralAnalyzer:
         # derating icin). motor_data 'wall_temperature_hot/cold' veya
         # 'chamber_temperature' tasiyabilir; yoksa termal etki devre disi kalir.
         T_inner_wall, T_outer_wall = self._estimate_wall_delta_T(motor_data, mat_props)
-        # Yapisal derating icin temsili cidar sicakligi = sicak (ic) yuz.
-        wall_temp_structural = T_inner_wall
-        # Sicaklik derating'i (yield/ultimate dususu)
-        derating = self._derate_strength(mat_props, wall_temp_structural)
-        # Cidar boyunca termal gradyan
-        wall_delta_T = T_inner_wall - T_outer_wall
 
-        # Chamber wall analysis (termal gerilme + derating dahil)
-        chamber_analysis = self._analyze_chamber_wall(
-            design_pressure, chamber_diameter, chamber_length, mat_props,
-            derating=derating, wall_delta_T=wall_delta_T
-        )
+        # OPUS DENETIM DUZELTMESI (major): Eski kod AYNI ANDA hem "cidar
+        # servis sicakligina isinmis" (agir derating) hem de "tam soguk
+        # gradyan" (tam termal gerilme) varsayiyordu — fiziksel olarak
+        # celiskili iki uc durumun yigilmasi her sicak motoru SF~0.10'a
+        # cokertiyordu. Iki TUTARLI senaryo ayri degerlendirilir, kritik
+        # (dusuk SF'li) olan tasarimi yonetir:
+        #   A) Sicak-soak (sogutmasiz kararli hal): cidar ~izotermal sicak
+        #      -> derating T_ic'te, gradyan kucuk artik deger (0.15x)
+        #   B) Sogutmali gradyan: ic yuz sicak, ortalama cidar daha soguk
+        #      -> derating ORTALAMA cidar sicakliginda, gradyan tam
+        scenarios = {}
+        dT_full = T_inner_wall - T_outer_wall
+        for name, (T_derate, dT) in {
+            'hot_soak': (T_inner_wall, 0.15 * dT_full),
+            'cooled_gradient': (0.5 * (T_inner_wall + T_outer_wall), dT_full),
+        }.items():
+            der = self._derate_strength(mat_props, T_derate)
+            ana = self._analyze_chamber_wall(
+                design_pressure, chamber_diameter, chamber_length, mat_props,
+                derating=der, wall_delta_T=dT
+            )
+            scenarios[name] = {'analysis': ana, 'derating': der,
+                               'derating_temp_K': T_derate, 'delta_T_K': dT}
+
+        # Yoneten senaryo: dusuk von Mises SF'li olan
+        governing = min(
+            scenarios,
+            key=lambda k: scenarios[k]['analysis'].get(
+                'von_mises_safety_factor', float('inf')))
+        chamber_analysis = scenarios[governing]['analysis']
+        chamber_analysis['governing_thermal_scenario'] = governing
+        chamber_analysis['thermal_scenarios'] = {
+            k: {'von_mises_safety_factor':
+                v['analysis'].get('von_mises_safety_factor'),
+                'derating_temp_K': v['derating_temp_K'],
+                'delta_T_K': v['delta_T_K']}
+            for k, v in scenarios.items()}
+        derating = scenarios[governing]['derating']
+        wall_temp_structural = scenarios[governing]['derating_temp_K']
+        wall_delta_T = scenarios[governing]['delta_T_K']
 
         # Burkulma kontrolu (NASA SP-8007) - hazne cidari geometrisiyle
         chamber_t = chamber_analysis['recommended_thickness'] / 1000.0  # m
@@ -488,10 +517,21 @@ class StructuralAnalyzer:
         # konservatif olarak toplanir).
         hoop_stress = pressure_hoop_stress + thermal_hoop_stress
 
-        # Von Mises esdeger gerilme (toplam hoop ile)
-        von_mises_stress = np.sqrt(
-            hoop_stress**2 - hoop_stress * longitudinal_stress + longitudinal_stress**2
-        )
+        # Von Mises esdeger gerilme (toplam hoop ile).
+        # OPUS DENETIM DUZELTMESI (minor): kalin cidarda ic yuzeyde radyal
+        # gerilme sigma_r = -p ihmal edilirse von Mises %5-17 DUSUK cikar
+        # (non-konservatif yon). Kalin-cidar rejiminde 3 eksenli form kullanilir.
+        if not thin_wall_valid:
+            sigma_r = -pressure
+            von_mises_stress = np.sqrt(0.5 * (
+                (hoop_stress - longitudinal_stress) ** 2
+                + (longitudinal_stress - sigma_r) ** 2
+                + (sigma_r - hoop_stress) ** 2
+            ))
+        else:
+            von_mises_stress = np.sqrt(
+                hoop_stress**2 - hoop_stress * longitudinal_stress + longitudinal_stress**2
+            )
 
         # Safety factors -> DERATE EDILMIS yield'e gore
         hoop_safety_factor = yield_for_design / hoop_stress if hoop_stress > 0 else float('inf')

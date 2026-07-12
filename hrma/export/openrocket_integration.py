@@ -197,8 +197,26 @@ class OpenRocketExporter:
         return 'A'  # Default
     
     def _generate_thrust_curve(self, motor_data: Dict) -> List[Tuple[float, float]]:
-        """Generate thrust vs time curve"""
-        
+        """Generate thrust vs time curve.
+
+        Öncelik: motor_data['transient'] içinde GERÇEK zaman-çözümlü eğri
+        (transient_ballistics çıktısı: time[] + thrust[]) varsa onu kullan;
+        yoksa eski şekilsel şablona (startup/tail-off + %15 azalma) düş.
+        """
+        tr = motor_data.get('transient') or {}
+        t_real = tr.get('time')
+        F_real = tr.get('thrust')
+        if t_real is not None and F_real is not None and len(t_real) > 3:
+            pts = [(0.0, 0.0)]  # .eng formatı 0 itkiyle başlamalı
+            # ~100 noktaya seyrelt (OpenRocket için yeterli çözünürlük)
+            idx = np.linspace(0, len(t_real) - 1,
+                              min(100, len(t_real))).astype(int)
+            for i in idx:
+                pts.append((float(t_real[i]), max(0.0, float(F_real[i]))))
+            if pts[-1][1] > 0:  # kuyrukta sıfıra indir (format gereği)
+                pts.append((pts[-1][0] + 0.05, 0.0))
+            return pts
+
         burn_time = motor_data.get('burn_time', 10)
         avg_thrust = motor_data.get('thrust', 1000)
         

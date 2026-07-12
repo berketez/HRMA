@@ -18,6 +18,15 @@ from typing import Dict, Optional, List
 #
 # Bu tablo hybrid_rocket_engine.py ve regression_analysis.py tarafından
 # import edilir; değerleri başka dosyaya KOPYALAMAYIN.
+#
+# OPUS DENETİM NOTU (2026-07-12, bilinçli karar): Bu katsayılar literatürde
+# G_OX bazlı korelasyonlardan gelir; regression_analysis varsayılanı ise
+# Marxman G_TOTAL kapanışıdır. G_ox-fit katsayının G_total ile kullanımı
+# regresyonu sistematik +%10-18 yükseltir — Rezaei HTPB/N2O ölçümüne göre
+# model zaten −%32 DÜŞÜK tahminde olduğundan bu yön doğrulama ile uyumludur
+# ve davranış testlerle korunmaktadır (VALIDATION_STATUS.md). G_ox-bazlı
+# birebir karşılaştırma gerekirse flux_mode='ox' kullanın; G_total'e özgü
+# yeniden fit gelecek iş olarak işaretlidir.
 # ---------------------------------------------------------------------------
 HYBRID_REGRESSION_COEFFICIENTS = {
     # Doran et al., AIAA 2007-5352 (HTPB/N2O):

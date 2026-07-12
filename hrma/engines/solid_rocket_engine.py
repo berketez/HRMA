@@ -131,6 +131,11 @@ class SolidRocketEngine:
             # Erozif yanma katsayısı (burn_rate içindeki düzeltme bunu kullanır;
             # atanmazsa model tetiklendiğinde AttributeError oluşur)
             self.erosive_burning_coeff = prop.get('erosive_burning_coeff', 0.0)
+            # OPUS DENETİM DÜZELTMESİ (minor): yakıta özgü sıcaklık katsayısı
+            # daha önce ölü veriydi (constructor default'u 0.002 hep ezik
+            # kalıyordu) — dict'te varsa yakıt değeri kullanılır
+            if 'burn_rate_temp_coeff' in prop:
+                self.burn_rate_temp_coeff = prop['burn_rate_temp_coeff']
         else:
             # Default values
             self.rho_p = 1700
@@ -141,25 +146,36 @@ class SolidRocketEngine:
             self.nozzle_efficiency = 0.98
             self.erosive_burning_coeff = 0.0
     
+    def _bates_segment_count(self):
+        """BATES segment sayısı — TEK tanım noktası.
+
+        Konvansiyon: L_seg ≈ D_chamber (NASA SP-8064). grain_design çıktısı
+        ve yanma alanı modeli AYNI sayıyı kullanmalıdır (Opus denetim bulgusu:
+        önceden rapor 5 segment derken model tek monolitik grain yakıyordu →
+        aşırı progressif profil, Pc 3.4 kat şişiyordu).
+        """
+        return max(1, round(self.L_grain / self.D_chamber))
+
     def calculate_burn_area(self, web_thickness):
         """Calculate burn area based on grain geometry"""
         if self.grain_type == 'bates':
-            # Simple cylindrical grain with core
+            # OPUS DENETİM DÜZELTMESİ (major): n-segmentli BATES.
+            # Her segmentin çekirdeği + İKİ uç yüzeyi yanar; segment boyu
+            # eksenel olarak L_seg(w) = L_seg0 − 2w ile geriler (kütle
+            # korunumu −dV/dw = A_core + A_ends bu kısalmayla sağlanır;
+            # NASA SP-8064 / Sutton BATES geometrisi).
+            n_seg = self._bates_segment_count()
             r_outer = self.D_chamber / 2
             r_inner = self.D_core / 2 + web_thickness
+            L_seg = self.L_grain / n_seg - 2 * web_thickness
 
-            # İki uç yüzey de yandığı için grain boyu eksenel olarak geriler:
-            # L(w) = L0 - 2w (kütle korunumu: -dV/dw = A_core + A_ends özdeşliği
-            # ancak bu kısalmayla sağlanır; NASA SP-8064 / Sutton BATES geometrisi)
-            L_current = self.L_grain - 2 * web_thickness
-
-            # Web tükenme koşulu: radyal (r_i >= r_o) VEYA eksenel (L <= 0)
-            if r_inner >= r_outer or L_current <= 0:
+            # Web tükenme koşulu: radyal (r_i >= r_o) VEYA eksenel (L_seg <= 0)
+            if r_inner >= r_outer or L_seg <= 0:
                 return 0  # Grain burned out
 
-            # Burning surfaces: inner core + 2 ends
-            A_core = 2 * np.pi * r_inner * L_current
-            A_ends = 2 * np.pi * (r_outer**2 - r_inner**2)
+            # Burning surfaces: her segmentte iç çekirdek + 2 uç
+            A_core = n_seg * 2 * np.pi * r_inner * L_seg
+            A_ends = n_seg * 2 * np.pi * (r_outer**2 - r_inner**2)
             return A_core + A_ends
             
         elif self.grain_type == 'star':
@@ -1484,12 +1500,16 @@ class SolidRocketEngine:
         if d_throat < 0.001 or d_throat > 0.5:  # 1mm - 500mm arası makul
             print(f"Uyarı: Boğaz çapı anormal: {d_throat*1000:.1f} mm")
         
-        # Genişleme oranı (deniz seviyesi optimize)
-        epsilon_sea_level = 8.0  # Atmosferik işletim için optimize
+        # OPUS DENETİM DÜZELTMESİ (major): Aynı motor için 3 farklı ε
+        # üretiliyordu (top-level 8.0 hardcode, CAD 5.93 hesaplı, vakum 40
+        # hardcode) → iki farklı çıkış çapı raporlanıyordu. TEK kaynak:
+        # _estimate_expansion_ratio() (deniz seviyesi Pe=Pa izentropik çözümü).
+        epsilon_sea_level = self._estimate_expansion_ratio()
         d_exit = d_throat * np.sqrt(epsilon_sea_level)
-        
-        # Vakum optimize genişleme oranı
-        epsilon_vacuum = 40.0  # Vakum işletimi için yüksek
+
+        # Vakum ε'su: pratik üst sınır (ayrılma/kütle sınırı) — deniz
+        # seviyesi değerinin katı olarak, 40'ı aşmayan bir tahmin
+        epsilon_vacuum = min(40.0, max(4.0 * epsilon_sea_level, 25.0))
         d_exit_vacuum = d_throat * np.sqrt(epsilon_vacuum)
         
         # Çıkış çapı fiziksel kontrolü
@@ -1554,10 +1574,13 @@ class SolidRocketEngine:
         Kn_final   = A_burn_final / A_throat if A_throat > 0 else 0.0
 
         # Segment count & length (BATES convention: L_seg ~ D_chamber)
+        # NOT: n_segments yanma alanı modeliyle AYNI kaynaktan gelir
+        # (_bates_segment_count); inhibitör etiketi modelle tutarlı —
+        # uçlar YANAR, dış yüzey inhibitörlüdür.
         if self.grain_type == 'bates':
-            n_segments = max(1, round(self.L_grain / self.D_chamber))
+            n_segments = self._bates_segment_count()
             segment_length = self.L_grain / n_segments
-            inhibitor_cfg = 'both_ends'
+            inhibitor_cfg = 'outer_surface'
         elif self.grain_type == 'end_burner':
             n_segments = 1
             segment_length = self.L_grain

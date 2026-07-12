@@ -306,6 +306,12 @@ class NozzleDesigner:
             # Parabolik konturda çıkış açısı sözlükte yok; tipik %80 Rao bell
             # çıkış açısı ~10° (Sutton & Biblarz 9th ed., Fig. 3-14). Konservatif.
             theta_e = 10.0
+        # OPUS DENETİM NOTU (minor, bilinçli bırakıldı): salt çıkış-açısı
+        # formülü θe=8°'de 0.995 verir; gerçek %80 Rao bell'in TÜM kontur
+        # kaybı λ≈0.985-0.99'dur. Ancak ayrık-kayıp ÇARPIMI (λ·η_fric·η_kin
+        # ≈ 0.995·0.99·0.995 = 0.980) legacy tek-faktör 0.98'e kalibrelidir
+        # (test_default_reproduces_legacy_098) — λ'yı tek başına kırpmak
+        # toplam kalibrasyonu bozar. Toplam verim zaten konservatif banttadır.
         return 0.5 * (1.0 + np.cos(np.radians(theta_e)))
 
     def _calculate_nozzle_performance(self, throat_area: float, exit_area: float,

@@ -615,39 +615,30 @@ class LiquidRocketEngine:
         
         self.P_e = P_atm_bar  # Exit pressure equals ambient
         
-        # Iterative solution for optimal expansion ratio
-        def area_ratio_equation(epsilon):
-            """Isentropic area ratio equation for given pressure ratio"""
-            # Mach number at exit from area ratio
-            def mach_area_relation(M):
-                term1 = (1 + (gamma-1)/2 * M**2)
-                term2 = ((gamma+1)/2) ** ((gamma+1)/(gamma-1))
-                term3 = (1 + (gamma-1)/2 * M**2) ** (-(gamma+1)/(2*(gamma-1)))
-                return (1/M) * (term2 * term3) ** 0.5 - epsilon
-            
-            try:
-                # Solve for exit Mach number
-                M_e = fsolve(mach_area_relation, 3.0, xtol=convergence_tol)[0]
-                
-                # Pressure ratio from isentropic relations
-                P_ratio_calc = (1 + (gamma-1)/2 * M_e**2) ** (-gamma/(gamma-1))
-                P_e_calc = self.P_c * P_ratio_calc
-                
-                return P_e_calc - self.P_e
-            except:
-                return 1e6  # Large error if convergence fails
-        
+        # OPUS DENETİM DÜZELTMESİ (critical): Eski iç içe fsolve'daki
+        # mach_area_relation formülü yanlıştı (M=1'de 1.30 veriyor, M ile
+        # AZALIYORDU) → dış fsolve residual'ı işaret değiştirmediğinden
+        # epsilon her koşulda başlangıç tahmini 20.0'da donuk kalıyordu.
+        # Doğru yol kapalı-formdur (Sutton & Biblarz 9. baskı, Eq. 3-25/3-14;
+        # solid_rocket_engine._expansion_ratio_from_pressure_ratio ile aynı):
+        #   M_e = sqrt( 2/(γ-1) · [ (P_c/P_e)^((γ-1)/γ) − 1 ] )
+        #   ε   = (1/M_e) · [ (2/(γ+1))·(1+(γ-1)/2·M_e²) ]^((γ+1)/(2(γ-1)))
+        # (Eski kodda çıplak `gamma` adı NameError atıp bare-except'e
+        # yutuluyordu — fsolve residual'ı hep 1e6 görüp seed'de kalıyordu.)
+        g = float(self.gamma)
         try:
-            # Solve for optimal expansion ratio
-            epsilon_optimal = fsolve(area_ratio_equation, 20.0, xtol=convergence_tol)[0]
-            
-            # Physical constraints
-            epsilon_optimal = max(2.5, min(epsilon_optimal, 1000))  # Extended range for vacuum
-            
-        except:
-            # Fallback calculation if iterative method fails
-            pressure_ratio = self.P_c / self.P_e
-            epsilon_optimal = pressure_ratio ** (1/gamma) * ((gamma+1)/2) ** ((gamma+1)/(2*(gamma-1)))
+            pressure_ratio = self.P_c / max(self.P_e, 1e-9)
+            M_e = np.sqrt(2.0 / (g - 1.0)
+                          * (pressure_ratio ** ((g - 1.0) / g) - 1.0))
+            M_e = max(M_e, 1.0001)  # süpersonik dal
+            epsilon_optimal = (1.0 / M_e) * (
+                (2.0 / (g + 1.0)) * (1.0 + (g - 1.0) / 2.0 * M_e ** 2)
+            ) ** ((g + 1.0) / (2.0 * (g - 1.0)))
+            epsilon_optimal = max(2.5, min(epsilon_optimal, 1000))
+        except Exception:
+            # Son çare: kaba yaklaşım (eski fallback korunuyor)
+            pressure_ratio = self.P_c / max(self.P_e, 1e-9)
+            epsilon_optimal = pressure_ratio ** (1/g) * ((g+1)/2) ** ((g+1)/(2*(g-1)))
             epsilon_optimal = max(4, min(epsilon_optimal, 300))
         
         self.expansion_ratio = epsilon_optimal
@@ -873,7 +864,10 @@ class LiquidRocketEngine:
             'total_heat_load': total_heat_load / 1000,  # kW
             'chamber_heat_load': Q_chamber / 1000,  # kW
             'nozzle_heat_load': Q_nozzle / 1000,  # kW
-            'peak_heat_flux': q_dot_chamber / 1000,  # kW/m²
+            # OPUS DENETİM DÜZELTMESİ (minor): tepe akı BOĞAZDADIR, haznede
+            # değil (Bartz alan ölçeklemesi (At/A)^0.9 boğazda 1'e gider)
+            'peak_heat_flux': h_g_throat * (self.T_c - T_wall_hot) / 1000,  # kW/m² (boğaz)
+            'chamber_heat_flux': q_dot_chamber / 1000,  # kW/m²
             'coolant_flow_rate': coolant_flow,  # kg/s
             'coolant_temperature_rise': coolant_temp_rise,  # K
             'cooling_pressure_drop': pressure_drop,  # bar

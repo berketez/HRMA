@@ -491,7 +491,11 @@ class TrajectoryAnalyzer:
 
         # Calculate derived quantities
         complete_velocity = np.sqrt(complete_vx ** 2 + complete_vz ** 2)
-        complete_acceleration = np.gradient(complete_velocity, complete_time)
+        # OPUS DENETİM DÜZELTMESİ (minor): yük faktörü |a| vektör büyüklüğüdür;
+        # eski skaler d|v|/dt dönüşlerde ivmeyi eksik gösterir.
+        _ax = np.gradient(complete_vx, complete_time)
+        _az = np.gradient(complete_vz, complete_time)
+        complete_acceleration = np.sqrt(_ax ** 2 + _az ** 2)
         complete_altitude = complete_z
 
         return {

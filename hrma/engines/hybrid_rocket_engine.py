@@ -235,6 +235,17 @@ class HybridRocketEngine:
         # eşitlenmiyordu (3-4 kat tutarsızlık).
         self.m_f = self.m_f_grain
         self.m_total = self.m_ox + self.m_f
+        # OPUS DENETİM DÜZELTMESİ (major): m_f YANAN yakıttır; grain dış
+        # çapı kamara iç çapına kadar döküldüğünden YÜKLENEN yakıt daha
+        # büyüktür (yanmayan sliver kalır). İkisi ayrı raporlanır ki araç
+        # kütle bütçesi (yüklenen) ile performans bütçesi (yanan)
+        # karıştırılmasın.
+        r_grain_outer = self.D_ch / 2.0
+        self.m_f_loaded = self.rho_f * np.pi / 4.0 * (
+            (2.0 * r_grain_outer) ** 2 - self.D_port_initial ** 2
+        ) * self.L_grain
+        self.fuel_sliver_fraction = max(
+            0.0, 1.0 - self.m_f / max(self.m_f_loaded, 1e-9))
         
         # Advanced combustion analysis with Cantera (kendi yanma çözücümüz)
         fuel_composition = {self.fuel_type: 100.0}  # Simplified for now
@@ -760,7 +771,9 @@ class HybridRocketEngine:
             # Propellant
             'propellant_mass_total': self.m_total,
             'oxidizer_mass': self.m_ox,
-            'fuel_mass': self.m_f,
+            'fuel_mass': self.m_f,                      # YANAN yakıt (performans bütçesi)
+            'fuel_mass_loaded': getattr(self, 'm_f_loaded', self.m_f),  # yüklenen (kütle bütçesi)
+            'fuel_sliver_fraction': getattr(self, 'fuel_sliver_fraction', 0.0),
             
             # Operating conditions
             'chamber_pressure': self.P_c,

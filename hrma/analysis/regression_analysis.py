@@ -114,6 +114,16 @@ class RegressionAnalyzer:
         mdot_f = rho_f * np.pi * port_diameter * grain_length * r_dot
         G_fuel = mdot_f / A_port
         G_total = G_ox + G_fuel
+        if not converged:
+            # OPUS DENETİM DÜZELTMESİ (minor): sessiz yakınsamama yasak.
+            # n≥0.7 egzotik yakıt + aşırı yakıt-baskın geometri 50 iterasyonu
+            # aşabilir; kullanıcı son iterat kullanıldığını bilmeli.
+            import warnings
+            warnings.warn(
+                f"Marxman G_total sabit-nokta iterasyonu {max_iter} adımda "
+                f"yakınsamadı (n={n}, G_fuel/G_total="
+                f"{G_fuel/max(G_total,1e-12):.3f}); son iterat kullanılıyor.",
+                RuntimeWarning)
         return {
             'r_dot': r_dot, 'G_ox': G_ox, 'G_fuel': G_fuel, 'G_total': G_total,
             'mdot_f': mdot_f, 'flux_used': G_total, 'iterations': it,
@@ -144,7 +154,9 @@ class RegressionAnalyzer:
         n = motor_data.get('regression_n', fuel_props['n'])
         rho_f = motor_data.get('fuel_density', fuel_props['density'])  # kg/m³
 
-        # Zaman dizisi
+        # Zaman dizisi. OPUS DENETİM DÜZELTMESİ (minor): dt, linspace grid
+        # aralığıyla aynı olmalı (eski tb/steps, tb/(steps-1) griddle %1
+        # zamanlama kayması yaratıyordu).
         time_steps = 100
         time_array = np.linspace(0, burn_time, time_steps)
 
@@ -155,7 +167,7 @@ class RegressionAnalyzer:
         oxidizer_flux = []
         total_flux = []
 
-        dt = burn_time / time_steps
+        dt = burn_time / (time_steps - 1)
 
         for t in time_array:
             # Port alanı ve oksitleyici akış yoğunluğu

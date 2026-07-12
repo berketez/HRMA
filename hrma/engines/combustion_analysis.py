@@ -441,13 +441,46 @@ class CombustionAnalyzer:
             return self._empirical_flame_temperature(elements, pressure)
 
     def _empirical_flame_temperature(self, elements: Dict, pressure: float) -> float:
-        """Ampirik alev sıcaklığı modeli (Cantera yokken / başarısızken)."""
-        base_temp = 3200  # K
+        """Ampirik alev sıcaklığı modeli (Cantera yokken / başarısızken).
+
+        OPUS DENETİM DÜZELTMESİ (major): eski model karışım oranına tamamen
+        duyarsızdı — aşırı yakıt-zengin uçlarda (Cantera HP'nin yakınsamadığı
+        bölge) 3679 K sabit döndürüp optimum O/F aramasında sahte Isp tepesi
+        üretiyordu (gerçek Tc ~1200-1600 K olmalıyken). Artık elemental
+        oksijen dengesinden eşdeğerlik oranı φ türetilir ve sıcaklık
+        stokiyometride tepe yapan bir zarf ile ölçeklenir:
+
+          φ = O_gerekli / O_mevcut   (>1 yakıt-zengin, <1 fakir)
+          f(φ) = 1 / (1 + 0.25·ln²φ),  f ∈ [0.35, 1]
+
+        Zarf, hidrokarbon/N₂O-LOX sistemlerinin CEA eğrilerinin kaba
+        biçimini yakalar (φ≈2'de ~0.89, φ≈9.6'da ~0.44 → ~1400 K); fallback
+        hassas değildir ama artık en azından FİZİKSEL EĞİLİMİ taşır.
+        """
+        base_temp = 3200.0  # K (stokiyometriye yakın hidrokarbon/oksitleyici)
         if elements.get('AL', 0) > 0.1:
             base_temp += 500
         if elements.get('H', 0) > 0.1:
             base_temp += 200
-        return base_temp * (1.0 + 0.05 * np.log(pressure))
+
+        # Eşdeğerlik oranı: elemental kütle kesirlerinden oksijen dengesi.
+        # Tam oksidasyon talebi (mol O atomu / kg karışım):
+        #   C → CO₂ (2 O), H → H₂O (0.5 O), AL → Al₂O₃ (1.5 O)
+        _M = {'C': 12.011e-3, 'H': 1.008e-3, 'O': 15.999e-3,
+              'N': 14.007e-3, 'AL': 26.982e-3}
+        n_C = elements.get('C', 0.0) / _M['C']
+        n_H = elements.get('H', 0.0) / _M['H']
+        n_O = elements.get('O', 0.0) / _M['O']
+        n_AL = elements.get('AL', 0.0) / _M['AL']
+        o_needed = 2.0 * n_C + 0.5 * n_H + 1.5 * n_AL
+        if n_O > 1e-9 and o_needed > 1e-9:
+            phi = o_needed / n_O
+            factor = 1.0 / (1.0 + 0.25 * np.log(phi) ** 2)
+            factor = float(np.clip(factor, 0.35, 1.0))
+        else:
+            factor = 1.0  # denge kurulamıyorsa eski davranış
+
+        return base_temp * factor * (1.0 + 0.05 * np.log(pressure))
 
     def _calculate_reactant_enthalpy(self, fuel_composition: Optional[Dict],
                                      oxidizer_type: Optional[str],
