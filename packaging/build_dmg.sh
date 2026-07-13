@@ -15,6 +15,7 @@ cp -R "$B/mac/HRMA.app" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 cp "$B/README_MAC.txt" "$STAGE/README.txt"
 
-hdiutil create -volname "HRMA Setup" -srcfolder "$STAGE" -ov -format UDZO \
+# ULMO = LZMA sıkıştırma (macOS 10.15+ açar; UDZO/zlib 651 MB veriyordu — 2026-07-14)
+hdiutil create -volname "HRMA Setup" -srcfolder "$STAGE" -ov -format ULMO \
     "$DIST/HRMA-Setup-${VERSION}-macOS.dmg"
 ls -lh "$DIST"
