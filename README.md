@@ -18,6 +18,9 @@ A comprehensive web-based tool for designing and analyzing hybrid, solid, and li
 - **Exact Star Grain Regression**: burning perimeter computed by geometric offset of the true star profile (Huygens principle, validated against the analytic circular-port solution) — point count and depth feed directly into the thrust curve
 - **Liquid Engine Flow Schematic**: feed-system diagram (tanks → turbopump/pressure-fed → injector → chamber → nozzle) generated from computed flow rates and pressures
 - **6-DOF Flight Panel** (all three motor pages): Barrowman stability (CN_α/CP, static margin), weathercocking, apogee — chains directly onto the computed thrust curve
+- **Native Desktop App**: opens in its own window (macOS WKWebView / Windows WebView2 — no Chrome required), splash screen appears in ~1 s while engines load in the background; closing the window closes the app
+- **Automatic Updates**: checks GitHub Releases at startup and offers one-click download & install of new versions
+- **Fully Offline**: all JS libraries (Plotly, Three.js, MathJax) are bundled — no CDN, no internet required after installation
 - **NASA CEA Integration**: Real thermochemical data via RocketCEA; hybrid thermochemistry computed by the built-in Cantera equilibrium solver
 - **Performance Analysis**: Thrust curves, Isp, trajectory simulation, heat transfer, structural analysis
 - **Export**: STL files, OpenRocket .eng files, PDF reports
@@ -27,7 +30,7 @@ A comprehensive web-based tool for designing and analyzing hybrid, solid, and li
 HRMA's thermochemistry is cross-checked against **NASA CEA** (via RocketCEA):
 hybrid combustion (c\*, Tc, Isp) agrees within **≤1.5 %** across all supported
 fuel/oxidizer pairs, and liquid c\* within **<2 %**. The hybrid regression model
-is compared against published static-fire data (Rezaei HTPB/N2O). 177 automated
+is compared against published static-fire data (Rezaei HTPB/N2O). 228 automated
 tests pass.
 
 HRMA is a **preliminary-design and educational tool**, not a flight-qualification
@@ -41,10 +44,16 @@ uncertainty bands, and known limitations.
 One-click installers with Python 3.12 and **all** dependencies embedded — no
 internet connection, no admin rights, no terminal needed:
 
+Download the latest installers from the
+[**Releases page**](https://github.com/berketez/HRMA/releases/latest):
+
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | `HRMA-Kurulum-1.0.0.exe` (~165 MB) | Turkish setup wizard; installs per-user, creates a desktop shortcut |
-| **macOS 11+ (Apple Silicon)** | `HRMA-Kurulum-1.0.0-macOS.dmg` (~510 MB) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | `HRMA-Setup-2.3.0.exe` (~205 MB) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | `HRMA-Setup-2.3.0-macOS.dmg` (~650 MB) | Drag & drop to Applications; right-click → Open on first launch |
+
+Once installed, HRMA notifies you at startup when a new version is released
+and updates itself with one click.
 
 The installers are unsigned: Windows SmartScreen shows "More info → Run anyway",
 macOS Gatekeeper needs right-click → Open once. CAD and drawing outputs are
@@ -143,12 +152,13 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## Version
 
-**HRMA v2.2**
+**HRMA v2.3**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - Professional Rocket Propulsion Design Tool
-- Last Updated: July 2026 (one-click Windows/macOS installers, solid & liquid
-  feature parity, Monte Carlo tolerance analysis, exact star-grain regression model)
+- Last Updated: July 2026 (native desktop window with instant splash, automatic
+  updates via GitHub Releases, offline JS bundle, English installers, 10× faster
+  startup, safety-analysis completion)
 
 ## Ready to Design?
 
