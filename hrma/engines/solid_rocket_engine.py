@@ -6,23 +6,43 @@ import json
 import warnings
 
 from hrma.constants import G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR, R_STAR_ICAO
+
+# Parametrik maliyet modeli birim fiyatları (2026 tahmini, USD) — TEK tanım
+# noktası. _calculate_cost_analysis bunlardan ölçekler; kesin fiyat değildir.
+SOLID_COST_PARAMS = {
+    'propellant_usd_per_kg': {
+        'apcp': 40.0, 'knsb': 12.0, 'knsu': 10.0, 'kndx': 12.0,
+        'black_powder': 15.0, 'default': 35.0,
+    },
+    # malzeme: (yoğunluk kg/m³, USD/kg)
+    'case_materials': {
+        'steel': (7850.0, 8.0),
+        'aluminum': (2700.0, 15.0),
+        'composite': (1600.0, 60.0),
+        'titanium': (4430.0, 90.0),
+    },
+    'nozzle_usd_per_kg': 80.0,       # grafit/işlenmiş çelik karışık ortalama
+    'insulation_usd_per_kg': 25.0,   # EPDM/fenolik
+    'labor_usd_per_hour': 30.0,
+}
 warnings.filterwarnings('ignore')
 
 class SolidRocketEngine:
     """Solid rocket motor analysis module"""
     
-    def __init__(self, grain_type='bates', propellant_type='apcp', 
-                 chamber_diameter=100, grain_length=500, 
+    def __init__(self, grain_type='bates', propellant_type='apcp',
+                 chamber_diameter=100, grain_length=500,
                  core_diameter=30, chamber_pressure=40,
                  burn_rate_a=0.005, burn_rate_n=0.35,
-                 burn_rate_temp_coeff=0.002, temp_ref=293.15):
-        
+                 burn_rate_temp_coeff=0.002, temp_ref=293.15,
+                 overrides=None):
+
         # Grain geometry
         self.grain_type = grain_type  # bates, star, wagon_wheel, end_burner
         self.D_chamber = chamber_diameter / 1000  # m
         self.L_grain = grain_length / 1000  # m
         self.D_core = core_diameter / 1000  # m
-        
+
         # Propellant properties
         self.propellant_type = propellant_type
         self.P_c = chamber_pressure  # bar
@@ -30,12 +50,71 @@ class SolidRocketEngine:
         self.n = burn_rate_n  # burn rate exponent
         self.burn_rate_temp_coeff = burn_rate_temp_coeff  # 1/K temperature coefficient
         self.temp_ref = temp_ref  # K reference temperature
-        
+
+        # UI'dan gelen opsiyonel parametreler (yakıt özellikleri, segman
+        # sayısı, star geometrisi...). Monte Carlo yeniden kurulum için
+        # constructor argümanları da saklanır.
+        self.overrides = dict(overrides or {})
+        self._ctor_args = dict(
+            grain_type=grain_type, propellant_type=propellant_type,
+            chamber_diameter=chamber_diameter, grain_length=grain_length,
+            core_diameter=core_diameter, chamber_pressure=chamber_pressure,
+            burn_rate_a=burn_rate_a, burn_rate_n=burn_rate_n,
+            burn_rate_temp_coeff=burn_rate_temp_coeff, temp_ref=temp_ref)
+
         # Set propellant properties
         self._set_propellant_properties()
-        
+        self._apply_overrides()
+
         # Physical constants (BIPM standart yerce kimi, hrma.constants)
         self.g0 = G_0  # m/s^2
+
+    def _override_val(self, key, lo, hi):
+        """overrides[key] sonlu ve [lo, hi] içindeyse float döndürür, yoksa None."""
+        try:
+            f = float(self.overrides.get(key))
+        except (TypeError, ValueError):
+            return None
+        return f if (np.isfinite(f) and lo <= f <= hi) else None
+
+    def _apply_overrides(self):
+        """Formdan gelen değerlerle yakıt tablosu değerlerini ez (2026-07-13).
+
+        Harita bulgusu: UI ~60 alan gönderiyordu, motor 8'ini kullanıyordu —
+        kullanıcı yoğunluk/C*/gama değiştirse de hesaba etki etmiyordu.
+        Yalnız sonlu ve fiziksel aralıktaki değerler uygulanır; boş/uçuk
+        değer sessizce tablo değerinde kalır.
+
+        Bilinçli KABLOLANMAYANLAR: throat/exit/expansion girişleri — UI
+        default'ları (15/35 mm) fiziksel boğaz boyutlandırmasını ezmesin
+        diye motor kendi kütle dengesinden boyutlandırmaya devam eder.
+        """
+        m = self._override_val('density', 500.0, 3000.0)
+        if m is not None:
+            self.rho_p = m
+        m = self._override_val('char_velocity', 800.0, 2500.0)
+        if m is not None:
+            self.c_star = m
+        m = self._override_val('gamma', 1.05, 1.5)
+        if m is not None:
+            self.gamma = m
+        m = self._override_val('flame_temp', 1000.0, 4500.0)
+        if m is not None:
+            self.T_c = m
+        m = self._override_val('nozzle_efficiency', 0.80, 1.0)
+        if m is not None:
+            self.nozzle_efficiency = m
+        m = self._override_val('erosive_k', 0.0, 1.0)
+        if m is not None:
+            self.erosive_burning_coeff = m
+        m = self._override_val('temp_coeff', 0.0, 0.02)
+        if m is not None:
+            self.burn_rate_temp_coeff = m
+        # Başlangıç sıcaklığı yanma hızını düzeltir: a_T = a·exp(σp·(T0−Tref))
+        m = self._override_val('initial_temp', 200.0, 350.0)
+        if m is not None:
+            self.a = self.a * float(np.exp(
+                self.burn_rate_temp_coeff * (m - self.temp_ref)))
         
     def _set_propellant_properties(self):
         """CEA-tutarlı yakıt referans setleri (sentetik referans, deneysel veri değil)"""
@@ -153,7 +232,14 @@ class SolidRocketEngine:
         ve yanma alanı modeli AYNI sayıyı kullanmalıdır (Opus denetim bulgusu:
         önceden rapor 5 segment derken model tek monolitik grain yakıyordu →
         aşırı progressif profil, Pc 3.4 kat şişiyordu).
+
+        Kullanıcı formdan grain_count gönderdiyse (1-20) o kullanılır; yanma
+        alanı modeli ve grain_design raporu aynı yerden okuduğu için tutarlılık
+        bozulmaz.
         """
+        user_n = self._override_val('grain_count', 1, 20)
+        if user_n is not None:
+            return int(round(user_n))
         return max(1, round(self.L_grain / self.D_chamber))
 
     def calculate_burn_area(self, web_thickness):
@@ -503,37 +589,166 @@ class SolidRocketEngine:
             }
         }
     
-    def _calculate_cost_analysis(self):
-        """Cost analysis like other systems"""
-        return {
-            'material_costs_usd': {
-                'propellant': 45.0,
-                'case_materials': 120.0,
-                'nozzle': 35.0,
-                'insulation': 15.0,
-                'hardware': 25.0,
-                'total_materials': 240.0
-            },
-            'manufacturing_costs_usd': {
-                'propellant_mixing': 20.0,
-                'casting': 15.0,
-                'curing': 10.0,
-                'machining': 45.0,
-                'assembly': 25.0,
-                'testing': 35.0,
-                'total_manufacturing': 150.0
-            },
-            'development_costs_usd': {
-                'design': 500.0,
-                'testing': 300.0,
-                'certification': 200.0,
-                'total_development': 1000.0
-            },
-            'cost_per_flight': {
-                'recurring_cost_usd': 390.0,
-                'cost_per_kg_payload': 780.0,
-                'cost_per_ns_impulse': 0.015
+    def run_monte_carlo(self, n_samples=300, seed=42):
+        """Üretim toleransı belirsizlikleriyle Monte Carlo performans analizi.
+
+        1σ belirsizlikler (katı yakıt üretimi için literatür-tipik):
+          yanma hızı katsayısı a: ±%3, üssü n: ±0.005 (mutlak),
+          yakıt yoğunluğu: ±%1, C*: ±%1.
+        Başarı ölçütü: ortalama itki nominalin ±%10'u, Isp ±%5'i içinde ve
+        tepe basıncı ≤ nominal tepe × 1.2 (MEOP marjı).
+        Sabit tohum → tekrarlanabilir sonuç (aynı girdi aynı çıktıyı verir).
+        """
+        n_samples = int(max(20, min(n_samples, 2000)))
+        rng = np.random.default_rng(int(seed))
+
+        nominal = self.calculate_performance()
+        if isinstance(nominal, dict) and nominal.get('error'):
+            return {'error': f"Nominal hesap başarısız: {nominal['error']}"}
+        nom_thrust = float(nominal['average_thrust'])
+        nom_isp = float(nominal['specific_impulse'])
+        nom_burn = float(nominal['burn_time'])
+        nom_pmax = float(np.max(nominal['thrust_curve']['pressure']))
+
+        # initial_temp düzeltmesi self.a'ya zaten işlendi — örneklem
+        # kurulumunda ikinci kez uygulanmasın
+        base_ov = dict(self.overrides)
+        base_ov.pop('initial_temp', None)
+
+        keys = ('thrust', 'isp', 'burn_time', 'max_pressure')
+        samples = {k: [] for k in keys}
+        n_success = 0
+        n_failed_runs = 0
+
+        for _ in range(n_samples):
+            ov = dict(base_ov)
+            ov['density'] = self.rho_p * (1.0 + rng.normal(0.0, 0.01))
+            ov['char_velocity'] = self.c_star * (1.0 + rng.normal(0.0, 0.01))
+            args = dict(self._ctor_args)
+            args['burn_rate_a'] = self.a * (1.0 + rng.normal(0.0, 0.03))
+            args['burn_rate_n'] = float(np.clip(
+                self.n + rng.normal(0.0, 0.005), 0.1, 0.99))
+            try:
+                r = SolidRocketEngine(overrides=ov, **args).calculate_performance()
+                if isinstance(r, dict) and r.get('error'):
+                    raise ValueError(r['error'])
+                s_thrust = float(r['average_thrust'])
+                s_isp = float(r['specific_impulse'])
+                s_burn = float(r['burn_time'])
+                s_pmax = float(np.max(r['thrust_curve']['pressure']))
+            except Exception:
+                n_failed_runs += 1
+                continue
+            samples['thrust'].append(s_thrust)
+            samples['isp'].append(s_isp)
+            samples['burn_time'].append(s_burn)
+            samples['max_pressure'].append(s_pmax)
+            if (abs(s_thrust - nom_thrust) <= 0.10 * nom_thrust
+                    and abs(s_isp - nom_isp) <= 0.05 * nom_isp
+                    and s_pmax <= 1.2 * nom_pmax):
+                n_success += 1
+
+        def _stats(vals, nom):
+            if not vals:
+                return {}
+            arr = np.asarray(vals, dtype=float)
+            mean = float(np.mean(arr))
+            return {
+                'nominal': nom,
+                'mean': mean,
+                'std': float(np.std(arr)),
+                'cv_percent': float(np.std(arr) / mean * 100.0) if mean else 0.0,
+                'p5': float(np.percentile(arr, 5)),
+                'p95': float(np.percentile(arr, 95)),
             }
+
+        return {
+            'n_samples': n_samples,
+            'n_failed_runs': n_failed_runs,
+            'success_rate_percent': round(100.0 * n_success / n_samples, 1),
+            'criteria': ('İtki ±%10, Isp ±%5, tepe basıncı ≤ nominal×1.2; '
+                         '1σ: a ±%3, n ±0.005, yoğunluk ±%1, C* ±%1'),
+            'thrust': _stats(samples['thrust'], nom_thrust),
+            'isp': _stats(samples['isp'], nom_isp),
+            'burn_time': _stats(samples['burn_time'], nom_burn),
+            'max_pressure': _stats(samples['max_pressure'], nom_pmax),
+            'histograms': {
+                'thrust': [round(v, 1) for v in samples['thrust']],
+                'isp': [round(v, 2) for v in samples['isp']],
+            },
+        }
+
+    def _calculate_cost_analysis(self):
+        """Parametrik maliyet TAHMİNİ — kütle ve boyutlardan ölçeklenir.
+
+        2026-07-13: eski sürüm motor boyutundan bağımsız sabit değerler
+        döndürüyordu (100 g motor da 100 kg motor da 240$ malzeme). Artık
+        grain hacmi, kasa kütlesi ve boğaz çapından ölçeklenen birim-fiyat
+        modeli kullanılır. Birim fiyatlar SOLID_COST_PARAMS'ta tek noktada.
+        Bu bir TAHMİNDİR; sonuç sözlüğündeki 'basis' alanı varsayımları belirtir.
+        """
+        p = SOLID_COST_PARAMS
+
+        # Kütleler (kg)
+        grain_vol = np.pi / 4.0 * max(self.D_chamber ** 2 - self.D_core ** 2, 0.0) \
+            * self.L_grain
+        m_prop = grain_vol * self.rho_p
+        wall = min(max(0.045 * self.D_chamber, 0.003), 0.12 * self.D_chamber)
+        material = str(self.overrides.get('case_material') or 'aluminum').lower()
+        rho_case, usd_case = p['case_materials'].get(
+            material, p['case_materials']['aluminum'])
+        m_case = np.pi * self.D_chamber * self.L_grain * 1.15 * wall * rho_case
+        d_t = self._estimate_throat_diameter()
+        m_nozzle = min(max(0.8 * (d_t / 0.05) ** 2, 0.2), 60.0)
+        m_insul = np.pi * self.D_chamber * self.L_grain * 0.003 * 1200.0
+
+        mat = {
+            'propellant': m_prop * p['propellant_usd_per_kg'].get(
+                self.propellant_type, p['propellant_usd_per_kg']['default']),
+            'case_materials': m_case * usd_case,
+            'nozzle': m_nozzle * p['nozzle_usd_per_kg'],
+            'insulation': m_insul * p['insulation_usd_per_kg'],
+        }
+        mat['hardware'] = 0.15 * sum(mat.values())
+        mat = {k: round(v, 1) for k, v in mat.items()}
+        mat['total_materials'] = round(sum(mat.values()), 1)
+
+        # İşçilik: süreler kütle/boyutla ölçeklenir, saat ücreti tek katsayı
+        hr = p['labor_usd_per_hour']
+        hours = {
+            'propellant_mixing': 0.5 + 0.05 * m_prop,
+            'casting': 0.5 + 0.04 * m_prop,
+            'curing': 0.3 + 0.01 * m_prop,       # fırın gözetimi
+            'machining': 1.0 + 8.0 * self.D_chamber,   # kasa+nozul tornası
+            'assembly': 0.5 + 3.0 * self.D_chamber,
+            'testing': 1.0 + 0.02 * m_prop,
+        }
+        man = {k: round(v * hr, 1) for k, v in hours.items()}
+        man['total_manufacturing'] = round(sum(man.values()), 1)
+
+        # Geliştirme: toplam impuls sınıfıyla ölçeklenen bir kerelik maliyet
+        total_impulse = getattr(self, '_last_total_impulse', None)
+        if not total_impulse:
+            total_impulse = 5000.0
+        dev_scale = max(1.0, (total_impulse / 5000.0) ** 0.6)
+        dev = {
+            'design': round(500.0 * dev_scale, 0),
+            'testing': round(300.0 * dev_scale, 0),
+            'certification': round(200.0 * dev_scale, 0),
+        }
+        dev['total_development'] = round(sum(dev.values()), 0)
+
+        recurring = mat['total_materials'] + man['total_manufacturing']
+        return {
+            'material_costs_usd': mat,
+            'manufacturing_costs_usd': man,
+            'development_costs_usd': dev,
+            'cost_per_flight': {
+                'recurring_cost_usd': round(recurring, 1),
+                'cost_per_ns_impulse': round(recurring / max(total_impulse, 1.0), 4),
+            },
+            'basis': ('Parametrik tahmin: birim fiyatlar SOLID_COST_PARAMS, '
+                      'kütleler grain/kasa geometrisinden. Kesin fiyat değildir.'),
         }
     
     def _generate_motor_cad_data(self):
@@ -623,9 +838,12 @@ class SolidRocketEngine:
     
     def _analyze_star_grain(self):
         """Star grain detailed analysis"""
-        # Simplified star grain (6-pointed)
-        star_points = 6
-        point_depth = 0.015  # 15mm typical
+        # Star geometrisi: formdan star_points (3-12) ve star_radius (mm,
+        # uç derinliği) gelirse kullanılır; yoksa 6 uç / 15 mm tipik değerler
+        _pts = self._override_val('star_points', 3, 12)
+        star_points = int(round(_pts)) if _pts is not None else 6
+        _dep = self._override_val('star_radius', 2.0, 60.0)
+        point_depth = (_dep / 1000.0) if _dep is not None else 0.015
         
         # Calculate enhanced burning surface
         base_core_area = np.pi * (self.D_core/2)**2
@@ -1437,7 +1655,9 @@ class SolidRocketEngine:
         avg_thrust = np.mean(curve['thrust'])
         max_thrust = np.max(curve['thrust'])
         total_impulse = np.trapz(curve['thrust'], curve['time'])
-        
+        # Maliyet modeli geliştirme ölçeği için (parametrik tahmin)
+        self._last_total_impulse = float(total_impulse)
+
         # Detailed analysis like other systems
         detailed_analysis = self._calculate_detailed_analysis(curve)
         structural_analysis = self._calculate_structural_analysis()

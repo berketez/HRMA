@@ -691,7 +691,7 @@
             <div class="form-grid">
                 <div class="form-group">
                     <label>
-                        Throat Diameter Dt <span class="unit">(mm)</span>
+                        Throat Diameter Dt <span class="unit">(mm)</span> <span class="unit" style="color:#4facfe;">(hesapla sonrası otomatik)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
                             <span class="tooltip-text">Nozzle throat diameter - critical parameter that determines chamber pressure and mass flow rate. Smaller throat = higher pressure. Must be sized for desired pressure and thrust.</span>
@@ -701,7 +701,7 @@
                 </div>
                 <div class="form-group">
                     <label>
-                        Exit Diameter De <span class="unit">(mm)</span>
+                        Exit Diameter De <span class="unit">(mm)</span> <span class="unit" style="color:#4facfe;">(hesapla sonrası otomatik)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
                             <span class="tooltip-text">Nozzle exit diameter. Larger exit provides better expansion and higher specific impulse at altitude but increases nozzle weight and length.</span>
@@ -711,7 +711,7 @@
                 </div>
                 <div class="form-group">
                     <label>
-                        Expansion Ratio ε
+                        Expansion Ratio ε <span class="unit" style="color:#4facfe;">(hesapla sonrası otomatik)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
                             <span class="tooltip-text">Ratio of exit area to throat area (Ae/At). Automatically calculated from diameters. Higher ratios provide better performance at altitude but risk flow separation at sea level.</span>
@@ -1155,6 +1155,24 @@
             <div class="panel">
                 <h2>Performance Summary</h2>
                 <div id="performanceMetrics"></div>
+            </div>
+
+            <!-- Monte Carlo Analizi (Üretim Toleransları) — gerçek backend
+                 (/api/solid-monte-carlo). Buton koşarken 'Hesaplanıyor...' -->
+            <div class="panel">
+                <h2>Monte Carlo Analizi (Üretim Toleransları)</h2>
+                <div class="chart-explanation">
+                    <p><strong>Ne yapar:</strong> Üretim toleranslarını (yanma hızı katsayısı a, üs n, yoğunluk, C*) rastgele örnekleyip motor performansının istatistiksel dağılımını çıkarır.</p>
+                    <ul>
+                        <li><strong>Başarı oranı:</strong> İtki/Isp/tepe basıncı kabul kriterlerini sağlayan koşuların yüzdesi</li>
+                        <li><strong>CV%:</strong> Değişim katsayısı (σ/ortalama) — düşük değer tutarlı üretim demektir</li>
+                        <li><strong>[p5, p95]:</strong> Koşuların %90'ının içine düştüğü aralık</li>
+                    </ul>
+                </div>
+                <div style="text-align: center; margin-bottom: 15px;">
+                    <button type="button" id="mc_run_btn" class="btn btn-primary" onclick="runSolidMonteCarlo()">Analizi Çalıştır</button>
+                </div>
+                <div id="mc_results" style="display: none;"></div>
             </div>
 
             <!-- Motor Tasarımı (hibrit sayfası paritesi) -->
@@ -1666,6 +1684,152 @@
             panel.style.display = 'none';   // veri yok → yalan panel gösterme
         }
 
+        // Hesap sonrası: backend'in fiziksel kütle dengesinden HESAPLADIĞI nozul
+        // boyutlarını (throat/exit mm, expansion oran) ilgili inputlara yazar.
+        // Bu üç alan artık girdi değil ÇIKTI — backend zaten formdaki değerleri
+        // yok sayıyor; kullanıcı "(hesapla sonrası otomatik)" etiketiyle görür.
+        function applyNozzleFeedback(results) {
+            if (!results) return;
+            const setVal = function (id, val, digits) {
+                const el = document.getElementById(id);
+                if (el && typeof val === 'number' && isFinite(val)) {
+                    el.value = val.toFixed(digits);
+                }
+            };
+            setVal('throat_diameter', results.throat_diameter, 2);   // mm
+            setVal('exit_diameter', results.exit_diameter, 2);       // mm
+            setVal('expansion_ratio', results.expansion_ratio, 2);   // oran
+        }
+
+        // ---- Monte Carlo (Üretim Toleransları) — /api/solid-monte-carlo ----
+        // İstek gövdesi: collectAllParameters() + {n_samples: 300}.
+        async function runSolidMonteCarlo() {
+            const btn = document.getElementById('mc_run_btn');
+            const origText = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = 'Hesaplanıyor...'; }
+            try {
+                const data = collectAllParameters();
+                data.n_samples = 300;
+                const response = await fetch('/api/solid-monte-carlo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const mc = await response.json();
+                if (!response.ok || mc.status !== 'success') {
+                    throw new Error(mc.error || 'Monte Carlo analizi başarısız oldu');
+                }
+                renderSolidMonteCarlo(mc);
+            } catch (error) {
+                showError('Monte Carlo hatası: ' + error.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = origText || 'Analizi Çalıştır'; }
+            }
+        }
+
+        // Tek bir istatistik kartı (nominal, ortalama±σ, CV%, [p5,p95]).
+        function mcStatCard(title, s, unit, digits) {
+            const cellL = 'padding:3px 0; color:#7d97a5;';
+            const cellR = 'padding:3px 0; text-align:right;';
+            if (!s || typeof s.mean !== 'number') {
+                return '<div style="background: var(--hd-inset, #0a1524); border: 1px solid var(--hd-line, rgba(0,229,255,0.14)); border-radius: 8px; padding: 15px;">' +
+                    '<div style="font-weight:600; color:#4facfe; margin-bottom:8px;">' + title + '</div>' +
+                    '<div style="color:#7d97a5;">—</div></div>';
+            }
+            const u = unit ? (' ' + unit) : '';
+            return '<div style="background: var(--hd-inset, #0a1524); border: 1px solid var(--hd-line, rgba(0,229,255,0.14)); border-radius: 8px; padding: 15px;">' +
+                '<div style="font-weight:600; color:#4facfe; margin-bottom:8px;">' + title + '</div>' +
+                '<table style="width:100%; font-size:13px; border-collapse:collapse;">' +
+                '<tr><td style="' + cellL + '">Nominal</td><td style="' + cellR + '">' + fmtNum(s.nominal, digits) + u + '</td></tr>' +
+                '<tr><td style="' + cellL + '">Ortalama ± σ</td><td style="' + cellR + '">' + fmtNum(s.mean, digits) + ' ± ' + fmtNum(s.std, digits) + u + '</td></tr>' +
+                '<tr><td style="' + cellL + '">CV</td><td style="' + cellR + '">%' + fmtNum(s.cv_percent, 1) + '</td></tr>' +
+                '<tr><td style="' + cellL + '">[p5, p95]</td><td style="' + cellR + '">[' + fmtNum(s.p5, digits) + ', ' + fmtNum(s.p95, digits) + ']' + u + '</td></tr>' +
+                '</table></div>';
+        }
+
+        // Monte Carlo sonucunu #mc_results içine çizer: büyük başarı oranı kartı,
+        // 4 istatistik kartı, 2 histogram (nominal dikey çizgili), criteria metni.
+        function renderSolidMonteCarlo(mc) {
+            const box = document.getElementById('mc_results');
+            if (!box) return;
+
+            // Başarı oranı rengi: %95+ yeşil, %80-95 sarı, altı kırmızı
+            const sr = mc.success_rate_percent;
+            let srColor = '#f5576c';               // kırmızı
+            if (sr >= 95)      srColor = '#2ecc71'; // yeşil
+            else if (sr >= 80) srColor = '#f0ad4e'; // sarı
+
+            const successCard =
+                '<div style="text-align:center; padding:24px; border-radius:8px; color:#fff; background:' + srColor + '; margin-bottom:16px;">' +
+                '<div style="font-size:40px; font-weight:300;">%' + fmtNum(sr, 1) + '</div>' +
+                '<div style="font-size:15px; opacity:0.95;">Başarı Oranı (' + mc.n_samples + ' koşu)</div>' +
+                '</div>';
+
+            const statsGrid =
+                '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; margin-bottom:16px;">' +
+                mcStatCard('İtki', mc.thrust, 'N', 0) +
+                mcStatCard('Isp', mc.isp, 's', 1) +
+                mcStatCard('Yanma Süresi', mc.burn_time, 's', 2) +
+                mcStatCard('Tepe Basıncı', mc.max_pressure, 'bar', 1) +
+                '</div>';
+
+            const histGrid =
+                '<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:12px;">' +
+                '<div id="mc_hist_thrust" class="plot-container" style="height:320px; margin:0;"></div>' +
+                '<div id="mc_hist_isp" class="plot-container" style="height:320px; margin:0;"></div>' +
+                '</div>';
+
+            const failWarn = (mc.n_failed_runs > 0)
+                ? '<p style="margin-top:6px; font-size:13px; color:#f0ad4e;">⚠ ' + mc.n_failed_runs +
+                  ' koşu yakınsamadı (istatistiklere dahil edilmedi).</p>'
+                : '';
+
+            const criteriaText = mc.criteria
+                ? '<p style="margin-top:10px; font-size:12px; color:#7d97a5;">' + mc.criteria + '</p>'
+                : '';
+
+            box.innerHTML = successCard + statsGrid + histGrid + failWarn + criteriaText;
+            box.style.display = 'block';
+
+            // Histogramlar (nominal değere kesikli dikey çizgi)
+            const nominalLine = function (nom, color) {
+                return (typeof nom === 'number' && isFinite(nom)) ? [{
+                    type: 'line', x0: nom, x1: nom, y0: 0, y1: 1, yref: 'paper',
+                    line: { color: color, width: 2, dash: 'dash' }
+                }] : [];
+            };
+
+            if (mc.histograms && Array.isArray(mc.histograms.thrust)) {
+                Plotly.newPlot('mc_hist_thrust', [{
+                    x: mc.histograms.thrust,
+                    type: 'histogram',
+                    marker: { color: 'rgba(240,147,251,0.55)', line: { color: '#f093fb', width: 1 } }
+                }], {
+                    title: 'İtki Dağılımı',
+                    xaxis: { title: 'İtki (N)' },
+                    yaxis: { title: 'Frekans' },
+                    shapes: nominalLine(mc.thrust && mc.thrust.nominal, '#ff6b6b'),
+                    showlegend: false,
+                    margin: { t: 40, r: 20, b: 45, l: 55 }
+                }, { responsive: true });
+            }
+
+            if (mc.histograms && Array.isArray(mc.histograms.isp)) {
+                Plotly.newPlot('mc_hist_isp', [{
+                    x: mc.histograms.isp,
+                    type: 'histogram',
+                    marker: { color: 'rgba(102,126,234,0.55)', line: { color: '#667eea', width: 1 } }
+                }], {
+                    title: 'Isp Dağılımı',
+                    xaxis: { title: 'Isp (s)' },
+                    yaxis: { title: 'Frekans' },
+                    shapes: nominalLine(mc.isp && mc.isp.nominal, '#4facfe'),
+                    showlegend: false,
+                    margin: { t: 40, r: 20, b: 45, l: 55 }
+                }, { responsive: true });
+            }
+        }
+
         function displayResults(results) {
             document.getElementById('results').style.display = 'block';
             
@@ -1698,6 +1862,10 @@
             // Hibrit paritesi: Motor Tasarımı tablosu + Motor Kesiti (plots.motor)
             populateMotorDesignTable(results);
             renderSolidMotorKesit(results);
+
+            // Nozul input geri-beslemesi: backend'in hesapladığı throat/exit/oran
+            // değerlerini forma yaz (bu üç alan çıktı olarak işaretli).
+            applyNozzleFeedback(results);
 
             // Thrust curve
             const thrustTrace = {
@@ -2139,7 +2307,12 @@ Please provide:
             const cost = results.cost_analysis || {};
             const materialCosts = cost.material_costs_usd || {};
             const manufacturingCosts = cost.manufacturing_costs_usd || {};
-            
+            // Yeni parametrik model: cost_per_kg_payload kalktı, yerine 'basis'
+            // (tahmin varsayımı metni) geldi — sekmenin altına italik notla eklenir.
+            const basisNote = cost.basis
+                ? `<p style="margin-top: 16px; font-size: 12px; font-style: italic; color: #7d97a5;">${cost.basis}</p>`
+                : '';
+
             return `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                     <div>
@@ -2166,9 +2339,10 @@ Please provide:
                         </table>
                     </div>
                 </div>
+                ${basisNote}
             `;
         }
-        
+
         function generateCADAnalysisHTML(results) {
             const cad = results.cad_design || {};
             const motorAssembly = cad.motor_assembly || {};

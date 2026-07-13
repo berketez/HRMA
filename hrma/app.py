@@ -66,6 +66,7 @@ from hrma.export.motor_geometry import (
     solid_results_to_motor_geometry,
     liquid_results_to_motor_geometry,
 )
+from hrma.constants import G_0
 from hrma.visualization.advanced_results import (
     create_cea_style_results, create_altitude_performance_plot,
     create_mass_fractions_plot, create_thrust_altitude_plot
@@ -773,6 +774,9 @@ def calculate_solid():
         validate_input_range(burn_rate_n, 0.1, 1.0, "Burn rate exponent")
         
         # Create solid motor instance
+        # overrides=data: formun yoğunluk/C*/gama/segman/star/sıcaklık gibi
+        # alanları motora işlensin (2026-07-13 — girdi-backend kopukluğu fixi;
+        # motor yalnız tanıdığı ve fiziksel aralıktaki anahtarları uygular)
         motor = SolidRocketEngine(
             grain_type=data.get('grain_type', 'bates'),
             propellant_type=data.get('propellant_type', 'apcp'),
@@ -781,7 +785,8 @@ def calculate_solid():
             core_diameter=core_diameter,
             chamber_pressure=chamber_pressure,
             burn_rate_a=burn_rate_a,
-            burn_rate_n=burn_rate_n
+            burn_rate_n=burn_rate_n,
+            overrides=data
         )
         
         # Calculate motor performance
@@ -873,6 +878,36 @@ def calculate_liquid():
             'traceback': error_traceback,
             'error_type': type(e).__name__
         }), 400
+
+@app.route('/api/solid-monte-carlo', methods=['POST'])
+def solid_monte_carlo():
+    """Katı motor Monte Carlo analizi — üretim toleransı belirsizlikleri.
+
+    Girdi: /calculate_solid ile aynı form alanları + opsiyonel n_samples.
+    Çıktı: başarı oranı, itki/Isp/yanma süresi/tepe basıncı istatistikleri
+    ve histogram verileri (frontend çizer).
+    """
+    try:
+        data = request.json or {}
+        motor = SolidRocketEngine(
+            grain_type=data.get('grain_type', 'bates'),
+            propellant_type=data.get('propellant_type', 'apcp'),
+            chamber_diameter=data.get('chamber_diameter', 100),
+            grain_length=data.get('grain_length', 500),
+            core_diameter=data.get('core_diameter', 30),
+            chamber_pressure=data.get('chamber_pressure', 40),
+            burn_rate_a=data.get('burn_rate_a', 0.005),
+            burn_rate_n=data.get('burn_rate_n', 0.35),
+            overrides=data
+        )
+        mc = motor.run_monte_carlo(n_samples=int(data.get('n_samples', 300)))
+        if mc.get('error'):
+            return jsonify({'status': 'error', 'error': mc['error']}), 400
+        return jsonify({'status': 'success', **sanitize_json_values(mc)})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 
 @app.route('/export_tank_cad', methods=['POST'])
 def export_tank_cad():
@@ -2328,24 +2363,31 @@ def trajectory_analysis():
         drag_coefficient = float(data.get('drag_coefficient', 0.5))
         reference_area = float(data.get('reference_area', 0.1))
         
-        # Extract base motor data
-        fuel_type = data.get('fuel_type', 'paraffin')
-        oxidizer_type = data.get('oxidizer_type', 'n2o')
-        of_ratio = float(data.get('of_ratio', 2.5))
-        chamber_pressure = float(data.get('chamber_pressure', 20))  # Already in bar
-        
-        # Create hybrid rocket engine for trajectory analysis
-        engine = HybridRocketEngine(
-            fuel_type=fuel_type,
-            chamber_pressure=chamber_pressure,
-            of_ratio=of_ratio,
-            thrust=1000,  # Default thrust for trajectory analysis
-            burn_time=10  # Default burn time
-        )
-        
-        # Calculate engine performance
-        engine.calculate()
-        
+        # Genel itki kaynağı (2026-07-13): istek doğrudan thrust + burn_time
+        # veriyorsa (katı/sıvı sayfaları) hibrit motor kurulmaz — mevcut
+        # hesap sonuçları kullanılır. Verilmemişse eski hibrit yolu çalışır.
+        direct_thrust = data.get('thrust')
+        direct_burn_time = data.get('burn_time')
+        engine = None
+        if not (direct_thrust and direct_burn_time):
+            # Extract base motor data
+            fuel_type = data.get('fuel_type', 'paraffin')
+            oxidizer_type = data.get('oxidizer_type', 'n2o')
+            of_ratio = float(data.get('of_ratio', 2.5))
+            chamber_pressure = float(data.get('chamber_pressure', 20))  # bar
+
+            # Create hybrid rocket engine for trajectory analysis
+            engine = HybridRocketEngine(
+                fuel_type=fuel_type,
+                chamber_pressure=chamber_pressure,
+                of_ratio=of_ratio,
+                thrust=1000,  # Default thrust for trajectory analysis
+                burn_time=10  # Default burn time
+            )
+
+            # Calculate engine performance
+            engine.calculate()
+
         # Create trajectory analyzer
         trajectory_analyzer = TrajectoryAnalyzer()
         
@@ -2357,14 +2399,28 @@ def trajectory_analysis():
         )
         
         # Prepare motor data for trajectory analysis
-        motor_data = {
-            'thrust': engine.F,
-            'burn_time': 10.0,
-            'total_impulse': engine.F * 10.0,
-            'isp': engine.Isp,
-            'mass_flow_rate': engine.mdot_total,
-            'propellant_mass_total': initial_mass - final_mass
-        }
+        if engine is not None:
+            motor_data = {
+                'thrust': engine.F,
+                'burn_time': 10.0,
+                'total_impulse': engine.F * 10.0,
+                'isp': engine.Isp,
+                'mass_flow_rate': engine.mdot_total,
+                'propellant_mass_total': initial_mass - final_mass
+            }
+        else:
+            thrust = float(direct_thrust)
+            burn_time = float(direct_burn_time)
+            isp = float(data.get('isp', 200.0))
+            motor_data = {
+                'thrust': thrust,
+                'burn_time': burn_time,
+                'total_impulse': float(data.get('total_impulse',
+                                                thrust * burn_time)),
+                'isp': isp,
+                'mass_flow_rate': thrust / (isp * G_0) if isp > 0 else 0.0,
+                'propellant_mass_total': initial_mass - final_mass
+            }
         
         # Prepare launch parameters
         launch_params = {
@@ -2419,10 +2475,10 @@ def trajectory_analysis():
             'trajectory_data': sanitize_json_values(results),
             'plot_data': trajectory_plot,
             'engine_data': {
-                'thrust': engine.F,
-                'isp': engine.Isp,
-                'burn_time': 10.0,
-                'total_impulse': engine.F * 10.0
+                'thrust': motor_data['thrust'],
+                'isp': motor_data['isp'],
+                'burn_time': motor_data['burn_time'],
+                'total_impulse': motor_data['total_impulse']
             }
         })
         

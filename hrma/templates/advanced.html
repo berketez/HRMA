@@ -1295,7 +1295,6 @@
                     <button type="button" class="btn" onclick="calculate()">Calculate</button>
                     <button type="button" class="btn btn-success" onclick="switchTab('parametric')">Parametric Analysis</button>
                     <button type="button" class="btn btn-warning" onclick="exportReport()" id="exportResultsBtn" disabled>Export Results</button>
-                    <button type="button" class="btn btn-info" onclick="generate3DCAD()" id="cadButton" style="display:none;">3D CAD Design</button>
                 </div>
             </div>
             
@@ -1831,73 +1830,6 @@
                 <div id="motor_3d_plot" style="display: none;"></div>
             </div>
             
-            <!-- CEA Style Results -->
-            <div id="cea_results_panel" class="panel" style="display: none;">
-                <h2>NASA CEA Style Analysis Results</h2>
-                <div id="cea_output" style="background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px; max-height: 600px; overflow-y: auto;"></div>
-            </div>
-            
-            <!-- Advanced Analysis Plots -->
-            <div id="altitude_performance_panel" class="panel" style="display: none;">
-                <h2>Altitude Performance Analysis</h2>
-                <div class="chart-explanation">
-                    <p><strong>What this shows:</strong> Motor performance variation with operating altitude</p>
-                    <ul>
-                        <li><strong>X-axis:</strong> Altitude (m) - from sea level to high altitude</li>
-                        <li><strong>Y-axis:</strong> Performance metrics (Thrust, Isp, efficiency)</li>
-                        <li><strong>Blue line:</strong> Thrust (N) - decreases with altitude due to back pressure</li>
-                        <li><strong>Red line:</strong> Specific Impulse (s) - increases with altitude (vacuum performance)</li>
-                        <li><strong>Critical points:</strong> Optimal altitude for maximum efficiency shown as markers</li>
-                        <li><strong>Reference:</strong> Standard atmosphere model (ISA) used for calculations</li>
-                    </ul>
-                </div>
-                <div id="altitude_performance_plot" class="plot-container"></div>
-            </div>
-            
-            <div id="mass_fractions_panel" class="panel" style="display: none;">
-                <h2>Mass Fractions Through Nozzle</h2>
-                <div class="chart-explanation">
-                    <p><strong>What this shows:</strong> Chemical species distribution along nozzle length</p>
-                    <ul>
-                        <li><strong>X-axis:</strong> Normalized nozzle position (0 = throat, 1 = exit)</li>
-                        <li><strong>Y-axis:</strong> Mass fraction (0-1) of chemical species</li>
-                        <li><strong>Different colors:</strong> Various combustion products (H2O, CO2, N2, etc.)</li>
-                        <li><strong>Trends:</strong> Species concentration changes due to expansion cooling</li>
-                        <li><strong>Applications:</strong> Nozzle design optimization and performance prediction</li>
-                        <li><strong>Reference:</strong> Based on equilibrium thermodynamic calculations</li>
-                    </ul>
-                </div>
-                <div id="mass_fractions_plot" class="plot-container"></div>
-            </div>
-            
-            <div id="thrust_altitude_panel" class="panel" style="display: none;">
-                <h2>Total Impulse Analysis - Thrust vs Altitude</h2>
-                <div class="chart-explanation">
-                    <p><strong>What this shows:</strong> Total impulse delivery capability across altitude range</p>
-                    <ul>
-                        <li><strong>X-axis:</strong> Altitude (km) - operational flight envelope</li>
-                        <li><strong>Y-axis:</strong> Total Impulse (N·s) - integrated thrust over burn time</li>
-                        <li><strong>Blue curve:</strong> Total impulse variation with altitude</li>
-                        <li><strong>Peak point:</strong> Optimal altitude for maximum impulse delivery</li>
-                        <li><strong>Applications:</strong> Mission trajectory optimization and staging analysis</li>
-                        <li><strong>Reference:</strong> Accounts for atmospheric back-pressure effects</li>
-                    </ul>
-                </div>
-                <div id="thrust_altitude_plot" class="plot-container"></div>
-            </div>
-            
-            <!-- Heat Transfer Analysis -->
-            <div id="heat_transfer_panel" class="panel" style="display: none;">
-                <h2>Heat Transfer Analysis</h2>
-                <div id="heat_transfer_results" style="font-family: monospace; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px;"></div>
-            </div>
-            
-            <!-- Structural Analysis -->
-            <div id="structural_panel" class="panel" style="display: none;">
-                <h2>Structural Analysis</h2>
-                <div id="structural_results" style="font-family: monospace; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px;"></div>
-            </div>
-            
             <!-- Comprehensive Safety Analysis -->
             <div id="safety_analysis_panel" class="panel" style="display: none;">
                 <h2>Comprehensive Safety Analysis</h2>
@@ -1952,32 +1884,13 @@
                 </div>
             </div>
             
-            <!-- OpenRocket Integration -->
-            <div id="openrocket_panel" class="panel" style="display: none;">
-                <h2>OpenRocket Integration</h2>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <h4>Motor Export</h4>
-                        <button class="btn" onclick="exportEngFile()" style="background: #28a745; color: white; margin-right: 10px;">
-                            Download .eng File
-                        </button>
-                        <button class="btn" onclick="exportSimulation()" style="background: #17a2b8; color: white;">
-                            Export Simulation
-                        </button>
-                    </div>
-                    <div class="form-group">
-                        <h4>Flight Profile</h4>
-                        <div id="flight_profile_summary" style="background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px; font-family: monospace;"></div>
-                    </div>
-                </div>
-                <div id="openrocket_details" style="margin-top: 20px; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 4px; font-family: monospace;"></div>
-            </div>
         </div>
     </div>
 
     <script>
         // Global variables
         var currentResults = null;
+        var lastSafetyResults = null;  // Son güvenlik analizi sonuçları (rapor/JSON export için)
 
         // Essential tab switching functions - defined early to avoid reference errors
         window.switchEnvironmentTab = function(tabName) {
@@ -3196,294 +3109,6 @@
 
         // Calculate function moved to app.js to avoid conflicts
 
-        function displayResults(results) {
-            console.log('displayResults called with:', results);
-            console.log('Regression rate value:', results.motor?.regression_rate);
-            console.log('Regression rate avg:', results.motor?.regression_rate_avg);
-            try {
-                const resultsDiv = document.getElementById('resultsPanel');
-                if (!resultsDiv) {
-                    console.error('Results div not found!');
-                    return;
-                }
-                resultsDiv.style.display = 'block';
-                console.log('Results div made visible');
-            
-                // Performance metrics cards
-                const metricsDiv = document.getElementById('performance_metrics');
-                if (!metricsDiv) {
-                    console.error('performance_metrics div not found!');
-                    return;
-                }
-                
-                // Safe number formatting function
-                function safeFixed(value, decimals) {
-                    if (value === null || value === undefined || isNaN(value)) {
-                        return 'N/A';
-                    }
-                    return Number(value).toFixed(decimals);
-                }
-                
-                const metrics = [
-                    { label: 'Specific Impulse', value: safeFixed(results.motor.isp, 1), unit: 's', color: '#667eea' },
-                    { label: 'Thrust', value: safeFixed(results.motor.thrust, 0), unit: 'N', color: '#764ba2' },
-                    { label: 'Chamber Pressure', value: safeFixed(results.motor.chamber_pressure, 1), unit: 'bar', color: '#f093fb' },
-                    { label: 'Total Mass Flow Rate', value: safeFixed(results.motor.mdot_total, 3), unit: 'kg/s', color: '#f5576c' }
-                ];
-                
-                console.log('Metrics prepared:', metrics);
-            
-            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
-            metrics.forEach(metric => {
-                html += `
-                    <div class="metric-card" style="background: linear-gradient(135deg, ${metric.color} 0%, ${metric.color}aa 100%);">
-                        <div class="metric-value">${metric.value}</div>
-                        <div class="metric-label">${metric.label} (${metric.unit})</div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-            metricsDiv.innerHTML = html;
-
-            // Motor table (convert to mm where appropriate)
-            const motorTable = document.getElementById('motor_table').getElementsByTagName('tbody')[0];
-            motorTable.innerHTML = '';
-            const motorData = [
-                ['Throat Diameter', safeFixed(results.motor.throat_diameter * 1000, 2), 'mm'],
-                ['Exit Diameter', safeFixed(results.motor.exit_diameter * 1000, 2), 'mm'],
-                ['Chamber Diameter', safeFixed(results.motor.chamber_diameter * 1000, 2), 'mm'],
-                ['Chamber Length', safeFixed(results.motor.chamber_length * 1000, 2), 'mm'],
-                ['Expansion Ratio (Ae/At)', safeFixed(results.motor.expansion_ratio, 2), '-'],
-                ['Initial Port Diameter', safeFixed(results.motor.port_diameter_initial * 1000, 2), 'mm'],
-                ['Final Port Diameter', safeFixed(results.motor.port_diameter_final * 1000, 2), 'mm'],
-                ['Regression Rate', safeFixed(results.motor.regression_rate * 1000, 3), 'mm/s'],
-                ['Avg Regression Rate', safeFixed(results.motor.regression_rate_avg * 1000, 3), 'mm/s'],
-                ['C* Velocity', safeFixed(results.motor.c_star, 1), 'm/s'],
-                ['Thrust Coefficient (CF)', safeFixed(results.motor.cf, 3), '-']
-            ];
-            motorData.forEach(row => {
-                const tr = motorTable.insertRow();
-                row.forEach(cell => {
-                    const td = tr.insertCell();
-                    td.textContent = cell;
-                });
-            });
-
-            // Injector table
-            const injTable = document.getElementById('injector_table').getElementsByTagName('tbody')[0];
-            injTable.innerHTML = '';
-            const injData = [
-                ['Type', results.injector.type.charAt(0).toUpperCase() + results.injector.type.slice(1), '-'],
-                ['Exit Velocity', safeFixed(results.injector.exit_velocity, 1), 'm/s'],
-                ['Reynolds Number', safeFixed(results.injector.reynolds_number, 0), '-'],
-                ['Pressure Drop', safeFixed(results.injector.pressure_drop, 2), 'bar']
-            ];
-            
-            // Add type-specific data
-            if (results.injector.type === 'showerhead') {
-                injData.push(['Number of Holes', results.injector.n_holes, 'pcs']);
-                injData.push(['Hole Diameter', safeFixed(results.injector.hole_diameter, 3), 'mm']);
-                injData.push(['L/D Ratio', safeFixed(results.injector.L_D_ratio, 2), '-']);
-            } else if (results.injector.type === 'pintle') {
-                injData.push(['Outer Diameter', safeFixed(results.injector.outer_diameter, 2), 'mm']);
-                injData.push(['Gap', safeFixed(results.injector.gap, 3), 'mm']);
-            } else if (results.injector.type === 'swirl') {
-                injData.push(['Number of Slots', results.injector.n_slots, 'pcs']);
-                injData.push(['Slot Width', safeFixed(results.injector.slot_width, 3), 'mm']);
-                injData.push(['Slot Height', safeFixed(results.injector.slot_height, 3), 'mm']);
-            }
-            
-            injData.forEach(row => {
-                const tr = injTable.insertRow();
-                row.forEach(cell => {
-                    const td = tr.insertCell();
-                    td.textContent = cell;
-                });
-            });
-
-            // Display plots
-            if (results.plots && results.plots.motor) {
-                const motorPlotData = JSON.parse(results.plots.motor);
-                Plotly.newPlot('motor_plot', motorPlotData.data, motorPlotData.layout, {responsive: true});
-            }
-
-            // Performance plots now contains the regression rate and injector performance
-            // This should go to injector_plot div which is visible
-            if (results.plots && results.plots.performance) {
-                const performancePlotData = JSON.parse(results.plots.performance);
-                console.log('Rendering performance plots with regression rate...');
-                Plotly.newPlot('injector_plot', performancePlotData.data, performancePlotData.layout, {responsive: true});
-            }
-            
-            // Also render the old injector plot if it exists (for backward compatibility)
-            if (results.plots && results.plots.injector && !results.plots.performance) {
-                const injectorPlotData = JSON.parse(results.plots.injector);
-                Plotly.newPlot('injector_plot', injectorPlotData.data, injectorPlotData.layout, {responsive: true});
-            }
-            
-            // If there's separate performance data for the second panel
-            if (results.plots && results.plots.performance_secondary) {
-                const performancePlotData = JSON.parse(results.plots.performance_secondary);
-                Plotly.newPlot('performance_plots', performancePlotData.data, performancePlotData.layout, {responsive: true});
-            }
-            
-            // Display CEA-style results
-            if (results.cea_results) {
-                const ceaOutput = document.getElementById('cea_output');
-                if (ceaOutput) {
-                    ceaOutput.innerHTML = `<pre style="font-family: monospace; white-space: pre-wrap; font-size: 12px; line-height: 1.4;">${results.cea_results}</pre>`;
-                    document.getElementById('cea_results_panel').style.display = 'block';
-                }
-            }
-            
-            // Display advanced plots
-            if (results.plots && results.plots.altitude_performance) {
-                const altitudePlotData = JSON.parse(results.plots.altitude_performance);
-                Plotly.newPlot('altitude_performance_plot', altitudePlotData.data, altitudePlotData.layout, {responsive: true});
-                document.getElementById('altitude_performance_panel').style.display = 'block';
-            }
-            
-            if (results.plots && results.plots.mass_fractions) {
-                const massFractionPlotData = JSON.parse(results.plots.mass_fractions);
-                Plotly.newPlot('mass_fractions_plot', massFractionPlotData.data, massFractionPlotData.layout, {responsive: true});
-                document.getElementById('mass_fractions_panel').style.display = 'block';
-            }
-            
-            if (results.plots && results.plots.thrust_altitude) {
-                const thrustAltitudePlotData = JSON.parse(results.plots.thrust_altitude);
-                Plotly.newPlot('thrust_altitude_plot', thrustAltitudePlotData.data, thrustAltitudePlotData.layout, {responsive: true});
-                document.getElementById('thrust_altitude_panel').style.display = 'block';
-            }
-            
-            // Display heat transfer analysis
-            if (results.motor && results.motor.heat_transfer_analysis) {
-                const heatTransfer = results.motor.heat_transfer_analysis;
-                let heatTransferText = 'HEAT TRANSFER ANALYSIS\n';
-                heatTransferText += '======================\n\n';
-                
-                heatTransferText += `Material: ${heatTransfer.design_parameters.material}\n`;
-                heatTransferText += `Wall Thickness: ${safeFixed(heatTransfer.design_parameters.wall_thickness, 1)} mm\n`;
-                heatTransferText += `Cooling Type: ${heatTransfer.design_parameters.cooling_type}\n\n`;
-                
-                heatTransferText += 'TEMPERATURES:\n';
-                heatTransferText += `Inner Wall: ${safeFixed(heatTransfer.wall_analysis.inner_temperature, 0)} K\n`;
-                heatTransferText += `Outer Wall: ${safeFixed(heatTransfer.wall_analysis.outer_temperature, 0)} K\n`;
-                heatTransferText += `Max Temperature: ${safeFixed(heatTransfer.wall_analysis.max_temperature, 0)} K\n\n`;
-                
-                heatTransferText += 'HEAT TRANSFER:\n';
-                heatTransferText += `Heat Flux: ${safeFixed(heatTransfer.gas_side_analysis.heat_flux/1000, 1)} kW/m²\n`;
-                heatTransferText += `Total Heat Rate: ${safeFixed(heatTransfer.gas_side_analysis.total_heat_rate/1000, 1)} kW\n`;
-                heatTransferText += `Gas-side h: ${safeFixed(heatTransfer.heat_transfer_coefficients.gas_side, 0)} W/m²·K\n\n`;
-                
-                heatTransferText += 'SAFETY:\n';
-                heatTransferText += `Temperature Safety Factor: ${safeFixed(heatTransfer.safety_analysis.temperature_safety_factor, 2)}\n`;
-                heatTransferText += `Risk Level: ${heatTransfer.safety_analysis.risk_level}\n`;
-                
-                document.getElementById('heat_transfer_results').textContent = heatTransferText;
-                document.getElementById('heat_transfer_panel').style.display = 'block';
-            }
-            
-            // Display structural analysis
-            if (results.motor && results.motor.structural_analysis) {
-                const structural = results.motor.structural_analysis;
-                let structuralText = 'STRUCTURAL ANALYSIS\n';
-                structuralText += '==================\n\n';
-                
-                structuralText += `Material: ${structural.design_parameters.material}\n`;
-                structuralText += `Design Pressure: ${structural.design_parameters.design_pressure.toFixed(1)} bar\n\n`;
-                
-                structuralText += 'CHAMBER WALL:\n';
-                structuralText += `Recommended Thickness: ${structural.chamber_analysis.recommended_thickness.toFixed(1)} mm\n`;
-                structuralText += `Hoop Stress: ${structural.chamber_analysis.hoop_stress.toFixed(1)} MPa\n`;
-                structuralText += `Safety Factor: ${structural.chamber_analysis.hoop_safety_factor.toFixed(2)}\n\n`;
-                
-                structuralText += 'NOZZLE:\n';
-                structuralText += `Throat Thickness: ${structural.nozzle_analysis.required_throat_thickness.toFixed(1)} mm\n`;
-                structuralText += `Safety Factor: ${structural.nozzle_analysis.safety_factor.toFixed(2)}\n\n`;
-                
-                structuralText += 'WEIGHT:\n';
-                structuralText += `Total Weight: ${structural.weight_analysis.total_weight.toFixed(2)} kg\n`;
-                structuralText += `Chamber: ${structural.weight_analysis.chamber_weight.toFixed(2)} kg\n\n`;
-                
-                structuralText += 'OVERALL SAFETY:\n';
-                structuralText += `Minimum Safety Factor: ${structural.safety_analysis.minimum_safety_factor.toFixed(2)}\n`;
-                structuralText += `Status: ${structural.safety_analysis.status}\n`;
-                structuralText += `Risk Level: ${structural.safety_analysis.risk_level}\n`;
-                
-                document.getElementById('structural_results').textContent = structuralText;
-                document.getElementById('structural_panel').style.display = 'block';
-            }
-            
-            // Display OpenRocket integration
-            if (results.openrocket) {
-                const openrocket = results.openrocket;
-                
-                // Flight profile summary
-                if (openrocket.flight_profile) {
-                    const profile = openrocket.flight_profile.performance_summary;
-                    let profileText = 'FLIGHT PROFILE ESTIMATE\n';
-                    profileText += '=======================\n\n';
-                    profileText += `Max Altitude: ${safeFixed(profile.max_altitude, 0)} m\n`;
-                    profileText += `Max Velocity: ${safeFixed(profile.max_velocity, 1)} m/s\n`;
-                    profileText += `Max Acceleration: ${safeFixed(profile.max_acceleration, 1)} m/s²\n`;
-                    profileText += `Total Flight Time: ${safeFixed(profile.total_flight_time, 1)} s\n`;
-                    profileText += `Apogee Time: ${safeFixed(profile.apogee_time, 1)} s\n`;
-                    
-                    document.getElementById('flight_profile_summary').textContent = profileText;
-                }
-                
-                // Motor summary for OpenRocket
-                if (openrocket.motor_summary) {
-                    const motor = openrocket.motor_summary;
-                    let detailsText = 'OPENROCKET MOTOR DATA\n';
-                    detailsText += '=====================\n\n';
-                    detailsText += `Designation: ${motor.motor_info.designation}\n`;
-                    detailsText += `Manufacturer: ${motor.motor_info.manufacturer}\n`;
-                    detailsText += `Total Impulse: ${safeFixed(motor.performance.total_impulse, 0)} N⋅s\n`;
-                    detailsText += `Average Thrust: ${safeFixed(motor.performance.average_thrust, 0)} N\n`;
-                    detailsText += `Burn Time: ${safeFixed(motor.performance.burn_time, 1)} s\n`;
-                    detailsText += `Motor Diameter: ${safeFixed(motor.physical.diameter, 1)} mm\n`;
-                    detailsText += `Motor Length: ${safeFixed(motor.physical.length, 1)} mm\n`;
-                    detailsText += `Propellant Mass: ${safeFixed(motor.physical.propellant_mass, 3)} kg\n`;
-                    
-                    document.getElementById('openrocket_details').textContent = detailsText;
-                }
-                
-                document.getElementById('openrocket_panel').style.display = 'block';
-            }
-
-            // Show warnings
-            if (results.injector.warnings && results.injector.warnings.length > 0) {
-                let warningText = 'Warnings: ' + results.injector.warnings.join('; ');
-                showMessage(warningText, 'warning');
-            }
-            
-            // Enable export buttons after successful calculation
-            document.getElementById('downloadEngBtn').disabled = false;
-            document.getElementById('exportSTLBtn').disabled = false;
-            document.getElementById('generateCADBtn').disabled = false;
-            document.getElementById('regressionBtn').disabled = false;
-            
-            console.log('displayResults completed successfully');
-            
-            } catch (error) {
-                console.error('Error in displayResults:', error);
-                console.error('Results data:', results);
-                
-                let errorDetails = 'Error displaying results: ' + error.message + '\n\n';
-                errorDetails += 'Detailed Error Info:\n';
-                errorDetails += 'Message: ' + error.message + '\n';
-                errorDetails += 'Stack: ' + (error.stack || 'No stack trace') + '\n';
-                errorDetails += 'Results Data Keys: ' + Object.keys(results || {}).join(', ') + '\n';
-                
-                if (results && results.motor) {
-                    errorDetails += 'Motor Data Keys: ' + Object.keys(results.motor).join(', ') + '\n';
-                }
-                
-                showMessage(errorDetails, 'error');
-            }
-        }
-
         async function calculateParametric() {
             return await runParametricAnalysis();
         }
@@ -4634,9 +4259,6 @@
             // Tam rapor: mevcut client-side rapor + teknik çizim PDF'i
             return exportDrawingsPDF();
         }
-        // Eski butonlarda referans verilen ama hiç tanımlanmamış fonksiyonlar
-        function exportEngFile() { return downloadEngFile(); }
-        function exportSimulation() { return exportCompleteZip(); }
         
         async function exportOpenRocket() {
             showMessage('Generating OpenRocket .eng file...', 'info');
@@ -4772,6 +4394,7 @@
                 const result = await response.json();
                 
                 if (result.status === 'success') {
+                    lastSafetyResults = result.safety_analysis;
                     displaySafetyResults(result.safety_analysis);
                     document.getElementById('safety_analysis_panel').style.display = 'block';
                     showMessage('Safety analysis completed successfully', 'success');
@@ -5059,14 +4682,137 @@
             return '';
         }
         
-        function generateSafetyReport() {
-            showMessage('Generating comprehensive safety report...', 'info');
-            // Implementation for PDF report generation
+        // Sayisal degeri guvenli bicimlendir (null/undefined/NaN -> 'N/A')
+        function _safeNumSafety(value, decimals) {
+            if (value === null || value === undefined || isNaN(value)) return 'N/A';
+            return Number(value).toFixed(decimals);
         }
-        
+
+        // Guvenlik analizi metin raporu (client-side .txt indirme)
+        function generateSafetyReport() {
+            if (!lastSafetyResults) {
+                showMessage('Önce Run Safety Analysis çalıştırın', 'warning');
+                return;
+            }
+            const s = lastSafetyResults;
+            const motor = (currentResults && currentResults.motor) ? currentResults.motor : {};
+            const motorName = _motorName();
+
+            let r = 'UZAYTEK - HİBRİT ROKET MOTORU GÜVENLİK RAPORU\n';
+            r += '================================================\n\n';
+            r += 'Motor Adı: ' + motorName + '\n';
+            r += 'Rapor Tarihi: ' + new Date().toLocaleString('tr-TR') + '\n\n';
+
+            // --- Motor Ozeti ---
+            r += 'MOTOR ÖZETİ\n';
+            r += '-----------\n';
+            r += 'Özgül İtki (Isp): ' + _safeNumSafety(motor.isp, 1) + ' s\n';
+            r += 'İtki: ' + _safeNumSafety(motor.thrust, 0) + ' N\n';
+            r += 'Yanma Odası Basıncı: ' + _safeNumSafety(motor.chamber_pressure, 1) + ' bar\n';
+            r += 'Yanma Odası Sıcaklığı: ' + _safeNumSafety(motor.chamber_temperature, 0) + ' K\n';
+            r += 'Toplam Kütle Debisi: ' + _safeNumSafety(motor.mdot_total, 3) + ' kg/s\n';
+            r += 'Yanma Süresi: ' + _safeNumSafety(motor.burn_time, 1) + ' s\n';
+            if (s.risk_assessment) {
+                const ra = s.risk_assessment;
+                r += '\nGenel Risk Seviyesi: ' + (ra.risk_level || 'N/A') + '\n';
+                r += 'Kabul Edilebilirlik: ' + (ra.acceptability || 'N/A') + '\n';
+                r += 'Genel Risk Skoru: ' + _safeNumSafety(ra.overall_risk_score, 2) + ' / 5.0\n';
+            }
+            r += '\n';
+
+            // --- Basinc Guvenligi ---
+            r += 'BASINÇ GÜVENLİĞİ\n';
+            r += '----------------\n';
+            r += 'Tasarım Yanma Odası Basıncı: ' + _safeNumSafety(motor.chamber_pressure, 1) + ' bar\n';
+            if (s.risk_assessment && s.risk_assessment.individual_risks) {
+                r += 'Basınç Risk Skoru: ' + _safeNumSafety(s.risk_assessment.individual_risks.pressure, 1) + ' / 5\n';
+            }
+            if (s.structural_safety && s.structural_safety.hoop_stress_mpa !== undefined) {
+                r += 'Hoop (Çember) Gerilmesi: ' + _safeNumSafety(s.structural_safety.hoop_stress_mpa, 1) + ' MPa\n';
+            }
+            r += '\n';
+
+            // --- Yapisal Guvenlik ---
+            r += 'YAPISAL GÜVENLİK\n';
+            r += '----------------\n';
+            if (s.structural_safety) {
+                const ss = s.structural_safety;
+                r += 'Akma Emniyet Katsayısı: ' + _safeNumSafety(ss.yield_safety_factor, 2) + '\n';
+                r += 'Von Mises Emniyet Katsayısı: ' + _safeNumSafety(ss.von_mises_safety_factor, 2) + '\n';
+                r += 'Hoop Gerilmesi: ' + _safeNumSafety(ss.hoop_stress_mpa, 1) + ' MPa\n';
+                if (ss.failure_probability !== undefined && ss.failure_probability !== null && !isNaN(ss.failure_probability)) {
+                    r += 'Kırılma Olasılığı: ' + (ss.failure_probability * 100).toFixed(3) + ' %\n';
+                }
+                r += 'Yapısal Bütünlük: ' + (ss.structural_integrity || 'N/A') + '\n';
+                r += 'Önerilen Muayene Aralığı: ' + (ss.recommended_inspection_interval || 'N/A') + '\n';
+            } else {
+                r += 'Yapısal güvenlik verisi mevcut değil.\n';
+            }
+            r += '\n';
+
+            // --- Termal Guvenlik ---
+            r += 'TERMAL GÜVENLİK\n';
+            r += '---------------\n';
+            if (s.thermal_safety) {
+                const ts = s.thermal_safety;
+                r += 'Yanma Odası Sıcaklığı: ' + _safeNumSafety(ts.chamber_temperature_k, 0) + ' K\n';
+                r += 'Tahmini Cidar Sıcaklığı: ' + _safeNumSafety(ts.estimated_wall_temperature_k, 1) + ' K\n';
+                r += 'Çelik Termal Emniyet Katsayısı: ' + _safeNumSafety(ts.steel_thermal_safety_factor, 2) + '\n';
+                r += 'Alüminyum Termal Emniyet Katsayısı: ' + _safeNumSafety(ts.aluminum_thermal_safety_factor, 2) + '\n';
+                r += 'Işınımsal Isı Tehlike Mesafesi: ' + _safeNumSafety(ts.radiant_heat_hazard_distance_m, 1) + ' m\n';
+                r += 'Malzeme Önerisi: ' + (ts.material_recommendation || 'N/A') + '\n';
+                r += 'Soğutma Gerekli: ' + (ts.cooling_required ? 'Evet' : 'Hayır') + '\n';
+            } else {
+                r += 'Termal güvenlik verisi mevcut değil.\n';
+            }
+            r += '\n';
+
+            // --- Oneriler ---
+            r += 'ÖNERİLER\n';
+            r += '--------\n';
+            const recs = (s.risk_assessment && s.risk_assessment.recommendations) ? s.risk_assessment.recommendations : [];
+            if (recs && recs.length > 0) {
+                recs.forEach(function(rec) { r += '- ' + rec + '\n'; });
+            } else {
+                r += 'Belirli bir öneri üretilmedi.\n';
+            }
+            r += '\n---\nUZAYTEK Hibrit Roket Motoru Analiz Yazılımı tarafından üretilmiştir.\n';
+
+            const blob = new Blob([r], { type: 'text/plain;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = motorName + '_guvenlik_raporu.txt';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            showMessage('Güvenlik raporu indirildi', 'success');
+        }
+
+        // Guvenlik analizi verisini JSON olarak indir (client-side)
         function exportSafetyData() {
-            showMessage('Exporting safety analysis data...', 'info');
-            // Implementation for data export
+            if (!lastSafetyResults) {
+                showMessage('Önce Run Safety Analysis çalıştırın', 'warning');
+                return;
+            }
+            const motorName = _motorName();
+            const payload = {
+                motor_name: motorName,
+                exported_at: new Date().toISOString(),
+                motor_summary: (currentResults && currentResults.motor) ? currentResults.motor : null,
+                safety_analysis: lastSafetyResults
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = motorName + '_guvenlik_verisi.json';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            showMessage('Güvenlik verisi (JSON) indirildi', 'success');
         }
 
         // Initialize

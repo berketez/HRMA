@@ -1540,7 +1540,13 @@
                                 <li><strong>Trade-offs:</strong> Performance vs complexity analysis</li>
                             </ul>
                         </div>
-                        <div id="parametric_plots" style="height: 400px; margin: 20px 0;"></div>
+                        <div id="parametric_plots" style="min-height: 200px; margin: 20px 0; display:flex; align-items:center; justify-content:center;">
+                            <p style="text-align:center; color:#7d97a5; max-width:520px; line-height:1.6;">
+                                Çok-parametreli görev zarfı (delta-V / faydalı yük) taraması bu sürümde
+                                hesaplanmıyor. Zamana bağlı yörünge analizi için
+                                <strong style="color:#cfe8f2;">Yörünge Analizi</strong> alt sekmesini kullanın.
+                            </p>
+                        </div>
                     </div>
                     
                     <div id="trajectory_comparison_content" class="subtab-content">
@@ -1554,6 +1560,33 @@
                                 <li><strong>Green line:</strong> Acceleration (g) loading on vehicle and payload</li>
                                 <li><strong>Critical points:</strong> Stage separation, MECO, orbit insertion events</li>
                             </ul>
+                        </div>
+
+                        <!-- Yörünge girdileri — thrust/isp mevcut hesaptan (currentResults) otomatik alınır -->
+                        <div class="subsystem-card" style="margin: 15px 0;">
+                            <h3>Yörünge Girdileri</h3>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 10px;">
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;">Başlangıç Kütlesi (kg)
+                                    <input type="number" id="traj_initial_mass" value="5000" step="100" style="margin-top:4px;">
+                                </label>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;">Bitiş (Kuru) Kütle (kg)
+                                    <input type="number" id="traj_final_mass" value="2000" step="100" style="margin-top:4px;">
+                                </label>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;">Sürükleme Katsayısı
+                                    <input type="number" id="traj_drag_coeff" value="0.5" step="0.05" style="margin-top:4px;">
+                                </label>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;">Referans Alan (m²)
+                                    <input type="number" id="traj_ref_area" value="0.05" step="0.01" style="margin-top:4px;">
+                                </label>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;">Yanma Süresi (s)
+                                    <input type="number" id="traj_burn_time" value="30" step="5" style="margin-top:4px;">
+                                </label>
+                            </div>
+                            <div style="text-align:center; margin-top:14px;">
+                                <button type="button" onclick="computeTrajectory()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 10px 24px; border: none; border-radius: 5px; cursor: pointer;">
+                                    Yörünge Hesapla
+                                </button>
+                            </div>
                         </div>
                         <div id="trajectory_plots" style="height: 400px; margin: 20px 0;"></div>
                     </div>
@@ -1851,11 +1884,10 @@
 
             // Generate CAD Visualization
             generateCADVisualization(results);
-            
-            // Display detailed analysis results
-            displayDetailedAnalysis(results);
-            
-            // Subsystems
+
+            // Subsystems — TEMEL kartlar önce yazılır. displayDetailedAnalysis
+            // (ek kartlar + grafikler) MUTLAKA bu innerHTML atamasından SONRA
+            // çağrılmalı; aksi halde eklenen kartlar bu satırda siliniyordu.
             const subsystemsDiv = document.getElementById('subsystemsGrid');
             subsystemsDiv.innerHTML = `
                 <div class="subsystem-card">
@@ -1911,7 +1943,11 @@
                 </div>
                 ` : ''}
             `;
-            
+
+            // Ek mühendislik kartları + detaylı analiz grafikleri (temel kartlardan SONRA)
+            displayEngineeringCards(results);
+            displayDetailedAnalysis(results);
+
             // Altitude Performance Plot
             if (results.altitude_performance && results.altitude_performance.length > 0) {
                 const altitudeIspTrace = {
@@ -2228,7 +2264,7 @@
         }
         
         function createMixtureRatioChart(mrData) {
-            const chartDiv = document.getElementById('mrOptChart') || createChartDiv('mrOptChart', 'Mixture Ratio Optimization');
+            const chartDiv = document.getElementById('mrOptChart') || createChartDiv('mrOptChart', 'Karışım Oranı Optimizasyonu');
             
             const trace1 = {
                 x: mrData.mr_range,
@@ -2250,7 +2286,7 @@
         }
         
         function createAltitudePerformanceChart(altData) {
-            const chartDiv = document.getElementById('altChart') || createChartDiv('altChart', 'Altitude Performance');
+            const chartDiv = document.getElementById('altChart') || createChartDiv('altChart', 'İrtifa Performans Haritası');
             
             const trace1 = {
                 x: altData.altitude_range.map(alt => alt/1000), // Convert to km
@@ -2271,51 +2307,37 @@
             Plotly.newPlot(chartDiv, [trace1], layout);
         }
         
+        // Her dinamik grafik KENDİ kalıcı div'ini alır. Rezerve panel div'lerine
+        // (altitude_analysis_plot, altitude_profile_plot, parametric_plots,
+        // engine_diagram, trajectory_plots) ARTIK DOKUNULMAZ — eskiden bu fonksiyon
+        // o div'leri boşaltıp ID'lerini ele geçiriyordu (grafik yığılması bug'ı).
+        // Grafikler "Motor Alt Sistemleri" (subsystemsGrid) altında tam-genişlik
+        // kart olarak oluşturulur; turbopump haritası da feed system kartlarının
+        // yanında burada belirir.
         function createChartDiv(id, title) {
-            // Try different container IDs based on chart type
-            let container = null;
-            
-            if (id.includes('alt') || id.includes('altitude')) {
-                container = document.getElementById('altitude_analysis_plot') || 
-                           document.getElementById('altitude_profile_plot');
-            } else if (id.includes('mr') || id.includes('mixture')) {
-                container = document.getElementById('single_altitude_content') ||
-                           document.getElementById('parametric_plots');
-            } else if (id.includes('turbopump')) {
-                container = document.getElementById('parametric_plots') ||
-                           document.getElementById('thrust_time_content');
-            } else {
-                // Default containers
-                container = document.getElementById('single_altitude_content') || 
-                           document.getElementById('parametric_plots') ||
-                           document.getElementById('thrust_time_content');
-            }
-            
-            if (container) {
-                // Clear existing content if it's a plot container
-                if (container.id.includes('plot')) {
-                    container.innerHTML = '';
-                    container.id = id; // Change the container ID to the chart ID
-                    return container;
-                }
-                
-                // Otherwise create new div inside container
-                const chartDiv = document.createElement('div');
-                chartDiv.id = id;
-                chartDiv.style.width = '100%';
-                chartDiv.style.height = '400px';
-                chartDiv.style.margin = '20px 0';
-                
-                const titleEl = document.createElement('h3');
-                titleEl.textContent = title;
-                titleEl.style.textAlign = 'center';
-                titleEl.style.marginBottom = '10px';
-                
-                container.appendChild(titleEl);
-                container.appendChild(chartDiv);
-                return chartDiv;
-            }
-            return null;
+            const existing = document.getElementById(id);
+            if (existing) return existing;
+
+            const host = document.getElementById('subsystemsGrid');
+            if (!host) return null;
+
+            const card = document.createElement('div');
+            card.className = 'subsystem-card';
+            card.style.gridColumn = '1 / -1'; // grid'de tüm sütunları kapla (tam genişlik)
+
+            const titleEl = document.createElement('h3');
+            titleEl.textContent = title;
+
+            const chartDiv = document.createElement('div');
+            chartDiv.id = id;
+            chartDiv.style.width = '100%';
+            chartDiv.style.height = '400px';
+            chartDiv.style.marginTop = '10px';
+
+            card.appendChild(titleEl);
+            card.appendChild(chartDiv);
+            host.appendChild(card);
+            return chartDiv;
         }
         
         function updateFeedSystemTab(feedSystem) {
@@ -2336,7 +2358,7 @@
         }
         
         function createTurbopumpChart(pumpData) {
-            const chartDiv = document.getElementById('turbopumpChart') || createChartDiv('turbopumpChart', 'Turbopump Performance');
+            const chartDiv = document.getElementById('turbopumpChart') || createChartDiv('turbopumpChart', 'Turbopump Performans Haritası');
             
             if (!chartDiv) return;
             
@@ -2411,7 +2433,7 @@
         
         function displayCombustionEfficiency(analysis) {
             // Create combustion efficiency chart
-            const chartDiv = document.getElementById('combustionChart') || createChartDiv('combustionChart', 'Combustion Analysis');
+            const chartDiv = document.getElementById('combustionChart') || createChartDiv('combustionChart', 'Yanma Analizi');
             
             if (!chartDiv) return;
             
@@ -2448,7 +2470,7 @@
         }
         
         function createEfficiencyBreakdownChart(effData) {
-            const chartDiv = document.getElementById('efficiencyChart') || createChartDiv('efficiencyChart', 'Efficiency Breakdown');
+            const chartDiv = document.getElementById('efficiencyChart') || createChartDiv('efficiencyChart', 'Verim Dağılımı');
             
             if (!chartDiv) return;
             
@@ -2592,7 +2614,7 @@
         
         function createTankVisualization(tankData) {
             // Create 3D visualization of propellant tanks
-            const chartDiv = document.getElementById('tankVisualization') || createChartDiv('tankVisualization', 'Propellant Tank 3D CAD');
+            const chartDiv = document.getElementById('tankVisualization') || createChartDiv('tankVisualization', 'Yakıt Tankı 3D Modeli');
             
             if (!chartDiv) return;
             
@@ -3209,8 +3231,10 @@ Please provide:
             });
             
             // Show selected tab
-            document.getElementById(tabName + '_tab').classList.add('active');
+            const shown = document.getElementById(tabName + '_tab');
+            shown.classList.add('active');
             event.target.classList.add('active');
+            resizeVisiblePlots(shown);
         }
         
         function showSubTab(subtabName) {
@@ -3228,8 +3252,10 @@ Please provide:
             });
             
             // Show selected subtab
-            document.getElementById(subtabName + '_content').classList.add('active');
+            const shownSub = document.getElementById(subtabName + '_content');
+            shownSub.classList.add('active');
             event.target.classList.add('active');
+            resizeVisiblePlots(shownSub);
         }
         
         function showSubSubTab(subsubtabName) {
@@ -3247,8 +3273,10 @@ Please provide:
             });
             
             // Show selected sub-subtab
-            document.getElementById(subsubtabName + '_content').classList.add('active');
+            const shownSubSub = document.getElementById(subsubtabName + '_content');
+            shownSubSub.classList.add('active');
             event.target.classList.add('active');
+            resizeVisiblePlots(shownSubSub);
         }
         
         // Sıvı motor hesap sonucunu MotorViz3D sözlüğüne (SI-metre) çevirir.
@@ -3445,38 +3473,330 @@ Please provide:
             generateParametricPlots(results);
         }
         
+        // Analiz panellerinin tümünü GERÇEK backend verisiyle doldurur.
+        // (Eskiden burada altitude_analysis_plot'a JS-içi sentetik interpolasyon
+        //  çiziliyordu; kaldırıldı — artık results.altitude_performance kullanılır.)
         function generateParametricPlots(results) {
-            // Altitude performance plot
-            const altitudePlotDiv = document.getElementById('altitude_analysis_plot');
-            if (altitudePlotDiv && typeof Plotly !== 'undefined') {
-                const altitudes = [0, 5, 10, 15, 20, 30, 50, 80, 120];
-                const ispValues = altitudes.map(alt => {
-                    const seaLevelIsp = results.isp_sea_level || 300;
-                    const vacuumIsp = results.isp_vacuum || 350;
-                    return seaLevelIsp + (vacuumIsp - seaLevelIsp) * Math.min(alt / 50, 1);
+            drawSingleAltitudePlot(results);   // altitude_analysis_plot (Isp + itki)
+            drawAltitudeProfilePlot(results);  // altitude_profile_plot (Cf/Mach/verim)
+            drawEngineDiagram(results);        // engine_diagram (akış şeması)
+        }
+
+        // Sayısal biçimlendirme — geçersiz/eksik değerde '—' döner.
+        function hrmaFmt(v, dec, unit) {
+            if (typeof v !== 'number' || !isFinite(v)) return '—';
+            const s = v.toFixed(dec != null ? dec : 1);
+            return unit ? (s + ' ' + unit) : s;
+        }
+
+        // Görünür Plotly grafiklerini yeniden boyutlandırır (gizli sekmede 0px
+        // genişlikle çizilenler sekme açılınca düzelsin diye).
+        function resizeVisiblePlots(root) {
+            if (typeof Plotly === 'undefined') return;
+            const scope = root || document;
+            scope.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+                if (el.offsetParent !== null) {
+                    try { Plotly.Plots.resize(el); } catch (e) {}
+                }
+            });
+        }
+
+        // TASK 2 — Parametrik > Tek İrtifa: gerçek irtifa-performans serisi
+        // (Özgül İtki + ikinci eksende İtki).
+        function drawSingleAltitudePlot(results) {
+            const div = document.getElementById('altitude_analysis_plot');
+            if (!div || typeof Plotly === 'undefined') return;
+            const ap = results && results.altitude_performance;
+            if (!Array.isArray(ap) || ap.length === 0) {
+                div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">İrtifa performans verisi bulunamadı.</p>';
+                return;
+            }
+            const km = ap.map(p => (p.altitude || 0) / 1000);
+            const ispTrace = {
+                x: km, y: ap.map(p => p.specific_impulse),
+                type: 'scatter', mode: 'lines+markers', name: 'Özgül İtki (Isp)',
+                line: { color: '#4facfe', width: 3 }, marker: { size: 7 }, yaxis: 'y'
+            };
+            const thrustTrace = {
+                x: km, y: ap.map(p => (p.thrust || 0) / 1000),
+                type: 'scatter', mode: 'lines+markers', name: 'İtki',
+                line: { color: '#f093fb', width: 3, dash: 'dot' }, marker: { size: 7 }, yaxis: 'y2'
+            };
+            const layout = {
+                title: 'İrtifaya Göre Motor Performansı',
+                xaxis: { title: 'İrtifa (km)' },
+                yaxis: { title: 'Özgül İtki (s)', titlefont: { color: '#4facfe' }, tickfont: { color: '#4facfe' } },
+                yaxis2: { title: 'İtki (kN)', titlefont: { color: '#f093fb' }, tickfont: { color: '#f093fb' }, overlaying: 'y', side: 'right' },
+                showlegend: true, margin: { l: 60, r: 60, t: 60, b: 60 }
+            };
+            Plotly.newPlot(div, [ispTrace, thrustTrace], layout, { responsive: true });
+        }
+
+        // TASK 3 — Parametrik > İrtifa Profili: nozul parametrelerinin irtifayla
+        // değişimi. İtki katsayısı (Cf) ve nozul verimi sol eksende (ikisi de ~O(1)),
+        // çıkış Mach sayısı sağ eksende (3–15 aralığı).
+        function drawAltitudeProfilePlot(results) {
+            const div = document.getElementById('altitude_profile_plot');
+            if (!div || typeof Plotly === 'undefined') return;
+            const ap = results && results.altitude_performance;
+            if (!Array.isArray(ap) || ap.length === 0) {
+                div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">İrtifa performans verisi bulunamadı.</p>';
+                return;
+            }
+            const km = ap.map(p => (p.altitude || 0) / 1000);
+            const cfTrace = {
+                x: km, y: ap.map(p => p.thrust_coefficient),
+                type: 'scatter', mode: 'lines+markers', name: 'İtki Katsayısı (Cf)',
+                line: { color: '#4facfe', width: 3 }, yaxis: 'y'
+            };
+            const effTrace = {
+                x: km, y: ap.map(p => p.nozzle_efficiency),
+                type: 'scatter', mode: 'lines+markers', name: 'Nozul Verimi',
+                line: { color: '#5fd6a5', width: 3, dash: 'dot' }, yaxis: 'y'
+            };
+            const machTrace = {
+                x: km, y: ap.map(p => p.exit_mach_number),
+                type: 'scatter', mode: 'lines+markers', name: 'Çıkış Mach Sayısı',
+                line: { color: '#f5576c', width: 3 }, yaxis: 'y2'
+            };
+            const layout = {
+                title: 'Nozul Parametrelerinin İrtifayla Değişimi',
+                xaxis: { title: 'İrtifa (km)' },
+                yaxis: { title: 'Cf / Nozul Verimi (oran)' },
+                yaxis2: { title: 'Çıkış Mach Sayısı', overlaying: 'y', side: 'right' },
+                showlegend: true, margin: { l: 60, r: 60, t: 60, b: 60 }
+            };
+            Plotly.newPlot(div, [cfTrace, effTrace, machTrace], layout, { responsive: true });
+        }
+
+        // TASK 4 — Yörünge > Tek Nokta > Toplam İtki: besleme + enjeksiyon
+        // verisinden şematik akış diyagramı (Plotly shapes + annotations, koyu tema).
+        function drawEngineDiagram(results) {
+            const div = document.getElementById('engine_diagram');
+            if (!div || typeof Plotly === 'undefined') return;
+            results = results || {};
+            const fs = results.feed_system || {};
+            const inj = results.injection_system || {};
+            const mfr = fs.mass_flow_rates || {};
+            const tanks = fs.tanks || {};
+            const pd = fs.pressure_drops || {};
+            const tp = fs.turbopump; // null → basınç beslemeli
+            const hasPump = !!tp;
+
+            const oxColor = '#4facfe', fuColor = '#f5576c', pumpColor = '#a78bfa';
+            const injColor = '#f093fb', chColor = '#ff8a5c', nzColor = '#9b8cff';
+            const shapes = [], ann = [];
+
+            function box(x0, y0, x1, y1, color) {
+                shapes.push({
+                    type: 'rect', xref: 'x', yref: 'y', x0: x0, y0: y0, x1: x1, y1: y1,
+                    line: { color: color, width: 2 }, fillcolor: color, opacity: 0.18
                 });
-                
-                const trace = {
-                    x: altitudes,
-                    y: ispValues,
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    name: 'Specific Impulse',
-                    line: { color: '#4facfe', width: 3 },
-                    marker: { size: 8 }
-                };
-                
-                const layout = {
-                    title: 'Engine Performance vs Altitude',
-                    xaxis: { title: 'Altitude (km)' },
-                    yaxis: { title: 'Specific Impulse (s)' },
-                    margin: { l: 60, r: 40, t: 60, b: 60 }
-                };
-                
-                Plotly.newPlot(altitudePlotDiv, [trace], layout);
+            }
+            function label(cx, cy, text, color, size) {
+                ann.push({
+                    x: cx, y: cy, xref: 'x', yref: 'y', text: text, showarrow: false,
+                    font: { color: color || '#eaf7fb', size: size || 13 }, align: 'center'
+                });
+            }
+            function arrow(x0, y0, x1, y1, color) {
+                ann.push({
+                    x: x1, y: y1, ax: x0, ay: y0, xref: 'x', yref: 'y', axref: 'x', ayref: 'y',
+                    text: '', showarrow: true, arrowhead: 3, arrowsize: 1.3, arrowwidth: 2, arrowcolor: color
+                });
+            }
+
+            const yOx = 7.2, yFu = 2.8, yMid = 5.0;
+            // Tanklar
+            box(0.3, yOx - 0.8, 2.2, yOx + 0.8, oxColor);
+            label(1.25, yOx + 0.25, 'Oksitleyici<br>Tankı', oxColor);
+            label(1.25, yOx - 0.4, hrmaFmt(tanks.oxidizer_tank && tanks.oxidizer_tank.pressure, 1, 'bar'), '#cfe8f2', 11);
+            box(0.3, yFu - 0.8, 2.2, yFu + 0.8, fuColor);
+            label(1.25, yFu + 0.25, 'Yakıt<br>Tankı', fuColor);
+            label(1.25, yFu - 0.4, hrmaFmt(tanks.fuel_tank && tanks.fuel_tank.pressure, 1, 'bar'), '#cfe8f2', 11);
+
+            const oxFlow = hrmaFmt(mfr.oxidizer, 2, 'kg/s');
+            const fuFlow = hrmaFmt(mfr.fuel, 2, 'kg/s');
+
+            let injLeftX = 3.2; // enjektöre giren okun başlangıcı (pompa yoksa direkt tanktan)
+            if (hasPump) {
+                // Pompa kutuları
+                box(3.1, yOx - 0.7, 4.7, yOx + 0.7, pumpColor);
+                label(3.9, yOx + 0.15, 'Oksitleyici<br>Pompası', '#eaf7fb', 12);
+                label(3.9, yOx - 0.45, hrmaFmt(pd.pump_discharge_pressure_ox, 0, 'bar'), '#cfe8f2', 11);
+                box(3.1, yFu - 0.7, 4.7, yFu + 0.7, pumpColor);
+                label(3.9, yFu + 0.15, 'Yakıt<br>Pompası', '#eaf7fb', 12);
+                label(3.9, yFu - 0.45, hrmaFmt(pd.pump_discharge_pressure_fuel, 0, 'bar'), '#cfe8f2', 11);
+                // Tank → Pompa
+                arrow(2.2, yOx, 3.1, yOx, oxColor); label(2.65, yOx + 0.35, oxFlow, '#9fd0ff', 10);
+                arrow(2.2, yFu, 3.1, yFu, fuColor); label(2.65, yFu + 0.35, fuFlow, '#ffb0b8', 10);
+                injLeftX = 4.7;
+            } else {
+                label(3.9, yMid, 'Basınç<br>Beslemeli', '#cfe8f2', 13);
+                injLeftX = 2.2;
+            }
+
+            // Enjektör
+            box(5.6, yFu + 0.2, 6.9, yOx - 0.2, injColor);
+            label(6.25, yMid, 'Enjektör', '#eaf7fb', 13);
+            const injP = hasPump ? hrmaFmt(inj.required_ox_tank_pressure, 0, 'bar')
+                                 : hrmaFmt(tanks.oxidizer_tank && tanks.oxidizer_tank.pressure, 1, 'bar');
+            label(6.25, yFu - 0.05, injP, '#cfe8f2', 10);
+            // Pompa/tank → Enjektör
+            arrow(injLeftX, yOx, 5.6, yOx - 0.6, oxColor); label((injLeftX + 5.6) / 2, yOx + 0.3, oxFlow, '#9fd0ff', 10);
+            arrow(injLeftX, yFu, 5.6, yFu + 0.6, fuColor); label((injLeftX + 5.6) / 2, yFu - 0.35, fuFlow, '#ffb0b8', 10);
+
+            // Yanma Odası
+            box(7.2, yMid - 0.9, 8.4, yMid + 0.9, chColor);
+            label(7.8, yMid + 0.2, 'Yanma<br>Odası', '#eaf7fb', 12);
+            label(7.8, yMid - 0.45, hrmaFmt(results.chamber_pressure, 0, 'bar'), '#ffe0cc', 11);
+            arrow(6.9, yMid, 7.2, yMid, injColor);
+
+            // Nozul (ıraksak — path şekli)
+            shapes.push({
+                type: 'path', xref: 'x', yref: 'y',
+                path: 'M 8.6,' + (yMid - 0.45) + ' L 8.6,' + (yMid + 0.45) +
+                      ' L 9.8,' + (yMid + 1.1) + ' L 9.8,' + (yMid - 1.1) + ' Z',
+                line: { color: nzColor, width: 2 }, fillcolor: nzColor, opacity: 0.18
+            });
+            label(9.2, yMid, 'Nozul', '#eaf7fb', 12);
+            arrow(8.4, yMid, 8.6, yMid, chColor);
+
+            const layout = {
+                title: 'Motor Akış Şeması (Besleme → Enjektör → Oda → Nozul)',
+                xaxis: { visible: false, range: [0, 10.2], fixedrange: true },
+                yaxis: { visible: false, range: [1.2, 8.6], fixedrange: true },
+                shapes: shapes, annotations: ann, showlegend: false,
+                margin: { l: 10, r: 10, t: 50, b: 10 }
+            };
+            Plotly.newPlot(div, [], layout, { responsive: true, displayModeBar: false });
+        }
+
+        // TASK 5 — Yörünge > Yörünge Analizi: form girdileriyle /api/trajectory-analysis
+        // çağrılır, dönen Plotly figürü çizilir. thrust/isp currentResults'tan otomatik.
+        async function computeTrajectory() {
+            const div = document.getElementById('trajectory_plots');
+            if (!div) return;
+            const cr = window.currentResults || {};
+            const getv = (id, d) => {
+                const el = document.getElementById(id);
+                const v = el ? parseFloat(el.value) : NaN;
+                return (isFinite(v)) ? v : d;
+            };
+            const body = {
+                initial_mass: getv('traj_initial_mass', 5000),
+                final_mass: getv('traj_final_mass', 2000),
+                drag_coefficient: getv('traj_drag_coeff', 0.5),
+                reference_area: getv('traj_ref_area', 0.05),
+                burn_time: getv('traj_burn_time', 30),
+                thrust: (typeof cr.thrust === 'number' && cr.thrust > 0) ? cr.thrust : 50000,
+                isp: cr.isp_vacuum || cr.isp_sea_level || 300
+            };
+            div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">Yörünge hesaplanıyor…</p>';
+            try {
+                const resp = await fetch('/api/trajectory-analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const d = await resp.json();
+                if (d.status !== 'success' || !d.plot_data) {
+                    throw new Error(d.error || 'Yörünge verisi alınamadı');
+                }
+                const fig = JSON.parse(d.plot_data);
+                Plotly.newPlot(div, fig.data, fig.layout, { responsive: true });
+            } catch (e) {
+                div.innerHTML = '<p style="text-align:center;color:#ff7a85;padding:40px;">Yörünge hesaplanamadı: ' + e.message + '</p>';
             }
         }
-        
+
+        // TASK 7 — Backend'in zengin ama UI'de gösterilmeyen verisi için kartlar:
+        // Yapısal Analiz, Termal Koruma, Bileşen Kütleleri, Tasarım Özeti.
+        function displayEngineeringCards(results) {
+            const grid = document.getElementById('subsystemsGrid');
+            if (!grid || !results) return;
+
+            const row = (label, val) => '<tr><td>' + label + ':</td><td>' + val + '</td></tr>';
+            const addCard = (title, rowsHtml) => {
+                if (!rowsHtml) return;
+                const card = document.createElement('div');
+                card.className = 'subsystem-card';
+                card.innerHTML = '<h3>' + title + '</h3><table class="spec-table">' + rowsHtml + '</table>';
+                grid.appendChild(card);
+            };
+
+            // Yapısal Analiz
+            const sa = results.structural_analysis;
+            if (sa) {
+                const csr = sa.chamber_structure || {};
+                const dr = sa.design_requirements || {};
+                addCard('Yapısal Analiz',
+                    row('Malzeme', csr.material || '—') +
+                    row('Cidar Kalınlığı', hrmaFmt(csr.wall_thickness, 2, 'mm')) +
+                    row('Çember Gerilmesi', hrmaFmt(csr.hoop_stress, 1, 'MPa')) +
+                    row('İzin Verilen Gerilme', hrmaFmt(csr.allowable_stress, 1, 'MPa')) +
+                    row('Emniyet Katsayısı', hrmaFmt(csr.safety_factor, 2)) +
+                    row('Patlama Basıncı', hrmaFmt(dr.burst_pressure, 1, 'bar')) +
+                    row('Kanıt Basıncı', hrmaFmt(dr.proof_pressure, 1, 'bar')) +
+                    row('Termal Çevrim', hrmaFmt(dr.thermal_cycles, 0)));
+            }
+
+            // Termal Koruma
+            const tprot = results.thermal_protection;
+            if (tprot) {
+                addCard('Termal Koruma',
+                    row('Soğutma Tipi', tprot.cooling_type || '—') +
+                    row('Soğutucu', tprot.coolant_type || '—') +
+                    row('Kanal Boyutu', tprot.channel_dimensions || '—') +
+                    row('Kanal Sayısı', hrmaFmt(tprot.cooling_channels, 0)) +
+                    row('Soğutucu Hızı', hrmaFmt(tprot.coolant_velocity, 1, 'm/s')) +
+                    row('Isı Akısı', hrmaFmt(tprot.heat_flux, 1, 'MW/m²')) +
+                    row('Cidar Sıcaklığı', hrmaFmt(tprot.wall_temperature, 0, 'K')) +
+                    row('Sıcaklık Artışı', hrmaFmt(tprot.temperature_rise, 0, 'K')) +
+                    row('Basınç Düşümü', hrmaFmt(tprot.pressure_drop, 1, 'bar')));
+            }
+
+            // Bileşen Kütleleri
+            const cs = results.component_sizing;
+            if (cs && cs.component_masses) {
+                const cm = cs.component_masses;
+                addCard('Bileşen Kütleleri',
+                    row('Yanma Odası', hrmaFmt(cm.combustion_chamber, 1, 'kg')) +
+                    row('Enjektör Grubu', hrmaFmt(cm.injector_assembly, 1, 'kg')) +
+                    row('Nozul Grubu', hrmaFmt(cm.nozzle_assembly, 1, 'kg')) +
+                    row('Turbopump Grubu', hrmaFmt(cm.turbopump_assembly, 1, 'kg')) +
+                    row('Besleme Sistemi', hrmaFmt(cm.feed_system, 1, 'kg')) +
+                    row('Kontrol/Aviyonik', hrmaFmt(cm.controls_avionics, 1, 'kg')) +
+                    row('Toplam Kuru Kütle', hrmaFmt(cm.total_dry_mass, 1, 'kg')));
+            }
+
+            // Tasarım Özeti
+            const ds = results.design_summary;
+            if (ds) {
+                const kd = ds.key_dimensions || {};
+                const ms = ds.masses || {};
+                let rows =
+                    row('Başlık', ds.title || '—') +
+                    row('Durum', ds.status || '—') +
+                    row('Oda Çapı', hrmaFmt(kd.chamber_diameter_mm, 1, 'mm')) +
+                    row('Oda Boyu', hrmaFmt(kd.chamber_length_mm, 1, 'mm')) +
+                    row('Boğaz Çapı', hrmaFmt(kd.nozzle_throat_mm, 1, 'mm')) +
+                    row('Çıkış Çapı', hrmaFmt(kd.nozzle_exit_mm, 1, 'mm')) +
+                    row('Toplam Boy', hrmaFmt(kd.overall_length_mm, 1, 'mm')) +
+                    row('Motor Kütlesi', hrmaFmt(ms.engine_mass_kg, 1, 'kg')) +
+                    row('İtki/Ağırlık', hrmaFmt(ms.thrust_to_weight, 1));
+                let html = '<h3>Tasarım Özeti</h3><table class="spec-table">' + rows + '</table>';
+                if (ds.recommendation) {
+                    html += '<p style="margin-top:12px;color:#cfe8f2;font-size:13px;line-height:1.5;">' + ds.recommendation + '</p>';
+                }
+                const card = document.createElement('div');
+                card.className = 'subsystem-card';
+                card.style.gridColumn = '1 / -1';
+                card.innerHTML = html;
+                grid.appendChild(card);
+            }
+        }
+
         // PDF Export Function
         async function exportPDF(reportType) {
             try {
