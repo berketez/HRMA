@@ -3,16 +3,28 @@
 """
 HRMA masaüstü başlatıcı (Windows kurulumu ve macOS .app paketi ortak).
 
-Görevleri:
+Açılış stratejisi (2026-07-14 hız + yerel pencere reformu):
+1. Boş port bulunur, waitress ANINDA hafif bir WSGI shim ile başlatılır:
+   shim, uygulama yüklenene kadar her isteğe koyu temalı bir "başlatılıyor"
+   (splash) sayfası döner; /health ile hazır olma durumu sorgulanır.
+2. Ağır importlar (hrma.app: numpy, scipy, plotly, OCC...) ARKA PLAN
+   thread'inde yapılır; bitince shim gerçek Flask uygulamasına devreder,
+   splash sayfası kendini yeniler.
+3. Pencere pywebview ile YEREL olarak açılır (macOS: WKWebView,
+   Windows: Edge WebView2) — Chrome'a gidilmez. pywebview yoksa/başarısızsa
+   sırasıyla Chromium --app penceresi ve varsayılan tarayıcı sekmesine düşülür.
+4. Pencere kapanınca süreç (ve sunucu) kapanır — gerçek uygulama davranışı.
+
+Diğer görevler:
 - Paket içindeki libs/ dizinini sys.path'e ekler (.pth dosyaları dahil)
 - Çıktı dizinini Belgeler/HRMA altına kurar (cad_exports oraya yazılır)
-- Boş port bulur (8080-8090), sunucu hazır olunca tarayıcıyı açar
-- HRMA zaten çalışıyorsa ikinci kopya başlatmaz, mevcut sekmeyi açar
+- HRMA zaten çalışıyorsa ikinci kopya başlatmaz, mevcut sunucuya pencere açar
 """
 
 import os
 import sys
 import site
+import json
 import time
 import socket
 import shutil
@@ -24,6 +36,11 @@ import urllib.request
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBS_DIR = os.path.abspath(os.path.join(APP_DIR, os.pardir, "libs"))
+
+PENCERE_BASLIK = "HRMA — UZAYTEK Hybrid Rocket Motor Analysis"
+
+# Gerçek uygulama yüklenene kadar durum: {"wsgi": Flask|None, "error": str|None}
+_app_state = {"wsgi": None, "error": None, "started_at": time.time()}
 
 
 def _setup_paths():
@@ -49,7 +66,7 @@ def _setup_console():
             sys.stdout = sys.stderr = io.StringIO()
         return
     if os.name == "nt":
-        os.system("title HRMA - UZAYTEK Hibrit Roket Motor Analizi")
+        os.system("title HRMA - UZAYTEK Hybrid Rocket Motor Analysis")
         os.system("chcp 65001 >nul")
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -94,16 +111,159 @@ def _pick_port():
             continue
         finally:
             s.close()
-    raise RuntimeError("8080-8090 arasında boş port bulunamadı.")
+    raise RuntimeError("No free port available in range 8080-8090.")
 
+
+# ---------------------------------------------------------------------------
+# Splash + shim: pencere ANINDA açılır, ağır yükleme arkada sürer
+# ---------------------------------------------------------------------------
+
+SPLASH_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Starting HRMA…</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #cfe8f2;
+    background:
+      radial-gradient(1100px 520px at 85% -10%, rgba(0,140,200,0.15), transparent 60%),
+      radial-gradient(900px 620px at -10% 30%, rgba(0,90,160,0.10), transparent 55%),
+      linear-gradient(165deg, #04070d 0%, #0a1322 60%, #070d18 100%);
+  }
+  .kutu { text-align: center; max-width: 420px; padding: 24px; }
+  .logo { font-size: 34px; font-weight: 800; letter-spacing: 6px; color: #00e5ff;
+          text-shadow: 0 0 18px rgba(0,229,255,0.35); margin-bottom: 6px; }
+  .alt { font-size: 12px; letter-spacing: 2px; color: #7d97a5; margin-bottom: 34px; }
+  .halka { width: 46px; height: 46px; margin: 0 auto 22px;
+           border: 3px solid rgba(0,229,255,0.15); border-top-color: #00e5ff;
+           border-radius: 50%; animation: don 0.9s linear infinite; }
+  @keyframes don { to { transform: rotate(360deg); } }
+  .durum { font-size: 14px; color: #eaf7fb; margin-bottom: 8px; }
+  .ipucu { font-size: 12px; color: #46606d; line-height: 1.6; }
+  .hata { display: none; font-size: 12px; color: #ff5d73; text-align: left;
+          white-space: pre-wrap; max-height: 180px; overflow: auto;
+          background: rgba(6,14,26,0.85); border: 1px solid rgba(255,93,115,0.4);
+          border-radius: 8px; padding: 12px; margin-top: 16px; }
+</style>
+</head>
+<body>
+  <div class="kutu">
+    <div class="logo">HRMA</div>
+    <div class="alt">UZAYTEK HYBRID ROCKET MOTOR ANALYSIS</div>
+    <div class="halka" id="halka"></div>
+    <div class="durum" id="durum">Starting…</div>
+    <div class="ipucu" id="ipucu">Loading computation engines.</div>
+    <div class="hata" id="hata"></div>
+  </div>
+<script>
+  var t0 = Date.now();
+  var ipuclari = [
+    "Loading computation engines.",
+    "Preparing thermochemistry databases.",
+    "Loading CAD kernel (OpenCascade).",
+    "Almost ready…"
+  ];
+  var i = 0;
+  setInterval(function () {
+    var sn = Math.round((Date.now() - t0) / 1000);
+    document.getElementById('durum').textContent = 'Starting… (' + sn + ' s)';
+    if (sn > 0 && sn % 4 === 0) {
+      i = Math.min(i + 1, ipuclari.length - 1);
+      document.getElementById('ipucu').textContent = ipuclari[i];
+    }
+  }, 1000);
+  function kontrol() {
+    fetch('/health', {cache: 'no-store'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.ready) { location.replace('/'); return; }
+        if (d.error) {
+          document.getElementById('halka').style.display = 'none';
+          document.getElementById('durum').textContent = 'Startup error';
+          document.getElementById('ipucu').textContent =
+            'Details below — you can send this text to support.';
+          var h = document.getElementById('hata');
+          h.style.display = 'block';
+          h.textContent = d.error;
+          return;
+        }
+        setTimeout(kontrol, 600);
+      })
+      .catch(function () { setTimeout(kontrol, 600); });
+  }
+  setTimeout(kontrol, 400);
+</script>
+</body>
+</html>"""
+
+
+def _shim_app(environ, start_response):
+    """Gerçek uygulama yüklenene kadar splash + /health servis eden WSGI shim."""
+    path = environ.get("PATH_INFO", "/")
+    if path == "/health":
+        body = json.dumps({
+            "ready": _app_state["wsgi"] is not None,
+            "error": _app_state["error"],
+            "elapsed_s": round(time.time() - _app_state["started_at"], 1),
+        }).encode("utf-8")
+        start_response("200 OK", [
+            ("Content-Type", "application/json"),
+            ("Cache-Control", "no-store"),
+            ("Content-Length", str(len(body))),
+        ])
+        return [body]
+
+    real = _app_state["wsgi"]
+    if real is not None:
+        return real(environ, start_response)
+
+    body = SPLASH_HTML.encode("utf-8")
+    start_response("200 OK", [
+        ("Content-Type", "text/html; charset=utf-8"),
+        ("Cache-Control", "no-store"),
+        ("Content-Length", str(len(body))),
+    ])
+    return [body]
+
+
+def _load_real_app():
+    """Ağır importları arka planda yapar; bitince shim devreder."""
+    t0 = time.time()
+    try:
+        from hrma.app import app as flask_app
+        _app_state["wsgi"] = flask_app
+        print("  Application loaded (%.1f s)." % (time.time() - t0))
+    except Exception:
+        _app_state["error"] = traceback.format_exc()
+        print("  APPLICATION FAILED TO LOAD:\n%s" % _app_state["error"])
+
+
+def _wait_for_port(port, timeout_s=15):
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Pencere: pywebview (yerel) → Chromium --app → tarayıcı sekmesi
+# ---------------------------------------------------------------------------
 
 def _ui_profile_dir():
-    """HRMA uygulama penceresi için AYRI tarayıcı profili.
+    """HRMA uygulama penceresi için AYRI profil/depolama dizini.
 
-    Chrome/Edge zaten açıkken --app parametresi mevcut pencereye sekme
-    olarak yönlendirilir (2026-07-13 tespiti). Ayrı --user-data-dir ile
-    her zaman bağımsız bir süreç ve gerçek uygulama penceresi açılır;
-    pencere kapanınca süreç biter → sunucu ömrü pencereye bağlanabilir.
+    pywebview'de localStorage kalıcılığı (private_mode=False + storage_path),
+    Chromium fallback'inde ise --user-data-dir için kullanılır. Chromium'da
+    ayrı profil şart: Chrome zaten açıkken --app parametresi yoksa mevcut
+    pencereye sekme olarak yönlendiriliyor (2026-07-13 tespiti).
     """
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
@@ -114,8 +274,41 @@ def _ui_profile_dir():
     return d
 
 
+def _try_native_window(url):
+    """Yerel pencere (pywebview): macOS WKWebView / Windows Edge WebView2.
+
+    Chrome kurulu olması GEREKMEZ. Pencere kapanana kadar bloklar;
+    başarıyla açıldıysa True, hiç açılamadıysa False döner.
+    """
+    try:
+        import webview
+    except Exception as exc:
+        print("  pywebview unavailable (%s) — falling back to Chromium window." % exc)
+        return False
+    try:
+        # CAD/rapor indirmeleri (blob) için indirme izni şart
+        try:
+            webview.settings["ALLOW_DOWNLOADS"] = True
+        except Exception:
+            pass
+        webview.create_window(
+            PENCERE_BASLIK, url,
+            width=1440, height=900, min_size=(1100, 700),
+        )
+        kwargs = {"private_mode": False, "storage_path": _ui_profile_dir()}
+        if os.name == "nt":
+            # WebView2 dışındaki eski motorlara (mshtml vb.) düşülmesin
+            kwargs["gui"] = "edgechromium"
+        webview.start(**kwargs)
+        return True  # pencere kapatıldı
+    except Exception:
+        print("  Native window failed, falling back to Chromium:")
+        traceback.print_exc()
+        return False
+
+
 def _open_app_window(url):
-    """Arayüzü gerçek uygulama penceresi olarak aç (Chromium --app modu).
+    """Yedek 1: Chromium ailesi --app penceresi (Chrome/Edge/Brave kuruluysa).
 
     Başarıda pencereye ait Popen döndürür (süreç = pencere ömrü);
     Chromium ailesi yoksa None döner, çağıran tarayıcı sekmesine düşer.
@@ -146,42 +339,39 @@ def _open_app_window(url):
     return None
 
 
-def _open_ui(url):
-    """UI'yi aç; uygulama penceresi süreci varsa Popen'ını döndürür."""
+def _show_window_blocking(url):
+    """Pencereyi açar ve KAPANANA KADAR bloklar; dönüşte süreç sonlanmalı.
+
+    Sıra: pywebview (yerel) → Chromium --app → varsayılan tarayıcı sekmesi.
+    Tarayıcı sekmesine düşüldüyse pencere ömrü izlenemez; sunucu, kullanıcı
+    süreci kapatana kadar çalışır durumda bırakılır.
+    """
+    if os.environ.get("HRMA_NO_WINDOW"):
+        # Otomatik test modu: pencere açma, sunucuyu ayakta tut
+        print("  HRMA_NO_WINDOW=1 — window suppressed, server: %s" % url)
+        threading.Event().wait()
+        return
+
+    if _try_native_window(url):
+        return
+
     proc = _open_app_window(url)
-    if proc is None:
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
-    return proc
-
-
-def _bind_lifetime_to_window(proc):
-    """Uygulama penceresi kapanınca sunucuyu da kapat (gerçek uygulama hissi)."""
-    def _bekci():
-        proc.wait()
-        print("Uygulama penceresi kapatıldı, HRMA kapanıyor...")
-        time.sleep(1)
-        os._exit(0)
-    threading.Thread(target=_bekci, daemon=True).start()
-
-
-def _open_browser_when_ready(port, timeout_s=120):
-    url = "http://127.0.0.1:%d" % port
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=2):
-                break
-        except Exception:
-            time.sleep(0.5)
-    proc = _open_ui(url)
     if proc is not None:
-        _bind_lifetime_to_window(proc)
-    print()
-    print("  HRMA penceresi açıldı: %s" % url)
-    print("  Açılmadıysa yukarıdaki adresi tarayıcınıza elle yazın.")
+        print("  Chromium app window opened: %s" % url)
+        proc.wait()
+        print("  Application window closed.")
+        return
+
+    try:
+        webbrowser.open(url)
+        print()
+        print("  HRMA opened in your browser: %s" % url)
+        print("  If it did not open, type the address above manually.")
+        print("  Window tracking is unavailable in this mode; end this")
+        print("  process to quit (Ctrl+C / task bar).")
+    except Exception:
+        print("  Could not open a browser, open this address manually: %s" % url)
+    threading.Event().wait()  # süreç, kullanıcı kapatana kadar yaşar
 
 
 def main():
@@ -190,7 +380,7 @@ def main():
     os.environ.setdefault("MPLBACKEND", "Agg")
 
     print("=" * 62)
-    print("  HRMA - UZAYTEK Hibrit Roket Motor Analizi")
+    print("  HRMA - UZAYTEK Hybrid Rocket Motor Analysis")
     print("=" * 62)
 
     port, already_running = _pick_port()
@@ -198,53 +388,71 @@ def main():
 
     if already_running:
         print()
-        print("  HRMA zaten çalışıyor, pencere açılıyor: %s" % url)
-        _open_ui(url)
-        time.sleep(3)
+        print("  HRMA is already running, opening a window: %s" % url)
+        _show_window_blocking(url)
         return
 
     out_dir = _outputs_dir()
     os.chdir(out_dir)
 
     print()
-    print("  Başlatılıyor, ilk açılış 10-30 saniye sürebilir...")
-    print("  Çıktı dosyaları (CAD, çizimler): %s" % out_dir)
-    print("  HRMA penceresini kapatınca program da kapanır.")
+    print("  Opening window; engines are loading in the background...")
+    print("  Output files (CAD, drawings): %s" % out_dir)
+    print("  Closing the HRMA window also closes the program.")
     print()
 
-    from hrma.app import app  # ağır importlar burada (numpy, scipy, OCC...)
+    # 1) Ağır importlar arka planda
+    threading.Thread(target=_load_real_app, daemon=True).start()
 
+    # 2) Sunucu ANINDA kalkar (shim: splash + /health)
+    from waitress import serve
     threading.Thread(
-        target=_open_browser_when_ready, args=(port,), daemon=True
+        target=lambda: serve(_shim_app, host="127.0.0.1", port=port, threads=8),
+        daemon=True,
     ).start()
 
-    from waitress import serve
+    # 3) Port dinlemeye geçer geçmez pencereyi aç (splash görünür)
+    _wait_for_port(port)
 
-    serve(app, host="127.0.0.1", port=port, threads=8)
+    # Güvence: portta BİZİM shim mi konuşuyor? (HRMA_PORT zorlanmış ve port
+    # başka bir sunucudaysa pencereyi yabancı içeriğe açma — 2026-07-14 denetimi)
+    try:
+        with urllib.request.urlopen(url + "/health", timeout=3) as resp:
+            json.loads(resp.read())["ready"]
+    except Exception:
+        print("  HATA: %s beklenen HRMA sunucusu değil (port çakışması?)." % url)
+        print("  HRMA_PORT ayarını kaldırın veya boş bir port verin.")
+        sys.exit(1)
+
+    _show_window_blocking(url)
+
+    # Pencere kapandı → sunucu daemon thread'leriyle birlikte kapan
+    print("  Shutting down HRMA...")
+    os._exit(0)
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nHRMA kapatılıyor...")
+        print("\nShutting down HRMA...")
     except Exception:
-        print("\nBir hata oluştu:\n")
+        print("\nAn error occurred:\n")
         traceback.print_exc()
-        print("\nBu dosyayı destek için iletebilirsiniz: Belgeler/HRMA/hrma_log.txt")
+        print("\nYou can send this file to support: Documents/HRMA/hrma_log.txt")
         if os.name == "nt":
             # pythonw ile konsol yok — hatayı iletişim kutusuyla göster
             try:
                 import ctypes
                 ctypes.windll.user32.MessageBoxW(
-                    0, "HRMA başlatılamadı.\n\nAyrıntı: Belgeler\\HRMA\\"
+                    0, "HRMA could not start.\n\nDetails: Documents\\HRMA\\"
                        "hrma_log.txt\n\n" + traceback.format_exc()[-900:],
-                    "HRMA - Hata", 0x10)
+                    "HRMA - Error", 0x10)
             except Exception:
                 pass
         try:
             if sys.stdin is not None and sys.stdin.isatty():
-                input("Kapatmak için Enter tuşuna basın...")
+                input("Press Enter to close...")
         except Exception:
             pass
         sys.exit(1)

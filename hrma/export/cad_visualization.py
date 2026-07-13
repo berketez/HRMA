@@ -11,10 +11,7 @@ import numpy as np
 import trimesh
 
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 from typing import Dict, List, Tuple, Optional
 import json

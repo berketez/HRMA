@@ -256,22 +256,19 @@ class RegressionAnalyzer:
                 gridcolor='rgba(128,128,128,0.2)'
             ),
             yaxis=dict(
-                title='Regresyon Hızı (mm/s)',
-                titlefont=dict(color='red'),
+                title=dict(text='Regresyon Hızı (mm/s)', font=dict(color='red')),
                 tickfont=dict(color='red'),
                 side='left'
             ),
             yaxis2=dict(
-                title='Port Çapı (mm)',
-                titlefont=dict(color='blue'),
+                title=dict(text='Port Çapı (mm)', font=dict(color='blue')),
                 tickfont=dict(color='blue'),
                 anchor='x',
                 overlaying='y',
                 side='right'
             ),
             yaxis3=dict(
-                title='G_ox (kg/m²/s)',
-                titlefont=dict(color='green'),
+                title=dict(text='G_ox (kg/m²/s)', font=dict(color='green')),
                 tickfont=dict(color='green'),
                 anchor='free',
                 overlaying='y',

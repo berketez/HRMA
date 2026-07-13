@@ -1,0 +1,195 @@
+/* HRMA otomatik güncelleme bildirimi.
+ *
+ * Sayfa açıldıktan kısa süre sonra /api/update/check çağrılır; yeni sürüm
+ * varsa koyu temayla uyumlu bir modal gösterilir:
+ *   [Şimdi güncelle]  → /api/update/download (sunucu Downloads'a indirir,
+ *                        bitince kurulum dosyasını açar; ilerleme çubuğu
+ *                        /api/update/status ile izlenir)
+ *   [Daha sonra]      → modal kapanır, sonraki açılışta yine sorar
+ *   [Bu sürümü atla]  → localStorage'a yazılır, o sürüm bir daha sorulmaz
+ */
+(function () {
+    'use strict';
+
+    var SKIP_KEY = 'hrma_update_skip';
+    var POLL_MS = 700;
+
+    function el(tag, style, html) {
+        var node = document.createElement(tag);
+        if (style) node.style.cssText = style;
+        if (html !== undefined) node.innerHTML = html;
+        return node;
+    }
+
+    function buildModal(info) {
+        var wrap = el('div',
+            'position:fixed;inset:0;z-index:99990;display:flex;align-items:center;' +
+            'justify-content:center;background:rgba(2,6,12,0.72);backdrop-filter:blur(4px);');
+        wrap.id = 'hrma-update-modal';
+
+        var box = el('div',
+            'max-width:480px;width:calc(100% - 48px);padding:26px 28px;' +
+            'background:var(--hd-panel-solid, #0a1524);' +
+            'border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));' +
+            'border-radius:var(--hd-radius, 14px);' +
+            'box-shadow:var(--hd-shadow, 0 14px 44px rgba(0,0,0,0.42));' +
+            'color:var(--hd-ink, #cfe8f2);' +
+            'font-family:var(--hd-sans, sans-serif);');
+
+        box.appendChild(el('div',
+            'font-size:15px;font-weight:700;letter-spacing:0.4px;margin-bottom:6px;' +
+            'color:var(--hd-cyan, #00e5ff);',
+            'UPDATE AVAILABLE'));
+        box.appendChild(el('div',
+            'font-size:14px;line-height:1.55;margin-bottom:14px;' +
+            'color:var(--hd-ink-strong, #eaf7fb);',
+            'HRMA <b>' + escapeHtml(info.latest) + '</b> has been released ' +
+            '(installed version: ' + escapeHtml(info.current) + '). ' +
+            'Would you like to update now?'));
+
+        if (info.notes) {
+            var notes = el('div',
+                'max-height:120px;overflow-y:auto;font-size:12px;line-height:1.5;' +
+                'padding:10px 12px;margin-bottom:16px;white-space:pre-wrap;' +
+                'background:var(--hd-inset, rgba(6,14,26,0.85));' +
+                'border:1px solid var(--hd-line, rgba(0,229,255,0.14));' +
+                'border-radius:var(--hd-radius-sm, 8px);' +
+                'color:var(--hd-ink-dim, #7d97a5);');
+            notes.textContent = info.notes;
+            box.appendChild(notes);
+        }
+
+        var progress = el('div', 'display:none;margin-bottom:14px;');
+        var bar = el('div',
+            'height:6px;border-radius:3px;overflow:hidden;' +
+            'background:var(--hd-inset, rgba(6,14,26,0.85));');
+        var fill = el('div',
+            'height:100%;width:0%;transition:width 0.3s;' +
+            'background:var(--hd-cyan, #00e5ff);');
+        bar.appendChild(fill);
+        var progressText = el('div',
+            'font-size:12px;margin-top:6px;color:var(--hd-ink-dim, #7d97a5);', '');
+        progress.appendChild(bar);
+        progress.appendChild(progressText);
+        box.appendChild(progress);
+
+        var btnRow = el('div', 'display:flex;gap:10px;flex-wrap:wrap;');
+        var btnBase =
+            'flex:1;min-width:120px;padding:10px 14px;font-size:13px;font-weight:600;' +
+            'border-radius:var(--hd-radius-sm, 8px);cursor:pointer;' +
+            'font-family:var(--hd-sans, sans-serif);transition:opacity 0.15s;';
+        var updateBtn = el('button', btnBase +
+            'border:none;background:var(--hd-cyan, #00e5ff);color:#04070d;',
+            'Update now');
+        var laterBtn = el('button', btnBase +
+            'background:transparent;color:var(--hd-ink, #cfe8f2);' +
+            'border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));',
+            'Later');
+        var skipBtn = el('button', btnBase +
+            'background:transparent;color:var(--hd-ink-faint, #46606d);border:none;' +
+            'flex:0 1 auto;min-width:0;',
+            'Skip this version');
+
+        laterBtn.onclick = function () { wrap.remove(); };
+        skipBtn.onclick = function () {
+            try { localStorage.setItem(SKIP_KEY, info.latest); } catch (e) { /* özel mod */ }
+            wrap.remove();
+        };
+        updateBtn.onclick = function () { startDownload(info); };
+
+        btnRow.appendChild(updateBtn);
+        btnRow.appendChild(laterBtn);
+        btnRow.appendChild(skipBtn);
+        box.appendChild(btnRow);
+        wrap.appendChild(box);
+        document.body.appendChild(wrap);
+
+        function startDownload(inf) {
+            updateBtn.disabled = true;
+            updateBtn.style.opacity = '0.5';
+            fetch('/api/update/download', { method: 'POST' })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res.started) {
+                        // platforma uygun asset yok → Releases sayfasını yeni pencerede aç
+                        window.open(inf.page_url || res.page_url, '_blank');
+                        wrap.remove();
+                        return;
+                    }
+                    progress.style.display = 'block';
+                    progressText.textContent = 'Downloading…';
+                    pollStatus();
+                })
+                .catch(function () {
+                    progressText.textContent = 'Could not start the download.';
+                });
+        }
+
+        var idleStrikes = 0;
+        function pollStatus() {
+            fetch('/api/update/status')
+                .then(function (r) { return r.json(); })
+                .then(function (st) {
+                    if (st.state === 'downloading') {
+                        idleStrikes = 0;
+                        fill.style.width = st.pct + '%';
+                        progressText.textContent = 'Downloading… ' + st.pct + '%';
+                        setTimeout(pollStatus, POLL_MS);
+                    } else if (st.state === 'done') {
+                        fill.style.width = '100%';
+                        progressText.innerHTML =
+                            'Downloaded — the installer has been opened. ' +
+                            'Close HRMA to complete the update.<br>' +
+                            '<span style="font-size:11px;">File: ' +
+                            escapeHtml(st.path) + '</span>';
+                        laterBtn.textContent = 'OK';
+                    } else if (st.state === 'error') {
+                        progressText.textContent =
+                            'Download error: ' + st.error +
+                            ' — you can download it manually from the Releases page.';
+                        updateBtn.disabled = false;
+                        updateBtn.style.opacity = '1';
+                    } else {
+                        // 'idle' indirme başladıktan sonra görülüyorsa sunucu yeniden
+                        // başlamış demektir — sonsuza dek dönme (2026-07-14 denetimi)
+                        idleStrikes += 1;
+                        if (idleStrikes > 5) {
+                            progressText.textContent =
+                                'Download was interrupted — please try again.';
+                            updateBtn.disabled = false;
+                            updateBtn.style.opacity = '1';
+                            return;
+                        }
+                        setTimeout(pollStatus, POLL_MS);
+                    }
+                })
+                .catch(function () { setTimeout(pollStatus, POLL_MS * 2); });
+        }
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function checkNow() {
+        fetch('/api/update/check')
+            .then(function (r) { return r.json(); })
+            .then(function (info) {
+                if (!info.available || !info.latest) return;
+                var skipped = null;
+                try { skipped = localStorage.getItem(SKIP_KEY); } catch (e) { /* özel mod */ }
+                if (skipped === info.latest) return;
+                if (document.getElementById('hrma-update-modal')) return;
+                buildModal(info);
+            })
+            .catch(function () { /* ağ yok — sessiz geç */ });
+    }
+
+    // Sayfa otursun, ağır grafikler yüklensin diye küçük gecikmeyle sor
+    if (document.readyState === 'complete') {
+        setTimeout(checkNow, 2500);
+    } else {
+        window.addEventListener('load', function () { setTimeout(checkNow, 2500); });
+    }
+})();

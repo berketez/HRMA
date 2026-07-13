@@ -4,7 +4,6 @@ Advanced nozzle kinetic analysis similar to TDK (JANNAF standard)
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.integrate import odeint, solve_ivp
 from scipy.optimize import fsolve, minimize_scalar
 import json

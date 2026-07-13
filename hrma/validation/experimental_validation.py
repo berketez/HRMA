@@ -11,12 +11,14 @@ consistency only and must NOT be reported as experimental validation.
 """
 
 import numpy as np
-import pandas as pd
 import json
 import sqlite3
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-import matplotlib.pyplot as plt
+# matplotlib bilinçli olarak modül seviyesinde import edilmiyor: yalnızca
+# generate_validation_plots() kullanıyor ve uygulama açılışına ~1.5 sn
+# ekliyordu (2026-07-14 açılış hızlandırması; pandas da aynı sebeple silindi,
+# hiç kullanılmıyordu ve tek başına ~6.6 sn'ydi).
 from scipy import stats
 from datetime import datetime
 import os
@@ -817,10 +819,11 @@ class ExperimentalValidation:
     
     def plot_validation_results(self, validation_results: Dict, save_plots: bool = True):
         """Generate validation plots"""
-        
+        import matplotlib.pyplot as plt
+
         if 'detailed_results' not in validation_results:
             return
-        
+
         # Extract data for plotting
         params = ['thrust', 'isp', 'chamber_pressure']
         
@@ -835,7 +838,7 @@ class ExperimentalValidation:
             
             if not experimental:
                 continue
-            
+
             # Create scatter plot
             plt.figure(figsize=(8, 6))
             plt.scatter(experimental, predicted, alpha=0.7, s=50)

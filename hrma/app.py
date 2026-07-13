@@ -224,6 +224,25 @@ def formulas():
 def test():
     return jsonify({'status': 'ok', 'message': 'HRMA is running'})
 
+# ---- Otomatik güncelleme (GitHub Releases) ----
+# Arayüz açılışta /api/update/check'i çağırır; yeni sürüm varsa modal gösterir.
+# İndirme URL'si istemciden alınmaz (bkz. hrma/utils/update_checker.py).
+
+@app.route('/api/update/check')
+def update_check():
+    from hrma.utils.update_checker import check_for_update
+    return jsonify(check_for_update())
+
+@app.route('/api/update/download', methods=['POST'])
+def update_download():
+    from hrma.utils.update_checker import start_download
+    return jsonify(start_download())
+
+@app.route('/api/update/status')
+def update_status():
+    from hrma.utils.update_checker import download_status
+    return jsonify(download_status())
+
 @app.route('/test-simple')
 def test_simple():
     return '<h1>SIMPLE TEST</h1><p>If you see this, Flask is working!</p><a href="/">Home Page</a>'

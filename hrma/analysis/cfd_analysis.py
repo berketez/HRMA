@@ -4,7 +4,6 @@ Computational Fluid Dynamics analysis for rocket motor internal flows
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.interpolate import griddata

@@ -258,13 +258,15 @@ class OpenRocketExporter:
         # Motor line format: name diameter length delays prop_mass loaded_mass manufacturer
         loaded_mass = prop_mass + 0.5  # Add case mass estimate
         manufacturer = "UZAYTEK"
-        delays = "0"  # No ejection delay for hybrid motors
+        delays = "P"  # RASP: tıpalı motor (ejeksiyon yükü yok); "0" anında ateşleme demekti
         
         motor_line = f"{designation} {diameter:.1f} {length:.1f} {delays} {prop_mass:.3f} {loaded_mass:.3f} {manufacturer}"
         lines.append(motor_line)
         
-        # Thrust curve data
+        # Thrust curve data (RASP: ilk örnek t>0 ve F>0 olmalı)
         for time, thrust in thrust_curve:
+            if time <= 0 and thrust <= 0:
+                continue
             lines.append(f"{time:.3f} {thrust:.1f}")
         
         # End marker

@@ -657,11 +657,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/theme.css">
-    <script src="https://cdn.plot.ly/plotly-1.58.5.min.js"></script>
+    <script src="/static/vendor/plotly-1.58.5.min.js"></script>
     <script src="/static/js/plotly_dark.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls: 3D motor simülasyonu için -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="/static/vendor/three-0.128.0.min.js"></script>
+    <script src="/static/vendor/OrbitControls-0.128.0.js"></script>
     <script src="/static/js/motor_viz3d.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/transient_panel.js"></script>
@@ -4852,5 +4852,6 @@
         checkDatabaseStatus();
         resetCADStatus();
     </script>
+    <script src="/static/js/update_check.js"></script>
 </body>
 </html>

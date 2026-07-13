@@ -21,3 +21,11 @@ dist/
 # data/ klasörü boş da olsa repoda bulunsun (SQLite klasör oluşturamaz)
 !data/.gitkeep
 .playwright-mcp/
+
+# Paketleme build çıktıları (5+ GB — asla commit edilmez)
+packaging/mac/
+packaging/win/
+packaging/runtime/
+packaging/hrma_stub
+packaging/*.exe
+packaging/*.dmg

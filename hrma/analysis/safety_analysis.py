@@ -193,7 +193,21 @@ class SafetyAnalyzer:
             'structural_integrity': 'SAFE' if yield_safety_factor >= 4.0 else 'MARGINAL' if yield_safety_factor >= 2.0 else 'UNSAFE',
             'recommended_inspection_interval': self._calculate_inspection_interval(yield_safety_factor)
         }
-    
+
+    def _calculate_inspection_interval(self, yield_safety_factor: float) -> str:
+        """Emniyet katsayısına göre önerilen muayene aralığı.
+
+        Basınçlı kap pratiğiyle uyumlu kaba merdiven: katsayı düştükçe
+        muayene sıklaşır; 2'nin altı zaten 'UNSAFE' sınıfında raporlanıyor.
+        """
+        if yield_safety_factor >= 4.0:
+            return 'Every 12 months (visual), hydrostatic every 5 years'
+        if yield_safety_factor >= 3.0:
+            return 'Every 6 months (visual), hydrostatic every 3 years'
+        if yield_safety_factor >= 2.0:
+            return 'Before each test campaign (visual + dye penetrant)'
+        return 'Do not operate — redesign required (SF < 2)'
+
     def _analyze_pressure_vessel_safety(self, chamber_pressure: float, diameter: float) -> Dict:
         """Analyze pressure vessel safety requirements"""
         
@@ -719,6 +733,239 @@ class SafetyAnalyzer:
             'solid_monoprop': ['n2o'] if 'n2o' in propellant_type.lower() else []
         }
         return toxic_map.get(propellant_type, [])
-    
-    # Many more helper methods would be implemented here...
+
+    # ------------------------------------------------------------------
+    # 2026-07-14: /analyze_safety 500 veriyordu — sınıfın çağırdığı 25
+    # yardımcı metot hiç yazılmamıştı ("Many more helper methods would be
+    # implemented here..."). Aşağıdakiler genel emniyet pratiğine dayalı
+    # deterministik sınıflandırma/tavsiye merdivenleridir; tesise özgü
+    # mevzuat yerine geçmez, danışma amaçlıdır.
+    # ------------------------------------------------------------------
+
+    def _determine_pressure_safety_devices(self, chamber_pressure: float) -> List[str]:
+        devices = ['Pressure relief valve sized for full flow', 'Burst disc (secondary relief)']
+        if chamber_pressure > 20:
+            devices.append('Remote pressure monitoring with automatic abort')
+        if chamber_pressure > 100:
+            devices.append('Redundant transducers (2oo3 voting) and hard-wired cutoff')
+        return devices
+
+    def _classify_explosive_hazard(self, tnt_equivalent: float) -> str:
+        if tnt_equivalent < 0.5:
+            return 'HD 1.4 equivalent — minor hazard, local effects only'
+        if tnt_equivalent < 5:
+            return 'HD 1.3 equivalent — mass fire / minor blast hazard'
+        return 'HD 1.1 equivalent treatment recommended — mass explosion potential'
+
+    def _determine_storage_requirements(self, tnt_equivalent: float, propellant_type: str) -> List[str]:
+        reqs = ['Segregate oxidizer and fuel storage', 'Grounded, ventilated storage area',
+                'No ignition sources within exclusion zone']
+        if tnt_equivalent >= 0.5:
+            reqs.append('Dedicated magazine with quantity-distance siting')
+        if 'liquid' in propellant_type:
+            reqs.append('Secondary containment and leak detection for liquid propellants')
+        return reqs
+
+    def _determine_transport_requirements(self, tnt_equivalent: float, propellant_type: str) -> List[str]:
+        reqs = ['Transport per ADR/DOT dangerous goods rules', 'Documented and placarded load']
+        if tnt_equivalent >= 0.5:
+            reqs.append('Class 1 explosives routing and escort requirements apply')
+        if 'liquid' in propellant_type:
+            reqs.append('Pressure-rated, relief-equipped transport containers')
+        return reqs
+
+    def _calculate_toxic_release_scenario(self, component: str, propellant_mass: float,
+                                          facility_type: str) -> Dict:
+        # Kaba korunma mesafesi: kütle ile karekök ölçekleme, bileşene göre katsayı
+        katsayi = {'n2o4': 60.0, 'mmh': 80.0, 'udmh': 80.0, 'hydrazine': 90.0, 'n2o': 15.0}
+        base = katsayi.get(component, 30.0)
+        distance_m = base * max(propellant_mass, 0.1) ** 0.5
+        return {
+            'component': component,
+            'release_mass_kg': propellant_mass,
+            'protective_action_distance_m': round(distance_m, 0),
+            'hazard_distance_m': round(distance_m, 0),  # tüketici bu adı okuyor
+            'facility_type': facility_type,
+            'scenario': 'Worst-case full inventory release, neutral weather (F stability)',
+        }
+
+    def _determine_toxic_detection_requirements(self, toxic_components: List[str]) -> List[str]:
+        if not toxic_components:
+            return []
+        return ['Fixed gas detection for: ' + ', '.join(toxic_components),
+                'Portable detectors for entry teams',
+                'Alarm setpoints at 50% of exposure limit']
+
+    def _determine_toxic_ppe_requirements(self, toxic_components: List[str]) -> List[str]:
+        if not toxic_components:
+            return ['Standard test-stand PPE (eye/ear protection, flame-resistant clothing)']
+        agir = any(c in ('mmh', 'udmh', 'hydrazine', 'n2o4') for c in toxic_components)
+        if agir:
+            return ['SCBA or supplied-air respirator for transfer operations',
+                    'Chemical splash suit (Level B) for hypergolic handling',
+                    'Butyl rubber gloves; emergency shower/eyewash within 10 s reach']
+        return ['Half-mask respirator with appropriate cartridge available',
+                'Chemical splash goggles and gloves']
+
+    def _assess_toxic_hazard_level(self, release_scenarios: List[Dict]) -> str:
+        if not release_scenarios:
+            return 'LOW'
+        d = max(s.get('hazard_distance_m', 0) for s in release_scenarios)
+        if d >= 300:
+            return 'HIGH'
+        if d >= 75:
+            return 'MEDIUM'
+        return 'LOW'
+
+    def _determine_exposure_monitoring(self, toxic_components: List[str]) -> List[str]:
+        if not toxic_components:
+            return []
+        return ['Personal dosimetry/badge sampling for exposed personnel',
+                'Post-operation area sampling before re-entry',
+                'Medical surveillance program for routine handlers']
+
+    def _determine_emergency_treatment(self, toxic_components: List[str]) -> Dict:
+        tedavi = {}
+        for c in toxic_components:
+            if c in ('mmh', 'udmh', 'hydrazine'):
+                tedavi[c] = 'Remove from exposure, oxygen, pyridoxine (B6) protocol per physician'
+            elif c == 'n2o4':
+                tedavi[c] = 'Fresh air, oxygen; observe 24-48 h for delayed pulmonary edema'
+            elif c == 'n2o':
+                tedavi[c] = 'Fresh air, oxygen if hypoxic symptoms'
+            else:
+                tedavi[c] = 'Decontaminate, supportive care, consult poison control'
+        return tedavi
+
+    def _classify_fire_hazard(self, propellant_type: str) -> str:
+        if 'liquid' in propellant_type:
+            return 'Class B (flammable liquid) with oxidizer-enhanced burning'
+        if 'hybrid' in propellant_type:
+            return 'Class A fuel grain + oxidizer-enhanced burning'
+        return 'Class 1.3-type solid propellant fire (self-oxidized, cannot be smothered)'
+
+    def _assess_auto_ignition_risk(self, propellant_type: str, chamber_temperature: float) -> Dict:
+        # _score_fire_risk 'risk_level' anahtarını okuyor — dict sözleşmesi
+        if 'solid' in propellant_type and chamber_temperature > 2500:
+            return {'risk_level': 'MEDIUM',
+                    'note': 'Residual grain can reignite from hot surfaces; enforce cooldown'}
+        if 'liquid' in propellant_type:
+            return {'risk_level': 'MEDIUM',
+                    'note': 'Vapor accumulation near hot components; ventilate before approach'}
+        return {'risk_level': 'LOW', 'note': 'Controlled ignition sources only'}
+
+    def _analyze_fire_spread_potential(self, propellant_mass: float, propellant_type: str) -> str:
+        if propellant_mass > 100:
+            return 'HIGH — radiant heating can ignite adjacent structures; wide firebreak needed'
+        if propellant_mass > 10:
+            return 'MEDIUM — local spread possible; clear combustibles within safety distance'
+        return 'LOW — limited to immediate test area'
+
+    def _determine_fire_suppression_system(self, fire_class: str, propellant_mass: float,
+                                           auto_ignition_risk: str) -> Dict:
+        sistemler = ['Water deluge for cooling structures (note: solid propellant fires are not extinguishable — protect exposures and let burn)']
+        primary = 'Water deluge (exposure protection)'
+        if 'Class B' in fire_class:
+            sistemler.append('Foam or CO2 capability for liquid fuel spill fires')
+            primary = 'Foam (AFFF) on liquid spill; water for cooling'
+        if propellant_mass > 50 or auto_ignition_risk.get('risk_level') in ('HIGH', 'MEDIUM'):
+            sistemler.append('Fixed remote-actuated deluge over test stand')
+        sistemler.append('Rated portable extinguishers at all egress points')
+        return {'primary_agent': primary, 'systems': sistemler}
+
+    def _calculate_fire_safety_distances(self, propellant_mass: float) -> Dict:
+        # Kaba kübik-kök ölçekleme (kütle ↑ → mesafe ↑), min 15 m
+        base = max(propellant_mass, 1.0) ** (1.0 / 3.0)
+        return {
+            'personnel_distance_m': round(max(15.0, 20.0 * base), 0),
+            'equipment_distance_m': round(max(10.0, 10.0 * base), 0),
+            'public_distance_m': round(max(60.0, 60.0 * base), 0),
+            # _generate_emergency_procedures bu anahtarı okuyor
+            'radiant_heat_m': round(max(15.0, 20.0 * base), 0),
+        }
+
+    def _identify_ignition_sources_control(self) -> List[str]:
+        return ['Hot work permit system within exclusion zone',
+                'Bonding/grounding of all transfer equipment',
+                'Non-sparking tools for propellant handling',
+                'ATEX/intrinsically-safe electrical equipment in vapor zones',
+                'No smoking / no open flame policy with physical enforcement']
+
+    def _generate_fire_fighting_procedures(self, fire_class: str) -> List[str]:
+        adimlar = ['Evacuate to safety distance and account for personnel',
+                   'Actuate remote deluge; do NOT approach burning propellant',
+                   'Notify fire brigade with propellant data sheet']
+        if 'not be smothered' in fire_class or 'solid' in fire_class.lower():
+            adimlar.append('Let solid propellant burn out; cool surroundings only')
+        adimlar.append('Re-enter only after thermal + toxic clearance measurements')
+        return adimlar
+
+    def _determine_safety_equipment_requirements(self, explosive_hazards: Dict,
+                                                 toxic_hazards: Dict, fire_hazards: Dict,
+                                                 facility_type: str) -> Dict:
+        return {
+            'fixed_systems': ['Remote firing and abort system', 'Blast barrier or berm',
+                              'Fixed deluge (per fire analysis)', 'Area gas detection (per toxic analysis)'],
+            'personal_equipment': ['Flame-resistant clothing', 'Hearing and eye protection',
+                                   'Hard hats in mechanical hazard areas'] +
+                                  toxic_hazards.get('ppe_requirements', []),
+            'emergency_equipment': ['First aid + burn kit', 'Emergency shower/eyewash',
+                                    'Backup communications', 'Fire blankets and extinguishers'],
+            'facility_type': facility_type,
+        }
+
+    def _determine_personnel_limits(self, motor_data: Dict, facility_type: str) -> Dict:
+        return {
+            'test_cell_during_operation': 0,
+            'control_room': 'Essential test crew only',
+            'observation_area': 'Authorized personnel behind rated barrier',
+            'note': 'No personnel inside exclusion zone from pressurization to safing',
+        }
+
+    def _determine_qualification_requirements(self, facility_type: str) -> List[str]:
+        return ['Documented propellant-handling qualification for operators',
+                'Test conductor certified on abort procedures',
+                'Annual requalification and emergency drill participation']
+
+    def _determine_training_requirements(self, propellant_type: str, facility_type: str) -> List[str]:
+        egitim = ['Propellant hazards and compatibility training',
+                  'Emergency response and evacuation drills',
+                  'Pressure systems safety awareness']
+        if 'liquid' in propellant_type:
+            egitim.append('Cryogenic/toxic liquid transfer procedures (as applicable)')
+        return egitim
+
+    def _determine_required_antidotes(self, toxic_hazards: Dict) -> List[str]:
+        bilesenler = toxic_hazards.get('toxic_components', []) or []
+        antidot = []
+        if any(c in ('mmh', 'udmh', 'hydrazine') for c in bilesenler):
+            antidot.append('Pyridoxine (vitamin B6) IV protocol available on site/nearby')
+        if 'n2o4' in bilesenler:
+            antidot.append('Oxygen therapy capability; bronchodilators per physician')
+        return antidot or ['No specific antidote required — supportive care']
+
+    def _generate_treatment_protocols(self, toxic_hazards: Dict) -> List[str]:
+        return ['Decontaminate (remove clothing, flush 15 min) before transport',
+                'Transport with propellant safety data sheet',
+                'Observe gas-exposure casualties for delayed symptoms (24-48 h)']
+
+    def _generate_risk_matrix(self) -> Dict:
+        return {
+            'axes': {'likelihood': ['Rare', 'Unlikely', 'Possible', 'Likely', 'Frequent'],
+                     'severity': ['Negligible', 'Minor', 'Major', 'Critical', 'Catastrophic']},
+            'acceptance': {'LOW': 'Acceptable with routine controls',
+                           'MEDIUM': 'Acceptable with documented mitigations',
+                           'HIGH': 'Requires risk reduction before test',
+                           'CRITICAL': 'Unacceptable — redesign or re-site'},
+        }
+
+    def _determine_mitigation_priority(self, structural_risk: float, pressure_risk: float,
+                                       thermal_risk: float, explosive_risk: float,
+                                       toxic_risk: float, fire_risk: float) -> List[Dict]:
+        adlar = [('structural', structural_risk), ('pressure', pressure_risk),
+                 ('thermal', thermal_risk), ('explosive', explosive_risk),
+                 ('toxic', toxic_risk), ('fire', fire_risk)]
+        sirali = sorted(adlar, key=lambda x: x[1], reverse=True)
+        return [{'area': ad, 'risk_score': round(sk, 2), 'priority': i + 1}
+                for i, (ad, sk) in enumerate(sirali)]
     # This is a representative sample of the complete safety analysis system

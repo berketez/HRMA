@@ -2,15 +2,19 @@
 # HRMA DMG kurucu
 set -euo pipefail
 B="$(cd "$(dirname "$0")" && pwd)"
+SRC="/Users/apple/Desktop/dosyalar/HRMA"
 STAGE="$B/mac/dmg_stage"
-DIST="/Users/apple/Desktop/dosyalar/HRMA/dist"
+DIST="$SRC/dist"
+
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/hrma/__init__.py")"
+[ -n "$VERSION" ] || { echo "HATA: sürüm okunamadı"; exit 1; }
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$DIST"
 cp -R "$B/mac/HRMA.app" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-cp "$B/OKU_BENI_MAC.txt" "$STAGE/OKU BENI.txt"
+cp "$B/README_MAC.txt" "$STAGE/README.txt"
 
-hdiutil create -volname "HRMA Kurulum" -srcfolder "$STAGE" -ov -format UDZO \
-    "$DIST/HRMA-Kurulum-1.0.0-macOS.dmg"
+hdiutil create -volname "HRMA Setup" -srcfolder "$STAGE" -ov -format UDZO \
+    "$DIST/HRMA-Setup-${VERSION}-macOS.dmg"
 ls -lh "$DIST"

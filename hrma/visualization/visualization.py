@@ -1,5 +1,4 @@
 import plotly.graph_objects as go
-import plotly.express as px
 import numpy as np
 import json
 from scipy.interpolate import griddata

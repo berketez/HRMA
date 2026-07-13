@@ -111,6 +111,7 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     chamber = _revolve_profile(chamber_profile)
     files['chamber'] = os.path.join(out_dir, f'{name}_chamber.step')
     export_step(chamber, files['chamber'])
+    chamber.label = 'chamber'
     solids.append(chamber)
 
     # ---- Nozul: iç kontur + duvar ofseti (tek kontur kaynağı) ----
@@ -121,6 +122,7 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     nozzle = _revolve_profile(inner + outer)
     files['nozzle'] = os.path.join(out_dir, f'{name}_nozzle.step')
     export_step(nozzle, files['nozzle'])
+    nozzle.label = 'nozzle'
     solids.append(nozzle)
 
     # ---- Yakıt grain'i: portlu halka silindir ----
@@ -135,6 +137,7 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
         grain = grain_bp.part
         files['fuel_grain'] = os.path.join(out_dir, f'{name}_fuel_grain.step')
         export_step(grain, files['fuel_grain'])
+        grain.label = 'fuel_grain'
         solids.append(grain)
 
     # ---- Enjektör plakası: gerçek orifis delikleri ----
@@ -157,10 +160,12 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
         injector = inj_bp.part
         files['injector'] = os.path.join(out_dir, f'{name}_injector.step')
         export_step(injector, files['injector'])
+        injector.label = 'injector'
         solids.append(injector)
 
     # ---- Assembly (tek dosya) ----
-    assembly = Compound(children=solids)
+    # Parça adları CAD ağacında görünsün (SolidWorks/Fusion 'COMPOUND ×5' sorunu)
+    assembly = Compound(children=solids, label='HRMA_motor_assembly')
     files['assembly'] = os.path.join(out_dir, f'{name}_assembly.step')
     export_step(assembly, files['assembly'])
 

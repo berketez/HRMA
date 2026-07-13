@@ -7,11 +7,16 @@ SRC="/Users/apple/Desktop/dosyalar/HRMA"
 APP="$B/mac/HRMA.app"
 RES="$APP/Contents/Resources"
 
-echo "[1/6] İskelet..."
+# Sürüm tek kaynaktan: hrma/__init__.py
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/hrma/__init__.py")"
+[ -n "$VERSION" ] || { echo "HATA: sürüm okunamadı"; exit 1; }
+echo "Sürüm: $VERSION"
+
+echo "[1/7] İskelet..."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$RES"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -19,16 +24,17 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>HRMA</string>
     <key>CFBundleDisplayName</key><string>HRMA</string>
     <key>CFBundleIdentifier</key><string>com.uzaytek.hrma</string>
-    <key>CFBundleVersion</key><string>1.0.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
+    <key>CFBundleVersion</key><string>${VERSION}</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleExecutable</key><string>HRMA</string>
     <key>CFBundleIconFile</key><string>icon.icns</string>
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <!-- Ana çalıştırılabilir script olduğu için LaunchServices pencere kaydı
-         beklemesin: Dock'ta sonsuz zıplama bunun yüzündendi (2026-07-13) -->
-    <key>LSUIElement</key><true/>
+    <!-- LSUIElement KALDIRILDI (2026-07-14): pencere artık pywebview ile
+         süreç içinde açılıyor; uygulama Dock'ta normal görünür. Eski
+         "sonsuz zıplama" sorunu sunucunun arka plana atılıp stub'ın hemen
+         çıkmasından kaynaklanıyordu; şimdi python ön planda çalışıyor. -->
 </dict>
 </plist>
 PLIST
@@ -71,61 +77,76 @@ case "$APP_BUNDLE" in
     ;;
 esac
 
-# İlk onaydan sonra karantinayı temizle (sonraki açılışlar sorunsuz olsun)
-xattr -dr com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+# İlk onaydan sonra karantinayı temizle (sonraki açılışlar sorunsuz olsun).
+# DİKKAT (2026-07-14): xattr -dr 1.4 GB'lık ağacın tamamını tarıyor ve
+# açılışı DAKİKALARCA bloklayabiliyordu. Artık yalnızca bundle kökünde
+# karantina işareti varsa ve ARKA PLANDA çalışır; açılışı bekletmez.
+if xattr -p com.apple.quarantine "$APP_BUNDLE" >/dev/null 2>&1; then
+  ( xattr -dr com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true ) &
+fi
 
 PY="$RES/python/bin/python3.12"
 LAUNCH="$RES/app/launcher.py"
 
-# Terminal'siz başlatma (2026-07-13): sunucu arka planda, log dosyaya.
-# UI penceresini launcher kendisi açar (Chromium --app, ayrı profil) ve
-# pencere kapanınca sunucu da kapanır — gerçek uygulama davranışı.
 LOGDIR="$HOME/Library/Logs"
 mkdir -p "$LOGDIR"
 LOG="$LOGDIR/HRMA.log"
 
-# Zaten çalışıyorsa launcher 'already running' dalında yalnız pencere açar
+# ÖN PLANDA çalıştır (2026-07-14): pencereyi launcher pywebview ile süreç
+# içinde açar; süreç = uygulama ömrü. Splash shim'i sayesinde pencere
+# saniyeler içinde görünür, ağır importlar arkada yüklenir.
 export PYTHONUNBUFFERED=1
-"$PY" "$LAUNCH" >> "$LOG" 2>&1 &
-disown
-
-# 75 sn'ye kadar sunucunun kalkmasını bekle; kalkmazsa kullanıcıya söyle
-for i in $(seq 1 75); do
-  for p in 8080 8081 8082 8083 8084; do
-    if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$p/"; then
-      exit 0
-    fi
-  done
-  sleep 1
-done
-osascript -e 'display dialog "HRMA başlatılamadı. Ayrıntı için şu dosyaya bakın: Kitaplık/Logs/HRMA.log" buttons {"Tamam"} with icon caution with title "HRMA"' >/dev/null 2>&1
-exit 1
+exec "$PY" "$LAUNCH" >> "$LOG" 2>&1
 MAIN
 chmod +x "$APP/Contents/MacOS/hrma_baslat.sh"
 
-echo "[2/6] Python runtime..."
+echo "[2/7] Python runtime..."
 tar -xzf "$B/runtime/pbs-mac.tar.gz" -C "$RES"   # 'python/' kökünü açar
 
-echo "[3/6] libs..."
+echo "[3/7] libs..."
 cp -R "$B/mac/libs" "$RES/libs"
 # rocketcea: PyPI'da mac wheel yok — çalışan anaconda ortamından kopyala (arm64, numpy 1.26.4 uyumlu)
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea "$RES/libs/"
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea-*.dist-info "$RES/libs/" 2>/dev/null || true
 
-echo "[4/6] Uygulama kaynakları..."
+# pywebview (yerel WKWebView penceresi) + pyobjc ailesi — marker sorunu
+# yüzünden --no-deps + açık liste (bkz. build_win_payload.sh notu).
+# mac/libs eski bir kopyadan geliyorsa bile bu adım güncel tutar.
+python3 -m pip install --target "$RES/libs" --no-deps --only-binary=:all: \
+    --upgrade \
+    pywebview==6.2.1 bottle==0.13.4 \
+    pyobjc-core==12.2.1 pyobjc-framework-Cocoa==12.2.1 \
+    pyobjc-framework-Quartz==12.2.1 pyobjc-framework-Security==12.2.1 \
+    pyobjc-framework-UniformTypeIdentifiers==12.2.1 \
+    pyobjc-framework-WebKit==12.2.1 \
+    --no-warn-script-location
+# proxy_tools: yalnız sdist (saf Python) → --only-binary'siz ayrı kurulur
+python3 -m pip install --target "$RES/libs" --no-deps --upgrade \
+    proxy_tools==0.1.0 --no-warn-script-location
+
+# Doğrulama: pywebview'in JS varlıkları olmadan pencere açılışta çöker
+# (OC_PythonException: Cannot find JS directory — 2026-07-14 vakası)
+[ -d "$RES/libs/webview/js" ] || { echo "HATA: webview/js eksik!"; exit 1; }
+[ -d "$RES/libs/reportlab" ] || { echo "HATA: reportlab eksik!"; exit 1; }
+
+echo "[4/7] Uygulama kaynakları..."
 mkdir -p "$RES/app"
 rsync -a --exclude='__pycache__' "$SRC/hrma" "$RES/app/"
 rsync -a "$SRC/data" "$RES/app/"
 cp "$B/launcher.py" "$RES/app/launcher.py"
 cp "$SRC/icon.icns" "$RES/icon.icns"
 
-echo "[5/6] Temizlik..."
-find "$RES/libs" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+echo "[5/7] Temizlik..."
 rm -rf "$RES/libs/bin" 2>/dev/null || true   # --target'ın script stub'ları gereksiz (kaleido hariç — kontrol edilecek)
+
+echo "[6/7] Bytecode ön-derleme (ilk açılışı hızlandırır)..."
+# Paketin KENDİ python'u ile derle (magic number uyumu garanti).
+# __pycache__ silinmiyor — ilk açılışta pandas/scipy derleme bedeli kalkar.
+"$RES/python/bin/python3.12" -m compileall -q -j 0 "$RES/libs" "$RES/app" || true
 
 # Bundle seviyesinde ad-hoc imza (arm64 exec ile tutarlı mühür)
 codesign --force -s - "$APP" 2>/dev/null || true
 
-echo "[6/6] Boyut:"
+echo "[7/7] Boyut:"
 du -sh "$APP"
-echo "TAMAM: $APP"
+echo "TAMAM: $APP (v$VERSION)"
