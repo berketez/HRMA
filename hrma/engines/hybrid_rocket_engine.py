@@ -855,29 +855,70 @@ class HybridRocketEngine:
         }
 
         # --- 3. Injector Design ---
-        # Injector sizing: total orifice area from Bernoulli with discharge coeff
-        Cd_inj = 0.65  # Typical sharp-edge orifice discharge coefficient
+        # Gerçek tasarım: injector_design modülü (docs/10_Enjektor_ARGE.md).
+        # N2O'da Dyer NHNE iki-faz debisi, Cd gerekçesi, delik planı, SMD,
+        # chug/flip kontrolleri. Modül hata verirse eski basit Bernoulli
+        # hesabına düşülür (hesap zinciri kırılmaz).
         delta_P_inj = self._inj_delta_P  # bar (stored from _design_fuel_grain)
         rho_ox = self._inj_rho_ox        # kg/m³
-        # A_inj = mdot_ox / (Cd * sqrt(2 * rho_ox * delta_P))
-        A_inj_total = self.mdot_ox / (Cd_inj * np.sqrt(2 * rho_ox * delta_P_inj * 1e5))
-        n_orifices = 12  # Typical showerhead pattern
-        A_single = A_inj_total / n_orifices
-        d_orifice = np.sqrt(4 * A_single / np.pi)  # m
-        # Manifold diameter: ~2x port diameter initial (practical sizing)
-        manifold_d = self.D_port_initial * 2.0
-
-        basic_results['injector_design'] = {
-            'injector_type': 'showerhead',
-            'oxidizer_flow_rate_kg_s': self.mdot_ox,
-            'injection_velocity_m_s': self._inj_velocity,
-            'number_of_orifices': n_orifices,
-            'orifice_diameter_mm': d_orifice * 1000,
-            'injection_pressure_drop_bar': delta_P_inj,
-            'manifold_diameter_mm': manifold_d * 1000,
-            'discharge_coefficient': Cd_inj,
-            'total_injector_area_mm2': A_inj_total * 1e6,
-        }
+        try:
+            from hrma.engines.injector_design import design_injector
+            inj_spec = {
+                'motor_type': 'hybrid',
+                'injector_type': 'showerhead',
+                'mdot_ox': self.mdot_ox,
+                'rho_ox': rho_ox,
+                'Pc_bar': self.P_c,
+                'dp_ratio_ox': delta_P_inj / self.P_c if self.P_c > 0 else 0.20,
+            }
+            ox_name = (getattr(self, 'oxidizer_type', None) or 'n2o').lower()
+            if ox_name == 'n2o':
+                # Tank sıcaklığı motor girdisi değil; doymuş depolama 293 K
+                # varsayımı (transient/blowdown varsayılanıyla aynı)
+                inj_spec['fluid_ox'] = 'n2o'
+                inj_spec['T_ox_K'] = 293.15
+            # Oda gazı yoğunluğu (SMD için): T_c ve MW = R_evrensel/R_spesifik
+            if getattr(self, 'T_c', None) and getattr(self, 'R', None):
+                inj_spec['T_c_K'] = self.T_c
+                inj_spec['mw_gas'] = 8314.462618 / self.R
+            detail = design_injector(inj_spec)
+            if detail.get('status') != 'success':
+                raise ValueError(detail.get('error', 'enjektör tasarım hatası'))
+            oxc = detail['ox_circuit']
+            basic_results['injector_design'] = {
+                'injector_type': detail['injector_type'],
+                'oxidizer_flow_rate_kg_s': self.mdot_ox,
+                'injection_velocity_m_s': oxc['velocity_m_s'],
+                'number_of_orifices': oxc['n_orifices'],
+                'orifice_diameter_mm': oxc['orifice_d_mm'],
+                'injection_pressure_drop_bar': oxc['delta_p_bar'],
+                'manifold_diameter_mm': oxc['manifold']['d_mm'],
+                'discharge_coefficient': oxc['cd'],
+                'total_injector_area_mm2': oxc['total_area_mm2'],
+            }
+            basic_results['injector_design_detail'] = detail
+        except Exception as _inj_err:
+            warnings.warn(f'injector_design modülü kullanılamadı, basit '
+                          f'hesaba düşüldü: {_inj_err}')
+            # Eski basit boyutlandırma (geriye uyum):
+            Cd_inj = 0.65  # Typical sharp-edge orifice discharge coefficient
+            A_inj_total = self.mdot_ox / (
+                Cd_inj * np.sqrt(2 * rho_ox * delta_P_inj * 1e5))
+            n_orifices = 12  # Typical showerhead pattern
+            A_single = A_inj_total / n_orifices
+            d_orifice = np.sqrt(4 * A_single / np.pi)  # m
+            manifold_d = self.D_port_initial * 2.0
+            basic_results['injector_design'] = {
+                'injector_type': 'showerhead',
+                'oxidizer_flow_rate_kg_s': self.mdot_ox,
+                'injection_velocity_m_s': self._inj_velocity,
+                'number_of_orifices': n_orifices,
+                'orifice_diameter_mm': d_orifice * 1000,
+                'injection_pressure_drop_bar': delta_P_inj,
+                'manifold_diameter_mm': manifold_d * 1000,
+                'discharge_coefficient': Cd_inj,
+                'total_injector_area_mm2': A_inj_total * 1e6,
+            }
 
         # --- 4. Design Summary ---
         # Total motor length estimate: chamber + convergent + divergent sections

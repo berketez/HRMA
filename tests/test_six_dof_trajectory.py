@@ -155,6 +155,36 @@ class TestWindResponse:
         """10 m/s yan rüzgârda kararlı araç α'yı sınırlı tutmalı."""
         assert flight_with_wind['max_alpha_deg'] < 15.0
 
+    def test_wind_direction_isotropy(self):
+        """Dik atışta fizik rüzgâr yönünden bağımsız olmalı (izotropi).
+
+        q̇ = ½·ω⊗q regresyonu: ters Hamilton sırası yalnız kuzey-rüzgârı
+        senaryosunda doğru sonucu taklit eder; doğu rüzgârında apoje
+        çöker (5178 m → 128 m) ve α patlar. Bu test o hatayı kilitler.
+        """
+        results = {}
+        for name, wdir in [('north', 0.0), ('east', 90.0), ('ne', 45.0)]:
+            solver = SixDOFTrajectory(
+                aero=_standard_rocket(), dry_mass=8.0, propellant_mass=4.0,
+                thrust=1200.0, burn_time=6.0, cd0=0.45,
+                wind_speed=8.0, wind_direction_deg=wdir,
+                launch_elevation_deg=90.0)
+            results[name] = solver.solve(t_max=200.0)
+
+        ap = {k: v['apogee'] for k, v in results.items()}
+        al = {k: v['max_alpha_deg'] for k, v in results.items()}
+        # Apoje ve max α her yönde aynı olmalı (%1 tolerans)
+        assert ap['east'] == pytest.approx(ap['north'], rel=0.01)
+        assert ap['ne'] == pytest.approx(ap['north'], rel=0.01)
+        assert al['east'] == pytest.approx(al['north'], rel=0.02)
+        # Sürüklenme rüzgârın geldiği yöne: kuzey rüzgârı → +x (kuzey),
+        # doğu rüzgârı → +y (doğu); büyüklükler eşit olmalı
+        r_n, r_e = results['north']['position'], results['east']['position']
+        drift_n = r_n[0][np.argmax(r_n[2])]
+        drift_e = r_e[1][np.argmax(r_e[2])]
+        assert drift_n > 0 and drift_e > 0
+        assert drift_e == pytest.approx(drift_n, rel=0.01)
+
 
 class TestInstability:
     def test_negative_static_margin_flagged(self):

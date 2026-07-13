@@ -1596,7 +1596,9 @@
     </div>
     
     <script>
-        let currentResults = null;
+        // var ŞART: window.currentResults olarak da okunuyor (let window'a yazmaz —
+        // 2026-07-13 bulgusu: CAD View butonları bu yüzden hep 'önce analiz' diyordu)
+        var currentResults = null;
         
         // UI Feedback Functions
         function showMessage(message, type = 'info') {
@@ -3890,19 +3892,59 @@ Please provide:
         }
         
         // CAD Generation Functions
+
+        // 3D CAD konteynerinin gizli sekme atalarını (analysis-tab / subtab /
+        // sub-subtab) aktive edip görünür olmasını garantiler. Solid sayfası
+        // düzeltme deseniyle tutarlı: önce görünürlük, sonra mount — gizliyken
+        // mount edilen sahne 0×0 canvas tuzağına düşebilir.
+        function ensureCadContainerVisible() {
+            const container = document.getElementById('cad_visualization');
+            if (!container) return false;
+            const sectionClasses = ['analysis-tab-content', 'subtab-content', 'sub-subtab-content'];
+            // Ata zincirini dıştan içe topla
+            const chain = [];
+            let el = container;
+            while (el && el !== document.body) {
+                if (el.classList && sectionClasses.some(c => el.classList.contains(c))) {
+                    chain.unshift(el);
+                }
+                el = el.parentElement;
+            }
+            chain.forEach(section => {
+                if (section.classList.contains('active')) return;
+                const cls = sectionClasses.find(c => section.classList.contains(c));
+                // Aynı gruptaki kardeş panelleri pasifle, bunu aç
+                const scope = section.parentElement || document;
+                scope.querySelectorAll(':scope > .' + cls).forEach(sib => sib.classList.remove('active'));
+                section.classList.add('active');
+                // İlgili sekme butonunun vurgusunu senkronla
+                const name = section.id.replace(/_(tab|content)$/, '');
+                const btn = document.querySelector('[onclick*="\'' + name + '\'"]');
+                if (btn) {
+                    (btn.parentElement || document).querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                }
+            });
+            if (chain.length) resizeVisiblePlots(document.getElementById('trajectory_tab'));
+            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return true;
+        }
+
         function generateBasicCAD() {
             // Use the existing CAD visualization
             if (window.currentResults) {
+                ensureCadContainerVisible();
                 generateCADVisualization(window.currentResults);
                 updateCadDescription('basic');
             } else {
-                alert('Please run motor analysis first to generate CAD visualization.');
+                showWarning('Please run motor analysis first to generate CAD visualization.');
             }
         }
         
         async function generateDetailedCAD() {
             try {
                 // Show loading message
+                ensureCadContainerVisible();
                 const cadContainer = document.getElementById('cad_visualization');
                 cadContainer.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; font-size: 18px; color: #666;">Generating detailed engineering CAD...</div>';
                 
@@ -4012,6 +4054,7 @@ Please provide:
     <script src="/static/js/motor_viz3d.js"></script>
     <script src="/static/js/motor_viz_deck.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
+    <script src="/static/js/injector_panel.js"></script>
     <script>
         // 6-DOF uçuş paneli — sıvı motorda sabit itki (sürekli rejim)
         document.addEventListener('DOMContentLoaded', function () {
@@ -4023,6 +4066,21 @@ Please provide:
                                      (document.getElementById('sd_burn') || {}).value) || 10 };
                     }
                     return null;
+                },
+            });
+            // Enjektör tasarım paneli — hesap sonucundan ṁ/Pc/ρ otomatik dolar
+            InjectorPanel.init({
+                motorType: 'liquid',
+                resultsProvider: function () {
+                    const cr = window.currentResults;
+                    if (!cr) return null;
+                    const mfr = (cr.feed_system && cr.feed_system.mass_flow_rates) || {};
+                    return { mdot_ox: mfr.oxidizer, mdot_fuel: mfr.fuel,
+                             Pc_bar: cr.chamber_pressure,
+                             T_c_K: cr.chamber_temperature,
+                             mw_gas: cr.molecular_weight,
+                             rho_ox: cr.oxidizer_density,
+                             rho_fuel: cr.fuel_density };
                 },
             });
         });

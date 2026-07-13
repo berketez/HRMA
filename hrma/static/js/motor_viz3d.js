@@ -72,6 +72,38 @@
         return tex;
     }
 
+    // Fırçalanmış metal dokusu: çevresel taşlama izleri (LatheGeometry
+    // UV'sinde u=çevre, v=profil → satır bazlı parlaklık gürültüsü çevresel
+    // çizgi üretir). bumpMap + roughnessMap olarak paylaşılır.
+    function brushedTexture() {
+        var c = makeCanvas(64, 256);
+        var g = c.getContext('2d');
+        for (var y = 0; y < 256; y++) {
+            // Düşük kontrast: sert çizgiler kapak yüzeyinde iç parıltıyı
+            // aynalayıp altın halka artefaktı üretiyordu (2026-07-13)
+            var v = 195 + Math.floor(Math.random() * 35);
+            g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
+            g.fillRect(0, y, 64, 1);
+        }
+        var tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(1, 3);
+        return tex;
+    }
+
+    // Kesit-uyumlu halka (O-ring / snap ring): cutaway modunda 270° yay,
+    // açıklığı lathe kesit boşluğuyla (φ=0 merkezli ±45°) hizalanır.
+    // Torus θ→lathe φ eşlemesi: φ = 90°−θ (rotateX(π/2) sonrası);
+    // rotateZ(−225°) ile çizilen yay φ∈[45°,315°] bandına oturur.
+    function ringGeo(R, tube, radialSeg, tubularSeg, cutaway) {
+        var arc = cutaway ? CUT_PHI_LENGTH : TAU;
+        var geo = new THREE.TorusGeometry(R, tube, radialSeg, tubularSeg, arc);
+        if (cutaway) geo.rotateZ(THREE.MathUtils.degToRad(-225));
+        geo.rotateX(Math.PI / 2);
+        return geo;
+    }
+
     // Monospace metin sprite'ı (ölçü etiketleri, HUD çağrıları)
     function textSprite(text, opts) {
         opts = opts || {};
@@ -524,16 +556,32 @@
         return pts;
     }
 
-    // Nozul katı poligonu: iç kontur + duvar ofsetli dış yol + montaj flanşı
+    // Nozul katı poligonu: iç kontur + duvar ofsetli dış yol + montaj flanşı.
+    // Boğaz bölgesinde gövde iç yüzeyi grafit insert kalınlığı kadar dışa
+    // ötelenir; insert ayrı katı olarak döner (gerçek motor mimarisi:
+    // grafit boğaz insert'i + metal tutucu gövde).
     function nozzleProfile(dims) {
         var inner = nozzleInnerContour(dims);
         var zEnd = inner[inner.length - 1].z;
         var flangeR = dims.rcOut + dims.flangeLip;
         var flangeZ1 = dims.Lch + dims.flangeT;
 
+        // İnsert aralığı: konverjanın ortasından diverjanın ilk çeyreğine
+        var tIns = clamp(0.35 * dims.rt, 2.5, 10);
+        var zt = dims.Lch + dims.Lc;
+        var zA = dims.Lch + 0.45 * dims.Lc;
+        var zB = zt + 0.28 * dims.Ld;
+        var ramp = Math.max(2, 0.08 * (zB - zA)); // uçlarda yumuşak geçiş
+        function insOffset(z) {
+            if (z <= zA || z >= zB) return 0;
+            var fIn = clamp((z - zA) / ramp, 0, 1);
+            var fOut = clamp((zB - z) / ramp, 0, 1);
+            return tIns * Math.min(fIn, fOut);
+        }
+
         var poly = [];
-        // iç yüzey (öne doğru)
-        inner.forEach(function (p) { poly.push({ r: p.r, z: p.z }); });
+        // iç yüzey (öne doğru) — insert bölgesinde dışa ofsetli
+        inner.forEach(function (p) { poly.push({ r: p.r + insOffset(p.z), z: p.z }); });
         // çıkış dudağı
         poly.push({ r: inner[inner.length - 1].r + dims.nozzleWall, z: zEnd });
         // dış yüzey (geriye doğru, duvar ofseti + flanş bölgesi)
@@ -543,8 +591,20 @@
             if (p.z <= flangeZ1) rOut = Math.max(rOut, flangeR);
             poly.push({ r: rOut, z: p.z });
         }
+
+        // Grafit insert katısı: gerçek akış konturu ile ofsetli gövde arası
+        var span = inner.filter(function (p) { return p.z >= zA && p.z <= zB; });
+        var insertPoly = null;
+        if (span.length >= 3) {
+            insertPoly = [];
+            span.forEach(function (p) { insertPoly.push({ r: p.r, z: p.z }); });
+            for (var k = span.length - 1; k >= 0; k--) {
+                var q = span[k];
+                insertPoly.push({ r: q.r + Math.max(insOffset(q.z), 0.6), z: q.z });
+            }
+        }
         return { poly: poly, zExit: zEnd, rExit: inner[inner.length - 1].r,
-                 flangeR: flangeR, inner: inner };
+                 flangeR: flangeR, inner: inner, insertPoly: insertPoly };
     }
 
     // ------------------------------------------------------------------
@@ -554,18 +614,29 @@
     var viz = null; // tek aktif örnek
 
     function createMaterials() {
+        var brushed = brushedTexture();
         return {
-            casing: new THREE.MeshStandardMaterial({ color: 0x97a4b5, metalness: 0.88, roughness: 0.34 }),
+            // Fırçalanmış alüminyum kasa: çevresel taşlama izi bump+roughness
+            casing: new THREE.MeshStandardMaterial({
+                color: 0x9fabbc, metalness: 0.72, roughness: 0.42,
+                bumpMap: brushed, bumpScale: 0.12, roughnessMap: brushed
+            }),
             casingCut: new THREE.MeshStandardMaterial({ color: 0xc3ccd8, metalness: 0.15, roughness: 0.9, side: THREE.DoubleSide }),
-            nozzle: new THREE.MeshStandardMaterial({ color: 0x454e59, metalness: 0.72, roughness: 0.42 }),
-            nozzleCut: new THREE.MeshStandardMaterial({ color: 0x6e7987, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide }),
+            nozzle: new THREE.MeshStandardMaterial({ color: 0x525c68, metalness: 0.78, roughness: 0.38 }),
+            nozzleCut: new THREE.MeshStandardMaterial({ color: 0x76818f, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide }),
+            // Grafit boğaz insert'i: koyu, mat, hafif yansımalı
+            graphite: new THREE.MeshStandardMaterial({ color: 0x23262a, metalness: 0.42, roughness: 0.78 }),
+            graphiteCut: new THREE.MeshStandardMaterial({ color: 0x393e45, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide }),
             grain: new THREE.MeshStandardMaterial({ color: 0x6d4326, metalness: 0.0, roughness: 0.94 }),
             grainCut: new THREE.MeshStandardMaterial({ color: 0x936243, metalness: 0.0, roughness: 1.0, side: THREE.DoubleSide }),
             liner: new THREE.MeshStandardMaterial({ color: 0x23282e, metalness: 0.05, roughness: 0.9 }),
             linerCut: new THREE.MeshStandardMaterial({ color: 0x3a4046, metalness: 0.0, roughness: 1.0, side: THREE.DoubleSide }),
             injector: new THREE.MeshStandardMaterial({ color: 0xb08d57, metalness: 0.85, roughness: 0.38 }),
             injectorCut: new THREE.MeshStandardMaterial({ color: 0xd2b184, metalness: 0.2, roughness: 0.85, side: THREE.DoubleSide }),
-            bolt: new THREE.MeshStandardMaterial({ color: 0x2e343c, metalness: 0.8, roughness: 0.45 }),
+            bolt: new THREE.MeshStandardMaterial({ color: 0x343b44, metalness: 0.85, roughness: 0.4 }),
+            steel: new THREE.MeshStandardMaterial({ color: 0x6f7883, metalness: 0.9, roughness: 0.32 }),
+            // O-ring elastomeri: tam mat, simsiyah
+            oring: new THREE.MeshStandardMaterial({ color: 0x121417, metalness: 0.0, roughness: 0.97 }),
             orifice: new THREE.MeshStandardMaterial({ color: 0x10151a, metalness: 0.2, roughness: 0.8 })
         };
     }
@@ -637,7 +708,8 @@
         this._keyLight = key;
         this.scene.add(key);
         this._rimCyan = new THREE.PointLight(0x00e5ff, 0.55, 0, 2);
-        this._rimOrange = new THREE.PointLight(0xff7a1a, 0.4, 0, 2);
+        // 0.15: 0.4'te metal kapak yüzeyi turuncuyu aynalayıp altın görünüyordu
+        this._rimOrange = new THREE.PointLight(0xff7a1a, 0.15, 0, 2);
         this.scene.add(this._rimCyan, this._rimOrange);
 
         // Yanma ışıkları (dinamik)
@@ -672,20 +744,111 @@
         this.assembly = new THREE.Group();
         this.parts = {};
 
-        // --- Gövde: baş kapak + silindirik tüp (tek katı) ---
+        var isLiquid = d.motorType === 'liquid';
+        var isSolid = d.motorType === 'solid';
+
+        // Detay segment sayıları: perf modunda düşürülür
+        var segR = this._perfMode ? 8 : 12;    // torus kesit segmenti
+        var segC = this._perfMode ? 24 : 48;   // torus çevre segmenti
+
+        // O-ring boyutu ve yiv yardımcısı: rOut duvarında zList merkezli
+        // kare yivler açan (r,z) nokta dizisi üretir (z artan yönde)
+        var orr = clamp(0.16 * d.capT, 1.2, 3);   // O-ring kesit yarıçapı
+        function wallWithGrooves(rOut, z0, z1, zList, gw, gd) {
+            var pts = [{ r: rOut, z: z0 }];
+            zList.forEach(function (zc) {
+                pts.push({ r: rOut, z: zc - gw });
+                pts.push({ r: rOut - gd, z: zc - gw });
+                pts.push({ r: rOut - gd, z: zc + gw });
+                pts.push({ r: rOut, z: zc + gw });
+            });
+            pts.push({ r: rOut, z: z1 });
+            return pts;
+        }
+        function addORing(parent, R, zPos, tube) {
+            var ring = new THREE.Mesh(ringGeo(R, tube || orr, segR, segC, cut), mats.oring);
+            ring.position.y = zPos;
+            parent.add(ring);
+            return ring;
+        }
+        // Dış parting-line halkası (işlenmiş parça birleşim izi — tam çember)
+        function addJointLine(parent, zPos) {
+            var jr = new THREE.Mesh(
+                new THREE.TorusGeometry(d.rcOut + 0.25, 0.5, 6, segC), mats.bolt);
+            jr.rotation.x = Math.PI / 2;
+            jr.position.y = zPos;
+            parent.add(jr);
+        }
+
+        // --- Gövde tüpü (kapak artık AYRI parça — gerçek motor mimarisi) ---
+        // Katıda tüp öne uzar: kapak tüpün içinde, snap-ring ile tutulur
+        var tubeZ0 = isSolid ? -d.capT - 4 : 0;
         var casingPoly = [
-            { r: 0, z: -d.capT },
-            { r: d.rcOut, z: -d.capT },
+            { r: d.rc, z: tubeZ0 },
+            { r: d.rcOut, z: tubeZ0 },
             { r: d.rcOut, z: d.Lch },
-            { r: d.rc, z: d.Lch },
-            { r: d.rc, z: 0 },
-            { r: 0, z: 0 }
+            { r: d.rc, z: d.Lch }
         ];
         var casing = buildSolid(casingPoly, mats.casing, mats.casingCut, cut);
         this.parts.casing = casing;
 
-        var isLiquid = d.motorType === 'liquid';
-        var isSolid = d.motorType === 'solid';
+        // --- Ön kapak (forward closure): O-ring yivli, cıvatalı/snap-ring'li ---
+        var closure = new THREE.Group();
+        if (isSolid) {
+            // Tüp içine oturan kapak: OD üzerinde 2 O-ring yivi + önünde
+            // tüp iç yüzeyine oturan snap ring (segman)
+            var cOD = d.rc - 0.15;
+            var zO1 = -0.65 * d.capT, zO2 = -0.3 * d.capT;
+            // Yiv yarı genişliği aralığa oranla sınırlı: dar kapakta
+            // yivlerin çakışıp poligonu kendine kesmesini önler
+            var gwS = Math.min(orr * 0.9, 0.15 * d.capT);
+            var closPoly = [{ r: 0, z: -d.capT }]
+                .concat(wallWithGrooves(cOD, -d.capT, 0, [zO1, zO2], gwS, orr * 0.7))
+                .concat([{ r: 0, z: 0 }]);
+            closure.add(buildSolid(closPoly, mats.casing, mats.casingCut, cut));
+            addORing(closure, cOD - orr * 0.7 + orr * 0.55, zO1);
+            addORing(closure, cOD - orr * 0.7 + orr * 0.55, zO2);
+            // Snap ring: kapağın önünde, tüp ID yivinde
+            var snap = new THREE.Mesh(
+                ringGeo(d.rc - 0.6, clamp(0.12 * d.capT, 1, 2.4), 4, segC, cut),
+                mats.steel);
+            snap.position.y = -d.capT - 2;
+            closure.add(snap);
+        } else {
+            // Hibrit/sıvı: flanşlı kapak + tüp içine giren spigot (2 O-ring
+            // yivli) + tüp alın yüzeyine cıvata çemberi
+            var spigR = d.rc - 0.25;
+            var sg = clamp(0.55 * d.capT, 5, 20);
+            var zg1 = 0.32 * sg, zg2 = 0.72 * sg;
+            // Yiv yarı genişliği spigot boyuna oranla sınırlı (çakışma önlemi)
+            var gwH = Math.min(orr * 0.9, 0.16 * sg);
+            var closPoly2 = [
+                { r: 0, z: -d.capT },
+                { r: d.rcOut, z: -d.capT },
+                { r: d.rcOut, z: 0 }
+            ].concat(wallWithGrooves(spigR, 0, sg, [zg1, zg2], gwH, orr * 0.7))
+             .concat([{ r: 0, z: sg }]);
+            closure.add(buildSolid(closPoly2, mats.casing, mats.casingCut, cut));
+            addORing(closure, spigR - orr * 0.7 + orr * 0.55, zg1);
+            addORing(closure, spigR - orr * 0.7 + orr * 0.55, zg2);
+            // Cıvata çemberi: kapak ön yüzünden tüp alın yüzeyine (M4-M6 görünüm)
+            var cbR = clamp(0.3 * d.casingWall, 1.6, 4);
+            var cbH = clamp(0.5 * d.capT, 4, 12);
+            var cbGeo = new THREE.CylinderGeometry(cbR, cbR, cbH, 6);
+            var cbCircle = (d.rc + d.rcOut) / 2;
+            for (var cb = 0; cb < d.nBolts; cb++) {
+                var cphi = ((cb + 0.5) / d.nBolts) * TAU;
+                var cbolt = new THREE.Mesh(cbGeo, mats.bolt);
+                cbolt.position.set(cbCircle * Math.sin(cphi), -d.capT - cbH * 0.45,
+                    cbCircle * Math.cos(cphi));
+                cbolt.userData.phi = cphi;
+                cbolt.userData.hideInCut = true;
+                cbolt.castShadow = true;
+                closure.add(cbolt);
+            }
+            addJointLine(closure, 0.4); // kapak-tüp birleşim izi
+        }
+        this.parts.closure = closure;
 
         // Oksitleyici/yakıt giriş borusu + rakor (katıda yok — kapalı kapak)
         if (!isSolid) {
@@ -695,14 +858,14 @@
                 { r: d.inletR, z: -d.capT + 1 },
                 { r: 0, z: -d.capT + 1 }
             ];
-            casing.add(buildSolid(inletPoly, mats.casing, null, false));
+            closure.add(buildSolid(inletPoly, mats.casing, null, false));
             var collar = new THREE.Mesh(
-                new THREE.TorusGeometry(d.inletR + 1.5, 2.2, 12, 40),
+                new THREE.TorusGeometry(d.inletR + 1.5, 2.2, segR, segC),
                 mats.bolt
             );
             collar.rotation.x = Math.PI / 2;
             collar.position.y = -d.capT - d.inletL * 0.55;
-            casing.add(collar);
+            closure.add(collar);
         }
 
         // Sıvı motor: rejeneratif soğutma kanalı bilezikleri (görsel detay)
@@ -731,10 +894,16 @@
             this.parts.liner = new THREE.Group();
         }
 
-        // --- Enjektör plakası + orifis deseni (katı motorda yok) ---
+        // --- Enjektör plakası + showerhead orifis deseni (katı motorda yok) ---
         if (!isSolid) {
+            // Plaka, kapak spigot'unun hemen arkasına oturur (manifold
+            // hacmi = spigot yüzü ile plaka arasındaki boşluk)
+            var injZ0 = sg + 2;
             var injT = clamp(0.9 * d.capT, 6, 24);
-            var injZ0 = 4;
+            if (!isLiquid) {
+                // Hibritte plaka grain başlangıcına taşmasın
+                injT = Math.max(4, Math.min(injT, d.zg0 - injZ0 - 1));
+            }
             var injPoly = [
                 { r: 0, z: injZ0 },
                 { r: d.rc - 0.4, z: injZ0 },
@@ -742,15 +911,34 @@
                 { r: 0, z: injZ0 + injT }
             ];
             var injector = buildSolid(injPoly, mats.injector, mats.injectorCut, cut);
-            var oriGeo = new THREE.CylinderGeometry(Math.max(d.orificeR * 1.6, 1.2), Math.max(d.orificeR * 1.6, 1.2), 1.6, 12);
-            for (var k = 0; k < d.nOrifices; k++) {
-                var phi = (k / d.nOrifices) * TAU;
-                var rr = 0.55 * d.rc;
-                var ori = new THREE.Mesh(oriGeo, mats.orifice);
-                ori.position.set(rr * Math.sin(phi), injZ0 + injT + 0.5, rr * Math.cos(phi));
-                ori.userData.phi = phi;
-                ori.userData.hideInCut = true;
-                injector.add(ori);
+            // Showerhead: eş merkezli 2-3 delik halkası (çevreyle orantılı dağıtım)
+            var oriR = Math.max(d.orificeR * 1.6, 1.2);
+            var oriGeo = new THREE.CylinderGeometry(oriR, oriR, 1.6, this._perfMode ? 8 : 12);
+            var rMaxO = d.rc - 6;
+            var ringFr = d.nOrifices >= 10 ? [0.35, 0.6, 0.85] : [0.4, 0.75];
+            var frSum = ringFr.reduce(function (a, b) { return a + b; }, 0);
+            ringFr.forEach(function (fr, ri) {
+                var rr = fr * rMaxO;
+                var nRing = Math.max(3, Math.round(d.nOrifices * fr / frSum));
+                for (var k = 0; k < nRing; k++) {
+                    var phi = ((k + ri * 0.5) / nRing) * TAU; // halkalar arası kaydırma
+                    var ori = new THREE.Mesh(oriGeo, mats.orifice);
+                    ori.position.set(rr * Math.sin(phi), injZ0 + injT + 0.5, rr * Math.cos(phi));
+                    ori.userData.phi = phi;
+                    ori.userData.hideInCut = true;
+                    injector.add(ori);
+                }
+            });
+            // Hibrit: kapaktan port girişine uzanan ateşleyici (pirinç gövde)
+            if (!isLiquid) {
+                var igR = clamp(0.09 * d.rc, 2.5, 8);
+                var igL = (injZ0 + injT + 10) - (-d.capT + 1);
+                var ig = new THREE.Mesh(
+                    new THREE.CylinderGeometry(igR, igR * 0.8, igL, this._perfMode ? 10 : 16),
+                    mats.injector);
+                ig.position.y = (-d.capT + 1) + igL / 2;
+                ig.castShadow = true;
+                injector.add(ig);
             }
             this.parts.injector = injector;
         } else {
@@ -762,11 +950,20 @@
         this._grainMesh = null;
         this._rebuildGrain(portRadiusAt(d, this.state.time), true);
 
-        // --- Nozul (+ montaj flanşı) ---
+        // --- Nozul: metal tutucu gövde + grafit boğaz insert'i + flanş ---
         var np = nozzleProfile(d);
         this._nozzleInfo = np;
         var nozzle = buildSolid(np.poly, mats.nozzle, mats.nozzleCut, cut);
-        // Flanş cıvataları
+        // Grafit insert: gerçek akış konturunu taşıyan ayrı katı (kesitte
+        // koyu bant olarak metal gövdeden ayrışır)
+        if (np.insertPoly) {
+            nozzle.add(buildSolid(np.insertPoly, mats.graphite, mats.graphiteCut, cut));
+        }
+        // Nozul-kasa arayüz O-ringi (flanş alın yüzeyi contası)
+        addORing(nozzle, (d.rc + d.rcOut) / 2, d.Lch + 0.6,
+                 clamp(0.18 * d.flangeT, 1.2, 3));
+        addJointLine(nozzle, d.Lch - 0.4); // tüp-flanş birleşim izi
+        // Flanş cıvataları (retention: cıvatalı flanş)
         var boltR = clamp(0.05 * d.rc, 2.2, 6);
         var boltGeo = new THREE.CylinderGeometry(boltR, boltR, d.flangeT * 0.9, 6); // altıgen başlı görünüm
         var boltCircle = (np.flangeR + d.rcOut) / 2 + 1;
@@ -802,8 +999,8 @@
         this._throatFlame.position.set(0, d.Lch + d.Lc, 0);
         this._throatFlame.scale.setScalar(d.rt * 3.2);
 
-        this.assembly.add(this.parts.casing, this.parts.liner, this.parts.injector,
-            this.parts.grain, this.parts.nozzle, this._throatFlame);
+        this.assembly.add(this.parts.casing, this.parts.closure, this.parts.liner,
+            this.parts.injector, this.parts.grain, this.parts.nozzle, this._throatFlame);
 
         // Modeli merkeze al
         var zMin = -d.capT - d.inletL;
@@ -1010,9 +1207,10 @@
     MotorScene.prototype._applyExplode = function (f) {
         if (!this.parts.casing) return;
         var L = this._totalLen;
-        this.parts.casing.position.y = -0.34 * L * f;
-        this.parts.injector.position.y = -0.18 * L * f;
-        this.parts.liner.position.y = -0.08 * L * f;
+        if (this.parts.closure) this.parts.closure.position.y = -0.48 * L * f;
+        this.parts.casing.position.y = -0.30 * L * f;
+        this.parts.injector.position.y = -0.16 * L * f;
+        this.parts.liner.position.y = -0.06 * L * f;
         this.parts.grain.position.y = 0.10 * L * f;
         this.parts.nozzle.position.y = 0.30 * L * f;
     };
@@ -1191,8 +1389,10 @@
         callout(this._nozzleInfo.zExit - 2, this._nozzleInfo.rExit + d.nozzleWall, 'ØE ' + d.de.toFixed(1) + ' mm');
 
         // Toplam uzunluk = kapak dışı → nozul çıkışı (2D kesitle aynı tanım;
-        // oksitleyici giriş borusu hariç)
-        var totalTxt = textSprite('L ' + (this._nozzleInfo.zExit + d.capT).toFixed(0) + ' mm  •  GRAIN ' + d.Lg.toFixed(0) + ' mm',
+        // oksitleyici giriş borusu hariç). GRAIN etiketi sıvıda anlamsız —
+        // orada Lg yanma odası boyudur, CHAMBER olarak yazılır.
+        var lgLabel = (d.motorType === 'liquid' ? 'CHAMBER ' : 'GRAIN ') + d.Lg.toFixed(0) + ' mm';
+        var totalTxt = textSprite('L ' + (this._nozzleInfo.zExit + d.capT).toFixed(0) + ' mm  •  ' + lgLabel,
             { border: 'rgba(255,150,60,0.55)', color: '#ffd9a8' });
         var th = scaleBase * 0.62;
         totalTxt.scale.set(th * totalTxt.userData.aspect, th, 1);
@@ -1478,11 +1678,18 @@
         this._camPresetIdx = ((this._camPresetIdx || 0) + 1) % order.length;
         return this.setCameraPreset(order[this._camPresetIdx]);
     };
-    // Kalite anahtarı: 'high' (varsayılan) | 'perf' — pixelRatio + partikül tavanı
+    // Kalite anahtarı: 'high' (varsayılan) | 'perf' — pixelRatio + partikül
+    // tavanı + donanım detay segmentleri (O-ring/cıvata/halka poligon sayısı)
     MotorScene.prototype.setQuality = function (mode) {
         var perf = mode === 'perf';
         this._qualityFactor = perf ? 0.45 : 1.0;
         this.renderer.setPixelRatio(perf ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+        if (this._perfMode !== perf) {
+            this._perfMode = perf;
+            this._lastPortR = -1;
+            this._buildMotor();     // detay geometrileri yeni segment sayısıyla
+            this._buildLabels();
+        }
         return perf ? 'perf' : 'high';
     };
     MotorScene.prototype.dispose = function () {
@@ -1495,6 +1702,8 @@
             if (o.material) {
                 (Array.isArray(o.material) ? o.material : [o.material]).forEach(function (m) {
                     if (m.map) m.map.dispose();
+                    if (m.bumpMap) m.bumpMap.dispose();
+                    if (m.roughnessMap && m.roughnessMap !== m.bumpMap) m.roughnessMap.dispose();
                     m.dispose();
                 });
             }

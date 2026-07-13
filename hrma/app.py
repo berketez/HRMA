@@ -669,6 +669,44 @@ def transient_analysis():
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
+@app.route('/api/injector-design', methods=['POST'])
+def injector_design_api():
+    """Enjektör tasarımı — docs/10_Enjektor_ARGE.md bölüm C sözleşmesi.
+
+    Girdi: spec B.1 alanları (motor_type, injector_type, mdot_ox, ...).
+    Kolaylık: from_results=true + motor_results bloğu gönderilirse
+    mdot_ox/mdot_fuel/Pc_bar/T_c_K/mw_gas oradan doldurulur (istekte
+    açıkça verilen alan kazanır).
+
+    Yanıt: 200 {'status':'success','design':{...}} | 400 doğrulama |
+    500 beklenmeyen hata. Saf hesaptır, dosya yazmaz.
+    """
+    try:
+        data = request.json or {}
+        spec = {k: v for k, v in data.items()
+                if k not in ('from_results', 'motor_results')}
+
+        if data.get('from_results') and isinstance(
+                data.get('motor_results'), dict):
+            mr = data['motor_results']
+            for key in ('mdot_ox', 'mdot_fuel', 'Pc_bar', 'T_c_K', 'mw_gas'):
+                if spec.get(key) in (None, '', 0) and mr.get(key) is not None:
+                    spec[key] = mr[key]
+
+        from hrma.engines.injector_design import design_injector
+        design = design_injector(spec)
+        if isinstance(design, dict) and design.get('status') == 'error':
+            return jsonify({'status': 'error',
+                            'error': design.get('error', 'tasarım hatası')}), 400
+        return jsonify(sanitize_json_values(
+            {'status': 'success', 'design': design}))
+    except ValueError as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
 @app.route('/api/six-dof-analysis', methods=['POST'])
 def six_dof_analysis():
     """6-DOF rijit gövde uçuş analizi (Barrowman stabilite + weathercock).

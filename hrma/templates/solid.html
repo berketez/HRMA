@@ -1275,7 +1275,9 @@
     </div>
     
     <script>
-        let currentResults = null;
+        // var ŞART: window.currentResults olarak da okunuyor (let window'a yazmaz —
+        // 6-DOF thrustProvider ve rapor exportu aksi halde sessizce boş kalıyor)
+        var currentResults = null;
         
         // UI Feedback Functions
         function showMessage(message, type = 'info') {
@@ -2555,6 +2557,25 @@ Please provide:
             }
 
             const cadView = document.getElementById('cad_3d_view');
+            if (!cadView) {
+                showWarning('Design report not ready — run the analysis first.');
+                return;
+            }
+
+            // cad_3d_view, Design Report'un CAD sekmesinin İÇİNDE. Sekme kapalıyken
+            // mount edilirse canvas 0x0 kalır ve buton "çalışmıyor" görünür.
+            // Deck kurulmadan ÖNCE sekmeyi gerçek tab butonuyla aktive et.
+            const cadPanel = document.getElementById('tab-cad');
+            if (cadPanel && getComputedStyle(cadPanel).display === 'none') {
+                const cadTabBtn = Array.from(document.querySelectorAll('.tab-button'))
+                    .find(b => (b.getAttribute('onclick') || '').includes("'cad'"));
+                if (cadTabBtn) {
+                    cadTabBtn.click();          // showTab('cad') + buton stilleri tutarlı
+                } else {
+                    cadPanel.style.display = 'block';
+                }
+            }
+
             cadView.style.display = 'block';
 
             const grainType = currentResults.grain_type ||
@@ -2574,7 +2595,10 @@ Please provide:
                         motorType: 'solid',
                         portShape: portShape
                     });
-                if (deck) return;               // başarıyla kuruldu
+                if (deck) {
+                    cadView.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;                     // başarıyla kuruldu
+                }
                 // deck null (WebGL yok) → eski Plotly yoluna düş
                 cadView.style.height = '400px';
             }
@@ -2586,6 +2610,7 @@ Please provide:
                 displaylogo: false,
                 modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d']
             });
+            cadView.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
         
         function create3DMotorVisualization(results) {

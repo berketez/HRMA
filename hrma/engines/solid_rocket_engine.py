@@ -281,8 +281,39 @@ class SolidRocketEngine:
             verts.append((r_i * np.cos(a_val), r_i * np.sin(a_val)))
         return _ShapelyPolygon(verts)
 
-    def _star_burn_perimeter(self, web_thickness):
-        """Star portun yanan çevresi (m), web ilerlemesine göre — KESİN model.
+    def _wagon_port_polygon(self):
+        """Wagon-wheel port kesiti: merkez + 6 çevre delik (shapely, metre).
+
+        Delik yarıçapı r_core = D_core/4 (eski modelle aynı), çevre delikler
+        R_pitch = D_chamber/4 dairesi üzerinde eşit aralıklı. D_core <
+        D_chamber/2 olduğu sürece delikler çakışmaz; çakışırsa union bunu
+        geometrik olarak zaten doğru ele alır.
+        """
+        r_core = self.D_core / 4.0
+        r_pitch = self.D_chamber / 4.0
+        holes = [_ShapelyPoint(0.0, 0.0).buffer(r_core, quad_segs=48)]
+        for k in range(6):
+            a = 2.0 * np.pi * k / 6.0
+            holes.append(_ShapelyPoint(r_pitch * np.cos(a),
+                                       r_pitch * np.sin(a))
+                         .buffer(r_core, quad_segs=48))
+        port = holes[0]
+        for h in holes[1:]:
+            port = port.union(h)
+        return port
+
+    def _grain_port_polygon(self):
+        """Grain tipine göre başlangıç port kesiti (shapely) — yoksa None."""
+        if not SHAPELY_AVAILABLE:
+            return None
+        if self.grain_type == 'star':
+            return self._star_port_polygon()
+        if self.grain_type == 'wagon_wheel':
+            return self._wagon_port_polygon()
+        return None
+
+    def _port_burn_perimeter(self, port0, web_thickness):
+        """Bir port kesitinin yanan çevresi (m), web ilerlemesine göre.
 
         Huygens ilkesi: yanan yüzey, başlangıç yüzeyinin web kadar normal
         ofsetidir → poligon buffer'ı bunu birebir üretir. Port grain dış
@@ -292,7 +323,6 @@ class SolidRocketEngine:
         hassasiyetle verir (test_star_grain_model testleri).
         """
         r_go = self.D_chamber / 2.0
-        port0 = self._star_port_polygon()
         port_w = port0.buffer(web_thickness, quad_segs=32) \
             if web_thickness > 0 else port0
         disk = _ShapelyPoint(0.0, 0.0).buffer(r_go, quad_segs=96)
@@ -305,6 +335,34 @@ class SolidRocketEngine:
         touching = inter.boundary.intersection(ring)
         per_burn = per_total - getattr(touching, 'length', 0.0)
         return max(per_burn, 0.0)
+
+    def _star_burn_perimeter(self, web_thickness):
+        """Star portun yanan çevresi (m) — _port_burn_perimeter sarmalayıcısı."""
+        return self._port_burn_perimeter(self._star_port_polygon(),
+                                         web_thickness)
+
+    def _propellant_volume(self):
+        """Grain tipine göre GERÇEK yakıt hacmi (m³).
+
+        Isp = I_toplam/(m_p·g0) tabanı bu hacimden gelir; tüm tipler için
+        dairesel annulus kullanmak star'da %10, end-burner'da %8 hata,
+        wagon'da belirsiz hata veriyordu (2026-07-13 formül teyidi, K2).
+        """
+        r_outer = self.D_chamber / 2.0
+        disk_area = np.pi * r_outer ** 2
+        if self.grain_type == 'end_burner':
+            # Core'suz tam silindir (sigara yanması)
+            return disk_area * self.L_grain
+        port0 = self._grain_port_polygon()
+        if port0 is not None:  # star / wagon_wheel (shapely varsa)
+            return max(disk_area - port0.area, 0.0) * self.L_grain
+        if self.grain_type == 'wagon_wheel':
+            # shapely yok: 7 delik analitik (çakışmasız varsayım)
+            r_core = self.D_core / 4.0
+            return max(disk_area - 7 * np.pi * r_core ** 2, 0.0) * self.L_grain
+        # bates (ve star fallback'i): dairesel annulus
+        r_inner = self.D_core / 2.0
+        return np.pi * (r_outer ** 2 - r_inner ** 2) * self.L_grain
 
     def calculate_burn_area(self, web_thickness):
         """Calculate burn area based on grain geometry"""
@@ -341,13 +399,23 @@ class SolidRocketEngine:
             return perimeter * self.L_grain
             
         elif self.grain_type == 'wagon_wheel':
-            # Multiple cores
+            # Gerçek model (2026-07-13): star ile aynı Huygens ofset makinesi,
+            # 7 delikli port poligonuyla. Eski 7·2π(r+w) formu delik-delik
+            # çakışmasını ve dış yarıçap kesmesini görmüyordu → kasadaki
+            # yakıtın 3 katı yakılıyordu (kütle korunumu ihlali).
+            if SHAPELY_AVAILABLE:
+                return self._port_burn_perimeter(
+                    self._wagon_port_polygon(), web_thickness) * self.L_grain
+            warnings.warn('shapely yok: wagon wheel için sınırsız-çevre '
+                          'yaklaşıklığı kullanılıyor (kütle korunumu zayıf)')
             n_cores = 7  # Center + 6 surrounding
             r_core = self.D_core / 4  # Smaller cores
             perimeter = n_cores * 2 * np.pi * (r_core + web_thickness)
             return perimeter * self.L_grain
-            
+
         else:  # end_burner
+            # Sigara yanması: sabit dairesel yüzey; web EKSENEL ilerler
+            # (sonlanma koşulu calculate_thrust_curve'de web >= L_grain).
             r_outer = self.D_chamber / 2
             return np.pi * r_outer**2
     
@@ -1558,7 +1626,16 @@ class SolidRocketEngine:
         """High-precision thrust curve with iterative pressure-burn rate coupling"""
         # Initial conditions
         web_thickness = 0
-        max_web = (self.D_chamber - self.D_core) / 2
+        if self.grain_type == 'end_burner':
+            # Eksenel yanma: tükenme koşulu grain BOYU üzerinden
+            # (radyal web anlamsız — eski koşul yakıtın %7'sinde kesiyordu)
+            max_web = self.L_grain
+        elif self.grain_type in ('star', 'wagon_wheel') and SHAPELY_AVAILABLE:
+            # Ofset modeli tükenmeyi geometrik bilir (A_burn → 0);
+            # üst sınır yalnız güvenlik ağı
+            max_web = self.D_chamber / 2
+        else:
+            max_web = (self.D_chamber - self.D_core) / 2
         
         time = []
         thrust = []
@@ -1688,15 +1765,11 @@ class SolidRocketEngine:
             mass_flow.append(m_dot_gen)
             burn_rate_data.append(r_burn_actual)
             
-            # Advanced web progression model
-            # Account for non-uniform burning
-            web_progression_factor = 1.0
-            if self.grain_type == 'star':
-                # Star points burn faster initially
-                star_factor = 1.2 * (1 - web_thickness / max_web)
-                web_progression_factor *= star_factor
-            
-            web_thickness += r_burn_actual * dt * web_progression_factor
+            # Web ilerlemesi: Huygens ofsetinde yüzey normal boyunca tam
+            # yanma hızıyla ilerler (dw/dt = r). Eski 1.2·(1−w/W) star
+            # çarpanı ofset modeliyle çifte-sayımdı: kütle korunumunu %44
+            # bozuyor ve yapay itki kuyruğu üretiyordu (2026-07-13 teyidi).
+            web_thickness += r_burn_actual * dt
             t += dt
             
             # Safety limits
@@ -1748,7 +1821,9 @@ class SolidRocketEngine:
         if self.L_grain <= 0:
             return {'error': 'Grain uzunluğu pozitif olmalı'}
             
-        grain_volume = np.pi * (outer_radius**2 - inner_radius**2) * self.L_grain
+        # Grain tipine göre gerçek hacim (star=poligon, end_burner=tam
+        # silindir, wagon=7 delik düşülmüş) — annulus yalnız BATES için doğru
+        grain_volume = self._propellant_volume()
         propellant_mass = grain_volume * self.rho_p
         
         # Kütle kontrolü

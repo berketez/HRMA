@@ -304,7 +304,9 @@ def create_motor_plot(motor_data):
             borderwidth=1
         ),
         hovermode='closest',
-        width=1200,
+        # Sabit width=1200 dar pencerede taşma/üst üste binme yaratıyordu;
+        # responsive konteynerde autosize + sabit yükseklik yeterli
+        autosize=True,
         height=600,
         plot_bgcolor='white',
         annotations=annotations,
@@ -680,7 +682,7 @@ def create_injector_plot(injector_data, injector_type):
         ),
         showlegend=True,
         legend=dict(x=0.02, y=0.98),
-        width=800,
+        autosize=True,
         height=800,
         plot_bgcolor='white',
         hovermode='closest',
@@ -854,7 +856,7 @@ def create_performance_plots(motor_data, injector_data):
         ),
         showlegend=True,
         height=850,
-        width=1300,
+        autosize=True,
         plot_bgcolor='white',
         paper_bgcolor='white',
         margin=dict(t=120, b=100, l=100, r=100)
@@ -962,7 +964,7 @@ def create_heat_transfer_plots(heat_data):
         title_text="Heat Transfer Analysis Dashboard",
         showlegend=True,
         height=800,
-        width=1200
+        autosize=True
     )
     
     # Update axes
@@ -1079,7 +1081,7 @@ def create_combustion_analysis_plots(combustion_data):
         title_text="Combustion Analysis Dashboard",
         showlegend=True,
         height=800,
-        width=1200
+        autosize=True
     )
     
     # Update axes
@@ -1205,7 +1207,7 @@ def create_structural_analysis_plots(structural_data):
         title_text="Structural Analysis Dashboard",
         showlegend=True,
         height=800,
-        width=1200
+        autosize=True
     )
     
     # Update axes
@@ -1320,7 +1322,7 @@ def create_real_time_dashboard(motor_data, time_data):
         title_text="Real-Time Motor Performance Dashboard",
         showlegend=False,
         height=900,
-        width=1400
+        autosize=True
     )
     
     return fig.to_json()
@@ -1419,7 +1421,7 @@ def create_3d_motor_visualization(motor_data):
             zaxis_title='Z (mm)',
             aspectmode='data'
         ),
-        width=800,
+        autosize=True,
         height=600
     )
     
@@ -1500,7 +1502,7 @@ def create_comparative_analysis_plot(motor_configs):
         title_text="Motor Configuration Comparison",
         showlegend=False,
         height=800,
-        width=1200
+        autosize=True
     )
     
     # Update axes
@@ -1600,7 +1602,7 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
             zaxis_title='Specific Impulse (s)',
             camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))
         ),
-        width=900,
+        autosize=True,
         height=700,
         showlegend=True
     )
@@ -1730,7 +1732,7 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
         },
         xaxis_title='Axial Position (mm)',
         yaxis_title='Radial Position (mm)',
-        width=1000,
+        autosize=True,
         height=600,
         showlegend=True
     )
@@ -1845,7 +1847,7 @@ def create_wall_heat_flux_waterfall_plot(thermal_data: Dict) -> str:
             zaxis_title='Heat Flux (MW/m²)',
             camera=dict(eye=dict(x=1.3, y=1.3, z=1.3))
         ),
-        width=1000,
+        autosize=True,
         height=700,
         showlegend=True
     )
@@ -2306,7 +2308,7 @@ def create_showerhead_with_tooltips(injector_data):
         plot_bgcolor='white',
         paper_bgcolor='white',
         hovermode='closest',
-        width=700,
+        autosize=True,
         height=700
     )
 

@@ -158,14 +158,19 @@ def _quat_to_dcm(q):
 
 
 def _quat_derivative(q, omega_body):
-    """q̇ = ½·q⊗[0,ω]"""
+    """q̇ = ½·q⊗[0,ω] — Hamilton çarpımı, vektör kısmı w·ω + v×ω.
+
+    Dikkat: ters sıra (½·ω⊗q) çapraz terimlerin işaretini çevirir ve yalnız
+    dönme ekseni fırlatma quaternion'ının ekseniyle paralelken aynı sonucu
+    verir; düzlem-dışı rüzgârda yön asimetrisi yaratır (2026-07-13 bulgusu).
+    """
     w, x, y, z = q
     p, qy, r = omega_body
     return 0.5 * np.array([
         -x * p - y * qy - z * r,
-        w * p + qy * z - r * y,
-        w * qy + r * x - p * z,
-        w * r + p * y - qy * x,
+        w * p + y * r - z * qy,
+        w * qy + z * p - x * r,
+        w * r + x * qy - y * p,
     ])
 
 

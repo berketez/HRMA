@@ -666,8 +666,9 @@
     <script src="/static/js/app.js"></script>
     <script src="/static/js/transient_panel.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
+    <script src="/static/js/injector_panel.js"></script>
     <script>
-        // Transient + 6-DOF panelleri (yeni fizik katmanlarının UI'ı)
+        // Transient + 6-DOF + Enjektör panelleri (yeni fizik katmanlarının UI'ı)
         document.addEventListener('DOMContentLoaded', function () {
             TransientPanel.init({ anchorId: 'trajectoryPanel' });
             SixDofPanel.init({
@@ -684,6 +685,18 @@
                                  burn_time: currentResults.motor.burn_time };
                     }
                     return null;
+                },
+            });
+            InjectorPanel.init({
+                anchorId: 'trajectoryPanel',
+                motorType: 'hybrid',
+                resultsProvider: function () {
+                    // Hibrit hesap sonucundan ṁ_ox / Pc / T_c otomatik dolar
+                    const m = window.currentResults && currentResults.motor;
+                    if (!m) return null;
+                    return { mdot_ox: m.mdot_ox,
+                             Pc_bar: m.chamber_pressure,
+                             T_c_K: m.chamber_temperature };
                 },
             });
         });
@@ -1565,8 +1578,13 @@
                 </div>
                 
                 <!-- Performance Analysis panel removed: duplicate of Performance Analysis Dashboard above -->
+
+                <!-- Transient + 6-DOF panelleri JS ile bu çapanın ÖNÜNE eklenir
+                     (tek kolonlu grid → tam genişlik; çapa yoksa çok kolonlu
+                     results-grid'e düşüp sıkışıyordu) -->
+                <div id="trajectoryPanel"></div>
             </div>
-            
+
             <!-- Export/CAD Actions Panel -->
             <div id="exportActionsPanel" class="panel" style="display: none; margin-top: 20px; clear: both;">
                 <h2>Export & CAD Options</h2>
@@ -1587,7 +1605,7 @@
                     <div class="export-section">
                         <h3>Regression Analysis</h3>
                         <div class="btn-group-export">
-                            <button class="btn btn-info" onclick="performRegressionAnalysis()" id="regressionBtn" disabled>
+                            <button class="btn btn-info" onclick="performRegressionAnalysis()" id="regressionBtn">
                                 <i class="fas fa-chart-line"></i> Analyze Regression Rate
                             </button>
                             <button class="btn btn-secondary" onclick="exportRegressionData()" id="exportRegressionBtn" disabled>
@@ -1970,6 +1988,18 @@
                     console.log('Activated button for:', tabName);
                 }
             }
+        }
+
+        // app.js'teki displayCalculationResults'u sarmala: güvenlik paneli
+        // (safety_analysis_panel) display:none başlar ve tek açıcısı kendi
+        // içindeki butondu (döngüsel kilit) — hesap sonrası burada açılır.
+        if (typeof displayCalculationResults === 'function') {
+            const _origDisplayCalcResults = displayCalculationResults;
+            window.displayCalculationResults = function (results) {
+                _origDisplayCalcResults.apply(this, arguments);
+                const sp = document.getElementById('safety_analysis_panel');
+                if (sp) sp.style.display = 'block';
+            };
         }
 
         // Altitude to pressure conversion (standard atmosphere)
@@ -3115,22 +3145,19 @@
 
         async function runParametricAnalysis() {
             const baseParams = getFormData();
-            const sweepParam = document.getElementById('sweep_parameter')?.value || 'of_ratio';
-            const sweepMin = parseFloat(document.getElementById('sweep_min')?.value || 0.5);
-            const sweepMax = parseFloat(document.getElementById('sweep_max')?.value || 3.0);
-            const sweepPoints = parseInt(document.getElementById('sweep_points')?.value || 20);
-            const includeTrajectory = document.getElementById('include_trajectory_sweep')?.checked || false;
-            
+            // Form id'leri: param_type/param_start/param_end/param_steps (parametric_tab).
+            // Endpoint (/parametric-analysis) düz form verisi + param_* anahtarları bekler.
+            const sweepParam = document.getElementById('param_type')?.value || 'of_ratio';
+            const sweepMin = parseFloat(document.getElementById('param_start')?.value);
+            const sweepMax = parseFloat(document.getElementById('param_end')?.value);
+            const sweepPoints = parseInt(document.getElementById('param_steps')?.value);
+
             const data = {
-                base_parameters: baseParams,
-                sweep_parameter: sweepParam,
-                sweep_range: [sweepMin, sweepMax],
-                sweep_points: sweepPoints,
-                include_trajectory: includeTrajectory,
-                vehicle_mass_dry: baseParams.vehicle_mass_dry,
-                vehicle_diameter: baseParams.vehicle_diameter,
-                launch_angle: baseParams.launch_angle,
-                launch_altitude: baseParams.launch_altitude
+                ...baseParams,
+                param_type: sweepParam,
+                param_start: isNaN(sweepMin) ? 1.5 : sweepMin,
+                param_end: isNaN(sweepMax) ? 4.0 : sweepMax,
+                param_steps: isNaN(sweepPoints) ? 10 : sweepPoints
             };
             
             showLoading(true);
@@ -3150,12 +3177,8 @@
                     if (results.plot) {
                         const plotData = JSON.parse(results.plot);
                         Plotly.newPlot('parametric_plot', plotData.data, plotData.layout);
-                        const parametricDiv = document.getElementById('parametric_results');
-                        if (parametricDiv) {
-                            parametricDiv.style.display = 'block';
-                        } else {
-                            console.error('parametric_results div not found!');
-                        }
+                        document.getElementById('parametric_plot')
+                            .scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     }
                     showMessage('Parametric analysis completed successfully', 'success');
                 } else {
@@ -4103,6 +4126,11 @@
             const regressionResultsDiv = document.getElementById('regressionResults');
             const chartDiv = document.getElementById('regressionChart');
             const dataDiv = document.getElementById('regressionData');
+
+            // Konteyner display:none başlar — grafik çizilmeden önce görünür yap
+            if (regressionResultsDiv) {
+                regressionResultsDiv.style.display = 'block';
+            }
             
             // Show results section
             const resultsPanelDiv = document.getElementById('resultsPanel');

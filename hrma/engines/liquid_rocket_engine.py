@@ -991,8 +991,13 @@ class LiquidRocketEngine:
         # We tanimindan: D = We_crit * sigma / (rho * v_rel^2).
         # We_crit ~ 12: dusuk viskoziteli sivi damlacik parcalanma esigi
         # (Lefebvre & McDonell, "Atomization and Sprays", 2nd ed.)
+        # 2026-07-13 teyidi: aerodinamik parcalanma We'si SUREKLI FAZ (oda
+        # gazi) yogunlugu ile tanimlanir; sivi yogunlugu kullanmak capi
+        # ~140x kucultuyordu ve deger her kosulda 10 um tabanina yapisiyordu
+        # (Lefebvre & McDonell 2nd ed., Bolum 2).
         target_weber = 12
-        droplet_diameter = target_weber * surface_tension / (self.rho_ox * (v_relative**2))
+        rho_gas = (self.P_c * PA_PER_BAR) / ((R_UNIVERSAL / self.mw) * self.T_c)
+        droplet_diameter = target_weber * surface_tension / (rho_gas * (v_relative**2))
         # Makul fiziksel sinirlar: 10-500 mikron (tipik enjektor sprey araligi)
         droplet_diameter = min(max(droplet_diameter, 10e-6), 500e-6)
 
@@ -1045,7 +1050,7 @@ class LiquidRocketEngine:
         else:
             combustion_efficiency = 0.95  # Conservative estimate
         
-        return {
+        result = {
             'injector_type': self.injector_type,
             'fuel_injection_area': A_fuel * 1e6,  # mm²
             'ox_injection_area': A_ox * 1e6,  # mm²
@@ -1065,6 +1070,58 @@ class LiquidRocketEngine:
             'weber_number': target_weber,
             'mixing_residence_time': residence_time * 1000  # ms
         }
+
+        # Gerçek tasarım katmanı: injector_design modülü (10_Enjektor_ARGE.md).
+        # Geriye uyum: mevcut alan adları korunur, eşleşen alanlar modül
+        # çıktısıyla doldurulur; tam çıktı 'injector_design_detail'. Modül
+        # hata verirse yukarıdaki eski hesap olduğu gibi döner.
+        try:
+            from hrma.engines.injector_design import design_injector
+            type_map = {'impinging': 'impinging_doublet',
+                        'coaxial': 'coax_swirl',
+                        'showerhead': 'showerhead',
+                        'pintle': 'pintle',
+                        'swirl': 'swirl'}
+            inj_spec = {
+                'motor_type': 'liquid',
+                'injector_type': type_map.get(self.injector_type,
+                                              'impinging_doublet'),
+                'mdot_ox': self.mdot_ox,
+                'mdot_fuel': self.mdot_fuel,
+                'rho_ox': self.rho_ox,
+                'rho_fuel': self.rho_fuel,
+                'Pc_bar': self.P_c,
+                'dp_ratio_ox': pressure_drop_factor,
+                'dp_ratio_fuel': pressure_drop_factor,
+                'T_c_K': self.T_c,
+                'mw_gas': self.mw,
+                'mu_ox': ox_viscosity,
+                'mu_fuel': fuel_viscosity,
+            }
+            detail = design_injector(inj_spec)
+            if detail.get('status') == 'success':
+                oxc, fc = detail['ox_circuit'], detail.get('fuel_circuit')
+                result['injector_design_detail'] = detail
+                result['number_of_elements'] = detail['pattern']['n_elements']
+                result['ox_orifice_diameter'] = oxc['orifice_d_mm']
+                result['ox_injection_velocity'] = oxc['velocity_m_s']
+                result['ox_pressure_drop'] = oxc['delta_p_bar']
+                result['ox_injection_area'] = oxc['total_area_mm2']
+                result['discharge_coefficient_ox'] = oxc['cd']
+                if fc:
+                    result['fuel_orifice_diameter'] = fc['orifice_d_mm']
+                    result['fuel_injection_velocity'] = fc['velocity_m_s']
+                    result['fuel_pressure_drop'] = fc['delta_p_bar']
+                    result['fuel_injection_area'] = fc['total_area_mm2']
+                    result['discharge_coefficient_fuel'] = fc['cd']
+                smd = detail['atomization'].get('smd_ox_um')
+                if smd:
+                    result['droplet_diameter'] = smd  # microns (modül SMD'si)
+        except Exception as _inj_err:
+            warnings.warn(f'injector_design modülü kullanılamadı, eski '
+                          f'enjektör hesabı korundu: {_inj_err}')
+
+        return result
     
     def calculate_turbopump_requirements(self):
         """Calculate turbopump specifications (if required)"""

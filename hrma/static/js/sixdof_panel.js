@@ -59,7 +59,7 @@
                 </label>
             </div>` : '';
         return `
-        <div class="panel" id="sixDofPanel" style="width:100%;">
+        <div class="panel" id="sixDofPanel" style="width:100%; grid-column: 1 / -1;">
             <h2>▶ Flight Dynamics — 6-DOF Stability</h2>
             <div class="chart-explanation">
                 <strong>What this shows:</strong> Rigid-body flight with quaternion

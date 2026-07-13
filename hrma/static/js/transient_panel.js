@@ -52,7 +52,7 @@
 
     function panelHtml() {
         return `
-        <div class="panel" id="transientPanel" style="width:100%;">
+        <div class="panel" id="transientPanel" style="width:100%; grid-column: 1 / -1;">
             <h2>▶ Transient Analysis — Pc(t) / F(t)</h2>
             <div class="chart-explanation">
                 <strong>What this shows:</strong> Time-resolved chamber pressure and

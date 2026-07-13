@@ -86,3 +86,47 @@ class TestStarOffsetModel:
         r = _make(star_points=8, star_radius=10.0).calculate_performance()
         assert r['grain_design']['star_points'] == 8
         assert r['grain_design']['point_depth'] == pytest.approx(10.0)
+
+
+class TestMassConservationAllGrains:
+    """∫ṁdt ≈ ρ·V_grain — 2026-07-13 formül teyidi regresyonları.
+
+    Kilitlenen hatalar: star web_progression_factor çifte-sayımı (+%44),
+    wagon_wheel sınırsız çevre (3× ihlal), end_burner radyal-web kesmesi
+    (yakıtın %93'ü yanmadan sonlanıyordu), annulus kütle tabanı (yanlış Isp).
+    """
+
+    @pytest.mark.parametrize('grain_type', [
+        'bates', 'star', 'wagon_wheel', 'end_burner'])
+    def test_burned_mass_matches_loaded_mass(self, grain_type):
+        m = SolidRocketEngine(
+            grain_type=grain_type, propellant_type='apcp',
+            chamber_diameter=100, grain_length=500, core_diameter=30,
+            chamber_pressure=40)
+        curve = m.calculate_thrust_curve()
+        burned = np.trapz(curve['mass_flow'], curve['time'])
+        available = m._propellant_volume() * m.rho_p
+        assert available > 0
+        # dt ayrıklaştırması + son adım kuyruğu için %2 tolerans
+        assert burned == pytest.approx(available, rel=0.02)
+
+    def test_isp_physical_band_for_apcp(self):
+        """Tüm grain tiplerinde APCP deniz seviyesi Isp fiziksel bantta."""
+        for gt in ['bates', 'star', 'wagon_wheel', 'end_burner']:
+            r = SolidRocketEngine(
+                grain_type=gt, propellant_type='apcp',
+                chamber_diameter=100, grain_length=500, core_diameter=30,
+                chamber_pressure=40).calculate_performance()
+            assert 200 < r['specific_impulse'] < 280, \
+                f"{gt}: Isp={r['specific_impulse']}"
+
+    def test_end_burner_burn_time_axial(self):
+        """End-burner yanma süresi L_grain/r mertebesinde olmalı (eksenel)."""
+        m = SolidRocketEngine(
+            grain_type='end_burner', propellant_type='apcp',
+            chamber_diameter=100, grain_length=500, core_diameter=30,
+            chamber_pressure=40)
+        curve = m.calculate_thrust_curve()
+        t_b = curve['time'][-1]
+        r_avg = np.mean(curve['burn_rate'])
+        assert t_b == pytest.approx(0.5 / r_avg, rel=0.05)
