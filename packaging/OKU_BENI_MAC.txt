@@ -22,16 +22,17 @@ Eğer "Aç" düğmesi görünmüyorsa:
   Sistem Ayarları → Gizlilik ve Güvenlik → en altta
   "HRMA engellendi" yazısının yanındaki "Yine de Aç" düğmesine basın.
 
-Bu onay SADECE İLK açılışta gerekir. Sonraki açılışlar normaldir.
+Bu onay SADECE İLK açılışta gerekir.
 
 
 KULLANIM:
 
-- HRMA açılınca bir Terminal penceresi ve ardından tarayıcınızda
-  HRMA arayüzü görünür (adres: http://127.0.0.1:8080).
-- Terminal penceresini KAPATMAYIN, küçültün. O pencere kapanırsa
-  program da kapanır.
+- Simgeye çift tıklayın; ilk açılış 10-30 saniye sürebilir.
+- HRMA kendi penceresinde açılır (Chrome/Edge/Brave kuruluysa).
+  Hiçbiri kurulu değilse normal tarayıcı sekmesinde açılır.
+- HRMA penceresini kapatınca program da kapanır. Tekrar açmak
+  için simgeye yeniden çift tıklayın.
 - CAD ve çizim çıktılarınız Belgeler/HRMA klasörüne kaydedilir.
 
-Sorun yaşarsanız Terminal penceresindeki yazıların fotoğrafını çekip
-UZAYTEK ekibine iletin.
+Sorun yaşarsanız şu dosyayı UZAYTEK ekibine iletin:
+Kitaplık (Library) → Logs → HRMA.log

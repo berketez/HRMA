@@ -4,7 +4,7 @@ HRMA - Hybrid Rocket Motor Analysis
 
 import os
 
-__version__ = "1.0.0"
+__version__ = "2.2.0"
 __author__ = "HRMA Team"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

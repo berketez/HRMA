@@ -942,7 +942,7 @@ function prepareAIData(results) {
         timestamp: new Date().toISOString(),
         schema_version: "1.0",
         units_system: "SI_mixed", // Note: Mixed units used (bar for pressure, mm for dimensions)
-        generator: "HRMA v2.0",
+        generator: "HRMA v2.2",
         run_id: generateRunId(),
         
         input_parameters: {

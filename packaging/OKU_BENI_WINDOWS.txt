@@ -18,11 +18,11 @@ KURULUM:
 
 KULLANIM:
 
-- HRMA simgesine çift tıklayın.
-- Önce siyah bir pencere açılır, 10-30 saniye içinde tarayıcınızda
-  HRMA arayüzü görünür (adres: http://127.0.0.1:8080).
-- Siyah pencereyi KAPATMAYIN, küçültün. O pencere kapanırsa
-  program da kapanır.
+- HRMA simgesine çift tıklayın; ilk açılış 10-30 saniye sürebilir.
+- HRMA kendi penceresinde açılır (Edge/Chrome üzerinden —
+  Windows 10/11'de Edge zaten kuruludur).
+- HRMA penceresini kapatınca program da kapanır. Tekrar açmak
+  için simgeye yeniden çift tıklayın.
 - CAD ve çizim çıktılarınız Belgeler\HRMA klasörüne kaydedilir.
 
 KALDIRMA:
@@ -30,5 +30,5 @@ KALDIRMA:
 Ayarlar → Uygulamalar → HRMA → Kaldır
 (veya Başlat menüsü → HRMA → HRMA Kaldır)
 
-Sorun yaşarsanız siyah penceredeki yazıların fotoğrafını çekip
-UZAYTEK ekibine iletin.
+Sorun yaşarsanız şu dosyayı UZAYTEK ekibine iletin:
+Belgeler\HRMA\hrma_log.txt

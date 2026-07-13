@@ -37,7 +37,7 @@ InstallDir "$LOCALAPPDATA\HRMA"
 
 Function LaunchApp
   SetOutPath "$INSTDIR\app"
-  Exec '"$INSTDIR\python\python.exe" "$INSTDIR\app\launcher.py"'
+  Exec '"$INSTDIR\python\pythonw.exe" "$INSTDIR\app\launcher.py"'
 FunctionEnd
 
 Section "HRMA" SecMain
@@ -50,9 +50,9 @@ Section "HRMA" SecMain
 
   ; Kısayollar
   SetOutPath "$INSTDIR\app"
-  CreateShortCut "$DESKTOP\HRMA.lnk" "$INSTDIR\python\python.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Hibrit Roket Motor Analizi"
+  CreateShortCut "$DESKTOP\HRMA.lnk" "$INSTDIR\python\pythonw.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Hibrit Roket Motor Analizi"
   CreateDirectory "$SMPROGRAMS\HRMA"
-  CreateShortCut "$SMPROGRAMS\HRMA\HRMA.lnk" "$INSTDIR\python\python.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Hibrit Roket Motor Analizi"
+  CreateShortCut "$SMPROGRAMS\HRMA\HRMA.lnk" "$INSTDIR\python\pythonw.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Hibrit Roket Motor Analizi"
 
   ; Kaldırıcı + Program Ekle/Kaldır kaydı
   WriteUninstaller "$INSTDIR\uninstall.exe"
