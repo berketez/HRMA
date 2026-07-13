@@ -38,6 +38,9 @@ class ChemicalDatabase:
     
     def initialize_database(self):
         """Initialize SQLite database for chemical species"""
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         

@@ -9,19 +9,19 @@ echo.
 REM Check for Python installations (try different commands)
 set PYTHON_CMD=
 python --version >nul 2>&1
-if !errorlevel! eql 0 (
+if !errorlevel! equ 0 (
     set PYTHON_CMD=python
     goto :python_found
 )
 
 python3 --version >nul 2>&1
-if !errorlevel! eql 0 (
+if !errorlevel! equ 0 (
     set PYTHON_CMD=python3
     goto :python_found
 )
 
 py --version >nul 2>&1
-if !errorlevel! eql 0 (
+if !errorlevel! equ 0 (
     set PYTHON_CMD=py
     goto :python_found
 )

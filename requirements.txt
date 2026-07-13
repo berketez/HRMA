@@ -26,6 +26,7 @@ ezdxf>=1.1.0           # DXF imalat çizimleri
 # Static chart export (teknik çizim PDF'leri)
 # 0.2.1 pini: kaleido 1.x, plotly<6.1.1 ile write_image üretemiyor
 kaleido==0.2.1
+reportlab>=4.0.0       # PDF rapor/çizim exportları (/api/export-pdf, /api/export-drawings-pdf)
 
 # Image processing
 Pillow>=10.0.0

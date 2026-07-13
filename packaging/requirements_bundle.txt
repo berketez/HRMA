@@ -12,6 +12,7 @@ trimesh==4.7.1
 manifold3d==3.2.0
 ezdxf==1.4.4
 kaleido==0.2.1
+reportlab==4.4.3
 pillow==10.4.0
 requests==2.32.3
 beautifulsoup4==4.12.3

@@ -85,7 +85,8 @@ def main():
         ("numpy", "NumPy"),
         ("scipy", "SciPy"),
         ("plotly", "Plotly"),
-        ("pandas", "Pandas")
+        ("pandas", "Pandas"),
+        ("reportlab", "ReportLab")
     ]
     
     # Platform-specific server
@@ -152,7 +153,7 @@ def main():
     # Test import of main app
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import app
+        from hrma.app import app  # noqa: F401
         print("✓ Application modules loaded successfully")
     except ImportError as e:
         print(f"✗ Error loading application: {e}")

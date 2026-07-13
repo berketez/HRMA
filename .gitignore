@@ -17,3 +17,7 @@ docs/bolum*.md
 validation_results.json
 *.docx
 dist/
+
+# data/ klasörü boş da olsa repoda bulunsun (SQLite klasör oluşturamaz)
+!data/.gitkeep
+.playwright-mcp/
