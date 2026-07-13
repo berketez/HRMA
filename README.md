@@ -13,6 +13,10 @@ A comprehensive web-based tool for designing and analyzing hybrid, solid, and li
 - **Real-Geometry CAD Export**: STL solids revolved from the same nozzle contour used by the solver and the 2D drawing (watertight, single source of truth); injector orifices actually drilled (manifold3d booleans)
 - **STEP / DXF / Drawing PDF**: true parametric STEP solids (build123d/OpenCascade), layered DXF manufacturing profiles (ezdxf), and multi-page dimensioned technical-drawing PDFs — plus a one-click complete design package ZIP (STL+STEP+DXF+PDF+.eng+geometry)
 - **Transient Ballistics Panel**: time-resolved Pc(t)/F(t) with regulated or self-pressurizing N₂O blowdown feed, SP-8089 injector-stability margins; the OpenRocket `.eng` export uses the real computed thrust curve
+- **Full Feature Parity Across Motor Types**: motor design tables, engineering cross-section drawings, working CAD/PDF/.eng exports, trajectory and safety reports on the hybrid, solid **and** liquid pages
+- **Solid Motor Monte Carlo**: manufacturing-tolerance uncertainty analysis (burn-rate a/n, density, C*; 300 samples in <1 s) with success rate, statistics and thrust/Isp histograms
+- **Exact Star Grain Regression**: burning perimeter computed by geometric offset of the true star profile (Huygens principle, validated against the analytic circular-port solution) — point count and depth feed directly into the thrust curve
+- **Liquid Engine Flow Schematic**: feed-system diagram (tanks → turbopump/pressure-fed → injector → chamber → nozzle) generated from computed flow rates and pressures
 - **6-DOF Flight Panel** (all three motor pages): Barrowman stability (CN_α/CP, static margin), weathercocking, apogee — chains directly onto the computed thrust curve
 - **NASA CEA Integration**: Real thermochemical data via RocketCEA; hybrid thermochemistry computed by the built-in Cantera equilibrium solver
 - **Performance Analysis**: Thrust curves, Isp, trajectory simulation, heat transfer, structural analysis
@@ -23,7 +27,7 @@ A comprehensive web-based tool for designing and analyzing hybrid, solid, and li
 HRMA's thermochemistry is cross-checked against **NASA CEA** (via RocketCEA):
 hybrid combustion (c\*, Tc, Isp) agrees within **≤1.5 %** across all supported
 fuel/oxidizer pairs, and liquid c\* within **<2 %**. The hybrid regression model
-is compared against published static-fire data (Rezaei HTPB/N2O). 127 automated
+is compared against published static-fire data (Rezaei HTPB/N2O). 177 automated
 tests pass.
 
 HRMA is a **preliminary-design and educational tool**, not a flight-qualification
@@ -32,7 +36,22 @@ tool. Predicted performance should be cross-checked against an independent code
 See [VALIDATION_STATUS.md](VALIDATION_STATUS.md) for full verification results,
 uncertainty bands, and known limitations.
 
-## Quick Start
+## Installation (No Python Required)
+
+One-click installers with Python 3.12 and **all** dependencies embedded — no
+internet connection, no admin rights, no terminal needed:
+
+| Platform | Installer | Notes |
+|---|---|---|
+| **Windows 10/11** | `HRMA-Kurulum-1.0.0.exe` (~165 MB) | Turkish setup wizard; installs per-user, creates a desktop shortcut |
+| **macOS 11+ (Apple Silicon)** | `HRMA-Kurulum-1.0.0-macOS.dmg` (~510 MB) | Drag & drop to Applications; right-click → Open on first launch |
+
+The installers are unsigned: Windows SmartScreen shows "More info → Run anyway",
+macOS Gatekeeper needs right-click → Open once. CAD and drawing outputs are
+written to `Documents/HRMA`. Build pipeline and reproduction instructions:
+[`packaging/`](packaging/README.md).
+
+## Quick Start (Developers)
 
 ```bash
 git clone https://github.com/berketez/HRMA.git
@@ -124,11 +143,12 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## Version
 
-**HRMA v2.1**
+**HRMA v2.2**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - Professional Rocket Propulsion Design Tool
-- Last Updated: July 2026 (dark mission-control UI, Three.js digital twin, interactive design mode)
+- Last Updated: July 2026 (one-click Windows/macOS installers, solid & liquid
+  feature parity, Monte Carlo tolerance analysis, exact star-grain regression model)
 
 ## Ready to Design?
 
