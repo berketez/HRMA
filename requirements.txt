@@ -17,6 +17,7 @@ matplotlib>=3.7.0
 pandas>=2.0.0
 
 # 3D CAD and geometry
+shapely>=2.0.0         # star grain gerçek yanma-yüzeyi modeli (poligon ofseti)
 trimesh>=3.20.0
 manifold3d>=2.0.0      # trimesh boolean backend (enjektör orifis delikleri)
 build123d>=0.11.0      # gerçek STEP export (OCC tabanlı, ~500 MB)

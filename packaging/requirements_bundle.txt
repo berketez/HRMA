@@ -32,3 +32,4 @@ webcolors==24.8.0
 lib3mf==2.5.0
 typing_extensions==4.15.0
 ipython==8.30.0
+shapely==2.1.2

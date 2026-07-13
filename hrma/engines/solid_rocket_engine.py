@@ -5,6 +5,14 @@ from scipy.interpolate import interp1d
 import json
 import warnings
 
+# Star grain gerçek yanma-yüzeyi modeli için (poligon ofseti, Huygens ilkesi).
+# Yoksa star için eski basitleştirilmiş çevre yaklaşıklığına düşülür.
+try:
+    from shapely.geometry import Polygon as _ShapelyPolygon, Point as _ShapelyPoint
+    SHAPELY_AVAILABLE = True
+except ImportError:
+    SHAPELY_AVAILABLE = False
+
 from hrma.constants import G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR, R_STAR_ICAO
 
 # Parametrik maliyet modeli birim fiyatları (2026 tahmini, USD) — TEK tanım
@@ -242,6 +250,62 @@ class SolidRocketEngine:
             return int(round(user_n))
         return max(1, round(self.L_grain / self.D_chamber))
 
+    def _star_params(self):
+        """Star geometrisi (N uç, uç derinliği m) — TEK tanım noktası.
+
+        Yanma alanı modeli ve geometri raporu aynı değerleri kullanır.
+        Uç derinliği web'i negatife düşürmesin diye fiziksel üst sınırla kırpılır.
+        """
+        _pts = self._override_val('star_points', 3, 12)
+        star_points = int(round(_pts)) if _pts is not None else 6
+        _dep = self._override_val('star_radius', 2.0, 60.0)
+        point_depth = (_dep / 1000.0) if _dep is not None else 0.015
+        max_depth = 0.8 * max((self.D_chamber - self.D_core) / 2.0, 0.002)
+        return star_points, min(point_depth, max_depth)
+
+    def _star_port_polygon(self):
+        """Başlangıç star port kesiti (shapely Polygon, metre, merkez orijin).
+
+        Basit zikzak star: vadiler core yarıçapında (Ri = D_core/2), uçlar
+        Ri + derinlikte; 2N köşe. Vadi filetoları ayrıca modellenmez — ofset
+        (buffer) ilerledikçe köşeler fiziksel olarak zaten yuvarlanır.
+        """
+        n_pts, depth = self._star_params()
+        r_i = self.D_core / 2.0
+        r_p = r_i + depth
+        verts = []
+        for k in range(n_pts):
+            a_tip = 2.0 * np.pi * k / n_pts
+            a_val = 2.0 * np.pi * (k + 0.5) / n_pts
+            verts.append((r_p * np.cos(a_tip), r_p * np.sin(a_tip)))
+            verts.append((r_i * np.cos(a_val), r_i * np.sin(a_val)))
+        return _ShapelyPolygon(verts)
+
+    def _star_burn_perimeter(self, web_thickness):
+        """Star portun yanan çevresi (m), web ilerlemesine göre — KESİN model.
+
+        Huygens ilkesi: yanan yüzey, başlangıç yüzeyinin web kadar normal
+        ofsetidir → poligon buffer'ı bunu birebir üretir. Port grain dış
+        yarıçapına (D_chamber/2) ulaştığı yerlerde yakıt bitmiştir; dış
+        çembere oturan yay uzunluğu yanan çevreden düşülür.
+        Doğrulama: dairesel portta 2π(r0+w) analitik sonucunu binde-bir
+        hassasiyetle verir (test_star_grain_model testleri).
+        """
+        r_go = self.D_chamber / 2.0
+        port0 = self._star_port_polygon()
+        port_w = port0.buffer(web_thickness, quad_segs=32) \
+            if web_thickness > 0 else port0
+        disk = _ShapelyPoint(0.0, 0.0).buffer(r_go, quad_segs=96)
+        inter = port_w.intersection(disk)
+        if inter.is_empty:
+            return 0.0
+        per_total = inter.boundary.length
+        # Dış çembere değen (yakıtı bitmiş) yaylar: ince halka kesişimi
+        ring = disk.boundary.buffer(max(1e-6, r_go * 1e-6))
+        touching = inter.boundary.intersection(ring)
+        per_burn = per_total - getattr(touching, 'length', 0.0)
+        return max(per_burn, 0.0)
+
     def calculate_burn_area(self, web_thickness):
         """Calculate burn area based on grain geometry"""
         if self.grain_type == 'bates':
@@ -265,8 +329,14 @@ class SolidRocketEngine:
             return A_core + A_ends
             
         elif self.grain_type == 'star':
-            # Simplified star grain (5-pointed star)
-            # This is a simplified calculation
+            # Gerçek model (2026-07-13): yanan çevre, başlangıç star
+            # profilinin web kadar geometrik ofsetinden hesaplanır (Huygens).
+            # Uç sayısı ve derinliği artık itki eğrisine tam yansır.
+            if SHAPELY_AVAILABLE:
+                return self._star_burn_perimeter(web_thickness) * self.L_grain
+            # shapely yoksa eski basitleştirilmiş yaklaşıklık (uyarıyla)
+            warnings.warn('shapely yok: star grain için basitleştirilmiş '
+                          'çevre yaklaşıklığı kullanılıyor (π·D·2.5)')
             perimeter = self.D_core * np.pi * 2.5  # Approximation
             return perimeter * self.L_grain
             
@@ -838,12 +908,9 @@ class SolidRocketEngine:
     
     def _analyze_star_grain(self):
         """Star grain detailed analysis"""
-        # Star geometrisi: formdan star_points (3-12) ve star_radius (mm,
-        # uç derinliği) gelirse kullanılır; yoksa 6 uç / 15 mm tipik değerler
-        _pts = self._override_val('star_points', 3, 12)
-        star_points = int(round(_pts)) if _pts is not None else 6
-        _dep = self._override_val('star_radius', 2.0, 60.0)
-        point_depth = (_dep / 1000.0) if _dep is not None else 0.015
+        # Star geometrisi tek kaynaktan (_star_params) — yanma alanı modeli
+        # ve bu rapor aynı değerleri kullanır.
+        star_points, point_depth = self._star_params()
         
         # Calculate enhanced burning surface
         base_core_area = np.pi * (self.D_core/2)**2
@@ -852,13 +919,18 @@ class SolidRocketEngine:
         web_thickness = (self.D_chamber - self.D_core) / 2 - point_depth
         
         return {
-            'type': 'Star (6-pointed)',
+            'type': f'Star ({star_points}-pointed)',
             'outer_diameter': self.D_chamber * 1000,
             'core_diameter': self.D_core * 1000,
             'length': self.L_grain * 1000,
             'star_points': star_points,
             'point_depth': point_depth * 1000,  # mm
             'web_thickness': web_thickness * 1000,
+            'model_note': ('Yanan çevre geometrik ofset modeliyle (Huygens) '
+                           'hesaplanır; uç sayısı ve derinliği itki eğrisine '
+                           'tam yansır.' if SHAPELY_AVAILABLE else
+                           'shapely kurulu değil: itki eğrisi basitleştirilmiş '
+                           'çevre yaklaşıklığıyla hesaplanır.'),
             'burning_characteristics': 'Progressive',
             'burning_surfaces': {
                 'initial_core_area': base_core_area,
@@ -1839,6 +1911,15 @@ class SolidRocketEngine:
             'Kn_initial': Kn_initial,
             'Kn_final': Kn_final,
         }
+        if self.grain_type == 'star':
+            _n_star, _depth_star = self._star_params()
+            grain_design['star_points'] = _n_star
+            grain_design['point_depth'] = _depth_star * 1000  # mm
+            grain_design['model_note'] = (
+                'Yanan çevre geometrik ofset modeliyle (Huygens) hesaplanır; '
+                'uç sayısı ve derinliği itki eğrisine tam yansır.'
+                if SHAPELY_AVAILABLE else
+                'shapely kurulu değil: basitleştirilmiş çevre yaklaşıklığı.')
 
         # --- Design Summary ---
         # Wall thickness from hoop stress (same formula as _calculate_dry_mass)
