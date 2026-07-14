@@ -1020,6 +1020,336 @@ def bolted_joint_analysis():
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
+# ---------------------------------------------------------------------------
+# Dalga 4B — Soğutma & besleme sistemi endpoint'leri
+# (docs/ANALIZ_PLATFORM_PLANI.md). Modüller literatür referanslı, HTTP katmanı
+# burada yalnız girdi doğrulama + birim çevirisi + zarafet yapar:
+#   /api/regen-cooling      -> hrma.analysis.regen_cooling.RegenCooling
+#   /api/slosh-analysis     -> hrma.analysis.slosh_analysis.analyze_slosh
+#   /api/pressurant-sizing  -> hrma.analysis.pressurant_sizing.analyze_pressurant
+#   /api/water-hammer       -> hrma.analysis.water_hammer.WaterHammerAnalyzer
+# Tüm modüller geçersiz girdide ValueError yükseltir -> endpoint 400'e çevirir.
+# Basınçlar arayüzde bar; modül SI (Pa) beklediği için burada çevrilir.
+# ---------------------------------------------------------------------------
+
+
+def _bar_to_pa(data, key):
+    """'<key>' alanını bar'dan Pa'ya çevirir; yok/boş ise None döner."""
+    v = _json_float(data, key)
+    return None if v is None else v * 1e5
+
+
+@app.route('/api/regen-cooling', methods=['POST'])
+def regen_cooling_analysis():
+    """Rejeneratif soğutma 1D istasyon marşı (analiz modu — otomatik
+    boyutlandırma YOK, kanal geometrisi kullanıcı girdisidir).
+
+    Girdi (JSON): chamber_pressure (bar, ZORUNLU), chamber_temperature (K,
+      ZORUNLU), throat_diameter (m, ZORUNLU); nozul için expansion_ratio (>1)
+      VEYA exit_diameter (m) — en az biri; gamma (vars. 1.2),
+      molecular_weight (g/mol, vars. 24); coolant 'water'|'rp1' (vars.
+      water); coolant_mdot (kg/s, vars. 1); coolant_inlet_temp (K, vars.
+      300); coolant_inlet_pressure (bar, vars. 30); n_channels (vars. 64);
+      channel_width, channel_height, wall_thickness (MM — burada m'ye
+      çevrilir); wall_material (materials_db anahtarı, vars. copper);
+      flow_direction 'counterflow'|'coflow' (vars. counterflow); n_stations
+      (20-50, vars. 40).
+
+    Yanıt 200: {'status':'success', 'cooling': RegenCooling.solve()} —
+      istasyon dizileri (x_mm, T_wall_hot_K, T_wall_cold_K, T_coolant_K,
+      P_coolant_bar, q_MW_m2, velocity_m_s), summary (peak wall T, malzeme
+      limiti, dP, çıkış T, koklaşma durumu, uyarılar) ve model_note.
+    Hata 400: {'status':'error','error': mesaj} — tüm girdi hataları ValueError.
+    """
+    try:
+        data = request.json or {}
+        from hrma.analysis.regen_cooling import RegenCooling
+
+        chamber_pressure_bar = _json_float(data, 'chamber_pressure')
+        chamber_temperature = _json_float(data, 'chamber_temperature')
+        throat_diameter = _json_float(data, 'throat_diameter')
+        if chamber_pressure_bar is None:
+            raise ValueError("'chamber_pressure' is required (bar)")
+        if chamber_temperature is None:
+            raise ValueError("'chamber_temperature' is required (K)")
+        if throat_diameter is None:
+            raise ValueError("'throat_diameter' is required (m)")
+
+        gamma = _json_float(data, 'gamma')
+        molecular_weight = _json_float(data, 'molecular_weight')
+        coolant_mdot = _json_float(data, 'coolant_mdot')
+        coolant_inlet_temp = _json_float(data, 'coolant_inlet_temp')
+        coolant_inlet_pressure_bar = _json_float(data, 'coolant_inlet_pressure')
+        n_channels = _json_float(data, 'n_channels')
+        n_stations = _json_float(data, 'n_stations')
+        expansion_ratio = _json_float(data, 'expansion_ratio')
+        exit_diameter = _json_float(data, 'exit_diameter')
+
+        # Kanal geometrisi arayüzde mm; modül SI (m) bekler.
+        channel_width_mm = _json_float(data, 'channel_width')
+        channel_height_mm = _json_float(data, 'channel_height')
+        wall_thickness_mm = _json_float(data, 'wall_thickness')
+
+        kwargs = dict(
+            chamber_pressure=chamber_pressure_bar * 1e5,
+            chamber_temperature=chamber_temperature,
+            throat_diameter=throat_diameter,
+            coolant=data.get('coolant', 'water'),
+            wall_material=data.get('wall_material', 'copper'),
+            flow_direction=data.get('flow_direction', 'counterflow'),
+        )
+        if gamma is not None:
+            kwargs['gamma'] = gamma
+        if molecular_weight is not None:
+            kwargs['molecular_weight'] = molecular_weight
+        if coolant_mdot is not None:
+            kwargs['coolant_mdot'] = coolant_mdot
+        if coolant_inlet_temp is not None:
+            kwargs['coolant_inlet_temp'] = coolant_inlet_temp
+        if coolant_inlet_pressure_bar is not None:
+            kwargs['coolant_inlet_pressure'] = coolant_inlet_pressure_bar * 1e5
+        if n_channels is not None:
+            kwargs['n_channels'] = int(n_channels)
+        if n_stations is not None:
+            kwargs['n_stations'] = int(n_stations)
+        if expansion_ratio is not None:
+            kwargs['expansion_ratio'] = expansion_ratio
+        if exit_diameter is not None:
+            kwargs['exit_diameter'] = exit_diameter
+        if channel_width_mm is not None:
+            kwargs['channel_width'] = channel_width_mm / 1e3
+        if channel_height_mm is not None:
+            kwargs['channel_height'] = channel_height_mm / 1e3
+        if wall_thickness_mm is not None:
+            kwargs['wall_thickness'] = wall_thickness_mm / 1e3
+
+        result = RegenCooling(**kwargs).solve()
+        return jsonify(sanitize_json_values(
+            {'status': 'success', 'cooling': result}))
+    except (ValueError, KeyError) as e:
+        # KeyError: bilinmeyen materials_db anahtarı (get_material)
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/slosh-analysis', methods=['POST'])
+def slosh_analysis_api():
+    """Yakıt çalkalanması (slosh) analizi — dik silindirik tank, doğrusal
+    serbest yüzey teorisi (NASA SP-106 / Dodge 2000).
+
+    Girdi (JSON): radius (m, ZORUNLU), fill_height (m, ZORUNLU), g_eff
+      (m/s^2, vars. 9.80665), fluid_density (kg/m^3, ops.), liquid_mass
+      (kg, ops.), baffle_width_ratio (w/R, ops. — verilmezse hedef sönümleme
+      önerisi döner), baffle_depth_ratio (d_s/R, vars. 0.10),
+      control_frequencies / structural_frequencies (Hz listeleri, ops.),
+      coincidence_margin (vars. 0.20).
+
+    Yanıt 200: {'status':'success', 'slosh': analyze_slosh()} — f1_hz,
+      slosh_mass_ratio, pendulum_length, modes, fill_sweep (doluluk eğrisi
+      dizileri), baffle (sönümleme), coincidence_warnings, model_note.
+    Hata 400: {'status':'error','error': mesaj}.
+    """
+    try:
+        data = request.json or {}
+        from hrma.analysis.slosh_analysis import analyze_slosh
+
+        radius = _json_float(data, 'radius')
+        fill_height = _json_float(data, 'fill_height')
+        if radius is None:
+            raise ValueError("'radius' is required (m)")
+        if fill_height is None:
+            raise ValueError("'fill_height' is required (m)")
+
+        g_eff = _json_float(data, 'g_eff')
+        fluid_density = _json_float(data, 'fluid_density')
+        liquid_mass = _json_float(data, 'liquid_mass')
+        baffle_width_ratio = _json_float(data, 'baffle_width_ratio')
+        baffle_depth_ratio = _json_float(data, 'baffle_depth_ratio')
+        coincidence_margin = _json_float(data, 'coincidence_margin')
+
+        def _freq_list(key):
+            v = data.get(key)
+            if v in (None, ''):
+                return None
+            if isinstance(v, (list, tuple)):
+                out = [float(x) for x in v if x not in (None, '')]
+                return out or None
+            # virgülle ayrılmış string de kabul et (panel kolaylığı)
+            try:
+                out = [float(x) for x in str(v).split(',') if x.strip()]
+                return out or None
+            except (TypeError, ValueError):
+                raise ValueError(f"'{key}' must be a list of frequencies [Hz]")
+
+        analyze_kwargs = dict(
+            radius=radius,
+            fill_height=fill_height,
+            g_eff=(9.80665 if g_eff is None else g_eff),
+            fluid_density=fluid_density,
+            liquid_mass=liquid_mass,
+            baffle_depth_ratio=(0.10 if baffle_depth_ratio is None
+                                else baffle_depth_ratio),
+            control_frequencies=_freq_list('control_frequencies'),
+            structural_frequencies=_freq_list('structural_frequencies'),
+        )
+        if baffle_width_ratio is not None:
+            analyze_kwargs['baffle_width_ratio'] = baffle_width_ratio
+        if coincidence_margin is not None:
+            analyze_kwargs['coincidence_margin'] = coincidence_margin
+
+        result = analyze_slosh(**analyze_kwargs)
+        return jsonify(sanitize_json_values(
+            {'status': 'success', 'slosh': result}))
+    except (ValueError, KeyError) as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/pressurant-sizing', methods=['POST'])
+def pressurant_sizing_api():
+    """Basınçlandırıcı gaz (helyum/azot) boyutlandırma — regüleli veya
+    blowdown besleme mimarisi (Sutton 9. baskı Böl. 6; Huzel & Huang Böl. 5).
+
+    Girdi (JSON): mode 'regulated' (vars.) | 'blowdown'.
+      Ortak: propellant_volume (m^3, ZORUNLU); gas 'helium'|'nitrogen';
+        initial_temperature (K, vars. 293.15).
+      regulated: tank_pressure (bar, ZORUNLU); storage_pressure (bar, vars.
+        200); regulator_margin (vars. 0.10); collapse_factor (vars. 1.0).
+      blowdown: initial_ullage_volume (m^3, ZORUNLU); initial_pressure (bar,
+        ZORUNLU); polytropic_n (vars. 1.2).
+
+    Yanıt 200: {'status':'success','mode':mode,'pressurant': result}.
+    Hata 400: {'status':'error','error': mesaj}.
+    """
+    try:
+        data = request.json or {}
+        from hrma.analysis.pressurant_sizing import analyze_pressurant
+
+        mode = str(data.get('mode', 'regulated')).strip().lower()
+        if mode not in ('regulated', 'blowdown'):
+            raise ValueError("'mode' must be 'regulated' or 'blowdown'")
+
+        propellant_volume = _json_float(data, 'propellant_volume')
+        if propellant_volume is None:
+            raise ValueError("'propellant_volume' is required (m^3)")
+        initial_temperature = _json_float(data, 'initial_temperature')
+        gas = data.get('gas', 'helium' if mode == 'regulated' else 'nitrogen')
+
+        if mode == 'regulated':
+            tank_pressure_pa = _bar_to_pa(data, 'tank_pressure')
+            if tank_pressure_pa is None:
+                raise ValueError("'tank_pressure' is required (bar)")
+            storage_pressure_pa = _bar_to_pa(data, 'storage_pressure')
+            regulator_margin = _json_float(data, 'regulator_margin')
+            collapse_factor = _json_float(data, 'collapse_factor')
+            kwargs = dict(
+                mode='regulated',
+                propellant_volume=propellant_volume,
+                tank_pressure=tank_pressure_pa,
+                gas=gas,
+            )
+            if initial_temperature is not None:
+                kwargs['initial_temperature'] = initial_temperature
+            if storage_pressure_pa is not None:
+                kwargs['storage_pressure'] = storage_pressure_pa
+            if regulator_margin is not None:
+                kwargs['regulator_margin'] = regulator_margin
+            if collapse_factor is not None:
+                kwargs['collapse_factor'] = collapse_factor
+        else:  # blowdown
+            initial_ullage_volume = _json_float(data, 'initial_ullage_volume')
+            initial_pressure_pa = _bar_to_pa(data, 'initial_pressure')
+            if initial_ullage_volume is None:
+                raise ValueError("'initial_ullage_volume' is required (m^3)")
+            if initial_pressure_pa is None:
+                raise ValueError("'initial_pressure' is required (bar)")
+            polytropic_n = _json_float(data, 'polytropic_n')
+            kwargs = dict(
+                mode='blowdown',
+                propellant_volume=propellant_volume,
+                initial_ullage_volume=initial_ullage_volume,
+                initial_pressure=initial_pressure_pa,
+                gas=gas,
+            )
+            if initial_temperature is not None:
+                kwargs['initial_temperature'] = initial_temperature
+            if polytropic_n is not None:
+                kwargs['polytropic_n'] = polytropic_n
+
+        result = analyze_pressurant(**kwargs)
+        return jsonify(sanitize_json_values(
+            {'status': 'success', 'mode': mode, 'pressurant': result}))
+    except (ValueError, KeyError) as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/water-hammer', methods=['POST'])
+def water_hammer_api():
+    """Su koçu (water hammer) besleme hattı geçici basınç analizi
+    (Joukowsky/Allievi + ince-cidar hoop basınç sınıfı kıyası).
+
+    Girdi (JSON): fluid 'water'|'n2o'|'rp1'|'lox' (özel sıvı için
+      bulk_modulus_Pa + density_kg_m3 birlikte); line_length_m (ZORUNLU),
+      line_id_mm (ZORUNLU), wall_thickness_mm (ZORUNLU), working_pressure_bar
+      (ZORUNLU); mdot_kg_s VEYA flow_velocity_m_s (en az biri); pipe_material
+      (materials_db anahtarı, vars. ss_304); valve_closure_time_ms (ops. —
+      None ani kapanma); pipe_mawp_bar (ops.); delta_v_m_s (ops.).
+
+    Yanıt 200: {'status':'success','water_hammer': WaterHammerAnalyzer.
+      analyze()} — wave_speed, critical_closure_time, joukowsky/applied
+      pressure rise, peak_pressure, pipe MAWP/akma/kopma, status
+      (SAFE/MARGINAL/UNSAFE), recommendation, recommended_closure_time_ms.
+    Hata 400: {'status':'error','error': mesaj}.
+    """
+    try:
+        data = request.json or {}
+        from hrma.analysis.water_hammer import WaterHammerAnalyzer
+
+        fluid = data.get('fluid', 'water')
+        line_length_m = _json_float(data, 'line_length_m')
+        line_id_mm = _json_float(data, 'line_id_mm')
+        wall_thickness_mm = _json_float(data, 'wall_thickness_mm')
+        working_pressure_bar = _json_float(data, 'working_pressure_bar')
+        if line_length_m is None:
+            raise ValueError("'line_length_m' is required (m)")
+        if line_id_mm is None:
+            raise ValueError("'line_id_mm' is required (mm)")
+        if wall_thickness_mm is None:
+            raise ValueError("'wall_thickness_mm' is required (mm)")
+        if working_pressure_bar is None:
+            raise ValueError("'working_pressure_bar' is required (bar)")
+
+        result = WaterHammerAnalyzer().analyze(
+            fluid=fluid,
+            line_length_m=line_length_m,
+            line_id_mm=line_id_mm,
+            wall_thickness_mm=wall_thickness_mm,
+            working_pressure_bar=working_pressure_bar,
+            mdot_kg_s=_json_float(data, 'mdot_kg_s'),
+            flow_velocity_m_s=_json_float(data, 'flow_velocity_m_s'),
+            valve_closure_time_ms=_json_float(data, 'valve_closure_time_ms'),
+            pipe_material=data.get('pipe_material', 'ss_304'),
+            pipe_mawp_bar=_json_float(data, 'pipe_mawp_bar'),
+            bulk_modulus_Pa=_json_float(data, 'bulk_modulus_Pa'),
+            density_kg_m3=_json_float(data, 'density_kg_m3'),
+            delta_v_m_s=_json_float(data, 'delta_v_m_s'),
+        )
+        return jsonify(sanitize_json_values(
+            {'status': 'success', 'water_hammer': result}))
+    except (ValueError, KeyError) as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
 @app.route('/calculate_solid', methods=['POST'])
 def calculate_solid():
     try:
