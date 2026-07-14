@@ -29,3 +29,4 @@ packaging/runtime/
 packaging/hrma_stub
 packaging/*.exe
 packaging/*.dmg
+tests/
