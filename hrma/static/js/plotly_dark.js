@@ -151,6 +151,20 @@
         return layout;
     }
 
+    // Okunabilirlik: 4+ trace'li grafikte sayfa legend konumu vermediyse
+    // dikey legend sağda veriyi kapatabiliyor — yatay alta al, alt marjı aç.
+    function maybeBottomLegend(data, layout) {
+        if (!Array.isArray(data) || data.length < 4 || !layout) return;
+        var lg = layout.legend || {};
+        if (lg.orientation !== undefined || lg.x !== undefined || lg.y !== undefined) return;
+        lg.orientation = 'h';
+        lg.y = -0.25;
+        lg.yanchor = 'top';
+        layout.legend = lg;
+        layout.margin = layout.margin || {};
+        if (layout.margin.b === undefined || layout.margin.b < 80) layout.margin.b = 80;
+    }
+
     // HUD ek 5: KOŞULLU 'x unified' hover — yalnız çok-trace 2B scatter
     // grafiklerde ve sayfa hovermode tanımlamadıysa. Pasta/heatmap/3B
     // grafiklere dokunulmaz; tek trace'te Plotly varsayılanı kalır.
@@ -172,6 +186,7 @@
             try {
                 if (Array.isArray(data)) data.forEach(fixTrace);
                 layout = applyDarkLayout(layout);
+                maybeBottomLegend(data, layout);
                 maybeUnifiedHover(data, layout);
             } catch (e) {
                 console.warn('HRMA dark theme patch failed, rendering as-is:', e);

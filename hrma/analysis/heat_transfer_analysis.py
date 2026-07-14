@@ -31,6 +31,8 @@ import json
 import warnings
 from typing import Dict, List, Tuple, Optional
 
+from scipy.optimize import brentq
+
 from hrma.data.materials_db import build_materials_view
 
 # Universal gas constant [J/(mol*K)] for frozen Cp / R_specific derivation.
@@ -269,6 +271,49 @@ class HeatTransferAnalyzer:
         m2 = (gamma - 1.0) / 2.0 * mach_local ** 2
         return chamber_temperature * (1.0 + r * m2) / (1.0 + m2)
 
+    def _coolant_side_coefficient(self, motor_data: Dict, cooling_type: str) -> float:
+        """
+        Soğutucu tarafı film katsayısı [W/(m^2*K)] — TEK merkezi kaynak.
+
+        Rejeneratif değer soğutma kanallarındaki yüksek hızlı sıvıyı yansıtır
+        (Huzel & Huang Böl. 4: kriyojenik/sıvı rejeneratif için tipik olarak
+        1e4-5e4 W/m^2/K); önceki 2000 W/m^2/K bir mertebe düşüktü ve cidarı
+        adyabatiğe yakın kilitliyordu. Hem throat-analizi hem eksenel profil
+        aynı değerleri kullanır (parametre tutarlılığı kuralı).
+        """
+        h_coolant = motor_data.get('coolant_side_coefficient', None)
+        if h_coolant is not None:
+            return float(h_coolant)
+        if cooling_type == 'forced':
+            return 100.0     # zorlanmış hava soğutması
+        if cooling_type == 'regenerative':
+            return 20000.0   # sıvı rejeneratif soğutma (Huzel & Huang)
+        return 25.0          # doğal taşınım (hava) — bilinmeyen tip dahil
+
+    @staticmethod
+    def _mach_from_area_ratio(area_ratio: float, gamma: float,
+                              supersonic: bool) -> float:
+        """
+        İzantropik alan-Mach bağıntısını çözer (Sutton & Biblarz Eq. 3-14):
+
+          A/A* = (1/M) * [ (2/(g+1)) * (1 + (g-1)/2 * M^2) ]^((g+1)/(2(g-1)))
+
+        area_ratio = A/A_t (>= 1). supersonic=False konverjan (subsonik dal),
+        True diverjan (süpersonik dal) içindir; boğazda (A/A_t=1) M=1 döner.
+        """
+        eps = float(area_ratio)
+        if eps <= 1.0 + 1e-9:
+            return 1.0
+        exponent = (gamma + 1.0) / (2.0 * (gamma - 1.0))
+
+        def f(M):
+            return (1.0 / M) * ((2.0 / (gamma + 1.0))
+                                * (1.0 + (gamma - 1.0) / 2.0 * M * M)) ** exponent - eps
+
+        if supersonic:
+            return float(brentq(f, 1.0 + 1e-9, 100.0, xtol=1e-10, maxiter=200))
+        return float(brentq(f, 1e-6, 1.0 - 1e-9, xtol=1e-12, maxiter=200))
+
     # ==================================================================
     # PUBLIC API (signature preserved)
     # ==================================================================
@@ -367,6 +412,190 @@ class HeatTransferAnalyzer:
             }
         }
 
+    def analyze_axial_profile(self, motor_data: Dict, n_stations: int = 40,
+                              material: str = 'steel',
+                              wall_thickness: float = 0.005,
+                              ambient_temp: float = 293.15,
+                              cooling_type: str = 'natural') -> Dict:
+        """
+        Eksenel ısı yükü profili: hazne çıkışı -> boğaz -> nozul çıkışı.
+
+        Nozul iç konturu TEK ortak geometri kaynağından örneklenir
+        (hrma.engines.nozzle_design.sample_nozzle_inner_contour — 2D/3D/CAD
+        ile aynı kontur; kopya geometri YOK). Her istasyonda:
+
+          - A(x)/A_t alan oranı (kontur yarıçapından),
+          - izantropik M(x) (konverjanda subsonik, diverjanda süpersonik dal),
+          - Bartz h_g(x) = _bartz_coefficient(area_ratio_local=A_t/A, M) —
+            throat-analiziyle AYNI korelasyon ve gaz özellikleri,
+          - kurtarma (recovery/adyabatik cidar) sıcaklığı Taw(x),
+          - muhafazakâr tasarım ısı akısı q(x) (taşınım + radyasyon,
+            referans soğutulmuş cidarda — modülün 'design flux' felsefesi),
+          - belirtilen soğutma için denge cidar sıcaklığı T_wall_eq(x)
+            (yüzey enerji dengesi, bisection).
+
+        Args:
+            motor_data: analyze_heat_transfer ile aynı şema (chamber_pressure
+                [bar], chamber_temperature [K], gamma, molecular_weight,
+                mdot_total, throat_diameter/exit_diameter [m], ...).
+            n_stations: Toplam istasyon sayısı (boğaz istasyonu garanti dahil).
+            material / wall_thickness / ambient_temp / cooling_type:
+                analyze_heat_transfer ile aynı cidar girdileri.
+
+        Returns:
+            {'x_mm', 'area_ratio', 'mach', 'h_g', 'q_MW', 'T_wall_eq',
+             'T_recovery', 'x_throat_mm', 'x_exit_mm', 'throat_index', ...}
+            Tüm diziler eşit uzunluktadır; grafik üretilmez (frontend çizer).
+        """
+        # Tembel import: hrma.engines.__init__ -> hybrid_rocket_engine ->
+        # heat_transfer_analysis zinciri modül-üstü importta döngü yaratır.
+        from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+
+        n_stations = int(max(5, min(int(n_stations), 400)))
+
+        chamber_pressure = motor_data.get('chamber_pressure', 20.0) * 1e5  # Pa
+        chamber_temperature = motor_data.get('chamber_temperature', 3000)  # K
+        mdot_total = motor_data.get('mdot_total', 1.0)  # kg/s
+
+        mat_props = self.materials.get(material, self.materials['steel'])
+        gas = self._get_gas_properties(motor_data, chamber_temperature)
+        throat = self._resolve_throat_conditions(
+            motor_data, chamber_pressure, chamber_temperature, gas, mdot_total
+        )
+        gamma = gas['gamma']
+
+        # --- Kontur: geometri sözlüğünü çözülen boğaz/çıkış çapıyla besle ---
+        # (motor_data'da yoksa sampler'ın jenerik fallback'i yerine Bartz ile
+        # tutarlı gerçek boğaz çapı kullanılır; alan oranları fizikle uyumlu
+        # kalır.)
+        md_geo = dict(motor_data)
+        md_geo.setdefault('throat_diameter', throat['throat_diameter'])
+        if md_geo.get('exit_diameter') in (None, 0, ''):
+            expansion_ratio = motor_data.get('expansion_ratio', None)
+            try:
+                expansion_ratio = float(expansion_ratio)
+            except (TypeError, ValueError):
+                expansion_ratio = 0.0
+            if expansion_ratio and expansion_ratio > 1.0:
+                md_geo['exit_diameter'] = (
+                    md_geo['throat_diameter'] * np.sqrt(expansion_ratio)
+                )
+            else:
+                md_geo.pop('exit_diameter', None)
+
+        contour_pts, contour_meta = sample_nozzle_inner_contour(md_geo)
+        z_pts = np.array([p[0] for p in contour_pts], dtype=float)  # mm
+        r_pts = np.array([p[1] for p in contour_pts], dtype=float)  # mm
+        z_throat = float(contour_meta['z_throat'])
+        z_exit = float(contour_meta['z_exit'])
+        r_throat = float(contour_meta['r_throat'])
+
+        # --- İstasyon ızgarası: boğaz istasyonu KESİN dahil ---
+        # Konverjan/diverjan pay dağılımı uzunlukla orantılı; boğaz noktası
+        # iki parçanın ortak ucu (q maks ve M=1 tam boğazda yakalanır).
+        frac_conv = z_throat / z_exit if z_exit > 0 else 0.5
+        n_conv_st = int(round(n_stations * frac_conv))
+        n_conv_st = min(max(n_conv_st, 2), n_stations - 1)
+        n_div_st = n_stations - n_conv_st + 1  # boğaz paylaşılır
+        x_conv = np.linspace(0.0, z_throat, n_conv_st)
+        x_div = np.linspace(z_throat, z_exit, n_div_st)[1:]
+        x_mm = np.concatenate([x_conv, x_div])
+        throat_index = n_conv_st - 1
+
+        # Kontur z ekseni monotonik artar (konverjan -> yay -> diverjan);
+        # doğrusal interpolasyon güvenlidir ve tüm örnek yarıçaplar >= r_t.
+        r_mm = np.interp(x_mm, z_pts, r_pts)
+        area_ratio = np.maximum((r_mm / r_throat) ** 2, 1.0)  # A/A_t >= 1
+        area_ratio[throat_index] = 1.0  # boğazda kesin 1 (interp toleransı)
+
+        # --- İstasyon döngüsü ---
+        throat_d = throat['throat_diameter']
+        c_star = throat['c_star']
+        rc_over_dt = throat['rc_over_dt']
+        emissivity = mat_props.get('emissivity', 0.8)
+        k_wall = mat_props['thermal_conductivity']
+        allowable = mat_props.get('allowable_temperature', 1073)
+        h_coolant = self._coolant_side_coefficient(motor_data, cooling_type)
+        R_out = wall_thickness / k_wall + 1.0 / h_coolant  # m^2*K/W
+
+        mach = np.empty(n_stations)
+        h_g = np.empty(n_stations)
+        q_flux = np.empty(n_stations)     # W/m^2
+        t_recovery = np.empty(n_stations)
+        t_wall_eq = np.empty(n_stations)
+
+        for i in range(n_stations):
+            supersonic = i > throat_index
+            M = self._mach_from_area_ratio(area_ratio[i], gamma, supersonic)
+            mach[i] = M
+
+            # Kurtarma (adyabatik cidar) sıcaklığı — q'nun sürücü sıcaklığı.
+            Taw = self._adiabatic_wall_temperature(chamber_temperature, gas, M)
+            t_recovery[i] = Taw
+
+            # Referans soğutulmuş cidar (modülün tasarım-akısı felsefesi):
+            # malzeme izin sıcaklığı, ama Taw'ın ~%80'inden sıcak değil.
+            Tw_ref = min(allowable, 0.8 * Taw)
+            Tw_ref = max(Tw_ref, ambient_temp)
+
+            h_i = self._bartz_coefficient(
+                throat_d, chamber_pressure, c_star, gas,
+                chamber_temperature, Tw_ref, rc_over_dt,
+                area_ratio_local=1.0 / area_ratio[i],  # A_t/A (boğazda 1)
+                mach_local=M
+            )
+            h_g[i] = h_i
+
+            def gas_side_flux(Tw):
+                q_conv = h_i * (Taw - Tw)
+                q_rad = emissivity * self.stefan_boltzmann * (
+                    Taw ** 4 - max(Tw, 0.0) ** 4
+                )
+                return q_conv + q_rad
+
+            q_flux[i] = gas_side_flux(Tw_ref)
+
+            # Denge cidar sıcaklığı: q_in(Tw) = (Tw - T_amb)/R_out, bisection.
+            def q_out(Tw):
+                return (Tw - ambient_temp) / R_out
+
+            lo, hi = ambient_temp, Taw
+            if (gas_side_flux(lo) - q_out(lo)) <= 0:
+                t_wall_eq[i] = ambient_temp
+            elif (gas_side_flux(hi) - q_out(hi)) >= 0:
+                t_wall_eq[i] = hi
+            else:
+                for _ in range(200):
+                    mid = 0.5 * (lo + hi)
+                    if (gas_side_flux(mid) - q_out(mid)) > 0:
+                        lo = mid
+                    else:
+                        hi = mid
+                    if hi - lo < 1e-3:
+                        break
+                t_wall_eq[i] = 0.5 * (lo + hi)
+
+        return {
+            # İstenen çekirdek şema — tüm diziler eşit uzunlukta
+            'x_mm': x_mm.tolist(),
+            'area_ratio': area_ratio.tolist(),      # A(x)/A_t (>= 1)
+            'mach': mach.tolist(),
+            'h_g': h_g.tolist(),                    # W/(m^2*K)
+            'q_MW': (q_flux / 1e6).tolist(),        # MW/m^2 (tasarım yükü)
+            'T_wall_eq': t_wall_eq.tolist(),        # K (denge, verilen soğutma)
+            # Ek (additive) meta — frontend işaretçileri ve teşhis için
+            'T_recovery': t_recovery.tolist(),      # K (adyabatik cidar)
+            'x_throat_mm': z_throat,
+            'x_exit_mm': z_exit,
+            'throat_index': throat_index,
+            'throat_diameter_m': throat_d,
+            'nozzle_type': contour_meta.get('noz_type'),
+            'material': material,
+            'cooling_type': cooling_type,
+            'wall_thickness_mm': wall_thickness * 1000.0,
+            'n_stations': n_stations,
+        }
+
     def _calculate_heat_transfer_coefficients(self, motor_data: Dict,
                                            mat_props: Dict, cooling_type: str,
                                            gas: Optional[Dict] = None,
@@ -413,21 +642,7 @@ class HeatTransferAnalyzer:
         nusselt = h_gas * throat_d / gas['gas_conductivity']
 
         # --- Coolant side ---
-        # Representative coolant-side film coefficients [W/(m^2*K)].
-        # Regenerative value reflects high-velocity liquid coolant in cooling
-        # channels (Huzel & Huang Ch. 4: typically 1e4-5e4 W/m^2/K for
-        # cryogenic/liquid regenerative cooling); the previous 2000 W/m^2/K was
-        # an order of magnitude too low and pinned the wall near-adiabatic.
-        h_coolant = motor_data.get('coolant_side_coefficient', None)
-        if h_coolant is None:
-            if cooling_type == 'natural':
-                h_coolant = 25.0     # natural convection in air
-            elif cooling_type == 'forced':
-                h_coolant = 100.0    # forced air cooling
-            elif cooling_type == 'regenerative':
-                h_coolant = 20000.0  # liquid regenerative cooling (Huzel & Huang)
-            else:
-                h_coolant = 25.0
+        h_coolant = self._coolant_side_coefficient(motor_data, cooling_type)
 
         return {
             'gas_side': h_gas,

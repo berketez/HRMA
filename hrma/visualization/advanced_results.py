@@ -278,28 +278,28 @@ def create_altitude_performance_plot(altitude_data: List[Dict]) -> str:
     # Isp vs altitude
     fig.add_trace(
         go.Scatter(x=altitudes, y=isp_values, mode='lines+markers',
-                  name='Specific Impulse', line=dict(color='blue', width=3)),
+                  name='Specific Impulse', line=dict(color='#00e5ff', width=3)),
         row=1, col=1
     )
     
     # Thrust vs altitude  
     fig.add_trace(
         go.Scatter(x=altitudes, y=thrust_values, mode='lines+markers',
-                  name='Thrust', line=dict(color='red', width=3)),
+                  name='Thrust', line=dict(color='#ff5d73', width=3)),
         row=1, col=2
     )
     
     # Cf vs altitude
     fig.add_trace(
         go.Scatter(x=altitudes, y=cf_values, mode='lines+markers',
-                  name='Thrust Coefficient', line=dict(color='green', width=3)),
+                  name='Thrust Coefficient', line=dict(color='#2dd4a8', width=3)),
         row=2, col=1
     )
     
     # Pressure vs altitude
     fig.add_trace(
         go.Scatter(x=altitudes, y=pressure_values, mode='lines+markers',
-                  name='Atmospheric Pressure', line=dict(color='orange', width=3)),
+                  name='Atmospheric Pressure', line=dict(color='#ff8c33', width=3)),
         row=2, col=2
     )
     
@@ -332,7 +332,7 @@ def create_mass_fractions_plot(mass_fractions: Dict) -> str:
     
     # Major species to plot
     species_list = ['CO2', 'CO', 'H2O', 'N2', 'H2', 'OH', 'O2', 'NO']
-    colors = ['red', 'orange', 'blue', 'green', 'purple', 'brown', 'pink', 'gray']
+    colors = ['#ff5d73', '#ff8c33', '#00e5ff', '#2dd4a8', '#c792ea', 'brown', 'pink', 'gray']
     
     fig = go.Figure()
     
@@ -387,21 +387,21 @@ def create_thrust_altitude_plot(thrust_data: List[Dict]) -> str:
     # Thrust vs altitude
     fig.add_trace(
         go.Scatter(x=altitudes, y=thrust_values, mode='lines+markers',
-                  name='Thrust', line=dict(color='red', width=3)),
+                  name='Thrust', line=dict(color='#ff5d73', width=3)),
         row=1, col=1
     )
     
     # Isp vs altitude  
     fig.add_trace(
         go.Scatter(x=altitudes, y=isp_values, mode='lines+markers',
-                  name='Specific Impulse', line=dict(color='blue', width=3)),
+                  name='Specific Impulse', line=dict(color='#00e5ff', width=3)),
         row=1, col=2
     )
     
     # Efficiency vs altitude
     fig.add_trace(
         go.Scatter(x=altitudes, y=efficiency_values, mode='lines+markers',
-                  name='Impulse Efficiency', line=dict(color='green', width=3)),
+                  name='Impulse Efficiency', line=dict(color='#2dd4a8', width=3)),
         row=1, col=3
     )
     

@@ -1870,14 +1870,32 @@ def generate_complete_design_package():
         
         # Analysis reports
         if package_options.get('include_analysis', True):
+            # Dalga 2 (2026-07-14): Eski sabit 'safety_factor: 4.0' ve ondan
+            # türetilen uydurma burst_pressure/material_limits kaldırıldı.
+            # Gerçek yapısal analiz sonucu varsa o raporlanır; yoksa alan
+            # 'NOT ANALYZED' olarak işaretlenir — değer UYDURULMAZ.
+            structural_pkg = motor_data.get('structural_analysis') or {}
+            safety_sub_pkg = structural_pkg.get('safety_analysis') or {}
+            safety_section = {
+                'chamber_pressure': motor_data.get('chamber_pressure', 0),
+            }
+            if structural_pkg.get('safety_factor') is not None:
+                safety_section.update({
+                    'safety_factor': structural_pkg.get('safety_factor'),
+                    'safety_factor_pressure': structural_pkg.get('safety_factor_pressure'),
+                    'safety_factor_total': structural_pkg.get('safety_factor_total'),
+                    'status': safety_sub_pkg.get('status', 'UNKNOWN'),
+                    'risk_level': safety_sub_pkg.get('risk_level', 'UNKNOWN'),
+                })
+            else:
+                safety_section.update({
+                    'safety_factor': None,
+                    'status': 'NOT ANALYZED',
+                    'note': 'Run the structural analysis to obtain real safety factors.',
+                })
             complete_package['analysis'] = {
                 'motor_performance': motor_data,
-                'safety_analysis': {
-                    'chamber_pressure': motor_data.get('chamber_pressure', 0),
-                    'safety_factor': 4.0,  # Standard aerospace safety factor
-                    'burst_pressure': motor_data.get('chamber_pressure', 0) * 4.0,
-                    'material_limits': 'Within safe operating limits'
-                },
+                'safety_analysis': safety_section,
                 'weight_breakdown': {
                     'chamber_mass': cad_data['performance_summary']['mass_breakdown']['chamber_mass'] if 'cad_data' in locals() else 'N/A',
                     'nozzle_mass': cad_data['performance_summary']['mass_breakdown']['nozzle_mass'] if 'cad_data' in locals() else 'N/A',
@@ -2680,7 +2698,75 @@ def analyze_thermal_safety():
             'status': 'success',
             'thermal_analysis': sanitize_json_values(thermal_results)
         })
-        
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/analysis/wall-profile', methods=['POST'])
+def analyze_wall_profile():
+    """Eksenel cidar ısı profili (Dalga 2).
+
+    Nozul konturu boyunca (hazne -> boğaz -> çıkış) A(x)/A_t, izantropik
+    M(x), Bartz h_g(x), tasarım ısı akısı q(x) ve denge cidar sıcaklığı
+    T_wall_eq(x) dizilerini döner. Grafik ÇİZMEZ — frontend çizer.
+
+    Girdi şeması /analyze_thermal_safety ile aynı çekirdek alanları kullanır
+    (chamber_pressure, chamber_temperature, chamber_diameter, chamber_length,
+    burn_time, mdot_total, material, wall_thickness, cooling_type) + isteğe
+    bağlı geometri/gaz alanları (throat_diameter, exit_diameter,
+    expansion_ratio, nozzle_type, gamma, molecular_weight, n_stations...).
+    """
+    try:
+        data = request.json or {}
+
+        # Çekirdek alanlar — /analyze_thermal_safety ile bire bir aynı
+        motor_data = {
+            'chamber_pressure': float(data.get('chamber_pressure', 20)),   # bar
+            'chamber_temperature': float(data.get('chamber_temperature', 3000)),  # K
+            'chamber_diameter': float(data.get('chamber_diameter', 0.1)),  # m
+            'chamber_length': float(data.get('chamber_length', 0.5)),      # m
+            'burn_time': float(data.get('burn_time', 10)),                 # s
+            'mdot_total': float(data.get('mdot_total', 1.0)),              # kg/s
+        }
+        material = data.get('material', 'steel')
+        wall_thickness = float(data.get('wall_thickness', 0.005))  # m
+        cooling_type = data.get('cooling_type', 'natural')
+
+        # İsteğe bağlı sayısal alanlar: verilirse geçir (0/boş = "kullanma")
+        optional_numeric = (
+            'gamma', 'molecular_weight', 'gas_constant', 'c_star',
+            'throat_diameter', 'exit_diameter', 'expansion_ratio',
+            'throat_radius_curvature', 'coolant_side_coefficient',
+        )
+        for key in optional_numeric:
+            value = data.get(key)
+            if value in (None, '', 0, '0'):
+                continue
+            try:
+                motor_data[key] = float(value)
+            except (TypeError, ValueError):
+                pass
+        if data.get('nozzle_type'):
+            # sample_nozzle_inner_contour konik/bell ayrımını buradan okur
+            motor_data['nozzle_angles'] = {'nozzle_type': str(data['nozzle_type'])}
+
+        n_stations = int(data.get('n_stations', 40))
+
+        thermal_analyzer = HeatTransferAnalyzer()
+        profile = thermal_analyzer.analyze_axial_profile(
+            motor_data,
+            n_stations=n_stations,
+            material=material,
+            wall_thickness=wall_thickness,
+            ambient_temp=float(data.get('ambient_temp', 293.15)),
+            cooling_type=cooling_type,
+        )
+
+        return jsonify({
+            'status': 'success',
+            'wall_profile': sanitize_json_values(profile)
+        })
+
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
@@ -3261,17 +3347,112 @@ def advanced_performance_analysis():
         }), 500
 
 # PDF Export Endpoints
+def _build_pdf_analysis_sections(motor_data, analysis_results):
+    """PDF rapor bölümlerini motorun GERÇEK analiz sonuçlarıyla doldurur.
+
+    Kaynak öncelik sırası (Dalga 2, 2026-07-14):
+      motor sonuçları (motor_data.heat_transfer_analysis /
+      structural_analysis) > istekle gelen analysis_results alanları.
+    Sabit/uydurma değer ÜRETİLMEZ: veri yoksa ilgili alan hiç konmaz;
+    pdf_generator eksik alanları 'N/A' olarak basar. (Eski app.js sabit
+    SF 4.0/3.0/4.0 dürüstlük sorununun rapor katmanındaki karşılığı.)
+    """
+    out = dict(analysis_results or {})
+    md = motor_data or {}
+
+    def _num(value):
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return None
+        return f if np.isfinite(f) else None
+
+    # ---- Performans: motor sonucundaki gerçek değerler öncelikli ----
+    performance = dict(out.get('performance') or {})
+    perf_sources = {
+        'thrust': ('thrust',),
+        'specific_impulse': ('specific_impulse', 'isp'),
+        'chamber_pressure': ('chamber_pressure',),
+        'burn_time': ('burn_time',),
+        'total_impulse': ('total_impulse',),
+        'exit_velocity': ('exit_velocity',),
+        'mass_flow_rate': ('mdot_total', 'total_mdot', 'mass_flow_rate'),
+    }
+    for target, sources in perf_sources.items():
+        for source in sources:
+            value = _num(md.get(source))
+            if value is not None:
+                performance[target] = value
+                break
+    if performance:
+        out['performance'] = performance
+
+    # ---- Termal: heat_transfer_analysis (Bartz) gerçek sonuçları ----
+    heat = md.get('heat_transfer_analysis') or out.get('heat_transfer_analysis') or {}
+    if isinstance(heat, dict) and heat:
+        wall = heat.get('wall_analysis') or {}
+        gas_side = heat.get('gas_side_analysis') or {}
+        cooling = heat.get('cooling_analysis') or {}
+        thermal = dict(out.get('thermal') or {})
+        heat_flux = _num(gas_side.get('heat_flux'))
+        candidates = {
+            'max_wall_temp': _num(wall.get('max_temperature')),
+            'heat_flux': heat_flux / 1e6 if heat_flux is not None else None,  # W/m^2 -> MW/m^2
+            'cooling_req': _num(cooling.get('peak_heat_rate')),  # kW
+            'adiabatic_wall_temp': _num(gas_side.get('adiabatic_wall_temperature')),
+            'gas_side_coefficient': _num(gas_side.get('gas_side_coefficient')),
+        }
+        for key, value in candidates.items():
+            if value is not None:
+                thermal[key] = value
+        if thermal:
+            out['thermal'] = thermal
+
+    # ---- Yapısal: gerçek SF'ler (sabit 4.0 kalıntısı YOK) ----
+    structural_src = md.get('structural_analysis') or out.get('structural_analysis') or {}
+    if isinstance(structural_src, dict) and structural_src:
+        safety_sub = structural_src.get('safety_analysis') or {}
+        chamber = structural_src.get('chamber_analysis') or {}
+        structural = dict(out.get('structural') or {})
+        candidates = {
+            'safety_factor': _num(structural_src.get('safety_factor')),
+            'safety_factor_pressure': _num(structural_src.get('safety_factor_pressure')),
+            'safety_factor_total': _num(structural_src.get('safety_factor_total')),
+            'min_safety_factor': _num(safety_sub.get('minimum_safety_factor')),
+            'von_mises_stress_MPa': _num(chamber.get('von_mises_stress')),
+            'hoop_stress_MPa': _num(chamber.get('hoop_stress')),
+        }
+        for key, value in candidates.items():
+            if value is not None:
+                structural[key] = value
+        if safety_sub.get('status'):
+            structural['status'] = str(safety_sub['status'])
+        if safety_sub.get('risk_level'):
+            structural['risk_level'] = str(safety_sub['risk_level'])
+        if structural:
+            out['structural'] = structural
+
+    # ---- Güvenlik özeti: istekle geldiyse aynen korunur ----
+    # (out zaten istekten kopyalandı; 'safety' anahtarına dokunulmaz.)
+    return out
+
+
 @app.route('/api/export-pdf/<report_type>', methods=['POST'])
 def export_pdf_report(report_type):
     """Export motor analysis as PDF report"""
     try:
         from hrma.export.pdf_generator import PDFReportGenerator
-        
+
         data = request.json
         motor_data = data.get('motor_data', {})
         analysis_results = data.get('analysis_results', {})
         charts = data.get('charts', [])
-        
+
+        # Dalga 2: rapor bölümleri motor sonuçlarındaki GERÇEK analizlerle
+        # beslenir (heat_transfer_analysis + structural_analysis + istekle
+        # gelen safety özeti). Sabit değer enjekte edilmez.
+        analysis_results = _build_pdf_analysis_sections(motor_data, analysis_results)
+
         pdf_generator = PDFReportGenerator()
         
         # Generate different types of reports

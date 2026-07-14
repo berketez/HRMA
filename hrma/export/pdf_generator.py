@@ -63,6 +63,21 @@ class PDFReportGenerator:
             fontName='Helvetica'
         ))
 
+    @staticmethod
+    def _fmt(value, pattern: str = '{:.1f}', missing: str = 'N/A') -> str:
+        """Sayısal değeri güvenli biçimlendirir; eksik/geçersizse 'N/A'.
+
+        Rapor katmanı sabit/uydurma değer basmaz (Dalga 2): analiz sonucu
+        yoksa alan 'N/A' görünür — eski sabit SF 4.0 tarzı dolgu YOK.
+        """
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return missing
+        if number != number or number in (float('inf'), float('-inf')):
+            return missing
+        return pattern.format(number)
+
     def generate_motor_analysis_report(self, motor_data: Dict, analysis_results: Dict, 
                                      charts: List[str], report_type: str = 'complete') -> bytes:
         """
@@ -176,17 +191,21 @@ class PDFReportGenerator:
         thrust = performance.get('thrust', 0)
         isp = performance.get('specific_impulse', 0)
         burn_time = performance.get('burn_time', 0)
-        
+        # Gerçek toplam impuls varsa onu kullan; yoksa F*t_b yaklaşımı
+        total_impulse = performance.get('total_impulse')
+        if total_impulse is None:
+            total_impulse = thrust * burn_time
+
         summary_text = f"""
-        This report presents a comprehensive analysis of the rocket motor performance 
+        This report presents a comprehensive analysis of the rocket motor performance
         and characteristics. Key performance metrics include:
-        
-        • Maximum Thrust: {thrust:.1f} N
-        • Specific Impulse: {isp:.1f} s
-        • Burn Time: {burn_time:.1f} s
-        • Total Impulse: {thrust * burn_time:.1f} N⋅s
-        
-        The analysis was conducted using NASA-standard methodologies and includes 
+
+        • Maximum Thrust: {self._fmt(thrust)} N
+        • Specific Impulse: {self._fmt(isp)} s
+        • Burn Time: {self._fmt(burn_time)} s
+        • Total Impulse: {self._fmt(total_impulse)} N⋅s
+
+        The analysis was conducted using NASA-standard methodologies and includes
         thermal, structural, and performance evaluations.
         """
         
@@ -269,13 +288,13 @@ class PDFReportGenerator:
         
         perf_data = [
             ['Parameter', 'Value', 'Unit'],
-            ['Maximum Thrust', f"{performance.get('thrust', 0):.1f}", 'N'],
-            ['Specific Impulse', f"{performance.get('specific_impulse', 0):.1f}", 's'],
-            ['Chamber Pressure', f"{performance.get('chamber_pressure', 0):.1f}", 'bar'],
-            ['Exit Velocity', f"{performance.get('exit_velocity', 0):.1f}", 'm/s'],
-            ['Mass Flow Rate', f"{performance.get('mass_flow_rate', 0):.3f}", 'kg/s'],
-            ['Burn Time', f"{performance.get('burn_time', 0):.1f}", 's'],
-            ['Total Impulse', f"{performance.get('total_impulse', 0):.1f}", 'N⋅s']
+            ['Maximum Thrust', self._fmt(performance.get('thrust')), 'N'],
+            ['Specific Impulse', self._fmt(performance.get('specific_impulse')), 's'],
+            ['Chamber Pressure', self._fmt(performance.get('chamber_pressure')), 'bar'],
+            ['Exit Velocity', self._fmt(performance.get('exit_velocity')), 'm/s'],
+            ['Mass Flow Rate', self._fmt(performance.get('mass_flow_rate'), '{:.3f}'), 'kg/s'],
+            ['Burn Time', self._fmt(performance.get('burn_time')), 's'],
+            ['Total Impulse', self._fmt(performance.get('total_impulse')), 'N⋅s']
         ]
         
         perf_table = Table(perf_data, colWidths=[2*inch, 1.5*inch, 1*inch])
@@ -294,18 +313,27 @@ class PDFReportGenerator:
         story.append(perf_table)
         story.append(Spacer(1, 0.2*inch))
         
-        # Thermal Analysis
+        # Thermal Analysis — gerçek Bartz sonuçları (app.py bölüm besleyicisi
+        # motor.heat_transfer_analysis'ten doldurur; uydurma değer yok).
         thermal = analysis_results.get('thermal', {})
         if thermal:
             story.append(Paragraph("Thermal Analysis", self.styles['Heading3']))
-            
+
             thermal_data = [
                 ['Parameter', 'Value', 'Unit'],
-                ['Max Wall Temperature', f"{thermal.get('max_wall_temp', 0):.1f}", 'K'],
-                ['Heat Flux', f"{thermal.get('heat_flux', 0):.1f}", 'MW/m²'],
-                ['Cooling Requirement', f"{thermal.get('cooling_req', 0):.1f}", 'kW']
+                ['Max Wall Temperature', self._fmt(thermal.get('max_wall_temp')), 'K'],
+                ['Heat Flux', self._fmt(thermal.get('heat_flux'), '{:.2f}'), 'MW/m²'],
+                ['Cooling Requirement', self._fmt(thermal.get('cooling_req')), 'kW']
             ]
-            
+            # İsteğe bağlı gerçek-analiz satırları (varsa eklenir)
+            if thermal.get('adiabatic_wall_temp') is not None:
+                thermal_data.append(['Adiabatic Wall Temperature',
+                                     self._fmt(thermal.get('adiabatic_wall_temp')), 'K'])
+            if thermal.get('gas_side_coefficient') is not None:
+                thermal_data.append(['Gas-Side Coefficient (Bartz)',
+                                     self._fmt(thermal.get('gas_side_coefficient'), '{:.0f}'),
+                                     'W/m²K'])
+
             thermal_table = Table(thermal_data, colWidths=[2*inch, 1.5*inch, 1*inch])
             thermal_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.red),
@@ -315,9 +343,52 @@ class PDFReportGenerator:
                 ('FONTSIZE', (0, 0), (-1, -1), 10),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black)
             ]))
-            
+
             story.append(thermal_table)
-        
+
+        # Structural Analysis — GERÇEK emniyet faktörleri (Dalga 2).
+        # Eski davranış: rapor katmanına hiç yapısal bölüm girmiyordu ve
+        # dışa aktarımlar sabit SF (4.0) yazabiliyordu. Artık yalnız gerçek
+        # analiz değerleri basılır; veri yoksa bölüm hiç oluşmaz.
+        structural = analysis_results.get('structural', {})
+        if structural:
+            story.append(Spacer(1, 0.2*inch))
+            story.append(Paragraph("Structural Analysis", self.styles['Heading3']))
+
+            structural_data = [['Parameter', 'Value', 'Unit']]
+
+            def _add_structural_row(label, key, pattern='{:.2f}', unit='-'):
+                if structural.get(key) is not None:
+                    structural_data.append(
+                        [label, self._fmt(structural.get(key), pattern), unit]
+                    )
+
+            _add_structural_row('Safety Factor (pressure only)', 'safety_factor_pressure')
+            _add_structural_row('Safety Factor (pressure + thermal)', 'safety_factor_total')
+            _add_structural_row('Minimum Safety Factor (all modes)', 'min_safety_factor')
+            _add_structural_row('Von Mises Stress', 'von_mises_stress_MPa', unit='MPa')
+            _add_structural_row('Hoop Stress (total)', 'hoop_stress_MPa', unit='MPa')
+            if structural.get('status'):
+                structural_data.append(['Structural Status', str(structural['status']), '-'])
+            if structural.get('risk_level'):
+                structural_data.append(['Risk Level', str(structural['risk_level']), '-'])
+
+            if len(structural_data) > 1:
+                structural_table = Table(structural_data,
+                                         colWidths=[2.5*inch, 1.5*inch, 0.75*inch])
+                structural_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                     [colors.white, colors.lightgrey])
+                ]))
+                story.append(structural_table)
+
         return story
 
     def _create_charts_section(self, charts: List[str]) -> List:

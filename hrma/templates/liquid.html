@@ -136,17 +136,6 @@
         
         .results { display: none; }
         
-        .metric-card {
-            text-align: center;
-            padding: 20px;
-            border-radius: 8px;
-            color: white;
-            margin-bottom: 15px;
-        }
-        .metric-value { font-size: 32px; font-weight: 300; }
-        .metric-label { font-size: 14px; opacity: 0.9; }
-        .metric-unit { font-size: 12px; opacity: 0.7; }
-        
         .loading {
             display: none;
             text-align: center;
@@ -1869,27 +1858,55 @@
         function displayResults(results) {
             document.getElementById('results').style.display = 'block';
             
-            // Performance metrics
+            // Performans metrikleri — hd-metric HUD kartları
+            // (app.js displayPerformanceMetrics deseni; HRMAHud yoksa düz metin)
             const metricsDiv = document.getElementById('performanceMetrics');
             const metrics = [
-                { label: 'Sea Level Isp', value: results.isp_sea_level.toFixed(1), unit: 's', color: '#4facfe' },
-                { label: 'Vacuum Isp', value: results.isp_vacuum.toFixed(1), unit: 's', color: '#667eea' },
-                { label: 'Space Optimized Isp', value: results.isp_vacuum_optimized.toFixed(1), unit: 's', color: '#f093fb' },
-                { label: 'Vacuum Thrust', value: (results.thrust_vacuum / 1000).toFixed(1), unit: 'kN', color: '#f5576c' }
+                { label: 'Sea Level Isp', value: results.isp_sea_level, decimals: 1, unit: 's' },
+                { label: 'Vacuum Isp', value: results.isp_vacuum, decimals: 1, unit: 's' },
+                { label: 'Space Optimized Isp', value: results.isp_vacuum_optimized, decimals: 1, unit: 's' },
+                { label: 'Vacuum Thrust', value: results.thrust_vacuum / 1000, decimals: 1, unit: 'kN' }
             ];
-            
-            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
-            metrics.forEach(metric => {
-                html += `
-                    <div class="metric-card" style="background: ${metric.color};">
-                        <div class="metric-value">${metric.value}</div>
-                        <div class="metric-label">${metric.label}</div>
-                        <div class="metric-unit">${metric.unit}</div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-            metricsDiv.innerHTML = html;
+
+            const fmtMetric = m => {
+                const v = Number(m.value);
+                return isFinite(v) ? v.toFixed(m.decimals) : 'n/a';
+            };
+
+            if (metricsDiv) {
+                if (typeof window.HRMAHud === 'undefined') {
+                    // HUD katmanı yüklenmemişse zarifçe düz metne düş
+                    metricsDiv.innerHTML = metrics.map(m =>
+                        `<div style="padding:4px 0;"><strong>${m.label}:</strong> ${fmtMetric(m)} ${m.unit}</div>`
+                    ).join('');
+                } else {
+                    let html = '<div class="hd-metric-grid">';
+                    metrics.forEach(m => {
+                        const v = Number(m.value);
+                        const countSpan = isFinite(v)
+                            ? `<span class="hd-count" data-target="${v}" data-decimals="${m.decimals}">0</span>`
+                            : '<span>n/a</span>';
+                        html += `
+                            <div class="hd-metric">
+                                <div class="hd-metric-head">
+                                    <div class="hd-metric-label">${m.label}</div>
+                                </div>
+                                <div class="hd-metric-value">
+                                    ${countSpan}<small>${m.unit}</small>
+                                </div>
+                            </div>`;
+                    });
+                    html += '</div>';
+                    metricsDiv.innerHTML = html;
+
+                    // Durum bağlama (varsa) + count-up başlatma
+                    const cards = metricsDiv.querySelectorAll('.hd-metric');
+                    metrics.forEach((m, i) => {
+                        if (m.state && cards[i]) HRMAHud.bindState(cards[i], m.state);
+                    });
+                    HRMAHud.initAll(metricsDiv);
+                }
+            }
 
             // Motor Tasarımı tablosu + Motor Kesiti çizimi (hibrit sayfası paritesi)
             displayMotorDesign(results);
@@ -1968,7 +1985,7 @@
                     type: 'scatter',
                     mode: 'lines+markers',
                     name: 'Isp vs Altitude',
-                    line: { color: '#4facfe', width: 3 },
+                    line: { color: '#00e5ff', width: 3 },
                     marker: { size: 6 },
                     yaxis: 'y'
                 };
@@ -1979,7 +1996,7 @@
                     type: 'scatter',
                     mode: 'lines+markers',
                     name: 'Thrust vs Altitude',
-                    line: { color: '#f093fb', width: 3 },
+                    line: { color: '#ff8c33', width: 3 },
                     marker: { size: 6 },
                     yaxis: 'y2'
                 };
@@ -1989,13 +2006,13 @@
                     xaxis: { title: 'Altitude (km)' },
                     yaxis: { 
                         title: 'Specific Impulse (s)',
-                        titlefont: { color: '#4facfe' },
-                        tickfont: { color: '#4facfe' }
+                        titlefont: { color: '#00e5ff' },
+                        tickfont: { color: '#00e5ff' }
                     },
                     yaxis2: {
                         title: 'Thrust (kN)',
-                        titlefont: { color: '#f093fb' },
-                        tickfont: { color: '#f093fb' },
+                        titlefont: { color: '#ff8c33' },
+                        tickfont: { color: '#ff8c33' },
                         overlaying: 'y',
                         side: 'right'
                     },
@@ -2284,7 +2301,7 @@
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: 'Specific Impulse',
-                line: { color: '#4facfe', width: 3 }
+                line: { color: '#00e5ff', width: 3 }
             };
             
             const layout = {
@@ -2306,7 +2323,7 @@
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: 'Specific Impulse',
-                line: { color: '#667eea', width: 3 }
+                line: { color: '#00e5ff', width: 3 }
             };
             
             const layout = {
@@ -2381,7 +2398,7 @@
                 mode: 'lines',
                 name: 'Head (m)',
                 yaxis: 'y1',
-                line: { color: '#f5576c', width: 3 }
+                line: { color: '#ff5d73', width: 3 }
             };
             
             const trace2 = {
@@ -2391,18 +2408,18 @@
                 mode: 'lines',
                 name: 'Efficiency (%)',
                 yaxis: 'y2',
-                line: { color: '#4facfe', width: 3 }
+                line: { color: '#00e5ff', width: 3 }
             };
             
             const layout = {
                 title: 'Turbopump Performance Map',
                 xaxis: { title: 'Flow Rate (kg/s)' },
-                yaxis: { title: 'Head (m)', side: 'left', color: '#f5576c' },
+                yaxis: { title: 'Head (m)', side: 'left', color: '#ff5d73' },
                 yaxis2: { 
                     title: 'Efficiency (%)', 
                     side: 'right', 
                     overlaying: 'y',
-                    color: '#4facfe'
+                    color: '#00e5ff'
                 },
                 showlegend: true
             };
@@ -2460,7 +2477,7 @@
                 y: efficiencies,
                 type: 'bar',
                 marker: {
-                    color: ['#4facfe', '#667eea', '#f093fb']
+                    color: ['#00e5ff', '#c792ea', '#ff8c33']
                 }
             };
             
@@ -2640,11 +2657,11 @@
             const fuelL = fuelTank.dimensions.length / 1000;
             
             // Oxidizer tank (cylinder)
-            const oxTankTrace = createCylinderTrace(0, 0, 0, oxD/2, oxL, 'Oxidizer Tank', '#4facfe', 0.7);
+            const oxTankTrace = createCylinderTrace(0, 0, 0, oxD/2, oxL, 'Oxidizer Tank', '#00e5ff', 0.7);
             
             // Fuel tank (positioned next to oxidizer tank)
             const spacing = Math.max(oxD, fuelD) * 1.2;
-            const fuelTankTrace = createCylinderTrace(spacing, 0, 0, fuelD/2, fuelL, 'Fuel Tank', '#f5576c', 0.7);
+            const fuelTankTrace = createCylinderTrace(spacing, 0, 0, fuelD/2, fuelL, 'Fuel Tank', '#ff5d73', 0.7);
             
             // Internal structures visualization
             const baffleTraces = [];
@@ -2654,7 +2671,7 @@
                 const baffleZ = (baffle.position / 1000) - oxL/2; // Convert to m and center
                 const baffleTraceSet = createRingTrace(0, 0, baffleZ, 
                     baffle.outer_diameter / 2000, baffle.inner_diameter / 2000, 
-                    `Baffle ${index + 1}`, '#667eea', 0.9);
+                    `Baffle ${index + 1}`, '#c792ea', 0.9);
                 
                 // baffleTraceSet is an array, so spread it
                 baffleTraces.push(...baffleTraceSet);
@@ -2664,13 +2681,13 @@
             const antiVortex = oxTank.internal_structures.anti_vortex_device;
             const antiVortexTrace = createCylinderTrace(0, 0, -oxL/2 + 0.05, 
                 antiVortex.diameter / 2000, antiVortex.height / 1000, 
-                'Anti-Vortex Device', '#f093fb', 0.8);
+                'Anti-Vortex Device', '#ff8c33', 0.8);
             
             // Add inlet and outlet pipes
             const inletTrace = createCylinderTrace(0, 0, oxL/2 - 0.1, 
-                0.05, 0.2, 'Inlet Pipe', '#00f2fe', 0.7); // 100mm diameter inlet
+                0.05, 0.2, 'Inlet Pipe', '#2dd4a8', 0.7); // 100mm diameter inlet
             const outletTrace = createCylinderTrace(0, 0, -oxL/2 + 0.05, 
-                0.075, 0.1, 'Outlet Pipe', '#ff6b6b', 0.7); // 150mm diameter outlet
+                0.075, 0.1, 'Outlet Pipe', '#ffd166', 0.7); // 150mm diameter outlet
             
             // Combine all traces
             const allTraces = [oxTankTrace, fuelTankTrace, antiVortexTrace, 
@@ -3527,18 +3544,18 @@ Please provide:
             const ispTrace = {
                 x: km, y: ap.map(p => p.specific_impulse),
                 type: 'scatter', mode: 'lines+markers', name: 'Özgül İtki (Isp)',
-                line: { color: '#4facfe', width: 3 }, marker: { size: 7 }, yaxis: 'y'
+                line: { color: '#00e5ff', width: 3 }, marker: { size: 7 }, yaxis: 'y'
             };
             const thrustTrace = {
                 x: km, y: ap.map(p => (p.thrust || 0) / 1000),
                 type: 'scatter', mode: 'lines+markers', name: 'İtki',
-                line: { color: '#f093fb', width: 3, dash: 'dot' }, marker: { size: 7 }, yaxis: 'y2'
+                line: { color: '#ff8c33', width: 3, dash: 'dot' }, marker: { size: 7 }, yaxis: 'y2'
             };
             const layout = {
                 title: 'İrtifaya Göre Motor Performansı',
                 xaxis: { title: 'İrtifa (km)' },
-                yaxis: { title: 'Özgül İtki (s)', titlefont: { color: '#4facfe' }, tickfont: { color: '#4facfe' } },
-                yaxis2: { title: 'İtki (kN)', titlefont: { color: '#f093fb' }, tickfont: { color: '#f093fb' }, overlaying: 'y', side: 'right' },
+                yaxis: { title: 'Özgül İtki (s)', titlefont: { color: '#00e5ff' }, tickfont: { color: '#00e5ff' } },
+                yaxis2: { title: 'İtki (kN)', titlefont: { color: '#ff8c33' }, tickfont: { color: '#ff8c33' }, overlaying: 'y', side: 'right' },
                 showlegend: true, margin: { l: 60, r: 60, t: 60, b: 60 }
             };
             Plotly.newPlot(div, [ispTrace, thrustTrace], layout, { responsive: true });
@@ -3559,7 +3576,7 @@ Please provide:
             const cfTrace = {
                 x: km, y: ap.map(p => p.thrust_coefficient),
                 type: 'scatter', mode: 'lines+markers', name: 'İtki Katsayısı (Cf)',
-                line: { color: '#4facfe', width: 3 }, yaxis: 'y'
+                line: { color: '#00e5ff', width: 3 }, yaxis: 'y'
             };
             const effTrace = {
                 x: km, y: ap.map(p => p.nozzle_efficiency),
@@ -3569,7 +3586,7 @@ Please provide:
             const machTrace = {
                 x: km, y: ap.map(p => p.exit_mach_number),
                 type: 'scatter', mode: 'lines+markers', name: 'Çıkış Mach Sayısı',
-                line: { color: '#f5576c', width: 3 }, yaxis: 'y2'
+                line: { color: '#ff5d73', width: 3 }, yaxis: 'y2'
             };
             const layout = {
                 title: 'Nozul Parametrelerinin İrtifayla Değişimi',
@@ -3595,8 +3612,8 @@ Please provide:
             const tp = fs.turbopump; // null → basınç beslemeli
             const hasPump = !!tp;
 
-            const oxColor = '#4facfe', fuColor = '#f5576c', pumpColor = '#a78bfa';
-            const injColor = '#f093fb', chColor = '#ff8a5c', nzColor = '#9b8cff';
+            const oxColor = '#00e5ff', fuColor = '#ff5d73', pumpColor = '#c792ea';
+            const injColor = '#ffd166', chColor = '#ff8c33', nzColor = '#2dd4a8';
             const shapes = [], ann = [];
 
             function box(x0, y0, x1, y1, color) {
@@ -3999,13 +4016,13 @@ Please provide:
                     
                 } else {
                     const errorData = await response.json();
-                    cadContainer.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">Detailed CAD generation failed: ${errorData.error}</div>`;
+                    cadContainer.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--hd-red, #ff5d73);">Detailed CAD generation failed: ${errorData.error}</div>`;
                 }
                 
             } catch (error) {
                 console.error('Detailed CAD error:', error);
                 const cadContainer = document.getElementById('cad_visualization');
-                cadContainer.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">Error: ${error.message}</div>`;
+                cadContainer.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--hd-red, #ff5d73);">Error: ${error.message}</div>`;
             }
         }
         
@@ -4100,6 +4117,7 @@ Please provide:
     <script src="/static/js/panels/structural_panel.js"></script>
     <script src="/static/js/panels/thermal_panel.js"></script>
     <script src="/static/js/panels/safety_panel.js"></script>
+    <script src="/static/js/panels/performance_panel.js"></script>
     <script>
         // Analiz güvertesi (thermal/structural/safety) — çapa #results içinde
         // olduğundan hesap bitip sonuç bölümü açılınca görünür olur.

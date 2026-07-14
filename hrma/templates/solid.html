@@ -142,17 +142,6 @@
             font-weight: 600;
         }
         
-        .metric-card {
-            text-align: center;
-            padding: 20px;
-            border-radius: 8px;
-            color: white;
-            margin-bottom: 15px;
-        }
-        .metric-value { font-size: 32px; font-weight: 300; }
-        .metric-label { font-size: 14px; opacity: 0.9; }
-        .metric-unit { font-size: 12px; opacity: 0.7; }
-        
         .loading {
             display: none;
             text-align: center;
@@ -1767,9 +1756,9 @@
 
             // Başarı oranı rengi: %95+ yeşil, %80-95 sarı, altı kırmızı
             const sr = mc.success_rate_percent;
-            let srColor = '#f5576c';               // kırmızı
-            if (sr >= 95)      srColor = '#2ecc71'; // yeşil
-            else if (sr >= 80) srColor = '#f0ad4e'; // sarı
+            let srColor = '#ff5d73';               // kırmızı
+            if (sr >= 95)      srColor = '#2dd4a8'; // yeşil
+            else if (sr >= 80) srColor = '#ffd166'; // sarı
 
             const successCard =
                 '<div style="text-align:center; padding:24px; border-radius:8px; color:#fff; background:' + srColor + '; margin-bottom:16px;">' +
@@ -1792,7 +1781,7 @@
                 '</div>';
 
             const failWarn = (mc.n_failed_runs > 0)
-                ? '<p style="margin-top:6px; font-size:13px; color:#f0ad4e;">⚠ ' + mc.n_failed_runs +
+                ? '<p style="margin-top:6px; font-size:13px; color:#ffd166;">⚠ ' + mc.n_failed_runs +
                   ' koşu yakınsamadı (istatistiklere dahil edilmedi).</p>'
                 : '';
 
@@ -1815,12 +1804,12 @@
                 Plotly.newPlot('mc_hist_thrust', [{
                     x: mc.histograms.thrust,
                     type: 'histogram',
-                    marker: { color: 'rgba(240,147,251,0.55)', line: { color: '#f093fb', width: 1 } }
+                    marker: { color: 'rgba(0,229,255,0.35)', line: { color: '#00e5ff', width: 1 } }
                 }], {
                     title: 'İtki Dağılımı',
                     xaxis: { title: 'İtki (N)' },
                     yaxis: { title: 'Frekans' },
-                    shapes: nominalLine(mc.thrust && mc.thrust.nominal, '#ff6b6b'),
+                    shapes: nominalLine(mc.thrust && mc.thrust.nominal, '#ff5d73'),
                     showlegend: false,
                     margin: { t: 40, r: 20, b: 45, l: 55 }
                 }, { responsive: true });
@@ -1830,12 +1819,12 @@
                 Plotly.newPlot('mc_hist_isp', [{
                     x: mc.histograms.isp,
                     type: 'histogram',
-                    marker: { color: 'rgba(102,126,234,0.55)', line: { color: '#667eea', width: 1 } }
+                    marker: { color: 'rgba(255,140,51,0.35)', line: { color: '#ff8c33', width: 1 } }
                 }], {
                     title: 'Isp Dağılımı',
                     xaxis: { title: 'Isp (s)' },
                     yaxis: { title: 'Frekans' },
-                    shapes: nominalLine(mc.isp && mc.isp.nominal, '#4facfe'),
+                    shapes: nominalLine(mc.isp && mc.isp.nominal, '#00e5ff'),
                     showlegend: false,
                     margin: { t: 40, r: 20, b: 45, l: 55 }
                 }, { responsive: true });
@@ -1845,31 +1834,59 @@
         function displayResults(results) {
             document.getElementById('results').style.display = 'block';
             
-            // Performance metrics with comprehensive display
+            // Performans metrikleri — hd-metric HUD kartları
+            // (app.js displayPerformanceMetrics deseni; HRMAHud yoksa düz metin)
             const metricsDiv = document.getElementById('performanceMetrics');
             const metrics = [
-                { label: 'Deniz Seviyesi Isp', value: results.isp_sea_level.toFixed(1), unit: 's', color: '#f093fb' },
-                { label: 'Vakum Isp', value: results.isp_vacuum.toFixed(1), unit: 's', color: '#667eea' },
-                { label: 'Ortalama Thrust', value: results.average_thrust.toFixed(0), unit: 'N', color: '#4facfe' },
-                { label: 'Yanma Süresi', value: results.burn_time.toFixed(2), unit: 's', color: '#f5576c' },
-                { label: 'Toplam İtki', value: (results.total_impulse / 1000).toFixed(1), unit: 'kN·s', color: '#ff6b6b' },
-                { label: 'C* Verimlilik', value: (results.detailed_analysis?.performance_metrics?.c_star_efficiency_percent || 96).toFixed(1), unit: '%', color: '#4ecdc4' },
-                { label: 'Thrust Katsayısı', value: (results.detailed_analysis?.performance_metrics?.average_thrust_coefficient || 1.65).toFixed(2), unit: '', color: '#45b7d1' },
-                { label: 'Yanıcı Kütlesi', value: results.propellant_mass.toFixed(2), unit: 'kg', color: '#96ceb4' }
+                { label: 'Sea Level Isp', value: results.isp_sea_level, decimals: 1, unit: 's' },
+                { label: 'Vacuum Isp', value: results.isp_vacuum, decimals: 1, unit: 's' },
+                { label: 'Average Thrust', value: results.average_thrust, decimals: 0, unit: 'N' },
+                { label: 'Burn Time', value: results.burn_time, decimals: 2, unit: 's' },
+                { label: 'Total Impulse', value: results.total_impulse / 1000, decimals: 1, unit: 'kN·s' },
+                { label: 'C* Efficiency', value: (results.detailed_analysis?.performance_metrics?.c_star_efficiency_percent || 96), decimals: 1, unit: '%' },
+                { label: 'Thrust Coefficient', value: (results.detailed_analysis?.performance_metrics?.average_thrust_coefficient || 1.65), decimals: 2, unit: '' },
+                { label: 'Propellant Mass', value: results.propellant_mass, decimals: 2, unit: 'kg' }
             ];
-            
-            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">';
-            metrics.forEach(metric => {
-                html += `
-                    <div class="metric-card" style="background: ${metric.color};">
-                        <div class="metric-value">${metric.value}</div>
-                        <div class="metric-label">${metric.label}</div>
-                        <div class="metric-unit">${metric.unit}</div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-            metricsDiv.innerHTML = html;
+
+            const fmtMetric = m => {
+                const v = Number(m.value);
+                return isFinite(v) ? v.toFixed(m.decimals) : 'n/a';
+            };
+
+            if (metricsDiv) {
+                if (typeof window.HRMAHud === 'undefined') {
+                    // HUD katmanı yüklenmemişse zarifçe düz metne düş
+                    metricsDiv.innerHTML = metrics.map(m =>
+                        `<div style="padding:4px 0;"><strong>${m.label}:</strong> ${fmtMetric(m)} ${m.unit}</div>`
+                    ).join('');
+                } else {
+                    let html = '<div class="hd-metric-grid">';
+                    metrics.forEach(m => {
+                        const v = Number(m.value);
+                        const countSpan = isFinite(v)
+                            ? `<span class="hd-count" data-target="${v}" data-decimals="${m.decimals}">0</span>`
+                            : '<span>n/a</span>';
+                        html += `
+                            <div class="hd-metric">
+                                <div class="hd-metric-head">
+                                    <div class="hd-metric-label">${m.label}</div>
+                                </div>
+                                <div class="hd-metric-value">
+                                    ${countSpan}<small>${m.unit}</small>
+                                </div>
+                            </div>`;
+                    });
+                    html += '</div>';
+                    metricsDiv.innerHTML = html;
+
+                    // Durum bağlama (varsa) + count-up başlatma
+                    const cards = metricsDiv.querySelectorAll('.hd-metric');
+                    metrics.forEach((m, i) => {
+                        if (m.state && cards[i]) HRMAHud.bindState(cards[i], m.state);
+                    });
+                    HRMAHud.initAll(metricsDiv);
+                }
+            }
 
             // Hibrit paritesi: Motor Tasarımı tablosu + Motor Kesiti (plots.motor)
             populateMotorDesignTable(results);
@@ -1886,7 +1903,7 @@
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Thrust',
-                line: { color: '#f093fb', width: 3 }
+                line: { color: '#00e5ff', width: 3 }
             };
             
             const thrustLayout = {
@@ -1905,7 +1922,7 @@
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Pressure',
-                line: { color: '#667eea', width: 3 }
+                line: { color: '#ff8c33', width: 3 }
             };
             
             const pressureLayout = {
@@ -1925,7 +1942,7 @@
                     type: 'scatter',
                     mode: 'lines+markers',
                     name: 'Isp vs Altitude',
-                    line: { color: '#4facfe', width: 3 },
+                    line: { color: '#2dd4a8', width: 3 },
                     marker: { size: 6 }
                 };
                 
@@ -2653,10 +2670,10 @@ Please provide:
             traces.push(createCylinderTrace(0, 0, 5, caseID, caseLength-10, 'Kasa İçi', '#888888', 0.1));
             
             // Propellant grain (solid cylinder with core)
-            traces.push(createHollowCylinderTrace(0, 0, 50, grainOD, grainCore, grainLength, 'Yanıcı Grain', '#ff6b6b', 0.8));
+            traces.push(createHollowCylinderTrace(0, 0, 50, grainOD, grainCore, grainLength, 'Yanıcı Grain', '#ff5d73', 0.8));
             
             // Nozzle assembly
-            traces.push(createNozzleTrace(0, 0, caseLength, throatD, exitD, nozzleLength, 'Nozzle', '#4ecdc4', 0.9));
+            traces.push(createNozzleTrace(0, 0, caseLength, throatD, exitD, nozzleLength, 'Nozzle', '#2dd4a8', 0.9));
             
             const layout = {
                 title: 'Katı Yakıt Motor 3D CAD Görünümü',
@@ -3108,6 +3125,7 @@ Please provide:
     <script src="/static/js/panels/structural_panel.js"></script>
     <script src="/static/js/panels/thermal_panel.js"></script>
     <script src="/static/js/panels/safety_panel.js"></script>
+    <script src="/static/js/panels/performance_panel.js"></script>
     <script>
         // Analiz güvertesi (thermal/structural/safety) — çapa #results içinde
         // olduğundan hesap bitip sonuç bölümü açılınca görünür olur.

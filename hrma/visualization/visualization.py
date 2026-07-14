@@ -6,6 +6,54 @@ from typing import Dict, List, Tuple, Optional
 
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
 
+# ---------------------------------------------------------------------------
+# Ortak koyu tema paleti — theme.css / plotly_dark.js COLORWAY ile hizalı.
+# Kural: seri/çizgi renkleri bu sıradan atanır; kırmızı-yeşil-sarı YALNIZ
+# anlamsal (güvenli/uyarı/tehlike) kullanım içindir (kitsch kuralı).
+# advanced_results.py de bu sabitleri import eder — tek kaynak.
+# ---------------------------------------------------------------------------
+PALETTE = ['#00e5ff', '#ff8c33', '#2dd4a8', '#ff5d73',
+           '#c792ea', '#ffd166', '#7cc4ff', '#f78fb3']
+COL_SAFE = '#2dd4a8'      # güvenli / hedefte
+COL_WARN = '#ffd166'      # uyarı (hafif)
+COL_WARN_HI = '#ff8c33'   # uyarı (kuvvetli)
+COL_DANGER = '#ff5d73'    # tehlike / limit aşımı
+STRUCT_INK = '#d7e3ee'    # yapı çizgileri (koyu zeminde okunur mürekkep)
+STRUCT_DIM = '#5f7c8c'    # ikincil çizgiler (eksen/ölçü yardımcıları)
+# Sıralı büyüklükler için tek aileli cyan skala; sıcak aile yalnız ısı akısı
+# gibi fiziksel olarak "sıcak" büyüklüklerde kullanılır (yine tek aile)
+SEQ_CYAN = [[0.0, '#0a1322'], [0.5, '#0a7c8f'], [1.0, '#00e5ff']]
+SEQ_WARM = [[0.0, '#1a0e08'], [0.5, '#8f4a0a'], [1.0, '#ff8c33']]
+SEQ_BROWN = [[0.0, '#3a2415'], [1.0, '#c98a55']]  # yakıt grain malzemesi
+# Kutuplu (diverging) büyüklükler: tehlike ↔ nötr koyu ↔ cyan
+DIV_SCALE = [[0.0, '#ff5d73'], [0.5, '#0a1322'], [1.0, '#00e5ff']]
+# Gauge step zeminleri — yarı saydam, gövdeyi bastırmayan
+STEP_DIM = 'rgba(125, 151, 165, 0.15)'
+STEP_SAFE = 'rgba(45, 212, 168, 0.25)'
+STEP_WARN = 'rgba(255, 209, 102, 0.25)'
+STEP_DANGER = 'rgba(255, 93, 115, 0.25)'
+# Koyu panel zeminleri (plotly_dark.js ile aynı değerler)
+DARK_PLOT_BG = 'rgba(8, 16, 28, 0.35)'
+DARK_PAPER_BG = 'rgba(0,0,0,0)'
+DARK_LEGEND_BG = 'rgba(6, 13, 24, 0.7)'
+DARK_LEGEND_BORDER = 'rgba(0, 229, 255, 0.2)'
+
+
+def _style_subplot_titles(fig, size=13, color='#cfe8f2'):
+    """make_subplots başlıklarını küçült — 16px varsayılan başlıklar
+    kalabalık panolarda eksen etiketleriyle iç içe geçiyordu.
+    make_subplots'tan HEMEN sonra çağrılmalı (başlıklar annotation'dır;
+    sonradan eklenen annotation'lara dokunulmasın)."""
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=size, color=color)
+
+
+def _legend_below(y=-0.12):
+    """Kalabalık legend'ı grafiğin altına yatay dizer (çakışma önleme)."""
+    return dict(orientation='h', yanchor='top', y=y, x=0.5, xanchor='center',
+                bgcolor=DARK_LEGEND_BG, bordercolor=DARK_LEGEND_BORDER)
+
+
 def create_motor_plot(motor_data):
     """Create professional motor cross-section plot"""
     
@@ -40,7 +88,7 @@ def create_motor_plot(motor_data):
     fig.add_trace(go.Scatter(
         x=chamber_wall_upper_x, y=chamber_wall_upper_y,
         mode='lines',
-        line=dict(color='black', width=4),
+        line=dict(color=STRUCT_INK, width=4),
         name='Chamber Wall',
         showlegend=False
     ))
@@ -48,7 +96,7 @@ def create_motor_plot(motor_data):
     fig.add_trace(go.Scatter(
         x=chamber_wall_lower_x, y=chamber_wall_lower_y,
         mode='lines',
-        line=dict(color='black', width=4),
+        line=dict(color=STRUCT_INK, width=4),
         name='Chamber Wall',
         showlegend=False
     ))
@@ -58,7 +106,7 @@ def create_motor_plot(motor_data):
         x=[-L_mm/2, -L_mm/2],
         y=[-D_ch_mm/2, D_ch_mm/2],
         mode='lines',
-        line=dict(color='black', width=4),
+        line=dict(color=STRUCT_INK, width=4),
         name='Head End',
         showlegend=False
     ))
@@ -80,9 +128,9 @@ def create_motor_plot(motor_data):
         x=[grain_start, grain_end, grain_end, grain_start, grain_start],
         y=[port_radius, port_radius, grain_outer_radius, grain_outer_radius, port_radius],
         fill='toself',
-        fillcolor='rgba(160, 82, 45, 0.8)',
+        fillcolor='rgba(178, 116, 68, 0.9)',
         mode='lines',
-        line=dict(color='saddlebrown', width=3),
+        line=dict(color='#c98a55', width=3),
         name='Fuel Grain',
         hovertemplate=f'Fuel Grain<br>Length: {grain_length:.1f} mm<br>Thickness: {grain_outer_radius-port_radius:.1f} mm<br>Port: {D_port_i_mm:.1f} mm'
     ))
@@ -92,9 +140,9 @@ def create_motor_plot(motor_data):
         x=[grain_start, grain_end, grain_end, grain_start, grain_start],
         y=[-port_radius, -port_radius, -grain_outer_radius, -grain_outer_radius, -port_radius],
         fill='toself',
-        fillcolor='rgba(160, 82, 45, 0.8)',
+        fillcolor='rgba(178, 116, 68, 0.9)',
         mode='lines',
-        line=dict(color='saddlebrown', width=3),
+        line=dict(color='#c98a55', width=3),
         showlegend=False,
         hoverinfo='skip'
     ))
@@ -106,7 +154,7 @@ def create_motor_plot(motor_data):
         x=[grain_start, grain_end],
         y=[final_port_radius, final_port_radius],
         mode='lines',
-        line=dict(color='red', width=3, dash='dash'),
+        line=dict(color=COL_DANGER, width=3, dash='dash'),
         name='Port (Final)',
         hovertemplate=f'Final Port: {D_port_f_mm:.1f} mm diameter'
     ))
@@ -115,7 +163,7 @@ def create_motor_plot(motor_data):
         x=[grain_start, grain_end],
         y=[-final_port_radius, -final_port_radius],
         mode='lines',
-        line=dict(color='red', width=3, dash='dash'),
+        line=dict(color=COL_DANGER, width=3, dash='dash'),
         showlegend=False,
         hoverinfo='skip'
     ))
@@ -146,7 +194,7 @@ def create_motor_plot(motor_data):
         fill='toself',
         fillcolor='rgba(160, 160, 160, 0.8)',
         mode='lines',
-        line=dict(color='black', width=3),
+        line=dict(color=STRUCT_INK, width=3),
         name='Nozzle',
         hovertemplate='Nozzle<br>Throat: %.1f mm<br>Exit: %.1f mm<br>Expansion Ratio: %.1f' % 
                      (d_t_mm, d_e_mm, motor_data.get('expansion_ratio', d_e_mm**2/d_t_mm**2))
@@ -158,7 +206,7 @@ def create_motor_plot(motor_data):
         x=[throat_x, throat_x],
         y=[-d_t_mm/2, d_t_mm/2],
         mode='lines',
-        line=dict(color='orange', width=3),
+        line=dict(color=COL_WARN_HI, width=3),
         name='Throat',
         hovertemplate='Throat Location<br>Diameter: %.2f mm' % d_t_mm
     ))
@@ -169,7 +217,7 @@ def create_motor_plot(motor_data):
         x=[-L_mm/2, nozzle_end_x],
         y=[0, 0],
         mode='lines',
-        line=dict(color='gray', width=1, dash='dot'),
+        line=dict(color=STRUCT_DIM, width=1, dash='dot'),
         name='Centerline',
         showlegend=False
     ))
@@ -199,7 +247,7 @@ def create_motor_plot(motor_data):
         x=arc_x,
         y=arc_y,
         mode='lines',
-        line=dict(color='orange', width=2),
+        line=dict(color=COL_WARN_HI, width=2),
         name=f'Convergent {convergent_angle}°',
         showlegend=True
     ))
@@ -208,7 +256,7 @@ def create_motor_plot(motor_data):
         x=[conv_mid_x, conv_angle_end_x],
         y=[conv_mid_y, conv_angle_end_y],
         mode='lines',
-        line=dict(color='orange', width=3, dash='dot'),
+        line=dict(color=COL_WARN_HI, width=3, dash='dot'),
         name=f'Conv. Angle {convergent_angle}°',
         showlegend=False
     ))
@@ -231,7 +279,7 @@ def create_motor_plot(motor_data):
         x=arc_x_div,
         y=arc_y_div,
         mode='lines',
-        line=dict(color='green', width=2),
+        line=dict(color='#2dd4a8', width=2),
         name=f'Divergent {divergent_angle}°',
         showlegend=True
     ))
@@ -240,7 +288,7 @@ def create_motor_plot(motor_data):
         x=[div_mid_x, div_angle_end_x],
         y=[div_mid_y, div_angle_end_y],
         mode='lines',
-        line=dict(color='green', width=3, dash='dot'),
+        line=dict(color='#2dd4a8', width=3, dash='dot'),
         name=f'Div. Angle {divergent_angle}°',
         showlegend=False
     ))
@@ -258,13 +306,13 @@ def create_motor_plot(motor_data):
         # Add angle annotations with larger text
         dict(x=conv_mid_x + 15, y=conv_mid_y + 10, text=f'α = {convergent_angle}°',
              showarrow=True, arrowhead=2, ax=0, ay=-30,
-             font=dict(size=14, color='orange', family='Arial Black')),
+             font=dict(size=14, color='#ff8c33', family='Inter, sans-serif')),
         dict(x=div_mid_x + 15, y=div_mid_y + 10, text=f'β = {divergent_angle}°',
              showarrow=True, arrowhead=2, ax=0, ay=-30,
-             font=dict(size=14, color='green', family='Arial Black')),
+             font=dict(size=14, color='#2dd4a8', family='Inter, sans-serif')),
         # Add expansion ratio
         dict(x=(throat_x + nozzle_end_x) / 2, y=D_ch_mm/2 + 40, text=f'ε = {expansion_ratio:.1f}',
-             showarrow=False, font=dict(size=11, color='purple'))
+             showarrow=False, font=dict(size=11, color='#c792ea'))
     ]
     
     # Clean motor layout with improved sizing
@@ -272,7 +320,7 @@ def create_motor_plot(motor_data):
         title=dict(
             text='Hybrid Rocket Motor - Axial Cross-Section View',
             x=0.5,
-            font=dict(size=18, family='Arial', color='black')
+            font=dict(size=18, family='Arial', color=STRUCT_INK)
         ),
         xaxis=dict(
             title='Length (mm)',
@@ -299,7 +347,7 @@ def create_motor_plot(motor_data):
             x=0.02, 
             y=0.98,
             bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='black',
+            bordercolor=STRUCT_INK,
             borderwidth=1
         ),
         hovermode='closest',
@@ -391,7 +439,7 @@ def create_injector_plot(injector_data, injector_type):
             x=plate_radius_mm * np.cos(theta),
             y=plate_radius_mm * np.sin(theta),
             mode='lines',
-            line=dict(color='black', width=4),
+            line=dict(color=STRUCT_INK, width=4),
             name='Injector Plate',
             hovertemplate=f'Plate Diameter: {plate_radius_mm*2:.1f} mm'
         ))
@@ -414,7 +462,7 @@ def create_injector_plot(injector_data, injector_type):
             fill='toself',
             fillcolor='rgba(160, 160, 160, 0.7)',
             mode='lines',
-            line=dict(color='black', width=4),
+            line=dict(color=STRUCT_INK, width=4),
             name='Outer Body',
             hovertemplate=f'Outer Body<br>Diameter: {D_outer_mm:.1f} mm<br>Material: Stainless Steel'
         ))
@@ -427,7 +475,7 @@ def create_injector_plot(injector_data, injector_type):
             fill='toself',
             fillcolor='rgba(173, 216, 230, 0.4)',
             mode='lines',
-            line=dict(color='blue', width=2, dash='dot'),
+            line=dict(color='#00e5ff', width=2, dash='dot'),
             name='Flow Annulus',
             hovertemplate=f'Flow Annulus<br>Gap: {gap_mm:.2f} mm<br>Flow Area: {np.pi * ((D_outer_mm/2)**2 - inner_radius**2):.1f} mm²'
         ))
@@ -439,7 +487,7 @@ def create_injector_plot(injector_data, injector_type):
             fill='toself',
             fillcolor='rgba(64, 64, 64, 0.9)',
             mode='lines',
-            line=dict(color='black', width=3),
+            line=dict(color=STRUCT_INK, width=3),
             name='Pintle',
             hovertemplate=f'Pintle<br>Diameter: {D_pintle_mm:.1f} mm<br>Material: Stainless Steel'
         ))
@@ -472,7 +520,7 @@ def create_injector_plot(injector_data, injector_type):
                 fill='toself',
                 fillcolor='rgba(64, 64, 64, 0.9)',
                 mode='lines',
-                line=dict(color='black', width=2),
+                line=dict(color=STRUCT_INK, width=2),
                 name='Support Arms' if i == 0 else '',
                 showlegend=i == 0,
                 hovertemplate='Support Arm<br>Thickness: 2 mm'
@@ -495,7 +543,7 @@ def create_injector_plot(injector_data, injector_type):
                     x=[x_start, x_end],
                     y=[y_start, y_end],
                     mode='lines',
-                    line=dict(color='red', width=3),
+                    line=dict(color='#ff5d73', width=3),
                     name='Flow Direction' if i == 0 else '',
                     showlegend=i == 0 and 'Flow Direction' not in [trace.name for trace in fig.data],
                     hoverinfo='skip'
@@ -533,7 +581,7 @@ def create_injector_plot(injector_data, injector_type):
             fill='toself',
             fillcolor='rgba(180, 180, 180, 0.6)',
             mode='lines',
-            line=dict(color='black', width=4),
+            line=dict(color=STRUCT_INK, width=4),
             name='Swirl Chamber',
             hovertemplate=f'Swirl Chamber<br>Diameter: {chamber_radius_mm*2:.1f} mm<br>Material: Stainless Steel'
         ))
@@ -546,7 +594,7 @@ def create_injector_plot(injector_data, injector_type):
             fill='toself',
             fillcolor='rgba(135, 206, 235, 0.3)',
             mode='lines',
-            line=dict(color='blue', width=2, dash='dot'),
+            line=dict(color='#00e5ff', width=2, dash='dot'),
             name='Swirl Region',
             hovertemplate='Swirl Flow Region'
         ))
@@ -603,7 +651,7 @@ def create_injector_plot(injector_data, injector_type):
                 x=[arrow_start_x, arrow_end_x],
                 y=[arrow_start_y, arrow_end_y],
                 mode='lines',
-                line=dict(color='red', width=3),
+                line=dict(color='#ff5d73', width=3),
                 name='Flow Direction' if i == 0 else '',
                 showlegend=i == 0,
                 hoverinfo='skip'
@@ -619,7 +667,7 @@ def create_injector_plot(injector_data, injector_type):
             fill='toself',
             fillcolor='white',
             mode='lines',
-            line=dict(color='black', width=3),
+            line=dict(color=STRUCT_INK, width=3),
             name='Exit Orifice',
             hovertemplate=f'Exit Orifice<br>Diameter: {exit_radius_mm*2:.2f} mm<br>Area: {exit_area_mm2:.2f} mm²'
         ))
@@ -633,7 +681,7 @@ def create_injector_plot(injector_data, injector_type):
         fig.add_trace(go.Scatter(
             x=spiral_x, y=spiral_y,
             mode='lines',
-            line=dict(color='blue', width=2, dash='dash'),
+            line=dict(color='#00e5ff', width=2, dash='dash'),
             name='Swirl Pattern',
             hovertemplate='Swirl Flow Pattern'
         ))
@@ -661,7 +709,7 @@ def create_injector_plot(injector_data, injector_type):
         title=dict(
             text=f'{title}<br><sub>{subtitle}</sub>',
             x=0.5,
-            font=dict(size=18, family='Arial', color='black')
+            font=dict(size=18, family='Arial', color=STRUCT_INK)
         ),
         xaxis=dict(
             title='X (mm)',
@@ -711,7 +759,7 @@ def create_performance_plots(motor_data, injector_data):
         go.Bar(
             x=['Total', 'Oxidizer', 'Fuel'],
             y=[motor_data['mdot_total'], motor_data['mdot_ox'], motor_data['mdot_f']],
-            marker_color=['blue', 'green', 'orange'],
+            marker_color=['#00e5ff', '#2dd4a8', '#ff8c33'],
             text=[f"{v:.3f} kg/s" for v in [motor_data['mdot_total'], 
                                             motor_data['mdot_ox'], 
                                             motor_data['mdot_f']]],
@@ -730,7 +778,7 @@ def create_performance_plots(motor_data, injector_data):
         go.Bar(
             x=pressures,
             y=values,
-            marker_color=['red', 'blue', 'green'],
+            marker_color=['#ff5d73', '#00e5ff', '#2dd4a8'],
             text=[f"{v:.1f} bar" for v in values],
             textposition='auto'
         ),
@@ -769,7 +817,7 @@ def create_performance_plots(motor_data, injector_data):
                 x=time,
                 y=port_diameter * 1000,  # Convert to mm
                 mode='lines',
-                line=dict(color='purple', width=3),
+                line=dict(color='#c792ea', width=3),
                 name='Port Diameter Growth',
                 hovertemplate='Time: %{x:.1f}s<br>Port Diameter: %{y:.1f}mm<extra></extra>'
             ),
@@ -782,7 +830,7 @@ def create_performance_plots(motor_data, injector_data):
                 x=time,
                 y=regression_rate_array,
                 mode='lines',
-                line=dict(color='red', width=2),
+                line=dict(color='#ff5d73', width=2),
                 name=reg_label,
                 hovertemplate='Time: %{x:.1f}s<br>Regression Rate: %{y:.2f} mm/s<extra></extra>'
             ),
@@ -801,7 +849,7 @@ def create_performance_plots(motor_data, injector_data):
                 x=time,
                 y=port_diameter,
                 mode='lines',
-                line=dict(color='purple', width=3),
+                line=dict(color='#c792ea', width=3),
                 name='Port Diameter Growth',
                 hovertemplate='Time: %{x:.1f}s<br>Port Diameter: %{y:.1f}mm<extra></extra>'
             ),
@@ -813,7 +861,7 @@ def create_performance_plots(motor_data, injector_data):
                 x=time,
                 y=regression_rate_default,
                 mode='lines',
-                line=dict(color='red', width=2),
+                line=dict(color='#ff5d73', width=2),
                 name='Regression Rate (2.0 mm/s)',
                 hovertemplate='Time: %{x:.1f}s<br>Regression Rate: %{y:.2f} mm/s<extra></extra>'
             ),
@@ -832,12 +880,12 @@ def create_performance_plots(motor_data, injector_data):
                 'axis': {'range': [0, 100]},
                 'bar': {'color': "darkblue"},
                 'steps': [
-                    {'range': [0, 20], 'color': "lightgray"},
-                    {'range': [20, 50], 'color': "green"},
-                    {'range': [50, 100], 'color': "red"}
+                    {'range': [0, 20], 'color': "#46606d"},
+                    {'range': [20, 50], 'color': "#2dd4a8"},
+                    {'range': [50, 100], 'color': "#ff5d73"}
                 ],
                 'threshold': {
-                    'line': {'color': "red", 'width': 4},
+                    'line': {'color': "#ff5d73", 'width': 4},
                     'thickness': 0.75,
                     'value': 50
                 }
@@ -850,7 +898,7 @@ def create_performance_plots(motor_data, injector_data):
     fig.update_layout(
         title=dict(
             text="Hybrid Rocket Performance Analysis",
-            font=dict(size=22, family='Arial', color='black'),
+            font=dict(size=22, family='Arial', color=STRUCT_INK),
             x=0.5
         ),
         showlegend=True,
@@ -894,7 +942,7 @@ def create_heat_transfer_plots(heat_data):
                 x=wall_data['position'],
                 y=wall_data['temperature'],
                 mode='lines+markers',
-                line=dict(color='red', width=3),
+                line=dict(color='#ff5d73', width=3),
                 marker=dict(size=6),
                 name='Wall Temperature',
                 hovertemplate='Position: %{x:.2f} m<br>Temperature: %{y:.1f} K'
@@ -907,7 +955,7 @@ def create_heat_transfer_plots(heat_data):
         fig.add_hline(
             y=critical_temp,
             line_dash="dash",
-            line_color="orange",
+            line_color="#ff8c33",
             annotation_text=f"Critical Temp: {critical_temp}K",
             row=1, col=1
         )
@@ -935,7 +983,7 @@ def create_heat_transfer_plots(heat_data):
             go.Bar(
                 x=cooling_data['zones'],
                 y=cooling_data['effectiveness'],
-                marker_color=['green' if x > 0.8 else 'orange' if x > 0.6 else 'red' 
+                marker_color=['#2dd4a8' if x > 0.8 else '#ff8c33' if x > 0.6 else '#ff5d73' 
                              for x in cooling_data['effectiveness']],
                 text=[f"{x:.1%}" for x in cooling_data['effectiveness']],
                 textposition='auto',
@@ -1013,8 +1061,8 @@ def create_combustion_analysis_plots(combustion_data):
                 x=flame_data['position'],
                 y=flame_data['temperature'],
                 mode='lines+markers',
-                line=dict(color='orange', width=3),
-                marker=dict(size=6, color='red'),
+                line=dict(color='#ff8c33', width=3),
+                marker=dict(size=6, color='#ff5d73'),
                 name='Flame Temperature'
             ),
             row=1, col=2
@@ -1033,12 +1081,12 @@ def create_combustion_analysis_plots(combustion_data):
                 'axis': {'range': [0, 100]},
                 'bar': {'color': "darkgreen"},
                 'steps': [
-                    {'range': [0, 70], 'color': "lightgray"},
-                    {'range': [70, 90], 'color': "yellow"},
-                    {'range': [90, 100], 'color': "green"}
+                    {'range': [0, 70], 'color': "#46606d"},
+                    {'range': [70, 90], 'color': "#ffd166"},
+                    {'range': [90, 100], 'color': "#2dd4a8"}
                 ],
                 'threshold': {
-                    'line': {'color': "red", 'width': 4},
+                    'line': {'color': "#ff5d73", 'width': 4},
                     'thickness': 0.75,
                     'value': 95
                 }
@@ -1055,7 +1103,7 @@ def create_combustion_analysis_plots(combustion_data):
                 x=of_data['of_ratios'],
                 y=of_data['specific_impulse'],
                 mode='lines+markers',
-                line=dict(color='blue', width=3),
+                line=dict(color='#00e5ff', width=3),
                 marker=dict(size=8),
                 name='Isp vs O/F Ratio'
             ),
@@ -1069,7 +1117,7 @@ def create_combustion_analysis_plots(combustion_data):
                 x=[of_data['of_ratios'][optimum_idx]],
                 y=[of_data['specific_impulse'][optimum_idx]],
                 mode='markers',
-                marker=dict(size=15, color='red', symbol='star'),
+                marker=dict(size=15, color='#ff5d73', symbol='star'),
                 name='Optimum Point',
                 hovertemplate=f'Optimum O/F: {of_data["of_ratios"][optimum_idx]:.2f}<br>Max Isp: {of_data["specific_impulse"][optimum_idx]:.1f} s'
             ),
@@ -1126,7 +1174,7 @@ def create_structural_analysis_plots(structural_data):
     # Safety factor analysis
     if 'safety_factors' in structural_data:
         sf_data = structural_data['safety_factors']
-        colors = ['green' if x > 4 else 'orange' if x > 2 else 'red' for x in sf_data['values']]
+        colors = ['#2dd4a8' if x > 4 else '#ff8c33' if x > 2 else '#ff5d73' for x in sf_data['values']]
         fig.add_trace(
             go.Bar(
                 x=sf_data['locations'],
@@ -1143,7 +1191,7 @@ def create_structural_analysis_plots(structural_data):
         fig.add_hline(
             y=2.0,
             line_dash="dash",
-            line_color="red",
+            line_color="#ff5d73",
             annotation_text="Min SF: 2.0",
             row=1, col=2
         )
@@ -1156,7 +1204,7 @@ def create_structural_analysis_plots(structural_data):
                 x=wt_data['thickness'],
                 y=wt_data['mass'],
                 mode='lines+markers',
-                line=dict(color='blue', width=3),
+                line=dict(color='#00e5ff', width=3),
                 marker=dict(size=6),
                 name='Mass vs Thickness',
                 yaxis='y'
@@ -1169,7 +1217,7 @@ def create_structural_analysis_plots(structural_data):
                 x=wt_data['thickness'],
                 y=wt_data['safety_factor'],
                 mode='lines+markers',
-                line=dict(color='red', width=3),
+                line=dict(color='#ff5d73', width=3),
                 marker=dict(size=6),
                 name='Safety Factor',
                 yaxis='y2'
@@ -1185,7 +1233,7 @@ def create_structural_analysis_plots(structural_data):
                 x=fatigue_data['cycles'],
                 y=fatigue_data['stress_amplitude'],
                 mode='lines+markers',
-                line=dict(color='purple', width=3),
+                line=dict(color='#c792ea', width=3),
                 marker=dict(size=6),
                 name='S-N Curve'
             ),
@@ -1197,7 +1245,7 @@ def create_structural_analysis_plots(structural_data):
             fig.add_hline(
                 y=fatigue_data['fatigue_limit'],
                 line_dash="dash",
-                line_color="green",
+                line_color="#2dd4a8",
                 annotation_text=f"Fatigue Limit: {fatigue_data['fatigue_limit']:.0f} MPa",
                 row=2, col=2
             )
@@ -1245,7 +1293,7 @@ def create_real_time_dashboard(motor_data, time_data):
             gauge={
                 'axis': {'range': [0, current_thrust * 1.2]},
                 'bar': {'color': "darkgreen"},
-                'steps': [{'range': [0, current_thrust * 0.8], 'color': "lightgray"}],
+                'steps': [{'range': [0, current_thrust * 0.8], 'color': "#46606d"}],
             }
         ),
         row=1, col=1
@@ -1287,7 +1335,7 @@ def create_real_time_dashboard(motor_data, time_data):
                 x=time_data['time'],
                 y=time_data['propellant_mass'],
                 mode='lines',
-                line=dict(color='red', width=3),
+                line=dict(color='#ff5d73', width=3),
                 name='Propellant Mass'
             ),
             row=3, col=1
@@ -1299,7 +1347,7 @@ def create_real_time_dashboard(motor_data, time_data):
                 x=time_data['time'],
                 y=time_data['burn_rate'],
                 mode='lines',
-                line=dict(color='orange', width=3),
+                line=dict(color='#ff8c33', width=3),
                 name='Burn Rate'
             ),
             row=3, col=2
@@ -1311,7 +1359,7 @@ def create_real_time_dashboard(motor_data, time_data):
                 x=time_data['time'],
                 y=time_data['port_diameter'],
                 mode='lines',
-                line=dict(color='blue', width=3),
+                line=dict(color='#00e5ff', width=3),
                 name='Port Diameter'
             ),
             row=3, col=3
@@ -1489,7 +1537,7 @@ def create_comparative_analysis_plot(motor_configs):
             x=mass_values,
             y=isp_values,
             mode='markers+text',
-            marker=dict(size=15, color='purple'),
+            marker=dict(size=15, color='#c792ea'),
             text=config_names,
             textposition='top center',
             name='Mass vs Isp'
@@ -1570,7 +1618,7 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
         x=PC,
         y=OF,
         z=instability_z,
-        colorscale=[[0, 'red'], [1, 'darkred']],
+        colorscale=[[0, '#ff5d73'], [1, '#c23b52']],
         name='Instability Region',
         showscale=False,
         opacity=0.8
@@ -1676,7 +1724,7 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
         x=x_stations * 1000,  # Convert to mm
         y=y_stations * 1000,
         z=MACH,
-        colorscale='Jet',
+        colorscale=[[0, '#0a1322'], [0.35, '#0a7c8f'], [0.7, '#00e5ff'], [1, '#ff8c33']],
         contours=dict(
             start=0.5,
             end=4.0,
@@ -1694,7 +1742,7 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
         x=x_stations * 1000,
         y=wall_upper,
         mode='lines',
-        line=dict(color='black', width=3),
+        line=dict(color=STRUCT_INK, width=3),
         name='Nozzle Wall'
     ))
     
@@ -1702,13 +1750,13 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
         x=x_stations * 1000,
         y=wall_lower,
         mode='lines',
-        line=dict(color='black', width=3),
+        line=dict(color=STRUCT_INK, width=3),
         showlegend=False
     ))
     
     # Mark throat location
     throat_x = nozzle_length * 0.1 * 1000  # mm
-    fig.add_vline(x=throat_x, line_dash="dash", line_color="red", 
+    fig.add_vline(x=throat_x, line_dash="dash", line_color="#ff5d73", 
                   annotation_text="Throat")
     
     # Identify shock regions (Mach > 3.5)
@@ -1719,8 +1767,8 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
             y=25,
             text="Potential Shock Zone",
             showarrow=True,
-            arrowcolor="red",
-            font=dict(color="red")
+            arrowcolor="#ff5d73",
+            font=dict(color="#ff5d73")
         )
     
     fig.update_layout(
@@ -1806,7 +1854,7 @@ def create_wall_heat_flux_waterfall_plot(thermal_data: Dict) -> str:
             size=0.1,
             coloring='lines'
         ),
-        line=dict(color='red', width=3),
+        line=dict(color='#ff5d73', width=3),
         name=f'Critical Flux ({critical_flux} MW/m²)',
         showscale=False
     ))
@@ -1817,7 +1865,7 @@ def create_wall_heat_flux_waterfall_plot(thermal_data: Dict) -> str:
         y=[throat_position, throat_position],
         z=[0, 0],
         mode='lines',
-        line=dict(color='blue', width=5, dash='dash'),
+        line=dict(color='#00e5ff', width=5, dash='dash'),
         name='Throat Location'
     ))
     
@@ -1830,7 +1878,7 @@ def create_wall_heat_flux_waterfall_plot(thermal_data: Dict) -> str:
                 y=X[runaway_mask],
                 z=HEAT_FLUX_MW[runaway_mask],
                 mode='markers',
-                marker=dict(size=3, color='red', symbol='x'),
+                marker=dict(size=3, color='#ff5d73', symbol='x'),
                 name='Thermal Runaway Risk'
             ))
     
@@ -2246,7 +2294,7 @@ def create_showerhead_with_tooltips(injector_data):
         x=(plate_diameter/2) * np.cos(theta),
         y=(plate_diameter/2) * np.sin(theta),
         mode='lines',
-        line=dict(color='black', width=3),
+        line=dict(color=STRUCT_INK, width=3),
         name='Injektor Plakasi',
         hovertemplate=(
             f'<b>Injektor Plakasi</b><br>'
@@ -2269,7 +2317,7 @@ def create_showerhead_with_tooltips(injector_data):
             arrowhead=2,
             arrowsize=1,
             arrowwidth=2,
-            arrowcolor='red',
+            arrowcolor='#ff5d73',
             opacity=0.6
         )
 
@@ -2286,7 +2334,7 @@ def create_showerhead_with_tooltips(injector_data):
         font=dict(size=11),
         align='center',
         bgcolor='rgba(255, 255, 255, 0.9)',
-        bordercolor='black',
+        bordercolor=STRUCT_INK,
         borderwidth=1
     )
 
