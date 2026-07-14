@@ -633,12 +633,26 @@ def transient_analysis():
         )
         engine.calculate()
 
-        from hrma.analysis.transient_ballistics import TransientBallistics
+        from hrma.analysis.transient_ballistics import (
+            TransientBallistics, ThroatErosionModel)
+
+        # Dalga 3 — opsiyonel boğaz erozyonu kuplajı (varsayılan KAPALI).
+        # erosion_a_ref_mm_s: özel katsayı [mm/s @ 70 bar]; çelik/bakır gibi
+        # 'not recommended' malzemelerde ZORUNLU (modelsiz ValueError → 400).
+        erosion_model = None
+        erosion_a_ref = data.get('erosion_a_ref_mm_s')
+        if data.get('erosion_enabled') or erosion_a_ref is not None:
+            erosion_model = ThroatErosionModel.for_material(
+                data.get('throat_material', 'graphite'),
+                a_ref_mm_s=(float(erosion_a_ref)
+                            if erosion_a_ref is not None else None))
+
         solver = TransientBallistics(
             engine,
             feed_mode=data.get('feed_mode', 'regulated'),
             tank_temperature=float(data.get('tank_temperature', 293.15)),
             liquid_fill_fraction=float(data.get('liquid_fill_fraction', 0.85)),
+            erosion_model=erosion_model,
         )
         tr = solver.solve()
 
@@ -773,6 +787,220 @@ def six_dof_analysis():
         return jsonify(sanitize_json_values({
             'status': 'success', 'summary': summary, 'series': series}))
     except ValueError as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Dalga 3 — Analiz platformu endpoint'leri (docs/ANALIZ_PLATFORM_PLANI.md):
+# basınçlı kap (ASME VIII / AIAA S-080 + Faupel burst), termal koruma
+# (ablasyon Q* / heat-sink / radyasyon dengesi) ve cıvatalı bağlantı
+# (Shigley). Modüller: hrma/analysis/{pressure_vessel, thermal_protection,
+# bolted_joint}.py — burada yalnız girdi doğrulama + HTTP zarafeti var.
+# ---------------------------------------------------------------------------
+
+def _json_float(data, key):
+    """JSON alanını float'a çevirir; yok / None / '' ise None döner.
+
+    Sayıya çevrilemeyen değer ValueError yükseltir (endpoint 400'e çevirir).
+    """
+    v = data.get(key)
+    if v is None or v == '':
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"'{key}' must be a number (got {v!r})")
+
+
+def _json_bool(data, key, default):
+    """JSON alanını bool'a çevirir ('true'/'false' string'leri dahil)."""
+    v = data.get(key)
+    if v is None or v == '':
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s in ('true', '1', 'yes', 'on'):
+        return True
+    if s in ('false', '0', 'no', 'off'):
+        return False
+    raise ValueError(f"'{key}' must be a boolean (got {v!r})")
+
+
+@app.route('/api/pressure-vessel-analysis', methods=['POST'])
+def pressure_vessel_analysis():
+    """Basınçlı kap boyutlandırma + gerçek kopma (burst) basıncı.
+
+    Girdi (JSON): meop_bar (ZORUNLU), inner_diameter_mm (ZORUNLU),
+      material (vars. 'aluminum_6061'), wall_thickness_mm (None → otomatik
+      boyutlandırma), temperature_K (vars. 293.15), weld_efficiency
+      {0.70, 0.85, 1.00} (vars. 1.0), head_type (vars. 'ellipsoidal_2_1'),
+      code_mode 'aiaa_s080' (vars.) | 'asme_viii'.
+
+    Yanıt 200: PressureVesselAnalyzer.analyze() sözlüğü (status alanı
+    PASS/MARGINAL/FAIL; actual_burst_pressure_bar "kaç barda patlar").
+    Hata 400: {'error': mesaj} — tüm girdi hataları ValueError.
+    """
+    try:
+        data = request.json or {}
+        from hrma.analysis.pressure_vessel import PressureVesselAnalyzer
+
+        meop_bar = _json_float(data, 'meop_bar')
+        inner_diameter_mm = _json_float(data, 'inner_diameter_mm')
+        if meop_bar is None:
+            raise ValueError(
+                "'meop_bar' is required (maximum expected operating "
+                "pressure, bar)")
+        if inner_diameter_mm is None:
+            raise ValueError("'inner_diameter_mm' is required")
+
+        temperature_K = _json_float(data, 'temperature_K')
+        weld_efficiency = _json_float(data, 'weld_efficiency')
+
+        result = PressureVesselAnalyzer().analyze(
+            meop_bar=meop_bar,
+            inner_diameter_mm=inner_diameter_mm,
+            material=data.get('material', 'aluminum_6061'),
+            wall_thickness_mm=_json_float(data, 'wall_thickness_mm'),
+            temperature_K=(293.15 if temperature_K is None
+                           else temperature_K),
+            weld_efficiency=(1.0 if weld_efficiency is None
+                             else weld_efficiency),
+            head_type=data.get('head_type', 'ellipsoidal_2_1'),
+            code_mode=data.get('code_mode', 'aiaa_s080'),
+        )
+        return jsonify(sanitize_json_values(result))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# Termal koruma — mod bazlı parametre beyaz listeleri. Panel tek formdan
+# tüm alanları gönderir; hedef modun kabul etmediği alanlar burada sessizce
+# düşer (TypeError 500'e düşmesin). Anahtar adları modül imzalarıyla birebir
+# (hrma/analysis/thermal_protection.py).
+_TP_MODE_KEYS = {
+    'ablative': ('q_net_W_m2', 'burn_time_s', 'time_s', 'material',
+                 'design_margin', 'density_kg_m3'),
+    'heat_sink': ('h_gas_W_m2K', 'T_recovery_K', 'burn_time_s',
+                  'wall_thickness_m', 'wall_material', 'T_initial_K',
+                  'n_nodes', 'cfl_safety', 'store_history'),
+    'radiation_equilibrium': ('h_gas_W_m2K', 'T_recovery_K', 'emissivity',
+                              'material'),
+}
+
+
+@app.route('/api/thermal-protection', methods=['POST'])
+@app.route('/api/analysis/thermal-protection', methods=['POST'])
+def thermal_protection_analysis():
+    """Termal koruma analizi (üç mod).
+
+    Girdi (JSON): {'mode': 'ablative' | 'heat_sink' |
+    'radiation_equilibrium', ...mod parametreleri} — şema için
+    hrma/analysis/thermal_protection.py docstring'lerine bakınız.
+
+    Kolaylıklar (panel sözleşmesi):
+      * ablative: 'q_star_MJ_kg' kabul edilir → q_star_J_kg (x 1e6).
+      * radiation_equilibrium: 'radiation_material' kabul edilir →
+        'material' (panel, ablatif malzeme seçicisiyle çakışmasın diye
+        ayrı alan adı kullanır).
+      * heat_sink: store_history verilmezse True (panel T_w(t) grafiği).
+
+    Yanıt 200: ThermalProtectionAnalyzer.analyze() sözlüğü (model_note
+    alanı 'Simplified model' rozetine bağlanır). Hata 400: {'error': ...}.
+    """
+    try:
+        data = request.json or {}
+        mode = data.get('mode', 'ablative')
+        if mode not in _TP_MODE_KEYS:
+            raise ValueError(
+                f"Unknown mode '{mode}'. "
+                f"Available: {sorted(_TP_MODE_KEYS)}")
+
+        params = {k: data[k] for k in _TP_MODE_KEYS[mode]
+                  if data.get(k) not in (None, '')}
+
+        if mode == 'ablative' and data.get('q_star_MJ_kg') not in (None, ''):
+            params['q_star_J_kg'] = float(data['q_star_MJ_kg']) * 1e6
+        if (mode == 'radiation_equilibrium'
+                and data.get('radiation_material') not in (None, '')):
+            params['material'] = data['radiation_material']
+        if mode == 'heat_sink':
+            params['store_history'] = _json_bool(data, 'store_history', True)
+
+        from hrma.analysis.thermal_protection import ThermalProtectionAnalyzer
+        result = ThermalProtectionAnalyzer().analyze(mode, **params)
+        return jsonify(sanitize_json_values(result))
+    except (ValueError, KeyError) as e:
+        # KeyError: bilinmeyen materials_db anahtarı (get_material)
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/bolted-joint', methods=['POST'])
+def bolted_joint_analysis():
+    """Cıvatalı bağlantı (flanş/kapak) analizi — Shigley yöntemi.
+
+    Girdi (JSON): pressure_bar + seal_diameter_mm VEYA
+    external_axial_load_n (en az biri zorunlu); bolt_count (ZORUNLU);
+    size 'M4'..'M24' (vars. 'M8'); property_class '8.8'|'10.9'|'12.9'|
+    'A2-70' (vars. '8.8'); grip_length_mm (vars. 20); member_material
+    (materials_db anahtarı, vars. 'aluminum_6061'); lubricated (vars.
+    false); reusable (vars. true).
+
+    Yanıt 200: {'status': 'success', 'joint': {...}} — tork önerisi
+    ±%25 ön-yük saçılım bandıyla, ayrılma marjı ve emniyet faktörleri.
+    Hata 400: {'status': 'error', 'error': mesaj}.
+    """
+    try:
+        data = request.json or {}
+        from hrma.analysis.bolted_joint import analyze_bolted_joint
+
+        pressure_bar = _json_float(data, 'pressure_bar')
+        seal_diameter_mm = _json_float(data, 'seal_diameter_mm')
+        external_load_n = _json_float(data, 'external_axial_load_n')
+        if pressure_bar is None and external_load_n is None:
+            raise ValueError(
+                "Provide either 'pressure_bar' (with 'seal_diameter_mm') "
+                "or 'external_axial_load_n'")
+
+        bolt_count = data.get('bolt_count')
+        if bolt_count in (None, ''):
+            raise ValueError("'bolt_count' is required (integer >= 1)")
+        try:
+            bolt_count = int(bolt_count)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"'bolt_count' must be an integer >= 1 (got {bolt_count!r})")
+
+        grip_length_mm = _json_float(data, 'grip_length_mm')
+
+        joint = analyze_bolted_joint(
+            pressure_bar=pressure_bar,
+            seal_diameter_mm=seal_diameter_mm,
+            bolt_count=bolt_count,
+            size=data.get('size', 'M8'),
+            property_class=data.get('property_class', '8.8'),
+            grip_length_mm=(20.0 if grip_length_mm is None
+                            else grip_length_mm),
+            member_material=data.get('member_material', 'aluminum_6061'),
+            lubricated=_json_bool(data, 'lubricated', False),
+            reusable=_json_bool(data, 'reusable', True),
+            external_axial_load_n=external_load_n,
+        )
+        return jsonify(sanitize_json_values(
+            {'status': 'success', 'joint': joint}))
+    except (ValueError, KeyError) as e:
+        # KeyError: bilinmeyen materials_db anahtarı (get_material)
         return jsonify({'status': 'error', 'error': str(e)}), 400
     except Exception as e:
         traceback.print_exc()

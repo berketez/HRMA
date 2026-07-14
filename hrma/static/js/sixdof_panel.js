@@ -167,8 +167,13 @@
         html += badge(`APOGEE ${(s.apogee / 1000).toFixed(2)} km @ ${s.apogee_time.toFixed(1)} s`, 'info');
         html += badge(`MAX MACH ${s.max_mach.toFixed(2)}`, 'info');
         html += badge(`MAX α ${s.max_alpha_deg.toFixed(1)}°`, s.max_alpha_deg < 10 ? 'ok' : 'warn');
-        html += badge(`MARGIN ${s.static_margin_full.toFixed(2)} / ${s.static_margin_empty.toFixed(2)} cal`,
-            (s.static_margin_full > 1 && s.static_margin_empty > 1) ? 'ok' : 'err');
+        // NASA amatör roket pratiği: hedef 1.5-2 kalibre; >3 aşırı-stabil
+        // (rüzgâra dönme + irtifa kaybı) — 2026-07-15 GPT-5.6 çapraz kontrol önerisi
+        const smMin = Math.min(s.static_margin_full, s.static_margin_empty);
+        const smMax = Math.max(s.static_margin_full, s.static_margin_empty);
+        const smKind = smMin <= 1 ? 'err' : (smMax > 3 ? 'warn' : 'ok');
+        html += badge(`MARGIN ${s.static_margin_full.toFixed(2)} / ${s.static_margin_empty.toFixed(2)} cal`
+            + (smMax > 3 ? ' — OVER-STABLE' : ''), smKind);
         html += badge(`CNα ${s.cn_alpha.toFixed(2)} · CP ${s.x_cp.toFixed(3)} m`, 'info');
         html += badge('THRUST: ' + (usedCurve ? 'COMPUTED CURVE' : 'CONSTANT'), 'info');
         if (s.end_reason && s.end_reason !== 'apogee') {

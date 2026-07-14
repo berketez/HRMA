@@ -25,17 +25,201 @@ Besleme modları:
 
 Durdurma olayları: yakıt web'i bitti / tank sıvısı bitti / ΔP kararlılık
 sınırının altına düştü (SP-8089: ΔP/P_c < 0.05 → yanma kararsızlığı) /
-t_max aşıldı.
+t_max aşıldı / boğaz erozyonla ε ≤ 1.2'ye büyüdü (erozyon açıkken).
+
+Boğaz erozyonu (Dalga 3, opsiyonel — varsayılan KAPALI): ThroatErosionModel
+ampirik ṙ = a_ref·(Pc/70 bar)^0.8 modeliyle her adımda d_t büyütülür; Pc ve
+F eğrileri buna göre düşer. Kapalıyken çözüm eski davranışla bit-özdeştir.
 """
 
 import numpy as np
 
 from hrma.analysis.regression_analysis import RegressionAnalyzer
 from hrma.analysis.tank_blowdown import N2OTankBlowdown
+from hrma.data.materials_db import get_material
 
 # SP-8089 enjektör kararlılık eşikleri (ΔP/P_c)
 DP_RATIO_WARN = 0.15      # bunun altında chugging riski uyarısı
 DP_RATIO_UNSTABLE = 0.05  # bunun altında yarı-kararlı model geçersiz → dur
+
+
+# ---------------------------------------------------------------------------
+# Boğaz erozyonu (Dalga 3, 2026-07-14) — ampirik, model-değiştirilebilir API
+# ---------------------------------------------------------------------------
+# Model:  ṙ_ero = a_ref · (Pc / Pc_ref)^0.8   [mm/s],  Pc_ref = 70 bar
+#
+# Fiziksel dayanak: grafit/C-C boğaz gerilemesi tipik motor koşullarında
+# DİFÜZYON-KONTROLLÜ oksidasyon rejimindedir (H2O/CO2 türlerinin cidara
+# taşınımı sınırlar); gerileme hızı konvektif ısı/kütle taşınım katsayısıyla
+# ölçeklenir ve Bartz korelasyonunda h_g ∝ Pc^0.8'dir. Kaynaklar:
+#   - Bartz, D.R., "A Simple Equation for Rapid Estimation of Rocket Nozzle
+#     Convective Heat Transfer Coefficients", Jet Propulsion 27(1), 1957
+#     (Pc^0.8 ölçeklemesinin kaynağı).
+#   - Thakre, P., Yang, V., "Chemical Erosion of Graphite and Refractory
+#     Metal Nozzles in Solid-Propellant Rocket Motors", J. Propulsion and
+#     Power 24(4), 2008 — grafit gerilemesi ~0.1 mm/s sınıfı @ ~7 MPa
+#     AP/HTPB; erozyon difüzyon-sınırlı → basınçla yaklaşık lineer-altı artar.
+#   - Geisler, R.L., AIAA katı motor nozul malzemesi derlemeleri — grafit
+#     bandı ~0.05–0.25 mm/s (motor sınıfına göre).
+#
+# a_ref bantları @ 70 bar sınıfı APPROXIMATE'tir: gerçek hız itki gazı
+# oksitleyici kesrine (H2O+CO2+OH), alev sıcaklığına ve malzeme yoğunluğuna
+# güçlü bağlıdır; ±%50 saçılım normaldir. Varsayılan = bandın KONSERVATİF
+# (üst) ucu. Kesin tasarım için test verisi şarttır.
+THROAT_EROSION_MATERIALS = {
+    'graphite': {
+        'db_key': 'graphite',            # materials_db kaydı (görünen ad için)
+        'display': 'Graphite (isostatic, nozzle insert grade)',
+        'a_ref_band_mm_s': (0.05, 0.15),
+        'a_ref_default_mm_s': 0.15,      # konservatif üst uç
+        'recommended': True,
+        'source': ('Thakre & Yang 2008 (J. Prop. Power 24-4): ~0.1 mm/s '
+                   'class at ~7 MPa AP/HTPB; Geisler AIAA graphite band '
+                   '0.05-0.25 mm/s. Band approximate.'),
+    },
+    'carbon_carbon': {
+        'db_key': None,                  # materials_db'de kayıt yok
+        'display': 'Carbon-carbon composite (C-C)',
+        'a_ref_band_mm_s': (0.02, 0.10),
+        'a_ref_default_mm_s': 0.10,      # konservatif üst uç
+        'recommended': True,
+        'source': ('Thakre & Yang 2008: dense C-C erodes measurably less '
+                   'than bulk polycrystalline graphite (higher density, '
+                   'fewer open pores). Band approximate.'),
+    },
+    'steel': {
+        'db_key': 'steel',
+        'display': 'Steel (uncooled)',
+        'a_ref_band_mm_s': None,
+        'a_ref_default_mm_s': None,
+        'recommended': False,
+        'warning': ('Uncooled steel throat is NOT RECOMMENDED: wall softens '
+                    'and melts far below flame temperature (see materials_db '
+                    'max_service_temp); the empirical Pc^0.8 oxidation model '
+                    'is not valid for melting metals. Use graphite or C-C, '
+                    'or supply a test-derived a_ref explicitly.'),
+        'source': 'Engineering judgement; no validated coefficient.',
+    },
+    'copper': {
+        'db_key': 'copper',
+        'display': 'Copper (uncooled heat sink)',
+        'a_ref_band_mm_s': None,
+        'a_ref_default_mm_s': None,
+        'recommended': False,
+        'warning': ('Uncooled copper throat is NOT RECOMMENDED for sustained '
+                    'burns: copper is a short-duration heat sink only '
+                    '(melting point 1358 K, materials_db); the empirical '
+                    'Pc^0.8 oxidation model is not valid for melting metals. '
+                    'Use graphite or C-C, or supply a test-derived a_ref '
+                    'explicitly.'),
+        'source': 'Engineering judgement; no validated coefficient.',
+    },
+}
+
+# Yaygın ad/alias'lar → erozyon tablosu anahtarı
+_EROSION_ALIASES = {
+    'c-c': 'carbon_carbon', 'c_c': 'carbon_carbon', 'cc': 'carbon_carbon',
+    'carbon-carbon': 'carbon_carbon', 'carboncarbon': 'carbon_carbon',
+    'steel_4130': 'steel', 'ss_304': 'steel', 'ss_316': 'steel',
+    'stainless': 'steel', 'stainless_304': 'steel', 'stainless_316': 'steel',
+    'cucrzr': 'copper', 'cu_cr_zr': 'copper', 'cu': 'copper',
+}
+
+
+class ThroatErosionModel:
+    """Ampirik boğaz erozyon modeli:  ṙ = a_ref·(Pc/Pc_ref)^exponent.
+
+    Model-değiştirilebilir API: TransientBallistics kuplajı yalnız
+    ``rate_m_s(Pc_pa)`` çağırır — aynı imzayı sağlayan HERHANGİ bir nesne
+    (ör. Thakre-Yang tarzı kinetik model, test-verisi interpolasyonu)
+    ``erosion_model=`` argümanıyla takılabilir.
+
+    Varsayılan katsayı ve üs için kaynaklar modül başındaki blokta
+    (Bartz 1957; Thakre & Yang 2008; Geisler). Bantlar approximate'tir.
+    """
+
+    def __init__(self, a_ref_mm_s, pc_ref_bar=70.0, exponent=0.8,
+                 material='custom', material_display=None,
+                 a_ref_band_mm_s=None,
+                 source='user-supplied coefficient', warnings=None):
+        a = float(a_ref_mm_s)
+        if not np.isfinite(a) or a <= 0.0:
+            raise ValueError("a_ref_mm_s must be a positive finite number")
+        pc_ref = float(pc_ref_bar)
+        if not np.isfinite(pc_ref) or pc_ref <= 0.0:
+            raise ValueError("pc_ref_bar must be a positive finite number")
+        self.a_ref_mm_s = a
+        self.pc_ref_bar = pc_ref
+        self.exponent = float(exponent)
+        self.material = str(material)
+        self.material_display = material_display or str(material)
+        self.a_ref_band_mm_s = (tuple(a_ref_band_mm_s)
+                                if a_ref_band_mm_s else None)
+        self.source = source
+        self.warnings = list(warnings or [])
+
+    @classmethod
+    def for_material(cls, material, a_ref_mm_s=None):
+        """Malzeme adından model kurar (tablo + materials_db görünen adı).
+
+        Önerilmeyen malzemelerde (çelik/bakır soğutmasız) a_ref override'ı
+        verilmemişse ValueError yükseltir; override verilirse model kurulur
+        ama 'not recommended' uyarısı taşınır.
+        """
+        key = str(material).strip().lower().replace(' ', '_')
+        key = _EROSION_ALIASES.get(key, key)
+        if key not in THROAT_EROSION_MATERIALS:
+            raise ValueError(
+                f"No throat erosion data for material '{material}'. "
+                f"Available: {sorted(THROAT_EROSION_MATERIALS)} "
+                f"(or pass a_ref_mm_s for a custom material)")
+        rec = THROAT_EROSION_MATERIALS[key]
+
+        display = rec['display']
+        if rec.get('db_key'):
+            try:
+                # Merkezi malzeme DB'sindeki görünen adı kullan (tek kaynak).
+                display = get_material(rec['db_key'])['name']
+            except KeyError:
+                pass
+
+        warns = []
+        if not rec['recommended']:
+            warns.append(rec['warning'])
+            if a_ref_mm_s is None:
+                raise ValueError(
+                    f"Throat material '{key}': {rec['warning']}")
+        a = a_ref_mm_s if a_ref_mm_s is not None else rec['a_ref_default_mm_s']
+        return cls(a, material=key, material_display=display,
+                   a_ref_band_mm_s=rec.get('a_ref_band_mm_s'),
+                   source=rec['source'], warnings=warns)
+
+    def rate_mm_s(self, pc_bar):
+        """Erozyon hızı [mm/s] (yarıçapta gerileme), Pc [bar]."""
+        pc = float(pc_bar)
+        if pc <= 0.0:
+            return 0.0
+        return self.a_ref_mm_s * (pc / self.pc_ref_bar) ** self.exponent
+
+    def rate_m_s(self, pc_pa):
+        """Erozyon hızı [m/s] (yarıçapta gerileme), Pc [Pa]."""
+        return self.rate_mm_s(float(pc_pa) / 1e5) / 1000.0
+
+    def describe(self):
+        """JSON-uyumlu model özeti (rapor/endpoint için)."""
+        return {
+            'model': (f"r_dot = a_ref*(Pc/{self.pc_ref_bar:g} bar)"
+                      f"^{self.exponent:g} (empirical)"),
+            'a_ref_mm_s': self.a_ref_mm_s,
+            'pc_ref_bar': self.pc_ref_bar,
+            'exponent': self.exponent,
+            'material': self.material,
+            'material_display': self.material_display,
+            'a_ref_band_mm_s': (list(self.a_ref_band_mm_s)
+                                if self.a_ref_band_mm_s else None),
+            'source': self.source,
+            'warnings': list(self.warnings),
+        }
 
 
 class TransientBallistics:
@@ -43,7 +227,9 @@ class TransientBallistics:
 
     def __init__(self, engine, feed_mode='regulated',
                  tank_temperature=293.15, liquid_fill_fraction=0.85,
-                 n_steps=400, t_max_factor=1.6):
+                 n_steps=400, t_max_factor=1.6,
+                 erosion_enabled=False, throat_material='graphite',
+                 erosion_model=None):
         """
         Args:
             engine: calculate() çağrılmış HybridRocketEngine örneği
@@ -52,6 +238,14 @@ class TransientBallistics:
             liquid_fill_fraction: tank sıvı doluluk oranı (ullage payı)
             n_steps: nominal yanma süresi için adım sayısı
             t_max_factor: t_max = factor · t_b (blowdown uzayabilir)
+            erosion_enabled: True → boğaz erozyonu kuplajı (her adımda d_t
+                büyür, Pc/F eğrisi düşer). Varsayılan KAPALI — geriye dönük
+                uyum: kapalıyken çözüm eski davranışla bit-özdeştir.
+            throat_material: erozyon malzemesi ('graphite' | 'carbon_carbon';
+                çelik/bakır soğutmasız → not-recommended, a_ref şart)
+            erosion_model: opsiyonel özel model — rate_m_s(Pc_pa) sağlayan
+                herhangi bir nesne (verilirse throat_material yok sayılır ve
+                erozyon etkinleşir; model-değiştirilebilir API)
         """
         required = ('At', 'epsilon', 'gamma', 'D_port_initial', 'L_grain',
                     'rho_f', 'a', 'n', 'mdot_ox', 'C_star', 'P_c', 'P_a')
@@ -101,6 +295,15 @@ class TransientBallistics:
             # Etkin C_d·A: t=0'da tasarım debisini gerçek ΔP'de verir
             self._K_inj = float(engine.mdot_ox) / np.sqrt(2.0 * rho0 * dP0)
 
+        # Boğaz erozyonu (Dalga 3): varsayılan KAPALI — geriye dönük uyum.
+        # erosion_model verilirse malzeme tablosuna bakılmaz (rate_m_s(Pc_pa)
+        # sağlayan her nesne kabul edilir — model-değiştirilebilir API).
+        self.erosion = None
+        if erosion_model is not None:
+            self.erosion = erosion_model
+        elif erosion_enabled:
+            self.erosion = ThroatErosionModel.for_material(throat_material)
+
     # ---------------- nozul yardımcıları ----------------
 
     @staticmethod
@@ -123,12 +326,21 @@ class TransientBallistics:
                        * (2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (gamma - 1.0))
                        * (1.0 - pe_ratio ** ((gamma - 1.0) / gamma)))
 
-    def _thrust_coefficient(self, Pc_pa):
-        """C_F(P_c): sabit ε'da yalnız basınç-itki terimi değişir."""
-        eps = float(self.e.epsilon)
+    def _thrust_coefficient(self, Pc_pa, eps=None, pe_ratio=None,
+                            cf_momentum=None):
+        """C_F(P_c): sabit ε'da yalnız basınç-itki terimi değişir.
+
+        Erozyon açıkken boğaz büyür → ε = A_e/A_t küçülür; çağıran güncel
+        (eps, pe_ratio, cf_momentum) üçlüsünü geçirir. None → tasarım
+        değerleri (eski davranış; erozyon kapalıyken bit-özdeş yol).
+        """
+        if eps is None:
+            eps = float(self.e.epsilon)
+            pe_ratio = self._pe_ratio
+            cf_momentum = self._cf_momentum
         Pa_pa = float(self.e.P_a) * 1e5
-        return (self._lambda * self._cf_momentum
-                + eps * self._pe_ratio - eps * Pa_pa / Pc_pa)
+        return (self._lambda * cf_momentum
+                + eps * pe_ratio - eps * Pa_pa / Pc_pa)
 
     # ---------------- ana çözüm ----------------
 
@@ -141,10 +353,24 @@ class TransientBallistics:
                                e.rho_f * np.pi / 4.0
                                * (D_max ** 2 - D_port ** 2) * e.L_grain)
 
+        # Boğaz durumu (Dalga 3): erozyon kapalıyken At tasarım değerinde
+        # SABİT kalır (eski davranışla bit-özdeş aritmetik); açıkken her
+        # adımda büyür → Pc = ṁ·c*/(Cd·At) düşer, ε = A_e/A_t küçülür.
+        At = float(e.At)
+        d_throat = 2.0 * np.sqrt(At / np.pi)
+        d_throat0 = d_throat
+        A_exit = float(e.epsilon) * At   # nozul çıkışı rijit (sabit alan)
+        eps_cur = None    # None → tasarım ε / Pe-oranı / momentum-CF üçlüsü
+        pe_cur = None
+        cfm_cur = None
+
         t_arr, Pc_arr, F_arr = [], [], []
         mdot_ox_arr, mdot_f_arr, of_arr, D_arr = [], [], [], []
+        dthr_arr = []
         tankP_arr, tankT_arr = [], []
         warnings_list = []
+        if self.erosion is not None:
+            warnings_list.extend(getattr(self.erosion, 'warnings', []))
         event = 'time_limit'
 
         Pc_pa = float(e.P_c) * 1e5   # yarı-kararlı iterasyon başlangıcı
@@ -175,7 +401,7 @@ class TransientBallistics:
                 of_inst = mdot_ox / max(mdot_f, 1e-9)
                 cstar_inst, _ = e._instantaneous_performance(of_inst)
                 Pc_new = ((mdot_ox + mdot_f) * cstar_inst
-                          / (self._cd_nozzle * e.At))
+                          / (self._cd_nozzle * At))
                 if abs(Pc_new - Pc_pa) < 100.0:  # 1 mbar yakınsama
                     Pc_pa = Pc_new
                     break
@@ -201,7 +427,8 @@ class TransientBallistics:
                         f"t={t:.2f}s: ΔP/Pc={dp_ratio:.2f} < {DP_RATIO_WARN} "
                         f"— chugging riski (SP-8089)")
 
-            F = self._thrust_coefficient(Pc_pa) * Pc_pa * e.At
+            F = self._thrust_coefficient(Pc_pa, eps_cur, pe_cur, cfm_cur) \
+                * Pc_pa * At
 
             # --- kayıt ---
             t += dt
@@ -212,6 +439,7 @@ class TransientBallistics:
             mdot_f_arr.append(mdot_f)
             of_arr.append(of_inst)
             D_arr.append(D_port)
+            dthr_arr.append(d_throat)
             if self.tank is not None:
                 tankP_arr.append(self.tank.pressure)
                 tankT_arr.append(self.tank.T)
@@ -219,6 +447,27 @@ class TransientBallistics:
             # --- durum ilerlet ---
             D_port += 2.0 * r_dot * dt
             fuel_burned += mdot_f * dt
+
+            # Boğaz erozyonu: d_t büyür → At büyür → sonraki adımda Pc düşer.
+            # Sabit çıkış alanlı (rijit) nozulda ε = A_e/A_t küçülür; Pe/Pc
+            # ve momentum-CF izentropik bağıntılardan yeniden hesaplanır.
+            if self.erosion is not None:
+                r_ero = float(self.erosion.rate_m_s(Pc_pa))  # m/s (yarıçap)
+                if r_ero > 0.0:
+                    d_throat += 2.0 * r_ero * dt
+                    At = np.pi * (d_throat / 2.0) ** 2
+                    eps_new = A_exit / At
+                    if eps_new <= 1.2:
+                        event = 'throat_erosion_limit'
+                        warnings_list.append(
+                            f"t={t:.2f}s: throat eroded to expansion ratio "
+                            f"{eps_new:.2f} <= 1.2 — nozzle no longer "
+                            f"effective, simulation stopped")
+                        break
+                    eps_cur = eps_new
+                    pe_cur = self._exit_pressure_ratio(float(e.gamma), eps_cur)
+                    cfm_cur = self._momentum_cf(float(e.gamma), pe_cur)
+
             if D_port >= D_max or fuel_burned >= fuel_available:
                 event = 'web_exhausted'
                 break
@@ -244,6 +493,19 @@ class TransientBallistics:
             'mdot_fuel': np.array(mdot_f_arr),
             'of_ratio': np.array(of_arr),
             'port_diameter': np.array(D_arr),
+            'throat_diameter': np.array(dthr_arr),  # m (erozyon kapalı→sabit)
+            'erosion': {
+                'enabled': self.erosion is not None,
+                'initial_throat_diameter_mm': d_throat0 * 1000.0,
+                # Özet, KAYDEDİLEN dizinin son elemanından okunur — döngü
+                # kayıt→ilerletme sıralı olduğundan d_throat değişkeni diziden
+                # bir adım ilerideydi (2026-07-15 Dalga 3 test ajanı bulgusu)
+                'final_throat_diameter_mm': float(dthr_arr[-1]) * 1000.0,
+                # Gerileme yarıçapta ölçülür: (d_son - d_ilk)/2
+                'total_recession_mm': (float(dthr_arr[-1]) - d_throat0) / 2.0 * 1000.0,
+                'model': (self.erosion.describe()
+                          if hasattr(self.erosion, 'describe') else None),
+            },
             'tank_pressure': np.array(tankP_arr),  # Pa (blowdown)
             'tank_temperature': np.array(tankT_arr),
             'feed_mode': self.feed_mode,

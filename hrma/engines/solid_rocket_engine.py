@@ -1087,6 +1087,34 @@ class SolidRocketEngine:
         # Throat curvature radius: typically 0.5-1.5 * r_throat
         throat_curvature = d_throat / 2 * 1.0  # 1x throat radius
 
+        # Boğaz erozyon tahmini (Dalga 3, 2026-07-14): eski sabit
+        # '0.001 mm/s' metni yerine ampirik model —
+        #   ṙ = a_ref·(Pc/70 bar)^0.8
+        # (Bartz 1957 Pc^0.8 ölçeklemesi; Thakre & Yang 2008 grafit bandı).
+        # Tembel import: engines → analysis modül-seviyesi bağımlılığı ve
+        # olası döngüsel importu önler.
+        from hrma.analysis.transient_ballistics import ThroatErosionModel
+        _ero = ThroatErosionModel.for_material('graphite')  # nozul malzemesi
+        _pc_bar = float(self.P_c)
+        _ero_rate = _ero.rate_mm_s(_pc_bar)                 # mm/s @ tasarım Pc
+        _scale = (_pc_bar / _ero.pc_ref_bar) ** _ero.exponent
+        _band = _ero.a_ref_band_mm_s or (_ero.a_ref_mm_s, _ero.a_ref_mm_s)
+        erosion_estimate = {
+            'rate_mm_s': round(_ero_rate, 4),
+            'band_mm_s': [round(_band[0] * _scale, 4),
+                          round(_band[1] * _scale, 4)],
+            'chamber_pressure_bar': _pc_bar,
+            'material': _ero.material,
+            'model': (f"r_dot = a_ref*(Pc/{_ero.pc_ref_bar:g} bar)"
+                      f"^{_ero.exponent:g}, a_ref = {_ero.a_ref_mm_s:g} mm/s "
+                      f"(conservative end of band)"),
+            'note': ('Empirical estimate (approximate); multiply by burn '
+                     'duration for total throat recession. Time-coupled '
+                     'Pc(t) effect available via TransientBallistics'
+                     '(erosion_enabled=True).'),
+            'source': _ero.source,
+        }
+
         return {
             'type': 'De Laval Nozzle',
             'throat_diameter': d_throat * 1000,  # mm
@@ -1108,7 +1136,9 @@ class SolidRocketEngine:
             'performance': {
                 'thrust_coefficient': 1.65,
                 'nozzle_efficiency': self.nozzle_efficiency,
-                'erosion_rate': '0.001 mm/s',
+                # Gerçek ampirik modelden (eskiden sabit '0.001 mm/s' idi)
+                'erosion_rate': f"{_ero_rate:.3f} mm/s",
+                'erosion_estimate': erosion_estimate,
                 'operating_temperature': '2800°C'
             }
         }

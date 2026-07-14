@@ -32,11 +32,18 @@ class OptimumOFRatioFinder:
             ('ap', 'pban'): 5.5,      # PBAN
         }
         
-        # ISP polynomial coefficients for rapid optimization
-        self.isp_models = {
-            ('n2o', 'htpb'): [-0.5, 7.5, -35, 80, 200],  # ax^4 + bx^3 + cx^2 + dx + e
-            ('lox', 'lh2'): [-0.2, 3.0, -15, 35, 400],
-            ('lox', 'rp1'): [-0.8, 9.0, -38, 75, 260],
+        # 2026-07-15: Eski "polinom" katsayıları uydurmaydı ve N2O/HTPB için
+        # 400 s Isp raporluyordu (gerçek teorik vakum ~250 s). Kaldırıldı;
+        # yerine literatür tabanlı teorik vakum Isp tepe değerleri (Sutton,
+        # Rocket Propulsion Elements, tipik CEA sonuçları) + çan eğrisi şekli
+        # kullanılır. Bu araç bir TARAMA aracıdır: optimum O/F oranının YERİ
+        # güvenilirdir, mutlak Isp için gerçek CEA hesabı esas alınmalıdır.
+        self.peak_vac_isp = {
+            ('n2o', 'htpb'): 250, ('n2o', 'paraffin'): 255,
+            ('lox', 'htpb'): 330, ('lox', 'paraffin'): 335,
+            ('lox', 'lh2'): 455, ('lox', 'rp1'): 355,
+            ('lox', 'methane'): 365, ('lox', 'ch4'): 365,
+            ('n2o4', 'mmh'): 335, ('n2o4', 'udmh'): 330,
         }
     
     def find_optimum_hybrid(self, oxidizer: str, fuel: str, 
@@ -117,29 +124,19 @@ class OptimumOFRatioFinder:
                             of_ratio: float, chamber_pressure: float) -> float:
         """Calculate ISP for hybrid motor at given O/F ratio"""
         
-        # Use polynomial model if available
+        # Çan eğrisi: tepe = literatür teorik vakum Isp, konum = teorik optimum
         key = (oxidizer.lower(), fuel.lower())
-        if key in self.isp_models:
-            coeffs = self.isp_models[key]
-            isp = np.polyval(coeffs, of_ratio)
-        else:
-            # Generic model based on bell curve around theoretical optimum
-            theoretical = self.theoretical_optimums.get(key, 7.0)
-            deviation = abs(of_ratio - theoretical) / theoretical
-            efficiency = np.exp(-2 * deviation**2)  # Bell curve
-            
-            # Base ISP depends on propellant combination
-            if oxidizer.lower() == 'n2o':
-                base_isp = 250
-            else:  # LOX
-                base_isp = 300
-            
-            # Pressure correction
-            pressure_factor = np.sqrt(chamber_pressure / 20.0)
-            
-            isp = base_isp * efficiency * pressure_factor
-        
-        return max(100, min(400, isp))  # Realistic bounds
+        theoretical = self.theoretical_optimums.get(key, 7.0)
+        base_isp = self.peak_vac_isp.get(key, 250 if oxidizer.lower() == 'n2o' else 300)
+        deviation = abs(of_ratio - theoretical) / theoretical
+        efficiency = np.exp(-2 * deviation**2)
+
+        # Basınç düzeltmesi ZAYIF olmalı: Isp'nin Pc bağımlılığı c* üzerinden
+        # yüzde birkaç mertebesindedir (eski sqrt(Pc/20) 30 bar'da +%22 veriyordu)
+        pressure_factor = float(np.clip((chamber_pressure / 20.0) ** 0.05, 0.92, 1.08))
+
+        isp = base_isp * efficiency * pressure_factor
+        return max(50.0, float(isp))
     
     def _calculate_isp_liquid(self, oxidizer: str, fuel: str, 
                             of_ratio: float, chamber_pressure: float) -> float:
@@ -166,12 +163,11 @@ class OptimumOFRatioFinder:
         deviation = abs(of_ratio - optimal_of) / optimal_of
         efficiency = np.exp(-3 * deviation**2)  # Sharper curve for liquids
         
-        # Pressure correction (higher effect for liquids)
-        pressure_factor = (chamber_pressure / 100.0) ** 0.3
-        
+        # Basınç düzeltmesi zayıf tutulur (Isp ~ birkaç % / Pc dekadı)
+        pressure_factor = float(np.clip((chamber_pressure / 100.0) ** 0.08, 0.90, 1.08))
+
         isp = base_isp * efficiency * pressure_factor
-        
-        return max(150, min(500, isp))
+        return max(100.0, float(isp))
     
     def get_recommendation(self, motor_type: str, oxidizer: str, fuel: str) -> str:
         """Get recommendation text for optimum O/F ratio"""

@@ -632,42 +632,129 @@ class StructuralAnalyzer:
             'warning': bolt_warning
         }
     
-    def _analyze_fatigue(self, stress: float, burn_time: float, mat_props: Dict) -> Dict:
-        """Analyze fatigue life"""
-        
-        fatigue_limit = mat_props['fatigue_limit']
-        
-        # Estimate number of cycles
-        # Assume pressure cycling during burn + startup/shutdown cycles
-        cycles_per_burn = max(1, int(burn_time))  # Pressure oscillations
-        startup_shutdown_cycles = 1
-        total_cycles = cycles_per_burn + startup_shutdown_cycles
-        
-        # Fatigue safety factor
-        fatigue_safety_factor = fatigue_limit / stress if stress > 0 else float('inf')
-        
-        # Estimated fatigue life (simplified S-N curve)
-        if stress < fatigue_limit:
-            estimated_life = float('inf')  # Infinite life
+    def _analyze_fatigue(self, stress: float, burn_time: float,
+                         mat_props: Dict,
+                         design_cycles: Optional[int] = None) -> Dict:
+        """Yorulma analizi — Goodman ortalama-gerilme düzeltmesi (R≈0).
+
+        DALGA 3 DÜZELTMESİ (2026-07-14) — eski sürümün üç hatası giderildi:
+          1. BİRİM HATASI: 'stress' MPa cinsinden gelir (analyze_structure,
+             chamber_analysis['hoop_stress'] MPa döndürür) ama Pa cinsinden
+             fatigue_limit ile oranlanıyordu → SF ~1e6 kat şişkin çıkıyor,
+             yorulma daima 'SAFE' görünüyordu (tehlikeyi az gösterme).
+          2. GENLİK=TEPE HATASI: tam σ_max 'amplitude' sayılıyor, ortalama
+             gerilme etkisi (Goodman) hiç uygulanmıyordu. Basınçlı kap her
+             ateşlemede 0 → P → 0 yüklenir (R = σ_min/σ_max ≈ 0); bu
+             çevrimde σ_a = σ_m = σ_max/2'dir.
+          3. 'Basquin b=10' sabiti ve saniyede-1-tam-çevrim sayımı fiziksel
+             dayanaksızdı (yanma içi kamara osilasyonları tam R=0
+             basınçlandırma çevrimi DEĞİLDİR, genlikleri Pc'nin küçük bir
+             yüzdesidir — çevrim sayılmaz).
+
+        Model (Shigley's Mechanical Engineering Design, 10th ed., Böl. 6):
+          Düzeltilmiş Goodman doğrusu (Eq. 6-46):
+              1/n_f = σ_a/S_e + σ_m/S_u
+          S_e : malzeme kaydındaki fatigue_limit (materials_db — kaynaklı,
+                malzemeye özgü değer; jenerik 0.5·S_u kuralı yerine merkezi
+                DB değeri kullanılır → parametre tutarlılığı)
+          S_u : materials_db 'ultimate_strength'
+          Sonlu ömür (n_f < 1): Goodman eşdeğer tam-ters genliği
+              σ_ar = σ_a/(1 − σ_m/S_u)
+          ile Basquin S-N eğrisi (Shigley Eq. 6-14/6-15):
+              S_f = a·N^b,  a = (f·S_u)²/S_e,  b = −log10(f·S_u/S_e)/3,
+              f ≈ 0.9 (Fig. 6-18 yaklaşımı — approximate)
+
+        Args:
+            stress: σ_max [MPa] — hoop gerilme (analyze_structure MPa yollar)
+            burn_time: yanma süresi [s] — bilgi amaçlı; çevrim sayılmaz
+            mat_props: get_material() kaydı (fatigue_limit, ultimate_strength)
+            design_cycles: tasarım basınçlandırma çevrimi sayısı (hidrotest +
+                test kampanyası + uçuş). None → 25 (approximate varsayım;
+                endpoint/çağıran geçersiz kılabilir).
+        """
+        sigma_max_pa = max(float(stress), 0.0) * 1e6   # MPa → Pa
+        S_e = float(mat_props['fatigue_limit'])        # Pa (materials_db)
+        S_u = float(mat_props['ultimate_strength'])    # Pa (materials_db)
+        if design_cycles is None:
+            design_cycles = 25  # hidrotest + test kampanyası + uçuş (approx.)
+        design_cycles = max(1, int(design_cycles))
+
+        # R ≈ 0 basınç çevrimi: σ_a = σ_m = σ_max/2
+        sigma_a = sigma_max_pa / 2.0
+        sigma_m = sigma_max_pa / 2.0
+
+        if sigma_a <= 0.0:
+            goodman_utilization = 0.0
+            fatigue_safety_factor = float('inf')
         else:
-            # Simplified Basquin's law: N = (Sf/S)^b where b ≈ 10 for steel
-            b_exponent = 10
-            estimated_life = (fatigue_limit / stress) ** b_exponent
-        
-        fatigue_status = 'SAFE'
-        if fatigue_safety_factor < 2.0:
-            fatigue_status = 'CRITICAL'
-        elif fatigue_safety_factor < 4.0:
+            goodman_utilization = sigma_a / S_e + sigma_m / S_u
+            fatigue_safety_factor = 1.0 / goodman_utilization
+
+        # Sonlu ömür tahmini — yalnız Goodman doğrusu aşıldıysa (n_f < 1)
+        estimated_life = 'Infinite'
+        cycle_margin = 'Infinite'
+        lcf_warning = None
+        if fatigue_safety_factor < 1.0:
+            if sigma_m < S_u:
+                sigma_ar = sigma_a / (1.0 - sigma_m / S_u)  # Goodman eşdeğeri
+                f_frac = 0.9  # Fig. 6-18 (S_u <= ~490 MPa için 0.9; approx.)
+                a_basq = (f_frac * S_u) ** 2 / S_e          # Eq. 6-14
+                b_basq = -np.log10(f_frac * S_u / S_e) / 3.0  # Eq. 6-15
+                N = float(max((sigma_ar / a_basq) ** (1.0 / b_basq), 1.0))
+            else:
+                N = 0.0  # ortalama gerilme çekme dayanımını aşıyor → statik kırılma
+            estimated_life = N
+            cycle_margin = N / design_cycles
+            if N < 1e3:
+                lcf_warning = ('Low-cycle fatigue regime (N < 1000): Basquin '
+                               'extrapolation is approximate; strain-life '
+                               'method recommended')
+
+        # Durum eşikleri: Goodman SF sonsuz ömre karşı ölçülür. n_f >= 1.5
+        # tipik yorulma saçılım payıdır (approximate practice). n_f < 1 ama
+        # tahmini ömür tasarım çevriminin >= 10 katıysa MARGINAL (sonlu ömür
+        # kabulü), aksi halde CRITICAL.
+        if fatigue_safety_factor >= 1.5:
+            fatigue_status = 'SAFE'
+        elif fatigue_safety_factor >= 1.0:
             fatigue_status = 'MARGINAL'
-        
-        return {
-            'stress_amplitude': stress / 1e6,  # MPa (assuming mean stress = stress amplitude)
-            'fatigue_limit': fatigue_limit / 1e6,  # MPa
-            'fatigue_safety_factor': fatigue_safety_factor,
-            'estimated_cycles': total_cycles,
-            'estimated_life': min(1e6, estimated_life) if estimated_life != float('inf') else 'Infinite',
-            'fatigue_status': fatigue_status
+        elif (isinstance(estimated_life, float)
+              and estimated_life / design_cycles >= 10.0):
+            fatigue_status = 'MARGINAL'
+        else:
+            fatigue_status = 'CRITICAL'
+
+        result = {
+            # Eski anahtarlar korunur (sözleşme testleri) — anlamları düzeltildi
+            'stress_amplitude': sigma_a / 1e6,   # MPa (σ_a = σ_max/2, R=0)
+            'fatigue_limit': S_e / 1e6,          # MPa
+            'fatigue_safety_factor': fatigue_safety_factor,  # Goodman n_f
+            'estimated_cycles': design_cycles,   # tasarım çevrim sayısı
+            'estimated_life': estimated_life,    # çevrim sayısı | 'Infinite'
+            'fatigue_status': fatigue_status,
+            # Yeni alanlar (Dalga 3)
+            'max_stress': sigma_max_pa / 1e6,    # MPa (σ_max)
+            'mean_stress': sigma_m / 1e6,        # MPa (σ_m = σ_max/2)
+            'stress_ratio_R': 0.0,               # basınç çevrimi 0→P→0
+            'ultimate_strength': S_u / 1e6,      # MPa
+            'goodman_utilization': goodman_utilization,  # σa/Se + σm/Su
+            'cycle_margin': cycle_margin,        # tahmini ömür / tasarım çevrimi
+            'design_cycles': design_cycles,
+            'model': ('Modified Goodman mean-stress correction, R=0 pressure '
+                      'cycle (Shigley 10th ed. Eq. 6-46)'),
+            'assumptions': [
+                'Each firing = one full 0 -> P -> 0 pressure cycle (R = 0)',
+                'sigma_a = sigma_m = sigma_max/2',
+                'S_e taken from central material record '
+                '(materials_db fatigue_limit)',
+                'Combustion oscillations are not counted as full cycles',
+                f'Design cycle count = {design_cycles} (proof test + test '
+                f'campaign + flight; approximate, override via parameter)',
+            ],
         }
+        if lcf_warning:
+            result['warning'] = lcf_warning
+        return result
     
     def _calculate_weight(self, chamber_analysis: Dict, nozzle_analysis: Dict,
                         end_cap_analysis: Dict, mat_props: Dict) -> Dict:
