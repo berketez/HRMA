@@ -1,6 +1,23 @@
 # HRMA - High-Fidelity Rocket Motor Analysis
 
-A comprehensive web-based tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D digital twin of your motor.
+A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D digital twin of your motor.
+
+## 📥 Just Want to Use HRMA? Download the Installer
+
+**You do not need Python, the source code, or anything on this page.** Grab the
+installer for your platform from the
+[**latest release**](https://github.com/berketez/HRMA/releases/latest), run it,
+and you're done:
+
+| Platform | File to download |
+|---|---|
+| **Windows 10/11** | `HRMA-Setup-X.Y.Z.exe` — double-click, Next → Next → Install |
+| **macOS 11+ (Apple Silicon)** | `HRMA-Setup-X.Y.Z-macOS.dmg` — drag HRMA to Applications |
+
+Everything is bundled (Python, all libraries, offline charts). HRMA opens in
+its own native window and notifies you automatically when a new version is
+available. All the folders and files below are **source code for developers** —
+you can ignore them entirely.
 
 ## Features
 
@@ -66,7 +83,7 @@ written to `Documents/HRMA`. Build pipeline and reproduction instructions:
 git clone https://github.com/berketez/HRMA.git
 cd HRMA
 pip install -r requirements.txt
-python run.py
+python hrma/run.py
 ```
 
 Open http://localhost:8080 in your browser.
@@ -75,7 +92,7 @@ Open http://localhost:8080 in your browser.
 
 ```
 HRMA/
-├── run.py                  # Entry point
+├── start.sh / start.bat    # Developer launch scripts
 ├── hrma/                   # Main package
 │   ├── app.py              # Flask web application (48 routes)
 │   ├── engines/            # Motor calculations
@@ -164,7 +181,7 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 1. **Clone the repo**
 2. **Install dependencies**: `pip install -r requirements.txt`
-3. **Run**: `python run.py`
+3. **Run**: `python hrma/run.py`
 4. **Open**: `http://localhost:8080`
 5. **Start designing rockets!**
 

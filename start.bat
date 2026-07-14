@@ -80,12 +80,12 @@ echo Press Ctrl+C in this window to stop the application
 echo.
 
 REM Start the application (try Windows-optimized version first)
-if exist run_windows.py (
+if exist hrma\run_windows.py (
     echo Using Windows-optimized launcher...
-    !PYTHON_CMD! run_windows.py
+    !PYTHON_CMD! hrma\run_windows.py
 ) else (
     echo Using standard launcher...
-    !PYTHON_CMD! run.py
+    !PYTHON_CMD! hrma\run.py
 )
 
 REM Keep window open if there's an error

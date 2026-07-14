@@ -81,7 +81,7 @@ echo "Press Ctrl+C to stop the application"
 echo
 
 # Make run.py executable
-chmod +x run.py
+chmod +x hrma/run.py
 
 # Start the application
-$PYTHON_CMD run.py
+$PYTHON_CMD hrma/run.py

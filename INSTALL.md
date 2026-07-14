@@ -36,7 +36,7 @@ python3 --version
 ### Step 3: Install Dependencies
 ```bash
 # Option 1: Automatic (recommended)
-python install.py
+python hrma/install.py
 
 # Option 2: Manual
 pip install flask flask-cors numpy scipy plotly pandas waitress
@@ -48,7 +48,7 @@ pip install -r requirements.txt
 ### Step 4: Run Application
 ```bash
 # Simple method
-python run.py
+python hrma/run.py
 
 # Or use platform scripts
 # Windows: start.bat
@@ -61,8 +61,7 @@ python run.py
 HRMA/
 ├── start.bat              # Windows launcher
 ├── start.sh               # Mac/Linux launcher  
-├── install.py             # Cross-platform installer
-├── run.py                 # Main application launcher
+├── hrma/run.py            # Main application launcher (developers)
 ├── app.py                 # Flask web application
 ├── requirements.txt       # Python dependencies
 ├── hybrid_rocket_engine.py # Motor calculations
@@ -193,7 +192,7 @@ source hrma_env/bin/activate
 pip install -r requirements.txt
 
 # Run application
-python run.py
+python hrma/run.py
 ```
 
 ### Using Conda:
@@ -206,7 +205,7 @@ conda activate hrma
 pip install -r requirements.txt
 
 # Run application
-python run.py
+python hrma/run.py
 ```
 
 ### Docker (for advanced users):
@@ -217,15 +216,15 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
 EXPOSE 5000
-CMD ["python", "run.py"]
+CMD ["python", "hrma/run.py"]
 ```
 
 ## Getting Help
 
 ### Before seeking help:
-1. ✅ **Run the installer**: `python install.py`
+1. ✅ **Run the installer**: `python hrma/install.py`
 2. ✅ **Check Python version**: `python --version` (should be 3.7+)
-3. ✅ **Try the simple command**: `python run.py`
+3. ✅ **Try the simple command**: `python hrma/run.py`
 4. ✅ **Check the browser**: Open http://localhost:5000 manually
 
 ### Error Logs:

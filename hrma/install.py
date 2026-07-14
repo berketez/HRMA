@@ -152,7 +152,7 @@ def main():
     
     # Test import of main app
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from hrma.app import app  # noqa: F401
         print("✓ Application modules loaded successfully")
     except ImportError as e:

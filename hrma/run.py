@@ -11,8 +11,8 @@ import webbrowser
 import time
 from threading import Timer
 
-# Add current directory to Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Betik hrma/ içinde yaşıyor: 'import hrma' için depo kökü sys.path'e eklenir
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def open_browser():
     """Open web browser after a delay"""

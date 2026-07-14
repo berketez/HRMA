@@ -473,10 +473,10 @@ python build_macos.py --sign "Developer ID" --dmg
 ### Installation
 ```python
 # Run installation
-python install.py --full --test
+python hrma/install.py --full --test
 
 # Launch application
-python run.py --port 5000 --browser chrome
+python hrma/run.py --port 5000 --browser chrome
 ```
 
 ---

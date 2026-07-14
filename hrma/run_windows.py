@@ -12,6 +12,9 @@ import time
 import subprocess
 from threading import Timer
 
+# Betik hrma/ içinde: 'import hrma' için depo kökü sys.path'e eklenir
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 def clear_screen():
     """Clear the console screen"""
     os.system('cls' if os.name == 'nt' else 'clear')
