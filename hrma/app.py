@@ -41,6 +41,19 @@ from hrma.analysis.cfd_analysis import cfd_analyzer
 from hrma.analysis.kinetic_analysis import kinetic_analyzer
 from hrma.analysis.trajectory_analysis import TrajectoryAnalyzer
 
+# Dalga 4A — hızlı gerçekçi modeller (sahte CFD/kinetik yerine):
+# quasi-1D lüle akışı, kademeli kinetik verim, kullanıcı CSV doğrulaması,
+# hafif iş kuyruğu (docs/ANALIZ_PLATFORM_PLANI.md)
+from hrma.analysis.nozzle_flow_1d import NozzleFlow1D
+from hrma.analysis.kinetic_efficiency import (
+    kinetic_efficiency, VALID_FIDELITY_LEVELS as KINETIC_FIDELITY_LEVELS,
+    CANTERA_AVAILABLE as KINETIC_CANTERA_AVAILABLE,
+)
+from hrma.validation.user_data_validation import (
+    parse_thrust_csv, compare as compare_thrust_curves,
+)
+from hrma.utils.job_runner import job_runner
+
 # Data
 from hrma.data.propellant_database import propellant_db
 from hrma.data.open_source_propellant_api import propellant_api
@@ -1510,22 +1523,64 @@ def create_parametric_plot(results, sweep_param):
 
 @app.route('/api/comparative-analysis', methods=['POST'])
 def comparative_analysis():
-    """Create comparative analysis between multiple motor configurations"""
+    """Create comparative analysis between multiple motor configurations.
+
+    Dalga 4A onarımı (2026-07-14): eski kod eksik metrik anahtarlarında
+    (thrust/isp/total_impulse/total_mass) KeyError -> 500 veriyordu.
+    Şema doğrulaması artık onarılmış create_comparative_analysis_plot
+    içinde yapılır (ValueError -> net 400 mesajı); "en iyi" sıralamaları
+    yalnız ilgili metriği taşıyan konfigürasyonlar üzerinden hesaplanır.
+    """
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         motor_configs = data.get('motor_configs', {})
-        
+
+        if not isinstance(motor_configs, dict):
+            return jsonify({
+                'status': 'error',
+                'error': ("motor_configs must be an object of "
+                          "{config_name: {metric: value}} entries."),
+            }), 400
         if len(motor_configs) < 2:
-            return jsonify({'error': 'At least 2 motor configurations required for comparison'}), 400
-        
-        # Create comparative plot
-        comparative_plot = create_comparative_analysis_plot(motor_configs)
-        
-        # Calculate performance metrics
-        best_thrust = max(motor_configs, key=lambda x: motor_configs[x]['thrust'])
-        best_isp = max(motor_configs, key=lambda x: motor_configs[x]['isp'])
-        best_efficiency = max(motor_configs, key=lambda x: motor_configs[x]['isp'] / motor_configs[x]['total_mass'])
-        
+            return jsonify({
+                'status': 'error',
+                'error': ('At least 2 motor configurations are required '
+                          'for comparison.'),
+            }), 400
+
+        # Onarılmış plot fonksiyonu: eksik anahtar tolere edilir, yapısal
+        # bozukluk ValueError ile net mesaj verir (visualization.py).
+        try:
+            comparative_plot = create_comparative_analysis_plot(motor_configs)
+        except ValueError as exc:
+            return jsonify({'status': 'error', 'error': str(exc)}), 400
+
+        def _numeric(value):
+            return isinstance(value, (int, float)) and np.isfinite(value)
+
+        def _best_by(metric_fn):
+            # metric_fn(cfg) -> sayısal skor veya None; skoru olmayan
+            # konfigürasyon sıralamaya girmez (eski kodun KeyError tuzağı)
+            scored = {}
+            for name, cfg in motor_configs.items():
+                if not isinstance(cfg, dict):
+                    continue
+                score = metric_fn(cfg)
+                if score is not None:
+                    scored[name] = score
+            if not scored:
+                return None
+            return max(scored, key=scored.get)
+
+        best_thrust = _best_by(
+            lambda c: c['thrust'] if _numeric(c.get('thrust')) else None)
+        best_isp = _best_by(
+            lambda c: c['isp'] if _numeric(c.get('isp')) else None)
+        best_efficiency = _best_by(
+            lambda c: (c['isp'] / c['total_mass'])
+            if (_numeric(c.get('isp')) and _numeric(c.get('total_mass'))
+                and c['total_mass'] > 0) else None)
+
         return jsonify({
             'status': 'success',
             'plot': comparative_plot,
@@ -1536,7 +1591,7 @@ def comparative_analysis():
                 'total_configs': len(motor_configs)
             }
         })
-        
+
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
@@ -3090,11 +3145,15 @@ def perform_cfd_analysis():
     """Perform 2D CFD analysis"""
     # Dalga 0 bekçisi (2026-07-14): mevcut çözücü gerçek CFD değil —
     # kütle korunumu yok, 3 iterasyonda ıraksıyor (|u|→7.5e10 m/s),
-    # NaN -> 500. Quasi-1D sıkıştırılabilir lüle modeli (nozzle_flow_1d)
-    # gelene kadar dürüst 501 döner. Orijinal işleyici aşağıda korunur.
+    # NaN -> 500. Dalga 4A: quasi-1D halef uç noktası yayında —
+    # 501 yanıtı artık yönlendirme alanı taşır. Orijinal işleyici korunur.
     return jsonify({
-        'error': 'This analysis is being rebuilt on the reduced-order physics architecture',
-        'status': 'unavailable'
+        'error': ('This analysis is being rebuilt on the reduced-order '
+                  'physics architecture. Its successor endpoint is live: '
+                  'POST /api/flow-analysis (quasi-1D compressible nozzle '
+                  'flow with Fast Screening / Engineering fidelity levels).'),
+        'status': 'unavailable',
+        'successor': '/api/flow-analysis'
     }), 501
     try:
         data = request.json
@@ -3144,11 +3203,15 @@ def perform_kinetic_analysis():
     """Perform nozzle kinetic loss analysis"""
     # Dalga 0 bekçisi (2026-07-14): stiff ODE + explicit RK45 tek istasyonda
     # ~23 dk sürüyor ve tek-worker masaüstü uygulamasını KİLİTLİYOR; bitse
-    # bile isp_loss ≡ 0 dönüyordu. Frozen/shifting + η_kin korelasyonu
-    # gelene kadar dürüst 501 döner. Orijinal işleyici aşağıda korunur.
+    # bile isp_loss ≡ 0 dönüyordu. Dalga 4A: kademeli kinetik verim halefi
+    # yayında — 501 yanıtı yönlendirme alanı taşır. Orijinal işleyici korunur.
     return jsonify({
-        'error': 'This analysis is being rebuilt on the reduced-order physics architecture',
-        'status': 'unavailable'
+        'error': ('This analysis is being rebuilt on the reduced-order '
+                  'physics architecture. Its successor endpoint is live: '
+                  'POST /api/kinetic-efficiency (tiered frozen/shifting '
+                  'kinetic-loss model: fast / engineering / high_fidelity).'),
+        'status': 'unavailable',
+        'successor': '/api/kinetic-efficiency'
     }), 501
     try:
         data = request.json
@@ -3803,6 +3866,382 @@ def generate_detailed_cad(motor_type):
             'status': 'error',
             'error': f'CAD generation failed: {str(e)}'
         }), 500
+
+# ============================================================================
+# Dalga 4A — Akış / Kinetik / Doğrulama / İş kuyruğu uç noktaları (2026-07-14)
+# Mimari: docs/ANALIZ_PLATFORM_PLANI.md — sahte CFD/kinetik yerine hızlı
+# gerçekçi modeller; UI seviyeleri Fast Screening / Engineering / High-Fidelity.
+# ============================================================================
+
+# /api/flow-analysis'in kabul ettiği seviyeler (High-Fidelity kinetik zinciri
+# /api/kinetic-efficiency üzerinden yürür; akış modeli quasi-1D kalır)
+FLOW_FIDELITY_LEVELS = ('fast', 'engineering')
+
+
+def _flow_float(data, key, default=None):
+    """İstek gövdesinden sayısal alan oku; bozuksa net İngilizce ValueError."""
+    value = data.get(key, default)
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Field '{key}' must be a number, got {value!r}.")
+    if not np.isfinite(value):
+        raise ValueError(f"Field '{key}' must be finite.")
+    return value
+
+
+def _kinetic_evaluate_job(kwargs, progress_callback=None):
+    """job_runner işi: kinetik verim değerlendirmesi (async yol).
+
+    progress_callback runner tarafından enjekte edilir; değerlendirme tek
+    parça olduğundan yalnız başla/bitti işaretlenir.
+    """
+    if progress_callback:
+        progress_callback(0.1)
+    result = kinetic_efficiency.evaluate(**kwargs)
+    if progress_callback:
+        progress_callback(1.0)
+    return sanitize_json_values(result)
+
+
+def _run_kinetic_chain(data, chamber_pressure_bar, throat_diameter,
+                       nozzle_profile=None):
+    """Ortak kinetik verim zinciri (flow-analysis + kinetic-efficiency).
+
+    Returns (result_dict_or_None, note_or_None). Yakıt tanımı yoksa None +
+    açıklayıcı not döner; değerlendirme hatası da not olarak raporlanır
+    (akış analizi kinetik zincir yüzünden 500'e düşmez).
+    """
+    of_ratio = data.get('of_ratio')
+    if of_ratio is None:
+        return None, ("Kinetic-efficiency chain skipped: provide 'of_ratio' "
+                      "(and optionally 'fuel_type', 'oxidizer_type') to "
+                      "evaluate nozzle kinetic losses.")
+    fidelity = str(data.get('kinetic_fidelity',
+                            data.get('fidelity', 'engineering')))
+    if fidelity not in KINETIC_FIDELITY_LEVELS:
+        fidelity = 'engineering'
+    fuel_composition = data.get('fuel_composition')
+    if not isinstance(fuel_composition, dict) or not fuel_composition:
+        fuel_composition = {str(data.get('fuel_type', 'htpb')): 100.0}
+    try:
+        result = kinetic_efficiency.evaluate(
+            fuel_composition=fuel_composition,
+            oxidizer_type=str(data.get('oxidizer_type', 'N2O')),
+            of_ratio=float(of_ratio),
+            chamber_pressure=chamber_pressure_bar,
+            fidelity=fidelity,
+            characteristic_length=_flow_float(data, 'characteristic_length'),
+            throat_diameter=throat_diameter,
+            nozzle_profile=nozzle_profile,
+        )
+        return sanitize_json_values(result), None
+    except Exception as exc:
+        return None, f"Kinetic-efficiency chain failed: {exc}"
+
+
+@app.route('/api/flow-analysis', methods=['POST'])
+def flow_analysis():
+    """Quasi-1D compressible nozzle flow (successor of /api/cfd-analysis).
+
+    Fidelity levels (Wave 4 architecture):
+      fast        — isentropic summary: regime classification, CF/thrust,
+                    throat state (no station arrays, no Bartz coupling).
+      engineering — full 30-60 station arrays (P, M, T, rho, u, wall P),
+                    axial Bartz h_g/q coupling, and the kinetic-efficiency
+                    chain when the propellant definition is supplied
+                    (of_ratio [+ fuel_type/oxidizer_type]).
+
+    Units follow the repo convention: chamber_pressure in bar, temperatures
+    in K, diameters in m, ambient_pressure in Pa.
+    """
+    data = request.get_json(silent=True) or {}
+
+    fidelity = str(data.get('fidelity', 'engineering')).lower()
+    if fidelity not in FLOW_FIDELITY_LEVELS:
+        return jsonify({
+            'status': 'error',
+            'error': (f"fidelity must be one of {list(FLOW_FIDELITY_LEVELS)}; "
+                      f"got '{fidelity}'. High-fidelity finite-rate kinetics "
+                      "is served by POST /api/kinetic-efficiency."),
+        }), 400
+
+    try:
+        chamber_pressure_bar = _flow_float(data, 'chamber_pressure', 20.0)
+        chamber_temperature = _flow_float(data, 'chamber_temperature', 3000.0)
+        gamma = _flow_float(data, 'gamma', 1.2)
+        molecular_weight = _flow_float(data, 'molecular_weight', 24.0)
+        throat_diameter = _flow_float(data, 'throat_diameter', 0.02)
+        exit_diameter = _flow_float(data, 'exit_diameter')
+        expansion_ratio = _flow_float(data, 'expansion_ratio')
+        ambient_pressure = _flow_float(data, 'ambient_pressure', 101325.0)
+        n_stations = int(_flow_float(data, 'n_stations', 45))
+        separation_factor = _flow_float(data, 'separation_factor', 0.40)
+        wall_temperature = _flow_float(data, 'wall_temperature', 800.0)
+        friction_loss_fraction = _flow_float(
+            data, 'friction_loss_fraction', 0.015)
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+
+    # Geometri varsayılanı: ne çıkış çapı ne genişleme oranı verilmişse
+    # tipik ε=4 (küçük atmosferik motor) ile çalışılır — panel önerileri
+    # gerçek motor sonuçlarından doldurur.
+    if exit_diameter is None and expansion_ratio is None:
+        expansion_ratio = 4.0
+
+    motor_data = {}
+    if data.get('nozzle_type'):
+        # sample_nozzle_inner_contour konik/bell ayrımını buradan okur
+        motor_data['nozzle_angles'] = {'nozzle_type': str(data['nozzle_type'])}
+    if data.get('chamber_diameter') is not None:
+        try:
+            motor_data['chamber_diameter'] = float(data['chamber_diameter'])
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        solver = NozzleFlow1D(
+            chamber_pressure=chamber_pressure_bar * 1e5,
+            chamber_temperature=chamber_temperature,
+            gamma=gamma,
+            molecular_weight=molecular_weight,
+            throat_diameter=throat_diameter,
+            exit_diameter=exit_diameter,
+            expansion_ratio=expansion_ratio,
+            ambient_pressure=ambient_pressure,
+            n_stations=n_stations,
+            separation_factor=separation_factor,
+            wall_temperature=wall_temperature,
+            friction_loss_fraction=friction_loss_fraction,
+            motor_data=motor_data,
+        )
+        flow = solver.solve(include_bartz=(fidelity == 'engineering'))
+    except ValueError as exc:
+        # Modülün fizik doğrulamaları (Pa >= Pc, gamma bandı...) — net 400
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+    except Exception as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+
+    kinetic_result = None
+    kinetic_note = None
+    if fidelity == 'fast':
+        # İzantropik özet: istasyon dizileri taşınmaz (hızlı tarama seviyesi)
+        flow.pop('stations', None)
+        kinetic_note = ("Fast Screening level: station arrays and the "
+                        "kinetic-efficiency chain require the Engineering "
+                        "fidelity level.")
+    else:
+        nozzle_profile = None
+        stations = flow.get('stations') or {}
+        if stations.get('x_mm'):
+            # Yüksek doğruluk kinetiği için quasi-1D profil (mm -> m)
+            nozzle_profile = {
+                'x': [v / 1000.0 for v in stations['x_mm']],
+                'T': stations['temperature_K'],
+                'P': stations['pressure_Pa'],
+                'u': stations['velocity_m_s'],
+            }
+        kinetic_result, kinetic_note = _run_kinetic_chain(
+            data, chamber_pressure_bar, throat_diameter,
+            nozzle_profile=nozzle_profile)
+
+    response = {
+        'status': 'success',
+        'fidelity': fidelity,
+        'fidelity_levels': list(FLOW_FIDELITY_LEVELS),
+        'flow': sanitize_json_values(flow),
+        'kinetic_efficiency': kinetic_result,
+    }
+    if kinetic_note:
+        response['kinetic_note'] = kinetic_note
+    return jsonify(response)
+
+
+@app.route('/api/kinetic-efficiency', methods=['POST'])
+def kinetic_efficiency_analysis():
+    """Tiered nozzle kinetic-efficiency analysis (successor of
+    /api/kinetic-analysis).
+
+    Fidelity: 'fast' (equilibrium reference), 'engineering' (JANNAF-style
+    Damköhler correlation), 'high_fidelity' (Cantera finite-rate along a
+    nozzle T(x), P(x) profile; graceful fallback to engineering — the
+    'fidelity_used' field always reports what actually ran).
+
+    Special modes:
+      {'probe': true}  — capability probe only: reports whether the
+                         high-fidelity path is available (no heavy work).
+      {'async': true}  — queue the evaluation on the job runner; returns
+                         202 with a job id to poll via GET /api/jobs/<id>.
+    """
+    data = request.get_json(silent=True) or {}
+
+    # --- Yetenek sondası: Cantera + reaksiyonlu mekanizma var mı? ---
+    # Panel, High-Fidelity seçeneğini fidelity_used alanından tespit eder.
+    if data.get('probe'):
+        available = False
+        detail = 'Cantera is not installed'
+        if KINETIC_CANTERA_AVAILABLE:
+            try:
+                # Modülün kendi mekanizma çözücüsü (önbellekli); reaksiyonsuz
+                # termo-dosyalar (nasa_gas.yaml) elenir.
+                kinetic_efficiency._get_kinetics_gas()
+                available = True
+                detail = (f"Cantera mechanism "
+                          f"'{kinetic_efficiency._kin_mech_name}' ready")
+            except Exception as exc:
+                detail = str(exc)
+        levels = ['fast', 'engineering'] + (['high_fidelity'] if available
+                                            else [])
+        return jsonify({
+            'status': 'success',
+            'probe': True,
+            'fidelity_requested': 'high_fidelity',
+            'fidelity_used': 'high_fidelity' if available else 'engineering',
+            'cantera_available': bool(KINETIC_CANTERA_AVAILABLE),
+            'fidelity_levels': levels,
+            'detail': detail,
+        })
+
+    fidelity = str(data.get('fidelity', 'engineering'))
+    if fidelity not in KINETIC_FIDELITY_LEVELS:
+        return jsonify({
+            'status': 'error',
+            'error': (f"fidelity must be one of "
+                      f"{list(KINETIC_FIDELITY_LEVELS)}; got '{fidelity}'."),
+        }), 400
+
+    try:
+        of_ratio = _flow_float(data, 'of_ratio')
+        chamber_pressure_bar = _flow_float(data, 'chamber_pressure', 20.0)
+        characteristic_length = _flow_float(data, 'characteristic_length')
+        throat_diameter = _flow_float(data, 'throat_diameter')
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+    if of_ratio is None:
+        return jsonify({
+            'status': 'error',
+            'error': ("Field 'of_ratio' is required (oxidizer-to-fuel mass "
+                      "ratio, e.g. 6.0 for N2O/HTPB)."),
+        }), 400
+
+    fuel_composition = data.get('fuel_composition')
+    if not isinstance(fuel_composition, dict) or not fuel_composition:
+        fuel_composition = {str(data.get('fuel_type', 'htpb')): 100.0}
+
+    kwargs = {
+        'fuel_composition': fuel_composition,
+        'oxidizer_type': str(data.get('oxidizer_type', 'N2O')),
+        'of_ratio': of_ratio,
+        'chamber_pressure': chamber_pressure_bar,
+        'fidelity': fidelity,
+        'characteristic_length': characteristic_length,
+        'throat_diameter': throat_diameter,
+        'nozzle_profile': data.get('nozzle_profile'),
+    }
+
+    if data.get('async'):
+        # Uzun sürebilecek yol (Cantera BDF) iş kuyruğuna atılır; istemci
+        # GET /api/jobs/<id> ile yoklar (job_runner sözleşmesi).
+        job_id = job_runner.submit(_kinetic_evaluate_job, kwargs)
+        return jsonify({
+            'status': 'queued',
+            'job_id': job_id,
+            'poll_url': f'/api/jobs/{job_id}',
+        }), 202
+
+    try:
+        result = kinetic_efficiency.evaluate(**kwargs)
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+    except Exception as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+
+    payload = {'status': 'success'}
+    payload.update(sanitize_json_values(result))
+    return jsonify(payload)
+
+
+@app.route('/api/jobs/<job_id>', methods=['GET'])
+def get_job_status(job_id):
+    """Poll a queued analysis job (job_runner contract).
+
+    States: queued | running | done | error. A finished job carries
+    'result'; a failed one carries 'error'. Records expire after the
+    runner TTL (default 1 h) and then return 404.
+    """
+    try:
+        status = job_runner.status(job_id)
+    except KeyError:
+        return jsonify({
+            'status': 'error',
+            'error': f'Unknown or expired job id: {job_id}',
+        }), 404
+    return jsonify({'status': 'success', 'job': sanitize_json_values(status)})
+
+
+@app.route('/api/validation/upload-csv', methods=['POST'])
+def validation_upload_csv():
+    """Parse a user static-fire thrust CSV and (optionally) compare it with
+    the HRMA prediction.
+
+    Accepts either:
+      - a plain-text body (text/csv, text/plain): parse only, or
+      - JSON {'csv_text': str, 'predicted_curve': {'time': [...],
+        'thrust': [...]}} — parse + quantitative comparison (total impulse,
+        peak/mean thrust, NFPA 1125 burn time, RMSE/NRMSE, English
+        assessment).
+    """
+    predicted_curve = None
+    csv_text = None
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        csv_text = data.get('csv_text')
+        predicted_curve = data.get('predicted_curve')
+    else:
+        csv_text = request.get_data(as_text=True)
+
+    if not isinstance(csv_text, str) or not csv_text.strip():
+        return jsonify({
+            'status': 'error',
+            'error': ("No CSV content provided. Send the file as a "
+                      "text/csv body, or as JSON {'csv_text': '...'} with "
+                      "an optional 'predicted_curve' {'time', 'thrust'}."),
+        }), 400
+
+    try:
+        parsed = parse_thrust_csv(csv_text)
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+
+    parsed_out = {
+        'time': parsed['time'].tolist(),
+        'thrust': parsed['thrust'].tolist(),
+        'n_points': parsed['n_points'],
+        'warnings': parsed['warnings'],
+    }
+
+    comparison = None
+    if predicted_curve is not None:
+        try:
+            comparison = sanitize_json_values(
+                compare_thrust_curves(parsed, predicted_curve))
+        except ValueError as exc:
+            # CSV çözüldü ama karşılaştırma anlamsız (örtüşme yok vb.):
+            # panel çözümlemeyi yine gösterebilsin diye parsed eklenir.
+            return jsonify({
+                'status': 'error',
+                'error': str(exc),
+                'parsed': parsed_out,
+            }), 400
+
+    return jsonify({
+        'status': 'success',
+        'parsed': parsed_out,
+        'comparison': comparison,
+    })
+
 
 if __name__ == '__main__':
     print("Starting Motor Analysis on port 5000...")

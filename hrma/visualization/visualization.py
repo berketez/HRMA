@@ -1474,10 +1474,55 @@ def create_3d_motor_visualization(motor_data):
     
     return fig.to_json()
 
+#: Karşılaştırma grafiğinin tanıdığı metrik anahtarları (şema esnetildi:
+#: eksik anahtar artık KeyError değil — panel yalnız mevcut veriyle çizilir)
+COMPARATIVE_METRIC_KEYS = ('thrust', 'isp', 'total_impulse', 'total_mass')
+
+
+def _validate_comparative_configs(motor_configs):
+    """Şema doğrulaması — çağırana NET hata mesajı (İngilizce).
+
+    Dalga 4 onarımı (2026-07-14): eski kod motor_configs[name]['total_impulse']
+    gibi zorunlu indekslemeler yüzünden eksik anahtarda KeyError atıyor,
+    /api/comparative-analysis 500 dönüyordu. Yeni sözleşme: anahtarlar
+    opsiyonel, ama yapı (dict-of-dict, sayısal değerler) doğrulanır.
+    """
+    if not isinstance(motor_configs, dict) or not motor_configs:
+        raise ValueError(
+            "motor_configs must be a non-empty dict of "
+            "{config_name: {metric: value}} entries.")
+    for name, cfg in motor_configs.items():
+        if not isinstance(cfg, dict):
+            raise ValueError(
+                f"Configuration '{name}' must be a dict of metrics "
+                f"(got {type(cfg).__name__}). Expected keys include: "
+                + ", ".join(COMPARATIVE_METRIC_KEYS) + ".")
+        for key in COMPARATIVE_METRIC_KEYS:
+            value = cfg.get(key)
+            if value is not None and not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"Configuration '{name}' key '{key}' must be numeric, "
+                    f"got {type(value).__name__}.")
+    if not any(cfg.get(key) is not None
+               for cfg in motor_configs.values()
+               for key in COMPARATIVE_METRIC_KEYS):
+        raise ValueError(
+            "No plottable metrics found in motor_configs. Provide at "
+            "least one of: " + ", ".join(COMPARATIVE_METRIC_KEYS) + ".")
+
+
 def create_comparative_analysis_plot(motor_configs):
-    """Create comparative analysis between different motor configurations"""
+    """Create comparative analysis between different motor configurations.
+
+    Eksik metrik anahtarları tolere edilir: her panel yalnızca o metriğe
+    sahip konfigürasyonlarla çizilir; hiçbir konfigürasyonda yoksa panel
+    boş bırakılır. Yapısal bozukluklar (dict olmayan config, sayısal
+    olmayan değer) ValueError ile net mesaj verir.
+    """
     from plotly.subplots import make_subplots
-    
+
+    _validate_comparative_configs(motor_configs)
+
     fig = make_subplots(
         rows=2, cols=2,
         subplot_titles=('Thrust Comparison', 'Isp Comparison',
@@ -1485,65 +1530,75 @@ def create_comparative_analysis_plot(motor_configs):
         specs=[[{'type': 'bar'}, {'type': 'bar'}],
                [{'type': 'bar'}, {'type': 'scatter'}]]
     )
-    
-    config_names = list(motor_configs.keys())
-    
+
+    def _pairs(key):
+        # (isim, değer) — yalnız anahtarı mevcut ve sayısal olan configler
+        return [(name, cfg[key]) for name, cfg in motor_configs.items()
+                if cfg.get(key) is not None]
+
     # Thrust comparison
-    thrust_values = [motor_configs[name]['thrust'] for name in config_names]
-    fig.add_trace(
-        go.Bar(
-            x=config_names,
-            y=thrust_values,
-            marker_color='lightblue',
-            text=[f"{v:.0f} N" for v in thrust_values],
-            textposition='auto',
-            name='Thrust'
-        ),
-        row=1, col=1
-    )
-    
+    thrust_pairs = _pairs('thrust')
+    if thrust_pairs:
+        fig.add_trace(
+            go.Bar(
+                x=[n for n, _ in thrust_pairs],
+                y=[v for _, v in thrust_pairs],
+                marker_color='lightblue',
+                text=[f"{v:.0f} N" for _, v in thrust_pairs],
+                textposition='auto',
+                name='Thrust'
+            ),
+            row=1, col=1
+        )
+
     # Isp comparison
-    isp_values = [motor_configs[name]['isp'] for name in config_names]
-    fig.add_trace(
-        go.Bar(
-            x=config_names,
-            y=isp_values,
-            marker_color='lightgreen',
-            text=[f"{v:.1f} s" for v in isp_values],
-            textposition='auto',
-            name='Specific Impulse'
-        ),
-        row=1, col=2
-    )
-    
-    # Total impulse comparison
-    total_impulse_values = [motor_configs[name]['total_impulse'] for name in config_names]
-    fig.add_trace(
-        go.Bar(
-            x=config_names,
-            y=total_impulse_values,
-            marker_color='lightcoral',
-            text=[f"{v:.0f} N⋅s" for v in total_impulse_values],
-            textposition='auto',
-            name='Total Impulse'
-        ),
-        row=2, col=1
-    )
-    
-    # Mass efficiency scatter
-    mass_values = [motor_configs[name]['total_mass'] for name in config_names]
-    fig.add_trace(
-        go.Scatter(
-            x=mass_values,
-            y=isp_values,
-            mode='markers+text',
-            marker=dict(size=15, color='#c792ea'),
-            text=config_names,
-            textposition='top center',
-            name='Mass vs Isp'
-        ),
-        row=2, col=2
-    )
+    isp_pairs = _pairs('isp')
+    if isp_pairs:
+        fig.add_trace(
+            go.Bar(
+                x=[n for n, _ in isp_pairs],
+                y=[v for _, v in isp_pairs],
+                marker_color='lightgreen',
+                text=[f"{v:.1f} s" for _, v in isp_pairs],
+                textposition='auto',
+                name='Specific Impulse'
+            ),
+            row=1, col=2
+        )
+
+    # Total impulse comparison (eski kodda zorunlu indeksleme -> KeyError)
+    impulse_pairs = _pairs('total_impulse')
+    if impulse_pairs:
+        fig.add_trace(
+            go.Bar(
+                x=[n for n, _ in impulse_pairs],
+                y=[v for _, v in impulse_pairs],
+                marker_color='lightcoral',
+                text=[f"{v:.0f} N⋅s" for _, v in impulse_pairs],
+                textposition='auto',
+                name='Total Impulse'
+            ),
+            row=2, col=1
+        )
+
+    # Mass efficiency scatter — hem total_mass hem isp gerektirir
+    eff_points = [(name, cfg['total_mass'], cfg['isp'])
+                  for name, cfg in motor_configs.items()
+                  if cfg.get('total_mass') is not None
+                  and cfg.get('isp') is not None]
+    if eff_points:
+        fig.add_trace(
+            go.Scatter(
+                x=[m for _, m, _ in eff_points],
+                y=[i for _, _, i in eff_points],
+                mode='markers+text',
+                marker=dict(size=15, color='#c792ea'),
+                text=[n for n, _, _ in eff_points],
+                textposition='top center',
+                name='Mass vs Isp'
+            ),
+            row=2, col=2
+        )
     
     fig.update_layout(
         title_text="Motor Configuration Comparison",
