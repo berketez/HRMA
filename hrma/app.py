@@ -356,25 +356,17 @@ def calculate():
             injector_plot = performance_plots
         
         # Create advanced analysis visualizations
-        heat_transfer_plot = None
+        #
+        # Dalga 0 (2026-07-14): Isı ve yapısal analiz burada İKİNCİ kez
+        # hesaplanıp plot'lanıyordu (plots.heat_transfer /
+        # plots.structural_analysis) ama HİÇBİR şablon bu plot'ları render
+        # etmiyordu — ~251 KB ölü yük + çifte hesap. Kaldırıldı. Motor
+        # İÇİNDEKİ sonuçlar (motor.heat_transfer_analysis,
+        # motor.structural_analysis) KALIR: 3D ısı haritası
+        # (motor_viz3d.js) ve analiz panelleri onları okur.
         combustion_analysis_plot = None
-        structural_analysis_plot = None
         real_time_dashboard_plot = None
         motor_3d_plot = None
-        
-        # Generate heat transfer analysis
-        if data.get('include_heat_analysis', True):
-            try:
-                heat_analyzer = HeatTransferAnalyzer()
-                heat_data = heat_analyzer.analyze_heat_transfer(motor_results, material=data.get('material_type', 'steel'))
-                # Adapt analysis result to match plot function's expected format
-                if 'cooling_analysis' in heat_data and 'zones' not in heat_data['cooling_analysis']:
-                    ca = heat_data['cooling_analysis']
-                    ca['zones'] = ['Chamber', 'Throat', 'Nozzle']
-                    ca['effectiveness'] = [ca.get('cooling_efficiency', 0.8)] * 3
-                heat_transfer_plot = create_heat_transfer_plots(heat_data)
-            except Exception as e:
-                print(f"Heat transfer analysis error: {e}")
 
         # Generate combustion analysis
         if data.get('include_combustion_analysis', True):
@@ -390,26 +382,7 @@ def calculate():
             except Exception as e:
                 print(f"Combustion analysis error: {e}")
         
-        # Generate structural analysis
-        if data.get('include_structural_analysis', True):
-            try:
-                structural_analyzer = StructuralAnalyzer()
-                structural_data = structural_analyzer.analyze_structure(
-                    motor_results, material=data.get('material_type', 'steel_4130')
-                )
-                # Adapt fatigue data for plot function (expects arrays)
-                if 'fatigue_analysis' in structural_data:
-                    fa = structural_data['fatigue_analysis']
-                    if 'cycles' not in fa:
-                        import numpy as np
-                        est_cycles = fa.get('estimated_cycles', 1e6)
-                        fa['cycles'] = np.logspace(2, np.log10(max(est_cycles * 10, 1e7)), 20).tolist()
-                        stress_amp = fa.get('stress_amplitude', 100)
-                        if not isinstance(stress_amp, (list, tuple)):
-                            fa['stress_amplitude'] = [stress_amp * (1e6 / max(c, 1)) ** 0.1 for c in fa['cycles']]
-                structural_analysis_plot = create_structural_analysis_plots(structural_data)
-            except Exception as e:
-                print(f"Structural analysis error: {e}")
+        # (Yapısal analiz çifte hesabı da kaldırıldı — bkz. yukarıdaki not.)
 
         # Generate real-time dashboard
         if data.get('include_realtime_dashboard', True):
@@ -524,9 +497,10 @@ def calculate():
                 'altitude_performance': altitude_performance_plot,
                 'mass_fractions': mass_fractions_plot,
                 'thrust_altitude': thrust_altitude_plot,
-                'heat_transfer': heat_transfer_plot,
+                # 'heat_transfer' ve 'structural_analysis' plot anahtarları
+                # bilinçli olarak KALDIRILDI (Dalga 0): hiçbir şablon render
+                # etmiyordu; analiz panelleri motor.* sonuçlarını okur.
                 'combustion_analysis': combustion_analysis_plot,
-                'structural_analysis': structural_analysis_plot,
                 'realtime_dashboard': real_time_dashboard_plot,
                 'motor_3d': motor_3d_plot
             }
@@ -1349,11 +1323,39 @@ def advanced_analysis():
         results = {}
         
         # Heat transfer analysis
+        # Dalga 0 düzeltmesi (2026-07-14): analyze_chamber_thermal diye bir
+        # metot HİÇ olmadı — bu dal her çağrıda AttributeError -> 500
+        # veriyordu. Gerçek API analyze_heat_transfer'dir; girdi sözlüğü
+        # onun beklediği anahtarlarla kurulur.
         if 'heat_transfer' in analysis_types:
             heat_analyzer = HeatTransferAnalyzer()
-            heat_data = heat_analyzer.analyze_chamber_thermal(
-                motor_data, data.get('material_type', 'steel')
+            ht_input = {
+                'chamber_pressure': float(motor_data.get('chamber_pressure', 20.0)),   # bar
+                'chamber_temperature': float(motor_data.get('chamber_temperature', 3000.0)),  # K
+                'chamber_diameter': float(motor_data.get('chamber_diameter', 0.1)),    # m
+                'chamber_length': float(motor_data.get('chamber_length', 0.5)),        # m
+                'burn_time': float(motor_data.get('burn_time', 10.0)),                 # s
+                'mdot_total': float(motor_data.get('mdot_total', 1.0)),                # kg/s
+            }
+            # Varsa gerçek gaz/boğaz değerlerini geçir (Bartz fallback'i yerine)
+            for key in ('gamma', 'molecular_weight', 'gas_constant',
+                        'throat_diameter', 'c_star'):
+                if motor_data.get(key) is not None:
+                    try:
+                        ht_input[key] = float(motor_data[key])
+                    except (TypeError, ValueError):
+                        pass
+            heat_data = heat_analyzer.analyze_heat_transfer(
+                ht_input,
+                material=data.get('material_type', 'steel'),
+                wall_thickness=float(data.get('wall_thickness', 0.005)),
+                cooling_type=data.get('cooling_type', 'natural')
             )
+            # Plot fonksiyonunun beklediği zones/effectiveness alanlarını ekle
+            if 'cooling_analysis' in heat_data and 'zones' not in heat_data['cooling_analysis']:
+                ca = heat_data['cooling_analysis']
+                ca['zones'] = ['Chamber', 'Throat', 'Nozzle']
+                ca['effectiveness'] = [ca.get('cooling_efficiency', 0.8)] * 3
             results['heat_transfer_plot'] = create_heat_transfer_plots(heat_data)
             results['heat_analysis'] = heat_data
         
@@ -2572,11 +2574,15 @@ def analyze_safety():
         safety_analyzer = SafetyAnalyzer()
         
         # Perform comprehensive safety analysis
+        # Dalga 0 (2026-07-14): malzeme artık istekten geçer — yapısal
+        # emniyet merkezi materials_db dayanımlarıyla hesaplanır (eski
+        # sabit 250/400 MPa jenerik çelik kalktı).
         safety_results = safety_analyzer.analyze_comprehensive_safety(
             motor_data=motor_data,
             propellant_mass=propellant_mass,
             propellant_type=propellant_type,
-            facility_type=facility_type
+            facility_type=facility_type,
+            material=data.get('material', 'steel_4130')
         )
         
         return jsonify({
@@ -2600,7 +2606,7 @@ def analyze_structural_safety():
         throat_diameter = float(data.get('throat_diameter', 0.02))  # m
         burn_time = float(data.get('burn_time', 10))  # s
         material = data.get('material', 'steel_4130')
-        
+
         motor_data = {
             'chamber_pressure': chamber_pressure,
             'chamber_diameter': chamber_diameter,
@@ -2608,6 +2614,11 @@ def analyze_structural_safety():
             'throat_diameter': throat_diameter,
             'burn_time': burn_time
         }
+        # Termal senaryo bu uçta pasif kalıyordu: gaz sıcaklığı geçilmeyince
+        # yapısal modül termal gerilmeyi hiç değerlendirmiyordu (2026-07-14).
+        # İstemci gönderirse geçir; 0/boş "termal analizi atla" demektir.
+        if data.get('chamber_temperature'):
+            motor_data['chamber_temperature'] = float(data['chamber_temperature'])
         
         # Initialize structural analyzer
         structural_analyzer = StructuralAnalyzer()
@@ -2763,6 +2774,14 @@ def perform_experimental_validation():
 @app.route('/api/cfd-analysis', methods=['POST'])
 def perform_cfd_analysis():
     """Perform 2D CFD analysis"""
+    # Dalga 0 bekçisi (2026-07-14): mevcut çözücü gerçek CFD değil —
+    # kütle korunumu yok, 3 iterasyonda ıraksıyor (|u|→7.5e10 m/s),
+    # NaN -> 500. Quasi-1D sıkıştırılabilir lüle modeli (nozzle_flow_1d)
+    # gelene kadar dürüst 501 döner. Orijinal işleyici aşağıda korunur.
+    return jsonify({
+        'error': 'This analysis is being rebuilt on the reduced-order physics architecture',
+        'status': 'unavailable'
+    }), 501
     try:
         data = request.json
         motor_type = data.get('motor_type', 'hybrid')
@@ -2809,6 +2828,14 @@ def perform_cfd_analysis():
 @app.route('/api/kinetic-analysis', methods=['POST'])
 def perform_kinetic_analysis():
     """Perform nozzle kinetic loss analysis"""
+    # Dalga 0 bekçisi (2026-07-14): stiff ODE + explicit RK45 tek istasyonda
+    # ~23 dk sürüyor ve tek-worker masaüstü uygulamasını KİLİTLİYOR; bitse
+    # bile isp_loss ≡ 0 dönüyordu. Frozen/shifting + η_kin korelasyonu
+    # gelene kadar dürüst 501 döner. Orijinal işleyici aşağıda korunur.
+    return jsonify({
+        'error': 'This analysis is being rebuilt on the reduced-order physics architecture',
+        'status': 'unavailable'
+    }), 501
     try:
         data = request.json
         motor_type = data.get('motor_type', 'hybrid')
@@ -2854,6 +2881,13 @@ def perform_kinetic_analysis():
 @app.route('/api/professional-analysis', methods=['POST'])
 def perform_complete_professional_analysis():
     """Perform complete professional-grade analysis using all modules"""
+    # Dalga 0 bekçisi (2026-07-14): bu uç CFD + kinetik çözücüleri birlikte
+    # çağırıyor — ikisi de yukarıdaki nedenlerle emekliye ayrıldı (kilitleme
+    # + ıraksama riski). Dürüst 501 döner. Orijinal işleyici aşağıda korunur.
+    return jsonify({
+        'error': 'This analysis is being rebuilt on the reduced-order physics architecture',
+        'status': 'unavailable'
+    }), 501
     try:
         data = request.json
         motor_type = data.get('motor_type', 'hybrid')

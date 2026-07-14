@@ -657,6 +657,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/theme.css">
+    <!-- HUD sonuç katmanı: theme.css'ten SONRA yüklenir (results_hud.css kuralı) -->
+    <link rel="stylesheet" href="/static/css/results_hud.css">
+    <script src="/static/js/hud.js"></script>
     <script src="/static/vendor/plotly-1.58.5.min.js"></script>
     <script src="/static/js/plotly_dark.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls: 3D motor simülasyonu için -->
@@ -667,6 +670,11 @@
     <script src="/static/js/transient_panel.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
     <script src="/static/js/injector_panel.js"></script>
+    <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->
+    <script src="/static/js/analysis_dock.js"></script>
+    <script src="/static/js/panels/structural_panel.js"></script>
+    <script src="/static/js/panels/thermal_panel.js"></script>
+    <script src="/static/js/panels/safety_panel.js"></script>
     <script>
         // Transient + 6-DOF + Enjektör panelleri (yeni fizik katmanlarının UI'ı)
         document.addEventListener('DOMContentLoaded', function () {
@@ -698,6 +706,14 @@
                              Pc_bar: m.chamber_pressure,
                              T_c_K: m.chamber_temperature };
                 },
+            });
+            // Analiz güvertesi (thermal/structural/safety) — çapa resultsPanel
+            // içinde olduğundan hesap bitip panel açılınca görünür olur
+            // (injector panel deseniyle aynı görünürlük mekaniği).
+            AnalysisDock.init({
+                anchorId: 'analysis-dock-anchor',
+                motorType: 'hybrid',
+                resultsProvider: function () { return window.currentResults; },
             });
         });
     </script>
@@ -1584,6 +1600,10 @@
                      results-grid'e düşüp sıkışıyordu) -->
                 <div id="trajectoryPanel"></div>
             </div>
+
+            <!-- Analysis Dock çapası: güverte JS ile bu çapanın ÖNÜNE kurulur
+                 (resultsPanel içinde olduğundan hesap bitmeden görünmez) -->
+            <div id="analysis-dock-anchor"></div>
 
             <!-- Export/CAD Actions Panel -->
             <div id="exportActionsPanel" class="panel" style="display: none; margin-top: 20px; clear: both;">

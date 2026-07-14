@@ -7,6 +7,8 @@ import numpy as np
 import json
 from typing import Dict, List, Tuple, Optional
 
+from hrma.data.materials_db import build_materials_view
+
 class StructuralAnalyzer:
     """Structural analysis for hybrid rocket motor chambers.
 
@@ -24,87 +26,16 @@ class StructuralAnalyzer:
     """
 
     def __init__(self):
-        # Material properties database
+        # Malzeme veritabanı — MERKEZİ kaynaktan (Dalga 0, 2026-07-14).
         #
-        # Eklenen alanlar (her malzeme icin):
-        #   'thermal_expansion'    : alpha [1/K]   termal genlesme katsayisi
-        #   'max_service_temp'     : [K]           kisa-sureli azami servis sicakligi
-        #   'derating_curve'       : {T_celsius: yield_retention_fraction}
-        #
-        # Derating noktalari literatur kaynaklidir (asagida her malzeme icin atif).
-        self.materials = {
-            'steel_4130': {
-                'yield_strength': 460e6,        # Pa  (oda sicakligi, normalize; AZoM AISI 4130)
-                'ultimate_strength': 730e6,     # Pa
-                'elastic_modulus': 200e9,       # Pa
-                'density': 7850,               # kg/m³
-                'poisson_ratio': 0.27,
-                'fatigue_limit': 230e6,        # Pa
-                'safety_factor': 4.0,
-                # Termal genlesme: AISI 4130 ~12.3e-6 1/K (20-300 C ort.)
-                # Kaynak: MatWeb / ASM Metals Handbook, AISI 4130.
-                'thermal_expansion': 12.3e-6,  # 1/K
-                'max_service_temp': 811.0,     # K (~538 C; dusuk-alasim celik kisa-sureli sinir)
-                # Yield derating (oda sicakligi yield'ine oran), MMPDS Fig. 2.3.1.1.1
-                # AISI dusuk-alasimli celikler, kisa-sureli maruziyet egrisi.
-                'derating_curve': {
-                    20: 1.00, 200: 0.92, 300: 0.82,
-                    400: 0.66, 500: 0.44, 600: 0.29, 700: 0.15
-                }
-            },
-            'aluminum_6061': {
-                'yield_strength': 275e6,
-                'ultimate_strength': 310e6,
-                'elastic_modulus': 68.9e9,
-                'density': 2700,
-                'poisson_ratio': 0.33,
-                'fatigue_limit': 96e6,
-                'safety_factor': 4.0,
-                # Al 6061-T6 alpha ~23.6e-6 1/K. Kaynak: ASM / MatWeb.
-                'thermal_expansion': 23.6e-6,  # 1/K
-                'max_service_temp': 477.0,     # K (~204 C; T6 uzeri hizli yumusama)
-                # MMPDS 6061-T6 kisa-sureli yield derating (Fig. 3.6.x).
-                'derating_curve': {
-                    20: 1.00, 100: 0.95, 150: 0.85, 200: 0.60,
-                    250: 0.35, 300: 0.18, 350: 0.08
-                }
-            },
-            'inconel_718': {
-                'yield_strength': 1100e6,
-                'ultimate_strength': 1275e6,
-                'elastic_modulus': 200e9,
-                'density': 8220,
-                'poisson_ratio': 0.29,
-                'fatigue_limit': 450e6,
-                'safety_factor': 3.0,
-                # Inconel 718 alpha ~13.0e-6 1/K (20-300 C). Kaynak: Special Metals datasheet.
-                'thermal_expansion': 13.0e-6,  # 1/K
-                'max_service_temp': 977.0,     # K (~704 C; 718 sik kullanim siniri)
-                # Inconel 718 yield, yuksek sicaklikta cok iyi korunur.
-                # Kaynak: Special Metals INCONEL alloy 718 datasheet (yield vs temp).
-                'derating_curve': {
-                    20: 1.00, 300: 0.93, 500: 0.88, 650: 0.83,
-                    700: 0.78, 800: 0.60, 900: 0.35
-                }
-            },
-            'titanium_6al4v': {
-                'yield_strength': 880e6,
-                'ultimate_strength': 950e6,
-                'elastic_modulus': 114e9,
-                'density': 4430,
-                'poisson_ratio': 0.31,
-                'fatigue_limit': 350e6,
-                'safety_factor': 4.0,
-                # Ti-6Al-4V alpha ~8.6e-6 1/K. Kaynak: ASM / MMPDS.
-                'thermal_expansion': 8.6e-6,   # 1/K
-                'max_service_temp': 673.0,     # K (~400 C; uzun-sureli servis siniri)
-                # MMPDS Ti-6Al-4V kisa-sureli yield derating.
-                'derating_curve': {
-                    20: 1.00, 200: 0.85, 300: 0.78, 400: 0.70,
-                    500: 0.60, 600: 0.48, 700: 0.32
-                }
-            }
-        }
+        # Eski yerel tablo hrma/data/materials_db.py'ye taşındı: mekanik +
+        # termal özellikler artık TEK kayıtta (parametre tutarlılığı kuralı;
+        # heat_transfer/safety modülleriyle aynı değerler). Alanlar ve
+        # derating eğrileri kaynaklarıyla birlikte orada belgelidir.
+        # Anahtar uyumluluğu: steel_4130 / aluminum_6061 / inconel_718 /
+        # titanium_6al4v aynen korunur; ek malzemeler (ss_304, ss_316,
+        # copper, cucrzr, graphite, ablative, steel) de seçilebilir.
+        self.materials = build_materials_view()
 
     # ------------------------------------------------------------------
     # YENI YARDIMCI FONKSIYONLAR (DENETIM DUZELTMESI 2026-06)
@@ -423,6 +354,12 @@ class StructuralAnalyzer:
             'fatigue_analysis': fatigue_analysis,
             'weight_analysis': weight_analysis,
             'safety_analysis': safety_analysis,
+            # İki SF raporu (Dalga 0, 2026-07-14): üst seviyede de raporlanır
+            # ki UI/rapor katmanı chamber_analysis'e inmek zorunda kalmasın.
+            # safety_factor = safety_factor_total (geriye dönük tek-SF alanı).
+            'safety_factor_pressure': chamber_analysis.get('safety_factor_pressure'),
+            'safety_factor_total': chamber_analysis.get('safety_factor_total'),
+            'safety_factor': chamber_analysis.get('safety_factor_total'),
             # YENI (DENETIM DUZELTMESI 2026-06)
             'thermal_analysis': {
                 'wall_temperature_inner_K': T_inner_wall,
@@ -537,6 +474,15 @@ class StructuralAnalyzer:
         hoop_safety_factor = yield_for_design / hoop_stress if hoop_stress > 0 else float('inf')
         von_mises_safety_factor = yield_for_design / von_mises_stress if von_mises_stress > 0 else float('inf')
 
+        # İKİ SF RAPORU (Dalga 0, 2026-07-14): basınç-yalnız (birincil yük)
+        # ve basınç+termal (toplam). Termal gerilme İKİNCİL (deplasman
+        # kontrollü) yüktür; ayrı raporlanması tasarımcıya hangi etkinin
+        # domine ettiğini gösterir. safety_factor_total, mevcut
+        # hoop_safety_factor ile aynıdır (geriye dönük uyum).
+        safety_factor_pressure = (yield_for_design / pressure_hoop_stress
+                                  if pressure_hoop_stress > 0 else float('inf'))
+        safety_factor_total = hoop_safety_factor
+
         return {
             'minimum_thickness': min_thickness * 1000,  # mm
             'recommended_thickness': recommended_thickness * 1000,  # mm
@@ -550,6 +496,9 @@ class StructuralAnalyzer:
             'von_mises_stress': von_mises_stress / 1e6,  # MPa
             'hoop_safety_factor': hoop_safety_factor,
             'von_mises_safety_factor': von_mises_safety_factor,
+            # İki SF raporu (Dalga 0): basınç-yalnız ve basınç+termal
+            'safety_factor_pressure': safety_factor_pressure,
+            'safety_factor_total': safety_factor_total,
             'allowable_stress': allowable_stress / 1e6,  # MPa (derate edilmis)
             'yield_strength_used_MPa': yield_for_design / 1e6,  # derate edilmis yield
             'thin_wall_ratio_t_over_r': t_over_r,
@@ -793,6 +742,16 @@ class StructuralAnalyzer:
             risk_level = 'VERY LOW'
             status = 'SAFE'
 
+        # UNSAFE durumunda hangi yükün domine ettiğini açıkla (Dalga 0):
+        # termal gerilme basınç gerilmesini aşıyorsa sorun soğutma/malzeme
+        # kaynaklıdır, cidar kalınlaştırmak tek başına çözmez.
+        explanation = ''
+        if status == 'UNSAFE':
+            thermal = chamber_analysis.get('thermal_hoop_stress', 0.0)
+            pressure = chamber_analysis.get('pressure_hoop_stress', 0.0)
+            explanation = ('thermal-dominated' if thermal > pressure
+                           else 'pressure-dominated')
+
         recommendations = []
         if min_safety_factor < 3.0:
             recommendations.append('Increase wall thickness')
@@ -816,6 +775,7 @@ class StructuralAnalyzer:
             'minimum_safety_factor': min_safety_factor,
             'risk_level': risk_level,
             'status': status,
+            'explanation': explanation,
             'safety_factors': sf_candidates,
             'recommendations': recommendations
         }

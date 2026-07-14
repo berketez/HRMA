@@ -54,7 +54,11 @@
 - ANSYS sınırı beyanı UI'da: el hesabı kapsamı vs "ANSYS'e git" listesi (süreksizlik gerilmeleri, t/r>0.2, çok modlu slosh...).
 
 ### Dalga 4 — Akış, uzun koşumlar, doğrulama
-- `nozzle_flow_1d.py` (CFD'nin yerine) + η_kin korelasyonu (kinetiğin yerine); Cantera opsiyonel eklenti (varsa kullan, yoksa korelasyon).
+*(2026-07-14 revizyonu — Berke'nin GPT-5.6 danışması ARGE öneri­siyle örtüştü; şu eklemeler kabul edildi:)*
+- `nozzle_flow_1d.py` (CFD'nin yerine): quasi-1D sıkıştırılabilir akış + boğulma + Mach/P dağılımı + **under/over-expanded durumlar + nozul ayrılma (separation) kriteri (Summerfield)** + eksenel Bartz + temel viskoz kayıplar.
+- Kinetik: **kademeli mimari** — equilibrium → frozen → basitleştirilmiş finite-rate → detaylı; hızlı taramada equilibrium/frozen, finite-rate için kendi integratörümüz DEĞİL **Cantera backend** (kuruluysa; yoksa η_kin korelasyonuna düş).
+- UI seviye adlandırması: **Fast Screening / Engineering Fidelity / High-Fidelity Validation** (teknik modül adları yerine).
+- MDO (çok disiplinli optimizasyon) bilinçli olarak kapsam DIŞI — ayrı gelecek dalga.
 - `job_runner.py`: threading iş kuyruğu + progress (uzun analizler; Celery gereksiz).
 - Deneysel doğrulama: **kullanıcı CSV modu** (sentetik DB vitrine çıkmaz; Berke kendi static-fire verisiyle karşılaştırır).
 - /api/comparative-analysis şema doğrulaması + panel; /api/professional-analysis emekli.

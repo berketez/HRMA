@@ -8,6 +8,8 @@ import json
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
+from hrma.data.materials_db import get_material
+
 @dataclass
 class SafetyMargins:
     """Safety margin requirements for different components"""
@@ -52,28 +54,32 @@ class SafetyAnalyzer:
     
     def analyze_comprehensive_safety(self, motor_data: Dict, propellant_mass: float,
                                    propellant_type: str = 'composite',
-                                   facility_type: str = 'test_stand') -> Dict:
+                                   facility_type: str = 'test_stand',
+                                   material: str = 'steel_4130') -> Dict:
         """
         Complete safety analysis including all hazard types
-        
+
         Args:
             motor_data: Motor performance and design data
             propellant_mass: Total propellant mass (kg)
             propellant_type: Type of propellant system
             facility_type: 'test_stand', 'manufacturing', 'transport', 'launch'
-            
+            material: Chamber material key (hrma.data.materials_db); the
+                structural-safety hoop check uses this material's real
+                yield/ultimate strengths instead of a fixed generic steel.
+
         Returns:
             Comprehensive safety analysis results
         """
-        
+
         # Extract motor parameters
         chamber_pressure = motor_data.get('chamber_pressure', 20.0)  # bar
         chamber_temperature = motor_data.get('chamber_temperature', 3000)  # K
         thrust = motor_data.get('thrust', 1000)  # N
         burn_time = motor_data.get('burn_time', 10)  # s
-        
+
         # Structural safety analysis
-        structural_safety = self._analyze_structural_safety(motor_data)
+        structural_safety = self._analyze_structural_safety(motor_data, material)
         
         # Pressure vessel safety
         pressure_safety = self._analyze_pressure_vessel_safety(
@@ -136,17 +142,30 @@ class SafetyAnalyzer:
             'recommendations': self._generate_safety_recommendations(risk_assessment)
         }
     
-    def _analyze_structural_safety(self, motor_data: Dict) -> Dict:
-        """Analyze structural safety factors and failure modes"""
-        
+    def _analyze_structural_safety(self, motor_data: Dict,
+                                   material: str = 'steel_4130') -> Dict:
+        """Analyze structural safety factors and failure modes.
+
+        Dalga 0 (2026-07-14): Eski sürüm sabit 250/400 MPa jenerik çelikle
+        hesaplıyordu; structural_analysis aynı motor için 4130'da 460 MPa +
+        derating kullanınca iki panel farklı SF gösteriyordu. Artık malzeme
+        dayanımları merkezi hrma/data/materials_db.py kaydından okunur.
+        """
+
         chamber_pressure = motor_data.get('chamber_pressure', 20.0) * 1e5  # Pa
         chamber_diameter = motor_data.get('chamber_diameter', 0.1)  # m
         wall_thickness = motor_data.get('wall_thickness', 0.005)  # m
-        
-        # Material properties (conservative steel values)
-        yield_strength = 250e6  # Pa
-        ultimate_strength = 400e6  # Pa
-        
+
+        # Malzeme dayanımları merkezi DB'den (bilinmeyen ad -> steel_4130)
+        try:
+            mat = get_material(material)
+            material_key = material
+        except KeyError:
+            mat = get_material('steel_4130')
+            material_key = 'steel_4130'
+        yield_strength = mat['yield_strength']        # Pa
+        ultimate_strength = mat['ultimate_strength']  # Pa
+
         # Hoop stress calculation
         hoop_stress = chamber_pressure * (chamber_diameter/2) / wall_thickness
         
@@ -186,6 +205,10 @@ class SafetyAnalyzer:
         
         return {
             'hoop_stress_mpa': hoop_stress / 1e6,
+            'material': material_key,
+            'material_name': mat.get('name', material_key),
+            'yield_strength_mpa': yield_strength / 1e6,
+            'ultimate_strength_mpa': ultimate_strength / 1e6,
             'yield_safety_factor': yield_safety_factor,
             'ultimate_safety_factor': ultimate_safety_factor,
             'failure_probability': failure_probability,

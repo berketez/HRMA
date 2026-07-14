@@ -19,6 +19,11 @@
 
     var INK = '#cfe8f2', INK_DIM = '#7d97a5';
     var GRID = 'rgba(0, 229, 255, 0.08)';
+    var CYAN = '#00e5ff';
+    var MONO = "'JetBrains Mono', 'SF Mono', Consolas, monospace";
+    // HUD ek 1: kurumsal renk sırası (theme.css paletiyle hizalı)
+    var COLORWAY = ['#00e5ff', '#ff8c33', '#2dd4a8', '#ff5d73',
+                    '#c792ea', '#ffd166', '#7cc4ff', '#f78fb3'];
     // Koyu zeminde kaybolan koyu trace renkleri → açık mürekkep
     var COLOR_FIX = {
         'black': '#d7e3ee', '#000': '#d7e3ee', '#000000': '#d7e3ee',
@@ -48,7 +53,16 @@
         ax.linecolor = 'rgba(125, 151, 165, 0.35)';
         // Tick etiketleri kesilmesin / eksen başlığına binmesin
         if (ax.automargin === undefined) ax.automargin = true;
-        ax.tickfont = Object.assign({ size: 11 }, ax.tickfont, { color: INK_DIM });
+        // HUD ek 2: cyan noktalı crosshair (yalnız sayfa tanımlamadıysa)
+        if (ax.showspikes === undefined) {
+            ax.showspikes = true;
+            ax.spikecolor = 'rgba(0, 229, 255, 0.55)';
+            ax.spikethickness = 1;
+            ax.spikedash = 'dot';
+            ax.spikemode = 'across';
+        }
+        // HUD ek 4: tick etiketleri JetBrains Mono (sayfa fontu öncelikli)
+        ax.tickfont = Object.assign({ size: 11, family: MONO }, ax.tickfont, { color: INK_DIM });
         if (typeof ax.title === 'string') ax.title = { text: ax.title };
         if (ax.title) {
             ax.title.font = Object.assign({ size: 12 }, ax.title.font, { color: INK_DIM });
@@ -62,6 +76,14 @@
         layout.paper_bgcolor = 'rgba(0,0,0,0)';
         layout.plot_bgcolor = 'rgba(8, 16, 28, 0.35)';
         layout.font = Object.assign({ size: 12 }, layout.font, { color: INK });
+        // HUD ek 1: renk sırası — yalnız tanımsızsa (sayfa override'ı korunur)
+        if (layout.colorway === undefined) layout.colorway = COLORWAY;
+        // HUD ek 3: modebar teması
+        layout.modebar = Object.assign({
+            bgcolor: 'rgba(0,0,0,0)',
+            color: INK_DIM,
+            activecolor: CYAN
+        }, layout.modebar);
         if (typeof layout.title === 'string') layout.title = { text: layout.title };
         if (layout.title) {
             layout.title.font = Object.assign({}, layout.title.font, { color: '#eaf7fb' });
@@ -129,6 +151,20 @@
         return layout;
     }
 
+    // HUD ek 5: KOŞULLU 'x unified' hover — yalnız çok-trace 2B scatter
+    // grafiklerde ve sayfa hovermode tanımlamadıysa. Pasta/heatmap/3B
+    // grafiklere dokunulmaz; tek trace'te Plotly varsayılanı kalır.
+    function maybeUnifiedHover(data, layout) {
+        if (!layout || layout.hovermode !== undefined) return;
+        if (!Array.isArray(data) || data.length < 2) return;
+        var all2dScatter = data.every(function (tr) {
+            if (!tr || typeof tr !== 'object') return false;
+            var t = tr.type || 'scatter'; // tip verilmemişse Plotly scatter sayar
+            return t === 'scatter' || t === 'scattergl';
+        });
+        if (all2dScatter) layout.hovermode = 'x unified';
+    }
+
     function wrap(fnName) {
         var orig = Plotly[fnName] && Plotly[fnName].bind(Plotly);
         if (!orig) return;
@@ -136,6 +172,7 @@
             try {
                 if (Array.isArray(data)) data.forEach(fixTrace);
                 layout = applyDarkLayout(layout);
+                maybeUnifiedHover(data, layout);
             } catch (e) {
                 console.warn('HRMA dark theme patch failed, rendering as-is:', e);
             }

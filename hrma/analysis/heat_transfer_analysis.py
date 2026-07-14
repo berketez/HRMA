@@ -31,6 +31,8 @@ import json
 import warnings
 from typing import Dict, List, Tuple, Optional
 
+from hrma.data.materials_db import build_materials_view
+
 # Universal gas constant [J/(mol*K)] for frozen Cp / R_specific derivation.
 R_UNIVERSAL = 8314.462618  # J/(kmol*K) == J/(mol*K)*1000; here used with MW in g/mol
 
@@ -41,80 +43,16 @@ class HeatTransferAnalyzer:
         self.stefan_boltzmann = 5.670374419e-8  # W/(m^2*K^4), CODATA 2018
         self.g0 = 9.80665  # m/s^2 (standard gravity; NOT used in SI Bartz)
 
-        # Material properties database
-        # 'max_service_temperature': physical upper bound for steady-state wall
-        #   temperature used for unphysical-result clamping/warnings.
-        self.materials = {
-            'steel': {
-                'thermal_conductivity': 50.0,  # W/m·K
-                'density': 7850,               # kg/m³
-                'specific_heat': 460,          # J/kg·K
-                'melting_point': 1773,         # K
-                'emissivity': 0.8,
-                'allowable_temperature': 1073,  # K (safety limit)
-                'max_service_temperature': 2000  # K (clamp bound for steel)
-            },
-            # Alias: hybrid_rocket_engine.py passes material='steel_4130'.
-            # 4130 chromoly steel — properties near plain steel, slightly higher
-            # service limit. Kept as explicit entry so the fallback to 'steel'
-            # is no longer silently triggered.
-            'steel_4130': {
-                'thermal_conductivity': 42.7,  # W/m·K (AISI 4130, ~ room temp)
-                'density': 7850,
-                'specific_heat': 477,
-                'melting_point': 1705,         # K (solidus ~1432 C)
-                'emissivity': 0.8,
-                'allowable_temperature': 1000,  # K (loses strength rapidly above)
-                'max_service_temperature': 2000
-            },
-            'aluminum': {
-                'thermal_conductivity': 205.0,
-                'density': 2700,
-                'specific_heat': 900,
-                'melting_point': 933,
-                'emissivity': 0.9,
-                'allowable_temperature': 773,
-                'max_service_temperature': 933
-            },
-            'inconel': {
-                'thermal_conductivity': 15.0,
-                'density': 8440,
-                'specific_heat': 435,
-                'melting_point': 1673,
-                'emissivity': 0.85,
-                'allowable_temperature': 1373,
-                'max_service_temperature': 1673
-            },
-            'copper': {
-                'thermal_conductivity': 401.0,
-                'density': 8960,
-                'specific_heat': 385,
-                'melting_point': 1358,
-                'emissivity': 0.75,
-                'allowable_temperature': 1000,
-                'max_service_temperature': 1358
-            },
-            # Ablative / refractory liner: high allowable surface temperature.
-            # Used as clamp bound for ablative-cooled chambers (<3500 K).
-            'ablative': {
-                'thermal_conductivity': 0.5,   # W/m·K (charred phenolic, low k)
-                'density': 1400,
-                'specific_heat': 1500,
-                'melting_point': 3800,
-                'emissivity': 0.9,
-                'allowable_temperature': 3300,
-                'max_service_temperature': 3500
-            },
-            'graphite': {
-                'thermal_conductivity': 100.0,
-                'density': 1800,
-                'specific_heat': 710,
-                'melting_point': 3900,         # sublimes ~3900 K
-                'emissivity': 0.85,
-                'allowable_temperature': 3300,
-                'max_service_temperature': 3500
-            }
-        }
+        # Malzeme veritabanı — MERKEZİ kaynaktan (Dalga 0, 2026-07-14).
+        # Eski yerel termal tablo hrma/data/materials_db.py'ye taşındı ve
+        # yapısal (mekanik) alanlarla TEK kayıtta birleştirildi (parametre
+        # tutarlılığı kuralı). Termal değerler bire bir korunmuştur:
+        # steel / steel_4130 / copper / ablative / graphite değişmedi.
+        # 'aluminum' ve 'inconel' jenerik anahtarları artık alaşım
+        # kayıtlarına (6061-T6, 718) çözülür; ss_304, ss_316, cucrzr ve
+        # titanium_6al4v yeni seçilebilir malzemelerdir.
+        # 'max_service_temperature': denge cidar sıcaklığı klamp üst sınırı.
+        self.materials = build_materials_view()
 
     # ------------------------------------------------------------------
     # Gas property model (replaces hardcoded k=0.2, mu=5e-5, cp=1200)
@@ -349,8 +287,10 @@ class HeatTransferAnalyzer:
                   gas_constant [J/kg/K], gas_cp, gas_viscosity, gas_conductivity,
                   prandtl, c_star [m/s], throat_diameter [m], throat_area [m^2],
                   throat_radius_curvature [m], cantera_gas (Cantera Solution).
-            material: Wall material key (steel, steel_4130, aluminum, inconel,
-                copper, ablative, graphite).
+            material: Wall material key (hrma.data.materials_db: steel,
+                steel_4130, ss_304, ss_316, aluminum_6061, titanium_6al4v,
+                inconel_718, copper, cucrzr, ablative, graphite; aliases
+                aluminum/inconel/titanium resolve to the alloy records).
             wall_thickness: Wall thickness in meters.
             ambient_temp: Ambient / coolant inlet temperature in K.
             cooling_type: 'natural', 'forced', 'regenerative'.

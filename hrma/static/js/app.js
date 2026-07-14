@@ -331,6 +331,12 @@ function displayCalculationResults(results) {
     if (exportPanel) {
         exportPanel.style.display = 'block';
     }
+
+    // Analysis Dock önerilerini en güncel sonuçla tazele (dock yüklüyse).
+    // Kullanıcının elle değiştirdiği alanlar (data-dirty) ezilmez.
+    if (window.AnalysisDock && typeof AnalysisDock.refreshSuggestions === 'function') {
+        AnalysisDock.refreshSuggestions();
+    }
 }
 
 // Validate and fix injector diameter
@@ -375,30 +381,74 @@ function validateAndFixInjectorDiameter(results) {
 }
 
 // Display performance metrics
+// Eski mor inline-gradyan kartlar hd-metric şablonuna taşındı (results_hud.css
+// + hud.js). HUD katmanı yüklü değilse (eski sayfa) düz metne düşülür.
 function displayPerformanceMetrics(motorData) {
     const metricsDiv = document.getElementById('performanceMetrics');
-    
+    if (!metricsDiv) return;
+
+    // Metrik listesi — tüm değerler backend sonucundan; süs/sahte veri yok.
     const metrics = [
-        { label: 'Specific Impulse', value: motorData.isp.toFixed(1), unit: 's', color: '#667eea' },
-        { label: 'Thrust', value: motorData.thrust.toFixed(0), unit: 'N', color: '#764ba2' },
-        { label: 'Chamber Pressure', value: motorData.chamber_pressure.toFixed(1), unit: 'bar', color: '#f093fb' },
-        { label: 'Mass Flow Rate', value: motorData.mdot_total.toFixed(3), unit: 'kg/s', color: '#f5576c' }
+        { label: 'Specific Impulse', value: motorData.isp, decimals: 1, unit: 's' },
+        { label: 'Thrust', value: motorData.thrust, decimals: 0, unit: 'N' },
+        { label: 'Chamber Pressure', value: motorData.chamber_pressure, decimals: 1, unit: 'bar' },
+        { label: 'Mass Flow Rate', value: motorData.mdot_total, decimals: 3, unit: 'kg/s' }
     ];
-    
-    let html = '';
-    metrics.forEach(metric => {
+
+    // Yapısal durum backend'den geldiyse beşinci kart: minimum SF.
+    // data-state eşlemesi hud.js bindState ile — eşik hesabı burada YOK,
+    // durum stringi (SAFE/MARGINAL/UNSAFE) backend'in kendi kararıdır.
+    const structSafety = motorData.structural_analysis
+        && motorData.structural_analysis.safety_analysis;
+    if (structSafety && typeof structSafety.minimum_safety_factor === 'number'
+        && isFinite(structSafety.minimum_safety_factor)) {
+        metrics.push({
+            label: 'Structural Min SF',
+            value: structSafety.minimum_safety_factor,
+            decimals: 2,
+            unit: '',
+            state: structSafety.status
+        });
+    }
+
+    const fmtVal = m => {
+        const v = Number(m.value);
+        return isFinite(v) ? v.toFixed(m.decimals) : 'n/a';
+    };
+
+    // HUD katmanı yoksa (hud.js yüklenmemiş eski sayfa): zarifçe düz metin.
+    if (typeof window.HRMAHud === 'undefined') {
+        metricsDiv.innerHTML = metrics.map(m =>
+            `<div style="padding:4px 0;"><strong>${m.label}:</strong> ${fmtVal(m)} ${m.unit}</div>`
+        ).join('');
+        return;
+    }
+
+    let html = '<div class="hd-metric-grid">';
+    metrics.forEach(m => {
+        const v = Number(m.value);
+        const countSpan = isFinite(v)
+            ? `<span class="hd-count" data-target="${v}" data-decimals="${m.decimals}">0</span>`
+            : '<span>n/a</span>';
         html += `
-            <div class="col-md-3 col-sm-6">
-                <div class="metric-card" style="background: linear-gradient(135deg, ${metric.color} 0%, ${metric.color}aa 100%);">
-                    <div class="metric-value">${metric.value}</div>
-                    <div class="metric-label">${metric.label}</div>
-                    <div class="metric-unit">${metric.unit}</div>
+            <div class="hd-metric">
+                <div class="hd-metric-head">
+                    <div class="hd-metric-label">${m.label}</div>
                 </div>
-            </div>
-        `;
+                <div class="hd-metric-value">
+                    ${countSpan}<small>${m.unit}</small>
+                </div>
+            </div>`;
     });
-    
+    html += '</div>';
     metricsDiv.innerHTML = html;
+
+    // Durum bağlama + count-up başlatma
+    const cards = metricsDiv.querySelectorAll('.hd-metric');
+    metrics.forEach((m, i) => {
+        if (m.state && cards[i]) HRMAHud.bindState(cards[i], m.state);
+    });
+    HRMAHud.initAll(metricsDiv);
 }
 
 // Display plots
@@ -1052,19 +1102,7 @@ function prepareAIData(results) {
             }
         },
         
-        structural_analysis: {
-            design_pressure_bar: (results.motor.chamber_pressure * 1.5) || 30,
-            safety_factors: {
-                chamber_wall: 4.0,
-                nozzle: 3.0,
-                injector: 4.0
-            },
-            stress_analysis: {
-                hoop_stress_estimate_MPa: calculateHoopStress(results.motor),
-                wall_thickness_recommendation_mm: calculateWallThickness(results.motor),
-                burst_pressure_factor: 4.0
-            }
-        },
+        structural_analysis: buildStructuralExport(results.motor),
         
         safety_considerations: {
             critical_parameters: {
@@ -1181,27 +1219,45 @@ function calculateCavitationIndex(injectorData) {
     return pressureDrop / inletPressure;
 }
 
-function calculateHoopStress(motorData) {
-    // Hoop stress calculation: σ = PD/(2t)
-    // Assuming 5mm wall thickness for estimation
-    const pressure = (motorData.chamber_pressure || 20) * 1e5; // Pa
-    const diameter = (motorData.chamber_diameter || 0.1) * 1000; // mm  
-    const thickness = 5; // mm, estimated
-    
-    const hoopStress = (pressure * diameter) / (2 * thickness * 1e6); // Convert to MPa
-    return Math.round(hoopStress * 100) / 100;
-}
-
-function calculateWallThickness(motorData) {
-    // Wall thickness calculation based on pressure vessel design
-    // t = PD/(2σ) * SF
-    const pressure = (motorData.chamber_pressure || 20) * 1e5; // Pa
-    const diameter = (motorData.chamber_diameter || 0.1) * 1000; // mm
-    const allowableStress = 200e6; // Pa, steel yield strength / safety factor
-    const safetyFactor = 4.0;
-    
-    const thickness = (pressure * diameter) / (2 * allowableStress) * safetyFactor;
-    return Math.max(3.0, Math.round(thickness * 100) / 100); // Minimum 3mm
+// Rapor exportu için yapısal bölüm: currentResults.motor.structural_analysis'in
+// GERÇEK backend değerleri kullanılır. Sonuç yoksa alanlar 'not computed'
+// bırakılır — JS tarafında yeniden hesap veya sabit uydurma değer YASAK
+// (eski 4.0/3.0/4.0 sabitleri ve JS hoop stress tahmini kaldırıldı, 2026-07-14).
+function buildStructuralExport(motorData) {
+    const NOT_COMPUTED = 'not computed';
+    const sa = motorData && motorData.structural_analysis;
+    if (!sa) {
+        return {
+            source: NOT_COMPUTED,
+            note: 'Backend structural analysis was not available for this run; no values were estimated client-side.'
+        };
+    }
+    const chamber = sa.chamber_analysis || {};
+    const safety = sa.safety_analysis || {};
+    const designParams = sa.design_parameters || {};
+    const num = v => (typeof v === 'number' && isFinite(v)) ? v : NOT_COMPUTED;
+    return {
+        source: 'HRMA backend structural_analysis (materials from MMPDS/Sutton-referenced database)',
+        material: designParams.material || NOT_COMPUTED,
+        design_pressure_bar: num(designParams.design_pressure),
+        design_pressure_factor: num(designParams.design_pressure_factor),
+        safety_factors: {
+            pressure_only: num(sa.safety_factor_pressure),
+            total_incl_thermal: num(sa.safety_factor_total),
+            minimum_all_modes: num(safety.minimum_safety_factor),
+            per_mode: safety.safety_factors || NOT_COMPUTED
+        },
+        stress_analysis: {
+            hoop_stress_total_MPa: num(chamber.hoop_stress),
+            pressure_hoop_stress_MPa: num(chamber.pressure_hoop_stress),
+            thermal_hoop_stress_MPa: num(chamber.thermal_hoop_stress),
+            von_mises_stress_MPa: num(chamber.von_mises_stress),
+            wall_thickness_minimum_mm: num(chamber.minimum_thickness),
+            wall_thickness_recommendation_mm: num(chamber.recommended_thickness)
+        },
+        status: safety.status || NOT_COMPUTED,
+        risk_level: safety.risk_level || NOT_COMPUTED
+    };
 }
 
 function identifyRiskFactors(results) {

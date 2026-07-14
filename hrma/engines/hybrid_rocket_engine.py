@@ -338,6 +338,21 @@ class HybridRocketEngine:
             'nozzle_type': self.nozzle_type,
             'burn_time': self.t_b
         }
+        # ISI -> YAPISAL ZİNCİR (Dalga 0, 2026-07-14): Isı analizinin
+        # hesapladığı GERÇEK iç/dış cidar sıcaklıkları yapısal modüle
+        # aktarılır. structural_analysis._estimate_wall_delta_T bu
+        # anahtarları birinci öncelikle okur; verilmezse T_c'den hayali,
+        # aşırı karamsar bir gradyan tahmini yapıyordu (iki modül aynı
+        # motor için farklı cidar sıcaklığı varsayıyordu).
+        try:
+            wall = heat_transfer_results['wall_analysis']
+            t_hot = float(wall['inner_temperature'])
+            t_cold = float(wall['outer_temperature'])
+            if np.isfinite(t_hot) and np.isfinite(t_cold) and t_hot > 0:
+                struct_input['wall_temperature_hot'] = t_hot
+                struct_input['wall_temperature_cold'] = max(t_cold, 0.0)
+        except (KeyError, TypeError, ValueError):
+            pass  # ısı sonucu yoksa eski konservatif T_c tahmini devrede kalır
         structural_results = self.structural_analyzer.analyze_structure(
             struct_input,
             material='steel_4130',
@@ -797,6 +812,23 @@ class HybridRocketEngine:
             'g_total_initial': getattr(self, 'G_total_initial', self.G_ox_initial),
             'g_total_final': getattr(self, 'G_total_final', self.G_ox_final),
         }
+
+        # gamma + molecular_weight ÜST SEVİYEDE (Dalga 0, 2026-07-14):
+        # Bartz ve lüle tüketicileri artık compositions->chamber'a inmek
+        # ya da varsayılana (gamma=1.20, MW=24) düşmek zorunda kalmaz.
+        # Öncelik: yanma dengesinin chamber kaydı; yoksa sınıf değerleri
+        # (self.gamma, MW = R_evrensel / self.R).
+        gamma_top = self.gamma
+        mw_top = None
+        if getattr(self, 'R', None):
+            mw_top = self.combustion_analyzer.R_universal / self.R  # g/mol
+        if combustion_results:
+            chamber_comp = combustion_results.get(
+                'compositions', {}).get('chamber', {})
+            gamma_top = chamber_comp.get('gamma', gamma_top)
+            mw_top = chamber_comp.get('molecular_weight', mw_top)
+        basic_results['gamma'] = gamma_top
+        basic_results['molecular_weight'] = mw_top
 
         # O/F kaymasının performansa etkisi (denetim bulgusu #2): time-marching
         # boyunca anlık O/F'den hesaplanan c*/Isp dizileri ve zaman-ortalamaları.
