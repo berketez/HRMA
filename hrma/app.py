@@ -1,11 +1,20 @@
+import os
+import sys
+
+# app.py DOĞRUDAN çalıştırılırsa (python hrma/app.py / python app.py) depo
+# kökü sys.path'te olmaz → "ModuleNotFoundError: No module named 'hrma'"
+# (2026-07-15 Windows geri dönütü). run.py/run_windows.py bunu zaten yapıyor;
+# app.py'ye de eklendi ki hangi dosya çalıştırılırsa çalışsın 'hrma' bulunur.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
 import numpy as np
 import json
 import io
-import os
 import platform
-import sys
 
 # Apply Windows fixes before importing other modules
 if platform.system() == 'Windows':

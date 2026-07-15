@@ -4057,23 +4057,42 @@
             }
             
             // Display data summary
+            // DÜZELTME: backend dizi döndürüyor (regression_rate [mm/s],
+            // port_diameter [mm], parameters:{a,n}). Eski kod olmayan skaler
+            // alanları (initial_rate vb.) okuyup toFixed'de patlıyordu.
             if (results.regression_data) {
                 const data = results.regression_data;
+                const rr = data.regression_rate || [];
+                const pd = data.port_diameter || [];
+                const nz = (v, d) => (typeof v === 'number' && isFinite(v)) ? v : d;
+                const rInit = nz(rr[0], 0);
+                const rFinal = nz(rr[rr.length - 1], 0);
+                const rAvg = rr.length ? rr.reduce((s, v) => s + nz(v, 0), 0) / rr.length : 0;
+                const dInit = nz(pd[0], 0);
+                const dFinal = nz(pd[pd.length - 1], 0);
+                const areaGrowthPct = dInit > 0 ? ((dFinal - dInit) / dInit) * 100 : 0;
+                const p = data.parameters || {};
                 dataDiv.innerHTML = `
                     <div class="regression-summary">
                         <h4>Regression Rate Analysis Summary</h4>
                         <div class="row">
                             <div class="col-md-6">
-                                <strong>Initial Regression Rate:</strong> ${(data.initial_rate * 1000).toFixed(3)} mm/s<br>
-                                <strong>Final Regression Rate:</strong> ${(data.final_rate * 1000).toFixed(3)} mm/s<br>
-                                <strong>Average Regression Rate:</strong> ${(data.average_rate * 1000).toFixed(3)} mm/s
+                                <strong>Initial Regression Rate:</strong> ${rInit.toFixed(3)} mm/s<br>
+                                <strong>Final Regression Rate:</strong> ${rFinal.toFixed(3)} mm/s<br>
+                                <strong>Average Regression Rate:</strong> ${rAvg.toFixed(3)} mm/s
                             </div>
                             <div class="col-md-6">
-                                <strong>Port Diameter Growth:</strong> ${((data.final_diameter - data.initial_diameter) * 1000).toFixed(2)} mm<br>
-                                <strong>Burn Surface Area Change:</strong> ${((data.final_area - data.initial_area) * 100).toFixed(1)}%<br>
-                                <strong>O/F Ratio Shift:</strong> ${data.of_ratio_change.toFixed(2)}
+                                <strong>Initial Port Diameter:</strong> ${dInit.toFixed(2)} mm<br>
+                                <strong>Final Port Diameter:</strong> ${dFinal.toFixed(2)} mm<br>
+                                <strong>Port Perimeter Growth:</strong> ${areaGrowthPct.toFixed(1)}%
                             </div>
                         </div>
+                        <p style="margin-top:8px; font-size:12px; color:#7d97a5;">
+                            Marxman law: r&#775; = a&middot;G<sup>n</sup>
+                            (a = ${nz(p.a, 0).toExponential(3)}, n = ${nz(p.n, 0).toFixed(3)})
+                            &middot; fuel: ${data.fuel_name || data.fuel_type || '—'}
+                            &middot; flux: ${data.flux_mode === 'ox' ? 'oxidizer (G_ox)' : 'total (G_ox+G_fuel)'}
+                        </p>
                     </div>
                 `;
             }
@@ -4242,13 +4261,15 @@
 
                 const result = await response.json();
 
-                if (result.status === 'success' && result.content) {
+                // Backend anahtarı 'eng_file_content' (eski kod 'content' okuyordu → hep hata)
+                const engContent = result.eng_file_content || result.content;
+                if (result.status === 'success' && engContent) {
                     // Download the .eng file (transient koşulduysa gerçek eğri)
-                    const blob = new Blob([result.content], { type: 'text/plain' });
+                    const blob = new Blob([engContent], { type: 'text/plain' });
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = _motorName() + '.eng';
+                    a.download = result.download_filename || (_motorName() + '.eng');
                     document.body.appendChild(a);
                     a.click();
                     window.URL.revokeObjectURL(url);

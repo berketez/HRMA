@@ -3827,13 +3827,14 @@ Please provide:
 
         // PDF Export Function
         async function exportPDF(reportType) {
+            // DÜZELTME: btn/originalText try içinde const'tı → finally'de
+            // "btn is not defined" (buton "Generating PDF..." de takılı kalıyordu).
+            const btn = (typeof event !== 'undefined' && event && event.target) ? event.target : null;
+            const originalText = btn ? btn.textContent : '';
             try {
                 // Show loading message
-                const btn = event.target;
-                const originalText = btn.textContent;
-                btn.textContent = 'Generating PDF...';
-                btn.disabled = true;
-                
+                if (btn) { btn.textContent = 'Generating PDF...'; btn.disabled = true; }
+
                 // Sayfada OLMAYAN input'lar (motor_name, chamber_length, exit_diameter, of_ratio)
                 // currentResults'tan / güvenli fallback'lerle alınır. Aksi halde null.value TypeError
                 // fetch'e ulaşmadan patlıyordu. Birim tuzağı: exit_diameter METRE → ×1000 = mm.
@@ -3912,11 +3913,10 @@ Please provide:
                 alert(`PDF export failed: ${error.message}`);
             } finally {
                 // Restore button
-                btn.textContent = originalText;
-                btn.disabled = false;
+                if (btn) { btn.textContent = originalText; btn.disabled = false; }
             }
         }
-        
+
         // CAD Generation Functions
 
         // 3D CAD konteynerinin gizli sekme atalarını (analysis-tab / subtab /

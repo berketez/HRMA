@@ -3009,12 +3009,14 @@ Please provide:
         
         // PDF Export Function
         async function exportPDF(reportType) {
+            // DÜZELTME: btn/originalText try içinde const'tı → finally'de
+            // "btn is not defined" (buton "Generating PDF..." de takılı kalıyordu).
+            // Ayrıca programatik çağrıda event global olmayabilir.
+            const btn = (typeof event !== 'undefined' && event && event.target) ? event.target : null;
+            const originalText = btn ? btn.textContent : '';
             try {
                 // Show loading message
-                const btn = event.target;
-                const originalText = btn.textContent;
-                btn.textContent = 'Generating PDF...';
-                btn.disabled = true;
+                if (btn) { btn.textContent = 'Generating PDF...'; btn.disabled = true; }
                 
                 // Collect motor data
                 // NOT: sayfada #motor_name / #propellant_type YOK → opsiyonel
@@ -3097,8 +3099,7 @@ Please provide:
                 alert(`PDF export failed: ${error.message}`);
             } finally {
                 // Restore button
-                btn.textContent = originalText;
-                btn.disabled = false;
+                if (btn) { btn.textContent = originalText; btn.disabled = false; }
             }
         }
     </script>
