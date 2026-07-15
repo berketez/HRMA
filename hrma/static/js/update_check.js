@@ -172,19 +172,53 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    function checkNow() {
+    function toast(msg) {
+        var old = document.getElementById('hrma-update-toast');
+        if (old) old.remove();
+        var t = el('div',
+            'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);' +
+            'z-index:99991;padding:12px 22px;font-size:13px;font-weight:600;' +
+            'font-family:var(--hd-sans, sans-serif);' +
+            'background:var(--hd-panel-solid, #0a1524);' +
+            'border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));' +
+            'border-radius:var(--hd-radius-sm, 8px);' +
+            'color:var(--hd-ink-strong, #eaf7fb);' +
+            'box-shadow:var(--hd-shadow, 0 14px 44px rgba(0,0,0,0.42));');
+        t.id = 'hrma-update-toast';
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(function () { t.remove(); }, 4200);
+    }
+
+    function checkNow(force) {
+        // force=true: kullanıcı menüden istedi — atlanan sürümü de göster,
+        // güncel/hata durumunda sessiz kalma (toast bildir).
         fetch('/api/update/check')
             .then(function (r) { return r.json(); })
             .then(function (info) {
-                if (!info.available || !info.latest) return;
-                var skipped = null;
-                try { skipped = localStorage.getItem(SKIP_KEY); } catch (e) { /* özel mod */ }
-                if (skipped === info.latest) return;
+                if (!info.available || !info.latest) {
+                    if (force) {
+                        toast((info.error || !info.current)
+                            ? 'Could not reach the update server.'
+                            : 'HRMA v' + info.current + ' is up to date.');
+                    }
+                    return;
+                }
+                if (!force) {
+                    var skipped = null;
+                    try { skipped = localStorage.getItem(SKIP_KEY); } catch (e) { /* özel mod */ }
+                    if (skipped === info.latest) return;
+                }
                 if (document.getElementById('hrma-update-modal')) return;
                 buildModal(info);
             })
-            .catch(function () { /* ağ yok — sessiz geç */ });
+            .catch(function () {
+                if (force) toast('Could not reach the update server.');
+            });
     }
+
+    // Yerel pencere menüsü (macOS "Check for Updates…") buradan tetikler
+    window.hrmaCheckForUpdates = checkNow;
 
     // Sayfa otursun, ağır grafikler yüklensin diye küçük gecikmeyle sor
     if (document.readyState === 'complete') {

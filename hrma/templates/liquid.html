@@ -530,13 +530,13 @@
             
             <div class="propellant-preview" id="propellant_preview">
                 <div class="propellant-item">
-                    <div class="propellant-icon">🛢️</div>
+                    <div class="propellant-icon">F</div>
                     <div><strong>RP-1</strong></div>
                     <div style="font-size: 12px; color: #6c757d;">Kerosene</div>
                 </div>
                 <div class="plus-sign">+</div>
                 <div class="propellant-item">
-                    <div class="propellant-icon">❄️</div>
+                    <div class="propellant-icon">O</div>
                     <div><strong>LOX</strong></div>
                     <div style="font-size: 12px; color: #6c757d;">Liquid Oxygen</div>
                 </div>
@@ -1333,7 +1333,7 @@
             <button class="btn btn-primary" onclick="calculateLiquid()">Calculate Engine Performance</button>
             <button class="btn btn-secondary" onclick="resetForm()">Reset</button>
             <button class="btn btn-primary" onclick="exportCAD()" style="background: linear-gradient(135deg, #28a745, #20c997);">
-                💾 Export CAD Design
+                Export CAD Design
             </button>
         </div>
         
@@ -1654,16 +1654,16 @@
             const oxType = document.getElementById('oxidizer_type').value;
             
             const fuelData = {
-                'rp1': { name: 'RP-1', desc: 'Kerosene', icon: '🛢️' },
-                'lh2': { name: 'LH2', desc: 'Liquid Hydrogen', icon: '⚡' },
-                'methane': { name: 'CH4', desc: 'Methane', icon: '🔥' },
-                'mmh': { name: 'MMH', desc: 'Monomethylhydrazine', icon: '☠️' },
-                'udmh': { name: 'UDMH', desc: 'Dimethylhydrazine', icon: '☠️' }
+                'rp1': { name: 'RP-1', desc: 'Kerosene', icon: 'F' },
+                'lh2': { name: 'LH2', desc: 'Liquid Hydrogen', icon: 'F' },
+                'methane': { name: 'CH4', desc: 'Methane', icon: 'F' },
+                'mmh': { name: 'MMH', desc: 'Monomethylhydrazine', icon: 'F' },
+                'udmh': { name: 'UDMH', desc: 'Dimethylhydrazine', icon: 'F' }
             };
             
             const oxData = {
-                'lox': { name: 'LOX', desc: 'Liquid Oxygen', icon: '❄️' },
-                'n2o4': { name: 'N2O4', desc: 'Nitrogen Tetroxide', icon: '🟤' }
+                'lox': { name: 'LOX', desc: 'Liquid Oxygen', icon: 'O' },
+                'n2o4': { name: 'N2O4', desc: 'Nitrogen Tetroxide', icon: 'O' }
             };
             
             const fuel = fuelData[fuelType];
@@ -2079,9 +2079,9 @@
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>Data Sources:</strong></td>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14)); font-size: 11px;">
-                            <div>✓ NASA CEA Database</div>
-                            <div>✓ NIST Thermophysical Properties</div>
-                            <div>✓ Flight Heritage Data</div>
+                            <div>NASA CEA Database</div>
+                            <div>NIST Thermophysical Properties</div>
+                            <div>Flight Heritage Data</div>
                             <div style="color: #28a745;">Real-time propellant data integration</div>
                         </td>
                     </tr>
@@ -3003,7 +3003,7 @@
             // event.target'i senkron yakala (async then/finally içinde global event güvenilmez)
             const btn = event.target;
             const originalText = btn.innerHTML;
-            btn.innerHTML = '🔄 CAD Oluşturuluyor...';
+            btn.innerHTML = 'CAD Oluşturuluyor...';
             btn.disabled = true;
 
             // Backend sözleşmesi: body {results: currentResults}
@@ -3482,7 +3482,6 @@ Please provide:
             } else {
                 cadContainer.innerHTML = `
                     <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: var(--hd-inset, #0a1524); border-radius: 8px; flex-direction: column;">
-                        <div style="font-size: 48px; margin-bottom: 20px;">🚀</div>
                         <h3 style="color: #1e3c72; margin-bottom: 10px;">3D Engine Visualization</h3>
                         <p style="color: #6c757d; text-align: center;">Chamber: ${chamberDiameter}mm × ${chamberLength}mm<br>
                         Throat: ${throatDiameter}mm | Exit: ${exitDiameter}mm<br>

@@ -74,6 +74,11 @@
             box-shadow: 0 0 10px var(--hd-cyan), 0 0 22px rgba(0,229,255,0.6);
             animation: pulse 2.2s ease-in-out infinite;
         }
+        .hero-badge .ver {
+            padding-left: 14px; margin-left: 5px;
+            border-left: 1px solid rgba(0, 229, 255, 0.3);
+            color: var(--hd-cyan-soft);
+        }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
         .hero h1 {
@@ -278,7 +283,7 @@
     <div class="hero">
         <div class="hero-stars"></div>
         <div class="hero-grid"></div>
-        <div class="hero-badge"><span class="dot"></span>SYSTEM ONLINE — SOLVER READY</div>
+        <div class="hero-badge"><span class="dot"></span>SYSTEM ONLINE — SOLVER READY<span class="ver">v{{ app_version }}</span></div>
         <h1>HRM<span>A</span></h1>
         <div class="tagline">High-Fidelity Rocket Motor Analysis &amp; Design Suite</div>
         <div class="sub">Parametric Solvers &middot; NASA CEA Validated &middot; Digital Twin Visualization</div>
@@ -357,7 +362,7 @@
     </div>
 
     <div class="footer">
-        <p>HRMA v2.2 &nbsp;|&nbsp; Developed by: Berke Tezgöçen &nbsp;|&nbsp; Idea &amp; Testing: Ayberk Cem Aksoy &nbsp;|&nbsp; Professional Rocket Propulsion Design Tool</p>
+        <p>HRMA v{{ app_version }} &nbsp;|&nbsp; Developed by: Berke Tezgöçen &nbsp;|&nbsp; Idea &amp; Testing: Ayberk Cem Aksoy &nbsp;|&nbsp; Professional Rocket Propulsion Design Tool</p>
     </div>
     <script src="/static/js/update_check.js"></script>
 </body>

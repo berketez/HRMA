@@ -3,7 +3,8 @@
 set -euo pipefail
 B="$(cd "$(dirname "$0")" && pwd)"
 SRC="/Users/apple/Desktop/dosyalar/HRMA"
-STAGE="$B/mac/dmg_stage"
+# build.noindex: Spotlight bu ağacı indekslemesin (sahte "HRMA" kopyaları)
+STAGE="$B/mac/build.noindex/dmg_stage"
 DIST="$SRC/dist"
 
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/hrma/__init__.py")"
@@ -11,7 +12,7 @@ VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/hrma/__init__.py")"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$DIST"
-cp -R "$B/mac/HRMA.app" "$STAGE/"
+cp -R "$B/mac/build.noindex/HRMA.app" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 cp "$B/README_MAC.txt" "$STAGE/README.txt"
 

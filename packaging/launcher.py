@@ -37,7 +37,25 @@ import urllib.request
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBS_DIR = os.path.abspath(os.path.join(APP_DIR, os.pardir, "libs"))
 
+HRMA_APP_NAME = "HRMA"
+APP_COPYRIGHT = "© 2026 Berke Tezgöçen — UZAYTEK"
+GITHUB_URL = "https://github.com/berketez/HRMA"
 PENCERE_BASLIK = "HRMA — UZAYTEK Hybrid Rocket Motor Analysis"
+
+
+def _hrma_version():
+    """Sürümü tek kaynaktan (hrma/__init__.py) okur; _setup_paths sonrası çağrılmalı."""
+    try:
+        import hrma
+        return getattr(hrma, "__version__", "") or ""
+    except Exception:
+        return ""
+
+
+def _pencere_baslik(version):
+    if version:
+        return "HRMA v%s — UZAYTEK Hybrid Rocket Motor Analysis" % version
+    return PENCERE_BASLIK
 
 # Gerçek uygulama yüklenene kadar durum: {"wsgi": Flask|None, "error": str|None}
 _app_state = {"wsgi": None, "error": None, "started_at": time.time()}
@@ -153,7 +171,7 @@ SPLASH_HTML = """<!DOCTYPE html>
 <body>
   <div class="kutu">
     <div class="logo">HRMA</div>
-    <div class="alt">UZAYTEK HYBRID ROCKET MOTOR ANALYSIS</div>
+    <div class="alt">UZAYTEK HYBRID ROCKET MOTOR ANALYSIS __HRMA_VERSION__</div>
     <div class="halka" id="halka"></div>
     <div class="durum" id="durum">Starting…</div>
     <div class="ipucu" id="ipucu">Loading computation engines.</div>
@@ -221,7 +239,10 @@ def _shim_app(environ, start_response):
     if real is not None:
         return real(environ, start_response)
 
-    body = SPLASH_HTML.encode("utf-8")
+    ver = _app_state.get("version") or ""
+    body = SPLASH_HTML.replace(
+        "__HRMA_VERSION__", ("· v" + ver) if ver else ""
+    ).encode("utf-8")
     start_response("200 OK", [
         ("Content-Type", "text/html; charset=utf-8"),
         ("Cache-Control", "no-store"),
@@ -251,6 +272,95 @@ def _wait_for_port(port, timeout_s=15):
         except OSError:
             time.sleep(0.1)
     return False
+
+
+# ---------------------------------------------------------------------------
+# macOS uygulama kimliği: menü çubuğu + About paneli
+# ---------------------------------------------------------------------------
+
+def _macos_app_identity(version):
+    """Menü çubuğu ve About paneli 'Python 3.12' değil HRMA kimliği göstersin.
+
+    .app içindeki gerçek yürütücü Resources/python/bin/python3.12 olduğundan
+    NSBundle.mainBundle() bizim Info.plist'i bulamıyor; AppKit de menüde ve
+    About panelinde Python kimliği gösteriyordu (2026-07-15 şikayeti).
+    Bilgi sözlüğü süreç içinde yamalanır — NSApplication OLUŞMADAN ÖNCE
+    (webview.start'tan önce) çağrılmalı.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        from Foundation import NSBundle
+        bundle = NSBundle.mainBundle()
+        if bundle is None:
+            return
+        for info in (bundle.infoDictionary(), bundle.localizedInfoDictionary()):
+            if info is None:
+                continue
+            info["CFBundleName"] = HRMA_APP_NAME
+            info["CFBundleDisplayName"] = HRMA_APP_NAME
+            if version:
+                info["CFBundleShortVersionString"] = version
+                info["CFBundleVersion"] = version
+            info["NSHumanReadableCopyright"] = APP_COPYRIGHT
+    except Exception:
+        traceback.print_exc()  # kozmetik — pencere açılışını engelleme
+    try:
+        # About paneli ve Dock, paketsiz python sürecinde varsayılan (boş/
+        # Python) simgeye düşer; bundle'daki icon.icns'i elle veriyoruz.
+        # .app'te launcher Resources/app/ altında, ikon Resources/ kökünde.
+        import AppKit
+        icon_path = os.path.abspath(os.path.join(APP_DIR, os.pardir, "icon.icns"))
+        if os.path.isfile(icon_path):
+            img = AppKit.NSImage.alloc().initWithContentsOfFile_(icon_path)
+            if img:
+                AppKit.NSApplication.sharedApplication().setApplicationIconImage_(img)
+    except Exception:
+        pass
+
+
+def _menu_check_updates():
+    """macOS menüsü 'Check for Updates…' — arayüzdeki denetimi zorla tetikler."""
+    try:
+        import webview
+        if webview.windows:
+            webview.windows[0].evaluate_js(
+                "window.hrmaCheckForUpdates && window.hrmaCheckForUpdates(true)")
+    except Exception:
+        traceback.print_exc()
+
+
+def _menu_open_outputs():
+    try:
+        subprocess.Popen(["open", _outputs_dir()])
+    except Exception:
+        traceback.print_exc()
+
+
+def _macos_menu():
+    """Uygulama menüsüne HRMA'ya özgü ögeler (About'un hemen altına) + Help.
+
+    Yalnız macOS'ta kullanılır; pywebview '__app__' başlıklı menünün
+    ögelerini uygulama menüsüne (About ile Services arasına) yerleştirir.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        import webview.menu as wm
+    except Exception:
+        return None
+    return [
+        wm.Menu("__app__", [
+            wm.MenuAction("Check for Updates…", _menu_check_updates),
+            wm.MenuAction("Open Output Folder", _menu_open_outputs),
+        ]),
+        wm.Menu("Help", [
+            wm.MenuAction("HRMA on GitHub",
+                          lambda: webbrowser.open(GITHUB_URL)),
+            wm.MenuAction("Releases and Downloads",
+                          lambda: webbrowser.open(GITHUB_URL + "/releases/latest")),
+        ]),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -286,19 +396,25 @@ def _try_native_window(url):
         print("  pywebview unavailable (%s) — falling back to Chromium window." % exc)
         return False
     try:
+        version = _hrma_version()
+        # NSApplication oluşmadan ÖNCE: menü çubuğu/About kimliği (macOS)
+        _macos_app_identity(version)
         # CAD/rapor indirmeleri (blob) için indirme izni şart
         try:
             webview.settings["ALLOW_DOWNLOADS"] = True
         except Exception:
             pass
         webview.create_window(
-            PENCERE_BASLIK, url,
+            _pencere_baslik(version), url,
             width=1440, height=900, min_size=(1100, 700),
         )
         kwargs = {"private_mode": False, "storage_path": _ui_profile_dir()}
         if os.name == "nt":
             # WebView2 dışındaki eski motorlara (mshtml vb.) düşülmesin
             kwargs["gui"] = "edgechromium"
+        menu = _macos_menu()
+        if menu:
+            kwargs["menu"] = menu
         webview.start(**kwargs)
         return True  # pencere kapatıldı
     except Exception:
@@ -379,8 +495,11 @@ def main():
     _setup_paths()
     os.environ.setdefault("MPLBACKEND", "Agg")
 
+    _app_state["version"] = _hrma_version()
+
     print("=" * 62)
-    print("  HRMA - UZAYTEK Hybrid Rocket Motor Analysis")
+    print("  HRMA - UZAYTEK Hybrid Rocket Motor Analysis"
+          + (" v" + _app_state["version"] if _app_state["version"] else ""))
     print("=" * 62)
 
     port, already_running = _pick_port()

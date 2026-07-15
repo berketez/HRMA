@@ -2,7 +2,7 @@
 # Mac bundle doğrulama: import + sunucu + kritik uçlar
 set -uo pipefail
 B="$(cd "$(dirname "$0")" && pwd)"
-RES="$B/mac/HRMA.app/Contents/Resources"
+RES="$B/mac/build.noindex/HRMA.app/Contents/Resources"
 PY="$RES/python/bin/python3.12"
 export RES
 

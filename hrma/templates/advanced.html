@@ -565,6 +565,7 @@
     <link rel="stylesheet" href="/static/css/results_hud.css">
     <script src="/static/js/hud.js"></script>
     <script src="/static/vendor/plotly-1.58.5.min.js"></script>
+    <script>window.HRMA_VERSION = "{{ app_version }}";</script>
     <script src="/static/js/plotly_dark.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls: 3D motor simülasyonu için -->
     <script src="/static/vendor/three-0.128.0.min.js"></script>
@@ -1321,7 +1322,7 @@
             
             <div id="trajectory_tab" class="tab-content">
                 <div class="alert alert-info">
-                    🚀 Trajectory analysis will calculate motor performance throughout the flight profile, 
+                    Trajectory analysis will calculate motor performance throughout the flight profile, 
                     accounting for altitude-dependent ambient pressure changes.
                 </div>
                 
@@ -2474,7 +2475,7 @@
             }
             
             if (composition.length === 0) {
-                showMessage('❌ Please enter at least one composition component', 'error');
+                showMessage('Please enter at least one composition component', 'error');
                 return;
             }
             
@@ -2492,7 +2493,7 @@
                     const props = result.mixture_properties;
                     validation.innerHTML = `
                         <div class="alert alert-success">
-                            ✅ Composition validated successfully with NASA CEA database<br>
+                            Composition validated successfully with NASA CEA database<br>
                             <strong>Calculated Properties:</strong><br>
                             • Molecular Weight: ${props.molecular_weight.toFixed(2)} g/mol<br>
                             • Heat of Formation: ${props.heat_of_formation.toFixed(1)} kJ/mol<br>
@@ -2504,22 +2505,22 @@
                     // Update density field
                     document.getElementById('fuel_density').value = props.density.toFixed(0);
                     
-                    showMessage('✅ Fuel composition validated with NASA CEA', 'success');
+                    showMessage('Fuel composition validated with NASA CEA', 'success');
                 } else {
                     validation.innerHTML = `
                         <div class="alert alert-danger">
-                            ❌ Validation failed: ${result.error}
+                            Validation failed: ${result.error}
                         </div>
                     `;
-                    showMessage('❌ Validation failed: ' + result.error, 'error');
+                    showMessage('Validation failed: ' + result.error, 'error');
                 }
                 
             } catch (error) {
-                showMessage('❌ Connection to NASA CEA failed: ' + error.message, 'error');
+                showMessage('Connection to NASA CEA failed: ' + error.message, 'error');
                 const validation = document.getElementById('composition_validation');
                 validation.innerHTML = `
                     <div class="alert alert-danger">
-                        ❌ Connection to NASA CEA database failed
+                        Connection to NASA CEA database failed
                     </div>
                 `;
             }
@@ -3111,12 +3112,12 @@
         }
 
         function optimize() {
-            showMessage('⚡ Optimization feature coming soon!', 'warning');
+            showMessage('Optimization feature coming soon!', 'warning');
         }
 
         function exportResults() {
             if (!currentResults) {
-                showMessage('❌ No results to export', 'error');
+                showMessage('No results to export', 'error');
                 return;
             }
             

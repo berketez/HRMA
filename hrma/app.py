@@ -213,6 +213,12 @@ trajectory_analyzer = TrajectoryAnalyzer()
 openrocket_exporter = OpenRocketExporter()
 cad_designer = MotorCADDesigner()
 
+@app.context_processor
+def inject_app_version():
+    # Şablonlar sürümü tek kaynaktan gösterir (hrma/__init__.py)
+    from hrma import __version__
+    return {'app_version': __version__}
+
 @app.route('/')
 def index():
     return render_template('index.html')

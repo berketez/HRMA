@@ -4,7 +4,10 @@ set -euo pipefail
 
 B="$(cd "$(dirname "$0")" && pwd)"
 SRC="/Users/apple/Desktop/dosyalar/HRMA"
-APP="$B/mac/HRMA.app"
+# build.noindex: Spotlight ".noindex" ile biten klasörleri indekslemez —
+# aksi halde derleme kopyaları Spotlight/Launchpad'de 3 ayrı "HRMA" olarak
+# görünüyordu (2026-07-15 şikayeti).
+APP="$B/mac/build.noindex/HRMA.app"
 RES="$APP/Contents/Resources"
 
 # Sürüm tek kaynaktan: hrma/__init__.py
