@@ -30,3 +30,6 @@ packaging/hrma_stub
 packaging/*.exe
 packaging/*.dmg
 tests/
+
+# Kişisel AI talimat/mem dosyası public repoya girmez
+docs/CLAUDE.md
