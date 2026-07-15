@@ -95,37 +95,88 @@
             try { localStorage.setItem(SKIP_KEY, info.latest); } catch (e) { /* özel mod */ }
             wrap.remove();
         };
-        updateBtn.onclick = function () { startDownload(info); };
+        updateBtn.onclick = function () { startDownload(); };
 
         btnRow.appendChild(updateBtn);
         btnRow.appendChild(laterBtn);
         btnRow.appendChild(skipBtn);
         box.appendChild(btnRow);
+
+        // Yedek indirme satırı — HER ZAMAN görünür. Uygulama içi indirme
+        // yavaş/başarısız olduğunda (GitHub CDN, ağ) ya da kullanıcı kendi
+        // indirme yöneticisini tercih ettiğinde tek tıkla sistem tarayıcısında
+        // doğrudan indirir. Backend webbrowser.open olduğu için pywebview/exe
+        // penceresi ve her tarayıcıda aynı çalışır.
+        var manualRow = el('div',
+            'margin-top:12px;font-size:12px;color:var(--hd-ink-dim, #7d97a5);');
+        var manualLink = el('a',
+            'color:var(--hd-cyan-soft, #6fd3e6);cursor:pointer;text-decoration:underline;',
+            'download it in your browser');
+        manualRow.appendChild(document.createTextNode('Slow or stuck? You can also '));
+        manualRow.appendChild(manualLink);
+        manualRow.appendChild(document.createTextNode('.'));
+        box.appendChild(manualRow);
+
+        manualLink.onclick = function () { openInBrowser(); };
+
         wrap.appendChild(box);
         document.body.appendChild(wrap);
 
-        function startDownload(inf) {
+        function openInBrowser() {
+            fetch('/api/update/open-download', { method: 'POST' })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (res.opened) {
+                        progress.style.display = 'block';
+                        progressText.innerHTML =
+                            'Opened in your browser — download the installer there, ' +
+                            'then run it to update.';
+                    } else if (res.url) {
+                        // Sunucu tarayıcı açamadıysa istemci tarafını dene
+                        window.open(res.url, '_blank');
+                    }
+                })
+                .catch(function () {
+                    if (info.page_url) window.open(info.page_url, '_blank');
+                });
+        }
+
+        function startDownload() {
             updateBtn.disabled = true;
             updateBtn.style.opacity = '0.5';
             fetch('/api/update/download', { method: 'POST' })
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
                     if (!res.started) {
-                        // platforma uygun asset yok → Releases sayfasını yeni pencerede aç
-                        window.open(inf.page_url || res.page_url, '_blank');
-                        wrap.remove();
+                        // platforma uygun asset yok → tarayıcıdan indirmeye düş
+                        openInBrowser();
                         return;
                     }
                     progress.style.display = 'block';
                     progressText.textContent = 'Downloading…';
+                    lastPct = -1;
+                    stallStrikes = 0;
                     pollStatus();
                 })
                 .catch(function () {
-                    progressText.textContent = 'Could not start the download.';
+                    progressText.innerHTML =
+                        'Could not start the download — try the browser link above.';
+                    updateBtn.disabled = false;
+                    updateBtn.style.opacity = '1';
                 });
         }
 
+        // İlerleme takılırsa (pct uzun süre artmazsa) tarayıcı seçeneğini öne çıkar
+        var STALL_LIMIT = Math.round(20000 / POLL_MS); // ~20 sn ilerlemesiz
+        var lastPct = -1;
+        var stallStrikes = 0;
         var idleStrikes = 0;
+
+        function highlightManual() {
+            manualRow.style.color = 'var(--hd-ink-strong, #eaf7fb)';
+            manualLink.style.fontWeight = '700';
+        }
+
         function pollStatus() {
             fetch('/api/update/status')
                 .then(function (r) { return r.json(); })
@@ -133,7 +184,22 @@
                     if (st.state === 'downloading') {
                         idleStrikes = 0;
                         fill.style.width = st.pct + '%';
-                        progressText.textContent = 'Downloading… ' + st.pct + '%';
+                        // Takılma algılama: pct artmıyorsa say, eşiği geçince uyar
+                        if (st.pct <= lastPct) {
+                            stallStrikes += 1;
+                            if (stallStrikes === STALL_LIMIT) {
+                                highlightManual();
+                                progressText.innerHTML = 'Downloading… ' + st.pct +
+                                    '% — this looks slow. You can ' +
+                                    'download it in your browser instead (link below).';
+                            } else {
+                                progressText.textContent = 'Downloading… ' + st.pct + '%';
+                            }
+                        } else {
+                            stallStrikes = 0;
+                            lastPct = st.pct;
+                            progressText.textContent = 'Downloading… ' + st.pct + '%';
+                        }
                         setTimeout(pollStatus, POLL_MS);
                     } else if (st.state === 'done') {
                         fill.style.width = '100%';
@@ -144,9 +210,10 @@
                             escapeHtml(st.path) + '</span>';
                         laterBtn.textContent = 'OK';
                     } else if (st.state === 'error') {
-                        progressText.textContent =
-                            'Download error: ' + st.error +
-                            ' — you can download it manually from the Releases page.';
+                        highlightManual();
+                        progressText.innerHTML =
+                            'Download error: ' + escapeHtml(st.error || '') +
+                            ' — use the browser link below instead.';
                         updateBtn.disabled = false;
                         updateBtn.style.opacity = '1';
                     } else {
@@ -154,8 +221,9 @@
                         // başlamış demektir — sonsuza dek dönme (2026-07-14 denetimi)
                         idleStrikes += 1;
                         if (idleStrikes > 5) {
-                            progressText.textContent =
-                                'Download was interrupted — please try again.';
+                            highlightManual();
+                            progressText.innerHTML =
+                                'Download was interrupted — try the browser link below.';
                             updateBtn.disabled = false;
                             updateBtn.style.opacity = '1';
                             return;

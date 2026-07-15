@@ -184,6 +184,25 @@ def _open_installer(path):
         pass  # açılamazsa dosya yine de Downloads'ta duruyor
 
 
+def open_download_in_browser():
+    """Yedek indirme: asset URL'sini (yoksa Releases sayfasını) sistem
+    tarayıcısında açar. Uygulama içi indirme yavaş/başarısız olduğunda
+    (GitHub CDN yavaşlığı, ağ kısıtı) veya kullanıcı indirme yöneticisini
+    tercih ettiğinde kullanılır. webbrowser.open sunucu tarafında çalıştığı
+    için pywebview/exe penceresi, Chromium ve her tarayıcıda aynı davranır.
+    """
+    info = check_for_update()
+    asset = info.get("asset")
+    url = (asset or {}).get("url") or info.get("page_url") or RELEASES_PAGE
+    try:
+        import webbrowser
+        webbrowser.open(url)
+        return {"opened": True, "url": url}
+    except Exception as exc:
+        return {"opened": False, "url": url,
+                "error": "%s: %s" % (type(exc).__name__, exc)}
+
+
 def start_download():
     """Platforma uygun asset'i ~/Downloads'a indirmeye başlar (arka planda).
 

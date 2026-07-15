@@ -271,6 +271,16 @@ def update_status():
     from hrma.utils.update_checker import download_status
     return jsonify(download_status())
 
+@app.route('/api/update/open-download', methods=['POST'])
+def update_open_download():
+    # Manuel/yedek indirme: uygulama içi indirme yavaş/başarısız olursa
+    # (GitHub CDN yavaşlığı, ağ kısıtı) kullanıcı buradan sistem tarayıcısında
+    # doğrudan asset URL'sini (yoksa Releases sayfasını) açar. Sunucu tarafı
+    # webbrowser.open olduğu için pywebview/exe, Chromium ve her tarayıcıda
+    # aynı çalışır — istemci ortamına bağımlı değil.
+    from hrma.utils.update_checker import open_download_in_browser
+    return jsonify(open_download_in_browser())
+
 @app.route('/test-simple')
 def test_simple():
     return '<h1>SIMPLE TEST</h1><p>If you see this, Flask is working!</p><a href="/">Home Page</a>'

@@ -46,6 +46,18 @@ FunctionEnd
 
 Section "HRMA" SecMain
   SectionIn RO
+
+  ; --- Temiz güncelleme ---
+  ; Aynı dizine kuruluyken eski sürümden artık dosyalar (yeni sürümde
+  ; kaldırılmış modüller/kütüphaneler) kalmasın diye program dosyalarını
+  ; önce sil, sonra yeniden yaz. Kullanıcı çıktıları Belgeler\HRMA'da
+  ; tutulduğu için ($INSTDIR'da DEĞİL) bu silme veriyi etkilemez.
+  ; NOT: HRMA çalışırken dosyalar kilitli olur — bitiş sayfası kullanıcıyı
+  ; güncellemeden önce programı kapatması için uyarıyor.
+  RMDir /r "$INSTDIR\app"
+  RMDir /r "$INSTDIR\libs"
+  RMDir /r "$INSTDIR\python"
+
   SetOutPath "$INSTDIR"
   File /r "win/payload/python"
   File /r "win/payload/libs"
