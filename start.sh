@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Hybrid Rocket Motor Analysis - Cross-platform Startup Script
+# Rocket Motor Analysis - Cross-platform Startup Script
 
 echo "=========================================="
-echo "  HYBRID ROCKET MOTOR ANALYSIS TOOL"
+echo "  ROCKET MOTOR ANALYSIS TOOL"
 echo "=========================================="
 echo
 

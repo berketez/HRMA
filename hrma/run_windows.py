@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Windows-optimized launcher for Hybrid Rocket Motor Analysis Tool
+Windows-optimized launcher for Rocket Motor Analysis Tool
 Includes enhanced error handling and Windows-specific optimizations
 """
 
@@ -137,7 +137,7 @@ def run_server():
         from hrma.app import app
         
         print("=" * 60)
-        print("  HYBRID ROCKET MOTOR ANALYSIS TOOL")
+        print("  ROCKET MOTOR ANALYSIS TOOL")
         print("  http://localhost:8080")
         print("=" * 60)
         print()
@@ -192,7 +192,7 @@ def main():
         run_server()
     except KeyboardInterrupt:
         print("\n✓ Server stopped gracefully")
-        print("Thank you for using Hybrid Rocket Motor Analysis Tool!")
+        print("Thank you for using Rocket Motor Analysis Tool!")
         time.sleep(1)
     except Exception as e:
         print(f"\n✗ Unexpected error: {e}")

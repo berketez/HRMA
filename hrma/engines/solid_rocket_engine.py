@@ -141,7 +141,7 @@ class SolidRocketEngine:
                 'density_temp_coeff': -0.7e-3,  # kg/m³/K
                 'c_star_pressure_coeff': 2.1,  # s·Pa^-1 
                 'burn_rate_temp_coeff': 0.0042,  # 1/K
-                'erosive_burning_coeff': 0.0234,  # Summerfield criterion
+                'erosive_burning_coeff': 0.0136,  # Summerfield criterion (yeniden kalibre, #446: D^-0.2 formu)
                 'nozzle_efficiency': 0.985  # Divergence + friction losses
             },
             'black_powder': {
@@ -154,7 +154,7 @@ class SolidRocketEngine:
                 'density_temp_coeff': -0.9e-3,
                 'c_star_pressure_coeff': 1.8,
                 'burn_rate_temp_coeff': 0.0038,
-                'erosive_burning_coeff': 0.0189,
+                'erosive_burning_coeff': 0.0110,  # yeniden kalibre (#446)
                 'nozzle_efficiency': 0.975
             },
             # Şeker yakıtları (KNO3 + şeker). DİKKAT: değerler NASA CEA'dan
@@ -175,7 +175,7 @@ class SolidRocketEngine:
                 'density_temp_coeff': -0.8e-3,
                 'c_star_pressure_coeff': 1.9,
                 'burn_rate_temp_coeff': 0.0041,
-                'erosive_burning_coeff': 0.0212,
+                'erosive_burning_coeff': 0.0123,  # yeniden kalibre (#446)
                 'nozzle_efficiency': 0.978
             },
             'knsu': {  # KNO3/Sucrose 65/35 (amatör roketçilik standardı)
@@ -188,7 +188,7 @@ class SolidRocketEngine:
                 'density_temp_coeff': -0.6e-3,
                 'c_star_pressure_coeff': 2.3,
                 'burn_rate_temp_coeff': 0.0045,
-                'erosive_burning_coeff': 0.0267,
+                'erosive_burning_coeff': 0.0155,  # yeniden kalibre (#446)
                 'nozzle_efficiency': 0.983
             },
             'double_base': {
@@ -201,7 +201,7 @@ class SolidRocketEngine:
                 'density_temp_coeff': -1.1e-3,
                 'c_star_pressure_coeff': 1.7,
                 'burn_rate_temp_coeff': 0.0036,
-                'erosive_burning_coeff': 0.0198,
+                'erosive_burning_coeff': 0.0115,  # yeniden kalibre (#446)
                 'nozzle_efficiency': 0.981
             }
         }
@@ -215,6 +215,8 @@ class SolidRocketEngine:
             self.propellant_name = prop['name']
             # Ensure nozzle efficiency is available for later calculations
             self.nozzle_efficiency = prop.get('nozzle_efficiency', 0.98)
+            # Egzoz molekül ağırlığı (Bartz ısı akısı gaz özellikleri için)
+            self.mw_exhaust = prop.get('molecular_weight', 26.0)  # g/mol
             # Erozif yanma katsayısı (burn_rate içindeki düzeltme bunu kullanır;
             # atanmazsa model tetiklendiğinde AttributeError oluşur)
             self.erosive_burning_coeff = prop.get('erosive_burning_coeff', 0.0)
@@ -230,6 +232,7 @@ class SolidRocketEngine:
             self.gamma = 1.25
             self.T_c = 2500
             self.propellant_name = 'Custom'
+            self.mw_exhaust = 26.0  # g/mol, tipik katı yakıt egzozu
             self.nozzle_efficiency = 0.98
             self.erosive_burning_coeff = 0.0
     
@@ -450,18 +453,27 @@ class SolidRocketEngine:
             pressure_plateau = 1.0
             
         # Erosive burning correction (Summerfield / Lenoir-Robillard).
-        # G = mdot / (π * D * μ) where μ is dynamic viscosity. Baskın terim
-        # kütle-akısı bağımlılığı reynolds_factor = (G/500)^0.8'dir.
-        # DENETİM NOTU (#446, BELİRSİZ — kasıtlı DEĞİŞTİRİLMEDİ): port_diameter_ratio
-        # çarpanı web açıldıkça büyür (~0.3→~1); oysa Lenoir-Robillard geometrik
-        # bağımlılık D^-0.2 (çapla TERS) olup erozyon küçük port/yüksek G'de
-        # (yanma başı) en güçlüdür — yani bu terimin işareti fiziksel olarak
-        # tartışmalıdır. Net model çökmüyor (G^0.8 baskın), ANCAK
-        # erosive_burning_coeff mevcut forma göre kalibre olduğundan terim
-        # değiştirilirse katsayı yeniden kalibre edilmelidir → davranış korunuyor.
+        # Baskın terim kütle-akısı bağımlılığı reynolds_factor = (G/500)^0.8;
+        # eşik G > 100 kg/m²s (Summerfield tipi eşik davranışı: düşük akıda
+        # erozyon yok). DENETİM DÜZELTMESİ (#446): eski kod geometrik çarpan
+        # olarak port_diameter_ratio'yu DOĞRUDAN kullanıyordu — web açıldıkça
+        # (~0.37→1) BÜYÜR, yani erozyonu yanma SONUNDA güçlendirirdi. Fiziksel
+        # gerçek tam tersi: erozyon küçük port/yüksek G'de (yanma BAŞI) en
+        # güçlüdür; Lenoir-Robillard geometrik bağımlılığı ~D^-0.2'dir
+        # (Sutton & Biblarz 9. baskı Böl. 12; L-R ikinci terim ∝ G^0.8/L^0.2).
+        # Yeni çarpan (D_port/D_ch)^-0.2: yanma başı ~1.22 → sonu 1.0, tekdüze
+        # AZALAN — G^0.8 ile birlikte doğru monotonluk. Çarpanın mutlak ölçeği
+        # ~O(1) korunduğundan erosive_burning_coeff kalibrasyon ölçeği bozulmaz.
+        # Codex GPT-5.5 çapraz teyidi (2026-07-16): işaret/üs doğru, form
+        # L-R indirgenmiş vekili olarak savunulabilir; tek eleştirisi G=100'deki
+        # SERT eşiğin ~%0.6-0.9 süreksizlik yaratmasıydı → excess-flux formuna
+        # geçildi: ((G-100)/400)^0.8, eşikte 0'dan sürekli başlar ve G=500
+        # kalibrasyon çapasında eski değere eşittir (1.0) — k yeniden
+        # kalibrasyon gerektirmez. Statik ateşleme kalibrasyonu yine önerilir.
         if hasattr(self, 'mass_flux') and self.mass_flux > 100:  # kg/m²s
-            reynolds_factor = (self.mass_flux / 500) ** 0.8
-            erosive_factor = 1.0 + self.erosive_burning_coeff * reynolds_factor * port_diameter_ratio
+            reynolds_factor = ((self.mass_flux - 100.0) / 400.0) ** 0.8
+            geom_factor = max(port_diameter_ratio, 0.05) ** -0.2
+            erosive_factor = 1.0 + self.erosive_burning_coeff * reynolds_factor * geom_factor
         else:
             erosive_factor = 1.0
             
@@ -596,15 +608,23 @@ class SolidRocketEngine:
         theoretical_mass_flow = np.mean(curve['mass_flow'])
         
         # Combustion efficiency metrics
-        # DENETİM NOTU (#572, BELİRSİZ — kasıtlı DEĞİŞTİRİLMEDİ): Bu değer GERÇEK
-        # c* verimi DEĞİLDİR. Gerçek η_c* = c*_ölçülen/c*_teorik olup AYNI yakıtın
-        # teorik değerine göredir (Sutton). Burada self.c_star sabit APCP idealine
-        # (1600 m/s) bölünüyor → bu "APCP referansına göre c* enerji ORANI"dır;
-        # düşük-enerjili ama tam-verimli bir yakıtı (ör. şeker c*≈921 → ~%57.6)
-        # "düşük verimli" gösterir. Ölçülen c* verisi olmadığından gerçek verim
-        # türetilemez; dict anahtar sözleşmesi (c_star_efficiency_percent) test/UI
-        # tarafından beklendiğinden korunuyor. Yorumlanırken bu sınır dikkate alın.
-        c_star_efficiency = self.c_star / 1600 * 100  # APCP referansına göre c* oranı (%)
+        # DENETİM DÜZELTMESİ (#572): η_c* artık GERÇEK tanımıyla hesaplanıyor —
+        # teslim edilen c*'ın AYNI yakıtın teorik c*'ına oranı (Sutton & Biblarz
+        # 9. baskı, Eş. 3-32 civarı; statik ateşleme veri-indirgeme standardı):
+        #     c*_teslim = ∫Pc·A_t dt / m_yakıt ,  η_c* = c*_teslim / c*_teorik
+        # Eski kod self.c_star'ı SABİT 1600 m/s'ye (APCP ideali) bölüyordu; bu,
+        # düşük-enerjili ama tam-verimli yakıtı (şeker c*≈921 → %57.6) "verimsiz"
+        # gösteren anlamsız bir metrikti. Yeni tanımda ideal (kayıpsız) simülasyon
+        # ~%100 verir — doğru; kullanıcı CSV doğrulama paneliyle GERÇEK test
+        # eğrisi yüklediğinde bu metrik gerçek yanma verimine dönüşür.
+        m_propellant = self._propellant_volume() * self.rho_p  # kg
+        if m_propellant > 0 and len(curve['time']) > 1:
+            pressure_integral = np.trapz(
+                np.asarray(curve['pressure']) * 1e5, curve['time'])  # Pa·s
+            c_star_delivered = pressure_integral * A_t_ref / m_propellant  # m/s
+            c_star_efficiency = c_star_delivered / self.c_star * 100.0
+        else:
+            c_star_efficiency = 100.0  # veri yok → ideal varsayım (kayıpsız sim)
         
         return {
             'thrust_profile_analysis': {
@@ -1701,20 +1721,44 @@ class SolidRocketEngine:
         return thermal_stress + pressure_stress
     
     def _calculate_heat_flux(self):
-        """Konvektif ısı akısı (kW/m²) — BASİTLEŞTİRİLMİŞ PLACEHOLDER.
+        """Boğaz konvektif ısı akısı [kW/m²] — Bartz (1957) korelasyonu.
 
-        DENETİM UYARISI (#1633, BELİRSİZ — kasıtlı DEĞİŞTİRİLMEDİ): Bu ifade
-        (T_c·0.002) FİZİKSEL DEĞİLDİR ve tipik değerin ~100-4000× ALTINDA sonuç
-        verir. Gerçek roket boğaz/oda konvektif akısı Bartz (1957) korelasyonuyla
-        ~1-30 MW/m² (=1000-30000 kW/m²) mertebesindedir:
-            h_g ∝ Pc^0.8 / D_t^0.2,   q = h_g·(T_aw − T_wall).
-        Doğru değer için Bartz tabanlı bir model gerekir; bu placeholder yalnız
-        arayüzde GÖSTERİM amaçlı bir diagnostik olup termal koruma/soğutma
-        TASARIMINDA KULLANILMAMALIDIR. Kalibrasyon/aşağı-akış bağımlılığı
-        bilinmediğinden ve yanlış Bartz uygulaması yeni hata riski taşıdığından
-        sayısal değer bu denetimde değiştirilmedi (BELİRSİZ olarak raporlandı).
+        DENETİM DÜZELTMESİ (#1633): Eski placeholder (T_c·0.002 kW/m²) gerçek
+        değerin ~1000× altındaydı. Artık heat_transfer_analysis modülündeki
+        MEVCUT Bartz implementasyonu (Sutton & Biblarz 9. baskı, Eş. 8-22)
+        boğaz istasyonunda (M=1, A_t/A=1) çağrılıyor — yeni fizik yazılmadı,
+        doğrulanmış olan yeniden kullanıldı:
+            h_g = (0.026/D_t^0.2)·(μ^0.2·cp/Pr^0.6)·(Pc/c*)^0.8·(D_t/R_c)^0.1·σ
+            q   = h_g·(T_aw − T_w),  T_aw = kurtarma sıcaklığı (r = Pr^{1/3})
+        Duvar sıcaklığı T_w = 700 K (soğutmasız çelik kasa, yanma-ortası
+        temsili tasarım değeri; T_aw ≈ 0.9·T_c ≫ T_w olduğundan q, T_w
+        seçimine zayıf duyarlıdır — 300↔1000 K arası fark ~%15).
+        Boğaz eğrilik yarıçapı R_c = 1.5·r_t (Bartz'ın standart varsayımı,
+        analyzer._resolve_throat_conditions ile aynı).
         """
-        return self.T_c * 0.002  # kW/m² (PLACEHOLDER — bkz. yukarıdaki uyarı; ~1000× düşük)
+        from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
+        analyzer = HeatTransferAnalyzer()
+        gas = analyzer._get_gas_properties(
+            {'gamma': self.gamma, 'molecular_weight': getattr(self, 'mw_exhaust', 26.0)},
+            self.T_c,
+        )
+        d_throat = self._estimate_throat_diameter()  # m
+        rc_over_dt = max((1.5 * d_throat / 2.0) / d_throat, 0.25)  # = 0.75
+        T_wall = 700.0  # K, temsili soğutmasız çelik duvar (bkz. docstring)
+        h_g = analyzer._bartz_coefficient(
+            throat_diameter=d_throat,
+            chamber_pressure=self.P_c * 1e5,   # bar → Pa
+            c_star=self.c_star,
+            gas=gas,
+            chamber_temperature=self.T_c,
+            wall_temperature=T_wall,
+            rc_over_dt=rc_over_dt,
+            area_ratio_local=1.0,
+            mach_local=1.0,
+        )  # W/(m²·K)
+        T_aw = analyzer._adiabatic_wall_temperature(self.T_c, gas, mach_local=1.0)
+        q = h_g * (T_aw - T_wall)  # W/m²
+        return q / 1000.0  # kW/m²
     
     def _calculate_case_temperature(self):
         """Calculate case temperature"""

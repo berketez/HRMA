@@ -165,11 +165,12 @@ class StructuralAnalyzer:
         return T_inner, T_outer
 
     def _check_buckling(self, pressure: float, radius: float, thickness: float,
-                        length: float, mat_props: Dict) -> Dict:
+                        length: float, mat_props: Dict,
+                        axial_compression_force: float = 0.0) -> Dict:
         """Ince-cidarli silindir burkulma kontrolu (NASA SP-8007).
 
         Iki mod kontrol edilir:
-          A) Eksenel basma burkulmasi (motor sonu kuvveti, gerdirme/montaj yuku):
+          A) Eksenel basma burkulmasi (itki/montaj/ucus basma yuku):
              sigma_cl = E / sqrt(3(1-nu^2)) * (t/r)      [klasik]
              sigma_cr = gamma * sigma_cl                  [tasarim]
              gamma = 1 - 0.901*(1 - exp(-phi)),  phi = (1/16)*sqrt(r/t)
@@ -177,13 +178,18 @@ class StructuralAnalyzer:
              p_cl = E/(4(1-nu^2)) * (t/r)^3
 
         Kaynak: NASA SP-8007 "Buckling of Thin-Walled Circular Cylinders"
-        (revised 1968), NTRS 19680026348. Knockdown gamma ve klasik
-        eksenel/dis-basinc formulleri SP-8007 ve Timoshenko shell teorisinden.
+        (revised 1968), NTRS 19680026348.
 
-        Not: Eksenel burkulma yuku, kapali uctaki basinc kuvvetinden gelen
-        eksenel cidar gerilmesi (longitudinal = p*r/(2t)) ile karsilastirilir;
-        bu motor montaj/itki yuklerini de yaklasik kapsayan konservatif bir
-        eksenel gerilme tabanidir.
+        DENETIM DUZELTMESI (#203): Eski surum, burkulma emniyetini kapali-uc
+        IC BASINC boylamsal gerilmesiyle (p*r/2t) karsilastiriyordu. Bu gerilme
+        CEKMEdir — kabuk burkulmaz, aksine stabilize olur (SP-8007 basincli
+        silindirlerde knockdown'in IYILESTIGINI soyler). Dogru burkulma yuku
+        GERCEK eksenel BASMAdir (itki, montaj on-yuku, ucus ataleti):
+            sigma_basma = F / (2*pi*r*t)
+            net = max(sigma_basma - p*r/(2t), 0)   [basinc cekmesi kredisi]
+        Basinc-stabilizasyon gamma iyilesmesi muhafazakarlik icin ALINMAZ;
+        yalnizca net-kesit gerilme kredisi kullanilir. Basma yuku yoksa
+        (F=0) net=0 -> eksenel burkulma bu yuk durumunda olusmaz, SF=inf.
         """
         E = mat_props['elastic_modulus']
         nu = mat_props['poisson_ratio']
@@ -199,8 +205,17 @@ class StructuralAnalyzer:
             gamma_kd = 1.0
             sigma_cr_axial = float('inf')
 
-        # Uygulanan eksenel cidar gerilmesi (longitudinal, kapali-uc basinci)
-        applied_axial_stress = pressure * radius / (2.0 * thickness) if thickness > 0 else float('inf')
+        # Uygulanan NET eksenel BASMA gerilmesi (bkz. docstring #203):
+        # basma (F/2πrt) eksi ic-basinc boylamsal CEKME kredisi (p*r/2t).
+        if thickness > 0 and radius > 0:
+            sigma_compression = (axial_compression_force
+                                 / (2.0 * np.pi * radius * thickness))
+            sigma_pressure_tension = pressure * radius / (2.0 * thickness)
+            applied_axial_stress = max(sigma_compression - sigma_pressure_tension, 0.0)
+        else:
+            sigma_compression = float('inf')
+            sigma_pressure_tension = 0.0
+            applied_axial_stress = float('inf')
         axial_buckling_sf = (sigma_cr_axial / applied_axial_stress
                              if applied_axial_stress > 0 else float('inf'))
 
@@ -231,6 +246,11 @@ class StructuralAnalyzer:
             'critical_external_pressure_bar': (p_cr_external / 1e5
                                                if np.isfinite(p_cr_external) else float('inf')),
             'buckling_status': buckling_status,
+            # #203 sonrasi eklenen tanilar: uygulanan basma kuvveti ve
+            # ic-basinc cekme kredisi (raporlanan applied = NET basma)
+            'axial_compression_force_N': axial_compression_force,
+            'pressure_stabilizing_stress_MPa': (sigma_pressure_tension / 1e6
+                                                if np.isfinite(sigma_pressure_tension) else 0.0),
             'source': 'NASA SP-8007 (1968), NTRS 19680026348'
         }
     
@@ -308,11 +328,17 @@ class StructuralAnalyzer:
         wall_temp_structural = scenarios[governing]['derating_temp_K']
         wall_delta_T = scenarios[governing]['delta_T_K']
 
-        # Burkulma kontrolu (NASA SP-8007) - hazne cidari geometrisiyle
+        # Burkulma kontrolu (NASA SP-8007) - hazne cidari geometrisiyle.
+        # #203: eksenel BASMA yuku olarak motor itkisi kullanilir (ucus/montaj
+        # basmasinin ust sinari — itkinin tamami kabuktan gecer varsayimi,
+        # muhafazakar). motor_data'da thrust yoksa 0 -> saf ic basinc
+        # eksenel burkulma yaratamaz (cekme), SF=inf/SAFE raporlanir.
         chamber_t = chamber_analysis['recommended_thickness'] / 1000.0  # m
+        axial_force = float(motor_data.get('thrust', 0.0) or 0.0)  # N
         buckling_analysis = self._check_buckling(
             design_pressure, chamber_diameter / 2.0, chamber_t,
-            chamber_length, mat_props
+            chamber_length, mat_props,
+            axial_compression_force=axial_force,
         )
         
         # Nozzle analysis

@@ -4,7 +4,7 @@ SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 
 !define APPNAME "HRMA"
-!define APPFULL "HRMA - Hybrid Rocket Motor Analysis"
+!define APPFULL "HRMA - Rocket Motor Analysis"
 !define COMPANY "UZAYTEK"
 ; Sürüm derleme komutundan gelir: makensis -DVERSION=2.3.0 hrma.nsi
 ; (tek kaynak: hrma/__init__.py — build betiği okuyup geçirir)
@@ -23,7 +23,7 @@ InstallDir "$LOCALAPPDATA\HRMA"
 !define MUI_ICON "hrma.ico"
 !define MUI_UNICON "hrma.ico"
 !define MUI_WELCOMEPAGE_TITLE "Welcome to HRMA Setup"
-!define MUI_WELCOMEPAGE_TEXT "This wizard will install the UZAYTEK Hybrid Rocket Motor Analysis suite on your computer.$\r$\n$\r$\nThe installation uses about 2.5 GB of disk space and does NOT require an internet connection.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "This wizard will install the UZAYTEK Rocket Motor Analysis suite on your computer.$\r$\n$\r$\nThe installation uses about 2.5 GB of disk space and does NOT require an internet connection.$\r$\n$\r$\nClick Next to continue."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -66,9 +66,9 @@ Section "HRMA" SecMain
 
   ; Kısayollar
   SetOutPath "$INSTDIR\app"
-  CreateShortCut "$DESKTOP\HRMA.lnk" "$INSTDIR\python\pythonw.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Hybrid Rocket Motor Analysis"
+  CreateShortCut "$DESKTOP\HRMA.lnk" "$INSTDIR\python\pythonw.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Rocket Motor Analysis"
   CreateDirectory "$SMPROGRAMS\HRMA"
-  CreateShortCut "$SMPROGRAMS\HRMA\HRMA.lnk" "$INSTDIR\python\pythonw.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Hybrid Rocket Motor Analysis"
+  CreateShortCut "$SMPROGRAMS\HRMA\HRMA.lnk" "$INSTDIR\python\pythonw.exe" '"$INSTDIR\app\launcher.py"' "$INSTDIR\hrma.ico" 0 SW_SHOWNORMAL "" "UZAYTEK Rocket Motor Analysis"
 
   ; Kaldırıcı + Program Ekle/Kaldır kaydı
   WriteUninstaller "$INSTDIR\uninstall.exe"

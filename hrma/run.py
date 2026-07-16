@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hybrid Rocket Motor Analysis Web Application
+Rocket Motor Analysis Web Application
 Cross-platform launcher script (Windows/Mac/Linux)
 """
 
@@ -43,7 +43,7 @@ def run_server():
     from hrma.app import app
 
     print("=" * 60)
-    print("  HYBRID ROCKET MOTOR ANALYSIS WEB TOOL")
+    print("  ROCKET MOTOR ANALYSIS WEB TOOL")
     print("  http://localhost:8080")
     print("=" * 60)
     print()

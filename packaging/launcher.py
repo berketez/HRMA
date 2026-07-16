@@ -40,7 +40,7 @@ LIBS_DIR = os.path.abspath(os.path.join(APP_DIR, os.pardir, "libs"))
 HRMA_APP_NAME = "HRMA"
 APP_COPYRIGHT = "© 2026 Berke Tezgöçen — UZAYTEK"
 GITHUB_URL = "https://github.com/berketez/HRMA"
-PENCERE_BASLIK = "HRMA — UZAYTEK Hybrid Rocket Motor Analysis"
+PENCERE_BASLIK = "HRMA — UZAYTEK Rocket Motor Analysis"
 
 
 def _hrma_version():
@@ -54,7 +54,7 @@ def _hrma_version():
 
 def _pencere_baslik(version):
     if version:
-        return "HRMA v%s — UZAYTEK Hybrid Rocket Motor Analysis" % version
+        return "HRMA v%s — UZAYTEK Rocket Motor Analysis" % version
     return PENCERE_BASLIK
 
 # Gerçek uygulama yüklenene kadar durum: {"wsgi": Flask|None, "error": str|None}
@@ -84,7 +84,7 @@ def _setup_console():
             sys.stdout = sys.stderr = io.StringIO()
         return
     if os.name == "nt":
-        os.system("title HRMA - UZAYTEK Hybrid Rocket Motor Analysis")
+        os.system("title HRMA - UZAYTEK Rocket Motor Analysis")
         os.system("chcp 65001 >nul")
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -171,7 +171,7 @@ SPLASH_HTML = """<!DOCTYPE html>
 <body>
   <div class="kutu">
     <div class="logo">HRMA</div>
-    <div class="alt">UZAYTEK HYBRID ROCKET MOTOR ANALYSIS __HRMA_VERSION__</div>
+    <div class="alt">UZAYTEK ROCKET MOTOR ANALYSIS __HRMA_VERSION__</div>
     <div class="halka" id="halka"></div>
     <div class="durum" id="durum">Starting…</div>
     <div class="ipucu" id="ipucu">Loading computation engines.</div>
@@ -498,7 +498,7 @@ def main():
     _app_state["version"] = _hrma_version()
 
     print("=" * 62)
-    print("  HRMA - UZAYTEK Hybrid Rocket Motor Analysis"
+    print("  HRMA - UZAYTEK Rocket Motor Analysis"
           + (" v" + _app_state["version"] if _app_state["version"] else ""))
     print("=" * 62)
 

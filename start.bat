@@ -6,7 +6,7 @@ REM bulunamiyordu ("Could not open requirements file" — 2026-07-15 geri donutu
 cd /d "%~dp0"
 
 echo ==========================================
-echo   HYBRID ROCKET MOTOR ANALYSIS TOOL
+echo   ROCKET MOTOR ANALYSIS TOOL
 echo ==========================================
 echo.
 
