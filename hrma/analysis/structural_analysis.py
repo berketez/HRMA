@@ -523,12 +523,28 @@ class StructuralAnalyzer:
         # Nozzle transition stresses (simplified)
         # Higher stress concentration at throat
         stress_concentration_factor = 2.0 if nozzle_type == 'conical' else 1.5
-        
-        # Effective stress at throat
-        effective_stress = pressure * throat_radius / min_throat_thickness * stress_concentration_factor
-        
+
         # Required thickness considering stress concentration
         required_throat_thickness = min_throat_thickness * stress_concentration_factor
+
+        # Effective (peak) stress at throat.
+        # DUZELTME (2026-07-16): Eski kod effective_stress'u min_throat_thickness
+        # (yigilma payi OLMADAN) uzerinden hesaplayip SCF ile carpiyordu:
+        #     effective_stress = P*r_t/min_t*SCF = allowable*SCF
+        # burada P ve r_t TAMAMEN sadelesiyor -> bogaz gerilmesi ve emniyet
+        # faktoru (=SF_mat/SCF) gercek basinc/geometriden BAGIMSIZ bir SABIT
+        # cikiyordu (totoloji). Dogrusu: ONERILEN (SCF payli) kalinliktaki gercek
+        # tepe gerilmeyi, ince-cidar hoop'una (P*r_t/t) yigilma faktorunu
+        # uygulayarak hesapla -> boylece raporlanan gerilme ile kullanilan
+        # kalinlik TUTARLI olur ve SCF yalnizca BIR kez sayilir. Sized bogaz
+        # icin sonuc allowable'a esittir, dolayisiyla SF = SF_mat (malzeme emniyet
+        # faktoru) olarak dogru raporlanir. Kaynak: Peterson "Stress Concentration
+        # Factors"; ince-cidar hoop Sutton & Biblarz / Roark's Ch.13.
+        if required_throat_thickness > 0:
+            effective_stress = (stress_concentration_factor * pressure * throat_radius
+                                / required_throat_thickness)
+        else:
+            effective_stress = float('inf')
         
         # Nozzle wall thickness variation
         chamber_thickness = pressure * chamber_radius / allowable_stress
@@ -561,9 +577,18 @@ class StructuralAnalyzer:
         # Flat head thickness
         flat_head_thickness = radius * np.sqrt((3 * pressure * (3 + poisson_ratio)) / (8 * allowable_stress))
         
-        # Dished head thickness (more efficient)
-        # Assuming 2:1 elliptical head
-        dished_head_thickness = pressure * radius / (2 * allowable_stress)
+        # Dished head thickness — ASME BPVC VIII-1 UG-32(d): 2:1 yari-elipsoidal baslik.
+        # DUZELTME (2026-07-16): Eski formul pressure*radius/(2*allowable) = P*D/(4S)
+        # idi; bu bir YARIMKURE (hemispherical) kalinligidir, 2:1 elipsoidal DEGIL.
+        # 2:1 elipsoidal baslik silindir govdeyle yaklasik ayni kalinligi gerektirir
+        # (P*D/(2S)), yarisini degil -> eski deger belirtilen baslik tipi icin 2x
+        # ince, non-konservatif. Dogru ASME UG-32(d) formulu:
+        #     t = P*D / (2*S*E - 0.2*P),  K = 1.0 (2:1 orani icin)
+        # D = ic cap (= diameter), S = allowable_stress, E = kaynak verimi
+        # (1.0; dikissiz / tam-radyografi varsayimi).
+        joint_efficiency = 1.0
+        dished_head_thickness = (pressure * diameter
+                                 / (2 * allowable_stress * joint_efficiency - 0.2 * pressure))
         
         # Bolt circle analysis
         bolt_circle_diameter = diameter + 0.05  # 50mm larger than chamber
@@ -596,10 +621,21 @@ class StructuralAnalyzer:
         bolt_safety_factor = 4.0
         force_per_bolt = total_force * bolt_safety_factor / num_bolts
         
-        # Bolt sizing (assume steel bolts, 400 MPa allowable stress)
+        # Bolt sizing (assume steel bolts, 400 MPa allowable stress).
+        # DUZELTME (2026-07-16): Civata cekme kapasitesi NOMINAL kesitten degil,
+        # dis dibindeki GERILME ALANI A_t uzerinden tasinir. ISO 898-1 / Shigley
+        # Tablo 8-1: A_t ~ 0.75*(pi/4*d_nom^2) (or. M10: A_t=58 mm^2 vs
+        # pi/4*10^2=78.5, oran ~0.74). Eski kod gerekli alani dogrudan tam-dolu
+        # daireye (pi/4*d^2) ceviriyordu -> civatayi sqrt(0.75)~0.87 kat KUCUK
+        # seciyordu (non-konservatif). Dogrusu: gerekli A_t'yi guvenli nominal
+        # capa cevir -> A_nom = A_t / 0.75. (400 MPa ~ 8.8 sinifi yaklasik izin
+        # verilen cekme; sinif-bazli S_p icin bolted_joint.py tablosu kullanilabilir,
+        # imza korundugu icin burada sabit tutuldu.)
         bolt_allowable_stress = 400e6  # Pa
-        required_bolt_area = force_per_bolt / bolt_allowable_stress  # m²
-        required_bolt_diameter = 2 * np.sqrt(required_bolt_area / np.pi)  # m
+        THREAD_STRESS_AREA_RATIO = 0.75  # A_t / (pi/4*d_nom^2), ISO 898-1 yaklasik
+        required_stress_area = force_per_bolt / bolt_allowable_stress  # m^2 (gerekli A_t)
+        required_nominal_area = required_stress_area / THREAD_STRESS_AREA_RATIO  # m^2
+        required_bolt_diameter = 2 * np.sqrt(required_nominal_area / np.pi)  # m (nominal)
         
         # Standard bolt sizes (in meters)
         standard_sizes = [0.006, 0.008, 0.010, 0.012, 0.016, 0.020, 0.024, 0.030, 0.036, 0.042]  # M6 to M42

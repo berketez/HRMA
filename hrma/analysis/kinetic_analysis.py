@@ -290,8 +290,10 @@ class NozzleKineticAnalyzer:
         for i, area_ratio in enumerate(area_ratios):
             # Isentropic relations for initial guess
             if area_ratio == 1.0:  # Throat
-                pressure_ratio = 0.5283  # Critical pressure ratio
-                temp_ratio = 0.8333     # Critical temperature ratio
+                # Kritik oranlar seçilen gamma'dan (1.4/hava sabitleri değil;
+                # modül gamma=1.25 kullanıyor, komşu istasyonlarla tutarlı olmalı)
+                pressure_ratio = (2.0 / (gamma + 1.0)) ** (gamma / (gamma - 1.0))
+                temp_ratio = 2.0 / (gamma + 1.0)
             else:
                 # Supersonic expansion (simplified)
                 mach_approx = self._estimate_mach_from_area_ratio(area_ratio, gamma)
@@ -356,9 +358,11 @@ class NozzleKineticAnalyzer:
                 curr_temp = station['temperature']
                 avg_temp = (prev_temp + curr_temp) / 2
                 
-                # Speed of sound
+                # Speed of sound. Yanma gazı gaz sabiti (havanın 287'si DEĞİL;
+                # yanma ürünleri MW≈24-27 → R≈310-350). Ses hızı ∝ √R olduğu
+                # için 287 kalış süresini çarpıtıyordu.
                 gamma = 1.25
-                R_specific = 287  # J/kg/K (approximate)
+                R_specific = 350.0  # J/kg/K, tipik yanma gazı (R_u/MW, MW≈24)
                 c_avg = np.sqrt(gamma * R_specific * avg_temp)
                 
                 # Average Mach number
@@ -480,10 +484,21 @@ class NozzleKineticAnalyzer:
                     dissociation_rate = self._estimate_dissociation_rate(species, temperature)
                     final_composition[species] *= np.exp(-dissociation_rate * dt)
         
-        # Calculate temperature change due to reactions (simplified)
+        # Kinetik çıkış sıcaklığı: izentropik istasyon değerinden reaksiyon-
+        # entalpi sapması kadar ayrılır. Kinetik (sonlu-hız) akış nozülde
+        # rekombinasyonu GECİKTİRİR; salınmayan kimyasal enerji donmuş
+        # radikallerde kilitli kalır → gaz equilibrium'a göre DAHA SOĞUKtur,
+        # dolayısıyla temperature_loss ≥ 0 olmalı (Vincenti & Kruger Ch.8).
+        # ESKİ HATA: final_temperature = station['temperature'] (izentropik)
+        # ataması, _calculate_kinetic_losses'ta exit_temp_kinetic ile
+        # exit_temp_equilibrium'u eşitleyip temperature_loss=0, dolayısıyla
+        # kinetic_efficiency=1.0'ı HER girdi için sabitliyordu (sahte %100).
+        # NOT: Bu legacy yol basitleştirilmiş bir kestirimdir; yüksek-doğruluk
+        # frozen/shifting analizi kinetic_efficiency.py (/api/kinetic-efficiency,
+        # UI VALIDATION paneli) üzerinden yürür.
         temp_change = self._calculate_temperature_change(composition, final_composition, temperature)
-        final_temperature = station['temperature']  # Use isentropic temperature
-        final_pressure = station['pressure']       # Use isentropic pressure
+        final_temperature = station['temperature'] - abs(temp_change)
+        final_pressure = station['pressure']       # izentropik basınç referansı
         
         # Calculate kinetic losses
         kinetic_loss = self._calculate_kinetic_energy_loss(composition, final_composition, temperature)

@@ -18,7 +18,7 @@ except ImportError:
     ct = None
     CANTERA_AVAILABLE = False
 
-from hrma.constants import G_0, R_UNIVERSAL
+from hrma.constants import G_0, R_UNIVERSAL, PA_PER_BAR
 
 logger = logging.getLogger(__name__)
 
@@ -904,7 +904,13 @@ class CombustionAnalyzer:
         c_star = np.sqrt(R_c * T_c / gamma) / ((2/(gamma+1))**((gamma+1)/(2*(gamma-1))))
         
         # Throat velocity (choked)
-        v_throat = np.sqrt(gamma * R_t * T_t)
+        # DENETIM DUZELTMESI: Bogaz ses hizi YEREL (bogaz) gamma ile
+        # hesaplanir: a_t = sqrt(γ_t·R_t·T_t). Oda gamma'sini bogaz R/T ile
+        # karistirmak fiziksel istasyon tutarsizligiydi (Sutton & Biblarz
+        # 9. baski, Eq. 3-10; bogaz gamma'si denge kaymasi+sicaklik nedeniyle
+        # oda degerinden ~%1-2 farklidir).
+        gamma_throat = thermo_props['stations']['throat']['gamma']
+        v_throat = np.sqrt(gamma_throat * R_t * T_t)
 
         # Exit velocity (Sutton Eq. 3-15 / paper line 151):
         # v_e = sqrt( 2*gamma/(gamma-1) * R * T_c * [1 - (P_e/P_c)^((gamma-1)/gamma)] )
@@ -972,25 +978,27 @@ class CombustionAnalyzer:
                 P = 0.22632 * np.exp(-9.80665 * 0.0289644 * (altitude - 11000) / (8.31432 * T))
             
             # Adjust performance for altitude
-            gamma = motor_data.get('gamma_avg', 1.25)
-            P_c = motor_data['chamber_pressure']
-            
-            # Exit velocity at this altitude
-            pressure_ratio = P_c / P
-            if pressure_ratio > 1:
-                v_exit = np.sqrt(2 * gamma * motor_data['gas_constants']['chamber'] * 
-                               motor_data['conditions']['chamber']['T'] / (gamma - 1) * 
-                               (1 - (P / P_c)**((gamma - 1) / gamma)))
-                
-                cf = v_exit / motor_data['performance']['c_star']
-                isp = v_exit / G_0
-                thrust = motor_data.get('mdot_total', 1.0) * v_exit
-            else:
-                # Under-expanded
-                v_exit = motor_data['performance']['velocities']['exit']
-                cf = motor_data['performance']['cf']
-                isp = motor_data['performance']['isp']
-                thrust = motor_data.get('mdot_total', 1.0) * v_exit
+            # DENETIM DUZELTMESI (Sutton & Biblarz 9. baski, Eq. 3-29): SABIT
+            # geometrili nozul. Ae/At sabit oldugundan cikis Mach'i, Pe ve
+            # v_exit SABITTIR; irtifa yalnizca (Pe - Pa)*Ae basinc-itki
+            # terimini degistirir. Eski kod her irtifada Pe=Pa (tam genlesme)
+            # varsayip v_exit'i yeniden cozuyor ve basinc-itki terimini hic
+            # eklemiyordu -> irtifa kazanimi ve vakum Isp'i sistematik abartili.
+            P_c = motor_data['chamber_pressure']                      # bar
+            v_exit = motor_data['performance']['velocities']['exit']  # m/s (SABIT, tasarim)
+            P_e_bar = motor_data['conditions']['exit']['P']           # bar (tasarim cikis basinci)
+            T_e = motor_data['conditions']['exit']['T']               # K (tasarim cikis statik)
+            R_e = motor_data['gas_constants']['exit']                 # J/(kg·K)
+            c_star = motor_data['performance']['c_star']              # m/s
+            mdot = motor_data.get('mdot_total', 1.0)                  # kg/s
+            # Cikis alani sureklilikten: Ae = mdot/(rho_e*v_exit),
+            # rho_e = Pe/(R_e*T_e) (ideal gaz). Sabit nozul icin Ae SABIT.
+            A_e = mdot * R_e * T_e / (P_e_bar * PA_PER_BAR * v_exit)  # m²
+            # F = mdot*v_exit + (Pe - Pa)*Ae; Pa = P (irtifa ambiyansi, bar).
+            thrust = mdot * v_exit + (P_e_bar - P) * PA_PER_BAR * A_e  # N
+            isp = thrust / (mdot * G_0)                              # s
+            # CF = F/(Pc*At); At = c_star*mdot/Pc -> CF = F/(mdot*c_star).
+            cf = thrust / (mdot * c_star)
             
             performance_data.append({
                 'altitude': altitude,
@@ -1251,33 +1259,23 @@ class CombustionAnalyzer:
                 T = 216.65
                 P = 0.22632 * np.exp(-9.80665 * 0.0289644 * (altitude - 11000) / (8.31432 * T))
             
-            # Adjust performance for altitude
-            gamma = motor_data['performance'].get('gamma_avg', 1.25)
-            P_c = motor_data.get('chamber_pressure', 20.0)  # bar
-            R = motor_data['performance']['gas_constants']['chamber']
-            T_c = motor_data['conditions']['chamber']['T']
-            
-            # Exit velocity at this altitude
-            pressure_ratio = P_c / P
-            if pressure_ratio > 1:
-                v_exit = np.sqrt(2 * gamma * R * T_c / (gamma - 1) * 
-                               (1 - (P / P_c)**((gamma - 1) / gamma)))
-                
-                # Specific impulse at altitude
-                isp_alt = v_exit / G_0
-                
-                # Thrust at altitude (constant mass flow rate)
-                thrust_alt = base_mdot * v_exit
-                
-                # Effective total impulse available at this altitude
-                effective_total_impulse = thrust_alt * motor_data.get('burn_time', 10)
-                
-            else:
-                # Under-expanded (shouldn't happen at reasonable altitudes)
-                v_exit = motor_data['performance']['velocities']['exit']
-                isp_alt = motor_data['performance']['isp']
-                thrust_alt = base_thrust
-                effective_total_impulse = total_impulse
+            # DENETIM DUZELTMESI (Sutton & Biblarz 9. baski, Eq. 3-29): SABIT
+            # geometrili nozul. Ae/At sabit oldugundan v_exit ve Pe SABITTIR;
+            # irtifa yalnizca (Pe - Pa)*Ae basinc-itki terimini degistirir.
+            # Eski kod her irtifada Pe=Pa (tam genlesme) varsayip v_exit'i
+            # yeniden cozuyor ve basinc-itki terimini hic eklemiyordu ->
+            # vakum itki ve Isp'i sistematik olarak abartiliyordu.
+            v_exit = motor_data['performance']['velocities']['exit']   # m/s (SABIT, tasarim)
+            P_e_bar = motor_data['conditions']['exit']['P']            # bar (tasarim cikis basinci)
+            T_e = motor_data['conditions']['exit']['T']                # K
+            R_e = motor_data['performance']['gas_constants']['exit']   # J/(kg·K)
+            burn_time = motor_data.get('burn_time', 10)                # s
+            # Cikis alani sureklilikten: Ae = mdot/(rho_e*v_exit),
+            # rho_e = Pe/(R_e*T_e) (ideal gaz). Sabit nozul icin Ae SABIT.
+            A_e = base_mdot * R_e * T_e / (P_e_bar * PA_PER_BAR * v_exit)  # m²
+            thrust_alt = base_mdot * v_exit + (P_e_bar - P) * PA_PER_BAR * A_e  # N
+            isp_alt = thrust_alt / (base_mdot * G_0)                   # s
+            effective_total_impulse = thrust_alt * burn_time
             
             thrust_data.append({
                 'altitude': altitude,

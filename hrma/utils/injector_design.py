@@ -114,9 +114,22 @@ class InjectorDesign:
             n_holes = params['n_holes']
             d_h = 2 * np.sqrt(A_inj_required / (n_holes * np.pi))
         
-        # Check constraints
-        d_h = max(params['d_min'], min(d_h, params['d_max']))
-        
+        # Check constraints — çapı imalat bandına oturt (denetim bulgusu #118).
+        # Çap kırpılırsa SABİT n_holes ile alan hedef debiyi karşılamaz
+        # (ṁ = Cd·A·√(2ρΔP)); bu yüzden teslim debisini korumak için delik
+        # SAYISI yeniden çözülür: n = ceil(A_gerekli / delik_alanı). Aksi halde
+        # gerçek mdot_ox hedeften sapıp O/F ve performans yanlış hesaplanır.
+        d_h_clamped = max(params['d_min'], min(d_h, params['d_max']))
+        if not np.isclose(d_h_clamped, d_h, rtol=1e-9):
+            area_per_hole = np.pi * (d_h_clamped / 2)**2
+            n_holes = max(4, int(np.ceil(A_inj_required / area_per_hole)))
+            warnings.warn(
+                f"Delik çapı imalat bandına ({params['d_min']*1000:.2f}-"
+                f"{params['d_max']*1000:.2f} mm) kırpıldı; hedef debiyi korumak "
+                f"için delik sayısı {n_holes}'e ayarlandı."
+            )
+        d_h = d_h_clamped
+
         # Recalculate with final values
         A_inj = n_holes * np.pi * (d_h/2)**2
         # Use consistent velocity calculation
@@ -127,10 +140,14 @@ class InjectorDesign:
         # ρ: kg/m³, v: m/s, D: m, μ: Pa·s = kg/(m·s)
         # N2O sıvısı için 20°C'de viskozite: ~0.0002 Pa·s
         
-        # Sıcaklık etkisiyle viskozite düzeltmesi (NIST verileri)
-        T_inj = 293  # K (20°C varsayılan)
-        mu_corrected = self.mu_ox * (T_inj / 273.15) ** 0.5  # Sıcaklık düzeltmesi
-        
+        # Viskozite (denetim bulgusu #132): self.mu_ox NIST/CoolProp'tan zaten
+        # enjeksiyon sıcaklığında (oxidizer_temp) alınıyor, o yüzden EK sıcaklık
+        # düzeltmesi uygulanmaz — çift-sayım olur. Eski kod gaz kinetik
+        # teorisinin √T ölçeklemesini (μ sıcaklıkla ARTAR) uyguluyordu; oysa
+        # sıvılarda viskozite sıcaklıkla AZALIR (Andrade: μ ∝ exp(B/T)) — yön
+        # de yanlıştı. Doğru değer doğrudan mu_ox'tur.
+        mu_corrected = self.mu_ox
+
         Re = self.rho_ox * v_exit * d_h / mu_corrected
         
         # Fiziksel kontrol - Reynolds sayısı 1000-200000 arası olmalı

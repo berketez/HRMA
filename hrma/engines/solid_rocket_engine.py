@@ -419,19 +419,29 @@ class SolidRocketEngine:
             r_outer = self.D_chamber / 2
             return np.pi * r_outer**2
     
-    def burn_rate(self, pressure, temperature=298.15, port_diameter_ratio=1.0):
+    def burn_rate(self, pressure, temperature=None, port_diameter_ratio=1.0):
         """High-precision burn rate with Saint-Robert's law + corrections (99.8% accuracy)"""
         # Saint-Robert yasası: r = a * P^n with advanced corrections
         # Birim kontrolü: a (m/s/bar^n), P (bar), sonuç (m/s)
-        
+        # OPUS DENETİM DÜZELTMESİ (#434): sıcaklık referansı TEK noktaya
+        # (self.temp_ref) sabitlendi. Önceden buradaki lineer düzeltme 298.15 K,
+        # initial_temp override'ı (a·exp(σp·(T0−temp_ref))) ise 293.15 K referansı
+        # kullanıyordu — aynı fiziksel sıcaklık-duyarlılığı iki farklı referansla
+        # ölçekleniyordu. Referans verilmezse temp_ref alınır → çarpan 1.0 (nötr,
+        # eski varsayılan davranışla sayısal olarak özdeş).
+        if temperature is None:
+            temperature = self.temp_ref
+
         if pressure <= 0.1:  # Minimum combustion pressure threshold
             return 0.0
             
         # Base Saint-Robert's law calculation
         base_rate = self.a * (pressure ** self.n)  # m/s
         
-        # Temperature effect correction (Arrhenius-type)
-        temp_correction = 1.0 + self.burn_rate_temp_coeff * (temperature - 298.15)
+        # Sıcaklık etkisi düzeltmesi (σp·ΔT lineer form). Referans self.temp_ref
+        # ile initial_temp override'ı TUTARLI (Sutton & Biblarz Böl. 12: sıcaklık
+        # duyarlılığı r = r_ref·exp(σp·(T−T_ref)) ≈ r_ref·(1+σp·(T−T_ref)))
+        temp_correction = 1.0 + self.burn_rate_temp_coeff * (temperature - self.temp_ref)
         
         # Pressure plateau effect at high pressures (verified from test data)
         if pressure > 100:  # bar
@@ -439,8 +449,16 @@ class SolidRocketEngine:
         else:
             pressure_plateau = 1.0
             
-        # Erosive burning correction (Summerfield criterion)
-        # G = mdot / (π * D * μ) where μ is dynamic viscosity
+        # Erosive burning correction (Summerfield / Lenoir-Robillard).
+        # G = mdot / (π * D * μ) where μ is dynamic viscosity. Baskın terim
+        # kütle-akısı bağımlılığı reynolds_factor = (G/500)^0.8'dir.
+        # DENETİM NOTU (#446, BELİRSİZ — kasıtlı DEĞİŞTİRİLMEDİ): port_diameter_ratio
+        # çarpanı web açıldıkça büyür (~0.3→~1); oysa Lenoir-Robillard geometrik
+        # bağımlılık D^-0.2 (çapla TERS) olup erozyon küçük port/yüksek G'de
+        # (yanma başı) en güçlüdür — yani bu terimin işareti fiziksel olarak
+        # tartışmalıdır. Net model çökmüyor (G^0.8 baskın), ANCAK
+        # erosive_burning_coeff mevcut forma göre kalibre olduğundan terim
+        # değiştirilirse katsayı yeniden kalibre edilmelidir → davranış korunuyor.
         if hasattr(self, 'mass_flux') and self.mass_flux > 100:  # kg/m²s
             reynolds_factor = (self.mass_flux / 500) ** 0.8
             erosive_factor = 1.0 + self.erosive_burning_coeff * reynolds_factor * port_diameter_ratio
@@ -515,27 +533,21 @@ class SolidRocketEngine:
             
             CF_ideal = np.sqrt(gamma_term * stagnation_term * expansion_term)
             
-            # Nozzle efficiency corrections
-            # 1. Divergence loss (conical nozzle)
-            divergence_loss = (1 + np.cos(np.radians(15))) / 2  # 15° half-angle
-            
-            # 2. Boundary layer loss (Reynolds number dependent)
-            Re_throat = 1e6  # Typical value
-            bl_loss = 1 - 0.0015 * (1e6 / Re_throat) ** 0.2
-            
-            # 3. Heat transfer loss
-            heat_loss = 0.998  # 0.2% typical heat loss
-            
-            # Combined nozzle efficiency
-            eta_nozzle = divergence_loss * bl_loss * heat_loss * self.nozzle_efficiency
+            # Nozul verimi — ana itki eğrisiyle (satır ~1777) TUTARLI olmalı.
+            # OPUS DENETİM DÜZELTMESİ (#530, diverjans ÇİFT SAYIMI):
+            # self.nozzle_efficiency yakıt tablosunda zaten "Divergence + friction
+            # losses" içeriyor (bkz. satır ~145, 0.985). Önceki kod eta_nozzle =
+            # divergence_loss·bl_loss·heat_loss·nozzle_efficiency kurarak 15° konik
+            # diverjans kaybını (λ=(1+cosα)/2, Sutton & Biblarz Böl. 3) ve
+            # sürtünmeyi İKİNCİ kez uyguluyordu → irtifa Isp'i ~%1.7 düşük çıkıyor,
+            # headline deniz-seviyesi Isp (yalnız nozzle_efficiency kullanır) ile
+            # tutarsız oluyordu. Diverjans tek yerde (nozzle_efficiency) uygulanır.
+            eta_nozzle = self.nozzle_efficiency
             
             CF_actual = CF_ideal * eta_nozzle
             
             # Specific impulse at this altitude
             isp_altitude = CF_actual * self.c_star / self.g0
-            
-            # Thrust variation with altitude
-            thrust_altitude_ratio = CF_actual / (CF_ideal * self.nozzle_efficiency)
             
             altitude_data.append({
                 'altitude': alt,
@@ -545,9 +557,24 @@ class SolidRocketEngine:
                 'thrust_coefficient': CF_actual,
                 'nozzle_efficiency': eta_nozzle,
                 'specific_impulse': isp_altitude,
-                'thrust_ratio': thrust_altitude_ratio
+                'thrust_ratio': 1.0  # deniz seviyesine göre normalize edilir (aşağıda)
             })
-        
+
+        # OPUS DENETİM DÜZELTMESİ (#538): 'thrust_ratio' önceden
+        # CF_actual/(CF_ideal·nozzle_efficiency) idi; CF_ideal sadeleşince
+        # irtifadan BAĞIMSIZ bir sabit (~0.98) veriyordu ("Thrust variation with
+        # altitude" etiketi yanıltıcıydı). Gerçek itki değişimini yansıtmak için
+        # her irtifadaki itki katsayısını en düşük irtifadakine (≈deniz seviyesi)
+        # oranlıyoruz → CF_actual, expansion_term (1−(Pe/Pc)^((γ−1)/γ)) üzerinden
+        # ortam basıncı düştükçe artar, dolayısıyla oran irtifayla >1'e çıkar.
+        if altitude_data:
+            ref_idx = min(range(len(altitude_data)),
+                          key=lambda k: altitude_data[k]['altitude'])
+            cf_ref = altitude_data[ref_idx]['thrust_coefficient']
+            if cf_ref > 0:
+                for d in altitude_data:
+                    d['thrust_ratio'] = d['thrust_coefficient'] / cf_ref
+
         return altitude_data
     
     def _calculate_detailed_analysis(self, curve):
@@ -569,7 +596,15 @@ class SolidRocketEngine:
         theoretical_mass_flow = np.mean(curve['mass_flow'])
         
         # Combustion efficiency metrics
-        c_star_efficiency = self.c_star / 1600 * 100  # Normalized to ideal APCP
+        # DENETİM NOTU (#572, BELİRSİZ — kasıtlı DEĞİŞTİRİLMEDİ): Bu değer GERÇEK
+        # c* verimi DEĞİLDİR. Gerçek η_c* = c*_ölçülen/c*_teorik olup AYNI yakıtın
+        # teorik değerine göredir (Sutton). Burada self.c_star sabit APCP idealine
+        # (1600 m/s) bölünüyor → bu "APCP referansına göre c* enerji ORANI"dır;
+        # düşük-enerjili ama tam-verimli bir yakıtı (ör. şeker c*≈921 → ~%57.6)
+        # "düşük verimli" gösterir. Ölçülen c* verisi olmadığından gerçek verim
+        # türetilemez; dict anahtar sözleşmesi (c_star_efficiency_percent) test/UI
+        # tarafından beklendiğinden korunuyor. Yorumlanırken bu sınır dikkate alın.
+        c_star_efficiency = self.c_star / 1600 * 100  # APCP referansına göre c* oranı (%)
         
         return {
             'thrust_profile_analysis': {
@@ -638,11 +673,31 @@ class SolidRocketEngine:
         # Heat transfer calculations
         convective_heat_flux = self._calculate_heat_flux()
         case_temperature = self._calculate_case_temperature()
-        
+
+        # OPUS DENETİM DÜZELTMESİ (#645): 'heat_release_rate_mw' önceden
+        # rho_p·2500·Hacim/1e6 idi — bu bir ENERJİ (kütle×2500 J/kg = J) olup
+        # zaman türevi içermiyordu, yani bir GÜÇ (MW) değildi; ayrıca 2500 J/kg
+        # katı yakıt reaksiyon ısısı için ~1000× düşüktü. Doğru güç:
+        #   P = ṁ_gen · Q_reaksiyon   [W]
+        # ṁ_gen = rho_p·A_burn0·r(Pc) (tasarım noktası kütle üretim debisi),
+        # Q_reaksiyon = cp·(Tc−298.15) (ürünleri alev sıcaklığına çıkaran entalpi;
+        # APCP için ~6 MJ/kg, literatürle uyumlu). cp ve R yakıtın c* ve γ'sından
+        # Vandenkerckhove/Γ bağıntısıyla türetilir (Sutton & Biblarz Eq. 3-32):
+        #   Γ = √γ·(2/(γ+1))^((γ+1)/(2(γ−1))),  R = (c*·Γ)²/Tc,  cp = γR/(γ−1)
+        gamma = self.gamma
+        gamma_fn = np.sqrt(gamma) * (2.0 / (gamma + 1.0)) ** (
+            (gamma + 1.0) / (2.0 * (gamma - 1.0)))
+        R_specific = (self.c_star * gamma_fn) ** 2 / self.T_c  # J/kg/K
+        cp_gas = gamma * R_specific / (gamma - 1.0)             # J/kg/K
+        q_reaction = cp_gas * max(self.T_c - 298.15, 0.0)       # J/kg
+        A_burn_0 = self.calculate_burn_area(0.0)
+        mdot_gen = self.rho_p * A_burn_0 * self.burn_rate(self.P_c) if A_burn_0 > 0 else 0.0
+        heat_release_rate_mw = mdot_gen * q_reaction / 1e6      # MW (güç = ṁ·Q)
+
         return {
             'combustion_thermal': {
                 'flame_temperature_k': self.T_c,
-                'heat_release_rate_mw': self.rho_p * 2500 * np.pi * (self.D_chamber/2)**2 * self.L_grain / 1e6,
+                'heat_release_rate_mw': heat_release_rate_mw,
                 'thermal_efficiency_percent': 85.2
             },
             'heat_transfer': {
@@ -1456,7 +1511,13 @@ class SolidRocketEngine:
     
     def _calculate_wet_mass(self):
         """Calculate wet mass with propellant"""
-        grain_volume = np.pi * (self.D_chamber**2/4 - self.D_core**2/4) * self.L_grain
+        # DENETİM DÜZELTMESİ (#1459): grain hacmi tek kaynaktan (_propellant_volume)
+        # alınır — bu fonksiyon grain tipine DUYARLIDIR (BATES/tübüler annulus,
+        # end-burner tam silindir, star/wagon poligon-ofset). Eski sabit annulus
+        # formülü np.pi*(D_ch²−D_core²)/4*L, end-burner ve star grainlerde yakıt
+        # kütlesini yanlış (end-burner'da EKSİK) sayıyordu. calculate_performance
+        # zaten _propellant_volume kullanıyor; wet_mass artık onunla tutarlı.
+        grain_volume = self._propellant_volume()
         propellant_mass = grain_volume * self.rho_p
         return self._calculate_dry_mass() + propellant_mass
     
@@ -1494,7 +1555,18 @@ class SolidRocketEngine:
     def _calculate_safety_analysis(self, curve):
         """Safety analysis like other systems"""
         max_pressure = np.max(curve['pressure'])
-        pressure_safety_factor = 100 / max_pressure  # Assuming 100 bar design limit
+        # DENETİM DÜZELTMESİ (#1497): emniyet katsayısı GERÇEK kasa dayanımından
+        # türetilir, sabit 100 bar varsayımından değil. Kasa duvarı
+        # _calculate_dry_mass ile AYNI boyutlandırmadan gelir (AISI 4130,
+        # sigma_y=250 MPa, tasarım SF=3, hoop t=P·r/(σy/SF)). Kasanın akmaya
+        # başladığı (yield) basınç: P_yield = σy·t/r. Böylece raporlanan SF
+        # gerçek duvar kalınlığı/malzemeyle tutarlıdır (Barlow ince-cidar hoop).
+        sigma_y = 250e6      # Pa, AISI 4130 akma (dry_mass ile aynı)
+        SF_design = 3.0      # tasarım emniyet katsayısı (dry_mass ile aynı)
+        r_inner = self.D_chamber / 2
+        t_wall = max((self.P_c * 1e5) * r_inner / (sigma_y / SF_design), 0.002)  # m
+        yield_pressure_bar = (sigma_y * t_wall / r_inner) / 1e5  # bar
+        pressure_safety_factor = yield_pressure_bar / max_pressure if max_pressure > 0 else float('inf')
         
         return {
             'pressure_safety': {
@@ -1629,8 +1701,20 @@ class SolidRocketEngine:
         return thermal_stress + pressure_stress
     
     def _calculate_heat_flux(self):
-        """Calculate convective heat flux"""
-        return self.T_c * 0.002  # kW/m², simplified calculation
+        """Konvektif ısı akısı (kW/m²) — BASİTLEŞTİRİLMİŞ PLACEHOLDER.
+
+        DENETİM UYARISI (#1633, BELİRSİZ — kasıtlı DEĞİŞTİRİLMEDİ): Bu ifade
+        (T_c·0.002) FİZİKSEL DEĞİLDİR ve tipik değerin ~100-4000× ALTINDA sonuç
+        verir. Gerçek roket boğaz/oda konvektif akısı Bartz (1957) korelasyonuyla
+        ~1-30 MW/m² (=1000-30000 kW/m²) mertebesindedir:
+            h_g ∝ Pc^0.8 / D_t^0.2,   q = h_g·(T_aw − T_wall).
+        Doğru değer için Bartz tabanlı bir model gerekir; bu placeholder yalnız
+        arayüzde GÖSTERİM amaçlı bir diagnostik olup termal koruma/soğutma
+        TASARIMINDA KULLANILMAMALIDIR. Kalibrasyon/aşağı-akış bağımlılığı
+        bilinmediğinden ve yanlış Bartz uygulaması yeni hata riski taşıdığından
+        sayısal değer bu denetimde değiştirilmedi (BELİRSİZ olarak raporlandı).
+        """
+        return self.T_c * 0.002  # kW/m² (PLACEHOLDER — bkz. yukarıdaki uyarı; ~1000× düşük)
     
     def _calculate_case_temperature(self):
         """Calculate case temperature"""
@@ -1675,7 +1759,8 @@ class SolidRocketEngine:
         burn_rate_data = []
         
         t = 0
-        current_temp = 298.15  # Initial temperature (K)
+        current_temp = self.temp_ref  # Başlangıç sıcaklığı = yanma-hızı referansı (K)
+        # (#434 tutarlılık: temp_correction ateşlemede nötr (1.0) başlar; delta korunur)
 
         # ------------------------------------------------------------------
         # Boğaz alanı TASARIM NOKTASINDA BİR KEZ boyutlandırılır ve yanma

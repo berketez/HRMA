@@ -51,18 +51,41 @@ def _atmosphere(h):
 
     ISA_LAYERS kayıt formatı: (h_taban, T_taban, lapse, P_taban) —
     constants.py'deki sırayla birebir (karıştırma NaN üretir!).
+
+    Tablo üstü (>84.852 km geopotansiyel) izotermal uzantıyla ele alınır
+    (kardeş trajectory_analysis._atm_full ile TUTARLI). USSA 1976 tablosu
+    84.852 km'de biter; 71 km katmanının lapse=-0.002 gradyanını sonsuza
+    uzatmak sıcaklığı ~178 km'de negatife çeker → (T/T_base)^(...) kesirli
+    üssü karmaşık/NaN üretir. Bu nedenle tablo üstünde T o noktadaki değere
+    (~187 K, mezopoz) sabitlenir ve basınç izotermal sönümle azalır.
     """
     h = max(h, 0.0)
     H = h * R_EARTH / (R_EARTH + h)  # geopotansiyel
-    T, P = 288.15, 101325.0
-    for base, T_base, lapse, P_base in ISA_LAYERS:
-        if H >= base:
-            if lapse == 0.0:
-                T = T_base
-                P = P_base * np.exp(-G0 * (H - base) / (R_AIR * T_base))
-            else:
-                T = T_base + lapse * (H - base)
-                P = P_base * (T / T_base) ** (-G0 / (lapse * R_AIR))
+    H_TABLE_TOP = 84852.0            # m, USSA 1976 üst geopotansiyel sınır
+
+    if H <= H_TABLE_TOP:
+        T, P = 288.15, 101325.0
+        for base, T_base, lapse, P_base in ISA_LAYERS:
+            if H >= base:
+                if lapse == 0.0:
+                    T = T_base
+                    P = P_base * np.exp(-G0 * (H - base) / (R_AIR * T_base))
+                else:
+                    T = T_base + lapse * (H - base)
+                    P = P_base * (T / T_base) ** (-G0 / (lapse * R_AIR))
+    else:
+        # Tablo üstü: son katmandan (71 km) 84.852 km'ye inilen sıcaklıkta
+        # izotermal uzantı. Katsayılar ISA_LAYERS son katmanından türetilir
+        # (magic number yok; _atm_full ile birebir aynı fizik).
+        base_top, T_base_top, lapse_top, P_base_top = ISA_LAYERS[-1]
+        T_top = T_base_top + lapse_top * (H_TABLE_TOP - base_top)
+        P_top = P_base_top * (T_top / T_base_top) ** (-G0 / (lapse_top * R_AIR))
+        T = T_top
+        P = P_top * np.exp(-G0 * (H - H_TABLE_TOP) / (R_AIR * T_top))
+
+    # Sayısal güvenlik tabanı (kardeş _atm_full ile aynı): T, P pozitif kalsın.
+    T = max(float(T), 150.0)
+    P = max(float(P), 1e-9)
     rho = P / (R_AIR * T)
     return rho, np.sqrt(GAMMA_AIR * R_AIR * T)
 

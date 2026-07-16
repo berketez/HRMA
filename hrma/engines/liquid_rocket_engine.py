@@ -1283,7 +1283,16 @@ class LiquidRocketEngine:
 
             # Exit conditions
             exit_mach = np.sqrt(2 / (gamma - 1) * ((self.P_c / pressure_atm)**((gamma-1)/gamma) - 1))
-            exit_velocity = exit_mach * np.sqrt(gamma * 287 * T)  # Approximate
+            # DENETIM DUZELTMESI: Cikis hizi = Me * a_exit; a_exit yanma gazinin
+            # OZGUL gaz sabiti (R_UNIVERSAL/mw ~330 J/kg·K) ve nozul CIKIS statik
+            # sicakligiyla hesaplanir. Havanin 287'si ve ambiyans sicakligi T
+            # yanlisti (100 km'de T=1000 K termosfer -> sacma deger). Dogrusu:
+            # a_exit = sqrt(γ·R_gas·T_exit), T_exit = Tc/(1+(γ-1)/2·Me²).
+            # T_exit Me ile azaldigindan cikis hizi fiziksel ust sinir
+            # sqrt(2·cp·Tc)'yi asmaz (Sutton & Biblarz Eq. 3-15/3-16).
+            R_gas_exit = R_UNIVERSAL / self.mw  # J/(kg*K), yanma urunu gazi
+            T_exit_static = self.T_c / (1 + (gamma - 1) / 2 * exit_mach**2)  # K
+            exit_velocity = exit_mach * np.sqrt(gamma * R_gas_exit * T_exit_static)
 
             altitude_data.append({
                 'altitude': alt,
@@ -2046,7 +2055,12 @@ class LiquidRocketEngine:
         mdot_total = getattr(self, 'mdot_total', self.F / (300 * G_0))
         rho_ox = getattr(self, 'rho_ox', 1200)
         rho_fuel = getattr(self, 'rho_fuel', 800)
-        residence_time = chamber_volume / (mdot_total / (rho_ox + rho_fuel) * 2)  # s
+        # DENETIM DUZELTMESI: Kalis suresi τ = ρ_gaz·V_c/ṁ ile hesaplanir.
+        # Yanma odasinda akiskan GAZ fazindadir; sivi propellant yogunlugu
+        # (~1000 kg/m³) kullanmak τ'yu ~130x fazla veriyordu (ve Damkohler
+        # sayisini ayni oranda sisiriyordu). ρ_gaz = Pc/(R_gas·Tc) ideal gaz.
+        rho_gas_chamber = (self.P_c * PA_PER_BAR) / ((R_UNIVERSAL / self.mw) * self.T_c)  # kg/m³
+        residence_time = chamber_volume * rho_gas_chamber / mdot_total  # s
         mixing_time = 0.002  # s typical for impinging injectors
         
         # Mixing efficiency based on momentum ratio
@@ -2062,7 +2076,13 @@ class LiquidRocketEngine:
         damkohler_number = residence_time / mixing_time  # Dimensionless
         combustion_efficiency = 1 - np.exp(-damkohler_number * 0.1)
         combustion_efficiency = max(0.90, min(0.99, combustion_efficiency))  # 90-99% range
-        
+
+        # DENETIM DUZELTMESI: Boyuna (L1) akustik mod ses hizi YANMA GAZI ile
+        # hesaplanir: a = sqrt(γ·R_gas·Tc) (~1200-1300 m/s, Tc~3600K). Havanin
+        # oda-sicakligi ses hizi 343 m/s frekansi ~3.7x hafife aliyordu
+        # (combustion instability metrigi -> yaniltici). f = a/(2L).
+        a_chamber = np.sqrt(self.gamma * (R_UNIVERSAL / self.mw) * self.T_c)  # m/s
+
         return {
             'chamber_geometry': {
                 'diameter': chamber_diameter * 1000,  # mm
@@ -2081,7 +2101,7 @@ class LiquidRocketEngine:
                 'optimal_momentum_ratio': optimal_momentum_ratio
             },
             'stability_analysis': {
-                'acoustic_frequency': 343 / (2 * chamber_length),  # Hz
+                'acoustic_frequency': a_chamber / (2 * chamber_length),  # Hz
                 'combustion_response_time': mixing_time * 1000,  # ms
                 'stability_rating': 'Stable',
                 'damping_mechanisms': ['Acoustic liners', 'Baffles', 'Variable geometry']

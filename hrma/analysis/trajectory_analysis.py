@@ -525,8 +525,14 @@ class TrajectoryAnalyzer:
         range_distance = trajectory['position_x'][-1]
 
         # Motor performance metrics
-        thrust_to_weight = motor_data['thrust'] / (self.vehicle_mass_dry * self.g0)
-        total_impulse_to_weight = motor_data['total_impulse'] / (self.vehicle_mass_dry * self.g0)
+        # Kalkış itki-ağırlık oranı BRÜT (yüklü) kütleyle hesaplanır:
+        # T/W = F / (m_0·g0), m_0 = m_kuru + m_yakıt (Sutton & Biblarz, Böl. 4;
+        # standart fırlatma aracı konvansiyonu). Kuru (yanma-sonu) kütle
+        # kullanmak T/W'yi (m_kuru+m_yakıt)/m_kuru katı şişirir → ray-çıkış
+        # >1.5 stabilite kuralına karşı TEHLİKELİ derecede iyimser sonuç verir.
+        loaded_mass = self.vehicle_mass_dry + motor_data['propellant_mass_total']
+        thrust_to_weight = motor_data['thrust'] / (loaded_mass * self.g0)
+        total_impulse_to_weight = motor_data['total_impulse'] / (loaded_mass * self.g0)
 
         # Efficiency metrics
         burnout_altitude = trajectory['phases']['powered']['max_altitude_powered']

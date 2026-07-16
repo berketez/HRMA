@@ -634,7 +634,15 @@ class HeatTransferAnalyzer:
 
         # Reynolds / Nusselt reported at the throat for reference/diagnostics.
         throat_d = throat['throat_diameter']
-        rho_throat = chamber_pressure / (gas['gas_constant'] * throat['throat_temperature'])
+        # Boğaz statik yoğunluğu STATİK boğaz basıncıyla hesaplanmalı: tıkanmış
+        # (M=1) boğazda statik basınç P_t = Pc·(2/(γ+1))^(γ/(γ-1)) < Pc'dir.
+        # Durgunluk oda basıncı Pc'yi statik boğaz sıcaklığıyla (T_t) eşleştirmek
+        # yoğunluğu -ve dolayısıyla raporlanan Reynolds/Nusselt'i- ~1.8x şişirir.
+        # Tutarlılık: rho_t·a_t = Pc/c* (boğaz kütle akısı). Yalnız diagnostik
+        # (h_gas ayrı Bartz korelasyonuyla hesaplanır, bu değerden etkilenmez).
+        throat_static_pressure = chamber_pressure * (2.0 / (gas['gamma'] + 1.0)) ** (
+            gas['gamma'] / (gas['gamma'] - 1.0))
+        rho_throat = throat_static_pressure / (gas['gas_constant'] * throat['throat_temperature'])
         a_throat = np.sqrt(gas['gamma'] * gas['gas_constant'] * throat['throat_temperature'])
         v_throat = a_throat  # M=1
         reynolds = rho_throat * v_throat * throat_d / gas['gas_viscosity']

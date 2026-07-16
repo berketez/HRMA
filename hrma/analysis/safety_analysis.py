@@ -401,23 +401,28 @@ class SafetyAnalyzer:
         # Scaled distance formula: Z = R / W^(1/3)
         # Where R = distance (m), W = TNT equivalent (kg)
         
+        # (aşırı-basınç [Pa], ölçekli mesafe Z [m/kg^(1/3)]) çiftleri.
+        # Z değerleri serbest-hava küresel TNT patlaması için doğrulanmış
+        # Kingery-Bulmash / Kinney-Graham eğrisinden alınmıştır (UFC 3-340-02,
+        # Kinney & Graham "Explosive Shocks in Air" 2nd ed.). ESKİ HATA:
+        # Z = 0.067·(P/1e5)^(-0.4) katsayısı ~30-60x KÜÇÜK Z veriyordu
+        # (100 kPa'da 0.067 yerine ~2.4 olmalı) → emniyet mesafelerini tehlikeli
+        # şekilde az gösteriyordu. Değerler konservatif (biraz büyük) tarafta.
         overpressures = {
-            'lethal': 100000,      # Pa (100 kPa)
-            'serious_injury': 35000,  # Pa (35 kPa)
-            'minor_injury': 7000,     # Pa (7 kPa)
-            'property_damage': 2000   # Pa (2 kPa)
+            'lethal':          (100000, 2.4),   # 100 kPa
+            'serious_injury':  (35000,  4.5),   # 35 kPa
+            'minor_injury':    (7000,  10.5),   # 7 kPa
+            'property_damage': (2000,  20.0),   # 2 kPa
         }
-        
+
         distances = {}
-        for level, pressure in overpressures.items():
-            # Simplified Kingery-Bulmash relationship
-            scaled_distance = 0.067 * (pressure / 100000) ** (-0.4)
-            distance = scaled_distance * (tnt_equivalent ** (1/3))
+        for level, (pressure, scaled_distance) in overpressures.items():
+            distance = scaled_distance * (tnt_equivalent ** (1.0 / 3.0))
             distances[level] = {
                 'distance_m': distance,
                 'overpressure_kpa': pressure / 1000
             }
-        
+
         return distances
     
     def _calculate_fragment_hazards(self, propellant_mass: float, thrust: float) -> Dict:
@@ -426,12 +431,20 @@ class SafetyAnalyzer:
         # Estimate case mass (empirical relationship)
         case_mass = propellant_mass * 0.15  # Typical case mass fraction
         
-        # Fragment velocity estimation (Gurney equation approximation)
-        gurney_velocity = 2700  # m/s for steel case
-        fragment_velocity = gurney_velocity * np.sqrt(propellant_mass / (propellant_mass + case_mass/2))
-        
-        # Fragment range (45-degree trajectory, no air resistance)
-        max_range = fragment_velocity**2 / 9.81
+        # Fragment velocity estimation (Gurney equation approximation).
+        # Gurney silindir formu: V = √(2E)·√(C/(M + C/2)); C = şarj (yakıt),
+        # M = kılıf (metal) kütlesi. ESKİ HATA: payda propellant + case/2
+        # (C + M/2) yazılmıştı → M ve C rolleri ters. Doğru payda M + C/2.
+        gurney_velocity = 2700  # m/s (√(2E), çelik kılıf için tipik)
+        fragment_velocity = gurney_velocity * np.sqrt(
+            propellant_mass / (case_mass + propellant_mass / 2))
+
+        # Fragment range. Vakum/45° menzili (v²/g) aerodinamik sürüklemeyi
+        # ihmal eder ve ~2600 m/s parça için ~700 km gibi FİZİKSEL OLMAYAN
+        # değer verir. Gerçek roket parçaları sürükleme-sınırlıdır; pratik
+        # üst sınırla kırpılır (tahliye mesafesi hesabına saçma değer gitmesin).
+        vacuum_range = fragment_velocity ** 2 / 9.81
+        max_range = min(vacuum_range, 2000.0)  # m, sürükleme-sınırlı pratik tavan
         
         # Lethal fragment analysis
         lethal_fragment_mass = 0.01  # kg (10g fragment considered lethal)
@@ -455,14 +468,20 @@ class SafetyAnalyzer:
     def _calculate_qd_requirements(self, tnt_equivalent: float) -> Dict:
         """Calculate quantity-distance requirements for different exposed sites"""
         
-        # NATO STANAG 4123 / DOD 6055.9-STD relationships
-        # K-factors for different exposed sites
+        # NATO STANAG 4123 / DOD 6055.9-STD ilişkileri, R = K·W^(1/3).
+        # DDESB/UFC 3-340-02 K-faktörleri klasik olarak ft/lb^(1/3)
+        # birimindedir; bu modül W'yi kg, R'yi m ile kullandığından metrik
+        # eşdeğere çevrildi (çarpan 0.3048/0.4536^(1/3) = 0.3966 m·lb^(1/3)/
+        # (ft·kg^(1/3))). ESKİ HATA: imperial 40/18/... değerleri doğrudan
+        # metrik girdiye uygulanıp mesafeler ~2.5x abartılıyordu.
+        # Örn. IBD: 40 ft/lb^(1/3) → 15.9 m/kg^(1/3).
+        _IMP_TO_METRIC = 0.3966
         k_factors = {
-            'inhabited_building': 40,      # K = 40
-            'public_traffic_route': 18,    # K = 18
-            'explosives_facility': 12,     # K = 12
-            'personnel_facility': 22,      # K = 22
-            'ammunition_storage': 12       # K = 12
+            'inhabited_building':   40 * _IMP_TO_METRIC,   # ≈15.9 (IBD)
+            'public_traffic_route': 18 * _IMP_TO_METRIC,   # ≈7.14 (PTRD)
+            'explosives_facility':  12 * _IMP_TO_METRIC,   # ≈4.76
+            'personnel_facility':   22 * _IMP_TO_METRIC,   # ≈8.73
+            'ammunition_storage':   12 * _IMP_TO_METRIC,   # ≈4.76
         }
         
         qd_distances = {}

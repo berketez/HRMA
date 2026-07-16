@@ -289,9 +289,13 @@ class HybridRocketEngine:
             altitudes
         )
         
-        # Optimum O/F ratio
+        # Optimum O/F ratio — oksitleyiciyi 'ox' (self.oxidizer_type) ile geçir
+        # (denetim bulgusu #294). Eski 'N2O' sabiti LOX/H2O2 motorlarında yanlış
+        # kimya/stokiyometri kullanıp optimum O/F'yi ve max Isp'yi kaydırıyordu
+        # (HTPB stok. O/F: N2O~7-8, LOX~2). combustion analyzer adı .lower() ile
+        # normalize ettiğinden n2o motorlarında sonuç değişmez (test güvenli).
         optimum_of = self.combustion_analyzer.find_optimum_of_ratio(
-            fuel_composition, 'N2O', self.P_c
+            fuel_composition, ox, self.P_c
         )
         
         # Total impulse to thrust at altitudes
@@ -529,35 +533,63 @@ class HybridRocketEngine:
         return CF_momentum + CF_pressure
     
     def _get_oxidizer_density(self):
-        """Sıvı N2O besleme yoğunluğu [kg/m³].
+        """Sıvı oksitleyici besleme yoğunluğu [kg/m³] — self.oxidizer_type'a göre.
 
         Faz, O/F oranından DEĞİL besleme (tank) koşulundan belirlenir
-        (denetim bulgusu #2): bu modül self-pressurized sıvı N2O beslemesi
-        varsayar (referans tank sıcaklığı 25°C). Gaz enjeksiyonu için ayrıca
-        sıkıştırılabilir orifis modeli gerekir ve burada modellenmemiştir.
+        (denetim bulgusu #2): sıvı-faz besleme varsayılır. Yoğunluk enjeksiyon
+        hızına (v=√(2ΔP/ρ)) ve orifis alanına (A=mdot/(Cd·√(2ρΔP))) beslendiği
+        için oksitleyiciye göre DOĞRU değer kullanılmalıdır (denetim bulgusu
+        #550): eski kod her oksitleyicide N2O yoğunluğu döndürüp LOX/H2O2
+        enjektör hız/orifis boyutunu ~%20-30 hatalı veriyordu.
 
-        Birincil kaynak: external_data_fetcher (CoolProp/NIST, yoksa
-        Span-Wagner EOS korelasyonu). Erişilemezse literatür sabiti
-        N2O_LIQUID_DENSITY_SAT_25C kullanılır (NIST WebBook,
-        Lemmon & Span 2006 EOS: 298.15 K doygun sıvı ≈ 743 kg/m³).
+        - N2O: self-pressurized, 25°C doygun sıvı. Birincil kaynak
+          external_data_fetcher (CoolProp/NIST, yoksa Span-Wagner EOS);
+          erişilemezse N2O_LIQUID_DENSITY_SAT_25C (≈745 kg/m³, NIST WebBook,
+          Lemmon & Span 2006).
+        - LOX / H2O2 / diğer: merkezi oksitleyici tablosundan
+          (PropellantDatabase) işletme sıvı yoğunluğu (LOX≈1141 kg/m³ @ 90 K,
+          H2O2 %98 ≈1450 kg/m³ @ 25°C). fetch_nist_oxidizer_properties bu
+          akışkanları desteklemeyip sessizce N2O'ya düştüğünden (ve LOX 25°C'de
+          kritik-üstü/gaz olacağından) tek doğruluk kaynağı olarak merkezi
+          tablo okunur — magic-number tekrarından da kaçınılır.
         """
-        T_tank = 298.15  # K — 25°C referans tank sıcaklığı (yer işletmesi)
-        # Doygunluk basıncının (~56.6 bar @ 298 K) üzerinde bir besleme basıncı
-        # verilir ki CoolProp sıvı dalı çözsün; sıvı sıkıştırılabilirliği düşük
-        # olduğundan yoğunluk doygun sıvıya çok yakındır.
-        P_feed = max(1.2 * self.P_c, 60.0)  # bar
+        ox_name = (getattr(self, 'oxidizer_type', None) or 'n2o').lower()
+
+        if ox_name == 'n2o':
+            T_tank = 298.15  # K — 25°C referans tank sıcaklığı (yer işletmesi)
+            # Doygunluk basıncının (~56.6 bar @ 298 K) üzerinde besleme basıncı
+            # ver ki CoolProp sıvı dalı çözsün; sıvı sıkıştırılabilirliği düşük
+            # olduğundan yoğunluk doygun sıvıya çok yakındır.
+            P_feed = max(1.2 * self.P_c, 60.0)  # bar
+            try:
+                props = data_fetcher.fetch_nist_oxidizer_properties(
+                    'n2o', temperature=T_tank, pressure=P_feed
+                )
+                rho = float(props.get('density', 0.0))
+                # Sıvı faz makulluk penceresi: doygun sıvı N2O 25°C'de ~745,
+                # 20°C'de ~785 kg/m³ (NIST WebBook). Pencere dışı → fallback.
+                if 500.0 < rho < 1000.0:
+                    return rho
+            except Exception:
+                pass
+            return N2O_LIQUID_DENSITY_SAT_25C  # NIST WebBook (Lemmon & Span 2006)
+
+        # LOX / H2O2 / diğer: merkezi tablodan işletme sıvı yoğunluğu.
         try:
-            props = data_fetcher.fetch_nist_oxidizer_properties(
-                'n2o', temperature=T_tank, pressure=P_feed
-            )
-            rho = float(props.get('density', 0.0))
-            # Sıvı faz makulluk penceresi: doygun sıvı N2O 25°C'de ~743,
-            # 20°C'de ~785 kg/m³ (NIST WebBook). Pencere dışı → fallback.
-            if 500.0 < rho < 1000.0:
-                return rho
+            from hrma.data.propellant_database import PropellantDatabase
+            props = PropellantDatabase().get_propellant_properties(ox_name)
+            if props and props.get('density'):
+                rho = float(props['density'])
+                if 300.0 < rho < 2000.0:  # sıvı oksitleyici makulluk penceresi
+                    return rho
         except Exception:
             pass
-        return N2O_LIQUID_DENSITY_SAT_25C  # kg/m³ — NIST WebBook (Lemmon & Span 2006)
+
+        warnings.warn(
+            f"Bilinmeyen/erişilemeyen oksitleyici yoğunluğu '{ox_name}' — "
+            "N2O değerine düşürüldü; enjektör boyutlandırması yaklaşık olabilir"
+        )
+        return N2O_LIQUID_DENSITY_SAT_25C
 
     def _design_fuel_grain(self):
         """Design fuel grain geometry using correct hybrid rocket equations.
@@ -570,7 +602,7 @@ class HybridRocketEngine:
         """
         # --- Enjektör parametreleri (YALNIZ enjektör tasarımı için) ---
         delta_P = 0.2 * self.P_c  # bar — tipik %20 enjektör basınç düşümü (Sutton & Biblarz 9. baskı, Böl. 8)
-        rho_ox = self._get_oxidizer_density()  # kg/m³ — sıvı N2O besleme yoğunluğu
+        rho_ox = self._get_oxidizer_density()  # kg/m³ — oxidizer_type'a göre sıvı besleme yoğunluğu
         # Bernoulli: v = sqrt(2·ΔP/ρ) — yoğunluk, akan akışkanın yoğunluğuyla
         # TUTARLI (denetim bulgusu #3; eski kodda 1220 hardcoded idi)
         injection_velocity = np.sqrt(2 * delta_P * 1e5 / rho_ox)  # m/s
