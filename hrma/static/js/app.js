@@ -1,4 +1,4 @@
-// JavaScript for Hybrid Rocket Motor Analysis Tool
+// JavaScript for HRMA Rocket Motor Analysis Tool
 
 // currentResults is defined in advanced.html to avoid conflicts
 

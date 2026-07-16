@@ -274,7 +274,7 @@ class WindowsCompatibility:
             return
         
         launcher_content = '''@echo off
-title HRMA - Hybrid Rocket Motor Analysis
+title HRMA - Rocket Motor Analysis
 color 0A
 
 echo ========================================
