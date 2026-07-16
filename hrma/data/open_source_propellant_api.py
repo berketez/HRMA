@@ -5,6 +5,16 @@ Fetches real-time chemical properties from:
 - NIST Chemistry WebBook
 - CoolProp
 - NASA CEA Database
+
+Offline behavior (2026-07-16): network-backed lookups resolve in this order:
+1. In-memory cache (TTL 3600 s, process lifetime)
+2. Persistent offline store (hrma.data.offline_store): user cache file,
+   then the bundled offline_snapshot.json shipped with the package
+3. Live network fetch (on success the result is written to the offline store)
+4. _estimate_* static fallbacks (via get_propellant_for_ui defaults)
+
+Connection errors and timeouts are swallowed with a single log line so the
+flow always falls through to the next layer instead of raising.
 """
 
 import requests
@@ -13,6 +23,8 @@ import xml.etree.ElementTree as ET
 from typing import Dict, Optional, List, Any
 import time
 import re
+
+from hrma.data import offline_store
 
 class OpenSourcePropellantAPI:
     """Integrates multiple open-source chemical databases"""
@@ -48,7 +60,7 @@ class OpenSourcePropellantAPI:
             'rp1': 11006,
             'hydrazine': 9321,
             'n2h4': 9321,
-            'mmh': 6037,  # monomethylhydrazine
+            'mmh': 6061,  # monomethylhydrazine (methylhydrazine; 6037 metotreksattı — 2026-07-16 düzeltmesi)
             'udmh': 5976,  # unsymmetrical dimethylhydrazine
             'ethanol': 702,
             'methanol': 887,
@@ -57,7 +69,7 @@ class OpenSourcePropellantAPI:
             'aluminum': 5359268,
             'al': 5359268,
             'htpb': 53298156,  # hydroxyl-terminated polybutadiene
-            'paraffin': 8002742,  # paraffin wax
+            'paraffin': 12408,  # n-octacosane, parafin mumu vekili (8002742 CAS'tan türetilmiş yanlış CID'di — 2026-07-16)
             'polyethylene': 23985,
             'pmma': 6658,  # polymethyl methacrylate
             'potassium_nitrate': 24434,
@@ -88,31 +100,41 @@ class OpenSourcePropellantAPI:
                 cid = int(response.text.strip().split('\n')[0])
                 self.known_cids[clean_name] = cid
                 return cid
+        except (requests.ConnectionError, requests.Timeout) as e:
+            print(f"PubChem CID lookup offline for {name}: {e.__class__.__name__}")
         except:
             pass
-        
+
         return None
     
     def get_pubchem_properties(self, compound_name: str) -> Dict:
         """Fetch all available properties from PubChem"""
         
-        # Check cache
+        # Check cache (bellek ici, TTL 3600 s)
         cache_key = f"pubchem_{compound_name}"
         if cache_key in self.cache:
             cached_data, timestamp = self.cache[cache_key]
             if time.time() - timestamp < self.cache_timeout:
                 return cached_data
-        
+
+        # Kalici cevrimdisi katman: kullanici cache -> paket snapshot
+        store_key = offline_store.make_key('pubchem', compound_name)
+        stored = offline_store.get(store_key)
+        if stored is not None:
+            print(f"Using offline store data for {store_key}")
+            self.cache[cache_key] = (stored, time.time())
+            return stored
+
         cid = self.get_compound_cid(compound_name)
         if not cid:
             return {}
-        
+
         properties = {
             'cid': cid,
             'name': compound_name,
             'source': 'PubChem'
         }
-        
+
         try:
             # Get basic properties
             prop_url = f"{self.pubchem_base}/compound/cid/{cid}/property/MolecularFormula,MolecularWeight,IUPACName/JSON"
@@ -143,10 +165,16 @@ class OpenSourcePropellantAPI:
             
             # Cache the result
             self.cache[cache_key] = (properties, time.time())
-            
+
+            # Ag basariliysa (temel alanlarin otesinde veri geldiyse) kalici depoya yaz
+            if len(properties) > 3:
+                offline_store.put(store_key, properties)
+
+        except (requests.ConnectionError, requests.Timeout) as e:
+            print(f"PubChem unreachable for {compound_name}: {e.__class__.__name__}")
         except Exception as e:
             print(f"Error fetching PubChem data for {compound_name}: {e}")
-        
+
         return properties
     
     def _parse_pubchem_section(self, section: Dict) -> Dict:
@@ -323,7 +351,14 @@ class OpenSourcePropellantAPI:
     def get_nist_webbook_data(self, compound_name: str) -> Dict:
         """Fetch REAL data from NIST Chemistry WebBook"""
         properties = {}
-        
+
+        # Kalici cevrimdisi katman: kullanici cache -> paket snapshot
+        store_key = offline_store.make_key('nistweb', compound_name)
+        stored = offline_store.get(store_key)
+        if stored is not None:
+            print(f"Using offline store data for {store_key}")
+            return stored
+
         try:
             # Get CAS number first for more accurate search
             cas_number = self._get_cas_number(compound_name)
@@ -373,10 +408,17 @@ class OpenSourcePropellantAPI:
                     
                     properties['nist_source'] = 'NIST Chemistry WebBook'
                     properties['nist_cas'] = cas_number
-                    
+
+                    # Gercek ozellik ayristirilabildiyse kalici depoya yaz
+                    # (yalniz kaynak/cas iceren bos sonuclar depoyu kirletmesin)
+                    if len(properties) > 2:
+                        offline_store.put(store_key, properties)
+
+        except (requests.ConnectionError, requests.Timeout) as e:
+            print(f"NIST WebBook unreachable for {compound_name}: {e.__class__.__name__}")
         except Exception as e:
             print(f"Error fetching NIST data for {compound_name}: {e}")
-        
+
         return properties
     
     def _get_cas_number(self, compound_name: str) -> Optional[str]:

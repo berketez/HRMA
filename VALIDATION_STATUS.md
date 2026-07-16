@@ -1,8 +1,25 @@
 # HRMA — Validation Status & Known Limitations
 
-*Last updated: 2026-07-12. This document states honestly what HRMA has been verified
+*Last updated: 2026-07-16. This document states honestly what HRMA has been verified
 against, where it is reliable, and where it is not. HRMA is a **preliminary-design
 and educational tool**, not a flight-qualification tool.*
+
+## 2026-07-16 — Leckner gas-emissivity radiation model
+
+The chamber radiative heat-flux term no longer treats the combustion gas as
+a black body. The gas emissivity is now computed from the **Leckner (1972)
+H₂O/CO₂ total-emissivity correlations** (partial pressures × mean beam
+length, with the pressure-overlap correction), so
+q_rad = ε_gas·σ·(T_aw⁴ − T_w⁴) uses a physically realistic ε_gas well below
+1 instead of the previous black-body assumption.
+
+**Conservatism note — the direction changed.** The old black-body term
+systematically *over-predicted* the radiative load (conservative for wall
+heating and thermal-protection sizing). The Leckner model is more accurate
+but *less* conservative on the radiation component: thermal margins that
+previously hid behind the inflated radiation term should be re-checked.
+Convective (Bartz) flux, which dominates at the throat, is unchanged, as is
+its ±20–30 % band.
 
 ## 2026-07-12 independent formula audit
 
@@ -61,7 +78,7 @@ knockdown exact, ISA layers exact). Defects found and **fixed** the same day:
 | Solid APCP c\* | Within **~1.2 %** of full AP/Al/HTPB CEA composite (two-phase). |
 | Sugar propellants (KNSU/sugar) | c\*≈921 m/s, Tc≈1719 K — consistent with NASA CEA + Nakka experimental (corrected 2026-06; previous values were non-physical). |
 | Solid delivered Isp (APCP ref.) | 251 s vs 265 s rated literature value (−5.4 %). *Note (2026-07-12): the earlier +2.5 % agreement was an artifact of the monolithic grain model over-pressuring the chamber; the segmented model runs at rated pressure and the delivered value sits inside the 240–270 s literature band.* |
-| Test suite | 171 automated tests passing (pytest). |
+| Test suite | 1,000+ automated tests passing (pytest). |
 | Export round-trips (2026-07-13) | DXF re-read via ezdxf (layers + >30-pt contour), STEP re-imported via build123d (ISO-10303), drawing PDF ≥3 pages, injector STL volume check proves orifices are drilled; fake-STL fallbacks removed (errors now raise). |
 
 ## What is validated against real data (partial)
@@ -107,9 +124,13 @@ knockdown exact, ISA layers exact). Defects found and **fixed** the same day:
    HTPB/N₂O measurement by ~32 %, so the direction is corrective). Use
    `flux_mode='ox'` for literal literature comparison; a G_total re-fit is
    future work.
-10. **N₂O injector model is single-phase (SPI).** Near-saturated N₂O feed can
-    flash/cavitate; SPI can over-predict orifice flow 20–40 %. A two-phase
-    (Dyer/NHNE) model is future work. The blowdown tank model itself is a
+10. **N₂O injector two-phase flow** (updated 2026-07-13). Injector *sizing*
+    now uses the two-phase Dyer NHNE model
+    (`hrma/engines/injector_design.py`), which corrects the 20–40 %
+    over-prediction of the single-phase SPI equation near saturation. The
+    transient blowdown *time-march* still drives the orifice with a
+    design-point-calibrated SPI coefficient. Cold-flow testing to anchor Cd
+    is still recommended. The blowdown tank model itself is a
     thermodynamic-equilibrium model (no wall thermal mass, no vaporization
     lag): pressure decay is slightly conservative.
 11. **Black powder / double-base c\* values are not independently anchored**

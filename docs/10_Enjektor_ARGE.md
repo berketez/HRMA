@@ -27,14 +27,14 @@ sistematik olarak **fazla** tahmin eder (%15-40'a varan hata; Waxman 2013).
 
 | Tip | Çalışma ilkesi | Uygulama | Avantaj | Dezavantaj | Amatör üretilebilirlik |
 |---|---|---|---|---|---|
-| **Showerhead** (düz delikli) | Eksenel paralel jetler | Hibrit oksitleyici, gaz jeneratörü | En basit imalat (matkap), tıkanmaya dayanıklı | Atomizasyon zayıf (yalnız jet parçalanması), karışım yok | ★★★★★ |
-| **Unlike-impinging doublet** (O-F çarpışan) | Farklı akışkan jetleri 2θ≈60° ile çarpışır | Küçük sıvı motorlar (depolanabilir/RP-1) | İyi karışım + atomizasyon, basit | Momentum dengesine duyarlı, ısı akısı çizgileri (fan düzlemi), blowapart riski | ★★★★ |
-| **Like-impinging doublet/triplet** (F-F, O-O) | Aynı akışkan kendi içinde çarpışır | Hipergolik, kararlılık istenen tasarımlar | Blowapart yok, duvara yakın yakıt filmi kolay | Karışım fana kalır (biraz daha düşük η) | ★★★★ |
-| **Unlike triplet (O-F-O)** | 2 dış jet ortadakine simetrik çarpar | O/F>2 sıvılar | Momentum simetrisi doğal, iyi karışım | Delik hizalama hassasiyeti | ★★★ |
-| **Pintle** | Merkez iğne: radyal iç akış + anülüs dış akış çarpışır | Derin kısılabilir motorlar (TRW/Merlin mirası) | Tek elemanla kısılabilirlik, doğal kararlılık geçmişi, az delik | Tek nokta ısı yükü, tasarım bilgisi TMR/BF'e gömülü | ★★★ (torna yeter) |
-| **Koaksiyel shear** | Merkez sıvı + anülüs gaz kesme | Gaz-sıvı (LOX/GH₂) | Kriyojenik mirası | Gaz fazı şart; amatör sıvı-sıvıda etkisiz | ★★ |
-| **Koaksiyel/basınç swirl** | Teğetsel girişle döndürülen film konisi | Sıvı-sıvı, N₂O hibrit (vorteks) | Mükemmel atomizasyon (ince film), ΔP'ye görece tolerant | İmalat hassasiyeti (teğet kanallar), analiz karmaşık | ★★★ (CNC ile) |
-| **Vorteks/swirl (hibrit N₂O)** | Oksitleyici teğetsel girişle port üstünde döner | N₂O hibrit özel | Regresyon ↑ (%'lerle ölçülü artış), yanma verimi ↑, film etkisi | Swirl sönümü, veri amatör literatürde sınırlı | ★★★★ |
+| **Showerhead** (düz delikli) | Eksenel paralel jetler | Hibrit oksitleyici, gaz jeneratörü | En basit imalat (matkap), tıkanmaya dayanıklı | Atomizasyon zayıf (yalnız jet parçalanması), karışım yok | 5/5 |
+| **Unlike-impinging doublet** (O-F çarpışan) | Farklı akışkan jetleri 2θ≈60° ile çarpışır | Küçük sıvı motorlar (depolanabilir/RP-1) | İyi karışım + atomizasyon, basit | Momentum dengesine duyarlı, ısı akısı çizgileri (fan düzlemi), blowapart riski | 4/5 |
+| **Like-impinging doublet/triplet** (F-F, O-O) | Aynı akışkan kendi içinde çarpışır | Hipergolik, kararlılık istenen tasarımlar | Blowapart yok, duvara yakın yakıt filmi kolay | Karışım fana kalır (biraz daha düşük η) | 4/5 |
+| **Unlike triplet (O-F-O)** | 2 dış jet ortadakine simetrik çarpar | O/F>2 sıvılar | Momentum simetrisi doğal, iyi karışım | Delik hizalama hassasiyeti | 3/5 |
+| **Pintle** | Merkez iğne: radyal iç akış + anülüs dış akış çarpışır | Derin kısılabilir motorlar (TRW/Merlin mirası) | Tek elemanla kısılabilirlik, doğal kararlılık geçmişi, az delik | Tek nokta ısı yükü, tasarım bilgisi TMR/BF'e gömülü | 3/5 (torna yeter) |
+| **Koaksiyel shear** | Merkez sıvı + anülüs gaz kesme | Gaz-sıvı (LOX/GH₂) | Kriyojenik mirası | Gaz fazı şart; amatör sıvı-sıvıda etkisiz | 2/5 |
+| **Koaksiyel/basınç swirl** | Teğetsel girişle döndürülen film konisi | Sıvı-sıvı, N₂O hibrit (vorteks) | Mükemmel atomizasyon (ince film), ΔP'ye görece tolerant | İmalat hassasiyeti (teğet kanallar), analiz karmaşık | 3/5 (CNC ile) |
+| **Vorteks/swirl (hibrit N₂O)** | Oksitleyici teğetsel girişle port üstünde döner | N₂O hibrit özel | Regresyon ↑ (%'lerle ölçülü artış), yanma verimi ↑, film etkisi | Swirl sönümü, veri amatör literatürde sınırlı | 4/5 |
 
 **Seçim kuralları (varsayılanlar):**
 - Hibrit N₂O → `showerhead` (varsayılan) veya `swirl` (vorteks); iki-faz model **zorunlu**.
@@ -185,7 +185,7 @@ Giffen & Muraszew (1953) inviscid teorisi (Lefebvre & McDonell Böl. 5):
 ρ=998 kg/m³, ΔP=10 bar, Cd=0.65, n=8, d=1.0 mm →
 A_tek=7.854·10⁻⁷ m², √(2ρΔP)=44 677 →
 **ṁ = 0.65·8·7.854e-7·44677 = 0.1825 kg/s**, v = 29.1 m/s.
-(ṁ=ρ·A_top·v özdeşliği: 998·6.283e-6·29.1 = 0.1825 ✓)
+(ṁ=ρ·A_top·v özdeşliği: 998·6.283e-6·29.1 = 0.1825 OK)
 
 **Ö2 — N₂O NHNE (hibrit, doymuş giriş):**
 T=293.15 K → P₁=P_v=50.4 bar, ρ_l≈770 kg/m³; P_c=30 bar → ΔP=20.4 bar.
@@ -232,26 +232,26 @@ def pintle_spray_angle(tmr) -> float
 
 | Alan | Tip | Birim | Zorunlu | Varsayılan / açıklama |
 |---|---|---|---|---|
-| `motor_type` | `'hybrid'\|'liquid'` | — | ✔ | — |
-| `injector_type` | `'showerhead'\|'impinging_doublet'\|'impinging_triplet'\|'like_impinging'\|'pintle'\|'coax_swirl'\|'swirl'` | — | ✖ | hybrid→`showerhead`, liquid→`impinging_doublet` |
-| `mdot_ox` | float > 0 | kg/s | ✔ | — |
-| `mdot_fuel` | float > 0 | kg/s | liquid'de ✔ | hybrid'de verilmez/None → `fuel_circuit=None` |
-| `rho_ox` | float | kg/m³ | ✔ (n2o'da tablo ezerse ops.) | `fluid_ox='n2o'` + `T_ox_K` verilirse doyma tablosundan |
-| `rho_fuel` | float | kg/m³ | liquid'de ✔ | — |
-| `Pc_bar` | float > 0 | bar | ✔ | oda basıncı |
-| `dp_ratio_ox` / `dp_ratio_fuel` | float | — | ✖ | 0.20 (bant 0.10-0.40; <0.15 uyarı) |
-| `fluid_ox` | `'n2o'\|'lox'\|'generic'` | — | ✖ | `'generic'`; `'n2o'` → NHNE yolu |
-| `T_ox_K` | float | K | n2o'da ✔ | doyma özellikleri için |
-| `p_feed_bar` | float | bar | ✖ | verilmezse `Pc·(1+dp_ratio)`; n2o'da P₁=min(p_feed, P_sat) doyma kontrolü |
-| `inlet_ox` / `inlet_fuel` | `'sharp'\|'radiused'` | — | ✖ | `'sharp'` |
-| `l_over_d` | float | — | ✖ | 4.0 |
-| `orifice_constraints` | dict | mm | ✖ | `{'d_min_mm':0.3,'d_max_mm':3.0,'n_max':120}` |
-| `sigma_ox`/`sigma_fuel` | float | N/m | ✖ | 0.02 |
-| `mu_ox`/`mu_fuel` | float | Pa·s | ✖ | 2e-4 |
-| `T_c_K`, `mw_gas` | float | K, kg/kmol | ✖ | verilirse ρ_A hesabında; yoksa ρ_A=5 kg/m³ varsayılan + assumption notu |
-| `pintle` | dict | — | pintle'da ✖ | `{'d_pintle_mm': None (otomatik), 'bf_target':0.58,'tmr_target':1.0}` |
-| `swirl` | dict | — | swirl'de ✖ | `{'K': None (θ hedefinden), 'theta_target_deg':45}` |
-| `target_velocity_ratio` | float | — | ✖ | doublet MR hedefi 1.0 |
+| `motor_type` | `'hybrid'\|'liquid'` | — | evet | — |
+| `injector_type` | `'showerhead'\|'impinging_doublet'\|'impinging_triplet'\|'like_impinging'\|'pintle'\|'coax_swirl'\|'swirl'` | — | hayır | hybrid→`showerhead`, liquid→`impinging_doublet` |
+| `mdot_ox` | float > 0 | kg/s | evet | — |
+| `mdot_fuel` | float > 0 | kg/s | liquid'de evet | hybrid'de verilmez/None → `fuel_circuit=None` |
+| `rho_ox` | float | kg/m³ | evet (n2o'da tablo ezerse ops.) | `fluid_ox='n2o'` + `T_ox_K` verilirse doyma tablosundan |
+| `rho_fuel` | float | kg/m³ | liquid'de evet | — |
+| `Pc_bar` | float > 0 | bar | evet | oda basıncı |
+| `dp_ratio_ox` / `dp_ratio_fuel` | float | — | hayır | 0.20 (bant 0.10-0.40; <0.15 uyarı) |
+| `fluid_ox` | `'n2o'\|'lox'\|'generic'` | — | hayır | `'generic'`; `'n2o'` → NHNE yolu |
+| `T_ox_K` | float | K | n2o'da evet | doyma özellikleri için |
+| `p_feed_bar` | float | bar | hayır | verilmezse `Pc·(1+dp_ratio)`; n2o'da P₁=min(p_feed, P_sat) doyma kontrolü |
+| `inlet_ox` / `inlet_fuel` | `'sharp'\|'radiused'` | — | hayır | `'sharp'` |
+| `l_over_d` | float | — | hayır | 4.0 |
+| `orifice_constraints` | dict | mm | hayır | `{'d_min_mm':0.3,'d_max_mm':3.0,'n_max':120}` |
+| `sigma_ox`/`sigma_fuel` | float | N/m | hayır | 0.02 |
+| `mu_ox`/`mu_fuel` | float | Pa·s | hayır | 2e-4 |
+| `T_c_K`, `mw_gas` | float | K, kg/kmol | hayır | verilirse ρ_A hesabında; yoksa ρ_A=5 kg/m³ varsayılan + assumption notu |
+| `pintle` | dict | — | pintle'da hayır | `{'d_pintle_mm': None (otomatik), 'bf_target':0.58,'tmr_target':1.0}` |
+| `swirl` | dict | — | swirl'de hayır | `{'K': None (θ hedefinden), 'theta_target_deg':45}` |
+| `target_velocity_ratio` | float | — | hayır | doublet MR hedefi 1.0 |
 
 Geçersiz girişte `ValueError` (mesaj Türkçe) — endpoint bunu 400'e çevirir.
 

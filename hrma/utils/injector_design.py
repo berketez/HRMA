@@ -23,15 +23,22 @@ class InjectorDesign:
         # Veri validasyonu
         is_valid, msg = data_fetcher.validate_data(nist_data, 'oxidizer')
         if not is_valid:
-            warnings.warn(f"NIST oksitleyici verisi geçersiz: {msg}")
-            print(f"UYARI - Veri geçersizliği: {msg}")
-        
-        # NIST verilerini kullan veya yedek değerleri al
-        self.rho_ox = nist_data.get('density', oxidizer_density)  # kg/m³
-        self.mu_ox = nist_data.get('viscosity', oxidizer_viscosity)  # Pa·s
-        
-        # Veri kaynağını logla
-        data_source = nist_data.get('data_source', 'nist_webbook')
+            # Geçersiz veri KULLANILMAZ: parametreyle gelen yerel değere
+            # düşülür. (Eski davranış anahtarı bulununca anormal değeri
+            # yine de atıyordu — 2026-07-16 denetim bulgusu.)
+            warnings.warn(
+                f"NIST oksitleyici verisi geçersiz: {msg} — "
+                f"yerel değere düşüldü (rho={oxidizer_density} kg/m³)"
+            )
+            print(f"UYARI - Veri geçersizliği: {msg} (yerel değere düşüldü)")
+            self.rho_ox = oxidizer_density  # kg/m³
+            self.mu_ox = oxidizer_viscosity  # Pa·s
+            data_source = 'local_fallback'
+        else:
+            # NIST verilerini kullan veya yedek değerleri al
+            self.rho_ox = nist_data.get('density', oxidizer_density)  # kg/m³
+            self.mu_ox = nist_data.get('viscosity', oxidizer_viscosity)  # Pa·s
+            data_source = nist_data.get('data_source', 'nist_webbook')
         print(f"Veri kaynağı: {data_source.upper()}")
         print(f"   ρ = {self.rho_ox:.0f} kg/m³")
         print(f"   μ = {self.mu_ox:.6f} Pa·s")

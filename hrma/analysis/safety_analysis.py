@@ -757,7 +757,8 @@ class SafetyAnalyzer:
         
         return recommendations
     
-    # Placeholder methods for other calculations
+    # Deterministik yardımcı hesaplar (2026-07-14'te gerçek
+    # implementasyonla dolduruldu; danışma amaçlı büyüklük kestirimleri)
     def _calculate_radiant_heat_distance(self, temperature: float, area: float) -> float:
         # Stefan-Boltzmann law approximation
         emissivity = 0.8

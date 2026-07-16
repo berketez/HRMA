@@ -173,8 +173,6 @@ async function calculate() {
     hideWelcomeMessage();
     
     try {
-        console.log('Sending data to backend:', data);
-        
         const response = await fetch('/calculate', {
             method: 'POST',
             headers: {
@@ -182,23 +180,18 @@ async function calculate() {
             },
             body: JSON.stringify(data)
         });
-        
-        console.log('Response status:', response.status);
-        console.log('Response headers:', response.headers);
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             console.error('Error response text:', errorText);
             throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
         }
-        
+
         const responseText = await response.text();
-        console.log('Raw response text:', responseText);
-        
+
         let results;
         try {
             results = JSON.parse(responseText);
-            console.log('Parsed results:', results);
         } catch (parseError) {
             console.error('JSON parse error:', parseError);
             throw new Error(`Failed to parse response: ${parseError.message}. Raw response: ${responseText}`);
@@ -323,8 +316,8 @@ function displayCalculationResults(results) {
     // Display injector design table
     displayInjectorTable(results.injector);
     
-    // Display warnings
-    displayWarnings(results.injector.warnings || []);
+    // Display warnings (enjektör uyarıları + backend doğrulama özeti)
+    displayWarnings((results.injector && results.injector.warnings) || [], results.validation);
     
     // Show export panel after successful calculation
     const exportPanel = document.getElementById('exportActionsPanel');
@@ -650,72 +643,51 @@ function displayDesignReport(motorData, injectorData) {
     reportDiv.innerHTML = html;
 }
 
-// Display warnings
-function displayWarnings(warnings) {
+// Display warnings — enjektör uyarıları + /calculate cevabındaki üst seviye
+// validation objesi birlikte listelenir:
+//   validation = { overall_status, critical_warnings[], regular_warnings[],
+//                  total_warnings, validation_passed }
+// critical_warnings kırmızı (CRITICAL), regular + enjektör uyarıları amber
+// (WARNING) etiketiyle gösterilir; hiç uyarı yoksa panel gizli kalır.
+function displayWarnings(warnings, validation) {
     const warningsPanel = document.getElementById('warningsPanel');
     const warningsList = document.getElementById('warningsList');
-    
+
     // Check if elements exist (they might not exist on all pages)
     if (!warningsPanel || !warningsList) {
         console.warn('Warning elements not found on this page');
         return;
     }
-    
-    if (warnings && warnings.length > 0) {
-        let html = '';
-        warnings.forEach(warning => {
-            html += `
-                <div class="warning-item">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    ${warning}
-                </div>
-            `;
-        });
-        
-        warningsList.innerHTML = html;
-        warningsPanel.style.display = 'block';
-    } else {
-        warningsPanel.style.display = 'none';
-    }
-}
 
-// Optimization function
-async function optimize() {
-    if (!currentResults) {
-        showError('Please calculate first before optimizing');
+    const critical = (validation && Array.isArray(validation.critical_warnings))
+        ? validation.critical_warnings : [];
+    const regular = (validation && Array.isArray(validation.regular_warnings))
+        ? validation.regular_warnings : [];
+    const injector = Array.isArray(warnings) ? warnings : [];
+
+    if (!critical.length && !regular.length && !injector.length) {
+        warningsList.innerHTML = '';
+        warningsPanel.style.display = 'none';
         return;
     }
-    
-    showLoading(true);
-    
-    try {
-        const data = getFormData();
-        
-        const response = await fetch('/optimize', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data)
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const results = await response.json();
-        
-        if (results.error) {
-            throw new Error(results.error);
-        }
-        
-        showInfo('Optimization completed: ' + results.message);
-        
-    } catch (error) {
-        handleError(error, 'Optimization Function');
-    } finally {
-        showLoading(false);
+
+    const item = (label, text, cls) =>
+        `<div class="warning-item ${cls}">` +
+        `<span class="warning-tag">${label}</span>` +
+        `<span class="warning-text">${text}</span></div>`;
+
+    let html = '';
+    if (validation && validation.overall_status) {
+        const statusCls = critical.length ? 'warning-status-critical' : 'warning-status-regular';
+        html += `<div class="warning-status ${statusCls}">Validation status: ` +
+            `${validation.overall_status}</div>`;
     }
+    critical.forEach(w => { html += item('CRITICAL', w, 'warning-critical'); });
+    regular.forEach(w => { html += item('WARNING', w, 'warning-regular'); });
+    injector.forEach(w => { html += item('WARNING', w, 'warning-regular'); });
+
+    warningsList.innerHTML = html;
+    warningsPanel.style.display = 'block';
 }
 
 // Export report function
@@ -758,10 +730,6 @@ function exportReport() {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
-}
-
-function exportRegressionData() {
-    alert('Export regression data functionality is not implemented yet.');
 }
 
 // Advanced Error Handler
@@ -1708,11 +1676,6 @@ function reset3DView() {
     }
 }
 
-function toggleWireframe() {
-    // This would toggle wireframe mode - implementation depends on plot type
-    console.log('Wireframe toggle not implemented yet');
-}
-
 // Parametric Analysis
 async function calculateParametric() {
     try {
@@ -1757,8 +1720,6 @@ async function calculateParametric() {
             param_steps: paramSteps
         };
         
-        console.log('Sending parametric analysis request:', requestData);
-        
         const response = await fetch('/parametric-analysis', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1775,8 +1736,6 @@ async function calculateParametric() {
         if (result.error) {
             throw new Error(result.error);
         }
-        
-        console.log('Parametric analysis result:', result);
         
         // Display parametric plot
         const plotContainer = document.getElementById('parametric_plot');
@@ -1883,8 +1842,6 @@ async function calculateTrajectory() {
             wind_speed: windSpeed
         };
         
-        console.log('Sending trajectory analysis request:', requestData);
-        
         // Call trajectory analysis API
         const response = await fetch('/api/trajectory-analysis', {
             method: 'POST',
@@ -1903,8 +1860,6 @@ async function calculateTrajectory() {
             throw new Error(result.error || 'Trajectory analysis failed');
         }
         
-        console.log('Trajectory analysis result:', result);
-        
         // Display trajectory plot
         const plotContainer = document.getElementById('trajectory_plot');
         if (!plotContainer) {
@@ -1920,11 +1875,6 @@ async function calculateTrajectory() {
         
         if (result.plot_data) {
             try {
-                console.log('Plot data type:', typeof result.plot_data);
-                if (typeof result.plot_data === 'string') {
-                    console.log('Plot data preview:', result.plot_data.substring(0, 100));
-                }
-                
                 let plotData;
                 if (typeof result.plot_data === 'string') {
                     plotData = JSON.parse(result.plot_data);
@@ -1933,8 +1883,7 @@ async function calculateTrajectory() {
                 }
                 
                 Plotly.newPlot('trajectory_plot', plotData.data, plotData.layout, {responsive: true});
-                console.log('Trajectory plot created successfully');
-                
+
                 // Show the trajectory tab if hidden
                 const trajectoryTab = document.getElementById('trajectory_tab');
                 if (trajectoryTab && trajectoryTab.style.display === 'none') {

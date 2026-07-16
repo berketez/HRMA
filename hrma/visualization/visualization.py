@@ -2418,7 +2418,7 @@ def create_showerhead_with_tooltips(injector_data):
 
 
 def create_pintle_cross_section(injector_data):
-    """Pintle injector kesit gorunumu"""
+    """Pintle injector kesit gorunumu (eksenel kesit: x = eksen, y = yarıçap)"""
 
     outer_diameter = injector_data.get('outer_diameter', 50)  # mm
     pintle_diameter = injector_data.get('pintle_diameter', 25)  # mm
@@ -2426,18 +2426,372 @@ def create_pintle_cross_section(injector_data):
 
     fig = go.Figure()
 
-    # TODO: Implement pintle cross-section
+    # ---------------- Türetilmiş geometri (mm) ----------------
+    r_p = pintle_diameter / 2.0            # pintle mili yarıçapı
+    r_ann = r_p + gap                      # anülüs dış yarıçapı (gövde iç bore)
+    r_out = outer_diameter / 2.0           # gövde dış yarıçapı
+    # Tutarsız girdi koruması: gövde her zaman anülüsü sarmalı
+    r_out = max(r_out, r_ann + max(2.0, 0.15 * r_ann))
+    body_len = 1.2 * outer_diameter        # manifold gövde uzunluğu (x<0)
+    tip_len = 0.8 * pintle_diameter        # pintle'ın odaya uzanan kısmı (x>0)
+    taper_len = 0.6 * r_p                  # konik uç uzunluğu
+    r_tip = 0.35 * r_p                     # uç yarıçapı
+    ann_area = np.pi * (r_ann**2 - r_p**2)  # anüler akış alanı (mm2)
+
+    # ---------------- Gövde duvarları (üst + alt) ----------------
+    body_x = [-body_len, 0, 0, -body_len, -body_len, None,
+              -body_len, 0, 0, -body_len, -body_len]
+    body_y = [r_ann, r_ann, r_out, r_out, r_ann, None,
+              -r_ann, -r_ann, -r_out, -r_out, -r_ann]
+    body_hover = (
+        f'<b>Injector Body</b><br>'
+        f'D_outer: {outer_diameter:.1f} mm<br>'
+        f'Wall (radial): {r_out - r_ann:.1f} mm<br>'
+        f'Function: houses oxidizer manifold and annulus'
+    )
+    fig.add_trace(go.Scatter(
+        x=body_x, y=body_y, mode='lines', fill='toself',
+        fillcolor='rgba(125, 151, 165, 0.22)',
+        line=dict(color=STRUCT_INK, width=2),
+        name='Injector Body', hoveron='fills+points',
+        text=body_hover, hoverinfo='text', showlegend=False
+    ))
+
+    # ---------------- Anüler akış geçidi (üst + alt) ----------------
+    ann_x = [-body_len, 0, 0, -body_len, -body_len, None,
+             -body_len, 0, 0, -body_len, -body_len]
+    ann_y = [r_p, r_p, r_ann, r_ann, r_p, None,
+             -r_p, -r_p, -r_ann, -r_ann, -r_p]
+    ann_hover = (
+        f'<b>Annular Flow Passage</b><br>'
+        f'Gap: {gap:.2f} mm<br>'
+        f'Flow Area: {ann_area:.1f} mm2<br>'
+        f'Function: axial oxidizer sheet around the pintle'
+    )
+    fig.add_trace(go.Scatter(
+        x=ann_x, y=ann_y, mode='lines', fill='toself',
+        fillcolor='rgba(0, 229, 255, 0.16)',
+        line=dict(color='rgba(0, 229, 255, 0.45)', width=1),
+        name='Annular Passage', hoveron='fills+points',
+        text=ann_hover, hoverinfo='text', showlegend=False
+    ))
+
+    # ---------------- Pintle mili (konik uçlu kesit) ----------------
+    pintle_x = [-body_len, tip_len - taper_len, tip_len, tip_len,
+                tip_len - taper_len, -body_len, -body_len]
+    pintle_y = [r_p, r_p, r_tip, -r_tip, -r_p, -r_p, r_p]
+    pintle_hover = (
+        f'<b>Pintle Post</b><br>'
+        f'D_pintle: {pintle_diameter:.1f} mm<br>'
+        f'Tip protrusion: {tip_len:.1f} mm<br>'
+        f'Function: central post; fuel injected radially at the tip'
+    )
+    fig.add_trace(go.Scatter(
+        x=pintle_x, y=pintle_y, mode='lines', fill='toself',
+        fillcolor='rgba(255, 140, 51, 0.28)',
+        line=dict(color=PALETTE[1], width=2),
+        name='Pintle Post', hoveron='fills+points',
+        text=pintle_hover, hoverinfo='text', showlegend=False
+    ))
+
+    # ---------------- Eksen çizgisi ----------------
+    fig.add_trace(go.Scatter(
+        x=[-body_len - 8, tip_len + 14], y=[0, 0], mode='lines',
+        line=dict(color=STRUCT_DIM, width=1, dash='dashdot'),
+        name='Centerline', hoverinfo='skip', showlegend=False
+    ))
+
+    # ---------------- Akış okları ----------------
+    # Eksenel oksitleyici okları (anülüs içinde, +x yönü)
+    arrow_len = 0.12 * body_len
+    for xa in (-0.85 * body_len, -0.55 * body_len, -0.25 * body_len):
+        for sgn in (1, -1):
+            fig.add_annotation(
+                x=xa + arrow_len, y=sgn * (r_p + gap / 2.0),
+                ax=xa, ay=sgn * (r_p + gap / 2.0),
+                xref='x', yref='y', axref='x', ayref='y',
+                showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                arrowcolor=PALETTE[0], opacity=0.85
+            )
+    # Radyal yakıt okları (pintle ucu yakınında, dışa doğru)
+    x_rad = 0.45 * tip_len
+    for sgn in (1, -1):
+        fig.add_annotation(
+            x=x_rad, y=sgn * (r_p + 0.55 * gap + 4.0),
+            ax=x_rad, ay=sgn * (0.55 * r_p),
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+            arrowcolor=PALETTE[1], opacity=0.9
+        )
+    # Sonuç sprey okları (~45 derece konik levha)
+    x_spr = 0.7 * tip_len
+    d_spr = 0.35 * outer_diameter
+    for sgn in (1, -1):
+        fig.add_annotation(
+            x=x_spr + d_spr, y=sgn * (r_ann + d_spr),
+            ax=x_spr, ay=sgn * r_ann,
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+            arrowcolor=PALETTE[6], opacity=0.8
+        )
+    fig.add_annotation(
+        x=x_spr + d_spr + 2, y=r_ann + d_spr + 4,
+        text='Spray sheet (~45 deg)', showarrow=False,
+        font=dict(size=10, color=PALETTE[6])
+    )
+
+    # ---------------- Boyut anotasyonları ----------------
+    # D_outer: sol tarafta çift oklu düşey ölçü çizgisi
+    x_dim = -body_len - 6
+    fig.add_annotation(
+        x=x_dim, y=r_out, ax=x_dim, ay=-r_out,
+        xref='x', yref='y', axref='x', ayref='y',
+        showarrow=True, arrowhead=2, arrowside='end+start',
+        arrowsize=1, arrowwidth=1.5, arrowcolor=STRUCT_DIM
+    )
+    fig.add_annotation(
+        x=x_dim - 3, y=0, text=f'D_outer = {outer_diameter:.1f} mm',
+        showarrow=False, textangle=-90, font=dict(size=10, color=STRUCT_DIM)
+    )
+    # D_pintle: mile işaret eden etiket oku
+    fig.add_annotation(
+        x=0.15 * tip_len, y=-0.4 * r_p,
+        ax=tip_len + 10, ay=-(r_out + 10),
+        xref='x', yref='y', axref='x', ayref='y',
+        text=f'D_pintle = {pintle_diameter:.1f} mm',
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK)
+    )
+    # gap: anülüse işaret eden etiket oku
+    fig.add_annotation(
+        x=-0.3 * body_len, y=r_p + gap / 2.0,
+        ax=-0.3 * body_len + 12, ay=r_out + 10,
+        xref='x', yref='y', axref='x', ayref='y',
+        text=f'gap = {gap:.2f} mm',
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK)
+    )
+
+    # ---------------- Özet bloğu ----------------
+    fig.add_annotation(
+        x=(-body_len + tip_len) / 2.0, y=r_out + 18,
+        text=(
+            f'<b>PINTLE INJECTOR - AXIAL CROSS-SECTION</b><br>'
+            f'D_outer {outer_diameter:.1f} mm | D_pintle {pintle_diameter:.1f} mm '
+            f'| gap {gap:.2f} mm<br>'
+            f'Annulus Flow Area: {ann_area:.1f} mm2'
+        ),
+        showarrow=False, font=dict(size=11), align='center'
+    )
+
+    # ---------------- Yerleşim ----------------
+    x_min = -body_len - 22
+    x_max = tip_len + d_spr + 26
+    y_lim = r_out + 28
+    fig.update_layout(
+        title='Pintle Injector - Cross Section',
+        xaxis=dict(
+            title='Axial Position (mm)',
+            scaleanchor='y', scaleratio=1,
+            range=[x_min, x_max], showgrid=True
+        ),
+        yaxis=dict(
+            title='Radial Position (mm)',
+            range=[-y_lim, y_lim], showgrid=True
+        ),
+        hovermode='closest',
+        autosize=True,
+        height=700
+    )
 
     return fig.to_json()
 
 
 def create_swirl_injector(injector_data):
-    """Swirl injector gorunumu"""
+    """Swirl injector gorunumu (yüz görünüşü: teğetsel yuvalar + girdap odası)"""
 
     n_slots = injector_data.get('n_slots', 6)
 
     fig = go.Figure()
 
-    # TODO: Implement swirl injector
+    # ---------------- Parametreler ve türetilmiş geometri (mm) ----------------
+    n_slots = max(1, int(n_slots))
+    outer_diameter = injector_data.get('outer_diameter', 50)  # mm
+    r_out = outer_diameter / 2.0
+    r_ch = 0.6 * r_out                          # girdap odası yarıçapı
+    r_ex = 0.35 * r_ch                          # çıkış orifisi yarıçapı
+    slot_width = injector_data.get('slot_width', max(1.5, 0.15 * r_ch))   # mm
+    slot_height = injector_data.get('slot_height', 0.5 * r_ch)            # mm
+    # Yuva gövde dışına taşmasın (kaba koruma)
+    max_reach = np.sqrt((r_ch + slot_width)**2 + slot_height**2)
+    if max_reach > 0.96 * r_out:
+        slot_height = max(0.5, np.sqrt(max(
+            (0.96 * r_out)**2 - (r_ch + slot_width)**2, 0.25)))
+
+    theta = np.linspace(0, 2 * np.pi, 120)
+
+    # ---------------- Gövde yüzü (dış halka) ----------------
+    fig.add_trace(go.Scatter(
+        x=r_out * np.cos(theta), y=r_out * np.sin(theta),
+        mode='lines', line=dict(color=STRUCT_INK, width=3),
+        name='Injector Body',
+        hovertemplate=(
+            f'<b>Injector Body</b><br>'
+            f'D_outer: {outer_diameter:.1f} mm<br>'
+            f'Function: houses swirl chamber and feed slots<extra></extra>'
+        ),
+        showlegend=False
+    ))
+
+    # ---------------- Girdap odası ----------------
+    fig.add_trace(go.Scatter(
+        x=r_ch * np.cos(theta), y=r_ch * np.sin(theta),
+        mode='lines', fill='toself',
+        fillcolor='rgba(0, 229, 255, 0.07)',
+        line=dict(color='rgba(0, 229, 255, 0.55)', width=2),
+        name='Swirl Chamber', hoveron='fills+points',
+        text=(
+            f'<b>Swirl Chamber</b><br>'
+            f'D_chamber: {2 * r_ch:.1f} mm<br>'
+            f'Function: tangential inflow builds the vortex'
+        ),
+        hoverinfo='text', showlegend=False
+    ))
+
+    # ---------------- Çıkış orifisi ----------------
+    fig.add_trace(go.Scatter(
+        x=r_ex * np.cos(theta), y=r_ex * np.sin(theta),
+        mode='lines', fill='toself',
+        fillcolor='rgba(0, 229, 255, 0.25)',
+        line=dict(color=PALETTE[0], width=2),
+        name='Exit Orifice', hoveron='fills+points',
+        text=(
+            f'<b>Exit Orifice</b><br>'
+            f'd_exit: {2 * r_ex:.1f} mm<br>'
+            f'Function: swirling film exits as a hollow cone spray'
+        ),
+        hoverinfo='text', showlegend=False
+    ))
+
+    # ---------------- Teğetsel giriş yuvaları ----------------
+    arrow_step = 1 if n_slots <= 12 else max(1, n_slots // 8)
+    for i in range(n_slots):
+        ang = 2 * np.pi * i / n_slots
+        c, s = np.cos(ang), np.sin(ang)
+        px, py = r_ch * c, r_ch * s            # oda duvarındaki giriş noktası
+        tx, ty = -s, c                         # teğet yön (saat yönü tersi)
+        nx, ny = c, s                          # radyal dış yön
+        # Dikdörtgen köşeleri: duvardan teğet geriye uzanan kanal
+        xs = [px, px - slot_height * tx, px - slot_height * tx + slot_width * nx,
+              px + slot_width * nx, px]
+        ys = [py, py - slot_height * ty, py - slot_height * ty + slot_width * ny,
+              py + slot_width * ny, py]
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode='lines', fill='toself',
+            fillcolor='rgba(255, 140, 51, 0.30)',
+            line=dict(color=PALETTE[1], width=1.5),
+            name=f'Slot {i + 1}', hoveron='fills+points',
+            text=(
+                f'<b>Tangential Slot #{i + 1}</b><br>'
+                f'Size: {slot_width:.2f} x {slot_height:.2f} mm<br>'
+                f'Position: {np.degrees(ang):.0f} deg<br>'
+                f'Function: injects propellant tangentially (angular momentum)'
+            ),
+            hoverinfo='text', showlegend=False
+        ))
+        # Giriş akış oku (teğet yönde odaya doğru)
+        if i % arrow_step == 0:
+            mx, my = px + 0.5 * slot_width * nx, py + 0.5 * slot_width * ny
+            fig.add_annotation(
+                x=mx - 0.1 * slot_height * tx, y=my - 0.1 * slot_height * ty,
+                ax=mx - 0.85 * slot_height * tx, ay=my - 0.85 * slot_height * ty,
+                xref='x', yref='y', axref='x', ayref='y',
+                showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                arrowcolor=PALETTE[1], opacity=0.9
+            )
+
+    # ---------------- Dönüş yönü okları (dairesel yay + uç oku) ----------------
+    r_arc = (r_ex + r_ch) / 2.0
+    arc_span = np.radians(70)
+    for a0 in np.radians([15, 135, 255]):
+        arc = np.linspace(a0, a0 + arc_span, 30)
+        fig.add_trace(go.Scatter(
+            x=r_arc * np.cos(arc), y=r_arc * np.sin(arc),
+            mode='lines', line=dict(color=PALETTE[0], width=2),
+            name='Swirl Direction',
+            hovertemplate='<b>Swirl Direction</b><br>'
+                          'Counter-clockwise vortex<extra></extra>',
+            showlegend=False
+        ))
+        a1 = a0 + arc_span
+        fig.add_annotation(
+            x=r_arc * np.cos(a1 + 0.12), y=r_arc * np.sin(a1 + 0.12),
+            ax=r_arc * np.cos(a1), ay=r_arc * np.sin(a1),
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=2,
+            arrowcolor=PALETTE[0]
+        )
+
+    # ---------------- Boyut anotasyonları ----------------
+    # d_exit: orifis üzerinden çift oklu yatay ölçü
+    fig.add_annotation(
+        x=r_ex, y=0, ax=-r_ex, ay=0,
+        xref='x', yref='y', axref='x', ayref='y',
+        showarrow=True, arrowhead=2, arrowside='end+start',
+        arrowsize=1, arrowwidth=1.5, arrowcolor=STRUCT_DIM
+    )
+    fig.add_annotation(
+        x=0, y=-r_ex - 2.5, text=f'd_exit = {2 * r_ex:.1f} mm',
+        showarrow=False, font=dict(size=10, color=STRUCT_DIM)
+    )
+    # D_chamber: oda duvarına etiket oku
+    ang_dim = np.radians(200)
+    fig.add_annotation(
+        x=r_ch * np.cos(ang_dim), y=r_ch * np.sin(ang_dim),
+        ax=(r_out + 12) * np.cos(ang_dim), ay=(r_out + 12) * np.sin(ang_dim),
+        xref='x', yref='y', axref='x', ayref='y',
+        text=f'D_chamber = {2 * r_ch:.1f} mm',
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK)
+    )
+    # D_outer: gövde dış duvarına etiket oku
+    ang_dim2 = np.radians(340)
+    fig.add_annotation(
+        x=r_out * np.cos(ang_dim2), y=r_out * np.sin(ang_dim2),
+        ax=(r_out + 14) * np.cos(ang_dim2), ay=(r_out + 14) * np.sin(ang_dim2),
+        xref='x', yref='y', axref='x', ayref='y',
+        text=f'D_outer = {outer_diameter:.1f} mm',
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK)
+    )
+
+    # ---------------- Özet bloğu ----------------
+    fig.add_annotation(
+        x=0, y=r_out + 14,
+        text=(
+            f'<b>SWIRL INJECTOR - FACE VIEW</b><br>'
+            f'{n_slots} Tangential Slots x {slot_width:.2f} x {slot_height:.2f} mm<br>'
+            f'D_chamber {2 * r_ch:.1f} mm | d_exit {2 * r_ex:.1f} mm'
+        ),
+        showarrow=False, font=dict(size=11), align='center'
+    )
+
+    # ---------------- Yerleşim ----------------
+    lim = r_out + 24
+    fig.update_layout(
+        title='Swirl Injector - Face View',
+        xaxis=dict(
+            title='X Position (mm)',
+            scaleanchor='y', scaleratio=1,
+            range=[-lim, lim], showgrid=True
+        ),
+        yaxis=dict(
+            title='Y Position (mm)',
+            range=[-lim, lim + 6], showgrid=True
+        ),
+        hovermode='closest',
+        autosize=True,
+        height=700
+    )
 
     return fig.to_json()

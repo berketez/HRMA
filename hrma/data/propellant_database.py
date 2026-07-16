@@ -398,25 +398,20 @@ class PropellantDatabase:
         return None
     
     def _fetch_from_online_database(self, propellant_name: str) -> Optional[Dict]:
-        """Fetch propellant data from online sources (NIST, NASA)"""
-        try:
-            # Try NIST WebBook first
-            nist_data = self._fetch_from_nist(propellant_name)
-            if nist_data:
-                return nist_data
-            
-            # Try other sources...
-            # This is a placeholder for actual API calls
-            
-        except Exception as e:
-            print(f"Error fetching online data: {e}")
-        
+        """Çevrimiçi kaynak çekimi UYGULANMADI — her zaman None döner.
+
+        Uygulama çevrimdışı-öncelikli (masaüstü paket); yakıt verileri bu
+        modüldeki yerel, kaynak-atıflı tablodan gelir. None dönüşü
+        get_propellant'ı yerel tabloya düşürür (tasarlanan davranış).
+        """
         return None
-    
+
     def _fetch_from_nist(self, chemical_name: str) -> Optional[Dict]:
-        """Fetch chemical properties from NIST WebBook"""
-        # This would normally make actual API calls to NIST
-        # For now, returning None as placeholder
+        """Çevrimiçi NIST WebBook çekimi UYGULANMADI — her zaman None döner.
+
+        Yerel doğrulanmış tabloya düşülür; ayrıntı için
+        _fetch_from_online_database docstring'ine bak.
+        """
         return None
     
     def get_propellant_list(self, category: str = 'all') -> List[str]:

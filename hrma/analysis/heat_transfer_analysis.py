@@ -38,6 +38,55 @@ from hrma.data.materials_db import build_materials_view
 # Universal gas constant [J/(mol*K)] for frozen Cp / R_specific derivation.
 R_UNIVERSAL = 8314.462618  # J/(kmol*K) == J/(mol*K)*1000; here used with MW in g/mol
 
+# ----------------------------------------------------------------------
+# Gaz radyasyonu (Leckner) sabitleri
+# ----------------------------------------------------------------------
+# Yanma ürünü ışıyan tür mol kesri varsayılanları. Hidrokarbon yakıt +
+# N2O/LOX oksitleyici sistemlerinde (HTPB/N2O, RP-1/LOX, parafin/N2O)
+# denge kompozisyonu tipik olarak ~%20-30 H2O ve ~%10-20 CO2 içerir
+# (kalan N2/CO/H2/OH: kızılötesinde ya şeffaf ya ikincil). RocketCEA /
+# Cantera kompozisyonu motor_data['x_H2O'] / ['x_CO2'] ile geçilirse
+# bu varsayımlar devre dışı kalır.
+DEFAULT_X_H2O = 0.25
+DEFAULT_X_CO2 = 0.15
+
+# Ortalama ışın uzunluğu katsayısı: L = 0.9 * D (silindirik hazne için
+# standart mühendislik yaklaşımı; Hottel ortalama ışın uzunluğu tablosu,
+# sonsuz silindir 0.95D, L/D~1 silindir 0.6-0.7D bandının üst-orta değeri).
+MEAN_BEAM_LENGTH_FACTOR = 0.9
+
+# Leckner (1972) toplam emisivite korelasyonu katsayı matrisleri.
+# Kaynak: B. Leckner, "Spectral and total emissivity of water vapor and
+# carbon dioxide", Combustion and Flame 19(1):33-48, 1972; M.F. Modest,
+# "Radiative Heat Transfer", 3rd ed., Academic Press, Table 10.4
+# (2. baskı Table 11.2) düzeninde:
+#
+#   eps_0 = exp( sum_i a_i(t) * x^i ),   x = log10(p_a*L / 1 bar*cm),
+#   a_i(t) = sum_j C[i][j] * t^j,        t = T / 1000 K.
+#
+# Satırlar a_0, a_1, a_2; sütunlar t^0, t^1, t^2 (CO2 için t^3 dahil).
+_LECKNER_T0 = 1000.0  # K
+_LECKNER_H2O = (
+    (-2.2118, -1.1987, 0.035596),
+    (0.85667, 0.93048, -0.14391),
+    (-0.10838, -0.17156, 0.045915),
+)
+_LECKNER_CO2 = (
+    (-3.9893, 2.7669, -2.1081, 0.39163),
+    (1.2710, -1.1090, 1.0195, -0.21897),
+    (-0.23678, 0.19731, -0.19544, 0.044644),
+)
+# Korelasyonun fit aralığı dışına taşmayı önleyen kelepçeler (mühendislik
+# bekçileri; literatür sınırı değil): sıcaklık Leckner fit aralığında
+# tutulur (~300-3000 K). Roket haznesi 3000 K üstünde kalabilir; eps_g
+# sıcaklıkla düştüğünden T'yi 3000'de kelepçelemek emisiviteyi hafif
+# ABARTIR = muhafazakâr yön (tasarım-yükü felsefesi, codex teyitli).
+# Optik derinlik 1e-4..1e3 bar*cm bandında tutulur.
+_LECKNER_T_MIN = 300.0    # K
+_LECKNER_T_MAX = 3000.0   # K
+_LECKNER_PAL_MIN = 1e-4   # bar*cm
+_LECKNER_PAL_MAX = 1e3    # bar*cm
+
 class HeatTransferAnalyzer:
     """Heat transfer analysis for hybrid rocket motor chambers"""
 
@@ -146,6 +195,187 @@ class HeatTransferAnalyzer:
             'gas_conductivity': gas_conductivity,
             'prandtl': prandtl,
         }
+
+    # ------------------------------------------------------------------
+    # Gaz radyasyonu: Leckner (1972) toplam emisivite / absorptivite
+    # ------------------------------------------------------------------
+    # Eski model gazı kara cisim sayıyordu (q_rad = eps_w*sigma*(Taw^4-Tw^4)),
+    # bu roket haznesi ölçeğinde radyasyonu ~2-6x abartır. Yanma gazı GRİ
+    # değil seçici ışıyandır: yalnız H2O ve CO2 bantları önemlidir ve
+    # eps_g optik derinliğe (p_i*L) bağlıdır. Aşağıdaki model:
+    #   eps_g = eps_H2O + eps_CO2 - delta_eps   (bant örtüşme düzeltmesi)
+    # Kaynaklar:
+    #   - B. Leckner, "Spectral and total emissivity of water vapor and
+    #     carbon dioxide", Combustion and Flame 19(1):33-48, 1972.
+    #   - M.F. Modest, "Radiative Heat Transfer", 3rd ed., Academic Press,
+    #     Table 10.4 (katsayılar), Eq. (10.140)-(10.145) (basınç ve örtüşme
+    #     düzeltmeleri), Eq. (10.146) (absorptivite ölçekleme kuralı).
+    #   - Cengel & Ghajar, "Heat and Mass Transfer", 5th ed., Bl. 13-5
+    #     (duvar etkin emisivitesi (eps_w+1)/2 yaklaşımı, eps_w > 0.7 için).
+
+    def _species_emissivity(self, species: str, T_g: float, p_total_bar: float,
+                            p_partial_bar: float, path_length_cm: float) -> float:
+        """
+        Tek ışıyan tür (H2O veya CO2) toplam emisivitesi — Leckner (1972).
+
+        eps_0 (1 bar referans) Modest Table 10.4 katsayı matrisiyle,
+        basınç düzeltmesi (eps/eps_0) aynı tablonun P_E / (p_a L)_m / A / B / c
+        parametreleriyle hesaplanır. Korelasyon fit aralığı dışına taşma
+        modül sabitlerindeki kelepçelerle önlenir.
+        """
+        pal = p_partial_bar * path_length_cm  # bar*cm optik derinlik
+        if pal < _LECKNER_PAL_MIN:
+            return 0.0  # tür yok ya da optik olarak ihmal edilebilir ince
+        pal = min(pal, _LECKNER_PAL_MAX)
+
+        T = min(max(T_g, _LECKNER_T_MIN), _LECKNER_T_MAX)
+        t = T / _LECKNER_T0
+        x = np.log10(pal)
+
+        # eps_0 = exp(sum_i a_i(t) x^i), a_i(t) = sum_j C[i][j] t^j
+        if species == 'h2o':
+            coeffs = _LECKNER_H2O
+        elif species == 'co2':
+            coeffs = _LECKNER_CO2
+        else:
+            raise ValueError(f"Bilinmeyen ışıyan tür: {species}")
+        ln_eps0 = 0.0
+        for i, row in enumerate(coeffs):
+            a_i = sum(c * t ** j for j, c in enumerate(row))
+            ln_eps0 += a_i * x ** i
+        eps0 = float(np.exp(ln_eps0))
+
+        # Basınç düzeltmesi (Modest Eq. 10.140-10.143, Table 10.4):
+        #   eps/eps_0 = 1 - (A-1)(1-P_E)/(A+B-1+P_E)
+        #               * exp(-c*(log10((p_a L)_m/(p_a L)))^2)
+        # Payda +P_E: -P_E formu P_E ~ A+B-1 (~2 bar) noktasında kutup
+        # üretir ve roket haznesi basınçları tam o bölgeden geçer; +P_E
+        # kutupsuzdur ve yüksek basınçta eps/eps_0 > 1 verir (çizgi
+        # genişlemesi fiziğiyle tutarlı; codex GPT-5.5 çapraz teyitli).
+        if species == 'h2o':
+            P_E = p_total_bar + 2.56 * p_partial_bar / np.sqrt(t)
+            pal_m = 13.2 * t ** 2
+            # Leckner H2O: t < 0.75 için A sabit 2.144 (Modest Table 10.4).
+            # Hazne gazında t ~ 3 olduğundan etkisiz; absorptivite duvar
+            # sıcaklığında (t ~ 0.6-1.1) değerlendirildiği için orada önemli.
+            A = 2.144 if t < 0.75 else 1.888 - 2.053 * np.log10(t)
+            B = 1.10 * t ** (-1.4)
+            c_damp = 0.5
+        else:  # co2
+            P_E = p_total_bar + 0.28 * p_partial_bar
+            pal_m = 0.054 / t ** 2 if t < 0.7 else 0.225 * t ** 2
+            A = 1.0 + 0.1 * t ** (-1.45)
+            B = 0.23
+            c_damp = 1.47
+
+        denom = A + B - 1.0 + P_E
+        if abs(denom) < 1e-6:
+            factor = 1.0  # savunmacı bekçi (P_E >= 0 iken erişilmez)
+        else:
+            factor = 1.0 - ((A - 1.0) * (1.0 - P_E) / denom) * np.exp(
+                -c_damp * (np.log10(pal_m / pal)) ** 2
+            )
+        # Fit aralığı dışındaki uçlarda düzeltme patlamasın: Leckner
+        # çizelgelerinde basınç düzeltmesi ~0.3x-2x bandında kalır.
+        factor = min(max(factor, 0.3), 2.0)
+
+        return float(min(max(eps0 * factor, 0.0), 0.995))
+
+    def _gas_emissivity(self, T_g: float, p_total_bar: float, beam_length_m: float,
+                        x_H2O: float = DEFAULT_X_H2O,
+                        x_CO2: float = DEFAULT_X_CO2) -> float:
+        """
+        Toplam yanma gazı emisivitesi eps_g(T_g, p, L) — Leckner (1972).
+
+            eps_g = eps_H2O + eps_CO2 - delta_eps
+
+        delta_eps: H2O/CO2 bant örtüşme düzeltmesi (Leckner; Modest Eq. 10.145):
+            zeta = p_w/(p_w+p_c)
+            delta_eps = (zeta/(10.7+101*zeta) - 0.0089*zeta^10.4)
+                        * (log10((p_w+p_c)*L))^2.76
+        Formül T >= 1000 K bandı için verilmiştir; daha düşük sıcaklıklarda
+        (absorptivite değerlendirmesinde duvar sıcaklığı) aynı ifade küçük
+        değerler ürettiğinden mühendislik yaklaşımı olarak korunur.
+
+        Args:
+            T_g: Gaz (statik) sıcaklığı [K].
+            p_total_bar: Toplam basınç [bar].
+            beam_length_m: Ortalama ışın uzunluğu L [m]
+                (silindirik hazne için L = 0.9*D, modül sabiti).
+            x_H2O, x_CO2: Işıyan tür mol kesirleri. Varsayılanlar hidrokarbon
+                yakıt + N2O/LOX yanması denge kompozisyonunun tipik bandı
+                (modül sabitleri DEFAULT_X_H2O/DEFAULT_X_CO2, gerekçe orada).
+
+        Returns:
+            eps_g in [0, 0.995].
+        """
+        L_cm = max(beam_length_m, 0.0) * 100.0
+        p_w = max(x_H2O, 0.0) * p_total_bar
+        p_c = max(x_CO2, 0.0) * p_total_bar
+
+        eps_w = self._species_emissivity('h2o', T_g, p_total_bar, p_w, L_cm)
+        eps_c = self._species_emissivity('co2', T_g, p_total_bar, p_c, L_cm)
+
+        # Bant örtüşme düzeltmesi — yalnız iki tür de mevcutken ve toplam
+        # optik derinlik > 1 bar*cm iken anlamlı (log10 tabanı; altında
+        # negatif tabanın kesirli kuvveti tanımsız olur, örtüşme zaten ~0).
+        delta_eps = 0.0
+        pal_sum = (p_w + p_c) * L_cm
+        if eps_w > 0.0 and eps_c > 0.0 and pal_sum > 1.0:
+            zeta = p_w / (p_w + p_c)
+            delta_eps = (
+                zeta / (10.7 + 101.0 * zeta) - 0.0089 * zeta ** 10.4
+            ) * np.log10(pal_sum) ** 2.76
+            delta_eps = min(max(delta_eps, 0.0), eps_w + eps_c)
+
+        return float(min(max(eps_w + eps_c - delta_eps, 0.0), 0.995))
+
+    def _gas_absorptivity(self, T_g: float, T_w: float, p_total_bar: float,
+                          beam_length_m: float,
+                          x_H2O: float = DEFAULT_X_H2O,
+                          x_CO2: float = DEFAULT_X_CO2) -> float:
+        """
+        Gazın duvar ışınımına karşı absorptivitesi — Leckner pratik kuralı
+        (Modest Eq. 10.146):
+
+            alpha_g(T_g -> T_w) = (T_g/T_w)^0.5 * eps_g(T_w, p*L*(T_w/T_g))
+
+        Emisivite duvar sıcaklığında, optik derinlik T_w/T_g ile
+        ölçeklenmiş yol üzerinden değerlendirilir.
+        """
+        T_g_eff = max(T_g, 1.0)
+        T_w_eff = max(T_w, _LECKNER_T_MIN)  # korelasyon alt sınırı
+        scale = T_w_eff / T_g_eff
+        alpha = (T_g_eff / T_w_eff) ** 0.5 * self._gas_emissivity(
+            T_w_eff, p_total_bar, beam_length_m * scale, x_H2O, x_CO2
+        )
+        return float(min(max(alpha, 0.0), 0.995))
+
+    def _gas_radiation_flux(self, T_g: float, T_w: float, p_total_bar: float,
+                            beam_length_m: float,
+                            x_H2O: float = DEFAULT_X_H2O,
+                            x_CO2: float = DEFAULT_X_CO2,
+                            wall_emissivity: float = 0.8) -> float:
+        """
+        Gaz-duvar net radyatif ısı akısı [W/m^2]:
+
+            q_rad = sigma * (eps_w+1)/2 * (eps_g*T_g^4 - alpha_g*T_w^4)
+
+        (eps_w+1)/2 etkin duvar emisivitesi, gri duvar (eps_w > ~0.7) ile
+        izotermal gaz arasındaki alışveriş için standart mühendislik
+        yaklaşımıdır (Hottel; Cengel & Ghajar Bl. 13-5). Eski kara cisim
+        modeline göre q_rad DÜŞER — beklenen fiziksel davranış budur
+        (roket haznesinde radyasyon toplam akının tipik %5-30'u).
+        """
+        eps_g = self._gas_emissivity(T_g, p_total_bar, beam_length_m, x_H2O, x_CO2)
+        alpha_g = self._gas_absorptivity(T_g, T_w, p_total_bar, beam_length_m,
+                                         x_H2O, x_CO2)
+        eps_wall_eff = 0.5 * (min(max(wall_emissivity, 0.0), 1.0) + 1.0)
+        T_w_pos = max(T_w, 0.0)
+        return float(
+            eps_wall_eff * self.stefan_boltzmann
+            * (eps_g * T_g ** 4 - alpha_g * T_w_pos ** 4)
+        )
 
     # ------------------------------------------------------------------
     # Throat conditions (replaces throat_flux = chamber*1.5 hardcode)
@@ -513,6 +743,10 @@ class HeatTransferAnalyzer:
         c_star = throat['c_star']
         rc_over_dt = throat['rc_over_dt']
         emissivity = mat_props.get('emissivity', 0.8)
+        # Işıyan tür kesirleri: kompozisyon verilmişse ondan, yoksa modül
+        # varsayılanı (DEFAULT_X_H2O/DEFAULT_X_CO2 — gerekçe sabitlerde).
+        x_h2o_frac = float(motor_data.get('x_H2O', DEFAULT_X_H2O))
+        x_co2_frac = float(motor_data.get('x_CO2', DEFAULT_X_CO2))
         k_wall = mat_props['thermal_conductivity']
         allowable = mat_props.get('allowable_temperature', 1073)
         h_coolant = self._coolant_side_coefficient(motor_data, cooling_type)
@@ -546,12 +780,22 @@ class HeatTransferAnalyzer:
             )
             h_g[i] = h_i
 
+            # Radyasyon: Leckner gaz emisivitesi (kara cisim DEĞİL). Yayan
+            # gaz yerel STATİK sıcaklık/basınçta; ışın uzunluğu yerel çapla.
+            T_stat = chamber_temperature / (1.0 + 0.5 * (gamma - 1.0) * M * M)
+            p_stat_bar = (chamber_pressure / 1e5) * (
+                1.0 + 0.5 * (gamma - 1.0) * M * M
+            ) ** (-gamma / (gamma - 1.0))
+            beam_local = MEAN_BEAM_LENGTH_FACTOR * (2.0 * r_mm[i] / 1000.0)
+
             def gas_side_flux(Tw):
                 q_conv = h_i * (Taw - Tw)
-                q_rad = emissivity * self.stefan_boltzmann * (
-                    Taw ** 4 - max(Tw, 0.0) ** 4
+                q_rad = self._gas_radiation_flux(
+                    T_stat, Tw, p_stat_bar, beam_local,
+                    x_H2O=x_h2o_frac, x_CO2=x_co2_frac,
+                    wall_emissivity=emissivity,
                 )
-                return q_conv + q_rad
+                return q_conv + max(q_rad, 0.0)
 
             q_flux[i] = gas_side_flux(Tw_ref)
 
@@ -682,19 +926,21 @@ class HeatTransferAnalyzer:
         (A) DESIGN HEAT FLUX (safety-relevant load). The convective+radiative
             heat flux the cooling system MUST remove, evaluated at a conservative
             *reference cooled wall temperature* (the material allowable temp,
-            bounded). This is q = h_g*(Taw - Tw_ref) + eps*sigma_SB*(Taw^4-Tw_ref^4).
+            bounded). This is q = h_g*(Taw - Tw_ref) + q_rad(Taw, Tw_ref), where
+            q_rad uses the Leckner (1972) H2O/CO2 gas emissivity model (see
+            _gas_radiation_flux) instead of the former black-body assumption.
             It must NOT be allowed to collapse to zero — letting the wall float to
             the adiabatic temperature drives q->0 and masks the danger.
 
         (B) EQUILIBRIUM WALL TEMPERATURE (cooling-adequacy check). The steady
             wall temperature actually reached for the *specified* cooling, from
             the surface energy balance q_in(Tw) = q_out(Tw):
-                q_in  = h_g*(Taw - Tw) + eps*sigma_SB*(Taw^4 - Tw^4)
+                q_in  = h_g*(Taw - Tw) + q_rad(Taw, Tw)   [Leckner gas radiation]
                 q_out = (Tw - T_coolant) / (R_cond + R_coolant)
             If Tw floats near Taw, the cooling is grossly inadequate (warn).
 
         References: Bartz (1957); Sutton & Biblarz 9th ed. Ch. 8;
-        NASA SP-8124; Huzel & Huang Ch. 4.
+        NASA SP-8124; Huzel & Huang Ch. 4; Leckner, Comb. Flame 19:33 (1972).
         """
         warnings_list: List[str] = []
 
@@ -716,10 +962,19 @@ class HeatTransferAnalyzer:
         Tw_ref = min(allowable, 0.8 * Taw)
         Tw_ref = max(Tw_ref, ambient_temp)
 
+        # Radyasyon: Leckner gaz emisivitesi (kara cisim DEĞİL). Muhafazakâr
+        # tasarım yükü felsefesine uygun olarak hazne koşulları kullanılır
+        # (T_g = Taw ~ T_c, p = P_c, L = 0.9*D_hazne); nozulda statik T/p
+        # düşer, yani bu seçim güvenli taraftadır.
+        p_total_bar = pressure / 1e5
+        beam_length = MEAN_BEAM_LENGTH_FACTOR * diameter
+
         def gas_side_flux(Tw, h):
             q_conv = h * (Taw - Tw)
-            q_rad = emissivity * self.stefan_boltzmann * (Taw ** 4 - max(Tw, 0.0) ** 4)
-            return q_conv + q_rad
+            q_rad = self._gas_radiation_flux(
+                Taw, Tw, p_total_bar, beam_length, wall_emissivity=emissivity
+            )
+            return q_conv + max(q_rad, 0.0)
 
         throat_heat_flux = gas_side_flux(Tw_ref, h_gas)  # W/m^2 (real design load)
 

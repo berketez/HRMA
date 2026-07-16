@@ -116,7 +116,7 @@ echo.
 echo Installation completed successfully!
 echo.
 echo Starting web application...
-echo The browser will open automatically at: http://localhost:5000
+echo The browser will open automatically at: http://localhost:8080
 echo.
 echo Press Ctrl+C in this window to stop the application
 echo.

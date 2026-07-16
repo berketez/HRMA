@@ -1,0 +1,379 @@
+{
+ "_meta": {
+  "generated": "2026-07-16",
+  "note": "Bundled offline snapshot; user cache overrides"
+ },
+ "entries": {
+  "pubchem:abs": {
+   "data": {
+    "cid": 24756,
+    "formula": "C15H17N",
+    "iupac_name": "buta-1,3-diene;prop-2-enenitrile;styrene",
+    "molecular_weight": "211.30",
+    "name": "abs",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:19"
+  },
+  "pubchem:ethanol": {
+   "data": {
+    "cid": 702,
+    "formula": "C2H6O",
+    "iupac_name": "ethanol",
+    "molecular_weight": "46.07",
+    "name": "ethanol",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:39"
+  },
+  "pubchem:h2o2": {
+   "data": {
+    "cid": 784,
+    "formula": "H2O2",
+    "iupac_name": "hydrogen peroxide",
+    "molecular_weight": "34.015",
+    "name": "h2o2",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:28"
+  },
+  "pubchem:htpb": {
+   "data": {
+    "cid": 53298156,
+    "formula": "C21H17ClN4O",
+    "iupac_name": "N-(3-chloro-4-methoxyphenyl)-4-(pyridin-3-ylmethyl)phthalazin-1-amine",
+    "molecular_weight": "376.8",
+    "name": "htpb",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:12"
+  },
+  "pubchem:lh2": {
+   "data": {
+    "cid": 783,
+    "formula": "H2",
+    "iupac_name": "molecular hydrogen",
+    "molecular_weight": "2.016",
+    "name": "lh2",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:33"
+  },
+  "pubchem:lox": {
+   "data": {
+    "cid": 977,
+    "formula": "O2",
+    "iupac_name": "molecular oxygen",
+    "molecular_weight": "31.999",
+    "name": "lox",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:26"
+  },
+  "pubchem:methane": {
+   "data": {
+    "cid": 297,
+    "formula": "CH4",
+    "iupac_name": "methane",
+    "molecular_weight": "16.043",
+    "name": "methane",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:35"
+  },
+  "pubchem:mmh": {
+   "data": {
+    "cid": 6061,
+    "formula": "CH6N2",
+    "iupac_name": "methylhydrazine",
+    "molecular_weight": "46.072",
+    "name": "mmh",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:41"
+  },
+  "pubchem:n2o": {
+   "data": {
+    "cid": 948,
+    "formula": "N2O",
+    "iupac_name": "nitrous oxide",
+    "molecular_weight": "44.013",
+    "name": "n2o",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:23"
+  },
+  "pubchem:n2o4": {
+   "data": {
+    "cid": 25352,
+    "formula": "N2O4",
+    "iupac_name": "",
+    "molecular_weight": "92.011",
+    "name": "n2o4",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:30"
+  },
+  "pubchem:paraffin": {
+   "data": {
+    "cid": 12408,
+    "formula": "C28H58",
+    "iupac_name": "octacosane",
+    "molecular_weight": "394.8",
+    "name": "paraffin",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:14"
+  },
+  "pubchem:pmma": {
+   "data": {
+    "cid": 6658,
+    "formula": "C5H8O2",
+    "iupac_name": "methyl 2-methylprop-2-enoate",
+    "molecular_weight": "100.12",
+    "name": "pmma",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:16"
+  },
+  "pubchem:rp1": {
+   "data": {
+    "cid": 11006,
+    "formula": "C16H34",
+    "iupac_name": "hexadecane",
+    "molecular_weight": "226.44",
+    "name": "rp1",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:32"
+  },
+  "pubchem:udmh": {
+   "data": {
+    "cid": 5976,
+    "formula": "C2H8N2",
+    "iupac_name": "1,1-dimethylhydrazine",
+    "molecular_weight": "60.10",
+    "name": "udmh",
+    "source": "PubChem"
+   },
+   "timestamp": "2026-07-16T21:56:43"
+  },
+  "webapi:cea|ethanol|lox|20|2.5": {
+   "data": {
+    "c_star": 5320.019513388217,
+    "chamber_temperature": 5866.775578504509,
+    "fetched_at": "2026-07-16T21:56:49.735103",
+    "fuel": "ethanol",
+    "gamma": 1.1197683443794704,
+    "isp_sea_level": 309.5917970108975,
+    "isp_vacuum": 354.55890614512475,
+    "molecular_weight": 25.79430091123744,
+    "oxidizer": "lox",
+    "source": "RocketCEA Library (NASA CEA)",
+    "status": "success"
+   },
+   "timestamp": "2026-07-16T21:56:49"
+  },
+  "webapi:cea|lh2|lox|20|2.5": {
+   "data": {
+    "c_star": 7896.632571314953,
+    "chamber_temperature": 3853.8266514432926,
+    "fetched_at": "2026-07-16T21:56:48.362954",
+    "fuel": "lh2",
+    "gamma": 1.2533640535745827,
+    "isp_sea_level": 423.5306890543736,
+    "isp_vacuum": 451.60946742135945,
+    "molecular_weight": 7.05279473262964,
+    "oxidizer": "lox",
+    "source": "RocketCEA Library (NASA CEA)",
+    "status": "success"
+   },
+   "timestamp": "2026-07-16T21:56:48"
+  },
+  "webapi:cea|methane|lox|20|2.5": {
+   "data": {
+    "c_star": 6049.856159056823,
+    "chamber_temperature": 5558.987608938905,
+    "fetched_at": "2026-07-16T21:56:49.205961",
+    "fuel": "methane",
+    "gamma": 1.1605350913119603,
+    "isp_sea_level": 336.9956665543822,
+    "isp_vacuum": 371.4931460444832,
+    "molecular_weight": 18.342134108354266,
+    "oxidizer": "lox",
+    "source": "RocketCEA Library (NASA CEA)",
+    "status": "success"
+   },
+   "timestamp": "2026-07-16T21:56:49"
+  },
+  "webapi:cea|rp1|lox|20|2.5": {
+   "data": {
+    "c_star": 5831.338109641931,
+    "chamber_temperature": 6270.470922754222,
+    "fetched_at": "2026-07-16T21:56:46.752621",
+    "fuel": "rp1",
+    "gamma": 1.1323723288170937,
+    "isp_sea_level": 335.7709144715173,
+    "isp_vacuum": 377.33817484065,
+    "molecular_weight": 22.760747235967177,
+    "oxidizer": "lox",
+    "source": "RocketCEA Library (NASA CEA)",
+    "status": "success"
+   },
+   "timestamp": "2026-07-16T21:56:46"
+  },
+  "webapi:lh2|lox|20|2.5": {
+   "data": {
+    "combustion_data": {
+     "c_star": 7896.632571314953,
+     "chamber_temperature": 3853.8266514432926,
+     "fetched_at": "2026-07-16T21:56:48.362954",
+     "fuel": "lh2",
+     "gamma": 1.2533640535745827,
+     "isp_sea_level": 423.5306890543736,
+     "isp_vacuum": 451.60946742135945,
+     "molecular_weight": 7.05279473262964,
+     "oxidizer": "lox",
+     "source": "RocketCEA Library (NASA CEA)",
+     "status": "success"
+    },
+    "flight_validation": {
+     "error": "525 Server Error: <none> for url: https://api.spacexdata.com/v4/launches/latest",
+     "source": "spacex_error"
+    },
+    "fuel_properties": {
+     "boiling_point": 20.369,
+     "compound": "lh2",
+     "density": 70.85,
+     "source": "NIST Direct (Verified)",
+     "status": "success",
+     "thermal_conductivity": 0.1005,
+     "viscosity": 1.34e-05
+    },
+    "oxidizer_properties": {
+     "boiling_point": 90.188,
+     "compound": "lox",
+     "density": 1141.7,
+     "source": "NIST Direct (Verified)",
+     "status": "success",
+     "thermal_conductivity": 0.15,
+     "viscosity": 0.000194
+    },
+    "summary": {
+     "combination": "LH2/LOX",
+     "confidence": "high",
+     "data_freshness": "2026-07-16T21:56:49.002847",
+     "sources_used": [
+      "NIST Webbook",
+      "NASA CEA",
+      "SpaceX API"
+     ]
+    }
+   },
+   "timestamp": "2026-07-16T21:56:49"
+  },
+  "webapi:methane|lox|20|2.5": {
+   "data": {
+    "combustion_data": {
+     "c_star": 6049.856159056823,
+     "chamber_temperature": 5558.987608938905,
+     "fetched_at": "2026-07-16T21:56:49.205961",
+     "fuel": "methane",
+     "gamma": 1.1605350913119603,
+     "isp_sea_level": 336.9956665543822,
+     "isp_vacuum": 371.4931460444832,
+     "molecular_weight": 18.342134108354266,
+     "oxidizer": "lox",
+     "source": "RocketCEA Library (NASA CEA)",
+     "status": "success"
+    },
+    "flight_validation": {
+     "error": "525 Server Error: <none> for url: https://api.spacexdata.com/v4/launches/latest",
+     "source": "spacex_error"
+    },
+    "fuel_properties": {
+     "boiling_point": 111.66,
+     "compound": "methane",
+     "density": 422.6,
+     "source": "NIST Direct (Verified)",
+     "status": "success",
+     "thermal_conductivity": 0.195,
+     "viscosity": 0.000117
+    },
+    "oxidizer_properties": {
+     "boiling_point": 90.188,
+     "compound": "lox",
+     "density": 1141.7,
+     "source": "NIST Direct (Verified)",
+     "status": "success",
+     "thermal_conductivity": 0.15,
+     "viscosity": 0.000194
+    },
+    "summary": {
+     "combination": "METHANE/LOX",
+     "confidence": "high",
+     "data_freshness": "2026-07-16T21:56:49.727893",
+     "sources_used": [
+      "NIST Webbook",
+      "NASA CEA",
+      "SpaceX API"
+     ]
+    }
+   },
+   "timestamp": "2026-07-16T21:56:49"
+  },
+  "webapi:rp1|lox|20|2.5": {
+   "data": {
+    "combustion_data": {
+     "c_star": 5831.338109641931,
+     "chamber_temperature": 6270.470922754222,
+     "fetched_at": "2026-07-16T21:56:46.752621",
+     "fuel": "rp1",
+     "gamma": 1.1323723288170937,
+     "isp_sea_level": 335.7709144715173,
+     "isp_vacuum": 377.33817484065,
+     "molecular_weight": 22.760747235967177,
+     "oxidizer": "lox",
+     "source": "RocketCEA Library (NASA CEA)",
+     "status": "success"
+    },
+    "flight_validation": {
+     "error": "525 Server Error: <none> for url: https://api.spacexdata.com/v4/launches/latest",
+     "source": "spacex_error"
+    },
+    "fuel_properties": {
+     "compound": "rp1",
+     "density": 815.0,
+     "fetched_at": "2026-07-16T21:57:30.392633",
+     "heat_of_combustion": 43135000.0,
+     "name": "RP-1 Kerosene",
+     "source": "Fallback Data (direct_nist_error)",
+     "specific_heat": 2090,
+     "status": "fallback",
+     "thermal_conductivity": 0.145,
+     "viscosity": 0.00164
+    },
+    "oxidizer_properties": {
+     "boiling_point": 90.188,
+     "compound": "lox",
+     "density": 1141.7,
+     "source": "NIST Direct (Verified)",
+     "status": "success",
+     "thermal_conductivity": 0.15,
+     "viscosity": 0.000194
+    },
+    "summary": {
+     "combination": "RP1/LOX",
+     "confidence": "high",
+     "data_freshness": "2026-07-16T21:56:48.159521",
+     "sources_used": [
+      "NIST Webbook",
+      "NASA CEA",
+      "SpaceX API"
+     ]
+    }
+   },
+   "timestamp": "2026-07-16T21:56:48"
+  }
+ }
+}

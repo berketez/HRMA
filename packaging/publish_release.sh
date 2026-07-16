@@ -25,10 +25,11 @@ gh release create "v${VERSION}" "$DMG" "$EXE" \
     --notes "$NOTLAR"
 
 # README'deki doğrudan indirme linklerini yeni sürüme çevir (her yayında güncel kalsın)
+# Python bloğu göreli 'README.md' yolunu kullanır — önce repo köküne geç.
+cd "$SRC"
 python3 - "$VERSION" <<'PY'
 import re, sys
 v = sys.argv[1]
-p = __import__('os').path.join(__import__('os').path.dirname(__import__('os').path.abspath('__file__')), 'README.md')
 p = 'README.md'
 s = open(p, encoding='utf-8').read()
 s = re.sub(r'/releases/download/v[\d.]+/', f'/releases/download/v{v}/', s)
@@ -38,6 +39,5 @@ open(p, 'w', encoding='utf-8').write(s)
 print('README indirme linkleri v' + v + ' oldu — commit etmeyi unutma')
 PY
 
-cd "$SRC"
 echo "TAMAM: https://github.com/berketez/HRMA/releases/tag/v${VERSION}"
 echo "Kurulu uygulamalar bir sonraki açılışta bu sürümü önerecek."

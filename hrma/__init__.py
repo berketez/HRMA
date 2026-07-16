@@ -1,10 +1,10 @@
 """
-HRMA - Hybrid Rocket Motor Analysis
+HRMA - UZAYTEK Rocket Motor Analysis
 """
 
 import os
 
-__version__ = "2.4.5"
+__version__ = "2.4.6"
 __author__ = "Berke Tezgöçen"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

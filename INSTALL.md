@@ -1,261 +1,245 @@
-# Installation Guide - Hybrid Rocket Motor Analysis Tool
+# Installation Guide - HRMA
 
-## Universal Cross-Platform Installation
+## Easiest Path: Use the Installers
 
-This tool works on **Windows**, **macOS**, and **Linux** with Python 3.7+.
+If you just want to use HRMA, you do not need Python or this guide. Download
+`HRMA-Setup-X.Y.Z.exe` (Windows) or `HRMA-Setup-X.Y.Z-macOS.dmg` (macOS) from
+the [latest release](https://github.com/berketez/HRMA/releases/latest).
+Everything (Python, all libraries, offline charts) is bundled.
 
-## Quick Start (Recommended)
+The rest of this guide covers **installing from source** (developers, Linux
+users, or anyone who prefers running the code directly).
 
-### Windows Users:
-1. **Download** all files to a folder
-2. **Double-click** `start.bat`
-3. **Wait** for automatic installation and browser opening
+## Requirements
 
-### Mac/Linux Users:
-1. **Download** all files to a folder
-2. **Open terminal** in the folder
-3. **Run**: `chmod +x start.sh && ./start.sh`
-4. **Wait** for automatic installation and browser opening
+- **Python 3.10-3.13** (3.12 recommended). Python 3.14 is **not** supported
+  yet: HRMA pins `numpy<2` because several compiled dependencies (CoolProp,
+  manifold3d, build123d) are built against the NumPy 1.x ABI, and those
+  wheels do not exist for 3.14.
+- **RAM**: 2 GB available
+- **Storage**: ~1 GB free (packages included)
+- **Internet**: required only for the initial package installation
+
+Supported platforms: Windows 10/11, macOS 11+ (Apple Silicon and Intel),
+Linux (Ubuntu 20.04+, Debian 11+, Fedora, etc.).
+
+## Quick Start
+
+### Windows
+
+1. Install Python 3.10-3.13 from [python.org](https://www.python.org/downloads/)
+   (check "Add Python to PATH" during installation)
+2. Download or clone the repository
+3. Double-click `start.bat`
+4. Wait for automatic installation; the app opens at http://localhost:8080
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/berketez/HRMA.git
+cd HRMA
+chmod +x start.sh && ./start.sh
+```
 
 ## Manual Installation
 
-### Step 1: Install Python
-- **Windows**: Download from [python.org](https://www.python.org/downloads/) 
-  - ⚠️ **Important**: Check "Add Python to PATH" during installation
-- **Mac**: `brew install python3` or download from python.org
-- **Linux**: `sudo apt install python3 python3-pip` or `sudo yum install python3 python3-pip`
+### Step 1: Verify Python version
 
-### Step 2: Verify Installation
 ```bash
-# Check Python version (should be 3.7+)
-python --version
-# or
-python3 --version
+python3 --version   # must print 3.10.x - 3.13.x
 ```
 
-### Step 3: Install Dependencies
+### Step 2: Install dependencies
+
 ```bash
-# Option 1: Automatic (recommended)
-python hrma/install.py
-
-# Option 2: Manual
-pip install flask flask-cors numpy scipy plotly pandas waitress
-
-# Option 3: From requirements file
+# Recommended: from the requirements file
 pip install -r requirements.txt
+
+# Or use the helper installer
+python3 hrma/install.py
 ```
 
-### Step 4: Run Application
+### Step 3: Run the application
+
 ```bash
-# Simple method
-python hrma/run.py
-
-# Or use platform scripts
-# Windows: start.bat
-# Mac/Linux: ./start.sh
+python3 hrma/run.py
 ```
+
+The server (waitress) listens on **http://localhost:8080** and your browser
+opens automatically.
+
+### Optional extras
+
+```bash
+pip install build123d "numpy<2"   # true STEP solid export
+pip install cantera               # High-Fidelity kinetic level
+```
+
+Without these, the STEP export returns an explanatory error and kinetic
+requests gracefully fall back to the Engineering level. The desktop
+installers bundle build123d already.
 
 ## File Structure
 
 ```
 HRMA/
-├── start.bat              # Windows launcher
-├── start.sh               # Mac/Linux launcher  
-├── hrma/run.py            # Main application launcher (developers)
-├── app.py                 # Flask web application
-├── requirements.txt       # Python dependencies
-├── hybrid_rocket_engine.py # Motor calculations
-├── injector_design.py     # Injector algorithms
-├── visualization.py       # Plotting functions
-├── templates/
-│   └── index.html         # Web interface
-├── static/
-│   ├── css/style.css      # Styling
-│   └── js/app.js          # Frontend logic
-└── README.md              # Documentation
+├── start.bat               # Windows launcher
+├── start.sh                # macOS/Linux launcher
+├── requirements.txt        # Python dependencies
+├── hrma/                   # Main package
+│   ├── run.py              # Application launcher (developers)
+│   ├── app.py              # Flask web application
+│   ├── constants.py        # Shared constants
+│   ├── install.py          # Dependency helper installer
+│   ├── engines/            # Motor solvers (hybrid/solid/liquid, combustion,
+│   │                       #   nozzle, injector)
+│   ├── analysis/           # Engineering analyses (thermal, structural,
+│   │                       #   transient, 6-DOF, feed system, quasi-1D flow, ...)
+│   ├── data/               # Propellant/chemical/materials databases
+│   ├── export/             # STL/STEP/DXF/drawing-PDF/.eng/report generation
+│   ├── validation/         # Verification & user-data validation
+│   ├── visualization/      # Plotly chart builders
+│   ├── utils/              # Helpers, update checker, job runner
+│   ├── templates/          # HTML pages (index, hybrid, solid, liquid, formulas)
+│   └── static/             # CSS + JS (Three.js 3D viz, Analysis Deck panels)
+├── data/                   # Runtime databases & cache (created on first run)
+├── packaging/              # Installer build scripts (developers only)
+├── tests/                  # Automated test suite
+└── docs/                   # Documentation
 ```
-
-## System Requirements
-
-### Minimum Requirements:
-- **Python**: 3.7 or higher
-- **RAM**: 512 MB available
-- **Storage**: 100 MB free space
-- **Internet**: Required for initial package installation
-
-### Supported Operating Systems:
-- ✅ **Windows 7/8/10/11** (32-bit and 64-bit)
-- ✅ **macOS 10.13+** (High Sierra and newer)
-- ✅ **Linux** (Ubuntu, Debian, CentOS, Fedora, etc.)
-
-### Supported Python Installations:
-- ✅ **Official Python** (python.org)
-- ✅ **Microsoft Store Python** (Windows)
-- ✅ **Homebrew Python** (macOS)
-- ✅ **System Python** (Linux distributions)
-- ✅ **Anaconda/Miniconda**
-- ✅ **PyPy** (partial compatibility)
 
 ## Dependencies
 
-The application automatically installs these packages:
+Installed automatically from `requirements.txt`; the main ones:
 
-- **Flask**: Web framework for the user interface
-- **Flask-CORS**: Cross-origin resource sharing
-- **NumPy**: Numerical computing
-- **SciPy**: Scientific computing and optimization
-- **Plotly**: Interactive visualizations
-- **Pandas**: Data manipulation
-- **Waitress** (Windows) / **Gunicorn** (Unix): Production web servers
+- **Flask** + **waitress**: local web server behind the UI
+- **NumPy (<2)**, **SciPy**: numerical computing
+- **Plotly**: interactive charts (bundled offline)
+- **CoolProp**: real-fluid thermodynamic properties (N2O blowdown, etc.)
+- **RocketCEA**: NASA CEA cross-checks
+- **Cantera** (optional): equilibrium/finite-rate combustion chemistry
+- **ezdxf**, **manifold3d**, **reportlab**: DXF, STL boolean, and PDF outputs
+- **pywebview**: native desktop window (packaged app)
 
 ## Troubleshooting
 
-### Common Issues:
+### "Python is not recognized"
 
-#### "Python is not recognized"
 **Windows:**
-- Reinstall Python with "Add to PATH" checked
-- Or manually add Python to PATH environment variable
+- Reinstall Python with "Add to PATH" checked, or add it manually
 
-**Mac/Linux:**
+**macOS/Linux:**
 - Try `python3` instead of `python`
-- Install with package manager: `brew install python3` (Mac) or `sudo apt install python3` (Linux)
 
-#### "Permission denied" (Mac/Linux)
+### "Permission denied" (macOS/Linux)
+
 ```bash
 chmod +x start.sh
 ./start.sh
 ```
 
-#### "pip is not recognized"
+### "pip is not recognized"
+
 ```bash
-# Try these alternatives:
 python -m pip install -r requirements.txt
+# or
 python3 -m pip install -r requirements.txt
+# or (Windows)
 py -m pip install -r requirements.txt
 ```
 
-#### "Port 5000 already in use"
+### "Port 8080 already in use"
+
 **Windows:**
 ```cmd
-netstat -ano | findstr :5000
+netstat -ano | findstr :8080
 taskkill /PID <PID_NUMBER> /F
 ```
 
-**Mac/Linux:**
+**macOS/Linux:**
 ```bash
-lsof -ti:5000 | xargs kill -9
+lsof -ti:8080 | xargs kill -9
 ```
 
-#### Installation fails on corporate networks
-- Use: `pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r requirements.txt`
-- Or contact IT department about Python package installation
+### NumPy / compiled-package errors
 
-#### Slow installation
-- The first installation downloads ~200MB of packages
+HRMA requires `numpy<2`. If another tool upgraded NumPy:
+
+```bash
+pip install "numpy<2"
+```
+
+If you are on Python 3.14, downgrade to 3.10-3.13 — the compiled
+dependencies have no 3.14 wheels yet, and `hrma/run.py` refuses unsupported
+interpreters with a clear message.
+
+### Installation fails on corporate networks
+
+```bash
+pip install --trusted-host pypi.org --trusted-host pypi.python.org \
+    --trusted-host files.pythonhosted.org -r requirements.txt
+```
+
+### Slow installation
+
+- The first installation downloads a few hundred MB of packages
 - Subsequent runs are much faster
-- Use `pip install --cache-dir ./cache -r requirements.txt` for offline cache
 
-### Platform-Specific Notes:
+### Platform notes
 
-#### Windows:
-- Tested on Windows 7, 8, 10, 11
-- Both 32-bit and 64-bit supported
-- Microsoft Store Python works
-- Antivirus may slow first-time installation
+**Windows**: Microsoft Store Python works; antivirus may slow the first
+installation.
 
-#### macOS:
-- Requires macOS 10.13+ (High Sierra)
-- Both Intel and Apple Silicon (M1/M2) supported
-- Homebrew Python recommended: `brew install python3`
-- May need to install Xcode Command Line Tools
+**macOS**: Homebrew Python is fine (`brew install python@3.12`); Xcode
+Command Line Tools may be required for compiled packages.
 
-#### Linux:
-- Tested on Ubuntu 18.04+, CentOS 7+, Debian 9+
-- Both x86_64 and ARM64 supported
-- May need development packages: `sudo apt install python3-dev build-essential`
+**Linux**: you may need development packages:
+`sudo apt install python3-dev build-essential`.
 
 ## Advanced Installation
 
-### Using Virtual Environment (Recommended for developers):
-```bash
-# Create virtual environment
-python -m venv hrma_env
+### Virtual environment (recommended for developers)
 
-# Activate virtual environment
+```bash
+python3 -m venv hrma_env
+
 # Windows:
 hrma_env\Scripts\activate
-# Mac/Linux:
+# macOS/Linux:
 source hrma_env/bin/activate
 
-# Install packages
 pip install -r requirements.txt
-
-# Run application
 python hrma/run.py
 ```
 
-### Using Conda:
+### Conda
+
 ```bash
-# Create conda environment
-conda create -n hrma python=3.9
+conda create -n hrma python=3.12
 conda activate hrma
-
-# Install packages
 pip install -r requirements.txt
-
-# Run application
 python hrma/run.py
 ```
 
-### Docker (for advanced users):
+### Docker (advanced users)
+
 ```dockerfile
-FROM python:3.9-slim
+FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
-EXPOSE 5000
+EXPOSE 8080
 CMD ["python", "hrma/run.py"]
 ```
 
-## Getting Help
-
-### Before seeking help:
-1. ✅ **Run the installer**: `python hrma/install.py`
-2. ✅ **Check Python version**: `python --version` (should be 3.7+)
-3. ✅ **Try the simple command**: `python hrma/run.py`
-4. ✅ **Check the browser**: Open http://localhost:5000 manually
-
-### Error Logs:
-- Errors are displayed in the terminal/command prompt
-- Screenshot error messages when reporting issues
-- Include your operating system and Python version
-
-### Common Solutions:
-- **Restart** your computer after Python installation
-- **Update pip**: `python -m pip install --upgrade pip`
-- **Clear pip cache**: `pip cache purge`
-- **Try user installation**: `pip install --user -r requirements.txt`
-
 ## Success Indicators
 
-When everything works correctly, you should see:
-```
-==========================================
-  HYBRID ROCKET MOTOR ANALYSIS TOOL
-  http://localhost:5000
-==========================================
-
-Platform: Windows 10.0.19041
-Starting web server...
-Press Ctrl+C to stop
-
-✓ Browser should open automatically
-✓ Web interface loads at http://localhost:5000
-✓ You can enter motor parameters and calculate
-```
+When everything works, the terminal shows the server starting on
+http://localhost:8080, your browser opens automatically, and you can enter
+motor parameters and press Calculate on the hybrid/solid/liquid pages.
 
 ---
 
-**Need more help?** Check the main README.md file for usage instructions.
+**Need usage help?** See [USER_MANUAL.md](USER_MANUAL.md) and the main
+[README.md](README.md).

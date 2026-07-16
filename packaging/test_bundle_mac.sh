@@ -7,7 +7,7 @@ PY="$RES/python/bin/python3.12"
 export RES
 
 if curl -s -o /dev/null --max-time 2 http://127.0.0.1:8085/; then
-  echo "HATA: 8080 portunda zaten bir sunucu var, test sağlıklı olmaz. Önce onu kapat."
+  echo "HATA: 8085 portunda zaten bir sunucu var, test sağlıklı olmaz. Önce onu kapat."
   exit 1
 fi
 

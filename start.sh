@@ -43,6 +43,35 @@ echo "Found Python: $PYTHON_CMD"
 $PYTHON_CMD --version
 echo
 
+# Python surum kapisi: 3.10-3.13 desteklenir. 3.14+ derlenmis bagimliliklar
+# (numpy<2, CoolProp, RocketCEA) icin wheel bulamayip kaynaktan derlemeye
+# calisiyor ve C derleyicisi olmadan patliyor (2026-07-15 numpy meson hatasi).
+PYMAJ=$($PYTHON_CMD -c 'import sys; print(sys.version_info[0])')
+PYMIN=$($PYTHON_CMD -c 'import sys; print(sys.version_info[1])')
+if [ "$PYMAJ" -ne 3 ]; then
+    echo "Error: Python 3.10-3.13 required. Detected: $PYMAJ.$PYMIN"
+    exit 1
+fi
+if [ "$PYMIN" -lt 10 ]; then
+    echo "Error: Python 3.10 or newer required. Detected: 3.$PYMIN"
+    exit 1
+fi
+if [ "$PYMIN" -ge 14 ]; then
+    echo "=========================================================="
+    echo "  Python 3.$PYMIN is not supported for source install."
+    echo "=========================================================="
+    echo "Compiled dependencies numpy, CoolProp, RocketCEA do not ship"
+    echo "3.14+ wheels, so pip tries to build them from source and fails"
+    echo "without a C compiler."
+    echo
+    echo "EASIEST FIX: download the ready-made installer instead of the"
+    echo "source code: https://github.com/berketez/HRMA/releases/latest"
+    echo "  macOS: HRMA-Setup-x.y.z-macOS.dmg  (bundles Python 3.12 + everything)"
+    echo
+    echo "Or install Python 3.12 from https://www.python.org/downloads/"
+    exit 1
+fi
+
 # Check for pip
 if ! $PYTHON_CMD -m pip --version &> /dev/null; then
     echo "Installing pip..."
@@ -75,7 +104,7 @@ echo
 echo "Installation completed successfully!"
 echo
 echo "Starting web application..."
-echo "The browser will open automatically at: http://localhost:5000"
+echo "The browser will open automatically at: http://localhost:8080"
 echo
 echo "Press Ctrl+C to stop the application"
 echo

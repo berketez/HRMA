@@ -2,7 +2,7 @@
 
 A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D digital twin of your motor.
 
-## 📥 Just Want to Use HRMA? Download the Installer
+## Just Want to Use HRMA? Download the Installer
 
 **You do not need Python, the source code, or anything on this page.** Grab the
 installer for your platform from the
@@ -11,8 +11,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**⬇ HRMA-Setup-2.4.5.exe**](https://github.com/berketez/HRMA/releases/download/v2.4.5/HRMA-Setup-2.4.5.exe) — double-click, Next → Next → Install |
-| **macOS 11+ (Apple Silicon)** | [**⬇ HRMA-Setup-2.4.5-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.4.5/HRMA-Setup-2.4.5-macOS.dmg) — drag HRMA to Applications |
+| **Windows 10/11** | [**HRMA-Setup-2.4.6.exe**](https://github.com/berketez/HRMA/releases/download/v2.4.6/HRMA-Setup-2.4.6.exe) — double-click, Next → Next → Install |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.4.6-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.4.6/HRMA-Setup-2.4.6-macOS.dmg) — drag HRMA to Applications |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -35,6 +35,12 @@ you can ignore them entirely.
 - **Exact Star Grain Regression**: burning perimeter computed by geometric offset of the true star profile (Huygens principle, validated against the analytic circular-port solution) — point count and depth feed directly into the thrust curve
 - **Liquid Engine Flow Schematic**: feed-system diagram (tanks → turbopump/pressure-fed → injector → chamber → nozzle) generated from computed flow rates and pressures
 - **6-DOF Flight Panel** (all three motor pages): Barrowman stability (CN_α/CP, static margin), weathercocking, apogee — chains directly onto the computed thrust curve
+- **Analysis Deck (13 panels)**: tabbed engineering-analysis deck that pre-fills from the current motor result — Structural Safety (Lamé/SP-8007/fatigue), Thermal Safety (Bartz + axial wall profile), Comprehensive Safety, Advanced Performance (3D surface, Mach contour), Pressure Vessel (MAWP/burst), Thermal Protection (ablative/heat-sink/radiation-cooled), Bolted Joint (Shigley), Nozzle Flow (quasi-1D), User Data Validation (static-fire CSV), Regenerative Cooling (liquid), Feed System (slosh/pressurant/water hammer), Injector Design, and Comparative Analysis
+- **Quasi-1D Nozzle Flow**: compressible quasi-1D solver with regime detection, P(x)/M(x) profiles and CF — replaces the former placeholder CFD panel
+- **Staged Combustion Kinetics**: three explicit fidelity levels (Fast Screening / Engineering / High-Fidelity finite-rate Cantera integration) with honest `fidelity_used` reporting and graceful fallback when Cantera is absent
+- **Materials Database**: 11 engineering materials (steels, aluminum, titanium, Inconel, coppers, graphite, ablative liner) with temperature-derated properties feeding the structural and thermal panels
+- **Injector Design Module**: seven element types with the Dyer NHNE two-phase model for self-pressurizing N₂O (not the optimistic single-phase orifice equation)
+- **Gas Radiation (Leckner)**: chamber radiation uses Leckner H₂O/CO₂ gas emissivity correlations instead of a black-body assumption
 - **Native Desktop App**: opens in its own window (macOS WKWebView / Windows WebView2 — no Chrome required), splash screen appears in ~1 s while engines load in the background; closing the window closes the app
 - **Automatic Updates**: checks GitHub Releases at startup and offers one-click download & install of new versions
 - **Fully Offline**: all JS libraries (Plotly, Three.js, MathJax) are bundled — no CDN, no internet required after installation
@@ -47,8 +53,8 @@ you can ignore them entirely.
 HRMA's thermochemistry is cross-checked against **NASA CEA** (via RocketCEA):
 hybrid combustion (c\*, Tc, Isp) agrees within **≤1.5 %** across all supported
 fuel/oxidizer pairs, and liquid c\* within **<2 %**. The hybrid regression model
-is compared against published static-fire data (Rezaei HTPB/N2O). 228 automated
-tests pass.
+is compared against published static-fire data (Rezaei HTPB/N2O). 1,000+
+automated tests pass.
 
 HRMA is a **preliminary-design and educational tool**, not a flight-qualification
 tool. Predicted performance should be cross-checked against an independent code
@@ -66,8 +72,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [⬇ `HRMA-Setup-2.4.5.exe`](https://github.com/berketez/HRMA/releases/download/v2.4.5/HRMA-Setup-2.4.5.exe) (~206 MB) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [⬇ `HRMA-Setup-2.4.5-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.4.5/HRMA-Setup-2.4.5-macOS.dmg) (~496 MB) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.4.6.exe`](https://github.com/berketez/HRMA/releases/download/v2.4.6/HRMA-Setup-2.4.6.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.4.6-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.4.6/HRMA-Setup-2.4.6-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -94,38 +100,48 @@ Open http://localhost:8080 in your browser.
 HRMA/
 ├── start.sh / start.bat    # Developer launch scripts
 ├── hrma/                   # Main package
-│   ├── app.py              # Flask web application (48 routes)
+│   ├── app.py              # Flask web application (~73 routes)
+│   ├── run.py              # Launcher (waitress on port 8080)
+│   ├── constants.py        # Shared physical constants & parameters
 │   ├── engines/            # Motor calculations
 │   │   ├── hybrid_rocket_engine.py
 │   │   ├── solid_rocket_engine.py
 │   │   ├── liquid_rocket_engine.py
 │   │   ├── combustion_analysis.py
+│   │   ├── injector_design.py      # 7 element types, Dyer NHNE two-phase
 │   │   └── nozzle_design.py
 │   ├── analysis/           # Engineering analysis
-│   │   ├── cfd_analysis.py
+│   │   ├── nozzle_flow_1d.py       # Quasi-1D compressible nozzle flow
+│   │   ├── kinetic_efficiency.py   # Fast / Engineering / High-Fidelity kinetics
 │   │   ├── heat_transfer_analysis.py
 │   │   ├── structural_analysis.py
-│   │   ├── safety_analysis.py
-│   │   ├── trajectory_analysis.py
+│   │   ├── pressure_vessel.py
+│   │   ├── thermal_protection.py
+│   │   ├── bolted_joint.py
+│   │   ├── regen_cooling.py
+│   │   ├── slosh_analysis.py / pressurant_sizing.py / water_hammer.py
+│   │   ├── transient_ballistics.py / tank_blowdown.py
+│   │   ├── six_dof_trajectory.py / trajectory_analysis.py
+│   │   ├── safety_analysis.py / safety_limits.py
 │   │   └── ...
-│   ├── data/               # Data sources & APIs
+│   ├── data/               # Data sources & databases
 │   │   ├── propellant_database.py
+│   │   ├── materials_db.py         # 11 engineering materials
 │   │   ├── chemical_database.py
-│   │   ├── web_propellant_api.py
-│   │   ├── nasa_realtime_validator.py
 │   │   └── ...
 │   ├── export/             # Output generation
-│   │   ├── cad_export.py
-│   │   ├── cad_visualization.py
+│   │   ├── cad_export.py / step_export.py
+│   │   ├── drawing_generator.py / motor_geometry.py
 │   │   ├── openrocket_integration.py
 │   │   └── pdf_generator.py
 │   ├── validation/         # Verification & validation
 │   ├── visualization/      # Plotly charts & dashboards
-│   ├── utils/              # Helpers & utilities
-│   ├── templates/          # HTML templates
-│   └── static/             # Dark theme CSS + JS (Three.js motor viz, Plotly wrappers)
+│   ├── utils/              # Helpers, update checker, job runner
+│   ├── templates/          # HTML templates (index, hybrid, solid, liquid, formulas)
+│   └── static/             # Dark theme CSS + JS (Three.js viz, Analysis Deck panels)
 ├── data/                   # Runtime databases & cache
-├── tests/                  # Test suite
+├── packaging/              # Installer build scripts (dmg / exe) & release tooling
+├── tests/                  # Test suite (1,000+ automated tests)
 └── docs/                   # Documentation
 ```
 
@@ -169,13 +185,14 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## Version
 
-**HRMA v2.3**
+**HRMA v2.4.6**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - Professional Rocket Propulsion Design Tool
-- Last Updated: July 2026 (native desktop window with instant splash, automatic
-  updates via GitHub Releases, offline JS bundle, English installers, 10× faster
-  startup, safety-analysis completion)
+- Last Updated: July 2026 (13-panel Analysis Deck with comparative analysis,
+  quasi-1D nozzle flow, staged combustion kinetics, materials database,
+  Leckner gas-emissivity radiation, NHNE injector design, physics-audit
+  fixes, native desktop window with automatic updates via GitHub Releases)
 
 ## Ready to Design?
 

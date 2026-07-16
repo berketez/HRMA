@@ -16,6 +16,19 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.graphics.shapes import Drawing
+
+
+def _hrma_version() -> str:
+    """Rapor künyesindeki yazılım sürümü — tek kaynaktan (hrma/__init__.py).
+
+    Eski kod sabit 'v2.0' yazıyordu (2026-07-16 denetim bulgusu); artık
+    sürüm bump'ı raporlara otomatik yansır.
+    """
+    try:
+        from hrma import __version__
+        return __version__
+    except Exception:
+        return 'unknown'
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.piecharts import Pie
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -150,7 +163,7 @@ class PDFReportGenerator:
             ['Report Type:', report_type.title()],
             ['Generated:', datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
             ['Motor Type:', motor_type],
-            ['Analysis Software:', 'UZAYTEK HRMA v2.0'],
+            ['Analysis Software:', f'UZAYTEK HRMA v{_hrma_version()}'],
             ['Standards:', 'NASA SP-125, NASA-STD-5012, NASA SP-8124']
         ]
         

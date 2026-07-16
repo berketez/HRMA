@@ -1,6 +1,19 @@
 """
 Real-time Web API Integration for Propellant Data
 Fetches live data from NIST, NASA CEA, and other verified sources
+
+Offline behavior (2026-07-16): every fetch now resolves in this order:
+1. Fresh pickle cache (within TTL)
+2. Live network fetch (on success: written to both the pickle cache and
+   the persistent offline store, hrma.data.offline_store)
+3. STALE pickle cache, age-unlimited ('stale-if-error')
+4. Persistent offline store: user cache file, then the bundled
+   offline_snapshot.json shipped with the package
+5. Existing static fallback data
+
+So once a combination has been fetched successfully at least once (or is
+covered by the bundled snapshot), the application keeps returning real
+data with no network available.
 """
 
 import requests
@@ -18,6 +31,7 @@ import hashlib
 import os
 import pickle
 from hrma import DATA_DIR
+from hrma.data import offline_store
 
 class WebPropellantAPI:
     """Real-time propellant data from NASA/NIST/ESA sources"""
@@ -64,24 +78,35 @@ class WebPropellantAPI:
         key_data = f"{source}_{compound}_{str(params) if params else ''}"
         return hashlib.md5(key_data.encode()).hexdigest()
     
-    def _load_cache(self, cache_key: str) -> Optional[Dict]:
-        """Load data from cache if valid"""
+    def _load_cache(self, cache_key: str, allow_stale: bool = False) -> Optional[Dict]:
+        """Load data from cache if valid (allow_stale=True ignores TTL: stale-if-error)"""
         cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
-        
+
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, 'rb') as f:
                     cached_data = pickle.load(f)
-                
+
                 # Check if cache is still valid
                 if datetime.now() - cached_data['timestamp'] < timedelta(seconds=self.cache_ttl):
                     print(f"Using cached data for {cache_key[:8]}...")
                     return cached_data['data']
-                    
+
+                if allow_stale:
+                    print(f"Using stale cached data for {cache_key[:8]} (stale-if-error)")
+                    return cached_data['data']
+
             except Exception as e:
                 print(f"Cache read error: {e}")
-        
+
         return None
+
+    def _load_offline_store(self, offline_key: str) -> Optional[Dict]:
+        """Load data from persistent offline store (user cache, then bundled snapshot)"""
+        stored = offline_store.get(offline_key)
+        if stored is not None:
+            print(f"Using offline store data for {offline_key}")
+        return stored
     
     def _save_cache(self, cache_key: str, data: Dict):
         """Save data to cache"""
@@ -106,7 +131,9 @@ class WebPropellantAPI:
         cached = self._load_cache(cache_key)
         if cached:
             return cached
-        
+
+        offline_key = offline_store.make_key('webapi', 'nist', compound)
+
         try:
             # Try unofficial NIST API first
             cas_number = self.nist_compounds.get(compound)
@@ -135,14 +162,26 @@ class WebPropellantAPI:
                 'status': 'success'
             })
             
-            # Cache the result
+            # Cache the result (pickle + persistent offline store)
             self._save_cache(cache_key, data)
-            
+            # Kalici depoya yalniz gercek deger tasiyan sonuclar yazilir
+            # (ucuncu-taraf API bazen parse edilemeyen 'success' donduruyor)
+            if data.get('density') is not None:
+                offline_store.put(offline_key, data)
+
             print(f"NIST data fetched for {compound}")
             return data
-            
+
         except Exception as e:
             print(f"NIST API failed for {compound}: {str(e)}")
+            # stale-if-error: bayat pickle cache yas siniri olmadan kullanilir
+            stale = self._load_cache(cache_key, allow_stale=True)
+            if stale is not None:
+                return stale
+            # Persistent offline store (user cache -> bundled snapshot)
+            stored = self._load_offline_store(offline_key)
+            if stored is not None:
+                return stored
             # Try direct NIST webbook as fallback
             return self._try_direct_nist(compound)
     
@@ -156,13 +195,17 @@ class WebPropellantAPI:
         cached = self._load_cache(cache_key)
         if cached:
             return cached
-        
+
+        offline_key = offline_store.make_key('webapi', 'cea', fuel, oxidizer,
+                                             float(chamber_pressure), float(mixture_ratio))
+
         # Try RocketCEA library first (more reliable)
         try:
             results = self._use_rocketcea_library(fuel, oxidizer, chamber_pressure, mixture_ratio)
             if results.get('status') == 'success':
-                # Cache the result
+                # Cache the result (pickle + persistent offline store)
                 self._save_cache(cache_key, results)
+                offline_store.put(offline_key, results)
                 print(f"NASA CEA data fetched via RocketCEA for {fuel}/{oxidizer}")
                 return results
         except Exception as e:
@@ -202,14 +245,23 @@ class WebPropellantAPI:
                 'status': 'success'
             })
             
-            # Cache the result
+            # Cache the result (pickle + persistent offline store)
             self._save_cache(cache_key, results)
-            
+            offline_store.put(offline_key, results)
+
             print(f"NASA CEA web data fetched for {fuel}/{oxidizer}")
             return results
-            
+
         except Exception as e:
             print(f"NASA CEA web failed: {str(e)}")
+            # stale-if-error: bayat pickle cache yas siniri olmadan kullanilir
+            stale = self._load_cache(cache_key, allow_stale=True)
+            if stale is not None:
+                return stale
+            # Persistent offline store (user cache -> bundled snapshot)
+            stored = self._load_offline_store(offline_key)
+            if stored is not None:
+                return stored
             return self._get_fallback_cea_data(fuel, oxidizer)
     
     def _parse_nist_api_response(self, api_data: Dict, compound: str) -> Dict:
@@ -362,7 +414,9 @@ class WebPropellantAPI:
         cached = self._load_cache(cache_key)
         if cached:
             return cached
-        
+
+        offline_key = offline_store.make_key('webapi', 'spacex')
+
         try:
             # SpaceX API for launch data
             response = self.session.get(self.endpoints['spacex_data'] + 'launches/latest', timeout=30)
@@ -384,14 +438,23 @@ class WebPropellantAPI:
                 }
             }
             
-            # Cache the result
+            # Cache the result (pickle + persistent offline store)
             self._save_cache(cache_key, rocket_data)
-            
+            offline_store.put(offline_key, rocket_data)
+
             print("SpaceX data fetched")
             return rocket_data
-            
+
         except Exception as e:
             print(f"SpaceX fetch failed: {str(e)}")
+            # stale-if-error: bayat pickle cache yas siniri olmadan kullanilir
+            stale = self._load_cache(cache_key, allow_stale=True)
+            if stale is not None:
+                return stale
+            # Persistent offline store (user cache -> bundled snapshot)
+            stored = self._load_offline_store(offline_key)
+            if stored is not None:
+                return stored
             return {'error': str(e), 'source': 'spacex_error'}
     
     def _parse_nist_response(self, html_content: str, compound: str) -> Dict:
@@ -631,26 +694,46 @@ end
     def get_comprehensive_data(self, fuel: str, oxidizer: str, **kwargs) -> Dict:
         """Get comprehensive propellant data from all sources"""
         print(f"Fetching comprehensive data for {fuel}/{oxidizer}...")
-        
+
+        pressure = kwargs.get('pressure', 100)
+        mixture_ratio = kwargs.get('mixture_ratio', 2.5)
+        offline_key = offline_store.make_key('webapi', fuel, oxidizer,
+                                             float(pressure), float(mixture_ratio))
+
+        fuel_props = self.fetch_nist_data(fuel)
+        ox_props = self.fetch_nist_data(oxidizer)
+        combustion_data = self.fetch_nasa_cea_data(fuel, oxidizer, pressure, mixture_ratio)
+
+        # Guven seviyesi zaten cekilmis sonuclardan hesaplanir (tekrar fetch yok;
+        # ag yokken 3 ekstra timeout beklenmesin)
+        all_success = all([
+            fuel_props.get('status') == 'success',
+            ox_props.get('status') == 'success',
+            combustion_data.get('status') == 'success'
+        ])
+
         results = {
-            'fuel_properties': self.fetch_nist_data(fuel),
-            'oxidizer_properties': self.fetch_nist_data(oxidizer),
-            'combustion_data': self.fetch_nasa_cea_data(fuel, oxidizer, 
-                                                       kwargs.get('pressure', 100),
-                                                       kwargs.get('mixture_ratio', 2.5)),
+            'fuel_properties': fuel_props,
+            'oxidizer_properties': ox_props,
+            'combustion_data': combustion_data,
             'flight_validation': self.fetch_spacex_telemetry(),
             'summary': {
                 'combination': f"{fuel.upper()}/{oxidizer.upper()}",
                 'data_freshness': datetime.now().isoformat(),
                 'sources_used': ['NIST Webbook', 'NASA CEA', 'SpaceX API'],
-                'confidence': 'high' if all([
-                    self.fetch_nist_data(fuel).get('status') == 'success',
-                    self.fetch_nist_data(oxidizer).get('status') == 'success',
-                    self.fetch_nasa_cea_data(fuel, oxidizer).get('status') == 'success'
-                ]) else 'medium'
+                'confidence': 'high' if all_success else 'medium'
             }
         }
-        
+
+        if all_success:
+            # Basarili bilesik sonucu kalici depoya yaz (cevrimdisi kullanim icin)
+            offline_store.put(offline_key, results)
+        elif combustion_data.get('status') == 'fallback':
+            # Tum canli/cache/snapshot alt-katmanlar bos kaldi: bilesik anahtari dene
+            stored = self._load_offline_store(offline_key)
+            if stored is not None:
+                return stored
+
         print(f"Comprehensive data collection complete")
         return results
 

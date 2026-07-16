@@ -1,252 +1,407 @@
-# Hybrid Rocket Motor Analysis Tool - User Manual
+# HRMA User Manual
 
-## 📖 Overview
+HRMA (UZAYTEK Rocket Motor Analysis) is a desktop application for the
+preliminary design and analysis of hybrid, solid, and liquid rocket motors.
+It runs a local Flask engine behind a native desktop window (pywebview) and
+presents results in a dark-themed web interface with an interactive 3D
+digital twin, an Analysis Deck of engineering panels, and working CAD /
+drawing / report exports.
 
-This high-precision MATLAB tool designs and analyzes hybrid rocket motors with **99.9% accuracy**. It supports three injector types (showerhead, pintle, swirl) and includes advanced features like time-dependent analysis, sensitivity studies, and optimization.
+This manual describes HRMA **v2.4.6**.
 
-## 🚀 Getting Started
+> **Scope notice.** HRMA is a preliminary-design and educational tool built
+> on closed-form and 1D engineering correlations. It is not a
+> flight-qualification tool. See "Scope and Limitations" at the end of this
+> manual and [VALIDATION_STATUS.md](VALIDATION_STATUS.md) for what has been
+> verified and what has not.
 
-### Prerequisites
-- MATLAB R2018b or newer
-- Optimization Toolbox (for advanced features)
-- Statistics and Machine Learning Toolbox (optional)
+## Table of Contents
 
-### Installation
-1. Download all `.m` files to a single folder
-2. Add the folder to MATLAB path: `addpath('path/to/HRMA')`
-3. Run the main program: `hybrid_rocket_main`
-
-## 📋 How to Use
-
-### Step 1: Launch the Program
-```matlab
-hybrid_rocket_main
-```
-
-### Step 2: Input Motor Parameters
-
-The program will ask for the following inputs in order:
-
-#### Basic Motor Parameters:
-- **Thrust [N]**: Desired thrust force (10-100,000 N)
-- **Burn time [s]**: Duration of motor operation (1-500 s)  
-- **O/F ratio**: Oxidizer to fuel mass ratio (1-20, typical 4-8)
-- **Chamber pressure [bar]**: Combustion chamber pressure (5-200 bar)
-- **Atmospheric pressure [bar]**: Ambient pressure (default 1.013 bar)
-
-#### Advanced Parameters (with defaults):
-- **Chamber temperature [K]**: Combustion temperature (default 2800 K)
-- **Gamma**: Specific heat ratio (default 1.25)
-- **Gas constant [J/kg·K]**: Exhaust gas constant (default 296)
-- **L* [m]**: Characteristic length (default 1.0 m)
-- **Expansion ratio**: Nozzle expansion ratio (0 for auto-calculation)
-- **Nozzle type**: 1=Conical, 2=Bell (recommended)
-
-#### Fuel Properties:
-- **Regression rate coefficient (a)**: Default 0.0003
-- **Regression rate exponent (n)**: Default 0.5  
-- **Fuel density [kg/m³]**: Default 900 (HTPB)
-
-### Step 3: Input Oxidizer Parameters
-
-#### Oxidizer Phase:
-- **1. Liquid** (N2O recommended): Higher performance
-- **2. Gas**: Simpler system
-
-#### Properties:
-- **Density [kg/m³]**: N2O liquid = 1220, gas varies with T&P
-- **Dynamic viscosity [Pa·s]**: N2O = 0.0002
-- **Tank pressure [bar]**: Must be higher than chamber pressure
-- **Injector pressure drop [bar]**: 0 for auto (25% of Pc)
-- **Discharge coefficient**: Default 0.75
-
-### Step 4: Select Injector Type
-
-#### 1. Showerhead Injector
-- **Pros**: Simple design, good mixing
-- **Parameters**:
-  - Target exit velocity: 20-50 m/s recommended
-  - Number of holes: 0 for optimization
-  - Min/max hole diameter: 0.3-2.0 mm typical
-  - Plate thickness: 3 mm typical
-
-#### 2. Pintle Injector  
-- **Pros**: Self-impinging, good atomization
-- **Parameters**:
-  - Auto-sizing recommended for first design
-  - Manual: Outer diameter, pintle diameter
-
-#### 3. Swirl Injector
-- **Pros**: Excellent atomization, wide spray
-- **Parameters**:
-  - Number of slots: 6 recommended
-  - Auto-dimension calculation recommended
-
-### Step 5: Review Results
-
-The program automatically:
-1. Calculates motor geometry
-2. Sizes the injector
-3. Validates design criteria
-4. Generates 2D cross-section plots
-5. Creates comprehensive report
-6. Saves results to files
-
-## 🔧 Advanced Features Menu
-
-After basic analysis, access advanced features:
-
-### 1. CEA Integration
-- Automatically calculates thermodynamic properties
-- Compares with input values
-- Generates NASA CEA input files
-- **Use**: More accurate combustion modeling
-
-### 2. Time-Dependent Analysis
-- Simulates fuel grain regression over burn time
-- Shows port diameter growth
-- Analyzes O/F ratio drift  
-- **Use**: Understanding performance changes during burn
-
-### 3. Sensitivity Analysis
-- Studies parameter effects on performance
-- Single and multi-parameter analysis
-- Response surface generation
-- **Use**: Design optimization and robustness
-
-### 4. Injector Optimization
-- **Showerhead**: Minimizes pressure drop, optimizes atomization
-- **Pintle**: Optimizes gap and dimensions
-- **Swirl**: Optimizes slot configuration
-- **Use**: Fine-tuning injector performance
-
-### 5. Design Validation
-- Dimensional consistency checks
-- Conservation law verification
-- Safety factor analysis
-- Manufacturing feasibility
-- **Use**: Final design verification before manufacturing
-
-## 📊 Understanding Results
-
-### Key Performance Metrics:
-- **Isp (Specific Impulse)**: Efficiency measure (150-300s typical for hybrids)
-- **C* (Characteristic Velocity)**: Combustion efficiency (1200-1600 m/s)
-- **CF (Thrust Coefficient)**: Nozzle efficiency (1.2-1.8 typical)
-
-### Design Criteria (All Should Pass):
-- ✅ **Pressure Drop**: ≥20% of chamber pressure
-- ✅ **Exit Velocity**: 20-50 m/s for good atomization  
-- ✅ **Reynolds Number**: >4000 for turbulent flow
-- ✅ **L/D Ratio**: 3-5 for showerhead holes
-- ✅ **Manufacturing**: Feasible dimensions
-
-### Warning Signs:
-- ❌ Very low Isp (<150s): Check propellant properties
-- ❌ Low Reynolds number: Increase pressure drop
-- ❌ Extreme velocities: Adjust injector sizing
-
-## 📁 Output Files
-
-The program automatically saves:
-
-1. **`hybrid_rocket_results_YYYY-MM-DD_HH-MM-SS.mat`**
-   - Complete MATLAB workspace
-   - All calculations and geometry
-
-2. **`results_summary_YYYY-MM-DD_HH-MM-SS.csv`**
-   - Key parameters in spreadsheet format
-   - Easy import to Excel/other tools
-
-3. **`detailed_report_YYYY-MM-DD_HH-MM-SS.txt`**
-   - Human-readable comprehensive report
-   - Design recommendations
-
-4. **`backup_results_YYYY-MM-DD_HH-MM-SS.mat`**
-   - Backup copy for safety
-
-## 🎯 Design Guidelines
-
-### For Best Results:
-
-#### Chamber Pressure Selection:
-- **Low (10-20 bar)**: Simple, low-cost, lower performance
-- **Medium (25-50 bar)**: Good balance, typical for amateur rockets
-- **High (50+ bar)**: High performance, requires stronger materials
-
-#### O/F Ratio Selection:
-- **N2O/HTPB**: 6.5-7.5 optimal
-- **N2O/Paraffin**: 7.0-8.0 optimal  
-- **GOX/PE**: 2.5-3.5 optimal
-
-#### Injector Selection Guide:
-- **Showerhead**: Simple manufacturing, good for beginners
-- **Pintle**: Self-impinging, good throttling capability
-- **Swirl**: Best atomization, complex manufacturing
-
-### Safety Considerations:
-- Tank pressure >25% above chamber pressure
-- Pressure drop 20-30% of chamber pressure
-- Reynolds number >4000 for predictable flow
-- Manufacturing tolerances within ±5% for critical dimensions
-
-## 🔍 Troubleshooting
-
-### Common Issues:
-
-#### "Input validation failed"
-- Check that all values are positive and realistic
-- Ensure chamber pressure > atmospheric pressure
-- Verify tank pressure > chamber pressure
-
-#### "Results validation failed"  
-- Input combination may be physically unrealistic
-- Try adjusting O/F ratio or chamber pressure
-- Check fuel/oxidizer property inputs
-
-#### "Optimization failed"
-- Constraints may be too restrictive
-- Relax hole diameter limits for showerhead
-- Try different injector type
-
-#### Poor Performance (Low Isp):
-- Verify combustion temperature input
-- Check O/F ratio is near optimal
-- Ensure expansion ratio appropriate for altitude
-
-#### Manufacturing Warnings:
-- Hole diameters <0.5mm require precision drilling
-- Gaps <0.5mm require tight machining tolerances
-- Consider design modifications for easier manufacturing
-
-## 📞 Support
-
-### For Technical Issues:
-1. Check all input parameters are realistic
-2. Review error messages in MATLAB console
-3. Check that all required files are in path
-4. Verify MATLAB version compatibility
-
-### For Design Questions:
-- Consult rocket propulsion textbooks
-- Review NASA technical reports on hybrid rockets
-- Consider experimental validation for critical applications
-
-## 📚 References
-
-- Sutton, G.P. and Biblarz, O., "Rocket Propulsion Elements"
-- Karabeyoglu, M.A., "Hybrid Rocket Propulsion" 
-- NASA SP-8087: "Liquid Rocket Engine Injectors"
-- Altman, D., "Hybrid Rocket Development at a Low Cost"
-
-## 🔄 Version History
-
-**v1.0** - Initial release with high-precision analysis
-- 99.9% accuracy guarantee
-- Three injector types supported
-- Advanced optimization and validation features
+1. [Installation](#1-installation)
+2. [First Launch](#2-first-launch)
+3. [Main Pages](#3-main-pages)
+4. [The Calculate Workflow (Hybrid Page)](#4-the-calculate-workflow-hybrid-page)
+5. [Reading the Results](#5-reading-the-results)
+6. [Standalone Panels: Transient, Injector, 6-DOF](#6-standalone-panels-transient-injector-6-dof)
+7. [The Analysis Deck](#7-the-analysis-deck)
+8. [3D Digital Twin](#8-3d-digital-twin)
+9. [Exports](#9-exports)
+10. [Kinetic Fidelity Levels](#10-kinetic-fidelity-levels)
+11. [Validating Against Your Own Test Data](#11-validating-against-your-own-test-data)
+12. [Automatic Updates](#12-automatic-updates)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Scope and Limitations](#14-scope-and-limitations)
 
 ---
 
-**© 2024 Hybrid Rocket Motor Analysis Tool**  
-*High-Precision Engineering Software*
+## 1. Installation
+
+### Option A — Windows installer (recommended on Windows)
+
+1. Download `HRMA-Setup-2.4.6.exe` from the
+   [latest release](https://github.com/berketez/HRMA/releases/latest).
+2. Double-click and follow the wizard (Next, Next, Install). The installer
+   is per-user: no administrator rights are required.
+3. Windows SmartScreen may warn because the installer is unsigned: click
+   "More info", then "Run anyway".
+
+Python and all libraries are bundled; no separate installation is needed.
+
+### Option B — macOS disk image (recommended on macOS)
+
+1. Download `HRMA-Setup-2.4.6-macOS.dmg` from the
+   [latest release](https://github.com/berketez/HRMA/releases/latest)
+   (Apple Silicon, macOS 11 or newer).
+2. Open the DMG and drag `HRMA` into `Applications`.
+3. On first launch, right-click the app and choose "Open" (Gatekeeper
+   requires this once for unsigned apps).
+
+### Option C — from source (developers)
+
+```bash
+git clone https://github.com/berketez/HRMA.git
+cd HRMA
+pip install -r requirements.txt
+python hrma/run.py
+```
+
+Requirements: Python 3.10-3.13 (3.12 recommended; 3.14 is not supported yet
+because compiled dependencies require `numpy<2`). The app serves on
+`http://localhost:8080` (waitress) and opens your browser automatically.
+
+Optional extras for source installs:
+
+- `build123d` — enables true STEP solid export (the packaged installers
+  include it).
+- `cantera` — enables the High-Fidelity kinetic level (without it, kinetic
+  requests gracefully fall back to the Engineering level and say so).
+
+## 2. First Launch
+
+The packaged app opens a splash screen within about a second while the
+calculation engines load in the background, then shows the home page in its
+own native window (WKWebView on macOS, WebView2 on Windows — Chrome is not
+required). Everything runs locally and offline; no analysis data leaves your
+computer. At startup HRMA checks GitHub Releases for a newer version (see
+[Automatic Updates](#12-automatic-updates)) — this is the only network
+access, and it fails silently when offline.
+
+CAD, drawing, and report outputs are written to `Documents/HRMA`.
+
+## 3. Main Pages
+
+| Page | URL | Purpose |
+|---|---|---|
+| Home | `/` | Motor-type selection cards (Hybrid / Solid / Liquid) and a link to the formula reference |
+| Hybrid Designer | `/hybrid` | Full hybrid motor design and analysis (the most complete page) |
+| Solid Designer | `/solid` | Solid motor design: grain geometry, ballistics, Monte Carlo |
+| Liquid Designer | `/liquid` | Liquid engine design: feed system, injector, regenerative cooling |
+| Formula Reference | `/formulas` | The equations used by the solvers, rendered with MathJax |
+
+All three designer pages share the same structure: an input form, a
+Calculate button, a results HUD, standalone panels (transient / injector /
+6-DOF where applicable), the Analysis Deck, the 3D digital twin, and export
+buttons.
+
+## 4. The Calculate Workflow (Hybrid Page)
+
+Fill the form top to bottom, then press **Calculate**. The main input groups:
+
+### Mission and operating point
+
+- **Motor name** — free text, used in exports and reports.
+- **Altitude** — single altitude (ambient pressure is derived automatically)
+  or an altitude range for altitude-swept performance.
+- **Thrust [N] and burn time [s]**, or alternatively **total impulse [N·s]**
+  (the form derives the missing pair member).
+
+### Combustion
+
+- **O/F ratio** — oxidizer-to-fuel mass ratio. The "Find Optimum" helper
+  (`/api/find-optimum-of`) sweeps O/F and suggests the c*-optimal value.
+- **Chamber pressure [bar]** and **tank pressure [bar]** — the form warns
+  when tank pressure does not sufficiently exceed chamber pressure.
+- **Combustion model** — equilibrium thermochemistry is computed by the
+  built-in Cantera-based solver; propellant data is cross-checked against
+  NASA CEA (see VALIDATION_STATUS.md).
+
+### Geometry
+
+- **L\* [m]** — characteristic chamber length.
+- **Expansion ratio** — enter 0 for automatic (ambient-pressure adapted)
+  calculation.
+- **Nozzle type** — conical or bell.
+- **Chamber diameter, contraction ratio, chamber mass flux** — enter 0 to
+  let the solver size them.
+
+### Fuel
+
+- **Fuel type** — HTPB, paraffin, PE, PMMA, ABS, PLA, or a user mixture
+  (paraffin / carbon / Al2O3 / aluminum / HTPB percentages with automatic
+  density update).
+- **Density, regression coefficients a and n** — defaults are
+  literature values for the selected fuel; override them with your own
+  fitted coefficients when you have static-fire data.
+
+### Oxidizer
+
+- **Oxidizer type and phase** (N2O, LOX, H2O2; liquid or gas), density,
+  viscosity, and temperature (density auto-updates with temperature for
+  self-pressurizing N2O).
+
+### Injector
+
+- **Injector type** — showerhead, pintle, or swirl, with type-specific
+  parameters (target velocity, hole diameter limits, plate thickness).
+  For detailed injector design use the dedicated Injector Design panel
+  (Section 6), which implements the Dyer NHNE two-phase model for
+  self-pressurizing N2O.
+
+The solid and liquid pages follow the same pattern with type-specific
+inputs (grain geometry, segments, and propellant family on the solid page;
+propellant pair, feed system type, and cooling inputs on the liquid page).
+
+## 5. Reading the Results
+
+Pressing Calculate sends the form to `/calculate` (or `/calculate_solid`,
+`/calculate_liquid`) and populates:
+
+- **Results HUD** — animated stat cards for the headline numbers: thrust,
+  total impulse, Isp, c*, CF, chamber pressure, throat and exit diameters,
+  fuel/oxidizer mass flow, and a SAFE / MARGINAL / UNSAFE state badge.
+- **Warnings panel** — design-criteria messages from the solver and the
+  validation system (for example injector pressure-drop ratio, L/D limits,
+  regression-model applicability). Read these before trusting the numbers.
+- **Motor design tables** — full geometry: nozzle contour dimensions and
+  angles, grain/port geometry, injector plan, wall thickness.
+- **Performance charts** — Plotly charts (thrust curve, pressure, altitude
+  sweeps) in the same dark theme, fully offline.
+- **2D cross-section** — engineering cross-section drawing generated from
+  the same geometry the solver used.
+
+Interactive design mode: after a calculation, the chamber diameter, L*, and
+expansion-ratio sliders recompute geometry in about a second
+(`/api/quick-geometry`) and update the 3D model and the 2D cross-section
+live, without a full recalculation.
+
+## 6. Standalone Panels: Transient, Injector, 6-DOF
+
+These panels sit below the main results and chain onto the computed design.
+
+### Transient Ballistics (hybrid page)
+
+`/api/transient-analysis` marches the coupled chamber/feed equations in
+time and returns the real Pc(t) and F(t) histories:
+
+- **Feed mode** — regulated (constant feed pressure) or self-pressurizing
+  N2O blowdown (equilibrium two-phase tank model; tank pressure and
+  temperature decay are part of the result).
+- **Stability guards** — NASA SP-8089 injector pressure-drop margins are
+  checked at every time step and reported as warnings.
+- The resulting thrust curve feeds the OpenRocket `.eng` export, the 6-DOF
+  panel, and the burn animation of the 3D digital twin.
+
+### Injector Design (hybrid and liquid pages)
+
+`/api/injector-design` performs detailed injector sizing for seven element
+types (showerhead, unlike/like impinging doublets and triplets, pintle,
+swirl, coaxial shear). For self-pressurizing N2O it uses the **Dyer NHNE
+two-phase model** (blend of single-phase incompressible and homogeneous
+equilibrium flow) instead of the optimistic single-phase orifice equation.
+Outputs: hole plan (count, diameter, pattern), pressure drop, discharge
+behavior, spray/atomization estimates, manifold checks, and design
+warnings. Fields are pre-filled from the current motor result and can be
+overridden.
+
+### 6-DOF Flight (all three pages)
+
+`/api/six-dof-analysis` runs a rigid-body six-degree-of-freedom flight
+simulation on top of the computed thrust curve: quaternion attitude,
+Barrowman CN_alpha / CP stability derivatives, static margin,
+weathercocking into wind, and apogee. Use it for stability screening
+(small angle-of-attack aerodynamics), not for tumbling or large-alpha
+flight.
+
+## 7. The Analysis Deck
+
+The Analysis Deck is a tabbed panel container (categories: THERMAL,
+STRUCTURAL, SAFETY, PERFORMANCE, PRESSURE VESSEL, FLOW, VALIDATION, and
+more) that appears after a successful calculation. Every panel:
+
+- pre-fills its input fields from the current motor result (suggestions
+  only — anything you edit by hand is preserved and never overwritten),
+- POSTs the form to its own API endpoint when you press Run Analysis,
+- renders tables, stat cards, and Plotly charts, with ok / warning / error
+  badges.
+
+The 13 panels in v2.4.6:
+
+| Panel | Endpoint | Motor types | What it computes |
+|---|---|---|---|
+| Structural Safety | `/analyze_structural_safety` | all | Pressure-vessel stress (Lame, thick/thin wall), buckling (NASA SP-8007 knockdown), fatigue, temperature-derated safety factors against the materials database |
+| Thermal Safety | `/analyze_thermal_safety` + `/api/analysis/wall-profile` | all | Bartz gas-side heat transfer, wall temperatures vs material limits, and an axial heat-flux / wall-temperature / Mach profile along the chamber-nozzle axis |
+| Comprehensive Safety | `/analyze_safety` | all | Combined risk assessment: pressure-vessel margins, failure modes, hazard ranking |
+| Advanced Performance | `/api/advanced-performance-analysis` | all | 3D performance surface, Mach contour, and heat-flux map over the operating envelope |
+| Pressure Vessel | `/api/pressure-vessel-analysis` | all | Vessel sizing, MAWP, and real burst-pressure estimate for the selected material and weld efficiency |
+| Thermal Protection | `/api/thermal-protection` | all | Ablative, heat-sink, and radiation-cooled liner sizing; in-depth wall temperature profile at end of burn and hot-face temperature history |
+| Bolted Joint | `/api/bolted-joint` | all | Closure-bolt preload, tightening torque, and joint-separation margins (Shigley method) |
+| Nozzle Flow | `/api/flow-analysis` (+ `/api/kinetic-efficiency` probe) | all | Quasi-1D compressible nozzle flow: regime detection, P(x), M(x), CF; reports which kinetic fidelity level was actually used |
+| User Data Validation | `/api/validation/upload-csv` | all | Compares your own static-fire CSV against the HRMA prediction (Section 11) |
+| Regenerative Cooling | `/api/regen-cooling` | liquid only | 1D station march along the chamber-nozzle axis: Bartz gas side, Dittus-Boelter coolant side, wall and coolant temperatures, heat flux, coolant pressure drop |
+| Feed System | `/api/slosh-analysis`, `/api/pressurant-sizing`, `/api/water-hammer` | liquid + hybrid (water hammer: all) | Tank slosh frequencies and slosh mass vs fill level, pressurant gas sizing, and water-hammer surge pressure from valve closure |
+| Injector Design | `/api/injector-design` | hybrid + liquid | See Section 6 |
+| Comparative Analysis | `/api/comparative-analysis` | all | Side-by-side comparison of multiple saved motor configurations (thrust, Isp, total impulse, mass) with best-in-metric ranking (new in v2.4.6) |
+
+Panels marked "long" warn you that the analysis may take noticeably longer
+(for example the high-fidelity kinetic integration).
+
+## 8. 3D Digital Twin
+
+The Three.js/WebGL viewer builds a parametric 3D motor directly from the
+solver output — it is not a canned model. Features:
+
+- **Cutaway view** — quarter-section of chamber, grain, injector, nozzle.
+- **Burn animation** — the port opens over time following the computed
+  regression history (from the transient analysis when available).
+- **Exploded view** and dimension labels.
+- **Wall heat-flux map** — chamber and nozzle surfaces colored by the
+  Bartz-distributed heat flux, anchored to the heat-transfer module's
+  real q and wall-temperature values.
+- **Exhaust plume** visualization.
+- Grain port cross-sections: circular, star, multi-port, and finocyl
+  (area-equivalent visualization; ballistics uses the circular-equivalent
+  port).
+
+## 9. Exports
+
+All exports are generated from the same geometry the solver produced
+(single source of truth). Files are written to `Documents/HRMA` (packaged
+app) or a temporary directory (source runs), and offered as downloads.
+
+| Export | Endpoint | Notes |
+|---|---|---|
+| STL solids | `/api/export-stl`, `/api/export-stl-zip` | Watertight solids revolved from the real nozzle contour; injector orifices are actually drilled (manifold3d booleans) |
+| STEP solid | `/api/export-step` | True parametric STEP (AP214) via build123d/OpenCascade; returns an explanatory error if build123d is not installed (bundled in the installers) |
+| DXF profiles | `/api/export-dxf` | Layered 2D manufacturing profiles (ezdxf) |
+| Technical drawing PDF | `/api/export-drawings-pdf` | Multi-page dimensioned drawing set |
+| OpenRocket `.eng` | `/api/export-eng` | Uses the real computed thrust curve when a transient analysis has been run, otherwise the design-point curve |
+| Analysis report PDF | `/api/export-pdf/<type>` | Formatted report of inputs, results, and warnings |
+| Complete package ZIP | `/api/export-complete-zip` | STL + STEP + DXF + drawing PDF + `.eng` + geometry in one archive |
+
+## 10. Kinetic Fidelity Levels
+
+Kinetic-efficiency estimates (finite-rate combustion losses) are offered at
+three explicit levels; the response always reports both
+`fidelity_requested` and `fidelity_used` so you know what you actually got:
+
+- **Fast Screening (`fast`)** — correlation-based estimate, instant.
+- **Engineering (`engineering`)** — the default: reduced physics-based
+  model, suitable for trade studies.
+- **High-Fidelity (`high_fidelity`)** — finite-rate species integration
+  (Cantera, BDF) along the nozzle. Requires the optional `cantera`
+  package; if Cantera is not installed the request degrades gracefully to
+  the Engineering level and says so in the result.
+
+The Nozzle Flow panel probes the kinetic module and displays which level is
+available on your installation.
+
+## 11. Validating Against Your Own Test Data
+
+The **User Data Validation** panel compares HRMA's predicted thrust curve
+with your own static-fire measurement:
+
+1. Run a calculation (and ideally a transient analysis — the comparison
+   then uses the real F(t) curve instead of a constant-thrust rectangle).
+2. Open the panel, paste your CSV or choose a file. Expected format: two
+   numeric columns, time [s] and thrust [N]; the parser reports what it
+   understood (point count, warnings).
+3. Press the panel's upload button. The panel overlays both curves and
+   reports quantitative metrics with a grade (excellent / good / fair /
+   poor) and an assessment text.
+
+This is the honest way to close the loop: fit your measured regression
+coefficients back into the fuel inputs and re-run.
+
+## 12. Automatic Updates
+
+At startup HRMA queries the GitHub Releases API for the repository
+`berketez/HRMA`. If a newer tagged version exists, a modal offers a
+one-click download of the platform-appropriate asset (`.dmg` on macOS,
+`.exe` on Windows) into your Downloads folder, with progress reporting.
+The updater selects the asset itself by file suffix; no URL from outside
+the GitHub API is ever used. If no matching asset exists, it falls back to
+opening the Releases page. When offline, the check fails silently and the
+app runs normally.
+
+## 13. Troubleshooting
+
+**Port 8080 already in use.** HRMA serves on `http://localhost:8080`.
+Find and stop the conflicting process:
+
+```bash
+# macOS / Linux
+lsof -ti:8080 | xargs kill -9
+
+# Windows
+netstat -ano | findstr :8080
+taskkill /PID <PID_NUMBER> /F
+```
+
+**Window opens but stays blank / spinning.** Wait a few seconds on first
+launch (engines are loading); if it persists, quit and relaunch. On source
+runs, check the terminal for a Python traceback.
+
+**`numpy` version errors (source install).** HRMA requires `numpy<2`
+because several compiled dependencies (CoolProp, manifold3d, build123d)
+are built against the NumPy 1.x ABI. Fix with:
+
+```bash
+pip install "numpy<2"
+```
+
+**Python 3.14 not supported.** Use Python 3.10-3.13 (3.12 recommended).
+`run.py` refuses to start on unsupported interpreters with a clear message.
+
+**STEP export returns an error (source install).** Install the optional
+dependency: `pip install build123d "numpy<2"`. The packaged installers
+already include it.
+
+**High-Fidelity kinetics falls back to Engineering.** Install the optional
+`cantera` package. The fallback is intentional and reported, not a bug.
+
+**macOS: "app can't be opened" on first launch.** Right-click the app and
+choose Open (unsigned app, Gatekeeper requires one manual confirmation).
+
+**Windows SmartScreen blocks the installer.** Click "More info", then
+"Run anyway" (the installer is unsigned).
+
+**Results look wrong.** Read the warnings panel first — most "wrong"
+results are inputs outside the validity range of the underlying
+correlations, and the validation system flags them.
+
+## 14. Scope and Limitations
+
+HRMA operates at the **hand-calculation / preliminary-design level**:
+closed-form relations, empirical correlations, quasi-1D flow, and 1D
+thermal marches. It is deliberately not a high-fidelity simulation
+environment:
+
+- **No finite-element analysis.** Structural margins come from Lame
+  thick-wall relations, SP-8007 buckling knockdowns, and Shigley joint
+  methods — not FEA. For detailed stress analysis of a flight design, use
+  a dedicated FEA package (for example ANSYS Mechanical or CalculiX) and
+  a hydrostatic proof test.
+- **No CFD.** The nozzle flow is quasi-1D compressible; injector spray
+  and combustion-chamber flow fields are correlation-based. For internal
+  flow detail, use a CFD code (for example ANSYS Fluent or OpenFOAM).
+- **No combustion-instability prediction.** SP-8089 pressure-drop margins
+  screen for feed-coupled instability; acoustic modes (chug/screech) are
+  demonstrated on the test stand, not in software.
+- **Empirical uncertainty.** Hybrid regression rates carry a documented
+  ±20-30 % band; heat transfer (Bartz) is ±20-30 %. See
+  [VALIDATION_STATUS.md](VALIDATION_STATUS.md) for the complete, honest
+  list of verification anchors and known limitations.
+
+Use HRMA to converge a design and narrow a test matrix. Cross-check any
+serious design against an independent tool (NASA CEA, RPA, openMotor) and
+verify by physical testing before firing any motor.

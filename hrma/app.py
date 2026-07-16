@@ -289,11 +289,10 @@ def test_simple():
 def calculate():
     try:
         data = request.json
-        print("Received data:", data)  # Debug log
-        
+
         # Determine motor type (default to hybrid for this endpoint)
         motor_type = data.get('motor_type', 'hybrid')
-        
+
         # Use comprehensive validator
         is_valid, validation_messages = motor_validator.validate_motor_data(data, motor_type)
         if not is_valid:
@@ -303,10 +302,10 @@ def calculate():
                 'motor_type': motor_type,
                 'status': 'validation_error'
             }), 400
-        
+
         # Log warnings but continue
         if validation_messages:
-            print(f"Validation warnings: {validation_messages}")
+            app.logger.info(f"Validation warnings: {validation_messages}")
         
         # Create engine instance with support for total impulse
         # Only pass user-provided values, let the engine use fuel-specific defaults
@@ -372,7 +371,21 @@ def calculate():
             )
         
         injector_results = injector.calculate()
-        
+
+        # Fizik limiti doğrulaması (ValidationSystem, Sutton & Biblarz +
+        # NASA SP-8089 aralıkları): rapor üretilemezse /calculate ASLA
+        # kırılmaz — hata loglanır, 'validation' anahtarı yanıttan atlanır.
+        validation_report = None
+        try:
+            combo = f"{data.get('oxidizer_type', 'n2o')}_{data.get('fuel_type', 'htpb')}"
+            if combo not in validator.performance_limits['specific_impulse']:
+                combo = 'n2o_htpb'
+            validation_report = validator.comprehensive_validation(
+                motor_results, injector_results, combo
+            )
+        except Exception as val_error:
+            app.logger.warning(f"Validation report skipped: {val_error}")
+
         # Create visualizations - Use improved visuals
         try:
             # New improved motor cross-section
@@ -543,18 +556,18 @@ def calculate():
                 'motor_3d': motor_3d_plot
             }
         }
-        
+
+        # ValidationSystem raporu (UI kontratı: results.validation)
+        if validation_report is not None:
+            results['validation'] = validation_report
+
         # Sanitize results to handle NaN and Infinity values
         try:
             sanitized_results = sanitize_json_values(results)
-            
+
             # Test JSON serialization before returning
             test_json = json.dumps(sanitized_results, indent=2)
-            
-            print("Calculation successful!")
-            print(f"Results keys: {list(sanitized_results.keys())}")
-            print(f"Results size: {len(str(sanitized_results))} characters")
-            
+
             return jsonify(sanitized_results)
             
         except (TypeError, ValueError) as json_error:
@@ -1642,15 +1655,6 @@ def export_liquid_cad():
         traceback.print_exc()
         return jsonify({'error': f'CAD export error: {str(e)}'}), 500
 
-@app.route('/optimize', methods=['POST'])
-def optimize_injector():
-    try:
-        data = request.json
-        # Implement injector optimization
-        return jsonify({'optimized': True, 'message': 'Feature coming soon'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
 @app.route('/parametric-analysis', methods=['POST'])
 def parametric_analysis():
     """Parametric analysis for motor design optimization"""
@@ -2636,42 +2640,6 @@ def export_simulation_file():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-@app.route('/api/generate-cad', methods=['POST'])
-def generate_cad():
-    """Generate 3D CAD design for motor"""
-    try:
-        data = request.json
-        motor_data = data.get('motor_data', {})
-        
-        # Simplified CAD generation for now
-        return jsonify({
-            'status': 'success',
-            'cad_visualization': 'CAD visualization generated',
-            'technical_drawings': {
-                'chamber_drawing': 'Chamber technical drawing',
-                'nozzle_drawing': 'Nozzle technical drawing',
-                'injector_drawing': 'Injector technical drawing'
-            },
-            'material_specifications': {
-                'chamber_material': 'Steel 4130',
-                'nozzle_material': 'Graphite',
-                'injector_material': 'Stainless Steel 316L'
-            },
-            'manufacturing_notes': [
-                'All dimensions ±0.1mm tolerance',
-                'Surface finish Ra 3.2 μm',
-                'Pressure test at 1.5x operating pressure'
-            ],
-            'performance_summary': {
-                'thrust': motor_data.get('thrust', 1000),
-                'isp': motor_data.get('isp', 250),
-                'burn_time': motor_data.get('burn_time', 10)
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
-
 @app.route('/api/generate-3d', methods=['POST'])
 def generate_3d():
     """Generate 3D visualization for motor"""
@@ -3615,10 +3583,17 @@ def perform_complete_professional_analysis():
     """Perform complete professional-grade analysis using all modules"""
     # Dalga 0 bekçisi (2026-07-14): bu uç CFD + kinetik çözücüleri birlikte
     # çağırıyor — ikisi de yukarıdaki nedenlerle emekliye ayrıldı (kilitleme
-    # + ıraksama riski). Dürüst 501 döner. Orijinal işleyici aşağıda korunur.
+    # + ıraksama riski). v2.4.6: halefler yayında — 501 yanıtı yönlendirme
+    # alanı taşır. Orijinal işleyici aşağıda korunur.
     return jsonify({
-        'error': 'This analysis is being rebuilt on the reduced-order physics architecture',
-        'status': 'unavailable'
+        'error': ('This analysis is being rebuilt on the reduced-order '
+                  'physics architecture. Its successors are live: '
+                  'POST /api/flow-analysis, POST /api/kinetic-efficiency '
+                  'and the Analysis Deck panels '
+                  '(structural/thermal/safety/flow/validation).'),
+        'status': 'unavailable',
+        'successor': ['/api/flow-analysis', '/api/kinetic-efficiency',
+                      'Analysis Deck panels (structural/thermal/safety/flow/validation)']
     }), 501
     try:
         data = request.json
@@ -4599,5 +4574,6 @@ def validation_upload_csv():
 
 
 if __name__ == '__main__':
-    print("Starting Motor Analysis on port 5000...")
-    app.run(debug=True, port=5000, host='127.0.0.1')
+    # Gerçek giriş noktası hrma/run.py (waitress, 8080); bu blok yalnız geliştirme içindir.
+    print("Starting Motor Analysis on port 8080...")
+    app.run(debug=True, port=8080, host='127.0.0.1')

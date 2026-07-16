@@ -1,132 +1,106 @@
-# UZAYTEK HRMA - Release Documentation
+# HRMA - Release Process
 
-## Download Instructions
+How an HRMA version is built, published, and delivered to installed
+applications. The full build details live in
+[`packaging/README.md`](packaging/README.md); this document is the
+overview.
 
-### Windows
-1. Download `UZAYTEK_HRMA_Windows.zip` from the [Releases](../../releases) page
-2. Extract the ZIP file
-3. Double-click `UZAYTEK_HRMA.exe` to launch
-4. Click "Launch Application" when the desktop app opens
-5. The application will open in your web browser
+## Single Source of Version Truth
 
-**System Requirements:**
-- Windows 10 or newer
-- 4GB RAM minimum
-- 500MB free disk space
-- No Python installation required
+The version lives in **one** place:
 
-### macOS
-1. Download `UZAYTEK_HRMA_macOS.zip` from the [Releases](../../releases) page
-2. Extract the ZIP file
-3. Drag `UZAYTEK HRMA.app` to Applications folder (or double-click to run directly)
-4. Launch from Applications or Spotlight search
-5. Click "Launch Application" when the desktop app opens
-6. The application will open in your web browser
-
-**System Requirements:**
-- macOS 10.15 (Catalina) or newer
-- 4GB RAM minimum
-- 500MB free disk space
-- No Python installation required
-
-**First Launch Security:**
-If you see a security warning, go to:
-System Preferences > Security & Privacy > Allow "UZAYTEK HRMA"
-
-### Linux
-1. Download `UZAYTEK_HRMA_Linux.tar.gz` from the [Releases](../../releases) page
-2. Extract: `tar -xzf UZAYTEK_HRMA_Linux.tar.gz`
-3. Run installation script: `cd UZAYTEK_HRMA_Linux && ./install.sh`
-4. Launch from applications menu or run `uzaytek-hrma` in terminal
-5. Click "Launch Application" when the desktop app opens
-6. The application will open in your web browser
-
-**System Requirements:**
-- Linux (Ubuntu 18.04+, CentOS 7+, or equivalent)
-- X11 display server
-- 4GB RAM minimum
-- 500MB free disk space
-- No Python installation required
-
-## How It Works
-
-The UZAYTEK HRMA desktop application:
-
-1. **Launches a local web server** on your computer (usually port 5000-5010)
-2. **Opens your default browser** to the application URL
-3. **Runs completely offline** - no internet connection required for analysis
-4. **All data stays local** - nothing is sent to external servers
-5. **Self-contained** - includes all required libraries and dependencies
-
-## Features
-
-- **Hybrid Rocket Motor Analysis** - Complete performance calculations
-- **STL File Export** - 3D printable motor components
-- **Performance Visualization** - Interactive graphs and charts
-- **Motor Configuration** - Advanced design parameters
-- **Safety Analysis** - Structural and thermal calculations
-- **Report Generation** - Professional documentation export
-
-## Troubleshooting
-
-### Windows
-- If Windows Defender blocks the file, click "More info" then "Run anyway"
-- Make sure you're running Windows 10 or newer
-- Try running as administrator if needed
-
-### macOS
-- If you get "App can't be opened because it is from an unidentified developer":
-  - Right-click the app and select "Open"
-  - Or go to System Preferences > Security & Privacy and allow the app
-- Make sure you're running macOS 10.15 or newer
-
-### Linux
-- If the application doesn't start, try running from terminal to see error messages
-- Make sure you have X11 display server running
-- Install missing system packages if prompted
-
-### Common Issues
-- **Port already in use**: The app will automatically find another available port
-- **Browser doesn't open**: Copy the URL from the desktop app window and paste it manually
-- **Application freezes**: Restart the desktop application
-
-## Building from Source
-
-If you want to build the executables yourself:
-
-```bash
-# Windows
-python build_windows.py
-
-# macOS
-python build_macos.py
-
-# Linux
-python build_linux.py
+```python
+# hrma/__init__.py
+__version__ = "2.4.6"
 ```
 
-Requirements:
-- Python 3.8+
-- PyInstaller
-- All project dependencies
+Every build script (`build_mac_app.sh`, `build_dmg.sh`,
+`publish_release.sh`) reads the version from this file. The Windows
+installer receives it explicitly on the makensis command line and it must
+match `__init__.py` — the version is never hardcoded anywhere else.
+
+## Release Artifacts
+
+Each release ships exactly two assets, named so the in-app update checker
+can find them:
+
+| Platform | Asset | Built by |
+|---|---|---|
+| macOS 11+ (Apple Silicon) | `HRMA-Setup-X.Y.Z-macOS.dmg` | `packaging/build_mac_app.sh` + `packaging/build_dmg.sh` |
+| Windows 10/11 | `HRMA-Setup-X.Y.Z.exe` | `packaging/build_win_payload.sh` + `makensis -DVERSION=X.Y.Z packaging/hrma.nsi` |
+
+Both bundles embed a Python 3.12 runtime and all dependencies (CoolProp,
+build123d/OpenCascade, RocketCEA, offline Plotly/Three.js, ...) — end users
+never need Python or an internet connection. Both are produced on a single
+macOS machine; no Windows build machine is required (the exe is
+cross-assembled with NSIS via `brew install makensis`).
+
+## Release Steps
+
+```bash
+# 1) Bump the version (single source)
+#    edit hrma/__init__.py -> __version__ = "X.Y.Z"
+
+# 2) Build macOS app + DMG (reads version from hrma/__init__.py)
+bash packaging/build_mac_app.sh
+bash packaging/test_bundle_mac.sh     # import + server smoke test (mandatory)
+bash packaging/build_dmg.sh           # -> dist/HRMA-Setup-X.Y.Z-macOS.dmg
+
+# 3) Build Windows installer (version passed explicitly, must match step 1)
+bash packaging/build_win_payload.sh   # embedded Python + win_amd64 wheels
+makensis -DVERSION=X.Y.Z packaging/hrma.nsi   # -> HRMA-Setup-X.Y.Z.exe
+
+# 4) Publish the GitHub Release
+bash packaging/publish_release.sh "Release notes..."
+```
+
+`publish_release.sh`:
+
+- reads the version from `hrma/__init__.py` and verifies both assets exist
+  in `dist/`,
+- creates the GitHub Release `vX.Y.Z` with both assets
+  (`gh release create`),
+- rewrites the direct download links in `README.md` to the new version
+  (commit that change afterwards).
+
+## How Installed Apps Pick Up the Release
+
+The in-app update checker (`hrma/utils/update_checker.py`) runs at startup:
+
+1. It queries the GitHub Releases API for the latest release of
+   `berketez/HRMA` and compares the tag (`vX.Y.Z`) against the running
+   `__version__`.
+2. If newer, it selects the platform-appropriate asset from the release
+   **by file suffix**: `.dmg` on macOS, `.exe` on Windows. Asset URLs come
+   only from the GitHub API response — external URL injection is not
+   possible.
+3. The UI offers a one-click download into the user's Downloads folder with
+   progress reporting, then hands off to the OS installer. If no matching
+   asset exists, the Releases page is opened instead.
+4. When offline, the check fails silently and the app runs normally.
+
+This is why the asset naming convention above is a contract: a release
+without a `.dmg` and an `.exe` asset will not be offered to installed
+applications on that platform.
+
+## Version History (recent)
+
+- **v2.4.6** — comparative analysis panel, Leckner gas-emissivity
+  radiation, NHNE injector fallback fixes, real pintle/swirl cross-section
+  drawings, warning panel in the UI, documentation overhaul, dead-route
+  cleanup (`/optimize`, `/api/generate-cad`).
+- **v2.4.5** — physics audit: 32 findings fixed (kinetic efficiency,
+  explosion energy, altitude Isp, T/W, Bartz, erosive burning), brand
+  sweep.
+- **v2.4.0** — 13-panel Analysis Deck, quasi-1D nozzle flow, staged
+  kinetics, materials database, 1,000+ automated tests.
+- **v2.3** — native desktop window (pywebview), instant splash, automatic
+  updates via GitHub Releases, English installers.
+
+Release notes for shipped versions are kept in
+`packaging/release_notes_v*.md`.
 
 ## Support
 
-For technical support:
-- Email: berke.tezgocen@uzaytek.com
-- Create an issue in this repository
-- Check the documentation in the `docs/` folder
-
-## Version History
-
-### v1.0.0
-- Initial release
-- Complete hybrid rocket motor analysis
-- Cross-platform desktop applications
-- STL export functionality
-- Performance visualization
-- Safety analysis integration
-
----
-
-© 2024 UZAYTEK. All rights reserved.
+- Create an issue: https://github.com/berketez/HRMA/issues
+- Documentation: `README.md`, `USER_MANUAL.md`, `docs/`

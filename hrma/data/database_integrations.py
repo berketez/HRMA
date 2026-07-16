@@ -64,11 +64,13 @@ class NistWebBookAPI:
             }
     
     def _parse_nist_response(self, html: str, temperature: float) -> Dict:
-        """Parse NIST HTML response to extract properties"""
-        
-        # This would need to parse the actual NIST HTML structure
-        # For now, return realistic values based on known data
-        
+        """Parse NIST HTML response to extract properties.
+
+        NOT: Gerçek NIST HTML yapısına göre tam ayrıştırma UYGULANMADI —
+        basit regex'ler tutmazsa aşağıda bilinen literatür değerlerine
+        düşülür. Bu yol app.py'de yalnız test_connections/doğrulama için
+        kullanılıyor; hesap akışı yerel tablolardan beslenir.
+        """
         properties = {}
         
         # Extract density if available in liquid phase

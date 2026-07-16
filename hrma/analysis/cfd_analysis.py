@@ -634,8 +634,10 @@ class CFD2DAnalyzer:
         
         validation = {
             'convergence_achieved': results['convergence_info']['converged'],
-            'mass_conservation_error': 0.0,  # Placeholder
-            'energy_conservation_error': 0.0,  # Placeholder
+            # Hesaplanmıyor (emekli modül, /api/cfd-analysis 501 bekçisi
+            # arkasında; halef: /api/flow-analysis). Sahte 0.0 yerine None.
+            'mass_conservation_error': None,
+            'energy_conservation_error': None,
             'solution_quality': 'UNKNOWN'
         }
         

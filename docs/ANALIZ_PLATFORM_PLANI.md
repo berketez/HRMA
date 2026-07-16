@@ -1,5 +1,7 @@
 # HRMA Analiz Platformu Planı (Task #7 + #8)
 
+**Durum 2026-07-16:** Dalga 0-4B tamamlandı ve v2.4.5-2.4.6 ile yayınlandı; Leckner düzeltmesi ve comparative panel v2.4.6'da kapatıldı.
+
 **Tarih:** 2026-07-14 · **Kaynak:** 5 ajanlı ARGE turu (733k token, tüm bulgular test_client ile ampirik doğrulandı)
 **Vizyon (Berke):** Motor tasarımcısı ısı, dayanıklılık, basınç/kopma, akışkan — tüm analizleri HRMA'dan yapsın; ANSYS yalnız çok detay durumlara kalsın. Tasarım + hesap + analiz + CAD tek platformda.
 

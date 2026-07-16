@@ -556,10 +556,48 @@
         }
         .status-connected { background: #d4edda; color: #155724; }
         .status-disconnected { background: #f8d7da; color: #721c24; }
+
+        /* Uyarı paneli (app.js displayWarnings) — renkler theme.css değişkenlerinden */
+        #warningsPanel {
+            border-left: 3px solid var(--hd-orange, #ff8c33);
+        }
+        #warningsPanel .warning-status {
+            font-family: var(--hd-mono, monospace);
+            font-size: 0.78rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin: 4px 0 10px;
+        }
+        #warningsPanel .warning-status-critical { color: var(--hd-red, #ff5d73); }
+        #warningsPanel .warning-status-regular { color: var(--hd-orange, #ff8c33); }
+        #warningsPanel .warning-item {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            padding: 8px 12px;
+            margin: 6px 0;
+            border: 1px solid var(--hd-line, rgba(0, 229, 255, 0.14));
+            border-radius: var(--hd-radius-sm, 8px);
+            background: var(--hd-inset, rgba(6, 14, 26, 0.85));
+            color: var(--hd-ink, #cfe8f2);
+            font-size: 0.85rem;
+        }
+        #warningsPanel .warning-tag {
+            font-family: var(--hd-mono, monospace);
+            font-size: 0.68rem;
+            letter-spacing: 0.08em;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid currentColor;
+            flex-shrink: 0;
+        }
+        #warningsPanel .warning-critical { border-color: var(--hd-red, #ff5d73); }
+        #warningsPanel .warning-critical .warning-tag { color: var(--hd-red, #ff5d73); }
+        #warningsPanel .warning-regular { border-color: var(--hd-orange, #ff8c33); }
+        #warningsPanel .warning-regular .warning-tag { color: var(--hd-orange, #ff8c33); }
     </style>
     <!-- HRMA tasarım sistemi: inline stillerden SONRA yüklenir, onları ezer -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/fonts.css">
     <link rel="stylesheet" href="/static/css/theme.css">
     <!-- HUD sonuç katmanı: theme.css'ten SONRA yüklenir (results_hud.css kuralı) -->
     <link rel="stylesheet" href="/static/css/results_hud.css">
@@ -593,6 +631,8 @@
          (FEED SYSTEM: slosh / pressurant / water hammer) -->
     <script src="/static/js/panels/cooling_panel.js"></script>
     <script src="/static/js/panels/feed_panel.js"></script>
+    <!-- COMPARE paneli: snapshot tabanlı konfigürasyon karşılaştırması -->
+    <script src="/static/js/panels/comparative_panel.js"></script>
     <script>
         // Transient + 6-DOF + Enjektör panelleri (yeni fizik katmanlarının UI'ı)
         document.addEventListener('DOMContentLoaded', function () {
@@ -1458,6 +1498,13 @@
             <div class="panel">
                 <h2>Performance Summary</h2>
                 <div id="performanceMetrics"></div>
+            </div>
+
+            <!-- Validation & Injector Warnings (app.js displayWarnings doldurur;
+                 hiç uyarı yoksa gizli kalır) -->
+            <div id="warningsPanel" class="panel" style="display: none;">
+                <h2>Warnings</h2>
+                <div id="warningsList"></div>
             </div>
 
             <!-- Results Grid -->
@@ -3111,128 +3158,41 @@
             }
         }
 
-        function optimize() {
-            showMessage('Optimization feature coming soon!', 'warning');
-        }
-
-        function exportResults() {
-            if (!currentResults) {
-                showMessage('No results to export', 'error');
-                return;
-            }
-            
-            const motorName = document.getElementById('motor_name').value || 'UZAYTEK-HRM-001';
-            const description = document.getElementById('motor_description').value || '';
-            
-            let report = `UZAYTEK - HYBRID ROCKET MOTOR ANALYSIS REPORT\n`;
-            report += `===============================================\n\n`;
-            report += `Motor Name: ${motorName}\n`;
-            report += `Description: ${description}\n`;
-            report += `Analysis Date: ${new Date().toLocaleDateString('en-US')}\n\n`;
-            
-            report += `PERFORMANCE SUMMARY:\n`;
-            report += `Specific Impulse: ${currentResults.motor.isp.toFixed(1)} s\n`;
-            report += `Thrust: ${currentResults.motor.thrust.toFixed(0)} N\n`;
-            report += `Chamber Pressure: ${currentResults.motor.chamber_pressure.toFixed(1)} bar\n`;
-            report += `Total Mass Flow Rate: ${currentResults.motor.mdot_total.toFixed(3)} kg/s\n\n`;
-            
-            report += `MOTOR DESIGN:\n`;
-            report += `Throat Diameter: ${(currentResults.motor.throat_diameter * 1000).toFixed(2)} mm\n`;
-            report += `Exit Diameter: ${(currentResults.motor.exit_diameter * 1000).toFixed(2)} mm\n`;
-            report += `Chamber Diameter: ${(currentResults.motor.chamber_diameter * 1000).toFixed(2)} mm\n`;
-            report += `Chamber Length: ${(currentResults.motor.chamber_length * 1000).toFixed(2)} mm\n\n`;
-            
-            report += `INJECTOR DESIGN:\n`;
-            report += `Type: ${currentResults.injector.type}\n`;
-            report += `Exit Velocity: ${currentResults.injector.exit_velocity.toFixed(1)} m/s\n`;
-            report += `Reynolds Number: ${currentResults.injector.reynolds_number.toFixed(0)}\n`;
-            report += `Pressure Drop: ${currentResults.injector.pressure_drop.toFixed(2)} bar\n\n`;
-            
-            if (currentResults.injector.warnings && currentResults.injector.warnings.length > 0) {
-                report += `WARNINGS:\n`;
-                currentResults.injector.warnings.forEach(warning => {
-                    report += `• ${warning}\n`;
-                });
-                report += `\n`;
-            }
-            
-            report += `---\nGenerated by UZAYTEK Rocket Motor Analysis Software\n`;
-            report += `Space Technologies Team - Professional Analysis Tool\n`;
-            
-            const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${motorName}_analysis_report.txt`;
-            a.click();
-            window.URL.revokeObjectURL(url);
-            
-            showMessage('Report exported successfully!', 'success');
-        }
-
         async function generate3DCAD() {
             if (!currentResults) {
                 showMessage('No calculation results available for CAD generation', 'error');
                 return;
             }
-            
+
             showLoading(true);
-            showMessage('Generating 3D CAD design...', 'info');
-            
+            showMessage('Generating 3D motor model...', 'info');
+
             try {
-                const response = await fetch('/api/generate-cad', {
+                const response = await fetch('/api/generate-3d', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ motor_data: currentResults.motor })
+                    body: JSON.stringify({
+                        motor_data: currentResults.motor,
+                        injector_data: currentResults.injector
+                    })
                 });
-                
-                const cadData = await response.json();
-                
-                if (cadData.status === 'success') {
-                    // Create new window for 3D visualization
-                    const cadWindow = window.open('', '_blank', 'width=1200,height=800');
-                    cadWindow.document.write(`
-                        <!DOCTYPE html>
-                        <html>
-                        <head>
-                            <title>UZAYTEK 3D CAD Design</title>
-                            <!-- Koyu doküman teması: hd_doc.css (theme.css'in popup çekirdeği) -->
-                            <link rel="stylesheet" href="${window.location.origin}/static/css/hd_doc.css">
-                            <style>
-                                /* Yalnız yerleşim; renkler hd_doc.css'ten */
-                                .visualization { width: 100%; height: 600px; }
-                                .specs { grid-template-columns: 1fr 1fr; }
-                                .spec-panel pre { color: var(--hd-ink); font-family: var(--hd-mono); font-size: 0.78rem; white-space: pre-wrap; }
-                                .spec-panel h3 { margin-top: 0; color: var(--hd-cyan); }
-                            </style>
-                        </head>
-                        <body>
-                            <div class="header">
-                                <h1>UZAYTEK Hybrid Rocket Motor - 3D CAD Design</h1>
-                                <p>Professional Motor Assembly Visualization</p>
-                            </div>
-                            <div class="visualization">
-                                ${cadData.cad_visualization}
-                            </div>
-                            <div class="specs">
-                                <div class="spec-panel">
-                                    <h3>Technical Specifications</h3>
-                                    <pre>${JSON.stringify(cadData.technical_drawings, null, 2)}</pre>
-                                </div>
-                                <div class="spec-panel">
-                                    <h3>Material Properties</h3>
-                                    <pre>${JSON.stringify(cadData.material_specifications, null, 2)}</pre>
-                                </div>
-                            </div>
-                        </body>
-                        </html>
-                    `);
-                    
+
+                const result = await response.json();
+
+                if (result.status === 'success' && result.plot_data) {
+                    // Plotly 3D modeli sayfadaki mevcut panele bas (popup yok)
+                    const plotData = JSON.parse(result.plot_data);
+                    const plotDiv = document.getElementById('motor_3d_plot');
+                    if (plotDiv) plotDiv.style.display = 'block';
+                    Plotly.newPlot('motor_3d_plot', plotData.data, plotData.layout, {responsive: true});
+                    const panel = document.getElementById('cad3DPanel');
+                    if (panel) panel.style.display = 'block';
+
                     showMessage('3D CAD design generated successfully!', 'success');
                 } else {
-                    throw new Error(cadData.error || 'Failed to generate CAD design');
+                    throw new Error(result.error || 'Failed to generate 3D model');
                 }
-                
+
             } catch (error) {
                 showMessage('Error generating 3D CAD: ' + error.message, 'error');
             } finally {
@@ -3428,7 +3388,7 @@
             
             showMessage('Generating complete motor design package...', 'info');
             document.getElementById('cadStatus').textContent = 'Generating full motor design...';
-            
+
             try {
                 // 3D simülasyon: geometri zaten currentResults.motor içinde,
                 // Three.js modülü parametrik modeli istemci tarafında kurar
@@ -3451,145 +3411,96 @@
                         document.getElementById('cad3DPanel').style.display = 'block';
                     }
                 }
-                
-                // Then generate complete CAD package
-                const responseCAD = await fetch('/api/generate-cad', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        motor_data: currentResults.motor,
-                        injector_data: currentResults.injector
-                    })
-                });
-                
-                const cadResult = await responseCAD.json();
-                
-                if (cadResult.status === 'success') {
-                    // Ensure we have proper CAD data structure
-                    const cadData = {
-                        status: 'success',
-                        performance_summary: {
-                            thrust: currentResults.motor.thrust || 1000,
-                            isp: currentResults.motor.isp || 250,
-                            burn_time: 10,
-                            chamber_pressure: currentResults.motor.chamber_pressure || 20
-                        },
-                        material_specifications: {
-                            chamber_material: 'AISI 316L Stainless Steel',
-                            nozzle_material: 'Graphite Composite',
-                            injector_material: 'Aluminum 6061-T6'
-                        },
-                        technical_drawings: {
-                            chamber_drawing: 'Chamber Assembly Drawing - DWG-001',
-                            nozzle_drawing: 'Nozzle Assembly Drawing - DWG-002',
-                            injector_drawing: 'Injector Assembly Drawing - DWG-003'
-                        },
-                        manufacturing_notes: [
-                            'Precision CNC machining required for injector components',
-                            'Chamber welding must meet ASME standards',
-                            'Nozzle throat requires high-temperature material',
-                            'Quality control: pressure test at 1.5x working pressure'
-                        ]
-                    };
-                    
-                    // Display complete design package
-                    displayCompleteDesignPackage(cadData);
-                    
-                    document.getElementById('cadStatus').textContent = 'Complete motor design generated successfully!';
-                    document.getElementById('exportSTLBtn').disabled = false;
-                    showMessage('Complete motor design package generated!', 'success');
-                } else {
-                    document.getElementById('cadStatus').textContent = 'Design generation failed: ' + (cadResult.error || 'Unknown error');
-                    showMessage('Design generation failed: ' + (cadResult.error || 'Unknown error'), 'error');
-                }
+
+                // Tasarım özeti popup'ı — yalnız gerçek hesap sonuçlarıyla kurulur
+                // (imalat çıktıları için Export STEP / DXF / Drawings PDF akışı)
+                displayCompleteDesignPackage();
+
+                document.getElementById('cadStatus').textContent = 'Complete motor design generated successfully!';
+                document.getElementById('exportSTLBtn').disabled = false;
+                showMessage('Complete motor design package generated!', 'success');
             } catch (error) {
                 document.getElementById('cadStatus').textContent = 'Design generation failed';
                 showMessage('Error generating design: ' + error.message, 'error');
             }
         }
 
-        function displayCompleteDesignPackage(cadData) {
+        function displayCompleteDesignPackage() {
+            // Yalnız GERÇEK hesap sonuçları gösterilir: eksik değer 'not computed'
+            // olarak yazılır, uydurma sabit fallback yok. İmalat çıktıları
+            // (STEP/DXF/PDF) gerçek export akışlarından indirilir.
+            const m = (currentResults && currentResults.motor) || {};
+            const fmtVal = (v, d, unit) =>
+                (typeof v === 'number' && isFinite(v))
+                    ? (v.toFixed(d) + (unit ? ' ' + unit : '')) : 'not computed';
+            const totalImpulse =
+                (typeof m.total_impulse === 'number' && isFinite(m.total_impulse))
+                    ? m.total_impulse
+                    : ((typeof m.thrust === 'number' && isFinite(m.thrust)
+                        && typeof m.burn_time === 'number' && isFinite(m.burn_time))
+                        ? m.thrust * m.burn_time : undefined);
+            const throatDiaMm =
+                (typeof m.throat_diameter === 'number' && isFinite(m.throat_diameter))
+                    ? m.throat_diameter * 1000 : undefined;
+
             const designWindow = window.open('', '_blank', 'width=1400,height=900');
+            if (!designWindow) {
+                // Popup engellendi — 3D akışı başarısız sayılmasın
+                showMessage('Design summary popup was blocked by the browser', 'warning');
+                return;
+            }
             designWindow.document.write(`<!DOCTYPE html>
 <html>
 <head>
-    <title>UZAYTEK - Complete Motor Design Package</title>
+    <title>UZAYTEK - Motor Design Summary</title>
     <!-- Koyu doküman teması: hd_doc.css (theme.css'in popup çekirdeği) -->
     <link rel="stylesheet" href="${window.location.origin}/static/css/hd_doc.css">
 </head>
 <body>
     <div class="header">
-        <h1>UZAYTEK - Complete Hybrid Motor Design Package</h1>
-        <p>Professional Motor Design Documentation & Manufacturing Package</p>
+        <h1>UZAYTEK - Hybrid Motor Design Summary</h1>
+        <p>Performance summary from the latest calculation results</p>
     </div>
-    
+
     <div class="section">
         <h2>Motor Performance Specifications</h2>
         <div class="specs-grid">
             <div class="spec-item">
                 <div class="spec-label">Thrust</div>
-                <div>${cadData.performance_summary.thrust || 1000} N</div>
+                <div>${fmtVal(m.thrust, 0, 'N')}</div>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Specific Impulse</div>
-                <div>${Number(cadData.performance_summary.isp || 250).toFixed(1)} s</div>
+                <div>${fmtVal(m.isp, 1, 's')}</div>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Burn Time</div>
-                <div>${cadData.performance_summary.burn_time || 10} s</div>
+                <div>${fmtVal(m.burn_time, 1, 's')}</div>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Chamber Pressure</div>
-                <div>${currentResults.motor.chamber_pressure || 20} bar</div>
+                <div>${fmtVal(m.chamber_pressure, 1, 'bar')}</div>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Total Impulse</div>
-                <div>${(cadData.performance_summary.thrust * cadData.performance_summary.burn_time).toFixed(0)} N⋅s</div>
+                <div>${fmtVal(totalImpulse, 0, 'N·s')}</div>
             </div>
             <div class="spec-item">
                 <div class="spec-label">Throat Diameter</div>
-                <div>${(currentResults.motor.throat_diameter * 1000).toFixed(1)} mm</div>
+                <div>${fmtVal(throatDiaMm, 1, 'mm')}</div>
             </div>
         </div>
     </div>
-    
+
     <div class="section">
-        <h2>Material Specifications</h2>
-        <ul class="materials-list">
-            <li><strong>Chamber:</strong> ${cadData.material_specifications.chamber_material} - High strength, temperature resistant</li>
-            <li><strong>Nozzle:</strong> ${cadData.material_specifications.nozzle_material} - Erosion resistant, high thermal conductivity</li>
-            <li><strong>Injector:</strong> ${cadData.material_specifications.injector_material} - Corrosion resistant, precision machining</li>
-        </ul>
+        <h2>Manufacturing Outputs</h2>
+        <p>Material selection and technical drawings are not part of this summary.
+           Real manufacturing outputs are produced by the export pipeline:
+           use the buttons below (or the Export STEP / Export DXF / Drawings PDF
+           buttons on the main page) to download geometry generated from the
+           calculated motor design.</p>
     </div>
-    
-    <div class="section">
-        <h2>Technical Drawings</h2>
-        <div class="specs-grid">
-            <div class="spec-item">
-                <div class="spec-label">Chamber Assembly</div>
-                <div>${cadData.technical_drawings.chamber_drawing}</div>
-                <button class="download-btn" onclick="window.opener && window.opener.exportDXF ? window.opener.exportDXF() : alert('Ana sayfa kapali')">Download DXF</button>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">Nozzle Assembly</div>
-                <div>${cadData.technical_drawings.nozzle_drawing}</div>
-                <button class="download-btn" onclick="window.opener && window.opener.exportDXF ? window.opener.exportDXF() : alert('Ana sayfa kapali')">Download DXF</button>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">Injector Assembly</div>
-                <div>${cadData.technical_drawings.injector_drawing}</div>
-                <button class="download-btn" onclick="window.opener && window.opener.exportDrawingsPDF ? window.opener.exportDrawingsPDF() : alert('Ana sayfa kapali')">Download Drawing PDF</button>
-            </div>
-        </div>
-    </div>
-    
-    <div class="section">
-        <h2>Manufacturing Requirements</h2>
-        <ul>
-            ${cadData.manufacturing_notes.map(note => '<li>' + note + '</li>').join('')}
-        </ul>
-    </div>
-    
+
     <div class="section">
         <h2>Download Package</h2>
         <button class="download-btn" onclick="downloadSTL()">Download 3D Models (STL)</button>
@@ -3597,11 +3508,11 @@
         <button class="download-btn" onclick="downloadDrawings()">Download Technical Drawings (PDF)</button>
         <button class="download-btn" onclick="downloadSpecs()">Download Full Specifications (PDF)</button>
     </div>
-    
+
     <div class="warning">
         <strong>Safety Notice:</strong> This motor design is for educational/research purposes. Professional testing and certification required before use.
     </div>
-    
+
     <scr` + `ipt>
         function downloadSTL() { window.opener && window.opener.exportSTLZip ? window.opener.exportSTLZip() : alert('Ana sayfa kapali'); }
         function downloadCAD() { window.opener && window.opener.exportSTEP ? window.opener.exportSTEP() : alert('Ana sayfa kapali'); }
@@ -3933,29 +3844,9 @@
             }
             
             showMessage('Generating and exporting STL files...', 'info');
-            
+
             try {
-                // First generate the CAD if not already done
-                const cadResponse = await fetch('/api/generate-cad', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        motor_data: currentResults.motor,
-                        motor_type: document.getElementById('motor_type').value || 'hybrid'
-                    })
-                });
-                
-                if (!cadResponse.ok) {
-                    throw new Error(`CAD generation failed: ${cadResponse.status}`);
-                }
-                
-                const cadResult = await cadResponse.json();
-                
-                if (cadResult.status !== 'success') {
-                    throw new Error(cadResult.error || 'CAD generation failed');
-                }
-                
-                // Now export the STL
+                // STL doğrudan hesap sonucundaki geometriden üretilir
                 const response = await fetch('/api/export-stl', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

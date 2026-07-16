@@ -1,167 +1,110 @@
 #!/usr/bin/env python3
 """
 Cross-platform installer and dependency checker
-for Hybrid Rocket Motor Analysis Tool
+for UZAYTEK Rocket Motor Analysis
+
+Thin wrapper: checks the Python version, installs the pinned
+dependencies from the repository's requirements.txt, then verifies
+that the application imports cleanly.
 """
 
-import sys
 import os
 import platform
 import subprocess
-import importlib.util
+import sys
+
+# Repo kökü: bu dosya hrma/ altında, bir üst dizin repo köküdür.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REQUIREMENTS = os.path.join(REPO_ROOT, "requirements.txt")
+
 
 def check_python_version():
-    """Check if Python version is adequate (3.10–3.13 supported, 3.12 recommended)"""
+    """Check if Python version is adequate (3.10-3.13 supported, 3.12 recommended)"""
     version = sys.version_info
-    if version.major < 3 or (version.major == 3 and version.minor < 10):
+    if version.major != 3 or version.minor < 10:
         print(f"Error: Python {version.major}.{version.minor} detected.")
-        print("Python 3.10 or higher is required (3.12 recommended).")
+        print("Python 3.10-3.13 is required (3.12 recommended).")
         return False
-    if (version.major, version.minor) >= (3, 14):
+    if version.minor >= 14:
         print(f"Error: Python {version.major}.{version.minor} detected.")
-        print("Python 3.14+ is not supported yet: compiled dependencies (Cantera,")
+        print("Python 3.14+ is not supported yet: compiled dependencies (numpy<2,")
         print("CoolProp, RocketCEA) do not ship 3.14 wheels. Please use Python 3.12.")
         return False
-    print(f"✓ Python {version.major}.{version.minor}.{version.micro} detected")
+    print(f"OK: Python {version.major}.{version.minor}.{version.micro} detected")
     return True
 
-def check_pip():
-    """Check if pip is available"""
+
+def install_requirements():
+    """Install pinned dependencies from the repository requirements.txt"""
+    if not os.path.isfile(REQUIREMENTS):
+        print(f"Error: requirements.txt not found at {REQUIREMENTS}")
+        return False
+    print(f"Installing dependencies from {REQUIREMENTS} ...")
+    print("This may take a few minutes on first run...")
+    # --prefer-binary: pip mumkun oldugunca wheel kullansin, sdist derlemesin
+    # (numpy meson build hatasinin ana sebebi kaynaktan derlemeye dusmesiydi).
+    result = subprocess.run([
+        sys.executable, "-m", "pip", "install",
+        "--prefer-binary", "-r", REQUIREMENTS,
+    ])
+    if result.returncode != 0:
+        print()
+        print("Error: Failed to install required packages!")
+        print("Common solutions:")
+        print("1. Check your internet connection")
+        print("2. Use Python 3.12 (3.14+ has no wheels for some packages)")
+        print("3. EASIEST: use the ready-made installer instead of source:")
+        print("   https://github.com/berketez/HRMA/releases/latest")
+        return False
+    print("OK: All dependencies installed")
+    return True
+
+
+def verify_app_import():
+    """Verify the main application imports cleanly"""
     try:
-        import pip
-        print("✓ pip is available")
+        sys.path.insert(0, REPO_ROOT)
+        from hrma.app import app  # noqa: F401
+        print("OK: Application modules loaded successfully")
         return True
-    except ImportError:
-        print("! pip is not available")
+    except ImportError as e:
+        print(f"Error loading application: {e}")
         return False
 
-def install_package(package_name):
-    """Install a package using pip"""
-    try:
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", package_name
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-def check_package(package_name):
-    """Check if a package is installed"""
-    spec = importlib.util.find_spec(package_name)
-    return spec is not None
 
 def main():
     print("=" * 60)
-    print("  HYBRID ROCKET MOTOR ANALYSIS TOOL")
+    print("  UZAYTEK ROCKET MOTOR ANALYSIS")
     print("  Cross-platform Installation Check")
     print("=" * 60)
     print()
-    
-    # System info
     print(f"Platform: {platform.system()} {platform.release()}")
     print(f"Architecture: {platform.machine()}")
     print()
-    
-    # Check Python version
+
     if not check_python_version():
         input("Press Enter to exit...")
         sys.exit(1)
-    
-    # Check pip
-    if not check_pip():
-        print("Installing pip...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "ensurepip", "--upgrade"])
-            print("✓ pip installed successfully")
-        except subprocess.CalledProcessError:
-            print("✗ Failed to install pip")
-            input("Press Enter to exit...")
-            sys.exit(1)
-    
-    # Required packages
-    packages = [
-        ("flask", "Flask"),
-        ("flask_cors", "Flask-CORS"),
-        ("numpy", "NumPy"),
-        ("scipy", "SciPy"),
-        ("plotly", "Plotly"),
-        ("pandas", "Pandas"),
-        ("reportlab", "ReportLab")
-    ]
-    
-    # Platform-specific server
-    if platform.system() == "Windows":
-        packages.append(("waitress", "Waitress"))
-    else:
-        packages.append(("gunicorn", "Gunicorn"))
-    
-    print("Checking required packages...")
-    print()
-    
-    missing_packages = []
-    
-    for import_name, display_name in packages:
-        if check_package(import_name):
-            print(f"✓ {display_name}")
-        else:
-            print(f"✗ {display_name} (missing)")
-            missing_packages.append(import_name)
-    
-    print()
-    
-    if missing_packages:
-        print(f"Installing {len(missing_packages)} missing packages...")
-        print("This may take a few minutes...")
-        print()
-        
-        failed_packages = []
-        
-        for package in missing_packages:
-            print(f"Installing {package}...", end=" ")
-            if install_package(package):
-                print("✓")
-            else:
-                print("✗")
-                failed_packages.append(package)
-        
-        if failed_packages:
-            print()
-            print("Failed to install the following packages:")
-            for package in failed_packages:
-                print(f"  - {package}")
-            print()
-            print("Try installing manually:")
-            print(f"  {sys.executable} -m pip install {' '.join(failed_packages)}")
-            print()
-            input("Press Enter to exit...")
-            sys.exit(1)
-    
-    print()
-    print("✓ All dependencies are installed!")
+
+    if not install_requirements():
+        input("Press Enter to exit...")
+        sys.exit(1)
+
+    if not verify_app_import():
+        input("Press Enter to exit...")
+        sys.exit(1)
+
     print()
     print("Installation complete. You can now run:")
-    
     if platform.system() == "Windows":
         print("  start.bat")
     else:
         print("  ./start.sh")
-    
     print("  or")
-    print(f"  {sys.executable} run.py")
-    print()
-    
-    # Test import of main app
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from hrma.app import app  # noqa: F401
-        print("✓ Application modules loaded successfully")
-    except ImportError as e:
-        print(f"✗ Error loading application: {e}")
-        input("Press Enter to exit...")
-        sys.exit(1)
-    
+    print(f"  {sys.executable} hrma/run.py")
     print()
     print("Ready to launch!")
+
 
 if __name__ == "__main__":
     try:

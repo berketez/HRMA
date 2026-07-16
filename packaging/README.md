@@ -23,10 +23,18 @@ bash build_win_payload.sh          # win_amd64 wheel'leriyle win/payload üretir
 # 3) macOS: .app + DMG
 bash build_mac_app.sh              # HRMA.app (bundled python + libs + app)
 bash test_bundle_mac.sh            # import + sunucu duman testi (zorunlu)
-bash build_dmg.sh                  # dist/HRMA-Kurulum-1.0.0-macOS.dmg
+bash build_dmg.sh                  # dist/HRMA-Setup-X.Y.Z-macOS.dmg (sürümü hrma/__init__.py'den okur)
 
 # 4) Windows: NSIS installer (Mac üstünde cross-compile)
-makensis hrma.nsi                  # HRMA-Kurulum-1.0.0.exe
+#    -DVERSION zorunlu: verilmezse hrma.nsi "0.0.0-dev" adlı exe üretir.
+#    Sürümün tek kaynağı hrma/__init__.py — oradaki __version__ değerini geçir.
+makensis -DVERSION=X.Y.Z hrma.nsi  # HRMA-Setup-X.Y.Z.exe
+
+# 5) Yayın (sürüm bump → build → publish sırası):
+#    a) hrma/__init__.py içinde __version__ değerini yükselt
+#    b) Yukarıdaki 3. ve 4. adımlarla dmg + exe'yi yeni sürümle derle
+#    c) GitHub Release oluştur + README indirme linklerini güncelle:
+bash publish_release.sh "Sürüm notları..."
 ```
 
 ## Kritik kararlar (değiştirmeden önce oku)

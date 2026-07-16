@@ -362,8 +362,7 @@
         }
     </style>
     <!-- HRMA tasarım sistemi: inline stillerden SONRA yüklenir, onları ezer -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/fonts.css">
     <link rel="stylesheet" href="/static/css/theme.css">
     <!-- HUD sonuç katmanı: theme.css'ten SONRA yüklenir (results_hud.css kuralı) -->
     <link rel="stylesheet" href="/static/css/results_hud.css">
@@ -4128,6 +4127,8 @@ Please provide:
          (FEED SYSTEM: slosh / pressurant / water hammer) -->
     <script src="/static/js/panels/cooling_panel.js"></script>
     <script src="/static/js/panels/feed_panel.js"></script>
+    <!-- COMPARE paneli: snapshot tabanlı konfigürasyon karşılaştırması -->
+    <script src="/static/js/panels/comparative_panel.js"></script>
     <script>
         // Analiz güvertesi (thermal/structural/safety) — çapa #results içinde
         // olduğundan hesap bitip sonuç bölümü açılınca görünür olur.

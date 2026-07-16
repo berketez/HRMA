@@ -6,6 +6,7 @@ NASA CEA-style chemical equilibrium and performance calculations with Cantera in
 import numpy as np
 import json
 import logging
+import warnings
 from typing import Dict, List, Tuple, Optional
 from scipy.optimize import minimize_scalar, fsolve
 
@@ -599,8 +600,19 @@ class CombustionAnalyzer:
             gamma_frozen = cp0 / cv0
             gamma_eq = gamma_frozen
             try:
-                self.gas.SP = s0, P0 * 1.01
-                self.gas.equilibrate('SP')
+                # GRI-Mech termo polinomları 300-3000 K için fit'li; denge
+                # çözümü 3000-3025 K bandına <%1 taşabiliyor (Cantera
+                # UserWarning basar). Ekstrapolasyon bilinçli kabul:
+                # sapma küçük, yakınsamazsa zaten frozen gamma'ya düşülür.
+                # Uyarı test/konsol gürültüsü yaratmasın diye burada filtreli.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        'ignore',
+                        message=r'.*outside valid range.*',
+                        category=UserWarning,
+                    )
+                    self.gas.SP = s0, P0 * 1.01
+                    self.gas.equilibrate('SP')
                 P1 = self.gas.P
                 rho1 = self.gas.density
                 n_s = np.log(P1 / P0) / np.log(rho1 / rho0)

@@ -32,9 +32,9 @@ the test matrix; it does not replace them.
 | Combustion thermochemistry | Cantera equilibrium, shifting-γ, frozen/shifting Isp | c\* ≤1.5 % vs NASA CEA over 18 propellant pairs | strong |
 | Motor sizing (throat, grain, chamber, L\*) | Closed-loop with Marxman G_total regression | mass conservation analytic; Rezaei static-fire within batch scatter | strong, ±20–30 % on regression |
 | **Thrust–time history** | Transient Pc(t)/F(t), quasi-steady chamber | design-point identity each step | new (2026-07-12) |
-| **Feed system** | Self-pressurizing N₂O blowdown (equilibrium two-phase) + regulated mode | CoolProp U-V flash within 1 K; SP-8089 ΔP stability guards | new (2026-07-12); SPI injector is single-phase |
+| **Feed system** | Self-pressurizing N₂O blowdown (equilibrium two-phase) + regulated mode | CoolProp U-V flash within 1 K; SP-8089 ΔP stability guards | new (2026-07-12); injector sizing uses the two-phase Dyer NHNE model (`nhne_mass_flow`, `hrma/engines/injector_design.py`, 2026-07-13); the blowdown time-march uses a design-point-calibrated SPI orifice |
 | Nozzle | Rao/conical/bell contours, discrete losses, altitude adaptation | CF vs Sutton/CEA ~0.03 %; ε(altitude) closed-form | strong |
-| Thermal | Bartz + recovery temperature + radiation, ablative/graphite materials | RS-25 throat band 40–120 kW/m²K reproduced | ±20–30 % |
+| Thermal | Bartz + recovery temperature + Leckner gas-emissivity radiation (2026-07-16), ablative/graphite materials | RS-25 throat band 40–120 kW/m²K reproduced | ±20–30 % |
 | Structural | Lamé, thermal stress scenarios, MMPDS derating, SP-8007 buckling | SP-8007 knockdown exact; hydrostatic proof still mandatory | conservative |
 | **Stability & flight** | 6-DOF rigid body, Barrowman CN_α/CP, weathercock, wind | Barrowman vs hand calc 1e-12; planar cross-check ±5 % | small-α linear aero |
 | Vehicle integration | OpenRocket `.eng` with the *real* transient curve, STL/CAD of as-analyzed geometry | single-source geometry pipeline | strong |
@@ -47,8 +47,10 @@ the test matrix; it does not replace them.
 2. **Hydrostatic proof and burst tests** of the chamber and tank (structural
    margins in HRMA are conservative but analytical).
 3. **Recovery, avionics, range safety** — outside HRMA's scope entirely.
-4. **Two-phase injector characterization** for N₂O (SPI assumption is
-   optimistic on orifice flow; cold-flow test recommended).
+4. **Injector cold-flow characterization** for N₂O. HRMA sizes the orifices
+   with the two-phase Dyer NHNE model (2026-07-13) rather than the
+   optimistic single-phase SPI equation, but the discharge coefficient and
+   the NHNE blend still deserve anchoring against a cold-flow test.
 5. **6-DOF with measured aero** — Barrowman is adequate for stability
    screening; a wind-tunnel or CFD-derived Cd/CN_α set tightens apogee
    prediction.
@@ -60,5 +62,5 @@ volume, injector plate, thrust curve, stability margins — and go directly to
 hardware procurement and a static-fire campaign for a 100 km-class hybrid.
 That is exactly the standard a preliminary-design tool must meet, and each
 step of that chain is now covered by an automated regression suite
-(166 tests) plus the documented verification anchors above. Orbital-class,
+(1,000+ automated tests) plus the documented verification anchors above. Orbital-class,
 multi-stage, TVC-guided vehicles remain outside the tool's scope.
