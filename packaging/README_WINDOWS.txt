@@ -1,4 +1,4 @@
-HRMA — UZAYTEK Hybrid Rocket Motor Analysis (Windows Installation)
+HRMA — UZAYTEK Rocket Motor Analysis (Windows Installation)
 ===================================================================
 
 INSTALLATION:

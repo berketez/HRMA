@@ -1,4 +1,4 @@
-HRMA — UZAYTEK Hybrid Rocket Motor Analysis (macOS Installation)
+HRMA — UZAYTEK Rocket Motor Analysis (macOS Installation)
 =================================================================
 
 INSTALLATION (2 steps):
