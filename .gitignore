@@ -33,3 +33,5 @@ tests/
 
 # Kişisel AI talimat/mem dosyası public repoya girmez
 docs/CLAUDE.md
+packaging/mac_server_test.log
+packaging/*.log
