@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-palacz2023-hdpe-n2o-t01",
+  "record_type": "static_fire",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "T. Palacz, J. Cieslik, 'Testing of the N2O/HDPE Vortex Flow Pancake Hybrid Rocket Engine with Augmented Spark Igniter', Aerospace 2023, 10(8), 727",
+    "doi": "10.3390/aerospace10080727",
+    "url": "https://doi.org/10.3390/aerospace10080727",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar makale PDF'inin Tablo 5'inden (s.13) dogrudan okundu; bu oturumda PDF yeniden acilip satir satir teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 9). Tasarim geometrisi Tablo 2'den (s.5)."
+  },
+  "propellants": {
+    "oxidizer": "n2o",
+    "fuel": "hdpe",
+    "hrma_oxidizer_key": "n2o",
+    "hrma_fuel_key": "pe"
+  },
+  "geometry": {
+    "grain_geometry": "vortex_flow_pancake",
+    "chamber_diameter_mm": 85,
+    "grain_length_top_mm": 40,
+    "grain_length_bottom_mm": 35,
+    "bottom_port_diameter_mm": 20,
+    "throat_diameter_mm": 4.0,
+    "injector_orifice_diameter_mm": 0.5,
+    "n_injector_orifices": 2
+  },
+  "inputs": {
+    "burn_time_s": 4.96,
+    "ignition_time_s": 3.0
+  },
+  "measured": {
+    "fuel_mass_loss_top_g": 6.7,
+    "fuel_mass_loss_bottom_g": 6.8,
+    "gox_vortex_gpcm2s": 1.22,
+    "regression_rate_top_mmps": 0.25,
+    "regression_rate_bottom_mmps": 0.09,
+    "mdot_fuel_gps": 2.72,
+    "mdot_ox_gps": 4.03,
+    "of_ratio": 1.48,
+    "chamber_pressure_avg_bar": 6.71
+  },
+  "units_original": "mm, s, g, g/cm^2.s, mm/s, g/s, bar (Tablo 5 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "vortex_flow_pancake",
+    "lab_scale",
+    "out_of_hrma_geometry_scope",
+    "feed_system_validation"
+  ],
+  "notes": "Tablo 5 (s.13) sicak test 1. VFP (vorteks/pancake) geometrisi HRMA'nin silindirik port modeline uymaz - motor balistigi korelasyonuna SOKULMAMALI; degeri: N2O besleme/blowdown ve enjektor orifis boyutlandirma dogrulamasi (Sekil 9 tank/besleme/Pc izleri) + kapsam-disi geometri negatif ornegi (ARGE karari). mdot_ox burada olculen sonuctur (tank kutle izinin turevi, s.13); ayarlanan buyukluk enjektor orifis capidir. Atesleme suresi testler 1-4'te 3 s, 5-11'de 10 s (s.13). On tasarim katsayisi rdot = 0.111*Gox^0.677 (yazarlarin keyfi secimi, Tablo 2 baglami)."
+}

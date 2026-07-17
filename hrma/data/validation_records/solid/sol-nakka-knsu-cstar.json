@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "test_id": "sol-nakka-knsu-cstar",
+  "motor_type": "solid",
+  "source": {
+    "citation": "R. Nakka, 'Solid Propellant Burn Rate' sayfasi, nakka-rocketry.net — KNSU 65/35 olculmus c* metni",
+    "doi": null,
+    "url": "https://www.nakka-rocketry.net/burnrate.html",
+    "access": "webpage",
+    "confidence": "medium",
+    "date_checked": "2026-07-17",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar sayfa metninden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 1.1 ek). Berke karari: medium confidence, UI'da kaynak rozetiyle."
+  },
+  "propellants": {
+    "propellant": "KNSU (KNO3/sukroz 65/35)",
+    "oxidizer": "kno3",
+    "fuel": "sucrose",
+    "hrma_propellant_key": "knsu"
+  },
+  "geometry": {
+    "apparatus_note": "kaynak sayfada motor/test geometrisi verilmedi"
+  },
+  "inputs": {
+    "oxidizer_mass_pct": 65,
+    "fuel_mass_pct": 35
+  },
+  "measured": {
+    "c_star_as_obtained_mps": 850,
+    "c_star_fine_ground_mps": 911
+  },
+  "units_original": "m/s (sayfa metni)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "c_star_anchor",
+    "kn_sugar",
+    "amateur_rigorous"
+  ],
+  "notes": "Olculmus c*: 850 m/s ('as obtained' iri oksitleyici tanesi) ve 911 m/s ('fine' ogutulmus) — HRMA termokimya c* tahmini ve verim kiyasi icin kucuk ama gercek capa; teorik c* ~950 m/s civarina karsi verim kiyasi (arge Bolum 1.1 ek). Ayni sayfada KNSU ortam basincinda r = 3.8 mm/s verilir (bu kayda islenmedi); 68 atm icin verilen ~15 mm/s YALNIZ yaklasik oldugu icin hic alinmadi. Sema notu: 'strand_burn_rate'/'c_star' tip ayrimi tags icinde tasinir."
+}

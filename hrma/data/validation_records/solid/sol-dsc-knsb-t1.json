@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "test_id": "sol-dsc-knsb-t1",
+  "record_type": "static_fire",
+  "motor_type": "solid",
+  "source": {
+    "citation": "R. Nakka, 'Burn Rate Testing' ozet sayfasi, 'Comparison with Actual Motor Burn rate Data' bolumu — Danish Space Challenge KNSB statik test seti, test 1",
+    "doi": null,
+    "url": "https://www.nakka-rocketry.net/bntest.html",
+    "access": "webpage",
+    "confidence": "medium",
+    "date_checked": "2026-07-17",
+    "data_extraction": "text",
+    "extraction_note": "Geometri ve test kosullari sayfa metninden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 1.2). Eksik alanlar bos birakildi (kaynakta yok)."
+  },
+  "propellants": {
+    "propellant": "KNSB (KNO3/sorbitol 65/35)",
+    "oxidizer": "kno3",
+    "fuel": "sorbitol",
+    "hrma_propellant_key": "knsb"
+  },
+  "geometry": {
+    "motor_diameter_mm": 102,
+    "motor_wall_thickness_mm": 2,
+    "motor_length_mm": 300,
+    "grain_shape": "rectangular_slab",
+    "grain_dimensions_mm": "40 x 90 x 300",
+    "burning_surfaces": "yalniz 90 mm yuzeyler yaniyor (kaynak metni)"
+  },
+  "inputs": {
+    "throat_diameter_mm": 18,
+    "oxidizer_mass_pct": 65,
+    "fuel_mass_pct": 35
+  },
+  "measured": {
+    "chamber_pressure_curve": null
+  },
+  "units_original": "mm (geometri); Pc egrisi yalniz grafik, birim kayda alinmadi",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "kn_sugar",
+    "motor_static_test",
+    "strand_anfit_cross_check"
+  ],
+  "notes": "Danish Space Challenge 6 statik testlik KNSB (65/35) seti; strand a-n setinin bagimsiz motor dogrulamasi. Kaynak metnin verdigi toplam sonuc: strand a-n seti ile hesaplanan toplam web tuketimi gercekle Grain 1 icin +%1.5, Grain 3 icin -%6 farkla uyusur (test-grain eslesmesi kaynakta acikca verilmedigi icin bu yuzdeler hicbir kaydin measured bloguna yazilmadi). Pc(t) egrileri kaynak sayfada YALNIZ grafik (Sekil 8) — sayisallastirilmadi; measured.chamber_pressure_curve null birakildi (sayisallastirma yapilirsa digitized: true ile guncellenir; arge Bolum 1.2). Test 1-2 bogaz 18 mm, test 3-6 bogaz 14 mm."
+}

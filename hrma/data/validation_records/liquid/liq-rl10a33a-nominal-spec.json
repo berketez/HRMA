@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-rl10a33a-nominal-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "M. Binder, 'An RL10A-3-3A Rocket Engine Model Using ROCETS', NASA CR-190786, Temmuz 1993, s.2; NASA TM-107318 (RL10A-3-3A model raporu), s.2 ve Tablolar 2.2.1-2.6.1",
+    "doi": null,
+    "access": "public_domain",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "erratum": "NASA TM-107318 metninde c* degeri '7824 in/sec' birimiyle basili; ft/s olmali (7824 ft/s = 2385 m/s, LOX/LH2 icin tutarli) — baski hatasi gorunumlu. HRMA kiyasinda ft/s varsayilip not dusulmeli (arge Acik risk 3).",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar CR-190786 ve TM-107318 PDF'lerinden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1 ve 2.3)."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 61.0,
+    "throat_diameter_in": 2.47,
+    "chamber_diameter_in": 5.13,
+    "cycle": "expander",
+    "injector_elements": 216,
+    "fuel_pump_stages": 2,
+    "fuel_pump_impeller_diameter_in": 7.07,
+    "lox_pump_impeller_diameter_in": 4.2,
+    "cooling_jacket": "pass-and-a-half; 180 kisa + 180 uzun boru; sicak duvar 0.013 in; ceket basinc dusumu 242.1 psid; isi aktarimi 7994 Btu/s (TM-107318 Tablolar 2.2.1-2.6.1)"
+  },
+  "inputs": {
+    "chamber_pressure_psia": 475,
+    "of_ratio": 5.0
+  },
+  "measured": {
+    "thrust_vac_lbf": 16500,
+    "thrust_vac_n": 73400,
+    "isp_vac_s": 445
+  },
+  "units_original": "lbf, N, s, psia, in, psid, Btu/s (NASA raporlarinin orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "expander_cycle",
+    "primary_liquid_anchor"
+  ],
+  "notes": "BIRINCIL sivi capa: tam geometri + 5 olculmus test noktasi (liq-rl10a33a-t1..t5). Isp CR-190786 metninde yaklasik verilir (~445 s); 445 sayisi metinden aynen alindi, tilde notu burada. TM-107318 Tablo 2.5.1 model tipik calisma noktasi (OLCUM DEGIL, P&W verisine dayali model degerleri): itki 16452 lbf (gross), Isp 440.3 s, Pc 482.0 psia (enjektor yuzu statik), MR 5.26, mdot 37.36 lbm/s, Tc 5888 R, c* verimi 0.9892 — model degeri olduklari icin measured bloguna YAZILMADI."
+}

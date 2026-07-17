@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-rezaei2018-htpb-n2o-ta3",
+  "record_type": "static_fire",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "H. Rezaei, M.R. Soltani, A.R. Mohammadi, 'Experimental Study of Fuel Regression Rate in a HTPB/N2O Hybrid Rocket Motor', Scientia Iranica B, 25(1), 253-265, 2018",
+    "doi": null,
+    "url": "https://scientiairanica.sharif.edu/article_4317_fd78e20a70c3a59449b0ca1fd11047c3.pdf",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar makale PDF'inin Tablo 3'unden (s.258) dogrudan okundu; bu oturumda PDF yeniden acilip teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 1). Olcum belirsizlikleri Tablo 1'den."
+  },
+  "propellants": {
+    "oxidizer": "n2o",
+    "fuel": "htpb",
+    "fuel_density_kgpm3": 983,
+    "hrma_oxidizer_key": "n2o",
+    "hrma_fuel_key": "htpb"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "throat_diameter_mm": 8.9,
+    "injector_area_mm2": 1.766,
+    "pre_chamber_length_mm": 25,
+    "post_chamber_length_mm": 25,
+    "grain_length_mm": 250.0,
+    "port_diameter_initial_mm": null
+  },
+  "inputs": {
+    "mdot_ox_gps": 68.75,
+    "burn_time_s": 6.33
+  },
+  "measured": {
+    "chamber_pressure_bar": 20.25,
+    "thrust_kgf": 15.94,
+    "mdot_fuel_gps": 23.9,
+    "regression_rate_mmps": 0.745,
+    "of_ratio": 2.88,
+    "c_star_mps": 1450,
+    "isp_s": 172.0,
+    "isp_vacuum_s": 285.0
+  },
+  "measurement_uncertainty": {
+    "chamber_pressure_bar": {
+      "value": 0.0014,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "thrust_kgf": {
+      "value": 0.0022,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "mdot_ox_gps": {
+      "value": 0.0074,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "isp_s": {
+      "value": 0.0081,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "c_star_mps": {
+      "value": 0.0081,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "regression_rate_mmps": {
+      "value": 0.0033,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    }
+  },
+  "units_original": "mm, g/s, s, bar, kgf, mm/s, m/s (makale tablolarinin orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "lab_scale",
+    "repeatability_series"
+  ],
+  "notes": "Tablo 3 (s.258) tekrarlanabilirlik serisi, test A3 (ayni kosullarda 3 test). A1 satiri Tablo 4 test 68 ile birebir ayni oldugundan ayri kayit girilmedi; bu seri t68 + ta2 + ta3 uclusudur. Baslangic port capi Tablo 3'te verilmemis (test 68'de Dp_i 37.8 mm). Kampanya ortalama/std (Tablo 3): Pc 20.02/0.204 bar, itki 15.47/0.425 kgf, rdot 0.733/0.012 mm/s, O/F 2.92/0.034, C* 1466/17.934 m/s, Isp 170.6/2.787 s, vakum Isp 288.0/3.524 s - UQ deneysel gurultu tabani."
+}

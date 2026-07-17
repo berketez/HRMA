@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-whitmore2020-multi-regfit-literature",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "S.A. Whitmore, D.P. Stoddard, 'Nytrox as Drop-in Replacement for Gaseous Oxygen in SmallSat Hybrid Propulsion Systems', Aerospace 2020, 7(4), 43 - Tablo 4 (s.26), referans [58,59,61-63] derleme satirlari",
+    "doi": "10.3390/aerospace7040043",
+    "url": "https://doi.org/10.3390/aerospace7040043",
+    "access": "open",
+    "confidence": "medium",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar Whitmore 2020 Tablo 4'ten (s.26) dogrudan okundu; ANCAK bu 6 kombinasyon Whitmore grubunun onceki calismalari ve literaturden izinle yeniden basilmis fit'lerdir (ikincil aktarim katmani var) - confidence bu yuzden medium. Capraz kontrol: LOX/parafin a=0.0488 cm/s, Zilliac 2006 Tablo 2'deki 0.488 mm/s ile birebir tutarli."
+  },
+  "propellants": {
+    "oxidizer": "n2o/lox",
+    "fuel": "abs/htpb/htpb-escorez/hdpe/paraffin",
+    "propellant_note": "6 ayri yakit/oksitleyici kombinasyonunun fit katsayilari tek kayitta; cift anahtarlar measured icinde kombinasyon adiyla ayristirildi"
+  },
+  "geometry": {
+    "geometry_note": "Cok kaynakli derleme; tek bir motor geometrisi yok (Tablo 4 satirlari)"
+  },
+  "inputs": {
+    "n_propellant_combinations": 6
+  },
+  "measured": {
+    "regression_a_n2o_abs_cmps": 0.00742,
+    "regression_n_n2o_abs": 0.799,
+    "regression_a_n2o_htpb_cmps": 0.00795,
+    "regression_n_n2o_htpb": 0.773,
+    "regression_a_lox_paraffin_cmps": 0.0488,
+    "regression_n_lox_paraffin": 0.491,
+    "regression_a_lox_htpb_cmps": 0.0146,
+    "regression_n_lox_htpb": 0.681,
+    "regression_a_lox_htpb_escorez_cmps": 0.0099,
+    "regression_n_lox_htpb_escorez": 0.68,
+    "regression_a_lox_hdpe_cmps": 0.0098,
+    "regression_n_lox_hdpe": 0.62
+  },
+  "units_original": "rdot cm/s, Gox g/cm^2.s: rdot = a*Gox^n (Tablo 4; dikkat: cm/s, mm/s degil)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "regression_correlation",
+    "literature_compilation"
+  ],
+  "notes": "REGRESYON KORELASYONU DERLEME KAYDI: Whitmore 2020 Tablo 4'un (s.26) kendi verisi OLMAYAN 6 satiri (N2O/ABS, N2O/HTPB, LOX/parafin, LOX/HTPB, LOX/HTPB-Escorez, LOX/HDPE). N2O fit'leri Whitmore grubunun onceki USU verisi [61,62]; LOX fit'leri ref [63]. inputs.n_propellant_combinations yalnizca sema geregi (bos birakilamayan blok) yapisal sayidir. Amaclanan record_type 'regression_correlation' idi; sema disi oldugu icin etikete tasindi. HRMA regresyon kutuphanesi katsayi bandi karsilastirmasi icin kullanilir; nokta dogrulamasi icin degil."
+}

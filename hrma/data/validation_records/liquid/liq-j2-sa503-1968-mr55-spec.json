@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-j2-sa503-1968-mr55-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "Saturn V News Reference, J-2 Engine Fact Sheet, Aralik 1968",
+    "doi": null,
+    "access": "public_domain",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar fact sheet PDF'inden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1)."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "configuration": "Saturn V S-II/S-IVB, Aralik 1968 konfigurasyonu capa alindi (arge Acik risk 4)",
+    "expansion_ratio": 27.5,
+    "nozzle_exit_diameter": "6 ft 5 in",
+    "dry_mass_lb": 3480
+  },
+  "inputs": {
+    "chamber_pressure_psia": 763,
+    "of_ratio": 5.5
+  },
+  "measured": {
+    "thrust_alt_lbf": 230000,
+    "isp_vac_s": 424,
+    "mdot_ox_lbps": 449,
+    "mdot_fuel_lbps": 81.7,
+    "combustion_temperature_f": 5750
+  },
+  "units_original": "lbf, s, psia, lb/s, F, lb, ft-in (fact sheet orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "mr_sensitivity_pair"
+  ],
+  "notes": "MR 5.5 nominal nokta. Fact sheet itkisi 230000 lb (irtifa); 503 aracinin 2. kademesinde 225000 lb (fact sheet notu). liq-j2-sa503-1968-mr50-spec ile birlikte Isp(MR) egim dogrulama cifti olusturur: HRMA'nin MR taramasi 5.5 -> 5.0'da +3 s vermeli (424 -> 427 s; arge Bolum 3). Ic tutarlilik: mdot_ox/mdot_fuel = 449/81.7 = 5.50 — MR ile uyumlu."
+}

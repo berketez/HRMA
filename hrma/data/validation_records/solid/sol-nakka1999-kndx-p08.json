@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "test_id": "sol-nakka1999-kndx-p08",
+  "motor_type": "solid",
+  "source": {
+    "citation": "R. Nakka, 'Effect of Chamber Pressure on Burning Rate for the Potassium Nitrate - Dextrose and Potassium Nitrate - Sorbitol Rocket Propellants', Issue 1, Haziran 1999 — Tablo 2, s.11 (KNDX, 14 gecerli nokta)",
+    "doi": null,
+    "url": "https://www.nakka-rocketry.net/soft/ds_burn.pdf",
+    "access": "open",
+    "confidence": "medium",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar ds_burn.pdf tablosundan dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 1.1; PDF'in tamami ARGE turunda incelendi). Berke karari: medium confidence, UI'da kaynak rozetiyle."
+  },
+  "propellants": {
+    "propellant": "KNDX (KNO3/dekstroz 65/35)",
+    "oxidizer": "kno3",
+    "fuel": "dextrose",
+    "hrma_propellant_key": "kndx"
+  },
+  "geometry": {
+    "apparatus": "Crawford tipi strand burner, N2 basinclandirma, cift termokupl gate olcumu; hidrostatik test 2500 psi (rapor metni)"
+  },
+  "inputs": {
+    "chamber_pressure_psia": 666,
+    "chamber_pressure_mpa": 4.59,
+    "oxidizer_mass_pct": 65,
+    "fuel_mass_pct": 35
+  },
+  "measured": {
+    "burn_rate_cmps": 1.1,
+    "burn_rate_inps": 0.433
+  },
+  "units_original": "psia (mutlak), MPa, cm/s, in/s (rapor Tablo 2 kolonlari aynen)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "strand_burn_rate",
+    "lab_scale",
+    "kn_sugar",
+    "amateur_rigorous"
+  ],
+  "notes": "KNDX strand yakmasi; 18 testten 14 gecerli noktadan biri (ret gerekcesi raporlanmis: drooling/yan tutusma). Basinc olcumu 0-5000 psi araliginda %0.25 dogruluklu Bourdon manometre; dogruluk esasi (okuma mi, tam skala mi) raporda net olmadigi icin measurement_uncertainty alani BILEREK yazilmadi (belirsizlik uydurulmaz). O/F = 65/35 sabit. Rejim bazli a-n fit tablosu icin bkz. sol-nakka1999-kndx-anfit. Sema notu: dogrulayici 'strand_burn_rate' record_type'ini tanimadigi icin tip 'strand_burn_rate' etiketiyle tags icinde tasinir; record_type alani bos birakildi."
+}

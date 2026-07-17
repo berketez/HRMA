@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-karabeyoglu2003-paraffin-gox-t4p-04",
+  "record_type": "static_fire",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "M.A. Karabeyoglu, G. Zilliac, P. Castellucci, P. Urbanczyk, J. Stevens, G. Inalhan, B.J. Cantwell, 'Scale-up Tests of High Regression Rate Liquefying Hybrid Rocket Fuels', AIAA 2003-1162, 41st Aerospace Sciences Meeting, Reno, 2003",
+    "doi": null,
+    "url": "https://web.stanford.edu/~cantwell/AA284A_Course_Material/AA284A_Resources/",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar bildiri PDF'inin Tablo 2 (s.11, test kosullari: orifis/port/bogaz capi, yanma suresi, not sutunu) ve Tablo 3'unden (s.12, sonuclar) dogrudan okundu; bu oturumda PDF yeniden acilip satir satir teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 2)."
+  },
+  "propellants": {
+    "oxidizer": "gox",
+    "fuel": "paraffin_sp1a",
+    "fuel_note": "SP-1a parafin formulasyonu, erime noktasi 69 C, santrifuj dokum",
+    "hrma_fuel_key": "paraffin"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "grain_od_in": 7.5,
+    "grain_length_in": null,
+    "grain_length_candidates_in": "33 veya 45 (test basina rapor edilmemis, s.6)",
+    "chamber_length_in": 47.3,
+    "chamber_id_in": 7.672,
+    "port_diameter_initial_in": 4.433,
+    "throat_diameter_initial_in": 2.817,
+    "injector_orifice_diameter_in": 0.45,
+    "nozzle_discharge_coefficient": 0.99
+  },
+  "inputs": {
+    "mdot_ox_kgps": 2.11,
+    "burn_time_s": 8.15
+  },
+  "measured": {
+    "gox_avg_gpcm2s": 14.69,
+    "regression_rate_mmps": 2.74,
+    "of_ratio": 1.78,
+    "chamber_pressure_psi": 159,
+    "gox_initial_gpcm2s": 22.79,
+    "c_star_efficiency": 0.78
+  },
+  "units_original": "in (capler), s, kg/s, g/cm^2.s, mm/s, psi (Pc), boyutsuz eta_c* (bildiri tablolarinin orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "scale_up",
+    "nasa_ames_hcf",
+    "paraffin",
+    "liquefying_fuel"
+  ],
+  "notes": "AIAA 2003-1162 Tablo 2 (s.11) + Tablo 3 (s.12), test '4P-04'. NASA Ames Hybrid Combustion Facility; Pc araligi ~10-68 atm, GOX. Grain boyu bildiride test basina RAPOR EDILMEMIS; HCF grainleri 33 veya 45 inc (s.6, Sekil 8 karsilastirmasi). Test basina atama guvenilir dayanak olmadigi icin YAPILMADI (grain_length_in null; VARSAYIM olarak bile ancak bu iki degerden biri olabilir). c* verimi hesabinda lule Cd = 0.99 (Ek, Es. A7). Kampanya regresyon yasasi (Es. 2): rdot = 0.488*Gox^0.62 (mm/s; g/cm^2.s; gecerli O/F 1.7-2.3). Bildiri notu: orijinal test adi '4P-04'; Tablo 2 not sutunu: 'Successful Test'.",
+  "anomaly": {
+    "flag": false
+  }
+}

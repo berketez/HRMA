@@ -55,6 +55,32 @@ zorundadır (yükleyici uyuşmazlığı reddeder).
 | `hyb-rezaei2018-htpb-n2o-t26` | hybrid | Rezaei, Soltani, Mohammadi, Scientia Iranica B 25(1), 2018 — Tablo 4 test 26 (HRMA'nın mevcut regresyon çapası) | high |
 | `liq-rs25-109pct-spec` | liquid | L3Harris RS-25 spec sheet (07/2024, L26301) + NASA FS-2015-07-064-MSFC | high |
 
+### G2 hibrit kampanya kayıtları (2026-07-17)
+
+Tüm sayılar ARGE dosyasındaki tablolardan alındı ve bu küratörlük oturumunda
+kaynak PDF'lerden (`HRMA-dogrulama-kaynaklari/`) yeniden teyit edildi.
+
+| Kaynak | test_id deseni | Kayıt | confidence | Not |
+|---|---|---|---|---|
+| Rezaei 2018 (HTPB/N2O, Scientia Iranica B 25(1)) | `hyb-rezaei2018-htpb-n2o-t*` | 30 (+t26 = 31) | high | Tablo 4 (17 yeni) + Tablo 5 yakıt boyu serisi (11) + Tablo 3 tekrarlanabilirlik (ta2/ta3; A1 == t68 olduğu için ayrı girilmedi, çift sayım önlendi); Tablo 1 ölçüm belirsizlikleri her kayıtta |
+| Karabeyoglu 2003 (Parafin SP-1a/GOX, AIAA 2003-1162, NASA Ames HCF) | `hyb-karabeyoglu2003-paraffin-gox-t*` | 26 | high | 8 kayıtta `anomaly.flag: true` (çatlak grain, lüle arızası/erozyonu, port yapısal arızası, kontrol arızası); grain boyu kaynakta test başına yok → `grain_length_in: null` + aday notu (33/45 inç) |
+| Whitmore & Stoddard 2020 (GOX+Nytrox87/ABS, Aerospace 7(4):43) | `hyb-whitmore2020-*` | 5 | high (4) / medium (1) | 2 kampanya istatistiği (13+19 yakmanın mu/sigma/%95 seti; Nytrox c* 560.84 → 1560.84 `source.erratum`) + 2 kendi a-n fit'i + 1 literatür a-n derlemesi (6 kombinasyon, ikincil aktarım → medium) |
+| Hansen & Edwards 2012 (Parafin-HTPB/N2O blowdown, UW SARP) | `hyb-hansen2012-paraffin-htpb-n2o-t2..t5` | 4 | high | usage_note: O/F~10 off-design — mutlak Isp kıyası için değil blowdown/Pc/enjektör dP doğrulaması için; t5'te `anomaly` (grain yapısal arızası, X-ray belgeli) |
+| Wei ve ark. 2025 (PP/N2O + PP/Nytrox blowdown, Aerospace 12(5):372) | `hyb-wei2025-pp-{n2o,nytrox}-t*` | 11 | high | Oksitleyici sıcaklık taraması (6 saf N2O + 5 Nytrox); mdot_ox kaynakta test başına tablolaştırılmamış → alan girilmedi |
+| Palacz & Cieślik 2023 (N2O/HDPE VFP, Aerospace 10(8):727) | `hyb-palacz2023-hdpe-n2o-t01..t11` | 11 | high | `out_of_hrma_geometry_scope`: motor balistiği korelasyonuna girmez; N2O besleme/blowdown doğrulaması + kapsam dışı geometri negatif örneği |
+
+Toplam hibrit: 88 kayıt (72 motor-düzeyi static-fire + 2 kampanya istatistiği +
+3 regresyon-fit kaydı + 11 kapsam-dışı VFP). Bilinçli dışarıda bırakılanlar:
+McFarland 2019 (oksitleyici türü kaynakta adlandırılmamış — karantina),
+Jens 2019 (slab yakıcı, motor-düzeyi satır yok), Zilliac 2006 (a-n derlemesi
+UQ önseli olarak kullanılacak, kayıt değil).
+
+Şema notu: kampanya istatistiği ve regresyon-fit kayıtlarında amaçlanan
+`record_type` değerleri (`campaign_statistics`, `regression_correlation`)
+doğrulayıcıda henüz tanımlı değil; bu kayıtlarda `record_type` verilmedi
+(yükleyici varsayılanı static_fire) ve tür `tags` + `notes` ile işaretlendi.
+Doğrulayıcıya bu iki tür eklenirse kayıtlar güncellenmelidir.
+
 Sayıların alındığı ARGE denetim dosyaları:
 `docs/arge-guven-2026-07/arge_hibrit_veri.md` ve
 `docs/arge-guven-2026-07/arge_kati_sivi_veri.md` (date_checked: 2026-07-17).

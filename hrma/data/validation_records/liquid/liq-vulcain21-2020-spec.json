@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-vulcain21-2020-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "ArianeGroup, Vulcain 2.1 spec sheet, 2020 (arsiv kopyasi)",
+    "doi": null,
+    "access": "vendor_datasheet",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "vendor_datasheet",
+    "extraction_note": "Sayilar spec sheet'ten dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1)."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "nozzle_exit_diameter_m": 2.1,
+    "height_m": 3.6,
+    "cycle": "gas_generator"
+  },
+  "inputs": {
+    "chamber_pressure_bar": 118.8,
+    "of_ratio": 6.03
+  },
+  "measured": {
+    "thrust_vac_kn": 1371,
+    "isp_vac_s": 432,
+    "mdot_total_kgps": 326
+  },
+  "units_original": "kN, s, bar, kg/s, m (spec sheet orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "mdot_consistency_anchor"
+  ],
+  "notes": "Ariane 6 ana kademe motoru; bagimsiz Avrupa capasi. mdot tutarlilik kontrolu: 1371 kN / (432 s x 9.81 m/s^2) = 323.9 kg/s ~ 326 kg/s (%0.6 fark; arge Bolum 2.1 ve 3). Genisleme orani spec sheet'te VERILMEDI — geometry'ye yazilmadi (uydurulmaz)."
+}

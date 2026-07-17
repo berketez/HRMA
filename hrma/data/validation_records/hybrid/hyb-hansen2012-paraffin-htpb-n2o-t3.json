@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-hansen2012-paraffin-htpb-n2o-t3",
+  "record_type": "static_fire",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "V.K. Hansen, T.C. Edwards, 'Development of an O-Class Paraffin/HTPB-N2O Hybrid Rocket Motor', University of Washington SARP, 2012 (AIAA formatli rapor; hakemli dergi degil)",
+    "doi": null,
+    "url": "http://vkhansen.pbworks.com/w/file/fetch/59877871/Development_of_an_O_Class_Paraffin_HTPB-N2O_Hybrid_Rocket_Motor(2012).pdf",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar rapor PDF'inin Ek tablosundan (s.10, 'Summary of data from full scale test series to date') dogrudan okundu; bu oturumda PDF yeniden acilip teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 4)."
+  },
+  "propellants": {
+    "oxidizer": "n2o",
+    "fuel": "paraffin_htpb",
+    "fuel_composition": "%88 parafin / %10 HTPB / %2 karbon karasi",
+    "hrma_oxidizer_key": "n2o"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "grain_od_cm": 10.16,
+    "port_diameter_initial_cm": 7.1,
+    "grain_length_cm": 30.0,
+    "tank_volume_l": 25,
+    "tank_material": "6061-T6 aluminyum",
+    "injector_area_m2": 3.74804e-05,
+    "injector_type_id": 1,
+    "injector_discharge_coefficient": 0.8,
+    "throat_area_m2": 0.00079178,
+    "nozzle_expansion_ratio": 4
+  },
+  "inputs": {
+    "n2o_initial_temperature_c": 9.4,
+    "fuel_mass_kg": 1.5
+  },
+  "measured": {
+    "thrust_avg_n": 1812.13,
+    "thrust_sigma_n": 352.25,
+    "pressure_thrust_loss_n": 27.8,
+    "tank_pressure_avg_kpaa": 3438.38,
+    "tank_pressure_sigma_kpa": 282.33,
+    "tank_temperature_avg_c": 3.8,
+    "n2o_density_avg_kgpm3": 887.2,
+    "chamber_pressure_avg_kpaa": 1917.96,
+    "chamber_pressure_sigma_kpa": 301.33,
+    "injector_dp_avg_kpa": 1520.42,
+    "mdot_avg_kgps": 1.56,
+    "n2o_consumed_liquid_kg": 15.29,
+    "liquid_injection_duration_s": 9.82,
+    "total_impulse_liquid_ns": 17795.08,
+    "isp_liquid_phase_s": 108.01
+  },
+  "anomaly": {
+    "flag": false,
+    "note": "Yakmanin ilk yarisinda yanma kararsizliklari gozlendi (on kenar basamagi yokluguna baglanmis); test gecerli sayilmis, itki/Pc sigma degerleri bu salinimlari icerir."
+  },
+  "units_original": "N, kPa abs, C, kg/m^3, m^2, kg/s, kg, s, N.s (rapor ek tablosunun orijinal birimleri; sigma sutunlari ayni birimde)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "blowdown",
+    "flight_scale",
+    "o_class"
+  ],
+  "notes": "Ek tablo (s.10) test 3, tarih 6/11/2011. 25 L 6061-T6 N2O tanki, blowdown; polikarbonat diyafram + piroteknik ateslemeli. usage_note: Motor tasarim O/F'sinden cok uzak calisti (mdot_ox ~1.4-1.8 kg/s'e karsi mdot_f ~0.15-0.4 kg/s; O/F ~10 mertebesi) - Isp degerleri bu yuzden dusuktur. Bu kayitlar mutlak Isp kiyasi icin DEGIL, blowdown tank bosalmasi / Pc / enjektor dP dogrulamasi icin kullanilmalidir (ARGE karari; off-design durumu anomali degildir). Tasarim Pc 2000 kPa. Zaman izleri Sekil 8-9'da (sayisallastirilmadi)."
+}

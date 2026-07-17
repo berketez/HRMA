@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-f1-sa503-1968-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "Saturn V News Reference, F-1 Engine Fact Sheet, Aralik 1968 (degisiklikli baski)",
+    "doi": null,
+    "access": "public_domain",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar fact sheet PDF'inden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1)."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "rp1",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "rp1"
+  },
+  "geometry": {
+    "configuration": "Saturn V S-IC, SA-503 donemi — Aralik 1968 konfigurasyonu capa alindi (arge Acik risk 4: uclar arasi kucuk farklar var, 503 vs 504)",
+    "expansion_ratio_with_extension": 16,
+    "expansion_ratio_without_extension": 10,
+    "nozzle_exit_diameter": "11 ft 7 in"
+  },
+  "inputs": {
+    "chamber_pressure_psia": 965,
+    "of_ratio": 2.27
+  },
+  "measured": {
+    "thrust_sl_lbf": 1500000,
+    "isp_sl_min_s": 260,
+    "mdot_ox_lbps": 3945,
+    "mdot_fuel_lbps": 1738,
+    "combustion_temperature_f": 5970
+  },
+  "units_original": "lbf, s, psia, lb/s, F, ft-in (fact sheet orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "large_scale",
+    "lox_rp1"
+  ],
+  "notes": "1968 konfigurasyonu (SA-503 donemi) capa olarak SABITLENDI; SA-504'ten itibaren itki 1522000 lbf'e yukselir (fact sheet notu). Isp fact sheet'te 'minimum 260 s (SL)' olarak verilir; ikincil kaynaklardaki 265.4 s SL / 304.1 s vak degerleri TEYITSIZ — capa degildir, HRMA kiyasinda '260 s minimum, ~265 s tipik (teyitli degil)' diye ele alinmali (arge Bolum 2.1 yon gosterici notu). mdot toplami 5683 lb/s; F/(Isp*g) tutarlilik kontrolu icin kullanilir (arge Bolum 3). LOX/RP-1 gaz jeneratoru cevrimi buyuk olcek ucu, dusuk genisleme orani."
+}

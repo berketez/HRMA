@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-merlin1d-thrust-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "SpaceX, Falcon 9 resmi arac sayfasi (spacex.com/vehicles/falcon-9), Wayback Machine 2025-01-01 anlik goruntusu",
+    "doi": null,
+    "access": "webpage",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "text",
+    "extraction_note": "Itki sayilari arsivlenmis resmi sayfadan dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1). Confidence 'high' YALNIZ itki icindir; diger buyuklukler resmi yayinlanmamistir."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "rp1",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "rp1"
+  },
+  "geometry": {
+    "cycle": "gas_generator"
+  },
+  "inputs": {
+    "n_engines": 1
+  },
+  "measured": {
+    "thrust_sl_kn": 845,
+    "thrust_sl_lbf": 190000,
+    "isp_sl_s": null,
+    "isp_vac_s": null
+  },
+  "units_original": "kN, lbf (resmi sayfa)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "thrust_only_anchor"
+  ],
+  "notes": "Berke onayli sinirlama: YALNIZ resmi itki capasi (845 kN / 190000 lbf, motor basina, SL). Resmi sayfada Isp/Pc/MR/genisleme orani YAYINLANMAMIS — Isp alanlari null (olculmedi degil, ACIKLANMADI); Pc/MR sema geregi inputs'a hic yazilmadi (olculmemis girdi yazilmaz); ikincil kaynak sayisi kullanmak guven surumu ilkesiyle celisir (arge Acik risk 5). Ayni sayfada 9 motorlu SL toplam 7607 kN / vak toplam 8227 kN; motor basi vakum itkisi resmi verilmedigi icin kayda ALINMADI (turetme yapilmaz). inputs.n_engines = 1: sema inputs'un bos olmamasini zorunlu kilar; degerlerin motor-basi oldugunu sabitler."
+}

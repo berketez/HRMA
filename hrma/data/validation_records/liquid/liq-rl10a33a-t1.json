@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-rl10a33a-t1",
+  "record_type": "static_fire",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "M. Binder, 'An RL10A-3-3A Rocket Engine Model Using ROCETS', NASA CR-190786, Temmuz 1993 — Tablo 1-5, test noktasi 1 (P&W test standi verisi)",
+    "doi": null,
+    "access": "public_domain",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar CR-190786 Tablo 1-5'ten dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.2)."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 61.0,
+    "throat_diameter_in": 2.47,
+    "cycle": "expander"
+  },
+  "inputs": {
+    "of_ratio": 5.63
+  },
+  "measured": {
+    "thrust_lbf": 16603,
+    "chamber_pressure_injector_face_psia": 472.35,
+    "lox_pump_discharge_pressure_psia": 613.8,
+    "fuel_pump_discharge_pressure_psia": 1061.4
+  },
+  "units_original": "lbf, psia (CR-190786 Tablo 1-5 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_test_point",
+    "test_stand",
+    "flight_heritage",
+    "expander_cycle"
+  ],
+  "notes": "Nokta-dogrulama altin setinin 1/5 noktasi. Pc enjektor yuzu statik basincidir. ROCETS modeli bu 5 noktada tum olculen parametrelerde %4 icinde, cogunlukla %1 icinde kalmistir — HRMA sistem modeli icin kabul bandi referansi (arge Bolum 2.2). Motor geometrisi icin bkz. liq-rl10a33a-nominal-spec. Sema notu: dogrulayici 'engine_test' record_type'ini tanimadigi icin record_type 'static_fire' + 'engine_test_point' etiketi kullanildi."
+}

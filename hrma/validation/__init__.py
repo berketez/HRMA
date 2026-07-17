@@ -23,3 +23,15 @@ from hrma.validation.experiment_db import (
     summarize,
     validate_record,
 )
+
+# v2.5.0 G2 (2026-07-17): korelasyon kosucusu + kayit->motor adaptorleri.
+# Iki modul de import aninda motor/kayit YUKLEMEZ (motor importlari fonksiyon
+# icindedir) — acilis suresi etkilenmez.
+from hrma.validation import correlation_runner, record_adapters
+from hrma.validation.correlation_runner import (
+    db_content_hash,
+    deterministic_view,
+    run_correlation,
+    to_markdown,
+)
+from hrma.validation.record_adapters import adapt_record

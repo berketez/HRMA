@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-rezaei2018-htpb-n2o-t64",
+  "record_type": "static_fire",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "H. Rezaei, M.R. Soltani, A.R. Mohammadi, 'Experimental Study of Fuel Regression Rate in a HTPB/N2O Hybrid Rocket Motor', Scientia Iranica B, 25(1), 253-265, 2018",
+    "doi": null,
+    "url": "https://scientiairanica.sharif.edu/article_4317_fd78e20a70c3a59449b0ca1fd11047c3.pdf",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar makale PDF'inin Tablo 5'inden (s.260) dogrudan okundu; bu oturumda PDF yeniden acilip satir satir teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 1). Olcum belirsizlikleri Tablo 1'den."
+  },
+  "propellants": {
+    "oxidizer": "n2o",
+    "fuel": "htpb",
+    "fuel_density_kgpm3": 983,
+    "hrma_oxidizer_key": "n2o",
+    "hrma_fuel_key": "htpb"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "throat_diameter_mm": 8.9,
+    "injector_area_mm2": 1.766,
+    "pre_chamber_length_mm": 25,
+    "post_chamber_length_mm": 25,
+    "grain_length_mm": 251.0,
+    "port_diameter_initial_mm": null
+  },
+  "inputs": {
+    "mdot_ox_gps": 83.39,
+    "burn_time_s": 6.59
+  },
+  "measured": {
+    "chamber_pressure_bar": 24.9,
+    "thrust_kgf": 21.39,
+    "mdot_fuel_gps": 21.5,
+    "regression_rate_mmps": 0.557,
+    "of_ratio": 3.88,
+    "gox_gpcm2s": 3.83,
+    "c_star_mps": 1563,
+    "isp_s": 203.9,
+    "isp_standard_s": 255.0,
+    "isp_vacuum_s": 307.2
+  },
+  "measurement_uncertainty": {
+    "chamber_pressure_bar": {
+      "value": 0.0014,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "thrust_kgf": {
+      "value": 0.0022,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "mdot_ox_gps": {
+      "value": 0.0074,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "isp_s": {
+      "value": 0.0081,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "c_star_mps": {
+      "value": 0.0081,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    },
+    "regression_rate_mmps": {
+      "value": 0.0033,
+      "type": "relative",
+      "coverage_k": null,
+      "source": "Tablo 1"
+    }
+  },
+  "units_original": "mm, g/s, s, bar, kgf, mm/s, g/cm^2.s, m/s (makale tablolarinin orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "lab_scale",
+    "fuel_length_series"
+  ],
+  "notes": "Tablo 5 (s.260) yakit boyu etkisi serisi, test 64. Baslangic port capi bu tabloda RAPOR EDILMEMIS (null); makaleye gore seride yakit boyu disindaki kosullar sabit tutulmus (s.259-260). isp_standard_s / isp_vacuum_s makalenin standart ve vakum kosuluna olceklenmis Isp sutunlaridir. Rezaei Es.11 (rdot = 0.07577*Go^0.364*L^0.293) bu seriden turetilmistir."
+}

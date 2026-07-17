@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "test_id": "sol-nakka1999-kndx-anfit",
+  "motor_type": "solid",
+  "source": {
+    "citation": "R. Nakka, 'Effect of Chamber Pressure on Burning Rate for the Potassium Nitrate - Dextrose and Potassium Nitrate - Sorbitol Rocket Propellants', Issue 1, Haziran 1999 — Tablo 4-5, s.17 (rejim bazli a-n katsayilari)",
+    "doi": null,
+    "url": "https://www.nakka-rocketry.net/soft/ds_burn.pdf",
+    "access": "open",
+    "confidence": "medium",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar ds_burn.pdf tablosundan dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 1.1; PDF'in tamami ARGE turunda incelendi). Berke karari: medium confidence, UI'da kaynak rozetiyle."
+  },
+  "propellants": {
+    "propellant": "KNDX (KNO3/dekstroz 65/35)",
+    "oxidizer": "kno3",
+    "fuel": "dextrose",
+    "hrma_propellant_key": "kndx"
+  },
+  "geometry": {
+    "apparatus": "Crawford tipi strand burner, N2 basinclandirma, cift termokupl gate olcumu; hidrostatik test 2500 psi (rapor metni)",
+    "regime1_p_min_mpa": 0.103,
+    "regime1_p_max_mpa": 0.779,
+    "regime2_p_min_mpa": 0.779,
+    "regime2_p_max_mpa": 2.57,
+    "regime3_p_min_mpa": 2.57,
+    "regime3_p_max_mpa": 5.93,
+    "regime4_p_min_mpa": 5.93,
+    "regime4_p_max_mpa": 8.5,
+    "regime5_p_min_mpa": 8.5,
+    "regime5_p_max_mpa": 11.2
+  },
+  "inputs": {
+    "pressure_range_min_mpa": 0.103,
+    "pressure_range_max_mpa": 11.2,
+    "oxidizer_mass_pct": 65,
+    "fuel_mass_pct": 35
+  },
+  "measured": {
+    "regime1_a_mmps_mpan": 8.88,
+    "regime1_n": 0.619,
+    "regime2_a_mmps_mpan": 7.55,
+    "regime2_n": -0.009,
+    "regime3_a_mmps_mpan": 3.84,
+    "regime3_n": 0.688,
+    "regime4_a_mmps_mpan": 17.2,
+    "regime4_n": -0.148,
+    "regime5_a_mmps_mpan": 4.78,
+    "regime5_n": 0.442
+  },
+  "units_original": "a: mm/s.MPa^-n, n: boyutsuz; P MPa mutlak (rapor Tablo 4-5, s.17)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "strand_burn_rate",
+    "an_fit",
+    "kn_sugar",
+    "multi_regime"
+  ],
+  "notes": "Rejim bazli Saint Robert fiti (r = a*P^n): plato davranisi, 5 rejim. a-n degerleri kaynagin KENDI en kucuk kareler fitidir (ham olcum degil); measured blogunda tasinmasi bilincli — G2 korelasyonu HRMA yakit DB'sindeki cok-rejimli katsayilarla dogrudan kiyas yapabilsin. Rejim basinc sinirlari geometry blogundadir (skorlanmaz, adaptor girdisi). Ham olcum noktalari: sol-nakka1999-kndx-p01..p14. Rejim sinirlarinin log-log kirilimi kaynak yazarinca elle cizilmistir (arge Bolum 1.1 eksi listesi). Sema notu: 'strand_burn_rate' tipi tags icinde tasinir."
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-wei2025-pp-nytrox-t01",
+  "record_type": "static_fire",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "S.-S. Wei, J.-C. Hsu ve ark., 'Investigation of Performance Stability of a Nytrox Hybrid Rocket Propulsion System', Aerospace 2025, 12(5), 372",
+    "doi": "10.3390/aerospace12050372",
+    "url": "https://doi.org/10.3390/aerospace12050372",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar makale PDF'inin Tablo 4'unden (s.15) dogrudan okundu; bu oturumda PDF yeniden acilip teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 5). Testler makalede numarasiz; kayitlar Tablo 4 sutun sirasina gore t01-t05 numaralandi."
+  },
+  "propellants": {
+    "oxidizer": "nytrox",
+    "oxidizer_note": "N2O, ~60 barA O2 ile basinclandirilip O2 cozundurulmus (Nytrox); cozunmus O2 kutle orani measured blokta test basina",
+    "fuel": "pp",
+    "fuel_note": "Polipropilen (PP) tek portlu grain"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "grain_od_mm": 80,
+    "port_diameter_initial_mm": 26,
+    "grain_length_mm": 240,
+    "injector_type": "girdapli (swirling)"
+  },
+  "inputs": {
+    "n2o_vapor_pressure_bara": 36.3,
+    "tank_pressure_before_test_bara": 60.6,
+    "n2o_liquid_temperature_c": 5.9
+  },
+  "measured": {
+    "chamber_pressure_avg_bara": 37.3,
+    "total_impulse_kgfs": 310.7,
+    "thrust_avg_kgf": 45.3,
+    "isp_sea_level_avg_s": 229.1,
+    "dissolved_o2_mass_fraction_pct": 2.9
+  },
+  "units_original": "barA, kgf.s, kgf, s, C, kutlece % (Tablo 4 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "blowdown",
+    "oxidizer_temperature_sweep",
+    "nytrox"
+  ],
+  "notes": "Tablo 4 (s.15) Nytrox blowdown serisi (~60 barA O2 basinclandirmali; sicaklik taramasi). Motor tasarimi: 45 kgf itki, Pc 40 barA, O/F ~7 (saf N2O), Isp 220 s, 8 s yanma; yatay statik test. Yanma suresi ve toplam impuls Pc > 20 barA penceresi icin hesaplanmis (s.12). mdot_ox test basina TABLOLASTIRILMAMIS - alan bos birakildi (Sekil 13-14 izlerinden turetilebilir ama sayisallastirma yapilmadi); rdot rapor edilmemis. Kampanya bulgusu: Nytrox'ta itki ~sabit 45.3 +/- 0.7 kgf, impuls 307.6 +/- 3.9 kgf.s; Pc/itki/impuls varyasyon katsayilari %1.9/%1.0/%1.1 (s.14). Baslangic tank basinci 60.4 +/- 0.4 barA (s.15)."
+}

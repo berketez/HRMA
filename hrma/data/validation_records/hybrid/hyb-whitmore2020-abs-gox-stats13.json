@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-whitmore2020-abs-gox-stats13",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "S.A. Whitmore, D.P. Stoddard, 'Nytrox as Drop-in Replacement for Gaseous Oxygen in SmallSat Hybrid Propulsion Systems', Aerospace 2020, 7(4), 43",
+    "doi": "10.3390/aerospace7040043",
+    "url": "https://doi.org/10.3390/aerospace7040043",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar makale PDF'inin Tablo 3'unden (s.22) dogrudan okundu; bu oturumda PDF yeniden acilip teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 3). Geometri Tablo 1'den (s.11)."
+  },
+  "propellants": {
+    "oxidizer": "gox",
+    "fuel": "abs",
+    "fuel_print_density_gpcm3": 1.04,
+    "fuel_note": "FDM baskili ABS grain; baski yogunlugu ~1.04 g/cm^3 (Tablo 1)",
+    "hrma_fuel_key": "abs"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "injector_orifice_diameter_cm": 0.127,
+    "grain_diameter_cm": 3.168,
+    "grain_length_cm": 5.1,
+    "grain_initial_mass_g": 45.0,
+    "port_diameter_initial_cm": 0.53,
+    "case_diameter_cm": 3.8,
+    "case_length_cm": 7.92,
+    "throat_diameter_cm": 0.345,
+    "nozzle_exit_diameter_cm": 0.483,
+    "nozzle_expansion_ratio": 2.07,
+    "nozzle_type": "conical, cikis yarim acisi 5 derece, grafit"
+  },
+  "inputs": {
+    "n_burns": 13
+  },
+  "measured": {
+    "thrust_loadcell_mu_n": 10.7,
+    "thrust_loadcell_sigma_n": 0.645,
+    "thrust_loadcell_ci95_n": 0.339,
+    "thrust_p0_mu_n": 10.9,
+    "thrust_p0_sigma_n": 0.617,
+    "thrust_p0_ci95_n": 0.373,
+    "cf_loadcell_mu": 1.262,
+    "cf_loadcell_sigma": 0.031,
+    "cf_loadcell_ci95": 0.019,
+    "cf_p0_mu": 1.273,
+    "cf_p0_sigma": 0.026,
+    "cf_p0_ci95": 0.016,
+    "isp_loadcell_mu_s": 224.9,
+    "isp_loadcell_sigma_s": 7.52,
+    "isp_loadcell_ci95_s": 4.54,
+    "isp_p0_mu_s": 224.8,
+    "isp_p0_sigma_s": 8.83,
+    "isp_p0_ci95_s": 5.34,
+    "c_star_mu_mps": 1751.4,
+    "c_star_sigma_mps": 23.84,
+    "c_star_ci95_mps": 14.4,
+    "combustion_efficiency_mu": 0.919,
+    "combustion_efficiency_sigma": 0.089,
+    "combustion_efficiency_ci95": 0.054,
+    "of_ratio_mu": 1.772,
+    "of_ratio_sigma": 0.228,
+    "of_ratio_ci95": 0.178,
+    "chamber_pressure_mu_kpa": 762.9,
+    "chamber_pressure_sigma_kpa": 62.82,
+    "chamber_pressure_ci95_kpa": 37.94,
+    "mdot_total_mu_gps": 4.85,
+    "mdot_total_sigma_gps": 0.349,
+    "mdot_total_ci95_gps": 0.211
+  },
+  "units_original": "N, s, m/s, kPa, g/s, boyutsuz CF/verim/O-F (Tablo 3 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "campaign_statistics",
+    "smallsat_thruster",
+    "lab_scale"
+  ],
+  "notes": "KAMPANYA ISTATISTIGI KAYDI: 13 GOX/ABS yakmasinin ortalama (mu), standart sapma (sigma) ve %95 t-guven araligi ozetidir (Tablo 3, s.22); tek bir static fire degildir. Amaclanan record_type 'campaign_statistics' idi; mevcut sema static_fire/flight/engine_spec disinda deger kabul etmedigi icin record_type verilmedi ve tur 'campaign_statistics' etiketiyle tasindi. Testler ~1430 m irtifada (Logan, Utah; s.26) - Isp degerleri ortam kosullarindadir. HRMA Monte Carlo cikti dagilimi bu mu/sigma seti ile karsilastirilabilir."
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-j2-sa503-1968-mr50-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "Saturn V News Reference, J-2 Engine Fact Sheet, Aralik 1968",
+    "doi": null,
+    "access": "public_domain",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar fact sheet PDF'inden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1)."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "configuration": "Saturn V S-II/S-IVB, Aralik 1968 konfigurasyonu capa alindi (arge Acik risk 4)",
+    "expansion_ratio": 27.5
+  },
+  "inputs": {
+    "of_ratio": 5.0
+  },
+  "measured": {
+    "isp_vac_s": 427
+  },
+  "units_original": "s (fact sheet orijinal birimi)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "mr_sensitivity_pair"
+  ],
+  "notes": "Fact sheet'in '427 s @ MR 5:1' ifadesinden AYRI kayit (Berke direktifi: iki MR noktasi ayri kayitlar, Isp(MR) egim dogrulamasi notuyla). Pc bu MR icin fact sheet'te ayrica verilmedigi icin inputs'ta yalniz MR var (uydurulmadi). Cifti: liq-j2-sa503-1968-mr55-spec (424 s @ MR 5.5). HRMA Isp(MR) egrisi 5.5 -> 5.0'da +3 s vermeli (arge Bolum 3)."
+}

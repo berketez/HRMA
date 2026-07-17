@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-whitmore2020-abs-nytrox87-regfit",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "S.A. Whitmore, D.P. Stoddard, 'Nytrox as Drop-in Replacement for Gaseous Oxygen in SmallSat Hybrid Propulsion Systems', Aerospace 2020, 7(4), 43",
+    "doi": "10.3390/aerospace7040043",
+    "url": "https://doi.org/10.3390/aerospace7040043",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar makale PDF'inin Tablo 4'unden (s.26) dogrudan okundu; bu oturumda PDF yeniden acilip teyit edildi (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 3). Islletme akis araligi 0-20 g/cm^2.s s.25 metninden."
+  },
+  "propellants": {
+    "oxidizer": "nytrox87",
+    "fuel": "abs",
+    "hrma_fuel_key": "abs",
+    "oxidizer_note": "Nytrox 87: N2O icinde cozunmus O2 (kutlece ~%87 N2O)"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "injector_orifice_diameter_cm": 0.127,
+    "grain_diameter_cm": 3.168,
+    "grain_length_cm": 5.1,
+    "grain_initial_mass_g": 45.0,
+    "port_diameter_initial_cm": 0.53,
+    "case_diameter_cm": 3.8,
+    "case_length_cm": 7.92,
+    "throat_diameter_cm": 0.345,
+    "nozzle_exit_diameter_cm": 0.483,
+    "nozzle_expansion_ratio": 2.07,
+    "nozzle_type": "conical, cikis yarim acisi 5 derece, grafit"
+  },
+  "inputs": {
+    "gox_operating_min_gpcm2s": 0,
+    "gox_operating_max_gpcm2s": 20
+  },
+  "measured": {
+    "regression_a_coefficient_cmps": 0.0354,
+    "regression_n_exponent": 0.455
+  },
+  "units_original": "rdot cm/s, Gox g/cm^2.s: rdot = a*Gox^n (Tablo 4 orijinal birimleri; dikkat: cm/s, mm/s degil)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "regression_correlation",
+    "smallsat_thruster",
+    "nytrox"
+  ],
+  "notes": "REGRESYON KORELASYONU KAYDI: 19 yakmadan turetilen guc yasasi fit'i (Tablo 4, s.26; rdot = a*Gox^n, rdot cm/s, Gox g/cm^2.s); tek bir static fire degildir. Amaclanan record_type 'regression_correlation' idi; mevcut sema disinda oldugu icin record_type verilmedi, tur etikette. Isletme akis araligi 0-20 g/cm^2.s (s.25). n ~0.5 degeri yanma boyunca O/F kaymasinin kucuklugunu gosterir (s.25)."
+}
