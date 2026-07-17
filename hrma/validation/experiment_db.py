@@ -53,7 +53,21 @@ ACCESS_VALUES = (
     "open", "paywalled", "public_domain", "webpage",
     "vendor_datasheet", "book", "synthetic",
 )
-RECORD_TYPES = ("static_fire", "flight", "engine_spec")
+# v2.5.0 G3 genislemesi: kuratorluk dalgasinin tags icinde tasidigi turler
+# artik birinci sinif record_type degerleridir.
+#   strand_burn_rate       -> Crawford/strand r(P) olcum noktasi (motor kosusu
+#                             yok; Saint-Robert a-n noktasal kiyasi)
+#   campaign_statistics    -> cok-yakmali kampanya mu/sigma/CI ozeti
+#                             (v1 kosucusunda not_supported)
+#   regression_correlation -> kaynagin kendi a-n / guc-yasasi fiti
+#                             (v1 kosucusunda not_supported)
+#   engine_test_point      -> motor testi nokta olcumu (engine_spec yoluyla
+#                             nokta kiyas kosusu)
+RECORD_TYPES = (
+    "static_fire", "flight", "engine_spec",
+    "strand_burn_rate", "campaign_statistics", "regression_correlation",
+    "engine_test_point",
+)
 DATA_EXTRACTION_VALUES = ("table", "text", "figure_digitized", "vendor_datasheet")
 UNCERTAINTY_TYPES = ("relative", "absolute")
 

@@ -1,6 +1,7 @@
 {
   "schema_version": "1.0",
   "test_id": "sol-nakka-knsu-cstar",
+  "record_type": "engine_test_point",
   "motor_type": "solid",
   "source": {
     "citation": "R. Nakka, 'Solid Propellant Burn Rate' sayfasi, nakka-rocketry.net — KNSU 65/35 olculmus c* metni",

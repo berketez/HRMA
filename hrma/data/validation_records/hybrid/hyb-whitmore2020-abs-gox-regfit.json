@@ -1,6 +1,7 @@
 {
   "schema_version": "1.0",
   "test_id": "hyb-whitmore2020-abs-gox-regfit",
+  "record_type": "regression_correlation",
   "motor_type": "hybrid",
   "source": {
     "citation": "S.A. Whitmore, D.P. Stoddard, 'Nytrox as Drop-in Replacement for Gaseous Oxygen in SmallSat Hybrid Propulsion Systems', Aerospace 2020, 7(4), 43",

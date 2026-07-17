@@ -14,6 +14,7 @@ from flask_cors import CORS
 import numpy as np
 import json
 import io
+import contextlib
 import platform
 
 # Apply Windows fixes before importing other modules
@@ -4538,6 +4539,303 @@ def validation_upload_csv():
         'parsed': parsed_out,
         'comparison': comparison,
     })
+
+
+# ---------------------------------------------------------------------------
+# v2.5.0 G3 — Belirsizlik nicelemesi (UQ) endpoint'i
+# ---------------------------------------------------------------------------
+# Kontrat (G3 API dalgası): POST /api/uncertainty-analysis
+#   fast / engineering  -> senkron 'ok' gövdesi
+#   high_fidelity       -> job_runner'a kuyruklanır (202 + job_id; sonuç
+#                          GET /api/jobs/<id> sözleşmesiyle, job.result =
+#                          aynı 'ok' gövdesi)
+# Motor print gürültüsü endpoint kapsamında os.devnull'a yönlendirilir.
+
+_UQ_MOTOR_TYPES = ('hybrid', 'solid', 'liquid')
+
+
+class _UQAnalysisError(RuntimeError):
+    """UQ koşusu status='error' döndürdü (örnek #0 tutarlılık kırılması
+    dahil) — sessiz düşme yok, 500 + mesajla yukarı taşınır."""
+
+
+def _uq_contract_body(motor_type, level, result):
+    """run_uncertainty sonucunu G3 API kontrat gövdesine çevirir.
+
+    Kontrat alanlarına ek olarak şeffaflık alanları taşınır (sampler,
+    uq_version, inputs_used künyeleri, yöntem notu) — kontratın üst kümesi.
+    'cv' yüzde cinsindendir (mevcut solid MC cv_percent geleneği); aynı değer
+    'cv_percent' adıyla da yankılanır ki birim belirsizliği kalmasın.
+    """
+    outputs = {}
+    for key, block in result['outputs'].items():
+        outputs[key] = {
+            'nominal': block['nominal'],
+            'mean': block['mean'],
+            'std': block['std'],
+            'cv': block['cv_percent'],
+            'cv_percent': block['cv_percent'],
+            'p5': block['p5'],
+            'p25': block['p25'],
+            'p50': block['p50'],
+            'p75': block['p75'],
+            'p95': block['p95'],
+            'histogram': block['histogram'],
+        }
+    sensitivity = {}
+    for key, rows in result['sensitivity'].items():
+        if key == 'method_note':
+            continue
+        sensitivity[key] = [
+            {'param': row['param'], 'rho': row['spearman']} for row in rows
+        ]
+    body = {
+        'status': 'ok',
+        'motor_type': motor_type,
+        'level': level,
+        'n_samples': result['n_samples'],
+        'failed_samples': result['failed_samples'],
+        'seed': result['seed'],
+        'timing_s': result['timing']['wall_s'],
+        'mean_shift_percent': result['consistency']['mean_shift_percent'],
+        'outputs': outputs,
+        'sensitivity': sensitivity,
+        'sensitivity_method_note': result['sensitivity'].get('method_note'),
+        'sampler': result['sampler'],
+        'uq_version': result['uq_version'],
+        'inputs_used': result['inputs_used'],
+        'consistency_note': result['consistency'].get('note'),
+    }
+    if result.get('warning'):
+        body['warning'] = result['warning']
+    return body
+
+
+def _run_uq_analysis(motor_type, level, seed, inputs, overrides,
+                     n_samples=None, progress_callback=None):
+    """Senkron ve job yolunun ortak çekirdeği.
+
+    Raises:
+        ValueError: girdi/dağılım doğrulama hatası (endpoint 400'e çevirir).
+        _UQAnalysisError: koşu status='error' bitirdi (endpoint 500).
+    """
+    from hrma.analysis import uncertainty as _uq
+    from hrma.analysis import uq_adapters as _uqa
+
+    distributions = _uqa.build_distributions(motor_type, overrides)
+    if n_samples is None:
+        n = _uq.LEVEL_BUDGETS[level]
+    else:
+        n = max(50, min(int(n_samples), 10000))  # spec 7.1 kırpması
+    track = (level == 'high_fidelity')  # spec: yalnız High-Fidelity O/F izler
+
+    cb = None
+    if progress_callback is not None:
+        def cb(done, total):
+            progress_callback(done / max(total, 1))
+
+    with open(os.devnull, 'w') as devnull, \
+            contextlib.redirect_stdout(devnull):
+        factory = _uqa.make_factory(motor_type, inputs,
+                                    track_performance=track)
+        result = _uq.run_uncertainty(
+            factory, distributions, n_samples=n, seed=seed,
+            progress_callback=cb)
+
+    if result.get('status') != 'success':
+        raise _UQAnalysisError(
+            result.get('error') or 'uncertainty analysis failed')
+    return sanitize_json_values(_uq_contract_body(motor_type, level, result))
+
+
+def _uncertainty_job(payload, progress_callback=None):
+    """job_runner işi: high_fidelity UQ koşusu (job.result = 'ok' gövdesi)."""
+    return _run_uq_analysis(
+        payload['motor_type'], payload['level'], payload['seed'],
+        payload['inputs'], payload['overrides'], payload.get('n_samples'),
+        progress_callback=progress_callback)
+
+
+@app.route('/api/uncertainty-analysis', methods=['POST'])
+def uncertainty_analysis():
+    """Monte Carlo / LHS uncertainty analysis (G3 contract).
+
+    Request: {motor_type, level, seed?, inputs, distribution_overrides?,
+    n_samples?}. fast/engineering run synchronously; high_fidelity is queued
+    on the job runner (202 + job_id, poll GET /api/jobs/<id>; the finished
+    job's result is the same 'ok' body).
+    """
+    data = request.get_json(silent=True) or {}
+
+    motor_type = data.get('motor_type')
+    if motor_type not in _UQ_MOTOR_TYPES:
+        return jsonify({
+            'status': 'error',
+            'error': (f"motor_type must be one of {list(_UQ_MOTOR_TYPES)}; "
+                      f"got {motor_type!r}."),
+        }), 400
+
+    from hrma.analysis.uncertainty import LEVEL_BUDGETS as _LEVELS
+    level = data.get('level')
+    if level not in _LEVELS:
+        return jsonify({
+            'status': 'error',
+            'error': (f"level must be one of {sorted(_LEVELS)}; "
+                      f"got {level!r}."),
+        }), 400
+
+    try:
+        seed = int(data.get('seed', 42))
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error',
+                        'error': "Field 'seed' must be an integer."}), 400
+
+    inputs = data.get('inputs')
+    if inputs is None:
+        inputs = {}
+    if not isinstance(inputs, dict):
+        return jsonify({'status': 'error',
+                        'error': "Field 'inputs' must be an object with the "
+                                 "motor form fields."}), 400
+
+    overrides = data.get('distribution_overrides')
+    n_samples = data.get('n_samples')
+    if n_samples is not None:
+        try:
+            n_samples = int(n_samples)
+        except (TypeError, ValueError):
+            return jsonify({'status': 'error',
+                            'error': "Field 'n_samples' must be an "
+                                     "integer."}), 400
+
+    # Dağılım kümesi erken doğrulanır: bozuk override job kuyruğuna girmeden
+    # net bir 400 ile dönsün (job yolunda hata ancak poll'da görünürdü).
+    try:
+        from hrma.analysis import uq_adapters as _uqa
+        _uqa.build_distributions(motor_type, overrides)
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+
+    if level == 'high_fidelity':
+        job_id = job_runner.submit(_uncertainty_job, {
+            'motor_type': motor_type,
+            'level': level,
+            'seed': seed,
+            'inputs': inputs,
+            'overrides': overrides,
+            'n_samples': n_samples,
+        })
+        return jsonify({
+            'status': 'queued',
+            'job_id': job_id,
+            'poll_url': f'/api/jobs/{job_id}',
+        }), 202
+
+    try:
+        body = _run_uq_analysis(motor_type, level, seed, inputs, overrides,
+                                n_samples)
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+    except _UQAnalysisError as exc:
+        # Örnek #0 tutarlılık kırılması dahil: sessiz düşme yok (spec 7.3)
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+    return jsonify(body)
+
+
+# ---------------------------------------------------------------------------
+# v2.5.0 G3 — Otomatik korelasyon raporu endpoint'i
+# ---------------------------------------------------------------------------
+# GET  /api/correlation-report          -> önbellekli özet (ilk çağrı koşar)
+# POST /api/correlation-report {refresh:true} -> önbelleği yok say, yeniden koş
+# Önbellek anahtarı: deney DB içerik hash'i (correlation_runner.db_content_hash)
+
+_CORRELATION_CACHE = {}
+
+
+def _correlation_report_body(refresh=False):
+    """Korelasyon rapor gövdesini kurar (modül-içi {db_hash: gövde} önbelleği).
+
+    Koşu ~15-25 s sürer (Cantera denge çözümleri); ilk çağrı senkron kabul
+    edilir, sonrakiler cached=true ile anında döner. DB içeriği değişince
+    hash değişir ve önbellek kendiliğinden ıskalar.
+    """
+    from hrma.validation import correlation_runner as _cr
+    from hrma.validation.experiment_db import (load_records,
+                                               records_for_statistics)
+    from hrma.validation.status_report import correlation_cells
+
+    records = load_records()
+    stat_records = sorted(records_for_statistics(records),
+                          key=lambda r: r.get('test_id', ''))
+    db_hash = _cr.db_content_hash(stat_records)
+
+    if not refresh and db_hash in _CORRELATION_CACHE:
+        body = dict(_CORRELATION_CACHE[db_hash])
+        body['cached'] = True
+        return body
+
+    with open(os.devnull, 'w') as devnull, \
+            contextlib.redirect_stdout(devnull):
+        result = _cr.run_correlation(records=records)
+
+    skipped_scores = {}
+    for rr in result['records']:
+        for score in rr.get('scores', {}).values():
+            status = score.get('status')
+            if status and status != 'scored':
+                skipped_scores[status] = skipped_scores.get(status, 0) + 1
+
+    body = sanitize_json_values({
+        'status': 'ok',
+        'db_hash': result['db_content_hash'],
+        'cached': False,
+        'generated_s': result['timing']['total_s'],
+        'record_counts': {
+            'total': result['n_records'],
+            'scored': result['status_counts'].get('ok', 0),
+            'insufficient_inputs': result['status_counts'].get(
+                'insufficient_inputs', 0),
+            'not_supported': result['status_counts'].get('not_supported', 0),
+            'runner_error': result['status_counts'].get('runner_error', 0),
+        },
+        'cells': correlation_cells(result['statistics']),
+        'skipped_summary': {
+            'status_counts': result['status_counts'],
+            'not_supported': result['not_supported'],
+            'insufficient_inputs': result['insufficient_inputs'],
+            'runner_errors': result['runner_errors'],
+            'skipped_score_counts': dict(sorted(skipped_scores.items())),
+        },
+        'markdown': _cr.to_markdown(result),
+    })
+
+    # Tek girdilik önbellek: DB değişince eski sonuç bellekte birikmesin
+    _CORRELATION_CACHE.clear()
+    _CORRELATION_CACHE[db_hash] = body
+    return dict(body)
+
+
+@app.route('/api/correlation-report', methods=['GET', 'POST'])
+def correlation_report():
+    """Real-experiment correlation report (G3 contract).
+
+    GET returns the cached report when the experiment DB is unchanged
+    (cached=true); the first call runs the full correlation synchronously.
+    POST with {"refresh": true} ignores the cache and re-runs.
+    """
+    refresh = False
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        refresh = bool(data.get('refresh'))
+    try:
+        body = _correlation_report_body(refresh=refresh)
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+    return jsonify(body)
 
 
 if __name__ == '__main__':

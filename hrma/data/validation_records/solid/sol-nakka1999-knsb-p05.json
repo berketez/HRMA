@@ -1,6 +1,7 @@
 {
   "schema_version": "1.0",
   "test_id": "sol-nakka1999-knsb-p05",
+  "record_type": "strand_burn_rate",
   "motor_type": "solid",
   "source": {
     "citation": "R. Nakka, 'Effect of Chamber Pressure on Burning Rate for the Potassium Nitrate - Dextrose and Potassium Nitrate - Sorbitol Rocket Propellants', Issue 1, Haziran 1999 — Tablo 3, s.11 (KNSB, 13 gecerli nokta)",

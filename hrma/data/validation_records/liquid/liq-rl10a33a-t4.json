@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "test_id": "liq-rl10a33a-t4",
-  "record_type": "static_fire",
+  "record_type": "engine_test_point",
   "motor_type": "liquid",
   "source": {
     "citation": "M. Binder, 'An RL10A-3-3A Rocket Engine Model Using ROCETS', NASA CR-190786, Temmuz 1993 — Tablo 1-5, test noktasi 4 (P&W test standi verisi)",

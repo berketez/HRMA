@@ -11,14 +11,14 @@ DEGIL, burada yapilir (SCHEMA.md ilke 5). Bu modul:
    kayittaki ``measured`` anahtarlarina karsilik gelen tahminleri cikarir.
 3. record_type farkindaligi (v1):
    - static_fire / flight / motor_test / engine_test -> tam motor kosusu
-   - engine_spec                                     -> nokta kiyas kosusu
+   - engine_spec / engine_test_point                 -> nokta kiyas kosusu
    - strand_burn_rate                                -> motor kosusu YOK;
      HRMA'nin Saint-Robert a-n modeliyle r(P) noktasal kiyas
    - campaign_statistics / regression_correlation    -> v1'de desteklenmez;
      'not_supported' durumuyla raporlanir (sessiz dusme yok)
-   NOT: strand_burn_rate / campaign_statistics / regression_correlation
-   tipleri henuz experiment_db.RECORD_TYPES icinde degildir; adaptor destegi
-   ileriye donuktur (kurator dalgasi semayi genisletirse kosucu hazirdir).
+   Bu turlerin tamami v2.5.0 G3'ten beri experiment_db.RECORD_TYPES icinde
+   birinci sinif sema degerleridir (eski tags-icinde-tasima gecici cozumu
+   kayitlarda record_type alanina tasindi).
 
 Durum etiketleri: 'ok' | 'insufficient_inputs' | 'not_supported'.
 Eksik girdili kayit HATA degil 'insufficient_inputs' etiketi alir; motor
@@ -49,6 +49,7 @@ __all__ = [
     "DIMENSIONLESS_BASES",
     "BASE_ALIASES",
     "FULL_RUN_RECORD_TYPES",
+    "ENGINE_POINT_RECORD_TYPES",
     "SKIP_V1_RECORD_TYPES",
     "split_quantity_key",
     "to_si",
@@ -148,6 +149,11 @@ BASE_ALIASES: Dict[str, str] = {
 
 FULL_RUN_RECORD_TYPES = frozenset({
     "static_fire", "flight", "motor_test", "engine_test",
+})
+# Nokta kiyas yolu: engine_spec (kamu spec'i) + engine_test_point (motor
+# testi nokta olcumu, or. RL10 CR-190786 Tablo 1-5) ayni adaptore gider.
+ENGINE_POINT_RECORD_TYPES = frozenset({
+    "engine_spec", "engine_test_point",
 })
 SKIP_V1_RECORD_TYPES = frozenset({
     "campaign_statistics", "regression_correlation",
@@ -793,7 +799,8 @@ def adapt_record(record: Dict[str, Any]) -> Dict[str, Any]:
             f"kosusuna eslenemez).")
     if record_type == "strand_burn_rate":
         return _run_strand(record)
-    if record_type not in FULL_RUN_RECORD_TYPES and record_type != "engine_spec":
+    if record_type not in FULL_RUN_RECORD_TYPES \
+            and record_type not in ENGINE_POINT_RECORD_TYPES:
         return _not_supported(
             record, f"bilinmeyen record_type '{record_type}' (v1).")
 

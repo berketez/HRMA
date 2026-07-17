@@ -88,6 +88,36 @@ knockdown exact, ISA layers exact). Defects found and **fixed** the same day:
   dominated by batch-to-batch scatter of the empirical `a` coefficient
   (HTPB/N2O `a` varies ~2× between studies), not a code error.
 
+## Automated correlation snapshot (real-experiment database)
+
+The table below is produced from the git-tracked experiment database
+(`hrma/data/validation_records/`) by the automated correlation runner
+(`hrma/validation/correlation_runner.py`). Only the block between the
+markers is machine-generated; the rest of this document remains hand-written.
+
+<!-- AUTO-CORRELATION:BEGIN -->
+*This block is auto-generated from the real-experiment correlation run — do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
+
+- Generated: 2026-07-17 (runner v1, adapter v1)
+- Experiment DB content hash: `334aec278367db44a82d929e15fecf7df476e9967a98998e138aada7d0508256`
+- Records: 136 total — scored 76, insufficient inputs 53, not supported (v1) 7, runner errors 0
+- Signed error convention: (predicted - measured) / measured x 100. Outliers are flagged, never dropped; anomaly-flagged records are aggregated separately.
+
+| Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test |
+|---|---|---|---|---|---|---|---|
+| hybrid | c_star | main | 18 | -6.2 | 6.3 | 7.2 | hyb-rezaei2018-htpb-n2o-t68 |
+| hybrid | chamber_pressure | main | 36 | +41.2 | 34.7 | 59.0 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 |
+| hybrid | isp | main | 18 | +1.8 | 3.0 | 4.4 | hyb-rezaei2018-htpb-n2o-t69 |
+| hybrid | port_diameter_final | main | 18 | -8.0 | 8.7 | 9.0 | hyb-rezaei2018-htpb-n2o-t65 |
+| hybrid | regression_rate | main | 36 | -5.3 | 35.9 | 38.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 |
+| hybrid | thrust | main | 18 | +1.8 | 3.0 | 4.4 | hyb-rezaei2018-htpb-n2o-t69 |
+| liquid | isp_vac | main | 4 | +3.0 | 2.8 | 4.0 | liq-j2-sa503-1968-mr55-spec |
+| liquid | thrust_vac | main | 1 | +0.7 | 0.7 | 0.7 | liq-rs25-109pct-spec |
+| solid | burn_rate | main | 27 | +83.8 | 89.9 | 89.3 | sol-nakka1999-kndx-p01 |
+| hybrid | chamber_pressure | anomaly | 8 | +147.1 | 92.8 | 203.7 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
+| hybrid | regression_rate | anomaly | 8 | +16.4 | 17.3 | 18.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-06 |
+<!-- AUTO-CORRELATION:END -->
+
 ## Known limitations (do NOT design beyond these without independent check)
 
 1. **No flight qualification.** Combustion instability, ignition transients,
