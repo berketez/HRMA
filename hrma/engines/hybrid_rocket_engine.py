@@ -23,7 +23,8 @@ class HybridRocketEngine:
                  combustion_type='infinite', chamber_diameter_input=0,
                  fuel_type='htpb', motor_name='', motor_description='',
                  initial_gox=None, flux_mode='total', track_performance=True,
-                 oxidizer_type='n2o'):
+                 oxidizer_type='n2o', uq_mode=False, combustion_analyzer=None,
+                 eta_c_star=None, precomputed_optimum_of=None):
         
         # Handle thrust/burn_time vs total_impulse input
         if total_impulse is not None:
@@ -92,9 +93,36 @@ class HybridRocketEngine:
             self.G_ox_design = 350.0  # kg/m²·s — tipik tasarım orta noktası
         
         self.g0 = G_0  # m/s^2 (BIPM standart, hrma.constants)
-        
+
+        # --- UQ modu (v2.5.0, ARGE spec 2.3/6.2) ---
+        # uq_mode=True: danışma amaçlı find_optimum_of_ratio araması (profilde
+        # ~%70 süre) ve irtifa/itki-irtifa tabloları ATLANIR — ana çıktılar
+        # (Isp, c*, CF, geometri, grain, kütleler) bire bir aynı kalır (bu
+        # eşdeğerlik test kilidi altındadır). Varsayılan False: nominal
+        # davranış değişmez.
+        self.uq_mode = bool(uq_mode)
+        # Nominal koşudan enjekte edilebilir optimum-O/F sonucu: uq_mode'da
+        # arama atlanınca çıktı sözleşmesindeki optimum_of alanını doldurmak
+        # için (None ise alan atlanır ve nota düşülür).
+        self._precomputed_optimum_of = precomputed_optimum_of
+        # c* (yanma) verimi: None => teorik denge c*'ı (mevcut davranış).
+        # Verilirse teslim edilen c* = eta_c_star * c*_teorik tüm performans
+        # zincirine (Isp, mdot, boğaz) uygulanır. Tipik hibrit 0.85-0.95
+        # (Sutton & Biblarz 9. baskı, Böl. 5/16; Chiaverini & Kuo 2007).
+        self.eta_c_star = None if eta_c_star is None else float(eta_c_star)
+        if self.eta_c_star is not None and not (0.5 <= self.eta_c_star <= 1.05):
+            warnings.warn(
+                f"eta_c_star = {self.eta_c_star:.3f} fiziksel bandın "
+                "(0.5-1.05) dışında — yine de uygulanacak"
+            )
+
         # Initialize advanced analysis modules
-        self.combustion_analyzer = CombustionAnalyzer()
+        # combustion_analyzer enjeksiyonu (UQ): örnekler arası paylaşılan
+        # memoizasyonlu CombustionAnalyzer geçirilebilir; None ise her motor
+        # kendi analizörünü kurar (mevcut davranış).
+        self.combustion_analyzer = (combustion_analyzer
+                                    if combustion_analyzer is not None
+                                    else CombustionAnalyzer())
         self.nozzle_designer = NozzleDesigner()
         self.heat_transfer_analyzer = HeatTransferAnalyzer()
         self.structural_analyzer = StructuralAnalyzer()
@@ -251,7 +279,8 @@ class HybridRocketEngine:
         fuel_composition = {self.fuel_type: 100.0}  # Simplified for now
         ox = getattr(self, 'oxidizer_type', None) or 'N2O'
         combustion_results = self.combustion_analyzer.analyze_combustion(
-            fuel_composition, ox, self.OF, self.P_c, None
+            fuel_composition, ox, self.OF, self.P_c, None,
+            eta_c_star=self.eta_c_star
         )
 
         # Gerçek termodinamik değerler CombustionAnalyzer denge çözümünden alınır.
@@ -275,33 +304,41 @@ class HybridRocketEngine:
             gamma=self.gamma, R_specific=self.R, T_chamber=self.T_c
         )
         
-        # Altitude performance
-        altitudes = [0, 1000, 5000, 10000, 15000, 20000]  # m
-        altitude_performance = self.combustion_analyzer.calculate_altitude_performance(
-            {
-                'chamber_pressure': self.P_c,
-                'gas_constants': combustion_results['performance']['gas_constants'],
-                'conditions': combustion_results['conditions'],
-                'performance': combustion_results['performance'],
-                'gamma_avg': combustion_results['performance']['gamma_avg'],
-                'mdot_total': self.mdot_total
-            },
-            altitudes
-        )
-        
+        # Altitude performance — uq_mode'da atlanır (danışma tablosu; ana
+        # çıktıları beslemez, MC örneğinde gereksiz maliyet — ARGE spec 6.2)
+        altitude_performance = None
+        if not self.uq_mode:
+            altitudes = [0, 1000, 5000, 10000, 15000, 20000]  # m
+            altitude_performance = self.combustion_analyzer.calculate_altitude_performance(
+                {
+                    'chamber_pressure': self.P_c,
+                    'gas_constants': combustion_results['performance']['gas_constants'],
+                    'conditions': combustion_results['conditions'],
+                    'performance': combustion_results['performance'],
+                    'gamma_avg': combustion_results['performance']['gamma_avg'],
+                    'mdot_total': self.mdot_total
+                },
+                altitudes
+            )
+
         # Optimum O/F ratio — oksitleyiciyi 'ox' (self.oxidizer_type) ile geçir
         # (denetim bulgusu #294). Eski 'N2O' sabiti LOX/H2O2 motorlarında yanlış
         # kimya/stokiyometri kullanıp optimum O/F'yi ve max Isp'yi kaydırıyordu
         # (HTPB stok. O/F: N2O~7-8, LOX~2). combustion analyzer adı .lower() ile
         # normalize ettiğinden n2o motorlarında sonuç değişmez (test güvenli).
-        optimum_of = self.combustion_analyzer.find_optimum_of_ratio(
-            fuel_composition, ox, self.P_c
-        )
-        
-        # Total impulse to thrust at altitudes
-        altitudes_thrust = [0, 1000, 5000, 10000, 15000, 20000]  # m
+        # uq_mode'da bu DANIŞMA amaçlı arama atlanır (profilde tek hesabın
+        # ~%70'i); nominal koşudan enjekte edilen sonuç varsa o kullanılır.
+        if self.uq_mode:
+            optimum_of = self._precomputed_optimum_of
+        else:
+            optimum_of = self.combustion_analyzer.find_optimum_of_ratio(
+                fuel_composition, ox, self.P_c
+            )
+
+        # Total impulse to thrust at altitudes — uq_mode'da atlanır (danışma)
         thrust_altitude_analysis = None
-        if hasattr(self, 'I_total') and self.I_total > 0:
+        if not self.uq_mode and hasattr(self, 'I_total') and self.I_total > 0:
+            altitudes_thrust = [0, 1000, 5000, 10000, 15000, 20000]  # m
             thrust_altitude_analysis = self.combustion_analyzer.calculate_thrust_at_altitudes(
                 self.I_total, {
                     'performance': combustion_results['performance'],
@@ -400,6 +437,12 @@ class HybridRocketEngine:
         if not (1000 < c_star < 1900):
             warnings.warn(f"Anormal c* değeri: {c_star:.0f} m/s (beklenen ~1300-1850)")
 
+        # c* verimi (v2.5.0 UQ): teslim edilen c* = eta * c*_teorik. Teorik
+        # değer ayrıca saklanır (raporlama). eta None ise davranış değişmez.
+        self.C_star_theoretical = c_star
+        if self.eta_c_star is not None:
+            c_star = self.eta_c_star * c_star
+
         return c_star
 
     def _instantaneous_performance(self, of_ratio):
@@ -425,6 +468,9 @@ class HybridRocketEngine:
                 fuel_composition, ox, max(of_key, 0.1), self.P_c, None
             )
             cstar_inst = results['performance']['c_star']
+            # c* verimi tasarım noktasıyla tutarlı uygulanır (v2.5.0 UQ)
+            if self.eta_c_star is not None:
+                cstar_inst = self.eta_c_star * cstar_inst
         except Exception:
             cstar_inst = getattr(self, 'C_star', 1500.0)
 
@@ -861,6 +907,23 @@ class HybridRocketEngine:
             mw_top = chamber_comp.get('molecular_weight', mw_top)
         basic_results['gamma'] = gamma_top
         basic_results['molecular_weight'] = mw_top
+
+        # --- UQ modu izleri (v2.5.0): atlanan danışma blokları dürüstçe not
+        # edilir; ana çıktılar uq_mode'dan ETKİLENMEZ (test kilidi altında).
+        if self.uq_mode:
+            basic_results['uq_mode'] = True
+            if optimum_of is None:
+                basic_results['optimum_of_note'] = (
+                    'optimum O/F search skipped in uq_mode (advisory output); '
+                    'inject precomputed_optimum_of from the nominal run to '
+                    'populate optimum_analysis/optimum_of_ratio.'
+                )
+        # c* verimi raporu: teslim edilen c* basic_results['c_star'] içindedir;
+        # teorik değer ayrıca verilir ki verim varsayımı şeffaf kalsın.
+        if self.eta_c_star is not None:
+            basic_results['eta_c_star'] = self.eta_c_star
+            basic_results['c_star_theoretical'] = getattr(
+                self, 'C_star_theoretical', self.C_star)
 
         # O/F kaymasının performansa etkisi (denetim bulgusu #2): time-marching
         # boyunca anlık O/F'den hesaplanan c*/Isp dizileri ve zaman-ortalamaları.

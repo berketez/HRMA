@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-rs25-109pct-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "L3Harris RS-25 engine spec sheet (07/2024, L26301); NASA fact sheet FS-2015-07-064-MSFC",
+    "doi": null,
+    "access": "vendor_datasheet",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "vendor_datasheet",
+    "extraction_note": "Sayilar spec sheet ve NASA fact sheet PDF'lerinden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1)."
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 69,
+    "length_in": 168,
+    "diameter_in": 96,
+    "dry_mass_lb": 7774,
+    "cycle": "staged_combustion"
+  },
+  "inputs": {
+    "chamber_pressure_psia": 2994,
+    "of_ratio": 6.03
+  },
+  "measured": {
+    "thrust_sl_lbf": 418000,
+    "thrust_vac_lbf": 512300,
+    "isp_vac_s": 452.3
+  },
+  "units_original": "lbf, s, psia, lb, in (L3Harris spec sheet orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": ["flight_heritage", "engine_spec_anchor", "high_pressure"],
+  "notes": "%109 RPL guc seviyesi (uretici nominal beyani); tek bir static-fire testi degil, motor duzeyi kamu spec'i (record_type: engine_spec). Yuksek basinc kademeli yanma ucu; SL/vak itki orani (418000/512300) lule modeli testi icin capadir (arge_kati_sivi_veri.md Bolum 3, sivi modul tablosu)."
+}

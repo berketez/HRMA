@@ -14,43 +14,88 @@ class LiquidRocketEngine:
     
     def __init__(self, thrust=10000, chamber_pressure=100, mixture_ratio=2.5,
                  fuel_type='rp1', oxidizer_type='lox', cooling_type='regenerative',
-                 injector_type='impinging', feed_system_type='turbopump'):
-        
+                 injector_type='impinging', feed_system_type='turbopump',
+                 propellant_data=None):
+
         # Performance parameters
         self.F = thrust  # N
         self.P_c = chamber_pressure  # bar
         self.MR = mixture_ratio  # O/F ratio
-        
+
         # Propellant combination
         self.fuel_type = fuel_type
         self.oxidizer_type = oxidizer_type
-        
+
         # Engine configuration
         self.cooling_type = cooling_type
         self.injector_type = injector_type
         self.feed_system_type = feed_system_type
-        
-        # Initialize web-enhanced propellant database
-        self.web_propellant_data = {}
-        self._fetch_web_propellant_data()
-        
+
+        # Web-enhanced propellant database — TEMBEL yükleme (v2.5.0, Berke
+        # onaylı karar 6): kurucu ASLA ağa çıkmaz. Eski davranış kurucuda canlı
+        # HTTP çağrısıydı (0.66 s/istek + 30 s timeout riski). Veri artık:
+        #   1) propellant_data parametresiyle enjekte edilir (UQ/MC örnekleri,
+        #      testler — örnek başına HTTP kesinlikle yasak), YA DA
+        #   2) İLK ihtiyaçta (web_propellant_data property erişimi) BİR KEZ,
+        #      web_propellant_api'nin çevrimdışı-öncelikli zinciriyle çekilir
+        #      (canlı -> taze pickle cache -> bayat cache -> kalıcı çevrimdışı
+        #      depo/bundled snapshot; v2.4.6). Aynı veri, farklı zaman: sonuç
+        #      değerleri değişmez.
+        self.web_combustion_data = {}
+        self.flight_validation = {}
+        if propellant_data is not None:
+            self._web_propellant_data = dict(propellant_data)
+        else:
+            self._web_propellant_data = None  # ilk erişimde bir kez çekilir
+
         # Physical constants (BIPM standart, hrma.constants)
         self.g0 = G_0  # m/s^2
         self.gamma_combustion = 1.2  # Typical for combustion gases
         self.P_a = 1.01325  # Atmospheric pressure (bar)
-        
+
         # Set propellant properties
         self._set_propellant_properties()
-        
+
         # CONSISTENCY FIX: Initialize c_star_effective and CD_throat early
         if not hasattr(self, 'c_star_effective'):
             self.c_star_effective = getattr(self, 'c_star', 1650.0)
         if not hasattr(self, 'CD_throat'):
             self.CD_throat = 0.98  # Default discharge coefficient
-        
-        # Initialize feed system components (after constants and propellant properties)
-        self.feed_system = self._initialize_feed_system()
-    
+
+        # Feed system — TEMBEL kurulum: tank/hat boyutlandırması yakıt verisine
+        # (web_propellant_data yoğunlukları) dokunduğundan kurucuda hesaplanmaz;
+        # ilk feed_system erişiminde bir kez kurulur (kurucu ağsız kalsın diye).
+        self._feed_system = None
+
+    @property
+    def web_propellant_data(self):
+        """Yakıt/oksitleyici veri sözlüğü — ilk erişimde bir kez doldurulur.
+
+        Kurucu ağa çıkmaz; bu property ilk okunduğunda
+        _fetch_web_propellant_data() çevrimdışı-öncelikli zinciri çalıştırır
+        (ya da kurucuya propellant_data enjekte edildiyse hiç çalışmaz).
+        """
+        if self._web_propellant_data is None:
+            self._fetch_web_propellant_data()
+            if self._web_propellant_data is None:  # savunmacı: fetch her durumda doldurur
+                self._web_propellant_data = {}
+        return self._web_propellant_data
+
+    @web_propellant_data.setter
+    def web_propellant_data(self, value):
+        self._web_propellant_data = value
+
+    @property
+    def feed_system(self):
+        """Besleme sistemi sözlüğü — ilk erişimde bir kez kurulur (tembel)."""
+        if self._feed_system is None:
+            self._feed_system = self._initialize_feed_system()
+        return self._feed_system
+
+    @feed_system.setter
+    def feed_system(self, value):
+        self._feed_system = value
+
     def _fetch_web_propellant_data(self):
         """Fetch real-time propellant data from NIST/NASA/SpaceX APIs"""
         try:

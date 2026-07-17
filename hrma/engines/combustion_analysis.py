@@ -3,6 +3,7 @@ Advanced Combustion Analysis Module
 NASA CEA-style chemical equilibrium and performance calculations with Cantera integration
 """
 
+import copy
 import numpy as np
 import json
 import logging
@@ -36,9 +37,19 @@ AIR_N2_MOLE_FRACTION = 0.79
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
 
-    def __init__(self):
+    def __init__(self, memoize=False):
         # Gas constant (CODATA 2018) - merkezi sabit modulunden
         self.R_universal = R_UNIVERSAL  # J/(kmol·K)
+
+        # Denge çözümü memoizasyonu (v2.5.0 UQ, ARGE spec 6.2): memoize=True
+        # iken analyze_combustion sonuçları (yakıt, oksitleyici, O/F@0.01,
+        # Pc@0.1, T) anahtarıyla instance ömürlü önbelleğe alınır. Yuvarlama
+        # YALNIZ anahtardadır — hesap girdileri yuvarlanmaz; c* yüzeyi (O/F,Pc)
+        # üzerinde pürüzsüz olduğundan 0.01/0.1 çözünürlüğün hatası << %0.1
+        # (motor içi _perf_cache zaten O/F@0.05 yuvarlıyor; bu daha sıkı).
+        # Varsayılan memoize=False: nominal davranış bire bir korunur.
+        self.memoize = bool(memoize)
+        self._equilibrium_cache = {}
 
         # Cantera gaz objesi - NASA-CEA veritabanı kullanarak
         self.gas = None
@@ -166,7 +177,35 @@ class CombustionAnalyzer:
         Returns:
             Complete combustion analysis results
         """
-        
+
+        # --- Memoizasyon (v2.5.0 UQ): anahtar eta_c_star İÇERMEZ, çünkü
+        # eta yalnız iki türetilmiş alanı (eta_c_star, c_star_delivered)
+        # etkiler ve isabet halinde kopya üstünde yeniden uygulanır. Böylece
+        # UQ örnekleri arasında eta değişse de pahalı denge çözümü paylaşılır.
+        cache_key = None
+        if self.memoize:
+            try:
+                cache_key = (
+                    tuple(sorted((str(k).lower(), round(float(v), 6))
+                                 for k, v in fuel_composition.items())),
+                    str(oxidizer_type).lower(),
+                    int(round(float(of_ratio) * 100)),          # O/F @ 0.01
+                    int(round(float(chamber_pressure) * 10)),   # Pc  @ 0.1 bar
+                    None if chamber_temperature is None
+                    else int(round(float(chamber_temperature) * 10)),
+                )
+            except (TypeError, ValueError):
+                cache_key = None  # anahtarlanamayan girdi: önbelleksiz devam
+            if cache_key is not None and cache_key in self._equilibrium_cache:
+                result = copy.deepcopy(self._equilibrium_cache[cache_key])
+                perf = result['performance']
+                perf['eta_c_star'] = eta_c_star
+                perf['c_star_delivered'] = (
+                    eta_c_star * perf['c_star'] if eta_c_star is not None
+                    else perf['c_star']
+                )
+                return result
+
         # Calculate elemental composition
         elements = self._calculate_elemental_composition(fuel_composition, oxidizer_type, of_ratio)
         
@@ -254,7 +293,7 @@ class CombustionAnalyzer:
         else:
             performance['c_star_delivered'] = performance['c_star']
 
-        return {
+        result = {
             'stoichiometric_of': of_stoich,
             'equivalence_ratio': of_stoich / of_ratio,
             'elemental_composition': elements,
@@ -270,6 +309,12 @@ class CombustionAnalyzer:
             },
             'performance': performance
         }
+
+        if cache_key is not None:
+            # Kopya sakla: çağıran sonucu mutasyona uğratsa bile önbellek bozulmaz
+            self._equilibrium_cache[cache_key] = copy.deepcopy(result)
+
+        return result
     
     def _calculate_elemental_composition(self, fuel_composition: Dict, 
                                        oxidizer_type: str, of_ratio: float) -> Dict:

@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "test_id": "hyb-rezaei2018-htpb-n2o-t26",
+  "record_type": "static_fire",
+  "motor_type": "hybrid",
+  "source": {
+    "citation": "H. Rezaei, M.R. Soltani, A.R. Mohammadi, 'Experimental Study of Fuel Regression Rate in a HTPB/N2O Hybrid Rocket Motor', Scientia Iranica B, 25(1), 253-265, 2018",
+    "doi": null,
+    "url": "https://scientiairanica.sharif.edu/article_4317_fd78e20a70c3a59449b0ca1fd11047c3.pdf",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-17",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar makale PDF'inin Tablo 1/2/4'unden dogrudan okundu (docs/arge-guven-2026-07/arge_hibrit_veri.md, Kampanya 1); ic tutarlilik kontrolu rdot=(Dpf-Dpi)/(2*tb) ile yapildi."
+  },
+  "propellants": {
+    "oxidizer": "n2o",
+    "fuel": "htpb",
+    "fuel_density_kgpm3": 983,
+    "hrma_oxidizer_key": "n2o",
+    "hrma_fuel_key": "htpb"
+  },
+  "geometry": {
+    "grain_geometry": "cylindrical_single_port",
+    "port_diameter_initial_mm": 37.0,
+    "grain_length_mm": 250.4,
+    "throat_diameter_mm": 8.9,
+    "injector_area_mm2": 1.766,
+    "pre_chamber_length_mm": 25,
+    "post_chamber_length_mm": 25
+  },
+  "inputs": {
+    "mdot_ox_gps": 95.77,
+    "burn_time_s": 6.55,
+    "fuel_mass_initial_g": 847.3
+  },
+  "measured": {
+    "chamber_pressure_bar": 28.60,
+    "thrust_kgf": 24.78,
+    "mdot_fuel_gps": 25.36,
+    "regression_rate_mmps": 0.779,
+    "of_ratio": 3.78,
+    "gox_gpcm2s": 6.88,
+    "c_star_mps": 1514,
+    "isp_s": 204.6,
+    "port_diameter_final_mm": 47.2,
+    "fuel_mass_final_g": 681.2
+  },
+  "measurement_uncertainty": {
+    "chamber_pressure_bar": {"value": 0.0014, "type": "relative", "coverage_k": null, "source": "Tablo 1"},
+    "thrust_kgf": {"value": 0.0022, "type": "relative", "coverage_k": null, "source": "Tablo 1"},
+    "mdot_ox_gps": {"value": 0.0074, "type": "relative", "coverage_k": null, "source": "Tablo 1"},
+    "isp_s": {"value": 0.0081, "type": "relative", "coverage_k": null, "source": "Tablo 1"},
+    "c_star_mps": {"value": 0.0081, "type": "relative", "coverage_k": null, "source": "Tablo 1"},
+    "regression_rate_mmps": {"value": 0.0033, "type": "relative", "coverage_k": null, "source": "Tablo 1"}
+  },
+  "units_original": "mm, g/s, s, bar, kgf, mm/s, g/cm^2.s, m/s, g (makale tablolarinin orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": ["lab_scale", "regression_anchor"],
+  "notes": "Tablo 4 test 26 (s.259); tam girdi seti Tablo 2'de (s.257). Yanma verimi makale metninde %94-98 bandi (s.260, test bazinda ayristirilmamis). Bu test HRMA'nin mevcut regresyon capasidir (tests/test_hybrid_regression_validation.py: G_ox=68.8 kg/m^2.s = 6.88 g/cm^2.s). Kuratorluk notu: eski test sabitindeki c*=1513 m/s, ARGE dogrudan okumasinda 1514 m/s; eski sabitteki O/F=1.766 degeri enjektor alani (1.766 mm^2) ile karismis gorunuyor, tablodaki olculen O/F 3.78'dir."
+}

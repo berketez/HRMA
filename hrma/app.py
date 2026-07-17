@@ -37,9 +37,10 @@ from hrma.utils.common_fixes import validation, calculations, graph_fixes, fuel_
 from hrma.utils.optimum_of_ratio import of_optimizer
 
 # Validation
+# v2.5.0 G1 (2026-07-17): experimental_validator emekli — sentetik kayitlar
+# tests/fixtures'a tasindi, gercek deney DB'si hrma.validation.experiment_db
 from hrma.validation.validation_system import validator
 from hrma.validation.motor_validation import motor_validator
-from hrma.validation.experimental_validation import experimental_validator
 
 # Analysis
 from hrma.analysis.regression_analysis import regression_analyzer
@@ -3428,40 +3429,11 @@ def get_chemical_species():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-@app.route('/api/experimental-validation', methods=['POST'])
-def perform_experimental_validation():
-    """Perform experimental validation analysis"""
-    try:
-        data = request.json
-        motor_type = data.get('motor_type', 'hybrid')
-        propellant_combination = data.get('propellant_combination', 'N2O/HTPB')
-        
-        # Get calculated results from the request
-        calculated_results = {
-            'thrust': data.get('thrust', 1000),
-            'isp': data.get('isp', 200),
-            'chamber_pressure': data.get('chamber_pressure', 20),
-            'burn_time': data.get('burn_time', 10)
-        }
-        
-        # Perform validation analysis
-        validation_results = experimental_validator.validate_against_experiments(
-            calculated_results, motor_type, propellant_combination
-        )
-        
-        # Generate validation report
-        validation_report = experimental_validator.generate_validation_report(
-            calculated_results, validation_results
-        )
-        
-        return jsonify({
-            'status': 'success',
-            'validation_results': sanitize_json_values(validation_results),
-            'validation_report': validation_report,
-            'confidence_metrics': experimental_validator.calculate_confidence_metrics(validation_results)
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+# v2.5.0 G1 (2026-07-17, karar K5): olu /api/experimental-validation endpoint'i
+# KALDIRILDI. Sinifta hic var olmamis metotlari cagiriyordu
+# (validate_against_experiments / calculate_confidence_metrics -> AttributeError
+# -> 500) ve frontend'de hicbir referansi yoktu. Halefi: G2 dalgasindaki
+# korelasyon endpoint'leri (/api/validation/correlation-*) olacak.
 
 @app.route('/api/cfd-analysis', methods=['POST'])
 def perform_cfd_analysis():
@@ -3618,17 +3590,11 @@ def perform_complete_professional_analysis():
         # 1. Chemical Database Analysis
         database_info = chemical_db.validate_database()
         
-        # 2. Experimental Validation
-        calculated_results = {
-            'thrust': data.get('thrust', 1000),
-            'isp': data.get('isp', 200),
-            'chamber_pressure': data.get('chamber_pressure', 20),
-            'burn_time': data.get('burn_time', 10)
-        }
-        
-        validation_results = experimental_validator.validate_against_experiments(
-            calculated_results, motor_type, propellant_combination
-        )
+        # 2. Experimental Validation — v2.5.0 G1: sentetik experimental_validator
+        # emekli (bu blok zaten yukaridaki 501 nedeniyle erisilemez; korunan
+        # olu kodun tutarliligi icin bos sonuc birakildi). Halef: experiment_db
+        # + G2 korelasyon koducusu.
+        validation_results = {}
         
         # 3. CFD Analysis
         from hrma.analysis.cfd_analysis import BoundaryConditions
@@ -3668,9 +3634,10 @@ def perform_complete_professional_analysis():
                 'thermodynamic_accuracy': 'HIGH'
             },
             'experimental_validation': {
-                'validation_grade': validation_results.get('overall_grade', 'B'),
-                'confidence_level': experimental_validator.calculate_confidence_metrics(validation_results),
-                'literature_sources': len(experimental_validator.test_database)
+                'status': 'retired',
+                'note': ('Synthetic experimental-validation layer removed in '
+                         'v2.5.0; real-experiment correlation lives in '
+                         'hrma/validation/experiment_db.py (runner in G2).')
             },
             'cfd_analysis': {
                 'convergence_achieved': cfd_results['convergence_info']['converged'],
