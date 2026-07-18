@@ -52,8 +52,9 @@
     "paraffin",
     "liquefying_fuel"
   ],
-  "notes": "AIAA 2003-1162 Tablo 2 (s.11) + Tablo 3 (s.12), test '4L-12'. NASA Ames Hybrid Combustion Facility; Pc araligi ~10-68 atm, GOX. Grain boyu bildiride test basina RAPOR EDILMEMIS; HCF grainleri 33 veya 45 inc (s.6, Sekil 8 karsilastirmasi). Test basina atama guvenilir dayanak olmadigi icin YAPILMADI (grain_length_in null; VARSAYIM olarak bile ancak bu iki degerden biri olabilir). c* verimi hesabinda lule Cd = 0.99 (Ek, Es. A7). Kampanya regresyon yasasi (Es. 2): rdot = 0.488*Gox^0.62 (mm/s; g/cm^2.s; gecerli O/F 1.7-2.3). Bildiri notu: orijinal test adi '4L-12'; Tablo 2 not sutunu: 'Successful Test'.",
+  "notes": "AIAA 2003-1162 Tablo 2 (s.11) + Tablo 3 (s.12), test '4L-12'. NASA Ames Hybrid Combustion Facility; Pc araligi ~10-68 atm, GOX. Grain boyu bildiride test basina RAPOR EDILMEMIS; HCF grainleri 33 veya 45 inc (s.6, Sekil 8 karsilastirmasi). Test basina atama guvenilir dayanak olmadigi icin YAPILMADI (grain_length_in null; VARSAYIM olarak bile ancak bu iki degerden biri olabilir). c* verimi hesabinda lule Cd = 0.99 (Ek, Es. A7). Kampanya regresyon yasasi (Es. 2): rdot = 0.488*Gox^0.62 (mm/s; g/cm^2.s; gecerli O/F 1.7-2.3). Bildiri notu: orijinal test adi '4L-12'; Tablo 2 not sutunu: 'Successful Test'. ANOMALI (2026-07-18): bildirinin kendi ic tutarliligi d_i=4.055 ile celisiyor; ayrinti anomaly.note alaninda.",
   "anomaly": {
-    "flag": false
+    "flag": true,
+    "note": "Bildiri-ici tutarsizlik (2026-07-18 fizik incelemesi, PDF Tablo 2 yeniden teyit edildi): port_diameter_initial_in=4.055 bildiride boyle yaziyor AMA bildirinin kendi G sutunlariyla celisiyor — mdot_ox=2.08 kg/s + d_i=4.055 in, G_init=24.96 g/cm2s verir (bildiri 11.06; oran 2.26, diger 24 kayitta 0.91-1.05); G_avg=9.4 icin gereken d_f=9.16 in > grain OD 7.5 in (fiziksel olarak imkansiz). Tutarli tek deger d_i~6.09 in olurdu; 4.055 buyuk olasilikla 4L-08 satirindan kopyalama hatasi. Deger bildiriye sadik birakildi, kayit istatistik disina alindi (veri uydurma yasagi)."
   }
 }

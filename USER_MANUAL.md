@@ -255,6 +255,73 @@ The 13 panels in v2.4.6:
 Panels marked "long" warn you that the analysis may take noticeably longer
 (for example the high-fidelity kinetic integration).
 
+### Uncertainty and Correlation (v2.5.0 Confidence Release)
+
+Two additional panels live in the Analysis Deck on the hybrid (`/hybrid`),
+solid (`/solid`) and liquid (`/liquid`) pages. Like the other panels, they
+appear only after a successful **Calculate** and pre-fill from the current
+motor result.
+
+#### Uncertainty (`/api/uncertainty-analysis`)
+
+This panel propagates the uncertainty of the design inputs through the whole
+solver with a Monte Carlo run (Latin Hypercube sampling) and reports how
+uncertain each output is.
+
+Controls:
+
+- **Analysis Level** — `fast` / `engineering` / `high_fidelity`, trading speed
+  for sample count (200 / 1000 / 3000 samples; Engineering is the sensible
+  default, High-Fidelity is the "long" setting).
+- **Seed** — the random seed; keeping it fixed makes a run exactly
+  reproducible.
+- **Run** — executes the analysis and draws the results.
+
+How to read it:
+
+- Each output is reported as **P50 with a [P5, P95] band**. P50 is the median
+  (the "middle" prediction); the [P5, P95] interval is a 90 % credible range —
+  there is a 90 % chance the true value lies inside it given the input
+  uncertainties you supplied. A wide band means the result is poorly
+  constrained, not that the nominal number is wrong.
+- The **sensitivity tornado** ranks the inputs by how strongly they drive the
+  output. The bar length is the **Spearman rank correlation** between that
+  input and the output over the Monte Carlo sample — it captures monotonic
+  effects only (an input that pushes the result up when it goes up, or vice
+  versa). The longest bars are the parameters worth measuring or controlling
+  most tightly; near-zero bars barely matter.
+
+#### Correlation (`/api/correlation-report`)
+
+This panel scores HRMA's predictions against the built-in real-experiment
+validation database (published, fully-cited hybrid, solid and liquid firing
+data) and shows a per-quantity accuracy table.
+
+Controls:
+
+- **Run / Refresh** — computes the correlation report. The result is cached by
+  the content hash of the experiment database, so if nothing in the database
+  changed a **CACHED** badge appears and the cached report is shown instantly
+  instead of recomputing.
+- **Layers** — the table is split into `main`, `low`, and `anomaly`. `main` is
+  the trustworthy body of statistics (high/medium-confidence records);
+  `low` isolates low-confidence records; `anomaly` aggregates records that were
+  flagged as anomalous (cracked grain, nozzle failure, etc.) separately.
+
+How to read it:
+
+- The signed error convention is **(predicted − measured) / measured × 100**:
+  a positive value means HRMA over-predicts, negative means it under-predicts.
+- **Outliers are flagged but never dropped** — a bad point stays in the table
+  and in the statistics, marked, so the numbers stay honest.
+- **Anomaly-flagged records do not enter the main statistics.** They are
+  reported in their own `anomaly` layer so that a known-bad firing does not
+  distort the headline accuracy.
+
+The live correlation numbers change whenever the database changes, so treat the
+panel (and the auto-generated block in VALIDATION_STATUS.md) as the current
+source of truth rather than any figure quoted elsewhere.
+
 ## 8. 3D Digital Twin
 
 The Three.js/WebGL viewer builds a parametric 3D motor directly from the

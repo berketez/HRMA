@@ -470,8 +470,13 @@
         root.appendChild(wrap);
 
         function redraw(key) {
-            drawHistogram(data, key, histEl);
-            drawTornado(data, key, tornEl);
+            // Aynı çerçevede, layout olmadan çizilirse Plotly kap genişliğini
+            // ölçemez ve 700px varsayılanına düşer (kap ~1200px iken grafik
+            // yarım kalır). Çizim bir sonraki çerçeveye ertelenir.
+            window.requestAnimationFrame(function () {
+                drawHistogram(data, key, histEl);
+                drawTornado(data, key, tornEl);
+            });
         }
         wrap.querySelector('#uq_out_select')
             .addEventListener('change', function (ev) { redraw(ev.target.value); });

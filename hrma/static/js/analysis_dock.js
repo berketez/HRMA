@@ -231,6 +231,16 @@
         Array.prototype.forEach.call(panes.children, function (p) {
             p.style.display = (p.id === 'ad_pane_' + cat) ? 'block' : 'none';
         });
+        // Gizli sekmedeyken render edilen Plotly grafikleri 700px
+        // varsayılanında kalır; pane görünür olunca gerçek genişliğe getir.
+        if (window.Plotly && typeof Plotly.Plots !== 'undefined') {
+            const shown = document.getElementById('ad_pane_' + cat);
+            if (shown) {
+                shown.querySelectorAll('.js-plotly-plot').forEach(function (p) {
+                    try { Plotly.Plots.resize(p); } catch (e) { /* boş pane */ }
+                });
+            }
+        }
     }
 
     // ------------------------------------------------------------------

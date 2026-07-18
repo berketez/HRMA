@@ -32,6 +32,8 @@ you can ignore them entirely.
 - **Transient Ballistics Panel**: time-resolved Pc(t)/F(t) with regulated or self-pressurizing N₂O blowdown feed, SP-8089 injector-stability margins; the OpenRocket `.eng` export uses the real computed thrust curve
 - **Full Feature Parity Across Motor Types**: motor design tables, engineering cross-section drawings, working CAD/PDF/.eng exports, trajectory and safety reports on the hybrid, solid **and** liquid pages
 - **Solid Motor Monte Carlo**: manufacturing-tolerance uncertainty analysis (burn-rate a/n, density, C*; 300 samples in <1 s) with success rate, statistics and thrust/Isp histograms
+- **Uncertainty Quantification (v2.5.0 Confidence Release)**: full-design Monte Carlo with Latin Hypercube sampling, reported as P50 median with a [P5, P95] 90 % credible interval per output, plus a Spearman rank-correlation sensitivity tornado that ranks which input uncertainties drive each result; three explicit effort levels (`fast` / `engineering` / `high_fidelity`, 200 / 1000 / 3000 samples) and a fixed seed for reproducibility (`/api/uncertainty-analysis`, available on the hybrid, solid and liquid pages)
+- **Real-Experiment Validation Database (v2.5.0 Confidence Release)**: a git-tracked JSON database of published, fully-cited real firing data (hybrid, solid and liquid static-fire points plus published engine specs and strand burn-rate data) with a hard `inputs`/`measured` separation that structurally prevents circular validation; an automatic correlation report (`/api/correlation-report`, cached by database content hash) scores HRMA predictions against the measurements and writes the summary into VALIDATION_STATUS.md
 - **Exact Star Grain Regression**: burning perimeter computed by geometric offset of the true star profile (Huygens principle, validated against the analytic circular-port solution) — point count and depth feed directly into the thrust curve
 - **Liquid Engine Flow Schematic**: feed-system diagram (tanks → turbopump/pressure-fed → injector → chamber → nozzle) generated from computed flow rates and pressures
 - **6-DOF Flight Panel** (all three motor pages): Barrowman stability (CN_α/CP, static margin), weathercocking, apogee — chains directly onto the computed thrust curve
@@ -52,9 +54,19 @@ you can ignore them entirely.
 
 HRMA's thermochemistry is cross-checked against **NASA CEA** (via RocketCEA):
 hybrid combustion (c\*, Tc, Isp) agrees within **≤1.5 %** across all supported
-fuel/oxidizer pairs, and liquid c\* within **<2 %**. The hybrid regression model
-is compared against published static-fire data (Rezaei HTPB/N2O). 1,000+
-automated tests pass.
+fuel/oxidizer pairs, and liquid c\* within **<2 %**. 1,000+ automated tests pass.
+
+As of the **v2.5.0 Confidence Release**, HRMA also carries a git-tracked
+database of real, fully-cited firing data (hybrid, solid and liquid), and an
+automated correlation runner scores the predictions against it. The current
+correlation statistics (bias, median absolute percent error, RMS, per-quantity
+sample counts and worst-case tests) are machine-generated and change with every
+run, so they are **not duplicated here** — see the auto-generated correlation
+block in [VALIDATION_STATUS.md](VALIDATION_STATUS.md) (the section "Automated
+correlation snapshot", between the `AUTO-CORRELATION` markers) for the live
+numbers. The signed-error convention there is `(predicted − measured) / measured
+× 100`; outliers are flagged but never dropped, and anomaly-flagged records are
+aggregated separately from the main statistics.
 
 HRMA is a **preliminary-design and educational tool**, not a flight-qualification
 tool. Predicted performance should be cross-checked against an independent code

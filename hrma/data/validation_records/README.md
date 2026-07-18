@@ -75,11 +75,14 @@ McFarland 2019 (oksitleyici türü kaynakta adlandırılmamış — karantina),
 Jens 2019 (slab yakıcı, motor-düzeyi satır yok), Zilliac 2006 (a-n derlemesi
 UQ önseli olarak kullanılacak, kayıt değil).
 
-Şema notu: kampanya istatistiği ve regresyon-fit kayıtlarında amaçlanan
-`record_type` değerleri (`campaign_statistics`, `regression_correlation`)
-doğrulayıcıda henüz tanımlı değil; bu kayıtlarda `record_type` verilmedi
-(yükleyici varsayılanı static_fire) ve tür `tags` + `notes` ile işaretlendi.
-Doğrulayıcıya bu iki tür eklenirse kayıtlar güncellenmelidir.
+Şema notu (v2.5.0 G3 ile güncellendi): Kampanya istatistiği ve regresyon-fit
+kayıtlarının tür değerleri (`campaign_statistics`, `regression_correlation`)
+artık doğrulayıcıda birinci sınıf `record_type` değerleridir; strand yanma-hızı
+ve motor test noktası kayıtları için de `strand_burn_rate` ve
+`engine_test_point` eklendi. İlgili kayıtlar artık doğru `record_type` alanını
+taşır (eski kayıtlardaki bazı `notes` metinleri hâlâ "şema dışı" ifadesini
+içeriyor olabilir; bu artık geçersizdir). Türlerin tam listesi ve anlamları
+için `SCHEMA.md` içindeki "`record_type` değerleri" bölümüne bakın.
 
 Sayıların alındığı ARGE denetim dosyaları:
 `docs/arge-guven-2026-07/arge_hibrit_veri.md` ve

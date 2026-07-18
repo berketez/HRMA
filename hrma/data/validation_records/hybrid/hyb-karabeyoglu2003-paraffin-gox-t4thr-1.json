@@ -50,9 +50,10 @@
     "scale_up",
     "nasa_ames_hcf",
     "paraffin",
-    "liquefying_fuel"
+    "liquefying_fuel",
+    "off_nominal_throttling"
   ],
-  "notes": "AIAA 2003-1162 Tablo 2 (s.11) + Tablo 3 (s.12), test '4THR-1'. NASA Ames Hybrid Combustion Facility; Pc araligi ~10-68 atm, GOX. Grain boyu bildiride test basina RAPOR EDILMEMIS; HCF grainleri 33 veya 45 inc (s.6, Sekil 8 karsilastirmasi). Test basina atama guvenilir dayanak olmadigi icin YAPILMADI (grain_length_in null; VARSAYIM olarak bile ancak bu iki degerden biri olabilir). c* verimi hesabinda lule Cd = 0.99 (Ek, Es. A7). Kampanya regresyon yasasi (Es. 2): rdot = 0.488*Gox^0.62 (mm/s; g/cm^2.s; gecerli O/F 1.7-2.3). Bildiri notu: orijinal test adi '4THR-1'; Tablo 2 not sutunu: 'Successful Test/Throttling'. Kisma (throttling) testi; basarili.",
+  "notes": "AIAA 2003-1162 Tablo 2 (s.11) + Tablo 3 (s.12), test '4THR-1'. NASA Ames Hybrid Combustion Facility; Pc araligi ~10-68 atm, GOX. Grain boyu bildiride test basina RAPOR EDILMEMIS; HCF grainleri 33 veya 45 inc (s.6, Sekil 8 karsilastirmasi). Test basina atama guvenilir dayanak olmadigi icin YAPILMADI (grain_length_in null; VARSAYIM olarak bile ancak bu iki degerden biri olabilir). c* verimi hesabinda lule Cd = 0.99 (Ek, Es. A7). Kampanya regresyon yasasi (Es. 2): rdot = 0.488*Gox^0.62 (mm/s; g/cm^2.s; gecerli O/F 1.7-2.3). Bildiri notu: orijinal test adi '4THR-1'; Tablo 2 not sutunu: 'Successful Test/Throttling'. Kisma (throttling) testi; basarili. OFF-NOMINAL (2026-07-18): kisma (throttling) testi — HRMA karali-hal modeli ortalama mdot ile kosar, Pc kiyasi temsili kestirimdir; kayit ana katmanda tutuldu, 'worst' anlatiminda bu bilgi verilmelidir.",
   "anomaly": {
     "flag": false
   }

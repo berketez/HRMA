@@ -1,8 +1,67 @@
 # HRMA — Validation Status & Known Limitations
 
-*Last updated: 2026-07-16. This document states honestly what HRMA has been verified
+*Last updated: 2026-07-18. This document states honestly what HRMA has been verified
 against, where it is reliable, and where it is not. HRMA is a **preliminary-design
 and educational tool**, not a flight-qualification tool.*
+
+## 2026-07-18 — Correlation-driven physics review (v2.5.0)
+
+The first full correlation run against the 136-record real-experiment database
+exposed four defects; all were fixed as **literature-backed constant/physics
+corrections** (never by feeding measured values back into the model):
+
+- **critical — 'gox' oxidizer was not handled at all.** The oxidizer dispatch
+  in `combustion_analysis` only knew n2o/lox/h2o2/air; gaseous-oxygen records
+  ran an **oxygen-free** equilibrium (c\* ≈ 2530 m/s, non-physical). Fixed by
+  adding the gox/o2 branch (O₂, ΔHf=0 at 298 K); paraffin/GOX c\* is now
+  ~1822 m/s (within ~1 % of CEA). Unknown fuel/oxidizer keys now raise instead
+  of silently producing garbage, and the correlation runner captures engine
+  warnings per record.
+- **major — HTPB heat of formation was wrong** (−125 kJ/mol "estimated"
+  ≈ −2.31 MJ/kg vs the CEA R-45 card's +0.05 MJ/kg). This under-predicted T_c
+  by ~300 K in the fuel-rich region the experiments actually live in
+  (O/F 2.9–4.6), the root cause of the previous −6.2 % hybrid c\* bias.
+  Paraffin ΔHf was also moved to the NIST n-dodecane(l) value.
+- **major — solid strand burn rates used a generic default a–n for every
+  propellant**, and the coefficient's origin is MPa-based while the engine
+  evaluates in bar (a one-sided ×2.24 inflation; the old +83.8 % cell).
+  Published Nakka KNDX/KNSB piecewise regime fits now live in a central
+  `hrma/data/burn_rate_db.py` (explicit units, source, and
+  `fit_source_records`) and the strand adapter uses them.
+- **minor — regression-rate flux basis.** HRMA's hybrid a–n coefficients are
+  G_ox-based literature fits; the validation adapter evaluated them against
+  G_total, stacking a (1+1/OF)^n factor. The validation layer now runs
+  `flux_mode='ox'` (the design path is unchanged).
+
+**Honesty notes on the new table (read before quoting numbers):**
+
+- The **hybrid isp/thrust cells got *worse* on paper (+1.8 % → +9.6 %) and this
+  is correct**: the old +1.8 % was two errors cancelling (c\* deficit × ideal-CF
+  excess). With c\* fixed, the ideal-CF optimism is visible. HRMA predicts
+  *theoretical* performance; the residual is consistent with un-modelled nozzle
+  losses and delivered efficiency (records carry no nozzle geometry to do
+  better without guessing).
+- The **solid burn_rate cell (0.5 % medAPE) is in-sample**: the regime
+  coefficients are the source author's own least-squares fits of the same 27
+  strand points. It validates data entry + the piecewise implementation, not
+  independent prediction (mechanically traceable via `fit_source_records`).
+- The **hybrid chamber_pressure residual (+16.8 %)** is the theoretical-c\*
+  chain: measured η_c\* (0.77–0.90 in the GOX campaign) is deliberately *not*
+  fed back (circularity ban). The worst main-layer test is the throttling test
+  4Thr-1, run with a steady-state average-ṁ model (tagged `off_nominal`).
+- The **hybrid regression_rate cell (−20.2 %, medAPE 35.1 %)** is now honest
+  rather than accidentally neutral: the Karabeyoglu paraffin subset sits near
+  its own published law, while the Rezaei low-flux HTPB/N₂O subset is
+  under-predicted by up to ~2× — a **documented model limit** (single published
+  a–n per fuel; Doran 2007 validity ≈ 10–30 g/cm²·s; radiation and small-motor
+  effects dominate below that). No coefficient was tuned to fix this.
+- One record (`...t4l-12`) was anomaly-flagged after the source PDF was
+  re-checked: the paper's own Table 2 port diameter contradicts its own
+  G columns and the grain OD (physically impossible chain). The published
+  value was kept, the record quarantined — data is never "corrected" by guess.
+- Guard tests (`tests/test_correlation_guards.py`) freeze this table's
+  baseline per cell (×1.25 degradation gate, absolute ceilings where approved,
+  over-improvement warnings against circularity) keyed to the DB content hash.
 
 ## 2026-07-16 — Leckner gas-emissivity radiation model
 
@@ -98,24 +157,24 @@ markers is machine-generated; the rest of this document remains hand-written.
 <!-- AUTO-CORRELATION:BEGIN -->
 *This block is auto-generated from the real-experiment correlation run — do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
-- Generated: 2026-07-17 (runner v1, adapter v1)
-- Experiment DB content hash: `334aec278367db44a82d929e15fecf7df476e9967a98998e138aada7d0508256`
+- Generated: 2026-07-18 (runner v1, adapter v1)
+- Experiment DB content hash: `e0b29e75c2aad81a1b7c034a26c6148e1fae2833f6ae81a3ab80599ed77b33eb`
 - Records: 136 total — scored 76, insufficient inputs 53, not supported (v1) 7, runner errors 0
 - Signed error convention: (predicted - measured) / measured x 100. Outliers are flagged, never dropped; anomaly-flagged records are aggregated separately.
 
 | Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test |
 |---|---|---|---|---|---|---|---|
-| hybrid | c_star | main | 18 | -6.2 | 6.3 | 7.2 | hyb-rezaei2018-htpb-n2o-t68 |
-| hybrid | chamber_pressure | main | 36 | +41.2 | 34.7 | 59.0 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 |
-| hybrid | isp | main | 18 | +1.8 | 3.0 | 4.4 | hyb-rezaei2018-htpb-n2o-t69 |
-| hybrid | port_diameter_final | main | 18 | -8.0 | 8.7 | 9.0 | hyb-rezaei2018-htpb-n2o-t65 |
-| hybrid | regression_rate | main | 36 | -5.3 | 35.9 | 38.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 |
-| hybrid | thrust | main | 18 | +1.8 | 3.0 | 4.4 | hyb-rezaei2018-htpb-n2o-t69 |
+| hybrid | c_star | main | 18 | +0.1 | 2.3 | 3.3 | hyb-rezaei2018-htpb-n2o-t55 |
+| hybrid | chamber_pressure | main | 35 | +16.8 | 13.8 | 20.7 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 |
+| hybrid | isp | main | 18 | +9.6 | 9.1 | 10.5 | hyb-rezaei2018-htpb-n2o-t69 |
+| hybrid | port_diameter_final | main | 18 | -9.4 | 10.1 | 10.6 | hyb-rezaei2018-htpb-n2o-t65 |
+| hybrid | regression_rate | main | 35 | -20.2 | 35.1 | 35.8 | hyb-rezaei2018-htpb-n2o-t69 |
+| hybrid | thrust | main | 18 | +9.6 | 9.1 | 10.5 | hyb-rezaei2018-htpb-n2o-t69 |
 | liquid | isp_vac | main | 4 | +3.0 | 2.8 | 4.0 | liq-j2-sa503-1968-mr55-spec |
 | liquid | thrust_vac | main | 1 | +0.7 | 0.7 | 0.7 | liq-rs25-109pct-spec |
-| solid | burn_rate | main | 27 | +83.8 | 89.9 | 89.3 | sol-nakka1999-kndx-p01 |
-| hybrid | chamber_pressure | anomaly | 8 | +147.1 | 92.8 | 203.7 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
-| hybrid | regression_rate | anomaly | 8 | +16.4 | 17.3 | 18.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-06 |
+| solid | burn_rate | main | 27 | -0.4 | 0.5 | 2.0 | sol-nakka1999-knsb-p09 |
+| hybrid | chamber_pressure | anomaly | 9 | +66.4 | 33.6 | 116.9 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
+| hybrid | regression_rate | anomaly | 9 | +5.8 | 7.8 | 20.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 |
 <!-- AUTO-CORRELATION:END -->
 
 ## Known limitations (do NOT design beyond these without independent check)

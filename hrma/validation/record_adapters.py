@@ -412,6 +412,14 @@ def _run_hybrid(record: Dict[str, Any]) -> Dict[str, Any]:
         "test bazli verim yok). Teslim c* olcumune karsi pozitif sapma "
         "beklenir (tipik eta_c* 0.90-0.98).")
     result["adapter_notes"].append(
+        "chamber_pressure tahmini de ayni teorik c* zincirindendir; olculen "
+        "eta_c* modele geri beslenmez (dongusellik yasagi), pozitif sapma "
+        "model-formu geregidir.")
+    result["adapter_notes"].append(
+        "flux_mode='ox': HRMA regresyon katsayilari G_ox tabanli literatur "
+        "fitleridir (Doran 2007, Karabeyoglu 2003); dogrulama katmani "
+        "katsayinin kendi aki tabaniyla kosar.")
+    result["adapter_notes"].append(
         "Grain boyu HRMA tarafindan yakit debisi talebinden boyutlandirilir; "
         "kayit geometrisindeki grain_length zorlanmaz (model-formu siniri).")
 
@@ -434,7 +442,11 @@ def _run_hybrid(record: Dict[str, Any]) -> Dict[str, Any]:
             oxidizer_type=ox_key,
             initial_gox=g_ox,
             fuel_density=rho_f,
-            flux_mode="total",
+            # G_ox tabanli fit katsayilari G_ox ile degerlendirilir; 'total'
+            # kombinasyonu (1+1/OF)^n = 1.15-1.36 sistematik carpani bindirir
+            # (2026-07-18 fizik incelemesi). Tasarim yolunun varsayilani
+            # degistirilmedi; bu yalniz dogrulama katmani karari.
+            flux_mode="ox",
             track_performance=False,
             uq_mode=True,
             combustion_analyzer=analyzer,
@@ -760,17 +772,42 @@ def _run_strand(record: Dict[str, Any]) -> Dict[str, Any]:
     if missing:
         return _insufficient(result, missing)
 
-    result["assumed_defaults"]["burn_rate_a"] = 0.005
-    result["assumed_defaults"]["burn_rate_n"] = 0.35
-    result["adapter_notes"].append(
-        "Strand kiyasi r = a*P^n noktasal degerlendirmedir (motor kosusu "
-        "yok); a-n HRMA varsayilanidir.")
+    from hrma.data import burn_rate_db
 
-    engine = SolidRocketEngine(
-        propellant_type=prop_key,
-        chamber_pressure=pressure / 1e5,
-    )
-    r_mps = float(engine.a) * (pressure / 1e5) ** float(engine.n)  # m/s
+    if burn_rate_db.has_law(prop_key):
+        # Merkezi rejim yasasi (v2.5.0 G4): yakit-basina, basinc-rejimi-basina
+        # yayimlanmis a-n (birim sozlesmesi tabloda acik).
+        law = burn_rate_db.BURN_RATE_LAWS[prop_key]
+        p_mpa = pressure / 1e6
+        r_mps = burn_rate_db.burn_rate_mps(prop_key, pressure)
+        result["assumed_defaults"]["burn_rate_law"] = (
+            f"{prop_key} rejim tablosu ({law['source']})")
+        result["adapter_notes"].append(
+            "Strand kiyasi r(P) noktasal degerlendirmedir (motor kosusu yok); "
+            "a-n merkezi rejim tablosundan (hrma/data/burn_rate_db.py).")
+        if record.get("test_id") in law.get("fit_source_records", []):
+            result["adapter_notes"].append(
+                "IN-SAMPLE: bu kaydin olcumu, kullanilan a-n fitinin kaynak "
+                "veri setindedir; skor bagimsiz tahmin degil implementasyon "
+                "dogrulamasidir (bkz. burn_rate_db durustluk notu).")
+        if not burn_rate_db.in_range(prop_key, p_mpa):
+            result["adapter_notes"].append(
+                f"Basinc {p_mpa:.3f} MPa kaynak fitin yayimlanmis araliginin "
+                f"disinda; en yakin uc rejim ekstrapole edildi (dusuk guven).")
+    else:
+        # Dogrulanmis yasa yok: motor kurucu varsayilani (dusuk guven).
+        result["assumed_defaults"]["burn_rate_a"] = 0.005
+        result["assumed_defaults"]["burn_rate_n"] = 0.35
+        result["adapter_notes"].append(
+            "Strand kiyasi r = a*P^n noktasal degerlendirmedir (motor kosusu "
+            "yok); yakit icin dogrulanmis rejim yasasi YOK, HRMA genel "
+            "varsayilan a-n kullanildi (dusuk guven; birim/koken belgesiz).")
+
+        engine = SolidRocketEngine(
+            propellant_type=prop_key,
+            chamber_pressure=pressure / 1e5,
+        )
+        r_mps = float(engine.a) * (pressure / 1e5) ** float(engine.n)  # m/s
 
     result["predictions"] = {
         "burn_rate": r_mps,          # m/s

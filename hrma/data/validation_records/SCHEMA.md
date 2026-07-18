@@ -35,7 +35,7 @@ KULLANILMAZ (yeni bağımlılık yasağı — paket bundle'ında yok).
 |---|---|---|---|
 | `schema_version` | str | hayır | Verilirse `"1.0"` olmalı |
 | `test_id` | str | evet | Benzersiz kimlik; `[a-z0-9][a-z0-9_.-]{2,63}` (büyük/küçük duyarsız). Öneri: `<tip>-<kaynak><yıl>-<etiket>` (ör. `hyb-rezaei2018-t26`) |
-| `record_type` | str | hayır | `static_fire` (varsayılan) / `flight` / `engine_spec` |
+| `record_type` | str | hayır | Verilmezse `static_fire`. Geçerli değerler ve anlamları aşağıdaki "`record_type` değerleri" bölümünde |
 | `motor_type` | str | evet | `hybrid` / `solid` / `liquid`; dosyanın bulunduğu alt klasörle uyuşmalı |
 | `source` | obje | evet | Künye bloğu (aşağıda) |
 | `propellants` | obje | evet | Boş olmayan sözlük; değerler str/sayı/null (ör. `oxidizer`, `fuel`, `fuel_density_kgpm3`, `hrma_fuel_key`) |
@@ -51,6 +51,24 @@ KULLANILMAZ (yeni bağımlılık yasağı — paket bundle'ında yok).
 | `notes` | str | hayır | Serbest metin: test standı, bilinen anormallikler, taşıma notları |
 
 Bilinmeyen üst düzey alan REDDEDİLİR (yazım hatası koruması).
+
+## `record_type` değerleri
+
+Geçerli değerler `hrma/validation/experiment_db.py` içindeki `RECORD_TYPES`
+kümesiyle birebir eşleşir (tek doğruluk kaynağı). Bilinmeyen bir değer
+REDDEDİLİR. İlk üç tür başlangıç şemasından; son dört tür v2.5.0 "Güven Sürümü"
+G3 küratörlük dalgasında birinci sınıf tür olarak eklendi (daha önce yalnız
+`tags`/`notes` ile işaretleniyorlardı).
+
+| Değer | Anlamı |
+|---|---|
+| `static_fire` | **Varsayılan** (`record_type` verilmezse bu kabul edilir). Tek bir yer ateşlemesinin motor-düzeyi ölçüm noktası: itki, oda basıncı, Isp, c\*, O/F, regresyon hızı gibi ölçülen büyüklükler. Korelasyon koşucusunun ana istatistik gövdesini bu tür oluşturur. |
+| `flight` | Gerçek uçuştan geri-hesaplanan performans ölçümü (yer static fire yerine uçuş verisi). Şemada tanımlıdır; şu an veritabanında bu türde kayıt yoktur. |
+| `engine_spec` | Yayımlanmış motor künyesi / spec-sheet çıpası (ör. RS-25, Vulcain 2.1, J-2). Ham bir ateşleme değil, üretici/kurum anma değerleridir; bağımsız nokta-kıyas çıpası olarak kullanılır. |
+| `strand_burn_rate` | Crawford/strand yakıcıda ölçülen tek bir yanma-hızı - basınç (r(P)) noktası; motor koşusu yoktur. Saint-Robert a·P^n güç-yasasının noktasal doğrulaması için kullanılır (ağırlıklı katı KN-şeker verisi). |
+| `campaign_statistics` | Çok-yakmalı bir kampanyanın istatistik özeti: ortalama/standart sapma/%95 güven aralığı seti. Tek bir static fire değildir; korelasyon koşucusunun v1 sürümünde `not_supported` sayılır (nokta-kıyasa girmez). |
+| `regression_correlation` | Kaynağın kendi verisinden türettiği regresyon-hızı korelasyonu (ör. rdot = a·G_ox^n güç-yasası katsayıları). Bir yakma serisinden türer, tek static fire değildir; v1 koşucusunda `not_supported`. |
+| `engine_test_point` | Motor testi nokta ölçümü (ör. ölçülmüş c\*). `engine_spec` kıyas yolundan HRMA tahmini ile noktasal karşılaştırmaya sokulur; `engine_spec` yayımlanmış anma değeriyken bu gerçek bir ölçüm noktasıdır. |
 
 ## `source` bloğu
 

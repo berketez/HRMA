@@ -246,6 +246,11 @@ class PropellantDatabase:
                 'heat_of_formation': -494.6,
                 'combustion_temp': 1800,  # K (lower than APCP)
                 'molecular_weight': 101.1,  # KNO3
+                # DİKKAT (2026-07-18 fizik incelemesi): bu a-n çifti birim
+                # etiketsizdir ve Nakka'nın yayımlanmış rejim fitleriyle hiçbir
+                # birim yorumunda uyuşmaz (bar yorumu +308%, MPa yorumu +45%
+                # sapma) — kaynağı doğrulanamadı, yalnız kaba gösterim değeri.
+                # Doğrulanmış, birim-açık rejim fitleri: hrma/data/burn_rate_db.py
                 'burn_rate_a': 0.008,
                 'burn_rate_n': 0.45,
                 'specific_impulse': 130,  # s (lower performance)

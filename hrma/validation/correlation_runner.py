@@ -37,6 +37,7 @@ import json
 import math
 import statistics as _stats
 import time
+import warnings as _warnings
 from typing import Any, Dict, Iterable, List, Optional
 
 from hrma.validation import record_adapters
@@ -254,14 +255,20 @@ def run_correlation(records: Optional[Iterable[Dict[str, Any]]] = None,
     record_results: List[Dict[str, Any]] = []
     for rec in stat_records:
         t0 = time.perf_counter()
-        try:
-            adapter_result = adapter(rec)
-            status = adapter_result.get("status", "runner_error")
-            reason = adapter_result.get("reason")
-        except Exception as exc:  # patlayan kayit listede kalir (etiketli)
-            adapter_result = {}
-            status = "runner_error"
-            reason = f"{type(exc).__name__}: {exc}"
+        # Motor uyarilari (warnings.warn) kayit basina YAKALANIR ve sonuca
+        # yazilir — 'gox' bugu aylarca yalniz stderr'e akan uyarilarla gizlendi
+        # (2026-07-18 fizik incelemesi); uyari artik gorunur veri.
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
+            try:
+                adapter_result = adapter(rec)
+                status = adapter_result.get("status", "runner_error")
+                reason = adapter_result.get("reason")
+            except Exception as exc:  # patlayan kayit listede kalir (etiketli)
+                adapter_result = {}
+                status = "runner_error"
+                reason = f"{type(exc).__name__}: {exc}"
+        engine_warnings = sorted({str(w.message) for w in caught})
         elapsed = time.perf_counter() - t0
 
         rr = {
@@ -279,6 +286,7 @@ def run_correlation(records: Optional[Iterable[Dict[str, Any]]] = None,
             "assumed_defaults": adapter_result.get("assumed_defaults", {}),
             "adapter_notes": adapter_result.get("adapter_notes", []),
             "convergence": adapter_result.get("convergence"),
+            "engine_warnings": engine_warnings,
             "scores": (_score_adapter_result(adapter_result)
                        if status == "ok" else {}),
             "elapsed_s": round(elapsed, 3),
@@ -416,5 +424,13 @@ def to_markdown(result: Dict[str, Any]) -> str:
             lines += ["", f"## {title}", ""]
             for item in items:
                 lines.append(f"- `{item['test_id']}`: {item[field]}")
+
+    warned = [rr for rr in result.get("records", [])
+              if rr.get("engine_warnings")]
+    if warned:
+        lines += ["", "## Engine warnings during record runs", ""]
+        for rr in warned:
+            for msg in rr["engine_warnings"]:
+                lines.append(f"- `{rr['test_id']}`: {msg}")
 
     return "\n".join(lines) + "\n"

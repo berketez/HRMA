@@ -10,7 +10,9 @@ from hrma.data.propellant_database import (
     HYBRID_REGRESSION_COEFFICIENTS,
     N2O_LIQUID_DENSITY_SAT_25C,
 )
-from hrma.constants import G_0, LAMBDA_BELL, LAMBDA_PARABOLIC, LAMBDA_CONICAL_15DEG
+from hrma.constants import (G_0, LAMBDA_BELL, LAMBDA_PARABOLIC,
+                            LAMBDA_CONICAL_15DEG, C_STAR_PLAUSIBLE_BAND_MPS,
+                            C_STAR_BAND_DEFAULT_MPS)
 import warnings
 
 class HybridRocketEngine:
@@ -433,9 +435,15 @@ class HybridRocketEngine:
 
         c_star = perf['c_star']
 
-        # c* validasyonu (fiziksel bant; hibrit yakıt/oksitleyici aralığı)
-        if not (1000 < c_star < 1900):
-            warnings.warn(f"Anormal c* değeri: {c_star:.0f} m/s (beklenen ~1300-1850)")
+        # c* validasyonu — oksitleyici-farkında fiziksel bant (v2.5.0 G4).
+        # Eski tek bant (1000-1900) N2O-merkezliydi: GOX/LOX'ta meşru ~1830
+        # değerler tavana dayanıyor, N2O'da 1700+ gerçek anomaliler kaçıyordu.
+        band = C_STAR_PLAUSIBLE_BAND_MPS.get(str(ox).lower(),
+                                             C_STAR_BAND_DEFAULT_MPS)
+        if not (band[0] < c_star < band[1]):
+            warnings.warn(
+                f"Anormal c* değeri: {c_star:.0f} m/s "
+                f"({ox} için beklenen bant {band[0]:.0f}-{band[1]:.0f} m/s)")
 
         # c* verimi (v2.5.0 UQ): teslim edilen c* = eta * c*_teorik. Teorik
         # değer ayrıca saklanır (raporlama). eta None ise davranış değişmez.

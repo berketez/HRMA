@@ -86,13 +86,22 @@ class CombustionAnalyzer:
                 'formula': 'C4H6',  # Simplified HTPB monomer
                 'molecular_weight': 54.09,  # g/mol
                 'density': 920,  # kg/m³
-                'enthalpy_formation': -125.0  # kJ/mol (estimated)
+                # CEA R-45 HTPB kartı (RocketCEA 'HTPB' FROM_RPL_DATA):
+                # +1200 cal/100 g = +50.2 kJ/kg -> C4H6 birimi başına +2.7 kJ/mol.
+                # Eski -125.0 kJ/mol '(estimated)' değeri -2311 kJ/kg demekti ve
+                # yakıt-zengin bölgede T_c'yi ~300 K, c*'ı %4-10 düşük veriyordu
+                # (2026-07-18 korelasyon fizik incelemesi). Kürlenmiş HTPB/IPDI
+                # için literatür biraz daha negatiftir (~-0.3..-0.5 MJ/kg);
+                # CEA kartı referans alındı ki CEA çapraz-doğrulaması tutarlı olsun.
+                'enthalpy_formation': 2.7  # kJ/mol (CEA R-45 kartı, +50 kJ/kg)
             },
             'paraffin': {
                 'formula': 'C12H26',  # Typical paraffin wax
                 'molecular_weight': 170.33,  # g/mol
                 'density': 900,  # kg/m³
-                'enthalpy_formation': -290.0  # kJ/mol
+                # NIST WebBook: n-dodekan(l) ΔHf° = -350.9 kJ/mol. Eski -290.0
+                # değeri kaynaksızdı ve karışımı ~%1-1.5 fazla enerjik yapıyordu.
+                'enthalpy_formation': -350.9  # kJ/mol (NIST, n-dodekan sıvı)
             },
             # Aşağıdaki polimer ΔHf° değerleri KATI faz, tekrar birimi başına
             # (kJ/mol). Monomer-gaz değerleriyle KARIŞTIRILMAMALIDIR (ör. etilen
@@ -145,10 +154,10 @@ class CombustionAnalyzer:
             'AL2O3_l': {'Hf': -1582.0, 'MW': 101.96, 'phase': 'liquid'},
             'C_s': {'Hf': 0.0, 'MW': 12.01, 'phase': 'solid'},
             
-            # Fuel components
-            'C12H26': {'Hf': -290.0, 'MW': 170.33, 'phase': 'liquid'},  # Paraffin approximation
+            # Fuel components (propellant_specs ile aynı kaynaklar)
+            'C12H26': {'Hf': -350.9, 'MW': 170.33, 'phase': 'liquid'},  # NIST n-dodekan(l)
             'AL': {'Hf': 0.0, 'MW': 26.98, 'phase': 'solid'},
-            'HTPB': {'Hf': -125.0, 'MW': 54.0, 'phase': 'solid'},  # Approximation C4H6
+            'HTPB': {'Hf': 2.7, 'MW': 54.0, 'phase': 'solid'},  # CEA R-45 kartı (C4H6 birimi)
         }
     
     def analyze_combustion(self, fuel_composition: Dict, oxidizer_type: str,
@@ -358,14 +367,22 @@ class CombustionAnalyzer:
                 elements['C'] += fuel_fraction * 5 * 12.01 / 100.12
                 elements['H'] += fuel_fraction * 8 * 1.01 / 100.12
                 elements['O'] += fuel_fraction * 2 * 16.00 / 100.12
-        
+            else:
+                # Sessiz düşme YASAK (oksitleyici dalındaki gerekçeyle aynı):
+                # bilinmeyen yakıt elemental katkısız kalır ve denge çöp üretir.
+                raise ValueError(
+                    f"Bilinmeyen yakıt anahtarı: '{fuel_type}'. Desteklenen: "
+                    f"htpb, paraffin, pe, pmma, abs, pla, aluminum")
+
         # Process oxidizer
         if oxidizer_type.lower() == 'n2o':
             # N2O
             elements['N'] += oxidizer_mass_fraction * 2 * 14.01 / 44.01
             elements['O'] += oxidizer_mass_fraction * 16.00 / 44.01
-        elif oxidizer_type.lower() == 'lox':
-            # O2
+        elif oxidizer_type.lower() in ('lox', 'gox', 'o2', 'oxygen'):
+            # O2 (sıvı ya da gaz — elemental katkı aynı). 'gox' eskiden hiçbir
+            # dala girmiyordu: elemental O=0 kalıyor, denge OKSİJENSİZ çözülüp
+            # c*'ı ~%40 şişiriyordu (2026-07-18 korelasyon fizik incelemesi).
             elements['O'] += oxidizer_mass_fraction * 2 * 16.00 / 32.00
         elif oxidizer_type.lower() == 'h2o2':
             # H2O2
@@ -377,7 +394,15 @@ class CombustionAnalyzer:
             # Eski kodda mol kesirleri (0.21/0.79) kütle kesri gibi kullanılıyordu.
             elements['O'] += oxidizer_mass_fraction * AIR_O2_MASS_FRACTION * 2 * 16.00 / 32.00
             elements['N'] += oxidizer_mass_fraction * AIR_N2_MASS_FRACTION * 2 * 14.01 / 28.01
-        
+        else:
+            # Sessiz düşme YASAK: bilinmeyen anahtar elemental katkısız kalır
+            # ve denge fiziksel olmayan sonuç üretir ('gox' bugı aylarca böyle
+            # gizlendi). Korelasyon koşucusu bu hatayı 'runner_error' olarak
+            # etiketler; UI listeleri yalnız tanınan anahtarları sunar.
+            raise ValueError(
+                f"Bilinmeyen oksitleyici anahtarı: '{oxidizer_type}'. "
+                f"Desteklenen: n2o, lox, gox/o2/oxygen, h2o2, air")
+
         return elements
     
     def _calculate_stoichiometric_of(self, fuel_composition: Dict, oxidizer_type: str) -> float:
@@ -418,8 +443,8 @@ class CombustionAnalyzer:
         if oxidizer_type.lower() == 'n2o':
             # N2O contains 36.36% oxygen by mass
             oxidizer_required = oxygen_required / 0.3636
-        elif oxidizer_type.lower() == 'lox':
-            # Pure oxygen
+        elif oxidizer_type.lower() in ('lox', 'gox', 'o2', 'oxygen'):
+            # Saf oksijen (sıvı ya da gaz) — açık dal; sessiz else'e güvenilmez
             oxidizer_required = oxygen_required
         elif oxidizer_type.lower() == 'h2o2':
             # H2O2'de yakıt oksidasyonu için KULLANILABİLİR oksijen:
@@ -548,6 +573,10 @@ class CombustionAnalyzer:
         elif ox_key == 'lox':
             # O2 referans hali Hf = 0 (NIST-JANAF); kriyojenik sıvının
             # duyulur entalpi farkı ihmal edilmiştir (CEA'da ~ -0.4 MJ/kg).
+            hf_ox, mw_ox = 0.0, 31.9988
+        elif ox_key in ('gox', 'o2', 'oxygen'):
+            # Gaz O2, 298 K referans hali: Hf = 0 TAM doğrudur (lox'taki
+            # kriyojenik yaklaşımdan farklı olarak duyulur düzeltme gerekmez).
             hf_ox, mw_ox = 0.0, 31.9988
         elif ox_key == 'h2o2':
             # Sıvı H2O2: Hf = -187.78 kJ/mol (NIST Chemistry WebBook)

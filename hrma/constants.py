@@ -63,6 +63,30 @@ PA_PER_BAR = 1e5  # 1 bar = 100000 Pa
 BAR_PER_PA = 1e-5
 
 # -----------------------------------------------------------------------------
+# Makul c* Bantları — oksitleyici-farkında fiziksel doğrulama (v2.5.0 G4)
+# -----------------------------------------------------------------------------
+# Teorik denge c* (m/s) için makullük bandı; hibrit HC yakıtları (HTPB,
+# parafin, PE, PMMA, ABS, PLA), Pc 5-50 bar. Eski tek bant (1000-1900)
+# N2O-merkezliydi: LOX/GOX çiftlerinde meşru ~1830 m/s değerler tavana
+# dayanıyor, N2O'da ise gerçek anomaliler (1700+) kaçıyordu.
+# Dayanak (NASA CEA maksimumları + ~%8 pay): N2O-HC maks ~1621 -> 1750;
+# GOX/LOX-HC maks ~1812 -> 1950/1980; H2O2(%98)-HC maks ~1673 -> 1780.
+# Alt sınırlar aşırı yakıt-zengin lab koşulları (örn. N2O O/F~1.2-1.5,
+# CEA ~1200-1280) eksi pay. 'air' bandı hava-solunumlu akademik testler
+# için kaba tahmindir (belirsiz). Bant eta_c_star uygulanmadan önce,
+# TEORİK c* üzerinde denetlenir.
+C_STAR_PLAUSIBLE_BAND_MPS = {
+    'n2o': (950.0, 1750.0),
+    'lox': (1100.0, 1950.0),
+    'gox': (1100.0, 1980.0),
+    'o2': (1100.0, 1980.0),
+    'oxygen': (1100.0, 1980.0),
+    'h2o2': (900.0, 1780.0),
+    'air': (600.0, 1400.0),
+}
+C_STAR_BAND_DEFAULT_MPS = (900.0, 2000.0)  # bilinmeyen oksitleyici: geniş bant
+
+# -----------------------------------------------------------------------------
 # Nozzle Diverjans Düzeltme Faktörleri (lambda)
 # -----------------------------------------------------------------------------
 # lambda = (1 + cos(alpha)) / 2 formülünden türetilmiş değerler
