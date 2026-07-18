@@ -7,7 +7,7 @@ presents results in a dark-themed web interface with an interactive 3D
 digital twin, an Analysis Deck of engineering panels, and working CAD /
 drawing / report exports.
 
-This manual describes HRMA **v2.4.6**.
+This manual describes HRMA **v2.5.1**.
 
 > **Scope notice.** HRMA is a preliminary-design and educational tool built
 > on closed-form and 1D engineering correlations. It is not a
@@ -38,7 +38,7 @@ This manual describes HRMA **v2.4.6**.
 
 ### Option A — Windows installer (recommended on Windows)
 
-1. Download `HRMA-Setup-2.4.6.exe` from the
+1. Download `HRMA-Setup-2.5.1.exe` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest).
 2. Double-click and follow the wizard (Next, Next, Install). The installer
    is per-user: no administrator rights are required.
@@ -49,7 +49,7 @@ Python and all libraries are bundled; no separate installation is needed.
 
 ### Option B — macOS disk image (recommended on macOS)
 
-1. Download `HRMA-Setup-2.4.6-macOS.dmg` from the
+1. Download `HRMA-Setup-2.5.1-macOS.dmg` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest)
    (Apple Silicon, macOS 11 or newer).
 2. Open the DMG and drag `HRMA` into `Applications`.
@@ -234,7 +234,7 @@ more) that appears after a successful calculation. Every panel:
 - renders tables, stat cards, and Plotly charts, with ok / warning / error
   badges.
 
-The 13 panels in v2.4.6:
+The 13 panels (introduced through v2.4.6, current in v2.5.1):
 
 | Panel | Endpoint | Motor types | What it computes |
 |---|---|---|---|

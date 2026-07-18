@@ -11,8 +11,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.5.0.exe**](https://github.com/berketez/HRMA/releases/download/v2.5.0/HRMA-Setup-2.5.0.exe) — double-click, Next → Next → Install |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.5.0-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.5.0/HRMA-Setup-2.5.0-macOS.dmg) — drag HRMA to Applications |
+| **Windows 10/11** | [**HRMA-Setup-2.5.1.exe**](https://github.com/berketez/HRMA/releases/download/v2.5.1/HRMA-Setup-2.5.1.exe) — double-click, Next → Next → Install |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.5.1-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.5.1/HRMA-Setup-2.5.1-macOS.dmg) — drag HRMA to Applications |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -84,8 +84,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.5.0.exe`](https://github.com/berketez/HRMA/releases/download/v2.5.0/HRMA-Setup-2.5.0.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.5.0-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.5.0/HRMA-Setup-2.5.0-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.5.1.exe`](https://github.com/berketez/HRMA/releases/download/v2.5.1/HRMA-Setup-2.5.1.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.5.1-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.5.1/HRMA-Setup-2.5.1-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -197,14 +197,18 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## Version
 
-**HRMA v2.4.6**
+**HRMA v2.5.1**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - Professional Rocket Propulsion Design Tool
-- Last Updated: July 2026 (13-panel Analysis Deck with comparative analysis,
-  quasi-1D nozzle flow, staged combustion kinetics, materials database,
-  Leckner gas-emissivity radiation, NHNE injector design, physics-audit
-  fixes, native desktop window with automatic updates via GitHub Releases)
+- Last Updated: July 2026 (Confidence Release line: Monte Carlo uncertainty
+  quantification with sensitivity tornado, 199-record fully-cited
+  real-experiment validation database with automatic correlation report and
+  baseline guard tests, database-driven KNDX/KNSB burn-rate presets, visible
+  liquid 3D engine simulation deck, 13-panel Analysis Deck, quasi-1D nozzle
+  flow, staged combustion kinetics, Leckner gas-emissivity radiation, NHNE
+  injector design, native desktop window with automatic updates via GitHub
+  Releases)
 
 ## Ready to Design?
 
