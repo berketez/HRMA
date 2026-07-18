@@ -1,0 +1,79 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-sims1998-htpb-lox-hp24-5030",
+ "record_type": "engine_test_point",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "J.D. Sims, H.W. Coleman, 'Results of a 24-inch Hybrid Motor Performance Uncertainty Analysis', AIAA-98-4021, 34th Joint Propulsion Conference, Cleveland OH, 1998. NTRS 19980236002",
+  "doi": null,
+  "url": "https://ntrs.nasa.gov/citations/19980236002",
+  "access": "open",
+  "confidence": "high",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Tablo 1-2 (s.8) ve Tablo 6 (s.11) taranmış sayfa görüntüsünden okundu (2026-07-18). C* belirsizliği %95 güven düzeyinde kaynakta AÇIKÇA verili — veritabanındaki tek belirsizlik-aralıklı büyük ölçek c* ölçümü."
+ },
+ "propellants": {
+  "oxidizer": "lox",
+  "fuel": "htpb_itar",
+  "fuel_note": "HTPB bazlı; bileşen yüzdeleri ITAR nedeniyle raporda yok",
+  "hrma_oxidizer_key": "lox",
+  "hrma_fuel_key": "htpb"
+ },
+ "geometry": {
+  "grain_geometry": "multi_port",
+  "case_od_in": 24.0,
+  "throat_diameter_final_avg_in": 5.327,
+  "throat_note": "Son boğaz 4 yönden 5.375/5.278/5.269/5.386 in — asimetrik erozyon; ön boğaz değerleri kaynakta tutarsız raporlanmış (4.6 in ve 3.706 in x4), her ikisi de nota aynen aktarıldı."
+ },
+ "inputs": {
+  "lox_inlet_pressure_psia": 1500.0,
+  "lox_inlet_temperature_f": -268.0
+ },
+ "measured": {
+  "c_star_ftps": 5775.0,
+  "c_star_theoretical_ftps": 5772.0,
+  "c_star_efficiency_percent": 100.0,
+  "chamber_pressure_psia": 580.0,
+  "fuel_mass_loss_lbm": 322.0
+ },
+ "units_original": "ft/s, psia, lbm, F (İngiliz birimleri; Tablo 1-2, 6)",
+ "digitized": false,
+ "measurement_uncertainty": {
+  "c_star_ftps": {
+   "value": 113.0,
+   "type": "absolute",
+   "coverage_k": "stated",
+   "source": "Tablo 6, %95 güven düzeyi"
+  },
+  "c_star_theoretical_ftps": {
+   "value": 14.0,
+   "type": "absolute",
+   "coverage_k": "stated",
+   "source": "Tablo 6, CEA"
+  },
+  "c_star_efficiency_percent": {
+   "value": 2.0,
+   "type": "absolute",
+   "coverage_k": "stated",
+   "source": "Tablo 6"
+  },
+  "chamber_pressure_psia": {
+   "value": 5.0,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Tablo 1 (bias)"
+  },
+  "fuel_mass_loss_lbm": {
+   "value": 25.0,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Tablo 1 (tek tartım)"
+  }
+ },
+ "tags": [
+  "large_scale",
+  "uncertainty_quantified"
+ ],
+ "notes": "HRMA belirsizlik bekçileri için referans vaka: baskın belirsizlik kaynağı LOX venturi Cd (0.9622 +- 0.019). Uyarı verisi: 11-inç GOX motorunda ham eta_C* %107.4 ölçülmüştü (ölçüm biası örneği)."
+}

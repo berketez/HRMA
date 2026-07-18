@@ -29,7 +29,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-__all__ = ["BURN_RATE_LAWS", "has_law", "burn_rate_mmps", "burn_rate_mps"]
+__all__ = ["BURN_RATE_LAWS", "has_law", "burn_rate_mmps", "burn_rate_mps",
+           "resolve_engine_coeffs"]
 
 # r[mm/s] = a * (P[MPa])^n  (units: 'mmps_mpan')
 BURN_RATE_LAWS = {
@@ -109,3 +110,35 @@ def in_range(prop_key: str, p_mpa: float) -> bool:
     """Basınç, kaynak fitin yayımlanmış geçerlilik aralığında mı?"""
     regimes = BURN_RATE_LAWS[str(prop_key).lower()]["regimes"]
     return regimes[0]["p_min_mpa"] <= float(p_mpa) <= regimes[-1]["p_max_mpa"]
+
+
+def resolve_engine_coeffs(prop_key: str, p_bar: float) -> dict:
+    """Tasarım basıncındaki rejim katsayılarını MOTOR konvansiyonuna çevirir.
+
+    Motor konvansiyonu (SolidRocketEngine.calculate_burn_rate):
+        r[m/s] = a_engine * (P[bar])^n
+    DB konvansiyonu (bu modül):
+        r[mm/s] = a_db * (P[MPa])^n
+    Aynı r için: a_engine = a_db / (1000 * 10^n), n değişmez.
+
+    Returns:
+        {a, n, r_mmps, regime: {p_min_mpa, p_max_mpa}, in_range,
+         name, source} — a/n motor birimlerinde; r_mmps bilgi amaçlı.
+    Raises:
+        KeyError: yakıt için rejim yasası yoksa (has_law ile kontrol edin).
+    """
+    law = BURN_RATE_LAWS[str(prop_key).lower()]
+    p_mpa = float(p_bar) / 10.0
+    reg = _select_regime(law, p_mpa)
+    n = float(reg["n"])
+    a_engine = float(reg["a"]) / (1000.0 * 10.0 ** n)
+    return {
+        "a": a_engine,
+        "n": n,
+        "r_mmps": burn_rate_mmps(prop_key, p_mpa),
+        "regime": {"p_min_mpa": reg["p_min_mpa"],
+                   "p_max_mpa": reg["p_max_mpa"]},
+        "in_range": in_range(prop_key, p_mpa),
+        "name": law["name"],
+        "source": law["source"],
+    }

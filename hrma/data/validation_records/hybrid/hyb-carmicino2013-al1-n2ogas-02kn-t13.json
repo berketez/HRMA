@@ -1,0 +1,56 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-carmicino2013-al1-n2ogas-02kn-t13",
+ "record_type": "static_fire",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "F. Scaramuzzino, C. Carmicino, G. Festa, A. Viviani, A. Russo Sorge, 'Paraffin-based and metal-loaded HTPB fuel regression-rates study in a lab-scale hybrid rocket fed with N2O', 5th EUCASS, Münih, 2013",
+  "doi": null,
+  "url": "https://www.eucass.eu/component/docindexer/?task=download&id=4157",
+  "access": "open",
+  "confidence": "high",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Appendix Tablo A1 ve A2 (s.15) PDF metin katmanından birebir çıkarıldı (2026-07-18). C* kolonunun birimi kaynakta 'mm/s' basılı — değerler (1184-1419) açıkça m/s; bariz dizgi hatası, m/s olarak alındı."
+ },
+ "propellants": {
+  "oxidizer": "n2o",
+  "oxidizer_phase": "gaseous",
+  "oxidizer_note": "N2O GAZ fazında enjekte edildi (tüp rampası + regülatör); sıvı-N2O kayıtlarından ayrı değerlendirilmeli.",
+  "fuel": "htpb_micro_al",
+  "fuel_note": "%76.6 HTPB + %12.8 mikro-Al (6.5/8 um) + plastikleştirici",
+  "hrma_oxidizer_key": "n2o",
+  "hrma_fuel_key": "htpb"
+ },
+ "geometry": {
+  "grain_geometry": "cylindrical_single_port",
+  "case_id_mm": 69.2,
+  "grain_length_mm": 239,
+  "port_diameter_initial_mm": 23.8,
+  "throat_diameter_mm": null,
+  "throat_note": "Grafit lüle boğazı 9.6 veya 12 mm; test bazında hangisi olduğu tablolaştırılmamış.",
+  "injector_type": "showerhead_13x1.1mm_axial"
+ },
+ "inputs": {
+  "mdot_ox_kgps": 0.048,
+  "burn_time_s": 8.0,
+  "feed_pressure_bar": 20.0
+ },
+ "measured": {
+  "chamber_pressure_bar": 13.5,
+  "regression_rate_avg_mmps": 0.91,
+  "port_diameter_mean_mm": 31.2,
+  "of_ratio": 2.2,
+  "gox_kgpm2s": 63.3,
+  "gtot_kgpm2s": 91.9,
+  "c_star_mps": 1310.9,
+  "c_star_efficiency": 0.87
+ },
+ "units_original": "mm, kg/(m^2 s), kg/s, bar, mm/s, m/s (Tablo A1/A2; C* birimi kaynakta hatalı 'mm/s' basılı)",
+ "digitized": false,
+ "tags": [
+  "lab_scale",
+  "gaseous_oxidizer"
+ ],
+ "notes": "Eksenel showerhead enjeksiyon; eta_C* art-oda basıncı ve CEA teorik C* ile tanımlı. İtki/Isp test başına tablolaştırılmamış (yalnız zaman izleri figürlerde)."
+}

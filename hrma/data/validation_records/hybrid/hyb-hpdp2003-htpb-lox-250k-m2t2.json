@@ -1,0 +1,51 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-hpdp2003-htpb-lox-250k-m2t2",
+ "record_type": "engine_test_point",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "G. Story, T. Zoladz, J. Arves, D. Kearney, T. Abel, O. Park, 'Hybrid Propulsion Demonstration Program 250K Hybrid Motor', AIAA 2003-5198, 39th Joint Propulsion Conference, Huntsville AL, 2003. NTRS 20030068416",
+  "doi": null,
+  "url": "https://ntrs.nasa.gov/citations/20030068416",
+  "access": "open",
+  "confidence": "high",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Tablo 2 (s.9, taranmış sayfa görüntüsünden okundu) — değerler 'HPDP FINAL REPORT [17], lazer port haritalamalı' kaynaklı; Pc metin s.10 (2026-07-18)."
+ },
+ "propellants": {
+  "oxidizer": "lox",
+  "fuel": "htpb_pcpd",
+  "fuel_note": "HTPB + polisiklopentadien (PCPD), metal katkısız",
+  "hrma_oxidizer_key": "lox",
+  "hrma_fuel_key": "htpb"
+ },
+ "geometry": {
+  "grain_geometry": "multi_port_wagon_wheel",
+  "port_length_in": 380.0,
+  "port_length_note": "Tasarım değeri (Tablo 1); L/D 35.3.",
+  "throat_diameter_mm": null
+ },
+ "inputs": {
+  "burn_time_s": 38.9
+ },
+ "measured": {
+  "thrust_vacuum_lbf": 210065.5,
+  "isp_vacuum_s": 276.9,
+  "isp_vacuum_efficiency": 0.9,
+  "c_star_ftps": 5092.9,
+  "c_star_efficiency_percent": 93.5,
+  "of_ratio": 3.5,
+  "chamber_pressure_psia": 600
+ },
+ "units_original": "lbf, s, ft/s, psia (Tablo 2; İngiliz birimleri)",
+ "digitized": false,
+ "anomaly": {
+  "flag": true,
+  "note": "Büyük genlikli basınç salınımı raporlandı."
+ },
+ "tags": [
+  "large_scale"
+ ],
+ "notes": "Test tarihi 1999-09-09. Ölçülen ort. Pc'ler (542-625 psia) tasarımın (750 psia) altında — raporun kendi ölçek-büyütme regresyon hatası tespiti. Üç tartım tekniği arasında ~%10 fark raporda belirtiliyor."
+}

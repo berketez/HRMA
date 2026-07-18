@@ -1384,6 +1384,12 @@
                 <div id="liquid_motor_kesit" style="min-height:420px; margin:10px 0;"></div>
             </div>
 
+            <!-- 3D Motor Simülasyonu (hibrit/katı sayfası paritesi) — WebGL yoksa gizli kalır -->
+            <div class="panel" id="liquid_3d_panel" style="display:none;">
+                <h2>3D Motor Simülasyonu</h2>
+                <div id="liquid_3d_view" style="margin:10px 0;"></div>
+            </div>
+
             <!-- Analysis Type Tabs -->
             <div class="panel">
                 <h2>Analysis Results</h2>
@@ -2023,15 +2029,22 @@
                     const altitudePlotDiv = document.createElement('div');
                     altitudePlotDiv.id = 'altitude_plot';
                     altitudePlotDiv.className = 'plot-container';
-                    
+
                     const altitudePanel = document.createElement('div');
                     altitudePanel.className = 'panel';
                     altitudePanel.innerHTML = '<h2>Altitude Performance Analysis</h2>';
                     altitudePanel.appendChild(altitudePlotDiv);
-                    
+
                     document.getElementById('designReport').parentNode.insertAdjacentElement('beforebegin', altitudePanel);
                 }
-                
+
+                // Yükseklik AÇIKÇA verilir: div yüksekliksiz yaratılıp Plotly
+                // ölçümü .plot-container:empty yer tutucusunun 140 px'ine denk
+                // gelince grafik ~148 px'e eziliyor, eksen etiketleri üst üste
+                // lapa oluyordu (320/330/340/350 yığılması). Hem div hem layout
+                // yüksekliği sabitlenir ki Plots.resize de 420'de kalsın.
+                document.getElementById('altitude_plot').style.height = '420px';
+                altitudeLayout.height = 420;
                 Plotly.newPlot('altitude_plot', [altitudeIspTrace, altitudeThrustTrace], altitudeLayout);
             }
             
@@ -3351,28 +3364,28 @@ Please provide:
         }
 
         // CAD Visualization Function
-        // Öncelik: Three.js simülasyon güvertesi (MotorVizDeck). WebGL yoksa
-        // ya da güverte null dönerse eski Plotly 3D CAD'ine düşer.
+        // Three.js güvertesi ana sonuç akışındaki GÖRÜNÜR panele (liquid_3d_panel)
+        // kurulur — eskiden trajectory sekmesinin alt-alt-sekmesine gömülüydü ve
+        // kullanıcı hiç göremiyordu. MotorViz3D TEKİL olduğundan (mount öncekini
+        // dispose eder) gömülü sekmedeki cad_visualization her durumda Plotly
+        // CAD çizimiyle doldurulur; ikinci bir Three güvertesi kurulamaz.
         function generateCADVisualization(results) {
-            const cadContainer = document.getElementById('cad_visualization');
-            if (!cadContainer) return;
-
-            // Yeni Three.js parametrik dijital ikizi
-            if (window.MotorVizDeck && window.MotorViz3D && MotorViz3D.isSupported()) {
-                const deck = MotorVizDeck.create('cad_visualization', buildLiquidVizData(results), {
+            const vizPanel = document.getElementById('liquid_3d_panel');
+            const vizHost = document.getElementById('liquid_3d_view');
+            if (vizPanel && vizHost &&
+                window.MotorVizDeck && window.MotorViz3D && MotorViz3D.isSupported()) {
+                vizPanel.style.display = 'block';
+                const deck = MotorVizDeck.create('liquid_3d_view', buildLiquidVizData(results), {
                     title: 'LIQUID ENGINE SIMULATION',
                     subtitle: 'PARAMETRIC DIGITAL TWIN — LIVE GEOMETRY FROM SOLVER OUTPUT',
                     motorType: 'liquid'
                 });
-                if (deck) {
-                    // Güverte kuruldu; yardımcı parametrik grafikleri de üret
-                    generateParametricPlots(results);
-                    return;
-                }
-                // deck null (konteyner/WebGL sorunu) → eski Plotly yoluna düş
+                // deck null (WebGL/konteyner sorunu) → boş panel gösterme
+                if (!deck) vizPanel.style.display = 'none';
             }
 
-            // Fallback: eski Plotly 3D CAD görselleştirmesi
+            // Trajectory sekmesindeki CAD içeriği: Plotly 3D CAD
+            // (sonunda generateParametricPlots'u da çağırır)
             generateCADVisualizationPlotly(results);
         }
 
@@ -3956,10 +3969,12 @@ Please provide:
         }
 
         function generateBasicCAD() {
-            // Use the existing CAD visualization
+            // Sekme içi buton: cad_visualization'a Plotly CAD çizer.
+            // generateCADVisualization ÇAĞRILMAZ — o, ana akıştaki Three
+            // güvertesini yeniden kurar (MotorViz3D tekil) ve bu sekmeye çizmez.
             if (window.currentResults) {
                 ensureCadContainerVisible();
-                generateCADVisualization(window.currentResults);
+                generateCADVisualizationPlotly(window.currentResults);
                 updateCadDescription('basic');
             } else {
                 showWarning('Please run motor analysis first to generate CAD visualization.');

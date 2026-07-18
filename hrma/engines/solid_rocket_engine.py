@@ -839,8 +839,11 @@ class SolidRocketEngine:
             ov['char_velocity'] = self.c_star * (1.0 + rng.normal(0.0, 0.01))
             args = dict(self._ctor_args)
             args['burn_rate_a'] = self.a * (1.0 + rng.normal(0.0, 0.03))
+            # Alt sınır -0.5: KN-şeker plateau/mesa rejimlerinde n negatif
+            # (burn_rate_db preset'leri); eski 0.1 tabanı fiziği sessizce
+            # değiştiriyordu (app.py doğrulama aralığıyla tutarlı).
             args['burn_rate_n'] = float(np.clip(
-                self.n + rng.normal(0.0, 0.005), 0.1, 0.99))
+                self.n + rng.normal(0.0, 0.005), -0.5, 0.99))
             try:
                 r = SolidRocketEngine(overrides=ov, **args).calculate_performance()
                 if isinstance(r, dict) and r.get('error'):

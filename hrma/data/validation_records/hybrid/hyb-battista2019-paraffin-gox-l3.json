@@ -1,0 +1,51 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-battista2019-paraffin-gox-l3",
+ "record_type": "static_fire",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "F. Battista, D. Cardillo, M. Fragiacomo, G.D. Di Martino, S. Mungiguerra, R. Savino, 'Design and Testing of a Paraffin-Based 1000 N HRE Breadboard', Aerospace (MDPI) 6(8):89, 2019",
+  "doi": "10.3390/aerospace6080089",
+  "url": "https://www.mdpi.com/2226-4310/6/8/89",
+  "access": "open",
+  "confidence": "high",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Tablo 3 (deneysel ölçümler) + Tablo 6 (performans); sayılar aynı kampanyanın EUCASS bildirisiyle (DOI 10.13009/EUCASS2019-541, PDF s.5-6) birebir çapraz doğrulandı (2026-07-18)."
+ },
+ "propellants": {
+  "oxidizer": "gox",
+  "fuel": "paraffin_sasol0907_blend",
+  "fuel_note": "SASOL 0907 ağırlıklı parafin karışımı, karartıcı katkılı (Tablo 1: erime 88-102 C)",
+  "hrma_oxidizer_key": "gox",
+  "hrma_fuel_key": "paraffin"
+ },
+ "geometry": {
+  "grain_geometry": "cylindrical_single_port",
+  "grain_length_mm": null,
+  "port_diameter_initial_mm": null,
+  "throat_diameter_mm": null,
+  "geometry_note": "Port çapı, grain uzunluğu, boğaz çapı ve genişleme oranı iki yayında da tablolaştırılmamış.",
+  "injector_type": "showerhead_7_orifice"
+ },
+ "inputs": {
+  "mdot_ox_kgps": 0.192,
+  "burn_time_s": 11.4
+ },
+ "measured": {
+  "chamber_pressure_avg_mpa": 1.67,
+  "thrust_avg_n": 679,
+  "isp_s": 190,
+  "mdot_fuel_kgps": 0.172,
+  "of_ratio": 1.11,
+  "gox_avg_kgpm2s": 52.37,
+  "regression_rate_avg_mmps": 2.49,
+  "c_star_efficiency": null
+ },
+ "units_original": "kg/s, s, MPa, N, mm/s, kg/(m^2 s) (Tablo 3 + Tablo 6)",
+ "digitized": false,
+ "tags": [
+  "lab_scale"
+ ],
+ "notes": "CIRA/Napoli grubu — Cardillo 2023 ile AYNI araştırma grubu; istatistiksel bağımsızlık değerlendirmesinde tek grup sayılmalı."
+}

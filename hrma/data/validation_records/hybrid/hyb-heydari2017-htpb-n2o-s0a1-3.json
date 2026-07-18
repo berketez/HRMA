@@ -1,0 +1,70 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-heydari2017-htpb-n2o-s0a1-3",
+ "record_type": "static_fire",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "M.M. Heydari, N. Ghadiri Massoom, 'Experimental Study of the Swirling Oxidizer Flow in HTPB/N2O Hybrid Rocket Motor', International Journal of Aerospace Engineering, 2017, Article ID 3174140, 2017",
+  "doi": "10.1155/2017/3174140",
+  "url": "https://doi.org/10.1155/2017/3174140",
+  "access": "open",
+  "confidence": "high",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Tablo 2 (eksenel seri), Tablo 4-6 (0-bench + S4A1 swirl serisi) PDF'ten birebir alındı; bağıl ölçüm hataları Tablo 1'den (2026-07-18)."
+ },
+ "propellants": {
+  "oxidizer": "n2o",
+  "oxidizer_phase": "liquid",
+  "fuel": "htpb",
+  "fuel_density_kgpm3": 930,
+  "hrma_oxidizer_key": "n2o",
+  "hrma_fuel_key": "htpb"
+ },
+ "geometry": {
+  "grain_geometry": "cylindrical_single_port",
+  "grain_od_mm": 64.0,
+  "port_diameter_initial_mm": null,
+  "throat_diameter_mm": null,
+  "geometry_note": "Eksenel seri için D0, mdot_ox ve boğaz çapı tablolaştırılmamış.",
+  "injector_type": "single_axial"
+ },
+ "inputs": {
+  "burn_time_s": 7.43
+ },
+ "measured": {
+  "chamber_pressure_bar": 36.7,
+  "thrust_kgf": 40.72,
+  "mdot_fuel_gps": 48,
+  "port_diameter_final_mm": 53.24,
+  "of_ratio": 3.54,
+  "c_star_mps": 1328.86,
+  "c_star_efficiency": 0.89
+ },
+ "units_original": "s, bar, kgf, g/s, mm, m/s (Tablo 2)",
+ "digitized": false,
+ "measurement_uncertainty": {
+  "chamber_pressure_bar": {
+   "value": 0.0001,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1 (dP)"
+  },
+  "burn_time_s": {
+   "value": 0.002,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1"
+  },
+  "port_diameter_final_mm": {
+   "value": 0.0034,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1"
+  }
+ },
+ "tags": [
+  "lab_scale"
+ ],
+ "notes": "Eksenel tek enjektör (S0A1 serisi)."
+}

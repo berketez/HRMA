@@ -1,0 +1,97 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-heydari2017-htpb-n2o-s4a1-2",
+ "record_type": "static_fire",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "M.M. Heydari, N. Ghadiri Massoom, 'Experimental Study of the Swirling Oxidizer Flow in HTPB/N2O Hybrid Rocket Motor', International Journal of Aerospace Engineering, 2017, Article ID 3174140, 2017",
+  "doi": "10.1155/2017/3174140",
+  "url": "https://doi.org/10.1155/2017/3174140",
+  "access": "open",
+  "confidence": "high",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Tablo 2 (eksenel seri), Tablo 4-6 (0-bench + S4A1 swirl serisi) PDF'ten birebir alındı; bağıl ölçüm hataları Tablo 1'den (2026-07-18)."
+ },
+ "propellants": {
+  "oxidizer": "n2o",
+  "oxidizer_phase": "liquid",
+  "fuel": "htpb",
+  "fuel_density_kgpm3": 930,
+  "hrma_oxidizer_key": "n2o",
+  "hrma_fuel_key": "htpb"
+ },
+ "geometry": {
+  "grain_geometry": "cylindrical_single_port",
+  "grain_od_mm": 64.0,
+  "grain_length_mm": 248,
+  "port_diameter_initial_mm": 45.5,
+  "throat_diameter_mm": 9.1,
+  "injector_type": "axial_1_plus_4_tangential_swirl"
+ },
+ "inputs": {
+  "burn_time_s": 4.66,
+  "fuel_mass_initial_g": 660.0,
+  "mdot_ox_gps": 56.5
+ },
+ "measured": {
+  "chamber_pressure_bar": 12.83,
+  "thrust_kgf": 11.3,
+  "mdot_fuel_gps": 24,
+  "port_diameter_final_mm": 51.83,
+  "regression_rate_avg_mmps": 0.68,
+  "of_ratio": 2.36,
+  "gox_gpcm2s": 3.039,
+  "c_star_mps": 1108.53,
+  "c_star_efficiency": 0.91
+ },
+ "units_original": "g/s, s, mm, g, kgf, bar, mm/s, g/(cm^2 s), m/s (Tablo 4-6)",
+ "digitized": false,
+ "measurement_uncertainty": {
+  "chamber_pressure_bar": {
+   "value": 0.0001,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1 (dP)"
+  },
+  "burn_time_s": {
+   "value": 0.002,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1"
+  },
+  "port_diameter_final_mm": {
+   "value": 0.0034,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1"
+  },
+  "regression_rate_avg_mmps": {
+   "value": 0.0208,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1"
+  },
+  "mdot_ox_gps": {
+   "value": 0.0203,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1"
+  },
+  "gox_gpcm2s": {
+   "value": 0.0209,
+   "type": "relative",
+   "coverage_k": null,
+   "source": "Tablo 1"
+  }
+ },
+ "anomaly": {
+  "flag": true,
+  "note": "Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer."
+ },
+ "tags": [
+  "lab_scale",
+  "swirl_injection"
+ ],
+ "notes": "Swirl (1 eksenel + 4 teğetsel) enjeksiyon — eksenel regresyon korelasyonu doğrulamasına sokulmamalı."
+}

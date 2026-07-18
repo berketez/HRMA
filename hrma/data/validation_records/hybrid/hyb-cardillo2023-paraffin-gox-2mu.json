@@ -1,0 +1,98 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-cardillo2023-paraffin-gox-2mu",
+ "record_type": "static_fire",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "D. Cardillo, F. Battista, G. Gallo, S. Mungiguerra, R. Savino, 'Experimental Firing Test Campaign and Nozzle Heat Transfer Reconstruction in a 200 N Hybrid Rocket Engine with Different Paraffin-Based Fuel Grain Lengths', Aerospace (MDPI) 10(6):546, 2023",
+  "doi": "10.3390/aerospace10060546",
+  "url": "https://www.mdpi.com/2226-4310/10/6/546",
+  "access": "open",
+  "confidence": "high",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Sayılar makalenin HTML tam metnindeki Tablo 2 (deney sonuçları) ve Tablo 3'ten (performans) birebir alındı; araştırma ajanı r.jina.ai HTML dönüşümünü aynı grubun EUCASS 2019 PDF tablolarıyla çapraz doğruladı (2026-07-18 veri genişletme dalgası)."
+ },
+ "propellants": {
+  "oxidizer": "gox",
+  "fuel": "paraffin_sasol0907_blend",
+  "fuel_note": "SASOL 0907 ağırlıklı parafin karışımı",
+  "hrma_oxidizer_key": "gox",
+  "hrma_fuel_key": "paraffin"
+ },
+ "geometry": {
+  "grain_geometry": "cylindrical_single_port",
+  "case_id_mm": 69.0,
+  "grain_length_mm": 130.0,
+  "port_diameter_initial_mm": null,
+  "port_note": "Başlangıç port çapı bu makalede verilmemiş; önceki kampanya makalesine (ref [9]) dayanıyor.",
+  "throat_diameter_initial_mm": 10.9,
+  "post_chamber_length_mm": 38.0,
+  "nozzle_expansion_ratio": 2.87,
+  "injector_type": "mono_injector_conical_6mm"
+ },
+ "inputs": {
+  "mdot_ox_gps": 41.2,
+  "burn_time_s": 4.2
+ },
+ "measured": {
+  "thrust_avg_n": 120.81,
+  "chamber_pressure_avg_bar": 10.91,
+  "c_star_mps": 1275.56,
+  "isp_s": 154.3,
+  "thrust_coefficient": 1.19,
+  "regression_rate_avg_mmps": 2.67,
+  "of_ratio": 1.07,
+  "gox_avg_kgpm2s": 76.49,
+  "throat_diameter_final_mm": 10.9
+ },
+ "units_original": "g/s, s, mm, kg/(m^2 s), mm/s, bar, N, m/s (kaynak tabloları)",
+ "digitized": false,
+ "measurement_uncertainty": {
+  "mdot_ox_gps": {
+   "value": 0.36,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Tablo 2"
+  },
+  "gox_avg_kgpm2s": {
+   "value": 2.49,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Tablo 2"
+  },
+  "regression_rate_avg_mmps": {
+   "value": 0.05,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Tablo 2"
+  },
+  "of_ratio": {
+   "value": 0.05,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Tablo 2"
+  },
+  "thrust_avg_n": {
+   "value": 0.05,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Metin, Bölüm 2"
+  },
+  "chamber_pressure_avg_bar": {
+   "value": 0.07,
+   "type": "absolute",
+   "coverage_k": null,
+   "source": "Metin, Bölüm 2 (7 kPa)"
+  }
+ },
+ "anomaly": {
+  "flag": true,
+  "note": "Yüksek genlikli basınç salınımı (mono-enjektör konfigürasyonu); kaynak fit dışı bıraktı."
+ },
+ "tags": [
+  "lab_scale",
+  "pressure_oscillation"
+ ],
+ "notes": "Yazarlar bu MU (mono-enjektör 130 mm) testini yüksek basınç salınımı nedeniyle regresyon fitinden dışladı; sayılar tablodan aynen."
+}

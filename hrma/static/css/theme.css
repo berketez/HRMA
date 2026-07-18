@@ -225,6 +225,23 @@ button:not([class]) {
     background: transparent;
     color: var(--hd-ink);
     border-color: var(--hd-line);
+    /* Bootstrap yok: .table sınıfı hiçbir stil getirmiyor. Genişlik ve
+       border-collapse burada verilmezse tablo auto daralıyor, hücreler
+       padding'siz kalıyor ve etiket-değer BİTİŞİK basılıyordu
+       (ör. Design Report: "Reynolds Number88548"). */
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table td, .spec-table td, .variable-table td, .report-table td {
+    padding: 5px 10px;
+}
+
+/* İki sütunlu etiket-değer raporlarında değer sütunu sağa yaslanır —
+   uzun etiketle değerin arası her genişlikte açık kalır. */
+.report-table td:last-child {
+    text-align: right;
+    white-space: nowrap;
 }
 
 .data-table th, .spec-table th, .variable-table th, .report-table th {

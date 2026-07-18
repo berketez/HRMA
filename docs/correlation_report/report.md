@@ -1,16 +1,16 @@
 # HRMA validation: correlation report
 
-Generated: 2026-07-18T16:43:07
+Generated: 2026-07-18T22:23:24
 
 Auto-generated numbers; narrative added by authors.
 
 ## Overview
 
 - Runner version: 1 (adapter 1, report 1)
-- Records in statistics pipeline: 136 (synthetic excluded: 0)
-- DB content hash: `e0b29e75c2aad81a1b7c034a26c6148e1fae2833f6ae81a3ab80599ed77b33eb`
-- Main cells: 9 | low-confidence cells: 0 | anomaly entries: 18
-- Status counts: insufficient_inputs=53, not_supported=7, ok=76
+- Records in statistics pipeline: 199 (synthetic excluded: 0)
+- DB content hash: `c64e8d7b715bbc1dfffddcb9cc38989015685dfe6b5ff3b1026ec032ae1800bd`
+- Main cells: 9 | low-confidence cells: 0 | anomaly entries: 34
+- Status counts: insufficient_inputs=112, not_supported=7, ok=80
 
 ## Confidence layers
 
@@ -114,9 +114,9 @@ fails or warns in CI.
 ## Detailed correlation tables
 
 - Runner version: 1 (adapter 1)
-- Records in statistics pipeline: 136 (synthetic excluded: 0)
-- DB content hash: `e0b29e75c2aad81a1b7c034a26c6148e1fae2833f6ae81a3ab80599ed77b33eb`
-- Status counts: insufficient_inputs=53, not_supported=7, ok=76
+- Records in statistics pipeline: 199 (synthetic excluded: 0)
+- DB content hash: `c64e8d7b715bbc1dfffddcb9cc38989015685dfe6b5ff3b1026ec032ae1800bd`
+- Status counts: insufficient_inputs=112, not_supported=7, ok=80
 
 Signed error convention: (predicted - measured) / measured * 100. Outliers (|error - median| > 3*MAD) are flagged, never dropped.
 
@@ -142,6 +142,22 @@ Signed error convention: (predicted - measured) / measured * 100. Outliers (|err
 
 | Test | Quantity | Error % | Note |
 |---|---|---|---|
+| hyb-heydari2017-htpb-n2o-s4a1-1 | c_star | +4.1 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-1 | chamber_pressure | +12.2 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-1 | port_diameter_final | -10.1 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-1 | thrust | +28.6 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-2 | c_star | +17.3 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-2 | chamber_pressure | +27.9 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-2 | port_diameter_final | -7.6 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-2 | thrust | +26.9 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-3 | c_star | +23.5 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. Ön/art yanma odası konfigürasyonu diğer testlerden farklı (Tablo 3); yazarlar doğrudan karşılaştırılamayacağını belirtiyor. |
+| hyb-heydari2017-htpb-n2o-s4a1-3 | chamber_pressure | +34.7 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. Ön/art yanma odası konfigürasyonu diğer testlerden farklı (Tablo 3); yazarlar doğrudan karşılaştırılamayacağını belirtiyor. |
+| hyb-heydari2017-htpb-n2o-s4a1-3 | port_diameter_final | -6.2 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. Ön/art yanma odası konfigürasyonu diğer testlerden farklı (Tablo 3); yazarlar doğrudan karşılaştırılamayacağını belirtiyor. |
+| hyb-heydari2017-htpb-n2o-s4a1-3 | thrust | +37.5 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. Ön/art yanma odası konfigürasyonu diğer testlerden farklı (Tablo 3); yazarlar doğrudan karşılaştırılamayacağını belirtiyor. |
+| hyb-heydari2017-htpb-n2o-s4a1-4 | c_star | +9.7 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-4 | chamber_pressure | +19.2 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-4 | port_diameter_final | -8.4 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
+| hyb-heydari2017-htpb-n2o-s4a1-4 | thrust | +21.0 | Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. |
 | hyb-karabeyoglu2003-paraffin-gox-t4f-1a | chamber_pressure | +28.2 | Lule erozyonu; yakma diger yonlerden iyi (Tablo 2 notu: 'Nozzle erosion/Good test'). |
 | hyb-karabeyoglu2003-paraffin-gox-t4f-1a | regression_rate | +1.8 | Lule erozyonu; yakma diger yonlerden iyi (Tablo 2 notu: 'Nozzle erosion/Good test'). |
 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 | chamber_pressure | +338.3 | Lule arizasi (Tablo 2 notu: 'Nozzle failure'); c* verimi rapor edilmemis (Tablo 3'te '-'). |
@@ -173,10 +189,68 @@ Signed error convention: (predicted - measured) / measured * 100. Outliers (|err
 
 ## Insufficient inputs
 
+- `hyb-amroc1993-htpb-lox-dm01-b1`: ['burn_time', 'mdot_ox', 'port_diameter_initial']
+- `hyb-amroc1993-htpb-lox-dm01-b2`: ['burn_time', 'mdot_ox', 'port_diameter_initial']
+- `hyb-amroc1993-htpb-lox-dm01-b3`: ['burn_time', 'mdot_ox', 'port_diameter_initial']
+- `hyb-amroc1993-htpb-lox-dm01-b4`: ['burn_time', 'mdot_ox', 'port_diameter_initial']
+- `hyb-battista2019-paraffin-gox-l1`: ['port_diameter_initial', 'throat_diameter']
+- `hyb-battista2019-paraffin-gox-l2`: ['port_diameter_initial', 'throat_diameter']
+- `hyb-battista2019-paraffin-gox-l3`: ['port_diameter_initial', 'throat_diameter']
+- `hyb-battista2019-paraffin-gox-l5`: ['port_diameter_initial', 'throat_diameter']
+- `hyb-cardillo2023-paraffin-gox-1mu`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-1s`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-2mu`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-2s`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-3mu`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-3s`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-4m`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-4s`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-5m`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-5s`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-6m`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-6s`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-7m`: ['port_diameter_initial']
+- `hyb-cardillo2023-paraffin-gox-8mu`: ['port_diameter_initial']
+- `hyb-carmicino2013-al1-n2ogas-02kn-t13`: ['throat_diameter']
+- `hyb-carmicino2013-al1-n2ogas-02kn-t14`: ['throat_diameter']
+- `hyb-carmicino2013-al1-n2ogas-02kn-t15`: ['throat_diameter']
+- `hyb-carmicino2013-cb-n2ogas-02kn-t07`: ['throat_diameter']
+- `hyb-carmicino2013-cb-n2ogas-02kn-t08`: ['throat_diameter']
+- `hyb-carmicino2013-cb-n2ogas-02kn-t09`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-t01`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-t02`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-t03`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-t04`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-t05`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-t06`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-tr1`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-tr7`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-02kn-tr8`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-1kn-rg1`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-1kn-rg2`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-1kn-t20`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-1kn-t21`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-1kn-t22`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-1kn-t26`: ['throat_diameter']
+- `hyb-carmicino2013-htpb-n2ogas-1kn-t27`: ['throat_diameter']
+- `hyb-carmicino2013-nal-n2ogas-02kn-t10`: ['throat_diameter']
+- `hyb-carmicino2013-nal-n2ogas-02kn-t11`: ['throat_diameter']
+- `hyb-carmicino2013-nal-n2ogas-02kn-t12`: ['throat_diameter']
 - `hyb-hansen2012-paraffin-htpb-n2o-t2`: ['burn_time', 'mdot_ox', 'of_ratio']
 - `hyb-hansen2012-paraffin-htpb-n2o-t3`: ['burn_time', 'mdot_ox', 'of_ratio']
 - `hyb-hansen2012-paraffin-htpb-n2o-t4`: ['burn_time', 'mdot_ox', 'of_ratio']
 - `hyb-hansen2012-paraffin-htpb-n2o-t5`: ['burn_time', 'mdot_ox', 'of_ratio']
+- `hyb-heydari2017-htpb-n2o-bench0`: ['mdot_ox']
+- `hyb-heydari2017-htpb-n2o-s0a1-1`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-heydari2017-htpb-n2o-s0a1-2`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-heydari2017-htpb-n2o-s0a1-3`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-heydari2017-htpb-n2o-s0a1-4`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-heydari2017-htpb-n2o-s0a1-5`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-hpdp2003-htpb-lox-250k-m1t1`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-hpdp2003-htpb-lox-250k-m2t1`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-hpdp2003-htpb-lox-250k-m2t2`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-hpdp2003-htpb-lox-250k-m2t3`: ['mdot_ox', 'port_diameter_initial', 'throat_diameter']
+- `hyb-knowles2004-htpb-lox-htt-002`: ['mdot_ox', 'of_ratio', 'port_diameter_initial']
 - `hyb-palacz2023-hdpe-n2o-t01`: ['port_diameter_initial']
 - `hyb-palacz2023-hdpe-n2o-t02`: ['port_diameter_initial']
 - `hyb-palacz2023-hdpe-n2o-t03`: ['port_diameter_initial']
@@ -201,6 +275,7 @@ Signed error convention: (predicted - measured) / measured * 100. Outliers (|err
 - `hyb-rezaei2018-htpb-n2o-t72`: ['port_diameter_initial']
 - `hyb-rezaei2018-htpb-n2o-ta2`: ['port_diameter_initial']
 - `hyb-rezaei2018-htpb-n2o-ta3`: ['port_diameter_initial']
+- `hyb-sims1998-htpb-lox-hp24-5030`: ['burn_time', 'mdot_ox', 'of_ratio', 'port_diameter_initial', 'throat_diameter']
 - `hyb-wei2025-pp-n2o-t01`: ['burn_time', 'mdot_ox', 'of_ratio', 'throat_diameter']
 - `hyb-wei2025-pp-n2o-t02`: ['burn_time', 'mdot_ox', 'of_ratio', 'throat_diameter']
 - `hyb-wei2025-pp-n2o-t03`: ['burn_time', 'mdot_ox', 'of_ratio', 'throat_diameter']

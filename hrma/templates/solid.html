@@ -783,10 +783,25 @@
             <div class="form-grid">
                 <div class="form-group">
                     <label>
-                        Burn Rate Coefficient (a) <span class="unit">(mm/s/bar^n)</span>
+                        Burn Rate Preset
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text">Material-specific coefficient in burn rate law r=a×P^n. APCP: 0.003-0.008, Black Powder: 0.1-0.3, Sugar: 0.01-0.05. Higher values mean faster burning propellant. Obtained from strand burner tests.</span>
+                            <span class="tooltip-text">Fills a and n from the central validated burn-rate database (Nakka 1999/2001 regime fits) at the current chamber pressure. KN-sugar propellants have piecewise plateau/mesa behavior, so coefficients depend on the pressure regime. Editing a or n manually switches back to Custom.</span>
+                        </div>
+                    </label>
+                    <select id="burn_rate_preset" onchange="applyBurnRatePreset()">
+                        <option value="custom" selected>Custom (manual a, n)</option>
+                        <option value="kndx">KNDX — KNO3/Dextrose 65/35 (Nakka fit)</option>
+                        <option value="knsb">KNSB — KNO3/Sorbitol 65/35 (Nakka fit)</option>
+                    </select>
+                    <div id="burn_rate_preset_note" style="font-size: 12px; color: var(--hd-dim, #7a8b99); margin-top: 6px; line-height: 1.5;"></div>
+                </div>
+                <div class="form-group">
+                    <label>
+                        Burn Rate Coefficient (a) <span class="unit">(m/s/bar^n)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text">Material-specific coefficient in burn rate law r[m/s]=a×P[bar]^n. APCP: 0.003-0.008. Higher values mean faster burning propellant. Obtained from strand burner tests or the central database preset above.</span>
                         </div>
                     </label>
                     <input type="number" id="burn_rate_a" value="0.005" step="0.0001">
@@ -796,7 +811,7 @@
                         Burn Rate Exponent (n)
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text">Pressure sensitivity exponent in burn rate law r=a×P^n. Values 0.2-0.8 typical. Low n (0.2-0.4) gives stable combustion. High n (0.6+) can cause pressure instability. APCP: 0.3-0.5, Black Powder: 0.7-1.0.</span>
+                            <span class="tooltip-text">Pressure sensitivity exponent in burn rate law r=a×P^n. Values 0.2-0.8 typical. Low n (0.2-0.4) gives stable combustion. High n (0.6+) can cause pressure instability. KN-sugar plateau/mesa regimes can have NEGATIVE n (burn rate drops with pressure) — this is physical, from published fits.</span>
                         </div>
                     </label>
                     <input type="number" id="burn_rate_n" value="0.35" step="0.01">
@@ -1542,8 +1557,14 @@
                 chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value) || 40,
                 
                 // Burn rate parameters
+                // DİKKAT: n negatif olabilir (KN-şeker plateau/mesa) — `|| 0.35`
+                // kalıbı 0 girdisini ezerdi; isNaN denetimiyle korunur.
                 burn_rate_a: parseFloat(document.getElementById('burn_rate_a').value) || 0.005,
-                burn_rate_n: parseFloat(document.getElementById('burn_rate_n').value) || 0.35,
+                burn_rate_n: (function () {
+                    const v = parseFloat(document.getElementById('burn_rate_n').value);
+                    return isNaN(v) ? 0.35 : v;
+                })(),
+                burn_rate_preset: (document.getElementById('burn_rate_preset') || {}).value || 'custom',
                 
                 // Efficiency factors
                 combustion_efficiency: parseFloat(document.getElementById('combustion_efficiency').value) || 0.95,
@@ -2084,9 +2105,73 @@
             document.getElementById('chamber_pressure').value = '40';
             document.getElementById('burn_rate_a').value = '0.005';
             document.getElementById('burn_rate_n').value = '0.35';
+            const brp = document.getElementById('burn_rate_preset');
+            if (brp) { brp.value = 'custom'; }
+            const brNote = document.getElementById('burn_rate_preset_note');
+            if (brNote) brNote.textContent = '';
             document.getElementById('results').style.display = 'none';
             updateGrainPreview();
         }
+
+        // ===== Burn-rate preset (merkezi burn_rate_db bağlantısı) =====
+        // Tasarım yolu ile korelasyon/doğrulama yolunun AYNI katsayıyı
+        // kullanması için a/n değerleri /api/burn-rate/resolve'dan çekilir
+        // (Nakka 1999/2001 rejim fitleri; basınca göre parçalı).
+        async function applyBurnRatePreset() {
+            const sel = document.getElementById('burn_rate_preset');
+            const note = document.getElementById('burn_rate_preset_note');
+            if (!sel || sel.value === 'custom') {
+                if (note) note.textContent = '';
+                return;
+            }
+            const pBar = parseFloat(document.getElementById('chamber_pressure').value) || 40;
+            try {
+                const resp = await fetch('/api/burn-rate/resolve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ propellant: sel.value, pressure_bar: pBar })
+                });
+                const d = await resp.json();
+                if (d.status !== 'success') throw new Error(d.error || 'resolve failed');
+                document.getElementById('burn_rate_a').value = Number(d.a.toPrecision(4));
+                document.getElementById('burn_rate_n').value = Number(d.n.toPrecision(4));
+                if (note) {
+                    const reg = d.regime;
+                    note.textContent = d.name + ': r = ' + d.r_mmps.toFixed(2) +
+                        ' mm/s @ ' + pBar.toFixed(1) + ' bar. Regime ' +
+                        (reg.p_min_mpa * 10).toFixed(1) + '-' + (reg.p_max_mpa * 10).toFixed(1) +
+                        ' bar.' + (d.in_range ? '' :
+                        ' WARNING: pressure outside published fit range - extrapolated.');
+                    note.style.color = d.in_range ? '' : 'var(--hd-red, #ff5d73)';
+                }
+            } catch (err) {
+                if (note) {
+                    note.textContent = 'Preset could not be resolved: ' + err.message;
+                    note.style.color = 'var(--hd-red, #ff5d73)';
+                }
+            }
+        }
+
+        // Basınç değişince aktif preset'i yeniden çözümle (rejim değişebilir);
+        // a/n elle düzenlenirse preset Custom'a döner.
+        document.addEventListener('DOMContentLoaded', function () {
+            const pc = document.getElementById('chamber_pressure');
+            if (pc) pc.addEventListener('change', function () {
+                const sel = document.getElementById('burn_rate_preset');
+                if (sel && sel.value !== 'custom') applyBurnRatePreset();
+            });
+            ['burn_rate_a', 'burn_rate_n'].forEach(function (id) {
+                const inp = document.getElementById(id);
+                if (inp) inp.addEventListener('input', function () {
+                    const sel = document.getElementById('burn_rate_preset');
+                    const note = document.getElementById('burn_rate_preset_note');
+                    if (sel && sel.value !== 'custom') {
+                        sel.value = 'custom';
+                        if (note) note.textContent = '';
+                    }
+                });
+            });
+        });
         
         // Ask AI Analysis
         function askAI() {

@@ -600,6 +600,40 @@ def calculate():
             'error_type': type(e).__name__
         }), 400
 
+@app.route('/api/burn-rate/resolve', methods=['POST'])
+def api_burn_rate_resolve():
+    """Merkezi burn_rate_db rejim fitinden tasarım basıncında (a, n) çözer.
+
+    Girdi:  {propellant: 'kndx'|'knsb', pressure_bar: float}
+    Çıktı:  motor konvansiyonunda a-n (r[m/s] = a·P[bar]^n) + rejim aralığı,
+            geçerlilik bayrağı ve kaynak künyesi. Katı sayfasındaki burn-rate
+            preset dropdown'ı bu endpoint'le a/n alanlarını doldurur — böylece
+            tasarım yolu ile korelasyon/doğrulama yolu AYNI merkezi katsayıyı
+            kullanır (CLAUDE.md kural 11).
+    """
+    try:
+        from hrma.data import burn_rate_db
+        data = request.json or {}
+        prop = str(data.get('propellant', '')).lower()
+        if not burn_rate_db.has_law(prop):
+            return jsonify({'status': 'error',
+                            'error': f"No published burn-rate law for "
+                                     f"'{prop}'. Available: "
+                                     f"{sorted(burn_rate_db.BURN_RATE_LAWS)}"
+                            }), 400
+        p_bar = float(data.get('pressure_bar', 0))
+        if not (0 < p_bar <= 1000):
+            return jsonify({'status': 'error',
+                            'error': 'pressure_bar must be in (0, 1000]'}), 400
+        result = burn_rate_db.resolve_engine_coeffs(prop, p_bar)
+        result['status'] = 'success'
+        result['propellant'] = prop
+        result['pressure_bar'] = p_bar
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+
+
 @app.route('/api/quick-geometry', methods=['POST'])
 def quick_geometry():
     """İnteraktif tasarım modu: yalnız motor çözücüsü + 2D kesit.
@@ -1411,9 +1445,12 @@ def calculate_solid():
         
         burn_rate_a = data.get('burn_rate_a', 0.005)
         validate_input_range(burn_rate_a, 0.0001, 0.1, "Burn rate coefficient")
-        
+
+        # Alt sınır -0.5: KN-şeker plateau/mesa rejimlerinde n NEGATİFTİR
+        # (Nakka 1999 KNDX n=-0.148, KNSB n=-0.314 — bkz. burn_rate_db).
+        # Eski [0.1, 1.0] aralığı merkezi db preset'lerini reddediyordu.
         burn_rate_n = data.get('burn_rate_n', 0.35)
-        validate_input_range(burn_rate_n, 0.1, 1.0, "Burn rate exponent")
+        validate_input_range(burn_rate_n, -0.5, 1.0, "Burn rate exponent")
         
         # Create solid motor instance
         # overrides=data: formun yoğunluk/C*/gama/segman/star/sıcaklık gibi

@@ -1,0 +1,43 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-knowles2004-htpb-lox-htt-002",
+ "record_type": "static_fire",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "T.E. Knowles, D. Kearney, R. Roberts, 'Overview of 10 inch Diameter HTPB Hybrid Motor Testing with Liquid Oxygen at Stennis Space Center', AIAA bildirisi. NTRS 20050185550",
+  "doi": null,
+  "url": "https://ntrs.nasa.gov/citations/20050185550",
+  "access": "open",
+  "confidence": "medium",
+  "date_checked": "2026-07-18",
+  "data_extraction": "text",
+  "extraction_note": "Sayılar metinden (s.7-8): itki/Pc zaman izleri yalnız şekillerde, sayısallaştırılmadı (2026-07-18)."
+ },
+ "propellants": {
+  "oxidizer": "lox",
+  "fuel": "htpb",
+  "hrma_oxidizer_key": "lox",
+  "hrma_fuel_key": "htpb"
+ },
+ "geometry": {
+  "grain_geometry": "double_d_two_port",
+  "case_od_in": 10.0,
+  "throat_diameter_in": 3.7,
+  "exit_diameter_in": 4.7,
+  "nozzle_expansion_ratio": 1.61,
+  "nozzle_note": "Metin güdük lüle için 1.61 derken Şekil 2 başlığı tahmini itki için 6.8:1 diyor — kaynak içi tutarsızlık."
+ },
+ "inputs": {
+  "mdot_ox_max_lbmps": 15.0,
+  "burn_time_s": 7.5
+ },
+ "measured": {
+  "regression_rate_avg_milps": 61.0
+ },
+ "units_original": "lbm/s, s, mil/s, in (metin; İngiliz birimleri)",
+ "digitized": false,
+ "tags": [
+  "mid_scale"
+ ],
+ "notes": "Test tarihi 2004-05-19 (HTT-002). Ortalama regresyon motor tartımıyla; web sağlam kaldı. İtki/Pc sayısal verilmediği için kayıt kısmi."
+}

@@ -874,7 +874,11 @@ def create_performance_plots(motor_data, injector_data):
         go.Indicator(
             mode="gauge+number",
             value=injector_data['exit_velocity'],
-            title={'text': "Exit Velocity (m/s)"},
+            # Başlık BİLEREK yok: hücrenin üstünde subplot_titles'tan gelen
+            # 'Injector Performance' annotation'ı var; Indicator'ın kendi
+            # title'ı onunla AYNI noktaya basılıp üst üste biniyordu.
+            # Birim, başlık yerine sayının sonekinde taşınır.
+            number={'suffix': ' m/s'},
             domain={'x': [0, 1], 'y': [0, 1]},
             gauge={
                 'axis': {'range': [0, 100]},
@@ -2169,13 +2173,22 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     dim_v(z_throat, -rt, rt, f'Ø<sub>t</sub> = {d_t:.1f} mm', side=1)
     dim_v(z_exit + 12, -re, re, f'Ø<sub>e</sub> = {d_e:.1f} mm', side=1)
 
-    # Diverjan açı etiketi
+    # Diverjan açı etiketi — lüle ALTINA konur. Eski konum (üst kontur
+    # ortası) kısa lülelerde Ø_t/Ø_e dikey ölçü yazılarıyla üst üste
+    # biniyordu (yatay 130 px'lik metin dar boğaz-çıkış bandını aşıyor).
+    # Altta dikey etiketler yok (y=0 merkezli bantta kalırlar) ve
+    # L_toplam ölçü çizgisi daha aşağıda (r_out+30).
     if noz_type == 'conical':
         angle_txt = f'Konik diverjan: α = {half_angle:.0f}°'
     else:
         angle_txt = f'{noz_type.capitalize()} kontur: θ<sub>n</sub> = {theta_n:.0f}° → θ<sub>e</sub> = {theta_e:.0f}°'
+    # Dikey Ø yazıları PİKSEL uzayında ~80 px uzunluğunda (metin ölçekten
+    # bağımsız); yalnız veri-mm ofseti düşük px/mm ölçekte yetmiyor. Bu
+    # yüzden konum iki bileşenli: veri-y lüle metalinin hemen altı
+    # (geometriyle ölçeklenir) + yshift=-48 px (Ø yazılarının y=0 merkezli
+    # ±40 px bandını her ölçekte temizler).
     fig.add_annotation(x=z_throat + 0.55 * (z_exit - z_throat),
-                       y=(rt + re) / 2 + wall_noz + 14, text=angle_txt,
+                       y=-(max(rt, re) + wall_noz), yshift=-48, text=angle_txt,
                        showarrow=False, font=dict(size=11, color=INK))
 
     # ---------------- Yerleşim (dijital blueprint) ----------------

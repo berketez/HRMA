@@ -1,0 +1,52 @@
+{
+ "schema_version": "1.0",
+ "test_id": "hyb-amroc1993-htpb-lox-dm01-b4",
+ "record_type": "engine_test_point",
+ "motor_type": "hybrid",
+ "source": {
+  "citation": "G. Story, 'Large-Scale Hybrid Motor Testing', NTRS 20060047689 (2006; Chiaverini & Kuo (ed.), Fundamentals of Hybrid Rocket Combustion and Propulsion, AIAA Progress Vol. 218 bölüm taslağı). DM-01 birincil kaynağı: McFarlane, Kniffen, Lichatowich, AIAA-93-2551",
+  "doi": null,
+  "url": "https://ntrs.nasa.gov/citations/20060047689",
+  "access": "open",
+  "confidence": "medium",
+  "date_checked": "2026-07-18",
+  "data_extraction": "table",
+  "extraction_note": "Tablo 3 (s.9, taranmış sayfa görüntüsünden okundu). İkinci el aktarım: birincil kaynak AIAA-93-2551 paywall'da, sayılar NASA yazarlı bölümden alındı (2026-07-18)."
+ },
+ "propellants": {
+  "oxidizer": "lox",
+  "fuel": "htpb",
+  "hrma_oxidizer_key": "lox",
+  "hrma_fuel_key": "htpb"
+ },
+ "geometry": {
+  "grain_geometry": "multi_port",
+  "case_od_in": 74.0,
+  "case_length_in": 386.0,
+  "nozzle_expansion_ratio": 3.7,
+  "throat_area_in2": 418
+ },
+ "inputs": {
+  "mdot_ox_lbmps": 587
+ },
+ "measured": {
+  "thrust_lbf": 214800,
+  "mdot_fuel_lbmps": 310,
+  "isp_s": 239,
+  "of_ratio": 1.89,
+  "chamber_pressure_psia": 369,
+  "thrust_vacuum_lbf": 235200,
+  "isp_vacuum_s": 262
+ },
+ "units_original": "lbf, lbm/s, s, psia, in^2 (Tablo 3; İngiliz birimleri)",
+ "digitized": false,
+ "anomaly": {
+  "flag": true,
+  "note": "Çıkış konisi çıkarılmış (alan oranı 3.70); yakma gövde arızasıyla erken bitti."
+ },
+ "tags": [
+  "large_scale",
+  "secondhand_republication"
+ ],
+ "notes": "Yakma tarihi 1993-03-24. Boğaz alanının 364'ten 418 in^2'ye büyümesi yakmalar arası gerçek erozyon ölçümü."
+}

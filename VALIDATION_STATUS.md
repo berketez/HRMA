@@ -158,8 +158,8 @@ markers is machine-generated; the rest of this document remains hand-written.
 *This block is auto-generated from the real-experiment correlation run — do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
 - Generated: 2026-07-18 (runner v1, adapter v1)
-- Experiment DB content hash: `e0b29e75c2aad81a1b7c034a26c6148e1fae2833f6ae81a3ab80599ed77b33eb`
-- Records: 136 total — scored 76, insufficient inputs 53, not supported (v1) 7, runner errors 0
+- Experiment DB content hash: `c64e8d7b715bbc1dfffddcb9cc38989015685dfe6b5ff3b1026ec032ae1800bd`
+- Records: 199 total — scored 80, insufficient inputs 112, not supported (v1) 7, runner errors 0
 - Signed error convention: (predicted - measured) / measured x 100. Outliers are flagged, never dropped; anomaly-flagged records are aggregated separately.
 
 | Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test |
@@ -173,8 +173,11 @@ markers is machine-generated; the rest of this document remains hand-written.
 | liquid | isp_vac | main | 4 | +3.0 | 2.8 | 4.0 | liq-j2-sa503-1968-mr55-spec |
 | liquid | thrust_vac | main | 1 | +0.7 | 0.7 | 0.7 | liq-rs25-109pct-spec |
 | solid | burn_rate | main | 27 | -0.4 | 0.5 | 2.0 | sol-nakka1999-knsb-p09 |
-| hybrid | chamber_pressure | anomaly | 9 | +66.4 | 33.6 | 116.9 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
+| hybrid | c_star | anomaly | 4 | +13.7 | 13.5 | 15.5 | hyb-heydari2017-htpb-n2o-s4a1-3 |
+| hybrid | chamber_pressure | anomaly | 13 | +53.2 | 32.6 | 98.2 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
+| hybrid | port_diameter_final | anomaly | 4 | -8.1 | 8.0 | 8.2 | hyb-heydari2017-htpb-n2o-s4a1-1 |
 | hybrid | regression_rate | anomaly | 9 | +5.8 | 7.8 | 20.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 |
+| hybrid | thrust | anomaly | 4 | +28.5 | 27.7 | 29.1 | hyb-heydari2017-htpb-n2o-s4a1-3 |
 <!-- AUTO-CORRELATION:END -->
 
 ## Known limitations (do NOT design beyond these without independent check)
