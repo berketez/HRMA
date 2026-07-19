@@ -618,13 +618,19 @@ class HeatTransferAnalyzer:
             gas_side_analysis['total_heat_rate'], burn_time, motor_data, cooling_type
         )
 
-        # Safety analysis
+        # Safety analysis — thermal stress from the ACTUAL through-wall
+        # gradient of the wall analysis (v2.5.2), not from a hot-face rise.
+        wall_gradient = (wall_analysis['inner_temperature']
+                         - wall_analysis['outer_temperature'])
         safety_analysis = self._analyze_thermal_safety(
-            wall_analysis['max_temperature'], mat_props, wall_thickness, chamber_pressure
+            wall_analysis['max_temperature'], mat_props, wall_thickness,
+            chamber_pressure, wall_delta_T=wall_gradient
         )
-        # Surface energy-balance warnings.
+        # Surface energy-balance + wall-clamp warnings.
         safety_analysis['warnings'] = (
-            list(safety_analysis.get('warnings', [])) + gas_side_analysis.get('warnings', [])
+            list(safety_analysis.get('warnings', []))
+            + gas_side_analysis.get('warnings', [])
+            + wall_analysis.get('warnings', [])
         )
 
         return {
@@ -1072,28 +1078,68 @@ class HeatTransferAnalyzer:
         Analyze wall temperature distribution.
 
         The hot-side (inner) wall temperature is taken from the gas-side energy
-        balance when available; the conduction drop across the wall and the
-        coolant-side drop are then back-computed consistently from the flux.
+        balance when available; the conduction and coolant-side drops are then
+        back-computed from the flux that is CONSISTENT WITH THAT BALANCE.
+
+        FIX (v2.5.2, thermal -3115 K bug): the conduction drop used to be
+        computed from the conservative DESIGN flux (the throat load evaluated
+        at a reference cooled wall, ~35 MW/m^2 for a 60 bar chamber), while the
+        inner wall temperature came from the equilibrium solution. Those two
+        quantities belong to different thermal states, so subtracting one from
+        the other drove the outer wall far below ambient (a 60 bar / 8 mm steel
+        case returned -3076 K). The equilibrium wall temperature already
+        satisfies
+
+            q_eq = (T_inner - T_ambient) / (R_conduction + R_coolant)
+
+        so the physically consistent drops are q_eq * R_conduction and
+        q_eq * R_coolant, which always leave
+        T_ambient <= T_outer <= T_inner. The conservative design flux is
+        untouched and still reported as throat/chamber heat flux by
+        _analyze_gas_side_heat_transfer.
         """
         k = mat_props['thermal_conductivity']
+        warnings_list: List[str] = []
 
         # Thermal resistance analysis [m^2*K/W]
         R_conduction = thickness / k
         R_convection = 1.0 / h_coolant
         R_total = R_conduction + R_convection
 
-        # Temperature drops driven by the (now physical) heat flux.
-        delta_T_conduction = heat_flux * R_conduction
-        delta_T_convection = heat_flux * R_convection
+        design_heat_flux = heat_flux  # W/m^2 (conservative cooling-sizing load)
 
         if gas_side is not None and 'estimated_wall_temperature' in gas_side:
-            # Inner hot-wall from energy balance; outer/coolant temps from flux.
-            T_inner = gas_side['estimated_wall_temperature']
+            # Inner hot wall from the surface energy balance; the through-wall
+            # flux is the one that balance actually transports.
+            T_inner = float(gas_side['estimated_wall_temperature'])
+            equilibrium_heat_flux = (
+                (T_inner - ambient_temp) / R_total if R_total > 0 else 0.0)
+            equilibrium_heat_flux = max(equilibrium_heat_flux, 0.0)
+            delta_T_conduction = equilibrium_heat_flux * R_conduction
+            delta_T_convection = equilibrium_heat_flux * R_convection
             T_outer = T_inner - delta_T_conduction
         else:
-            # Backward-compatible resistance-network estimate.
-            T_inner = ambient_temp + heat_flux * R_total
-            T_outer = ambient_temp + heat_flux * R_convection
+            # Backward-compatible resistance-network estimate (design flux).
+            equilibrium_heat_flux = design_heat_flux
+            delta_T_conduction = design_heat_flux * R_conduction
+            delta_T_convection = design_heat_flux * R_convection
+            T_inner = ambient_temp + design_heat_flux * R_total
+            T_outer = ambient_temp + design_heat_flux * R_convection
+
+        # Safety clamp: the outer wall can never be colder than the coolant /
+        # ambient sink, nor hotter than the hot face.
+        T_outer_raw = T_outer
+        lower_bound = min(ambient_temp, T_inner)
+        T_outer = min(max(T_outer, lower_bound), T_inner)
+        if abs(T_outer - T_outer_raw) > 1e-6:
+            warnings_list.append(
+                f"Outer wall temperature {T_outer_raw:.0f} K was outside the "
+                f"physical range [{lower_bound:.0f} K, {T_inner:.0f} K] and was "
+                f"clamped to {T_outer:.0f} K — check wall thickness, "
+                f"conductivity and cooling inputs."
+            )
+            delta_T_conduction = T_inner - T_outer
+
         T_average = (T_inner + T_outer) / 2.0
 
         # Temperature gradient through the wall
@@ -1105,6 +1151,10 @@ class HeatTransferAnalyzer:
             'average_temperature': T_average,
             'max_temperature': T_inner,
             'temperature_gradient': temp_gradient,
+            # Flux actually conducted through the wall at equilibrium (W/m^2);
+            # the conservative design load is reported separately.
+            'equilibrium_heat_flux': equilibrium_heat_flux,
+            'design_heat_flux': design_heat_flux,
             'thermal_resistance': {
                 'conduction': R_conduction,
                 'convection': R_convection,
@@ -1113,7 +1163,8 @@ class HeatTransferAnalyzer:
             'temperature_drops': {
                 'conduction': delta_T_conduction,
                 'convection': delta_T_convection
-            }
+            },
+            'warnings': warnings_list
         }
 
     def _analyze_cooling_requirements(self, heat_rate: float, burn_time: float,
@@ -1151,8 +1202,30 @@ class HeatTransferAnalyzer:
         }
 
     def _analyze_thermal_safety(self, max_temp: float, mat_props: Dict,
-                              thickness: float, pressure: float) -> Dict:
-        """Analyze thermal safety margins"""
+                              thickness: float, pressure: float,
+                              wall_delta_T: Optional[float] = None) -> Dict:
+        """Analyze thermal safety margins.
+
+        FIX (v2.5.2): the thermal stress used to be built from hardcoded steel
+        constants (alpha=12e-6, E=200e9, yield=250e6) AND from the fully
+        restrained form E*alpha*(T_wall - 293). Both were wrong:
+
+          - a copper or Inconel chamber was still evaluated as mild steel;
+          - the fully restrained form assumes the whole wall is prevented from
+            expanding, which returns absurd stresses (GPa-level) for any hot
+            chamber and pinned every design at a safety factor near zero.
+
+        The stress reported here is now the classical through-wall thermal
+        gradient stress of a thin cylindrical shell
+
+            sigma_th = E * alpha * dT_wall / (2 * (1 - nu))
+
+        with dT_wall = T_inner - T_outer taken from the wall analysis, and all
+        properties resolved from the selected material record
+        (hrma.data.materials_db). References: Timoshenko & Goodier, "Theory of
+        Elasticity"; Boley & Weiner, "Theory of Thermal Stresses" Ch. 10-11;
+        Roark's Formulas for Stress & Strain 9th ed. Ch. 16.
+        """
 
         allowable_temp = mat_props['allowable_temperature']
         melting_point = mat_props['melting_point']
@@ -1162,13 +1235,21 @@ class HeatTransferAnalyzer:
         temp_safety_factor = allowable_temp / max_temp_safe
         melting_safety_factor = melting_point / max_temp_safe
 
-        # Thermal stress (simplified)
-        thermal_expansion = 12e-6  # 1/K (typical for steel)
-        elastic_modulus = 200e9    # Pa
-        thermal_stress = elastic_modulus * thermal_expansion * (max_temp - 293)
+        # --- Material properties of the SELECTED material (no steel hardcode) ---
+        props = self._resolve_mechanical_properties(mat_props)
+        thermal_expansion = props['thermal_expansion']   # 1/K
+        elastic_modulus = props['elastic_modulus']       # Pa
+        poisson_ratio = props['poisson_ratio']           # -
+        yield_strength = props['yield_strength']         # Pa
 
-        # Allowable stress (simplified)
-        yield_strength = 250e6  # Pa (typical for steel)
+        # Through-wall gradient. If the wall analysis did not supply one, fall
+        # back to the hot-face rise above ambient (conservative upper bound).
+        if wall_delta_T is None:
+            wall_delta_T = max_temp - 293.15
+        delta_T_wall = max(float(wall_delta_T), 0.0)
+
+        thermal_stress = (elastic_modulus * thermal_expansion * delta_T_wall
+                          / (2.0 * (1.0 - poisson_ratio)))
         stress_safety_factor = yield_strength / thermal_stress if thermal_stress > 0 else 1e6
 
         # Risk assessment
@@ -1191,9 +1272,52 @@ class HeatTransferAnalyzer:
             'melting_safety_factor': melting_safety_factor,
             'stress_safety_factor': stress_safety_factor,
             'thermal_stress': thermal_stress / 1e6,  # MPa
+            'thermal_stress_delta_T_K': delta_T_wall,
+            'thermal_stress_properties': {
+                'elastic_modulus_GPa': elastic_modulus / 1e9,
+                'thermal_expansion_per_K': thermal_expansion,
+                'poisson_ratio': poisson_ratio,
+                'yield_strength_MPa': yield_strength / 1e6,
+            },
             'risk_level': risk_level,
             'warnings': warnings_list,
             'recommendations': self._get_safety_recommendations(temp_safety_factor, thickness)
+        }
+
+    @staticmethod
+    def _resolve_mechanical_properties(mat_props: Dict) -> Dict:
+        """Return E, alpha, nu and yield strength of the selected material.
+
+        The material records handed to this analyzer already come from the
+        central database (hrma.data.materials_db.build_materials_view), so the
+        mechanical fields are normally present. If a caller passes a partial
+        record, the values are re-read from materials_db.get_material() using
+        the record name before any generic fallback is used.
+        """
+        required = ('elastic_modulus', 'thermal_expansion',
+                    'poisson_ratio', 'yield_strength')
+        if all(mat_props.get(f) for f in required):
+            return {f: float(mat_props[f]) for f in required}
+
+        record: Dict = {}
+        name = mat_props.get('name', '')
+        if name:
+            try:
+                from hrma.data.materials_db import get_material
+                record = get_material(name)
+            except Exception:
+                record = {}
+
+        # Generic structural-steel fallback only if nothing else is available.
+        defaults = {
+            'elastic_modulus': 200e9,
+            'thermal_expansion': 12e-6,
+            'poisson_ratio': 0.29,
+            'yield_strength': 250e6,
+        }
+        return {
+            f: float(mat_props.get(f) or record.get(f) or defaults[f])
+            for f in required
         }
 
     def _calculate_cooling_efficiency(self, cooling_type: str) -> float:

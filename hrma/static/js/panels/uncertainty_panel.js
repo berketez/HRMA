@@ -33,14 +33,15 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
     const ENDPOINT = '/api/uncertainty-analysis';
     const PANEL_ID = 'uncertainty';
 
     const LEVELS = [
-        ['fast', 'Fast Screening (~10-30 s)'],
-        ['engineering', 'Engineering (~1-3 min)'],
-        ['high_fidelity', 'High-Fidelity (~10-15 min)'],
+        ['fast', 'Fast Screening (~10-30 s)', 'uq.levelFast'],
+        ['engineering', 'Engineering (~1-3 min)', 'uq.levelEng'],
+        ['high_fidelity', 'High-Fidelity (~10-15 min)', 'uq.levelHigh'],
     ];
 
     const POLL_INTERVAL_MS = 2000;
@@ -48,15 +49,15 @@
 
     // İnsan-okunur çıktı adları (sözleşmedeki anahtar kümesi; bilinmeyen
     // anahtar ad dönüşümüyle gösterilir — uydurma birim YOK)
-    const OUTPUT_LABELS = {
-        isp: 'Isp',
-        thrust: 'Thrust',
-        chamber_pressure: 'Chamber Pressure',
-        c_star: 'C*',
-        total_impulse: 'Total Impulse',
-        regression_rate_avg: 'Avg Regression Rate',
-        max_pressure: 'Max Pressure',
-        mdot_total: 'Total Mass Flow',
+    const OUTPUT_LABEL_KEYS = {
+        isp: ['Isp', 'out.isp'],
+        thrust: ['Thrust', 'out.thrust'],
+        chamber_pressure: ['Chamber Pressure', 'out.chamberPressure'],
+        c_star: ['C*', 'out.cStar'],
+        total_impulse: ['Total Impulse', 'out.totalImpulse'],
+        regression_rate_avg: ['Avg Regression Rate', 'out.regressionRateAvg'],
+        max_pressure: ['Max Pressure', 'out.maxPressure'],
+        mdot_total: ['Total Mass Flow', 'out.mdotTotal'],
     };
 
     let pollTimer = null;
@@ -68,10 +69,11 @@
     }
 
     function labelFor(key) {
-        return OUTPUT_LABELS[key]
-            || key.replace(/_/g, ' ').replace(/\b\w/g, function (c) {
-                return c.toUpperCase();
-            });
+        const pair = OUTPUT_LABEL_KEYS[key];
+        if (pair) return T(pair[1], pair[0]);
+        return key.replace(/_/g, ' ').replace(/\b\w/g, function (c) {
+            return c.toUpperCase();
+        });
     }
 
     // Sayı büyüklüğüne uyumlu biçim (Isp ~200 ile It ~1e5 aynı kartta)
@@ -106,28 +108,33 @@
     // ------------------------------------------------------------------
     function customFormHtml() {
         const opts = LEVELS.map(function (l) {
-            return '<option value="' + l[0] + '">' + l[1] + '</option>';
+            return '<option value="' + l[0] + '" data-i18n="' + l[2] + '">'
+                + T(l[2], l[1]) + '</option>';
         }).join('');
         return `<div id="uq_custom" style="margin:10px 0;">
             <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
                 <div class="form-group" style="min-width:220px;">
-                    <label>Analysis Level</label>
+                    <label data-i18n="panel.uncertainty.fLevel">${
+                        T('panel.uncertainty.fLevel', 'Analysis Level')}</label>
                     <select id="uq_level">${opts}</select>
                 </div>
                 <div class="form-group" style="width:110px;">
-                    <label>Seed</label>
+                    <label data-i18n="panel.uncertainty.fSeed">${
+                        T('panel.uncertainty.fSeed', 'Seed')}</label>
                     <input type="number" id="uq_seed" value="42" step="1">
                 </div>
                 <div class="form-group">
-                    <button class="btn" type="button" id="uq_run">
-                        Run Uncertainty Analysis</button>
+                    <button class="btn" type="button" id="uq_run"
+                        data-i18n="panel.uncertainty.btnRun">${
+                        T('panel.uncertainty.btnRun', 'Run Uncertainty Analysis')}</button>
                 </div>
             </div>
             <p style="font-family:var(--hd-mono, monospace); font-size:0.7rem;
-                color:var(--hd-ink-dim, #7d97a5); margin:6px 0 0;">
-                Inputs are taken from the motor form above exactly as a
-                normal calculation would send them. High-Fidelity runs are
-                queued and polled in the background.</p>
+                color:var(--hd-ink-dim, #7d97a5); margin:6px 0 0;"
+                data-i18n="panel.uncertainty.intro">${T('panel.uncertainty.intro',
+                'Inputs are taken from the motor form above exactly as a normal '
+                + 'calculation would send them. High-Fidelity runs are queued and '
+                + 'polled in the background.')}</p>
         </div>`;
     }
 
@@ -195,8 +202,8 @@
 
         const inputs = collectInputs();
         if (!inputs) {
-            setStatus('Could not read the motor form on this page — '
-                + 'form collector not found.', 'err');
+            setStatus(T('panel.uncertainty.noForm',
+                'Could not read the motor form on this page — form collector not found.'), 'err');
             return;
         }
         const level = levelEl.value;
@@ -206,8 +213,8 @@
         btn.disabled = true;
         root.style.display = 'none';
         setStatus(level === 'high_fidelity'
-            ? 'SUBMITTING HIGH-FIDELITY JOB…'
-            : 'RUNNING MONTE CARLO SAMPLING…');
+            ? T('panel.uncertainty.submitting', 'SUBMITTING HIGH-FIDELITY JOB…')
+            : T('panel.uncertainty.sampling', 'RUNNING MONTE CARLO SAMPLING…'));
 
         const payload = {
             motor_type: window.AnalysisDock.getMotorType(),
@@ -234,15 +241,17 @@
             }
             finish(data, btn, root);
         } catch (err) {
-            setStatus('ERROR: ' + err.message, 'err');
+            setStatus(U.tf('common.errorPrefix', { message: err.message },
+                           'ERROR: {message}'), 'err');
             btn.disabled = false;
         }
     }
 
     function pollJob(jobId, tries, btn, root) {
         if (tries >= POLL_MAX_TRIES) {
-            setStatus('ERROR: high-fidelity job timed out (still running '
-                + 'server-side, job id ' + jobId + ').', 'err');
+            setStatus(U.tf('panel.uncertainty.jobTimeout', { id: jobId },
+                'ERROR: high-fidelity job timed out (still running server-side, job id {id}).'),
+                'err');
             btn.disabled = false;
             return;
         }
@@ -263,11 +272,13 @@
                     throw new Error(job.error || 'job failed');
                 }
                 const pct = Math.round(100 * (job.progress || 0));
-                setStatus('HIGH-FIDELITY JOB ' + job.state.toUpperCase()
-                    + ' — ' + pct + '%');
+                setStatus(U.tf('panel.uncertainty.jobProgress',
+                    { state: job.state.toUpperCase(), pct: pct },
+                    'HIGH-FIDELITY JOB {state} — {pct}%'));
                 pollJob(jobId, tries + 1, btn, root);
             } catch (err) {
-                setStatus('ERROR: ' + err.message, 'err');
+                setStatus(U.tf('common.errorPrefix', { message: err.message },
+                               'ERROR: {message}'), 'err');
                 btn.disabled = false;
             }
         }, POLL_INTERVAL_MS);
@@ -276,8 +287,11 @@
     function finish(data, btn, root) {
         btn.disabled = false;
         if (!data || data.status !== 'ok' || !data.outputs) {
-            setStatus('ERROR: ' + ((data && data.error)
-                || 'unexpected response payload from backend'), 'err');
+            setStatus(U.tf('common.errorPrefix',
+                { message: (data && data.error)
+                    || T('panel.uncertainty.badPayload',
+                         'unexpected response payload from backend') },
+                'ERROR: {message}'), 'err');
             return;
         }
         lastData = data;
@@ -301,52 +315,56 @@
                  letter-spacing:0.08em;">${name}</div>
             <div style="font-size:1.2rem; font-family:var(--hd-mono);
                  color:var(--hd-ink-strong, #eaf7fb); margin-top:2px;"
-                 title="Median of the Monte Carlo sample (P50)">
+                 title="${T('panel.uncertainty.p50Tip', 'Median of the Monte Carlo sample (P50)')}">
                 ${fmtVal(o.p50)}</div>
             <div style="font-family:var(--hd-mono); font-size:0.72rem;
                  color:var(--hd-cyan, #00e5ff);"
-                 title="90% band: 5th to 95th percentile">
+                 title="${T('panel.uncertainty.bandTip', '90% band: 5th to 95th percentile')}">
                 [${fmtVal(o.p5)}, ${fmtVal(o.p95)}]</div>
             <div style="font-family:var(--hd-mono); font-size:0.7rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
-                nominal ${fmtVal(o.nominal)} · σ ${fmtVal(o.std)}</div>
+                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(o.nominal)} · σ ${fmtVal(o.std)}</div>
         </div>`;
     }
 
     function summaryCards(data) {
         return '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
-            + U.statCard('LEVEL', escapeHtml(String(data.level || '—')), '',
-                'info', 'Requested analysis level')
-            + U.statCard('SAMPLES', String(data.n_samples != null
+            + U.statCard(T('panel.uncertainty.cardLevel', 'LEVEL'),
+                escapeHtml(String(data.level || '—')), '',
+                'info', T('panel.uncertainty.cardLevelTip', 'Requested analysis level'))
+            + U.statCard(T('panel.uncertainty.cardSamples', 'SAMPLES'), String(data.n_samples != null
                 ? data.n_samples : '—'), '', 'info',
-                'Monte Carlo samples evaluated')
-            + U.statCard('FAILED', String(data.failed_samples != null
+                T('panel.uncertainty.cardSamplesTip', 'Monte Carlo samples evaluated'))
+            + U.statCard(T('panel.uncertainty.cardFailed', 'FAILED'), String(data.failed_samples != null
                 ? data.failed_samples : '—'), '',
                 (data.failed_samples > 0) ? 'warn' : 'ok',
-                'Samples that failed to evaluate and were excluded')
-            + U.statCard('SEED', String(data.seed != null ? data.seed : '—'),
-                '', 'dim', 'Random seed (reproducibility)')
-            + U.statCard('TIME', fmtVal(data.timing_s), 's', 'dim',
-                'Wall-clock analysis time')
+                T('panel.uncertainty.cardFailedTip', 'Samples that failed to evaluate and were excluded'))
+            + U.statCard(T('panel.uncertainty.cardSeed', 'SEED'), String(data.seed != null ? data.seed : '—'),
+                '', 'dim', T('panel.uncertainty.cardSeedTip', 'Random seed (reproducibility)'))
+            + U.statCard(T('panel.uncertainty.cardTime', 'TIME'), fmtVal(data.timing_s), 's', 'dim',
+                T('panel.uncertainty.cardTimeTip', 'Wall-clock analysis time'))
             + '</div>';
     }
 
     function warningRows(data) {
         const items = [];
         if (data.failed_samples > 0) {
-            items.push(data.failed_samples + ' of ' + data.n_samples
-                + ' samples failed and were excluded from the statistics.');
+            items.push(U.tf('panel.uncertainty.warnFailed',
+                { failed: data.failed_samples, total: data.n_samples },
+                '{failed} of {total} samples failed and were excluded from the statistics.'));
         }
         const shifts = data.mean_shift_percent || {};
         Object.keys(shifts).forEach(function (k) {
             const v = shifts[k];
             if (typeof v === 'number' && isFinite(v) && Math.abs(v) >= 1.0) {
-                items.push('Mean of ' + labelFor(k) + ' is shifted '
-                    + (v > 0 ? '+' : '') + v.toFixed(2)
-                    + '% from the nominal value (nonlinear response).');
+                items.push(U.tf('panel.uncertainty.warnShift',
+                    { name: labelFor(k), shift: (v > 0 ? '+' : '') + v.toFixed(2) },
+                    'Mean of {name} is shifted {shift}% from the nominal value '
+                    + '(nonlinear response).'));
             }
         });
-        return U.listBlock('Uncertainty warnings', items, 'warn');
+        return U.listBlock(T('panel.uncertainty.warningsTitle', 'Uncertainty warnings'),
+                           items, 'warn');
     }
 
     function selectableKeys(data) {
@@ -358,7 +376,7 @@
 
     function drawHistogram(data, key, plotEl) {
         if (typeof Plotly === 'undefined') {
-            plotEl.textContent = 'Plotly is not loaded — chart skipped.';
+            plotEl.textContent = T('common.plotlyMissing', 'Plotly is not loaded — chart skipped.');
             return;
         }
         const o = data.outputs[key];
@@ -384,11 +402,13 @@
             y: counts,
             width: widths,
             hovertemplate: labelFor(key)
-                + ': %{x:.4g}<br>count: %{y}<extra></extra>',
+                + ': %{x:.4g}<br>' + T('panel.uncertainty.count', 'count')
+                + ': %{y}<extra></extra>',
         }], {
-            title: labelFor(key) + ' — Monte Carlo Distribution',
+            title: U.tf('panel.uncertainty.chartHistogram', { name: labelFor(key) },
+                        '{name} — Monte Carlo Distribution'),
             xaxis: { title: labelFor(key) },
-            yaxis: { title: 'Sample count' },
+            yaxis: { title: T('panel.uncertainty.axisSampleCount', 'Sample count') },
             bargap: 0.05,
             shapes: shapes,
             height: 360,
@@ -397,13 +417,13 @@
 
     function drawTornado(data, key, plotEl) {
         if (typeof Plotly === 'undefined') {
-            plotEl.textContent = 'Plotly is not loaded — chart skipped.';
+            plotEl.textContent = T('common.plotlyMissing', 'Plotly is not loaded — chart skipped.');
             return;
         }
         const rows = ((data.sensitivity || {})[key] || []).slice(0, 6);
         if (!rows.length) {
-            plotEl.textContent =
-                'No sensitivity data available for this output.';
+            plotEl.textContent = T('panel.uncertainty.noSensitivity',
+                'No sensitivity data available for this output.');
             return;
         }
         // |rho| azalan gelir; yatay barda en etkili en ÜSTTE dursun
@@ -422,9 +442,11 @@
             },
             hovertemplate: '%{y}: ρ = %{x:.3f}<extra></extra>',
         }], {
-            title: 'Sensitivity Tornado — ' + labelFor(key)
-                + ' (top ' + rows.length + ' by |ρ|)',
-            xaxis: { title: 'Spearman rank correlation ρ', range: [-1, 1] },
+            title: U.tf('panel.uncertainty.chartTornado',
+                { name: labelFor(key), n: rows.length },
+                'Sensitivity Tornado — {name} (top {n} by |ρ|)'),
+            xaxis: { title: T('panel.uncertainty.axisSpearman', 'Spearman rank correlation ρ'),
+                     range: [-1, 1] },
             height: 320,
             margin: { l: 160 },
         }, { responsive: true, displaylogo: false });
@@ -433,15 +455,16 @@
     function render(data, root) {
         // 1) Koşu özeti + uyarılar
         const head = document.createElement('div');
-        head.innerHTML = U.sectionTitle('Run Summary') + summaryCards(data)
+        head.innerHTML = U.sectionTitle(T('panel.uncertainty.secSummary', 'Run Summary'))
+            + summaryCards(data)
             + warningRows(data);
         root.appendChild(head);
 
         // 2) Çıktı başına CI kartları
         const keys = Object.keys(data.outputs || {});
         const cards = document.createElement('div');
-        cards.innerHTML = U.sectionTitle('Output Confidence Intervals '
-            + '— P50 with [P5, P95] band')
+        cards.innerHTML = U.sectionTitle(T('panel.uncertainty.secCi',
+            'Output Confidence Intervals — P50 with [P5, P95] band'))
             + '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
             + keys.map(function (k) { return ciCard(k, data.outputs[k]); }).join('')
             + '</div>';
@@ -453,9 +476,10 @@
 
         const wrap = document.createElement('div');
         wrap.style.marginTop = '14px';
-        wrap.innerHTML = U.sectionTitle('Distribution and Sensitivity')
+        wrap.innerHTML = U.sectionTitle(T('panel.uncertainty.secDistribution',
+                'Distribution and Sensitivity'))
             + `<div class="form-group" style="max-width:280px;">
-                 <label>Output</label>
+                 <label>${T('panel.uncertainty.fOutput', 'Output')}</label>
                  <select id="uq_out_select">`
             + selKeys.map(function (k) {
                 return '<option value="' + escapeHtml(k) + '">'
@@ -489,6 +513,7 @@
     window.AnalysisDock.register({
         id: PANEL_ID,
         title: 'Uncertainty Quantification — Monte Carlo Confidence Bands',
+        titleKey: 'panel.uncertainty.title',
         category: 'UNCERTAINTY',
         endpoint: ENDPOINT,
         motorTypes: ['hybrid', 'liquid', 'solid'],

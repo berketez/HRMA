@@ -1,3 +1,6 @@
+import base64
+import math
+
 import plotly.graph_objects as go
 import numpy as np
 import json
@@ -5,6 +8,54 @@ from scipy.interpolate import griddata
 from typing import Dict, List, Tuple, Optional
 
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+
+# ---------------------------------------------------------------------------
+# Plotly JSON çıkışı — binary (bdata) kodlamasını SÖKEN tek kapı
+# ---------------------------------------------------------------------------
+# plotly 6.0.1, fig.to_json()/to_dict() içinde numpy dizilerini base64
+# "bdata" bloklarına çevirir. Uygulamanın paketlediği vendor plotly.js
+# 1.58.5 bu formatı ÇÖZEMEZ → seri boş çizilir ("Regression Rate & Port
+# Growth boş" bugının kökü, 2026-07-19). Bu yüzden her figür JSON'u
+# _fig_json() üzerinden geçirilir: bdata blokları listeye açılır, numpy
+# skalerleri Python tiplerine döner, NaN/Inf null olur (plotly.js boşluk
+# olarak yorumlar).
+_BDATA_DTYPES = {
+    'f8': '<f8', 'f4': '<f4', 'i1': '<i1', 'u1': '<u1', 'i2': '<i2',
+    'u2': '<u2', 'i4': '<i4', 'u4': '<u4', 'i8': '<i8', 'u8': '<u8',
+}
+
+
+def _decode_bdata(obj):
+    """{'dtype','bdata'[,'shape']} bloğunu numpy dizisine geri çevirir."""
+    arr = np.frombuffer(base64.b64decode(obj['bdata']),
+                        dtype=_BDATA_DTYPES[obj['dtype']])
+    shape = obj.get('shape')
+    if shape:
+        dims = [int(s) for s in str(shape).replace(' ', '').split(',') if s]
+        arr = arr.reshape(dims)
+    return arr
+
+
+def _to_plain(obj):
+    """Figür sözlüğünü saf Python (JSON-güvenli) tiplere indirger."""
+    if isinstance(obj, dict):
+        if 'bdata' in obj and obj.get('dtype') in _BDATA_DTYPES:
+            return _to_plain(_decode_bdata(obj))
+        return {k: _to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, np.ndarray):
+        return [_to_plain(v) for v in obj.tolist()]
+    if isinstance(obj, np.generic):
+        return _to_plain(obj.item())
+    if isinstance(obj, (list, tuple)):
+        return [_to_plain(v) for v in obj]
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    return obj
+
+
+def _fig_json(fig):
+    """fig.to_json() yerine kullanılır: bdata'sız, saf JSON string."""
+    return json.dumps(_to_plain(fig.to_dict()))
 
 # ---------------------------------------------------------------------------
 # Ortak koyu tema paleti — theme.css / plotly_dark.js COLORWAY ile hizalı.
@@ -37,6 +88,49 @@ DARK_PLOT_BG = 'rgba(8, 16, 28, 0.35)'
 DARK_PAPER_BG = 'rgba(0,0,0,0)'
 DARK_LEGEND_BG = 'rgba(6, 13, 24, 0.7)'
 DARK_LEGEND_BORDER = 'rgba(0, 229, 255, 0.2)'
+
+# ---------------------------------------------------------------------------
+# Analiz Güvertesi figürleri — çözücüye bağlı sabitler (2026-07-19 uydurma
+# denetimi). Bu blok ÖNCE uydurma şekil fonksiyonlarının içine gömülü olan
+# katsayıların yerini alır: artık ya gerçek çözücü çağrılır ya da eksik girdi
+# figürün üstünde AÇIKÇA "assumed" olarak listelenir. Sessiz varsayım yok.
+# ---------------------------------------------------------------------------
+#: Pc x O/F performans yüzeyinin ızgara boyutu (her düğüm = bir gerçek
+#: CombustionAnalyzer.analyze_combustion çağrısı ~28 ms; 7x7 = 49 çağrı).
+PERF_SURFACE_GRID_N = 7
+#: Yüzey tarama aralıkları (bar / O-F kütle oranı). Panelin eski görsel
+#: kapsamıyla aynı; tek fark artık her düğümde denge GERÇEKTEN çözülüyor.
+PERF_SURFACE_PC_RANGE_BAR = (10.0, 100.0)
+PERF_SURFACE_OF_RANGE = (1.0, 6.0)
+#: Tarama için propellant kimliği verilmediğinde kullanılan referans çift.
+#: Figür alt başlığında AÇIKÇA yazılır (kullanıcı kendi yakıtını sandığında
+#: yanılmasın diye) — app.py bu alanları geçirdiğinde otomatik değişir.
+PERF_SURFACE_DEFAULT_FUEL = 'htpb'
+PERF_SURFACE_DEFAULT_OXIDIZER = 'N2O'
+
+#: Quasi-1D Mach konturu: gaz özellikleri figüre geçirilmezse kullanılan
+#: referans oda hâli. Sutton & Biblarz 9. baskı Bölüm 3'te tipik hibrit/sıvı
+#: yanma gazı bandı (gamma 1.15-1.25, MW 20-28 g/mol). Bu değerler figürün
+#: alt başlığında "assumed" olarak listelenir.
+NOZZLE_FIG_DEFAULT_GAMMA = 1.20
+NOZZLE_FIG_DEFAULT_MW = 24.0            # g/mol
+NOZZLE_FIG_DEFAULT_PC_BAR = 20.0
+NOZZLE_FIG_DEFAULT_TC_K = 3000.0
+NOZZLE_FIG_AMBIENT_PA = 101325.0        # deniz seviyesi (ISA)
+NOZZLE_FIG_N_STATIONS = 45
+#: Kontur ızgarasının radyal düğüm sayısı (quasi-1D: M yarıçap boyunca
+#: SABİT; ızgara yalnız duvar içini boyamak için var).
+NOZZLE_FIG_N_RADIAL = 31
+
+#: Cidar ısı akısı figürü: Bartz profili için istasyon sayısı ve zaman
+#: ekseni düğüm sayısı (yığın-ısıl kütle geçici çözümü).
+HEATFLUX_FIG_N_STATIONS = 40
+HEATFLUX_FIG_N_TIME = 40
+#: Geçici cidar çözümü için varsayılan malzeme/kalınlık (HeatTransferAnalyzer
+#: malzeme veritabanı anahtarı). Figürde "assumed" listesine yazılır.
+HEATFLUX_FIG_DEFAULT_MATERIAL = 'steel'
+HEATFLUX_FIG_DEFAULT_WALL_M = 0.005
+HEATFLUX_FIG_DEFAULT_COOLING = 'natural'
 
 
 def _style_subplot_titles(fig, size=13, color='#cfe8f2'):
@@ -76,8 +170,13 @@ def create_motor_plot(motor_data):
     d_t_mm = d_t * 1000
     d_e_mm = d_e * 1000
     
-    # Calculate realistic nozzle geometry
-    nozzle_length = max(d_e_mm * 1.5, 80)  # Realistic nozzle length
+    # Calculate schematic nozzle geometry.
+    # DIKKAT (2026-07-19 uydurma denetimi): bu FALLBACK cizimdir. Ana yol
+    # create_improved_motor_cross_section() olup gercek nozul konturunu
+    # (sample_nozzle_inner_contour) kullanir; buraya yalnizca o yol istisna
+    # atinca dusulur. Nozul boyu burada cozucuden DEGIL, cikis capindan
+    # turetilen bir cizim oranidir — figure gorunur uyari eklenir.
+    nozzle_length = max(d_e_mm * 1.5, 80)  # schematic proportion, not solved
     
     # Chamber walls (upper and lower)
     chamber_wall_upper_x = [-L_mm/2, L_mm/2]
@@ -359,21 +458,39 @@ def create_motor_plot(motor_data):
         annotations=annotations,
         margin=dict(t=80, b=80, l=100, r=60)
     )
-    
-    return fig.to_json()
+    fig.add_annotation(
+        x=0.5, y=1.06, xref='paper', yref='paper', showarrow=False,
+        text=('Fallback schematic — the solver nozzle contour was not '
+              'available for this run; nozzle proportions are drawn, not '
+              'computed.'),
+        font=dict(size=11, color=COL_WARN_HI), align='center')
+
+    return _fig_json(fig)
 
 def create_injector_plot(injector_data, injector_type):
-    """Create professional injector visualization"""
-    
+    """Create professional injector visualization (legacy fallback path)."""
+
     fig = go.Figure()
-    
+
+    # Tip takma adları kanonik üç çizim dalına indirgenir: impingement delik
+    # deseni olarak (showerhead), koaksiyel eş merkezli kesit olarak (pintle)
+    # çizilir. Aksi halde bilinmeyen tip UnboundLocalError'a düşüyordu.
+    injector_type = INJECTOR_TYPE_ALIASES.get(str(injector_type).lower(),
+                                              'showerhead')
+    if injector_type == 'impingement':
+        injector_type = 'showerhead'
+    elif injector_type == 'coaxial':
+        injector_type = 'pintle'
+
     if injector_type == 'showerhead':
         # Create professional showerhead pattern
         n_holes = injector_data['n_holes']
         d_h_mm = injector_data['hole_diameter']  # Keep in mm
         
-        # Simplified plate design
-        plate_radius_mm = 60  # Fixed reasonable size
+        # Simplified plate design — FALLBACK yol (ana yol
+        # create_improved_injector_design). Plaka yaricapi cozucuden gelmez;
+        # figure gorunur uyari eklenir (2026-07-19 uydurma denetimi).
+        plate_radius_mm = 60  # schematic outline, not a reported dimension
         
         # Simple hole pattern - hexagonal close-packed or circular rings
         hole_positions_x = []
@@ -735,196 +852,628 @@ def create_injector_plot(injector_data, injector_type):
         hovermode='closest',
         margin=dict(t=100, b=80, l=80, r=80)
     )
-    
-    return fig.to_json()
+    fig.add_annotation(
+        x=0.5, y=1.05, xref='paper', yref='paper', showarrow=False,
+        text=('Fallback schematic — the detailed injector view was not '
+              'available for this run; plate outline is drawn, not computed.'),
+        font=dict(size=11, color=COL_WARN_HI), align='center')
 
-def create_performance_plots(motor_data, injector_data):
-    """Create performance visualization plots"""
-    
-    # Create subplots
-    from plotly.subplots import make_subplots
-    
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=('Mass Flow Rates', 'Pressure Distribution', 
-                       'Regression Rate & Port Growth', 'Injector Performance'),
-        specs=[[{'type': 'bar'}, {'type': 'bar'}],
-               [{'secondary_y': True}, {'type': 'indicator'}]],
-        vertical_spacing=0.20,
-        horizontal_spacing=0.15
-    )
-    
-    # Mass flow rates
-    fig.add_trace(
-        go.Bar(
-            x=['Total', 'Oxidizer', 'Fuel'],
-            y=[motor_data['mdot_total'], motor_data['mdot_ox'], motor_data['mdot_f']],
-            marker_color=['#00e5ff', '#2dd4a8', '#ff8c33'],
-            text=[f"{v:.3f} kg/s" for v in [motor_data['mdot_total'], 
-                                            motor_data['mdot_ox'], 
-                                            motor_data['mdot_f']]],
-            textposition='auto'
-        ),
-        row=1, col=1
-    )
-    
-    # Pressure distribution
-    pressures = ['Chamber', 'Tank', 'Injector ΔP']
-    values = [motor_data['chamber_pressure'], 
-              injector_data['pressure_drop'] + motor_data['chamber_pressure'],
-              injector_data['pressure_drop']]
-    
-    fig.add_trace(
-        go.Bar(
-            x=pressures,
-            y=values,
-            marker_color=['#ff5d73', '#00e5ff', '#2dd4a8'],
-            text=[f"{v:.1f} bar" for v in values],
-            textposition='auto'
-        ),
-        row=1, col=2
-    )
-    
-    # Regresyon/port evrimi — GERÇEK çözücü serisinden (Opus/keşif düzeltmesi).
-    # Eski kod lineer interpolasyon + yapay sinüs dalgacığı çiziyordu; Euler
-    # marşının ürettiği port_history (zaman, çap) artık doğrudan kullanılır,
-    # regresyon hızı da bu serinin türevinden gelir (r = (dD/dt)/2).
-    try:
-        burn_time = motor_data.get('burn_time', 10)
-        ph = motor_data.get('port_history') or {}
-        t_ph = ph.get('time')
-        d_ph = ph.get('port_diameter')
+    return _fig_json(fig)
 
-        if t_ph and d_ph and len(t_ph) == len(d_ph) and len(t_ph) >= 3:
-            time = np.asarray(t_ph, dtype=float)
-            port_diameter = np.asarray(d_ph, dtype=float)  # m
-            regression_rate_array = np.gradient(port_diameter, time) / 2.0 * 1000.0  # mm/s
-            reg_label = (f'Regression Rate (avg: '
-                         f'{float(np.mean(regression_rate_array)):.2f} mm/s)')
+# ---------------------------------------------------------------------------
+# Performans panosu (create_performance_plots) — motor tipine duyarlı adaptör
+# ---------------------------------------------------------------------------
+# Eski sürüm YALNIZ hibrit alan adlarına (mdot_ox / mdot_f / port_history /
+# injector.pressure_drop) bağlıydı; katı ve sıvı sayfalarında pano hiç
+# üretilemiyordu. Artık motor tipi motor_data'dan çıkarılır ve her tip kendi
+# panel listesini kurar. Veri yoksa panel UYDURULMAZ, listeden düşer ve ızgara
+# kalan panel sayısına göre yeniden boyutlanır. Çağrı imzası korunur
+# (injector_data katı motorda anlamsız olduğu için opsiyoneldir).
+PERF_V_SPACING = 0.20     # satırlar arası boşluk (dar ekran onarımı, 2026-07-19)
+PERF_H_SPACING = 0.22     # sütunlar arası boşluk
+PERF_ROW_HEIGHT = 425     # px/satır — 2 satır = eski 850 px pano yüksekliği
+PERF_TITLE_SIZE = 22
+PERF_SUBPLOT_COLS = 2     # varsayılan ızgara genişliği
+PERF_MIN_SERIES = 3       # bir zaman serisinin panel çizmeye yetmesi için min nokta
+# Enjektör göstergesi: ölçek tam skalası ve bölge sınırları ORAN olarak tutulur
+# (100 m/s tam skalada eski mutlak 20/50/100 sınırlarıyla birebir aynıdır).
+PERF_GAUGE_FULL_SCALE = 100.0   # m/s
+PERF_GAUGE_ROUND = 50.0         # skala taşarsa yuvarlanacağı adım
+PERF_GAUGE_STEP_FRACTIONS = (0.20, 0.50, 1.00)
+PERF_GAUGE_THRESHOLD_FRACTION = 0.50
+# Birim dönüşümleri (panolarda gösterim birimi)
+M_TO_MM = 1000.0
+M2_TO_CM2 = 1.0e4
+
+
+def _perf_num(value):
+    """Sonlu bir sayıya çevrilebiliyorsa saf float döner, aksi halde None."""
+    if value is None or isinstance(value, (bool, str, dict, list, tuple)):
+        if isinstance(value, str):
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return None
         else:
-            # port_history yoksa (eski kayıt/yabancı veri) eski davranışa düş
-            regression_rate = motor_data.get('regression_rate', 0.001)
-            port_initial = motor_data.get('port_diameter_initial', 0.03)
-            port_final = motor_data.get('port_diameter_final', 0.05)
-            time = np.linspace(0, burn_time, 100)
-            port_diameter = np.linspace(port_initial, port_final, 100)
-            regression_rate_array = np.ones(100) * regression_rate * 1000.0
-            reg_label = f'Regression Rate (avg: {regression_rate*1000:.2f} mm/s)'
+            return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
 
-        # Port diameter growth plot
+
+def _perf_series(seq, min_len=PERF_MIN_SERIES):
+    """Diziyi saf Python float listesine indirger.
+
+    numpy dizisi doğrudan Plotly'ye verilirse fig.to_dict() base64 'bdata'
+    bloğu üretir ve paketlenmiş plotly.js 1.58.5 bunu çözemez (boş çizgi
+    bugı). Bu yüzden pano serilerinin TAMAMI buradan geçer.
+    """
+    if seq is None:
+        return None
+    if isinstance(seq, np.ndarray):
+        seq = seq.tolist()
+    if not isinstance(seq, (list, tuple)):
+        return None
+    out = []
+    for v in seq:
+        n = _perf_num(v)
+        if n is None:
+            return None
+        out.append(n)
+    return out if len(out) >= min_len else None
+
+
+def _perf_motor_type(motor_data):
+    """motor_data'dan motor tipini çıkarır (hibrit / katı / sıvı).
+
+    Öncelik: açık 'motor_type' / 'viz_motor_type' anahtarı; yoksa alan
+    varlığından çıkarım (app.py'ye dokunmadan çalışabilmesi için).
+    """
+    explicit = motor_data.get('motor_type') or motor_data.get('viz_motor_type')
+    if isinstance(explicit, str) and explicit.strip().lower() in ('hybrid', 'solid', 'liquid'):
+        return explicit.strip().lower()
+
+    # Hibrit: tek gövdede iki ayrı debi (oksitleyici sıvı/gaz + katı yakıt)
+    if _perf_num(motor_data.get('mdot_ox')) is not None and \
+            _perf_num(motor_data.get('mdot_f')) is not None:
+        return 'hybrid'
+
+    # Katı: yanma alanı zaman serisi yalnız katı çözücüde vardır
+    curve = motor_data.get('thrust_curve')
+    if isinstance(curve, dict) and curve.get('burn_area') is not None:
+        return 'solid'
+    if motor_data.get('grain_type') and motor_data.get('propellant_type'):
+        return 'solid'
+
+    # Sıvı: besleme sistemi debileri
+    feed = motor_data.get('feed_system')
+    if isinstance(feed, dict) and isinstance(feed.get('mass_flow_rates'), dict):
+        return 'liquid'
+    if _perf_num(motor_data.get('mixture_ratio')) is not None and \
+            _perf_num(motor_data.get('total_mass_flow')) is not None:
+        return 'liquid'
+
+    return 'hybrid'
+
+
+def _perf_grid(n_panels):
+    """Panel sayısına göre (satır, sütun, yerleşim) döndürür.
+
+    Yerleşim öğesi (row, col, colspan). Tek sayıda panelde son panel satırı
+    boyunca uzatılır ki ızgarada boş hücre kalmasın.
+    """
+    if n_panels <= 1:
+        return 1, 1, [(1, 1, 1)]
+    if n_panels == 2:
+        return 1, 2, [(1, 1, 1), (1, 2, 1)]
+    cols = PERF_SUBPLOT_COLS
+    rows = int(math.ceil(n_panels / float(cols)))
+    slots = []
+    for i in range(n_panels):
+        r = i // cols + 1
+        c = i % cols + 1
+        span = cols if (i == n_panels - 1 and c == 1) else 1
+        slots.append((r, c, span))
+    return rows, cols, slots
+
+
+def _perf_bar_panel(title, labels, values, colors, value_fmt,
+                    x_title, y_title, trace_name=None):
+    """Sonlu değeri olan çubukları bir panel sözlüğüne çevirir (yoksa None)."""
+    trace_name = trace_name or title
+    keep = [(l, _perf_num(v), c) for l, v, c in zip(labels, values, colors)]
+    keep = [(l, v, c) for l, v, c in keep if v is not None]
+    if not keep:
+        return None
+    xs = [k[0] for k in keep]
+    ys = [k[1] for k in keep]
+    cs = [k[2] for k in keep]
+    texts = [value_fmt.format(v) for v in ys]
+
+    def draw(fig, row, col):
+        fig.add_trace(
+            go.Bar(
+                x=xs, y=ys, marker_color=cs, text=texts,
+                textposition='auto',
+                # Dik yazılan çubuk etiketleri dar ekranda okunmuyordu; yatay
+                # sabitlenir ve eksen kutusunun dışına taşabilir (kırpılmaz)
+                textangle=0,
+                cliponaxis=False,
+                name=trace_name, showlegend=False
+            ),
+            row=row, col=col
+        )
+
+    def axes(fig, row, col):
+        fig.update_xaxes(title_text=x_title, row=row, col=col)
+        fig.update_yaxes(title_text=y_title, row=row, col=col)
+
+    return {'title': title, 'spec': {'type': 'bar'}, 'draw': draw, 'axes': axes}
+
+
+def _perf_gauge_panel(title, value, unit='m/s'):
+    """Enjektör hız göstergesi paneli (değer yoksa None)."""
+    val = _perf_num(value)
+    if val is None or val <= 0:
+        return None
+    full = PERF_GAUGE_FULL_SCALE
+    if val > full:
+        full = math.ceil(val / PERF_GAUGE_ROUND) * PERF_GAUGE_ROUND
+    f_lo, f_mid, f_hi = PERF_GAUGE_STEP_FRACTIONS
+    steps = [
+        {'range': [0, full * f_lo], 'color': "#46606d"},
+        {'range': [full * f_lo, full * f_mid], 'color': COL_SAFE},
+        {'range': [full * f_mid, full * f_hi], 'color': COL_DANGER},
+    ]
+
+    def draw(fig, row, col):
+        fig.add_trace(
+            go.Indicator(
+                mode="gauge+number",
+                value=val,
+                # Başlık BİLEREK yok: hücrenin üstünde subplot_titles'tan gelen
+                # başlık annotation'ı var; Indicator'ın kendi title'ı onunla
+                # AYNI noktaya basılıp üst üste biniyordu. Birim, başlık yerine
+                # sayının sonekinde taşınır.
+                number={'suffix': ' ' + unit, 'font': {'size': 26}},
+                domain={'x': [0, 1], 'y': [0, 1]},
+                gauge={
+                    # Dar ekranda gösterge ekseni etiketleri sayının üstüne
+                    # biniyordu: yazı boyutu küçültüldü (2026-07-19)
+                    'axis': {'range': [0, full], 'tickfont': {'size': 10}},
+                    'bar': {'color': "darkblue"},
+                    'steps': steps,
+                    'threshold': {
+                        'line': {'color': COL_DANGER, 'width': 4},
+                        'thickness': 0.75,
+                        'value': full * PERF_GAUGE_THRESHOLD_FRACTION
+                    }
+                }
+            ),
+            row=row, col=col
+        )
+
+    def axes(fig, row, col):
+        return None
+
+    return {'title': title, 'spec': {'type': 'indicator'},
+            'draw': draw, 'axes': axes}
+
+
+def _perf_dual_axis_panel(title, x, primary, secondary, x_title):
+    """İki eksenli zaman serisi paneli.
+
+    primary/secondary: (y_listesi, ad, renk, y_ekseni_başlığı, hover_birimi)
+    secondary None ise tek eksen çizilir.
+    """
+    xs = _perf_series(x)
+    if xs is None or primary is None:
+        return None
+    y1, name1, color1, ytitle1, unit1 = primary
+    ys1 = _perf_series(y1)
+    if ys1 is None or len(ys1) != len(xs):
+        return None
+    sec = None
+    if secondary is not None:
+        y2, name2, color2, ytitle2, unit2 = secondary
+        ys2 = _perf_series(y2)
+        if ys2 is not None and len(ys2) == len(xs):
+            sec = (ys2, name2, color2, ytitle2, unit2)
+
+    def draw(fig, row, col):
         fig.add_trace(
             go.Scatter(
-                x=time,
-                y=port_diameter * 1000,  # Convert to mm
-                mode='lines',
+                x=xs, y=ys1, mode='lines',
+                line=dict(color=color1, width=3),
+                name=name1,
+                hovertemplate=('%{x:.2f} s<br>' + name1 +
+                               ': %{y:.2f} ' + unit1).rstrip() + '<extra></extra>'
+            ),
+            row=row, col=col
+        )
+        if sec is not None:
+            fig.add_trace(
+                go.Scatter(
+                    x=xs, y=sec[0], mode='lines',
+                    line=dict(color=sec[2], width=2),
+                    name=sec[1],
+                    hovertemplate=('%{x:.2f} s<br>' + sec[1] +
+                                   ': %{y:.2f} ' + sec[4]).rstrip() + '<extra></extra>'
+                ),
+                row=row, col=col, secondary_y=True
+            )
+
+    def axes(fig, row, col):
+        fig.update_xaxes(title_text=x_title, row=row, col=col)
+        fig.update_yaxes(title_text=ytitle1, secondary_y=False, row=row, col=col)
+        if sec is not None:
+            fig.update_yaxes(title_text=sec[3], secondary_y=True,
+                             row=row, col=col)
+
+    return {'title': title, 'spec': {'secondary_y': True},
+            'draw': draw, 'axes': axes}
+
+
+# --- Hibrit panelleri -------------------------------------------------------
+
+def _perf_panels_hybrid(motor_data, injector_data):
+    panels = []
+
+    panels.append(_perf_bar_panel(
+        'Mass Flow Rates',
+        ['Total', 'Oxidizer', 'Fuel'],
+        [motor_data.get('mdot_total'), motor_data.get('mdot_ox'),
+         motor_data.get('mdot_f')],
+        ['#00e5ff', COL_SAFE, COL_WARN_HI],
+        '{:.3f} kg/s', 'Component', 'Mass Flow Rate (kg/s)',
+        trace_name='Mass Flow'
+    ))
+
+    # Basınç dağılımı — Tank çubuğu GERÇEK tank basıncını gösterir.
+    # Eski kod Pc + ΔP_enjektör yazıyordu; bu besleme hattı kayıplarını yok
+    # sayan bir tahmindi ve kullanıcının girdiği tank basıncıyla çelişiyordu.
+    chamber = _perf_num(motor_data.get('chamber_pressure'))
+    inj_dp = _perf_num(injector_data.get('pressure_drop'))
+    tank = _perf_num(motor_data.get('tank_pressure'))
+    if (tank is None or tank <= 0) and chamber is not None and inj_dp is not None:
+        tank = inj_dp + chamber
+    panels.append(_perf_bar_panel(
+        'Pressure Distribution',
+        ['Chamber', 'Tank', 'Inj. ΔP'],
+        [chamber, tank, inj_dp],
+        [COL_DANGER, '#00e5ff', COL_SAFE],
+        '{:.1f} bar', 'Location', 'Pressure (bar)',
+        trace_name='Pressure'
+    ))
+
+    panels.append(_perf_panel_regression(motor_data))
+    panels.append(_perf_gauge_panel('Injector Performance',
+                                    injector_data.get('exit_velocity')))
+    return [p for p in panels if p]
+
+
+def _perf_panel_regression(motor_data):
+    """Regresyon/port evrimi — GERÇEK çözücü serisinden.
+
+    Eski kod lineer interpolasyon + yapay sinüs dalgacığı çiziyordu; Euler
+    marşının ürettiği port_history (zaman, çap) artık doğrudan kullanılır,
+    regresyon hızı da bu serinin türevinden gelir (r = (dD/dt)/2).
+    """
+    ph = motor_data.get('port_history') or {}
+    t_ph = _perf_series(ph.get('time')) if isinstance(ph, dict) else None
+    d_ph = _perf_series(ph.get('port_diameter')) if isinstance(ph, dict) else None
+
+    if t_ph and d_ph and len(t_ph) == len(d_ph):
+        time = np.asarray(t_ph, dtype=float)
+        port_diameter = np.asarray(d_ph, dtype=float)  # m
+        regression = np.gradient(port_diameter, time) / 2.0 * M_TO_MM  # mm/s
+        reg_label = (f'Regression Rate (avg: '
+                     f'{float(np.mean(regression)):.2f} mm/s)')
+        port_mm = (port_diameter * M_TO_MM).tolist()
+        reg_list = regression.tolist()
+        t_list = time.tolist()
+    else:
+        # port_history yoksa (eski kayıt/yabancı veri) analitik özete düş
+        burn_time = _perf_num(motor_data.get('burn_time'))
+        rate = _perf_num(motor_data.get('regression_rate'))
+        d_i = _perf_num(motor_data.get('port_diameter_initial'))
+        d_f = _perf_num(motor_data.get('port_diameter_final'))
+        if burn_time is None or burn_time <= 0 or rate is None \
+                or d_i is None or d_f is None:
+            return None
+        n_pts = 100
+        t_list = np.linspace(0, burn_time, n_pts).tolist()
+        port_mm = (np.linspace(d_i, d_f, n_pts) * M_TO_MM).tolist()
+        reg_list = (np.ones(n_pts) * rate * M_TO_MM).tolist()
+        reg_label = f'Regression Rate (avg: {rate * M_TO_MM:.2f} mm/s)'
+
+    def draw(fig, row, col):
+        fig.add_trace(
+            go.Scatter(
+                x=t_list, y=port_mm, mode='lines',
                 line=dict(color='#c792ea', width=3),
                 name='Port Diameter Growth',
                 hovertemplate='Time: %{x:.1f}s<br>Port Diameter: %{y:.1f}mm<extra></extra>'
             ),
-            row=2, col=1
+            row=row, col=col
         )
-
-        # Add regression rate line
         fig.add_trace(
             go.Scatter(
-                x=time,
-                y=regression_rate_array,
-                mode='lines',
-                line=dict(color='#ff5d73', width=2),
+                x=t_list, y=reg_list, mode='lines',
+                line=dict(color=COL_DANGER, width=2),
                 name=reg_label,
                 hovertemplate='Time: %{x:.1f}s<br>Regression Rate: %{y:.2f} mm/s<extra></extra>'
             ),
-            row=2, col=1,
-            secondary_y=True
+            row=row, col=col, secondary_y=True
         )
-    except Exception as e:
-        print(f"Warning: Regression rate plot error: {e}")
-        # Add default data if error occurs
-        time = np.linspace(0, 10, 100)
-        port_diameter = np.linspace(30, 50, 100)  # mm
-        regression_rate_default = np.ones(100) * 2.0  # mm/s
-        
-        fig.add_trace(
-            go.Scatter(
-                x=time,
-                y=port_diameter,
-                mode='lines',
-                line=dict(color='#c792ea', width=3),
-                name='Port Diameter Growth',
-                hovertemplate='Time: %{x:.1f}s<br>Port Diameter: %{y:.1f}mm<extra></extra>'
-            ),
-            row=2, col=1
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=time,
-                y=regression_rate_default,
-                mode='lines',
-                line=dict(color='#ff5d73', width=2),
-                name='Regression Rate (2.0 mm/s)',
-                hovertemplate='Time: %{x:.1f}s<br>Regression Rate: %{y:.2f} mm/s<extra></extra>'
-            ),
-            row=2, col=1,
-            secondary_y=True
-        )
-    
-    # Injector performance gauge
-    fig.add_trace(
-        go.Indicator(
-            mode="gauge+number",
-            value=injector_data['exit_velocity'],
-            # Başlık BİLEREK yok: hücrenin üstünde subplot_titles'tan gelen
-            # 'Injector Performance' annotation'ı var; Indicator'ın kendi
-            # title'ı onunla AYNI noktaya basılıp üst üste biniyordu.
-            # Birim, başlık yerine sayının sonekinde taşınır.
-            number={'suffix': ' m/s'},
-            domain={'x': [0, 1], 'y': [0, 1]},
-            gauge={
-                'axis': {'range': [0, 100]},
-                'bar': {'color': "darkblue"},
-                'steps': [
-                    {'range': [0, 20], 'color': "#46606d"},
-                    {'range': [20, 50], 'color': "#2dd4a8"},
-                    {'range': [50, 100], 'color': "#ff5d73"}
-                ],
-                'threshold': {
-                    'line': {'color': "#ff5d73", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 50
-                }
-            }
-        ),
-        row=2, col=2
+
+    def axes(fig, row, col):
+        fig.update_xaxes(title_text="Time (s)", row=row, col=col)
+        fig.update_yaxes(title_text="Port Diameter (mm)", secondary_y=False,
+                         row=row, col=col)
+        # İkincil eksen başlığı dar ekranda komşu hücreye taşıyordu; kısaltıldı
+        fig.update_yaxes(title_text="r (mm/s)", secondary_y=True,
+                         row=row, col=col)
+
+    return {'title': 'Regression Rate & Port Growth',
+            'spec': {'secondary_y': True}, 'draw': draw, 'axes': axes}
+
+
+# --- Katı motor panelleri ---------------------------------------------------
+
+def _perf_panels_solid(motor_data):
+    """Katı motor panosu: debi + basınç + F(t) + yanma alanı/Kn.
+
+    Katıda tek propellant vardır (oksitleyici/yakıt ayrımı YOK) ve port
+    yerine yanan yüzey regresyonu izlenir; paneller buna göre kurulur.
+    """
+    curve = motor_data.get('thrust_curve')
+    curve = curve if isinstance(curve, dict) else {}
+    t = _perf_series(curve.get('time'))
+    thrust = _perf_series(curve.get('thrust'))
+    pressure = _perf_series(curve.get('pressure'))
+    mdot = _perf_series(curve.get('mass_flow'))
+    burn_area = _perf_series(curve.get('burn_area'))
+
+    panels = []
+
+    # 1) Kütle debisi — tek propellant; tepe/ortalama/sönme değerleri
+    if mdot:
+        panels.append(_perf_bar_panel(
+            'Propellant Mass Flow',
+            ['Peak', 'Average', 'Burnout'],
+            [max(mdot), sum(mdot) / len(mdot), mdot[-1]],
+            ['#00e5ff', COL_SAFE, COL_WARN_HI],
+            '{:.3f} kg/s', 'Operating Point', 'Mass Flow Rate (kg/s)'
+        ))
+
+    # 2) Basınç dağılımı — tasarım Pc ile gerçekleşen tepe/ortalama
+    design_pc = _perf_num(motor_data.get('chamber_pressure'))
+    if pressure:
+        panels.append(_perf_bar_panel(
+            'Pressure Distribution',
+            ['Design Pc', 'Peak', 'Average'],
+            [design_pc, max(pressure), sum(pressure) / len(pressure)],
+            ['#00e5ff', COL_DANGER, COL_SAFE],
+            '{:.1f} bar', 'Operating Point', 'Pressure (bar)'
+        ))
+    elif design_pc is not None:
+        panels.append(_perf_bar_panel(
+            'Pressure Distribution', ['Design Pc'], [design_pc],
+            ['#00e5ff'], '{:.1f} bar', 'Operating Point', 'Pressure (bar)'
+        ))
+
+    # 3) İtki ve kamara basıncı zaman serisi
+    if t and thrust:
+        sec = None
+        if pressure and len(pressure) == len(t):
+            sec = (pressure, 'Chamber Pressure', COL_DANGER,
+                   'Pressure (bar)', 'bar')
+        panels.append(_perf_dual_axis_panel(
+            'Thrust & Chamber Pressure vs Time', t,
+            (thrust, 'Thrust', '#00e5ff', 'Thrust (N)', 'N'),
+            sec, 'Time (s)'
+        ))
+
+    # 4) Yanan yüzey alanı ve Kn (= A_burn / A_throat) evrimi
+    if t and burn_area and len(burn_area) == len(t):
+        area_cm2 = [a * M2_TO_CM2 for a in burn_area]
+        d_throat_mm = _perf_num(motor_data.get('throat_diameter'))
+        sec = None
+        if d_throat_mm and d_throat_mm > 0:
+            a_throat = math.pi * (d_throat_mm / M_TO_MM / 2.0) ** 2  # m^2
+            sec = ([a / a_throat for a in burn_area], 'Kn', COL_WARN_HI,
+                   'Kn (-)', '')
+        panels.append(_perf_dual_axis_panel(
+            'Burn Area & Kn vs Time', t,
+            (area_cm2, 'Burn Area', '#c792ea', 'Burn Area (cm²)', 'cm²'),
+            sec, 'Time (s)'
+        ))
+
+    return [p for p in panels if p]
+
+
+# --- Sıvı motor panelleri ---------------------------------------------------
+
+def _perf_panels_liquid(motor_data, injector_data):
+    """Sıvı motor panosu: debiler + basınç + besleme bütçesi + enjektör.
+
+    Sıvıda port regresyonu YOKTUR; onun yerine besleme sistemi basınç
+    bütçesi gösterilir (feed_system.pressure_drops).
+    """
+    feed = motor_data.get('feed_system')
+    feed = feed if isinstance(feed, dict) else {}
+    rates = feed.get('mass_flow_rates')
+    rates = rates if isinstance(rates, dict) else {}
+    inj_design = motor_data.get('injector_design')
+    inj_design = inj_design if isinstance(inj_design, dict) else {}
+    inj_system = motor_data.get('injection_system')
+    inj_system = inj_system if isinstance(inj_system, dict) else {}
+
+    mdot_total = _perf_num(rates.get('total'))
+    if mdot_total is None:
+        mdot_total = _perf_num(motor_data.get('total_mass_flow'))
+    mdot_ox = _perf_num(rates.get('oxidizer'))
+    if mdot_ox is None:
+        mdot_ox = _perf_num(motor_data.get('oxidizer_flow'))
+    mdot_f = _perf_num(rates.get('fuel'))
+    if mdot_f is None:
+        mdot_f = _perf_num(motor_data.get('fuel_flow'))
+
+    panels = []
+
+    panels.append(_perf_bar_panel(
+        'Mass Flow Rates',
+        ['Total', 'Oxidizer', 'Fuel'],
+        [mdot_total, mdot_ox, mdot_f],
+        ['#00e5ff', COL_SAFE, COL_WARN_HI],
+        '{:.3f} kg/s', 'Component', 'Mass Flow Rate (kg/s)',
+        trace_name='Mass Flow'
+    ))
+
+    # Basınç dağılımı: kamara / besleme (pompa çıkışı veya tank) / enjektör ΔP
+    chamber = _perf_num(motor_data.get('chamber_pressure'))
+    drops = feed.get('pressure_drops')
+    drops = drops if isinstance(drops, dict) else {}
+    inj_dp = _perf_num(inj_design.get('injection_pressure_drop_ox_bar'))
+    if inj_dp is None:
+        inj_dp = _perf_num(inj_system.get('ox_pressure_drop'))
+    if inj_dp is None:
+        inj_dp = _perf_num(injector_data.get('pressure_drop'))
+    if inj_dp is None:
+        inj_dp = _perf_num(drops.get('injector'))
+    feed_pressure = _perf_num(drops.get('pump_discharge_pressure_ox'))
+    if feed_pressure is None:
+        feed_pressure = _perf_num(inj_system.get('required_ox_tank_pressure'))
+    if feed_pressure is None:
+        feed_pressure = _perf_num(motor_data.get('tank_pressure'))
+    panels.append(_perf_bar_panel(
+        'Pressure Distribution',
+        ['Chamber', 'Feed', 'Inj. ΔP'],
+        [chamber, feed_pressure, inj_dp],
+        [COL_DANGER, '#00e5ff', COL_SAFE],
+        '{:.1f} bar', 'Location', 'Pressure (bar)'
+    ))
+
+    # Besleme hattı basınç bütçesi (yalnız bileşen kayıpları; toplamlar hariç)
+    budget_labels = [
+        ('tank_outlet', 'Tank Outlet'), ('main_valve', 'Main Valve'),
+        ('filters', 'Filters'), ('feed_lines', 'Feed Lines'),
+        ('injector', 'Injector'),
+    ]
+    b_names, b_vals = [], []
+    for key, label in budget_labels:
+        val = _perf_num(drops.get(key))
+        if val is not None:
+            b_names.append(label)
+            b_vals.append(val)
+    if b_names:
+        panels.append(_perf_bar_panel(
+            'Feed System Pressure Budget', b_names, b_vals,
+            [PALETTE[i % len(PALETTE)] for i in range(len(b_names))],
+            '{:.2f} bar', 'Component', 'Pressure Drop (bar)'
+        ))
+
+    inj_velocity = _perf_num(inj_design.get('ox_injection_velocity_m_s'))
+    if inj_velocity is None:
+        inj_velocity = _perf_num(inj_system.get('ox_injection_velocity'))
+    if inj_velocity is None:
+        inj_velocity = _perf_num(injector_data.get('exit_velocity'))
+    panels.append(_perf_gauge_panel('Injector Performance', inj_velocity))
+
+    return [p for p in panels if p]
+
+
+def _perf_empty_figure(title, note='No performance data available'):
+    """Hiçbir panel kurulamadığında boş ama okunur bir figür döner."""
+    fig = go.Figure()
+    fig.add_annotation(text=note, showarrow=False,
+                       font=dict(size=16, color=STRUCT_DIM),
+                       xref='paper', yref='paper', x=0.5, y=0.5)
+    fig.update_layout(
+        title=dict(text=title,
+                   font=dict(size=PERF_TITLE_SIZE, family='Arial',
+                             color=STRUCT_INK),
+                   x=0.5),
+        height=PERF_ROW_HEIGHT, autosize=True,
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        plot_bgcolor='white', paper_bgcolor='white'
     )
-    
-    # Update layout
+    return _fig_json(fig)
+
+
+PERF_TITLES = {
+    'hybrid': 'Hybrid Rocket Performance Analysis',
+    'solid': 'Solid Rocket Performance Analysis',
+    'liquid': 'Liquid Rocket Performance Analysis',
+}
+
+
+def create_performance_plots(motor_data, injector_data=None):
+    """Motor tipine duyarlı performans panosu (hibrit / katı / sıvı).
+
+    injector_data katı motorda anlamsız olduğundan opsiyoneldir; hibrit
+    çağrı imzası (motor_data, injector_data) değişmeden korunur.
+    """
+    from plotly.subplots import make_subplots
+
+    motor_data = motor_data if isinstance(motor_data, dict) else {}
+    injector_data = injector_data if isinstance(injector_data, dict) else {}
+
+    motor_type = _perf_motor_type(motor_data)
+    title = PERF_TITLES.get(motor_type, PERF_TITLES['hybrid'])
+    if motor_type == 'solid':
+        panels = _perf_panels_solid(motor_data)
+    elif motor_type == 'liquid':
+        panels = _perf_panels_liquid(motor_data, injector_data)
+    else:
+        panels = _perf_panels_hybrid(motor_data, injector_data)
+
+    if not panels:
+        return _perf_empty_figure(title)
+
+    rows, cols, slots = _perf_grid(len(panels))
+    specs = [[None] * cols for _ in range(rows)]
+    for panel, (r, c, span) in zip(panels, slots):
+        spec = dict(panel['spec'])
+        if span > 1:
+            spec['colspan'] = span
+        specs[r - 1][c - 1] = spec
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=[p['title'] for p in panels],
+        specs=specs,
+        vertical_spacing=PERF_V_SPACING,
+        # Dar ekran onarımı (2026-07-19): Windows %125-150 ölçekte efektif
+        # genişlik ~800 px'e düşüyor; 0.15 aralıkta sol sütunun y ekseni
+        # başlığı sağ sütunun çubuk etiketlerine giriyordu.
+        horizontal_spacing=PERF_H_SPACING
+    )
+
+    for panel, (r, c, _span) in zip(panels, slots):
+        panel['draw'](fig, r, c)
+
     fig.update_layout(
         title=dict(
-            text="Hybrid Rocket Performance Analysis",
-            font=dict(size=22, family='Arial', color=STRUCT_INK),
+            text=title,
+            font=dict(size=PERF_TITLE_SIZE, family='Arial', color=STRUCT_INK),
             x=0.5
         ),
         showlegend=True,
-        height=850,
+        height=rows * PERF_ROW_HEIGHT,
         autosize=True,
         plot_bgcolor='white',
         paper_bgcolor='white',
         margin=dict(t=120, b=100, l=100, r=100)
     )
-    
-    # Update axes
-    fig.update_xaxes(title_text="Component", row=1, col=1)
-    fig.update_yaxes(title_text="Mass Flow Rate (kg/s)", row=1, col=1)
-    
-    fig.update_xaxes(title_text="Location", row=1, col=2)
-    fig.update_yaxes(title_text="Pressure (bar)", row=1, col=2)
-    
-    fig.update_xaxes(title_text="Time (s)", row=2, col=1)
-    fig.update_yaxes(title_text="Port Diameter (mm)", secondary_y=False, row=2, col=1)
-    fig.update_yaxes(title_text="Regression Rate (mm/s)", secondary_y=True, row=2, col=1)
-    
-    return fig.to_json()
+
+    for panel, (r, c, _span) in zip(panels, slots):
+        panel['axes'](fig, r, c)
+
+    return _fig_json(fig)
 
 def create_heat_transfer_plots(heat_data):
     """Create comprehensive heat transfer analysis plots"""
@@ -1028,124 +1577,274 @@ def create_heat_transfer_plots(heat_data):
     fig.update_xaxes(title_text="Time (s)", row=2, col=2)
     fig.update_yaxes(title_text="Temperature (K)", row=2, col=2)
     
-    return fig.to_json()
+    return _fig_json(fig)
 
-def create_combustion_analysis_plots(combustion_data):
-    """Create comprehensive combustion analysis visualizations"""
+def _combustion_species_bars(combustion_data, station='chamber', top_n=10):
+    """Denge çözücüsünün GERÇEK tür kesirlerini (mol) döndürür.
+
+    Kaynak: CombustionAnalyzer.analyze_combustion -> compositions[station]
+    ['species'] = {tur: {'mole_fraction','mass_fraction'}}. Eski sürüm
+    hiç üretilmeyen 'species_concentrations' anahtarını aradığı için bu
+    çeyrek HER ZAMAN boş çiziliyordu (2026-07-19 uydurma denetimi).
+    """
+    comps = (combustion_data or {}).get('compositions') or {}
+    node = comps.get(station) or {}
+    species = node.get('species') if isinstance(node, dict) else None
+    if not isinstance(species, dict) or not species:
+        return [], []
+    pairs = []
+    for name, val in species.items():
+        if isinstance(val, dict):
+            x = _perf_num(val.get('mole_fraction'))
+        else:
+            x = _perf_num(val)
+        if x is not None and x > 0:
+            pairs.append((str(name), float(x)))
+    pairs.sort(key=lambda kv: kv[1], reverse=True)
+    pairs = pairs[:top_n]
+    return [k for k, _ in pairs], [v for _, v in pairs]
+
+
+def _combustion_station_temperatures(combustion_data):
+    """conditions{chamber,throat,exit}.T -> (etiketler, sıcaklıklar).
+
+    Eski sürüm 'flame_temperature_profile' anahtarını arıyordu; çözücü onu
+    hiç üretmiyor. Gerçek çözüm üç istasyonu raporluyor — eksen etiketinde
+    'station' yazılır, uydurma bir x[m] ekseni ÜRETİLMEZ.
+    """
+    cond = (combustion_data or {}).get('conditions') or {}
+    labels, temps = [], []
+    for key, label in (('chamber', 'Chamber'), ('throat', 'Throat'),
+                       ('exit', 'Exit')):
+        t = _perf_num((cond.get(key) or {}).get('T'))
+        if t is not None:
+            labels.append(label)
+            temps.append(float(t))
+    return labels, temps
+
+
+def _combustion_efficiency_breakdown(combustion_data, propellant=None):
+    """Yanma/kinetik verimini GERÇEKTEN hesaplar.
+
+    Döner: (yuzde | None, kaynak_notu)
+
+    Bileşenler:
+      eta_c*   : performance['c_star_delivered'] / performance['c_star'].
+                 eta_c_star çağırana verilmediyse teorik denge = teslim
+                 kabulüdür (1.000) ve not satırında BÖYLE yazılır.
+      eta_kin  : sonlu-hız (kinetik) lüle verimi — KineticEfficiency
+                 mühendislik korelasyonu, isp_predicted / isp_shifting.
+                 O/F, Pc ve gaz hâline gerçekten duyarlıdır.
+
+    Eski sürüm hiç üretilmeyen 'combustion_efficiency' anahtarını okuyup
+    varsayılan 0.95'e düşüyordu; gösterge HER koşuda %95 gösteriyordu.
+    """
+    perf = ((combustion_data or {}).get('performance') or {})
+    c_star = _perf_num(perf.get('c_star'))
+    c_star_del = _perf_num(perf.get('c_star_delivered'))
+    eta_c = None
+    if c_star and c_star > 0 and c_star_del is not None:
+        eta_c = c_star_del / c_star
+    eta_c_supplied = _perf_num(perf.get('eta_c_star')) is not None
+
+    eta_kin, kin_note = None, None
+    try:
+        from hrma.analysis.kinetic_efficiency import KineticEfficiency
+        pc_bar = _perf_num(((combustion_data.get('conditions') or {})
+                            .get('chamber') or {}).get('P'))
+        kin = KineticEfficiency().evaluate(
+            combustion_results=combustion_data,
+            chamber_pressure=pc_bar,
+            characteristic_length=(propellant or {}).get('characteristic_length'),
+            throat_diameter=(propellant or {}).get('throat_diameter'),
+            fidelity='engineering',
+        )
+        isp_sh = _perf_num(kin.get('isp_shifting'))
+        isp_pr = _perf_num(kin.get('isp_predicted'))
+        if isp_sh and isp_sh > 0 and isp_pr is not None:
+            eta_kin = isp_pr / isp_sh
+            kin_note = (f"eta_kin = {eta_kin * 100:.2f}% "
+                        f"({kin.get('fidelity_used', 'engineering')} "
+                        f"finite-rate correlation)")
+    except Exception as exc:                     # kinetik yol yoksa sessiz düşme YOK
+        kin_note = f"eta_kin not available ({type(exc).__name__})"
+
+    if eta_c is None and eta_kin is None:
+        return None, 'Not available for this run: solver reported no c* or Isp data.'
+
+    total = 1.0
+    parts = []
+    if eta_c is not None:
+        total *= eta_c
+        parts.append(
+            f"eta_c* = {eta_c * 100:.2f}%"
+            + ('' if eta_c_supplied
+               else ' (theoretical equilibrium; no measured c* efficiency supplied)')
+        )
+    if eta_kin is not None:
+        total *= eta_kin
+    if kin_note:
+        parts.append(kin_note)
+    return total * 100.0, ' | '.join(parts)
+
+
+def _combustion_of_sweep(propellant, n_points=9):
+    """Gerçek O/F taraması: her nokta bir analyze_combustion çağrısıdır.
+
+    propellant = {'fuel_composition': {...}, 'oxidizer_type': str,
+                  'chamber_pressure': bar, 'of_range': (lo, hi)}
+    Kimlik verilmemişse (app.py bugün geçirmiyor) None döner ve çeyrek
+    'not available' notuyla çizilir — uydurma bir parabol ÇİZİLMEZ.
+    """
+    if not propellant:
+        return None
+    fuel = propellant.get('fuel_composition')
+    ox = propellant.get('oxidizer_type')
+    pc = _perf_num(propellant.get('chamber_pressure'))
+    if not fuel or not ox or not pc:
+        return None
+    lo, hi = propellant.get('of_range') or PERF_SURFACE_OF_RANGE
+    from hrma.engines.combustion_analysis import CombustionAnalyzer
+    analyzer = propellant.get('analyzer') or CombustionAnalyzer(memoize=True)
+    of_vals, isp_vals = [], []
+    for of in np.linspace(float(lo), float(hi), int(n_points)):
+        try:
+            res = analyzer.analyze_combustion(dict(fuel), str(ox), float(of), pc)
+        except Exception:
+            continue
+        isp = _perf_num((res.get('performance') or {}).get('isp'))
+        if isp is None:
+            continue
+        of_vals.append(float(of))
+        isp_vals.append(float(isp))
+    if len(of_vals) < 2:
+        return None
+    return of_vals, isp_vals
+
+
+def create_combustion_analysis_plots(combustion_data, propellant=None):
+    """Combustion dashboard fed by the equilibrium solver (no placeholders).
+
+    Parameters
+    ----------
+    combustion_data : dict
+        ``CombustionAnalyzer.analyze_combustion`` output.
+    propellant : dict, optional
+        ``{'fuel_composition': {...}, 'oxidizer_type': 'N2O',
+        'chamber_pressure': bar}``. Only the O/F sweep quadrant needs it
+        (the sweep re-solves equilibrium at each point). Absent -> that
+        quadrant states it is unavailable instead of drawing a shape
+        function.
+    """
     from plotly.subplots import make_subplots
-    
+
     fig = make_subplots(
         rows=2, cols=2,
-        subplot_titles=('Chemical Equilibrium', 'Flame Temperature Profile',
-                       'Combustion Efficiency', 'O/F Ratio Optimization'),
+        subplot_titles=('Chamber Equilibrium Composition (solver)',
+                        'Temperature by Station (solver)',
+                        'Combustion / Kinetic Efficiency',
+                        'Isp vs O/F (equilibrium sweep)'),
         specs=[[{'type': 'bar'}, {'type': 'scatter'}],
                [{'type': 'indicator'}, {'type': 'scatter'}]]
     )
-    
-    # Chemical equilibrium
-    if 'species_concentrations' in combustion_data:
-        species_data = combustion_data['species_concentrations']
+    _style_subplot_titles(fig)
+    notes = []
+
+    # --- (1,1) Denge bileşimi: gerçek mol kesirleri --------------------
+    names, fracs = _combustion_species_bars(combustion_data)
+    if names:
         fig.add_trace(
-            go.Bar(
-                x=list(species_data.keys()),
-                y=list(species_data.values()),
-                marker_color='lightblue',
-                text=[f"{v:.3f}" for v in species_data.values()],
-                textposition='auto',
-                name='Species Concentration'
-            ),
-            row=1, col=1
-        )
-    
-    # Flame temperature profile
-    if 'flame_temperature_profile' in combustion_data:
-        flame_data = combustion_data['flame_temperature_profile']
+            go.Bar(x=names, y=fracs, marker_color=PALETTE[0],
+                   text=[f"{v:.4f}" for v in fracs], textposition='auto',
+                   name='Mole fraction',
+                   hovertemplate='%{x}: %{y:.5f} mole fraction<extra></extra>'),
+            row=1, col=1)
+    else:
+        notes.append('Equilibrium composition not available for this run.')
+
+    # --- (1,2) İstasyon sıcaklıkları ----------------------------------
+    labels, temps = _combustion_station_temperatures(combustion_data)
+    if temps:
         fig.add_trace(
-            go.Scatter(
-                x=flame_data['position'],
-                y=flame_data['temperature'],
-                mode='lines+markers',
-                line=dict(color='#ff8c33', width=3),
-                marker=dict(size=6, color='#ff5d73'),
-                name='Flame Temperature'
-            ),
-            row=1, col=2
-        )
-    
-    # Combustion efficiency gauge
-    efficiency = combustion_data.get('combustion_efficiency', 0.95)
-    fig.add_trace(
-        go.Indicator(
-            mode="gauge+number+delta",
-            value=efficiency * 100,
-            domain={'x': [0, 1], 'y': [0, 1]},
-            title={'text': "Combustion Efficiency (%)"},
-            delta={'reference': 95},
-            gauge={
-                'axis': {'range': [0, 100]},
-                'bar': {'color': "darkgreen"},
-                'steps': [
-                    {'range': [0, 70], 'color': "#46606d"},
-                    {'range': [70, 90], 'color': "#ffd166"},
-                    {'range': [90, 100], 'color': "#2dd4a8"}
-                ],
-                'threshold': {
-                    'line': {'color': "#ff5d73", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 95
-                }
-            }
-        ),
-        row=2, col=1
-    )
-    
-    # O/F ratio optimization
-    if 'of_optimization' in combustion_data:
-        of_data = combustion_data['of_optimization']
+            go.Scatter(x=labels, y=temps, mode='lines+markers',
+                       line=dict(color=PALETTE[1], width=3),
+                       marker=dict(size=10, color=PALETTE[3]),
+                       name='Temperature',
+                       hovertemplate='%{x}: %{y:.1f} K<extra></extra>'),
+            row=1, col=2)
+    else:
+        notes.append('Station temperatures not available for this run.')
+
+    # --- (2,1) Verim göstergesi: HESAPLANMIŞ ---------------------------
+    eff_pct, eff_note = _combustion_efficiency_breakdown(
+        combustion_data, propellant)
+    if eff_pct is not None:
         fig.add_trace(
-            go.Scatter(
-                x=of_data['of_ratios'],
-                y=of_data['specific_impulse'],
-                mode='lines+markers',
-                line=dict(color='#00e5ff', width=3),
-                marker=dict(size=8),
-                name='Isp vs O/F Ratio'
-            ),
-            row=2, col=2
-        )
-        
-        # Mark optimum point
-        optimum_idx = np.argmax(of_data['specific_impulse'])
+            go.Indicator(
+                mode="gauge+number+delta",
+                value=eff_pct,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={'text': "eta_c* x eta_kinetic (%)",
+                       'font': {'size': 13}},
+                number={'suffix': ' %', 'valueformat': '.2f'},
+                # Referans = ideal kayan-denge (kayıpsız) hâl
+                delta={'reference': 100.0, 'valueformat': '.2f'},
+                gauge={
+                    'axis': {'range': [90, 100]},
+                    'bar': {'color': COL_SAFE},
+                    'steps': [
+                        {'range': [90, 95], 'color': STEP_DANGER},
+                        {'range': [95, 98], 'color': STEP_WARN},
+                        {'range': [98, 100], 'color': STEP_SAFE},
+                    ],
+                }),
+            row=2, col=1)
+    notes.append(eff_note)
+
+    # --- (2,2) Gerçek O/F taraması ------------------------------------
+    sweep = _combustion_of_sweep(propellant)
+    if sweep:
+        of_vals, isp_vals = sweep
         fig.add_trace(
-            go.Scatter(
-                x=[of_data['of_ratios'][optimum_idx]],
-                y=[of_data['specific_impulse'][optimum_idx]],
-                mode='markers',
-                marker=dict(size=15, color='#ff5d73', symbol='star'),
-                name='Optimum Point',
-                hovertemplate=f'Optimum O/F: {of_data["of_ratios"][optimum_idx]:.2f}<br>Max Isp: {of_data["specific_impulse"][optimum_idx]:.1f} s'
-            ),
-            row=2, col=2
-        )
-    
+            go.Scatter(x=of_vals, y=isp_vals, mode='lines+markers',
+                       line=dict(color=PALETTE[0], width=3),
+                       marker=dict(size=7), name='Isp vs O/F',
+                       hovertemplate='O/F %{x:.2f}: %{y:.1f} s<extra></extra>'),
+            row=2, col=2)
+        k = int(np.argmax(isp_vals))
+        fig.add_trace(
+            go.Scatter(x=[of_vals[k]], y=[isp_vals[k]], mode='markers',
+                       marker=dict(size=15, color=COL_DANGER, symbol='star'),
+                       name='Sweep maximum',
+                       hovertemplate=(f'Sweep maximum<br>O/F {of_vals[k]:.2f}'
+                                      f'<br>Isp {isp_vals[k]:.1f} s'
+                                      '<extra></extra>')),
+            row=2, col=2)
+    else:
+        notes.append('Isp vs O/F sweep not available: propellant identity '
+                     '(fuel/oxidizer/chamber pressure) was not supplied to '
+                     'this figure.')
+
+    fig.add_annotation(
+        x=0.0, y=-0.14, xref='paper', yref='paper', xanchor='left',
+        showarrow=False, align='left',
+        text='<br>'.join(f'- {n}' for n in notes if n),
+        font=dict(size=10, color=STRUCT_DIM))
+
     fig.update_layout(
         title_text="Combustion Analysis Dashboard",
-        showlegend=True,
-        height=800,
-        autosize=True
-    )
-    
-    # Update axes
+        showlegend=True, height=820, autosize=True,
+        legend=_legend_below(-0.24),
+        margin=dict(b=170))
+
     fig.update_xaxes(title_text="Species", row=1, col=1)
     fig.update_yaxes(title_text="Mole Fraction", row=1, col=1)
-    
-    fig.update_xaxes(title_text="Position (m)", row=1, col=2)
+    fig.update_xaxes(title_text="Station", row=1, col=2)
     fig.update_yaxes(title_text="Temperature (K)", row=1, col=2)
-    
     fig.update_xaxes(title_text="O/F Ratio", row=2, col=2)
     fig.update_yaxes(title_text="Specific Impulse (s)", row=2, col=2)
-    
-    return fig.to_json()
+
+    return _fig_json(fig)
 
 def create_structural_analysis_plots(structural_data):
     """Create comprehensive structural analysis visualizations"""
@@ -1271,7 +1970,7 @@ def create_structural_analysis_plots(structural_data):
     fig.update_xaxes(title_text="Cycles to Failure", row=2, col=2, type="log")
     fig.update_yaxes(title_text="Stress Amplitude (MPa)", row=2, col=2, type="log")
     
-    return fig.to_json()
+    return _fig_json(fig)
 
 def create_real_time_dashboard(motor_data, time_data):
     """Create real-time performance monitoring dashboard"""
@@ -1376,7 +2075,7 @@ def create_real_time_dashboard(motor_data, time_data):
         autosize=True
     )
     
-    return fig.to_json()
+    return _fig_json(fig)
 
 def create_3d_motor_visualization(motor_data):
     """Create 3D motor visualization with cross-section and flow"""
@@ -1434,22 +2133,16 @@ def create_3d_motor_visualization(motor_data):
         name='Flow Channel'
     ))
     
-    # Nozzle
-    nozzle_length = 100  # mm
-    z_nozzle = np.linspace(L/2, L/2 + nozzle_length, 30)
-    
-    # Nozzle contour
-    throat_pos = L/2 + nozzle_length * 0.3
-    nozzle_radius = []
-    for z in z_nozzle:
-        if z <= throat_pos:
-            # Convergent
-            r = D/2 - (D/2 - d_throat/2) * (z - L/2) / (throat_pos - L/2)
-        else:
-            # Divergent
-            r = d_throat/2 + (d_exit/2 - d_throat/2) * (z - throat_pos) / (L/2 + nozzle_length - throat_pos)
-        nozzle_radius.append(r)
-    
+    # Nozzle — TEK ortak geometri kaynağı (2D kesit / STEP / STL ile aynı).
+    # DURUSTLUK DUZELTMESI (2026-07-19): eski surum `nozzle_length = 100 mm`
+    # SABIT cizip bogazi bu sabitin %30'una koyuyordu; ayni sayfadaki 2D
+    # kesit gercek konturu kullandigi icin iki gorsel celisiyordu.
+    contour_pts, contour_meta = sample_nozzle_inner_contour(motor_data)
+    z_c = np.array([p[0] for p in contour_pts], dtype=float)   # mm
+    r_c = np.array([p[1] for p in contour_pts], dtype=float)   # mm
+    z_nozzle = L / 2 + z_c
+    nozzle_radius = r_c
+
     theta_nozzle, z_nozzle_mesh = np.meshgrid(theta, z_nozzle)
     radius_mesh = np.array([nozzle_radius]).T
     x_nozzle = radius_mesh * np.cos(theta_nozzle)
@@ -1476,7 +2169,7 @@ def create_3d_motor_visualization(motor_data):
         height=600
     )
     
-    return fig.to_json()
+    return _fig_json(fig)
 
 #: Karşılaştırma grafiğinin tanıdığı metrik anahtarları (şema esnetildi:
 #: eksik anahtar artık KeyError değil — panel yalnız mevcut veriyle çizilir)
@@ -1624,346 +2317,846 @@ def create_comparative_analysis_plot(motor_configs):
     fig.update_xaxes(title_text="Total Mass (kg)", row=2, col=2)
     fig.update_yaxes(title_text="Isp (s)", row=2, col=2)
     
-    return fig.to_json()
+    return _fig_json(fig)
+
+def _resolve_surface_propellant(engine_data):
+    """Yüzey taraması için yakıt/oksitleyici kimliğini çözer.
+
+    Döner: (fuel_composition, oxidizer_type, supplied_flag). Çağıran kimlik
+    vermezse referans çift kullanılır ve figür alt başlığında AÇIKÇA yazılır
+    (kullanıcı kendi propellantını sanmasın).
+    """
+    ed = engine_data or {}
+    fuel = ed.get('fuel_composition')
+    if not isinstance(fuel, dict) or not fuel:
+        ftype = ed.get('fuel_type')
+        fuel = {str(ftype).lower(): 100.0} if ftype else None
+    ox = ed.get('oxidizer_type')
+    supplied = bool(fuel and ox)
+    if not fuel:
+        fuel = {PERF_SURFACE_DEFAULT_FUEL: 100.0}
+    if not ox:
+        ox = PERF_SURFACE_DEFAULT_OXIDIZER
+    return fuel, str(ox), supplied
+
 
 def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
+    """Isp surface over chamber pressure x O/F — solved, not shape-fitted.
+
+    Every node of the grid is a real ``CombustionAnalyzer.analyze_combustion``
+    call (chemical equilibrium + frozen/shifting expansion). The previous
+    version multiplied a constant ``base_isp`` by two invented analytic shape
+    functions and shaded an "instability" band with no sourced criterion
+    (2026-07-19 fabrication audit).
+
+    ``engine_data`` keys used: ``fuel_composition`` or ``fuel_type``,
+    ``oxidizer_type``, ``chamber_pressure``/``optimal_chamber_pressure``,
+    ``optimal_of_ratio``, ``base_isp`` (design point marker only),
+    ``pc_range``, ``of_range``, ``grid_n``.
     """
-    Create 3D Response Surface Plot: Chamber Pressure vs Mixture Ratio vs Isp
-    Based on NASA SP-125 Liquid-Propellant Rocket Engine Performance
-    """
-    
-    # Generate parameter ranges
-    pc_range = np.linspace(10, 100, 20)  # Chamber pressure: 10-100 bar
-    of_range = np.linspace(1.0, 6.0, 20)  # O/F ratio: 1.0-6.0
-    
-    # Create meshgrid
+    from hrma.engines.combustion_analysis import CombustionAnalyzer
+
+    ed = engine_data or {}
+    fuel, oxidizer, prop_supplied = _resolve_surface_propellant(ed)
+
+    pc_lo, pc_hi = ed.get('pc_range') or PERF_SURFACE_PC_RANGE_BAR
+    of_lo, of_hi = ed.get('of_range') or PERF_SURFACE_OF_RANGE
+    n = int(ed.get('grid_n') or PERF_SURFACE_GRID_N)
+    n = max(3, min(n, 21))
+
+    pc_range = np.linspace(float(pc_lo), float(pc_hi), n)
+    of_range = np.linspace(float(of_lo), float(of_hi), n)
     PC, OF = np.meshgrid(pc_range, of_range)
-    
-    # Calculate Isp based on NASA SP-125 correlations
-    # Simplified correlation: Isp = base_isp * pressure_factor * mixture_factor
-    base_isp = engine_data.get('base_isp', 300)  # Base specific impulse
-    
-    # Pressure effect (optimum around 50-70 bar)
-    pressure_factor = 1.0 + 0.15 * np.log(PC / 20) * np.exp(-(PC - 50)**2 / 800)
-    
-    # Mixture ratio effect (optimum varies by propellant)
-    optimal_of = engine_data.get('optimal_of_ratio', 3.5)
-    mixture_factor = 1.0 - 0.3 * ((OF - optimal_of) / optimal_of)**2
-    
-    # Calculate Isp surface
-    ISP = base_isp * pressure_factor * mixture_factor
-    
-    # Add combustion instability regions (NASA SP-125 criteria)
-    instability_mask = (PC > 80) & (OF < 2.0) | (PC < 15) & (OF > 5.0)
-    ISP[instability_mask] *= 0.7  # Reduce Isp in unstable regions
-    
-    # Create 3D surface plot
+
+    analyzer = CombustionAnalyzer(memoize=True)
+    ISP = np.full(PC.shape, np.nan)
+    failures = 0
+    first_error = None
+    for j in range(n):            # O/F ekseni
+        for i in range(n):        # Pc ekseni
+            try:
+                res = analyzer.analyze_combustion(
+                    dict(fuel), oxidizer, float(OF[j, i]), float(PC[j, i]))
+                isp = _perf_num((res.get('performance') or {}).get('isp'))
+                if isp is not None and isp > 0:
+                    ISP[j, i] = isp
+                else:
+                    failures += 1
+            except Exception as exc:
+                failures += 1
+                if first_error is None:
+                    first_error = str(exc)
+
     fig = go.Figure()
-    
-    # Main performance surface
     fig.add_trace(go.Surface(
-        x=PC,
-        y=OF,
-        z=ISP,
+        x=PC, y=OF, z=ISP,
         colorscale='Viridis',
-        name='Performance Surface',
+        name='Equilibrium Isp',
         showscale=True,
-        colorbar=dict(title="Isp (s)", x=1.02)
-    ))
-    
-    # Add combustion instability regions
-    instability_z = np.where(instability_mask, ISP, np.nan)
-    fig.add_trace(go.Surface(
-        x=PC,
-        y=OF,
-        z=instability_z,
-        colorscale=[[0, '#ff5d73'], [1, '#c23b52']],
-        name='Instability Region',
-        showscale=False,
-        opacity=0.8
-    ))
-    
-    # Add optimum point
-    optimal_pc = engine_data.get('optimal_chamber_pressure', 50)
-    optimal_isp = base_isp * (1.0 + 0.15 * np.log(optimal_pc / 20) * np.exp(-(optimal_pc - 50)**2 / 800))
-    
-    fig.add_trace(go.Scatter3d(
-        x=[optimal_pc],
-        y=[optimal_of],
-        z=[optimal_isp],
-        mode='markers',
-        marker=dict(size=15, color='gold', symbol='diamond'),
-        name='Optimum Point'
-    ))
-    
+        colorbar=dict(title="Isp (s)", x=1.02),
+        hovertemplate=('Pc %{x:.1f} bar<br>O/F %{y:.2f}<br>'
+                       'Isp %{z:.1f} s<extra></extra>')))
+
+    # Izgara maksimumu — taramanın KENDİ sonucundan, uydurma tepe yok
+    if np.isfinite(ISP).any():
+        j, i = np.unravel_index(np.nanargmax(ISP), ISP.shape)
+        fig.add_trace(go.Scatter3d(
+            x=[float(PC[j, i])], y=[float(OF[j, i])], z=[float(ISP[j, i])],
+            mode='markers',
+            marker=dict(size=8, color=COL_WARN, symbol='diamond'),
+            name='Sweep maximum',
+            hovertemplate=(f'Sweep maximum<br>Pc {PC[j, i]:.1f} bar<br>'
+                           f'O/F {OF[j, i]:.2f}<br>Isp {ISP[j, i]:.1f} s'
+                           '<extra></extra>')))
+
+    # Tasarım noktası: motor sonucundan gelen Isp (base_isp) — taramayla
+    # karşılaştırılabilsin diye AYRI işaretlenir, yüzeye karıştırılmaz.
+    design_pc = _perf_num(ed.get('optimal_chamber_pressure')
+                          if ed.get('optimal_chamber_pressure') is not None
+                          else ed.get('chamber_pressure'))
+    design_of = _perf_num(ed.get('optimal_of_ratio'))
+    design_isp = _perf_num(ed.get('base_isp'))
+    if None not in (design_pc, design_of, design_isp):
+        fig.add_trace(go.Scatter3d(
+            x=[design_pc], y=[design_of], z=[design_isp],
+            mode='markers',
+            marker=dict(size=9, color=COL_DANGER, symbol='cross'),
+            name='Design point (motor result)',
+            hovertemplate=(f'Design point reported by the motor solver<br>'
+                           f'Pc {design_pc:.1f} bar<br>O/F {design_of:.2f}<br>'
+                           f'Isp {design_isp:.1f} s<extra></extra>')))
+
+    prop_txt = (f"{oxidizer.upper()} / "
+                f"{'+'.join(str(k).upper() for k in fuel)}")
+    if not prop_supplied:
+        prop_txt += ' (reference pair — propellant identity not supplied)'
+    solved = int(n * n - failures)
+    subtitle = (f"Chemical-equilibrium sweep, {solved}/{n * n} nodes solved | "
+                f"{prop_txt}")
+    if failures:
+        subtitle += f" | {failures} node(s) unsolved (drawn as gaps)"
+
+    note = ('Combustion-instability bands are NOT modeled here; the earlier '
+            'shaded band had no sourced criterion and was removed. '
+            'Sea-level expansion (Pe = 1 bar) is used for Isp.')
+    if solved == 0:
+        note = ('Surface not available: the equilibrium solver rejected every '
+                'node of this sweep'
+                + (f' ({first_error})' if first_error else '')
+                + '. No surrogate surface is drawn.')
+    fig.add_annotation(
+        x=0.0, y=-0.06, xref='paper', yref='paper', xanchor='left',
+        showarrow=False, align='left', text=note,
+        font=dict(size=10, color=STRUCT_DIM))
+
     fig.update_layout(
-        title={
-            'text': '3D Performance Map: Chamber Pressure vs O/F Ratio vs Isp<br><sub>NASA SP-125 Based Analysis</sub>',
-            'x': 0.5,
-            'font': {'size': 16}
-        },
+        title={'text': ('3D Performance Map: Chamber Pressure vs O/F vs Isp'
+                        f'<br><sub>{subtitle}</sub>'),
+               'x': 0.5, 'font': {'size': 16}},
         scene=dict(
             xaxis_title='Chamber Pressure (bar)',
             yaxis_title='O/F Ratio',
             zaxis_title='Specific Impulse (s)',
-            camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))
-        ),
-        autosize=True,
-        height=700,
-        showlegend=True
-    )
-    
-    return fig.to_json()
+            camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))),
+        autosize=True, height=700, showlegend=True,
+        margin=dict(b=90))
+
+    return _fig_json(fig)
+
+def _nozzle_fig_motor_data(cfd_data: Dict) -> Tuple[Dict, List[str]]:
+    """Mach/akış figürü için motor sözlüğü kurar; varsayılanları RAPORLAR.
+
+    Döner: (motor_data, assumed_list). assumed_list figürün alt başlığına
+    yazılır — çağıran gerçek gaz hâlini geçirmediyse kullanıcı bunu görür.
+    """
+    cd = cfd_data or {}
+    assumed: List[str] = []
+
+    throat_d = _perf_num(cd.get('throat_diameter'))
+    if throat_d is None:
+        a_t = _perf_num(cd.get('throat_area'))
+        if a_t is None or a_t <= 0:
+            raise ValueError('throat_area (m^2) or throat_diameter (m) '
+                             'is required for the nozzle flow figure.')
+        throat_d = float(np.sqrt(4.0 * a_t / np.pi))
+
+    eps = _perf_num(cd.get('expansion_ratio'))
+    exit_d = _perf_num(cd.get('exit_diameter'))
+    if exit_d is None:
+        if eps is None or eps <= 1.0:
+            raise ValueError('expansion_ratio > 1 (or exit_diameter) is '
+                             'required for the nozzle flow figure.')
+        exit_d = throat_d * float(np.sqrt(eps))
+
+    def _pick(key, default, label):
+        val = _perf_num(cd.get(key))
+        if val is None:
+            assumed.append(label)
+            return default
+        return val
+
+    gamma = _pick('gamma', NOZZLE_FIG_DEFAULT_GAMMA,
+                  f'gamma = {NOZZLE_FIG_DEFAULT_GAMMA:.2f}')
+    mw = _pick('molecular_weight', NOZZLE_FIG_DEFAULT_MW,
+               f'MW = {NOZZLE_FIG_DEFAULT_MW:.0f} g/mol')
+    pc_bar = _pick('chamber_pressure', NOZZLE_FIG_DEFAULT_PC_BAR,
+                   f'Pc = {NOZZLE_FIG_DEFAULT_PC_BAR:.0f} bar')
+    tc = _pick('chamber_temperature', NOZZLE_FIG_DEFAULT_TC_K,
+               f'Tc = {NOZZLE_FIG_DEFAULT_TC_K:.0f} K')
+
+    md = {
+        'throat_diameter': throat_d,
+        'exit_diameter': exit_d,
+        'expansion_ratio': (exit_d / throat_d) ** 2,
+        'gamma': gamma,
+        'molecular_weight': mw,
+        'chamber_pressure': pc_bar,
+        'chamber_temperature': tc,
+    }
+    if _perf_num(cd.get('chamber_diameter')) is not None:
+        md['chamber_diameter'] = float(cd['chamber_diameter'])
+    else:
+        # NozzleDesigner geleneğiyle uyumlu daralma kabulü (r_c ~ 1.5 r_t;
+        # sample_nozzle_inner_contour docstring'inde belgeli). Sabit 0.1 m
+        # varsayılanı büyük boğazlarda r_c < r_t üretip konturu bozuyordu.
+        md['chamber_diameter'] = 1.5 * throat_d
+        assumed.append('chamber diameter = 1.5 x throat diameter')
+
+    # Kullanıcının verdiği nozul boyu GERÇEKTEN geometriye girsin: konik
+    # diverjan için yarım açı L'den türetilir (alpha = atan((Re-Rt)/L)).
+    # Böylece 'Nozzle Length' girdisi ölü kalmaz ve kontur ona uyar.
+    l_noz = _perf_num(cd.get('nozzle_length'))
+    if l_noz is not None and l_noz > 0:
+        half_deg = float(np.degrees(np.arctan(
+            max(exit_d - throat_d, 1e-9) / 2.0 / l_noz)))
+        half_deg = float(min(max(half_deg, 1.0), 60.0))
+        md['nozzle_angles'] = {'divergent_half_angle_deg': half_deg}
+        md['nozzle_contour'] = {'divergent': {'type': 'conical',
+                                              'half_angle': half_deg,
+                                              'length': l_noz * 1000.0}}
+    return md, assumed
+
 
 def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
+    """Nozzle Mach field from the project's quasi-1D compressible solver.
+
+    Physics source: :class:`hrma.analysis.nozzle_flow_1d.NozzleFlow1D`
+    (area-Mach relation solved with Brent on the correct branch — subsonic
+    upstream of the throat, supersonic downstream — on the SAME contour the
+    2D section, 3D deck and CAD export use).
+
+    Replaces (2026-07-19 fabrication audit) a hand-rolled area law, a fixed
+    gamma, a diverging Newton iteration that produced Mach numbers in the
+    thousands, and an invented near-wall Mach reduction.
+
+    Quasi-1D means the Mach number is uniform across each cross-section; the
+    contour is therefore constant radially by construction and the plot says
+    so. Nothing outside the real wall radius is coloured.
     """
-    Create Nozzle Exit Mach-Area Ratio Contour Plot
-    Based on NASA-STD-5012 Pressure Vessels & Pressurized Systems
-    """
-    
-    # Extract nozzle geometry
-    throat_area = cfd_data.get('throat_area', 0.001)  # m²
-    nozzle_length = cfd_data.get('nozzle_length', 0.1)  # m
-    expansion_ratio = cfd_data.get('expansion_ratio', 16)
-    
-    # Create nozzle contour coordinates
-    x_stations = np.linspace(0, nozzle_length, 50)
-    
-    # Nozzle area distribution (simplified bell nozzle)
-    area_ratios = []
-    for x in x_stations:
-        x_norm = x / nozzle_length
-        if x_norm <= 0.1:  # Converging section
-            area_ratio = 1.0 + 2.0 * (1 - x_norm / 0.1)
-        else:  # Diverging section  
-            area_ratio = 1.0 + (expansion_ratio - 1.0) * ((x_norm - 0.1) / 0.9)**0.8
-        area_ratios.append(area_ratio)
-    
-    area_ratios = np.array(area_ratios)
-    
-    # Calculate Mach numbers using isentropic relations
-    gamma = 1.25
-    mach_numbers = []
-    
-    for area_ratio in area_ratios:
-        if area_ratio <= 1.0:
-            # Subsonic
-            mach = 0.5 * area_ratio
-        else:
-            # Supersonic - solve isentropic relation iteratively
-            mach_guess = 2.0 * np.sqrt(area_ratio - 1)
-            for _ in range(10):  # Simple iteration
-                f = (1/mach_guess) * ((2/(gamma+1)) * (1 + (gamma-1)/2 * mach_guess**2))**((gamma+1)/(2*(gamma-1))) - area_ratio
-                df = -1/mach_guess**2 * ((2/(gamma+1)) * (1 + (gamma-1)/2 * mach_guess**2))**((gamma+1)/(2*(gamma-1)))
-                mach_guess = mach_guess - f/df if abs(df) > 1e-10 else mach_guess
-            mach_numbers.append(max(1.0, mach_guess))
-    
-    mach_numbers = np.array(mach_numbers)
-    
-    # Create 2D grid for contour (nozzle cross-section)
-    y_stations = np.linspace(-0.05, 0.05, 30)  # Radial positions
-    X, Y = np.meshgrid(x_stations, y_stations)
-    
-    # Create Mach number field
-    MACH = np.zeros_like(X)
-    for i, mach in enumerate(mach_numbers):
-        MACH[:, i] = mach
-    
-    # Add boundary layer effects (lower Mach near walls)
-    for i in range(len(y_stations)):
-        y_norm = abs(y_stations[i]) / 0.05
-        if y_norm > 0.8:  # Near wall
-            MACH[i, :] *= (1.0 - 0.3 * (y_norm - 0.8) / 0.2)
-    
-    # Create contour plot
+    from hrma.analysis.nozzle_flow_1d import NozzleFlow1D
+
+    md, assumed = _nozzle_fig_motor_data(cfd_data)
+    pa = _perf_num((cfd_data or {}).get('ambient_pressure'))
+    if pa is None:
+        pa = NOZZLE_FIG_AMBIENT_PA
+        assumed.append('ambient = 1 atm (sea level)')
+
+    solver = NozzleFlow1D.from_motor_data(
+        md, ambient_pressure=float(pa), n_stations=NOZZLE_FIG_N_STATIONS)
+    sol = solver.solve(include_bartz=False)
+
+    st = sol['stations']
+    x_mm = np.asarray(st['x_mm'], dtype=float)
+    r_mm = np.asarray(st['radius_mm'], dtype=float)
+    mach = np.asarray(st['mach'], dtype=float)
+    i_t = int(sol['throat']['index'])
+
+    # Radyal ızgara: gerçek duvar yarıçapına ölçekli (eski sürüm sabit
+    # +-50 mm kullanıyordu; büyük lülelerde duvar grafiğin dışında kalıyordu)
+    r_max = float(np.max(r_mm))
+    y_mm = np.linspace(-r_max, r_max, NOZZLE_FIG_N_RADIAL)
+    MACH = np.tile(mach, (len(y_mm), 1))
+    outside = np.abs(y_mm)[:, None] > r_mm[None, :]
+    MACH = np.where(outside, np.nan, MACH)
+
+    m_max = float(np.nanmax(MACH))
+    step = max(0.1, round(m_max / 16.0, 2))
+
     fig = go.Figure()
-    
-    # Mach number contours
-    contour = fig.add_trace(go.Contour(
-        x=x_stations * 1000,  # Convert to mm
-        y=y_stations * 1000,
-        z=MACH,
-        colorscale=[[0, '#0a1322'], [0.35, '#0a7c8f'], [0.7, '#00e5ff'], [1, '#ff8c33']],
-        contours=dict(
-            start=0.5,
-            end=4.0,
-            size=0.25
-        ),
-        colorbar=dict(title="Mach Number", x=1.02),
-        name='Mach Contours'
-    ))
-    
-    # Add nozzle walls
-    wall_upper = np.sqrt(area_ratios * throat_area / np.pi) * 1000  # mm
-    wall_lower = -wall_upper
-    
-    fig.add_trace(go.Scatter(
-        x=x_stations * 1000,
-        y=wall_upper,
-        mode='lines',
-        line=dict(color=STRUCT_INK, width=3),
-        name='Nozzle Wall'
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=x_stations * 1000,
-        y=wall_lower,
-        mode='lines',
-        line=dict(color=STRUCT_INK, width=3),
-        showlegend=False
-    ))
-    
-    # Mark throat location
-    throat_x = nozzle_length * 0.1 * 1000  # mm
-    fig.add_vline(x=throat_x, line_dash="dash", line_color="#ff5d73", 
-                  annotation_text="Throat")
-    
-    # Identify shock regions (Mach > 3.5)
-    shock_regions = MACH > 3.5
-    if np.any(shock_regions):
-        fig.add_annotation(
-            x=x_stations[np.argmax(np.max(MACH, axis=0))] * 1000,
-            y=25,
-            text="Potential Shock Zone",
-            showarrow=True,
-            arrowcolor="#ff5d73",
-            font=dict(color="#ff5d73")
-        )
-    
+    fig.add_trace(go.Contour(
+        x=x_mm, y=y_mm, z=MACH,
+        colorscale=SEQ_CYAN,
+        contours=dict(start=0.0, end=float(np.ceil(m_max * 10) / 10),
+                      size=step),
+        colorbar=dict(title="Mach", x=1.02),
+        connectgaps=False,
+        name='Mach field',
+        hovertemplate=('x %{x:.1f} mm<br>r %{y:.1f} mm<br>'
+                       'M %{z:.3f}<extra></extra>')))
+
+    for sign, show in ((1.0, True), (-1.0, False)):
+        fig.add_trace(go.Scatter(
+            x=x_mm, y=sign * r_mm, mode='lines',
+            line=dict(color=STRUCT_INK, width=3),
+            name='Nozzle wall', showlegend=show,
+            hovertemplate='x %{x:.1f} mm<br>wall r %{y:.1f} mm<extra></extra>'))
+
+    fig.add_vline(x=float(x_mm[i_t]), line_dash="dash",
+                  line_color=COL_DANGER,
+                  annotation_text=f"Throat (M = {mach[i_t]:.2f})")
+
+    # Rejim: çözücünün SINIFLANDIRMASI — uydurma 'shock zone' yok
+    regime = sol.get('regime') or {}
+    reg_type = str(regime.get('type', 'unknown')).replace('_', ' ')
+    shock = regime.get('normal_shock')
+    sep = regime.get('separation')
+    if isinstance(shock, dict) and shock.get('station_x_mm') is not None:
+        fig.add_vline(x=float(shock['station_x_mm']), line_dash='dot',
+                      line_color=COL_WARN_HI,
+                      annotation_text='Normal shock (quasi-1D)')
+    if isinstance(sep, dict) and sep.get('station_x_mm') is not None:
+        fig.add_vline(x=float(sep['station_x_mm']), line_dash='dot',
+                      line_color=COL_WARN,
+                      annotation_text='Flow separation (Summerfield)')
+
+    perf = sol.get('performance') or {}
+    sub = (f"Quasi-1D compressible solution | isentropic exit M = "
+           f"{float(mach[-1]):.2f}"
+           f" | Ae/At = {perf.get('expansion_ratio', 0):.1f} | regime: {reg_type}")
+    m_eff = _perf_num((perf.get('exit') or {}).get('mach'))
+    if m_eff is not None and abs(m_eff - float(mach[-1])) > 1e-3:
+        sub += f" (effective exit M = {m_eff:.2f})"
+    if assumed:
+        sub += '<br>Assumed (not supplied by this call): ' + ', '.join(assumed)
+
+    fig.add_annotation(
+        x=0.0, y=-0.20, xref='paper', yref='paper', xanchor='left',
+        showarrow=False, align='left',
+        text=('Quasi-1D: Mach is uniform across each cross-section — the '
+              'radial axis shows geometry only, no boundary layer is modeled.'),
+        font=dict(size=10, color=STRUCT_DIM))
+
     fig.update_layout(
-        title={
-            'text': 'Nozzle Mach Number Distribution & Flow Analysis<br><sub>NASA-STD-5012 Compliant Design</sub>',
-            'x': 0.5,
-            'font': {'size': 16}
-        },
+        title={'text': ('Nozzle Mach Number Distribution'
+                        f'<br><sub>{sub}</sub>'),
+               'x': 0.5, 'font': {'size': 16}},
         xaxis_title='Axial Position (mm)',
         yaxis_title='Radial Position (mm)',
-        autosize=True,
-        height=600,
-        showlegend=True
-    )
-    
-    return fig.to_json()
+        autosize=True, height=620, showlegend=True,
+        margin=dict(b=110))
+    fig.update_yaxes(scaleanchor='x', scaleratio=1)
+
+    return _fig_json(fig)
+
+def _heat_flux_reference_planes(fig, time_s, x_mm, thermal_data):
+    """Kullanıcının girdiği referans akıları düzlem olarak ekler.
+
+    Bunlar HESAP DEĞİL, kullanıcı girdisidir; ad ve hover metni bunu açıkça
+    söyler (eski sürüm base_heat_flux'ı hesaplanmış akı gibi sunuyordu).
+    """
+    td = thermal_data or {}
+    t0, t1 = float(time_s[0]), float(time_s[-1])
+    x0, x1 = float(x_mm[0]), float(x_mm[-1])
+    grid_t = [[t0, t1], [t0, t1]]
+    grid_x = [[x0, x0], [x1, x1]]
+
+    base = _perf_num(td.get('base_heat_flux'))
+    if base is not None and base > 0:
+        lvl = base / 1e6
+        fig.add_trace(go.Surface(
+            x=grid_t, y=grid_x, z=[[lvl, lvl], [lvl, lvl]],
+            showscale=False, opacity=0.25,
+            colorscale=[[0, PALETTE[0]], [1, PALETTE[0]]],
+            name=f'Reference flux (input) {lvl:.2f} MW/m2',
+            hovertemplate=(f'User input reference flux: {lvl:.2f} MW/m2'
+                           '<br>(not computed)<extra></extra>'),
+            showlegend=True))
+
+    crit = _perf_num(td.get('critical_heat_flux'))
+    if crit is not None and crit > 0:
+        fig.add_trace(go.Surface(
+            x=grid_t, y=grid_x, z=[[crit, crit], [crit, crit]],
+            showscale=False, opacity=0.25,
+            colorscale=[[0, COL_DANGER], [1, COL_DANGER]],
+            name=f'Critical flux (input) {crit:.2f} MW/m2',
+            hovertemplate=(f'User input critical flux: {crit:.2f} MW/m2'
+                           '<br>(not computed)<extra></extra>'),
+            showlegend=True))
+
+
+def _heat_flux_unavailable_figure(thermal_data, reason):
+    """Girdi yetersizse: panel KALIR, uydurma yüzey ÇİZİLMEZ."""
+    td = thermal_data or {}
+    burn = _perf_num(td.get('burn_time')) or 1.0
+    time_s = np.linspace(0.0, float(burn), 2)
+    total_mm = 1000.0 * ((_perf_num(td.get('chamber_length')) or 0.0)
+                         + (_perf_num(td.get('nozzle_length')) or 0.0))
+    x_mm = np.linspace(0.0, max(total_mm, 1.0), 2)
+
+    fig = go.Figure()
+    _heat_flux_reference_planes(fig, time_s, x_mm, td)
+    fig.add_annotation(
+        x=0.5, y=0.5, xref='paper', yref='paper', showarrow=False,
+        text=('<b>Computed wall heat flux not available for this call</b><br>'
+              + reason + '<br>'
+              'Only the reference levels you entered are shown; no surrogate '
+              'flux field is drawn.'),
+        font=dict(size=13, color=COL_WARN_HI), align='center')
+    fig.update_layout(
+        title={'text': ('Wall Heat Flux Distribution'
+                        '<br><sub>Bartz axial profile unavailable — inputs '
+                        'missing</sub>'),
+               'x': 0.5, 'font': {'size': 16}},
+        scene=dict(xaxis_title='Time (s)', yaxis_title='Axial Position (mm)',
+                   zaxis_title='Heat Flux (MW/m2)'),
+        autosize=True, height=700, showlegend=True)
+    return _fig_json(fig)
+
 
 def create_wall_heat_flux_waterfall_plot(thermal_data: Dict) -> str:
+    """Wall heat flux q(x, t) from the project's Bartz axial solver.
+
+    Axial profile: :meth:`HeatTransferAnalyzer.analyze_axial_profile` — the
+    same Bartz correlation + Leckner gas radiation used by the cooling deck,
+    evaluated on the shared nozzle contour.
+
+    Time axis: lumped-capacitance (heat-sink) wall,
+    ``rho c t_w dTw/dt = h_g (Taw - Tw)`` with the per-station Bartz
+    coefficient, giving ``Tw(t) = Taw - (Taw - Tw0) exp(-t/tau)`` and
+    ``q_conv(t) = q_conv(0) exp(-t/tau)``, ``tau = rho c t_w / h_g``. The flux
+    therefore FALLS as the wall soaks — the physical behaviour of an uncooled
+    wall. The previous version multiplied a user constant by an invented
+    50 mm Gaussian and a 5 s buildup and then multiplied every cell above
+    5 MW/m2 by 1.5 ("thermal runaway"), which is not a heat-transfer result
+    (2026-07-19 fabrication audit).
+
+    Keys used: ``chamber_pressure`` [bar], ``throat_area`` [m2] or
+    ``throat_diameter`` [m], ``expansion_ratio``/``exit_diameter``,
+    ``chamber_temperature``, ``gamma``, ``molecular_weight``,
+    ``chamber_length``/``nozzle_length`` [m], ``burn_time`` [s],
+    ``material``, ``wall_thickness`` [m], ``cooling_type``,
+    ``initial_wall_temperature`` [K], ``base_heat_flux``/``critical_heat_flux``
+    (reference levels only).
     """
-    Create Wall Heat Flux-Time Waterfall Plot
-    Based on NASA SP-8124 Thermal Design Criteria
-    """
-    
-    # Time range for analysis
-    time_points = np.linspace(0, thermal_data.get('burn_time', 30), 100)  # seconds
-    
-    # Axial positions along nozzle/chamber
-    chamber_length = thermal_data.get('chamber_length', 0.5)  # m
-    nozzle_length = thermal_data.get('nozzle_length', 0.1)   # m
-    total_length = chamber_length + nozzle_length
-    
-    axial_positions = np.linspace(0, total_length, 50) * 1000  # mm
-    
-    # Create meshgrids
-    T, X = np.meshgrid(time_points, axial_positions)
-    
-    # Calculate heat flux based on NASA SP-8124 correlations
-    # Heat flux varies with position and time
-    base_heat_flux = thermal_data.get('base_heat_flux', 2e6)  # W/m²
-    
-    # Axial variation (highest at throat)
-    throat_position = chamber_length * 1000  # mm
-    axial_factor = 1.0 + 2.0 * np.exp(-((X - throat_position) / 50)**2)
-    
-    # Temporal variation (thermal buildup)
-    thermal_buildup = 1.0 - np.exp(-T / 5.0)  # Exponential buildup
-    transient_factor = 1.0 + 0.5 * thermal_buildup
-    
-    # Calculate heat flux matrix
-    HEAT_FLUX = base_heat_flux * axial_factor * transient_factor
-    
-    # Add thermal runaway regions (NASA SP-8124 criteria)
-    runaway_threshold = 5e6  # W/m²
-    runaway_mask = HEAT_FLUX > runaway_threshold
-    HEAT_FLUX[runaway_mask] *= 1.5  # Accelerated heating in runaway
-    
-    # Convert to MW/m² for readability
-    HEAT_FLUX_MW = HEAT_FLUX / 1e6
-    
-    # Create waterfall plot using surface
+    from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
+
+    td = thermal_data or {}
+    if _perf_num(td.get('throat_area')) is None \
+            and _perf_num(td.get('throat_diameter')) is None:
+        return _heat_flux_unavailable_figure(
+            td, 'Throat geometry (throat_area or throat_diameter) was not '
+                'supplied, so the Bartz correlation cannot be evaluated.')
+    try:
+        md, assumed = _nozzle_fig_motor_data(td)
+    except ValueError as exc:
+        return _heat_flux_unavailable_figure(td, str(exc))
+
+    material = str(td.get('material') or HEATFLUX_FIG_DEFAULT_MATERIAL)
+    wall_m = _perf_num(td.get('wall_thickness')) or HEATFLUX_FIG_DEFAULT_WALL_M
+    cooling = str(td.get('cooling_type') or HEATFLUX_FIG_DEFAULT_COOLING)
+    if td.get('material') is None:
+        assumed.append(f'wall material = {material}')
+    if _perf_num(td.get('wall_thickness')) is None:
+        assumed.append(f'wall thickness = {wall_m * 1000:.1f} mm')
+
+    analyzer = HeatTransferAnalyzer()
+    md_heat = dict(md)
+    md_heat.setdefault('mdot_total', _perf_num(td.get('mdot_total')) or 1.0)
+    prof = analyzer.analyze_axial_profile(
+        md_heat, n_stations=HEATFLUX_FIG_N_STATIONS,
+        material=material, wall_thickness=float(wall_m),
+        cooling_type=cooling)
+
+    x_noz = np.asarray(prof['x_mm'], dtype=float)
+    h_g = np.asarray(prof['h_g'], dtype=float)
+    taw = np.asarray(prof['T_recovery'], dtype=float)
+    q_design = np.asarray(prof['q_MW'], dtype=float)      # MW/m2 (conv + rad)
+    throat_x = float(prof['x_throat_mm'])
+
+    # Hazne (sabit kesit) parçası: alan oranı sabit olduğundan Bartz de
+    # sabittir; ilk istasyonun değerleri yukarı doğru uzatılır.
+    chamber_len_mm = 1000.0 * (_perf_num(td.get('chamber_length')) or 0.0)
+    if chamber_len_mm > 0:
+        n_ch = max(2, int(HEATFLUX_FIG_N_STATIONS * 0.25))
+        x_ch = np.linspace(0.0, chamber_len_mm, n_ch, endpoint=False)
+        x_mm = np.concatenate([x_ch, x_noz + chamber_len_mm])
+        h_g = np.concatenate([np.full(n_ch, h_g[0]), h_g])
+        taw = np.concatenate([np.full(n_ch, taw[0]), taw])
+        q_design = np.concatenate([np.full(n_ch, q_design[0]), q_design])
+        throat_x += chamber_len_mm
+    else:
+        x_mm = x_noz
+
+    # --- Yığın ısıl kütle (heat-sink) cidar geçicisi ---
+    mat = analyzer.materials.get(material, analyzer.materials['steel'])
+    rho_w = float(mat['density'])
+    cp_w = float(mat['specific_heat'])
+    k_w = float(mat['thermal_conductivity'])
+    tw0 = _perf_num(td.get('initial_wall_temperature')) or 293.15
+    if _perf_num(td.get('initial_wall_temperature')) is None:
+        assumed.append('initial wall temperature = 293.15 K')
+
+    # Dış (soğutucu) taraf direnci — ısı modülünün KENDİ katsayısı, kopya yok
+    h_coolant = float(analyzer._coolant_side_coefficient(md_heat, cooling))
+    r_out = float(wall_m) / k_w + 1.0 / max(h_coolant, 1e-9)   # m2*K/W
+    # Denge cidar sıcaklığı: modülün eksenel profil çözümünden (radyasyon dahil)
+    t_eq = np.asarray(prof['T_wall_eq'], dtype=float)
+    if chamber_len_mm > 0:
+        t_eq = np.concatenate([np.full(len(x_mm) - len(t_eq), t_eq[0]), t_eq])
+
+    burn_time = _perf_num(td.get('burn_time')) or 1.0
+    time_s = np.linspace(0.0, float(burn_time), HEATFLUX_FIG_N_TIME)
+    # tau = rho*c*t_w / (h_g + 1/R_out): giriş ve çıkış yollarının toplamı
+    tau = (rho_w * cp_w * float(wall_m)
+           / np.maximum(h_g + 1.0 / r_out, 1e-6))                   # s
+    T, X = np.meshgrid(time_s, x_mm)                                # (nx, nt)
+    TAU = np.tile(tau[:, None], (1, len(time_s)))
+    TAW = np.tile(taw[:, None], (1, len(time_s)))
+    TEQ = np.tile(t_eq[:, None], (1, len(time_s)))
+    HG = np.tile(h_g[:, None], (1, len(time_s)))
+    TW = TEQ - (TEQ - tw0) * np.exp(-T / TAU)
+    HEAT_FLUX_MW = HG * (TAW - TW) / 1e6
+
+    # Malzeme sınırı: cidar erime noktasını geçtikten sonra model geçersizdir;
+    # o hücreler BOŞ bırakılır (uydurma bir "hâlâ çalışıyor" yüzeyi yok).
+    t_melt = _perf_num(mat.get('melting_point'))
+    t_service = _perf_num(mat.get('allowable_temperature'))
+    limit_note = ''
+    if t_melt:
+        beyond = TW > t_melt
+        if beyond.any():
+            HEAT_FLUX_MW = np.where(beyond, np.nan, HEAT_FLUX_MW)
+            first = float(T[beyond].min())
+            limit_note = (f' Wall reaches the {material} melting point '
+                          f'({t_melt:.0f} K) at t = {first:.2f} s; the surface '
+                          'is left blank beyond that.')
+    if t_service and (TW > t_service).any():
+        first_s = float(T[TW > t_service].min())
+        limit_note += (f' Service limit ({t_service:.0f} K) is exceeded from '
+                       f't = {first_s:.2f} s.')
+
+    biot = float(np.max(h_g) * float(wall_m) / k_w)
+
     fig = go.Figure()
-    
-    # Main heat flux surface
     fig.add_trace(go.Surface(
-        x=T,
-        y=X,
-        z=HEAT_FLUX_MW,
+        x=T, y=X, z=HEAT_FLUX_MW,
         colorscale='Hot',
-        name='Heat Flux',
-        colorbar=dict(title="Heat Flux (MW/m²)", x=1.02),
-        showscale=True
-    ))
-    
-    # Add critical heat flux contour
-    critical_flux = thermal_data.get('critical_heat_flux', 4.0)  # MW/m²
-    fig.add_trace(go.Contour(
-        x=time_points,
-        y=axial_positions,
-        z=HEAT_FLUX_MW.T,
-        contours=dict(
-            start=critical_flux,
-            end=critical_flux,
-            size=0.1,
-            coloring='lines'
-        ),
-        line=dict(color='#ff5d73', width=3),
-        name=f'Critical Flux ({critical_flux} MW/m²)',
-        showscale=False
-    ))
-    
-    # Mark throat position
+        name='Convective flux (Bartz, heat-sink wall)',
+        colorbar=dict(title="q_conv (MW/m2)", x=1.02), showscale=True,
+        hovertemplate=('t %{x:.2f} s<br>x %{y:.1f} mm<br>'
+                       'q %{z:.2f} MW/m2<extra></extra>')))
+
+    # Modülün tasarım akısı (taşınım + Leckner radyasyonu, referans soğutulmuş
+    # cidarda) — geçici yüzeyle karşılaştırma için t=0 kenarında çizgi
     fig.add_trace(go.Scatter3d(
-        x=[0, time_points[-1]],
-        y=[throat_position, throat_position],
-        z=[0, 0],
-        mode='lines',
-        line=dict(color='#00e5ff', width=5, dash='dash'),
-        name='Throat Location'
-    ))
-    
-    # Add thermal runaway warning regions
-    if np.any(runaway_mask):
-        runaway_x, runaway_y = np.where(runaway_mask)
-        if len(runaway_x) > 0:
-            fig.add_trace(go.Scatter3d(
-                x=T[runaway_mask],
-                y=X[runaway_mask],
-                z=HEAT_FLUX_MW[runaway_mask],
-                mode='markers',
-                marker=dict(size=3, color='#ff5d73', symbol='x'),
-                name='Thermal Runaway Risk'
-            ))
-    
+        x=np.zeros_like(x_mm), y=x_mm, z=q_design, mode='lines',
+        line=dict(color=PALETTE[0], width=5),
+        name='Design flux at reference cooled wall (conv + radiation)',
+        hovertemplate=('x %{y:.1f} mm<br>q_design %{z:.2f} MW/m2'
+                       '<extra></extra>')))
+
+    fig.add_trace(go.Scatter3d(
+        x=[0.0, float(time_s[-1])], y=[throat_x, throat_x],
+        z=[0.0, 0.0], mode='lines',
+        line=dict(color=PALETTE[0], width=4, dash='dash'),
+        name='Throat station'))
+
+    _heat_flux_reference_planes(fig, time_s, x_mm, td)
+
+    sub = (f"Bartz axial profile | peak design flux "
+           f"{np.max(q_design):.2f} MW/m2 at the throat | "
+           f"lumped-capacitance wall ({material}, {wall_m * 1000:.1f} mm), "
+           f"Biot_max = {biot:.2f}")
+    if assumed:
+        sub += '<br>Assumed (not supplied by this call): ' + ', '.join(assumed)
+
+    note = ('Time dependence is the wall soak of a lumped-capacitance wall '
+            'toward the equilibrium temperature of the selected cooling: '
+            'q_conv falls as Tw rises. No "thermal runaway" multiplier is '
+            'applied — exceeding a flux limit raises wall temperature, it '
+            'does not raise the flux.' + limit_note)
+    if biot > 0.1:
+        note += (f' Biot number {biot:.2f} > 0.1: the lumped wall model is '
+                 'approximate here, treat the transient as indicative.')
+    fig.add_annotation(
+        x=0.0, y=-0.02, xref='paper', yref='paper', xanchor='left',
+        showarrow=False, align='left', text=note,
+        font=dict(size=10, color=STRUCT_DIM))
+
     fig.update_layout(
-        title={
-            'text': 'Wall Heat Flux Distribution: Thermal Runaway Analysis<br><sub>NASA SP-8124 Thermal Design Criteria</sub>',
-            'x': 0.5,
-            'font': {'size': 16}
-        },
+        title={'text': f'Wall Heat Flux Distribution<br><sub>{sub}</sub>',
+               'x': 0.5, 'font': {'size': 16}},
         scene=dict(
             xaxis_title='Time (s)',
             yaxis_title='Axial Position (mm)',
-            zaxis_title='Heat Flux (MW/m²)',
-            camera=dict(eye=dict(x=1.3, y=1.3, z=1.3))
-        ),
-        autosize=True,
-        height=700,
-        showlegend=True
-    )
+            zaxis_title='Heat Flux (MW/m2)',
+            camera=dict(eye=dict(x=1.3, y=1.3, z=1.3))),
+        autosize=True, height=700, showlegend=True,
+        legend=_legend_below(-0.08), margin=dict(b=120))
 
-    return fig.to_json()
+    return _fig_json(fig)
 
 
 # ============================================================
 # Improved Visualization Functions (merged from visualization_improved.py)
 # ============================================================
+
+# Kesitte kullanılan enjektör tipi takma adları → kanonik ad. Yeni ARGE
+# zinciri ('impinging_doublet', 'coax_swirl' …) ve eski /calculate zinciri
+# ('showerhead', 'pintle', 'swirl', 'impingement', 'coaxial') aynı çizim
+# dallarına eşlenir.
+INJECTOR_TYPE_ALIASES = {
+    'showerhead': 'showerhead',
+    'pintle': 'pintle',
+    'swirl': 'swirl',
+    'coax_swirl': 'coaxial',
+    'coaxial': 'coaxial',
+    'impingement': 'impingement',
+    'impinging': 'impingement',
+    'impinging_doublet': 'impingement',
+    'impinging_triplet': 'impingement',
+    'like_impinging': 'impingement',
+}
+
+
+def resolve_injector_type(motor_data):
+    """motor_data'dan kanonik enjektör tipini çözer (bilinmeyen → showerhead)."""
+    inj = (motor_data or {}).get('injector_design') or {}
+    raw = inj.get('injector_type') or inj.get('type') or 'showerhead'
+    return INJECTOR_TYPE_ALIASES.get(str(raw).lower(), 'showerhead')
+
+
+def _add_injector_cross_section(fig, motor_data, z0, thickness, rc,
+                                plate_color, ink, dim):
+    """Enjektör plakasını ve TİPE ÖZEL iç geometriyi eksenel kesite ekler.
+
+    showerhead  : plaka + eksenel orifis işaretleri
+    pintle      : plaka + eksene uzanan merkez gövde + uç radyal jetler + anülüs
+    swirl       : plaka + teğetsel yuva sembolleri + sprey koni açısı çizgileri
+    impingement : plaka + açılı delik çiftleri (çarpışan jetler)
+    coaxial     : plaka + iç merkez jeti + dış halka (anülüs)
+    """
+    inj = (motor_data or {}).get('injector_design') or {}
+    # GERÇEK enjektör geometrisi burada: design_injector() tam çıktısı
+    # (pintle_geometry, swirl_geometry, pattern.impingement, atomization).
+    # Eski sürüm bu sözlüğü hiç okumuyor, pintle çapını/anülüs boşluğunu
+    # kamara yarıçapının sabit oranlarından ÜRETİP hover'da sayı olarak
+    # veriyordu (2026-07-19 uydurma denetimi).
+    detail = (motor_data or {}).get('injector_design_detail') or {}
+    pintle_geo = detail.get('pintle_geometry') or {}
+    swirl_geo = detail.get('swirl_geometry') or {}
+    atomization = detail.get('atomization') or {}
+    impinge_geo = ((detail.get('pattern') or {}).get('impingement')) or {}
+    kind = resolve_injector_type(motor_data)
+    n_ori = int(_num_safe(inj.get('number_of_orifices'), 12))
+    z1 = z0 + thickness
+    r_plate = rc - 0.4
+
+    label = {
+        'showerhead': 'Showerhead injector plate',
+        'pintle': 'Pintle injector',
+        'swirl': 'Swirl injector plate',
+        'impingement': 'Impinging-jet injector plate',
+        'coaxial': 'Coaxial injector plate',
+    }[kind]
+
+    fig.add_trace(go.Scatter(
+        x=[z0, z0, z1, z1, z0],
+        y=[-r_plate, r_plate, r_plate, -r_plate, -r_plate],
+        fill='toself', fillcolor=plate_color, mode='lines',
+        line=dict(color='#8a6a34', width=1.4), name='Injector plate',
+        hoverinfo='text', hoveron='fills',
+        hovertext=f'{label}<br>Plate thickness: {thickness:.1f} mm'))
+
+    n_marks = max(3, min(n_ori // 2 + 1, 9))
+
+    if kind == 'showerhead':
+        ori_y = np.linspace(-0.62 * rc, 0.62 * rc, n_marks)
+        fig.add_trace(go.Scatter(
+            x=[z1] * len(ori_y), y=ori_y.tolist(), mode='markers',
+            marker=dict(size=5, color='#10151a', symbol='circle'),
+            name='Orifices', showlegend=False,
+            hovertemplate=(f'Showerhead pattern: {n_ori} axial orifices'
+                           '<extra></extra>')))
+
+    elif kind == 'pintle':
+        # Merkez gövde: plakadan odaya uzanır; ucunda radyal jetler.
+        # Öncelik sırası: çözücünün pintle_geometry çıktısı -> injector_design
+        # takma adları -> yalnız ÇİZİM için oran (bu durumda hover sayı VERMEZ).
+        d_p_real = _perf_num(pintle_geo.get('d_pintle_mm'))
+        if d_p_real is None:
+            d_p_real = _perf_num(inj.get('pintle_diameter_mm'))
+        if d_p_real is None:
+            d_p_real = _perf_num(inj.get('pintle_diameter'))
+        gap_real = _perf_num(pintle_geo.get('annulus_gap_mm'))
+        if gap_real is None:
+            gap_real = _perf_num(inj.get('annulus_gap_mm'))
+        if gap_real is None:
+            gap_real = _perf_num(inj.get('gap'))
+        skip_real = _perf_num(pintle_geo.get('skip_distance_mm'))
+
+        d_p = d_p_real if d_p_real is not None else 0.22 * 2 * rc
+        r_p = max(1.5, min(d_p / 2.0, 0.45 * rc))
+        post_len = max(2.5 * r_p, 0.9 * thickness)
+        gap = gap_real if gap_real is not None else max(0.5, 0.06 * r_p)
+        post_rows = (f'D_pintle: {d_p_real:.2f} mm' if d_p_real is not None
+                     else 'D_pintle: not reported by the solver (schematic)')
+        if skip_real is not None:
+            post_rows += f'<br>Skip distance: {skip_real:.2f} mm'
+        else:
+            post_rows += '<br>Skip distance: not reported'
+        n_rad = _perf_num(pintle_geo.get('n_radial_holes'))
+        d_rad = _perf_num(pintle_geo.get('radial_hole_d_mm'))
+        if n_rad is not None and d_rad is not None:
+            post_rows += (f'<br>Radial holes: {int(n_rad)} x dia '
+                          f'{d_rad:.2f} mm')
+        gap_rows = (f'Gap: {gap_real:.3f} mm' if gap_real is not None
+                    else 'Gap: not reported by the solver (schematic)')
+        fig.add_trace(go.Scatter(
+            x=[z1, z1 + post_len, z1 + post_len, z1, z1],
+            y=[-r_p, -r_p, r_p, r_p, -r_p],
+            fill='toself', fillcolor='rgba(122,136,150,0.9)', mode='lines',
+            line=dict(color=ink, width=1.3), name='Pintle post',
+            hoverinfo='text', hoveron='fills',
+            hovertext='Pintle post<br>' + post_rows))
+        # Uç radyal jet işaretleri (dışa doğru oklar)
+        z_tip = z1 + post_len * 0.85
+        for sgn in (1, -1):
+            fig.add_annotation(x=z_tip, y=sgn * (r_p + 0.5 * rc * 0.35),
+                               ax=z_tip, ay=sgn * r_p,
+                               xref='x', yref='y', axref='x', ayref='y',
+                               showarrow=True, arrowhead=2, arrowsize=1,
+                               arrowwidth=1.6, arrowcolor='#ff8c33')
+        # Anülüs (pintle çevresindeki eksenel oks tabakası). Gerçek boşluk
+        # motor ölçeğinde (mm mertebesi) görünmez kalır; bant GÖRSEL olarak
+        # kalınlaştırılır, gerçek değer etiket/hover'da verilir.
+        gap_vis = max(gap, 0.035 * rc)
+        for sgn, show in ((1, True), (-1, False)):
+            fig.add_trace(go.Scatter(
+                x=[z1, z1 + post_len, z1 + post_len, z1, z1],
+                y=[sgn * r_p, sgn * r_p, sgn * (r_p + gap_vis),
+                   sgn * (r_p + gap_vis), sgn * r_p],
+                fill='toself', fillcolor='rgba(0,229,255,0.22)', mode='lines',
+                line=dict(color='#00e5ff', width=1.2, dash='dot'),
+                name=('Annulus gap %.3f mm' % gap_real if gap_real is not None
+                      else 'Annulus gap (not reported)'),
+                showlegend=show,
+                hoverinfo='text', hoveron='fills',
+                hovertext=('Annular oxidizer sheet<br>' + gap_rows
+                           + '<br>(band drawn to scale-independent width)')))
+
+    elif kind == 'swirl':
+        # Teğetsel yuva sembolleri: plaka içinde eğik kısa çizgiler
+        slot_y = np.linspace(-0.62 * rc, 0.62 * rc, min(n_marks, 6))
+        for i, y in enumerate(slot_y):
+            fig.add_trace(go.Scatter(
+                x=[z0 + 0.15 * thickness, z1 + 0.6 * thickness],
+                y=[y - 0.07 * rc, y + 0.07 * rc], mode='lines',
+                line=dict(color='#ff8c33', width=3),
+                name='Tangential slots', showlegend=(i == 0),
+                legendgroup='swirl_slots',
+                hovertemplate=('Tangential slot (swirl generator)'
+                               '<extra></extra>')))
+        # Sprey koni açısı çizgileri
+        # Gerçek sprey yarı açısı: atomization.spray_cone_half_angle_deg
+        # (Giffen-Muraszew swirl çözümünden) -> injector_design.spray_angle.
+        half_real = _perf_num(atomization.get('spray_cone_half_angle_deg'))
+        if half_real is None:
+            half_real = _perf_num(swirl_geo.get('spray_cone_half_angle_deg'))
+        if half_real is None:
+            ang = _perf_num(inj.get('spray_angle'))
+            half_real = (ang / 2.0) if ang is not None else None
+        cone_is_real = half_real is not None
+        half = max(5.0, min((half_real if cone_is_real else 45.0), 80.0))
+        reach = 1.4 * rc
+        dz = reach / max(np.tan(np.radians(half)), 0.1)
+        for sgn, show in ((1, True), (-1, False)):
+            fig.add_trace(go.Scatter(
+                x=[z1, z1 + dz], y=[0, sgn * reach], mode='lines',
+                line=dict(color=dim, width=1.5, dash='dash'),
+                name=(f'Spray cone 2θ={2*half:.0f}°' if cone_is_real
+                      else 'Spray cone (angle not reported)'),
+                showlegend=show,
+                hovertemplate=(
+                    (f'Hollow-cone spray<br>Full angle: {2*half:.1f} deg'
+                     if cone_is_real else
+                     'Hollow-cone spray<br>Cone angle not reported by the '
+                     'solver (drawn schematically)') + '<extra></extra>')))
+
+    elif kind == 'impingement':
+        # Açılı delik çiftleri: her çift eksene doğru yakınsayan iki çizgi
+        half_real = _perf_num(impinge_geo.get('half_angle_deg'))
+        if half_real is None:
+            ang = _perf_num(inj.get('impingement_angle_deg'))
+            half_real = (ang / 2.0) if ang is not None else None
+        imp_is_real = half_real is not None
+        half = max(10.0, min((half_real if imp_is_real else 30.0), 60.0))
+        n_pairs = max(2, min(int(_num_safe(inj.get('n_pairs'), max(2, n_ori // 2))), 5))
+        centers = np.linspace(-0.55 * rc, 0.55 * rc, n_pairs)
+        spread = max(0.06 * rc, 1.5)
+        reach = max(0.35 * rc, 6.0)
+        dz = reach / max(np.tan(np.radians(half)), 0.1)
+        for i, yc in enumerate(centers):
+            for sgn in (1, -1):
+                fig.add_trace(go.Scatter(
+                    x=[z1, z1 + dz], y=[yc + sgn * spread, yc], mode='lines',
+                    line=dict(color='#ff8c33', width=2),
+                    name=(f'Impinging pairs (2θ={2*half:.0f}°)' if imp_is_real
+                          else 'Impinging pairs (angle not reported)'),
+                    showlegend=(i == 0 and sgn == 1),
+                    legendgroup='impinge',
+                    hovertemplate=(
+                        (f'Like-on-like doublet<br>Included angle: '
+                         f'{2*half:.1f} deg'
+                         if imp_is_real else
+                         'Like-on-like doublet<br>Included angle not reported '
+                         'by the solver (drawn schematically)')
+                        + '<extra></extra>')))
+
+    else:  # coaxial
+        d_in_real = _perf_num(inj.get('inner_jet_diameter'))
+        if d_in_real is None:
+            d_in_real = _perf_num(pintle_geo.get('d_pintle_mm'))
+        gap_real = _perf_num(inj.get('annulus_gap'))
+        if gap_real is None:
+            gap_real = _perf_num(pintle_geo.get('annulus_gap_mm'))
+        d_in = d_in_real if d_in_real is not None else 0.18 * 2 * rc
+        r_in = max(1.2, min(d_in / 2.0, 0.35 * rc))
+        gap = gap_real if gap_real is not None else max(0.6, 0.25 * r_in)
+        jet_len = max(0.6 * thickness, 5.0)
+        fig.add_trace(go.Scatter(
+            x=[z1, z1 + jet_len, z1 + jet_len, z1, z1],
+            y=[-r_in, -r_in, r_in, r_in, -r_in],
+            fill='toself', fillcolor='rgba(0,229,255,0.20)', mode='lines',
+            line=dict(color='#00e5ff', width=1.4), name='Inner jet',
+            hoverinfo='text', hoveron='fills',
+            hovertext=('Coaxial inner jet<br>'
+                       + (f'Diameter: {d_in_real:.2f} mm'
+                          if d_in_real is not None else
+                          'Diameter: not reported by the solver (schematic)'))))
+        for sgn, show in ((1, True), (-1, False)):
+            fig.add_trace(go.Scatter(
+                x=[z1, z1 + jet_len, z1 + jet_len, z1, z1],
+                y=[sgn * (r_in + 0.6), sgn * (r_in + 0.6),
+                   sgn * (r_in + 0.6 + gap), sgn * (r_in + 0.6 + gap),
+                   sgn * (r_in + 0.6)],
+                fill='toself', fillcolor='rgba(255,140,51,0.25)', mode='lines',
+                line=dict(color='#ff8c33', width=1.2), name='Outer annulus',
+                showlegend=show, hoverinfo='text', hoveron='fills',
+                hovertext=('Coaxial outer annulus<br>'
+                           + (f'Gap: {gap_real:.3f} mm'
+                              if gap_real is not None else
+                              'Gap: not reported by the solver (schematic)'))))
+
+
+def _num_safe(v, fb):
+    """Modül düzeyi sayı dönüştürücü (yerel _num'ların dışa açık eşi)."""
+    try:
+        f = float(v)
+        return f if np.isfinite(f) else fb
+    except (TypeError, ValueError):
+        return fb
+
 
 def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     """Çözücü geometrisinden mühendislik eksenel kesit çizimi.
@@ -2069,47 +3262,37 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     # Kamara duvarı + baş kapak (tek katı)
     case_z = [-cap_t, -cap_t, L, L, 0, 0]
     case_r = [0, rc + wall_case, rc + wall_case, rc, rc, 0]
-    mirrored(case_z, case_r, C_CASE, 'Kamara duvarı',
-             f'Kamara duvarı<br>Et: {wall_case:.1f} mm<br>Øiç: {D_ch:.1f} mm')
+    mirrored(case_z, case_r, C_CASE, 'Chamber wall',
+             f'Chamber wall<br>Thickness: {wall_case:.1f} mm<br>Bore: Ø{D_ch:.1f} mm')
 
     if has_grain:
         # Fenolik liner
         liner_z = [2, 2, L - 2, L - 2]
         liner_r = [r_go, rc - 0.2, rc - 0.2, r_go]
-        mirrored(liner_z, liner_r, C_LINER, 'Liner (yalıtım)',
-                 f'Fenolik liner<br>Et: {liner_t:.1f} mm')
+        mirrored(liner_z, liner_r, C_LINER, 'Liner (insulation)',
+                 f'Phenolic liner<br>Thickness: {liner_t:.1f} mm')
 
         # Yakıt grain'i (katıda port = çekirdek/core, son port = grain dışı)
         grain_z = [zg0, zg0, zg1, zg1]
         grain_r = [r_p0, r_go, r_go, r_p0]
-        mirrored(grain_z, grain_r, C_GRAIN, 'Yakıt grain',
-                 (f'Yakıt grain<br>Boy: {L_g:.1f} mm<br>Port (başlangıç): Ø{2*r_p0:.1f} mm'
-                  f'<br>Port (son): Ø{2*r_pf:.1f} mm<br>Web: {r_pf - r_p0:.1f} mm'))
+        mirrored(grain_z, grain_r, C_GRAIN, 'Fuel grain',
+                 (f'Fuel grain<br>Length: {L_g:.1f} mm<br>Port (initial): Ø{2*r_p0:.1f} mm'
+                  f'<br>Port (final): Ø{2*r_pf:.1f} mm<br>Web: {r_pf - r_p0:.1f} mm'))
 
-    # Enjektör plakası (ekseni geçen tek dikdörtgen) + orifis işaretleri
+    # Enjektör plakası + tipe özel iç geometri (D1 ajanı gerçek enjektör
+    # tipini motor sonucuna kablolar; tip bilinmiyorsa showerhead varsayılır)
     if has_injector:
         inj_t = min(max(0.9 * cap_t, 6.0), 24.0)
-        fig.add_trace(go.Scatter(
-            x=[4, 4, 4 + inj_t, 4 + inj_t, 4],
-            y=[-(rc - 0.4), rc - 0.4, rc - 0.4, -(rc - 0.4), -(rc - 0.4)],
-            fill='toself', fillcolor=C_INJ, mode='lines',
-            line=dict(color='#8a6a34', width=1.4), name='Enjektör plakası',
-            hoverinfo='text', hoveron='fills',
-            hovertext='Enjektör plakası (showerhead)'))
-        n_ori = int(_num((motor_data.get('injector_design') or {}).get('number_of_orifices'), 12))
-        ori_y = np.linspace(-0.62 * rc, 0.62 * rc, max(3, min(n_ori // 2 + 1, 9)))
-        fig.add_trace(go.Scatter(
-            x=[4 + inj_t] * len(ori_y), y=ori_y.tolist(), mode='markers',
-            marker=dict(size=5, color='#10151a', symbol='circle'),
-            name='Orifisler', showlegend=False,
-            hovertemplate=f'Orifis deseni: {n_ori} delik<extra></extra>'))
+        _add_injector_cross_section(
+            fig, motor_data, z0=4.0, thickness=inj_t, rc=rc,
+            plate_color=C_INJ, ink=INK, dim=DIM)
 
     # Nozul duvarı (iç kontur + duvar ofseti)
     noz_wall_z = list(noz_z) + list(noz_z[::-1])
     noz_wall_r = list(noz_r) + list((noz_r + wall_noz)[::-1])
-    mirrored(noz_wall_z, noz_wall_r, C_NOZ, 'Nozul',
-             (f'Nozul ({noz_type})<br>Boğaz: Ø{d_t:.1f} mm<br>Çıkış: Ø{d_e:.1f} mm'
-              f'<br>Genişleme oranı: {(re/rt)**2:.1f}<br>Et: {wall_noz:.1f} mm'))
+    mirrored(noz_wall_z, noz_wall_r, C_NOZ, 'Nozzle',
+             (f'Nozzle ({noz_type})<br>Throat: Ø{d_t:.1f} mm<br>Exit: Ø{d_e:.1f} mm'
+              f'<br>Expansion ratio: {(re/rt)**2:.1f}<br>Wall: {wall_noz:.1f} mm'))
 
     # Son port çapı (kesikli) — eksenel kesitte yatay çizgi çifti
     if has_grain:
@@ -2117,21 +3300,21 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
             fig.add_trace(go.Scatter(
                 x=[zg0, zg1], y=[sgn * r_pf, sgn * r_pf], mode='lines',
                 line=dict(color='#d1495b', width=2, dash='dash'),
-                name=f'Son port Ø{2*r_pf:.1f} mm', showlegend=show,
-                hovertemplate=f'Yanma sonu port: Ø{2*r_pf:.1f} mm<extra></extra>'))
+                name=f'Final port Ø{2*r_pf:.1f} mm', showlegend=show,
+                hovertemplate=f'End-of-burn port: Ø{2*r_pf:.1f} mm<extra></extra>'))
 
     # Merkez ekseni (dash-dot, mühendislik konvansiyonu)
     fig.add_trace(go.Scatter(
         x=[-cap_t - 22, z_exit + 15], y=[0, 0], mode='lines',
         line=dict(color='#5f7c8c', width=1, dash='dashdot'),
-        name='Eksen', showlegend=False, hoverinfo='skip'))
+        name='Centerline', showlegend=False, hoverinfo='skip'))
 
     # Boğaz istasyonu
     fig.add_trace(go.Scatter(
         x=[z_throat, z_throat], y=[-rt, rt],
         mode='lines', line=dict(color=DIM, width=1, dash='dot'),
-        name='Boğaz', showlegend=False,
-        hovertemplate=f'Boğaz istasyonu<br>Ø{d_t:.1f} mm<extra></extra>'))
+        name='Throat', showlegend=False,
+        hovertemplate=f'Throat station<br>Ø{d_t:.1f} mm<extra></extra>'))
 
     # ---------------- Ölçü çizgileri ----------------
     r_out = rc + wall_case
@@ -2164,11 +3347,11 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
         fig.add_annotation(x=x, y=ym, text=label, showarrow=False, textangle=-90,
                            xshift=side * 14, font=dict(size=11, color=DIM))
 
-    dim_h(0, L, r_out + 16, f'L<sub>kamara</sub> = {L:.0f} mm')
+    dim_h(0, L, r_out + 16, f'L<sub>chamber</sub> = {L:.0f} mm')
     if has_grain:
         dim_h(zg0, zg1, r_out + 42, f'Grain = {L_g:.0f} mm')
     dim_h(-cap_t, z_exit, -(max(r_out, re + wall_noz) + 30),
-          f'L<sub>toplam</sub> = {z_exit + cap_t:.0f} mm', above=False)
+          f'L<sub>total</sub> = {z_exit + cap_t:.0f} mm', above=False)
     dim_v(-cap_t - 18, -rc, rc, f'Ø<sub>c</sub> = {D_ch:.1f} mm', side=-1)
     dim_v(z_throat, -rt, rt, f'Ø<sub>t</sub> = {d_t:.1f} mm', side=1)
     dim_v(z_exit + 12, -re, re, f'Ø<sub>e</sub> = {d_e:.1f} mm', side=1)
@@ -2179,9 +3362,10 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     # Altta dikey etiketler yok (y=0 merkezli bantta kalırlar) ve
     # L_toplam ölçü çizgisi daha aşağıda (r_out+30).
     if noz_type == 'conical':
-        angle_txt = f'Konik diverjan: α = {half_angle:.0f}°'
+        angle_txt = f'Conical divergent: α = {half_angle:.0f}°'
     else:
-        angle_txt = f'{noz_type.capitalize()} kontur: θ<sub>n</sub> = {theta_n:.0f}° → θ<sub>e</sub> = {theta_e:.0f}°'
+        angle_txt = (f'{noz_type.capitalize()} contour: θ<sub>n</sub> = '
+                     f'{theta_n:.0f}° → θ<sub>e</sub> = {theta_e:.0f}°')
     # Dikey Ø yazıları PİKSEL uzayında ~80 px uzunluğunda (metin ölçekten
     # bağımsız); yalnız veri-mm ofseti düşük px/mm ölçekte yetmiyor. Bu
     # yüzden konum iki bileşenli: veri-y lüle metalinin hemen altı
@@ -2211,14 +3395,14 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     else:
         y_max = 0.5 * x_span / ASPECT
     fig.update_layout(
-        title=dict(text='MOTOR EKSENEL KESİTİ — ÇÖZÜCÜ GEOMETRİSİ',
+        title=dict(text='MOTOR AXIAL CROSS-SECTION — SOLVER GEOMETRY',
                    x=0.5, font=dict(size=15, color='#eaf7fb')),
-        xaxis=dict(title='Eksenel konum (mm)', showgrid=True,
+        xaxis=dict(title='Axial position (mm)', showgrid=True,
                    gridcolor='rgba(0,229,255,0.07)', zeroline=False,
                    range=[x_min, x_max],
                    tickfont=dict(color='#7d97a5'),
                    title_font=dict(color='#7d97a5')),
-        yaxis=dict(title='Yarıçap (mm)', showgrid=True,
+        yaxis=dict(title='Radius (mm)', showgrid=True,
                    gridcolor='rgba(0,229,255,0.07)', zeroline=False,
                    range=[-y_max, y_max],
                    tickfont=dict(color='#7d97a5'),
@@ -2234,78 +3418,146 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
         height=520,
     )
 
-    return fig.to_json()
+    return _fig_json(fig)
 
 
 def create_improved_injector_design(injector_data):
-    """Gelistirilmis 2D injector tasarim gorsellestirmesi"""
+    """Improved 2D injector design visualisation (type-aware)."""
 
-    injector_type = injector_data.get('type', 'showerhead')
+    raw = injector_data.get('type', 'showerhead')
+    kind = INJECTOR_TYPE_ALIASES.get(str(raw).lower(), 'showerhead')
 
-    if injector_type == 'showerhead':
+    if kind in ('showerhead', 'impingement'):
+        # Impinging plakası da yüz görünüşünde delik deseni olarak okunur
         return create_showerhead_with_tooltips(injector_data)
-    elif injector_type == 'pintle':
+    elif kind in ('pintle', 'coaxial'):
+        # Koaksiyel eleman eş merkezlidir: pintle kesiti aynı geometriyi
+        # (merkez gövde + anülüs) doğru gösterir; utils koaksiyel çıktısı
+        # outer_diameter / pintle_diameter / gap takma adlarını sağlar.
         return create_pintle_cross_section(injector_data)
     else:
         return create_swirl_injector(injector_data)
 
 
-def create_showerhead_with_tooltips(injector_data):
-    """Showerhead injector - her delik icin detayli tooltip"""
+#: Enjektör plakası kalınlık/çap oranı yerine kullanılan kaba çizim payı:
+#: delik deseninin plaka kenarına değmemesi için bırakılan boşluk oranı.
+INJ_PLATE_PATTERN_FILL = 0.80
 
-    n_holes = injector_data.get('n_holes', 20)
-    hole_diameter = injector_data.get('hole_diameter', 1.5)  # mm
-    plate_thickness = injector_data.get('plate_thickness', 3.0)  # mm
-    exit_velocity = injector_data.get('exit_velocity', 30)  # m/s
-    reynolds = injector_data.get('reynolds_number', 50000)
+
+def _injector_total_mdot(injector_data):
+    """Enjektörden geçen TOPLAM debiyi [kg/s] çözer; kaynağını da döndürür.
+
+    Döner: (mdot | None, kaynak_metni)
+
+    Eski sürüm `injector_data.get('mdot_ox', 1.0)` yazıyordu; bu anahtar
+    InjectorDesign.calculate() çıktısında YOK, dolayısıyla payda HER ZAMAN
+    1.0 kg/s idi ve delik başı debi tamamen uyduruk çıkıyordu (2026-07-19
+    uydurma denetimi). Artık debi ya gerçekten verilir, ya Cd*rho*A*v
+    bağıntısından türetilir, ya da 'not available' denir.
+    """
+    d = injector_data or {}
+    for key in ('mdot_ox', 'mdot_kg_s', 'oxidizer_flow_rate_kg_s',
+                'mass_flow_rate', 'mdot_total'):
+        val = _perf_num(d.get(key))
+        if val is not None and val > 0:
+            return float(val), f'solver field {key}'
+    # Türetme: mdot = Cd * rho * A_inj * v_exit (A_inj mm^2 gelir)
+    rho = _perf_num(d.get('oxidizer_density'))
+    area_mm2 = _perf_num(d.get('injection_area'))
+    vel = _perf_num(d.get('exit_velocity'))
+    cd = _perf_num(d.get('discharge_coefficient'))
+    if None not in (rho, area_mm2, vel) and rho > 0 and area_mm2 > 0:
+        mdot = float(cd if cd else 1.0) * rho * (area_mm2 * 1e-6) * vel
+        return mdot, 'derived from Cd x rho x A_inj x v_exit'
+    return None, 'not available (oxidizer mass flow not reported)'
+
+
+def _injector_plate_diameter(injector_data, pattern_reach_mm):
+    """Plaka çapını [mm] çözer; ölçülemiyorsa şematik olduğunu bildirir.
+
+    Döner: (çap_mm, gerçek_mi). Eski sürüm 100 mm SABİT çiziyor ve hover'da
+    'Diameter: 100 mm' yazıyordu — kamara çapından bağımsızdı.
+    """
+    d = injector_data or {}
+    for key, scale in (('plate_diameter', 1.0), ('outer_diameter', 1.0),
+                       ('manifold_diameter_mm', 1.0),
+                       ('chamber_diameter_mm', 1.0),
+                       ('chamber_diameter', 1000.0)):
+        val = _perf_num(d.get(key))
+        if val is not None and val > 0:
+            return float(val) * scale, True
+    # Şematik: desen sığacak kadar; ölçü olarak SUNULMAZ
+    return max(2.0 * pattern_reach_mm / INJ_PLATE_PATTERN_FILL, 20.0), False
+
+
+def create_showerhead_with_tooltips(injector_data):
+    """Showerhead injector face view with a detailed tooltip per hole.
+
+    Per-hole mass flow comes from the solver's own mass flow (or is derived
+    from Cd*rho*A*v); when neither is available the row says so instead of
+    printing a number. The plate outline is the reported plate/chamber
+    diameter when known, otherwise it is drawn as a schematic and labelled.
+    """
+
+    n_holes = int(_num_safe(injector_data.get('n_holes'), 20))
+    n_holes = max(1, n_holes)
+    hole_diameter = _num_safe(injector_data.get('hole_diameter'), 1.5)  # mm
+    plate_thickness = _num_safe(injector_data.get('plate_thickness'), 3.0)
+    exit_velocity = _num_safe(injector_data.get('exit_velocity'), 30)  # m/s
+    reynolds = _num_safe(injector_data.get('reynolds_number'), 50000)
+    plate_material = injector_data.get('plate_material')
+
+    mdot_total, mdot_source = _injector_total_mdot(injector_data)
 
     fig = go.Figure()
 
-    plate_diameter = 100  # mm
-
-    holes_x = []
-    holes_y = []
-    hole_info = []
-
-    if n_holes == 1:
-        holes_x = [0]
-        holes_y = [0]
-        hole_info = ['Merkez Delik']
-    elif n_holes <= 7:
-        holes_x = [0]
-        holes_y = [0]
-        hole_info = ['Merkez']
-
-        if n_holes > 1:
-            n_outer = min(6, n_holes - 1)
-            for i in range(n_outer):
-                angle = i * 2 * np.pi / n_outer
-                r = 25  # mm
-                holes_x.append(r * np.cos(angle))
-                holes_y.append(r * np.sin(angle))
-                hole_info.append(f'Dis Halka #{i+1}')
+    # --- Delik deseni: önce halka sayısı, sonra plakaya oranlı yarıçaplar ---
+    if n_holes <= 7:
+        n_rings = 1 if n_holes > 1 else 0
     else:
-        placed = 0
-        ring_num = 0
-
+        n_rings, placed = 0, 1          # merkez delik
         while placed < n_holes:
-            if ring_num == 0:
-                holes_x.append(0)
-                holes_y.append(0)
-                hole_info.append('Merkez')
+            n_rings += 1
+            placed += 6 * n_rings
+    # Desenin ulaşacağı en dış yarıçap plaka yarıçapının payına oturtulur
+    pattern_reach = max(n_rings, 1) * max(hole_diameter * 2.5, 3.0)
+    plate_diameter, plate_is_real = _injector_plate_diameter(
+        injector_data, pattern_reach)
+    r_plate = plate_diameter / 2.0
+    ring_step = (r_plate * INJ_PLATE_PATTERN_FILL / max(n_rings, 1)) \
+        if n_rings else 0.0
+
+    holes_x, holes_y, hole_info = [], [], []
+    if n_holes == 1:
+        holes_x, holes_y, hole_info = [0.0], [0.0], ['Center hole']
+    elif n_holes <= 7:
+        holes_x, holes_y, hole_info = [0.0], [0.0], ['Center']
+        n_outer = min(6, n_holes - 1)
+        for i in range(n_outer):
+            angle = i * 2 * np.pi / n_outer
+            holes_x.append(ring_step * np.cos(angle))
+            holes_y.append(ring_step * np.sin(angle))
+            hole_info.append(f'Outer ring #{i+1}')
+    else:
+        holes_x, holes_y, hole_info = [0.0], [0.0], ['Center']
+        placed = 1
+        ring_num = 1
+        while placed < n_holes:
+            ring_radius = ring_num * ring_step
+            holes_in_ring = min(6 * ring_num, n_holes - placed)
+            for i in range(holes_in_ring):
+                angle = i * 2 * np.pi / holes_in_ring
+                holes_x.append(ring_radius * np.cos(angle))
+                holes_y.append(ring_radius * np.sin(angle))
+                hole_info.append(f'Ring {ring_num}, hole {i+1}')
                 placed += 1
-            else:
-                ring_radius = ring_num * 18  # mm
-                holes_in_ring = min(6 * ring_num, n_holes - placed)
-
-                for i in range(holes_in_ring):
-                    angle = i * 2 * np.pi / holes_in_ring
-                    holes_x.append(ring_radius * np.cos(angle))
-                    holes_y.append(ring_radius * np.sin(angle))
-                    hole_info.append(f'Halka {ring_num}, Delik {i+1}')
-                    placed += 1
-
             ring_num += 1
+
+    if mdot_total is not None:
+        flow_row = (f'Mass flow: {mdot_total / n_holes * 1000:.2f} g/s'
+                    f' ({mdot_source})')
+    else:
+        flow_row = 'Mass flow: not available (total flow not reported)'
 
     for i in range(len(holes_x)):
         x = holes_x[i]
@@ -2314,21 +3566,26 @@ def create_showerhead_with_tooltips(injector_data):
         radial_distance = np.sqrt(x**2 + y**2)
         angle_deg = np.degrees(np.arctan2(y, x)) % 360
 
-        local_velocity = exit_velocity * (1 + 0.05 * np.random.randn())
-        local_reynolds = reynolds * (1 + 0.03 * np.random.randn())
-        mass_flow_per_hole = injector_data.get('mdot_ox', 1.0) / n_holes * 1000  # g/s
+        # DURUSTLUK DUZELTMESI (v2.5.2): eski surum her delik icin hiz ve
+        # Reynolds'a RASTGELE gurultu ekliyordu (0.05 / 0.03 std). Bu, delikler
+        # arasi gercek bir dagilim olcumu DEGILDI; kullanici hover'da her
+        # delikte farkli sayi gorup bunu hesaplanmis bir dagilim saniyordu.
+        # Model tum delikleri esit paylasimli kabul ediyor, o yuzden tasarim
+        # degeri oldugu gibi gosterilir.
+        local_velocity = exit_velocity
+        local_reynolds = reynolds
 
         hover_text = (
             f'<b>{hole_info[i]}</b><br>'
-            f'Konum: ({x:.1f}, {y:.1f}) mm<br>'
-            f'Radyal Mesafe: {radial_distance:.1f} mm<br>'
-            f'Aci: {angle_deg:.0f} deg<br>'
+            f'Position: ({x:.1f}, {y:.1f}) mm<br>'
+            f'Radial distance: {radial_distance:.1f} mm<br>'
+            f'Angle: {angle_deg:.0f} deg<br>'
             f'---<br>'
-            f'Cap: {hole_diameter:.2f} mm<br>'
-            f'Alan: {np.pi*(hole_diameter/2)**2:.3f} mm2<br>'
-            f'Hiz: {local_velocity:.1f} m/s<br>'
+            f'Diameter: {hole_diameter:.2f} mm<br>'
+            f'Area: {np.pi*(hole_diameter/2)**2:.3f} mm2<br>'
+            f'Velocity: {local_velocity:.1f} m/s<br>'
             f'Re: {local_reynolds:.0f}<br>'
-            f'Debi: {mass_flow_per_hole:.2f} g/s<br>'
+            f'{flow_row}<br>'
             f'L/D: {plate_thickness/hole_diameter:.1f}'
         )
 
@@ -2337,12 +3594,12 @@ def create_showerhead_with_tooltips(injector_data):
             y=[y],
             mode='markers',
             marker=dict(
-                size=max(8, min(25, hole_diameter * 10)),
-                color='lightblue',
-                line=dict(color='darkblue', width=2),
+                size=max(6, min(22, hole_diameter * 10)),
+                color=PALETTE[0],
+                line=dict(color=STRUCT_INK, width=1.5),
                 symbol='circle'
             ),
-            name=f'Delik {i+1}',
+            name=f'Hole {i+1}',
             hovertemplate=hover_text + '<extra></extra>',
             showlegend=False
         ))
@@ -2352,23 +3609,30 @@ def create_showerhead_with_tooltips(injector_data):
                 x=x, y=y,
                 text=str(i+1),
                 showarrow=False,
-                font=dict(size=8, color='white'),
-                bgcolor='darkblue',
+                font=dict(size=8, color='#0a1322'),
+                bgcolor=PALETTE[0],
                 borderpad=2
             )
 
     theta = np.linspace(0, 2*np.pi, 100)
+    if plate_is_real:
+        plate_rows = f'Diameter: {plate_diameter:.1f} mm'
+    else:
+        plate_rows = ('Diameter: not reported by the solver'
+                      '<br>Outline drawn schematically, not to scale')
+    if plate_material:
+        plate_rows += f'<br>Material: {plate_material}'
     fig.add_trace(go.Scatter(
-        x=(plate_diameter/2) * np.cos(theta),
-        y=(plate_diameter/2) * np.sin(theta),
+        x=r_plate * np.cos(theta),
+        y=r_plate * np.sin(theta),
         mode='lines',
-        line=dict(color=STRUCT_INK, width=3),
-        name='Injektor Plakasi',
+        line=dict(color=STRUCT_INK, width=3,
+                  dash=(None if plate_is_real else 'dot')),
+        name='Injector plate',
         hovertemplate=(
-            f'<b>Injektor Plakasi</b><br>'
-            f'Cap: {plate_diameter:.0f} mm<br>'
-            f'Kalinlik: {plate_thickness:.1f} mm<br>'
-            f'Malzeme: Paslanmaz Celik<extra></extra>'
+            f'<b>Injector plate</b><br>'
+            f'{plate_rows}<br>'
+            f'Thickness: {plate_thickness:.1f} mm<extra></extra>'
         )
     ))
 
@@ -2378,30 +3642,33 @@ def create_showerhead_with_tooltips(injector_data):
 
         fig.add_annotation(
             x=x, y=y,
-            ax=x, ay=y-15,
+            ax=x, ay=y - 0.15 * r_plate,
             xref='x', yref='y',
             axref='x', ayref='y',
             showarrow=True,
             arrowhead=2,
             arrowsize=1,
             arrowwidth=2,
-            arrowcolor='#ff5d73',
+            arrowcolor=COL_DANGER,
             opacity=0.6
         )
 
     total_area = n_holes * np.pi * (hole_diameter/2)**2
+    summary = (f'<b>SHOWERHEAD INJECTOR</b><br>'
+               f'{n_holes} Holes x dia {hole_diameter:.2f} mm<br>'
+               f'Total Area: {total_area:.1f} mm2<br>'
+               f'Pressure Drop: {_num_safe(injector_data.get("pressure_drop"), 5):.1f} bar')
+    if mdot_total is not None:
+        summary += f'<br>Total Flow: {mdot_total:.3f} kg/s'
+    else:
+        summary += '<br>Total Flow: not reported'
     fig.add_annotation(
-        x=0, y=plate_diameter/2 + 20,
-        text=(
-            f'<b>SHOWERHEAD INJECTOR</b><br>'
-            f'{n_holes} Holes x dia {hole_diameter:.2f} mm<br>'
-            f'Total Area: {total_area:.1f} mm2<br>'
-            f'Pressure Drop: {injector_data.get("pressure_drop", 5):.1f} bar'
-        ),
+        x=0, y=r_plate * 1.22,
+        text=summary,
         showarrow=False,
-        font=dict(size=11),
+        font=dict(size=11, color=STRUCT_INK),
         align='center',
-        bgcolor='rgba(255, 255, 255, 0.9)',
+        bgcolor=DARK_LEGEND_BG,
         bordercolor=STRUCT_INK,
         borderwidth=1
     )
@@ -2420,18 +3687,18 @@ def create_showerhead_with_tooltips(injector_data):
             showgrid=True,
             gridcolor='rgba(200, 200, 200, 0.3)'
         ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
+        plot_bgcolor=DARK_PLOT_BG,
+        paper_bgcolor=DARK_PAPER_BG,
         hovermode='closest',
         autosize=True,
         height=700
     )
 
-    return fig.to_json()
+    return _fig_json(fig)
 
 
 def create_pintle_cross_section(injector_data):
-    """Pintle injector kesit gorunumu (eksenel kesit: x = eksen, y = yarıçap)"""
+    """Pintle injector cross-section (axial: x = axis, y = radius)."""
 
     outer_diameter = injector_data.get('outer_diameter', 50)  # mm
     pintle_diameter = injector_data.get('pintle_diameter', 25)  # mm
@@ -2617,24 +3884,45 @@ def create_pintle_cross_section(injector_data):
         height=700
     )
 
-    return fig.to_json()
+    return _fig_json(fig)
 
 
 def create_swirl_injector(injector_data):
-    """Swirl injector gorunumu (yüz görünüşü: teğetsel yuvalar + girdap odası)"""
+    """Swirl injector face view (tangential slots + swirl chamber)."""
 
     n_slots = injector_data.get('n_slots', 6)
 
     fig = go.Figure()
 
     # ---------------- Parametreler ve türetilmiş geometri (mm) ----------------
+    # DURUSTLUK DUZELTMESI (2026-07-19): çıkış orifisi çapı artık çözücünün
+    # GERÇEK akış alanından türetilir (exit_orifice_area). Eski sürüm
+    # outer_diameter=50 mm sabitinden zincirleme 0.6/0.35 oranlarıyla
+    # d_exit=10.5 mm üretip bunu ölçü oku ile teknik resim gibi sunuyordu;
+    # 6 kat debi değişiminde bile üç ölçü aynı kalıyordu.
     n_slots = max(1, int(n_slots))
-    outer_diameter = injector_data.get('outer_diameter', 50)  # mm
-    r_out = outer_diameter / 2.0
-    r_ch = 0.6 * r_out                          # girdap odası yarıçapı
-    r_ex = 0.35 * r_ch                          # çıkış orifisi yarıçapı
-    slot_width = injector_data.get('slot_width', max(1.5, 0.15 * r_ch))   # mm
-    slot_height = injector_data.get('slot_height', 0.5 * r_ch)            # mm
+    a_exit = _perf_num(injector_data.get('exit_orifice_area'))     # mm2
+    d_exit_direct = _perf_num(injector_data.get('exit_orifice_diameter'))
+    if d_exit_direct is not None and d_exit_direct > 0:
+        r_ex, exit_is_real = d_exit_direct / 2.0, True
+    elif a_exit is not None and a_exit > 0:
+        r_ex, exit_is_real = float(np.sqrt(a_exit / np.pi)), True
+    else:
+        r_ex, exit_is_real = 5.0, False        # yalnız çizim ölçeği
+
+    d_outer = _perf_num(injector_data.get('outer_diameter'))
+    d_chamber = _perf_num(injector_data.get('swirl_chamber_diameter'))
+    # Girdap odası / gövde çapı çözücü çıktısında YOK. Çizim ölçeği gerçek
+    # çıkış orifisine oturtulur; ölçü çağrıları 'not reported' der.
+    chamber_is_real = d_chamber is not None and d_chamber > 0
+    r_ch = (d_chamber / 2.0) if chamber_is_real else (r_ex / 0.35)
+    outer_is_real = d_outer is not None and d_outer > 0
+    r_out = (d_outer / 2.0) if outer_is_real else (r_ch / 0.6)
+    outer_diameter = 2.0 * r_out
+    slot_width = _num_safe(injector_data.get('slot_width'),
+                           max(1.5, 0.15 * r_ch))                 # mm
+    slot_height = _num_safe(injector_data.get('slot_height'),
+                            0.5 * r_ch)                           # mm
     # Yuva gövde dışına taşmasın (kaba koruma)
     max_reach = np.sqrt((r_ch + slot_width)**2 + slot_height**2)
     if max_reach > 0.96 * r_out:
@@ -2650,8 +3938,9 @@ def create_swirl_injector(injector_data):
         name='Injector Body',
         hovertemplate=(
             f'<b>Injector Body</b><br>'
-            f'D_outer: {outer_diameter:.1f} mm<br>'
-            f'Function: houses swirl chamber and feed slots<extra></extra>'
+            + (f'D_outer: {outer_diameter:.1f} mm<br>' if outer_is_real
+               else 'D_outer: not reported by the solver (schematic)<br>')
+            + f'Function: houses swirl chamber and feed slots<extra></extra>'
         ),
         showlegend=False
     ))
@@ -2665,8 +3954,9 @@ def create_swirl_injector(injector_data):
         name='Swirl Chamber', hoveron='fills+points',
         text=(
             f'<b>Swirl Chamber</b><br>'
-            f'D_chamber: {2 * r_ch:.1f} mm<br>'
-            f'Function: tangential inflow builds the vortex'
+            + (f'D_chamber: {2 * r_ch:.1f} mm<br>' if chamber_is_real
+               else 'D_chamber: not reported by the solver (schematic)<br>')
+            + f'Function: tangential inflow builds the vortex'
         ),
         hoverinfo='text', showlegend=False
     ))
@@ -2680,8 +3970,10 @@ def create_swirl_injector(injector_data):
         name='Exit Orifice', hoveron='fills+points',
         text=(
             f'<b>Exit Orifice</b><br>'
-            f'd_exit: {2 * r_ex:.1f} mm<br>'
-            f'Function: swirling film exits as a hollow cone spray'
+            + (f'd_exit: {2 * r_ex:.2f} mm (from solver exit orifice area)<br>'
+               if exit_is_real
+               else 'd_exit: not reported by the solver (schematic)<br>')
+            + f'Function: swirling film exits as a hollow cone spray'
         ),
         hoverinfo='text', showlegend=False
     ))
@@ -2754,7 +4046,9 @@ def create_swirl_injector(injector_data):
         arrowsize=1, arrowwidth=1.5, arrowcolor=STRUCT_DIM
     )
     fig.add_annotation(
-        x=0, y=-r_ex - 2.5, text=f'd_exit = {2 * r_ex:.1f} mm',
+        x=0, y=-r_ex - 2.5,
+        text=(f'd_exit = {2 * r_ex:.2f} mm' if exit_is_real
+              else 'd_exit: not reported'),
         showarrow=False, font=dict(size=10, color=STRUCT_DIM)
     )
     # D_chamber: oda duvarına etiket oku
@@ -2763,7 +4057,8 @@ def create_swirl_injector(injector_data):
         x=r_ch * np.cos(ang_dim), y=r_ch * np.sin(ang_dim),
         ax=(r_out + 12) * np.cos(ang_dim), ay=(r_out + 12) * np.sin(ang_dim),
         xref='x', yref='y', axref='x', ayref='y',
-        text=f'D_chamber = {2 * r_ch:.1f} mm',
+        text=(f'D_chamber = {2 * r_ch:.1f} mm' if chamber_is_real
+              else 'D_chamber: not reported'),
         showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
         arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK)
     )
@@ -2773,7 +4068,8 @@ def create_swirl_injector(injector_data):
         x=r_out * np.cos(ang_dim2), y=r_out * np.sin(ang_dim2),
         ax=(r_out + 14) * np.cos(ang_dim2), ay=(r_out + 14) * np.sin(ang_dim2),
         xref='x', yref='y', axref='x', ayref='y',
-        text=f'D_outer = {outer_diameter:.1f} mm',
+        text=(f'D_outer = {outer_diameter:.1f} mm' if outer_is_real
+              else 'D_outer: not reported'),
         showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
         arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK)
     )
@@ -2784,10 +4080,20 @@ def create_swirl_injector(injector_data):
         text=(
             f'<b>SWIRL INJECTOR - FACE VIEW</b><br>'
             f'{n_slots} Tangential Slots x {slot_width:.2f} x {slot_height:.2f} mm<br>'
-            f'D_chamber {2 * r_ch:.1f} mm | d_exit {2 * r_ex:.1f} mm'
+            + (f'd_exit {2 * r_ex:.2f} mm' if exit_is_real
+               else 'd_exit not reported')
+            + (f' | D_chamber {2 * r_ch:.1f} mm' if chamber_is_real else '')
         ),
-        showarrow=False, font=dict(size=11), align='center'
+        showarrow=False, font=dict(size=11, color=STRUCT_INK), align='center'
     )
+    if not (exit_is_real and chamber_is_real and outer_is_real):
+        fig.add_annotation(
+            x=0, y=-(r_out + 20), showarrow=False, align='center',
+            text=('Body and swirl-chamber outlines are schematic: the solver '
+                  'reports slot sizes and the exit orifice area, not the '
+                  'housing diameters. Do not machine from this view.'),
+            font=dict(size=10, color=STRUCT_DIM)
+        )
 
     # ---------------- Yerleşim ----------------
     lim = r_out + 24
@@ -2807,4 +4113,4 @@ def create_swirl_injector(injector_data):
         height=700
     )
 
-    return fig.to_json()
+    return _fig_json(fig)

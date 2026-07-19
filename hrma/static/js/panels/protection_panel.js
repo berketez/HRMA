@@ -21,21 +21,25 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     var U = window.AnalysisDock.ui;
+    var T = U.t;                         // çeviri kısayolu
 
     var MODES = [
-        ['ablative', 'Ablative liner — Q* sizing'],
-        ['heat_sink', 'Heat-sink wall — 1-D transient'],
-        ['radiation_equilibrium', 'Radiation-cooled extension'],
+        ['ablative', 'Ablative liner — Q* sizing', 'tps.modeAblative'],
+        ['heat_sink', 'Heat-sink wall — 1-D transient', 'tps.modeHeatSink'],
+        ['radiation_equilibrium', 'Radiation-cooled extension', 'tps.modeRadiation'],
     ];
 
-    // thermal_protection.py ABLATIVE_MATERIALS anahtarlarıyla birebir
+    // FALLBACK — thermal_protection.py ABLATIVE_MATERIALS anahtarlarıyla
+    // birebir; katalog gelirse 'ablative' etiketli DB kayıtlarıyla
+    // BİRLEŞTİRİLİR (carbon_phenolic/epdm modele özgüdür, listede kalır)
     var ABLATIVES = [
-        ['silica_phenolic', 'Silica-phenolic (MX-2600 class)'],
-        ['carbon_phenolic', 'Carbon-phenolic (MX-4926 class)'],
-        ['epdm', 'EPDM rubber insulation'],
+        ['silica_phenolic', 'Silica-phenolic (MX-2600 class)', 'tps.silicaPhenolic'],
+        ['carbon_phenolic', 'Carbon-phenolic (MX-4926 class)', 'tps.carbonPhenolic'],
+        ['epdm', 'EPDM rubber insulation', 'tps.epdm'],
     ];
 
-    // materials_db anahtarları (heat-sink metal cidar)
+    // FALLBACK — materials_db anahtarları (heat-sink metal cidar);
+    // katalog gelirse 'shell'+'liner' etiketli tam liste bunun yerine geçer
     var WALL_MATERIALS = [
         ['steel', 'Steel (generic)'],
         ['steel_4130', 'Steel AISI 4130'],
@@ -49,17 +53,19 @@
         ['graphite', 'Graphite'],
     ];
 
-    // thermal_protection.py RADIATION_EXTENSION_MATERIALS + merkezi DB
+    // FALLBACK — thermal_protection.py RADIATION_EXTENSION_MATERIALS +
+    // merkezi DB; katalog gelirse 'radiative' etiketli liste bunun yerine geçer
     var RAD_MATERIALS = [
-        ['niobium_c103', 'Niobium C-103 (silicide coated)'],
-        ['carbon_carbon', 'Carbon-carbon (2D/3D C-C)'],
+        ['niobium_c103', 'Niobium C-103 (silicide coated)', 'tps.niobium'],
+        ['carbon_carbon', 'Carbon-carbon (2D/3D C-C)', 'tps.carbonCarbon'],
         ['ss_316', 'Stainless 316'],
         ['inconel_718', 'Inconel 718'],
     ];
 
     function simplifiedBadge(note) {
-        return U.badge('SIMPLIFIED MODEL', 'warn',
-            note || 'Preliminary hand-calculation model — see assumptions.');
+        return U.badge(T('panel.protection.simplified', 'SIMPLIFIED MODEL'), 'warn',
+            note || T('panel.protection.simplifiedTip',
+                      'Preliminary hand-calculation model — see assumptions.'));
     }
 
     function limitKind(within) {
@@ -74,25 +80,30 @@
             ? d.q_star_band_MJ_kg.join('–') + ' MJ/kg' : '—';
         el.innerHTML =
             '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + U.badge('MODE: ABLATIVE (Q*)', 'info')
+            + U.badge(T('panel.protection.badgeAblative', 'MODE: ABLATIVE (Q*)'), 'info')
             + U.badge(d.material_name || d.material || '—', 'info')
             + simplifiedBadge(d.model_note)
             + '</div>'
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard('Required liner thickness', U.fmt(d.required_thickness_mm, 2),
-                'mm', 'info', 'Total recession × design margin')
-            + U.statCard('Total recession', U.fmt(d.total_recession_mm, 2), 'mm')
-            + U.statCard('Recession rate (mean)', U.fmt(d.recession_rate_mm_s, 3), 'mm/s')
-            + U.statCard('Q* used', U.fmt(d.q_star_MJ_kg, 1), 'MJ/kg', null,
-                'Literature band: ' + band + ' — conservative low end by default')
+            + U.statCard(T('panel.protection.cardThickness', 'Required liner thickness'),
+                U.fmt(d.required_thickness_mm, 2),
+                'mm', 'info', T('panel.protection.cardThicknessTip', 'Total recession × design margin'))
+            + U.statCard(T('panel.protection.cardRecession', 'Total recession'),
+                U.fmt(d.total_recession_mm, 2), 'mm')
+            + U.statCard(T('panel.protection.cardRecessionRate', 'Recession rate (mean)'),
+                U.fmt(d.recession_rate_mm_s, 3), 'mm/s')
+            + U.statCard(T('panel.protection.cardQstar', 'Q* used'), U.fmt(d.q_star_MJ_kg, 1), 'MJ/kg', null,
+                U.tf('panel.protection.cardQstarTip', { band: band },
+                     'Literature band: {band} — conservative low end by default'))
             + '</div>'
             + U.kvTable([
-                ['Mean heat flux', U.fmt(d.q_mean_W_m2 / 1e6, 2) + ' MW/m²'],
-                ['Total heat load', U.fmt(d.total_heat_load_J_m2 / 1e6, 1) + ' MJ/m²'],
-                ['Burn time', U.fmt(d.burn_time_s, 1) + ' s'],
-                ['Density', U.fmt(d.density_kg_m3, 0) + ' kg/m³'],
-                ['Design margin', U.fmt(d.design_margin, 2) + '×'],
-                ['Source', d.source || '—'],
+                [T('panel.protection.meanFlux', 'Mean heat flux'), U.fmt(d.q_mean_W_m2 / 1e6, 2) + ' MW/m²'],
+                [T('panel.protection.totalLoad', 'Total heat load'),
+                 U.fmt(d.total_heat_load_J_m2 / 1e6, 1) + ' MJ/m²'],
+                [T('common.burnTime', 'Burn Time'), U.fmt(d.burn_time_s, 1) + ' s'],
+                [T('common.density', 'Density'), U.fmt(d.density_kg_m3, 0) + ' kg/m³'],
+                [T('panel.protection.designMargin', 'Design margin'), U.fmt(d.design_margin, 2) + '×'],
+                [T('common.source', 'Source'), d.source || '—'],
             ]);
         root.appendChild(el);
     }
@@ -103,35 +114,42 @@
         var exceeded = !!d.exceeds_limit;
         el.innerHTML =
             '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + U.badge('MODE: HEAT SINK (1-D FD)', 'info')
+            + U.badge(T('panel.protection.badgeHeatSink', 'MODE: HEAT SINK (1-D FD)'), 'info')
             + U.badge(d.material_name || d.wall_material || '—', 'info')
             + (exceeded
-                ? U.badge('SERVICE LIMIT EXCEEDED', 'err',
-                    'Inner wall reaches the material service limit during the burn')
-                : U.badge('WITHIN SERVICE LIMIT', 'ok'))
+                ? U.badge(T('panel.protection.limitExceeded', 'SERVICE LIMIT EXCEEDED'), 'err',
+                    T('panel.protection.limitExceededTip',
+                      'Inner wall reaches the material service limit during the burn'))
+                : U.badge(T('panel.protection.withinLimit', 'WITHIN SERVICE LIMIT'), 'ok'))
             + (d.cfl_ok === false
-                ? U.badge('CFL UNSTABLE', 'err', 'Explicit FD stability criterion violated')
+                ? U.badge(T('panel.protection.cflUnstable', 'CFL UNSTABLE'), 'err',
+                          T('panel.protection.cflTip', 'Explicit FD stability criterion violated'))
                 : '')
             + simplifiedBadge(d.model_note)
             + '</div>'
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard('Inner wall T (end of burn)', U.fmt(d.T_inner_K, 0), 'K',
-                exceeded ? 'err' : 'ok')
-            + U.statCard('Outer wall T', U.fmt(d.T_outer_K, 0), 'K')
-            + U.statCard('Service limit', U.fmt(d.max_service_temp_K, 0), 'K', 'dim')
-            + U.statCard('Time to limit',
+            + U.statCard(T('panel.protection.cardInnerT', 'Inner wall T (end of burn)'),
+                U.fmt(d.T_inner_K, 0), 'K', exceeded ? 'err' : 'ok')
+            + U.statCard(T('panel.protection.cardOuterT', 'Outer wall T'), U.fmt(d.T_outer_K, 0), 'K')
+            + U.statCard(T('panel.protection.serviceLimit', 'Service limit'),
+                U.fmt(d.max_service_temp_K, 0), 'K', 'dim')
+            + U.statCard(T('panel.protection.cardTimeToLimit', 'Time to limit'),
                 (d.time_to_limit_s == null ? '—' : U.fmt(d.time_to_limit_s, 2)),
                 's', exceeded ? 'err' : 'ok',
-                'Moment the inner wall reaches the service limit ("—" = never during burn)')
-            + U.statCard('Margin to limit', U.fmt(d.margin_to_limit_K, 0), 'K',
+                T('panel.protection.cardTimeToLimitTip',
+                  'Moment the inner wall reaches the service limit (\u201c\u2014\u201d = never during burn)'))
+            + U.statCard(T('panel.protection.cardMargin', 'Margin to limit'), U.fmt(d.margin_to_limit_K, 0), 'K',
                 exceeded ? 'err' : 'ok')
             + '</div>'
             + U.kvTable([
-                ['Absorbed energy', U.fmt(d.absorbed_energy_J_m2 / 1e6, 2) + ' MJ/m²'],
-                ['h_gas (input, Bartz)', U.fmt(d.h_gas_W_m2K, 0) + ' W/m²·K'],
-                ['Recovery temperature', U.fmt(d.T_recovery_K, 0) + ' K'],
-                ['Grid / time step', (d.n_nodes || '—') + ' nodes · dt = '
-                    + U.fmt(d.dt_s * 1e3, 2) + ' ms',
+                [T('panel.protection.absorbedEnergy', 'Absorbed energy'),
+                 U.fmt(d.absorbed_energy_J_m2 / 1e6, 2) + ' MJ/m²'],
+                [T('panel.protection.hGas', 'h_gas (input, Bartz)'), U.fmt(d.h_gas_W_m2K, 0) + ' W/m²·K'],
+                [T('panel.protection.recoveryTemp', 'Recovery temperature'), U.fmt(d.T_recovery_K, 0) + ' K'],
+                [T('panel.protection.gridStep', 'Grid / time step'),
+                 U.tf('panel.protection.gridStepValue',
+                      { n: (d.n_nodes || '—'), dt: U.fmt(d.dt_s * 1e3, 2) },
+                      '{n} nodes · dt = {dt} ms'),
                  'Fo = ' + U.fmt(d.Fo, 3) + ', Bi = ' + U.fmt(d.Bi, 3)
                     + ', CFL ok: ' + d.cfl_ok],
             ]);
@@ -157,7 +175,8 @@
                 annotations.push({
                     xref: 'paper', x: 1, y: d.max_service_temp_K,
                     xanchor: 'right', yanchor: 'bottom',
-                    text: 'Service limit — ' + Math.round(d.max_service_temp_K) + ' K',
+                    text: T('panel.protection.serviceLimit', 'Service limit') + ' — '
+                        + Math.round(d.max_service_temp_K) + ' K',
                     showarrow: false, font: { size: 10, color: '#ff5d73' },
                 });
             }
@@ -167,9 +186,9 @@
                 line: { color: '#00e5ff', width: 2 },
                 hovertemplate: 'x = %{x:.2f} mm<br>T = %{y:.0f} K<extra></extra>',
             }], {
-                title: 'Wall Temperature Profile at End of Burn',
-                xaxis: { title: 'Depth from hot face (mm)' },
-                yaxis: { title: 'Temperature (K)' },
+                title: T('panel.protection.chartProfile', 'Wall Temperature Profile at End of Burn'),
+                xaxis: { title: T('panel.protection.axisDepth', 'Depth from hot face (mm)') },
+                yaxis: { title: T('common.axis.temperatureK', 'Temperature (K)') },
                 shapes: shapes,
                 annotations: annotations,
                 height: 340,
@@ -203,7 +222,8 @@
                 ann2.push({
                     x: d.time_to_limit_s, yref: 'paper', y: 1,
                     xanchor: 'left', yanchor: 'top',
-                    text: 'Limit reached — ' + U.fmt(d.time_to_limit_s, 2) + ' s',
+                    text: T('panel.protection.limitReached', 'Limit reached') + ' — '
+                        + U.fmt(d.time_to_limit_s, 2) + ' s',
                     showarrow: false, font: { size: 10, color: '#ff8c33' },
                 });
             }
@@ -212,9 +232,9 @@
                 line: { color: '#2dd4a8', width: 2 },
                 hovertemplate: 't = %{x:.2f} s<br>T_w = %{y:.0f} K<extra></extra>',
             }], {
-                title: 'Hot-Face Temperature History',
-                xaxis: { title: 'Time (s)' },
-                yaxis: { title: 'Inner wall temperature (K)' },
+                title: T('panel.protection.chartHistory', 'Hot-Face Temperature History'),
+                xaxis: { title: T('common.axis.timeS', 'Time (s)') },
+                yaxis: { title: T('panel.protection.axisInnerT', 'Inner wall temperature (K)') },
                 shapes: shapes2,
                 annotations: ann2,
                 height: 320,
@@ -228,31 +248,31 @@
         var el = document.createElement('div');
         el.innerHTML =
             '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + U.badge('MODE: RADIATION EQUILIBRIUM', 'info')
+            + U.badge(T('panel.protection.badgeRadiation', 'MODE: RADIATION EQUILIBRIUM'), 'info')
             + (d.material_name ? U.badge(d.material_name, 'info') : '')
             + (d.within_limit == null ? ''
                 : (d.within_limit
-                    ? U.badge('WITHIN SERVICE LIMIT', 'ok')
-                    : U.badge('SERVICE LIMIT EXCEEDED', 'err')))
+                    ? U.badge(T('panel.protection.withinLimit', 'WITHIN SERVICE LIMIT'), 'ok')
+                    : U.badge(T('panel.protection.limitExceeded', 'SERVICE LIMIT EXCEEDED'), 'err')))
             + simplifiedBadge(d.model_note)
             + '</div>'
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard('Equilibrium wall T', U.fmt(d.T_wall_eq_K, 0), 'K',
+            + U.statCard(T('panel.protection.cardEqWall', 'Equilibrium wall T'), U.fmt(d.T_wall_eq_K, 0), 'K',
                 limitKind(d.within_limit),
-                'h_g·(T_recovery − T_w) = ε·σ·T_w⁴ energy balance')
-            + U.statCard('Service limit',
+                T('panel.protection.cardEqWallTip', 'h_g·(T_recovery − T_w) = ε·σ·T_w⁴ energy balance'))
+            + U.statCard(T('panel.protection.serviceLimit', 'Service limit'),
                 (d.service_limit_K == null ? '—' : U.fmt(d.service_limit_K, 0)),
                 'K', 'dim')
-            + U.statCard('Margin',
+            + U.statCard(T('common.margin', 'Margin'),
                 (d.margin_K == null ? '—' : U.fmt(d.margin_K, 0)),
                 'K', limitKind(d.within_limit))
-            + U.statCard('Radiated flux', U.fmt(d.q_rad_W_m2 / 1e6, 2), 'MW/m²')
+            + U.statCard(T('panel.protection.cardRadFlux', 'Radiated flux'), U.fmt(d.q_rad_W_m2 / 1e6, 2), 'MW/m²')
             + '</div>'
             + U.kvTable([
-                ['Emissivity used', U.fmt(d.emissivity, 2)],
-                ['h_gas (input, Bartz)', U.fmt(d.h_gas_W_m2K, 0) + ' W/m²·K'],
-                ['Recovery temperature', U.fmt(d.T_recovery_K, 0) + ' K'],
-                ['Source', d.source || '—'],
+                [T('panel.protection.emissivityUsed', 'Emissivity used'), U.fmt(d.emissivity, 2)],
+                [T('panel.protection.hGas', 'h_gas (input, Bartz)'), U.fmt(d.h_gas_W_m2K, 0) + ' W/m²·K'],
+                [T('panel.protection.recoveryTemp', 'Recovery temperature'), U.fmt(d.T_recovery_K, 0) + ' K'],
+                [T('common.source', 'Source'), d.source || '—'],
             ]);
         root.appendChild(el);
     }
@@ -272,23 +292,29 @@
     window.AnalysisDock.register({
         id: 'protection',
         title: 'Thermal Protection — Ablative / Heat-Sink / Radiation-Cooled',
+        titleKey: 'panel.protection.title',
         category: 'THERMAL',
         endpoint: '/api/thermal-protection',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['mode', 'Analysis Mode', 'ablative', MODES],
-            ['q_net_W_m2', '[A] Net Heat Flux (W/m²)', 2000000, 100000],
-            ['material', '[A] Ablative Material', 'silica_phenolic', ABLATIVES],
-            ['design_margin', '[A] Design Margin (×)', 1.5, 0.1],
-            ['q_star_MJ_kg', '[A] Q* Override (MJ/kg, blank = band)', '', 0.5],
-            ['burn_time_s', '[A/H] Burn Time (s)', 10, 0.5],
-            ['h_gas_W_m2K', '[H/R] h_gas — Bartz (W/m²·K)', 3000, 100],
-            ['T_recovery_K', '[H/R] Recovery Temperature (K)', 3200, 50],
-            ['wall_thickness_m', '[H] Wall Thickness (m)', 0.005, 0.001],
-            ['wall_material', '[H] Wall Material', 'steel', WALL_MATERIALS],
-            ['T_initial_K', '[H] Initial Temperature (K)', 300, 5],
-            ['radiation_material', '[R] Extension Material', 'niobium_c103', RAD_MATERIALS],
-            ['emissivity', '[R] Emissivity Override (blank = material)', '', 0.05],
+            ['mode', 'Analysis Mode', 'ablative', MODES, 'panel.protection.fMode'],
+            ['q_net_W_m2', '[A] Net Heat Flux (W/m²)', 2000000, 100000, 'panel.protection.fQNet'],
+            ['material', '[A] Ablative Material', 'silica_phenolic', ABLATIVES,
+             'panel.protection.fAblativeMaterial'],
+            ['design_margin', '[A] Design Margin (×)', 1.5, 0.1, 'panel.protection.fDesignMargin'],
+            ['q_star_MJ_kg', '[A] Q* Override (MJ/kg, blank = band)', '', 0.5,
+             'panel.protection.fQstarOverride'],
+            ['burn_time_s', '[A/H] Burn Time (s)', 10, 0.5, 'panel.protection.fBurnTime'],
+            ['h_gas_W_m2K', '[H/R] h_gas — Bartz (W/m²·K)', 3000, 100, 'panel.protection.fHgas'],
+            ['T_recovery_K', '[H/R] Recovery Temperature (K)', 3200, 50, 'panel.protection.fTRecovery'],
+            ['wall_thickness_m', '[H] Wall Thickness (m)', 0.005, 0.001, 'panel.protection.fWallThickness'],
+            ['wall_material', '[H] Wall Material', 'steel', WALL_MATERIALS,
+             'panel.protection.fWallMaterial'],
+            ['T_initial_K', '[H] Initial Temperature (K)', 300, 5, 'panel.protection.fTInitial'],
+            ['radiation_material', '[R] Extension Material', 'niobium_c103', RAD_MATERIALS,
+             'panel.protection.fRadMaterial'],
+            ['emissivity', '[R] Emissivity Override (blank = material)', '', 0.05,
+             'panel.protection.fEmissivity'],
         ],
         fromResults: function (r) {
             var m = (r && r.motor) || r || {};
@@ -314,6 +340,25 @@
         },
         render: render,
     });
+
+    // Merkezi katalog yüklüyse üç select'i etiket filtreleriyle doldur;
+    // değilse fallback listeleri aynen kalır. Ablatif listesi MERGE ile
+    // birleştirilir: carbon_phenolic/epdm yalnız thermal_protection.py
+    // tablosunda vardır, kaybolmamalı.
+    if (typeof window.HRMAMaterials !== 'undefined' && window.HRMAMaterials) {
+        window.HRMAMaterials.populateSelect({
+            panelId: 'protection', fieldId: 'material',
+            tags: ['ablative'], fallback: ABLATIVES, merge: true,
+        });
+        window.HRMAMaterials.populateSelect({
+            panelId: 'protection', fieldId: 'wall_material',
+            tags: ['shell', 'liner'], fallback: WALL_MATERIALS, merge: true,
+        });
+        window.HRMAMaterials.populateSelect({
+            panelId: 'protection', fieldId: 'radiation_material',
+            tags: ['radiative'], fallback: RAD_MATERIALS,
+        });
+    }
 
     // Test / hata ayıklama: saf render'lar (dry-run)
     window.ProtectionPanel = {

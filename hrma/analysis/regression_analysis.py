@@ -35,6 +35,18 @@ LIQUEFYING_FUELS = {
     'paraffin': {'entrainment_in_correlation': True},
 }
 
+
+def _as_list(values) -> list:
+    """Plotly izlerine giren diziyi düz Python listesine çevirir.
+
+    Plotly 6.x numpy dizilerini JSON'a base64 'bdata' bloğu olarak yazar;
+    uygulamada yüklü plotly.js 1.58.5 bu formatı tanımadığı için grafik
+    BOŞ çizilir. Bu yardımcı, tüm figür üretimlerinde tek geçiş noktasıdır.
+    """
+    if isinstance(values, np.ndarray):
+        return [float(v) for v in values.tolist()]
+    return [float(v) for v in values]
+
 class RegressionAnalyzer:
     """Hibrit roket yakıt regresyon analizi"""
 
@@ -145,7 +157,14 @@ class RegressionAnalyzer:
         port_initial = motor_data.get('port_diameter_initial', 0.03)  # m
         port_final = motor_data.get('port_diameter_final', 0.05)  # m
         fuel_type = motor_data.get('fuel_type', 'htpb')
-        grain_length = motor_data.get('chamber_length', 0.3) * 0.8  # m
+        # Grain boyu: motor sonucunda VARSA doğrudan kullanılır. v2.5.2'de
+        # kamara boyu artık grain + ön-yanma + art-yanma toplamıdır, yani
+        # 0.8·L_kamara yaklaşımı grain'i sistematik olarak yanlış ölçekler
+        # (G_fuel -> r_dot zincirini kaydırır). Yaklaşım yalnız grain boyu
+        # verilmediğinde geriye uyum için kalır.
+        grain_length = motor_data.get('grain_length')
+        if not grain_length or grain_length <= 0:
+            grain_length = motor_data.get('chamber_length', 0.3) * 0.8  # m
         flux_mode = motor_data.get('flux_mode', 'total')  # 'total' (Marxman) | 'ox'
 
         # Yakıt özelliklerini al
@@ -205,63 +224,72 @@ class RegressionAnalyzer:
         }
     
     def create_regression_plot(self, regression_data: Dict) -> str:
-        """Regresyon hızı grafiği oluştur"""
-        
+        """Regresyon hızı grafiği (Plotly JSON).
+
+        NOT (v2.5.2): eksen dizileri _as_list ile PYTHON listesine cevrilir.
+        Plotly 6.x, numpy dizilerini JSON'a base64 'bdata' bloklari olarak
+        yazar; uygulamanin yukledigi plotly.js 1.58.5 bu formati tanimadigi
+        icin grafik BOS cizilir. Ayrica sabit width kaldirildi — kap
+        genisligine gore responsive cizilsin.
+        """
+
         fig = go.Figure()
-        
-        # Regresyon hızı vs zaman
+
+        time_axis = _as_list(regression_data['time'])
+
+        # Regression rate vs time
         fig.add_trace(go.Scatter(
-            x=regression_data['time'],
-            y=regression_data['regression_rate'],
+            x=time_axis,
+            y=_as_list(regression_data['regression_rate']),
             mode='lines',
-            name='Regresyon Hızı',
+            name='Regression Rate',
             line=dict(color='red', width=3),
-            hovertemplate='Zaman: %{x:.1f} s<br>Regresyon Hızı: %{y:.3f} mm/s<extra></extra>'
+            hovertemplate='Time: %{x:.1f} s<br>Regression Rate: %{y:.3f} mm/s<extra></extra>'
         ))
-        
-        # İkinci Y ekseni için port çapı
+
+        # Port diameter on the secondary Y axis
         fig.add_trace(go.Scatter(
-            x=regression_data['time'],
-            y=regression_data['port_diameter'],
+            x=time_axis,
+            y=_as_list(regression_data['port_diameter']),
             mode='lines',
-            name='Port Çapı',
+            name='Port Diameter',
             line=dict(color='blue', width=3, dash='dash'),
             yaxis='y2',
-            hovertemplate='Zaman: %{x:.1f} s<br>Port Çapı: %{y:.1f} mm<extra></extra>'
+            hovertemplate='Time: %{x:.1f} s<br>Port Diameter: %{y:.1f} mm<extra></extra>'
         ))
-        
-        # Oksitleyici akış yoğunluğu
+
+        # Oxidizer mass flux
         fig.add_trace(go.Scatter(
-            x=regression_data['time'],
-            y=regression_data['oxidizer_flux'],
+            x=time_axis,
+            y=_as_list(regression_data['oxidizer_flux']),
             mode='lines',
-            name='Oksitleyici Akış Yoğunluğu',
+            name='Oxidizer Mass Flux',
             line=dict(color='green', width=2),
             yaxis='y3',
             visible='legendonly',
-            hovertemplate='Zaman: %{x:.1f} s<br>G_ox: %{y:.0f} kg/m²/s<extra></extra>'
+            hovertemplate='Time: %{x:.1f} s<br>G_ox: %{y:.0f} kg/m²/s<extra></extra>'
         ))
-        
-        # Grafik düzeni
+
+        # Layout
         fig.update_layout(
             title=dict(
-                text=f'{regression_data["fuel_name"]} Regresyon Analizi<br>'
+                text=f'{regression_data["fuel_name"]} Regression Analysis<br>'
                      f'<sub>a = {regression_data["parameters"]["a"]:.4f}, n = {regression_data["parameters"]["n"]:.2f}</sub>',
                 x=0.5,
                 font=dict(size=16)
             ),
             xaxis=dict(
-                title='Zaman (s)',
+                title='Time (s)',
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)'
             ),
             yaxis=dict(
-                title=dict(text='Regresyon Hızı (mm/s)', font=dict(color='red')),
+                title=dict(text='Regression Rate (mm/s)', font=dict(color='red')),
                 tickfont=dict(color='red'),
                 side='left'
             ),
             yaxis2=dict(
-                title=dict(text='Port Çapı (mm)', font=dict(color='blue')),
+                title=dict(text='Port Diameter (mm)', font=dict(color='blue')),
                 tickfont=dict(color='blue'),
                 anchor='x',
                 overlaying='y',
@@ -285,24 +313,25 @@ class RegressionAnalyzer:
                 xanchor='right',
                 x=1
             ),
-            width=800,
             height=500
         )
-        
-        # Ortalama değerler için notlar
-        avg_regression = np.mean(regression_data['regression_rate'])
-        initial_port = regression_data['port_diameter'][0]
-        final_port = regression_data['port_diameter'][-1]
-        
+
+        # Summary annotation
+        avg_regression = float(np.mean(regression_data['regression_rate']))
+        initial_port = float(regression_data['port_diameter'][0])
+        final_port = float(regression_data['port_diameter'][-1])
+        growth_pct = ((final_port / initial_port - 1.0) * 100.0
+                      if initial_port > 0 else 0.0)
+
         fig.add_annotation(
             x=0.02, y=0.98,
             xref='paper', yref='paper',
             text=(
-                f'<b>Ortalama Değerler:</b><br>'
-                f'Regresyon Hızı: {avg_regression:.3f} mm/s<br>'
-                f'Başlangıç Port: {initial_port:.1f} mm<br>'
-                f'Son Port: {final_port:.1f} mm<br>'
-                f'Port Artışı: {(final_port/initial_port - 1)*100:.0f}%'
+                f'<b>Average Values</b><br>'
+                f'Regression rate: {avg_regression:.3f} mm/s<br>'
+                f'Initial port: {initial_port:.1f} mm<br>'
+                f'Final port: {final_port:.1f} mm<br>'
+                f'Port growth: {growth_pct:.0f}%'
             ),
             showarrow=False,
             align='left',
@@ -311,16 +340,20 @@ class RegressionAnalyzer:
             borderwidth=1,
             font=dict(size=10)
         )
-        
+
         return fig.to_json()
     
     def compare_fuel_types(self, base_conditions: Dict) -> str:
-        """Farklı yakıt türlerini karşılaştır"""
-        
+        """Yakıt türü karşılaştırma grafiği (Plotly JSON).
+
+        Eksen dizileri _as_list ile listeye cevrilir (bkz. create_regression_plot
+        bdata notu); sabit width kaldirildi.
+        """
+
         fig = go.Figure()
-        
+
         colors = ['red', 'blue', 'green', 'orange', 'purple']
-        
+
         # Her yakıt türü için regresyon eğrisi
         for i, (fuel_type, fuel_props) in enumerate(self.fuel_properties.items()):
             # Base conditions'ı kopyala ve yakıt tipini değiştir
@@ -328,25 +361,25 @@ class RegressionAnalyzer:
             conditions['fuel_type'] = fuel_type
             conditions['regression_a'] = fuel_props['a']
             conditions['regression_n'] = fuel_props['n']
-            
+
             # Regresyon analizi yap
             regression_data = self.analyze_regression_vs_time(conditions)
-            
+
             # Grafiğe ekle
             fig.add_trace(go.Scatter(
-                x=regression_data['time'],
-                y=regression_data['regression_rate'],
+                x=_as_list(regression_data['time']),
+                y=_as_list(regression_data['regression_rate']),
                 mode='lines',
                 name=fuel_props['name'],
                 line=dict(color=colors[i % len(colors)], width=2),
-                hovertemplate=f'{fuel_props["name"]}<br>Zaman: %{{x:.1f}} s<br>Regresyon: %{{y:.3f}} mm/s<extra></extra>'
+                hovertemplate=f'{fuel_props["name"]}<br>Time: %{{x:.1f}} s<br>Regression: %{{y:.3f}} mm/s<extra></extra>'
             ))
-        
+
         # Grafik düzeni
         fig.update_layout(
-            title='Yakıt Türleri Regresyon Hızı Karşılaştırması',
-            xaxis=dict(title='Zaman (s)'),
-            yaxis=dict(title='Regresyon Hızı (mm/s)'),
+            title='Fuel Type Regression Rate Comparison',
+            xaxis=dict(title='Time (s)'),
+            yaxis=dict(title='Regression Rate (mm/s)'),
             plot_bgcolor='white',
             paper_bgcolor='white',
             hovermode='x unified',
@@ -357,10 +390,9 @@ class RegressionAnalyzer:
                 xanchor='left',
                 x=1.02
             ),
-            width=800,
             height=500
         )
-        
+
         return fig.to_json()
 
 # Global instance

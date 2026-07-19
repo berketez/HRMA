@@ -48,6 +48,18 @@ GAMMA_AIR = 1.4
 R_SPECIFIC_AIR = R_STAR_ICAO / M_AIR  # = 8.31432/0.0289644 ≈ 287.05 J/(kg*K)
 
 
+def _as_list(values) -> list:
+    """Plotly izlerine giren diziyi düz Python listesine çevirir.
+
+    Plotly 6.x numpy dizilerini JSON'a base64 'bdata' bloğu olarak yazar;
+    uygulamada yüklü plotly.js 1.58.5 bu formatı tanımadığı için grafik
+    BOŞ çizilir (v2.5.2 sistemik düzeltmesi).
+    """
+    if isinstance(values, np.ndarray):
+        return [float(v) for v in values.tolist()]
+    return [float(v) for v in values]
+
+
 class TrajectoryAnalyzer:
     """Complete trajectory analysis for hybrid rocket motors"""
 
@@ -682,10 +694,13 @@ class TrajectoryAnalyzer:
         )
 
         # 1. Trajectory profile (altitude vs range)
+        # NOT (v2.5.2): tum eksen dizileri _as_list ile listeye cevrilir;
+        # numpy dizisi Plotly 6.x'te base64 'bdata' olur ve eski plotly.js
+        # 1.58.5 grafigi BOS cizer.
         fig.add_trace(
             go.Scatter(
-                x=trajectory['position_x'] / 1000,  # Convert to km
-                y=trajectory['altitude'] / 1000,  # Convert to km
+                x=_as_list(trajectory['position_x'] / 1000),  # Convert to km
+                y=_as_list(trajectory['altitude'] / 1000),  # Convert to km
                 mode='lines',
                 name='Flight Path',
                 line=dict(color='blue', width=3),
@@ -701,8 +716,8 @@ class TrajectoryAnalyzer:
         # Burnout point
         fig.add_trace(
             go.Scatter(
-                x=[powered_phase['position_x'][-1] / 1000],
-                y=[powered_phase['position_z'][-1] / 1000],
+                x=[float(powered_phase['position_x'][-1] / 1000)],
+                y=[float(powered_phase['position_z'][-1] / 1000)],
                 mode='markers',
                 name='Motor Burnout',
                 marker=dict(color='red', size=10, symbol='circle'),
@@ -714,8 +729,8 @@ class TrajectoryAnalyzer:
         # Apogee point
         fig.add_trace(
             go.Scatter(
-                x=[coasting_phase['position_x'][-1] / 1000],
-                y=[coasting_phase['position_z'][-1] / 1000],
+                x=[float(coasting_phase['position_x'][-1] / 1000)],
+                y=[float(coasting_phase['position_z'][-1] / 1000)],
                 mode='markers',
                 name='Apogee',
                 marker=dict(color='green', size=12, symbol='triangle-up'),
@@ -727,8 +742,8 @@ class TrajectoryAnalyzer:
         # 2. Altitude vs time
         fig.add_trace(
             go.Scatter(
-                x=trajectory['time'],
-                y=trajectory['altitude'] / 1000,  # Convert to km
+                x=_as_list(trajectory['time']),
+                y=_as_list(trajectory['altitude'] / 1000),  # Convert to km
                 mode='lines',
                 name='Altitude',
                 line=dict(color='green', width=3),
@@ -740,8 +755,8 @@ class TrajectoryAnalyzer:
         # 3. Velocity profile
         fig.add_trace(
             go.Scatter(
-                x=trajectory['time'],
-                y=trajectory['velocity_magnitude'],
+                x=_as_list(trajectory['time']),
+                y=_as_list(trajectory['velocity_magnitude']),
                 mode='lines',
                 name='Total Velocity',
                 line=dict(color='red', width=3),
@@ -752,8 +767,8 @@ class TrajectoryAnalyzer:
 
         fig.add_trace(
             go.Scatter(
-                x=trajectory['time'],
-                y=trajectory['velocity_z'],
+                x=_as_list(trajectory['time']),
+                y=_as_list(trajectory['velocity_z']),
                 mode='lines',
                 name='Vertical Velocity',
                 line=dict(color='orange', width=2, dash='dash'),
@@ -765,8 +780,8 @@ class TrajectoryAnalyzer:
         # 4. Acceleration profile
         fig.add_trace(
             go.Scatter(
-                x=trajectory['time'][1:],  # Skip first point for gradient
-                y=trajectory['acceleration'][1:] / self.g0,  # Convert to g's
+                x=_as_list(trajectory['time'][1:]),  # Skip first point for gradient
+                y=_as_list(trajectory['acceleration'][1:] / self.g0),  # Convert to g's
                 mode='lines',
                 name='Acceleration',
                 line=dict(color='purple', width=3),
@@ -776,12 +791,12 @@ class TrajectoryAnalyzer:
         )
 
         # 5. Flight phases
-        phase_times = [0, powered_phase['burnout_time'],
-                       powered_phase['burnout_time'] + coasting_phase['apogee_time'],
-                       trajectory['time'][-1]]
+        phase_times = _as_list([0, powered_phase['burnout_time'],
+                                powered_phase['burnout_time'] + coasting_phase['apogee_time'],
+                                trajectory['time'][-1]])
         phase_names = ['Launch', 'Burnout', 'Apogee', 'Landing']
-        phase_altitudes = [0, powered_phase['position_z'][-1] / 1000,
-                           coasting_phase['position_z'][-1] / 1000, 0]
+        phase_altitudes = _as_list([0, powered_phase['position_z'][-1] / 1000,
+                                    coasting_phase['position_z'][-1] / 1000, 0])
 
         fig.add_trace(
             go.Scatter(
@@ -799,7 +814,7 @@ class TrajectoryAnalyzer:
         )
 
         # 6. Performance summary gauge
-        max_altitude_km = performance['trajectory_metrics']['max_altitude'] / 1000
+        max_altitude_km = float(performance['trajectory_metrics']['max_altitude'] / 1000)
         fig.add_trace(
             go.Indicator(
                 mode="gauge+number+delta",
@@ -833,7 +848,6 @@ class TrajectoryAnalyzer:
             ),
             showlegend=True,
             height=900,
-            width=1200,
             hovermode='closest'
         )
 

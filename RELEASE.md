@@ -17,7 +17,7 @@ __version__ = "2.4.6"
 Every build script (`build_mac_app.sh`, `build_dmg.sh`,
 `publish_release.sh`) reads the version from this file. The Windows
 installer receives it explicitly on the makensis command line and it must
-match `__init__.py` — the version is never hardcoded anywhere else.
+match `__init__.py`; the version is never hardcoded anywhere else.
 
 ## Release Artifacts
 
@@ -30,7 +30,7 @@ can find them:
 | Windows 10/11 | `HRMA-Setup-X.Y.Z.exe` | `packaging/build_win_payload.sh` + `makensis -DVERSION=X.Y.Z packaging/hrma.nsi` |
 
 Both bundles embed a Python 3.12 runtime and all dependencies (CoolProp,
-build123d/OpenCascade, RocketCEA, offline Plotly/Three.js, ...) — end users
+build123d/OpenCascade, RocketCEA, offline Plotly/Three.js, ...), so end users
 never need Python or an internet connection. Both are produced on a single
 macOS machine; no Windows build machine is required (the exe is
 cross-assembled with NSIS via `brew install makensis`).
@@ -72,7 +72,7 @@ The in-app update checker (`hrma/utils/update_checker.py`) runs at startup:
    `__version__`.
 2. If newer, it selects the platform-appropriate asset from the release
    **by file suffix**: `.dmg` on macOS, `.exe` on Windows. Asset URLs come
-   only from the GitHub API response — external URL injection is not
+   only from the GitHub API response, so external URL injection is not
    possible.
 3. The UI offers a one-click download into the user's Downloads folder with
    progress reporting, then hands off to the OS installer. If no matching
@@ -85,16 +85,16 @@ applications on that platform.
 
 ## Version History (recent)
 
-- **v2.4.6** — comparative analysis panel, Leckner gas-emissivity
+- **v2.4.6**: comparative analysis panel, Leckner gas-emissivity
   radiation, NHNE injector fallback fixes, real pintle/swirl cross-section
   drawings, warning panel in the UI, documentation overhaul, dead-route
   cleanup (`/optimize`, `/api/generate-cad`).
-- **v2.4.5** — physics audit: 32 findings fixed (kinetic efficiency,
+- **v2.4.5**: physics audit: 32 findings fixed (kinetic efficiency,
   explosion energy, altitude Isp, T/W, Bartz, erosive burning), brand
   sweep.
-- **v2.4.0** — 13-panel Analysis Deck, quasi-1D nozzle flow, staged
+- **v2.4.0**: 13-panel Analysis Deck, quasi-1D nozzle flow, staged
   kinetics, materials database, 1,000+ automated tests.
-- **v2.3** — native desktop window (pywebview), instant splash, automatic
+- **v2.3**: native desktop window (pywebview), instant splash, automatic
   updates via GitHub Releases, English installers.
 
 Release notes for shipped versions are kept in

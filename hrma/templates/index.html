@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HRMA — Rocket Motor Analysis Suite</title>
+    <title data-i18n="page.title">HRMA — Rocket Motor Analysis Suite</title>
     <link rel="stylesheet" href="/static/css/fonts.css">
     <link rel="stylesheet" href="/static/css/theme.css">
     <style>
@@ -271,8 +271,37 @@
             letter-spacing: 0.5px;
         }
 
+        /* ---------- Dil seçici (sağ üst) ---------- */
+        .lang-switch {
+            position: absolute;
+            top: 18px; right: 20px;
+            z-index: 20;
+            display: flex; align-items: center; gap: 9px;
+            font-family: var(--hd-mono);
+            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--hd-ink-dim);
+        }
+        .lang-switch select {
+            font-family: var(--hd-mono);
+            font-size: 12px; letter-spacing: 1px;
+            color: var(--hd-cyan-soft);
+            background: rgba(3, 10, 18, 0.85);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            border-radius: 8px;
+            padding: 7px 12px;
+            cursor: pointer;
+            outline: none;
+        }
+        .lang-switch select:hover,
+        .lang-switch select:focus {
+            border-color: var(--hd-cyan);
+            box-shadow: 0 0 14px rgba(0, 229, 255, 0.22);
+        }
+        .lang-switch select option { background: #061018; color: #d7f2fb; }
+
         @media (max-width: 768px) {
             .hero { padding: 60px 16px 50px 16px; }
+            .lang-switch { top: 10px; right: 10px; }
             .motor-grid { grid-template-columns: 1fr; }
             .cap-strip { gap: 14px; }
         }
@@ -282,38 +311,45 @@
     <div class="hero">
         <div class="hero-stars"></div>
         <div class="hero-grid"></div>
-        <div class="hero-badge"><span class="dot"></span>SYSTEM ONLINE — SOLVER READY<span class="ver">v{{ app_version }}</span></div>
+        <div class="lang-switch">
+            <label for="langSelect" data-i18n="lang.label">Language</label>
+            <select id="langSelect" aria-label="Language">
+                <option value="en" data-i18n="lang.en">English</option>
+                <option value="tr" data-i18n="lang.tr">Türkçe</option>
+            </select>
+        </div>
+        <div class="hero-badge"><span class="dot"></span><span data-i18n="hero.badge">SYSTEM ONLINE — SOLVER READY</span><span class="ver">v{{ app_version }}</span></div>
         <h1>HRM<span>A</span></h1>
-        <div class="tagline">High-Fidelity Rocket Motor Analysis &amp; Design Suite</div>
-        <div class="sub">Parametric Solvers &middot; NASA CEA Validated &middot; Digital Twin Visualization</div>
+        <div class="tagline" data-i18n="hero.tagline">High-Fidelity Rocket Motor Analysis &amp; Design Suite</div>
+        <div class="sub" data-i18n="hero.sub">Parametric Solvers &middot; NASA CEA Validated &middot; Digital Twin Visualization</div>
         <div class="cap-strip">
-            <span>Regression-coupled ballistics</span>
-            <span>Rao nozzle contours</span>
-            <span>3D combustion simulation</span>
-            <span>CAD / STL export</span>
+            <span data-i18n="cap.regression">Regression-coupled ballistics</span>
+            <span data-i18n="cap.nozzle">Rao nozzle contours</span>
+            <span data-i18n="cap.sim3d">3D combustion simulation</span>
+            <span data-i18n="cap.cad">CAD / STL export</span>
         </div>
     </div>
 
     <div class="container">
-        <div class="section-label">Select Propulsion Architecture</div>
+        <div class="section-label" data-i18n="section.select">Select Propulsion Architecture</div>
         <div class="motor-grid">
             <!-- Hybrid Motor Card -->
             <div class="motor-card hybrid" onclick="window.location.href='/hybrid'">
                 <div class="mc-head">
                     <div class="mc-icon">H</div>
                     <div class="mc-title">
-                        <h2>Hybrid Motors</h2>
-                        <div class="code">LIQUID OX / SOLID FUEL</div>
+                        <h2 data-i18n="card.hybrid.title">Hybrid Motors</h2>
+                        <div class="code" data-i18n="card.hybrid.code">LIQUID OX / SOLID FUEL</div>
                     </div>
                 </div>
-                <p>Design and analyze hybrid rocket motors with regression-rate coupled ballistics, injector optimization and live 3D burn simulation.</p>
+                <p data-i18n="card.hybrid.desc">Design and analyze hybrid rocket motors with regression-rate coupled ballistics, injector optimization and live 3D burn simulation.</p>
                 <ul class="motor-features">
-                    <li>HTPB, Paraffin, ABS fuels</li>
-                    <li>N2O, LOX, H2O2 oxidizers</li>
-                    <li>Injector design optimization</li>
-                    <li>Marxman regression analysis</li>
+                    <li data-i18n="card.hybrid.f1">HTPB, Paraffin, ABS fuels</li>
+                    <li data-i18n="card.hybrid.f2">N2O, LOX, H2O2 oxidizers</li>
+                    <li data-i18n="card.hybrid.f3">Injector design optimization</li>
+                    <li data-i18n="card.hybrid.f4">Marxman regression analysis</li>
                 </ul>
-                <a href="/hybrid" class="btn-enter">Launch Designer</a>
+                <a href="/hybrid" class="btn-enter" data-i18n="btn.launch">Launch Designer</a>
             </div>
 
             <!-- Solid Motor Card -->
@@ -321,18 +357,18 @@
                 <div class="mc-head">
                     <div class="mc-icon">S</div>
                     <div class="mc-title">
-                        <h2>Solid Motors</h2>
-                        <div class="code">SOLID PROPELLANT</div>
+                        <h2 data-i18n="card.solid.title">Solid Motors</h2>
+                        <div class="code" data-i18n="card.solid.code">SOLID PROPELLANT</div>
                     </div>
                 </div>
-                <p>Analyze solid propellant rocket motors with various grain geometries, burn-rate laws and thrust-curve prediction.</p>
+                <p data-i18n="card.solid.desc">Analyze solid propellant rocket motors with various grain geometries, burn-rate laws and thrust-curve prediction.</p>
                 <ul class="motor-features">
-                    <li>BATES, Star, Wagon wheel grains</li>
-                    <li>APCP, Black powder, Sugar</li>
-                    <li>Burn rate calculations</li>
-                    <li>Progressive / regressive thrust</li>
+                    <li data-i18n="card.solid.f1">BATES, Star, Wagon wheel grains</li>
+                    <li data-i18n="card.solid.f2">APCP, Black powder, Sugar</li>
+                    <li data-i18n="card.solid.f3">Burn rate calculations</li>
+                    <li data-i18n="card.solid.f4">Progressive / regressive thrust</li>
                 </ul>
-                <a href="/solid" class="btn-enter">Launch Designer</a>
+                <a href="/solid" class="btn-enter" data-i18n="btn.launch">Launch Designer</a>
             </div>
 
             <!-- Liquid Motor Card -->
@@ -340,29 +376,44 @@
                 <div class="mc-head">
                     <div class="mc-icon">L</div>
                     <div class="mc-title">
-                        <h2>Liquid Engines</h2>
-                        <div class="code">BIPROPELLANT</div>
+                        <h2 data-i18n="card.liquid.title">Liquid Engines</h2>
+                        <div class="code" data-i18n="card.liquid.code">BIPROPELLANT</div>
                     </div>
                 </div>
-                <p>Design liquid bipropellant rocket engines with advanced cooling, injection systems and feed-cycle sizing.</p>
+                <p data-i18n="card.liquid.desc">Design liquid bipropellant rocket engines with advanced cooling, injection systems and feed-cycle sizing.</p>
                 <ul class="motor-features">
-                    <li>LOX/RP-1, LOX/LH2, Hypergolics</li>
-                    <li>Regenerative cooling design</li>
-                    <li>Turbopump specifications</li>
-                    <li>Combustion instability analysis</li>
+                    <li data-i18n="card.liquid.f1">LOX/RP-1, LOX/LH2, Hypergolics</li>
+                    <li data-i18n="card.liquid.f2">Regenerative cooling design</li>
+                    <li data-i18n="card.liquid.f3">Turbopump specifications</li>
+                    <li data-i18n="card.liquid.f4">Combustion instability analysis</li>
                 </ul>
-                <a href="/liquid" class="btn-enter">Launch Designer</a>
+                <a href="/liquid" class="btn-enter" data-i18n="btn.launch">Launch Designer</a>
             </div>
         </div>
 
         <div class="aux-links">
-            <a class="aux-link" href="/formulas">Formula Reference</a>
+            <a class="aux-link" href="/formulas" data-i18n="link.formulas">Formula Reference</a>
         </div>
     </div>
 
     <div class="footer">
-        <p>HRMA v{{ app_version }} &nbsp;|&nbsp; Developed by: Berke Tezgöçen &nbsp;|&nbsp; Idea &amp; Testing: Ayberk Cem Aksoy &nbsp;|&nbsp; Professional Rocket Propulsion Design Tool</p>
+        <p>HRMA v{{ app_version }} &nbsp;|&nbsp; <span data-i18n="footer.developedBy">Developed by:</span> Berke Tezgöçen &nbsp;|&nbsp; <span data-i18n="footer.ideaTesting">Idea &amp; Testing:</span> Ayberk Cem Aksoy &nbsp;|&nbsp; <span data-i18n="footer.tool">Professional Rocket Propulsion Design Tool</span></p>
     </div>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/update_check.js"></script>
+    <script>
+        // Dil seçici: tercihi localStorage'a yazar, sayfayı anında çevirir.
+        // i18n.js yüklenemezse seçici sessizce devre dışı kalır (sayfa bozulmaz).
+        (function () {
+            var sel = document.getElementById('langSelect');
+            if (!sel || typeof window.I18N === 'undefined') return;
+            sel.value = window.I18N.lang;
+            window.I18N.apply();
+            sel.addEventListener('change', function () {
+                window.I18N.setLang(sel.value);
+                sel.value = window.I18N.lang;
+            });
+        })();
+    </script>
 </body>
 </html>

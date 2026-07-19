@@ -177,24 +177,59 @@ class NasaCeaAPI:
                 mass_fraction = percent / 100.0
                 component_data['mass_fraction'] = mass_fraction
                 validated_components.append(component_data)
-                
-                # Calculate mixture properties
-                total_mw += component_data['molecular_weight'] * mass_fraction
-                total_hf += component_data['heat_of_formation'] * mass_fraction
-            
+
+                # Karisim ortalamalari: yalnizca GERCEK veri varsa toplanir.
+                # Bir bilesen icin deger yoksa o karisim alani None doner
+                # (uydurma sayi uretilmez).
+                mw = component_data.get('molecular_weight')
+                hf = component_data.get('heat_of_formation')
+                if mw is None:
+                    total_mw = None
+                elif total_mw is not None:
+                    total_mw += mw * mass_fraction
+                if hf is None:
+                    total_hf = None
+                elif total_hf is not None:
+                    total_hf += hf * mass_fraction
+
             # Calculate mixture properties
             properties = self._calculate_mixture_properties(validated_components)
-            
+
+            # KAYNAK ATFI (v2.5.2 duzeltmesi): eski surum, degerlerin bir kismi
+            # formulden TAHMIN edilmis olsa bile tum yaniti "NASA CEA Database"
+            # diye etiketliyordu. Artik atif bilesen bazinda gercege dayanir.
+            from_db = [c['formula'] for c in validated_components
+                       if c.get('found_in_database')]
+            estimated = [c['formula'] for c in validated_components
+                         if not c.get('found_in_database')]
+            if estimated and from_db:
+                source = ('Mixed provenance: NASA CEA species table for '
+                          + ', '.join(from_db)
+                          + '; molecular weight derived from formula for '
+                          + ', '.join(estimated))
+            elif estimated:
+                source = ('Derived from chemical formula (molecular weight only); '
+                          'not present in the NASA CEA species table')
+            else:
+                source = 'NASA CEA species table'
+
             return {
                 'status': 'success',
                 'components': validated_components,
                 'mixture_properties': {
                     'molecular_weight': total_mw,
                     'heat_of_formation': total_hf,
+                    'heat_of_formation_note': (
+                        None if total_hf is not None else
+                        'Not available: heat of formation cannot be derived from '
+                        'a chemical formula. Add the species to the CEA table or '
+                        'supply a measured value.'),
                     'density': properties['density'],
-                    'specific_heat': properties['specific_heat']
+                    'density_method': properties['density_method'],
+                    'specific_heat': properties['specific_heat'],
+                    'specific_heat_method': properties['specific_heat_method'],
                 },
-                'source': 'NASA CEA Database'
+                'source': source
             }
             
         except Exception as e:
@@ -267,52 +302,86 @@ class NasaCeaAPI:
                 'error': f'Formula parsing failed: {str(e)}'
             }
     
+    # Atom agirliklari (IUPAC 2021). Molekul agirligi formulden GERCEKTEN
+    # turetilebilir; olusum entalpisi turetilemez (asagidaki nota bak).
+    ATOMIC_WEIGHTS = {
+        'H': 1.008, 'C': 12.011, 'N': 14.007, 'O': 15.999,
+        'F': 18.998, 'AL': 26.982, 'CL': 35.45, 'K': 39.098,
+    }
+
     def _estimate_properties(self, elements: Dict[str, int]) -> Dict:
-        """Estimate properties from elemental composition"""
-        
-        total_mw = 0
-        total_hf = 0
-        
+        """Formulden turetilebilen ozellikleri hesaplar.
+
+        DUZELTME (v2.5.2): Eski surum bilinmeyen bir bilesigin olusum
+        entalpisini SERBEST ATOMLARIN gaz-fazi olusum entalpilerini toplayarak
+        buluyordu (C: +716.68, H: +217.97 kJ/mol). Bu deger bilesigin DHf'i
+        degil, atomlarina ayrisma referansidir; kararli bir bilesik icin
+        buyuk POZITIF bir sayi verir, oysa gercek DHf genellikle negatiftir.
+        Ornek: C4H6O2 icin eski kod +4062 kJ/mol donuyordu, gercek deger
+        yaklasik -430 kJ/mol mertebesinde.
+
+        Olusum entalpisi formulden turetilemez (bag enerjileri ya da olcum
+        gerekir). Bu yuzden tabloda bulunmayan bilesikte hf artik None doner
+        ve cagiran taraf bunu 'veri yok' olarak gosterir. Molekul agirligi
+        ise atom agirliklarinin toplamidir, o hesaplanmaya devam eder.
+        """
+        total_mw = 0.0
+        unknown_elements = []
+
         for element, count in elements.items():
-            if element in self.cea_species:
-                element_data = self.cea_species[element]
-                total_mw += element_data['mw'] * count
-                total_hf += element_data['hf'] * count
-            else:
-                # Use average values for unknown elements
-                total_mw += 12.0 * count  # Average atomic weight
-                total_hf += 0.0 * count   # Assume zero heat of formation
-        
+            weight = self.ATOMIC_WEIGHTS.get(element)
+            if weight is None:
+                unknown_elements.append(element)
+                continue
+            total_mw += weight * count
+
         return {
-            'mw': total_mw,
-            'hf': total_hf
+            'mw': total_mw if not unknown_elements else None,
+            'hf': None,                      # formulden turetilemez
+            'hf_available': False,
+            'unknown_elements': unknown_elements,
         }
     
     def _calculate_mixture_properties(self, components: List[Dict]) -> Dict:
-        """Calculate mixture properties from components"""
-        
-        # Estimate density based on components
-        total_density = 0
-        total_cp = 0
-        
+        """Karisim ozelliklerini BILESEN VERISINDEN hesaplar.
+
+        DUZELTME (v2.5.2): Eski surum yogunlugu `900 + karbon_sayisi * 50`,
+        ozgul isiyi `1500 + molekul_agirligi * 10` diye UYDURUYORDU. Bunlar
+        fiziksel bir bagintiya dayanmiyordu; sonuc yine de "NASA CEA Database"
+        etiketiyle sunuluyordu.
+
+        Dogru yol: karisim yogunlugu bilesen yogunluklarindan ters kutle-kesri
+        kuraliyla (1/rho = toplam(w_i/rho_i)), ozgul isi kutle-agirlikli
+        ortalamayla bulunur. Bunun icin BILESEN yogunlugu ve cp'si gerekir;
+        kimyasal formul tek basina bunlari vermez. Bilesen verisi yoksa alan
+        None doner ve cagiran taraf 'veri yok' gosterir -- uydurma sayi
+        uretilmez.
+        """
+        inv_density_sum = 0.0
+        cp_sum = 0.0
+        density_known = True
+        cp_known = True
+
         for comp in components:
-            mass_frac = comp['mass_fraction']
-            
-            # Estimate density (simplified)
-            if 'C' in comp.get('elements', {}):
-                comp_density = 900 + comp.get('elements', {}).get('C', 1) * 50
+            mass_frac = comp.get('mass_fraction', 0.0)
+            rho = comp.get('density')          # kg/m3, bilesen verisinden
+            cp = comp.get('specific_heat')     # J/kg-K, bilesen verisinden
+
+            if rho and rho > 0:
+                inv_density_sum += mass_frac / float(rho)
             else:
-                comp_density = 800
-            
-            # Estimate specific heat
-            comp_cp = 1500 + comp['molecular_weight'] * 10
-            
-            total_density += comp_density * mass_frac
-            total_cp += comp_cp * mass_frac
-        
+                density_known = False
+
+            if cp and cp > 0:
+                cp_sum += mass_frac * float(cp)
+            else:
+                cp_known = False
+
         return {
-            'density': total_density,
-            'specific_heat': total_cp
+            'density': (1.0 / inv_density_sum) if (density_known and inv_density_sum > 0) else None,
+            'specific_heat': cp_sum if cp_known else None,
+            'density_method': 'inverse mass-fraction rule' if density_known else 'unavailable (component densities not in database)',
+            'specific_heat_method': 'mass-weighted average' if cp_known else 'unavailable (component specific heats not in database)',
         }
 
 class DatabaseManager:

@@ -46,10 +46,15 @@ class OptimumOFRatioFinder:
             ('n2o4', 'mmh'): 335, ('n2o4', 'udmh'): 330,
         }
     
-    def find_optimum_hybrid(self, oxidizer: str, fuel: str, 
+    def find_optimum_hybrid(self, oxidizer: str, fuel: str,
                            chamber_pressure: float = 20.0) -> Dict:
-        """Find optimum O/F ratio for hybrid motors"""
-        
+        """Find optimum O/F ratio for hybrid motors.
+
+        Raises:
+            ValueError: the propellant pair has no reference data (see
+                _calculate_isp_hybrid). No silent default is produced.
+        """
+
         # Try to get from theoretical database first
         key = (oxidizer.lower(), fuel.lower())
         theoretical = self.theoretical_optimums.get(key, None)
@@ -120,14 +125,27 @@ class OptimumOFRatioFinder:
             'chamber_pressure': chamber_pressure
         }
     
-    def _calculate_isp_hybrid(self, oxidizer: str, fuel: str, 
+    def _calculate_isp_hybrid(self, oxidizer: str, fuel: str,
                             of_ratio: float, chamber_pressure: float) -> float:
-        """Calculate ISP for hybrid motor at given O/F ratio"""
-        
+        """Calculate ISP for hybrid motor at given O/F ratio.
+
+        Raises:
+            ValueError: the propellant pair is not in the reference table.
+                DUZELTME (v2.5.2): eski kod tabloda olmayan cift icin sessizce
+                O/F=7.0 (N2O/HTPB degeri) ve 250 s tepe Isp varsayiyordu, yani
+                yakit/oksitleyici secilmeden de 'optimum' uretiyordu. Sessiz
+                varsayilan YASAK; cagiran taraf ya tam yanma analizini
+                calistirmali ya da secimi duzeltmelidir.
+        """
         # Çan eğrisi: tepe = literatür teorik vakum Isp, konum = teorik optimum
         key = (oxidizer.lower(), fuel.lower())
-        theoretical = self.theoretical_optimums.get(key, 7.0)
-        base_isp = self.peak_vac_isp.get(key, 250 if oxidizer.lower() == 'n2o' else 300)
+        theoretical = self.theoretical_optimums.get(key)
+        base_isp = self.peak_vac_isp.get(key)
+        if theoretical is None or base_isp is None:
+            # Kullaniciya gorunur metin -> Ingilizce.
+            raise ValueError(
+                f"No optimum O/F data for pair {oxidizer.upper()}+{fuel.upper()}; "
+                f"run full combustion analysis or verify propellant selection.")
         deviation = abs(of_ratio - theoretical) / theoretical
         efficiency = np.exp(-2 * deviation**2)
 
@@ -138,13 +156,17 @@ class OptimumOFRatioFinder:
         isp = base_isp * efficiency * pressure_factor
         return max(50.0, float(isp))
     
-    def _calculate_isp_liquid(self, oxidizer: str, fuel: str, 
+    def _calculate_isp_liquid(self, oxidizer: str, fuel: str,
                             of_ratio: float, chamber_pressure: float) -> float:
-        """Calculate ISP for liquid motor at given O/F ratio"""
-        
+        """Calculate ISP for liquid motor at given O/F ratio.
+
+        Raises:
+            ValueError: unknown fuel AND unknown propellant pair — same
+                no-silent-default rule as the hybrid branch (v2.5.2).
+        """
         key = (oxidizer.lower(), fuel.lower())
-        theoretical = self.theoretical_optimums.get(key, 3.0)
-        
+        theoretical = self.theoretical_optimums.get(key)
+
         # Special handling for hydrogen
         if fuel.lower() in ['lh2', 'hydrogen']:
             base_isp = 450
@@ -155,10 +177,15 @@ class OptimumOFRatioFinder:
         elif fuel.lower() in ['methane', 'ch4']:
             base_isp = 380
             optimal_of = 3.5
-        else:
+        elif theoretical is not None:
             base_isp = 320
             optimal_of = theoretical
-        
+        else:
+            # Kullaniciya gorunur metin -> Ingilizce.
+            raise ValueError(
+                f"No optimum O/F data for pair {oxidizer.upper()}+{fuel.upper()}; "
+                f"run full combustion analysis or verify propellant selection.")
+
         # Calculate efficiency based on deviation from optimum
         deviation = abs(of_ratio - optimal_of) / optimal_of
         efficiency = np.exp(-3 * deviation**2)  # Sharper curve for liquids

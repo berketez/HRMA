@@ -28,15 +28,19 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
     const ENDPOINT = '/api/correlation-report';
     const PANEL_ID = 'correlation';
 
+    // [katman, başlık anahtarı, başlık EN, not anahtarı, not EN]
     const LAYER_SECTIONS = [
-        ['low_confidence', 'Low-confidence records',
+        ['low_confidence', 'panel.correlation.layerLow', 'Low-confidence records',
+         'panel.correlation.layerLowNote',
          'Records whose provenance or digitization confidence is limited; '
          + 'scored separately so they cannot skew the headline statistics.'],
-        ['anomaly', 'Anomalous records',
+        ['anomaly', 'panel.correlation.layerAnomaly', 'Anomalous records',
+         'panel.correlation.layerAnomalyNote',
          'Records flagged as statistical outliers versus the model; '
          + 'kept visible for engineering review instead of being deleted.'],
     ];
@@ -63,18 +67,23 @@
     function customFormHtml() {
         return `<div id="corr_custom" style="margin:10px 0;">
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <button class="btn" type="button" id="corr_run">
-                    Run Correlation vs Experimental Database</button>
+                <button class="btn" type="button" id="corr_run"
+                    data-i18n="panel.correlation.btnRun">${T('panel.correlation.btnRun',
+                    'Run Correlation vs Experimental Database')}</button>
                 <button class="btn" type="button" id="corr_refresh" disabled
-                    title="Ignore the cached report and re-run every record">
-                    Refresh (re-run)</button>
+                    data-i18n-title="panel.correlation.refreshTip"
+                    title="${T('panel.correlation.refreshTip',
+                        'Ignore the cached report and re-run every record')}"
+                    data-i18n="panel.correlation.btnRefresh">${T('panel.correlation.btnRefresh',
+                    'Refresh (re-run)')}</button>
                 <span id="corr_cached_badge"></span>
             </div>
             <p style="font-family:var(--hd-mono, monospace); font-size:0.7rem;
-                color:var(--hd-ink-dim, #7d97a5); margin:6px 0 0;">
-                Compares HRMA predictions against the hand-verified
-                experimental record database. Results are cached by
-                database content hash; Refresh forces a full re-run.</p>
+                color:var(--hd-ink-dim, #7d97a5); margin:6px 0 0;"
+                data-i18n="panel.correlation.intro">${T('panel.correlation.intro',
+                'Compares HRMA predictions against the hand-verified experimental '
+                + 'record database. Results are cached by database content hash; '
+                + 'Refresh forces a full re-run.')}</p>
         </div>`;
     }
 
@@ -131,8 +140,8 @@
         root.style.display = 'none';
         status.style.color = 'var(--hd-ink-dim, #7d97a5)';
         status.textContent = refresh
-            ? 'RE-RUNNING FULL CORRELATION (cache ignored)…'
-            : 'RUNNING CORRELATION REPORT…';
+            ? T('panel.correlation.rerunning', 'RE-RUNNING FULL CORRELATION (cache ignored)…')
+            : T('panel.correlation.running', 'RUNNING CORRELATION REPORT…');
         if (badge) badge.innerHTML = '';
 
         try {
@@ -148,11 +157,14 @@
             }
             lastData = data;
             if (badge) {
-                badge.innerHTML = U.badge(data.cached ? 'CACHED' : 'FRESH RUN',
+                badge.innerHTML = U.badge(
+                    data.cached ? T('panel.correlation.cached', 'CACHED')
+                                : T('panel.correlation.freshRun', 'FRESH RUN'),
                     data.cached ? 'dim' : 'ok',
                     data.cached
-                        ? 'Served from cache keyed by database content hash'
-                        : 'Computed in this request');
+                        ? T('panel.correlation.cachedTip',
+                            'Served from cache keyed by database content hash')
+                        : T('panel.correlation.freshTip', 'Computed in this request'));
             }
             root.innerHTML = '';
             render(data, root);
@@ -160,7 +172,8 @@
             status.textContent = '';
         } catch (err) {
             status.style.color = 'var(--hd-red, #ff5d73)';
-            status.textContent = 'ERROR: ' + err.message;
+            status.textContent = U.tf('common.errorPrefix', { message: err.message },
+                                      'ERROR: {message}');
         } finally {
             runBtn.disabled = false;
             if (refreshBtn) refreshBtn.disabled = !lastData;
@@ -193,7 +206,7 @@
         const motorStyle = isPage
             ? 'color:var(--hd-cyan, #00e5ff); font-weight:bold;'
             : 'color:var(--hd-ink, #cfe8f2);';
-        const tip = 'Worst record: '
+        const tip = T('panel.correlation.worstRecord', 'Worst record') + ': '
             + escapeHtml(String(c.worst_test_id || 'n/a'))
             + (typeof c.mape_percent === 'number' && isFinite(c.mape_percent)
                 ? (' | MAPE ' + c.mape_percent.toFixed(1) + '%') : '');
@@ -211,22 +224,26 @@
         if (!cells.length) {
             return `<p style="font-family:var(--hd-mono, monospace);
                 font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5);">
-                No cells in this layer.</p>`;
+                ${T('panel.correlation.noCells', 'No cells in this layer.')}</p>`;
         }
         const TH = U.TD + ' color:var(--hd-ink-dim, #7d97a5);'
             + ' font-family:var(--hd-mono); font-size:0.7rem;'
             + ' text-transform:uppercase; letter-spacing:0.06em;';
         return `<table style="${U.TBL}">
             <thead><tr>
-                <th style="${TH} text-align:left;">Motor</th>
-                <th style="${TH} text-align:left;">Quantity</th>
+                <th style="${TH} text-align:left;">${T('panel.correlation.colMotor', 'Motor')}</th>
+                <th style="${TH} text-align:left;">${T('panel.correlation.colQuantity', 'Quantity')}</th>
                 <th style="${TH} text-align:right;">n</th>
                 <th style="${TH} text-align:right;"
-                    title="Signed mean percent error (model minus experiment)">Bias %</th>
+                    title="${T('panel.correlation.biasTip',
+                        'Signed mean percent error (model minus experiment)')}">${
+                    T('panel.correlation.colBias', 'Bias %')}</th>
                 <th style="${TH} text-align:right;"
-                    title="Root-mean-square percent error">RMS %</th>
+                    title="${T('panel.correlation.rmsTip', 'Root-mean-square percent error')}">${
+                    T('panel.correlation.colRms', 'RMS %')}</th>
                 <th style="${TH} text-align:right;"
-                    title="Median absolute percent error">Median APE %</th>
+                    title="${T('panel.correlation.apeTip', 'Median absolute percent error')}">${
+                    T('panel.correlation.colApe', 'Median APE %')}</th>
             </tr></thead>
             <tbody>${orderCells(cells).map(cellRowHtml).join('')}</tbody>
         </table>`;
@@ -240,7 +257,8 @@
                 ${escapeHtml(title)}
                 <span style="font-family:var(--hd-mono); font-size:0.7rem;
                     color:var(--hd-ink-dim, #7d97a5);">
-                    (${cells.length} cell${cells.length === 1 ? '' : 's'})</span>
+                    (${U.tf('panel.correlation.cellCount', { n: cells.length },
+                             '{n} cells')})</span>
             </summary>
             <p style="font-family:var(--hd-mono, monospace); font-size:0.7rem;
                 color:var(--hd-ink-dim, #7d97a5); margin:6px 0;">
@@ -252,23 +270,27 @@
     function summaryLineHtml(data) {
         const rc = data.record_counts || {};
         const parts = [
-            'total ' + (rc.total != null ? rc.total : '—'),
-            'scored ' + (rc.scored != null ? rc.scored : '—'),
-            'insufficient inputs ' + (rc.insufficient_inputs != null
-                ? rc.insufficient_inputs : '—'),
-            'not supported ' + (rc.not_supported != null ? rc.not_supported : '—'),
+            T('panel.correlation.cntTotal', 'total') + ' ' + (rc.total != null ? rc.total : '—'),
+            T('panel.correlation.cntScored', 'scored') + ' ' + (rc.scored != null ? rc.scored : '—'),
+            T('panel.correlation.cntInsufficient', 'insufficient inputs') + ' '
+                + (rc.insufficient_inputs != null ? rc.insufficient_inputs : '—'),
+            T('panel.correlation.cntUnsupported', 'not supported') + ' '
+                + (rc.not_supported != null ? rc.not_supported : '—'),
         ];
-        if (rc.runner_error) parts.push('runner errors ' + rc.runner_error);
+        if (rc.runner_error) {
+            parts.push(T('panel.correlation.cntRunnerError', 'runner errors') + ' '
+                + rc.runner_error);
+        }
         const hash = String(data.db_hash || '');
         const shortHash = hash ? hash.slice(0, 12) : '—';
         return `<div style="font-family:var(--hd-mono, monospace);
                 font-size:0.75rem; color:var(--hd-ink-dim, #7d97a5);
                 margin:8px 0;">
-            Records: ${escapeHtml(parts.join(' · '))}
+            ${T('panel.correlation.recordsLabel', 'Records')}: ${escapeHtml(parts.join(' · '))}
             &nbsp;|&nbsp; db
             <span title="${escapeHtml(hash)}"
                 style="color:var(--hd-cyan, #00e5ff);">${escapeHtml(shortHash)}</span>
-            &nbsp;|&nbsp; generated in
+            &nbsp;|&nbsp; ${T('panel.correlation.generatedIn', 'generated in')}
             ${(typeof data.generated_s === 'number' && isFinite(data.generated_s))
                 ? data.generated_s.toFixed(2) : '—'} s
         </div>`;
@@ -279,13 +301,15 @@
         const main = cells.filter(function (c) { return c.layer === 'main'; });
 
         const head = document.createElement('div');
-        head.innerHTML = U.sectionTitle('Correlation vs Experimental Database')
+        head.innerHTML = U.sectionTitle(T('panel.correlation.secMain',
+                'Correlation vs Experimental Database'))
             + summaryLineHtml(data)
-            + U.sectionTitle('Main layer — motor type x quantity')
+            + U.sectionTitle(T('panel.correlation.secLayer', 'Main layer — motor type x quantity'))
             + `<p style="font-family:var(--hd-mono, monospace); font-size:0.7rem;
-                color:var(--hd-ink-dim, #7d97a5); margin:2px 0 6px;">
-                Rows for this page's motor type are listed first. Hover a
-                row for the worst-scoring test id.</p>`
+                color:var(--hd-ink-dim, #7d97a5); margin:2px 0 6px;">${
+                T('panel.correlation.mainNote',
+                  "Rows for this page's motor type are listed first. Hover a row "
+                  + 'for the worst-scoring test id.')}</p>`
             + '<div style="overflow-x:auto;">' + cellTableHtml(main) + '</div>';
         root.appendChild(head);
 
@@ -295,7 +319,8 @@
             });
             if (!layerCells.length) return;
             const holder = document.createElement('div');
-            holder.innerHTML = collapsibleLayerHtml(sec[1], sec[2], layerCells);
+            holder.innerHTML = collapsibleLayerHtml(T(sec[1], sec[2]), T(sec[3], sec[4]),
+                                                    layerCells);
             root.appendChild(holder.firstElementChild);
         });
     }
@@ -306,6 +331,7 @@
     window.AnalysisDock.register({
         id: PANEL_ID,
         title: 'Experimental Correlation — Model vs Static-Fire Database',
+        titleKey: 'panel.correlation.title',
         category: 'CORRELATION',
         endpoint: ENDPOINT,
         motorTypes: ['hybrid', 'liquid', 'solid'],

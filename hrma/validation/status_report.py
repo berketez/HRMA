@@ -112,13 +112,13 @@ def generate_status_section(result: Dict[str, Any],
     counts = result["status_counts"]
     lines = [
         "*This block is auto-generated from the real-experiment correlation "
-        "run — do not edit it by hand. Regenerate with "
+        "run; do not edit it by hand. Regenerate with "
         "`python3 -m hrma.validation.status_report`.*",
         "",
         f"- Generated: {generated_on} (runner v{result['runner_version']}, "
         f"adapter v{result['adapter_version']})",
         f"- Experiment DB content hash: `{result['db_content_hash']}`",
-        f"- Records: {result['n_records']} total — "
+        f"- Records: {result['n_records']} total, "
         f"scored {counts.get('ok', 0)}, "
         f"insufficient inputs {counts.get('insufficient_inputs', 0)}, "
         f"not supported (v1) {counts.get('not_supported', 0)}, "

@@ -29,6 +29,7 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
     const ENDPOINT = '/api/validation/upload-csv';
     const PANEL_ID = 'validation';
@@ -49,19 +50,19 @@
             if (tr && tr.transient && Array.isArray(tr.transient.time)
                 && tr.transient.time.length > 3) {
                 return { time: tr.transient.time, thrust: tr.transient.thrust,
-                         source: 'transient analysis F(t)' };
+                         source: T('panel.validation.srcTransient', 'transient analysis F(t)') };
             }
         } catch (e) { /* transient paneli yoksa sıradaki kaynak */ }
         const m = window.currentResults && window.currentResults.motor;
         if (m && m.transient && Array.isArray(m.transient.time)
             && m.transient.time.length > 3) {
             return { time: m.transient.time, thrust: m.transient.thrust,
-                     source: 'stored transient F(t)' };
+                     source: T('panel.validation.srcStored', 'stored transient F(t)') };
         }
         if (m && Number.isFinite(m.thrust) && Number.isFinite(m.burn_time)
             && m.burn_time > 0) {
             return { time: [0, m.burn_time], thrust: [m.thrust, m.thrust],
-                     source: 'design point (constant thrust)' };
+                     source: T('panel.validation.srcDesign', 'design point (constant thrust)') };
         }
         return null;
     }
@@ -72,8 +73,8 @@
     function customFormHtml() {
         return `<div id="vp_custom" style="margin:10px 0;">
             <div class="form-group">
-                <label>Static-Fire CSV — paste text or choose a file
-                    (columns: time [s], thrust [N])</label>
+                <label data-i18n="panel.validation.csvLabel">${T('panel.validation.csvLabel',
+                    'Static-Fire CSV — paste text or choose a file (columns: time [s], thrust [N])')}</label>
                 <textarea id="vp_csv_text" rows="8" spellcheck="false"
                     placeholder="time,thrust&#10;0.0,0&#10;0.1,412.5&#10;0.2,896.0&#10;..."
                     style="width:100%; font-family:var(--hd-mono); font-size:0.78rem;
@@ -86,7 +87,9 @@
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;">
                 <input type="file" id="vp_csv_file" accept=".csv,.txt,text/csv,text/plain"
                     style="font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5);">
-                <button class="btn" type="button" id="vp_run">Compare With HRMA Prediction</button>
+                <button class="btn" type="button" id="vp_run"
+                    data-i18n="panel.validation.btnCompare">${T('panel.validation.btnCompare',
+                    'Compare With HRMA Prediction')}</button>
                 <span id="vp_pred_source" style="font-family:var(--hd-mono); font-size:0.72rem;
                     color:var(--hd-ink-dim, #7d97a5);"></span>
             </div>
@@ -98,8 +101,10 @@
         if (!el) return;
         const pred = predictedCurve();
         el.textContent = pred
-            ? ('Prediction source: ' + pred.source)
-            : 'No HRMA prediction yet — run a motor calculation first (parse-only mode).';
+            ? U.tf('panel.validation.predSource', { source: pred.source },
+                   'Prediction source: {source}')
+            : T('panel.validation.noPrediction',
+                'No HRMA prediction yet — run a motor calculation first (parse-only mode).');
     }
 
     function augmentSection() {
@@ -130,7 +135,8 @@
                 };
                 reader.onerror = function () {
                     const st = document.getElementById('ad_status_' + PANEL_ID);
-                    if (st) st.textContent = 'Could not read the selected file.';
+                    if (st) st.textContent = T('panel.validation.fileError',
+                        'Could not read the selected file.');
                 };
                 reader.readAsText(file);
             });
@@ -165,14 +171,15 @@
         const textEl = document.getElementById('vp_csv_text');
         const csv = textEl ? textEl.value : '';
         if (!csv.trim()) {
-            status.textContent = 'Paste CSV data or choose a file first.';
+            status.textContent = T('panel.validation.needCsv',
+                'Paste CSV data or choose a file first.');
             return;
         }
         refreshPredictionSourceLabel();
         const pred = predictedCurve();
         btn.disabled = true;
         root.style.display = 'none';
-        status.textContent = 'COMPARING…';
+        status.textContent = T('panel.validation.comparing', 'COMPARING…');
         try {
             const body = { csv_text: csv };
             if (pred) body.predicted_curve = { time: pred.time, thrust: pred.thrust };
@@ -191,7 +198,8 @@
                     render({ parsed: data.parsed, comparison: null,
                              _predicted: pred }, root);
                     root.style.display = 'block';
-                    status.textContent = 'COMPARISON ERROR: ' + data.error;
+                    status.textContent = U.tf('panel.validation.comparisonError',
+                        { message: data.error }, 'COMPARISON ERROR: {message}');
                     return;
                 }
                 throw new Error((data && data.error) || ('HTTP ' + resp.status));
@@ -202,7 +210,8 @@
             root.style.display = 'block';
             status.textContent = '';
         } catch (err) {
-            status.textContent = 'ERROR: ' + err.message;
+            status.textContent = U.tf('common.errorPrefix', { message: err.message },
+                                      'ERROR: {message}');
         } finally {
             btn.disabled = false;
         }
@@ -214,22 +223,23 @@
     function drawCurves(parsed, pred, comparison, root) {
         const wrap = document.createElement('div');
         wrap.style.marginTop = '14px';
-        wrap.innerHTML = U.sectionTitle('Thrust Curve — Your Test Data vs HRMA Prediction');
+        wrap.innerHTML = U.sectionTitle(T('panel.validation.chartTitle',
+            'Thrust Curve — Your Test Data vs HRMA Prediction'));
         const plot = document.createElement('div');
         wrap.appendChild(plot);
         root.appendChild(wrap);
         if (typeof Plotly === 'undefined') {
-            plot.textContent = 'Plotly is not loaded — chart skipped.';
+            plot.textContent = T('common.plotlyMissing', 'Plotly is not loaded — chart skipped.');
             return;
         }
         const traces = [{
             x: parsed.time, y: parsed.thrust, mode: 'lines',
-            name: 'Your test data [N]', line: { width: 2 },
+            name: T('panel.validation.sUser', 'Your test data [N]'), line: { width: 2 },
         }];
         if (pred) {
             traces.push({
                 x: pred.time, y: pred.thrust, mode: 'lines',
-                name: 'HRMA prediction [N]',
+                name: T('panel.validation.sPredicted', 'HRMA prediction [N]'),
                 line: { width: 2, dash: 'dash' },
             });
         }
@@ -243,8 +253,8 @@
             });
         }
         Plotly.newPlot(plot, traces, {
-            xaxis: { title: 'Time (s)' },
-            yaxis: { title: 'Thrust (N)' },
+            xaxis: { title: T('common.axis.timeS', 'Time (s)') },
+            yaxis: { title: T('common.axis.thrustN', 'Thrust (N)') },
             shapes: shapes,
             margin: { t: 24, r: 16 },
             height: 340,
@@ -260,34 +270,36 @@
             return 'err';
         }
         return '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
-            + U.statCard('TOTAL IMPULSE',
+            + U.statCard(T('panel.validation.cardTotalImpulse', 'TOTAL IMPULSE'),
                 U.fmt(metrics.total_impulse_user_ns, 1) + ' / '
                 + U.fmt(metrics.total_impulse_predicted_ns, 1), 'N·s',
                 diffKind(metrics.total_impulse_diff_pct),
-                'Measured / predicted — Sutton Eq. 2-1 (trapezoidal)')
-            + U.statCard('IMPULSE DIFF',
+                T('panel.validation.cardTotalImpulseTip',
+                  'Measured / predicted — Sutton Eq. 2-1 (trapezoidal)'))
+            + U.statCard(T('panel.validation.cardImpulseDiff', 'IMPULSE DIFF'),
                 (metrics.total_impulse_diff_pct >= 0 ? '+' : '')
                 + U.fmt(metrics.total_impulse_diff_pct, 1), '%',
                 diffKind(metrics.total_impulse_diff_pct), '')
-            + U.statCard('PEAK THRUST',
+            + U.statCard(T('panel.validation.cardPeakThrust', 'PEAK THRUST'),
                 U.fmt(metrics.peak_thrust_user_n, 0) + ' / '
                 + U.fmt(metrics.peak_thrust_predicted_n, 0), 'N',
-                diffKind(metrics.peak_thrust_diff_pct), 'Measured / predicted')
-            + U.statCard('MEAN THRUST',
+                diffKind(metrics.peak_thrust_diff_pct),
+                T('panel.validation.measuredPredicted', 'Measured / predicted'))
+            + U.statCard(T('panel.validation.cardMeanThrust', 'MEAN THRUST'),
                 U.fmt(metrics.mean_thrust_user_n, 0) + ' / '
                 + U.fmt(metrics.mean_thrust_predicted_n, 0), 'N',
                 diffKind(metrics.mean_thrust_diff_pct),
-                'F_avg = I_t / t_burn (NFPA 1125 convention)')
-            + U.statCard('BURN TIME',
+                T('panel.validation.cardMeanThrustTip', 'F_avg = I_t / t_burn (NFPA 1125 convention)'))
+            + U.statCard(T('panel.validation.cardBurnTime', 'BURN TIME'),
                 U.fmt(metrics.burn_time_user_s, 2) + ' / '
                 + U.fmt(metrics.burn_time_predicted_s, 2), 's',
                 diffKind(metrics.burn_time_diff_pct),
-                '5% of peak-thrust threshold (NFPA 1125)')
+                T('panel.validation.cardBurnTimeTip', '5% of peak-thrust threshold (NFPA 1125)'))
             + U.statCard('RMSE', U.fmt(metrics.rmse_n, 1), 'N', 'dim',
-                'Root-mean-square error over the common time window')
+                T('panel.validation.rmseTip', 'Root-mean-square error over the common time window'))
             + U.statCard('NRMSE', U.fmt(metrics.nrmse_pct, 1), '%',
                 diffKind(metrics.nrmse_pct),
-                'RMSE normalized by the predicted peak thrust')
+                T('panel.validation.nrmseTip', 'RMSE normalized by the predicted peak thrust'))
             + '</div>';
     }
 
@@ -297,25 +309,28 @@
         const pred = data && data._predicted;
 
         const head = document.createElement('div');
-        let html = U.sectionTitle('Parsed Test Data')
+        let html = U.sectionTitle(T('panel.validation.secParsed', 'Parsed Test Data'))
             + `<p style="font-family:var(--hd-mono); font-size:0.78rem;
-                color:var(--hd-ink-dim, #7d97a5); margin:4px 0;">
-                ${parsed.n_points || (parsed.time ? parsed.time.length : 0)}
-                data points parsed.</p>`;
+                color:var(--hd-ink-dim, #7d97a5); margin:4px 0;">${
+                U.tf('panel.validation.pointsParsed',
+                     { n: parsed.n_points || (parsed.time ? parsed.time.length : 0) },
+                     '{n} data points parsed.')}</p>`;
         if (comparison) {
             const kind = GRADE_KINDS[comparison.grade] || 'dim';
-            html += U.sectionTitle('Agreement With HRMA Prediction')
+            html += U.sectionTitle(T('panel.validation.secAgreement', 'Agreement With HRMA Prediction'))
                 + `<div style="margin:4px 0 8px;">${U.badge(
-                    String(comparison.grade || '?').toUpperCase() + ' AGREEMENT',
-                    kind, 'Score buckets: 5% / 10% / 20% (engineering judgment)')}</div>`
+                    String(comparison.grade || '?').toUpperCase() + ' '
+                        + T('panel.validation.agreementWord', 'AGREEMENT'),
+                    kind, T('panel.validation.gradeTip',
+                            'Score buckets: 5% / 10% / 20% (engineering judgment)'))}</div>`
                 + metricCards(comparison.metrics || {})
                 + `<p style="font-size:0.82rem; color:var(--hd-ink, #cfe8f2);
                     margin:10px 0;">${comparison.assessment || ''}</p>`;
         } else {
             html += `<p style="font-size:0.8rem; color:var(--hd-ink-dim, #7d97a5);
-                margin:8px 0;">Parse-only mode: run a motor calculation (or the
-                transient analysis) first, then compare again to get the
-                quantitative agreement metrics.</p>`;
+                margin:8px 0;">${T('panel.validation.parseOnly',
+                'Parse-only mode: run a motor calculation (or the transient analysis) '
+                + 'first, then compare again to get the quantitative agreement metrics.')}</p>`;
         }
         head.innerHTML = html;
         root.appendChild(head);
@@ -324,7 +339,8 @@
 
         if (Array.isArray(parsed.warnings) && parsed.warnings.length) {
             const div = document.createElement('div');
-            div.innerHTML = U.listBlock('CSV parser notes', parsed.warnings, 'warn');
+            div.innerHTML = U.listBlock(T('panel.validation.parserNotes', 'CSV parser notes'),
+                                        parsed.warnings, 'warn');
             root.appendChild(div);
         }
     }
@@ -335,6 +351,7 @@
     window.AnalysisDock.register({
         id: PANEL_ID,
         title: 'User Data Validation — Static-Fire CSV vs HRMA Prediction',
+        titleKey: 'panel.validation.title',
         category: 'VALIDATION',
         endpoint: ENDPOINT,
         motorTypes: ['hybrid', 'liquid', 'solid'],

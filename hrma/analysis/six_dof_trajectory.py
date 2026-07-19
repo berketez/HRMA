@@ -228,7 +228,7 @@ class SixDOFTrajectory:
                  x_cg_full=None, x_cg_empty=None,
                  cd0=0.5, wind_speed=0.0, wind_direction_deg=0.0,
                  launch_elevation_deg=90.0, launch_azimuth_deg=0.0,
-                 rail_length=5.0, roll_damping=0.05):
+                 rail_length=5.0, roll_damping=0.05, components=None):
         """
         Args:
             aero: BarrowmanAero örneği
@@ -242,6 +242,12 @@ class SixDOFTrajectory:
                         GELDİĞİ yön (meteoroloji konvansiyonu, kuzeyden)
             rail_length: atış rayı boyu [m] — ray üstünde tutum kilitli
             roll_damping: pasif roll sönüm katsayısı
+            components: opsiyonel bileşen listesi
+                        [{'mass': kg, 'x': m (burundan), 'propellant': bool}];
+                        verilirse pitch/yaw ataleti nokta-kütle toplamı +
+                        gövde ince-silindir düzeltmesiyle kurulur (bkz.
+                        _inertia). None → tekdüze narin-gövde modeli
+                        (geriye dönük birebir aynı sonuç).
         """
         self.aero = aero
         self.m_dry = float(dry_mass)
@@ -265,6 +271,9 @@ class SixDOFTrajectory:
             self._impulse = float(thrust) * float(burn_time)
 
         L = aero.L
+        # Verilen CG kullanılır (UI bileşen tablosu x_cg_full/x_cg_empty
+        # gönderir); yoksa/0 ise kaba L kesri tahminine düşülür — 0 m (burun
+        # ucu) fiziksel olarak anlamsız olduğundan eksik girdi sayılır.
         self.x_cg_full = float(x_cg_full) if x_cg_full else 0.55 * L
         self.x_cg_empty = float(x_cg_empty) if x_cg_empty else 0.50 * L
         self.cd0 = float(cd0)
@@ -275,6 +284,24 @@ class SixDOFTrajectory:
                                                launch_azimuth_deg)
         self.rail_length = float(rail_length)
         self.roll_damping = float(roll_damping)
+
+        # Opsiyonel bileşen listesi → pitch/yaw ataleti bileşen toplamından.
+        # Geçersiz/negatif kayıtlar sessizce elenir; liste boş kalırsa None
+        # (tekdüze model) kullanılır. Yakıt işaretli bileşenlerin kütlesi
+        # uçuş sırasında kalan yakıt oranıyla ölçeklenir.
+        self.components = None
+        if components:
+            comps = []
+            for c in components:
+                try:
+                    m_i = float(c.get('mass', 0.0))
+                    x_i = float(c.get('x', 0.0))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                if m_i > 0.0 and np.isfinite(m_i) and np.isfinite(x_i):
+                    comps.append((m_i, x_i, bool(c.get('propellant', False))))
+            if comps:
+                self.components = comps
 
     # ---- zamana bağlı büyüklükler ----
 
@@ -300,11 +327,36 @@ class SixDOFTrajectory:
         frac = (m - self.m_dry) / max(self.m_prop, 1e-9)
         return self.x_cg_empty + (self.x_cg_full - self.x_cg_empty) * frac
 
-    def _inertia(self, m):
-        """Narin gövde yaklaşımı: I_t = m(3r²+L²)/12, I_x = m·r²/2."""
+    def _inertia(self, m, x_cg=None):
+        """Pitch/yaw (I_t) ve roll (I_x) ataleti.
+
+        components verilmişse: I_t = Σ m_i·(x_i − x_cg)² nokta-kütle toplamı
+        + m·(3r²)/12 gövde ince-çubuk (narin silindir) radyal öz-terimi —
+        tekdüze modeldeki 3r² terimiyle aynı; ayrıca tüm bileşenler aynı
+        konumdaysa bile ataletin sıfıra çökmesini önler. Yakıt işaretli
+        bileşenlerin kütlesi kalan yakıt oranıyla ölçeklenir; konumları
+        sabittir (tank/port CG'si yaklaşık sabit varsayımı).
+
+        components yoksa tekdüze narin gövde yaklaşımı (DEĞİŞMEDİ):
+        I_t = m(3r²+L²)/12, I_x = m·r²/2.
+
+        Sınır (dürüst beyan): bileşenler nokta kütle sayılır; uzun bir
+        bileşenin kendi boyuna öz-ataleti (m·l²/12) hesaba katılmaz, bu da
+        I_t'yi bir miktar EKSİK tahmin eder. Roll ataleti her iki modelde de
+        tekdüze silindir kabulüdür (bileşenlerden etkilenmez).
+        """
         r = self.aero.d / 2.0
-        I_t = m * (3.0 * r * r + self.aero.L ** 2) / 12.0
         I_x = 0.5 * m * r * r
+        if self.components is None:
+            I_t = m * (3.0 * r * r + self.aero.L ** 2) / 12.0
+            return I_x, I_t
+        if x_cg is None:
+            x_cg = self.x_cg_full
+        frac = min(max((m - self.m_dry) / max(self.m_prop, 1e-9), 0.0), 1.0)
+        I_t = m * (3.0 * r * r) / 12.0
+        for m_i, x_i, is_prop in self.components:
+            m_eff = m_i * frac if is_prop else m_i
+            I_t += m_eff * (x_i - x_cg) ** 2
         return I_x, I_t
 
     # ---- dinamik ----
@@ -317,7 +369,8 @@ class SixDOFTrajectory:
         w_b = y[10:13]
 
         m = self._mass_at(t)
-        I_x, I_t = self._inertia(m)
+        x_cg = self._cg_at(t)
+        I_x, I_t = self._inertia(m, x_cg)
         C_bi = _quat_to_dcm(q)          # gövde→atalet
         x_body_i = C_bi[:, 0]           # gövde ekseninin atalet ifadesi
 
@@ -355,7 +408,6 @@ class SixDOFTrajectory:
             F_i += C_bi @ F_aero_b
 
             # --- momentler (CP−CG kolu; gövde ekseninde) ---
-            x_cg = self._cg_at(t)
             arm = self.aero.x_cp - x_cg          # +x burun yönünde ölçülür
             r_cp_b = np.array([-arm, 0.0, 0.0])  # CP, CG'nin arkasında ise −x
             M_b = np.cross(r_cp_b, F_n_b)

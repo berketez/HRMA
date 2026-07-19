@@ -34,6 +34,38 @@
     'use strict';
     if (typeof window === 'undefined') return;
 
+    // ------------------------------------------------------------------
+    // Sözlük güvencesi: i18n_common.js şablona eklenmemişse buradan
+    // yüklenir (i18n.js'in çok-parçalı sözlük sözleşmesi yükleme sırasından
+    // bağımsızdır). Şablon zaten yüklüyorsa ikinci kez eklenmez.
+    // ------------------------------------------------------------------
+    (function ensureCommonDictionary() {
+        if (!document || !document.head || !document.querySelector) return;
+        if (document.querySelector('script[src*="i18n_common.js"]')) return;
+        var tag = document.createElement('script');
+        tag.src = '/static/js/i18n_common.js';
+        tag.async = false;
+        document.head.appendChild(tag);
+    })();
+
+    // ------------------------------------------------------------------
+    // i18n köprüsü — i18n.js yüklenmemişse İngilizce yedek metin döner
+    // ------------------------------------------------------------------
+    function T(key, fallback) {
+        return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
+    }
+    function TF(key, params, fallback) {
+        if (window.I18N && window.I18N.tf) return window.I18N.tf(key, params, fallback);
+        return String(fallback || key).replace(/\{(\w+)\}/g, function (whole, name) {
+            return (params && name in params) ? String(params[name]) : whole;
+        });
+    }
+    // Çevrilebilir nitelik: anahtar varsa data-i18n basar (dil değişince
+    // I18N.apply() metni kendiliğinden tazeler).
+    function i18nAttr(key) {
+        return key ? ' data-i18n="' + key + '"' : '';
+    }
+
     // Başlangıç kategori seti — register bilinmeyen kategoriyle gelirse
     // sekme dinamik eklenir (ileride genişleme sözleşmesi).
     const BASE_CATEGORIES = ['THERMAL', 'STRUCTURAL', 'SAFETY'];
@@ -43,6 +75,7 @@
     let activeCategory = null;
     const registry = [];          // kayıt sırası korunur
     const registeredIds = {};
+    const lastData = {};          // panel id -> son başarılı yanıt (dil değişiminde yeniden çizilir)
 
     // ------------------------------------------------------------------
     // Ortak UI yardımcıları (paneller AnalysisDock.ui üzerinden kullanır)
@@ -129,17 +162,21 @@
         return 'ad_f_' + panelId + '_' + fieldId;
     }
 
+    // Alan tanımı: [id, etiket, varsayılan, adım, etiketAnahtarı?]
+    // 5. eleman verilirse etiket data-i18n taşır; dil değişince kendiliğinden çevrilir.
+    // Seçenek listesi öğeleri de [değer, etiket, etiketAnahtarı?] olabilir.
     function fieldHtml(panelId, f) {
-        const fid = f[0], label = f[1], defVal = f[2], step = f[3];
+        const fid = f[0], label = f[1], defVal = f[2], step = f[3], labelKey = f[4];
         const domId = fieldDomId(panelId, fid);
+        const lab = `<label${i18nAttr(labelKey)}>${T(labelKey, label)}</label>`;
         if (Array.isArray(step)) {
-            // step bir seçenek listesi: [[value, label], ...] → <select>
+            // step bir seçenek listesi: [[value, label, labelKey?], ...] → <select>
             const opts = step.map(o =>
-                `<option value="${o[0]}"${o[0] === defVal ? ' selected' : ''}>${o[1]}</option>`).join('');
-            return `<div class="form-group"><label>${label}</label>
+                `<option value="${o[0]}"${o[0] === defVal ? ' selected' : ''}${i18nAttr(o[2])}>${T(o[2], o[1])}</option>`).join('');
+            return `<div class="form-group">${lab}
                 <select id="${domId}" data-field="${fid}">${opts}</select></div>`;
         }
-        return `<div class="form-group"><label>${label}</label>
+        return `<div class="form-group">${lab}
             <input type="number" id="${domId}" data-field="${fid}" value="${defVal}" step="${step}"></div>`;
     }
 
@@ -149,7 +186,7 @@
         <div id="ad_sec_${spec.id}" style="border:1px solid var(--hd-line, rgba(0,229,255,0.14));
              border-radius:var(--hd-radius-sm, 8px); padding:12px 16px; margin:12px 0;">
             <h3 style="margin:0 0 8px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
-                ${spec.title}
+                <span${i18nAttr(spec.titleKey)}>${T(spec.titleKey, spec.title)}</span>
                 <span style="font-family:var(--hd-mono); font-size:0.68rem;
                       color:var(--hd-ink-faint, #46606d);">${spec.endpoint || ''}</span>
             </h3>
@@ -157,7 +194,8 @@
                  gap:10px; margin:10px 0;">
                 ${fieldsHtml}
                 <div class="form-group" style="align-self:end;">
-                    <button class="btn" type="button" id="ad_run_${spec.id}">Run Analysis</button>
+                    <button class="btn" type="button" id="ad_run_${spec.id}"
+                        data-i18n="common.runAnalysis">${T('common.runAnalysis', 'Run Analysis')}</button>
                 </div>
             </div>
             <div id="ad_status_${spec.id}" style="font-family:var(--hd-mono);
@@ -167,23 +205,26 @@
     }
 
     function tabButtonHtml(cat) {
+        const key = 'dock.cat.' + cat;
         return `<button type="button" class="ad-tab" data-category="${cat}"
             style="font-family:var(--hd-mono); font-size:0.78rem; letter-spacing:0.08em;
             padding:7px 16px; cursor:pointer; border-radius:6px 6px 0 0;
             border:1px solid var(--hd-line, rgba(0,229,255,0.14)); border-bottom:none;
-            background:transparent; color:var(--hd-ink-dim, #7d97a5);">${cat}</button>`;
+            background:transparent; color:var(--hd-ink-dim, #7d97a5);"
+            data-i18n="${key}">${T(key, cat)}</button>`;
     }
 
     function dockHtml() {
         return `
         <div class="panel" id="analysisDock" style="width:100%; grid-column: 1 / -1;">
-            <h2>&#9654; Analysis Dock</h2>
+            <h2>&#9654; <span data-i18n="dock.title">${T('dock.title', 'Analysis Dock')}</span></h2>
             <div class="chart-explanation">
-                <strong>What it does:</strong> Runs detailed engineering analyses
-                (thermal, structural, safety) on the current motor design.
-                Inputs are pre-filled from the latest calculation results —
-                you can override any value before running. The request is
-                always built from the form fields shown.
+                <strong data-i18n="common.whatItDoes">${T('common.whatItDoes', 'What it does:')}</strong>
+                <span data-i18n="dock.intro">${T('dock.intro',
+                    'Runs detailed engineering analyses (thermal, structural, safety) '
+                    + 'on the current motor design. Inputs are pre-filled from the latest '
+                    + 'calculation results — you can override any value before running. '
+                    + 'The request is always built from the form fields shown.')}</span>
             </div>
             <div id="ad_tabs" style="display:flex; gap:6px; margin:14px 0 0; flex-wrap:wrap;"></div>
             <div id="ad_panes" style="border-top:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));"></div>
@@ -209,9 +250,10 @@
         pane = document.createElement('div');
         pane.id = 'ad_pane_' + cat;
         pane.style.display = 'none';
-        pane.innerHTML = `<p class="ad-empty" style="color:var(--hd-ink-dim, #7d97a5);
-            font-family:var(--hd-mono); font-size:0.8rem; margin:12px 0;">
-            No analyses registered in this category yet.</p>`;
+        pane.innerHTML = `<p class="ad-empty" data-i18n="dock.empty"
+            style="color:var(--hd-ink-dim, #7d97a5);
+            font-family:var(--hd-mono); font-size:0.8rem; margin:12px 0;">${
+            T('dock.empty', 'No analyses registered in this category yet.')}</p>`;
         panes.appendChild(pane);
         return pane;
     }
@@ -296,7 +338,8 @@
         btn.disabled = true;
         root.style.display = 'none';
         status.textContent = spec.long
-            ? 'RUNNING — this analysis may take a while…' : 'RUNNING…';
+            ? T('common.runningLong', 'RUNNING — this analysis may take a while…')
+            : T('common.running', 'RUNNING…');
         try {
             const resp = await fetch(spec.endpoint, {
                 method: 'POST',
@@ -308,14 +351,34 @@
                 throw new Error(data.error || ('HTTP ' + resp.status));
             }
             root.innerHTML = '';
+            lastData[spec.id] = data;          // dil değişiminde yeniden çizmek için sakla
             spec.render(data, root);
+            if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
             root.style.display = 'block';
             status.textContent = '';
         } catch (err) {
-            status.textContent = 'ERROR: ' + err.message;
+            status.textContent = TF('common.errorPrefix', { message: err.message },
+                                    'ERROR: {message}');
         } finally {
             btn.disabled = false;
         }
+    }
+
+    // Dil değiştiğinde: sabit etiketleri I18N.apply() zaten çevirir, panel
+    // çıktısı ise saklanan yanıtla yeniden çizilir (yeni istek atılmaz).
+    function rerenderAll() {
+        registry.forEach(function (spec) {
+            const data = lastData[spec.id];
+            const root = document.getElementById('ad_root_' + spec.id);
+            if (!data || !root || root.style.display === 'none') return;
+            try {
+                root.innerHTML = '';
+                spec.render(data, root);
+                if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
+            } catch (e) {
+                if (window.console) console.warn('AnalysisDock rerender:', spec.id, e);
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -344,6 +407,7 @@
         });
         // İlk montajda sonuçtan önerileri doldur (varsa)
         applySuggestions(spec);
+        if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(sec);
     }
 
     // ------------------------------------------------------------------
@@ -386,6 +450,8 @@
         BASE_CATEGORIES.forEach(ensureCategory);
         registry.filter(panelApplies).forEach(mountPanel);
         selectCategory(activeCategory || BASE_CATEGORIES[0]);
+        if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(dock);
+        if (window.I18N && window.I18N.onChange) window.I18N.onChange(rerenderAll);
     }
 
     function getMotorType() {
@@ -406,6 +472,8 @@
         refreshSuggestions: refreshSuggestions,
         selectCategory: selectCategory,
         ui: {
+            t: T,
+            tf: TF,
             badge: badge,
             statCard: statCard,
             kvTable: kvTable,

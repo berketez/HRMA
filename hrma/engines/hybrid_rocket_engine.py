@@ -15,6 +15,23 @@ from hrma.constants import (G_0, LAMBDA_BELL, LAMBDA_PARABOLIC,
                             C_STAR_BAND_DEFAULT_MPS)
 import warnings
 
+# --- Kamara boyu bölümlendirme katsayıları (v2.5.2 L* modeli) ---
+# Ön-yanma odası boyu = PRE_CHAMBER_D_FACTOR · D_kamara (sabit oran).
+# Art-yanma odası boyu L* hacminden çözülür; aşağıdaki oranlarla
+# kelepçelenir (çok kısa = yanma tamamlanmaz, çok uzun = ölü ağırlık).
+# Kaynak: Sutton & Biblarz 9. baskı Böl. 8/16; Chiaverini & Kuo (2007).
+PRE_CHAMBER_D_FACTOR = 0.5
+POST_CHAMBER_D_FACTOR_MIN = 0.3
+POST_CHAMBER_D_FACTOR_MAX = 3.0
+
+# Port çapının kamara iç çapına oranı için üst sınır. Yakıt grain'i portu
+# SARDIĞINDAN port her zaman kamaradan küçüktür; kalan et kalınlığı
+# (D_ch − D_port)/2 yapısal ve yanma açısından gereklidir. Web tükenmesi bu
+# orana ulaşınca ilan edilir. TEK TANIM YERİ (CLAUDE.md kural 11): hem
+# time-marching sınırı hem de girdi doğrulaması bu sabiti kullanır.
+PORT_TO_CHAMBER_MAX_RATIO = 0.8
+
+
 class HybridRocketEngine:
     def __init__(self, thrust=None, burn_time=None, total_impulse=None, of_ratio=1.0, chamber_pressure=20.0, 
                  atmospheric_pressure=1.0, chamber_temperature=None,
@@ -26,7 +43,9 @@ class HybridRocketEngine:
                  fuel_type='htpb', motor_name='', motor_description='',
                  initial_gox=None, flux_mode='total', track_performance=True,
                  oxidizer_type='n2o', uq_mode=False, combustion_analyzer=None,
-                 eta_c_star=None, precomputed_optimum_of=None):
+                 eta_c_star=None, precomputed_optimum_of=None,
+                 injector_type='showerhead', initial_port_diameter=None,
+                 tank_temperature=None):
         
         # Handle thrust/burn_time vs total_impulse input
         if total_impulse is not None:
@@ -93,7 +112,25 @@ class HybridRocketEngine:
                 )
         else:
             self.G_ox_design = 350.0  # kg/m²·s — tipik tasarım orta noktası
-        
+
+        # --- v2.5.2 kullanıcı girdisi bağlantıları (UI sözleşmesi) ---
+        # Eskiden bu üç büyüklük hesap zincirinde SABİT gömülüydü: enjektör
+        # her zaman 'showerhead' tasarlanıyor, N2O tank sıcaklığı hep 293.15 K
+        # varsayılıyor ve başlangıç port çapı yalnızca G_ox tasarım akısından
+        # türetiliyordu. Kullanıcı arayüzde bunları değiştirse bile sonuç
+        # değişmiyordu (kullanıcı şikayeti).
+        self.injector_type = (injector_type or 'showerhead').lower()
+        # Başlangıç port çapı [m]: verilirse A_port doğrudan bundan gelir ve
+        # G_ox_design türetmesi devre dışı kalır (bkz. _design_fuel_grain).
+        if initial_port_diameter is not None and float(initial_port_diameter) > 0:
+            self.initial_port_diameter = float(initial_port_diameter)
+        else:
+            self.initial_port_diameter = None
+        # Oksitleyici tank sıcaklığı [K]: N2O doyma özellikleri (Dyer NHNE)
+        # buna bağlıdır. None ise enjektör modülü varsayılanı kullanılır.
+        self.tank_temperature = (float(tank_temperature)
+                                 if tank_temperature is not None else None)
+
         self.g0 = G_0  # m/s^2 (BIPM standart, hrma.constants)
 
         # --- UQ modu (v2.5.0, ARGE spec 2.3/6.2) ---
@@ -251,11 +288,73 @@ class HybridRocketEngine:
             self.D_ch = self.chamber_diameter_input
         else:
             self.D_ch = self.D_port_final * 1.5
-        # Kamara boyu: L* tabanlı kalış-süresi boyu ile grain boyunun büyüğü —
-        # kamara, yakıt üretim kapanışından çözülen grain'i fiziksel olarak
-        # içerebilmelidir (denetim bulgusu #6; grain boyu artık L* haznesinden
-        # türetilmiyor).
-        self.L = max(4 * self.V_c / (np.pi * self.D_ch**2), self.L_grain)
+        # v2.5.2 (Codex bulgusu hybrid:827) — SON kapı: grain portu sarmalı.
+        # Yüklenen yakıt kütlesi (π/4)·(D_ch² − D_port_ilk²)·L_grain ile
+        # hesaplandığından D_ch <= D_port_ilk durumunda NEGATİF kütle çıkar.
+        # Time-marching girişindeki doğrulama bunu zaten reddeder; burası
+        # kullanıcı kamara çapı vermeyip portun beklenmedik biçimde büyüdüğü
+        # yolları da kapatır. Sessiz kırpma YOK — açık hata.
+        if self.D_ch <= self.D_port_initial:
+            raise ValueError(
+                f"Chamber diameter {self.D_ch * 1000:.1f} mm is not larger "
+                f"than the initial port diameter "
+                f"{self.D_port_initial * 1000:.1f} mm; the fuel grain would "
+                f"have negative volume. Increase the chamber diameter or "
+                f"reduce the port diameter / oxidizer mass flux."
+            )
+        # --- Kamara boyu (v2.5.2 L* modeli) ---
+        # ESKİ MODEL: L = max(4·V_c/(π·D_ch²), L_grain). Hibritte grain boyu
+        # neredeyse her zaman baskın olduğundan max(...) daima L_grain'i
+        # seçiyor ve L* girdisi geometriyi HİÇ değiştirmiyordu (kullanıcı
+        # şikayeti: "L* geometriyi değiştirmiyor").
+        #
+        # YENİ MODEL — hibrit kamara üç bölümden oluşur:
+        #     L = L_grain + L_pre + L_post
+        #   L_pre  : ön-yanma odası (pre-combustion chamber). Enjektör
+        #            püskürtmesinin gelişmesi ve akışın düzelmesi için
+        #            standart mühendislik ölçüsü ~0.5·D_ch.
+        #   L_post : art-yanma odası (post-combustion chamber). Karışmamış
+        #            yakıt/oksitleyicinin yanmasını tamamlaması için gereken
+        #            EK hacimden gelir: L* karakteristik boyu toplam kamara
+        #            hacmini (V_c = L*·At) belirler; portun içerdiği hacim
+        #            düşülünce kalan hacim art-yanma odasına verilir.
+        # Böylece L* ARTTIKÇA kamara boyu ölçülebilir biçimde artar.
+        # Kaynak: Sutton & Biblarz 9. baskı Böl. 8/16; Chiaverini & Kuo,
+        # "Fundamentals of Hybrid Rocket Combustion and Propulsion" (2007),
+        # ön/art-yanma odası boyutlandırma pratiği.
+        A_ch = np.pi / 4.0 * self.D_ch ** 2
+        L_pre = PRE_CHAMBER_D_FACTOR * self.D_ch
+        D_port_avg = 0.5 * (self.D_port_initial + self.D_port_final)
+        V_port_avg = np.pi / 4.0 * D_port_avg ** 2 * self.L_grain
+        L_post_raw = (self.V_c - V_port_avg) / A_ch if A_ch > 0 else 0.0
+        L_post = float(np.clip(L_post_raw,
+                               POST_CHAMBER_D_FACTOR_MIN * self.D_ch,
+                               POST_CHAMBER_D_FACTOR_MAX * self.D_ch))
+        self.L_pre_chamber = L_pre
+        self.L_post_chamber = L_post
+        self.L = self.L_grain + L_pre + L_post
+
+        # GERÇEKLEŞEN L*: hibritte port hacmi tek başına büyük olduğundan
+        # istenen L* çoğu zaman geometrik alt sınırın ALTINDA kalır; bu
+        # durumda kamara küçültülemez ve gerçekleşen L* istenenden büyüktür.
+        # Sessiz kalmak yerine dürüstçe raporlanır (kullanıcı "L* hiçbir şeyi
+        # değiştirmiyor" derken tam olarak bu kelepçeyi görüyordu).
+        V_chamber_actual = V_port_avg + (L_pre + L_post) * A_ch
+        self.V_c_actual = V_chamber_actual
+        self.L_star_achieved = (V_chamber_actual / self.At
+                                if self.At > 0 else self.L_star)
+        # Not: bu durum hibritlerde KURALDIR (port hacmi büyüktür), bu yüzden
+        # her koşuda uyarı üretmek gürültü olur; bilgi sonuç sözlüğüne not
+        # olarak konur ve arayüz gösterir.
+        if self.L_star_achieved > self.L_star * 1.02:
+            self.l_star_note = (
+                f"Requested L* = {self.L_star:.2f} m is below the volume the "
+                f"grain port geometry already provides; achieved L* is "
+                f"{self.L_star_achieved:.2f} m. Increase L* above that value "
+                f"to lengthen the post-combustion chamber."
+            )
+        else:
+            self.l_star_note = ''
 
         # Calculate propellant masses
         self.m_ox = self.mdot_ox * self.t_b
@@ -666,11 +765,27 @@ class HybridRocketEngine:
         self._inj_velocity = injection_velocity  # m/s
         self._inj_rho_ox = rho_ox            # kg/m³
 
-        # --- Port boyutlandırma: tasarım akısından (bulgu #1 düzeltmesi) ---
+        # --- Port boyutlandırma ---
+        # Öncelik (v2.5.2): kullanıcı başlangıç port ÇAPINI verdiyse geometri
+        # doğrudan ondan gelir; G_ox tasarım akısı bu durumda SONUÇtur
+        # (G_ox = mdot_ox / A_port), girdi değil. Çap verilmediyse eski yol:
         # G_ox = mdot_ox / A_port  =>  A_port = mdot_ox / G_ox_design
-        G_ox_initial = self.G_ox_design  # kg/m²·s
-        A_port_initial = self.mdot_ox / G_ox_initial
-        self.D_port_initial = 2 * np.sqrt(A_port_initial / np.pi)
+        # (bulgu #1 düzeltmesi; G_ox_design varsayılanı 350 kg/m²·s).
+        if self.initial_port_diameter is not None:
+            self.D_port_initial = self.initial_port_diameter
+            A_port_initial = np.pi * (self.D_port_initial / 2.0) ** 2
+            G_ox_initial = self.mdot_ox / A_port_initial
+            self.G_ox_design = G_ox_initial
+            if G_ox_initial > 600:
+                warnings.warn(
+                    f"G_ox = {G_ox_initial:.0f} kg/m²·s flooding sınırına "
+                    "(~600-700 kg/m²·s) yakın/üstünde — başlangıç port çapını "
+                    "büyütün (Sutton & Biblarz 9. baskı, Böl. 16)"
+                )
+        else:
+            G_ox_initial = self.G_ox_design  # kg/m²·s
+            A_port_initial = self.mdot_ox / G_ox_initial
+            self.D_port_initial = 2 * np.sqrt(A_port_initial / np.pi)
 
         # --- Regresyon hızı: Marxman toplam-akı bağıntısı (denetim bulgusu) ---
         # r = a · G_total^n, G_total = G_ox + G_fuel (Marxman & Gilbert 1963;
@@ -723,14 +838,27 @@ class HybridRocketEngine:
         # çapı port sonundan türetildiği için (D_ch = 1.5·D_port_final,
         # yani D_port_final ≈ 0.67·D_ch < 0.8·D_ch) sınır kendiliğinden sağlanır.
         if self.chamber_diameter_input > 0:
-            max_port = 0.8 * self.chamber_diameter_input
+            max_port = PORT_TO_CHAMBER_MAX_RATIO * self.chamber_diameter_input
             if max_port <= self.D_port_initial:
-                warnings.warn(
-                    f"Kamara çapı ({self.chamber_diameter_input*1000:.1f} mm) başlangıç "
-                    f"portu ({self.D_port_initial*1000:.1f} mm) için çok küçük — "
-                    "port sınırı uygulanamıyor, kamara çapını büyütün"
+                # v2.5.2 DÜZELTMESİ (Codex bulgusu, hybrid:827): eski kod
+                # burada UYARIP sınırı sonsuza çekiyordu. Bu, imkansız
+                # geometriyi (port >= kamara) hesaba devam ettiriyordu:
+                # yüklenen yakıt kütlesi m_f_loaded = rho·(π/4)·(D_ch² −
+                # D_port_ilk²)·L_grain olduğundan D_port_ilk > D_ch iken
+                # NEGATİF kütle, negatif sliver ve anlamsız kamara hacmi
+                # üretiliyordu. Sessizce devam etmek yerine reddedilir;
+                # /calculate ve /api/quick-geometry bunu HTTP 400'e çevirir.
+                raise ValueError(
+                    f"Chamber diameter {self.chamber_diameter_input * 1000:.1f} mm "
+                    f"is too small for the initial port diameter "
+                    f"{self.D_port_initial * 1000:.1f} mm. The fuel grain must "
+                    f"surround the port, so the chamber diameter has to exceed "
+                    f"the port diameter divided by "
+                    f"{PORT_TO_CHAMBER_MAX_RATIO:g} "
+                    f"(minimum {self.D_port_initial / PORT_TO_CHAMBER_MAX_RATIO * 1000:.1f} mm). "
+                    f"Increase the chamber diameter or reduce the port "
+                    f"diameter / oxidizer mass flux."
                 )
-                max_port = np.inf
         else:
             max_port = np.inf
 
@@ -860,6 +988,13 @@ class HybridRocketEngine:
             'chamber_volume': self.V_c,
             'chamber_diameter': self.D_ch,
             'chamber_length': self.L,
+            # L* modeli (v2.5.2): kamara boyu = grain + ön-yanma + art-yanma.
+            'pre_chamber_length': getattr(self, 'L_pre_chamber', 0.0),
+            'post_chamber_length': getattr(self, 'L_post_chamber', 0.0),
+            'l_star': self.L_star,
+            'l_star_achieved': getattr(self, 'L_star_achieved', self.L_star),
+            'l_star_note': getattr(self, 'l_star_note', ''),
+            'chamber_volume_actual': getattr(self, 'V_c_actual', self.V_c),
             
             # Fuel grain
             'port_diameter_initial': self.D_port_initial,
@@ -1000,7 +1135,9 @@ class HybridRocketEngine:
             from hrma.engines.injector_design import design_injector
             inj_spec = {
                 'motor_type': 'hybrid',
-                'injector_type': 'showerhead',
+                # v2.5.2: kullanıcının seçtiği enjektör tipi (eskiden sabit
+                # 'showerhead' idi, seçim sonucu hiç etkilemiyordu)
+                'injector_type': self.injector_type,
                 'mdot_ox': self.mdot_ox,
                 'rho_ox': rho_ox,
                 'Pc_bar': self.P_c,
@@ -1008,10 +1145,12 @@ class HybridRocketEngine:
             }
             ox_name = (getattr(self, 'oxidizer_type', None) or 'n2o').lower()
             if ox_name == 'n2o':
-                # Tank sıcaklığı motor girdisi değil; doymuş depolama 293 K
-                # varsayımı (transient/blowdown varsayılanıyla aynı)
+                # Tank sıcaklığı v2.5.2'de motor girdisi; verilmezse doymuş
+                # depolama 293.15 K varsayımı (transient/blowdown ile aynı)
                 inj_spec['fluid_ox'] = 'n2o'
-                inj_spec['T_ox_K'] = 293.15
+                inj_spec['T_ox_K'] = (self.tank_temperature
+                                      if self.tank_temperature is not None
+                                      else 293.15)
             # Oda gazı yoğunluğu (SMD için): T_c ve MW = R_evrensel/R_spesifik
             if getattr(self, 'T_c', None) and getattr(self, 'R', None):
                 inj_spec['T_c_K'] = self.T_c
@@ -1044,7 +1183,7 @@ class HybridRocketEngine:
             d_orifice = np.sqrt(4 * A_single / np.pi)  # m
             manifold_d = self.D_port_initial * 2.0
             basic_results['injector_design'] = {
-                'injector_type': 'showerhead',
+                'injector_type': self.injector_type,
                 'oxidizer_flow_rate_kg_s': self.mdot_ox,
                 'injection_velocity_m_s': self._inj_velocity,
                 'number_of_orifices': n_orifices,
@@ -1090,7 +1229,8 @@ class HybridRocketEngine:
                 'convergent_length_mm': L_conv * 1000,
                 'divergent_length_mm': L_div * 1000,
             },
-            'recommendation': 'Bu parametrelerle en iyi tasarim budur. Nozzle acilari ve grain geometrisi optimize edilmistir.',
+            'recommendation': ('Optimised design for the given parameters. '
+                               'Nozzle angles and grain geometry are sized to the design point.'),
         }
 
         # Add advanced analysis results if available

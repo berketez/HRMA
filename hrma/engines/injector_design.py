@@ -53,6 +53,11 @@ MR_BAND = (0.7, 1.3)           # doublet momentum oranı / Rupe pratik bandı
 C_IMP_SMD = 2.6                # impinging SMD sabiti (band 2-4; Ingebo TN 3265 eğilimi)
 PINTLE_BF_BAND = (0.3, 0.74)   # TRW mirası (Dressler & Bauer AIAA 2000-3871)
 PINTLE_SKIP_LS_DP = 1.0        # skip distance kuralı L_s/D_p ≈ 1
+# Hibrit (tek akışkan, ox-merkezli) pintle: oksitleyici alanının radyal
+# deliklere giden payı; kalanı anülüsten eksenel tabaka olarak akar.
+# 0.5 → radyal/anüler momentum oranı 1 (aynı akışkan, aynı ΔP) → θ ≈ 60°.
+PINTLE_HYBRID_RADIAL_FRACTION = 0.5
+PINTLE_ANNULUS_T_OVER_DP = 0.05  # D_p verilmezse anülüs boşluk/çap kuralı
 ANNULUS_GAP_MIN_MM = 0.3       # imalat alt sınırı
 RHO_GAS_DEFAULT = 5.0          # kg/m³ — T_c/MW verilmezse varsayılan oda gazı
 ORIFICE_D_PREF_MM = (0.5, 2.5) # tercih edilen delik çapı bandı
@@ -523,11 +528,14 @@ def design_injector(spec):
             raise ValueError('Sıvı motorda mdot_fuel zorunludur (kg/s, > 0)')
     else:
         mdot_fuel = None
-        if inj_type in ('impinging_doublet', 'impinging_triplet', 'pintle',
-                        'coax_swirl'):
+        # Pintle hibritte MEŞRUDUR: oksitleyici-merkezli tek akışkan düzen
+        # (merkez pintle gövdesi + anülüs ox akışı). Yakıt grain'den geldiği
+        # için TMR/mdot_fuel gerekmez — BF, anülüs boşluğu ve skip distance
+        # yine raporlanır (Dressler & Bauer AIAA 2000-3871 geometri pratiği).
+        if inj_type in ('impinging_doublet', 'impinging_triplet', 'coax_swirl'):
             raise ValueError(
                 f"'{inj_type}' hibritte desteklenmez (tek akışkan): "
-                "showerhead, swirl veya like_impinging kullanın")
+                "showerhead, swirl, pintle veya like_impinging kullanın")
 
     warnings_tr, assumptions_tr = [], []
     constraints = dict(DEFAULT_CONSTRAINTS)
@@ -689,6 +697,71 @@ def design_injector(spec):
                     f"2θ={2*half:.0f}° — blowapart riski yok")
             assumptions_tr.append(
                 'Like-impinging: MR/Rupe unlike çarpışmaya özgüdür, raporlanmaz')
+
+    elif inj_type == 'pintle' and fuel is None:
+        # Hibrit (tek akışkan) pintle: yakıt grain'den geldiği için pintle
+        # YALNIZ oksitleyiciyi taşır. Oksitleyici alanı ikiye bölünür:
+        #   - radyal delikler (pintle ucunda, çevresel dizi) → BF
+        #   - anülüs (pintle gövdesi çevresinde eksenel tabaka)
+        # Sprey açısı, iki ox akımının momentum oranından (Cheng 2017
+        # bağıntısı) gelir; aynı akışkan + aynı ΔP olduğu için hız eşittir,
+        # dolayısıyla TMR = f/(1−f) (f = radyal pay).
+        pin = spec.get('pintle') or {}
+        bf_target = pin.get('bf_target', 0.58)
+        f_rad = float(pin.get('radial_fraction', PINTLE_HYBRID_RADIAL_FRACTION))
+        f_rad = float(np.clip(f_rad, 0.1, 0.9))
+
+        a_total = ox['total_area_mm2'] * 1e-6
+        a_rad = f_rad * a_total          # radyal delikler
+        a_ann = a_total - a_rad          # anülüs
+
+        d_p = pin.get('d_pintle_mm')
+        if d_p is None:
+            # Anülüs boşluğu t ≈ 0.05·D_p kuralıyla kendinden tutarlı D_p
+            d_p_m = np.sqrt(a_ann / (np.pi * PINTLE_ANNULUS_T_OVER_DP))
+        else:
+            d_p_m = d_p * 1e-3
+        # BF hedefi: n·d = BF·π·D_p ve n·(π/4)d² = A_rad → d, n çöz
+        d_hole = (4.0 * a_rad / np.pi) / max(bf_target * np.pi * d_p_m, 1e-9)
+        n_holes = max(4, int(round(bf_target * np.pi * d_p_m / max(d_hole, 1e-9))))
+        d_hole = np.sqrt(4.0 * a_rad / (np.pi * n_holes))
+        bf = n_holes * d_hole / (np.pi * d_p_m)
+        t_ann = (np.sqrt(d_p_m ** 2 + 4.0 * a_ann / np.pi) - d_p_m) / 2.0
+        if t_ann * 1e3 < ANNULUS_GAP_MIN_MM:
+            warnings_tr.append(
+                f"Pintle anülüs boşluğu {t_ann*1e3:.2f} mm < "
+                f"{ANNULUS_GAP_MIN_MM} mm imalat sınırı")
+        tmr = f_rad / max(1.0 - f_rad, 1e-9)
+        theta = pintle_spray_angle(tmr)
+        momentum = {'momentum_ratio': None, 'rupe_factor': None,
+                    'tmr': float(tmr), 'target': pin.get('tmr_target', 1.0),
+                    'ok': bool(0.5 <= tmr <= 2.0)}
+        pintle_geometry = {
+            'd_pintle_mm': float(d_p_m * 1e3),
+            'skip_distance_mm': float(PINTLE_SKIP_LS_DP * d_p_m * 1e3),
+            'ls_over_dp': float(PINTLE_SKIP_LS_DP),
+            'bf': float(bf),
+            'annulus_gap_mm': float(t_ann * 1e3),
+            'n_radial_holes': int(n_holes),
+            'radial_hole_d_mm': float(d_hole * 1e3),
+            'radial_flow_fraction': f_rad,
+            'single_fluid': True,
+        }
+        if not (PINTLE_BF_BAND[0] <= bf <= PINTLE_BF_BAND[1]):
+            warnings_tr.append(
+                f"Pintle BF={bf:.2f} TRW bandının ({PINTLE_BF_BAND[0]}-"
+                f"{PINTLE_BF_BAND[1]}) dışında")
+        assumptions_tr.append(
+            f"Hibrit pintle tek akışkanlıdır: oksitleyici alanının %{f_rad*100:.0f}"
+            "'i radyal deliklere, kalanı anülüse ayrıldı; sprey açısı bu iki "
+            "ox akımının momentum oranından türetildi (yakıt grain'den gelir).")
+        smd_ox = smd_impinging(d_hole, v_ox, rho_ox_l, sigma_ox)
+        correlation = 'impinging-We13'
+        spray_half = theta
+        n_elements = 1
+        desc = (f"Oksitleyici merkezli hibrit pintle: D_p={d_p_m*1e3:.1f} mm, "
+                f"{n_holes}×{d_hole*1e3:.2f} mm radyal delik, anülüs "
+                f"{t_ann*1e3:.2f} mm, TMR={tmr:.2f} → θ={theta:.0f}°")
 
     elif inj_type == 'pintle':
         # Yakıt merkezli TRW/Merlin düzeni: radyal iç jetler = yakıt,

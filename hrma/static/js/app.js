@@ -1,5 +1,16 @@
 // JavaScript for HRMA Rocket Motor Analysis Tool
 
+// i18n köprüsü — i18n.js yüklenmemişse İngilizce yedek metin döner.
+function T(key, fallback) {
+    return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
+}
+function TF(key, params, fallback) {
+    if (window.I18N && window.I18N.tf) return window.I18N.tf(key, params, fallback);
+    return String(fallback).replace(/\{(\w+)\}/g, function (whole, name) {
+        return (params && name in params) ? String(params[name]) : whole;
+    });
+}
+
 // currentResults is defined in advanced.html to avoid conflicts
 
 // Update injector parameters based on selected type
@@ -19,23 +30,23 @@ function updateInjectorParams() {
         html = `
             <div id="showerhead_params">
                 <div class="mb-3">
-                    <label class="form-label">Target Velocity (m/s)</label>
+                    <label class="form-label" data-i18n="app.inj.targetVelocity">${T('app.inj.targetVelocity', 'Target Velocity (m/s)')}</label>
                     <input type="number" class="form-control" id="target_velocity" value="30" step="1">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Number of Holes (0 for auto)</label>
+                    <label class="form-label" data-i18n="app.inj.nHolesAuto">${T('app.inj.nHolesAuto', 'Number of Holes (0 for auto)')}</label>
                     <input type="number" class="form-control" id="n_holes" value="0" step="1">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Min Hole Diameter (mm)</label>
+                    <label class="form-label" data-i18n="app.inj.holeDiaMin">${T('app.inj.holeDiaMin', 'Min Hole Diameter (mm)')}</label>
                     <input type="number" class="form-control" id="hole_diameter_min" value="0.3" step="0.1">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Max Hole Diameter (mm)</label>
+                    <label class="form-label" data-i18n="app.inj.holeDiaMax">${T('app.inj.holeDiaMax', 'Max Hole Diameter (mm)')}</label>
                     <input type="number" class="form-control" id="hole_diameter_max" value="2.0" step="0.1">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Plate Thickness (mm)</label>
+                    <label class="form-label" data-i18n="app.inj.plateThickness">${T('app.inj.plateThickness', 'Plate Thickness (mm)')}</label>
                     <input type="number" class="form-control" id="plate_thickness" value="3.0" step="0.1">
                 </div>
             </div>
@@ -44,11 +55,11 @@ function updateInjectorParams() {
         html = `
             <div id="pintle_params">
                 <div class="mb-3">
-                    <label class="form-label">Outer Diameter (mm)</label>
+                    <label class="form-label" data-i18n="app.inj.outerDiameter">${T('app.inj.outerDiameter', 'Outer Diameter (mm)')}</label>
                     <input type="number" class="form-control" id="outer_diameter" value="50" step="1">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Pintle Diameter (mm)</label>
+                    <label class="form-label" data-i18n="app.inj.pintleDiameter">${T('app.inj.pintleDiameter', 'Pintle Diameter (mm)')}</label>
                     <input type="number" class="form-control" id="pintle_diameter" value="25" step="1">
                 </div>
             </div>
@@ -57,15 +68,15 @@ function updateInjectorParams() {
         html = `
             <div id="swirl_params">
                 <div class="mb-3">
-                    <label class="form-label">Number of Slots</label>
+                    <label class="form-label" data-i18n="app.inj.nSlots">${T('app.inj.nSlots', 'Number of Slots')}</label>
                     <input type="number" class="form-control" id="n_slots" value="6" step="1">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Slot Width (mm, 0 for auto)</label>
+                    <label class="form-label" data-i18n="app.inj.slotWidthAuto">${T('app.inj.slotWidthAuto', 'Slot Width (mm, 0 for auto)')}</label>
                     <input type="number" class="form-control" id="slot_width" value="0" step="0.1">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Slot Height (mm, 0 for auto)</label>
+                    <label class="form-label" data-i18n="app.inj.slotHeightAuto">${T('app.inj.slotHeightAuto', 'Slot Height (mm, 0 for auto)')}</label>
                     <input type="number" class="form-control" id="slot_height" value="0" step="0.1">
                 </div>
             </div>
@@ -73,7 +84,13 @@ function updateInjectorParams() {
     }
     
     paramsDiv.innerHTML = html;
+    if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(paramsDiv);
 }
+
+// Birim dönüşüm katsayıları — TEK KAYNAK. Arayüz mühendislik birimlerinde
+// (mm, mm²) girdi alır, backend SI (m, m²) bekler; dönüşüm burada tanımlıdır.
+const MM_PER_M = 1000;
+const MM2_PER_M2 = MM_PER_M * MM_PER_M;
 
 // Safe parseFloat with fallback - only for NaN/invalid values
 function safeParseFloat(value, fallback = 0) {
@@ -144,13 +161,16 @@ function getFormData() {
         data.hole_diameter_min = document.getElementById('hole_diameter_min') ? safeParseFloat(document.getElementById('hole_diameter_min').value, 0.3) : 0.3;
         data.hole_diameter_max = document.getElementById('hole_diameter_max') ? safeParseFloat(document.getElementById('hole_diameter_max').value, 2.0) : 2.0;
         data.plate_thickness = document.getElementById('plate_thickness') ? safeParseFloat(document.getElementById('plate_thickness').value, 3.0) : 3.0;
-    } else if (injectorType.value === 'pintle') {
-        data.outer_diameter = safeParseFloat(document.getElementById('outer_diameter').value, 50);
-        data.pintle_diameter = safeParseFloat(document.getElementById('pintle_diameter').value, 25);
-    } else if (injectorType.value === 'swirl') {
-        data.n_slots = parseInt(document.getElementById('n_slots').value || 6);
-        data.slot_width = safeParseFloat(document.getElementById('slot_width').value, 0);
-        data.slot_height = safeParseFloat(document.getElementById('slot_height').value, 0);
+    } else if (injectorType === 'pintle') {
+        // injectorType ZATEN string; eski kod injectorType.value okuyordu →
+        // undefined === 'pintle' hiç tutmuyor, pintle/swirl alanları hiç
+        // gönderilmiyordu. Alanlar sayfada yoksa mm cinsinden varsayılan.
+        data.outer_diameter = safeParseFloat(document.getElementById('outer_diameter')?.value, 50);
+        data.pintle_diameter = safeParseFloat(document.getElementById('pintle_diameter')?.value, 25);
+    } else if (injectorType === 'swirl') {
+        data.n_slots = parseInt(document.getElementById('n_slots')?.value || 6);
+        data.slot_width = safeParseFloat(document.getElementById('slot_width')?.value, 0);
+        data.slot_height = safeParseFloat(document.getElementById('slot_height')?.value, 0);
     }
     
     return data;
@@ -239,37 +259,51 @@ function validateInputs(data) {
     // Check for NaN values
     Object.keys(data).forEach(key => {
         if (typeof data[key] === 'number' && (isNaN(data[key]) || !isFinite(data[key]))) {
-            errors.push(`${key.replace('_', ' ')} has invalid value (${data[key]})`);
+            errors.push(TF('app.val.invalidValue',
+                { field: key.replace('_', ' '), value: data[key] },
+                '{field} has invalid value ({value})'));
         }
     });
     
-    if (data.thrust <= 0) errors.push('Thrust must be positive');
-    if (data.burn_time <= 0) errors.push('Burn time must be positive');
-    if (data.of_ratio <= 0) errors.push('O/F ratio must be positive');
-    if (data.chamber_pressure <= 0) errors.push('Chamber pressure must be positive');
+    if (data.thrust <= 0) errors.push(T('app.val.thrustPositive', 'Thrust must be positive'));
+    if (data.burn_time <= 0) errors.push(T('app.val.burnPositive', 'Burn time must be positive'));
+    if (data.of_ratio <= 0) errors.push(T('app.val.ofPositive', 'O/F ratio must be positive'));
+    if (data.chamber_pressure <= 0) {
+        errors.push(T('app.val.pcPositive', 'Chamber pressure must be positive'));
+    }
     
     // Detailed tank pressure validation
     if (data.tank_pressure <= 0) {
-        errors.push('Tank pressure must be positive');
+        errors.push(T('app.val.tankPositive', 'Tank pressure must be positive'));
     } else if (data.tank_pressure <= data.chamber_pressure) {
         const minRequired = data.chamber_pressure * 1.2; // Minimum 20% higher
-        errors.push(`Tank pressure (${data.tank_pressure} bar) must be higher than chamber pressure (${data.chamber_pressure} bar). Minimum required: ${minRequired.toFixed(1)} bar`);
+        errors.push(TF('app.val.tankTooLow',
+            { tank: data.tank_pressure, pc: data.chamber_pressure, min: minRequired.toFixed(1) },
+            'Tank pressure ({tank} bar) must be higher than chamber pressure ({pc} bar). '
+            + 'Minimum required: {min} bar'));
     } else if (data.tank_pressure < data.chamber_pressure * 1.2) {
         const minRecommended = data.chamber_pressure * 1.2;
-        errors.push(`Warning: Tank pressure (${data.tank_pressure} bar) should be at least 20% higher than chamber pressure. Recommended minimum: ${minRecommended.toFixed(1)} bar`);
+        errors.push(TF('app.val.tankMargin',
+            { tank: data.tank_pressure, min: minRecommended.toFixed(1) },
+            'Warning: Tank pressure ({tank} bar) should be at least 20% higher than '
+            + 'chamber pressure. Recommended minimum: {min} bar'));
     }
     
     // Additional range checks
-    if (data.of_ratio > 20) errors.push('O/F ratio too high (max 20)');
-    if (data.chamber_pressure > 200) errors.push('Chamber pressure too high (max 200 bar)');
-    if (data.burn_time > 300) errors.push('Burn time too long (max 300 seconds)');
+    if (data.of_ratio > 20) errors.push(T('app.val.ofTooHigh', 'O/F ratio too high (max 20)'));
+    if (data.chamber_pressure > 200) {
+        errors.push(T('app.val.pcTooHigh', 'Chamber pressure too high (max 200 bar)'));
+    }
+    if (data.burn_time > 300) {
+        errors.push(T('app.val.burnTooLong', 'Burn time too long (max 300 seconds)'));
+    }
     
     // Chamber diameter check
     if (data.chamber_diameter_input > 0 && data.chamber_diameter_input < 10) {
-        errors.push('Chamber diameter too small (min 10mm)');
+        errors.push(T('app.val.dcTooSmall', 'Chamber diameter too small (min 10mm)'));
     }
     if (data.chamber_diameter_input > 1000) {
-        errors.push('Chamber diameter too large (max 1000mm)');
+        errors.push(T('app.val.dcTooLarge', 'Chamber diameter too large (max 1000mm)'));
     }
     
     // Finite area combustion validation
@@ -278,14 +312,19 @@ function validateInputs(data) {
         const hasMassFlux = data.mass_flux_chamber && data.mass_flux_chamber > 0;
         
         if (hasContractionRatio && hasMassFlux) {
-            errors.push('For finite area combustion, fill only ONE parameter: either contraction ratio OR mass flux chamber (not both)');
+            errors.push(T('app.val.finiteBoth',
+                'For finite area combustion, fill only ONE parameter: either contraction '
+                + 'ratio OR mass flux chamber (not both)'));
         } else if (!hasContractionRatio && !hasMassFlux) {
-            errors.push('For finite area combustion, you must fill either contraction ratio OR mass flux chamber');
+            errors.push(T('app.val.finiteNone',
+                'For finite area combustion, you must fill either contraction ratio '
+                + 'OR mass flux chamber'));
         }
     }
     
     if (errors.length > 0) {
-        showError('Input validation failed:\n• ' + errors.join('\n• '));
+        showError(T('app.val.failed', 'Input validation failed:') + '\n• '
+            + errors.join('\n• '));
         return false;
     }
     
@@ -382,10 +421,10 @@ function displayPerformanceMetrics(motorData) {
 
     // Metrik listesi — tüm değerler backend sonucundan; süs/sahte veri yok.
     const metrics = [
-        { label: 'Specific Impulse', value: motorData.isp, decimals: 1, unit: 's' },
-        { label: 'Thrust', value: motorData.thrust, decimals: 0, unit: 'N' },
-        { label: 'Chamber Pressure', value: motorData.chamber_pressure, decimals: 1, unit: 'bar' },
-        { label: 'Mass Flow Rate', value: motorData.mdot_total, decimals: 3, unit: 'kg/s' }
+        { label: T('app.metric.isp', 'Specific Impulse'), value: motorData.isp, decimals: 1, unit: 's' },
+        { label: T('app.metric.thrust', 'Thrust'), value: motorData.thrust, decimals: 0, unit: 'N' },
+        { label: T('app.metric.pc', 'Chamber Pressure'), value: motorData.chamber_pressure, decimals: 1, unit: 'bar' },
+        { label: T('app.metric.mdot', 'Mass Flow Rate'), value: motorData.mdot_total, decimals: 3, unit: 'kg/s' }
     ];
 
     // Yapısal durum backend'den geldiyse beşinci kart: minimum SF.
@@ -396,7 +435,7 @@ function displayPerformanceMetrics(motorData) {
     if (structSafety && typeof structSafety.minimum_safety_factor === 'number'
         && isFinite(structSafety.minimum_safety_factor)) {
         metrics.push({
-            label: 'Structural Min SF',
+            label: T('app.metric.minSf', 'Structural Min SF'),
             value: structSafety.minimum_safety_factor,
             decimals: 2,
             unit: '',
@@ -444,60 +483,104 @@ function displayPerformanceMetrics(motorData) {
     HRMAHud.initAll(metricsDiv);
 }
 
+// Plotly grafiğini güvenle çizer (JSON parse + responsive layout ayarı).
+// displayPlots içinden ÇIKARILDI: opsiyonel panel yardımcısı da kullanıyor.
+function safePlotCreate(elementId, plotData) {
+    const element = document.getElementById(elementId);
+    if (element && plotData) {
+        try {
+            const parsedData = JSON.parse(plotData);
+
+            // Enhanced config for better responsive behavior
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+                toImageButtonOptions: {
+                    format: 'png',
+                    filename: elementId,
+                    height: 500,
+                    width: 700,
+                    scale: 1
+                }
+            };
+            
+            // Update layout for better responsiveness
+            if (parsedData.layout) {
+                parsedData.layout.autosize = true;
+                if (!parsedData.layout.margin) {
+                    parsedData.layout.margin = { l: 60, r: 30, t: 60, b: 60 };
+                }
+                // Yükseklik: layout'taki değeri konteynere sabitle ki panel
+                // içeriğe göre büyüsün (SVG taşması / panel çakışması önlenir).
+                // layout.height SİLİNMEZ: autosize gizli/animasyonlu konteyneri
+                // ~140px ölçüp iç çizim alanını 2px'e eziyordu (motor_plot bugı).
+                // Genişlik responsive kalır (width=undefined), yükseklik sabit.
+                if (parsedData.layout.height) {
+                    element.style.height = parsedData.layout.height + 'px';
+                }
+                parsedData.layout.width = undefined;
+            }
+            
+            Plotly.newPlot(elementId, parsedData.data, parsedData.layout, config);
+            // Yeniden boyutlandırmayı config.responsive üstlenir; her
+            // çağrıda window listener eklemek sızıntıya yol açıyordu
+
+        } catch (e) {
+            console.warn(`Failed to create plot for ${elementId}:`, e);
+            element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Plot data unavailable</div>';
+        }
+    } else if (element) {
+        element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No data available</div>';
+    }
+}
+
+// Opsiyonel grafik yükü BOŞ mu? Backend bu grafikleri her hesapta üretmez
+// (irtifa/kütle kesirleri/yanma verisi olmayabilir). Boş sayılan durumlar:
+// null/undefined, boş string, 'null', {error: ...}, veri dizisi boş figür.
+function isPlotPayloadEmpty(plotData) {
+    if (plotData === null || plotData === undefined) return true;
+
+    if (typeof plotData === 'object') {
+        if (plotData.error) return true;
+        return !Array.isArray(plotData.data) || plotData.data.length === 0;
+    }
+
+    if (typeof plotData !== 'string') return true;
+
+    const text = plotData.trim();
+    if (!text || text === 'null' || text === '{}') return true;
+
+    try {
+        const parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object' || parsed.error) return true;
+        return !Array.isArray(parsed.data) || parsed.data.length === 0;
+    } catch (e) {
+        return true;
+    }
+}
+
+// Opsiyonel grafik paneli: veri yoksa paneli TAMAMEN gizler (boş kutu ya da
+// "No data available" yazan sahte panel bırakmaz). Veri varsa paneli açıp
+// safePlotCreate ile çizer. Döndürdüğü değer: çizildi mi?
+function renderOptionalPlot(panelId, elementId, plotData) {
+    const panel = document.getElementById(panelId);
+    const empty = isPlotPayloadEmpty(plotData);
+
+    if (panel) {
+        panel.style.display = empty ? 'none' : 'block';
+    }
+    if (empty) return false;
+
+    safePlotCreate(elementId, typeof plotData === 'string' ? plotData : JSON.stringify(plotData));
+    return true;
+}
+
 // Display plots
 function displayPlots(plots) {
-    // Helper function to safely create plots
-    function safePlotCreate(elementId, plotData) {
-        const element = document.getElementById(elementId);
-        if (element && plotData) {
-            try {
-                const parsedData = JSON.parse(plotData);
-                
-                // Enhanced config for better responsive behavior
-                const config = {
-                    responsive: true,
-                    displayModeBar: true,
-                    displaylogo: false,
-                    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
-                    toImageButtonOptions: {
-                        format: 'png',
-                        filename: elementId,
-                        height: 500,
-                        width: 700,
-                        scale: 1
-                    }
-                };
-                
-                // Update layout for better responsiveness
-                if (parsedData.layout) {
-                    parsedData.layout.autosize = true;
-                    if (!parsedData.layout.margin) {
-                        parsedData.layout.margin = { l: 60, r: 30, t: 60, b: 60 };
-                    }
-                    // Yükseklik: layout'taki değeri konteynere sabitle ki panel
-                    // içeriğe göre büyüsün (SVG taşması / panel çakışması önlenir).
-                    // layout.height SİLİNMEZ: autosize gizli/animasyonlu konteyneri
-                    // ~140px ölçüp iç çizim alanını 2px'e eziyordu (motor_plot bugı).
-                    // Genişlik responsive kalır (width=undefined), yükseklik sabit.
-                    if (parsedData.layout.height) {
-                        element.style.height = parsedData.layout.height + 'px';
-                    }
-                    parsedData.layout.width = undefined;
-                }
-                
-                Plotly.newPlot(elementId, parsedData.data, parsedData.layout, config);
-                // Yeniden boyutlandırmayı config.responsive üstlenir; her
-                // çağrıda window listener eklemek sızıntıya yol açıyordu
+    plots = plots || {};
 
-            } catch (e) {
-                console.warn(`Failed to create plot for ${elementId}:`, e);
-                element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Plot data unavailable</div>';
-            }
-        } else if (element) {
-            element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No data available</div>';
-        }
-    }
-    
     // Motor plot
     safePlotCreate('motor_plot', plots.motor);
     
@@ -552,71 +635,209 @@ function displayPlots(plots) {
     } else if (plots.trajectory && plots.trajectory.error) {
         console.warn('Trajectory plot error:', plots.trajectory.error);
     }
+
+    // Opsiyonel analiz grafikleri. Bunları /calculate HER hesapta üretiyordu
+    // ama hiçbir şablon çizmiyordu (ölü yük). İrtifa performansı katı ve sıvı
+    // sayfalarda zaten vardı; hibritte yoktu — parite açığı kapatıldı.
+    // Veri gelmezse ilgili panel gizlenir.
+    renderOptionalPlot('altitudePerformancePanel', 'altitude_performance_plot',
+                       plots.altitude_performance);
+    renderOptionalPlot('thrustAltitudePanel', 'thrust_altitude_plot',
+                       plots.thrust_altitude);
+    renderOptionalPlot('massFractionsPanel', 'mass_fractions_plot',
+                       plots.mass_fractions);
+    renderOptionalPlot('combustionAnalysisPanel', 'combustion_analysis_plot',
+                       plots.combustion_analysis);
+    renderOptionalPlot('realtimeDashboardPanel', 'realtime_dashboard_plot',
+                       plots.realtime_dashboard);
 }
 
 // Display design report
+// L* satiri: istenen ve GERCEKLESEN L* birlikte gosterilir. Hibritte kamara
+// grain'den kisa olamaz; kucuk L* degerleri bu geometrik tabanin altinda
+// kalir ve boy degismez. Kullanici "L* hicbir seyi degistirmiyor" demesin
+// diye gerceklesen deger ve motorun notu acikca yazilir.
+function lStarRow(motorData) {
+    const asked = motorData.l_star;
+    const achieved = motorData.l_star_achieved;
+    if (typeof asked !== 'number' && typeof achieved !== 'number') return '';
+    const fmt = (v) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(2) : 'N/A';
+    let value = `${fmt(asked)} m`;
+    if (typeof achieved === 'number' && typeof asked === 'number'
+        && Math.abs(achieved - asked) > 0.01) {
+        value = `${fmt(asked)} m requested &rarr; <strong>${fmt(achieved)} m achieved</strong>`;
+    }
+    const note = motorData.l_star_note
+        ? `<div style="font-size:11px;color:#7d97a5;margin-top:2px;">${motorData.l_star_note}</div>`
+        : '';
+    return `<tr><td>${T('app.rep.lStar', 'L* (characteristic length)')}</td>`
+        + `<td>${value}${note}</td></tr>`;
+}
+
+// --- Design Report yardımcıları -------------------------------------------
+// Sayısal biçimleyici: sonlu değilse em-dash (tablo kırılmaz, sahte 0 yok).
+function reportNum(value, digits) {
+    return (typeof value === 'number' && isFinite(value)) ? value.toFixed(digits) : '—';
+}
+
+// 'cylindrical_bore' -> 'Cylindrical bore' (backend enum'ları okunur hale gelir)
+function reportLabel(value) {
+    if (typeof value !== 'string' || !value) return '—';
+    const text = value.replace(/_/g, ' ').trim();
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// [etiket, değer, birim] satırlarından rapor tablosu üretir.
+function reportSection(title, rows) {
+    const body = rows.map(function (row) {
+        const unit = row[2] ? ` ${row[2]}` : '';
+        return `<tr><td>${row[0]}</td><td>${row[1]}${unit}</td></tr>`;
+    }).join('');
+    return `
+        <div class="report-section">
+            <h6>${title}</h6>
+            <table class="report-table table table-striped">
+                <tbody>${body}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+// Nozul açıları (backend: motor.nozzle_angles). Katı ve sıvı sayfalarda
+// tabloya çıkıyordu, hibritte hiç kullanılmıyordu — parite açığı kapatıldı.
+function nozzleAnglesSection(nozzleAngles) {
+    if (!nozzleAngles || typeof nozzleAngles !== 'object') return '';
+
+    const rows = [
+        [T('app.rep.nozzleType', 'Nozzle Type'), reportLabel(nozzleAngles.nozzle_type), ''],
+        [T('app.rep.convHalfAngle', 'Convergent Half Angle'),
+         reportNum(nozzleAngles.convergent_half_angle_deg, 1), '&deg;'],
+        [T('app.rep.divHalfAngle', 'Divergent Half Angle'),
+         reportNum(nozzleAngles.divergent_half_angle_deg, 1), '&deg;'],
+        [T('app.rep.divEfficiency', 'Divergence Efficiency (lambda)'),
+         reportNum(nozzleAngles.divergence_efficiency, 4), '']
+    ];
+    if (typeof nozzleAngles.nozzle_length_mm === 'number') {
+        rows.push([T('app.rep.nozzleLength', 'Nozzle Length'),
+                   reportNum(nozzleAngles.nozzle_length_mm, 1), 'mm']);
+    }
+    return reportSection(T('app.rep.secNozzle', 'Nozzle Geometry'), rows);
+}
+
+// Grain geometrisi (backend: motor.grain_design). Tüm uzunluklar backend'de
+// zaten mm — burada tekrar ölçekleme YAPILMAZ.
+function grainDesignSection(grainDesign) {
+    if (!grainDesign || typeof grainDesign !== 'object') return '';
+
+    const rows = [
+        [T('app.rep.grainType', 'Grain Type'), reportLabel(grainDesign.grain_type), ''],
+        [T('app.rep.grainLength', 'Grain Length'), reportNum(grainDesign.grain_length_mm, 1), 'mm'],
+        [T('app.rep.grainOd', 'Grain Outer Diameter'),
+         reportNum(grainDesign.grain_outer_diameter_mm, 1), 'mm'],
+        [T('app.rep.portInitial', 'Initial Port Diameter'),
+         reportNum(grainDesign.port_diameter_initial_mm, 1), 'mm'],
+        [T('app.rep.portFinal', 'Final Port Diameter'),
+         reportNum(grainDesign.port_diameter_final_mm, 1), 'mm'],
+        [T('app.rep.webThickness', 'Web Thickness'), reportNum(grainDesign.web_thickness_mm, 1), 'mm'],
+        [T('app.rep.grainLd', 'Grain L/D'), reportNum(grainDesign.L_over_D, 2), ''],
+        [T('app.rep.segments', 'Number of Segments'), reportNum(grainDesign.number_of_segments, 0), ''],
+        [T('app.rep.inhibitor', 'Inhibitor'), reportLabel(grainDesign.inhibitor), '']
+    ];
+    return reportSection(T('app.rep.secGrain', 'Grain Design'), rows);
+}
+
+// Tasarım özeti (backend: motor.design_summary).
+// NOT: design_summary.recommendation alanı motor tarafında Türkçe üretiliyor;
+// arayüz metinleri İngilizce olduğu için o alan BİLİNÇLİ olarak basılmıyor.
+function designSummarySection(designSummary) {
+    if (!designSummary || typeof designSummary !== 'object') return '';
+
+    const dims = designSummary.key_dimensions || {};
+    const perf = designSummary.performance || {};
+    const nozzle = designSummary.nozzle || {};
+
+    const rows = [
+        [T('common.status', 'Status'), reportLabel(designSummary.status), ''],
+        [T('app.rep.totalLength', 'Total Motor Length'), reportNum(dims.total_motor_length_mm, 1), 'mm'],
+        [T('app.rep.chamberDia', 'Chamber Diameter'), reportNum(dims.chamber_diameter_mm, 1), 'mm'],
+        [T('app.rep.chamberLen', 'Chamber Length'), reportNum(dims.chamber_length_mm, 1), 'mm'],
+        [T('app.rep.throatDia', 'Throat Diameter'), reportNum(dims.nozzle_throat_diameter_mm, 1), 'mm'],
+        [T('app.rep.exitDia', 'Exit Diameter'), reportNum(dims.nozzle_exit_diameter_mm, 1), 'mm'],
+        [T('app.rep.convLength', 'Convergent Section Length'),
+         reportNum(nozzle.convergent_length_mm, 1), 'mm'],
+        [T('app.rep.divLength', 'Divergent Section Length'),
+         reportNum(nozzle.divergent_length_mm, 1), 'mm'],
+        [T('app.rep.dryMass', 'Dry Mass (estimate)'), reportNum(dims.dry_mass_estimate_kg, 2), 'kg'],
+        [T('app.rep.totalMass', 'Total Mass (estimate)'), reportNum(dims.total_mass_kg, 2), 'kg'],
+        [T('app.rep.totalImpulse', 'Total Impulse'), reportNum(perf.total_impulse_Ns, 0), 'N&middot;s'],
+        [T('common.burnTime', 'Burn Time'), reportNum(perf.burn_time_s, 2), 's']
+    ];
+    return reportSection(T('app.rep.secSummary', 'Design Summary'), rows);
+}
+
 function displayDesignReport(motorData, injectorData) {
     const reportDiv = document.getElementById('designReport');
     
     let html = `
         <div class="report-section">
-            <h6>Motor Performance</h6>
+            <h6>${T('app.rep.secPerformance', 'Motor Performance')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>Specific Impulse (Isp)</td><td>${motorData.isp.toFixed(1)} s</td></tr>
-                    <tr><td>Characteristic Velocity (C*)</td><td>${motorData.c_star.toFixed(0)} m/s</td></tr>
-                    <tr><td>Thrust Coefficient (CF)</td><td>${motorData.cf.toFixed(3)}</td></tr>
-                    <tr><td>Throat Diameter</td><td>${(motorData.throat_diameter * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>Exit Diameter</td><td>${(motorData.exit_diameter * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>Expansion Ratio</td><td>${motorData.expansion_ratio.toFixed(1)}</td></tr>
+                    <tr><td>${T('app.rep.ispLong', 'Specific Impulse (Isp)')}</td><td>${motorData.isp.toFixed(1)} s</td></tr>
+                    <tr><td>${T('app.rep.cstarLong', 'Characteristic Velocity (C*)')}</td><td>${motorData.c_star.toFixed(0)} m/s</td></tr>
+                    <tr><td>${T('app.rep.cfLong', 'Thrust Coefficient (CF)')}</td><td>${motorData.cf.toFixed(3)}</td></tr>
+                    <tr><td>${T('app.rep.throatDia', 'Throat Diameter')}</td><td>${(motorData.throat_diameter * 1000).toFixed(1)} mm</td></tr>
+                    <tr><td>${T('app.rep.exitDia', 'Exit Diameter')}</td><td>${(motorData.exit_diameter * 1000).toFixed(1)} mm</td></tr>
+                    <tr><td>${T('common.f.expansionRatio', 'Expansion Ratio')}</td><td>${motorData.expansion_ratio.toFixed(1)}</td></tr>
                 </tbody>
             </table>
         </div>
         
         <div class="report-section">
-            <h6>Motor Geometry</h6>
+            <h6>${T('app.rep.secGeometry', 'Motor Geometry')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>Chamber Diameter</td><td>${(motorData.chamber_diameter * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>Chamber Length</td><td>${(motorData.chamber_length * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>Chamber Volume</td><td>${(motorData.chamber_volume * 1e6).toFixed(1)} cm³</td></tr>
-                    <tr><td>Initial Port Diameter</td><td>${(motorData.port_diameter_initial * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>Final Port Diameter</td><td>${(motorData.port_diameter_final * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>Regression Rate</td><td>${motorData.regression_rate ? (motorData.regression_rate * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
-                    <tr><td>Avg Regression Rate</td><td>${motorData.regression_rate_avg ? (motorData.regression_rate_avg * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
+                    <tr><td>${T('app.rep.chamberDia', 'Chamber Diameter')}</td><td>${(motorData.chamber_diameter * 1000).toFixed(1)} mm</td></tr>
+                    <tr><td>${T('app.rep.chamberLen', 'Chamber Length')}</td><td>${(motorData.chamber_length * 1000).toFixed(1)} mm</td></tr>
+                    ${lStarRow(motorData)}
+                    <tr><td>${T('app.rep.chamberVolume', 'Chamber Volume')}</td><td>${(motorData.chamber_volume * 1e6).toFixed(1)} cm³</td></tr>
+                    <tr><td>${T('app.rep.portInitial', 'Initial Port Diameter')}</td><td>${(motorData.port_diameter_initial * 1000).toFixed(1)} mm</td></tr>
+                    <tr><td>${T('app.rep.portFinal', 'Final Port Diameter')}</td><td>${(motorData.port_diameter_final * 1000).toFixed(1)} mm</td></tr>
+                    <tr><td>${T('app.rep.regressionRate', 'Regression Rate')}</td><td>${motorData.regression_rate ? (motorData.regression_rate * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
+                    <tr><td>${T('app.rep.regressionAvg', 'Avg Regression Rate')}</td><td>${motorData.regression_rate_avg ? (motorData.regression_rate_avg * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
                 </tbody>
             </table>
         </div>
         
         <div class="report-section">
-            <h6>Injector Design</h6>
+            <h6>${T('inj.title', 'Injector Design')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>Type</td><td>${injectorData.type.charAt(0).toUpperCase() + injectorData.type.slice(1)}</td></tr>
-                    <tr><td>Exit Velocity</td><td>${injectorData.exit_velocity.toFixed(1)} m/s</td></tr>
-                    <tr><td>Reynolds Number</td><td>${injectorData.reynolds_number.toFixed(0)}</td></tr>
-                    <tr><td>Pressure Drop</td><td>${injectorData.pressure_drop.toFixed(2)} bar</td></tr>
+                    <tr><td>${T('common.type', 'Type')}</td><td>${injectorData.type.charAt(0).toUpperCase() + injectorData.type.slice(1)}</td></tr>
+                    <tr><td>${T('app.rep.exitVelocity', 'Exit Velocity')}</td><td>${injectorData.exit_velocity.toFixed(1)} m/s</td></tr>
+                    <tr><td>${T('app.rep.reynolds', 'Reynolds Number')}</td><td>${injectorData.reynolds_number.toFixed(0)}</td></tr>
+                    <tr><td>${T('app.rep.pressureDrop', 'Pressure Drop')}</td><td>${injectorData.pressure_drop.toFixed(2)} bar</td></tr>
     `;
     
     // Add type-specific parameters
     if (injectorData.type === 'showerhead') {
         html += `
-                    <tr><td>Number of Holes</td><td>${injectorData.n_holes}</td></tr>
-                    <tr><td>Hole Diameter</td><td>${injectorData.hole_diameter.toFixed(2)} mm</td></tr>
-                    <tr><td>L/D Ratio</td><td>${injectorData.L_D_ratio.toFixed(1)}</td></tr>
+                    <tr><td>${T('app.rep.nHoles', 'Number of Holes')}</td><td>${injectorData.n_holes}</td></tr>
+                    <tr><td>${T('app.rep.holeDia', 'Hole Diameter')}</td><td>${injectorData.hole_diameter.toFixed(2)} mm</td></tr>
+                    <tr><td>${T('app.rep.ldRatio', 'L/D Ratio')}</td><td>${injectorData.L_D_ratio.toFixed(1)}</td></tr>
         `;
     } else if (injectorData.type === 'pintle') {
         html += `
-                    <tr><td>Outer Diameter</td><td>${injectorData.outer_diameter.toFixed(1)} mm</td></tr>
-                    <tr><td>Pintle Diameter</td><td>${injectorData.pintle_diameter.toFixed(1)} mm</td></tr>
-                    <tr><td>Gap</td><td>${injectorData.gap.toFixed(2)} mm</td></tr>
+                    <tr><td>${T('app.rep.outerDia', 'Outer Diameter')}</td><td>${injectorData.outer_diameter.toFixed(1)} mm</td></tr>
+                    <tr><td>${T('app.rep.pintleDia', 'Pintle Diameter')}</td><td>${injectorData.pintle_diameter.toFixed(1)} mm</td></tr>
+                    <tr><td>${T('app.rep.gap', 'Gap')}</td><td>${injectorData.gap.toFixed(2)} mm</td></tr>
         `;
     } else if (injectorData.type === 'swirl') {
         html += `
-                    <tr><td>Number of Slots</td><td>${injectorData.n_slots}</td></tr>
-                    <tr><td>Slot Width</td><td>${injectorData.slot_width.toFixed(2)} mm</td></tr>
-                    <tr><td>Slot Height</td><td>${injectorData.slot_height.toFixed(2)} mm</td></tr>
-                    <tr><td>Spray Angle</td><td>${injectorData.spray_angle}°</td></tr>
+                    <tr><td>${T('app.rep.nSlots', 'Number of Slots')}</td><td>${injectorData.n_slots}</td></tr>
+                    <tr><td>${T('app.rep.slotWidth', 'Slot Width')}</td><td>${injectorData.slot_width.toFixed(2)} mm</td></tr>
+                    <tr><td>${T('app.rep.slotHeight', 'Slot Height')}</td><td>${injectorData.slot_height.toFixed(2)} mm</td></tr>
+                    <tr><td>${T('app.rep.sprayAngle', 'Spray Angle')}</td><td>${injectorData.spray_angle}°</td></tr>
         `;
     }
     
@@ -626,21 +847,107 @@ function displayDesignReport(motorData, injectorData) {
         </div>
         
         <div class="report-section">
-            <h6>Propellant</h6>
+            <h6>${T('app.rep.secPropellant', 'Propellant')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>Total Mass Flow Rate</td><td>${motorData.mdot_total.toFixed(3)} kg/s</td></tr>
-                    <tr><td>Oxidizer Mass Flow Rate</td><td>${motorData.mdot_ox.toFixed(3)} kg/s</td></tr>
-                    <tr><td>Fuel Mass Flow Rate</td><td>${motorData.mdot_f.toFixed(3)} kg/s</td></tr>
-                    <tr><td>Total Propellant Mass</td><td>${motorData.propellant_mass_total.toFixed(2)} kg</td></tr>
-                    <tr><td>Oxidizer Mass</td><td>${motorData.oxidizer_mass.toFixed(2)} kg</td></tr>
-                    <tr><td>Fuel Mass</td><td>${motorData.fuel_mass.toFixed(2)} kg</td></tr>
+                    <tr><td>${T('app.rep.mdotTotal', 'Total Mass Flow Rate')}</td><td>${motorData.mdot_total.toFixed(3)} kg/s</td></tr>
+                    <tr><td>${T('app.rep.mdotOx', 'Oxidizer Mass Flow Rate')}</td><td>${motorData.mdot_ox.toFixed(3)} kg/s</td></tr>
+                    <tr><td>${T('app.rep.mdotFuel', 'Fuel Mass Flow Rate')}</td><td>${motorData.mdot_f.toFixed(3)} kg/s</td></tr>
+                    <tr><td>${T('app.rep.propMassTotal', 'Total Propellant Mass')}</td><td>${motorData.propellant_mass_total.toFixed(2)} kg</td></tr>
+                    <tr><td>${T('app.rep.oxMass', 'Oxidizer Mass')}</td><td>${motorData.oxidizer_mass.toFixed(2)} kg</td></tr>
+                    <tr><td>${T('app.rep.fuelMass', 'Fuel Mass')}</td><td>${motorData.fuel_mass.toFixed(2)} kg</td></tr>
                 </tbody>
             </table>
         </div>
     `;
-    
+
+    // /calculate bu üç bloğu HER hesapta döndürüyordu ama hibrit sayfası
+    // hiçbirini kullanmıyordu (katı/sıvı sayfalarda tabloya çıkıyorlar).
+    // Kaynak öncelik: motor sonucu, yoksa üst düzey yanıt kopyası.
+    const topLevel = window.currentResults || {};
+    html += nozzleAnglesSection(motorData.nozzle_angles || topLevel.nozzle_angles);
+    html += grainDesignSection(motorData.grain_design || topLevel.grain_design);
+    html += designSummarySection(motorData.design_summary || topLevel.design_summary);
+
+    html += `
+        <div class="report-section">
+            <h6>${T('app.rep.secRegression', 'Regression Rate & Port Growth')}</h6>
+            <div id="designReportRegressionChart" style="min-height: 320px;"></div>
+        </div>
+    `;
+
     reportDiv.innerHTML = html;
+
+    // Rapordaki regresyon/port sayılarının zaman eğrisi (v2.5.2: tabloda
+    // sayı vardı ama grafiği yoktu). port_history yoksa başlangıç/son
+    // çaptan doğrusal bir tahmin çizilir ve bu açıkça etiketlenir.
+    try {
+        drawDesignReportRegressionChart(motorData);
+    } catch (e) {
+        console.warn('Design report regression chart skipped:', e);
+    }
+}
+
+function drawDesignReportRegressionChart(motorData) {
+    const el = document.getElementById('designReportRegressionChart');
+    if (!el || typeof Plotly === 'undefined') return;
+
+    const ph = motorData.port_history || {};
+    let time = Array.isArray(ph.time) ? ph.time.map(Number) : null;
+    let portMm = Array.isArray(ph.port_diameter) ? ph.port_diameter.map(v => Number(v) * 1000) : null;
+    let approximate = false;
+
+    if (!time || !portMm || time.length < 2 || portMm.length !== time.length) {
+        // Doğrusal tahmin (port geçmişi yoksa)
+        const tb = Number(motorData.burn_time) || 0;
+        const d0 = Number(motorData.port_diameter_initial) * 1000;
+        const d1 = Number(motorData.port_diameter_final) * 1000;
+        if (!(tb > 0) || !isFinite(d0) || !isFinite(d1)) {
+            el.innerHTML = '<div style="padding:16px;color:#7d97a5;">'
+                + T('app.chart.noPortHistory', 'Port history not available for this run.')
+                + '</div>';
+            return;
+        }
+        const n = 25;
+        time = Array.from({length: n}, (_, i) => (tb * i) / (n - 1));
+        portMm = time.map(t => d0 + (d1 - d0) * (t / tb));
+        approximate = true;
+    }
+
+    // r(t) = 0.5 * d(D)/dt  [mm/s]
+    const rate = portMm.map((_, i) => {
+        if (i === 0) return 0.5 * (portMm[1] - portMm[0]) / Math.max(1e-9, time[1] - time[0]);
+        if (i === portMm.length - 1) {
+            return 0.5 * (portMm[i] - portMm[i - 1]) / Math.max(1e-9, time[i] - time[i - 1]);
+        }
+        return 0.5 * (portMm[i + 1] - portMm[i - 1]) / Math.max(1e-9, time[i + 1] - time[i - 1]);
+    });
+
+    const traces = [
+        {
+            x: time, y: portMm, name: T('app.chart.portDia', 'Port diameter (mm)'), type: 'scatter', mode: 'lines',
+            line: {color: '#22d3ee', width: 2}
+        },
+        {
+            x: time, y: rate, name: T('app.chart.regressionRate', 'Regression rate (mm/s)'), type: 'scatter', mode: 'lines',
+            yaxis: 'y2', line: {color: '#f0a04b', width: 2, dash: 'dot'}
+        }
+    ];
+
+    const layout = {
+        autosize: true,
+        height: 320,
+        margin: {t: 30, b: 45, l: 55, r: 55},
+        xaxis: {title: T('common.axis.timeS', 'Time (s)')},
+        yaxis: {title: T('app.chart.portDia', 'Port diameter (mm)')},
+        yaxis2: {title: 'r (mm/s)', overlaying: 'y', side: 'right'},
+        legend: {orientation: 'h', y: -0.22},
+        title: approximate
+            ? T('app.chart.linearEstimate', 'Linear estimate (no transient port history)') : ''
+    };
+
+    // Koyu tema plotly_dark.js sarmalayıcısı tarafından otomatik uygulanır.
+    Plotly.newPlot(el, traces, layout, {responsive: true, displayModeBar: false});
 }
 
 // Display warnings — enjektör uyarıları + /calculate cevabındaki üst seviye
@@ -679,53 +986,78 @@ function displayWarnings(warnings, validation) {
     let html = '';
     if (validation && validation.overall_status) {
         const statusCls = critical.length ? 'warning-status-critical' : 'warning-status-regular';
-        html += `<div class="warning-status ${statusCls}">Validation status: ` +
-            `${validation.overall_status}</div>`;
+        html += `<div class="warning-status ${statusCls}">`
+            + T('app.warn.validationStatus', 'Validation status:') + ' '
+            + `${validation.overall_status}</div>`;
     }
-    critical.forEach(w => { html += item('CRITICAL', w, 'warning-critical'); });
-    regular.forEach(w => { html += item('WARNING', w, 'warning-regular'); });
-    injector.forEach(w => { html += item('WARNING', w, 'warning-regular'); });
+    const critLabel = T('app.warn.critical', 'CRITICAL');
+    const warnLabel = T('app.warn.warning', 'WARNING');
+    critical.forEach(w => { html += item(critLabel, w, 'warning-critical'); });
+    regular.forEach(w => { html += item(warnLabel, w, 'warning-regular'); });
+    injector.forEach(w => { html += item(warnLabel, w, 'warning-regular'); });
 
     warningsList.innerHTML = html;
     warningsPanel.style.display = 'block';
 }
 
 // Export report function
-function exportReport() {
+// Ana rapor indirmesi: v2.5.2'den itibaren düz .txt yerine PDF
+// (/api/export-pdf/summary). Sunucu PDF üretemezse okunabilir metin
+// rapora düşer — sessiz başarısızlık yok.
+async function exportReport() {
     if (!currentResults) {
-        showError('No results to export');
+        showError(T('app.msg.noResultsExport', 'No results to export'));
         return;
     }
-    
-    // Create a simple text report
-    let report = 'HYBRID ROCKET MOTOR ANALYSIS REPORT\n';
-    report += '=====================================\n\n';
-    
-    report += 'MOTOR PERFORMANCE:\n';
-    report += `Specific Impulse: ${currentResults.motor.isp.toFixed(1)} s\n`;
-    report += `Thrust: ${currentResults.motor.thrust.toFixed(0)} N\n`;
-    report += `Chamber Pressure: ${currentResults.motor.chamber_pressure.toFixed(1)} bar\n`;
-    report += `Mass Flow Rate: ${currentResults.motor.mdot_total.toFixed(3)} kg/s\n\n`;
-    
-    report += 'INJECTOR DESIGN:\n';
-    report += `Type: ${currentResults.injector.type}\n`;
-    report += `Exit Velocity: ${currentResults.injector.exit_velocity.toFixed(1)} m/s\n`;
-    report += `Reynolds Number: ${currentResults.injector.reynolds_number.toFixed(0)}\n`;
-    report += `Pressure Drop: ${currentResults.injector.pressure_drop.toFixed(2)} bar\n\n`;
-    
-    if (currentResults.injector.warnings.length > 0) {
-        report += 'WARNINGS:\n';
-        currentResults.injector.warnings.forEach(warning => {
-            report += `• ${warning}\n`;
+
+    const motor = currentResults.motor || {};
+    const name = motor.motor_name || 'HRMA_Motor';
+
+    try {
+        const response = await fetch('/api/export-pdf/summary', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                motor_data: motor,
+                analysis_results: currentResults
+            })
         });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const blob = await response.blob();
+        downloadBlobAs(blob, `${name}_summary_report.pdf`);
+        return;
+    } catch (e) {
+        console.warn('PDF report unavailable, falling back to text report:', e);
     }
-    
-    // Download the report
-    const blob = new Blob([report], { type: 'text/plain' });
+
+    const inj = currentResults.injector || {};
+    const f = (v, d) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : 'N/A';
+    let report = T('app.txt.title', 'HYBRID ROCKET MOTOR ANALYSIS REPORT') + '\n';
+    report += '=====================================\n\n';
+    report += T('app.txt.performance', 'MOTOR PERFORMANCE') + ':\n';
+    report += `${T('app.metric.isp', 'Specific Impulse')}: ${f(motor.isp, 1)} s\n`;
+    report += `${T('app.metric.thrust', 'Thrust')}: ${f(motor.thrust, 0)} N\n`;
+    report += `${T('app.metric.pc', 'Chamber Pressure')}: ${f(motor.chamber_pressure, 1)} bar\n`;
+    report += `${T('app.metric.mdot', 'Mass Flow Rate')}: ${f(motor.mdot_total, 3)} kg/s\n\n`;
+    report += T('inj.title', 'Injector Design').toUpperCase() + ':\n';
+    report += `${T('common.type', 'Type')}: ${inj.type || 'N/A'}\n`;
+    report += `${T('app.rep.exitVelocity', 'Exit Velocity')}: ${f(inj.exit_velocity, 1)} m/s\n`;
+    report += `${T('app.rep.reynolds', 'Reynolds Number')}: ${f(inj.reynolds_number, 0)}\n`;
+    report += `${T('app.rep.pressureDrop', 'Pressure Drop')}: ${f(inj.pressure_drop, 2)} bar\n\n`;
+
+    if (Array.isArray(inj.warnings) && inj.warnings.length > 0) {
+        report += T('common.warnings', 'Warnings').toUpperCase() + ':\n';
+        inj.warnings.forEach(warning => { report += `- ${warning}\n`; });
+    }
+
+    downloadBlobAs(new Blob([report], {type: 'text/plain'}), `${name}_report.txt`);
+}
+
+function downloadBlobAs(blob, filename) {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'hybrid_rocket_report.txt';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -745,20 +1077,20 @@ function handleError(error, context = 'Unknown') {
     let userMessage = error.message;
     
     if (error.message.includes('pattern')) {
-        errorSource = 'Form Validation';
-        userMessage = 'Form validation error - check input formats';
+        errorSource = T('app.err.srcForm', 'Form Validation');
+        userMessage = T('app.err.msgForm', 'Form validation error - check input formats');
     } else if (error.message.includes('HTTP')) {
-        errorSource = 'Network/Backend';
-        userMessage = 'Server communication error';
+        errorSource = T('app.err.srcNetwork', 'Network/Backend');
+        userMessage = T('app.err.msgNetwork', 'Server communication error');
     } else if (error instanceof TypeError) {
-        errorSource = 'JavaScript Type Error';
-        userMessage = 'Data type mismatch in calculations';
+        errorSource = T('app.err.srcType', 'JavaScript Type Error');
+        userMessage = T('app.err.msgType', 'Data type mismatch in calculations');
     } else if (error instanceof ReferenceError) {
-        errorSource = 'JavaScript Reference Error';
-        userMessage = 'Missing function or variable';
+        errorSource = T('app.err.srcReference', 'JavaScript Reference Error');
+        userMessage = T('app.err.msgReference', 'Missing function or variable');
     } else if (error.message.includes('JSON')) {
-        errorSource = 'Data Parsing';
-        userMessage = 'Invalid data format received from server';
+        errorSource = T('app.err.srcParsing', 'Data Parsing');
+        userMessage = T('app.err.msgParsing', 'Invalid data format received from server');
     }
     
     console.error('Error Source:', errorSource);
@@ -766,18 +1098,18 @@ function handleError(error, context = 'Unknown') {
     
     // Show detailed error to user
     const detailedError = `
-ERROR DETECTED
+${T('app.err.detected', 'ERROR DETECTED')}
 
-Source: ${errorSource}
-Context: ${context}
-Message: ${userMessage}
+${T('app.err.source', 'Source')}: ${errorSource}
+${T('app.err.context', 'Context')}: ${context}
+${T('app.err.message', 'Message')}: ${userMessage}
 
-Technical Details:
-- Type: ${error.constructor.name}
-- Original: ${error.message}
-- Time: ${new Date().toLocaleString()}
+${T('app.err.technical', 'Technical Details')}:
+- ${T('common.type', 'Type')}: ${error.constructor.name}
+- ${T('app.err.original', 'Original')}: ${error.message}
+- ${T('app.err.time', 'Time')}: ${new Date().toLocaleString()}
 
-Check browser console for full stack trace.
+${T('app.err.console', 'Check browser console for full stack trace.')}
     `;
     
     alert(detailedError);
@@ -800,17 +1132,19 @@ function hideWelcomeMessage() {
 }
 
 function showError(message) {
-    alert('Error: ' + message);
+    alert(T('common.error', 'Error') + ': ' + message);
 }
 
 function showInfo(message) {
-    alert('Info: ' + message);
+    alert(T('common.info', 'Info') + ': ' + message);
 }
 
 function showMessage(message, type = 'info') {
-    // Type can be: 'info', 'success', 'warning', 'error'
-    const prefix = type.charAt(0).toUpperCase() + type.slice(1);
-    alert(`${prefix}: ${message}`);
+    // Tip: 'info', 'success', 'warning', 'error'
+    const keys = { info: 'common.info', success: 'common.success',
+                   warning: 'common.warning', error: 'common.error' };
+    const fallback = type.charAt(0).toUpperCase() + type.slice(1);
+    alert(T(keys[type] || 'common.info', fallback) + ': ' + message);
 }
 
 function showSuccess(message) {
@@ -824,12 +1158,30 @@ function showWarning(message) {
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
     updateInjectorParams();
+    // Dil değişince: enjektör form etiketleri + saklanan sonuç blokları
+    // yeniden basılır (yeni hesap yapılmaz).
+    if (window.I18N && window.I18N.onChange) {
+        window.I18N.onChange(function () {
+            try { updateInjectorParams(); } catch (e) { /* form yoksa sessiz */ }
+            const r = window.currentResults;
+            if (!r || !r.motor) return;
+            try { displayPerformanceMetrics(r.motor); } catch (e) { /* panel yoksa */ }
+            try {
+                if (r.injector) displayDesignReport(r.motor, r.injector);
+            } catch (e) { /* rapor yoksa */ }
+            try { displayMotorTable(r.motor); } catch (e) { /* tablo yoksa */ }
+            try { if (r.injector) displayInjectorTable(r.injector); } catch (e) { /* tablo yoksa */ }
+            try { displayWarnings(r.injector && r.injector.warnings, r.validation); }
+            catch (e) { /* uyarı paneli yoksa */ }
+        });
+    }
 });
 
 // Ask AI Analysis
 function askAI() {
     if (!currentResults) {
-        showError('No results to analyze. Please run calculations first.');
+        showError(T('app.msg.noResultsAnalyze',
+            'No results to analyze. Please run calculations first.'));
         return;
     }
     
@@ -876,13 +1228,13 @@ Please provide specific numerical recommendations where applicable and explain t
     
     // Copy to clipboard
     navigator.clipboard.writeText(prompt).then(() => {
-        showInfo('Analysis data copied to clipboard! Paste it into your favorite AI assistant.');
+        showInfo(T('app.msg.aiCopied', 'Analysis data copied to clipboard! Paste it into your favorite AI assistant.'));
         
         // Optional: Show the data in a modal
         showAIDataModal(aiData, prompt);
     }).catch(err => {
         console.error('Failed to copy:', err);
-        showError('Failed to copy data. Check console for details.');
+        showError(T('app.msg.aiCopyFailed', 'Failed to copy data. Check console for details.'));
     });
 }
 
@@ -939,18 +1291,19 @@ function getFuelTypeDisplayName(fuelType) {
     
     // Return standard fuel type display name
     const fuelNames = {
-        'htpb': 'HTPB (Hydroxyl-terminated polybutadiene)',
-        'pe': 'Polyethylene',
-        'pmma': 'PMMA (Polymethyl methacrylate)',
-        'paraffin': 'Paraffin Wax',
-        'abs': 'ABS Plastic',
-        'pla': 'PLA Plastic',
-        'carbon': 'Carbon (Graphite)',
-        'aluminum': 'Aluminum Powder',
-        'al2o3': 'Aluminum Oxide (Al2O3)'
+        'htpb': T('fuel.htpb', 'HTPB (Hydroxyl-terminated polybutadiene)'),
+        'pe': T('fuel.pe', 'Polyethylene'),
+        'pmma': T('fuel.pmma', 'PMMA (Polymethyl methacrylate)'),
+        'paraffin': T('fuel.paraffinWax', 'Paraffin Wax'),
+        'abs': T('fuel.abs', 'ABS Plastic'),
+        'pla': T('fuel.pla', 'PLA Plastic'),
+        'carbon': T('fuel.carbon', 'Carbon (Graphite)'),
+        'aluminum': T('fuel.aluminum', 'Aluminum Powder'),
+        'al2o3': T('fuel.al2o3', 'Aluminum Oxide (Al2O3)')
     };
-    
-    return fuelNames[fuelType] || (fuelType ? fuelType.toUpperCase() : 'Unknown Fuel');
+
+    return fuelNames[fuelType]
+        || (fuelType ? fuelType.toUpperCase() : T('fuel.unknown', 'Unknown Fuel'));
 }
 
 // Prepare AI-friendly data
@@ -1270,11 +1623,13 @@ function showAIDataModal(data, prompt) {
     const modalHTML = `
         <div id="aiModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; align-items: center; justify-content: center;">
             <div style="background: white; padding: 30px; border-radius: 10px; max-width: 80%; max-height: 80%; overflow-y: auto;">
-                <h2 style="margin-bottom: 20px;">AI Analysis Data</h2>
-                <p style="margin-bottom: 15px;">The following data has been copied to your clipboard. You can paste it into ChatGPT, Claude, or any AI assistant:</p>
+                <h2 style="margin-bottom: 20px;">${T('app.ai.modalTitle', 'AI Analysis Data')}</h2>
+                <p style="margin-bottom: 15px;">${T('app.ai.modalIntro',
+                    'The following data has been copied to your clipboard. You can paste '
+                    + 'it into ChatGPT, Claude, or any AI assistant:')}</p>
                 <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; max-height: 400px;">${prompt}</pre>
                 <div style="text-align: center; margin-top: 20px;">
-                    <button onclick="document.getElementById('aiModal').remove()" style="background: #3498db; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">Close</button>
+                    <button onclick="document.getElementById('aiModal').remove()" style="background: #3498db; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">${T('common.close', 'Close')}</button>
                 </div>
             </div>
         </div>
@@ -1294,7 +1649,7 @@ document.addEventListener('keypress', function(e) {
 // Show design configuration panel
 function showDesignConfig() {
     if (!currentResults) {
-        showError('Please calculate motor first');
+        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
         return;
     }
     
@@ -1390,25 +1745,25 @@ function applyDesignConfig() {
     // Enable CAD generation
     document.getElementById('generateCADBtn').disabled = false;
     
-    showSuccess('Design configuration applied successfully');
+    showSuccess(T('app.msg.configApplied', 'Design configuration applied successfully'));
 }
 
 // CAD Generation Functions
 async function generateCAD() {
     if (!currentResults) {
-        showError('Please calculate motor first');
+        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
         return;
     }
     
     if (!window.designConfig) {
-        showError('Please configure design parameters first');
+        showError(T('app.msg.configureFirst', 'Please configure design parameters first'));
         showDesignConfig();
         return;
     }
     
     showLoading(true);
     const cadStatus = document.getElementById('cadStatus');
-    cadStatus.textContent = 'Generating 3D model...';
+    cadStatus.textContent = T('app.msg.generating3d', 'Generating 3D model...');
     
     try {
         // Merge analysis results with design config
@@ -1426,7 +1781,7 @@ async function generateCAD() {
             })
         });
         
-        if (!response.ok) throw new Error('CAD generation failed');
+        if (!response.ok) throw new Error(T('app.msg.cadFailed', 'CAD generation failed'));
         
         const data = await response.json();
         
@@ -1441,12 +1796,12 @@ async function generateCAD() {
         document.getElementById('exportSTLBtn').disabled = false;
         window.cadExportData = data.cad_exports;
         
-        cadStatus.textContent = 'CAD model generated successfully!';
-        showSuccess('3D CAD model generated successfully');
+        cadStatus.textContent = T('app.msg.cadOkAlert', 'CAD model generated successfully!');
+        showSuccess(T('app.msg.cadOk', '3D CAD model generated successfully'));
         
     } catch (error) {
-        cadStatus.textContent = 'CAD generation failed';
-        showError('Failed to generate CAD: ' + error.message);
+        cadStatus.textContent = T('app.msg.cadFailed', 'CAD generation failed');
+        showError(TF('app.msg.cadError', { message: error.message }, 'Failed to generate CAD: {message}'));
     } finally {
         showLoading(false);
     }
@@ -1454,7 +1809,7 @@ async function generateCAD() {
 
 async function exportSTL() {
     if (!currentResults || !currentResults.motor) {
-        showError('Please run motor analysis first');
+        showError(T('app.msg.analysisFirst', 'Please run motor analysis first'));
         return;
     }
     
@@ -1480,11 +1835,11 @@ async function exportSTL() {
         if (contentType && contentType.includes('application/json')) {
             const result = await response.json();
             if (result.status === 'error') {
-                throw new Error(result.error || 'STL export failed');
+                throw new Error(result.error || T('app.msg.stlFailed', 'STL export failed'));
             }
             // Handle multiple files case
             if (result.stl_files && result.stl_files.length > 0) {
-                showSuccess('STL files generated. Check downloads folder.');
+                showSuccess(T('app.msg.stlFiles', 'STL files generated. Check downloads folder.'));
                 return;
             }
         }
@@ -1503,11 +1858,11 @@ async function exportSTL() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
         
-        showSuccess('STL file exported successfully');
+        showSuccess(T('app.msg.stlOk', 'STL file exported successfully'));
         
     } catch (error) {
         console.error('Error exporting STL:', error);
-        showError('Error exporting STL: ' + error.message);
+        showError(TF('app.msg.stlError', { message: error.message }, 'Error exporting STL: {message}'));
     } finally {
         showLoading(false);
     }
@@ -1516,13 +1871,13 @@ async function exportSTL() {
 // OpenRocket Export Functions
 async function exportOpenRocket() {
     if (!currentResults) {
-        showError('Please calculate motor first');
+        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
         return;
     }
     
     showLoading(true);
     const openrocketStatus = document.getElementById('openrocketStatus');
-    openrocketStatus.textContent = 'Generating OpenRocket file...';
+    openrocketStatus.textContent = T('app.msg.orGenerating', 'Generating OpenRocket file...');
     
     try {
         const response = await fetch('/api/export-openrocket', {
@@ -1533,7 +1888,7 @@ async function exportOpenRocket() {
             })
         });
         
-        if (!response.ok) throw new Error('OpenRocket export failed');
+        if (!response.ok) throw new Error(T('app.msg.orFailed', 'OpenRocket export failed'));
         
         const data = await response.json();
         
@@ -1542,11 +1897,11 @@ async function exportOpenRocket() {
         document.getElementById('downloadEngBtn').disabled = false;
         
         openrocketStatus.textContent = `Motor: ${data.motor_designation} - Ready for download`;
-        showSuccess('OpenRocket file generated successfully');
+        showSuccess(T('app.msg.orOk', 'OpenRocket file generated successfully'));
         
     } catch (error) {
-        openrocketStatus.textContent = 'Export failed';
-        showError('Failed to export OpenRocket: ' + error.message);
+        openrocketStatus.textContent = T('app.msg.exportFailed', 'Export failed');
+        showError(TF('app.msg.orError', { message: error.message }, 'Failed to export OpenRocket: {message}'));
     } finally {
         showLoading(false);
     }
@@ -1554,7 +1909,7 @@ async function exportOpenRocket() {
 
 async function downloadEngFile() {
     if (!currentResults || !currentResults.motor) {
-        showError('Please run motor analysis first');
+        showError(T('app.msg.analysisFirst', 'Please run motor analysis first'));
         return;
     }
     
@@ -1588,14 +1943,14 @@ async function downloadEngFile() {
             URL.revokeObjectURL(url);
             document.body.removeChild(a);
             
-            showSuccess('OpenRocket motor file downloaded successfully');
+            showSuccess(T('app.msg.engOk', 'OpenRocket motor file downloaded successfully'));
         } else {
-            throw new Error(result.error || 'Failed to generate motor file');
+            throw new Error(result.error || T('app.msg.engFailed', 'Failed to generate motor file'));
         }
         
     } catch (error) {
         console.error('Error downloading motor file:', error);
-        showError('Error downloading motor file: ' + error.message);
+        showError(TF('app.msg.engError', { message: error.message }, 'Error downloading motor file: {message}'));
     } finally {
         showLoading(false);
     }
@@ -1604,13 +1959,13 @@ async function downloadEngFile() {
 // Complete Package Generation
 async function generateCompletePackage() {
     if (!currentResults) {
-        showError('Please calculate motor first');
+        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
         return;
     }
     
     showLoading(true);
     const packageStatus = document.getElementById('packageStatus');
-    packageStatus.textContent = 'Generating complete package...';
+    packageStatus.textContent = T('app.msg.packageGenerating', 'Generating complete package...');
     
     try {
         const response = await fetch('/api/generate-complete-package', {
@@ -1627,7 +1982,7 @@ async function generateCompletePackage() {
             })
         });
         
-        if (!response.ok) throw new Error('Package generation failed');
+        if (!response.ok) throw new Error(T('app.msg.packageFailed', 'Package generation failed'));
         
         const data = await response.json();
         
@@ -1640,12 +1995,12 @@ async function generateCompletePackage() {
         a.click();
         URL.revokeObjectURL(url);
         
-        packageStatus.textContent = 'Complete package downloaded!';
-        showSuccess('Complete design package generated successfully');
+        packageStatus.textContent = T('app.msg.packageDownloaded', 'Complete package downloaded!');
+        showSuccess(T('app.msg.packageOk', 'Complete design package generated successfully'));
         
     } catch (error) {
-        packageStatus.textContent = 'Package generation failed';
-        showError('Failed to generate package: ' + error.message);
+        packageStatus.textContent = T('app.msg.packageFailed', 'Package generation failed');
+        showError(TF('app.msg.packageError', { message: error.message }, 'Failed to generate package: {message}'));
     } finally {
         showLoading(false);
     }
@@ -1684,12 +2039,12 @@ async function calculateParametric() {
             !document.getElementById('param_start') || 
             !document.getElementById('param_end') || 
             !document.getElementById('param_steps')) {
-            showError('Parametric analysis form elements not found');
+            showError(T('app.msg.paramFormMissing', 'Parametric analysis form elements not found'));
             return;
         }
         
         showLoading(true);
-        showMessage('Parametric analysis started...', 'info');
+        showMessage(T('app.msg.paramStarted', 'Parametric analysis started...'), 'info');
         
         // Get form data
         const paramType = document.getElementById('param_type').value;
@@ -1699,15 +2054,15 @@ async function calculateParametric() {
         
         // Validate parametric inputs
         if (isNaN(paramStart) || isNaN(paramEnd) || isNaN(paramSteps)) {
-            throw new Error('Invalid parametric analysis inputs');
+            throw new Error(T('app.msg.paramInvalid', 'Invalid parametric analysis inputs'));
         }
         
         if (paramStart >= paramEnd) {
-            throw new Error('Start value must be less than end value');
+            throw new Error(T('app.msg.paramRange', 'Start value must be less than end value'));
         }
         
         if (paramSteps < 3 || paramSteps > 50) {
-            throw new Error('Number of steps must be between 3 and 50');
+            throw new Error(T('app.msg.paramSteps', 'Number of steps must be between 3 and 50'));
         }
         
         const baseData = getFormData();
@@ -1771,14 +2126,14 @@ async function calculateParametric() {
             const plotData = typeof result.plot === 'string' ? JSON.parse(result.plot) : result.plot;
             Plotly.newPlot('parametric_plot', plotData.data, plotData.layout, {responsive: true});
         } else {
-            showWarning('No plot data received from parametric analysis');
+            showWarning(T('app.msg.paramNoPlot', 'No plot data received from parametric analysis'));
         }
         
-        showSuccess('Parametric analysis completed successfully');
+        showSuccess(T('app.msg.paramOk', 'Parametric analysis completed successfully'));
         
     } catch (error) {
         console.error('Parametric analysis error:', error);
-        showError('Parametric analysis failed: ' + error.message);
+        showError(TF('app.msg.paramError', { message: error.message }, 'Parametric analysis failed: {message}'));
     } finally {
         showLoading(false);
     }
@@ -1797,13 +2152,15 @@ async function calculateTrajectory() {
         }
         
         showLoading(true);
-        showMessage('Trajectory analysis started...', 'info');
+        showMessage(T('app.msg.trajStarted', 'Trajectory analysis started...'), 'info');
         
         // Get trajectory specific data
         const initialMass = parseFloat(document.getElementById('initial_mass').value);
         const finalMass = parseFloat(document.getElementById('final_mass').value);
         const dragCoeff = parseFloat(document.getElementById('drag_coefficient').value);
-        const refArea = parseFloat(document.getElementById('reference_area').value);
+        // Alan arayüzde mm² girilir, backend m² bekler (sözleşme değişmedi).
+        const refAreaMm2 = parseFloat(document.getElementById('reference_area').value);
+        const refArea = refAreaMm2 / MM2_PER_M2;
         const trajAltStart = parseFloat(document.getElementById('traj_alt_start')?.value || 0);
         const trajAltEnd = parseFloat(document.getElementById('traj_alt_end')?.value || 10000);
         const trajPoints = parseInt(document.getElementById('traj_points')?.value || 20);
@@ -1811,20 +2168,20 @@ async function calculateTrajectory() {
         const windSpeed = parseFloat(document.getElementById('wind_speed')?.value || 0);
         
         // Validate trajectory inputs
-        if (isNaN(initialMass) || isNaN(finalMass) || isNaN(dragCoeff) || isNaN(refArea)) {
-            throw new Error('Invalid trajectory analysis inputs');
+        if (isNaN(initialMass) || isNaN(finalMass) || isNaN(dragCoeff) || isNaN(refAreaMm2)) {
+            throw new Error(T('app.msg.trajInvalid', 'Invalid trajectory analysis inputs'));
         }
         
         if (initialMass <= finalMass) {
-            throw new Error('Initial mass must be greater than final mass');
+            throw new Error(T('app.msg.trajMass', 'Initial mass must be greater than final mass'));
         }
         
         if (dragCoeff <= 0 || refArea <= 0) {
-            throw new Error('Drag coefficient and reference area must be positive');
+            throw new Error(T('app.msg.trajDrag', 'Drag coefficient and reference area must be positive'));
         }
         
         if (trajAltStart >= trajAltEnd) {
-            throw new Error('Starting altitude must be less than final altitude');
+            throw new Error(T('app.msg.trajAltitude', 'Starting altitude must be less than final altitude'));
         }
         
         const baseData = getFormData();
@@ -1857,7 +2214,7 @@ async function calculateTrajectory() {
         const result = await response.json();
         
         if (result.status === 'error' || result.error) {
-            throw new Error(result.error || 'Trajectory analysis failed');
+            throw new Error(result.error || T('app.msg.trajFailed', 'Trajectory analysis failed'));
         }
         
         // Display trajectory plot
@@ -1892,22 +2249,25 @@ async function calculateTrajectory() {
             } catch (parseError) {
                 console.error('Plot data parsing error:', parseError);
                 console.error('Raw plot data:', result.plot_data);
-                showWarning('Plot visualization failed, but trajectory data is available');
+                showWarning(T('app.msg.trajPlotFailed', 'Plot visualization failed, but trajectory data is available'));
             }
         } else {
-            showWarning('No plot data received from trajectory analysis');
+            showWarning(T('app.msg.trajNoPlot', 'No plot data received from trajectory analysis'));
         }
         
         // Show success message with engine data
         if (result.engine_data) {
             const engineData = result.engine_data;
-            showMessage(`Trajectory analysis completed! Engine: ${engineData.thrust.toFixed(0)}N thrust, ${engineData.isp.toFixed(1)}s Isp`, 'success');
+            showMessage(TF('app.msg.trajOkEngine',
+                { thrust: engineData.thrust.toFixed(0), isp: engineData.isp.toFixed(1) },
+                'Trajectory analysis completed! Engine: {thrust} N thrust, {isp} s Isp'),
+                'success');
         } else {
-            showMessage('Trajectory analysis completed successfully!', 'success');
+            showMessage(T('app.msg.trajOk', 'Trajectory analysis completed successfully!'), 'success');
         }
         
     } catch (error) {
-        showError('Trajectory analysis failed: ' + error.message);
+        showError(TF('app.msg.trajError', { message: error.message }, 'Trajectory analysis failed: {message}'));
     } finally {
         showLoading(false);
     }
@@ -1919,18 +2279,18 @@ function displayMotorTable(motorData) {
     if (!motorTableBody) return;
     
     const motorRows = [
-        ['Throat Diameter', (motorData.throat_diameter * 1000).toFixed(1), 'mm'],
-        ['Exit Diameter', (motorData.exit_diameter * 1000).toFixed(1), 'mm'],
-        ['Expansion Ratio', motorData.expansion_ratio.toFixed(1), '-'],
-        ['Chamber Diameter', (motorData.chamber_diameter * 1000).toFixed(1), 'mm'],
-        ['Chamber Length', (motorData.chamber_length * 1000).toFixed(1), 'mm'],
-        ['Chamber Volume', (motorData.chamber_volume * 1e6).toFixed(1), 'cm³'],
-        ['Chamber Pressure', (motorData.chamber_pressure).toFixed(1), 'bar'],
-        ['Thrust', (motorData.thrust).toFixed(0), 'N'],
-        ['Specific Impulse', motorData.isp.toFixed(1), 's'],
-        ['Characteristic Velocity', motorData.c_star.toFixed(0), 'm/s'],
-        ['Thrust Coefficient', motorData.cf.toFixed(3), '-'],
-        ['Mass Flow Rate', motorData.mdot_total.toFixed(3), 'kg/s']
+        [T('app.rep.throatDia', 'Throat Diameter'), (motorData.throat_diameter * 1000).toFixed(1), 'mm'],
+        [T('app.rep.exitDia', 'Exit Diameter'), (motorData.exit_diameter * 1000).toFixed(1), 'mm'],
+        [T('common.f.expansionRatio', 'Expansion Ratio'), motorData.expansion_ratio.toFixed(1), '-'],
+        [T('app.rep.chamberDia', 'Chamber Diameter'), (motorData.chamber_diameter * 1000).toFixed(1), 'mm'],
+        [T('app.rep.chamberLen', 'Chamber Length'), (motorData.chamber_length * 1000).toFixed(1), 'mm'],
+        [T('app.rep.chamberVolume', 'Chamber Volume'), (motorData.chamber_volume * 1e6).toFixed(1), 'cm³'],
+        [T('app.metric.pc', 'Chamber Pressure'), (motorData.chamber_pressure).toFixed(1), 'bar'],
+        [T('app.metric.thrust', 'Thrust'), (motorData.thrust).toFixed(0), 'N'],
+        [T('app.metric.isp', 'Specific Impulse'), motorData.isp.toFixed(1), 's'],
+        [T('app.rep.cstar', 'Characteristic Velocity'), motorData.c_star.toFixed(0), 'm/s'],
+        [T('app.rep.cf', 'Thrust Coefficient'), motorData.cf.toFixed(3), '-'],
+        [T('app.metric.mdot', 'Mass Flow Rate'), motorData.mdot_total.toFixed(3), 'kg/s']
     ];
     
     motorTableBody.innerHTML = '';
@@ -1946,43 +2306,61 @@ function displayMotorTable(motorData) {
 function displayInjectorTable(injectorData) {
     const injectorTableBody = document.querySelector('#injector_table tbody');
     if (!injectorTableBody) return;
+
+    // Sayisal alanlari guvenli bicimle: 0 gecerli bir degerdir ('N/A' degil).
+    const fmt = (v, digits) => (typeof v === 'number' && isFinite(v))
+        ? v.toFixed(digits) : 'N/A';
     
     const injectorRows = [
-        ['Type', injectorData.type, '-'],
-        ['Exit Velocity', injectorData.exit_velocity.toFixed(1), 'm/s'],
-        ['Reynolds Number', injectorData.reynolds_number.toFixed(0), '-'],
-        ['Pressure Drop', injectorData.pressure_drop.toFixed(2), 'bar']
+        [T('common.type', 'Type'), injectorData.type, '-'],
+        [T('app.rep.exitVelocity', 'Exit Velocity'), injectorData.exit_velocity.toFixed(1), 'm/s'],
+        [T('app.rep.reynolds', 'Reynolds Number'), injectorData.reynolds_number.toFixed(0), '-'],
+        [T('app.rep.pressureDrop', 'Pressure Drop'), injectorData.pressure_drop.toFixed(2), 'bar']
     ];
     
     // Add type-specific parameters
     if (injectorData.type === 'showerhead') {
-        injectorRows.push(['Number of Holes', injectorData.n_holes || 'N/A', '-']);
-        injectorRows.push(['Hole Diameter', injectorData.hole_diameter ? injectorData.hole_diameter.toFixed(2) : 'N/A', 'mm']);
-        injectorRows.push(['L/D Ratio', injectorData.l_d_ratio ? injectorData.l_d_ratio.toFixed(1) : 'N/A', '-']);
+        injectorRows.push([T('app.rep.nHoles', 'Number of Holes'), injectorData.n_holes || 'N/A', '-']);
+        injectorRows.push([T('app.rep.holeDia', 'Hole Diameter'), injectorData.hole_diameter ? injectorData.hole_diameter.toFixed(2) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.ldRatio', 'L/D Ratio'), injectorData.l_d_ratio ? injectorData.l_d_ratio.toFixed(1) : 'N/A', '-']);
     } else if (injectorData.type === 'pintle') {
-        injectorRows.push(['Outer Diameter', injectorData.outer_diameter ? injectorData.outer_diameter.toFixed(1) : 'N/A', 'mm']);
-        injectorRows.push(['Pintle Diameter', injectorData.pintle_diameter ? injectorData.pintle_diameter.toFixed(1) : 'N/A', 'mm']);
-        injectorRows.push(['Gap', injectorData.gap ? injectorData.gap.toFixed(2) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.outerDia', 'Outer Diameter'), injectorData.outer_diameter ? injectorData.outer_diameter.toFixed(1) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.pintleDia', 'Pintle Diameter'), injectorData.pintle_diameter ? injectorData.pintle_diameter.toFixed(1) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.gap', 'Gap'), injectorData.gap ? injectorData.gap.toFixed(2) : 'N/A', 'mm']);
     }
     
     // Add common parameters
-    injectorRows.push(['Discharge Coefficient', injectorData.discharge_coefficient ? injectorData.discharge_coefficient.toFixed(3) : 'N/A', '-']);
-    injectorRows.push(['Injection Area', injectorData.injection_area ? (injectorData.injection_area * 1e6).toFixed(2) : 'N/A', 'mm²']);
-    
+    // BIRIM SOZLESMESI (v2.5.2): backend injection_area'yi mm2 olarak
+    // dondurur (eskiden burada tekrar 1e6 ile carpiliyor, 10^6 kat sisik
+    // deger cikiyordu). mixing_efficiency backend'de zaten yuzde.
+    injectorRows.push([T('app.rep.cd', 'Discharge Coefficient'), fmt(injectorData.discharge_coefficient, 3)]);
+    injectorRows.push([T('app.rep.injectionArea', 'Injection Area'), fmt(injectorData.injection_area, 2), 'mm²']);
+
     // Add injector diameter if available
     if (injectorData.injector_diameter) {
-        injectorRows.push(['Max Injector Diameter', injectorData.injector_diameter.toFixed(1), 'mm']);
+        injectorRows.push([T('app.rep.maxInjectorDia', 'Max Injector Diameter'),
+                           injectorData.injector_diameter.toFixed(1), 'mm']);
     }
-    
-    injectorRows.push(['Weber Number', injectorData.weber_number ? injectorData.weber_number.toFixed(0) : 'N/A', '-']);
-    injectorRows.push(['Momentum Ratio', injectorData.momentum_ratio ? injectorData.momentum_ratio.toFixed(2) : 'N/A', '-']);
-    injectorRows.push(['Mixing Efficiency', injectorData.mixing_efficiency ? (injectorData.mixing_efficiency * 100).toFixed(1) : 'N/A', '%']);
+
+    injectorRows.push([T('app.rep.weber', 'Weber Number'), fmt(injectorData.weber_number, 0)]);
+    if (injectorData.momentum_ratio !== undefined && injectorData.momentum_ratio !== null) {
+        injectorRows.push([T('app.rep.momentumRatio', 'Momentum Flux Ratio'),
+                           fmt(injectorData.momentum_ratio, 2)]);
+    }
+    if (injectorData.mixing_efficiency !== undefined && injectorData.mixing_efficiency !== null) {
+        injectorRows.push([T('app.rep.mixingEfficiency', 'Mixing Efficiency'),
+                           fmt(injectorData.mixing_efficiency, 1), '%']);
+    }
+    if (injectorData.pressure_drop_source) {
+        injectorRows.push([T('app.rep.dpBasis', 'Pressure Drop Basis'),
+                           injectorData.pressure_drop_source, '-']);
+    }
     
     injectorTableBody.innerHTML = '';
     injectorRows.forEach(([param, value, unit]) => {
         const row = injectorTableBody.insertRow();
         row.insertCell(0).textContent = param;
         row.insertCell(1).textContent = value;
-        row.insertCell(2).textContent = unit;
+        row.insertCell(2).textContent = unit || '-';
     });
 }

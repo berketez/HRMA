@@ -7,7 +7,7 @@ import os
 import io
 import base64
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import json
 
 from reportlab.lib import colors
@@ -36,6 +36,71 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from jinja2 import Environment, BaseLoader
 import plotly.graph_objects as go
 import plotly.io as pio
+
+# --------------------------------------------------------------------------
+# Grafik gömme sabitleri — TEK tanım noktası (CLAUDE.md kural 11).
+# Eski kod 800x600 ölçeksiz PNG üretiyordu; A4 sayfa genişliğine gerilince
+# baskıda bulanıklaşıyordu ("grafiğin çözünürlüğü çok kötü" şikayeti).
+# --------------------------------------------------------------------------
+CHART_EXPORT_WIDTH_PX = 1600     # kaleido render genişliği [px]
+CHART_EXPORT_HEIGHT_PX = 1000    # kaleido render yüksekliği [px]
+CHART_EXPORT_SCALE = 2           # cihaz piksel oranı -> 3200x2000 gerçek px
+# A4 (595.27 pt) eksi 72 pt sol + 72 pt sağ kenar boşluğu = 451.27 pt.
+CHART_MAX_WIDTH_INCH = 6.1       # güvenli sayfa içi genişlik [inch]
+CHART_MAX_HEIGHT_INCH = 4.4      # tek grafik için üst yükseklik sınırı [inch]
+
+# PDF beyaz zeminlidir; arayüzün koyu tema figürleri olduğu gibi gömülürse
+# koyu kutu + koyu yazı okunamaz hale gelir. Dönüşümden ÖNCE tek noktada
+# aydınlık palete çevrilir.
+CHART_PRINT_PAPER_COLOR = '#ffffff'
+CHART_PRINT_FONT_COLOR = '#111111'
+CHART_PRINT_GRID_COLOR = '#d5d9de'
+CHART_PRINT_LINE_COLOR = '#333333'
+
+# Grafik gömülemediğinde basılan not. DİKKAT: 'Error loading image' metni
+# bilinçli olarak kullanılmaz — kullanıcıya hata yığını değil, durum
+# bildirilir (tests/test_pdf_charts.py bu metni gözler).
+CHART_UNAVAILABLE_NOTE = (
+    'Chart unavailable - this figure could not be rendered on the server '
+    '(image renderer not available or chart data not recognised).'
+)
+
+# --------------------------------------------------------------------------
+# Uzunluk birimi çözümü — TEK tanım noktası.
+# Hibrit yolunda motor ölçüleri METRE, katı yolunda MİLİMETRE gelir; eski kod
+# ikisini de ':.2f mm' ile basıyor ve hibritte "Chamber Diameter 0.10 mm" gibi
+# fiziksel olarak imkânsız satırlar üretiyordu (2026-07-19 denetimi).
+# Kural: motorun EN BÜYÜK uzunluk alanı bu eşikten küçükse girdiler metredir.
+# Milimetrede en büyük ölçü daima > 5 (5 mm'lik motor yok); metrede ise 5 m'yi
+# aşan bir hazne/lüle boyu roket motoru pratiğinde bulunmaz.
+LENGTH_UNIT_METRE_MAX = 5.0
+
+# Güvenlik puanı kabul eşiği (0-10 ölçeği) — tek tanım noktası.
+SAFETY_RATING_ACCEPTABLE = 7.0
+LENGTH_KEYS = ('chamber_diameter', 'chamber_length', 'throat_diameter',
+               'exit_diameter', 'nozzle_length', 'grain_length')
+
+
+def _is_dark(color) -> bool:
+    """'#rrggbb' / 'rgb(r,g,b)' rengi koyu mu? Çözülemezse False."""
+    try:
+        text = str(color).strip().lower()
+        if text.startswith('#'):
+            text = text[1:]
+            if len(text) == 3:
+                text = ''.join(c * 2 for c in text)
+            if len(text) < 6:
+                return False
+            r, g, b = (int(text[i:i + 2], 16) for i in (0, 2, 4))
+        elif text.startswith('rgb'):
+            parts = text[text.find('(') + 1:text.find(')')].split(',')
+            r, g, b = (float(p) for p in parts[:3])
+        else:
+            return False
+        # ITU-R BT.601 luma
+        return (0.299 * r + 0.587 * g + 0.114 * b) < 128.0
+    except Exception:
+        return False
 
 
 class PDFReportGenerator:
@@ -91,7 +156,44 @@ class PDFReportGenerator:
             return missing
         return pattern.format(number)
 
-    def generate_motor_analysis_report(self, motor_data: Dict, analysis_results: Dict, 
+    @staticmethod
+    def _length_scale_to_mm(motor_data: Dict) -> Tuple[float, str]:
+        """Girdi uzunluk birimini çözer; (mm'ye çarpan, birim_adı) döner.
+
+        Açık bildirim (`length_units`) varsa ona uyulur; yoksa motorun en büyük
+        uzunluk alanına bakılır (bkz. LENGTH_UNIT_METRE_MAX).
+        """
+        declared = str((motor_data or {}).get('length_units') or '').lower()
+        if declared in ('m', 'metre', 'meter'):
+            return 1000.0, 'm'
+        if declared in ('mm', 'millimetre', 'millimeter'):
+            return 1.0, 'mm'
+
+        largest = 0.0
+        for key in LENGTH_KEYS:
+            try:
+                value = float((motor_data or {}).get(key))
+            except (TypeError, ValueError):
+                continue
+            if value == value and value > largest:
+                largest = value
+        if largest <= 0.0:
+            return 1.0, 'mm'  # ölçü yok; dönüşüm uygulanmaz
+        return (1000.0, 'm') if largest < LENGTH_UNIT_METRE_MAX else (1.0, 'mm')
+
+    def _fmt_length_mm(self, motor_data: Dict, key: str,
+                       pattern: str = '{:.2f}') -> str:
+        """Uzunluğu daima mm olarak biçimlendirir (birim otomatik çözülür)."""
+        scale, _unit = self._length_scale_to_mm(motor_data)
+        try:
+            value = float(motor_data.get(key))
+        except (TypeError, ValueError):
+            return 'N/A'
+        if value != value or value in (float('inf'), float('-inf')):
+            return 'N/A'
+        return pattern.format(value * scale) + ' mm'
+
+    def generate_motor_analysis_report(self, motor_data: Dict, analysis_results: Dict,
                                      charts: List[str], report_type: str = 'complete') -> bytes:
         """
         Generate complete motor analysis PDF report
@@ -225,18 +327,38 @@ class PDFReportGenerator:
         story.append(Paragraph(summary_text, self.styles['Normal']))
         story.append(Spacer(1, 0.3*inch))
         
-        # Safety assessment
-        safety = analysis_results.get('safety', {})
-        safety_status = "ACCEPTABLE" if safety.get('overall_rating', 0) > 7 else "REVIEW REQUIRED"
-        
-        safety_text = f"""
+        # Safety assessment — YALNIZ gerçek güvenlik analizi varsa puan basılır.
+        # Eski kod 'safety' anahtarı hiç yokken bile bölümü basıyor, 0.0/10 ve
+        # "REVIEW REQUIRED" yazıyordu; kullanıcı hiç çalıştırılmamış bir
+        # analizin motorunu sıfır puanladığını sanıyordu (2026-07-19 denetimi).
+        safety = analysis_results.get('safety') or {}
+        rating = safety.get('overall_rating')
+        try:
+            rating = float(rating)
+        except (TypeError, ValueError):
+            rating = None
+        if rating is None or rating != rating:
+            rating = None
+
+        if rating is None:
+            safety_text = (
+                '<b>Safety Assessment: NOT EVALUATED IN THIS RUN</b><br/>'
+                'No safety analysis result was supplied with this report, so no '
+                'safety rating is reported. Run the safety analysis to include '
+                'this section.'
+            )
+        else:
+            safety_status = ("ACCEPTABLE" if rating > SAFETY_RATING_ACCEPTABLE
+                             else "REVIEW REQUIRED")
+            safety_text = f"""
         <b>Safety Assessment: {safety_status}</b><br/>
-        Overall Safety Rating: {safety.get('overall_rating', 0):.1f}/10<br/>
+        Overall Safety Rating: {rating:.1f}/10
+        (acceptance threshold {SAFETY_RATING_ACCEPTABLE:.0f}/10)<br/>
         Critical Issues: {len(safety.get('critical_issues', []))}
         """
-        
+
         story.append(Paragraph(safety_text, self.styles['Normal']))
-        
+
         return story
 
     def _create_motor_configuration(self, motor_data: Dict) -> List:
@@ -248,32 +370,47 @@ class PDFReportGenerator:
         # Configuration table
         config_data = []
         
+        # Ölçüler daima mm basılır; girdi birimi otomatik çözülür ve tabloda
+        # açıkça yazılır (hibrit yolu metre, katı yolu mm gönderiyor).
+        _scale, input_unit = self._length_scale_to_mm(motor_data)
+
         # Basic parameters
         config_data.extend([
-            ['Motor Type', motor_data.get('motor_type', 'N/A')],
-            ['Propellant Type', motor_data.get('propellant_type', 'N/A')],
-            ['Chamber Diameter', f"{motor_data.get('chamber_diameter', 0):.2f} mm"],
-            ['Chamber Length', f"{motor_data.get('chamber_length', 0):.2f} mm"],
-            ['Throat Diameter', f"{motor_data.get('throat_diameter', 0):.2f} mm"],
-            ['Exit Diameter', f"{motor_data.get('exit_diameter', 0):.2f} mm"],
-            ['Expansion Ratio', f"{motor_data.get('expansion_ratio', 0):.1f}"]
+            ['Motor Type', motor_data.get('motor_type')
+             or 'N/A (not reported by solver)'],
+            ['Propellant Type', motor_data.get('propellant_type')
+             or 'N/A (not reported by solver)'],
+            ['Chamber Diameter', self._fmt_length_mm(motor_data, 'chamber_diameter')],
+            ['Chamber Length', self._fmt_length_mm(motor_data, 'chamber_length')],
+            ['Throat Diameter', self._fmt_length_mm(motor_data, 'throat_diameter')],
+            ['Exit Diameter', self._fmt_length_mm(motor_data, 'exit_diameter')],
+            ['Expansion Ratio', self._fmt(motor_data.get('expansion_ratio'))],
+            ['Dimension units', f'mm (input interpreted as {input_unit})']
         ])
-        
-        # Add motor-specific parameters
-        if motor_data.get('motor_type') == 'solid':
+
+        # Motora özgü satırlar VERİ VARLIĞINA göre eklenir; eskiden yalnız
+        # motor_type == 'solid'/'liquid' ise basılıyordu, hibrit sonucunda bu
+        # anahtar olmadığı için O/F, oksitleyici ve yakıt satırları hiç
+        # görünmüyordu (2026-07-19 denetimi).
+        if motor_data.get('grain_type') or motor_data.get('grain_density'):
             config_data.extend([
                 ['Grain Configuration', motor_data.get('grain_type', 'N/A')],
-                ['Propellant Mass', f"{motor_data.get('propellant_mass', 0):.2f} kg"],
-                ['Grain Density', f"{motor_data.get('grain_density', 0):.0f} kg/m³"]
+                ['Propellant Mass', self._fmt(motor_data.get('propellant_mass'),
+                                              '{:.2f}') + ' kg'],
+                ['Grain Density', self._fmt(motor_data.get('grain_density'),
+                                            '{:.0f}') + ' kg/m3']
             ])
-        elif motor_data.get('motor_type') == 'liquid':
+        if (motor_data.get('oxidizer_type') or motor_data.get('fuel_type')
+                or motor_data.get('of_ratio') is not None):
             config_data.extend([
                 ['Oxidizer', motor_data.get('oxidizer_type', 'N/A')],
                 ['Fuel', motor_data.get('fuel_type', 'N/A')],
-                ['O/F Ratio', f"{motor_data.get('of_ratio', 0):.2f}"],
-                ['Chamber Pressure', f"{motor_data.get('chamber_pressure', 0):.1f} bar"]
+                ['O/F Ratio', self._fmt(motor_data.get('of_ratio'), '{:.2f}')],
+                ['Chamber Pressure', self._fmt(motor_data.get('chamber_pressure'))
+                 + ' bar']
             ])
-        
+
+
         table = Table(config_data, colWidths=[2.5*inch, 2.5*inch])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (0, -1), colors.lightblue),
@@ -404,31 +541,198 @@ class PDFReportGenerator:
 
         return story
 
+    # ------------------------------------------------------------------
+    # Grafik boru hattı
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_plotly_payload(chart_data) -> Optional[Dict]:
+        """Girdi Plotly figür tanımı ise sözlüğünü, değilse None döndürür.
+
+        Arayüz grafikleri JSON.stringify({data, layout}) olarak gönderiyor
+        (templates/*.html PDF toplayıcıları). Eski kod bunu base64 PNG
+        sanıp b64decode ediyordu; çözülen çöp reportlab'e verilince her
+        grafik hata satırına düşüyordu — kök neden buydu.
+        """
+        if isinstance(chart_data, dict):
+            payload = chart_data
+        else:
+            if isinstance(chart_data, bytes):
+                try:
+                    chart_data = chart_data.decode('utf-8')
+                except Exception:
+                    return None
+            if not isinstance(chart_data, str):
+                return None
+            text = chart_data.strip()
+            if not text.startswith('{'):
+                return None
+            try:
+                payload = json.loads(text)
+            except Exception:
+                return None
+        if not isinstance(payload, dict):
+            return None
+        if 'data' in payload or 'layout' in payload:
+            return payload
+        return None
+
+    @staticmethod
+    def _apply_print_theme(fig: 'go.Figure') -> 'go.Figure':
+        """Koyu tema figürünü baskı (beyaz zemin) paletine çevirir.
+
+        Tek nokta: hem rapor bölümü hem tekil grafik dışa aktarımı buradan
+        geçer, böylece PDF'lerde tema tutarlıdır.
+        """
+        fig.update_layout(
+            template='plotly_white',
+            paper_bgcolor=CHART_PRINT_PAPER_COLOR,
+            plot_bgcolor=CHART_PRINT_PAPER_COLOR,
+            font_color=CHART_PRINT_FONT_COLOR,
+        )
+        axis_style = dict(
+            color=CHART_PRINT_FONT_COLOR,
+            gridcolor=CHART_PRINT_GRID_COLOR,
+            zerolinecolor=CHART_PRINT_GRID_COLOR,
+            linecolor=CHART_PRINT_LINE_COLOR,
+        )
+        # 2B eksenler (3B sahnelerde bu çağrılar sessizce etkisizdir).
+        try:
+            fig.update_xaxes(**axis_style)
+            fig.update_yaxes(**axis_style)
+        except Exception:
+            pass
+        # Lejant / başlık / dipnot: koyu zemin varsayımıyla açık renkli
+        # yazılmış olabilir — okunur koyu renge çekilir.
+        try:
+            legend = fig.layout.legend
+            if legend is not None:
+                fig.update_layout(legend=dict(
+                    bgcolor='rgba(255,255,255,0.85)',
+                    bordercolor=CHART_PRINT_GRID_COLOR,
+                    font=dict(color=CHART_PRINT_FONT_COLOR)))
+        except Exception:
+            pass
+        try:
+            for ann in (fig.layout.annotations or ()):
+                if ann.font is None or ann.font.color is None \
+                        or not _is_dark(ann.font.color):
+                    ann.font.color = CHART_PRINT_FONT_COLOR
+        except Exception:
+            pass
+        try:
+            scene = fig.layout.scene
+            if scene is not None:
+                fig.update_layout(scene=dict(
+                    xaxis=dict(**axis_style), yaxis=dict(**axis_style),
+                    zaxis=dict(**axis_style),
+                    bgcolor=CHART_PRINT_PAPER_COLOR))
+        except Exception:
+            pass
+        return fig
+
+    @staticmethod
+    def _chart_title(payload: Optional[Dict], index: int) -> str:
+        """Figür başlığı varsa onu, yoksa 'Chart N' döndürür."""
+        try:
+            title = (payload or {}).get('layout', {}).get('title')
+            if isinstance(title, dict):
+                title = title.get('text')
+            title = str(title or '').strip()
+            if title:
+                return title
+        except Exception:
+            pass
+        return f'Chart {index}'
+
+    def _chart_to_png_bytes(self, chart_data) -> Optional[bytes]:
+        """Grafik girdisini PNG baytlarına çevirir; başarısızsa None.
+
+        İki biçim desteklenir (geriye dönük uyum korunur):
+          1. Plotly figür JSON'u  -> kaleido ile yüksek çözünürlüklü PNG
+          2. base64 kodlu PNG/JPEG -> olduğu gibi çözülür
+        kaleido kurulu değilse (paketli sürümde eksik olabilir) çökme
+        YOKTUR: None döner, çağıran bölüm 'chart unavailable' notu basar.
+        """
+        payload = self._parse_plotly_payload(chart_data)
+        if payload is not None:
+            try:
+                fig = go.Figure(payload)
+                self._apply_print_theme(fig)
+                return pio.to_image(
+                    fig, format='png',
+                    width=CHART_EXPORT_WIDTH_PX,
+                    height=CHART_EXPORT_HEIGHT_PX,
+                    scale=CHART_EXPORT_SCALE)
+            except Exception as exc:  # kaleido yok / figür bozuk
+                print(f"Chart render skipped: {exc}")
+                return None
+        # base64 gövde (data URI öneki olabilir)
+        try:
+            if isinstance(chart_data, bytes):
+                raw = chart_data
+                if raw[:4] in (b'\x89PNG', b'\xff\xd8\xff\xe0'):
+                    return raw
+                chart_data = raw.decode('utf-8')
+            text = str(chart_data).strip()
+            if text.startswith('data:') and ',' in text:
+                text = text.split(',', 1)[1]
+            decoded = base64.b64decode(text, validate=False)
+            if not decoded:
+                return None
+            # Geçerli bir raster mı? (PNG / JPEG / GIF imzaları)
+            if decoded[:8].startswith(b'\x89PNG') or decoded[:3] == b'\xff\xd8\xff' \
+                    or decoded[:3] == b'GIF':
+                return decoded
+            return None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _fit_image(png_bytes: bytes) -> Optional[Image]:
+        """PNG'yi en-boy oranını koruyarak sayfa içine sığdırır.
+
+        Eski kod 6x4 inch'e ZORLUYORDU; kare olmayan figürler eziliyor,
+        geniş figürler kenar boşluğuna taşıyordu.
+        """
+        try:
+            from reportlab.lib.utils import ImageReader
+            buffer = io.BytesIO(png_bytes)
+            width_px, height_px = ImageReader(buffer).getSize()
+            if not width_px or not height_px:
+                return None
+            aspect = float(height_px) / float(width_px)
+            draw_width = CHART_MAX_WIDTH_INCH * inch
+            draw_height = draw_width * aspect
+            if draw_height > CHART_MAX_HEIGHT_INCH * inch:
+                draw_height = CHART_MAX_HEIGHT_INCH * inch
+                draw_width = draw_height / aspect
+            buffer.seek(0)
+            return Image(buffer, width=draw_width, height=draw_height)
+        except Exception:
+            return None
+
     def _create_charts_section(self, charts: List[str]) -> List:
         """Create charts and visualizations section"""
         story = []
-        
+
         story.append(Paragraph("Analysis Charts", self.styles['SectionHeader']))
-        
+
         for i, chart_data in enumerate(charts):
-            try:
-                # Decode base64 image
-                image_data = base64.b64decode(chart_data)
-                image_buffer = io.BytesIO(image_data)
-                
-                # Create image
-                img = Image(image_buffer)
-                img.drawHeight = 4*inch
-                img.drawWidth = 6*inch
-                
-                story.append(Paragraph(f"Chart {i+1}", self.styles['Heading3']))
-                story.append(img)
-                story.append(Spacer(1, 0.2*inch))
-                
-            except Exception as e:
-                story.append(Paragraph(f"Chart {i+1}: Error loading image - {str(e)}", 
-                                     self.styles['Normal']))
-        
+            payload = self._parse_plotly_payload(chart_data)
+            heading = self._chart_title(payload, i + 1)
+            story.append(Paragraph(heading, self.styles['Heading3']))
+
+            png_bytes = self._chart_to_png_bytes(chart_data)
+            img = self._fit_image(png_bytes) if png_bytes else None
+            if img is None:
+                story.append(Paragraph(CHART_UNAVAILABLE_NOTE,
+                                       self.styles['Normal']))
+                story.append(Spacer(1, 0.15 * inch))
+                continue
+
+            story.append(img)
+            story.append(Spacer(1, 0.2 * inch))
+
         return story
 
     def _create_technical_appendix(self, motor_data: Dict, analysis_results: Dict) -> List:
@@ -467,18 +771,26 @@ class PDFReportGenerator:
         
         return story
 
-    def export_plotly_chart_to_image(self, plotly_json: str, format: str = 'png') -> str:
-        """Convert Plotly chart to base64 image"""
+    def export_plotly_chart_to_image(self, plotly_json, format: str = 'png',
+                                     width: int = CHART_EXPORT_WIDTH_PX,
+                                     height: int = CHART_EXPORT_HEIGHT_PX,
+                                     scale: int = CHART_EXPORT_SCALE) -> str:
+        """Convert a Plotly chart to a base64 image string.
+
+        Çözünürlük sabitleri modül başında tanımlıdır (baskı kalitesi);
+        çağıran özel bir boyut isterse parametreyle ezebilir. Figür koyu
+        temadan baskı temasına burada da çevrilir (tek nokta).
+        """
         try:
-            fig_dict = json.loads(plotly_json)
+            fig_dict = (plotly_json if isinstance(plotly_json, dict)
+                        else json.loads(plotly_json))
             fig = go.Figure(fig_dict)
-            
-            # Export as image
-            img_bytes = pio.to_image(fig, format=format, width=800, height=600)
-            img_base64 = base64.b64encode(img_bytes).decode()
-            
-            return img_base64
-            
+            self._apply_print_theme(fig)
+
+            img_bytes = pio.to_image(fig, format=format, width=width,
+                                     height=height, scale=scale)
+            return base64.b64encode(img_bytes).decode()
+
         except Exception as e:
             print(f"Error converting chart: {str(e)}")
             return ""

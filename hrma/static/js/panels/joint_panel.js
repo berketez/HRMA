@@ -16,6 +16,7 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     var U = window.AnalysisDock.ui;
+    var T = U.t;                         // çeviri kısayolu
 
     // bolted_joint.py THREAD_STRESS_AREA_MM2 anahtarlarıyla birebir
     var SIZES = ['M4', 'M5', 'M6', 'M8', 'M10', 'M12', 'M14', 'M16',
@@ -25,10 +26,12 @@
         ['8.8', '8.8 (ISO 898-1)'],
         ['10.9', '10.9 (ISO 898-1)'],
         ['12.9', '12.9 (ISO 898-1)'],
-        ['A2-70', 'A2-70 stainless (ISO 3506-1)'],
+        ['A2-70', 'A2-70 stainless (ISO 3506-1)', 'joint.classA270'],
     ];
 
-    // materials_db anahtarları (sıkılan üye malzemesi)
+    // FALLBACK listesi — /api/materials kataloğu yüklenemezse kullanılır
+    // (sıkılan üye malzemesi; katalog gelirse 'bolt'+'structural' etiketli
+    // tam liste bunun yerine geçer)
     var MEMBER_MATERIALS = [
         ['aluminum_6061', 'Aluminum 6061-T6'],
         ['steel', 'Steel (generic)'],
@@ -40,13 +43,13 @@
     ];
 
     var LUBRICATION = [
-        ['false', 'Dry assembly (K = 0.20)'],
-        ['true', 'Lubricated (K = 0.15)'],
+        ['false', 'Dry assembly (K = 0.20)', 'joint.dry'],
+        ['true', 'Lubricated (K = 0.15)', 'joint.lubricated'],
     ];
 
     var REUSE = [
-        ['true', 'Reusable — preload 75% of proof'],
-        ['false', 'Permanent — preload 90% of proof'],
+        ['true', 'Reusable — preload 75% of proof', 'joint.reusable'],
+        ['false', 'Permanent — preload 90% of proof', 'joint.permanent'],
     ];
 
     function sfKind(sf, warnBelow) {
@@ -73,14 +76,17 @@
         // ---- Rozetler ----
         var badges = '';
         badges += sep.separated
-            ? U.badge('JOINT SEPARATED', 'err',
-                'External load exceeds the preload capacity — the joint opens')
-            : U.badge('JOINT CLOSED', sfKind(sf.separation_factor_n0),
-                'Separation factor n₀ = ' + U.fmt(sf.separation_factor_n0, 2));
+            ? U.badge(T('panel.joint.separated', 'JOINT SEPARATED'), 'err',
+                T('panel.joint.separatedTip',
+                  'External load exceeds the preload capacity — the joint opens'))
+            : U.badge(T('panel.joint.closed', 'JOINT CLOSED'), sfKind(sf.separation_factor_n0),
+                U.tf('panel.joint.n0Tip', { n0: U.fmt(sf.separation_factor_n0, 2) },
+                     'Separation factor n0 = {n0}'));
         badges += U.badge(
-            (bolt.count || '—') + ' × ' + (bolt.size || '—') + ' class '
+            (bolt.count || '—') + ' × ' + (bolt.size || '—') + ' '
+            + T('panel.joint.classWord', 'class') + ' '
             + (bolt.property_class || '—'), 'info', bolt.strength_source || '');
-        badges += U.badge('MODEL: SHIGLEY CH. 8', 'info', j.source || '');
+        badges += U.badge(T('panel.joint.model', 'MODEL: SHIGLEY CH. 8'), 'info', j.source || '');
 
         var scatter = Array.isArray(tq.preload_scatter_band_N)
             ? tq.preload_scatter_band_N : [null, null];
@@ -89,54 +95,66 @@
         head.innerHTML = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
             + badges + '</div>'
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard('Recommended torque', U.fmt(tq.recommended_torque_Nm, 1), 'N·m',
+            + U.statCard(T('panel.joint.cardTorque', 'Recommended torque'),
+                U.fmt(tq.recommended_torque_Nm, 1), 'N·m',
                 'info', 'T = K·F_i·d, K = ' + U.fmt(tq.K_nut_factor, 2)
                 + ' (' + (tq.condition || '—') + ')')
-            + U.statCard('Preload F_i', fmtKN(pre.preload_N), 'kN', null,
+            + U.statCard(T('panel.joint.cardPreload', 'Preload F_i'), fmtKN(pre.preload_N), 'kN', null,
                 pre.basis || '')
-            + U.statCard('Preload scatter ±' + U.fmt(tq.preload_uncertainty_pct, 0) + '%',
+            + U.statCard(U.tf('panel.joint.cardScatter', { pct: U.fmt(tq.preload_uncertainty_pct, 0) },
+                              'Preload scatter ±{pct}%'),
                 fmtKN(scatter[0]) + ' – ' + fmtKN(scatter[1]), 'kN', 'warn',
-                'Torque-controlled tightening scatter band (Shigley Sec. 8-8)')
-            + U.statCard('Proof SF', U.fmt(sf.proof_SF, 2), '', sfKind(sf.proof_SF, 1.2),
-                'S_p·A_t / F_bolt (Shigley Eq. 8-28)')
-            + U.statCard('Overload factor n_L', U.fmt(sf.overload_factor_nL, 2), '',
+                T('panel.joint.cardScatterTip',
+                  'Torque-controlled tightening scatter band (Shigley Sec. 8-8)'))
+            + U.statCard(T('panel.joint.cardProofSf', 'Proof SF'), U.fmt(sf.proof_SF, 2), '',
+                sfKind(sf.proof_SF, 1.2), 'S_p·A_t / F_bolt (Shigley Eq. 8-28)')
+            + U.statCard(T('panel.joint.cardOverload', 'Overload factor n_L'),
+                U.fmt(sf.overload_factor_nL, 2), '',
                 sfKind(sf.overload_factor_nL, 1.2), 'Shigley Eq. 8-29')
-            + U.statCard('Separation factor n₀', U.fmt(sf.separation_factor_n0, 2), '',
+            + U.statCard(T('panel.joint.cardSeparation', 'Separation factor n0'),
+                U.fmt(sf.separation_factor_n0, 2), '',
                 sfKind(sf.separation_factor_n0), 'F_i / (P·(1−C)) — Shigley Eq. 8-30')
             + '</div>';
         root.appendChild(head);
 
         // ---- Tablolar ----
         var tail = document.createElement('div');
-        var html = U.sectionTitle('Load Sharing');
+        var html = U.sectionTitle(T('panel.joint.secLoads', 'Load Sharing'));
         html += U.kvTable([
-            ['Pressure load basis', (loads.pressure_bar == null ? '—'
-                : U.fmt(loads.pressure_bar, 1) + ' bar on seal area')],
-            ['Total external load', fmtKN(loads.total_external_load_N) + ' kN'],
-            ['External load per bolt', fmtKN(loads.external_load_per_bolt_N) + ' kN'],
-            ['Bolt total load F_b', fmtKN(loads.bolt_total_load_N) + ' kN',
+            [T('panel.joint.pressureBasis', 'Pressure load basis'), (loads.pressure_bar == null ? '—'
+                : U.tf('panel.joint.pressureBasisValue', { p: U.fmt(loads.pressure_bar, 1) },
+                       '{p} bar on seal area'))],
+            [T('panel.joint.totalExternal', 'Total external load'),
+             fmtKN(loads.total_external_load_N) + ' kN'],
+            [T('panel.joint.externalPerBolt', 'External load per bolt'),
+             fmtKN(loads.external_load_per_bolt_N) + ' kN'],
+            [T('panel.joint.boltTotal', 'Bolt total load F_b'), fmtKN(loads.bolt_total_load_N) + ' kN',
              'F_b = F_i + C·P (Shigley Eq. 8-24)'],
-            ['Member clamp load F_m', fmtKN(loads.member_clamp_load_N) + ' kN',
-             'F_m = F_i − (1−C)·P (Shigley Eq. 8-25) — ≤ 0 means separation'],
-            ['Joint constant C', U.fmt(st.joint_constant_C, 3),
+            [T('panel.joint.memberClamp', 'Member clamp load F_m'),
+             fmtKN(loads.member_clamp_load_N) + ' kN',
+             T('panel.joint.memberClampTip',
+               'F_m = F_i − (1−C)·P (Shigley Eq. 8-25) — ≤ 0 means separation')],
+            [T('panel.joint.jointConstant', 'Joint constant C'), U.fmt(st.joint_constant_C, 3),
              st.model || ''],
-            ['Separation load per bolt', fmtKN(sep.separation_load_per_bolt_N) + ' kN'],
+            [T('panel.joint.separationLoad', 'Separation load per bolt'),
+             fmtKN(sep.separation_load_per_bolt_N) + ' kN'],
         ]);
 
-        html += U.sectionTitle('Bolt Data');
+        html += U.sectionTitle(T('panel.joint.secBolt', 'Bolt Data'));
         html += U.kvTable([
-            ['Stress area A_t', U.fmt(bolt.stress_area_mm2, 1) + ' mm²',
-             'ISO 898-1:2013 Table A.1 (coarse thread)'],
-            ['Proof / yield / ultimate', U.fmt(bolt.proof_strength_MPa, 0) + ' / '
+            [T('panel.joint.stressArea', 'Stress area A_t'), U.fmt(bolt.stress_area_mm2, 1) + ' mm²',
+             T('panel.joint.stressAreaTip', 'ISO 898-1:2013 Table A.1 (coarse thread)')],
+            [T('panel.joint.proofYieldUts', 'Proof / yield / ultimate'),
+             U.fmt(bolt.proof_strength_MPa, 0) + ' / '
                 + U.fmt(bolt.yield_strength_MPa, 0) + ' / '
                 + U.fmt(bolt.ultimate_strength_MPa, 0) + ' MPa',
              bolt.strength_source || ''],
-            ['Proof load F_p', fmtKN(pre.proof_load_N) + ' kN'],
-            ['Member material', st.member_material || '—'],
+            [T('panel.joint.proofLoad', 'Proof load F_p'), fmtKN(pre.proof_load_N) + ' kN'],
+            [T('panel.joint.memberMaterial', 'Member material'), st.member_material || '—'],
         ]);
 
-        html += U.listBlock('Warnings', j.warnings, 'warn');
-        html += U.listBlock('Assumptions', j.assumptions, 'dim');
+        html += U.listBlock(T('common.warnings', 'Warnings'), j.warnings, 'warn');
+        html += U.listBlock(T('common.assumptions', 'Assumptions'), j.assumptions, 'dim');
         tail.innerHTML = html;
         root.appendChild(tail);
     }
@@ -144,20 +162,23 @@
     window.AnalysisDock.register({
         id: 'joint',
         title: 'Bolted Joint — Preload, Torque & Separation (Shigley)',
+        titleKey: 'panel.joint.title',
         category: 'STRUCTURAL',
         endpoint: '/api/bolted-joint',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['pressure_bar', 'Chamber Pressure (bar)', 40, 1],
-            ['seal_diameter_mm', 'Seal / Effective Diameter (mm)', 100, 1],
-            ['bolt_count', 'Bolt Count', 8, 1],
-            ['size', 'Bolt Size', 'M8', SIZES],
-            ['property_class', 'Property Class', '8.8', CLASSES],
-            ['grip_length_mm', 'Grip Length (mm)', 20, 1],
-            ['member_material', 'Member Material', 'aluminum_6061', MEMBER_MATERIALS],
-            ['lubricated', 'Thread Condition', 'false', LUBRICATION],
-            ['reusable', 'Connection Type', 'true', REUSE],
-            ['external_axial_load_n', 'Extra Axial Load (N, optional)', '', 100],
+            ['pressure_bar', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
+            ['seal_diameter_mm', 'Seal / Effective Diameter (mm)', 100, 1, 'panel.joint.fSealDiameter'],
+            ['bolt_count', 'Bolt Count', 8, 1, 'panel.joint.fBoltCount'],
+            ['size', 'Bolt Size', 'M8', SIZES, 'panel.joint.fBoltSize'],
+            ['property_class', 'Property Class', '8.8', CLASSES, 'panel.joint.fPropertyClass'],
+            ['grip_length_mm', 'Grip Length (mm)', 20, 1, 'panel.joint.fGripLength'],
+            ['member_material', 'Member Material', 'aluminum_6061', MEMBER_MATERIALS,
+             'panel.joint.fMemberMaterial'],
+            ['lubricated', 'Thread Condition', 'false', LUBRICATION, 'panel.joint.fThreadCondition'],
+            ['reusable', 'Connection Type', 'true', REUSE, 'panel.joint.fConnectionType'],
+            ['external_axial_load_n', 'Extra Axial Load (N, optional)', '', 100,
+             'panel.joint.fExtraAxial'],
         ],
         fromResults: function (r) {
             var m = (r && r.motor) || r || {};
@@ -173,6 +194,15 @@
         },
         render: render,
     });
+
+    // Merkezi katalog yüklüyse üye malzemesi select'ini 'bolt'+'structural'
+    // etiketli listeyle doldur; değilse fallback aynen kalır.
+    if (typeof window.HRMAMaterials !== 'undefined' && window.HRMAMaterials) {
+        window.HRMAMaterials.populateSelect({
+            panelId: 'joint', fieldId: 'member_material',
+            tags: ['bolt', 'structural'], fallback: MEMBER_MATERIALS,
+        });
+    }
 
     // Test / hata ayıklama: saf render (dry-run)
     window.JointPanel = { _render: render };

@@ -1,34 +1,34 @@
-# HRMA — Validation Status & Known Limitations
+# HRMA: Validation Status & Known Limitations
 
 *Last updated: 2026-07-18. This document states honestly what HRMA has been verified
 against, where it is reliable, and where it is not. HRMA is a **preliminary-design
 and educational tool**, not a flight-qualification tool.*
 
-## 2026-07-18 — Correlation-driven physics review (v2.5.0)
+## 2026-07-18: Correlation-driven physics review (v2.5.0)
 
 The first full correlation run against the 136-record real-experiment database
 exposed four defects; all were fixed as **literature-backed constant/physics
 corrections** (never by feeding measured values back into the model):
 
-- **critical — 'gox' oxidizer was not handled at all.** The oxidizer dispatch
+- **critical: 'gox' oxidizer was not handled at all.** The oxidizer dispatch
   in `combustion_analysis` only knew n2o/lox/h2o2/air; gaseous-oxygen records
   ran an **oxygen-free** equilibrium (c\* ≈ 2530 m/s, non-physical). Fixed by
   adding the gox/o2 branch (O₂, ΔHf=0 at 298 K); paraffin/GOX c\* is now
   ~1822 m/s (within ~1 % of CEA). Unknown fuel/oxidizer keys now raise instead
   of silently producing garbage, and the correlation runner captures engine
   warnings per record.
-- **major — HTPB heat of formation was wrong** (−125 kJ/mol "estimated"
+- **major: HTPB heat of formation was wrong** (−125 kJ/mol "estimated"
   ≈ −2.31 MJ/kg vs the CEA R-45 card's +0.05 MJ/kg). This under-predicted T_c
   by ~300 K in the fuel-rich region the experiments actually live in
   (O/F 2.9–4.6), the root cause of the previous −6.2 % hybrid c\* bias.
   Paraffin ΔHf was also moved to the NIST n-dodecane(l) value.
-- **major — solid strand burn rates used a generic default a–n for every
+- **major: solid strand burn rates used a generic default a–n for every
   propellant**, and the coefficient's origin is MPa-based while the engine
   evaluates in bar (a one-sided ×2.24 inflation; the old +83.8 % cell).
   Published Nakka KNDX/KNSB piecewise regime fits now live in a central
   `hrma/data/burn_rate_db.py` (explicit units, source, and
   `fit_source_records`) and the strand adapter uses them.
-- **minor — regression-rate flux basis.** HRMA's hybrid a–n coefficients are
+- **minor: regression-rate flux basis.** HRMA's hybrid a–n coefficients are
   G_ox-based literature fits; the validation adapter evaluated them against
   G_total, stacking a (1+1/OF)^n factor. The validation layer now runs
   `flux_mode='ox'` (the design path is unchanged).
@@ -52,18 +52,18 @@ corrections** (never by feeding measured values back into the model):
 - The **hybrid regression_rate cell (−20.2 %, medAPE 35.1 %)** is now honest
   rather than accidentally neutral: the Karabeyoglu paraffin subset sits near
   its own published law, while the Rezaei low-flux HTPB/N₂O subset is
-  under-predicted by up to ~2× — a **documented model limit** (single published
+  under-predicted by up to ~2×, a **documented model limit** (single published
   a–n per fuel; Doran 2007 validity ≈ 10–30 g/cm²·s; radiation and small-motor
   effects dominate below that). No coefficient was tuned to fix this.
 - One record (`...t4l-12`) was anomaly-flagged after the source PDF was
   re-checked: the paper's own Table 2 port diameter contradicts its own
   G columns and the grain OD (physically impossible chain). The published
-  value was kept, the record quarantined — data is never "corrected" by guess.
+  value was kept, the record quarantined; data is never "corrected" by guess.
 - Guard tests (`tests/test_correlation_guards.py`) freeze this table's
   baseline per cell (×1.25 degradation gate, absolute ceilings where approved,
   over-improvement warnings against circularity) keyed to the DB content hash.
 
-## 2026-07-16 — Leckner gas-emissivity radiation model
+## 2026-07-16: Leckner gas-emissivity radiation model
 
 The chamber radiative heat-flux term no longer treats the combustion gas as
 a black body. The gas emissivity is now computed from the **Leckner (1972)
@@ -72,7 +72,7 @@ length, with the pressure-overlap correction), so
 q_rad = ε_gas·σ·(T_aw⁴ − T_w⁴) uses a physically realistic ε_gas well below
 1 instead of the previous black-body assumption.
 
-**Conservatism note — the direction changed.** The old black-body term
+**Conservatism note: the direction changed.** The old black-body term
 systematically *over-predicted* the radiative load (conservative for wall
 heating and thermal-protection sizing). The Leckner model is more accurate
 but *less* conservative on the radiation component: thermal margins that
@@ -90,23 +90,23 @@ independent numerical re-implementation. Outcome: **all core formulas confirmed
 correct** (c\* to 12 digits, Bartz viscosity constant to 0.01 %, SP-8007
 knockdown exact, ISA layers exact). Defects found and **fixed** the same day:
 
-- **critical** — liquid nozzle expansion-ratio solver was inert (a NameError
+- **critical**: liquid nozzle expansion-ratio solver was inert (a NameError
   swallowed by a bare `except` froze ε at the fsolve seed 20 for every
   altitude); replaced with the closed-form isentropic solution. Delivered Isp
   was unaffected (CEA-anchored); reported geometry/CAD was wrong.
-- **major** — solid BATES model reported n segments but burned a monolithic
+- **major**: solid BATES model reported n segments but burned a monolithic
   grain (chamber pressure climbed 3.4× over rating); burn area now uses the
   same segment count as the reported grain design.
-- **major** — solid motor reported three inconsistent expansion ratios
+- **major**: solid motor reported three inconsistent expansion ratios
   (hardcoded 8 / computed 5.9 / hardcoded 40); single source now.
-- **major** — empirical flame-temperature fallback was mixture-ratio-blind
+- **major**: empirical flame-temperature fallback was mixture-ratio-blind
   (fake Isp peaks in the fuel-rich corner when Cantera equilibrium fails);
   now scales with equivalence ratio derived from the oxygen balance.
-- **major** — structural thermal model stacked two contradictory worst cases
+- **major**: structural thermal model stacked two contradictory worst cases
   (hot-soak derating + full cold gradient), collapsing every hot motor to
   SF≈0.1; now evaluates the two physically consistent scenarios separately
   and reports the governing one.
-- minor — thick-wall von Mises now includes the radial stress term; solid
+- minor: thick-wall von Mises now includes the radial stress term; solid
   temperature coefficients un-dead-coded; liquid peak heat flux reported at
   the throat; trajectory load factor is now the vector |a|; regression
   fixed-point non-convergence warns instead of failing silently.
@@ -135,14 +135,14 @@ knockdown exact, ISA layers exact). Defects found and **fixed** the same day:
 | Liquid c\* | LH2/LOX, RP-1/LOX within **<2 %** of NASA CEA (SSME c\* matches to ~0.5 %). |
 | Nozzle CF / isentropic flow | Matches Sutton Eq. 3-30 and CEA rocket-mode to ~0.03 %. |
 | Solid APCP c\* | Within **~1.2 %** of full AP/Al/HTPB CEA composite (two-phase). |
-| Sugar propellants (KNSU/sugar) | c\*≈921 m/s, Tc≈1719 K — consistent with NASA CEA + Nakka experimental (corrected 2026-06; previous values were non-physical). |
+| Sugar propellants (KNSU/sugar) | c\*≈921 m/s, Tc≈1719 K, consistent with NASA CEA + Nakka experimental (corrected 2026-06; previous values were non-physical). |
 | Solid delivered Isp (APCP ref.) | 251 s vs 265 s rated literature value (−5.4 %). *Note (2026-07-12): the earlier +2.5 % agreement was an artifact of the monolithic grain model over-pressuring the chamber; the segmented model runs at rated pressure and the delivered value sits inside the 240–270 s literature band.* |
 | Test suite | 1,000+ automated tests passing (pytest). |
 | Export round-trips (2026-07-13) | DXF re-read via ezdxf (layers + >30-pt contour), STEP re-imported via build123d (ISO-10303), drawing PDF ≥3 pages, injector STL volume check proves orifices are drilled; fake-STL fallbacks removed (errors now raise). |
 
 ## What is validated against real data (partial)
 
-- **Hybrid regression rate** — compared to Rezaei et al. (HTPB/N2O, *Scientia
+- **Hybrid regression rate**: compared to Rezaei et al. (HTPB/N2O, *Scientia
   Iranica* 2018): HRMA within **~32 %** of the measured rate. The residual is
   dominated by batch-to-batch scatter of the empirical `a` coefficient
   (HTPB/N2O `a` varies ~2× between studies), not a code error.
@@ -155,11 +155,11 @@ The table below is produced from the git-tracked experiment database
 markers is machine-generated; the rest of this document remains hand-written.
 
 <!-- AUTO-CORRELATION:BEGIN -->
-*This block is auto-generated from the real-experiment correlation run — do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
+*This block is auto-generated from the real-experiment correlation run; do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
 - Generated: 2026-07-18 (runner v1, adapter v1)
 - Experiment DB content hash: `c64e8d7b715bbc1dfffddcb9cc38989015685dfe6b5ff3b1026ec032ae1800bd`
-- Records: 199 total — scored 80, insufficient inputs 112, not supported (v1) 7, runner errors 0
+- Records: 199 total, scored 80, insufficient inputs 112, not supported (v1) 7, runner errors 0
 - Signed error convention: (predicted - measured) / measured x 100. Outliers are flagged, never dropped; anomaly-flagged records are aggregated separately.
 
 | Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test |
@@ -193,7 +193,7 @@ markers is machine-generated; the rest of this document remains hand-written.
    to finite expansion ratio and nozzle losses. The c\* (thermochemistry) is
    sound; the delivered-Isp figures are optimistic upper bounds.
 4. **Small solid motors over-predicted.** For motors below ~75 mm (e.g. Cesaroni
-   G-class), delivered Isp can be ~40 % optimistic — two-phase flow, heat loss,
+   G-class), delivered Isp can be ~40 % optimistic, because two-phase flow, heat loss,
    and short-L\* scale effects are not modelled (large-motor efficiency assumed).
 5. **Heat transfer is ±20–30 % (Bartz).** Gas-side coefficient and wall
    temperature are order-of-magnitude correct and now conservative, but true
@@ -211,7 +211,7 @@ markers is machine-generated; the rest of this document remains hand-written.
    tumbling/large-α flight. No aeroelasticity, spin-fin interaction, or
    turbulence model.
 9. **Hybrid regression coefficients are G_ox-fitted but applied to the
-   Marxman total-flux closure** — a deliberate, documented choice that raises
+   Marxman total-flux closure**, a deliberate and documented choice that raises
    predicted regression ~10–18 % (the model still under-predicts the Rezaei
    HTPB/N₂O measurement by ~32 %, so the direction is corrective). Use
    `flux_mode='ox'` for literal literature comparison; a G_total re-fit is

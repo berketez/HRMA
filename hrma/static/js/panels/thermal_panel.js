@@ -18,22 +18,25 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
-    // Malzeme anahtarları heat_transfer_analysis.py self.materials ile birebir
+    // FALLBACK listesi — /api/materials kataloğu yüklenemezse kullanılır
+    // (anahtarlar heat_transfer_analysis.py self.materials içinde çözülür;
+    // katalog gelirse 'liner'+'shell' etiketli tam liste bunun yerine geçer)
     const MATERIALS = [
-        ['steel', 'Steel (generic)'],
+        ['steel', 'Steel (generic)', 'mat.steelGeneric'],
         ['steel_4130', 'Steel AISI 4130'],
-        ['aluminum', 'Aluminum'],
-        ['copper', 'Copper'],
+        ['aluminum', 'Aluminum', 'mat.aluminum'],
+        ['copper', 'Copper', 'mat.copper'],
         ['inconel', 'Inconel'],
-        ['graphite', 'Graphite'],
-        ['ablative', 'Ablative liner'],
+        ['graphite', 'Graphite', 'mat.graphite'],
+        ['ablative', 'Ablative liner', 'mat.ablativeLiner'],
     ];
 
     const COOLING = [
-        ['natural', 'Natural (heat sink)'],
-        ['forced', 'Forced convection'],
-        ['regenerative', 'Regenerative'],
+        ['natural', 'Natural (heat sink)', 'cool.natural'],
+        ['forced', 'Forced convection', 'cool.forced'],
+        ['regenerative', 'Regenerative', 'cool.regenerative'],
     ];
 
     function riskKind(level) {
@@ -65,10 +68,10 @@
                 vals.push(v);
             }
         }
-        push('Combustion gas', gsa.gas_temperature);
-        push('Adiabatic wall', gsa.adiabatic_wall_temperature);
-        push('Wall (inner)', wa.inner_temperature);
-        push('Wall (outer)', wa.outer_temperature);
+        push(T('panel.thermal.combustionGas', 'Combustion gas'), gsa.gas_temperature);
+        push(T('panel.thermal.adiabaticWall', 'Adiabatic wall'), gsa.adiabatic_wall_temperature);
+        push(T('panel.thermal.wallInner', 'Wall (inner)'), wa.inner_temperature);
+        push(T('panel.thermal.wallOuter', 'Wall (outer)'), wa.outer_temperature);
         if (!cats.length) return;
 
         const div = document.createElement('div');
@@ -91,8 +94,8 @@
                 font: { size: 10, color: color },
             });
         }
-        limitLine(matp.allowable_temperature, 'Allowable limit', '#ff8c33');
-        limitLine(matp.melting_point, 'Melting point', '#ff5d73');
+        limitLine(matp.allowable_temperature, T('panel.thermal.allowableLimit', 'Allowable limit'), '#ff8c33');
+        limitLine(matp.melting_point, T('panel.thermal.meltingPoint', 'Melting point'), '#ff5d73');
 
         Plotly.newPlot(div, [{
             x: cats, y: vals, type: 'bar',
@@ -100,8 +103,8 @@
             width: 0.55,
             hovertemplate: '%{x}: %{y:.0f} K<extra></extra>',
         }], {
-            title: 'Wall Temperatures vs Material Limits',
-            yaxis: { title: 'Temperature (K)', rangemode: 'tozero' },
+            title: T('panel.thermal.chartTemps', 'Wall Temperatures vs Material Limits'),
+            yaxis: { title: T('common.axis.temperatureK', 'Temperature (K)'), rangemode: 'tozero' },
             xaxis: { title: '' },
             shapes: shapes,
             annotations: annotations,
@@ -169,7 +172,7 @@
             if (throatX == null) return [];
             return [{
                 x: throatX, yref: 'paper', y: 1, xanchor: 'left', yanchor: 'top',
-                text: 'Throat', showarrow: false,
+                text: T('common.throat', 'Throat'), showarrow: false,
                 font: { size: 10, color: '#7d97a5' },
             }];
         }
@@ -178,7 +181,7 @@
         const traces1 = [];
         if (sameLen(p.q_MW)) {
             const qTrace = {
-                x: x, y: p.q_MW, name: 'Heat flux q',
+                x: x, y: p.q_MW, name: T('panel.thermal.heatFluxSeries', 'Heat flux q'),
                 type: 'scatter', mode: 'lines',
                 line: { color: '#00e5ff', width: 2 },
                 hovertemplate: 'x = %{x:.1f} mm<br>q = %{y:.2f} MW/m²<extra></extra>',
@@ -192,7 +195,7 @@
         }
         if (sameLen(p.T_wall_eq)) {
             traces1.push({
-                x: x, y: p.T_wall_eq, name: 'Equilibrium wall T',
+                x: x, y: p.T_wall_eq, name: T('panel.thermal.eqWallSeries', 'Equilibrium wall T'),
                 type: 'scatter', mode: 'lines', yaxis: 'y2',
                 line: { color: '#ff8c33', width: 2, dash: 'dot' },
                 hovertemplate: 'x = %{x:.1f} mm<br>T_wall = %{y:.0f} K<extra></extra>',
@@ -203,10 +206,10 @@
             div1.style.marginTop = '10px';
             host.appendChild(div1);
             Plotly.newPlot(div1, traces1, {
-                title: 'Axial Heat Flux & Equilibrium Wall Temperature',
-                xaxis: { title: 'Axial position x (mm)' },
-                yaxis: { title: 'Heat flux (MW/m²)', rangemode: 'tozero' },
-                yaxis2: { title: 'Wall temperature (K)', overlaying: 'y',
+                title: T('panel.thermal.chartAxialQ', 'Axial Heat Flux & Equilibrium Wall Temperature'),
+                xaxis: { title: T('common.axis.axialX', 'Axial position x (mm)') },
+                yaxis: { title: T('common.axis.heatFlux', 'Heat flux (MW/m²)'), rangemode: 'tozero' },
+                yaxis2: { title: T('common.axis.wallTemp', 'Wall temperature (K)'), overlaying: 'y',
                           side: 'right', showgrid: false },
                 legend: { orientation: 'h' },
                 shapes: throatShape(),
@@ -233,16 +236,16 @@
             div2.style.marginTop = '10px';
             host.appendChild(div2);
             Plotly.newPlot(div2, [machTrace], {
-                title: 'Axial Mach Number',
-                xaxis: { title: 'Axial position x (mm)' },
-                yaxis: { title: 'Mach number', rangemode: 'tozero' },
+                title: T('panel.thermal.chartAxialMach', 'Axial Mach Number'),
+                xaxis: { title: T('common.axis.axialX', 'Axial position x (mm)') },
+                yaxis: { title: T('common.axis.machNumber', 'Mach number'), rangemode: 'tozero' },
                 shapes: [{
                     type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1,
                     line: { color: 'rgba(255, 93, 115, 0.7)', width: 1, dash: 'dash' },
                 }].concat(throatShape()),
                 annotations: [{
                     xref: 'paper', x: 1, y: 1, xanchor: 'right', yanchor: 'bottom',
-                    text: 'Sonic — M = 1', showarrow: false,
+                    text: T('panel.thermal.sonic', 'Sonic — M = 1'), showarrow: false,
                     font: { size: 10, color: '#ff5d73' },
                 }].concat(throatAnnotation()),
                 height: 320,
@@ -256,16 +259,18 @@
     // Bölüm montajı: başlık + 'Compute Axial Profile' butonu + grafikler
     function mountAxialSection(root) {
         const sec = document.createElement('div');
-        sec.innerHTML = U.sectionTitle('Axial Profile — Chamber to Nozzle Exit')
-            + `<p style="font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5); margin:4px 0 8px;">
-               Computes the axial distribution of heat flux, equilibrium wall
-               temperature and Mach number along the chamber–nozzle axis
-               (Bartz correlation with local area ratio).</p>`;
+        sec.innerHTML = U.sectionTitle(T('panel.thermal.secAxial',
+                'Axial Profile — Chamber to Nozzle Exit'))
+            + `<p style="font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5); margin:4px 0 8px;">${
+               T('panel.thermal.axialIntro',
+                 'Computes the axial distribution of heat flux, equilibrium wall '
+                 + 'temperature and Mach number along the chamber-nozzle axis '
+                 + '(Bartz correlation with local area ratio).')}</p>`;
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
         btn.id = 'ad_axial_thermal';
-        btn.textContent = 'Compute Axial Profile';
+        btn.textContent = T('panel.thermal.btnAxial', 'Compute Axial Profile');
         const status = document.createElement('div');
         status.style.cssText = 'font-family:var(--hd-mono); font-size:0.8rem;'
             + ' color:var(--hd-ink-dim, #7d97a5); margin:6px 0;';
@@ -277,7 +282,7 @@
 
         btn.addEventListener('click', async function () {
             btn.disabled = true;
-            status.textContent = 'COMPUTING AXIAL PROFILE…';
+            status.textContent = T('panel.thermal.computingAxial', 'COMPUTING AXIAL PROFILE…');
             charts.innerHTML = '';
             try {
                 const resp = await fetch(WALL_PROFILE_ENDPOINT, {
@@ -287,8 +292,9 @@
                 });
                 if (resp.status === 404 || resp.status === 501) {
                     // Backend ajanı endpoint'i paralel ekliyor — panel kırılmaz
-                    status.textContent = 'Axial profile backend is updating — '
-                        + 'please retry once the server has reloaded.';
+                    status.textContent = T('panel.thermal.axialUpdating',
+                        'Axial profile backend is updating — '
+                        + 'please retry once the server has reloaded.');
                     return;
                 }
                 let data = null;
@@ -302,12 +308,14 @@
                     ? data.wall_profile
                     : (data.profile && data.profile.x_mm) ? data.profile : data;
                 if (!renderAxialCharts(profile, charts)) {
-                    status.textContent = 'Unexpected response — no profile arrays found.';
+                    status.textContent = T('panel.thermal.noProfile',
+                        'Unexpected response — no profile arrays found.');
                     return;
                 }
                 status.textContent = '';
             } catch (err) {
-                status.textContent = 'ERROR: ' + err.message;
+                status.textContent = U.tf('common.errorPrefix', { message: err.message },
+                                          'ERROR: {message}');
             } finally {
                 btn.disabled = false;
             }
@@ -327,38 +335,46 @@
         // ---- Rozetler ----
         let badges = '';
         if (safe.risk_level) {
-            badges += U.badge('THERMAL RISK: ' + safe.risk_level, riskKind(safe.risk_level));
+            badges += U.badge(T('panel.thermal.badgeRisk', 'THERMAL RISK') + ': ' + safe.risk_level,
+                              riskKind(safe.risk_level));
         }
-        badges += U.badge('COOLING: ' + String(dpp.cooling_type || '—').toUpperCase(), 'info',
-            'Cooling efficiency ' + U.fmt(cool.cooling_efficiency, 2));
+        badges += U.badge(T('panel.thermal.badgeCooling', 'COOLING') + ': '
+            + String(dpp.cooling_type || '—').toUpperCase(), 'info',
+            U.tf('panel.thermal.coolingEffTip', { value: U.fmt(cool.cooling_efficiency, 2) },
+                 'Cooling efficiency {value}'));
         if (htc.correlation) {
-            badges += U.badge('MODEL: BARTZ', 'info', htc.correlation);
+            badges += U.badge(T('panel.thermal.badgeModel', 'MODEL: BARTZ'), 'info', htc.correlation);
         }
         if (gsa.wall_temperature_unphysical) {
-            badges += U.badge('WALL T UNPHYSICAL — cooling insufficient', 'err',
-                'Predicted steady-state wall temperature exceeds physical limits; '
-                + 'the wall would fail before reaching it. Improve cooling.');
+            badges += U.badge(T('panel.thermal.badgeUnphysical',
+                'WALL T UNPHYSICAL — cooling insufficient'), 'err',
+                T('panel.thermal.unphysicalTip',
+                  'Predicted steady-state wall temperature exceeds physical limits; '
+                  + 'the wall would fail before reaching it. Improve cooling.'));
         }
 
         // ---- Sayısal kartlar ----
-        const tempKind = function (T) {
-            if (typeof T !== 'number' || !Number.isFinite(T)) return 'dim';
-            if (matp.melting_point != null && T >= matp.melting_point) return 'err';
-            if (matp.allowable_temperature != null && T > matp.allowable_temperature) return 'warn';
+        const tempKind = function (temp) {
+            if (typeof temp !== 'number' || !Number.isFinite(temp)) return 'dim';
+            if (matp.melting_point != null && temp >= matp.melting_point) return 'err';
+            if (matp.allowable_temperature != null && temp > matp.allowable_temperature) return 'warn';
             return 'ok';
         };
         const head = document.createElement('div');
         head.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`
             + `<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">`
-            + U.statCard('h_g (gas side)', U.fmt(htc.gas_side, 0), 'W/m²·K', null,
-                htc.correlation || '')
-            + U.statCard('q_throat', U.fmt(gsa.throat_heat_flux / 1e6, 2), 'MW/m²')
-            + U.statCard('q_chamber', U.fmt(gsa.chamber_heat_flux / 1e6, 2), 'MW/m²')
-            + U.statCard('T_wall inner', U.fmt(wa.inner_temperature, 0), 'K',
-                tempKind(wa.inner_temperature))
-            + U.statCard('T_wall outer', U.fmt(wa.outer_temperature, 0), 'K',
-                tempKind(wa.outer_temperature))
-            + U.statCard('T_adiabatic wall', U.fmt(gsa.adiabatic_wall_temperature, 0), 'K')
+            + U.statCard(T('panel.thermal.cardHg', 'h_g (gas side)'), U.fmt(htc.gas_side, 0),
+                'W/m²·K', null, htc.correlation || '')
+            + U.statCard(T('panel.thermal.cardQThroat', 'q_throat'),
+                U.fmt(gsa.throat_heat_flux / 1e6, 2), 'MW/m²')
+            + U.statCard(T('panel.thermal.cardQChamber', 'q_chamber'),
+                U.fmt(gsa.chamber_heat_flux / 1e6, 2), 'MW/m²')
+            + U.statCard(T('panel.thermal.cardTwallIn', 'T_wall inner'),
+                U.fmt(wa.inner_temperature, 0), 'K', tempKind(wa.inner_temperature))
+            + U.statCard(T('panel.thermal.cardTwallOut', 'T_wall outer'),
+                U.fmt(wa.outer_temperature, 0), 'K', tempKind(wa.outer_temperature))
+            + U.statCard(T('panel.thermal.cardTaw', 'T_adiabatic wall'),
+                U.fmt(gsa.adiabatic_wall_temperature, 0), 'K')
             + '</div>';
         root.appendChild(head);
 
@@ -366,40 +382,46 @@
         temperaturePlot(root, ta);
 
         const tail = document.createElement('div');
-        let thtml = U.sectionTitle('Heat Load & Cooling Assessment');
+        let thtml = U.sectionTitle(T('panel.thermal.secHeatLoad', 'Heat Load & Cooling Assessment'));
         thtml += U.kvTable([
-            ['Total heat rate', U.fmt(cool.peak_heat_rate, 1) + ' kW'],
-            ['Total heat energy (burn)', U.fmt(cool.total_heat_energy, 1) + ' MJ'],
-            ['Cooling efficiency', U.fmt(cool.cooling_efficiency, 2)
+            [T('panel.thermal.totalHeatRate', 'Total heat rate'), U.fmt(cool.peak_heat_rate, 1) + ' kW'],
+            [T('panel.thermal.totalHeatEnergy', 'Total heat energy (burn)'),
+             U.fmt(cool.total_heat_energy, 1) + ' MJ'],
+            [T('panel.thermal.coolingEfficiency', 'Cooling efficiency'), U.fmt(cool.cooling_efficiency, 2)
                 + ' (' + String(dpp.cooling_type || '—') + ')'],
-            ['Required cooling area', U.fmt(cool.required_cooling_area, 2) + ' m²'],
-            ['Heat sink mass (steel equiv.)', U.fmt(cool.heat_sink_mass, 1) + ' kg',
-             'Steel heat-sink mass for a 200 K temperature rise'],
-            ['Hot-gas surface area', U.fmt(gsa.surface_area, 3) + ' m²'],
+            [T('panel.thermal.requiredArea', 'Required cooling area'),
+             U.fmt(cool.required_cooling_area, 2) + ' m²'],
+            [T('panel.thermal.heatSinkMass', 'Heat sink mass (steel equiv.)'),
+             U.fmt(cool.heat_sink_mass, 1) + ' kg',
+             T('panel.thermal.heatSinkTip', 'Steel heat-sink mass for a 200 K temperature rise')],
+            [T('panel.thermal.hotGasArea', 'Hot-gas surface area'), U.fmt(gsa.surface_area, 3) + ' m²'],
         ]);
 
-        thtml += U.sectionTitle('Thermal Safety Factors');
+        thtml += U.sectionTitle(T('panel.thermal.secSafety', 'Thermal Safety Factors'));
         const sfRow = function (label, v, note) {
             const c = U.kindColor(sfKind(v));
             return [label, `<span style="color:${c}; font-family:var(--hd-mono);">${U.fmt(v)}</span>`, note];
         };
         thtml += U.kvTable([
-            sfRow('Melting safety factor', safe.melting_safety_factor,
-                'Melting point / wall temperature'),
-            sfRow('Temperature safety factor', safe.temperature_safety_factor,
-                'Allowable temperature / wall temperature'),
-            sfRow('Thermal stress safety factor', safe.stress_safety_factor),
-            ['Thermal stress', U.fmt(safe.thermal_stress, 0) + ' MPa'],
-            ['Material limits', U.fmt(matp.allowable_temperature, 0) + ' K allowable · '
-                + U.fmt(matp.melting_point, 0) + ' K melting'],
-            ['Wall thickness', U.fmt(dpp.wall_thickness, 1) + ' mm ('
+            sfRow(T('panel.thermal.sfMelting', 'Melting safety factor'), safe.melting_safety_factor,
+                T('panel.thermal.sfMeltingTip', 'Melting point / wall temperature')),
+            sfRow(T('panel.thermal.sfTemperature', 'Temperature safety factor'),
+                safe.temperature_safety_factor,
+                T('panel.thermal.sfTemperatureTip', 'Allowable temperature / wall temperature')),
+            sfRow(T('panel.thermal.sfStress', 'Thermal stress safety factor'), safe.stress_safety_factor),
+            [T('panel.thermal.thermalStress', 'Thermal stress'), U.fmt(safe.thermal_stress, 0) + ' MPa'],
+            [T('panel.thermal.materialLimits', 'Material limits'),
+             U.tf('panel.thermal.materialLimitsValue',
+                  { allow: U.fmt(matp.allowable_temperature, 0), melt: U.fmt(matp.melting_point, 0) },
+                  '{allow} K allowable · {melt} K melting')],
+            [T('common.f.wallThickness', 'Wall thickness'), U.fmt(dpp.wall_thickness, 1) + ' mm ('
                 + (dpp.material || '—') + ')'],
         ]);
 
         const warns = [].concat(safe.warnings || [], gsa.warnings || []);
-        thtml += U.listBlock('Warnings', warns, 'warn');
+        thtml += U.listBlock(T('common.warnings', 'Warnings'), warns, 'warn');
         const recs = [].concat(safe.recommendations || [], cool.recommendations || []);
-        thtml += U.listBlock('Cooling Recommendations', recs, 'info');
+        thtml += U.listBlock(T('panel.thermal.coolingRecs', 'Cooling Recommendations'), recs, 'info');
         tail.innerHTML = thtml;
         root.appendChild(tail);
 
@@ -410,19 +432,20 @@
     window.AnalysisDock.register({
         id: 'thermal',
         title: 'Thermal Safety — Bartz Heat Transfer & Wall Temperatures',
+        titleKey: 'panel.thermal.title',
         category: 'THERMAL',
         endpoint: '/analyze_thermal_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01],
-            ['burn_time', 'Burn Time (s)', 10, 0.5],
-            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05],
-            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001],
-            ['material', 'Wall Material', 'steel', MATERIALS],
-            ['cooling_type', 'Cooling Type', 'natural', COOLING],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK'],
+            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
+            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
+            ['burn_time', 'Burn Time (s)', 10, 0.5, 'common.f.burnTimeS'],
+            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05, 'common.f.mdotTotal'],
+            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
+            ['material', 'Wall Material', 'steel', MATERIALS, 'common.f.wallMaterial'],
+            ['cooling_type', 'Cooling Type', 'natural', COOLING, 'common.f.coolingType'],
         ],
         fromResults: function (r) {
             const m = (r && r.motor) || r || {};
@@ -437,6 +460,15 @@
         },
         render: render,
     });
+
+    // Merkezi katalog yüklüyse cidar malzemesi select'ini 'liner'+'shell'
+    // etiketli listeyle doldur; değilse fallback aynen kalır.
+    if (typeof window.HRMAMaterials !== 'undefined' && window.HRMAMaterials) {
+        window.HRMAMaterials.populateSelect({
+            panelId: 'thermal', fieldId: 'material',
+            tags: ['liner', 'shell'], fallback: MATERIALS, merge: true,
+        });
+    }
 
     // Test / hata ayıklama: saf render (dry-run) + eksenel yardımcılar
     window.ThermalPanel = {

@@ -56,6 +56,65 @@ ISA_LAYERS = [
     (71000.0, 214.65, -0.002,  3.95642),
 ]
 
+# ISA tablo üst sınırı (geopotansiyel). Üzerinde son katmandan izotermal
+# uzantı kullanılır (T tablo tepesindeki değerde sabitlenir; basınç üstel
+# sönümle devam eder — sayısal kararlılık, negatif T/P engellenir).
+ISA_TABLE_TOP_M = 84852.0  # m
+
+
+def _isa_layer(altitude_m: float):
+    """ISA_LAYERS içinden verilen geopotansiyel irtifanın katmanını seçer."""
+    layer = ISA_LAYERS[0]
+    for candidate in ISA_LAYERS:
+        if altitude_m >= candidate[0]:
+            layer = candidate
+        else:
+            break
+    return layer
+
+
+def isa_temperature(altitude_m: float) -> float:
+    """US Standard Atmosphere 1976 sıcaklığı [K], geopotansiyel irtifa [m].
+
+    Satır-içi ISA kopyalarını tekilleştirir (combustion_analysis /
+    liquid_rocket_engine eski yerel formülleri bu yardımcıya bağlandı).
+    Negatif irtifada troposfer formülü ekstrapole edilir; tablo üstünde
+    (>84.852 km) sıcaklık tablo tepesindeki değerde sabitlenir.
+    """
+    h = float(altitude_m)
+    if h > ISA_TABLE_TOP_M:
+        h_base, T_base, lapse, _ = ISA_LAYERS[-1]
+        return T_base + lapse * (ISA_TABLE_TOP_M - h_base)
+    h_base, T_base, lapse, _ = _isa_layer(h)
+    return T_base + lapse * (h - h_base)
+
+
+def isa_pressure(altitude_m: float) -> float:
+    """US Standard Atmosphere 1976 basıncı [Pa], geopotansiyel irtifa [m].
+
+    Katman formülleri (US Std Atm 1976, Eq. 33a/33b):
+      lapse != 0:  P = P_b * (T/T_b)^(-g0*M/(R*·L))
+      lapse == 0:  P = P_b * exp(-g0*M*(h-h_b)/(R*·T_b))
+    Tablo üstünde (>84.852 km) tablo tepesi sıcaklığıyla izotermal uzantı.
+    """
+    import numpy as np
+    h = float(altitude_m)
+    if h > ISA_TABLE_TOP_M:
+        h_base, T_base, lapse, P_base = ISA_LAYERS[-1]
+        T_top = T_base + lapse * (ISA_TABLE_TOP_M - h_base)
+        P_top = P_base * (T_top / T_base) ** (
+            -G_0 * M_AIR / (R_STAR_ICAO * lapse))
+        return float(
+            P_top * np.exp(-G_0 * M_AIR * (h - ISA_TABLE_TOP_M)
+                           / (R_STAR_ICAO * T_top)))
+    h_base, T_base, lapse, P_base = _isa_layer(h)
+    if lapse == 0.0:
+        return float(
+            P_base * np.exp(-G_0 * M_AIR * (h - h_base)
+                            / (R_STAR_ICAO * T_base)))
+    T = T_base + lapse * (h - h_base)
+    return float(P_base * (T / T_base) ** (-G_0 * M_AIR / (R_STAR_ICAO * lapse)))
+
 # -----------------------------------------------------------------------------
 # Birim Çevirim Sabitleri
 # -----------------------------------------------------------------------------

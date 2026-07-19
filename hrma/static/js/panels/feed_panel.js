@@ -28,13 +28,17 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
     const PANEL_ID = 'feed';
+    const lastTabData = {};              // sekme -> son yanıt (dil değişiminde yeniden çizilir)
 
     // ------------------------------------------------------------------
     // Sekme tanımları — her biri kendi endpoint'i, alanları, render'ı,
     // motor-tipi kapısı ve motor sonucundan öneri fonksiyonuyla.
     // ------------------------------------------------------------------
-    const GASES = [['helium', 'Helium'], ['nitrogen', 'Nitrogen']];
+    const GASES = [['helium', 'Helium', 'gas.helium'], ['nitrogen', 'Nitrogen', 'gas.nitrogen']];
+    // FALLBACK — /api/materials kataloğu yüklenemezse kullanılır; katalog
+    // gelirse 'pipe' etiketli tam liste bunun yerine geçer.
     const PIPE_MATERIALS = [
         ['ss_304', 'Stainless 304'],
         ['ss_316', 'Stainless 316'],
@@ -43,25 +47,27 @@
         ['titanium_6al4v', 'Titanium 6Al-4V'],
     ];
     const WH_FLUIDS = [
-        ['water', 'Water'], ['n2o', 'Nitrous oxide (N2O)'],
-        ['rp1', 'RP-1 (kerosene)'], ['lox', 'Liquid oxygen'],
+        ['water', 'Water', 'coolant.water'], ['n2o', 'Nitrous oxide (N2O)', 'fluid.n2o'],
+        ['rp1', 'RP-1 (kerosene)', 'coolant.rp1'], ['lox', 'Liquid oxygen', 'fluid.lox'],
     ];
-    const PRESS_MODES = [['regulated', 'Regulated'], ['blowdown', 'Blowdown']];
+    const PRESS_MODES = [['regulated', 'Regulated', 'press.regulated'],
+                         ['blowdown', 'Blowdown', 'press.blowdown']];
 
     // ---- Slosh render --------------------------------------------------
     function renderSlosh(data, root) {
         const s = (data && data.slosh) || {};
         const cards = '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard('SLOSH FREQ f1', U.fmt(s.f1_hz, 3), 'Hz', 'info',
-                'Fundamental lateral slosh natural frequency (SP-106 Eq. 2.4)')
-            + U.statCard('SLOSH MASS FRACTION', U.fmt(s.slosh_mass_ratio, 3), '', 'dim',
-                'm1/m_liquid — fraction of liquid that participates in the fundamental mode')
-            + U.statCard('SLOSH MASS', U.fmt(s.slosh_mass_kg, 1), 'kg',
+            + U.statCard(T('panel.feed.cardF1', 'SLOSH FREQ f1'), U.fmt(s.f1_hz, 3), 'Hz', 'info',
+                T('panel.feed.cardF1Tip', 'Fundamental lateral slosh natural frequency (SP-106 Eq. 2.4)'))
+            + U.statCard(T('panel.feed.cardMassFrac', 'SLOSH MASS FRACTION'), U.fmt(s.slosh_mass_ratio, 3), '', 'dim',
+                T('panel.feed.cardMassFracTip',
+                  'm1/m_liquid — fraction of liquid that participates in the fundamental mode'))
+            + U.statCard(T('panel.feed.cardSloshMass', 'SLOSH MASS'), U.fmt(s.slosh_mass_kg, 1), 'kg',
                 (s.slosh_mass_kg == null ? 'dim' : 'dim'),
-                'Absolute fundamental slosh mass (needs density/mass)')
-            + U.statCard('PENDULUM LENGTH', U.fmt(s.pendulum_length, 3), 'm', 'dim',
-                'Equivalent-pendulum length of the slosh mass')
-            + U.statCard('FILL RATIO h/R', U.fmt(s.fill_ratio, 2), '', 'dim', '')
+                T('panel.feed.cardSloshMassTip', 'Absolute fundamental slosh mass (needs density/mass)'))
+            + U.statCard(T('panel.feed.cardPendulum', 'PENDULUM LENGTH'), U.fmt(s.pendulum_length, 3), 'm', 'dim',
+                T('panel.feed.cardPendulumTip', 'Equivalent-pendulum length of the slosh mass'))
+            + U.statCard(T('panel.feed.cardFill', 'FILL RATIO h/R'), U.fmt(s.fill_ratio, 2), '', 'dim', '')
             + '</div>';
 
         const head = document.createElement('div');
@@ -78,14 +84,15 @@
             const traces = [];
             if (Array.isArray(sweep.f1_hz)) {
                 traces.push({
-                    x: sweep.fill_ratio, y: sweep.f1_hz, name: 'Slosh frequency f1',
+                    x: sweep.fill_ratio, y: sweep.f1_hz, name: T('panel.feed.sF1', 'Slosh frequency f1'),
                     type: 'scatter', mode: 'lines', line: { color: '#00e5ff', width: 2 },
                     hovertemplate: 'h/R = %{x:.2f}<br>f1 = %{y:.3f} Hz<extra></extra>',
                 });
             }
             if (Array.isArray(sweep.slosh_mass_ratio)) {
                 traces.push({
-                    x: sweep.fill_ratio, y: sweep.slosh_mass_ratio, name: 'Slosh mass fraction',
+                    x: sweep.fill_ratio, y: sweep.slosh_mass_ratio,
+                    name: T('panel.feed.sMassFrac', 'Slosh mass fraction'),
                     type: 'scatter', mode: 'lines', yaxis: 'y2',
                     line: { color: '#2dd4a8', width: 2, dash: 'dot' },
                     hovertemplate: 'h/R = %{x:.2f}<br>m1/m = %{y:.3f}<extra></extra>',
@@ -100,10 +107,11 @@
                 });
             }
             Plotly.newPlot(div, traces, {
-                title: 'Slosh Frequency & Mass Fraction vs Fill Level',
-                xaxis: { title: 'Fill ratio h/R' },
-                yaxis: { title: 'Frequency f1 (Hz)', rangemode: 'tozero' },
-                yaxis2: { title: 'Slosh mass fraction', overlaying: 'y', side: 'right', showgrid: false },
+                title: T('panel.feed.chartSlosh', 'Slosh Frequency & Mass Fraction vs Fill Level'),
+                xaxis: { title: T('panel.feed.axisFill', 'Fill ratio h/R') },
+                yaxis: { title: T('panel.feed.axisF1', 'Frequency f1 (Hz)'), rangemode: 'tozero' },
+                yaxis2: { title: T('panel.feed.sMassFrac', 'Slosh mass fraction'),
+                          overlaying: 'y', side: 'right', showgrid: false },
                 legend: { orientation: 'h' },
                 shapes: shapes,
                 height: 340,
@@ -116,23 +124,31 @@
         let html = '';
         const rows = [];
         if (baffle.damping_ratio != null) {
-            rows.push(['Ring-baffle damping ratio',
-                U.fmt(baffle.damping_ratio, 4) + ' (band ' + U.fmt(baffle.damping_ratio_low, 4)
-                + '–' + U.fmt(baffle.damping_ratio_high, 4) + ')',
-                'Miles (1958) single flat ring baffle — approximate (factor ~2 band)']);
-            rows.push(['Blocked-area ratio', U.fmt(baffle.blocked_area_ratio, 3)]);
+            rows.push([T('panel.feed.baffleDamping', 'Ring-baffle damping ratio'),
+                U.tf('panel.feed.baffleBand',
+                     { v: U.fmt(baffle.damping_ratio, 4), lo: U.fmt(baffle.damping_ratio_low, 4),
+                       hi: U.fmt(baffle.damping_ratio_high, 4) },
+                     '{v} (band {lo}-{hi})'),
+                T('panel.feed.baffleTip',
+                  'Miles (1958) single flat ring baffle — approximate (factor ~2 band)')]);
+            rows.push([T('panel.feed.blockedArea', 'Blocked-area ratio'),
+                       U.fmt(baffle.blocked_area_ratio, 3)]);
         } else if (baffle.recommended_width_ratio != null) {
-            rows.push(['Recommended baffle width w/R', U.fmt(baffle.recommended_width_ratio, 3),
-                baffle.note || '']);
-            rows.push(['Target damping ratio', U.fmt(baffle.target_damping_ratio, 4)]);
+            rows.push([T('panel.feed.baffleWidthRec', 'Recommended baffle width w/R'),
+                U.fmt(baffle.recommended_width_ratio, 3), baffle.note || '']);
+            rows.push([T('panel.feed.targetDamping', 'Target damping ratio'),
+                       U.fmt(baffle.target_damping_ratio, 4)]);
         }
         if (rows.length) {
-            html += U.sectionTitle('Ring-Baffle Damping (Miles, approximate)') + U.kvTable(rows);
+            html += U.sectionTitle(T('panel.feed.secBaffle',
+                'Ring-Baffle Damping (Miles, approximate)')) + U.kvTable(rows);
         }
         if (Array.isArray(s.coincidence_warnings) && s.coincidence_warnings.length) {
-            html += U.listBlock('Frequency-coincidence warnings', s.coincidence_warnings, 'warn');
+            html += U.listBlock(T('panel.feed.coincidenceWarnings', 'Frequency-coincidence warnings'),
+                                s.coincidence_warnings, 'warn');
         }
-        if (s.model_note) html += U.listBlock('Model assumptions & limits', [s.model_note], 'dim');
+        if (s.model_note) html += U.listBlock(T('common.modelAssumptions',
+            'Model assumptions & limits'), [s.model_note], 'dim');
         tail.innerHTML = html;
         root.appendChild(tail);
     }
@@ -143,36 +159,40 @@
         const mode = (data && data.mode) || 'regulated';
         const head = document.createElement('div');
         let cards = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + U.badge('MODE: ' + mode.toUpperCase(), 'info')
-            + U.badge('GAS: ' + String(p.gas || '—').toUpperCase(), 'dim')
+            + U.badge(T('panel.feed.badgeMode', 'MODE') + ': ' + mode.toUpperCase(), 'info')
+            + U.badge(T('panel.feed.badgeGas', 'GAS') + ': ' + String(p.gas || '—').toUpperCase(), 'dim')
             + '</div><div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">';
         if (mode === 'regulated') {
             const iso = p.isothermal || {};
             const adia = p.adiabatic || {};
             const st = p.storage || {};
-            cards += U.statCard('DELIVERED GAS', U.fmt(p.recommended_delivered_mass_kg, 3), 'kg', 'info',
-                'Recommended (conservative, adiabatic bound) pressurant mass')
-                + U.statCard('ISOTHERMAL BOUND', U.fmt(iso.gas_mass_kg, 3), 'kg', 'dim',
-                    'Slow (dense-gas) minimum mass')
-                + U.statCard('ADIABATIC BOUND', U.fmt(adia.gas_mass_kg, 3), 'kg', 'dim',
-                    'Fast (cold-gas) maximum mass')
-                + U.statCard('BOTTLE VOLUME', U.fmt(st.bottle_water_volume_m3 * 1000, 1), 'L', 'dim',
-                    'Required storage bottle water volume')
-                + U.statCard('BOTTLE COUNT', U.fmt(st.bottle_count, 0), '×', 'info',
-                    '50 L standard bottles (ceil)')
-                + U.statCard('RESIDUAL GAS', U.fmt(st.residual_mass_kg, 3), 'kg', 'dim',
-                    'Unusable gas left below P_min');
+            cards += U.statCard(T('panel.feed.cardDelivered', 'DELIVERED GAS'),
+                U.fmt(p.recommended_delivered_mass_kg, 3), 'kg', 'info',
+                T('panel.feed.cardDeliveredTip',
+                  'Recommended (conservative, adiabatic bound) pressurant mass'))
+                + U.statCard(T('panel.feed.cardIso', 'ISOTHERMAL BOUND'), U.fmt(iso.gas_mass_kg, 3), 'kg', 'dim',
+                    T('panel.feed.cardIsoTip', 'Slow (dense-gas) minimum mass'))
+                + U.statCard(T('panel.feed.cardAdia', 'ADIABATIC BOUND'), U.fmt(adia.gas_mass_kg, 3), 'kg', 'dim',
+                    T('panel.feed.cardAdiaTip', 'Fast (cold-gas) maximum mass'))
+                + U.statCard(T('panel.feed.cardBottleVol', 'BOTTLE VOLUME'),
+                    U.fmt(st.bottle_water_volume_m3 * 1000, 1), 'L', 'dim',
+                    T('panel.feed.cardBottleVolTip', 'Required storage bottle water volume'))
+                + U.statCard(T('panel.feed.cardBottleCount', 'BOTTLE COUNT'), U.fmt(st.bottle_count, 0), '×', 'info',
+                    T('panel.feed.cardBottleCountTip', '50 L standard bottles (ceil)'))
+                + U.statCard(T('panel.feed.cardResidual', 'RESIDUAL GAS'), U.fmt(st.residual_mass_kg, 3), 'kg', 'dim',
+                    T('panel.feed.cardResidualTip', 'Unusable gas left below P_min'));
         } else {
             const bdKind = (Number.isFinite(p.blowdown_ratio) && p.blowdown_ratio > 4) ? 'warn' : 'ok';
-            cards += U.statCard('BLOWDOWN RATIO', U.fmt(p.blowdown_ratio, 2), '', bdKind,
-                'P_initial / P_final — engine must tolerate this pressure range')
-                + U.statCard('INITIAL PRESSURE', U.fmt(p.initial_pressure / 1e5, 1), 'bar', 'dim', '')
-                + U.statCard('FINAL PRESSURE', U.fmt(p.final_pressure / 1e5, 1), 'bar', 'info', '')
-                + U.statCard('FINAL TEMP', U.fmt(p.final_temperature_K, 0), 'K', 'dim',
-                    'Polytropic cooling of the trapped gas')
-                + U.statCard('TRAPPED GAS', U.fmt(p.gas_mass_kg, 3), 'kg', 'dim', '')
-                + U.statCard('POLYTROPIC n', U.fmt(p.polytropic_n, 2), '', 'dim',
-                    '1.0 isothermal .. gamma adiabatic');
+            cards += U.statCard(T('panel.feed.cardBdRatio', 'BLOWDOWN RATIO'), U.fmt(p.blowdown_ratio, 2), '', bdKind,
+                T('panel.feed.cardBdRatioTip',
+                  'P_initial / P_final — engine must tolerate this pressure range'))
+                + U.statCard(T('panel.feed.cardPInit', 'INITIAL PRESSURE'), U.fmt(p.initial_pressure / 1e5, 1), 'bar', 'dim', '')
+                + U.statCard(T('panel.feed.cardPFinal', 'FINAL PRESSURE'), U.fmt(p.final_pressure / 1e5, 1), 'bar', 'info', '')
+                + U.statCard(T('panel.feed.cardTFinal', 'FINAL TEMP'), U.fmt(p.final_temperature_K, 0), 'K', 'dim',
+                    T('panel.feed.cardTFinalTip', 'Polytropic cooling of the trapped gas'))
+                + U.statCard(T('panel.feed.cardTrapped', 'TRAPPED GAS'), U.fmt(p.gas_mass_kg, 3), 'kg', 'dim', '')
+                + U.statCard(T('panel.feed.cardPolytropic', 'POLYTROPIC n'), U.fmt(p.polytropic_n, 2), '', 'dim',
+                    T('panel.feed.cardPolytropicTip', '1.0 isothermal .. gamma adiabatic'));
         }
         cards += '</div>';
         head.innerHTML = cards;
@@ -180,7 +200,8 @@
 
         const tail = document.createElement('div');
         let html = '';
-        if (p.model_note) html += U.listBlock('Model assumptions & limits', [p.model_note], 'dim');
+        if (p.model_note) html += U.listBlock(T('common.modelAssumptions',
+            'Model assumptions & limits'), [p.model_note], 'dim');
         tail.innerHTML = html;
         root.appendChild(tail);
     }
@@ -199,28 +220,31 @@
         const kind = whKind(w.status);
         const head = document.createElement('div');
         let html = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + U.badge('STATUS: ' + String(w.status || '—'), kind,
-                'SAFE ≤ MAWP · MARGINAL ≤ hoop yield · UNSAFE > hoop yield')
-            + U.badge('FLUID: ' + String(w.fluid_name || w.fluid || '—'), 'dim',
+            + U.badge(T('common.statusUpper', 'STATUS') + ': ' + String(w.status || '—'), kind,
+                T('panel.feed.whStatusTip', 'SAFE ≤ MAWP · MARGINAL ≤ hoop yield · UNSAFE > hoop yield'))
+            + U.badge(T('panel.feed.badgeFluid', 'FLUID') + ': '
+                + String(w.fluid_name || w.fluid || '—'), 'dim',
                 (w.fluid_properties && w.fluid_properties.source) || '')
-            + U.badge('CLOSURE: ' + String(w.closure_regime || '—').toUpperCase(), 'info')
+            + U.badge(T('panel.feed.badgeClosure', 'CLOSURE') + ': '
+                + String(w.closure_regime || '—').toUpperCase(), 'info')
             + '</div>';
         html += '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard('PEAK PRESSURE', U.fmt(w.peak_pressure_bar, 1), 'bar', kind,
-                'Working pressure + applied transient rise')
-            + U.statCard('JOUKOWSKY RISE', U.fmt(w.joukowsky_pressure_rise_bar, 1), 'bar', 'dim',
-                'Instantaneous-closure rise ρ·a·Δv (Joukowsky 1898)')
-            + U.statCard('APPLIED RISE', U.fmt(w.applied_pressure_rise_bar, 1), 'bar', 'info',
-                'Rise for the actual closure time (Michaud reduction if slow)')
-            + U.statCard('WAVE SPEED', U.fmt(w.wave_speed_m_s, 0), 'm/s', 'dim',
-                'Elastic-pipe corrected (Wylie & Streeter Eq. 1-10)')
-            + U.statCard('CRITICAL TIME 2L/a', U.fmt(w.critical_closure_time_ms, 1), 'ms', 'dim',
-                'Closure faster than this → full Joukowsky pressure')
-            + U.statCard('PIPE MAWP', U.fmt(pipe.mawp_bar, 1), 'bar', 'dim',
+            + U.statCard(T('panel.feed.cardPeakP', 'PEAK PRESSURE'), U.fmt(w.peak_pressure_bar, 1), 'bar', kind,
+                T('panel.feed.cardPeakPTip', 'Working pressure + applied transient rise'))
+            + U.statCard(T('panel.feed.cardJoukowsky', 'JOUKOWSKY RISE'), U.fmt(w.joukowsky_pressure_rise_bar, 1), 'bar', 'dim',
+                T('panel.feed.cardJoukowskyTip', 'Instantaneous-closure rise ρ·a·Δv (Joukowsky 1898)'))
+            + U.statCard(T('panel.feed.cardApplied', 'APPLIED RISE'), U.fmt(w.applied_pressure_rise_bar, 1), 'bar', 'info',
+                T('panel.feed.cardAppliedTip', 'Rise for the actual closure time (Michaud reduction if slow)'))
+            + U.statCard(T('panel.feed.cardWave', 'WAVE SPEED'), U.fmt(w.wave_speed_m_s, 0), 'm/s', 'dim',
+                T('panel.feed.cardWaveTip', 'Elastic-pipe corrected (Wylie & Streeter Eq. 1-10)'))
+            + U.statCard(T('panel.feed.cardCritTime', 'CRITICAL TIME 2L/a'), U.fmt(w.critical_closure_time_ms, 1), 'ms', 'dim',
+                T('panel.feed.cardCritTimeTip', 'Closure faster than this → full Joukowsky pressure'))
+            + U.statCard(T('panel.feed.cardPipeMawp', 'PIPE MAWP'), U.fmt(pipe.mawp_bar, 1), 'bar', 'dim',
                 (pipe.mawp_source || '') + ' · ' + (pipe.material_name || ''))
-            + U.statCard('RECOMMENDED CLOSURE', U.fmt(w.recommended_closure_time_ms, 1), 'ms',
+            + U.statCard(T('panel.feed.cardRecClosure', 'RECOMMENDED CLOSURE'), U.fmt(w.recommended_closure_time_ms, 1), 'ms',
                 (w.recommended_closure_time_ms == null ? 'ok' : 'warn'),
-                'Minimum valve closure time to keep the peak within the pipe MAWP')
+                T('panel.feed.cardRecClosureTip',
+                  'Minimum valve closure time to keep the peak within the pipe MAWP'))
             + '</div>';
         head.innerHTML = html;
         root.appendChild(head);
@@ -232,10 +256,11 @@
                 + w.recommendation + '</p>';
         }
         if (Array.isArray(w.warnings) && w.warnings.length) {
-            t += U.listBlock('Warnings', w.warnings, kind === 'err' ? 'err' : 'warn');
+            t += U.listBlock(T('common.warnings', 'Warnings'), w.warnings, kind === 'err' ? 'err' : 'warn');
         }
         if (Array.isArray(w.assumptions) && w.assumptions.length) {
-            t += U.listBlock('Model assumptions & limits', w.assumptions, 'dim');
+            t += U.listBlock(T('common.modelAssumptions', 'Model assumptions & limits'),
+                             w.assumptions, 'dim');
         }
         tail.innerHTML = t;
         root.appendChild(tail);
@@ -246,15 +271,16 @@
     // ------------------------------------------------------------------
     const TABS = [
         {
-            key: 'slosh', label: 'Slosh', endpoint: '/api/slosh-analysis',
+            key: 'slosh', label: 'Slosh', labelKey: 'panel.feed.tabSlosh',
+            endpoint: '/api/slosh-analysis',
             motorTypes: ['liquid', 'hybrid'], render: renderSlosh,
             fields: [
-                ['radius', 'Tank Radius (m)', 0.3, 0.01],
-                ['fill_height', 'Fill Height (m)', 0.6, 0.01],
-                ['g_eff', 'Axial Acceleration (m/s²)', 9.81, 0.1],
-                ['fluid_density', 'Propellant Density (kg/m³)', 810, 1],
-                ['baffle_width_ratio', 'Baffle Width w/R', 0.15, 0.01],
-                ['baffle_depth_ratio', 'Baffle Depth d/R', 0.10, 0.01],
+                ['radius', 'Tank Radius (m)', 0.3, 0.01, 'panel.feed.fTankRadius'],
+                ['fill_height', 'Fill Height (m)', 0.6, 0.01, 'panel.feed.fFillHeight'],
+                ['g_eff', 'Axial Acceleration (m/s²)', 9.81, 0.1, 'panel.feed.fAxialAccel'],
+                ['fluid_density', 'Propellant Density (kg/m³)', 810, 1, 'panel.feed.fPropDensity'],
+                ['baffle_width_ratio', 'Baffle Width w/R', 0.15, 0.01, 'panel.feed.fBaffleW'],
+                ['baffle_depth_ratio', 'Baffle Depth d/R', 0.10, 0.01, 'panel.feed.fBaffleD'],
             ],
             suggest: function (m) {
                 const sug = {};
@@ -273,22 +299,24 @@
             },
         },
         {
-            key: 'pressurant', label: 'Pressurant', endpoint: '/api/pressurant-sizing',
+            key: 'pressurant', label: 'Pressurant', labelKey: 'panel.feed.tabPressurant',
+            endpoint: '/api/pressurant-sizing',
             motorTypes: ['liquid', 'hybrid'], render: renderPressurant,
             note: 'Regulated uses tank/storage pressure; Blowdown uses initial ullage '
                 + 'volume and initial pressure. Unused fields are ignored per mode.',
+            noteKey: 'panel.feed.pressurantNote',
             fields: [
-                ['mode', 'Architecture', 'regulated', PRESS_MODES],
-                ['gas', 'Pressurant Gas', 'helium', GASES],
-                ['propellant_volume', 'Propellant Volume (m³)', 0.5, 0.01],
-                ['initial_temperature', 'Gas Temperature (K)', 293, 1],
-                ['tank_pressure', 'Tank Pressure (bar) [reg]', 20, 1],
-                ['storage_pressure', 'Storage Pressure (bar) [reg]', 200, 5],
-                ['regulator_margin', 'Regulator Margin [reg]', 0.10, 0.01],
-                ['collapse_factor', 'Collapse Factor [reg]', 1.0, 0.05],
-                ['initial_ullage_volume', 'Initial Ullage Vol (m³) [bd]', 0.10, 0.01],
-                ['initial_pressure', 'Initial Pressure (bar) [bd]', 30, 1],
-                ['polytropic_n', 'Polytropic n [bd]', 1.2, 0.05],
+                ['mode', 'Architecture', 'regulated', PRESS_MODES, 'panel.feed.fArchitecture'],
+                ['gas', 'Pressurant Gas', 'helium', GASES, 'panel.feed.fGas'],
+                ['propellant_volume', 'Propellant Volume (m³)', 0.5, 0.01, 'panel.feed.fPropVolume'],
+                ['initial_temperature', 'Gas Temperature (K)', 293, 1, 'panel.feed.fGasTemp'],
+                ['tank_pressure', 'Tank Pressure (bar) [reg]', 20, 1, 'panel.feed.fTankPressure'],
+                ['storage_pressure', 'Storage Pressure (bar) [reg]', 200, 5, 'panel.feed.fStoragePressure'],
+                ['regulator_margin', 'Regulator Margin [reg]', 0.10, 0.01, 'panel.feed.fRegMargin'],
+                ['collapse_factor', 'Collapse Factor [reg]', 1.0, 0.05, 'panel.feed.fCollapse'],
+                ['initial_ullage_volume', 'Initial Ullage Vol (m³) [bd]', 0.10, 0.01, 'panel.feed.fUllage'],
+                ['initial_pressure', 'Initial Pressure (bar) [bd]', 30, 1, 'panel.feed.fInitialPressure'],
+                ['polytropic_n', 'Polytropic n [bd]', 1.2, 0.05, 'panel.feed.fPolytropic'],
             ],
             suggest: function (m) {
                 const sug = {};
@@ -302,17 +330,18 @@
             },
         },
         {
-            key: 'water_hammer', label: 'Water Hammer', endpoint: '/api/water-hammer',
+            key: 'water_hammer', label: 'Water Hammer', labelKey: 'panel.feed.tabWaterHammer',
+            endpoint: '/api/water-hammer',
             motorTypes: ['liquid', 'hybrid', 'solid'], render: renderWaterHammer,
             fields: [
-                ['fluid', 'Line Fluid', 'water', WH_FLUIDS],
-                ['line_length_m', 'Line Length (m)', 20, 0.5],
-                ['line_id_mm', 'Line Inner Diameter (mm)', 25, 1],
-                ['wall_thickness_mm', 'Wall Thickness (mm)', 2, 0.1],
-                ['working_pressure_bar', 'Working Pressure (bar)', 20, 1],
-                ['mdot_kg_s', 'Mass Flow (kg/s)', 5, 0.1],
-                ['valve_closure_time_ms', 'Valve Closure Time (ms)', 50, 1],
-                ['pipe_material', 'Pipe Material', 'ss_304', PIPE_MATERIALS],
+                ['fluid', 'Line Fluid', 'water', WH_FLUIDS, 'panel.feed.fLineFluid'],
+                ['line_length_m', 'Line Length (m)', 20, 0.5, 'panel.feed.fLineLength'],
+                ['line_id_mm', 'Line Inner Diameter (mm)', 25, 1, 'panel.feed.fLineId'],
+                ['wall_thickness_mm', 'Wall Thickness (mm)', 2, 0.1, 'common.f.wallThicknessMm'],
+                ['working_pressure_bar', 'Working Pressure (bar)', 20, 1, 'panel.feed.fWorkingPressure'],
+                ['mdot_kg_s', 'Mass Flow (kg/s)', 5, 0.1, 'panel.feed.fMassFlow'],
+                ['valve_closure_time_ms', 'Valve Closure Time (ms)', 50, 1, 'panel.feed.fValveTime'],
+                ['pipe_material', 'Pipe Material', 'ss_304', PIPE_MATERIALS, 'panel.feed.fPipeMaterial'],
             ],
             suggest: function (m) {
                 const sug = {};
@@ -330,18 +359,25 @@
     // ------------------------------------------------------------------
     function fieldDom(tabKey, fid) { return 'feed_' + tabKey + '_' + fid; }
 
+    // Etiket anahtarı 5. eleman olarak gelir; data-i18n ile dil değişiminde
+    // I18N.apply() metni kendiliğinden tazeler.
+    function labelHtml(key, text) {
+        return '<label' + (key ? ' data-i18n="' + key + '"' : '') + '>' + T(key, text) + '</label>';
+    }
+
     function fieldHtml(tabKey, f) {
-        const fid = f[0], label = f[1], def = f[2], step = f[3];
+        const fid = f[0], label = f[1], def = f[2], step = f[3], labelKey = f[4];
         const id = fieldDom(tabKey, fid);
         if (Array.isArray(step)) {
             const opts = step.map(function (o) {
                 return '<option value="' + o[0] + '"' + (o[0] === def ? ' selected' : '')
-                    + '>' + o[1] + '</option>';
+                    + (o[2] ? ' data-i18n="' + o[2] + '"' : '')
+                    + '>' + T(o[2], o[1]) + '</option>';
             }).join('');
-            return '<div class="form-group"><label>' + label + '</label>'
+            return '<div class="form-group">' + labelHtml(labelKey, label)
                 + '<select id="' + id + '" data-field="' + fid + '">' + opts + '</select></div>';
         }
-        return '<div class="form-group"><label>' + label + '</label>'
+        return '<div class="form-group">' + labelHtml(labelKey, label)
             + '<input type="number" id="' + id + '" data-field="' + fid + '" value="'
             + def + '" step="' + step + '"></div>';
     }
@@ -385,7 +421,7 @@
         if (!status || !result || !btn) return;
         btn.disabled = true;
         result.style.display = 'none';
-        status.textContent = 'RUNNING…';
+        status.textContent = T('common.running', 'RUNNING…');
         try {
             const resp = await fetch(tab.endpoint, {
                 method: 'POST',
@@ -398,11 +434,14 @@
                 throw new Error((data && data.error) || ('HTTP ' + resp.status));
             }
             result.innerHTML = '';
+            lastTabData[tab.key] = data;      // dil değişiminde yeniden çizmek için
             tab.render(data, result);
+            if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(result);
             result.style.display = 'block';
             status.textContent = '';
         } catch (err) {
-            status.textContent = 'ERROR: ' + err.message;
+            status.textContent = U.tf('common.errorPrefix', { message: err.message },
+                                      'ERROR: {message}');
         } finally {
             btn.disabled = false;
         }
@@ -424,14 +463,15 @@
             + ' border:1px solid var(--hd-line, rgba(0,229,255,0.14)); border-bottom:none;'
             + ' background:' + (on ? 'rgba(0,229,255,0.10)' : 'transparent') + ';'
             + ' color:' + (on ? 'var(--hd-cyan, #00e5ff)' : 'var(--hd-ink-dim, #7d97a5)')
-            + ';">' + tab.label + '</button>';
+            + ';" data-i18n="' + (tab.labelKey || '') + '">' + T(tab.labelKey, tab.label) + '</button>';
     }
 
     function paneHtml(tab, active) {
         const fields = tab.fields.map(function (f) { return fieldHtml(tab.key, f); }).join('');
         const noteHtml = tab.note
-            ? '<p style="font-size:0.76rem; color:var(--hd-ink-dim, #7d97a5); margin:4px 0 8px;">'
-              + tab.note + '</p>'
+            ? '<p style="font-size:0.76rem; color:var(--hd-ink-dim, #7d97a5); margin:4px 0 8px;"'
+              + (tab.noteKey ? ' data-i18n="' + tab.noteKey + '"' : '') + '>'
+              + T(tab.noteKey, tab.note) + '</p>'
             : '';
         return '<div class="feed-pane" data-pane="' + tab.key + '"'
             + ' style="display:' + (active ? 'block' : 'none') + '; padding:12px 4px 4px;">'
@@ -439,7 +479,8 @@
             + '<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));'
             + ' gap:10px; margin:6px 0;">' + fields
             + '<div class="form-group" style="align-self:end;">'
-            + '<button class="btn feed-run" type="button">Run Analysis</button></div></div>'
+            + '<button class="btn feed-run" type="button" data-i18n="common.runAnalysis">'
+            + T('common.runAnalysis', 'Run Analysis') + '</button></div></div>'
             + '<div class="feed-status" style="font-family:var(--hd-mono);'
             + ' color:var(--hd-ink-dim, #7d97a5); margin:6px 0;"></div>'
             + '<div class="feed-result" style="display:none;"></div></div>';
@@ -476,6 +517,8 @@
         // Bölüm başlığındaki tek-endpoint ipucunu üç endpoint özetiyle değiştir
         const hint = sec.querySelector('h3 span');
         if (hint) hint.textContent = 'slosh · pressurant · water-hammer';
+        // Dil değişince sekme çıktıları saklanan yanıtla yeniden çizilir
+        if (window.I18N && window.I18N.onChange) window.I18N.onChange(rerenderTabs);
 
         const tabs = visibleTabs();
         if (!tabs.length) { root.style.display = 'none'; return true; }
@@ -515,6 +558,27 @@
         return true;
     }
 
+    // Dil değişimi: sabit etiketleri I18N.apply() çevirir, sekme sonuçları
+    // saklanan yanıtla yeniden basılır (yeni istek atılmaz).
+    function rerenderTabs() {
+        const root = document.getElementById('ad_root_' + PANEL_ID);
+        if (!root) return;
+        TABS.forEach(function (tab) {
+            const data = lastTabData[tab.key];
+            if (!data) return;
+            const pane = root.querySelector('.feed-pane[data-pane="' + tab.key + '"]');
+            const result = pane && pane.querySelector('.feed-result');
+            if (!result || result.style.display === 'none') return;
+            try {
+                result.innerHTML = '';
+                tab.render(data, result);
+                if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(result);
+            } catch (e) {
+                if (window.console) console.warn('FeedPanel rerender:', tab.key, e);
+            }
+        });
+    }
+
     // Güverte bölüm kabuğu init sırasında kurulur; hazır olana kadar yokla
     // (flow_panel.js'in select bekleme desenini yansıtır).
     function scheduleMount() {
@@ -540,6 +604,7 @@
     window.AnalysisDock.register({
         id: PANEL_ID,
         title: 'Feed System — Slosh, Pressurant & Water Hammer',
+        titleKey: 'panel.feed.title',
         category: 'FEED SYSTEM',
         endpoint: '/api/water-hammer',
         motorTypes: ['liquid', 'hybrid', 'solid'],
@@ -549,6 +614,16 @@
         fromResults: function () { return {}; },
         render: function () { mountFeedTools(); },
     });
+
+    // Merkezi katalog yüklüyse boru malzemesi listesini 'pipe' etiketiyle
+    // doldur; değilse fallback aynen kalır. Bu panel kendi form DOM'unu
+    // kurduğu için select id'si feed_<tab>_<field> desenindedir.
+    if (typeof window.HRMAMaterials !== 'undefined' && window.HRMAMaterials) {
+        window.HRMAMaterials.populateSelect({
+            selectId: fieldDom('water_hammer', 'pipe_material'),
+            tags: ['pipe'], fallback: PIPE_MATERIALS,
+        });
+    }
 
     // Test / hata ayıklama: saf render + yardımcılar
     window.FeedPanel = {

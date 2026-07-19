@@ -24,6 +24,7 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
     const ENDPOINT = '/api/flow-analysis';
     const KINETIC_ENDPOINT = '/api/kinetic-efficiency';
@@ -31,16 +32,18 @@
 
     // Rejim rozetleri — separated/şok/boğulmamış KIRMIZI (görev sözleşmesi)
     const REGIME_INFO = {
-        underexpanded: { label: 'UNDEREXPANDED', kind: 'info' },
-        perfectly_expanded: { label: 'PERFECT EXPANSION', kind: 'ok' },
-        overexpanded: { label: 'OVEREXPANDED', kind: 'warn' },
-        separated: { label: 'SEPARATED', kind: 'err' },
-        normal_shock_in_nozzle: { label: 'NORMAL SHOCK IN NOZZLE', kind: 'err' },
-        unchoked: { label: 'UNCHOKED', kind: 'err' },
+        underexpanded: { key: 'nzl.regimeUnderexpanded', label: 'UNDEREXPANDED', kind: 'info' },
+        perfectly_expanded: { key: 'nzl.regimePerfect', label: 'PERFECT EXPANSION', kind: 'ok' },
+        overexpanded: { key: 'nzl.regimeOverexpanded', label: 'OVEREXPANDED', kind: 'warn' },
+        separated: { key: 'nzl.regimeSeparated', label: 'SEPARATED', kind: 'err' },
+        normal_shock_in_nozzle: { key: 'nzl.regimeShock', label: 'NORMAL SHOCK IN NOZZLE', kind: 'err' },
+        unchoked: { key: 'nzl.regimeUnchoked', label: 'UNCHOKED', kind: 'err' },
     };
 
     function regimeInfo(type) {
-        return REGIME_INFO[type] || { label: String(type || 'UNKNOWN').toUpperCase(), kind: 'dim' };
+        const found = REGIME_INFO[type];
+        if (found) return { label: T(found.key, found.label), kind: found.kind };
+        return { label: String(type || T('common.unknown', 'UNKNOWN')).toUpperCase(), kind: 'dim' };
     }
 
     // ------------------------------------------------------------------
@@ -55,7 +58,7 @@
         if (!sel.querySelector('option[value="high_fidelity"]')) {
             const opt = document.createElement('option');
             opt.value = 'high_fidelity';
-            opt.textContent = 'High-Fidelity (Cantera finite-rate)';
+            opt.textContent = T('nzl.kinHigh', 'High-Fidelity (Cantera finite-rate)');
             sel.appendChild(opt);
         }
         return true;
@@ -117,14 +120,16 @@
             const note = document.createElement('p');
             note.style.cssText = 'font-family:var(--hd-mono); font-size:0.78rem;'
                 + ' color:var(--hd-ink-dim, #7d97a5); margin:10px 0;';
-            note.textContent = 'Fast Screening level: station arrays P(x)/M(x) '
-                + 'require the Engineering fidelity level.';
+            note.textContent = T('panel.nzl.noStations',
+                'Fast Screening level: station arrays P(x)/M(x) '
+                + 'require the Engineering fidelity level.');
             root.appendChild(note);
             return;
         }
         if (typeof Plotly === 'undefined') {
             const note = document.createElement('p');
-            note.textContent = 'Plotly is not loaded — station charts skipped.';
+            note.textContent = T('panel.nzl.plotlyMissing',
+                'Plotly is not loaded — station charts skipped.');
             root.appendChild(note);
             return;
         }
@@ -135,25 +140,29 @@
         const pBar = st.pressure_Pa.map(function (p) { return p / 1e5; });
         const pWallBar = (st.wall_pressure_Pa || st.pressure_Pa)
             .map(function (p) { return p / 1e5; });
-        Plotly.newPlot(plotBlock(root, 'Static Pressure Along the Nozzle — P(x)'), [
-            { x: st.x_mm, y: pBar, mode: 'lines', name: 'Core P(x) [bar]',
+        Plotly.newPlot(plotBlock(root, T('panel.nzl.chartP',
+            'Static Pressure Along the Nozzle — P(x)')), [
+            { x: st.x_mm, y: pBar, mode: 'lines',
+              name: T('panel.nzl.seriesCoreP', 'Core P(x) [bar]'),
               line: { width: 2 } },
             { x: st.x_mm, y: pWallBar, mode: 'lines',
-              name: 'Wall P(x) [bar]', line: { width: 1.5, dash: 'dot' } },
+              name: T('panel.nzl.seriesWallP', 'Wall P(x) [bar]'),
+              line: { width: 1.5, dash: 'dot' } },
         ], {
-            xaxis: { title: 'Axial position x (mm)' },
-            yaxis: { title: 'Pressure (bar)' },
+            xaxis: { title: T('common.axis.axialX', 'Axial position x (mm)') },
+            yaxis: { title: T('common.axis.pressureBar', 'Pressure (bar)') },
             shapes: shapes,
             margin: { t: 24, r: 16 },
             height: 320,
         }, { responsive: true, displaylogo: false });
 
         // M(x)
-        Plotly.newPlot(plotBlock(root, 'Mach Number Along the Nozzle — M(x)'), [
+        Plotly.newPlot(plotBlock(root, T('panel.nzl.chartM',
+            'Mach Number Along the Nozzle — M(x)')), [
             { x: st.x_mm, y: st.mach, mode: 'lines', name: 'Mach', line: { width: 2 } },
         ], {
-            xaxis: { title: 'Axial position x (mm)' },
-            yaxis: { title: 'Mach number' },
+            xaxis: { title: T('common.axis.axialX', 'Axial position x (mm)') },
+            yaxis: { title: T('common.axis.machNumber', 'Mach number') },
             shapes: shapes.concat([{
                 type: 'line', xref: 'paper', yref: 'y',
                 x0: 0, x1: 1, y0: 1, y1: 1,
@@ -176,20 +185,23 @@
         const band = kin.loss_band_pct || [null, null];
         const lo = U.fmt(band[0], 2), hi = U.fmt(band[1], 2);
         const fidelityBadge = U.badge(
-            'KINETICS: ' + String(kin.fidelity_used || '?').toUpperCase(),
+            T('panel.nzl.kineticsBadge', 'KINETICS') + ': '
+            + String(kin.fidelity_used || '?').toUpperCase(),
             kin.fidelity_used === 'high_fidelity' ? 'ok' : 'info',
             kin.model_note || '');
-        return U.sectionTitle('Kinetic Efficiency — Frozen/Shifting Bracket')
+        return U.sectionTitle(T('panel.nzl.secKinetic',
+                'Kinetic Efficiency — Frozen/Shifting Bracket'))
             + `<div style="margin:4px 0 8px;">${fidelityBadge}</div>`
             + '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
-            + U.statCard('KINETIC LOSS', U.fmt(kin.kinetic_loss_pct, 2), '%',
+            + U.statCard(T('panel.nzl.cardKineticLoss', 'KINETIC LOSS'),
+                U.fmt(kin.kinetic_loss_pct, 2), '%',
                 kin.kinetic_loss_pct > 3 ? 'warn' : 'ok',
-                'Isp loss vs shifting equilibrium')
-            + U.statCard('LOSS BAND', lo + ' – ' + hi, '%', 'dim',
-                'Honest uncertainty band on the kinetic loss')
-            + U.statCard('ISP FROZEN', U.fmt(kin.isp_frozen, 1), 's', 'dim', '')
-            + U.statCard('ISP PREDICTED', U.fmt(kin.isp_predicted, 1), 's', 'info', '')
-            + U.statCard('ISP SHIFTING', U.fmt(kin.isp_shifting, 1), 's', 'dim', '')
+                T('panel.nzl.cardKineticLossTip', 'Isp loss vs shifting equilibrium'))
+            + U.statCard(T('panel.nzl.cardLossBand', 'LOSS BAND'), lo + ' – ' + hi, '%', 'dim',
+                T('panel.nzl.cardLossBandTip', 'Honest uncertainty band on the kinetic loss'))
+            + U.statCard(T('panel.nzl.cardIspFrozen', 'ISP FROZEN'), U.fmt(kin.isp_frozen, 1), 's', 'dim', '')
+            + U.statCard(T('panel.nzl.cardIspPredicted', 'ISP PREDICTED'), U.fmt(kin.isp_predicted, 1), 's', 'info', '')
+            + U.statCard(T('panel.nzl.cardIspShifting', 'ISP SHIFTING'), U.fmt(kin.isp_shifting, 1), 's', 'dim', '')
             + '</div>';
     }
 
@@ -206,36 +218,40 @@
         const head = document.createElement('div');
         let sepNote = '';
         if (regime.separation) {
-            sepNote = `<p style="color:var(--hd-red, #ff5d73); font-size:0.8rem; margin:6px 0;">
-                Separation at x = ${U.fmt(regime.separation.station_x_mm, 1)} mm
-                (area ratio ${U.fmt(regime.separation.area_ratio, 2)}) —
-                Summerfield criterion.</p>`;
+            sepNote = `<p style="color:var(--hd-red, #ff5d73); font-size:0.8rem; margin:6px 0;">${
+                U.tf('panel.nzl.separationNote',
+                     { x: U.fmt(regime.separation.station_x_mm, 1),
+                       ar: U.fmt(regime.separation.area_ratio, 2) },
+                     'Separation at x = {x} mm (area ratio {ar}) — Summerfield criterion.')}</p>`;
         }
-        head.innerHTML = U.sectionTitle('Flow Regime — Quasi-1D Classification')
+        head.innerHTML = U.sectionTitle(T('panel.nzl.secRegime',
+                'Flow Regime — Quasi-1D Classification'))
             + `<div style="margin:4px 0 6px;">${U.badge(info.label, info.kind,
                 regime.separation_criterion || '')}
                <span style="font-family:var(--hd-mono); font-size:0.72rem;
                      color:var(--hd-ink-dim, #7d97a5); margin-left:10px;">
-                 ${data.fidelity === 'fast' ? 'FAST SCREENING' : 'ENGINEERING'} ·
+                 ${data.fidelity === 'fast' ? T('nzl.fidelityFast', 'FAST SCREENING')
+                                             : T('nzl.fidelityEng', 'ENGINEERING')} ·
                  ${flow.model || ''}</span></div>`
             + `<p style="font-size:0.82rem; color:var(--hd-ink, #cfe8f2); margin:6px 0;">
                 ${regime.description || ''}</p>`
             + sepNote
-            + U.sectionTitle('Thrust & Thrust Coefficient')
+            + U.sectionTitle(T('panel.nzl.secThrust', 'Thrust & Thrust Coefficient'))
             + '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
             + U.statCard('CF', U.fmt(perf.CF, 3), '',
-                'info', 'Thrust coefficient F/(Pc·At)')
-            + U.statCard('CF IDEAL', U.fmt(perf.CF_ideal, 3), '',
+                'info', T('panel.nzl.cfTip', 'Thrust coefficient F/(Pc·At)'))
+            + U.statCard(T('panel.nzl.cfIdeal', 'CF IDEAL'), U.fmt(perf.CF_ideal, 3), '',
                 'dim', 'Sutton & Biblarz 9th ed. Eq. 3-30')
-            + U.statCard('CF EFFECTIVE', U.fmt(losses.CF_effective, 3), '',
-                'dim', 'After divergence + friction losses (approximate)')
-            + U.statCard('THRUST', U.fmt(perf.thrust_N, 0), 'N', 'info', '')
-            + U.statCard('EFFECTIVE THRUST', U.fmt(losses.thrust_effective_N, 0), 'N',
-                'dim', losses.note || '')
-            + U.statCard('MASS FLOW', U.fmt(perf.mass_flow_kg_s, 3), 'kg/s', 'dim', '')
+            + U.statCard(T('panel.nzl.cfEffective', 'CF EFFECTIVE'), U.fmt(losses.CF_effective, 3), '',
+                'dim', T('panel.nzl.cfEffectiveTip',
+                         'After divergence + friction losses (approximate)'))
+            + U.statCard(T('common.thrust', 'THRUST'), U.fmt(perf.thrust_N, 0), 'N', 'info', '')
+            + U.statCard(T('panel.nzl.thrustEffective', 'EFFECTIVE THRUST'),
+                U.fmt(losses.thrust_effective_N, 0), 'N', 'dim', losses.note || '')
+            + U.statCard(T('common.massFlow', 'MASS FLOW'), U.fmt(perf.mass_flow_kg_s, 3), 'kg/s', 'dim', '')
             + U.statCard('C*', U.fmt(perf.c_star_m_s, 0), 'm/s', 'dim',
-                'Analytic characteristic velocity (Sutton Eq. 3-32)')
-            + U.statCard('EXIT MACH', U.fmt(perf.exit && perf.exit.mach, 2), '',
+                T('panel.nzl.cstarTip', 'Analytic characteristic velocity (Sutton Eq. 3-32)'))
+            + U.statCard(T('panel.nzl.exitMach', 'EXIT MACH'), U.fmt(perf.exit && perf.exit.mach, 2), '',
                 'dim', '')
             + '</div>'
             + kineticCard(data.kinetic_efficiency, data.kinetic_note);
@@ -246,7 +262,7 @@
         // Varsayımlar — dürüst model sınırları (İngilizce, kullanıcıya görünür)
         if (Array.isArray(flow.assumptions) && flow.assumptions.length) {
             const div = document.createElement('div');
-            div.innerHTML = U.listBlock('Model assumptions & limits',
+            div.innerHTML = U.listBlock(T('common.modelAssumptions', 'Model assumptions & limits'),
                 flow.assumptions, 'dim');
             root.appendChild(div);
         }
@@ -258,35 +274,36 @@
     window.AnalysisDock.register({
         id: PANEL_ID,
         title: 'Nozzle Flow — Quasi-1D Compressible (Regime, P(x), M(x), CF)',
+        titleKey: 'panel.nzl.title',
         category: 'FLOW',
         endpoint: ENDPOINT,
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
             ['fidelity', 'Fidelity Level', 'engineering', [
-                ['fast', 'Fast Screening'],
-                ['engineering', 'Engineering'],
-            ]],
+                ['fast', 'Fast Screening', 'nzl.fidelityFastOpt'],
+                ['engineering', 'Engineering', 'nzl.fidelityEngOpt'],
+            ], 'panel.nzl.fFidelity'],
             ['kinetic_fidelity', 'Kinetic Model', 'engineering', [
-                ['fast', 'Fast (equilibrium reference)'],
-                ['engineering', 'Engineering (JANNAF-style)'],
+                ['fast', 'Fast (equilibrium reference)', 'nzl.kinFast'],
+                ['engineering', 'Engineering (JANNAF-style)', 'nzl.kinEng'],
                 // 'high_fidelity' seçeneği Cantera sondası başarılıysa eklenir
-            ]],
-            ['chamber_pressure', 'Chamber Pressure (bar)', 20, 1],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 50],
-            ['gamma', 'Gamma (frozen)', 1.2, 0.01],
-            ['molecular_weight', 'Molecular Weight (g/mol)', 24, 0.5],
-            ['throat_diameter', 'Throat Diameter (m)', 0.02, 0.001],
-            ['exit_diameter', 'Exit Diameter (m)', 0.06, 0.001],
-            ['ambient_pressure', 'Ambient Pressure (Pa)', 101325, 1000],
-            ['n_stations', 'Axial Stations (30-60)', 45, 1],
-            ['of_ratio', 'O/F Ratio (kinetics)', 6.0, 0.1],
+            ], 'panel.nzl.fKineticModel'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 20, 1, 'common.f.chamberPressureBar'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 50, 'common.f.chamberTemperatureK'],
+            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', 24, 0.5, 'common.f.molecularWeight'],
+            ['throat_diameter', 'Throat Diameter (m)', 0.02, 0.001, 'common.f.throatDiameterM'],
+            ['exit_diameter', 'Exit Diameter (m)', 0.06, 0.001, 'common.f.exitDiameterM'],
+            ['ambient_pressure', 'Ambient Pressure (Pa)', 101325, 1000, 'common.f.ambientPressurePa'],
+            ['n_stations', 'Axial Stations (30-60)', 45, 1, 'panel.nzl.fStations'],
+            ['of_ratio', 'O/F Ratio (kinetics)', 6.0, 0.1, 'panel.nzl.fOfKinetics'],
             ['fuel_type', 'Fuel (kinetics)', 'htpb', [
-                ['htpb', 'HTPB'], ['paraffin', 'Paraffin'], ['pe', 'PE'],
+                ['htpb', 'HTPB'], ['paraffin', 'Paraffin', 'fuel.paraffin'], ['pe', 'PE'],
                 ['pmma', 'PMMA'], ['abs', 'ABS'], ['pla', 'PLA'],
-            ]],
+            ], 'panel.nzl.fFuelKinetics'],
             ['oxidizer_type', 'Oxidizer (kinetics)', 'N2O', [
                 ['N2O', 'N2O'], ['LOX', 'LOX'], ['H2O2', 'H2O2'],
-            ]],
+            ], 'panel.nzl.fOxKinetics'],
         ],
         // Hibrit/katı/sıvı sayfalarında motor sonuçlarından otomatik dolum
         fromResults: function (r) {

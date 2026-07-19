@@ -11,6 +11,17 @@
 (function () {
     'use strict';
 
+    // i18n köprüsü — i18n.js yoksa İngilizce yedek metin döner
+    function T(key, fallback) {
+        return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
+    }
+    function TF(key, params, fallback) {
+        if (window.I18N && window.I18N.tf) return window.I18N.tf(key, params, fallback);
+        return String(fallback).replace(/\{(\w+)\}/g, function (whole, name) {
+            return (params && name in params) ? String(params[name]) : whole;
+        });
+    }
+
     var SKIP_KEY = 'hrma_update_skip';
     var POLL_MS = 700;
 
@@ -39,13 +50,15 @@
         box.appendChild(el('div',
             'font-size:15px;font-weight:700;letter-spacing:0.4px;margin-bottom:6px;' +
             'color:var(--hd-cyan, #00e5ff);',
-            'UPDATE AVAILABLE'));
+            T('update.available', 'UPDATE AVAILABLE')));
         box.appendChild(el('div',
             'font-size:14px;line-height:1.55;margin-bottom:14px;' +
             'color:var(--hd-ink-strong, #eaf7fb);',
-            'HRMA <b>' + escapeHtml(info.latest) + '</b> has been released ' +
-            '(installed version: ' + escapeHtml(info.current) + '). ' +
-            'Would you like to update now?'));
+            TF('update.releasedHtml',
+               { latest: '<b>' + escapeHtml(info.latest) + '</b>',
+                 current: escapeHtml(info.current) },
+               'HRMA {latest} has been released (installed version: {current}). '
+               + 'Would you like to update now?')));
 
         if (info.notes) {
             var notes = el('div',
@@ -80,15 +93,15 @@
             'font-family:var(--hd-sans, sans-serif);transition:opacity 0.15s;';
         var updateBtn = el('button', btnBase +
             'border:none;background:var(--hd-cyan, #00e5ff);color:#04070d;',
-            'Update now');
+            T('update.btnNow', 'Update now'));
         var laterBtn = el('button', btnBase +
             'background:transparent;color:var(--hd-ink, #cfe8f2);' +
             'border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));',
-            'Later');
+            T('update.btnLater', 'Later'));
         var skipBtn = el('button', btnBase +
             'background:transparent;color:var(--hd-ink-faint, #46606d);border:none;' +
             'flex:0 1 auto;min-width:0;',
-            'Skip this version');
+            T('update.btnSkip', 'Skip this version'));
 
         laterBtn.onclick = function () { wrap.remove(); };
         skipBtn.onclick = function () {
@@ -111,8 +124,9 @@
             'margin-top:12px;font-size:12px;color:var(--hd-ink-dim, #7d97a5);');
         var manualLink = el('a',
             'color:var(--hd-cyan-soft, #6fd3e6);cursor:pointer;text-decoration:underline;',
-            'download it in your browser');
-        manualRow.appendChild(document.createTextNode('Slow or stuck? You can also '));
+            T('update.browserLink', 'download it in your browser'));
+        manualRow.appendChild(document.createTextNode(
+            T('update.slowPrefix', 'Slow or stuck? You can also ')));
         manualRow.appendChild(manualLink);
         manualRow.appendChild(document.createTextNode('.'));
         box.appendChild(manualRow);
@@ -128,9 +142,9 @@
                 .then(function (res) {
                     if (res.opened) {
                         progress.style.display = 'block';
-                        progressText.innerHTML =
-                            'Opened in your browser — download the installer there, ' +
-                            'then run it to update.';
+                        progressText.innerHTML = T('update.openedInBrowser',
+                            'Opened in your browser — download the installer there, '
+                            + 'then run it to update.');
                     } else if (res.url) {
                         // Sunucu tarayıcı açamadıysa istemci tarafını dene
                         window.open(res.url, '_blank');
@@ -153,14 +167,14 @@
                         return;
                     }
                     progress.style.display = 'block';
-                    progressText.textContent = 'Downloading…';
+                    progressText.textContent = T('update.downloading', 'Downloading…');
                     lastPct = -1;
                     stallStrikes = 0;
                     pollStatus();
                 })
                 .catch(function () {
-                    progressText.innerHTML =
-                        'Could not start the download — try the browser link above.';
+                    progressText.innerHTML = T('update.startFailed',
+                        'Could not start the download — try the browser link above.');
                     updateBtn.disabled = false;
                     updateBtn.style.opacity = '1';
                 });
@@ -189,31 +203,35 @@
                             stallStrikes += 1;
                             if (stallStrikes === STALL_LIMIT) {
                                 highlightManual();
-                                progressText.innerHTML = 'Downloading… ' + st.pct +
-                                    '% — this looks slow. You can ' +
-                                    'download it in your browser instead (link below).';
+                                progressText.innerHTML = TF('update.slowProgress',
+                                    { pct: st.pct },
+                                    'Downloading… {pct}% — this looks slow. You can '
+                                    + 'download it in your browser instead (link below).');
                             } else {
-                                progressText.textContent = 'Downloading… ' + st.pct + '%';
+                                progressText.textContent = TF('update.progress',
+                                    { pct: st.pct }, 'Downloading… {pct}%');
                             }
                         } else {
                             stallStrikes = 0;
                             lastPct = st.pct;
-                            progressText.textContent = 'Downloading… ' + st.pct + '%';
+                            progressText.textContent = TF('update.progress',
+                                { pct: st.pct }, 'Downloading… {pct}%');
                         }
                         setTimeout(pollStatus, POLL_MS);
                     } else if (st.state === 'done') {
                         fill.style.width = '100%';
-                        progressText.innerHTML =
-                            'Downloaded — the installer has been opened. ' +
-                            'Close HRMA to complete the update.<br>' +
-                            '<span style="font-size:11px;">File: ' +
-                            escapeHtml(st.path) + '</span>';
-                        laterBtn.textContent = 'OK';
+                        progressText.innerHTML = T('update.done',
+                            'Downloaded — the installer has been opened. '
+                            + 'Close HRMA to complete the update.')
+                            + '<br><span style="font-size:11px;">'
+                            + T('update.fileLabel', 'File') + ': '
+                            + escapeHtml(st.path) + '</span>';
+                        laterBtn.textContent = T('common.ok', 'OK');
                     } else if (st.state === 'error') {
                         highlightManual();
-                        progressText.innerHTML =
-                            'Download error: ' + escapeHtml(st.error || '') +
-                            ' — use the browser link below instead.';
+                        progressText.innerHTML = TF('update.error',
+                            { message: escapeHtml(st.error || '') },
+                            'Download error: {message} — use the browser link below instead.');
                         updateBtn.disabled = false;
                         updateBtn.style.opacity = '1';
                     } else {
@@ -222,8 +240,8 @@
                         idleStrikes += 1;
                         if (idleStrikes > 5) {
                             highlightManual();
-                            progressText.innerHTML =
-                                'Download was interrupted — try the browser link below.';
+                            progressText.innerHTML = T('update.interrupted',
+                                'Download was interrupted — try the browser link below.');
                             updateBtn.disabled = false;
                             updateBtn.style.opacity = '1';
                             return;
@@ -267,8 +285,9 @@
                 if (!info.available || !info.latest) {
                     if (force) {
                         toast((info.error || !info.current)
-                            ? 'Could not reach the update server.'
-                            : 'HRMA v' + info.current + ' is up to date.');
+                            ? T('update.unreachable', 'Could not reach the update server.')
+                            : TF('update.upToDate', { version: info.current },
+                                 'HRMA v{version} is up to date.'));
                     }
                     return;
                 }
@@ -281,7 +300,7 @@
                 buildModal(info);
             })
             .catch(function () {
-                if (force) toast('Could not reach the update server.');
+                if (force) toast(T('update.unreachable', 'Could not reach the update server.'));
             });
     }
 

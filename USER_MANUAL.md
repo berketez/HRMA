@@ -7,7 +7,7 @@ presents results in a dark-themed web interface with an interactive 3D
 digital twin, an Analysis Deck of engineering panels, and working CAD /
 drawing / report exports.
 
-This manual describes HRMA **v2.5.1**.
+This manual describes HRMA **v2.5.2**.
 
 > **Scope notice.** HRMA is a preliminary-design and educational tool built
 > on closed-form and 1D engineering correlations. It is not a
@@ -36,9 +36,9 @@ This manual describes HRMA **v2.5.1**.
 
 ## 1. Installation
 
-### Option A — Windows installer (recommended on Windows)
+### Option A: Windows installer (recommended on Windows)
 
-1. Download `HRMA-Setup-2.5.1.exe` from the
+1. Download `HRMA-Setup-2.5.2.exe` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest).
 2. Double-click and follow the wizard (Next, Next, Install). The installer
    is per-user: no administrator rights are required.
@@ -47,16 +47,16 @@ This manual describes HRMA **v2.5.1**.
 
 Python and all libraries are bundled; no separate installation is needed.
 
-### Option B — macOS disk image (recommended on macOS)
+### Option B: macOS disk image (recommended on macOS)
 
-1. Download `HRMA-Setup-2.5.1-macOS.dmg` from the
+1. Download `HRMA-Setup-2.5.2-macOS.dmg` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest)
    (Apple Silicon, macOS 11 or newer).
 2. Open the DMG and drag `HRMA` into `Applications`.
 3. On first launch, right-click the app and choose "Open" (Gatekeeper
    requires this once for unsigned apps).
 
-### Option C — from source (developers)
+### Option C: from source (developers)
 
 ```bash
 git clone https://github.com/berketez/HRMA.git
@@ -71,19 +71,19 @@ because compiled dependencies require `numpy<2`). The app serves on
 
 Optional extras for source installs:
 
-- `build123d` — enables true STEP solid export (the packaged installers
+- `build123d`: enables true STEP solid export (the packaged installers
   include it).
-- `cantera` — enables the High-Fidelity kinetic level (without it, kinetic
+- `cantera`: enables the High-Fidelity kinetic level (without it, kinetic
   requests gracefully fall back to the Engineering level and say so).
 
 ## 2. First Launch
 
 The packaged app opens a splash screen within about a second while the
 calculation engines load in the background, then shows the home page in its
-own native window (WKWebView on macOS, WebView2 on Windows — Chrome is not
+own native window (WKWebView on macOS, WebView2 on Windows, so Chrome is not
 required). Everything runs locally and offline; no analysis data leaves your
 computer. At startup HRMA checks GitHub Releases for a newer version (see
-[Automatic Updates](#12-automatic-updates)) — this is the only network
+[Automatic Updates](#12-automatic-updates)). This is the only network
 access, and it fails silently when offline.
 
 CAD, drawing, and report outputs are written to `Documents/HRMA`.
@@ -109,37 +109,37 @@ Fill the form top to bottom, then press **Calculate**. The main input groups:
 
 ### Mission and operating point
 
-- **Motor name** — free text, used in exports and reports.
-- **Altitude** — single altitude (ambient pressure is derived automatically)
+- **Motor name**: free text, used in exports and reports.
+- **Altitude**: single altitude (ambient pressure is derived automatically)
   or an altitude range for altitude-swept performance.
 - **Thrust [N] and burn time [s]**, or alternatively **total impulse [N·s]**
   (the form derives the missing pair member).
 
 ### Combustion
 
-- **O/F ratio** — oxidizer-to-fuel mass ratio. The "Find Optimum" helper
+- **O/F ratio**: oxidizer-to-fuel mass ratio. The "Find Optimum" helper
   (`/api/find-optimum-of`) sweeps O/F and suggests the c*-optimal value.
-- **Chamber pressure [bar]** and **tank pressure [bar]** — the form warns
+- **Chamber pressure [bar]** and **tank pressure [bar]**: the form warns
   when tank pressure does not sufficiently exceed chamber pressure.
-- **Combustion model** — equilibrium thermochemistry is computed by the
+- **Combustion model**: equilibrium thermochemistry is computed by the
   built-in Cantera-based solver; propellant data is cross-checked against
   NASA CEA (see VALIDATION_STATUS.md).
 
 ### Geometry
 
-- **L\* [m]** — characteristic chamber length.
-- **Expansion ratio** — enter 0 for automatic (ambient-pressure adapted)
+- **L\* [m]**: characteristic chamber length.
+- **Expansion ratio**: enter 0 for automatic (ambient-pressure adapted)
   calculation.
-- **Nozzle type** — conical or bell.
-- **Chamber diameter, contraction ratio, chamber mass flux** — enter 0 to
+- **Nozzle type**: conical or bell.
+- **Chamber diameter, contraction ratio, chamber mass flux**: enter 0 to
   let the solver size them.
 
 ### Fuel
 
-- **Fuel type** — HTPB, paraffin, PE, PMMA, ABS, PLA, or a user mixture
+- **Fuel type**: HTPB, paraffin, PE, PMMA, ABS, PLA, or a user mixture
   (paraffin / carbon / Al2O3 / aluminum / HTPB percentages with automatic
   density update).
-- **Density, regression coefficients a and n** — defaults are
+- **Density, regression coefficients a and n**: defaults are
   literature values for the selected fuel; override them with your own
   fitted coefficients when you have static-fire data.
 
@@ -151,7 +151,7 @@ Fill the form top to bottom, then press **Calculate**. The main input groups:
 
 ### Injector
 
-- **Injector type** — showerhead, pintle, or swirl, with type-specific
+- **Injector type**: showerhead, pintle, or swirl, with type-specific
   parameters (target velocity, hole diameter limits, plate thickness).
   For detailed injector design use the dedicated Injector Design panel
   (Section 6), which implements the Dyer NHNE two-phase model for
@@ -166,17 +166,17 @@ propellant pair, feed system type, and cooling inputs on the liquid page).
 Pressing Calculate sends the form to `/calculate` (or `/calculate_solid`,
 `/calculate_liquid`) and populates:
 
-- **Results HUD** — animated stat cards for the headline numbers: thrust,
+- **Results HUD**: animated stat cards for the headline numbers: thrust,
   total impulse, Isp, c*, CF, chamber pressure, throat and exit diameters,
   fuel/oxidizer mass flow, and a SAFE / MARGINAL / UNSAFE state badge.
-- **Warnings panel** — design-criteria messages from the solver and the
+- **Warnings panel**: design-criteria messages from the solver and the
   validation system (for example injector pressure-drop ratio, L/D limits,
   regression-model applicability). Read these before trusting the numbers.
-- **Motor design tables** — full geometry: nozzle contour dimensions and
+- **Motor design tables**: full geometry: nozzle contour dimensions and
   angles, grain/port geometry, injector plan, wall thickness.
-- **Performance charts** — Plotly charts (thrust curve, pressure, altitude
+- **Performance charts**: Plotly charts (thrust curve, pressure, altitude
   sweeps) in the same dark theme, fully offline.
-- **2D cross-section** — engineering cross-section drawing generated from
+- **2D cross-section**: engineering cross-section drawing generated from
   the same geometry the solver used.
 
 Interactive design mode: after a calculation, the chamber diameter, L*, and
@@ -193,10 +193,10 @@ These panels sit below the main results and chain onto the computed design.
 `/api/transient-analysis` marches the coupled chamber/feed equations in
 time and returns the real Pc(t) and F(t) histories:
 
-- **Feed mode** — regulated (constant feed pressure) or self-pressurizing
+- **Feed mode**: regulated (constant feed pressure) or self-pressurizing
   N2O blowdown (equilibrium two-phase tank model; tank pressure and
   temperature decay are part of the result).
-- **Stability guards** — NASA SP-8089 injector pressure-drop margins are
+- **Stability guards**: NASA SP-8089 injector pressure-drop margins are
   checked at every time step and reported as warnings.
 - The resulting thrust curve feeds the OpenRocket `.eng` export, the 6-DOF
   panel, and the burn animation of the 3D digital twin.
@@ -229,12 +229,12 @@ STRUCTURAL, SAFETY, PERFORMANCE, PRESSURE VESSEL, FLOW, VALIDATION, and
 more) that appears after a successful calculation. Every panel:
 
 - pre-fills its input fields from the current motor result (suggestions
-  only — anything you edit by hand is preserved and never overwritten),
+  only, so anything you edit by hand is preserved and never overwritten),
 - POSTs the form to its own API endpoint when you press Run Analysis,
 - renders tables, stat cards, and Plotly charts, with ok / warning / error
   badges.
 
-The 13 panels (introduced through v2.4.6, current in v2.5.1):
+The 13 panels (introduced through v2.4.6, current in v2.5.2):
 
 | Panel | Endpoint | Motor types | What it computes |
 |---|---|---|---|
@@ -270,23 +270,23 @@ uncertain each output is.
 
 Controls:
 
-- **Analysis Level** — `fast` / `engineering` / `high_fidelity`, trading speed
+- **Analysis Level**: `fast` / `engineering` / `high_fidelity`, trading speed
   for sample count (200 / 1000 / 3000 samples; Engineering is the sensible
   default, High-Fidelity is the "long" setting).
-- **Seed** — the random seed; keeping it fixed makes a run exactly
+- **Seed**: the random seed; keeping it fixed makes a run exactly
   reproducible.
-- **Run** — executes the analysis and draws the results.
+- **Run**: executes the analysis and draws the results.
 
 How to read it:
 
 - Each output is reported as **P50 with a [P5, P95] band**. P50 is the median
-  (the "middle" prediction); the [P5, P95] interval is a 90 % credible range —
+  (the "middle" prediction); the [P5, P95] interval is a 90 % credible range,
   there is a 90 % chance the true value lies inside it given the input
   uncertainties you supplied. A wide band means the result is poorly
   constrained, not that the nominal number is wrong.
 - The **sensitivity tornado** ranks the inputs by how strongly they drive the
   output. The bar length is the **Spearman rank correlation** between that
-  input and the output over the Monte Carlo sample — it captures monotonic
+  input and the output over the Monte Carlo sample, and it captures monotonic
   effects only (an input that pushes the result up when it goes up, or vice
   versa). The longest bars are the parameters worth measuring or controlling
   most tightly; near-zero bars barely matter.
@@ -299,11 +299,11 @@ data) and shows a per-quantity accuracy table.
 
 Controls:
 
-- **Run / Refresh** — computes the correlation report. The result is cached by
+- **Run / Refresh**: computes the correlation report. The result is cached by
   the content hash of the experiment database, so if nothing in the database
   changed a **CACHED** badge appears and the cached report is shown instantly
   instead of recomputing.
-- **Layers** — the table is split into `main`, `low`, and `anomaly`. `main` is
+- **Layers**: the table is split into `main`, `low`, and `anomaly`. `main` is
   the trustworthy body of statistics (high/medium-confidence records);
   `low` isolates low-confidence records; `anomaly` aggregates records that were
   flagged as anomalous (cracked grain, nozzle failure, etc.) separately.
@@ -312,7 +312,7 @@ How to read it:
 
 - The signed error convention is **(predicted − measured) / measured × 100**:
   a positive value means HRMA over-predicts, negative means it under-predicts.
-- **Outliers are flagged but never dropped** — a bad point stays in the table
+- **Outliers are flagged but never dropped**: a bad point stays in the table
   and in the statistics, marked, so the numbers stay honest.
 - **Anomaly-flagged records do not enter the main statistics.** They are
   reported in their own `anomaly` layer so that a known-bad firing does not
@@ -325,13 +325,13 @@ source of truth rather than any figure quoted elsewhere.
 ## 8. 3D Digital Twin
 
 The Three.js/WebGL viewer builds a parametric 3D motor directly from the
-solver output — it is not a canned model. Features:
+solver output, not a canned model. Features:
 
-- **Cutaway view** — quarter-section of chamber, grain, injector, nozzle.
-- **Burn animation** — the port opens over time following the computed
+- **Cutaway view**: quarter-section of chamber, grain, injector, nozzle.
+- **Burn animation**: the port opens over time following the computed
   regression history (from the transient analysis when available).
 - **Exploded view** and dimension labels.
-- **Wall heat-flux map** — chamber and nozzle surfaces colored by the
+- **Wall heat-flux map**: chamber and nozzle surfaces colored by the
   Bartz-distributed heat flux, anchored to the heat-transfer module's
   real q and wall-temperature values.
 - **Exhaust plume** visualization.
@@ -361,10 +361,10 @@ Kinetic-efficiency estimates (finite-rate combustion losses) are offered at
 three explicit levels; the response always reports both
 `fidelity_requested` and `fidelity_used` so you know what you actually got:
 
-- **Fast Screening (`fast`)** — correlation-based estimate, instant.
-- **Engineering (`engineering`)** — the default: reduced physics-based
+- **Fast Screening (`fast`)**: correlation-based estimate, instant.
+- **Engineering (`engineering`)**: the default: reduced physics-based
   model, suitable for trade studies.
-- **High-Fidelity (`high_fidelity`)** — finite-rate species integration
+- **High-Fidelity (`high_fidelity`)**: finite-rate species integration
   (Cantera, BDF) along the nozzle. Requires the optional `cantera`
   package; if Cantera is not installed the request degrades gracefully to
   the Engineering level and says so in the result.
@@ -377,7 +377,7 @@ available on your installation.
 The **User Data Validation** panel compares HRMA's predicted thrust curve
 with your own static-fire measurement:
 
-1. Run a calculation (and ideally a transient analysis — the comparison
+1. Run a calculation (and ideally a transient analysis, since the comparison
    then uses the real F(t) curve instead of a constant-thrust rectangle).
 2. Open the panel, paste your CSV or choose a file. Expected format: two
    numeric columns, time [s] and thrust [N]; the parser reports what it
@@ -442,7 +442,7 @@ choose Open (unsigned app, Gatekeeper requires one manual confirmation).
 **Windows SmartScreen blocks the installer.** Click "More info", then
 "Run anyway" (the installer is unsigned).
 
-**Results look wrong.** Read the warnings panel first — most "wrong"
+**Results look wrong.** Read the warnings panel first. Most "wrong"
 results are inputs outside the validity range of the underlying
 correlations, and the validation system flags them.
 
@@ -455,7 +455,7 @@ environment:
 
 - **No finite-element analysis.** Structural margins come from Lame
   thick-wall relations, SP-8007 buckling knockdowns, and Shigley joint
-  methods — not FEA. For detailed stress analysis of a flight design, use
+  methods, not FEA. For detailed stress analysis of a flight design, use
   a dedicated FEA package (for example ANSYS Mechanical or CalculiX) and
   a hydrostatic proof test.
 - **No CFD.** The nozzle flow is quasi-1D compressible; injector spray

@@ -25,10 +25,12 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
-    // Soğutucu tarafı cidar malzemeleri — materials_db anahtarlarıyla birebir
-    // (get_material; regen_cooling.py wall_material). Bakır/CuCrZr yüksek
-    // iletkenlikleriyle tipik rejeneratif liner.
+    // FALLBACK — soğutucu tarafı cidar malzemeleri, materials_db
+    // anahtarlarıyla birebir (get_material; regen_cooling.py wall_material).
+    // Bakır/CuCrZr yüksek iletkenlikleriyle tipik rejeneratif liner.
+    // Katalog gelirse 'liner'+'shell' etiketli tam liste bunun yerine geçer.
     const WALL_MATERIALS = [
         ['copper', 'Copper (OFHC)'],
         ['cucrzr', 'CuCrZr alloy'],
@@ -38,13 +40,13 @@
     ];
 
     const COOLANTS = [
-        ['water', 'Water'],
-        ['rp1', 'RP-1 (kerosene)'],
+        ['water', 'Water', 'coolant.water'],
+        ['rp1', 'RP-1 (kerosene)', 'coolant.rp1'],
     ];
 
     const FLOW_DIRECTIONS = [
-        ['counterflow', 'Counterflow (exit → chamber)'],
-        ['coflow', 'Co-flow (chamber → exit)'],
+        ['counterflow', 'Counterflow (exit → chamber)', 'coolant.counterflow'],
+        ['coflow', 'Co-flow (chamber → exit)', 'coolant.coflow'],
     ];
 
     // Tepe cidar sıcaklığının malzeme limitlerine göre önem derecesi
@@ -70,21 +72,21 @@
         const sameLen = function (a) { return Array.isArray(a) && a.length === x.length; };
         if (sameLen(cooling.T_wall_hot_K)) {
             traces.push({
-                x: x, y: cooling.T_wall_hot_K, name: 'Hot-wall T (gas side)',
+                x: x, y: cooling.T_wall_hot_K, name: T('panel.regen.sHotWall', 'Hot-wall T (gas side)'),
                 type: 'scatter', mode: 'lines', line: { color: '#ff5d73', width: 2 },
                 hovertemplate: 'x = %{x:.1f} mm<br>T_wall,hot = %{y:.0f} K<extra></extra>',
             });
         }
         if (sameLen(cooling.T_wall_cold_K)) {
             traces.push({
-                x: x, y: cooling.T_wall_cold_K, name: 'Cold-wall T (coolant side)',
+                x: x, y: cooling.T_wall_cold_K, name: T('panel.regen.sColdWall', 'Cold-wall T (coolant side)'),
                 type: 'scatter', mode: 'lines', line: { color: '#ff8c33', width: 2, dash: 'dot' },
                 hovertemplate: 'x = %{x:.1f} mm<br>T_wall,cold = %{y:.0f} K<extra></extra>',
             });
         }
         if (sameLen(cooling.T_coolant_K)) {
             traces.push({
-                x: x, y: cooling.T_coolant_K, name: 'Coolant bulk T',
+                x: x, y: cooling.T_coolant_K, name: T('panel.regen.sCoolantBulk', 'Coolant bulk T'),
                 type: 'scatter', mode: 'lines', line: { color: '#2dd4a8', width: 2 },
                 hovertemplate: 'x = %{x:.1f} mm<br>T_coolant = %{y:.0f} K<extra></extra>',
             });
@@ -107,10 +109,10 @@
                 font: { size: 10, color: color },
             });
         }
-        refLine(sm.material_allowable_temp_K, 'Allowable wall limit', '#ff8c33');
-        refLine(sm.material_melting_K, 'Melting point', '#ff5d73');
+        refLine(sm.material_allowable_temp_K, T('panel.regen.allowableWall', 'Allowable wall limit'), '#ff8c33');
+        refLine(sm.material_melting_K, T('panel.thermal.meltingPoint', 'Melting point'), '#ff5d73');
         // RP-1 koklaşma çizgisi (yalnız RP-1: coking_threshold_K dolu)
-        refLine(sm.coking_threshold_K, 'RP-1 coking threshold', '#c678dd');
+        refLine(sm.coking_threshold_K, T('panel.regen.cokingLine', 'RP-1 coking threshold'), '#c678dd');
 
         // Boğaz konumu işareti
         const throatX = (typeof cooling.x_throat_mm === 'number'
@@ -122,7 +124,7 @@
             });
             annotations.push({
                 x: throatX, yref: 'paper', y: 1, xanchor: 'left', yanchor: 'top',
-                text: 'Throat', showarrow: false, font: { size: 10, color: '#7d97a5' },
+                text: T('common.throat', 'Throat'), showarrow: false, font: { size: 10, color: '#7d97a5' },
             });
         }
 
@@ -130,9 +132,10 @@
         div.style.marginTop = '10px';
         root.appendChild(div);
         Plotly.newPlot(div, traces, {
-            title: 'Wall & Coolant Temperatures Along the Chamber–Nozzle Axis',
-            xaxis: { title: 'Axial position x (mm)' },
-            yaxis: { title: 'Temperature (K)', rangemode: 'tozero' },
+            title: T('panel.regen.chartTemps',
+                'Wall & Coolant Temperatures Along the Chamber-Nozzle Axis'),
+            xaxis: { title: T('common.axis.axialX', 'Axial position x (mm)') },
+            yaxis: { title: T('common.axis.temperatureK', 'Temperature (K)'), rangemode: 'tozero' },
             shapes: shapes,
             annotations: annotations,
             legend: { orientation: 'h' },
@@ -152,14 +155,14 @@
         const traces = [];
         if (sameLen(cooling.q_MW_m2)) {
             traces.push({
-                x: x, y: cooling.q_MW_m2, name: 'Heat flux q',
+                x: x, y: cooling.q_MW_m2, name: T('panel.thermal.heatFluxSeries', 'Heat flux q'),
                 type: 'scatter', mode: 'lines', line: { color: '#00e5ff', width: 2 },
                 hovertemplate: 'x = %{x:.1f} mm<br>q = %{y:.2f} MW/m²<extra></extra>',
             });
         }
         if (sameLen(cooling.P_coolant_bar)) {
             traces.push({
-                x: x, y: cooling.P_coolant_bar, name: 'Coolant pressure',
+                x: x, y: cooling.P_coolant_bar, name: T('panel.regen.sCoolantP', 'Coolant pressure'),
                 type: 'scatter', mode: 'lines', yaxis: 'y2',
                 line: { color: '#ff8c33', width: 2, dash: 'dot' },
                 hovertemplate: 'x = %{x:.1f} mm<br>P = %{y:.2f} bar<extra></extra>',
@@ -170,10 +173,11 @@
         div.style.marginTop = '10px';
         root.appendChild(div);
         Plotly.newPlot(div, traces, {
-            title: 'Heat Flux & Coolant Pressure',
-            xaxis: { title: 'Axial position x (mm)' },
-            yaxis: { title: 'Heat flux (MW/m²)', rangemode: 'tozero' },
-            yaxis2: { title: 'Coolant pressure (bar)', overlaying: 'y', side: 'right', showgrid: false },
+            title: T('panel.regen.chartFlux', 'Heat Flux & Coolant Pressure'),
+            xaxis: { title: T('common.axis.axialX', 'Axial position x (mm)') },
+            yaxis: { title: T('common.axis.heatFlux', 'Heat flux (MW/m²)'), rangemode: 'tozero' },
+            yaxis2: { title: T('panel.regen.axisCoolantP', 'Coolant pressure (bar)'),
+                      overlaying: 'y', side: 'right', showgrid: false },
             legend: { orientation: 'h' },
             height: 320,
         }, { responsive: true, displaylogo: false });
@@ -189,26 +193,32 @@
 
         // ---- Rozetler ----
         let badges = '';
-        badges += U.badge('COOLANT: ' + String(sm.coolant || '—').toUpperCase(), 'info');
-        badges += U.badge('LINER: ' + String(sm.wall_material_name || sm.wall_material || '—'),
-            'info', 'Regenerative liner material (k_w, temperature limits)');
-        badges += U.badge('FLOW: ' + String(sm.flow_direction || '—').toUpperCase(), 'dim');
+        badges += U.badge(T('panel.regen.badgeCoolant', 'COOLANT') + ': '
+            + String(sm.coolant || '—').toUpperCase(), 'info');
+        badges += U.badge(T('panel.regen.badgeLiner', 'LINER') + ': '
+            + String(sm.wall_material_name || sm.wall_material || '—'),
+            'info', T('panel.regen.linerTip', 'Regenerative liner material (k_w, temperature limits)'));
+        badges += U.badge(T('panel.regen.badgeFlow', 'FLOW') + ': '
+            + String(sm.flow_direction || '—').toUpperCase(), 'dim');
 
         const wk = wallKind(sm);
         if (wk === 'err') {
-            badges += U.badge('WALL OVER LIMIT', 'err',
-                'Peak hot-wall temperature exceeds the material service/melting limit — '
-                + 'liner failure; increase coolant flow, change material or resize channels.');
+            badges += U.badge(T('panel.regen.wallOver', 'WALL OVER LIMIT'), 'err',
+                T('panel.regen.wallOverTip',
+                  'Peak hot-wall temperature exceeds the material service/melting limit — '
+                  + 'liner failure; increase coolant flow, change material or resize channels.'));
         } else if (wk === 'warn') {
-            badges += U.badge('WALL NEAR LIMIT', 'warn',
-                'Peak hot-wall temperature exceeds the allowable (strength) limit — margin reduced.');
+            badges += U.badge(T('panel.regen.wallNear', 'WALL NEAR LIMIT'), 'warn',
+                T('panel.regen.wallNearTip',
+                  'Peak hot-wall temperature exceeds the allowable (strength) limit — margin reduced.'));
         } else if (wk === 'ok') {
-            badges += U.badge('WALL WITHIN LIMIT', 'ok', '');
+            badges += U.badge(T('panel.regen.wallWithin', 'WALL WITHIN LIMIT'), 'ok', '');
         }
         if (sm.coking) {
-            badges += U.badge('RP-1 COKING', 'err',
-                'Coolant-side wall temperature exceeds the ~561 K RP-1 coking threshold — '
-                + 'carbon deposition and channel fouling likely (Huzel & Huang Ch. 4).');
+            badges += U.badge(T('panel.regen.coking', 'RP-1 COKING'), 'err',
+                T('panel.regen.cokingTip',
+                  'Coolant-side wall temperature exceeds the ~561 K RP-1 coking threshold — '
+                  + 'carbon deposition and channel fouling likely (Huzel & Huang Ch. 4).'));
         }
 
         // ---- Sayısal kartlar ----
@@ -219,20 +229,22 @@
         const head = document.createElement('div');
         head.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`
             + `<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">`
-            + U.statCard('PEAK WALL T', U.fmt(sm.max_wall_hot_K, 0), 'K', wk,
-                'Peak hot-wall (gas side) temperature at x = ' + U.fmt(sm.max_wall_hot_x_mm, 1) + ' mm')
-            + U.statCard('WALL MARGIN', U.fmt(sm.wall_temp_margin_K, 0), 'K', marginKind,
-                'Allowable limit − peak wall temperature')
-            + U.statCard('COOLANT EXIT T', U.fmt(sm.coolant_exit_temp_K, 0), 'K', 'info',
-                'Coolant bulk temperature at the outlet')
-            + U.statCard('COOLANT ΔT', U.fmt(sm.coolant_dT_K, 0), 'K', 'dim',
-                'Total coolant temperature rise (enthalpy balance)')
-            + U.statCard('PRESSURE DROP', U.fmt(sm.total_pressure_drop_bar, 2), 'bar', 'info',
-                'Darcy-Weisbach + Haaland friction across the channels')
-            + U.statCard('PEAK HEAT FLUX', U.fmt(sm.peak_heat_flux_MW_m2, 2), 'MW/m²', 'dim', '')
-            + U.statCard('MAX VELOCITY', U.fmt(sm.max_coolant_velocity_m_s, 1), 'm/s', 'dim', '')
-            + U.statCard('MIN REYNOLDS', U.fmt(sm.min_reynolds, 0), '', 'dim',
-                'Minimum channel Reynolds number (Dittus-Boelter turbulent floor ~1e4)')
+            + U.statCard(T('panel.regen.cardPeakWall', 'PEAK WALL T'), U.fmt(sm.max_wall_hot_K, 0), 'K', wk,
+                U.tf('panel.regen.cardPeakWallTip', { x: U.fmt(sm.max_wall_hot_x_mm, 1) },
+                     'Peak hot-wall (gas side) temperature at x = {x} mm'))
+            + U.statCard(T('panel.regen.cardMargin', 'WALL MARGIN'), U.fmt(sm.wall_temp_margin_K, 0), 'K', marginKind,
+                T('panel.regen.cardMarginTip', 'Allowable limit − peak wall temperature'))
+            + U.statCard(T('panel.regen.cardExitT', 'COOLANT EXIT T'), U.fmt(sm.coolant_exit_temp_K, 0), 'K', 'info',
+                T('panel.regen.cardExitTip', 'Coolant bulk temperature at the outlet'))
+            + U.statCard(T('panel.regen.cardDeltaT', 'COOLANT ΔT'), U.fmt(sm.coolant_dT_K, 0), 'K', 'dim',
+                T('panel.regen.cardDeltaTip', 'Total coolant temperature rise (enthalpy balance)'))
+            + U.statCard(T('panel.regen.cardDrop', 'PRESSURE DROP'), U.fmt(sm.total_pressure_drop_bar, 2), 'bar', 'info',
+                T('panel.regen.cardDropTip', 'Darcy-Weisbach + Haaland friction across the channels'))
+            + U.statCard(T('panel.regen.cardPeakFlux', 'PEAK HEAT FLUX'), U.fmt(sm.peak_heat_flux_MW_m2, 2), 'MW/m²', 'dim', '')
+            + U.statCard(T('panel.regen.cardMaxV', 'MAX VELOCITY'), U.fmt(sm.max_coolant_velocity_m_s, 1), 'm/s', 'dim', '')
+            + U.statCard(T('panel.regen.cardMinRe', 'MIN REYNOLDS'), U.fmt(sm.min_reynolds, 0), '', 'dim',
+                T('panel.regen.cardMinReTip',
+                  'Minimum channel Reynolds number (Dittus-Boelter turbulent floor ~1e4)'))
             + '</div>';
         root.appendChild(head);
 
@@ -244,10 +256,11 @@
         const tail = document.createElement('div');
         let html = '';
         if (Array.isArray(sm.warnings) && sm.warnings.length) {
-            html += U.listBlock('Warnings', sm.warnings, 'warn');
+            html += U.listBlock(T('common.warnings', 'Warnings'), sm.warnings, 'warn');
         }
         if (cooling.model_note) {
-            html += U.listBlock('Model assumptions & limits', [cooling.model_note], 'dim');
+            html += U.listBlock(T('common.modelAssumptions', 'Model assumptions & limits'),
+                                [cooling.model_note], 'dim');
         }
         tail.innerHTML = html;
         root.appendChild(tail);
@@ -259,27 +272,28 @@
     window.AnalysisDock.register({
         id: 'cooling',
         title: 'Regenerative Cooling — 1D Station March (Bartz + Dittus-Boelter)',
+        titleKey: 'panel.regen.title',
         category: 'THERMAL',
         endpoint: '/api/regen-cooling',
         motorTypes: ['liquid'],
         long: true,
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3400, 10],
-            ['throat_diameter', 'Throat Diameter (m)', 0.05, 0.001],
-            ['expansion_ratio', 'Expansion Ratio', 8, 0.1],
-            ['gamma', 'Gamma (frozen)', 1.2, 0.01],
-            ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5],
-            ['coolant', 'Coolant', 'water', COOLANTS],
-            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05],
-            ['coolant_inlet_temp', 'Coolant Inlet T (K)', 300, 5],
-            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', 60, 1],
-            ['n_channels', 'Number of Channels', 80, 1],
-            ['channel_width', 'Channel Width (mm)', 2.0, 0.1],
-            ['channel_height', 'Channel Height (mm)', 3.0, 0.1],
-            ['wall_thickness', 'Liner Thickness (mm)', 1.0, 0.1],
-            ['wall_material', 'Liner Material', 'copper', WALL_MATERIALS],
-            ['flow_direction', 'Flow Direction', 'counterflow', FLOW_DIRECTIONS],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3400, 10, 'common.f.chamberTemperatureK'],
+            ['throat_diameter', 'Throat Diameter (m)', 0.05, 0.001, 'common.f.throatDiameterM'],
+            ['expansion_ratio', 'Expansion Ratio', 8, 0.1, 'common.f.expansionRatio'],
+            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5, 'common.f.molecularWeight'],
+            ['coolant', 'Coolant', 'water', COOLANTS, 'panel.regen.fCoolant'],
+            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05, 'panel.regen.fCoolantMdot'],
+            ['coolant_inlet_temp', 'Coolant Inlet T (K)', 300, 5, 'panel.regen.fInletT'],
+            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', 60, 1, 'panel.regen.fInletP'],
+            ['n_channels', 'Number of Channels', 80, 1, 'panel.regen.fChannels'],
+            ['channel_width', 'Channel Width (mm)', 2.0, 0.1, 'panel.regen.fChannelW'],
+            ['channel_height', 'Channel Height (mm)', 3.0, 0.1, 'panel.regen.fChannelH'],
+            ['wall_thickness', 'Liner Thickness (mm)', 1.0, 0.1, 'panel.regen.fLinerThickness'],
+            ['wall_material', 'Liner Material', 'copper', WALL_MATERIALS, 'panel.regen.fLinerMaterial'],
+            ['flow_direction', 'Flow Direction', 'counterflow', FLOW_DIRECTIONS, 'panel.regen.fFlowDir'],
         ],
         // Sıvı motor sonuçlarından otomatik dolum: soğutucu = yakıt akışı.
         fromResults: function (r) {
@@ -300,6 +314,15 @@
         },
         render: render,
     });
+
+    // Merkezi katalog yüklüyse liner select'ini 'liner'+'shell' etiketli
+    // listeyle doldur; değilse fallback aynen kalır.
+    if (typeof window.HRMAMaterials !== 'undefined' && window.HRMAMaterials) {
+        window.HRMAMaterials.populateSelect({
+            panelId: 'cooling', fieldId: 'wall_material',
+            tags: ['liner', 'shell'], fallback: WALL_MATERIALS,
+        });
+    }
 
     // Test / hata ayıklama: saf render + çizim yardımcıları
     window.CoolingPanel = {

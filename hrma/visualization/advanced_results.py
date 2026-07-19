@@ -7,6 +7,56 @@ import numpy as np
 import json
 from typing import Dict, List, Optional
 
+# Plotly 6 binary (bdata) kodlaması vendor plotly.js 1.58.5 tarafından
+# çözülemiyor; tüm figür JSON'ları ortak sanitize kapısından geçer.
+from hrma.visualization.visualization import _fig_json
+
+#: Deniz seviyesi ISA ortam basinci [Pa] — vakum itkisi bagintisinda kullanilir
+#: (Sutton & Biblarz 9. baski, Eq. 3-29: F = mdot*ve + (pe - pa)*Ae).
+SEA_LEVEL_AMBIENT_PA = 101325.0
+
+
+def _identity(motor_results: Dict, keys) -> str:
+    """Propellant kimligini motor sonucundan okur; yoksa acikca soyler."""
+    for key in keys:
+        val = (motor_results or {}).get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip().upper()
+    return 'NOT REPORTED'
+
+
+def _vacuum_column(motor_results: Dict, sea_level_isp, vacuum_isp):
+    """(F_vac, Cf_vac, gerekce_metni) — duz carpan YOK.
+
+    1. Tercih: ayni tabloda basilan Isp cifti (sabit debide F ~ Isp).
+    2. Yedek: F_vac = F + p_a * A_e ve Cf_vac = F_vac/(Pc*At) geometriden.
+    3. Ikisi de yoksa None doner ve tabloda 'n/a' yazilir.
+    """
+    thrust_sl = motor_results.get('thrust')
+    cf_sl = motor_results.get('cf')
+    if (vacuum_isp and sea_level_isp and sea_level_isp > 0
+            and thrust_sl is not None):
+        ratio = float(vacuum_isp) / float(sea_level_isp)
+        return (float(thrust_sl) * ratio,
+                (float(cf_sl) * ratio) if cf_sl is not None else None,
+                'scaled from the solver Isp_vac/Isp_sl at fixed mass flow')
+
+    d_e = motor_results.get('exit_diameter')
+    d_t = motor_results.get('throat_diameter')
+    p_c_bar = motor_results.get('chamber_pressure')
+    if d_e and thrust_sl is not None:
+        a_e = np.pi * float(d_e) ** 2 / 4.0
+        f_vac = float(thrust_sl) + SEA_LEVEL_AMBIENT_PA * a_e
+        cf_v = None
+        if d_t and p_c_bar:
+            a_t = np.pi * float(d_t) ** 2 / 4.0
+            cf_v = f_vac / (float(p_c_bar) * 1e5 * a_t)
+        elif cf_sl is not None:
+            cf_v = float(cf_sl) * f_vac / float(thrust_sl)
+        return f_vac, cf_v, 'F_vac = F + p_a*A_e (Sutton Eq. 3-29), p_a = 1 atm'
+    return None, None, 'not available (no vacuum Isp and no exit geometry)'
+
+
 def create_cea_style_results(motor_results: Dict) -> str:
     """Create NASA CEA-style results output"""
     
@@ -22,8 +72,15 @@ def create_cea_style_results(motor_results: Dict) -> str:
     # Motor Information
     results_text.append("MOTOR CONFIGURATION:")
     results_text.append(f"  Motor Name: {motor_results.get('motor_name', 'UZAYTEK-HRM-001')}")
-    results_text.append(f"  Fuel Type: {motor_results.get('fuel_type', 'HTPB').upper()}")
-    results_text.append(f"  Oxidizer: N2O")
+    # DURUSTLUK DUZELTMESI (2026-07-19): yakit ve oksitleyici artik motor
+    # sonucundan okunur. Eski surum oksitleyiciyi 'N2O' SABIT yaziyor,
+    # yakiti da bulunmayan bir anahtarin varsayilaniyla 'HTPB' gosteriyordu;
+    # LOX/parafin secen kullanici raporda N2O/HTPB goruyordu.
+    fuel_label = _identity(motor_results, ('fuel_type', 'fuel', 'fuel_name'))
+    ox_label = _identity(motor_results, ('oxidizer_type', 'oxidizer',
+                                         'oxidizer_name'))
+    results_text.append(f"  Fuel Type: {fuel_label}")
+    results_text.append(f"  Oxidizer: {ox_label}")
     results_text.append(f"  O/F Ratio: {motor_results.get('of_ratio', 0):.4f}")
     
     if 'stoichiometric_of' in motor_results:
@@ -122,17 +179,36 @@ def create_cea_style_results(motor_results: Dict) -> str:
     results_text.append("-" * 75)
     
     sea_level_isp = motor_results.get('sea_level_isp', motor_results['isp'])
-    vacuum_isp = motor_results.get('vacuum_isp', motor_results['isp'] * 1.15)
-    
-    results_text.append("Specific Impulse".ljust(30) + f"{sea_level_isp:.1f}".rjust(15) + 
-                       f"{vacuum_isp:.1f}".rjust(15) + "s".rjust(15))
-    results_text.append("Thrust".ljust(30) + f"{motor_results['thrust']:.0f}".rjust(15) + 
-                       f"{motor_results['thrust'] * 1.15:.0f}".rjust(15) + "N".rjust(15))
-    results_text.append("C*".ljust(30) + f"{motor_results['c_star']:.1f}".rjust(15) + 
-                       f"{motor_results['c_star']:.1f}".rjust(15) + "m/s".rjust(15))
-    results_text.append("Cf".ljust(30) + f"{motor_results['cf']:.4f}".rjust(15) + 
-                       f"{motor_results['cf'] * 1.15:.4f}".rjust(15) + "-".rjust(15))
-    
+    vacuum_isp = motor_results.get('vacuum_isp')
+    thrust_sl = motor_results['thrust']
+    cf_sl = motor_results['cf']
+
+    # DURUSTLUK DUZELTMESI (2026-07-19): vakum itkisi ve Cf artik duz bir
+    # x1.15 carpanindan DEGIL, ayni tabloda basilan Isp ciftinden turetilir
+    # (sabit debide F = mdot*g0*Isp -> F_vac/F_sl = Isp_vac/Isp_sl). Eski
+    # surum ayni tabloda iki farkli vakum/deniz-seviyesi orani kullaniyordu
+    # (Isp icin 1.124, itki ve Cf icin 1.15).
+    thrust_vac, cf_vac, vac_basis = _vacuum_column(
+        motor_results, sea_level_isp, vacuum_isp)
+    if vacuum_isp is None:
+        vacuum_isp = (sea_level_isp * thrust_vac / thrust_sl
+                      if (thrust_vac and thrust_sl) else None)
+
+    def _cell(value, fmt):
+        return ('n/a' if value is None else format(value, fmt)).rjust(15)
+
+    results_text.append("Specific Impulse".ljust(30)
+                        + _cell(sea_level_isp, '.1f')
+                        + _cell(vacuum_isp, '.1f') + "s".rjust(15))
+    results_text.append("Thrust".ljust(30) + _cell(thrust_sl, '.0f')
+                        + _cell(thrust_vac, '.0f') + "N".rjust(15))
+    results_text.append("C*".ljust(30) + _cell(motor_results['c_star'], '.1f')
+                        + _cell(motor_results['c_star'], '.1f')
+                        + "m/s".rjust(15))
+    results_text.append("Cf".ljust(30) + _cell(cf_sl, '.4f')
+                        + _cell(cf_vac, '.4f') + "-".rjust(15))
+    results_text.append(f"  Vacuum column basis: {vac_basis}")
+
     results_text.append("")
     
     # Mass Flow Rates
@@ -321,49 +397,88 @@ def create_altitude_performance_plot(altitude_data: List[Dict]) -> str:
     fig.update_xaxes(title_text="Altitude (km)", row=2, col=2)
     fig.update_yaxes(title_text="Pressure (bar)", row=2, col=2)
     
-    return fig.to_json()
+    return _fig_json(fig)
+
+# Grafikte gosterilecek en fazla tur sayisi (kutle kesrine gore en buyukler).
+MAX_PLOTTED_SPECIES = 10
+# Bu esigin altinda kalan turler cizilmez (log eksende gurultu olurlar).
+MIN_SIGNIFICANT_MASS_FRACTION = 1e-4
+
+
+def _station_species(station_data: Dict) -> Dict[str, float]:
+    """Bir istasyonun tur -> kutle kesri sozlugunu cikarir.
+
+    Yanma cozucusunun gercek sekli ic ice: compositions[istasyon]['species']
+    [TUR]['mass_fraction']. Eski tuketici duz bir sozluk (istasyon[TUR] =
+    sayi) bekliyordu, bu yuzden HICBIR tur bulunamiyor ve figur 0 trace ile
+    uretiliyordu (panel her zaman bos). Iki sekli de kabul ediyoruz ki
+    cozucu ciktisi degisirse grafik sessizce bosalmasin.
+    """
+    if not isinstance(station_data, dict):
+        return {}
+    species = station_data.get('species', station_data)
+    out = {}
+    for name, value in (species or {}).items():
+        if isinstance(value, dict):
+            frac = value.get('mass_fraction', value.get('mole_fraction'))
+        else:
+            frac = value
+        try:
+            frac = float(frac)
+        except (TypeError, ValueError):
+            continue
+        if frac > 0:
+            out[str(name)] = frac
+    return out
+
 
 def create_mass_fractions_plot(mass_fractions: Dict) -> str:
     """Create mass fractions visualization"""
-    
+
     import plotly.graph_objects as go
-    
+
     stations = ['Chamber', 'Throat', 'Exit']
-    
-    # Major species to plot
-    species_list = ['CO2', 'CO', 'H2O', 'N2', 'H2', 'OH', 'O2', 'NO']
-    colors = ['#ff5d73', '#ff8c33', '#00e5ff', '#2dd4a8', '#c792ea', 'brown', 'pink', 'gray']
-    
+    station_keys = ['chamber', 'throat', 'exit']
+    colors = ['#ff5d73', '#ff8c33', '#00e5ff', '#2dd4a8', '#c792ea',
+              '#ffd166', '#7cc4ff', '#f78fb3', '#9ae6b4', '#b0a4ff']
+
+    per_station = [_station_species((mass_fractions or {}).get(k, {}))
+                   for k in station_keys]
+
+    # Tur listesi SABIT DEGIL: her yakit/oksitleyici cifti farkli baskin
+    # turler uretir (N2O/HTPB'de H2, OH, H2O, CO baskindir; eski sabit liste
+    # CO2/N2/NO gibi burada kucuk kalan turleri ariyordu). Istasyonlar
+    # boyunca en yuksek kutle kesrine gore siralayip ilk N'i cizeriz.
+    peak = {}
+    for station in per_station:
+        for name, frac in station.items():
+            if frac > peak.get(name, 0.0):
+                peak[name] = frac
+    ranked = [n for n, f in sorted(peak.items(), key=lambda kv: kv[1], reverse=True)
+              if f > MIN_SIGNIFICANT_MASS_FRACTION][:MAX_PLOTTED_SPECIES]
+
     fig = go.Figure()
-    
-    for i, species in enumerate(species_list):
-        chamber_frac = mass_fractions.get('chamber', {}).get(species, 0)
-        throat_frac = mass_fractions.get('throat', {}).get(species, 0)
-        exit_frac = mass_fractions.get('exit', {}).get(species, 0)
-        
-        fractions = [chamber_frac, throat_frac, exit_frac]
-        
-        if max(fractions) > 0.001:  # Only plot significant species
-            fig.add_trace(go.Scatter(
-                x=stations,
-                y=fractions,
-                mode='lines+markers',
-                name=species,
-                line=dict(color=colors[i % len(colors)], width=3),
-                marker=dict(size=8)
-            ))
-    
+    for i, species in enumerate(ranked):
+        fractions = [float(station.get(species, 0.0)) for station in per_station]
+        fig.add_trace(go.Scatter(
+            x=stations,
+            y=fractions,
+            mode='lines+markers',
+            name=species,
+            line=dict(color=colors[i % len(colors)], width=3),
+            marker=dict(size=8)
+        ))
+
     fig.update_layout(
         title='Mass Fractions Through Nozzle',
         xaxis_title='Nozzle Station',
         yaxis_title='Mass Fraction',
         yaxis_type='log',
-        width=800,
         height=500,
         hovermode='x unified'
     )
-    
-    return fig.to_json()
+
+    return _fig_json(fig)
 
 def create_thrust_altitude_plot(thrust_data: List[Dict]) -> str:
     """Create thrust vs altitude visualization"""
@@ -421,4 +536,4 @@ def create_thrust_altitude_plot(thrust_data: List[Dict]) -> str:
     fig.update_xaxes(title_text="Altitude (km)", row=1, col=3)
     fig.update_yaxes(title_text="Efficiency (%)", row=1, col=3)
     
-    return fig.to_json()
+    return _fig_json(fig)

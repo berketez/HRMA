@@ -27,6 +27,7 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
     const ENDPOINT = '/api/comparative-analysis';
     const PANEL_ID = 'comparative';
@@ -77,25 +78,31 @@
         return `<div id="cmp_custom" style="margin:10px 0;">
             <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
                 <div class="form-group" style="flex:1; min-width:180px;">
-                    <label>Configuration name</label>
+                    <label data-i18n="panel.comparative.fName">${
+                        T('panel.comparative.fName', 'Configuration name')}</label>
                     <input type="text" id="cmp_name" maxlength="40"
-                        placeholder="e.g. baseline, high-Pc, long-burn"
+                        data-i18n-placeholder="panel.comparative.namePlaceholder"
+                        placeholder="${T('panel.comparative.namePlaceholder',
+                            'e.g. baseline, high-Pc, long-burn')}"
                         style="width:100%;">
                 </div>
                 <div class="form-group">
-                    <button class="btn" type="button" id="cmp_snapshot">
-                        Snapshot current result</button>
+                    <button class="btn" type="button" id="cmp_snapshot"
+                        data-i18n="panel.comparative.btnSnapshot">${
+                        T('panel.comparative.btnSnapshot', 'Snapshot current result')}</button>
                 </div>
                 <div class="form-group">
-                    <button class="btn" type="button" id="cmp_run" disabled>
-                        Compare</button>
+                    <button class="btn" type="button" id="cmp_run" disabled
+                        data-i18n="panel.comparative.btnCompare">${
+                        T('panel.comparative.btnCompare', 'Compare')}</button>
                 </div>
             </div>
             <div id="cmp_list" style="margin-top:8px;"></div>
             <p style="font-family:var(--hd-mono, monospace); font-size:0.7rem;
-                color:var(--hd-ink-dim, #7d97a5); margin:6px 0 0;">
-                Snapshots live for this page session only. At least 2 are
-                required for a comparison.</p>
+                color:var(--hd-ink-dim, #7d97a5); margin:6px 0 0;"
+                data-i18n="panel.comparative.intro">${T('panel.comparative.intro',
+                'Snapshots live for this page session only. At least 2 are '
+                + 'required for a comparison.')}</p>
         </div>`;
     }
 
@@ -123,7 +130,7 @@
                 border:1px solid var(--hd-line, rgba(0,229,255,0.14));
                 border-radius:4px; color:var(--hd-ink-dim, #7d97a5);
                 font-family:var(--hd-mono, monospace); font-size:0.68rem;
-                padding:2px 8px;">REMOVE</button>
+                padding:2px 8px;">${T('common.removeUpper', 'REMOVE')}</button>
         </div>`;
     }
 
@@ -147,8 +154,8 @@
         const nameEl = document.getElementById('cmp_name');
         const metrics = currentMetrics();
         if (!metrics) {
-            if (status) status.textContent =
-                'No calculation result yet — run a motor calculation first.';
+            if (status) status.textContent = T('panel.comparative.noResult',
+                'No calculation result yet — run a motor calculation first.');
             return;
         }
         let name = (nameEl && nameEl.value.trim())
@@ -158,12 +165,14 @@
         const existing = snapshots.findIndex(function (s) { return s.name === name; });
         if (existing !== -1) {
             snapshots[existing] = { name: name, metrics: metrics };
-            if (status) status.textContent =
-                'Snapshot "' + name + '" updated (' + snapshots.length + ' stored).';
+            if (status) status.textContent = U.tf('panel.comparative.snapUpdated',
+                { name: name, count: snapshots.length },
+                'Snapshot "{name}" updated ({count} stored).');
         } else {
             snapshots.push({ name: name, metrics: metrics });
-            if (status) status.textContent =
-                'Snapshot "' + name + '" stored (' + snapshots.length + ' total).';
+            if (status) status.textContent = U.tf('panel.comparative.snapStored',
+                { name: name, count: snapshots.length },
+                'Snapshot "{name}" stored ({count} total).');
         }
         if (nameEl) nameEl.value = '';
         refreshList();
@@ -217,7 +226,8 @@
         const btn = document.getElementById('cmp_run');
         if (!status || !root || !btn) return;
         if (snapshots.length < 2) {
-            status.textContent = 'At least 2 snapshots are required for comparison.';
+            status.textContent = T('panel.comparative.needTwo',
+                'At least 2 snapshots are required for comparison.');
             return;
         }
         const motorConfigs = {};
@@ -225,7 +235,7 @@
 
         btn.disabled = true;
         root.style.display = 'none';
-        status.textContent = 'COMPARING…';
+        status.textContent = T('panel.validation.comparing', 'COMPARING…');
         try {
             const resp = await fetch(ENDPOINT, {
                 method: 'POST',
@@ -243,7 +253,8 @@
             root.style.display = 'block';
             status.textContent = '';
         } catch (err) {
-            status.textContent = 'ERROR: ' + err.message;
+            status.textContent = U.tf('common.errorPrefix', { message: err.message },
+                                      'ERROR: {message}');
         } finally {
             btn.disabled = snapshots.length < 2;
         }
@@ -263,40 +274,48 @@
     function summaryCards(analysis) {
         if (!analysis) return '';
         return '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
-            + U.statCard('BEST THRUST', escapeHtml(analysis.best_thrust || '—'), '',
+            + U.statCard(T('panel.comparative.bestThrust', 'BEST THRUST'),
+                escapeHtml(analysis.best_thrust || '—'), '',
                 analysis.best_thrust ? 'ok' : 'dim',
-                'Highest thrust among configurations that report it')
-            + U.statCard('BEST ISP', escapeHtml(analysis.best_isp || '—'), '',
+                T('panel.comparative.bestThrustTip',
+                  'Highest thrust among configurations that report it'))
+            + U.statCard(T('panel.comparative.bestIsp', 'BEST ISP'),
+                escapeHtml(analysis.best_isp || '—'), '',
                 analysis.best_isp ? 'ok' : 'dim',
-                'Highest specific impulse among configurations that report it')
-            + U.statCard('BEST EFFICIENCY', escapeHtml(analysis.best_efficiency || '—'), '',
+                T('panel.comparative.bestIspTip',
+                  'Highest specific impulse among configurations that report it'))
+            + U.statCard(T('panel.comparative.bestEfficiency', 'BEST EFFICIENCY'),
+                escapeHtml(analysis.best_efficiency || '—'), '',
                 analysis.best_efficiency ? 'ok' : 'dim',
-                'Highest Isp / total mass ratio (needs both metrics)')
-            + U.statCard('CONFIGS', String(analysis.total_configs || 0), '', 'info',
-                'Number of configurations compared')
+                T('panel.comparative.bestEfficiencyTip',
+                  'Highest Isp / total mass ratio (needs both metrics)'))
+            + U.statCard(T('panel.comparative.configs', 'CONFIGS'),
+                String(analysis.total_configs || 0), '', 'info',
+                T('panel.comparative.configsTip', 'Number of configurations compared'))
             + '</div>';
     }
 
     function render(data, root) {
         const head = document.createElement('div');
-        head.innerHTML = U.sectionTitle('Comparison Summary')
+        head.innerHTML = U.sectionTitle(T('panel.comparative.secSummary', 'Comparison Summary'))
             + summaryCards(data && data.analysis);
         root.appendChild(head);
 
         const wrap = document.createElement('div');
         wrap.style.marginTop = '14px';
-        wrap.innerHTML = U.sectionTitle('Motor Configuration Comparison');
+        wrap.innerHTML = U.sectionTitle(T('panel.comparative.secChart',
+            'Motor Configuration Comparison'));
         const plot = document.createElement('div');
         wrap.appendChild(plot);
         root.appendChild(wrap);
 
         const fig = parseFigure(data && data.plot);
         if (!fig) {
-            plot.textContent = 'Unexpected plot payload from backend.';
+            plot.textContent = T('common.badPayload', 'Unexpected plot payload from backend.');
             return;
         }
         if (typeof Plotly === 'undefined') {
-            plot.textContent = 'Plotly is not loaded — chart skipped.';
+            plot.textContent = T('common.plotlyMissing', 'Plotly is not loaded — chart skipped.');
             return;
         }
         Plotly.newPlot(plot, fig.data, fig.layout || {},
@@ -309,6 +328,7 @@
     window.AnalysisDock.register({
         id: PANEL_ID,
         title: 'Comparative Analysis — Snapshot & Compare Configurations',
+        titleKey: 'panel.comparative.title',
         category: 'COMPARE',
         endpoint: ENDPOINT,
         motorTypes: ['hybrid', 'liquid', 'solid'],

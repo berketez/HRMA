@@ -1,26 +1,26 @@
-# HRMA — Space-Class Motor Design Capability Assessment
+# HRMA: Space-Class Motor Design Capability Assessment
 
 *Assessed: 2026-07-12, following the four-pass independent formula audit and
 the addition of the transient-ballistics, tank-blowdown, and 6-DOF layers.
 This is an engineering judgement, argued from the verification evidence in
-[VALIDATION_STATUS.md](VALIDATION_STATUS.md) — not a marketing claim.*
+[VALIDATION_STATUS.md](VALIDATION_STATUS.md), not a marketing claim.*
 
 ## Question
 
-Can HRMA carry the **design** of a motor for a space-shot — a 100 km
-(Kármán-line) class hybrid sounding vehicle — from requirements to a
+Can HRMA carry the **design** of a motor for a space-shot, a 100 km
+(Kármán-line) class hybrid sounding vehicle, from requirements to a
 manufacturable preliminary design?
 
 ## Answer
 
-**Yes, for preliminary design — the analysis chain is now closed end-to-end.**
+**Yes, for preliminary design: the analysis chain is now closed end-to-end.**
 Requirements → thermochemistry → sizing → transient thrust curve → feed-system
 coupling → thermal/structural margins → stability and trajectory → CAD/STL and
 OpenRocket export, with every physics formula in that chain independently
 re-derived against primary literature (2026-07-12 audit: all core formulas
 confirmed; the defects the audit found were fixed the same day).
 
-**No, for flight qualification** — as for every analysis tool. Combustion
+**No, for flight qualification**, as for every analysis tool. Combustion
 stability, ignition, delivered c\* efficiency, and hardware integrity are
 demonstrated on the test stand, not in software. HRMA narrows the design and
 the test matrix; it does not replace them.
@@ -41,24 +41,24 @@ the test matrix; it does not replace them.
 
 ## What a space-shot campaign still needs beyond HRMA
 
-1. **Static-fire test series** — delivered c\* efficiency, ignition transient,
+1. **Static-fire test series**: delivered c\* efficiency, ignition transient,
    combustion stability (chug/screech), nozzle erosion rates. Feed HRMA's
    η_c\* and regression coefficients back from test data after each firing.
 2. **Hydrostatic proof and burst tests** of the chamber and tank (structural
    margins in HRMA are conservative but analytical).
-3. **Recovery, avionics, range safety** — outside HRMA's scope entirely.
+3. **Recovery, avionics, range safety**: outside HRMA's scope entirely.
 4. **Injector cold-flow characterization** for N₂O. HRMA sizes the orifices
    with the two-phase Dyer NHNE model (2026-07-13) rather than the
    optimistic single-phase SPI equation, but the discharge coefficient and
    the NHNE blend still deserve anchoring against a cold-flow test.
-5. **6-DOF with measured aero** — Barrowman is adequate for stability
+5. **6-DOF with measured aero**: Barrowman is adequate for stability
    screening; a wind-tunnel or CFD-derived Cd/CN_α set tightens apogee
    prediction.
 
 ## Bottom line
 
-A competent team can take HRMA's output — grain and nozzle drawings, tank
-volume, injector plate, thrust curve, stability margins — and go directly to
+A competent team can take HRMA's output (grain and nozzle drawings, tank
+volume, injector plate, thrust curve, stability margins) and go directly to
 hardware procurement and a static-fire campaign for a 100 km-class hybrid.
 That is exactly the standard a preliminary-design tool must meet, and each
 step of that chain is now covered by an automated regression suite

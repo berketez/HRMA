@@ -11,6 +11,14 @@
  * marj garantisi), annotation'lara zemin pili, hover etiketi teması.
  * Amaç: "çizgiler yazılarla iç içe giriyor" sınıfı sorunları tüm
  * grafiklerde tek merkezden bitirmek.
+ *
+ * 2026-07-19 dil katmanı: grafik metinleri (başlık, eksen, seri adı,
+ * anotasyon, hover şablonu, gösterge etiketi) sunucuda ve panel JS'lerinde
+ * ~250 ayrı yerde üretiliyor. Hepsini tek tek çevirmek yerine burada,
+ * TEK BOĞAZDAN çevriliyor: translateFigure() metinleri i18n_charts.js
+ * sözlüğünden geçirir. Sözlükte olmayan metin OLDUĞU GİBİ kalır.
+ * Kaynak (İngilizce) metin her nesnede gizli bir alanda saklanır, böylece
+ * dil ileri-geri değiştirilse de çeviri hep İngilizce kaynaktan yapılır.
  */
 (function () {
     'use strict';
@@ -179,6 +187,146 @@
         if (all2dScatter) layout.hovermode = 'x unified';
     }
 
+    /* ==================================================================
+       DİL KATMANI — grafik metinlerini tek boğazdan çevirir
+       ==================================================================
+       Sözlük ve çeviri kuralları i18n_charts.js'te; burada yalnız figürün
+       hangi alanlarının metin taşıdığı bilinir. i18n_charts.js yüklü
+       değilse tüm katman sessizce devre dışı kalır (grafik İngilizce
+       çizilir, hiçbir şey bozulmaz).
+    */
+
+    var SRC_KEY = '__hrmaEnSource';   // nesne üstünde saklanan İngilizce kaynak
+
+    function translator() {
+        var api = (typeof window !== 'undefined' &&
+                   (window.I18N || window.HRMAChartI18N)) || null;
+        return (api && typeof api.chartText === 'function') ? api.chartText : null;
+    }
+
+    /* Kaynağı (ilk görülen İngilizce değeri) numaralandırılamaz bir alanda
+       saklar. Böylece Plotly'nin JSON çıktısına, toImage'a ve dışa
+       aktarmalara sızmaz; buna karşın dil değişiminde geri dönülebilir. */
+    function sourceOf(obj, prop, current) {
+        var store = obj[SRC_KEY];
+        if (!store) {
+            store = {};
+            try {
+                Object.defineProperty(obj, SRC_KEY, {
+                    value: store, enumerable: false, writable: true, configurable: true
+                });
+            } catch (e) {
+                obj[SRC_KEY] = store;       // defineProperty yoksa düz atama
+            }
+        }
+        if (!Object.prototype.hasOwnProperty.call(store, prop)) store[prop] = current;
+        return store[prop];
+    }
+
+    /* obj[prop] metnini çevirir. Çeviri HER ZAMAN saklanan İngilizce
+       kaynaktan yapılır → ileri-geri dil değişimi metni bozmaz. */
+    function tset(obj, prop, tr) {
+        if (!obj || typeof obj !== 'object') return;
+        var value = obj[prop];
+        if (typeof value === 'string') {
+            obj[prop] = tr(sourceOf(obj, prop, value));
+            return;
+        }
+        if (Array.isArray(value)) {
+            if (value.length > 500) return;          // devasa etiket dizilerini atla
+            var src = sourceOf(obj, prop, value.slice());
+            var out = [];
+            for (var i = 0; i < src.length; i++) {
+                out.push(typeof src[i] === 'string' ? tr(src[i]) : src[i]);
+            }
+            obj[prop] = out;
+        }
+    }
+
+    /* Plotly başlıkları hem düz metin hem {text: ...} olabilir. */
+    function tTitle(owner, tr) {
+        if (!owner || typeof owner !== 'object') return;
+        if (typeof owner.title === 'string') {
+            tset(owner, 'title', tr);
+        } else if (owner.title && typeof owner.title === 'object') {
+            tset(owner.title, 'text', tr);
+        }
+    }
+
+    function tAxis(ax, tr) {
+        if (!ax || typeof ax !== 'object') return;
+        tTitle(ax, tr);
+        tset(ax, 'ticksuffix', tr);
+        if (Array.isArray(ax.ticktext)) tset(ax, 'ticktext', tr);
+    }
+
+    function tLayout(layout, tr) {
+        if (!layout || typeof layout !== 'object') return;
+        tTitle(layout, tr);
+
+        Object.keys(layout).forEach(function (k) {
+            var v = layout[k];
+            if (/^[xyz]axis\d*$/.test(k)) tAxis(v, tr);
+            if (/^(scene|polar|ternary)\d*$/.test(k) && v && typeof v === 'object') {
+                ['xaxis', 'yaxis', 'zaxis', 'radialaxis', 'angularaxis',
+                 'aaxis', 'baxis', 'caxis'].forEach(function (a) { tAxis(v[a], tr); });
+            }
+        });
+
+        if (layout.legend) tTitle(layout.legend, tr);
+        if (layout.coloraxis && layout.coloraxis.colorbar) tAxis(layout.coloraxis.colorbar, tr);
+
+        (layout.annotations || []).forEach(function (an) { tset(an, 'text', tr); });
+        (layout.shapes || []).forEach(function (sh) { tset(sh, 'name', tr); });
+
+        (layout.updatemenus || []).forEach(function (menu) {
+            (menu.buttons || []).forEach(function (b) { tset(b, 'label', tr); });
+        });
+        (layout.sliders || []).forEach(function (sl) {
+            if (sl.currentvalue) tset(sl.currentvalue, 'prefix', tr);
+            (sl.steps || []).forEach(function (st) { tset(st, 'label', tr); });
+        });
+    }
+
+    function tTrace(tr_, tr) {
+        if (!tr_ || typeof tr_ !== 'object') return;
+        tset(tr_, 'name', tr);
+        tset(tr_, 'hovertemplate', tr);
+        tset(tr_, 'hovertext', tr);
+        tset(tr_, 'text', tr);
+        // legendgroup BİLEREK çevrilmez: görünmez bir gruplama anahtarıdır,
+        // çevrilirse aynı gruptaki seriler birbirinden kopar.
+        if (tr_.legendgrouptitle) tset(tr_.legendgrouptitle, 'text', tr);
+
+        // indicator / gauge: başlık trace üstünde, eksen başlığı gauge içinde
+        tTitle(tr_, tr);
+        if (tr_.gauge) tAxis(tr_.gauge.axis, tr);
+
+        if (tr_.colorbar) tAxis(tr_.colorbar, tr);
+        if (tr_.marker && tr_.marker.colorbar) tAxis(tr_.marker.colorbar, tr);
+
+        // table trace: başlık satırı ve hücreler
+        ['header', 'cells'].forEach(function (part) {
+            var p = tr_[part];
+            if (!p || !Array.isArray(p.values)) return;
+            for (var i = 0; i < p.values.length; i++) {
+                if (Array.isArray(p.values[i])) {
+                    tset(p.values, i, tr);
+                } else if (typeof p.values[i] === 'string') {
+                    tset(p.values, i, tr);
+                }
+            }
+        });
+    }
+
+    /* Figürü yerinde çevirir. İngilizce dilde hiçbir şey değişmez. */
+    function translateFigure(data, layout) {
+        var tr = translator();
+        if (!tr) return;
+        if (Array.isArray(data)) data.forEach(function (t) { tTrace(t, tr); });
+        tLayout(layout, tr);
+    }
+
     function wrap(fnName) {
         var orig = Plotly[fnName] && Plotly[fnName].bind(Plotly);
         if (!orig) return;
@@ -188,6 +336,7 @@
                 layout = applyDarkLayout(layout);
                 maybeBottomLegend(data, layout);
                 maybeUnifiedHover(data, layout);
+                translateFigure(data, layout);
             } catch (e) {
                 console.warn('HRMA dark theme patch failed, rendering as-is:', e);
             }
@@ -197,4 +346,73 @@
 
     wrap('newPlot');
     wrap('react');
+
+    /* ------------------------------------------------------------------
+       Sözlüğü tembel yükle: şablon <script> etiketini eklemediyse bile
+       grafik çevirisi çalışsın. i18n_charts.js kendi içinde çift-yükleme
+       koruması taşır, iki yoldan da gelse tek kez kaydolur.
+       ------------------------------------------------------------------ */
+    (function ensureChartDictionary() {
+        if (typeof document === 'undefined' || !document.createElement) return;
+        if (typeof window !== 'undefined' && window.__HRMA_I18N_CHARTS) return;
+        if (document.querySelector('script[src*="i18n_charts.js"]')) return;
+        var s = document.createElement('script');
+        s.src = '/static/js/i18n_charts.js';
+        s.async = true;
+        // Sözlük geç gelirse: o ana kadar çizilmiş grafikleri tazele
+        // (aksi hâlde ilk hesap İngilizce kalır, sonrakiler Türkçe olurdu).
+        s.onload = function () {
+            if (typeof window !== 'undefined' && window.I18N &&
+                window.I18N.lang && window.I18N.lang !== 'en') {
+                scheduleRedraw();
+            }
+        };
+        (document.head || document.documentElement).appendChild(s);
+    })();
+
+    /* ------------------------------------------------------------------
+       Dil değişince ekrandaki grafikleri yeniden çiz. Sarmalayıcı devrede
+       olduğu için Plotly.react çağrısı çeviriyi kendiliğinden uygular;
+       çeviri saklanan İngilizce kaynaktan yapıldığı için ileri-geri dil
+       değişimi metinleri bozmaz. Sayfada grafik yoksa sessizce geçilir.
+       ------------------------------------------------------------------ */
+    function redrawAllPlots() {
+        if (typeof document === 'undefined' || !document.querySelectorAll) return;
+        var nodes = document.querySelectorAll('.js-plotly-plot');
+        for (var i = 0; i < nodes.length; i++) {
+            var gd = nodes[i];
+            if (!gd || !gd._fullLayout || !gd.data) continue;
+            try {
+                Plotly.react(gd, gd.data, gd.layout || {});
+            } catch (e) {
+                console.warn('HRMA i18n: grafik yeniden çizilemedi', e);
+            }
+        }
+    }
+
+    /* Hem I18N.onChange hem 'hrma:langchange' olayı bağlanır (yükleme
+       sırası ne olursa olsun en az biri çalışsın). İkisi birden tetiklenirse
+       aynı karede tek yeniden çizim yapılır. */
+    var redrawQueued = false;
+    function scheduleRedraw() {
+        if (redrawQueued) return;
+        redrawQueued = true;
+        var run = function () { redrawQueued = false; redrawAllPlots(); };
+        if (typeof setTimeout === 'function') setTimeout(run, 0);
+        else run();
+    }
+
+    (function bindLanguageChange() {
+        if (typeof window === 'undefined') return;
+        if (window.I18N && typeof window.I18N.onChange === 'function') {
+            window.I18N.onChange(scheduleRedraw);
+        }
+        if (typeof document !== 'undefined' && document.addEventListener) {
+            document.addEventListener('hrma:langchange', scheduleRedraw);
+        }
+    })();
+
+    // Test ve hata ayıklama için açığa çıkarılır (üretimde kullanılmaz).
+    Plotly.__hrmaTranslateFigure = translateFigure;
+    Plotly.__hrmaRedrawAllPlots = redrawAllPlots;
 })();

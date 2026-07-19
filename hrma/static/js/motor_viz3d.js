@@ -148,6 +148,26 @@
     // Motor verisinden boyut çıkarımı (hepsi mm)
     // ------------------------------------------------------------------
 
+    // Enjektör tipi takma adları — visualization.py INJECTOR_TYPE_ALIASES ile
+    // aynı eşleme (tek gerçeklik: 2D kesit ve 3D model aynı tipi çizer)
+    var INJECTOR_TYPE_ALIASES = {
+        showerhead: 'showerhead',
+        pintle: 'pintle',
+        swirl: 'swirl',
+        coax_swirl: 'coaxial',
+        coaxial: 'coaxial',
+        impingement: 'impingement',
+        impinging: 'impingement',
+        impinging_doublet: 'impingement',
+        impinging_triplet: 'impingement',
+        like_impinging: 'impingement'
+    };
+
+    function resolveInjectorType(inj) {
+        var raw = (inj && (inj.injector_type || inj.type)) || 'showerhead';
+        return INJECTOR_TYPE_ALIASES[String(raw).toLowerCase()] || 'showerhead';
+    }
+
     function extractDims(md) {
         md = md || {};
         var gd = md.grain_design || {};
@@ -238,6 +258,13 @@
             inletL: clamp(1.6 * capT, 14, 60),
             nOrifices: Math.max(4, Math.round(num(inj.number_of_orifices, 12))),
             orificeR: clamp(num(inj.orifice_diameter_mm, 1.5) / 2, 0.8, 4),
+            // Enjektör tipi 2D kesitle AYNI takma ad tablosundan çözülür
+            injectorType: resolveInjectorType(inj),
+            pintleR: clamp(num(inj.pintle_diameter_mm, num(inj.d_pintle_mm, 0.22 * Dch)) / 2,
+                2, 0.45 * rc),
+            annulusGap: clamp(num(inj.annulus_gap_mm, 1.2), 0.4, 6),
+            innerJetR: clamp(num(inj.inner_jet_diameter, 0.18 * Dch) / 2, 1.5, 0.35 * rc),
+            impingeHalfDeg: clamp(num(inj.impingement_angle_deg, 60) / 2, 10, 60),
             nBolts: Math.max(6, Math.round(num(fasteners.num_bolts, 8))),
             burnTime: Math.max(0.1, num(md.burn_time, 10)),
             thrust: num(md.thrust, 1000),
@@ -911,24 +938,133 @@
                 { r: 0, z: injZ0 + injT }
             ];
             var injector = buildSolid(injPoly, mats.injector, mats.injectorCut, cut);
-            // Showerhead: eş merkezli 2-3 delik halkası (çevreyle orantılı dağıtım)
+            // Enjektör tipine göre yüz geometrisi (2D kesitle aynı tip)
+            var injFace = injZ0 + injT;
+            var seg = this._perfMode ? 8 : 12;
             var oriR = Math.max(d.orificeR * 1.6, 1.2);
-            var oriGeo = new THREE.CylinderGeometry(oriR, oriR, 1.6, this._perfMode ? 8 : 12);
             var rMaxO = d.rc - 6;
-            var ringFr = d.nOrifices >= 10 ? [0.35, 0.6, 0.85] : [0.4, 0.75];
-            var frSum = ringFr.reduce(function (a, b) { return a + b; }, 0);
-            ringFr.forEach(function (fr, ri) {
-                var rr = fr * rMaxO;
-                var nRing = Math.max(3, Math.round(d.nOrifices * fr / frSum));
-                for (var k = 0; k < nRing; k++) {
-                    var phi = ((k + ri * 0.5) / nRing) * TAU; // halkalar arası kaydırma
-                    var ori = new THREE.Mesh(oriGeo, mats.orifice);
-                    ori.position.set(rr * Math.sin(phi), injZ0 + injT + 0.5, rr * Math.cos(phi));
-                    ori.userData.phi = phi;
-                    ori.userData.hideInCut = true;
-                    injector.add(ori);
+
+            if (d.injectorType === 'pintle') {
+                // Merkez pintle gövdesi: plakadan odaya uzanan silindir
+                var pR = clamp(d.pintleR, 2, 0.45 * d.rc);
+                var pLen = Math.max(2.5 * pR, 1.2 * injT);
+                var post = new THREE.Mesh(
+                    new THREE.CylinderGeometry(pR, pR * 0.92, pLen, this._perfMode ? 12 : 24),
+                    mats.injector);
+                post.position.y = injFace + pLen / 2;
+                post.castShadow = true;
+                injector.add(post);
+                // Uçta radyal delik dizisi (yatık silindirler)
+                var nRad = Math.max(6, Math.min(d.nOrifices, 24));
+                var radGeo = new THREE.CylinderGeometry(oriR * 0.8, oriR * 0.8,
+                    pR * 0.9, this._perfMode ? 6 : 10);
+                for (var rk = 0; rk < nRad; rk++) {
+                    var rphi = (rk / nRad) * TAU;
+                    var rad = new THREE.Mesh(radGeo, mats.orifice);
+                    rad.rotation.z = Math.PI / 2;
+                    rad.rotation.y = -rphi;
+                    rad.position.set(pR * 0.75 * Math.sin(rphi),
+                        injFace + pLen * 0.82, pR * 0.75 * Math.cos(rphi));
+                    rad.userData.phi = rphi;
+                    rad.userData.hideInCut = true;
+                    injector.add(rad);
                 }
-            });
+                // Anülüs bileziği (pintle çevresindeki eksenel oks tabakası)
+                var annGap = clamp(d.annulusGap, 0.4, 6);
+                var ann = new THREE.Mesh(
+                    new THREE.TorusGeometry(pR + annGap, Math.max(annGap * 0.5, 0.5),
+                        8, this._perfMode ? 24 : 48),
+                    mats.orifice);
+                ann.rotation.x = Math.PI / 2;
+                ann.position.y = injFace + 0.8;
+                ann.userData.hideInCut = true;
+                injector.add(ann);
+
+            } else if (d.injectorType === 'swirl') {
+                // Teğetsel kanal blokları: plaka yüzünde eğik kutular
+                var nSlot = Math.max(4, Math.min(d.nOrifices, 12));
+                var slotGeo = new THREE.BoxGeometry(Math.max(oriR * 1.4, 1.6),
+                    Math.max(injT * 0.5, 2), rMaxO * 0.45);
+                for (var sk = 0; sk < nSlot; sk++) {
+                    var sphi = (sk / nSlot) * TAU;
+                    var slot = new THREE.Mesh(slotGeo, mats.orifice);
+                    var sr = rMaxO * 0.62;
+                    slot.position.set(sr * Math.sin(sphi), injFace + 0.4,
+                        sr * Math.cos(sphi));
+                    // Teğetsel yönelim: radyal yönden 90 derece kaydırılmış
+                    slot.rotation.y = -sphi + Math.PI / 2;
+                    slot.userData.phi = sphi;
+                    slot.userData.hideInCut = true;
+                    injector.add(slot);
+                }
+                // Merkezi çıkış orifisi (içi boş koni sprey kaynağı)
+                var exitR = Math.max(oriR * 2.2, 0.12 * d.rc);
+                var exitO = new THREE.Mesh(
+                    new THREE.CylinderGeometry(exitR, exitR, 1.8, this._perfMode ? 12 : 24),
+                    mats.orifice);
+                exitO.position.y = injFace + 0.6;
+                exitO.userData.hideInCut = true;
+                injector.add(exitO);
+
+            } else if (d.injectorType === 'impingement') {
+                // Açılı delik çiftleri: her çift eksene doğru eğik iki silindir
+                var nPair = Math.max(3, Math.min(Math.round(d.nOrifices / 2), 12));
+                var tilt = THREE.MathUtils.degToRad(clamp(d.impingeHalfDeg, 10, 60));
+                var impGeo = new THREE.CylinderGeometry(oriR, oriR, injT * 0.9,
+                    this._perfMode ? 6 : 10);
+                for (var pk = 0; pk < nPair; pk++) {
+                    var pphi = (pk / nPair) * TAU;
+                    var pr = rMaxO * 0.68;
+                    for (var side = -1; side <= 1; side += 2) {
+                        var hole = new THREE.Mesh(impGeo, mats.orifice);
+                        hole.position.set(pr * Math.sin(pphi), injFace - injT * 0.35,
+                            pr * Math.cos(pphi));
+                        hole.translateX(side * oriR * 1.8);
+                        hole.rotation.z = -side * tilt;
+                        hole.userData.phi = pphi;
+                        hole.userData.hideInCut = true;
+                        injector.add(hole);
+                    }
+                }
+
+            } else if (d.injectorType === 'coaxial') {
+                // İç boru + dış halka (tek akışkan hibritte her ikisi de oks)
+                var iR = clamp(d.innerJetR, 1.5, 0.35 * d.rc);
+                var coLen = Math.max(2 * iR, injT);
+                var innerTube = new THREE.Mesh(
+                    new THREE.CylinderGeometry(iR, iR, coLen, this._perfMode ? 12 : 24),
+                    mats.orifice);
+                innerTube.position.y = injFace + coLen / 2;
+                innerTube.userData.hideInCut = true;
+                injector.add(innerTube);
+                var outerRing = new THREE.Mesh(
+                    new THREE.TorusGeometry(iR + clamp(d.annulusGap, 0.4, 6) + 0.6,
+                        Math.max(clamp(d.annulusGap, 0.4, 6) * 0.5, 0.6),
+                        8, this._perfMode ? 24 : 48),
+                    mats.injector);
+                outerRing.rotation.x = Math.PI / 2;
+                outerRing.position.y = injFace + coLen * 0.35;
+                outerRing.userData.hideInCut = true;
+                injector.add(outerRing);
+
+            } else {
+                // Showerhead: eş merkezli 2-3 delik halkası (çevreyle orantılı dağıtım)
+                var oriGeo = new THREE.CylinderGeometry(oriR, oriR, 1.6, seg);
+                var ringFr = d.nOrifices >= 10 ? [0.35, 0.6, 0.85] : [0.4, 0.75];
+                var frSum = ringFr.reduce(function (a, b) { return a + b; }, 0);
+                ringFr.forEach(function (fr, ri) {
+                    var rr = fr * rMaxO;
+                    var nRing = Math.max(3, Math.round(d.nOrifices * fr / frSum));
+                    for (var k = 0; k < nRing; k++) {
+                        var phi = ((k + ri * 0.5) / nRing) * TAU; // halkalar arası kaydırma
+                        var ori = new THREE.Mesh(oriGeo, mats.orifice);
+                        ori.position.set(rr * Math.sin(phi), injFace + 0.5, rr * Math.cos(phi));
+                        ori.userData.phi = phi;
+                        ori.userData.hideInCut = true;
+                        injector.add(ori);
+                    }
+                });
+            }
             // Hibrit: kapaktan port girişine uzanan ateşleyici (pirinç gövde)
             if (!isLiquid) {
                 var igR = clamp(0.09 * d.rc, 2.5, 8);

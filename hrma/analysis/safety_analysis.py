@@ -10,6 +10,49 @@ from dataclasses import dataclass
 
 from hrma.data.materials_db import get_material
 
+# ---------------------------------------------------------------------------
+# Emniyet modeli sabitleri — TEK tanım noktası (magic number yasağı).
+# Bu blok dışında sayısal sabit yazılmaz; testler de buradan okur.
+# ---------------------------------------------------------------------------
+SAFETY_MODEL = {
+    # Ortam / radyasyon
+    'ambient_temperature_k': 293.15,
+    'stefan_boltzmann': 5.670374419e-8,      # W/m²K⁴ (CODATA 2018)
+    'default_surface_emissivity': 0.80,      # oksitlenmiş metal dış yüzey
+    'radiant_pain_threshold_w_m2': 2500.0,   # ISO 13732-1 acı eşiği (~2.5 kW/m²)
+    # 2. derece yanık doz eşiği: ~1000 (kW/m²)^(4/3)·s  (Eisenberg probit /
+    # API 521 termal doz birimi, TDU). Maruziyet süresi yanma süresidir.
+    'second_degree_burn_tdu': 1000.0,
+    'min_hazard_distance_m': 3.0,
+    # Işıyan yüzey alanı bilinmiyorsa varsayılan narinlik (L/D). Sonuç
+    # 'radiating_area_basis' alanında AÇIKÇA beyan edilir.
+    'assumed_length_to_diameter': 5.0,
+    # Kasa kütle kesri — yalnız geometri verilmediğinde kullanılan ampirik
+    # yedek; kullanıldığında 'case_mass_basis' alanında beyan edilir.
+    'fallback_case_mass_fraction': 0.15,
+    'gurney_velocity_ms': 2700.0,            # √(2E), çelik kılıf tipik
+    'fragment_drag_limited_range_m': 2000.0,
+    'lethal_fragment_mass_kg': 0.01,
+    'lethal_kinetic_energy_j': 79.0,         # NATO STANAG 2920
+    # Serbest kalan (bağı kopan) motorun balistik menzili için sürükleme
+    # sınırlı pratik tavan.
+    'loose_motor_range_cap_m': 5000.0,
+    'gravity_m_s2': 9.80665,
+    # Basınçlı kap: emniyet valfi ayarı tasarım basıncının bu oranıdır
+    # (API 520 sınıfı pratik: set ≤ MAWP).
+    'relief_setting_fraction_of_design': 0.85,
+}
+
+# motor_type -> TNT eşdeğeri sınıfı. Kullanıcının seçtiği motor tipi,
+# propellant_type serbest metin olduğunda patlayıcı sınıfını belirler.
+MOTOR_TYPE_TO_EXPLOSIVE_CLASS = {
+    'solid': 'composite',
+    'hybrid': 'liquid_biprop',   # yakıt grain'i tek başına inert; olay
+                                 # oksitleyici kaynaklıdır
+    'liquid': 'liquid_biprop',
+}
+
+
 @dataclass
 class SafetyMargins:
     """Safety margin requirements for different components"""
@@ -55,7 +98,8 @@ class SafetyAnalyzer:
     def analyze_comprehensive_safety(self, motor_data: Dict, propellant_mass: float,
                                    propellant_type: str = 'composite',
                                    facility_type: str = 'test_stand',
-                                   material: str = 'steel_4130') -> Dict:
+                                   material: str = 'steel_4130',
+                                   motor_type: Optional[str] = None) -> Dict:
         """
         Complete safety analysis including all hazard types
 
@@ -67,6 +111,9 @@ class SafetyAnalyzer:
             material: Chamber material key (hrma.data.materials_db); the
                 structural-safety hoop check uses this material's real
                 yield/ultimate strengths instead of a fixed generic steel.
+            motor_type: 'solid' | 'hybrid' | 'liquid'. Selects the explosive
+                (TNT-equivalent) class when propellant_type is not one of the
+                tabulated class keys. Also read from motor_data['motor_type'].
 
         Returns:
             Comprehensive safety analysis results
@@ -74,28 +121,32 @@ class SafetyAnalyzer:
 
         # Extract motor parameters
         chamber_pressure = motor_data.get('chamber_pressure', 20.0)  # bar
-        chamber_temperature = motor_data.get('chamber_temperature', 3000)  # K
         thrust = motor_data.get('thrust', 1000)  # N
         burn_time = motor_data.get('burn_time', 10)  # s
+        if motor_type is None:
+            motor_type = motor_data.get('motor_type')
 
         # Structural safety analysis
         structural_safety = self._analyze_structural_safety(motor_data, material)
-        
-        # Pressure vessel safety
+
+        # Pressure vessel safety — gerçek cidar/malzeme ile (kopma basıncı
+        # PressureVesselAnalyzer'dan, sabit çarpanlardan değil).
         pressure_safety = self._analyze_pressure_vessel_safety(
-            chamber_pressure, motor_data.get('chamber_diameter', 0.1)
+            chamber_pressure, motor_data.get('chamber_diameter', 0.1),
+            wall_thickness=motor_data.get('wall_thickness', 0.005),
+            material=material,
         )
-        
-        # Thermal safety analysis
-        thermal_safety = self._analyze_thermal_safety(
-            chamber_temperature, motor_data.get('wall_thickness', 0.005)
-        )
-        
+
+        # Thermal safety analysis — cidar sıcaklığı ısı transferi modülünden,
+        # termal gerilme seçilen malzemenin gerçek E/alfa/nu değerlerinden.
+        thermal_safety = self._analyze_thermal_safety(motor_data, material)
+
         # Explosive hazard analysis
         explosive_hazards = self._analyze_explosive_hazards(
-            propellant_mass, propellant_type, thrust
+            propellant_mass, propellant_type, thrust, burn_time,
+            motor_type=motor_type, motor_data=motor_data, material=material
         )
-        
+
         # Toxic hazard analysis
         toxic_hazards = self._analyze_toxic_hazards(
             propellant_type, propellant_mass, facility_type
@@ -139,7 +190,17 @@ class SafetyAnalyzer:
             'safety_equipment': safety_equipment,
             'risk_assessment': risk_assessment,
             'compliance': self._check_safety_compliance(risk_assessment),
-            'recommendations': self._generate_safety_recommendations(risk_assessment)
+            'recommendations': self._generate_safety_recommendations(risk_assessment),
+            # Hangi girdinin gerçekten kullanıldığı kullanıcıya görünür olsun
+            # (eskiden motor_type/thrust/burn_time sessizce düşüyordu).
+            'inputs_used': {
+                'motor_type': motor_type if motor_type else 'not supplied',
+                'thrust_n': thrust,
+                'burn_time_s': burn_time,
+                'chamber_material': material,
+                'propellant_type': propellant_type,
+                'facility_type': facility_type,
+            },
         }
     
     def _analyze_structural_safety(self, motor_data: Dict,
@@ -231,19 +292,52 @@ class SafetyAnalyzer:
             return 'Before each test campaign (visual + dye penetrant)'
         return 'Do not operate — redesign required (SF < 2)'
 
-    def _analyze_pressure_vessel_safety(self, chamber_pressure: float, diameter: float) -> Dict:
-        """Analyze pressure vessel safety requirements"""
-        
+    def _analyze_pressure_vessel_safety(self, chamber_pressure: float, diameter: float,
+                                        wall_thickness: float = 0.005,
+                                        material: str = 'steel_4130') -> Dict:
+        """Analyze pressure vessel safety requirements.
+
+        DENETİM DÜZELTMESİ (2026-07-19): eskiden yalnız MEOP × sabit çarpanlar
+        raporlanıyordu; kabın GERÇEKTEN kaç barda patladığı hiç hesaplanmıyordu,
+        yani cidar kalınlığı ve malzeme bu panele hiç girmiyordu. Gerçek kopma
+        basıncı artık merkezi PressureVesselAnalyzer'dan (Faupel kalın-cidar +
+        ince-cidar plastik limit, sıcaklık derating'i) gelir — yapısal panelle
+        aynı kaynak.
+        """
+
         # Design pressure with safety factor
         design_pressure = chamber_pressure * self.safety_margins.pressure_safety_factor
-        
+
         # Burst pressure requirement
         required_burst_pressure = chamber_pressure * self.safety_margins.minimum_burst_pressure_ratio
-        
+
         # Pressure test requirements
         hydrostatic_test_pressure = design_pressure * 1.5
         proof_pressure = design_pressure * 1.25
-        
+
+        # --- GERÇEK kopma basıncı (malzeme + cidar kalınlığı + çap) ---
+        actual_burst_pressure = None
+        burst_margin = None
+        vessel_status = None
+        vessel_warnings: List[str] = []
+        try:
+            from hrma.analysis.pressure_vessel import PressureVesselAnalyzer
+            pv = PressureVesselAnalyzer().analyze(
+                meop_bar=max(float(chamber_pressure), 1e-6),
+                inner_diameter_mm=max(float(diameter), 1e-6) * 1e3,
+                material=material,
+                wall_thickness_mm=max(float(wall_thickness), 1e-9) * 1e3,
+            )
+            actual_burst_pressure = pv['actual_burst_pressure_bar']
+            burst_margin = pv['burst_margin']
+            vessel_status = pv['status']
+            vessel_warnings = list(pv.get('warnings', []))
+        except Exception as exc:      # malzeme/geometri geçersizse sessiz kalma
+            vessel_warnings.append(
+                f"Actual burst pressure could not be computed for this "
+                f"geometry/material ({exc}); only code-required pressures are "
+                f"shown.")
+
         # Pressure vessel classification
         if chamber_pressure > 100:  # bar
             vessel_class = 'HIGH_PRESSURE'
@@ -255,7 +349,7 @@ class SafetyAnalyzer:
             vessel_class = 'LOW_PRESSURE'
             inspection_requirements = '5-year visual, 15-year hydrostatic'
         
-        return {
+        result = {
             'operating_pressure_bar': chamber_pressure,
             'design_pressure_bar': design_pressure,
             'required_burst_pressure_bar': required_burst_pressure,
@@ -264,62 +358,242 @@ class SafetyAnalyzer:
             'vessel_classification': vessel_class,
             'inspection_requirements': inspection_requirements,
             'applicable_codes': ['ASME BPVC Section VIII', 'EN 13445', 'AS 1210'],
-            'safety_devices_required': self._determine_pressure_safety_devices(chamber_pressure)
+            'safety_devices_required': self._determine_pressure_safety_devices(chamber_pressure),
+            # Gerçek kap kapasitesi (malzeme + cidar kalınlığı + çap)
+            'material': material,
+            'wall_thickness_mm': float(wall_thickness) * 1e3,
+            'inner_diameter_mm': float(diameter) * 1e3,
+            'actual_burst_pressure_bar': actual_burst_pressure,
+            'burst_margin': burst_margin,
+            'vessel_status': vessel_status,
+            'vessel_warnings': vessel_warnings,
+            'burst_pressure_source': (
+                'Faupel thick-wall / thin-wall plastic limit '
+                '(hrma.analysis.pressure_vessel)'),
         }
-    
-    def _analyze_thermal_safety(self, chamber_temperature: float, wall_thickness: float) -> Dict:
-        """Analyze thermal safety and heat-related hazards"""
-        
-        # Material temperature limits (conservative values)
-        steel_max_temp = 800  # K
-        aluminum_max_temp = 600  # K
-        
-        # Estimated wall temperature (simplified heat transfer)
-        wall_temperature = chamber_temperature * 0.3  # Rough approximation
-        
-        # Thermal safety factors
-        steel_thermal_safety = steel_max_temp / wall_temperature
-        aluminum_thermal_safety = aluminum_max_temp / wall_temperature
-        
-        # Thermal expansion effects
-        thermal_expansion_steel = 12e-6 * (wall_temperature - 293)  # strain
-        thermal_stress_estimate = 200e9 * thermal_expansion_steel  # Pa (simplified)
-        
-        # Burn hazard distances
+        return result
+
+    def _analyze_thermal_safety(self, motor_data: Dict,
+                                material: str = 'steel_4130') -> Dict:
+        """Analyze thermal safety and heat-related hazards.
+
+        DENETİM DÜZELTMESİ (2026-07-19). Eski sürümdeki üç uydurma kaldırıldı:
+          (a) cidar sıcaklığı = 0.3 × hazne sıcaklığı sabit katsayısı,
+          (b) termal gerilme sabit çelik özellikleriyle (E=200 GPa, alfa=12e-6)
+              ve tam ankastre varsayımıyla — malzeme seçimi sonucu hiç
+              değiştirmiyordu,
+          (c) radyan tehlike mesafesine ışıyan ALAN yerine cidar kalınlığının
+              100 katının geçilmesi (birim hatası; cidar kalınlaştıkça tehlike
+              mesafesi büyüyordu).
+
+        Yeni zincir:
+          1) Cidar sıcaklığı: motor_data['wall_temperature_hot'/'cold']
+             sözleşmesi (ısı transferi modülünün GERÇEK sonucu) varsa o;
+             yoksa HeatTransferAnalyzer (Bartz + yüzey enerji dengesi)
+             burada çağrılır. Yapısal panel ile aynı kaynak.
+          2) Termal gerilme: seçilen malzemenin materials_db değerleriyle
+             klasik cidar-gradyan formu sigma = E*alfa*dT/(2(1-nu))
+             (Timoshenko/Boley-Weiner; structural_analysis ile AYNI form).
+          3) Radyan tehlike: gerçek dış yüzey alanı ve DIŞ CİDAR sıcaklığı
+             (hazne gazı sıcaklığı değil). Uzunluk verilmemişse varsayım
+             'radiating_area_basis' alanında açıkça beyan edilir.
+        """
+        chamber_temperature = float(motor_data.get('chamber_temperature', 3000))
+        wall_thickness = float(motor_data.get('wall_thickness', 0.005) or 0.005)
+        chamber_diameter = float(motor_data.get('chamber_diameter', 0.1) or 0.1)
+        burn_time = float(motor_data.get('burn_time', 10) or 10)
+        ambient = float(motor_data.get('ambient_temperature',
+                                       SAFETY_MODEL['ambient_temperature_k']))
+
+        try:
+            mat = get_material(material)
+            material_key = material
+        except KeyError:
+            mat = get_material('steel_4130')
+            material_key = 'steel_4130'
+
+        # --- 1) Gerçek cidar sıcaklıkları -----------------------------------
+        wall_hot, wall_cold, wall_source = self._resolve_wall_temperatures(
+            motor_data, material_key, wall_thickness, ambient)
+
+        # --- 2) Termal gerilme: seçilen malzeme + gerçek cidar gradyanı -----
+        delta_T_wall = max(0.0, wall_hot - wall_cold)
+        E = float(mat['elastic_modulus'])
+        alpha = float(mat['thermal_expansion'])
+        nu = float(mat['poisson_ratio'])
+        thermal_stress_estimate = E * alpha * delta_T_wall / (2.0 * (1.0 - nu))
+
+        # --- Malzeme sıcaklık marjları (materials_db, sabit 800/600 K değil) -
+        selected_limit = float(mat.get('max_service_temp', np.nan))
+        steel_limit = float(get_material('steel_4130')['max_service_temp'])
+        aluminum_limit = float(get_material('aluminum_6061')['max_service_temp'])
+        steel_thermal_safety = steel_limit / wall_hot if wall_hot > 0 else float('inf')
+        aluminum_thermal_safety = (aluminum_limit / wall_hot
+                                   if wall_hot > 0 else float('inf'))
+        selected_thermal_safety = (selected_limit / wall_hot
+                                   if wall_hot > 0 else float('inf'))
+
+        # --- 3) Radyan ısı: gerçek ışıyan yüzey + dış cidar sıcaklığı -------
+        area, area_basis = self._radiating_surface_area(
+            chamber_diameter, wall_thickness, motor_data)
+        emissivity = float(mat.get('emissivity',
+                                   SAFETY_MODEL['default_surface_emissivity']))
         radiant_heat_distance = self._calculate_radiant_heat_distance(
-            chamber_temperature, wall_thickness * 100  # convert to area approximation
-        )
-        
+            wall_cold, area, emissivity=emissivity, ambient=ambient)
+
+        # Maruziyet dozu: yanma süresi burada GERÇEKTEN kullanılıyor.
+        flux_at_distance = self._radiant_flux_at(
+            wall_cold, area, radiant_heat_distance, emissivity, ambient)
+        burn_distance = self._burn_dose_distance(
+            wall_cold, area, burn_time, emissivity, ambient)
+
         return {
             'chamber_temperature_k': chamber_temperature,
-            'estimated_wall_temperature_k': wall_temperature,
+            'estimated_wall_temperature_k': wall_hot,
+            'inner_wall_temperature_k': wall_hot,
+            'outer_wall_temperature_k': wall_cold,
+            'wall_temperature_source': wall_source,
+            'wall_delta_T_k': delta_T_wall,
+            'material': material_key,
+            'material_name': mat.get('name', material_key),
+            'material_max_service_temp_k': selected_limit,
+            'material_thermal_safety_factor': selected_thermal_safety,
             'steel_thermal_safety_factor': steel_thermal_safety,
             'aluminum_thermal_safety_factor': aluminum_thermal_safety,
             'thermal_stress_mpa': thermal_stress_estimate / 1e6,
+            'thermal_stress_formula': (
+                'sigma_th = E*alpha*dT/(2*(1-nu)) with the selected material '
+                'and the through-wall gradient'),
+            'radiating_area_m2': area,
+            'radiating_area_basis': area_basis,
+            'radiating_surface_temperature_k': wall_cold,
+            'surface_emissivity': emissivity,
             'radiant_heat_hazard_distance_m': radiant_heat_distance,
-            'material_recommendation': 'Steel' if steel_thermal_safety > 1.3 else 'Inconel/High-temp alloy',
-            'cooling_required': wall_temperature > steel_max_temp / self.safety_margins.temperature_safety_factor,
-            'thermal_protection_required': radiant_heat_distance > 3.0
+            'radiant_flux_at_hazard_distance_kw_m2': flux_at_distance / 1000.0,
+            'exposure_duration_s': burn_time,
+            'second_degree_burn_distance_m': burn_distance,
+            'recommended_minimum_standoff_m': max(
+                radiant_heat_distance, burn_distance,
+                SAFETY_MODEL['min_hazard_distance_m']),
+            'material_recommendation': (
+                'Selected material acceptable'
+                if selected_thermal_safety
+                > self.safety_margins.temperature_safety_factor
+                else 'Insulation or a higher-temperature alloy required'),
+            'cooling_required': bool(
+                wall_hot > selected_limit
+                / self.safety_margins.temperature_safety_factor),
+            'thermal_protection_required': bool(
+                radiant_heat_distance > SAFETY_MODEL['min_hazard_distance_m']
+                or burn_distance > SAFETY_MODEL['min_hazard_distance_m']),
         }
-    
-    def _analyze_explosive_hazards(self, propellant_mass: float, propellant_type: str, thrust: float) -> Dict:
-        """Analyze explosive hazards and calculate safety distances"""
-        
-        # TNT equivalent calculation
-        tnt_equivalent = propellant_mass * self.propellant_tnt_equivalents.get(propellant_type, 0.4)
-        
+
+    # ------------------------------------------------------------------
+    # Termal emniyet yardımcıları
+    # ------------------------------------------------------------------
+    def _resolve_wall_temperatures(self, motor_data: Dict, material: str,
+                                   wall_thickness: float,
+                                   ambient: float) -> Tuple[float, float, str]:
+        """(T_ic, T_dis, kaynak) — sabit katsayı YOK.
+
+        Öncelik:
+          1) motor_data['wall_temperature_hot'/'wall_temperature_cold']
+             (motor zincirlerinin doldurduğu sözleşme)
+          2) HeatTransferAnalyzer.analyze_heat_transfer (Bartz + yüzey enerji
+             dengesi) — projedeki tek gerçek cidar sıcaklığı kaynağı
+          3) Hiçbiri çalışmazsa ortam sıcaklığı + AÇIK uyarı (uydurma sayı
+             döndürmek yerine hesaplanamadığını söyler)
+        """
+        hot = motor_data.get('wall_temperature_hot')
+        cold = motor_data.get('wall_temperature_cold')
+        if hot is not None and cold is not None:
+            return (float(hot), float(cold),
+                    'motor_data wall_temperature_hot/cold contract')
+
+        try:
+            from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
+            ht = HeatTransferAnalyzer().analyze_heat_transfer(
+                motor_data, material=material,
+                wall_thickness=max(float(wall_thickness), 1e-6),
+                ambient_temp=ambient,
+                cooling_type=motor_data.get('cooling_type', 'natural'))
+            wall = ht['wall_analysis']
+            return (float(wall['inner_temperature']),
+                    float(wall['outer_temperature']),
+                    'HeatTransferAnalyzer (Bartz gas side + surface energy balance)')
+        except Exception as exc:
+            return (float(ambient), float(ambient),
+                    f'NOT COMPUTED - heat transfer chain failed ({exc}); '
+                    f'wall temperature defaulted to ambient and must not be '
+                    f'used for design')
+
+    def _radiating_surface_area(self, chamber_diameter: float,
+                                wall_thickness: float,
+                                motor_data: Dict) -> Tuple[float, str]:
+        """Motor gövdesinin dış ışıyan yüzey alanı [m²] ve dayanağı.
+
+        A = pi*D_dis*L + 2*(pi/4)*D_dis²  (silindir + iki uç kapak).
+        Uzunluk verilmemişse varsayılan narinlik kullanılır ve bu, dönen
+        metinde AÇIKÇA beyan edilir — sessiz varsayım bırakılmaz.
+        """
+        d_outer = float(chamber_diameter) + 2.0 * float(wall_thickness)
+        length = motor_data.get('chamber_length') or motor_data.get('motor_length')
+        if length:
+            length = float(length)
+            basis = 'computed from chamber_diameter, wall_thickness and chamber_length'
+        else:
+            length = SAFETY_MODEL['assumed_length_to_diameter'] * float(chamber_diameter)
+            basis = (f"ASSUMED L/D = {SAFETY_MODEL['assumed_length_to_diameter']:.0f} "
+                     f"(chamber_length was not supplied)")
+        area = np.pi * d_outer * length + 2.0 * (np.pi / 4.0) * d_outer ** 2
+        return float(area), basis
+
+    def _radiant_flux_at(self, surface_temperature: float, area: float,
+                         distance: float, emissivity: float,
+                         ambient: float) -> float:
+        """Verilen mesafede radyan akı [W/m²] (nokta kaynak yaklaşımı)."""
+        sigma = SAFETY_MODEL['stefan_boltzmann']
+        power = emissivity * sigma * max(
+            surface_temperature ** 4 - ambient ** 4, 0.0) * max(area, 0.0)
+        if distance <= 0:
+            return 0.0
+        return float(power / (4.0 * np.pi * distance ** 2))
+
+    def _analyze_explosive_hazards(self, propellant_mass: float, propellant_type: str,
+                                   thrust: float, burn_time: float = 10.0,
+                                   motor_type: Optional[str] = None,
+                                   motor_data: Optional[Dict] = None,
+                                   material: str = 'steel_4130') -> Dict:
+        """Analyze explosive hazards and calculate safety distances.
+
+        DENETİM DÜZELTMESİ (2026-07-19): motor_type artık patlayıcı sınıfını
+        seçiyor (eskiden tamamen düşüyordu) ve thrust/burn_time serbest kalan
+        motor tehlikesinde GERÇEKTEN kullanılıyor (eski imza thrust'ı alıp
+        gövdede hiç kullanmıyordu).
+        """
+
+        # TNT equivalent calculation — sınıf çözümü motor tipini de dikkate alır
+        class_key, class_basis = self._resolve_explosive_class(
+            propellant_type, motor_type)
+        tnt_factor = self.propellant_tnt_equivalents[class_key]
+        tnt_equivalent = propellant_mass * tnt_factor
+
         # Blast overpressure distances (Hopkinson-Cranz law)
         distances = self._calculate_blast_distances(tnt_equivalent)
-        
+
         # Fragment hazard analysis
-        fragment_hazards = self._calculate_fragment_hazards(propellant_mass, thrust)
-        
+        fragment_hazards = self._calculate_fragment_hazards(
+            propellant_mass, thrust, burn_time, motor_data, material)
+
         # Quantity-distance (Q-D) requirements
         qd_requirements = self._calculate_qd_requirements(tnt_equivalent)
-        
+
         return {
             'propellant_mass_kg': propellant_mass,
             'tnt_equivalent_kg': tnt_equivalent,
+            'tnt_equivalent_factor': tnt_factor,
+            'explosive_class': class_key,
+            'explosive_class_basis': class_basis,
             'blast_distances': distances,
             'fragment_hazards': fragment_hazards,
             'qd_requirements': qd_requirements,
@@ -425,34 +699,134 @@ class SafetyAnalyzer:
 
         return distances
     
-    def _calculate_fragment_hazards(self, propellant_mass: float, thrust: float) -> Dict:
-        """Calculate fragment throw distances and hazards"""
-        
-        # Estimate case mass (empirical relationship)
-        case_mass = propellant_mass * 0.15  # Typical case mass fraction
-        
+    def _resolve_explosive_class(self, propellant_type: str,
+                                 motor_type: Optional[str]) -> Tuple[str, str]:
+        """(TNT eşdeğeri sınıfı, dayanak metni).
+
+        propellant_type tablo anahtarlarından biriyse doğrudan kullanılır.
+        Değilse (ör. 'apcp', 'n2o_htpb' gibi serbest ad) motor tipi sınıfı
+        belirler — bu, motor_type girdisinin GERÇEK kullanım yeridir.
+        """
+        key = str(propellant_type or '').strip().lower()
+        if key in self.propellant_tnt_equivalents:
+            return key, f"propellant_type '{key}' matched the TNT-equivalent table"
+
+        mt = str(motor_type or '').strip().lower()
+        if mt in MOTOR_TYPE_TO_EXPLOSIVE_CLASS:
+            resolved = MOTOR_TYPE_TO_EXPLOSIVE_CLASS[mt]
+            return resolved, (
+                f"propellant_type '{propellant_type}' is not a tabulated class; "
+                f"motor_type '{mt}' selected the '{resolved}' class")
+
+        return 'composite', (
+            f"propellant_type '{propellant_type}' is not a tabulated class and "
+            f"no motor_type was supplied; the conservative 'composite' class "
+            f"was assumed")
+
+    def _estimate_case_mass(self, propellant_mass: float,
+                            motor_data: Optional[Dict],
+                            material: str) -> Tuple[float, str]:
+        """(kasa kütlesi kg, dayanak). Geometri varsa GERÇEK kabuk kütlesi.
+
+        m = rho * [pi*D_ort*L*t + 2*(pi/4)*D_dis^2*t]  (silindir + uç kapaklar)
+        Geometri yoksa ampirik kütle kesri kullanılır ve bu beyan edilir.
+        """
+        md = motor_data or {}
+        diameter = md.get('chamber_diameter')
+        thickness = md.get('wall_thickness')
+        length = md.get('chamber_length') or md.get('motor_length')
+        if diameter and thickness:
+            try:
+                rho = float(get_material(material)['density'])
+            except KeyError:
+                rho = float(get_material('steel_4130')['density'])
+            d = float(diameter)
+            t = float(thickness)
+            if length:
+                L = float(length)
+                basis = 'shell mass from chamber diameter, length and wall thickness'
+            else:
+                L = SAFETY_MODEL['assumed_length_to_diameter'] * d
+                basis = ("shell mass from chamber diameter and wall thickness "
+                         f"with an ASSUMED L/D = "
+                         f"{SAFETY_MODEL['assumed_length_to_diameter']:.0f} "
+                         "(chamber_length was not supplied)")
+            d_outer = d + 2.0 * t
+            volume = (np.pi * (d + t) * L * t
+                      + 2.0 * (np.pi / 4.0) * d_outer ** 2 * t)
+            return float(rho * volume), basis
+
+        frac = SAFETY_MODEL['fallback_case_mass_fraction']
+        return (float(propellant_mass) * frac,
+                f"EMPIRICAL case mass fraction {frac:.2f} of propellant mass "
+                f"(chamber geometry was not supplied)")
+
+    def _calculate_fragment_hazards(self, propellant_mass: float, thrust: float,
+                                    burn_time: float = 10.0,
+                                    motor_data: Optional[Dict] = None,
+                                    material: str = 'steel_4130') -> Dict:
+        """Calculate fragment throw distances and hazards.
+
+        DENETİM DÜZELTMESİ (2026-07-19): kasa kütlesi artık gerçek kabuk
+        geometrisinden hesaplanır (eski sabit %15 kesri yalnız geometri
+        yokken, beyan edilerek kullanılır) ve thrust/burn_time serbest kalan
+        motor tehlikesinde gerçekten kullanılır.
+        """
+
+        case_mass, case_mass_basis = self._estimate_case_mass(
+            propellant_mass, motor_data, material)
+
         # Fragment velocity estimation (Gurney equation approximation).
         # Gurney silindir formu: V = √(2E)·√(C/(M + C/2)); C = şarj (yakıt),
         # M = kılıf (metal) kütlesi. ESKİ HATA: payda propellant + case/2
         # (C + M/2) yazılmıştı → M ve C rolleri ters. Doğru payda M + C/2.
-        gurney_velocity = 2700  # m/s (√(2E), çelik kılıf için tipik)
+        gurney_velocity = SAFETY_MODEL['gurney_velocity_ms']  # m/s (√(2E))
         fragment_velocity = gurney_velocity * np.sqrt(
-            propellant_mass / (case_mass + propellant_mass / 2))
+            propellant_mass / (case_mass + propellant_mass / 2)) \
+            if (case_mass + propellant_mass / 2) > 0 else 0.0
 
         # Fragment range. Vakum/45° menzili (v²/g) aerodinamik sürüklemeyi
         # ihmal eder ve ~2600 m/s parça için ~700 km gibi FİZİKSEL OLMAYAN
         # değer verir. Gerçek roket parçaları sürükleme-sınırlıdır; pratik
         # üst sınırla kırpılır (tahliye mesafesi hesabına saçma değer gitmesin).
-        vacuum_range = fragment_velocity ** 2 / 9.81
-        max_range = min(vacuum_range, 2000.0)  # m, sürükleme-sınırlı pratik tavan
-        
+        g0 = SAFETY_MODEL['gravity_m_s2']
+        vacuum_range = fragment_velocity ** 2 / g0
+        max_range = min(vacuum_range, SAFETY_MODEL['fragment_drag_limited_range_m'])
+
         # Lethal fragment analysis
-        lethal_fragment_mass = 0.01  # kg (10g fragment considered lethal)
-        lethal_kinetic_energy = 79  # J (NATO STANAG 2920)
+        lethal_fragment_mass = SAFETY_MODEL['lethal_fragment_mass_kg']
+        lethal_kinetic_energy = SAFETY_MODEL['lethal_kinetic_energy_j']
         lethal_velocity = np.sqrt(2 * lethal_kinetic_energy / lethal_fragment_mass)
-        
+
+        # --- Serbest kalan motor tehlikesi: thrust ve burn_time BURADA gerçekten
+        # kullanılıyor. Test standından kopan motor bir mermi gibi davranır;
+        # toplam impuls onu hızlandırır (Sutton & Biblarz Böl. 2 impuls-momentum).
+        total_impulse = max(float(thrust), 0.0) * max(float(burn_time), 0.0)
+        # Ortalama uçuş kütlesi: kasa + yakıtın yarısı (yanma boyunca ortalama)
+        mean_mass = max(case_mass + propellant_mass / 2.0, 1e-6)
+        loose_velocity = total_impulse / mean_mass                    # m/s
+        loose_energy = 0.5 * mean_mass * loose_velocity ** 2          # J
+        # Bağlama elemanlarının karşılaması gereken kuvvet (yapısal emniyet
+        # katsayısıyla) — itkinin doğrudan emniyet karşılığı.
+        restraint_force = (max(float(thrust), 0.0)
+                           * self.safety_margins.structural_safety_factor)
+
         return {
             'estimated_case_mass_kg': case_mass,
+            'case_mass_basis': case_mass_basis,
+            'unrestrained_motor': {
+                'total_impulse_ns': total_impulse,
+                'mean_flight_mass_kg': mean_mass,
+                'burnout_velocity_ms': loose_velocity,
+                'kinetic_energy_j': loose_energy,
+                'required_restraint_force_n': restraint_force,
+                'note': ('If the motor breaks free of its restraint it becomes '
+                         'a projectile: burnout speed is total impulse divided '
+                         'by mean flight mass. The tie-down must react the '
+                         'thrust with the structural safety factor. No '
+                         'trajectory range is quoted because it depends on '
+                         'drag and attitude, which this model does not solve.'),
+            },
             'fragment_velocity_ms': fragment_velocity,
             'maximum_range_m': max_range,
             'lethal_fragment_range_m': max_range * 0.8,  # Conservative estimate
@@ -666,13 +1040,30 @@ class SafetyAnalyzer:
             return 5.0
     
     def _score_pressure_risk(self, pressure_safety: Dict) -> float:
+        """Basınç riski: sınıf tabanı + GERÇEK kopma marjı.
+
+        Eskiden yalnız basınç sınıfına bakıyordu; kasa duvarı ince veya
+        malzeme zayıf olsa bile skor değişmiyordu. Artık gerçek kopma
+        marjı (actual_burst / required_burst) skoru yönetir.
+        """
         vessel_class = pressure_safety.get('vessel_classification', 'MEDIUM_PRESSURE')
         if vessel_class == 'LOW_PRESSURE':
-            return 1.0
+            base = 1.0
         elif vessel_class == 'MEDIUM_PRESSURE':
-            return 2.0
+            base = 2.0
         else:
-            return 3.0
+            base = 3.0
+
+        margin = pressure_safety.get('burst_margin')
+        if margin is None:
+            return base
+        if margin < 1.0:
+            return 5.0
+        if margin < 1.25:
+            return max(base, 4.0)
+        if margin < 2.0:
+            return max(base, 3.0)
+        return base
     
     def _score_thermal_risk(self, thermal_safety: Dict) -> float:
         if thermal_safety.get('cooling_required', False):
@@ -759,16 +1150,61 @@ class SafetyAnalyzer:
     
     # Deterministik yardımcı hesaplar (2026-07-14'te gerçek
     # implementasyonla dolduruldu; danışma amaçlı büyüklük kestirimleri)
-    def _calculate_radiant_heat_distance(self, temperature: float, area: float) -> float:
-        # Stefan-Boltzmann law approximation
-        emissivity = 0.8
-        stefan_boltzmann = 5.67e-8
-        heat_flux = emissivity * stefan_boltzmann * (temperature**4 - 293**4)
-        # Distance for 2.5 kW/m² (pain threshold)
-        pain_threshold = 2500  # W/m²
-        distance = np.sqrt(heat_flux * area / (4 * np.pi * pain_threshold))
-        return max(distance, 3.0)  # Minimum 3m
-    
+    def _calculate_radiant_heat_distance(self, temperature: float, area: float,
+                                         emissivity: Optional[float] = None,
+                                         ambient: Optional[float] = None) -> float:
+        """Acı eşiği (2.5 kW/m²) radyan tehlike mesafesi [m].
+
+        Args:
+            temperature: IŞIYAN YÜZEYİN sıcaklığı [K] — hazne gazı değil, dış
+                cidar. (Eski çağrı hazne gazını geçiyordu; T^4 nedeniyle akı
+                ~100x şişiyordu.)
+            area: Işıyan dış yüzey ALANI [m²]. (Eski çağrı buraya cidar
+                kalınlığının 100 katını geçiyordu — birim hatası.)
+            emissivity: Yüzey yayınırlığı; None ise varsayılan.
+            ambient: Ortam sıcaklığı [K]; None ise varsayılan.
+
+        Model: P = eps*sigma*(T^4 - T_amb^4)*A yayılan güç, izotropik nokta
+        kaynak yaklaşımıyla q(r) = P/(4*pi*r²). r, q = 2.5 kW/m² için çözülür.
+        """
+        eps = (SAFETY_MODEL['default_surface_emissivity']
+               if emissivity is None else float(emissivity))
+        t_amb = (SAFETY_MODEL['ambient_temperature_k']
+                 if ambient is None else float(ambient))
+        sigma = SAFETY_MODEL['stefan_boltzmann']
+        emitted_flux = eps * sigma * max(float(temperature) ** 4 - t_amb ** 4, 0.0)
+        threshold = SAFETY_MODEL['radiant_pain_threshold_w_m2']
+        distance = np.sqrt(emitted_flux * max(float(area), 0.0)
+                           / (4.0 * np.pi * threshold))
+        return float(max(distance, SAFETY_MODEL['min_hazard_distance_m']))
+
+    def _burn_dose_distance(self, surface_temperature: float, area: float,
+                            exposure_time_s: float, emissivity: float,
+                            ambient: float) -> float:
+        """2. derece yanık DOZ mesafesi [m] — maruziyet süresini kullanır.
+
+        Termal doz birimi (API 521 / Eisenberg probit):
+            TDU = t * (q [kW/m²])^(4/3)
+        2. derece yanık eşiği ~1000 (kW/m²)^(4/3)·s. Eşik akı:
+            q_esik = (TDU_esik / t)^(3/4)  [kW/m²]
+        ve mesafe q(r) = P/(4*pi*r²) tersinden çözülür. Yanma süresi uzadıkça
+        aynı akı daha tehlikeli olur, yani mesafe BÜYÜR.
+        """
+        t_exp = max(float(exposure_time_s), 1e-3)
+        sigma = SAFETY_MODEL['stefan_boltzmann']
+        power = emissivity * sigma * max(
+            float(surface_temperature) ** 4 - float(ambient) ** 4, 0.0) * max(
+                float(area), 0.0)
+        q_threshold_kw = (SAFETY_MODEL['second_degree_burn_tdu'] / t_exp) ** 0.75
+        q_threshold = q_threshold_kw * 1000.0  # W/m²
+        if power <= 0 or q_threshold <= 0:
+            return 0.0
+        # Hesaplanan değer KIRPILMADAN döner; asgari duruş mesafesi önerisi
+        # ayrı alanda (recommended_minimum_standoff_m) verilir. Kırpma burada
+        # yapılırsa maruziyet süresinin etkisi görünmez olur.
+        return float(np.sqrt(power / (4.0 * np.pi * q_threshold)))
+
+
     def _identify_toxic_components(self, propellant_type: str) -> List[str]:
         toxic_map = {
             'liquid_biprop': ['n2o4'] if 'n2o4' in propellant_type.lower() else [],

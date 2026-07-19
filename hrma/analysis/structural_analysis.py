@@ -9,6 +9,12 @@ from typing import Dict, List, Tuple, Optional
 
 from hrma.data.materials_db import build_materials_view
 
+# Cidar sicakligi bilinmedigi durumda kullanilan radyasyon-denge tahmini:
+# sogutmasiz gaz-tarafi cidar, malzemenin kisa-sureli servis sinirinin bu
+# kadarina kadar isinir varsayilir (bkz. _estimate_wall_delta_T). Gercek
+# deger her zaman isi transferi modulunden alinmalidir.
+WALL_TEMP_SERVICE_FRACTION = 0.9
+
 class StructuralAnalyzer:
     """Structural analysis for hybrid rocket motor chambers.
 
@@ -98,19 +104,20 @@ class StructuralAnalyzer:
 
         Ince cidarli silindirde cidar boyunca lineer sicaklik gradyani (ic yuz
         sicak, dis yuz soguk; delta_T = T_ic - T_dis) icin yuzey termal
-        gerilmesinin buyuklugu:
+        gerilmesinin klasik buyuklugu:
 
-            sigma_thermal = E * alpha * delta_T / (1 - nu)      [KONSERVATIF UST SINIR]
+            sigma_thermal = E * alpha * delta_T / (2 * (1 - nu))
 
-        Not / kaynak: Timoshenko & Goodier "Theory of Elasticity" (uzun silindir,
-        eksenel kisitli hal) ve Boley & Weiner "Theory of Thermal Stresses"
-        Ch.10-11 termal gerilme cozumu; Roark's Formulas for Stress & Strain
-        9th ed. Ch.16. Tam ic-dis fark delta_T icin yuzey degeri klasik olarak
-        E*alpha*delta_T/(2(1-nu)) seklindedir; ancak biz KONSERVATIF olmak icin
-        2 faktorunu DUSURMUYORUZ (gorev tanimindaki E*alpha*dT/(1-nu) formu,
-        yuzey-orta-duzlem farki yorumuna ve gerilme yiginlasmasi/kisitlanmaya
-        karsi guvenli ust sinir). Bu termal etki cogu durumda BASINC hoop
-        gerilmesinden buyuktur ve onceki surumde tamamen yoktu.
+        Kaynak: Timoshenko & Goodier "Theory of Elasticity" (uzun silindir,
+        eksenel kisitli hal); Boley & Weiner "Theory of Thermal Stresses"
+        Ch.10-11; Roark's Formulas for Stress & Strain 9th ed. Ch.16.
+
+        DUZELTME (v2.5.2): onceki surum "konservatif olmak icin" 2 faktorunu
+        dusurmuyor, yani gerilmeyi sistematik olarak 2 KAT sisiriyordu. Bu
+        muhafazakarlik degil hataydi: her sicak motorun von Mises SF'si 1'in
+        altina dusuyor, tasarim penceresi kayboluyordu. Klasik yuzey degeri
+        geri konuldu; muhafazakarlik, gradyanin (delta_T) tahmininde ve
+        sicaklik derating'inde korunur.
 
         delta_T <= 0 (sogutmasiz/izotermal cidar) ise termal gerilme 0 alinir.
         """
@@ -119,25 +126,25 @@ class StructuralAnalyzer:
         nu = mat_props['poisson_ratio']
 
         dT = max(0.0, delta_T)
-        # KONSERVATIF: 1/(1-nu) (gorev tanimi). Klasik yuzey degeri 1/(2(1-nu)).
-        sigma_thermal = E * alpha * dT / (1.0 - nu)
+        sigma_thermal = E * alpha * dT / (2.0 * (1.0 - nu))
 
         return {
             'delta_T': dT,                          # K  (kullanilan cidar gradyani)
             'thermal_hoop_stress': sigma_thermal,   # Pa (tensile, dis yuzde)
             'thermal_hoop_stress_MPa': sigma_thermal / 1e6,
-            'formula': 'sigma_th = E*alpha*dT/(1-nu)  [Timoshenko/Boley-Weiner/Roark Ch.16, konservatif]'
+            'formula': 'sigma_th = E*alpha*dT/(2*(1-nu))  [Timoshenko/Boley-Weiner/Roark Ch.16]'
         }
 
     def _estimate_wall_delta_T(self, motor_data: Dict, mat_props: Dict) -> Tuple[float, float]:
         """Cidar ic/dis sicaklik degerlerini tahmin et.
 
         Tercih sirasi:
-          1) motor_data['wall_temperature_hot'] / 'wall_temperature_cold' (1s-iletim modulunden)
-          2) chamber_temperature'tan konservatif tahmin (sogutmasiz celik cidar):
-             ic yuz alev-tarafi recovery sicakligina yakin oturur. Sogutmasiz
-             celik cidar icin literatur ~malzemenin servis sinirina kadar isinir;
-             gradyan = T_ic_cidar - T_dis (ortam ~300 K).
+          1) motor_data['wall_temperature_hot'] / 'wall_temperature_cold'
+             (isi transferi modulunun cidar analizinden gelen GERCEK degerler;
+             hybrid/liquid/solid motor zincirleri bu anahtarlari doldurur)
+          2) chamber_temperature'tan radyasyon-denge TAHMINI: sogutmasiz cidar
+             ic yuzu alev sicakligina degil, isi kaybiyla dengelendigi bir
+             ara sicakliga oturur.
 
         Returns:
             (T_inner_wall_K, T_outer_wall_K)
@@ -155,13 +162,51 @@ class StructuralAnalyzer:
             # Sicaklik bilgisi yok -> termal etki devre disi (eski davranis korunur).
             return T_ambient, T_ambient
 
-        # Sogutmasiz cidar varsayimi (konservatif): gaz-tarafi cidar yuzeyi,
-        # malzeme azami servis sicakligina kadar isinir; ancak alev sicakligini
-        # asamaz. Boylece sicak-yuz sicakligini malzeme sinirinda kapariz
-        # (kalici rejim, sogutmasiz). Bu, hem derating hem gradyan icin
-        # makul-konservatif bir cidar sicakligi verir.
-        T_inner = min(float(T_chamber), mat_props.get('max_service_temp', float(T_chamber)))
-        T_outer = float(T_ambient)
+        # DUZELTME (v2.5.2): eski tahmin ic yuzu min(T_hazne, max_service_temp)
+        # aliyordu, yani cidar sicakligi bilinmeyen HER motor tam olarak
+        # malzeme servis sinirinda varsayiliyordu. Bu, hem derating'i hem
+        # gradyani ayni anda en kotu degerine sabitleyip her sicak motoru
+        # CRITICAL yapiyordu. Kisa sureli atesleme + radyasyon/iletim kaybi
+        # altinda cidar servis sinirina TAM oturmaz; servis sinirinin bir
+        # miktar altinda dengelenir. Tahmin bu nedenle servis sinirinin
+        # WALL_TEMP_SERVICE_FRACTION kati ile sinirlanir (yine alev
+        # sicakligini asamaz). Gercek deger her zaman isi transferi
+        # modulunden (secenek 1) gelmelidir.
+        T_cap = mat_props.get('max_service_temp', float(T_chamber)) * WALL_TEMP_SERVICE_FRACTION
+        T_inner = min(float(T_chamber), T_cap)
+
+        # DUZELTME (v2.5.2, ikinci tur): dis yuzu DOGRUDAN ortam sicakligina
+        # esitlemek fiziksel degildi. Cidar sicakligi bilinmeyen motor
+        # "sogutmasiz" kabul edilmelidir; sogutmasiz ince metal cidarda
+        # kesit boyunca gradyan KUCUKTUR, cunku iletim direnci (t/k) dis
+        # yuzey kayip direncinden kat kat kucuktur. Dis yuzey enerji dengesi:
+        #
+        #   k/t * (T_ic - T_dis) = h_konv * (T_dis - T_ortam)
+        #                          + eps * sigma * (T_dis^4 - T_ortam^4)
+        #
+        # 5 mm celikte (k/t = 9000 W/m^2K) bu denge ~2 K'lik bir gradyan
+        # verir; eski varsayim 430 K veriyordu, yani gercek olmayan bir
+        # rejeneratif sogutma (3.9 MW/m^2 atim) varsayiyordu. Sonuc: cidar
+        # sicakligi verilmeyen HER motor sahte CRITICAL cikiyordu.
+        # Gercek sogutmali degerler yol 1'den (isi transferi modulu) gelir.
+        t_wall = float(motor_data.get('wall_thickness', 0.005) or 0.005)
+        k_wall = float(mat_props.get('thermal_conductivity', 45.0) or 45.0)
+        emissivity = float(mat_props.get('emissivity', 0.3) or 0.3)
+        h_conv_out = 10.0        # W/m^2K, dogal konveksiyon (durgun hava)
+        SIGMA_SB = 5.670374419e-8
+
+        T_amb = float(T_ambient)
+        T_outer = T_inner        # baslangic: izotermal
+        for _ in range(60):      # sabit nokta iterasyonu (monoton, hizli yakinsar)
+            q_loss = (h_conv_out * (T_outer - T_amb)
+                      + emissivity * SIGMA_SB * (T_outer ** 4 - T_amb ** 4))
+            T_new = T_inner - q_loss * t_wall / k_wall
+            T_new = min(T_inner, max(T_amb, T_new))
+            if abs(T_new - T_outer) < 1e-3:
+                T_outer = T_new
+                break
+            T_outer = 0.5 * (T_outer + T_new)   # gevsetme (radyasyon T^4 icin)
+
         return T_inner, T_outer
 
     def _check_buckling(self, pressure: float, radius: float, thickness: float,
@@ -369,7 +414,8 @@ class StructuralAnalyzer:
         # Safety analysis (burkulma da dahil edilir)
         safety_analysis = self._analyze_safety_factors(
             chamber_analysis, nozzle_analysis, end_cap_analysis, mat_props,
-            buckling_analysis=buckling_analysis
+            buckling_analysis=buckling_analysis,
+            wall_temperature_K=wall_temp_structural
         )
 
         return {
@@ -857,7 +903,8 @@ class StructuralAnalyzer:
     
     def _analyze_safety_factors(self, chamber_analysis: Dict, nozzle_analysis: Dict,
                               end_cap_analysis: Dict, mat_props: Dict,
-                              buckling_analysis: Optional[Dict] = None) -> Dict:
+                              buckling_analysis: Optional[Dict] = None,
+                              wall_temperature_K: Optional[float] = None) -> Dict:
         """Analyze overall safety factors.
 
         DENETIM DUZELTMESI (2026-06): Burkulma (buckling) emniyet faktoru de
@@ -891,6 +938,31 @@ class StructuralAnalyzer:
             risk_level = 'VERY LOW'
             status = 'SAFE'
 
+        # SICAKLIK MARJI (v2.5.2): gerilme emniyet faktoru tek basina
+        # yeterli degil. Sogutmasiz ince metal cidar kesit boyunca neredeyse
+        # IZOTERMALDIR (bkz. _estimate_wall_delta_T), yani termal gradyan
+        # gerilmesi kucuk kalir ve SF yuksek cikar; asil tehlike cidarin
+        # butun olarak malzeme servis sinirina yaklasmasidir (yumusama,
+        # surunme, ani mukavemet kaybi). Onceki surumler bu tehlikeyi
+        # fiziksel olmayan bir gradyan varsayimiyla dolayli isaret ediyordu;
+        # simdi dogrudan sicaklik marjindan degerlendirilir.
+        T_wall = wall_temperature_K or chamber_analysis.get('wall_temperature_K')
+        T_service = mat_props.get('max_service_temp')
+        thermal_margin_ratio = None
+        if T_wall and T_service:
+            thermal_margin_ratio = float(T_wall) / float(T_service)
+            severity = None
+            if thermal_margin_ratio >= 1.0:
+                severity = ('UNSAFE', 'HIGH')
+            elif thermal_margin_ratio >= 0.85:
+                severity = ('MARGINAL', 'MEDIUM')
+            elif thermal_margin_ratio >= 0.70:
+                severity = ('ACCEPTABLE', 'LOW')
+            if severity is not None:
+                rank = {'SAFE': 0, 'ACCEPTABLE': 1, 'MARGINAL': 2, 'UNSAFE': 3}
+                if rank[severity[0]] > rank[status]:
+                    status, risk_level = severity
+
         # UNSAFE durumunda hangi yükün domine ettiğini açıkla (Dalga 0):
         # termal gerilme basınç gerilmesini aşıyorsa sorun soğutma/malzeme
         # kaynaklıdır, cidar kalınlaştırmak tek başına çözmez.
@@ -920,11 +992,19 @@ class StructuralAnalyzer:
         if derate is not None and derate < mat_props['yield_strength'] / 1e6 * 0.7:
             recommendations.append('Severe temperature derating (>30% yield loss): cool wall or change material')
 
+        if thermal_margin_ratio is not None and thermal_margin_ratio >= 0.85:
+            recommendations.append(
+                'Wall temperature is within 15% of the material service limit: '
+                'add cooling, insulate, or select a higher-temperature material')
+
         return {
             'minimum_safety_factor': min_safety_factor,
             'risk_level': risk_level,
             'status': status,
             'explanation': explanation,
             'safety_factors': sf_candidates,
+            # Cidar sicakligi / malzeme servis siniri. 1.0'i asmasi sicaklik
+            # kaynakli yetmezlik demektir; gerilme SF'si yuksek olsa bile.
+            'thermal_margin_ratio': thermal_margin_ratio,
             'recommendations': recommendations
         }

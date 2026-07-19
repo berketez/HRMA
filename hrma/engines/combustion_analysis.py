@@ -20,7 +20,8 @@ except ImportError:
     ct = None
     CANTERA_AVAILABLE = False
 
-from hrma.constants import G_0, R_UNIVERSAL, PA_PER_BAR
+from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, BAR_PER_PA,
+                            isa_pressure, isa_temperature)
 
 logger = logging.getLogger(__name__)
 
@@ -370,9 +371,10 @@ class CombustionAnalyzer:
             else:
                 # Sessiz düşme YASAK (oksitleyici dalındaki gerekçeyle aynı):
                 # bilinmeyen yakıt elemental katkısız kalır ve denge çöp üretir.
+                # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
                 raise ValueError(
-                    f"Bilinmeyen yakıt anahtarı: '{fuel_type}'. Desteklenen: "
-                    f"htpb, paraffin, pe, pmma, abs, pla, aluminum")
+                    f"Unsupported fuel key '{fuel_type}'. Supported fuels: "
+                    f"htpb, paraffin, pe, pmma, abs, pla, aluminum.")
 
         # Process oxidizer
         if oxidizer_type.lower() == 'n2o':
@@ -399,9 +401,10 @@ class CombustionAnalyzer:
             # ve denge fiziksel olmayan sonuç üretir ('gox' bugı aylarca böyle
             # gizlendi). Korelasyon koşucusu bu hatayı 'runner_error' olarak
             # etiketler; UI listeleri yalnız tanınan anahtarları sunar.
+            # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
             raise ValueError(
-                f"Bilinmeyen oksitleyici anahtarı: '{oxidizer_type}'. "
-                f"Desteklenen: n2o, lox, gox/o2/oxygen, h2o2, air")
+                f"Unsupported oxidizer key '{oxidizer_type}'. Supported "
+                f"oxidizers: n2o, lox, gox/o2/oxygen, h2o2, air.")
 
         return elements
     
@@ -1025,15 +1028,22 @@ class CombustionAnalyzer:
     
     def find_optimum_of_ratio(self, fuel_composition: Dict, oxidizer_type: str, 
                              chamber_pressure: float, of_range: Tuple[float, float] = (1.0, 10.0)) -> Dict:
-        """Find O/F ratio for maximum specific impulse"""
-        
+        """Find O/F ratio for maximum specific impulse.
+
+        Desteklenmeyen yakit/oksitleyici anahtarinda _calculate_elemental_
+        composition ValueError firlatir; tarama noktalari cezalandirilsa bile
+        optimum noktadaki tam analiz ayni hatayi yeniden firlatir, yani
+        cagirana Ingilizce ve aciklayici bir hata ulasir (sessiz varsayilan
+        uretilmez).
+        """
+
         def negative_isp(of_ratio):
             try:
                 results = self.analyze_combustion(fuel_composition, oxidizer_type, of_ratio, chamber_pressure)
                 return -results['performance']['isp']  # Negative because we minimize
-            except:
+            except Exception:
                 return 1000  # Large penalty for failed calculations
-        
+
         # Optimize
         result = minimize_scalar(negative_isp, bounds=of_range, method='bounded')
         
@@ -1055,14 +1065,11 @@ class CombustionAnalyzer:
         performance_data = []
         
         for altitude in altitudes:
-            # Standard atmosphere
-            if altitude < 11000:
-                T = 288.15 - 0.0065 * altitude
-                P = 1.01325 * (T / 288.15)**(9.80665 * 0.0289644 / (8.31432 * 0.0065))
-            else:
-                T = 216.65
-                P = 0.22632 * np.exp(-9.80665 * 0.0289644 * (altitude - 11000) / (8.31432 * T))
-            
+            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants;
+            # eski satır-içi 2-katman kopyası tekilleştirildi, v2.5.2)
+            T = isa_temperature(altitude)          # K
+            P = isa_pressure(altitude) * BAR_PER_PA  # bar
+
             # Adjust performance for altitude
             # DENETIM DUZELTMESI (Sutton & Biblarz 9. baski, Eq. 3-29): SABIT
             # geometrili nozul. Ae/At sabit oldugundan cikis Mach'i, Pe ve
@@ -1337,14 +1344,10 @@ class CombustionAnalyzer:
         base_mdot = base_thrust / (base_isp * G_0)
         
         for altitude in altitudes:
-            # Standard atmosphere
-            if altitude < 11000:
-                T = 288.15 - 0.0065 * altitude
-                P = 1.01325 * (T / 288.15)**(9.80665 * 0.0289644 / (8.31432 * 0.0065))
-            else:
-                T = 216.65
-                P = 0.22632 * np.exp(-9.80665 * 0.0289644 * (altitude - 11000) / (8.31432 * T))
-            
+            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants)
+            T = isa_temperature(altitude)          # K
+            P = isa_pressure(altitude) * BAR_PER_PA  # bar
+
             # DENETIM DUZELTMESI (Sutton & Biblarz 9. baski, Eq. 3-29): SABIT
             # geometrili nozul. Ae/At sabit oldugundan v_exit ve Pe SABITTIR;
             # irtifa yalnizca (Pe - Pa)*Ae basinc-itki terimini degistirir.

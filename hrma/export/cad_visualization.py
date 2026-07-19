@@ -10,6 +10,8 @@ MotorCADDesigner also uses trimesh for mesh-based geometry.
 import numpy as np
 import trimesh
 
+from hrma.constants import G_0
+from hrma.data.materials_db import get_material
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -39,24 +41,199 @@ def _real_nested(d, path):
     return v if (np.isfinite(v) and v > 0) else None
 
 
+# ---------------------------------------------------------------------------
+# Çıktı etiketleri — TEK tanım noktası (CLAUDE.md kural 11).
+# Bir imalat değeri çözücüden gelmiyorsa sabit sayı UYDURULMAZ; alan bu
+# metinle işaretlenir, kullanıcı neyin hesaplanmadığını görür.
+# ---------------------------------------------------------------------------
+NOT_AVAILABLE_SPEC = 'NOT AVAILABLE - not produced by this analysis run'
+
+# Yapısal analiz yoksa 3B mesh ve kütle hesabı AYNI yedek cidar kuralını
+# kullanır (görsel ile kütlenin çelişmemesi için tek sabit).
+CHAMBER_WALL_FALLBACK_FRACTION = 0.045  # cidar / kamara çapı
+
+# 3B mesh üretiminde delik sayısı üst sınırı (boolean kararlılığı). YALNIZ
+# mesh için geçerlidir; teknik çizim ve spesifikasyon çıktısı gerçek sayıyı
+# yazar (bkz. _injector_spec).
+MESH_MAX_INJECTOR_ORIFICES = 16
+
+# İmalat süresi/beceri tahminleri atölye deneyimi kaynaklıdır; motorun
+# hesabından türetilmez ve çıktıda böyle etiketlenir.
+MANUFACTURING_EFFORT_BASIS = ('typical machine-shop experience for this size '
+                              'class; not computed from the analysis')
+
+# Tolerans ve yüzey pürüzlülüğü bu yazılımın tasarım çıktısı DEĞİLDİR; standart
+# atölye değerleridir ve çizim sözlüğünde kaynağıyla birlikte verilir.
+DRAWING_TOLERANCE_BASIS = ('ISO 2768-m general tolerances (workshop standard, '
+                           'not computed by this analysis)')
+DRAWING_SURFACE_FINISH_BASIS = ('ISO 1302 typical machined finish (workshop '
+                                'standard, not computed by this analysis)')
+DRAWING_SURFACE_FINISH_CHAMBER = 'Ra 3.2 um'
+DRAWING_SURFACE_FINISH_NOZZLE = 'Ra 1.6 um'
+DRAWING_SURFACE_FINISH_INJECTOR = 'Ra 0.8 um'
+
+
+def _real_scalar(value):
+    """Sonlu pozitif float döndürür; aksi halde None (uydurma varsayılan yok)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if (np.isfinite(v) and v > 0) else None
+
+
+def _nozzle_half_angles(motor_data):
+    """Lüle yarı açılarını ÇÖZÜCÜ çıktısından okur.
+
+    Döner: (konverjan_derece|None, diverjan_derece|None, lüle_tipi)
+    Kaynak sırası: nozzle_angles -> nozzle_contour.divergent. Bell lülede
+    diverjan açısı boğaz çıkış açısıdır (tek bir konik açı yoktur), bu yüzden
+    tip de döndürülür ve çizim etiketinde kullanılır. Değer yoksa None döner —
+    çağıran sabit 15°/12° uydurmak yerine açıyı hiç etiketlemez.
+    """
+    md = motor_data or {}
+    angles = md.get('nozzle_angles') or {}
+    divergent = (md.get('nozzle_contour') or {}).get('divergent') or {}
+
+    conv = _real_scalar(angles.get('convergent_half_angle_deg'))
+    noz_type = (divergent.get('type') or angles.get('nozzle_type') or '').lower()
+
+    div = _real_scalar(angles.get('divergent_half_angle_deg'))
+    if noz_type == 'bell':
+        # Bell: boğaz çıkış açısı gerçek imalat açısıdır
+        div = _real_scalar(divergent.get('throat_angle')) or div
+    elif div is None:
+        div = _real_scalar(divergent.get('half_angle'))
+
+    return conv, div, (noz_type or 'conical')
+
+
+def _nozzle_length_m(motor_data):
+    """Lüle boyu [m] — sonuçta varsa oradan, yoksa GERÇEK kontur uzunluğundan.
+
+    Sabit 0.15 m yedeği kullanılmaz: sample_nozzle_inner_contour zaten motorun
+    kendi geometrisinden çıkarılmış konturu döndürür.
+    """
+    md = motor_data or {}
+    length = _real_scalar(md.get('nozzle_length'))
+    if length is not None:
+        return length
+    try:
+        _pts, meta = sample_nozzle_inner_contour(md)
+        return float(meta['z_exit']) / 1000.0
+    except Exception:
+        return None
+
+
+def _injector_spec(motor_data):
+    """Enjektör için TEK doğruluk kaynağı: motor sonucundaki injector_design.
+
+    Döner: {'n_orifices', 'orifice_diameter_mm', 'plate_diameter_mm',
+            'type', 'pressure_drop_bar', 'source'}
+    Aynı motor koşusunda ekran grafiği, teknik çizim PDF'i ve CAD sözlüğü
+    farklı delik sayıları gösteriyordu (2026-07-19 denetimi, kritik bulgu);
+    bütün CAD/çizim katmanı artık bu tek fonksiyondan okur. Değer yoksa
+    None bırakılır — sabit sayı uydurulmaz.
+    """
+    md = motor_data or {}
+    # Öncelik: kullanıcının enjektör panelinden gelen sonuç (ΔP/hız hedefleri
+    # oradan giriliyor) motor sonucuna eklenmişse o kazanır; yoksa motorun
+    # kendi injector_design'ı.
+    panel = md.get('injector_results') or {}
+    inj = panel or md.get('injector_design') or md.get('injector') or {}
+    source_name = ('injector panel (injector_results)' if panel
+                   else 'motor result injector_design')
+    detail = md.get('injector_design_detail') or {}
+    ox = (detail.get('ox_circuit') or {}) if isinstance(detail, dict) else {}
+
+    n = (inj.get('number_of_orifices') or inj.get('n_holes')
+         or inj.get('n_elements') or ox.get('n_orifices'))
+    n = _real_scalar(n)
+    d_mm = _real_scalar(inj.get('orifice_diameter_mm')
+                        or inj.get('hole_diameter')
+                        or ox.get('orifice_d_mm'))
+    dp = _real_scalar(inj.get('injection_pressure_drop_bar')
+                      or ox.get('delta_p_bar'))
+    plate_mm = _real_scalar(md.get('chamber_diameter'))
+    plate_mm = plate_mm * 1000.0 if plate_mm is not None else None
+
+    return {
+        'n_orifices': int(round(n)) if n else None,
+        'orifice_diameter_mm': d_mm,
+        'plate_diameter_mm': plate_mm,
+        'type': inj.get('injector_type') or detail.get('injector_type'),
+        'pressure_drop_bar': dp,
+        'source': source_name if n else 'not available',
+    }
+
+
+def _chamber_wall_thickness_m(motor_data):
+    """Kamara cidar kalınlığı [m] — yapısal analizin GERÇEK önerisi.
+
+    Döner: (kalınlık_m|None, kaynak_etiketi)
+    """
+    struct = (motor_data or {}).get('structural_analysis') or {}
+    t_mm = _real_nested(struct, ('chamber_analysis', 'recommended_thickness'))
+    if t_mm is not None:
+        return t_mm / 1000.0, 'structural analysis (recommended thickness)'
+    return None, 'not available'
+
+
+def _chamber_material(motor_data):
+    """Kamara malzemesi — yapısal analizde SEÇİLEN kayıt.
+
+    Döner: (materials_db kaydı|None, görünen_ad, yoğunluk_kg_m3|None)
+    """
+    struct = (motor_data or {}).get('structural_analysis') or {}
+    props = struct.get('material_properties') or {}
+    key = ((struct.get('design_parameters') or {}).get('material')
+           or (motor_data or {}).get('chamber_material'))
+    name = props.get('name')
+    density = _real_scalar(props.get('density'))
+    if key and not (name and density):
+        try:
+            rec = get_material(str(key))
+            name = name or rec.get('name')
+            density = density or _real_scalar(rec.get('density'))
+        except Exception:
+            pass
+    return key, name, density
+
+
+def _cad_material(db_key, fields, color):
+    """Merkezi materials_db kaydından CAD tablosu girdisi üretir.
+
+    Sayısal alanlar (density, yield_strength, melting_point...) TEK
+    doğruluk kaynağından (hrma/data/materials_db.py) okunur; yalnız
+    görsel alanlar (color) bu modülde yerel kalır. Önceki yerel tablo
+    merkezle çelişiyordu (Inconel 1034 vs 1100 MPa, grafit 2200 vs
+    1800 kg/m^3 vb.).
+    """
+    rec = get_material(db_key)
+    entry = {f: rec[f] for f in fields}
+    entry['color'] = color
+    return entry
+
+
 class MotorCADDesigner:
     """Professional 3D CAD design for hybrid rocket motors"""
 
     def __init__(self):
+        # Anahtarlar geriye dönük korunur; değerler merkezi DB'den gelir.
         self.materials_db = {
             'chamber': {
-                'steel_304': {'density': 7850, 'yield_strength': 215e6, 'color': '#C0C0C0'},
-                'aluminum_6061': {'density': 2700, 'yield_strength': 276e6, 'color': '#A8A8A8'},
-                'inconel_718': {'density': 8220, 'yield_strength': 1034e6, 'color': '#808080'}
+                'steel_304': _cad_material('ss_304', ('density', 'yield_strength'), '#C0C0C0'),
+                'aluminum_6061': _cad_material('aluminum_6061', ('density', 'yield_strength'), '#A8A8A8'),
+                'inconel_718': _cad_material('inconel_718', ('density', 'yield_strength'), '#808080'),
             },
             'nozzle': {
-                'graphite': {'density': 2200, 'melting_point': 3927, 'color': '#2F2F2F'},
-                'tungsten': {'density': 19300, 'melting_point': 3695, 'color': '#404040'},
-                'copper': {'density': 8960, 'melting_point': 1358, 'color': '#B87333'}
+                'graphite': _cad_material('graphite', ('density', 'melting_point'), '#2F2F2F'),
+                'tungsten': _cad_material('tungsten', ('density', 'melting_point'), '#404040'),
+                'copper': _cad_material('copper', ('density', 'melting_point'), '#B87333'),
             },
             'injector': {
-                'stainless_steel': {'density': 7850, 'yield_strength': 240e6, 'color': '#E5E5E5'},
-                'titanium': {'density': 4500, 'yield_strength': 880e6, 'color': '#C4C4C4'}
+                'stainless_steel': _cad_material('ss_316', ('density', 'yield_strength'), '#E5E5E5'),
+                'titanium': _cad_material('titanium_6al4v', ('density', 'yield_strength'), '#C4C4C4'),
             }
         }
 
@@ -126,7 +303,8 @@ class MotorCADDesigner:
             # Duvar kalınlıkları
             struct = motor_data.get('structural_analysis') or {}
             wall_case = _real_nested(struct, ('chamber_analysis', 'recommended_thickness'))
-            wall_case = (wall_case / 1000.0) if wall_case else max(0.004, 0.045 * chamber_diameter)
+            wall_case = ((wall_case / 1000.0) if wall_case else
+                         max(0.004, CHAMBER_WALL_FALLBACK_FRACTION * chamber_diameter))
             wall_case = min(wall_case, 0.12 * chamber_diameter)
             noz_geo = motor_data.get('nozzle_geometry') or {}
             wall_noz = noz_geo.get('wall_thickness')
@@ -147,7 +325,13 @@ class MotorCADDesigner:
                 injector_orifices = injector_config['n_holes_override']
             else:
                 injector_orifices = 8
-            injector_orifices = max(1, min(injector_orifices, 16))  # boolean kararlılığı
+            # Gerçek (kırpılmamış) sayı korunur: MESH kararlılığı için delik
+            # sayısı sınırlanır ama teknik çizim/spesifikasyon çıktısı gerçek
+            # sayıyı yazmalıdır (2026-07-19 denetimi: çözücü 41 orifis derken
+            # çizimde 16 görünüyordu).
+            injector_orifices_real = injector_orifices
+            injector_orifices = max(1, min(injector_orifices,
+                                           MESH_MAX_INJECTOR_ORIFICES))
             ori_mm = inj.get('orifice_diameter_mm')
             if ori_mm:
                 orifice_diameter = max(0.0005, min(0.01, ori_mm / 1000.0))
@@ -162,7 +346,8 @@ class MotorCADDesigner:
                 'chamber_length': chamber_length,
                 'nozzle_length': nozzle_length,
                 'port_diameter': port_diameter,
-                'injector_orifices': injector_orifices,
+                'injector_orifices': injector_orifices,          # MESH için kırpılmış
+                'injector_orifices_real': injector_orifices_real,  # gerçek sayı
                 'orifice_diameter': orifice_diameter,
                 'design_config': design_config
             })
@@ -447,14 +632,19 @@ class MotorCADDesigner:
                         faces = mesh.faces
 
                         if len(vertices) > 0 and len(faces) > 0:
+                            # BDATA DUZELTMESI (v2.5.2): plotly 6.x numpy
+                            # dizilerini fig.to_json()'da ikili (base64
+                            # 'bdata') olarak yaziyor; gomulu plotly.js
+                            # 1.58.5 bu bicimi cozemez ve 3D gorunum BOS
+                            # kalir. Listeye cevirerek duz JSON uretiyoruz.
                             fig.add_trace(
                                 go.Mesh3d(
-                                    x=vertices[:, 0],
-                                    y=vertices[:, 1],
-                                    z=vertices[:, 2],
-                                    i=faces[:, 0],
-                                    j=faces[:, 1],
-                                    k=faces[:, 2],
+                                    x=vertices[:, 0].tolist(),
+                                    y=vertices[:, 1].tolist(),
+                                    z=vertices[:, 2].tolist(),
+                                    i=faces[:, 0].tolist(),
+                                    j=faces[:, 1].tolist(),
+                                    k=faces[:, 2].tolist(),
                                     color=colors[i % len(colors)],
                                     opacity=0.7,
                                     name=name
@@ -641,31 +831,35 @@ class MotorCADDesigner:
             return simple_fig.to_json()
 
     def _add_cross_section_view(self, fig, motor_data: Dict, row: int, col: int):
-        """Add 2D cross-section technical drawing with angle annotations"""
+        """2D kesit — geometri ve açılar ÇÖZÜCÜNÜN kendi çıktısından.
+
+        Eski sürüm açıları `motor_data.get('convergent_angle', 15.0)` /
+        `('divergent_angle', 12.0)` ile okuyordu; bu anahtarlar motor
+        sonucunda HİÇ YOK, dolayısıyla her motor için 15°/12° çiziliyor ve
+        lejantta öyle etiketleniyordu (2026-07-19 denetimi). Gerçek değerler
+        `nozzle_angles` / `nozzle_contour.divergent` altında. Ayrıca kontur
+        artık sample_nozzle_inner_contour ile çizilir — 2D kesit, 3D CAD ve
+        DXF ile TEK kaynak (bell lüle artık düz koni gibi görünmez).
+        """
 
         chamber_diameter = motor_data.get('chamber_diameter', 0.1)
         chamber_length = motor_data.get('chamber_length', 0.5)
         throat_diameter = motor_data.get('throat_diameter', 0.02)
         exit_diameter = motor_data.get('exit_diameter', 0.04)
-        nozzle_length = motor_data.get('nozzle_length', 0.15)
 
-        # Get nozzle angles from motor data or use defaults
-        convergent_angle = motor_data.get('convergent_angle', 15.0)  # degrees
-        divergent_angle = motor_data.get('divergent_angle', 12.0)   # degrees
+        conv_deg, div_deg, angle_type = _nozzle_half_angles(motor_data)
 
-        # Chamber outline
         chamber_top = chamber_diameter / 2
         chamber_bottom = -chamber_diameter / 2
-
-        # Nozzle profile with correct angles
         nozzle_start = chamber_length
-        nozzle_end = chamber_length + nozzle_length
 
-        # Calculate throat position based on convergent angle
-        conv_angle_rad = np.radians(convergent_angle)
-        throat_r = throat_diameter / 2
-        conv_length = (chamber_top - throat_r) / np.tan(conv_angle_rad)
-        throat_pos = nozzle_start + conv_length
+        # Gerçek iç kontur (mm -> m); z=0 kamara çıkışı
+        pts_mm, meta = sample_nozzle_inner_contour(motor_data)
+        noz_x = [nozzle_start + z / 1000.0 for z, _r in pts_mm]
+        noz_r = [r / 1000.0 for _z, r in pts_mm]
+        throat_pos = nozzle_start + meta['z_throat'] / 1000.0
+        throat_r = meta['r_throat'] / 1000.0
+        nozzle_end = nozzle_start + meta['z_exit'] / 1000.0
 
         # Draw chamber
         fig.add_trace(
@@ -679,34 +873,13 @@ class MotorCADDesigner:
             row=row, col=col
         )
 
-        # Draw nozzle profile with actual angles
-        nozzle_x = np.linspace(nozzle_start, nozzle_end, 50)
-        nozzle_y_top = []
-        nozzle_y_bottom = []
-
-        for x in nozzle_x:
-            if x <= throat_pos:
-                # Convergent section - linear with specified angle
-                progress = (x - nozzle_start) / conv_length
-                r = chamber_top - (chamber_top - throat_r) * progress
-            else:
-                # Divergent section - linear with specified angle
-                div_angle_rad = np.radians(divergent_angle)
-                div_progress = x - throat_pos
-                r = throat_r + div_progress * np.tan(div_angle_rad)
-                # Cap at exit radius
-                exit_r = exit_diameter / 2
-                r = min(r, exit_r)
-
-            nozzle_y_top.append(r)
-            nozzle_y_bottom.append(-r)
-
+        # Draw nozzle profile from the solver contour
         fig.add_trace(
             go.Scatter(
-                x=nozzle_x.tolist() + nozzle_x[::-1].tolist(),
-                y=nozzle_y_top + nozzle_y_bottom[::-1],
+                x=noz_x + noz_x[::-1],
+                y=noz_r + [-r for r in noz_r[::-1]],
                 fill='toself',
-                name='Nozzle',
+                name=f'Nozzle ({meta.get("noz_type", "conical")})',
                 fillcolor='rgba(128,128,128,0.3)',
                 line=dict(color='gray')
             ),
@@ -725,49 +898,57 @@ class MotorCADDesigner:
             row=row, col=col
         )
 
-        # Add angle annotations
-        # Convergent angle annotation
-        conv_mid_x = nozzle_start + conv_length * 0.5
-        conv_mid_r = chamber_top - (chamber_top - throat_r) * 0.5
-
-        # Draw convergent angle line
-        angle_length = 0.03  # 30mm in meters
-        conv_angle_end_x = conv_mid_x + angle_length * np.cos(np.pi - conv_angle_rad)
-        conv_angle_end_y = conv_mid_r + angle_length * np.sin(np.pi - conv_angle_rad)
-
-        fig.add_trace(
-            go.Scatter(
-                x=[conv_mid_x, conv_angle_end_x],
-                y=[conv_mid_r, conv_angle_end_y],
-                mode='lines',
-                name=f'Conv. {convergent_angle}°',
-                line=dict(color='orange', width=2, dash='dot')
-            ),
-            row=row, col=col
-        )
-
-        # Divergent angle annotation
-        div_mid_x = throat_pos + (nozzle_end - throat_pos) * 0.5
-        div_mid_r = throat_r + (div_mid_x - throat_pos) * np.tan(np.radians(divergent_angle))
-
-        # Draw divergent angle line
-        div_angle_rad = np.radians(divergent_angle)
-        div_angle_end_x = div_mid_x + angle_length * np.cos(div_angle_rad)
-        div_angle_end_y = div_mid_r + angle_length * np.sin(div_angle_rad)
-
-        fig.add_trace(
-            go.Scatter(
-                x=[div_mid_x, div_angle_end_x],
-                y=[div_mid_r, div_angle_end_y],
-                mode='lines',
-                name=f'Div. {divergent_angle}°',
-                line=dict(color='green', width=2, dash='dot')
-            ),
-            row=row, col=col
-        )
-
-        # Add dimension lines and labels
         annotations = []
+        angle_length = 0.03  # açı göstergesi çizgi boyu [m]
+
+        # Açı göstergeleri YALNIZ gerçek açı varsa çizilir/etiketlenir.
+        if conv_deg is not None:
+            conv_angle_rad = np.radians(conv_deg)
+            conv_mid_x = nozzle_start + (throat_pos - nozzle_start) * 0.5
+            conv_mid_r = chamber_top - (chamber_top - throat_r) * 0.5
+            conv_end_x = conv_mid_x + angle_length * np.cos(np.pi - conv_angle_rad)
+            conv_end_y = conv_mid_r + angle_length * np.sin(np.pi - conv_angle_rad)
+            fig.add_trace(
+                go.Scatter(
+                    x=[conv_mid_x, conv_end_x],
+                    y=[conv_mid_r, conv_end_y],
+                    mode='lines',
+                    name=f'Conv. {conv_deg:.1f}°',
+                    line=dict(color='orange', width=2, dash='dot')
+                ),
+                row=row, col=col
+            )
+            annotations.append(dict(
+                x=conv_end_x, y=conv_end_y,
+                text=f'{conv_deg:.1f}°',
+                showarrow=False,
+                font=dict(size=9, color='orange')
+            ))
+
+        if div_deg is not None:
+            div_angle_rad = np.radians(div_deg)
+            div_mid_x = throat_pos + (nozzle_end - throat_pos) * 0.5
+            div_mid_r = throat_r + (div_mid_x - throat_pos) * np.tan(div_angle_rad)
+            div_end_x = div_mid_x + angle_length * np.cos(div_angle_rad)
+            div_end_y = div_mid_r + angle_length * np.sin(div_angle_rad)
+            div_label = ('Div. throat %.1f°' % div_deg if angle_type == 'bell'
+                         else 'Div. %.1f°' % div_deg)
+            fig.add_trace(
+                go.Scatter(
+                    x=[div_mid_x, div_end_x],
+                    y=[div_mid_r, div_end_y],
+                    mode='lines',
+                    name=div_label,
+                    line=dict(color='green', width=2, dash='dot')
+                ),
+                row=row, col=col
+            )
+            annotations.append(dict(
+                x=div_end_x, y=div_end_y,
+                text=f'{div_deg:.1f}°',
+                showarrow=False,
+                font=dict(size=9, color='green')
+            ))
 
         # Chamber diameter annotation
         annotations.append(dict(
@@ -797,25 +978,10 @@ class MotorCADDesigner:
             font=dict(size=10)
         ))
 
-        # Angle annotations
-        annotations.append(dict(
-            x=conv_angle_end_x,
-            y=conv_angle_end_y,
-            text=f'{convergent_angle}°',
-            showarrow=False,
-            font=dict(size=9, color='orange')
-        ))
-
-        annotations.append(dict(
-            x=div_angle_end_x,
-            y=div_angle_end_y,
-            text=f'{divergent_angle}°',
-            showarrow=False,
-            font=dict(size=9, color='green')
-        ))
-
-        # Add expansion ratio
-        expansion_ratio = (exit_diameter / throat_diameter) ** 2
+        # Expansion ratio: çözücünün değeri varsa o, yoksa geometriden
+        expansion_ratio = _real_scalar(motor_data.get('expansion_ratio'))
+        if expansion_ratio is None:
+            expansion_ratio = (exit_diameter / throat_diameter) ** 2
         annotations.append(dict(
             x=(throat_pos + nozzle_end) / 2,
             y=chamber_diameter * 0.3,
@@ -833,21 +999,43 @@ class MotorCADDesigner:
                 fig.add_annotation(ann, row=row, col=col)
 
     def _add_performance_chart(self, fig, motor_data: Dict, row: int, col: int):
-        """Add performance characteristics chart"""
+        """Add performance characteristics chart.
 
-        # Sample performance data
-        time = np.linspace(0, motor_data.get('burn_time', 10), 100)
-        thrust = motor_data.get('thrust', 1000) * np.ones_like(time)
+        DUZELTME (v2.5.2): eski surum burada UYDURMA bir egri ciziyordu
+        (sabit itkiye %10'luk dogrusal dusus ekleyip 'realistic thrust curve
+        variation' diye etiketliyordu). Teknik cizim ciktisinda hesaplanmamis
+        bir egriyi hesaplanmis gibi gostermek yanilticidir. Artik once GERCEK
+        egri aranir (transient / thrust_curve / port_history); yoksa sabit
+        tasarim itkisi cizilir ve etikette bunun bir VARSAYIM oldugu yazar.
 
-        # Add realistic thrust curve variation
-        thrust *= (1 - 0.1 * time / time[-1])  # Slight decrease over time
+        Ayrica diziler listeye cevrilir: plotly 6.x numpy'i ikili (bdata)
+        yaziyor, gomulu plotly.js 1.58.5 cozemiyor ve egri BOS kaliyordu.
+        """
+        time_s, thrust_n, label = None, None, None
+
+        transient = motor_data.get('transient') or {}
+        curve = motor_data.get('thrust_curve') or {}
+        if transient.get('time') and transient.get('thrust'):
+            time_s = list(transient['time'])
+            thrust_n = list(transient['thrust'])
+            label = 'Thrust (computed transient)'
+        elif curve.get('time') and curve.get('thrust'):
+            time_s = list(curve['time'])
+            thrust_n = list(curve['thrust'])
+            label = 'Thrust (computed curve)'
+        else:
+            burn_time = float(motor_data.get('burn_time', 10) or 10)
+            design_thrust = float(motor_data.get('thrust', 1000) or 1000)
+            time_s = [0.0, burn_time]
+            thrust_n = [design_thrust, design_thrust]
+            label = 'Thrust (design point, constant-thrust assumption)'
 
         fig.add_trace(
             go.Scatter(
-                x=time,
-                y=thrust,
+                x=[float(v) for v in time_s],
+                y=[float(v) for v in thrust_n],
                 mode='lines',
-                name='Thrust',
+                name=label,
                 line=dict(color='red', width=2)
             ),
             row=row, col=col
@@ -857,20 +1045,44 @@ class MotorCADDesigner:
         fig.update_yaxes(title_text="Thrust (N)", row=row, col=col)
 
     def _generate_technical_drawings(self, motor_data: Dict) -> Dict:
-        """Generate technical engineering drawings"""
+        """İmalat spesifikasyonu — ÇÖZÜCÜNÜN kendi sonuçlarından.
+
+        Eski sürümde cidar kalınlığı sabit 5.0 mm, enjektör plakası 30 mm ve
+        malzemeler ('Steel 304' / 'Graphite' / 'Stainless Steel 316') motor
+        sonucundan bağımsızdı; 20 kN'lik bir motorda yapısal analiz 29 mm cidar
+        isterken çizim 5 mm yazıyordu (2026-07-19 denetimi). Artık:
+          - cidar kalınlığı: structural_analysis.chamber_analysis
+          - enjektör plakası: structural_analysis.end_cap_analysis (düz kapak)
+          - malzeme: yapısal analizde seçilen materials_db kaydı
+          - lüle açıları: nozzle_angles / nozzle_contour
+        Değer yoksa sabit sayı yazılmaz; alan NOT_AVAILABLE_SPEC olur.
+        Tolerans ve yüzey pürüzlülüğü tasarım kararı DEĞİLDİR; standart
+        değerler 'basis' alanında kaynağıyla etiketlenir.
+        """
 
         drawings = {}
+
+        wall_m, wall_source = _chamber_wall_thickness_m(motor_data)
+        _mat_key, mat_name, _rho = _chamber_material(motor_data)
+        conv_deg, div_deg, noz_type = _nozzle_half_angles(motor_data)
+        inj = _injector_spec(motor_data)
+
+        struct = motor_data.get('structural_analysis') or {}
+        plate_mm = _real_nested(struct, ('end_cap_analysis', 'flat_head_thickness'))
 
         # Chamber drawing
         drawings['chamber'] = {
             'outer_diameter': motor_data.get('chamber_diameter', 0.1) * 1000,  # mm
-            'wall_thickness': 5.0,  # mm
+            'wall_thickness': (wall_m * 1000.0) if wall_m else NOT_AVAILABLE_SPEC,
+            'wall_thickness_source': wall_source,
             'length': motor_data.get('chamber_length', 0.5) * 1000,  # mm
-            'material': 'Steel 304',
-            'surface_finish': 'Ra 3.2 μm',
+            'material': mat_name or NOT_AVAILABLE_SPEC,
+            'surface_finish': DRAWING_SURFACE_FINISH_CHAMBER,
+            'finish_basis': DRAWING_SURFACE_FINISH_BASIS,
             'tolerances': {
                 'diameter': '+-0.1 mm',
-                'length': '+-0.5 mm'
+                'length': '+-0.5 mm',
+                'basis': DRAWING_TOLERANCE_BASIS
             }
         }
 
@@ -878,67 +1090,115 @@ class MotorCADDesigner:
         drawings['nozzle'] = {
             'throat_diameter': motor_data.get('throat_diameter', 0.02) * 1000,  # mm
             'exit_diameter': motor_data.get('exit_diameter', 0.04) * 1000,  # mm
-            'length': motor_data.get('nozzle_length', 0.15) * 1000,  # mm
-            'convergence_angle': motor_data.get('convergent_angle', 15),  # degrees
-            'divergence_angle': motor_data.get('divergent_angle', 12),  # degrees
-            'material': 'Graphite',
-            'surface_finish': 'Ra 1.6 μm'
+            'length': ((_nozzle_length_m(motor_data) or 0.0) * 1000
+                       or NOT_AVAILABLE_SPEC),  # mm
+            'nozzle_type': noz_type,
+            'convergence_angle': conv_deg if conv_deg is not None else NOT_AVAILABLE_SPEC,
+            'divergence_angle': div_deg if div_deg is not None else NOT_AVAILABLE_SPEC,
+            'divergence_angle_meaning': ('bell: throat exit angle (theta_n); the '
+                                         'wall angle decreases toward the exit'
+                                         if noz_type == 'bell'
+                                         else 'conical: constant half angle'),
+            'divergent_exit_angle': (
+                _real_scalar(((motor_data.get('nozzle_contour') or {})
+                              .get('divergent') or {}).get('exit_angle'))
+                or NOT_AVAILABLE_SPEC),
+            'angle_source': 'solver nozzle_angles / nozzle_contour',
+            'material': (motor_data.get('nozzle_material')
+                         or motor_data.get('throat_material')
+                         or NOT_AVAILABLE_SPEC),
+            'surface_finish': DRAWING_SURFACE_FINISH_NOZZLE,
+            'finish_basis': DRAWING_SURFACE_FINISH_BASIS
         }
 
         # Injector drawing
         drawings['injector'] = {
-            'plate_diameter': motor_data.get('chamber_diameter', 0.1) * 1000,  # mm
-            'plate_thickness': 30,  # mm
-            'orifice_count': motor_data.get('injector_orifices', 8),
-            'orifice_diameter': motor_data.get('orifice_diameter', 0.003) * 1000,  # mm
-            'material': 'Stainless Steel 316',
-            'surface_finish': 'Ra 0.8 μm'
+            'plate_diameter': (inj['plate_diameter_mm']
+                               if inj['plate_diameter_mm'] else NOT_AVAILABLE_SPEC),
+            'plate_thickness': plate_mm if plate_mm else NOT_AVAILABLE_SPEC,
+            'plate_thickness_source': ('structural analysis (flat closure head '
+                                       'at chamber pressure)' if plate_mm
+                                       else 'not available'),
+            'orifice_count': inj['n_orifices'] or NOT_AVAILABLE_SPEC,
+            'orifice_diameter': inj['orifice_diameter_mm'] or NOT_AVAILABLE_SPEC,
+            'injector_type': inj['type'] or NOT_AVAILABLE_SPEC,
+            'orifice_source': inj['source'],
+            'material': motor_data.get('injector_material') or NOT_AVAILABLE_SPEC,
+            'surface_finish': DRAWING_SURFACE_FINISH_INJECTOR,
+            'finish_basis': DRAWING_SURFACE_FINISH_BASIS
         }
 
         return drawings
 
     def _generate_material_specifications(self, motor_data: Dict) -> Dict:
-        """Generate material specifications and properties"""
+        """Malzeme spesifikasyonları — kamara kaydı materials_db'den (gerçek).
+
+        Kamara malzemesi yapısal analizde SEÇİLEN kayıttır; özellikleri merkezi
+        materials_db'den okunur (eski sürüm kullanıcı ne seçerse seçsin
+        'AISI 304' basıyordu). Lüle/enjektör için motor sonucunda malzeme
+        seçimi yoksa satır 'reference design' olarak etiketlenir.
+        """
+
+        mat_key, mat_name, _rho = _chamber_material(motor_data)
+        chamber_spec = None
+        if mat_key:
+            try:
+                rec = get_material(str(mat_key))
+                chamber_spec = {
+                    'designation': rec.get('name', mat_name),
+                    'properties': {
+                        'tensile_strength': f"{rec['ultimate_strength'] / 1e6:.0f} MPa",
+                        'yield_strength': f"{rec['yield_strength'] / 1e6:.0f} MPa",
+                        'density': f"{rec['density'] / 1000.0:.2f} g/cm3",
+                        'melting_point': f"{rec.get('melting_point', 'n/a')} K",
+                        'thermal_conductivity': f"{rec.get('thermal_conductivity', 'n/a')} W/m K"
+                    },
+                    'source': rec.get('source', 'hrma materials_db'),
+                    'selected_by': 'structural analysis material selection'
+                }
+            except Exception:
+                chamber_spec = None
 
         specs = {
-            'chamber_material': {
-                'designation': 'AISI 304 Stainless Steel',
-                'properties': {
-                    'tensile_strength': '515-620 MPa',
-                    'yield_strength': '205-310 MPa',
-                    'density': '7.85 g/cm3',
-                    'melting_point': '1400-1450 C',
-                    'thermal_conductivity': '16.2 W/m K'
-                },
-                'heat_treatment': 'Solution annealed at 1050 C',
-                'certification': 'ASME SA-240'
+            'chamber_material': chamber_spec or {
+                'designation': NOT_AVAILABLE_SPEC,
+                'properties': {},
+                'source': 'no material selected in this analysis run'
             },
-            'nozzle_material': {
-                'designation': 'High-Density Graphite',
-                'properties': {
-                    'compressive_strength': '137 MPa',
-                    'tensile_strength': '41 MPa',
-                    'density': '2.2 g/cm3',
-                    'max_temperature': '3000 C',
-                    'thermal_conductivity': '150 W/m K'
-                },
-                'grade': 'ATJ Graphite',
-                'machining': 'CNC machined, diamond polished'
-            },
-            'injector_material': {
-                'designation': 'AISI 316 Stainless Steel',
-                'properties': {
-                    'tensile_strength': '515-620 MPa',
-                    'yield_strength': '205-310 MPa',
-                    'density': '7.98 g/cm3',
-                    'corrosion_resistance': 'Excellent',
-                    'thermal_conductivity': '16.3 W/m K'
-                },
-                'finish': 'Electropolished Ra 0.4 um'
-            }
+            # Lüle ve enjektör malzemesi bu analiz koşusunda SEÇİLMİYOR; aşağıdaki
+            # kayıtlar merkezi materials_db'den okunan REFERANS tasarımlardır ve
+            # 'basis' alanıyla böyle etiketlenir (kullanıcı seçimi değildir).
+            'nozzle_material': self._reference_material_spec(
+                motor_data.get('nozzle_material') or motor_data.get('throat_material'),
+                'graphite'),
+            'injector_material': self._reference_material_spec(
+                motor_data.get('injector_material'), 'ss_316')
         }
 
         return specs
+
+    @staticmethod
+    def _reference_material_spec(selected_key, default_key) -> Dict:
+        """materials_db kaydından spesifikasyon; seçim yoksa referans etiketi."""
+        key = selected_key or default_key
+        try:
+            rec = get_material(str(key))
+        except Exception:
+            return {'designation': NOT_AVAILABLE_SPEC, 'properties': {},
+                    'basis': 'material not found in materials_db'}
+        return {
+            'designation': rec.get('name', str(key)),
+            'properties': {
+                'tensile_strength': f"{rec['ultimate_strength'] / 1e6:.0f} MPa",
+                'yield_strength': f"{rec['yield_strength'] / 1e6:.0f} MPa",
+                'density': f"{rec['density'] / 1000.0:.2f} g/cm3",
+                'melting_point': f"{rec.get('melting_point', 'n/a')} K",
+                'thermal_conductivity': f"{rec.get('thermal_conductivity', 'n/a')} W/m K"
+            },
+            'source': rec.get('source', 'hrma materials_db'),
+            'basis': ('selected in this analysis run' if selected_key
+                      else 'reference design - not selected in this analysis run')
+        }
 
     def _generate_manufacturing_notes(self, motor_data: Dict) -> List[str]:
         """Generate manufacturing and assembly notes"""
@@ -968,60 +1228,114 @@ class MotorCADDesigner:
         return notes
 
     def _generate_cad_performance_summary(self, motor_data: Dict) -> Dict:
-        """Generate CAD-specific performance summary"""
+        """CAD kütle/geometri özeti — kütleler GERÇEK kalınlık ve malzemeden."""
 
         chamber_volume = np.pi * (motor_data.get('chamber_diameter', 0.1)/2)**2 * motor_data.get('chamber_length', 0.5)
         nozzle_mass = self._estimate_component_mass('nozzle', motor_data)
         chamber_mass = self._estimate_component_mass('chamber', motor_data)
+        injector_mass = self._estimate_component_mass('injector', motor_data)
+        dry_mass = chamber_mass + nozzle_mass + injector_mass
+
+        wall_m, wall_source = _chamber_wall_thickness_m(motor_data)
+        _key, mat_name, _rho = _chamber_material(motor_data)
 
         return {
             'geometry_summary': {
-                'total_length': (motor_data.get('chamber_length', 0.5) + motor_data.get('nozzle_length', 0.15)) * 1000,  # mm
+                'total_length': ((_real_scalar(motor_data.get('chamber_length')) or 0.0)
+                                 + (_nozzle_length_m(motor_data) or 0.0)) * 1000,  # mm
                 'max_diameter': motor_data.get('chamber_diameter', 0.1) * 1000,  # mm
                 'chamber_volume': chamber_volume * 1e6,  # cm3
-                'thrust_to_weight': motor_data.get('thrust', 1000) / ((chamber_mass + nozzle_mass) * 9.81)
+                'thrust_to_weight': (motor_data.get('thrust', 1000) / (dry_mass * G_0)
+                                     if dry_mass > 0 else None)
             },
             'mass_breakdown': {
                 'chamber_mass': chamber_mass,  # kg
                 'nozzle_mass': nozzle_mass,  # kg
-                'injector_mass': self._estimate_component_mass('injector', motor_data),  # kg
-                'total_dry_mass': chamber_mass + nozzle_mass + self._estimate_component_mass('injector', motor_data)  # kg
+                'injector_mass': injector_mass,  # kg
+                'total_dry_mass': dry_mass,  # kg
+                # Kütlelerin neye dayandığı kullanıcıya açıkça söylenir.
+                'wall_thickness_mm': (wall_m * 1000.0) if wall_m else None,
+                'wall_thickness_source': wall_source,
+                'chamber_material': mat_name or NOT_AVAILABLE_SPEC,
             },
             'manufacturing_complexity': {
                 'machining_time': '24-48 hours',
                 'assembly_time': '4-6 hours',
                 'skill_level': 'Advanced machinist required',
-                'special_tooling': 'Diamond boring bar for nozzle'
+                'special_tooling': 'Diamond boring bar for nozzle',
+                'basis': MANUFACTURING_EFFORT_BASIS
             }
         }
 
     def _estimate_component_mass(self, component: str, motor_data: Dict) -> float:
-        """Estimate component mass based on geometry and material"""
+        """Bileşen kütlesi — GERÇEK cidar kalınlığı ve GERÇEK malzeme yoğunluğu.
+
+        Eski sürüm kamara kütlesini sabit 5 mm cidar + sabit 7850 kg/m^3 ile
+        hesaplıyordu; aynı motor sonucunda yapısal analizin önerdiği kalınlık
+        (ör. 20 kN motorda 29 mm) hazır dururken kütle 5 kata kadar sapıyor,
+        buradan türeyen total_dry_mass ve thrust_to_weight de yanlış çıkıyordu
+        (2026-07-19 denetimi, kritik bulgu).
+
+        Kalınlık/yoğunluk yoksa CAD katmanının 3B meshte kullandığı AYNI
+        yedek kural uygulanır (0.045·D_ch) — böylece görsel ile kütle çelişmez.
+        """
+
+        wall_m, _src = _chamber_wall_thickness_m(motor_data)
+        _key, _name, density = _chamber_material(motor_data)
+        chamber_d = _real_scalar(motor_data.get('chamber_diameter')) or 0.1
+        if wall_m is None:
+            # 3B mesh ile aynı yedek kural (bkz. generate_3d_motor_assembly)
+            wall_m = max(0.004, CHAMBER_WALL_FALLBACK_FRACTION * chamber_d)
+        # DİKKAT: mesh tarafındaki 0.12·D üst sınırı burada UYGULANMAZ; o sınır
+        # görsel içindir. Kütle, yapısal analizin gerçek kalınlığını yansıtmalı.
+        if density is None:
+            density = get_material('steel_4130')['density']
 
         if component == 'chamber':
-            outer_r = motor_data.get('chamber_diameter', 0.1) / 2
-            inner_r = outer_r - 0.005  # 5mm wall
-            length = motor_data.get('chamber_length', 0.5)
+            # Yapısal analizle AYNI hacim modeli: cidar iç çapın DIŞINA eklenir
+            # (structural_analysis._calculate_weight ile birebir tutarlı).
+            inner_r = chamber_d / 2
+            outer_r = inner_r + wall_m
+            length = _real_scalar(motor_data.get('chamber_length')) or 0.5
             volume = np.pi * length * (outer_r**2 - inner_r**2)
-            density = 7850  # kg/m3 for steel
             return volume * density
 
         elif component == 'nozzle':
-            # Simplified nozzle volume calculation
-            avg_radius = motor_data.get('throat_diameter', 0.02) / 2
-            length = motor_data.get('nozzle_length', 0.15)
-            volume = np.pi * avg_radius**2 * length * 0.7  # Account for hollow
-            density = 2200  # kg/m3 for graphite
-            return volume * density
+            # Öncelik: çözücünün kendi lüle kütlesi (gerçek kontur + cidar)
+            noz_geo = motor_data.get('nozzle_geometry') or {}
+            mass = _real_scalar(noz_geo.get('estimated_mass'))
+            if mass is not None:
+                return mass
+            struct_noz = _real_nested(motor_data.get('structural_analysis') or {},
+                                      ('weight_analysis', 'nozzle_weight'))
+            if struct_noz is not None:
+                return struct_noz
+            # Yedek: gerçek kontur yüzeyinden kabuk hacmi (grafit yoğunluğu)
+            pts_mm, meta = sample_nozzle_inner_contour(motor_data)
+            wall_noz = max(0.003, 0.1 * (_real_scalar(motor_data.get('throat_diameter')) or 0.02))
+            volume = 0.0
+            for (z0, r0), (z1, r1) in zip(pts_mm[:-1], pts_mm[1:]):
+                dz = (z1 - z0) / 1000.0
+                r_mid = (r0 + r1) / 2000.0
+                volume += 2 * np.pi * r_mid * wall_noz * abs(dz)
+            return volume * get_material('graphite')['density']
 
         elif component == 'injector':
-            radius = motor_data.get('chamber_diameter', 0.1) / 2
-            thickness = 0.03
-            volume = np.pi * radius**2 * thickness * 0.9  # Account for holes
-            density = 7850  # kg/m3 for steel
+            # Plaka kalınlığı: yapısal analizin düz kapak kalınlığı
+            plate_m = _real_nested(motor_data.get('structural_analysis') or {},
+                                   ('end_cap_analysis', 'flat_head_thickness'))
+            plate_m = (plate_m / 1000.0) if plate_m else wall_m * 2.0
+            radius = chamber_d / 2 + wall_m
+            # Orifis deliklerinin çıkardığı hacim GERÇEK delik sayısı/çapından
+            inj = _injector_spec(motor_data)
+            hole_volume = 0.0
+            if inj['n_orifices'] and inj['orifice_diameter_mm']:
+                r_hole = inj['orifice_diameter_mm'] / 2000.0
+                hole_volume = inj['n_orifices'] * np.pi * r_hole**2 * plate_m
+            volume = max(0.0, np.pi * radius**2 * plate_m - hole_volume)
             return volume * density
 
-        return 1.0  # Default
+        return 0.0
 
     def export_stl_files(self, assembly_meshes: List, output_dir: str = "./cad_exports/"):
         """Export STL files for 3D printing/machining"""
@@ -1602,27 +1916,61 @@ class DetailedCADGenerator:
         return traces
 
     def _get_component_details(self, motor_data) -> Dict:
-        """Get detailed component specifications"""
+        """Sıvı motor bileşen özeti — çözücü sonucundan.
+
+        Eski sürüm bu bloğu tamamen sabit dolduruyordu (24 kanal, 24 delik,
+        'Inconel 718' / 'C-C Composite' / 'Stainless Steel 316L', 'Regenerative')
+        ve kullanıcı bunu kendi tasarımının bileşen özeti sanıyordu; aynı
+        oturumda çözücü 80 kanal raporluyordu (2026-07-19 denetimi).
+
+        Beklenen sözleşme — istek gövdesinde motor sonucunun şu alanları
+        bulunmalıdır: injector_design (number_of_elements / number_of_orifices),
+        cooling_system (cooling_channels), cooling_type, chamber_material,
+        nozzle_material, injector_material. Alan yoksa SABİT DEĞER YAZILMAZ;
+        NOT_AVAILABLE_SPEC döner. (Not: yalnızca UI'nin sabit gönderdiği
+        'injector_holes' anahtarı bilerek okunmaz — o bir arayüz sabitidir,
+        tasarım sonucu değil.)
+        """
+        md = motor_data or {}
+        inj_design = md.get('injector_design') or {}
+        cooling = md.get('cooling_system') or {}
+
+        holes = _real_scalar(inj_design.get('number_of_elements')
+                             or inj_design.get('number_of_orifices')
+                             or md.get('injector_elements'))
+        channels = _real_scalar(cooling.get('cooling_channels')
+                                or md.get('cooling_channels'))
+        dp = _real_scalar(inj_design.get('injection_pressure_drop_fuel_bar')
+                          or inj_design.get('injection_pressure_drop_bar')
+                          or md.get('injector_dp'))
+        thrust = _real_scalar(md.get('thrust'))
+        isp = _real_scalar(md.get('isp'))
+        pc = _real_scalar(md.get('chamber_pressure'))
+
         return {
             'injector': {
-                'type': motor_data.get('injector_type', 'Unlike Impinging'),
-                'hole_count': motor_data.get('injector_holes', 24),
-                'pressure_drop': f"{motor_data.get('injector_dp', 15)} bar"
+                'type': (inj_design.get('injector_type') or md.get('injector_type')
+                         or NOT_AVAILABLE_SPEC),
+                'hole_count': int(round(holes)) if holes else NOT_AVAILABLE_SPEC,
+                'pressure_drop': f"{dp:.2f} bar" if dp else NOT_AVAILABLE_SPEC,
+                'source': 'solver injector_design' if holes else 'not available'
             },
             'cooling': {
-                'type': 'Regenerative',
-                'channel_count': 24,
-                'coolant': motor_data.get('fuel_type', 'RP-1')
+                'type': md.get('cooling_type') or NOT_AVAILABLE_SPEC,
+                'channel_count': int(round(channels)) if channels else NOT_AVAILABLE_SPEC,
+                'coolant': md.get('fuel_type') or NOT_AVAILABLE_SPEC,
+                'source': 'solver cooling_system' if channels else 'not available'
             },
             'materials': {
-                'chamber': 'Inconel 718',
-                'nozzle': 'C-C Composite',
-                'injector': 'Stainless Steel 316L'
+                'chamber': (_chamber_material(md)[1] or md.get('chamber_material')
+                            or NOT_AVAILABLE_SPEC),
+                'nozzle': md.get('nozzle_material') or NOT_AVAILABLE_SPEC,
+                'injector': md.get('injector_material') or NOT_AVAILABLE_SPEC
             },
             'performance': {
-                'thrust': f"{motor_data.get('thrust', 5000)} N",
-                'isp': f"{motor_data.get('isp', 320)} s",
-                'chamber_pressure': f"{motor_data.get('chamber_pressure', 50)} bar"
+                'thrust': f"{thrust:.0f} N" if thrust else NOT_AVAILABLE_SPEC,
+                'isp': f"{isp:.1f} s" if isp else NOT_AVAILABLE_SPEC,
+                'chamber_pressure': f"{pc:.1f} bar" if pc else NOT_AVAILABLE_SPEC
             }
         }
 
@@ -1647,17 +1995,38 @@ class DetailedCADGenerator:
         }
 
     def _get_solid_component_details(self, motor_data) -> Dict:
-        """Get solid motor component details"""
+        """Katı motor bileşen özeti — kasa verileri YAPISAL analizden.
+
+        Eski sürüm kasayı sabit yazıyordu ('Steel 4130', '5mm', SF 2.5);
+        emniyet katsayısı bu yazılımın en kritik çıktısı ve gerçek yapısal
+        analiz zaten mevcuttu (2026-07-19 denetimi).
+        """
+        md = motor_data or {}
+        struct = md.get('structural_analysis') or {}
+        wall_m, wall_source = _chamber_wall_thickness_m(md)
+        _key, mat_name, _rho = _chamber_material(md)
+        sf = (_real_scalar(struct.get('safety_factor_total'))
+              or _real_scalar(struct.get('safety_factor'))
+              or _real_nested(struct, ('safety_analysis', 'minimum_safety_factor')))
+        grain = md.get('grain_design') or {}
+
         return {
             'grain': {
-                'type': motor_data.get('grain_type', 'BATES'),
-                'segments': motor_data.get('grain_count', 3),
-                'inhibitor': 'Phenolic'
+                'type': (grain.get('grain_type') or md.get('grain_type')
+                         or NOT_AVAILABLE_SPEC),
+                'segments': (grain.get('number_of_segments')
+                             or md.get('grain_count') or NOT_AVAILABLE_SPEC),
+                'inhibitor': (grain.get('inhibitor') or md.get('inhibitor')
+                              or NOT_AVAILABLE_SPEC)
             },
             'case': {
-                'material': 'Steel 4130',
-                'thickness': '5mm',
-                'factor_of_safety': 2.5
+                'material': mat_name or NOT_AVAILABLE_SPEC,
+                'thickness': (f"{wall_m * 1000.0:.2f} mm" if wall_m
+                              else NOT_AVAILABLE_SPEC),
+                'thickness_source': wall_source,
+                'factor_of_safety': sf if sf else NOT_AVAILABLE_SPEC,
+                'factor_of_safety_source': ('structural analysis' if sf
+                                            else 'not available')
             }
         }
 

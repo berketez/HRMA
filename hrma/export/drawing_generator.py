@@ -78,15 +78,30 @@ def _cross_section_png(motor_results, width=1500, height=520):
 
 
 def _injector_face_png(motor_results, size=700):
-    """Enjektör yüz deseni: orifis yerleşimi ölçekli daire deseni (PNG bayt)."""
+    """Enjektör yüz deseni: orifis yerleşimi ölçekli daire deseni (PNG bayt).
+
+    Delik sayısı/çapı TEK doğruluk kaynağından okunur: cad_visualization
+    ._injector_spec (motor sonucundaki injector_design). Aynı motor koşusunda
+    ekrandaki enjektör grafiği, bu imalat çizimi ve CAD sözlüğü farklı sayılar
+    gösteriyordu (2026-07-19 denetimi, kritik bulgu: 50 delik x 0.94 mm ekranda,
+    5 delik x 2.26 mm çizimde). Değer yoksa desen çizilmez; sayfa "not
+    available" notuyla basılır — uydurma delik sayısı çizilmez.
+    """
     import plotly.graph_objects as go
     import plotly.io as pio
 
+    from hrma.export.cad_visualization import _injector_spec
+
     md = motor_results or {}
-    inj = md.get('injector_design') or md.get('injector') or {}
+    spec = _injector_spec(md)
     D_ch = _num(md.get('chamber_diameter'), 0.1) * 1000
-    n = int(_num(inj.get('number_of_orifices') or inj.get('n_holes'), 12))
-    d_h = _num(inj.get('orifice_diameter_mm') or inj.get('hole_diameter'), 1.5)
+    n = spec['n_orifices']
+    d_h = spec['orifice_diameter_mm']
+    if not n or not d_h:
+        raise ValueError('injector orifice count/diameter not available in the '
+                         'motor result (injector_design missing)')
+    n = int(n)
+    inj_type = str(spec['type'] or 'injector')
 
     fig = go.Figure()
     R = D_ch / 2
@@ -107,7 +122,8 @@ def _injector_face_png(motor_results, size=700):
                           line=dict(color='#c0392b', width=1.5))
         placed += k
     fig.update_layout(
-        title=f'INJECTOR FACE — {n} × Ø{d_h:.2f} mm (showerhead)',
+        title=(f'INJECTOR FACE - {n} x d{d_h:.2f} mm ({inj_type}); '
+               f'ring layout shown schematically'),
         paper_bgcolor='white', plot_bgcolor='white',
         font=dict(color='#1a2733'),
         xaxis=dict(title='mm', scaleanchor='y', scaleratio=1,
@@ -183,19 +199,47 @@ def generate_drawing_pdf(motor_results, out_path=None):
 
     # ---- Sayfa 3: Boyut ve malzeme tablosu ----
     title_block('DIMENSION & MATERIAL SCHEDULE', 3, total_sheets)
+    # Cidar kalınlığı, malzeme ve enjektör satırları ÇÖZÜCÜ sonucundan gelir
+    # (eski tablo sabit malzeme adları yazıyordu ve enjektör hiç yoktu).
+    from hrma.export.cad_visualization import (
+        NOT_AVAILABLE_SPEC, _chamber_material, _chamber_wall_thickness_m,
+        _injector_spec, _nozzle_half_angles)
+
+    wall_m, wall_src = _chamber_wall_thickness_m(motor_results)
+    _mat_key, mat_name, _rho = _chamber_material(motor_results)
+    spec = _injector_spec(motor_results)
+    conv_deg, div_deg, noz_type = _nozzle_half_angles(motor_results)
+
     rows = [
         ('Chamber inner diameter', f"{d['D_ch']:.1f} mm"),
         ('Chamber length', f"{d['L']:.1f} mm"),
+        ('Chamber wall thickness',
+         f"{wall_m * 1000:.2f} mm  [{wall_src}]" if wall_m else NOT_AVAILABLE_SPEC),
         ('Grain length', f"{d['L_g']:.1f} mm"),
         ('Port diameter (initial)', f"{d['d_p0']:.1f} mm"),
         ('Port diameter (final)', f"{d['d_pf']:.1f} mm"),
         ('Throat diameter', f"{d['d_t']:.2f} mm"),
         ('Exit diameter', f"{d['d_e']:.2f} mm"),
         ('Expansion ratio', f"{d['eps']:.2f}"),
-        ('Chamber material', 'AISI 316L / 4130 (see structural analysis)'),
-        ('Nozzle material', 'Graphite / ablative composite'),
-        ('Injector material', 'Aluminum 6061-T6'),
-        ('Pressure test requirement', '1.5 × MEOP hydrostatic before firing'),
+        ('Nozzle type / half angles',
+         f"{noz_type}; conv "
+         f"{('%.1f deg' % conv_deg) if conv_deg else 'n/a'}, div "
+         f"{('%.1f deg' % div_deg) if div_deg else 'n/a'}"),
+        ('Injector orifices',
+         (f"{spec['n_orifices']} x d{spec['orifice_diameter_mm']:.2f} mm "
+          f"({spec['type'] or 'type n/a'})")
+         if (spec['n_orifices'] and spec['orifice_diameter_mm'])
+         else NOT_AVAILABLE_SPEC),
+        ('Injector pressure drop',
+         f"{spec['pressure_drop_bar']:.2f} bar" if spec['pressure_drop_bar']
+         else NOT_AVAILABLE_SPEC),
+        ('Chamber material', mat_name or NOT_AVAILABLE_SPEC),
+        ('Nozzle material',
+         (motor_results or {}).get('nozzle_material')
+         or (motor_results or {}).get('throat_material') or NOT_AVAILABLE_SPEC),
+        ('Injector material',
+         (motor_results or {}).get('injector_material') or NOT_AVAILABLE_SPEC),
+        ('Pressure test requirement', '1.5 x MEOP hydrostatic before firing'),
     ]
     y = page_h - 45 * MM
     c.setFont('Helvetica-Bold', 11)

@@ -268,10 +268,34 @@ class OpenSourcePropellantAPI:
         
         return properties
     
-    def get_coolprop_properties(self, fluid_name: str, temperature: float = 298.15, pressure: float = 101325) -> Dict:
-        """Get properties from CoolProp (requires CoolProp library)"""
+    # Itici gazlarin GERCEK depolama durumu (v2.5.2 duzeltmesi).
+    # Eski surum her akiskani 298.15 K / 1 atm'de soruyordu; LOX 90.2 K'de,
+    # LH2 20.3 K'de kayniyor, yani o kosulda ikisi de GAZ. Sonuc: yogunluk
+    # 1141 yerine ~1.3 kg/m3 donuyor ve tank hacmi ~900 kat yanlis cikiyordu.
+    # Kriyojenler normal kaynama noktasinda doymus SIVI olarak sorulur;
+    # kendinden basincli N2O oda sicakliginda doymus sivi olarak.
+    DEFAULT_STORAGE_STATE = {
+        'Oxygen':        {'mode': 'saturated_liquid', 'T': 90.19,  'label': 'saturated liquid at NBP (90.2 K)'},
+        'Hydrogen':      {'mode': 'saturated_liquid', 'T': 20.28,  'label': 'saturated liquid at NBP (20.3 K)'},
+        'Methane':       {'mode': 'saturated_liquid', 'T': 111.67, 'label': 'saturated liquid at NBP (111.7 K)'},
+        'Nitrogen':      {'mode': 'saturated_liquid', 'T': 77.36,  'label': 'saturated liquid at NBP (77.4 K)'},
+        'NitrousOxide':  {'mode': 'saturated_liquid', 'T': 293.15, 'label': 'saturated liquid at 293 K (self-pressurising)'},
+        'CarbonDioxide': {'mode': 'saturated_liquid', 'T': 293.15, 'label': 'saturated liquid at 293 K'},
+        'Ammonia':       {'mode': 'saturated_liquid', 'T': 293.15, 'label': 'saturated liquid at 293 K'},
+        'Water':         {'mode': 'compressed',       'T': 298.15, 'label': 'liquid at 298 K, 1 atm'},
+    }
+
+    def get_coolprop_properties(self, fluid_name: str, temperature: float = None,
+                                pressure: float = None) -> Dict:
+        """Get properties from CoolProp at the fluid's real storage state.
+
+        temperature/pressure verilmezse akiskanin DEFAULT_STORAGE_STATE
+        girisi kullanilir (kriyojenler icin doymus sivi). Cagiran acikca bir
+        sicaklik verirse ona uyulur; o durumda donen 'phase' alani kullaniciya
+        hangi fazda oldugunu soyler.
+        """
         properties = {}
-        
+
         try:
             import CoolProp.CoolProp as CP
             
@@ -298,30 +322,51 @@ class OpenSourcePropellantAPI:
             }
             
             cp_name = coolprop_names.get(fluid_name.lower(), fluid_name)
-            
+
+            # Depolama durumunu belirle: cagiran vermediyse akiskanin gercek
+            # saklama kosulu kullanilir (kriyojende doymus sivi).
+            state = self.DEFAULT_STORAGE_STATE.get(cp_name)
+            state_label = None
+            if temperature is None:
+                if state is not None:
+                    temperature = state['T']
+                    state_label = state['label']
+                    if state['mode'] == 'saturated_liquid':
+                        try:
+                            pressure = CP.PropsSI('P', 'T', temperature, 'Q', 0, cp_name)
+                        except Exception:
+                            pressure = pressure or 101325
+                else:
+                    temperature = 298.15
+                    state_label = 'ambient (298 K, 1 atm) - no storage state defined for this fluid'
+            else:
+                state_label = f'user-specified ({temperature:.1f} K)'
+            if pressure is None:
+                pressure = 101325
+
             # Get properties at specified conditions (with error handling)
             properties = {}
             
-            try:
-                properties['density'] = CP.PropsSI('D', 'T', temperature, 'P', pressure, cp_name)
-            except:
-                pass
-            
-            try:
-                properties['specific_heat'] = CP.PropsSI('C', 'T', temperature, 'P', pressure, cp_name)
-            except:
-                pass
-            
-            try:
-                properties['thermal_conductivity'] = CP.PropsSI('L', 'T', temperature, 'P', pressure, cp_name)
-            except:
-                # Some fluids don't have thermal conductivity models
-                properties['thermal_conductivity'] = None
-            
-            try:
-                properties['viscosity'] = CP.PropsSI('V', 'T', temperature, 'P', pressure, cp_name)
-            except:
-                pass
+            # Doyma noktasinda (T, P) cifti BELIRSIZDIR (sivi ve buhar bir
+            # arada), CoolProp bu sorguyu reddeder. Doymus sivi icin kalite
+            # Q=0 ile sorulur; sikistirilmis/asiri isitilmis halde (T, P).
+            saturated = bool(state and state.get('mode') == 'saturated_liquid'
+                             and state_label and 'user-specified' not in state_label)
+            if saturated:
+                args = ('T', temperature, 'Q', 0)
+            else:
+                args = ('T', temperature, 'P', pressure)
+
+            # Basarisiz sorguda anahtari HIC KOYMA. None koymak, asagi
+            # akistaki `.get(key, yedek)` geri dususlerini kiriyor (cevrimdisi
+            # veri deposu bu yolla devreye giriyor). Eksik anahtar = "bu
+            # kaynaktan gelmedi" demek; uydurma deger uretilmiyor.
+            for key, symbol in (('density', 'D'), ('specific_heat', 'C'),
+                                ('thermal_conductivity', 'L'), ('viscosity', 'V')):
+                try:
+                    properties[key] = CP.PropsSI(symbol, *args, cp_name)
+                except Exception:
+                    pass
             
             try:
                 properties['critical_temperature'] = CP.PropsSI('Tcrit', cp_name)
@@ -330,10 +375,22 @@ class OpenSourcePropellantAPI:
             except:
                 pass
             
-            properties['source'] = 'CoolProp'
-            
+            properties['source'] = 'CoolProp (NIST REFPROP-based)'
+            properties['state_temperature_K'] = temperature
+            properties['state_pressure_Pa'] = pressure
+            properties['state'] = state_label
+            # Faz teyidi: kullanici bir sicaklik dayattiysa sivi mi gaz mi
+            # oldugunu ACIKCA soyle (sessizce gaz yogunlugu dondurme).
+            if saturated:
+                properties['phase'] = 'liquid (saturated)'
+            else:
+                try:
+                    properties['phase'] = CP.PhaseSI('T', temperature, 'P', pressure, cp_name)
+                except Exception:
+                    properties['phase'] = None
+
             # Get saturation properties if below critical temperature
-            if temperature < properties['critical_temperature']:
+            if properties.get('critical_temperature') and temperature < properties['critical_temperature']:
                 try:
                     properties['vapor_pressure'] = CP.PropsSI('P', 'T', temperature, 'Q', 0, cp_name)
                     properties['heat_of_vaporization'] = CP.PropsSI('H', 'T', temperature, 'Q', 1, cp_name) - \

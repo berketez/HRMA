@@ -331,13 +331,18 @@ def calculate():
             combustion_type=data.get('combustion_type', 'infinite'),
             chamber_diameter_input=data.get('chamber_diameter_input', 0),
             fuel_type=data.get('fuel_type', 'htpb'),
+            oxidizer_type=data.get('oxidizer_type', 'n2o'),
+            injector_type=data.get('injector_type', 'showerhead'),
+            initial_port_diameter=data.get('initial_port_diameter') or None,
+            initial_gox=data.get('mass_flux_chamber') or None,
+            tank_temperature=data.get('oxidizer_temp') or None,
             motor_name=data.get('motor_name', ''),
             motor_description=data.get('motor_description', '')
         )
-        
+
         # Calculate motor geometry and performance
         motor_results = engine.calculate()
-        
+
         # Design injector
         injector = InjectorDesign(
             mdot_ox=motor_results['mdot_ox'],
@@ -345,6 +350,8 @@ def calculate():
             oxidizer_phase=data.get('oxidizer_phase', 'liquid'),
             oxidizer_density=data.get('oxidizer_density', 1220),
             oxidizer_viscosity=data.get('oxidizer_viscosity', 0.0002),
+            oxidizer_temp=data.get('oxidizer_temp', 293),
+            oxidizer_type=data.get('oxidizer_type', 'n2o'),
             tank_pressure=data.get('tank_pressure', 50.0),
             pressure_drop=data.get('pressure_drop', 0),
             discharge_coefficient=data.get('discharge_coefficient', 0.7),
@@ -403,10 +410,10 @@ def calculate():
             # Fallback to old version if new one fails
             injector_plot = create_injector_plot(injector_results, data['injector_type'])
         performance_plots = create_performance_plots(motor_results, injector_results)
-        
-        # Use performance_plots as the main injector plot since it includes regression rate
-        if performance_plots:
-            injector_plot = performance_plots
+
+        # plots.injector = enjektör tip şeması, plots.performance = dashboard.
+        # (Eski davranış şemayı dashboard ile eziyordu; ayrı div'lerde
+        # gösterilir — advanced.html #injector_plot / #performance_plots.)
         
         # Create advanced analysis visualizations
         #
@@ -666,6 +673,11 @@ def quick_geometry():
             combustion_type=data.get('combustion_type', 'infinite'),
             chamber_diameter_input=data.get('chamber_diameter_input', 0),
             fuel_type=data.get('fuel_type', 'htpb'),
+            oxidizer_type=data.get('oxidizer_type', 'n2o'),
+            injector_type=data.get('injector_type', 'showerhead'),
+            initial_port_diameter=data.get('initial_port_diameter') or None,
+            initial_gox=data.get('mass_flux_chamber') or None,
+            tank_temperature=data.get('oxidizer_temp') or None,
             motor_name=data.get('motor_name', ''),
             motor_description=data.get('motor_description', '')
         )
@@ -708,15 +720,24 @@ def transient_analysis():
             of_ratio=data.get('of_ratio', 1.0),
             chamber_pressure=data.get('chamber_pressure', 20.0),
             atmospheric_pressure=data.get('atmospheric_pressure', 1.0),
+            chamber_temperature=data.get('chamber_temperature'),
+            gamma=data.get('gamma', 1.25),
+            gas_constant=data.get('gas_constant'),
             l_star=data.get('l_star', 1.0),
             expansion_ratio=data.get('expansion_ratio', 0),
             nozzle_type=data.get('nozzle_type', 'conical'),
+            thrust_coefficient=data.get('thrust_coefficient', 0),
             regression_a=data.get('regression_a'),
             regression_n=data.get('regression_n'),
             fuel_density=data.get('fuel_density'),
+            combustion_type=data.get('combustion_type', 'infinite'),
             chamber_diameter_input=data.get('chamber_diameter_input', 0),
             fuel_type=data.get('fuel_type', 'htpb'),
             oxidizer_type=data.get('oxidizer_type', 'n2o'),
+            injector_type=data.get('injector_type', 'showerhead'),
+            initial_port_diameter=data.get('initial_port_diameter') or None,
+            initial_gox=data.get('mass_flux_chamber') or None,
+            tank_temperature=data.get('tank_temperature') or data.get('oxidizer_temp') or None,
         )
         engine.calculate()
 
@@ -1483,6 +1504,14 @@ def calculate_solid():
         except Exception:
             traceback.print_exc()  # kesit çizimi hesabı düşürmesin
 
+        # Hibrit paritesi (v2.5.2): performans panosu artık motor tipini
+        # sonuç sözlüğünden kendisi tespit ediyor, tek argümanla çağrılır.
+        try:
+            sanitized_results.setdefault('plots', {})['performance'] = \
+                create_performance_plots(sanitized_results)
+        except Exception:
+            traceback.print_exc()  # pano hesabı düşürmesin
+
         print("Solid motor calculation successful!")
         return jsonify(sanitized_results)
         
@@ -1520,6 +1549,13 @@ def calculate_liquid():
             raise ValueError(msg)
         
         # Create liquid motor instance
+        # v2.5.2: formdaki ~55 sayısal girdinin HİÇBİRİ motora ulaşmıyordu
+        # (kurucu 7 parametre alıyordu, katı motordaki overrides bağlantısı
+        # sıvıda hiç kurulmamıştı). Kullanıcı genişleme oranı, L*, soğutma
+        # kanalı, enjektör ΔP gibi onlarca alanı doldurup sonucun değişmediğini
+        # göremiyordu. Motor artık aralık doğrulamalı `overrides` kabul ediyor;
+        # bağlanamayan alanlar sonuçta `unwired_inputs`, aralık dışı değerler
+        # `input_warnings` ile AÇIKÇA beyan ediliyor (sessiz yutma yok).
         engine = LiquidRocketEngine(
             thrust=thrust,
             chamber_pressure=chamber_pressure,
@@ -1527,7 +1563,8 @@ def calculate_liquid():
             fuel_type=data.get('fuel_type', 'rp1'),
             oxidizer_type=data.get('oxidizer_type', 'lox'),
             cooling_type=data.get('cooling_type', 'regenerative'),
-            injector_type=data.get('injector_type', 'impinging')
+            injector_type=data.get('injector_type', 'impinging'),
+            overrides=data
         )
         
         # Calculate engine performance
@@ -1544,6 +1581,14 @@ def calculate_liquid():
                 create_improved_motor_cross_section(geo, motor_type='liquid')
         except Exception:
             traceback.print_exc()  # kesit çizimi hesabı düşürmesin
+
+        # Hibrit paritesi (v2.5.2): performans panosu artık motor tipini
+        # sonuç sözlüğünden kendisi tespit ediyor, tek argümanla çağrılır.
+        try:
+            sanitized_results.setdefault('plots', {})['performance'] = \
+                create_performance_plots(sanitized_results)
+        except Exception:
+            traceback.print_exc()  # pano hesabı düşürmesin
 
         print("Liquid motor calculation successful!")
         return jsonify(sanitized_results)
@@ -2486,11 +2531,12 @@ def export_openrocket_files():
         flight_data = openrocket_exporter.create_flight_simulation_data(motor_data, rocket_params)
         
         # Generate motor designation
-        total_impulse = motor_data.get('total_impulse', 10000)
-        motor_class = openrocket_exporter._get_motor_class(total_impulse)
-        throat_diameter = motor_data.get('throat_diameter', 0.02) * 1000  # mm
-        motor_name = motor_data.get('motor_name', 'UZAYTEK-HRM')
-        motor_designation = f"{motor_class}{int(throat_diameter)}-{motor_name}"
+        # v2.5.2 (Codex bulgusu): burada kendi kopyası kuruluyordu ve
+        # throat_diameter'ı METRE varsayıp 1000 ile çarpıyordu. Katı motorda
+        # o alan zaten mm olduğu için isimlendirme "N47927-..." çıkıyordu.
+        # Tek doğruluk kaynağı dışa aktarıcının kendi çözücüsüdür (normalize
+        # motor_geometry varsa ondan, yoksa büyüklük çıkarımıyla).
+        motor_designation = openrocket_exporter._designation(motor_data)
         
         return jsonify({
             'status': 'success',
@@ -3019,29 +3065,84 @@ def get_propellant_properties():
 
 @app.route('/api/find-optimum-of', methods=['POST'])
 def find_optimum_of_ratio():
-    """Find optimum O/F ratio for maximum ISP"""
+    """Find optimum O/F ratio for maximum ISP.
+
+    Tek doğruluk kaynağı: CombustionAnalyzer'ın gerçek denge taraması.
+    Desteklenmeyen yakıt/oksitleyici çiftinde sessiz 7.0 varsayılanı
+    dönmek yerine 400 + açıklayıcı hata döner (kullanıcı şikayeti:
+    propellant seçilmeden 'optimum' üretiliyordu).
+    """
     try:
         data = request.json
         motor_type = data.get('motor_type', 'hybrid')
         oxidizer = data.get('oxidizer', 'n2o')
         fuel = data.get('fuel', 'htpb')
         chamber_pressure = data.get('chamber_pressure', 20.0)
-        
-        if motor_type == 'hybrid':
-            result = of_optimizer.find_optimum_hybrid(oxidizer, fuel, chamber_pressure)
-        elif motor_type == 'liquid':
-            result = of_optimizer.find_optimum_liquid(oxidizer, fuel, chamber_pressure)
-        else:
-            raise ValueError(f"Unknown motor type: {motor_type}")
-        
-        # Add recommendation
-        result['recommendation'] = of_optimizer.get_recommendation(motor_type, oxidizer, fuel)
-        
+
+        if fuel in ('custom', 'mixture') or oxidizer == 'custom':
+            return jsonify({
+                'status': 'error',
+                'error': ('Optimum O/F requires a defined propellant pair. '
+                          'Select a specific fuel and oxidizer first; custom or mixture '
+                          'compositions need a full combustion analysis run.')
+            }), 400
+
+        from hrma.engines.combustion_analysis import CombustionAnalyzer
+        analyzer = CombustionAnalyzer()
+        fuel_composition = {fuel: 100.0}
+        opt = analyzer.find_optimum_of_ratio(
+            fuel_composition, oxidizer, chamber_pressure
+        )
+        max_isp = float(opt.get('maximum_isp', 0) or 0)
+        optimum_of = float(opt.get('optimum_of_ratio', 0) or 0)
+        # minimize_scalar başarısız noktalara -1000 cezası verir; tüm
+        # noktalar başarısızsa max_isp fiziksel bandın dışında kalır.
+        if not (50.0 < max_isp < 600.0) or optimum_of <= 0:
+            return jsonify({
+                'status': 'error',
+                'error': (f'No reliable combustion data for {oxidizer.upper()}/{fuel.upper()}. '
+                          'Optimum O/F cannot be determined for this pair — verify the '
+                          'propellant selection.')
+            }), 400
+
+        # Isp-O/F eğrisi (UI performance_curve bekliyor)
+        performance_curve = None
+        try:
+            import numpy as _np
+            of_scan = _np.linspace(max(0.5, optimum_of * 0.4), optimum_of * 1.8, 15)
+            isp_vals = []
+            for _of in of_scan:
+                try:
+                    r = analyzer.analyze_combustion(
+                        fuel_composition, oxidizer, float(_of), chamber_pressure)
+                    isp_vals.append(float(r['performance']['isp']))
+                except Exception:
+                    isp_vals.append(None)
+            if any(v is not None for v in isp_vals):
+                performance_curve = {
+                    'of_ratios': [float(v) for v in of_scan],
+                    'isp_values': isp_vals,
+                }
+        except Exception as curve_err:
+            app.logger.info(f"Optimum O/F curve skipped: {curve_err}")
+
+        recommendation = None
+        try:
+            recommendation = of_optimizer.get_recommendation(motor_type, oxidizer, fuel)
+        except Exception:
+            pass
+
         return jsonify({
             'status': 'success',
-            **result
+            'optimum_of_ratio': optimum_of,
+            'max_isp': max_isp,
+            'method': 'combustion equilibrium scan (CombustionAnalyzer)',
+            'performance_curve': performance_curve,
+            'recommendation': recommendation,
         })
-        
+
+    except (ValueError, KeyError) as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
@@ -3282,7 +3383,14 @@ def analyze_structural_safety():
         # İstemci gönderirse geçir; 0/boş "termal analizi atla" demektir.
         if data.get('chamber_temperature'):
             motor_data['chamber_temperature'] = float(data['chamber_temperature'])
-        
+
+        # Isı transfer analizinden gelen gerçek cidar sıcaklıkları varsa
+        # geçir — yapısal modül termal gradyanı tahmin etmek yerine bunları
+        # kullanır (v2.5.2 sözleşmesi, structural_analysis._estimate_wall_delta_T).
+        for wall_key in ('wall_temperature_hot', 'wall_temperature_cold'):
+            if data.get(wall_key):
+                motor_data[wall_key] = float(data[wall_key])
+
         # Initialize structural analyzer
         structural_analyzer = StructuralAnalyzer()
         
@@ -3899,14 +4007,26 @@ def advanced_performance_analysis():
         
         if analysis_type == '3d_surface':
             # Chamber Pressure vs Mixture Ratio vs Isp (NASA SP-125)
+            # v2.5.2 (Codex bulgusu): yakıt/oksitleyici KİMLİĞİ bu sözlüğe
+            # konmuyordu, bu yüzden LOX/RP-1 koşusunda bile denge yüzeyi
+            # _resolve_surface_propellant'ın HTPB/N2O referans çiftiyle
+            # çözülüyordu. Kimlik ve tarama aralıkları artık aktarılır;
+            # verilmezse görselleştirme "referans çift" uyarısını basar.
             engine_data = {
                 'base_isp': data.get('base_isp', 300),
                 'optimal_of_ratio': data.get('optimal_of_ratio', 3.5),
-                'optimal_chamber_pressure': data.get('chamber_pressure', 50)
+                'optimal_chamber_pressure': data.get('chamber_pressure', 50),
+                'fuel_type': data.get('fuel_type'),
+                'fuel_composition': data.get('fuel_composition'),
+                'oxidizer_type': data.get('oxidizer_type'),
+                'pc_range': data.get('pc_range'),
+                'of_range': data.get('of_range'),
+                'grid_n': data.get('grid_n'),
             }
-            
+            engine_data = {k: v for k, v in engine_data.items() if v is not None}
+
             plot_json = create_chamber_pressure_mixture_ratio_3d_surface(engine_data)
-            
+
             return jsonify({
                 'status': 'success',
                 'plot_data': plot_json,
@@ -3916,15 +4036,39 @@ def advanced_performance_analysis():
                     'description': 'Shows optimum O/F ratio and chamber pressure regions with combustion instability bands'
                 }
             })
-            
+
         elif analysis_type == 'nozzle_mach':
             # Nozzle Mach-Area Ratio Contour (NASA-STD-5012)
+            # v2.5.2 (Codex bulgusu): yalnız throat_area / nozzle_length /
+            # expansion_ratio aktarılıyordu; gaz hâli (gamma, MW, Tc), oda
+            # basıncı, hazne çapı ve ortam basıncı DÜŞÜYORDU. Çözücü kendi
+            # 20 bar / gamma 1.20 / 1 atm varsayılanlarına iniyor, oda
+            # basıncını değiştirmek grafiği hiç değiştirmiyordu. Aynı ısı
+            # akısı dalındaki desen uygulanır: alan varsa geçilir, yoksa
+            # hiç konmaz ve figür "assumed" listesinde açıkça yazar.
             cfd_data = {
                 'throat_area': data.get('throat_area', 0.001),
+                'throat_diameter': data.get('throat_diameter'),
+                'exit_diameter': data.get('exit_diameter'),
                 'nozzle_length': data.get('nozzle_length', 0.1),
-                'expansion_ratio': data.get('expansion_ratio', 16)
+                'expansion_ratio': data.get('expansion_ratio', 16),
+                'chamber_diameter': data.get('chamber_diameter'),
+                'chamber_pressure': data.get('chamber_pressure'),
+                'chamber_temperature': data.get('chamber_temperature'),
+                'gamma': data.get('gamma'),
+                'molecular_weight': data.get('molecular_weight'),
+                # Görselleştirme sözleşmesi: ambient_pressure PASCAL
+                # (NozzleFlow1D.from_motor_data ambient_pressure=Pa bekler).
+                # Bar cinsinden gönderen çağıranlar için ayrı anahtar.
+                'ambient_pressure': (
+                    data.get('ambient_pressure')
+                    if data.get('ambient_pressure') is not None
+                    else (float(data['ambient_pressure_bar']) * 1e5
+                          if data.get('ambient_pressure_bar') is not None
+                          else None)),
             }
-            
+            cfd_data = {k: v for k, v in cfd_data.items() if v is not None}
+
             plot_json = create_nozzle_mach_area_ratio_contour(cfd_data)
             
             return jsonify({
@@ -3939,13 +4083,30 @@ def advanced_performance_analysis():
             
         elif analysis_type == 'heat_flux':
             # Wall Heat Flux Waterfall (NASA SP-8124)
+            # v2.5.2: panel throat_area / chamber_pressure / expansion_ratio
+            # gönderiyordu ama bu sözlüğe konmuyordu, dolayısıyla ısı akısı
+            # GERÇEK Bartz hesabına giremeyip "not available" durumuna
+            # düşüyordu. Üç alan da geçiriliyor; ek olarak malzeme, gaz
+            # özellikleri ve kütle debisi de varsa aktarılır.
             thermal_data = {
                 'burn_time': data.get('burn_time', 30),
                 'chamber_length': data.get('chamber_length', 0.5),
                 'nozzle_length': data.get('nozzle_length', 0.1),
                 'base_heat_flux': data.get('base_heat_flux', 2e6),
-                'critical_heat_flux': data.get('critical_heat_flux', 4.0)
+                'critical_heat_flux': data.get('critical_heat_flux', 4.0),
+                'molecular_weight': data.get('molecular_weight'),
+                'throat_area': data.get('throat_area'),
+                'throat_diameter': data.get('throat_diameter'),
+                'chamber_pressure': data.get('chamber_pressure'),
+                'chamber_temperature': data.get('chamber_temperature'),
+                'expansion_ratio': data.get('expansion_ratio'),
+                'chamber_diameter': data.get('chamber_diameter'),
+                'mdot_total': data.get('mdot_total'),
+                'gamma': data.get('gamma'),
+                'material': data.get('material'),
+                'c_star': data.get('c_star'),
             }
+            thermal_data = {k: v for k, v in thermal_data.items() if v is not None}
             
             plot_json = create_wall_heat_flux_waterfall_plot(thermal_data)
             
@@ -4061,6 +4222,115 @@ def _build_pdf_analysis_sections(motor_data, analysis_results):
     # ---- Güvenlik özeti: istekle geldiyse aynen korunur ----
     # (out zaten istekten kopyalandı; 'safety' anahtarına dokunulmaz.)
     return out
+
+
+@app.route('/api/materials', methods=['GET'])
+def get_materials_catalog():
+    """Merkezi malzeme kütüphanesini döndürür.
+
+    Sözleşme (v2.5.2): {ok, materials: {key: {name, source, tags, ...}},
+    aliases: {...}}. Paneller (static/js/materials_catalog.js) select
+    listelerini buradan doldurur; endpoint yoksa hardcoded fallback'e düşer.
+    """
+    try:
+        from hrma.data.materials_db import MATERIALS, ALIASES
+        return jsonify(sanitize_json_values({
+            'ok': True,
+            'materials': MATERIALS,
+            'aliases': ALIASES,
+        }))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/propellants', methods=['GET'])
+def get_propellants_catalog():
+    """Merkezi katı yakıt kataloğunu döndürür.
+
+    Sözleşme (v2.5.2) — /api/materials ile birebir aynı desen:
+        {ok: true,
+         propellants: {key: {...tüm kayıt alanları}},
+         aliases: {alias: canonical_key}}
+    Katı sayfası (static/js/propellant_catalog.js) yakıt seçicisini ve
+    otomatik dolan özellik alanlarını buradan besler; endpoint yoksa
+    sayfa kendi hardcoded fallback listesine düşer.
+
+    Tek doğruluk kaynağı: hrma/data/propellants_db.py — yanma hızı yasası
+    olan yakıtlarda (KNDX/KNSB) a-n değerleri merkezi burn_rate_db'den
+    türetilir, burada ayrıca yazılmaz.
+    """
+    try:
+        from hrma.data.propellants_db import PROPELLANTS, ALIASES
+        return jsonify(sanitize_json_values({
+            'ok': True,
+            'propellants': PROPELLANTS,
+            'aliases': ALIASES,
+        }))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/export-xlsx', methods=['POST'])
+def export_xlsx():
+    """Genel amaçlı Excel (xlsx) dışa aktarma.
+
+    Girdi: {filename: 'name.xlsx', sheets: [{name, headers: [...],
+    rows: [[...], ...]}]}. Transient sonuçları, regresyon analizi ve
+    genel analiz özeti bu uçtan insan-dostu Excel olarak iner
+    (kullanıcı şikayeti: .json indirmesi kullanışsızdı).
+    """
+    try:
+        from io import BytesIO
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+        from openpyxl.utils import get_column_letter
+
+        data = request.json or {}
+        sheets = data.get('sheets') or []
+        if not sheets:
+            return jsonify({'status': 'error', 'error': 'No sheets provided'}), 400
+
+        wb = Workbook()
+        wb.remove(wb.active)
+        header_font = Font(bold=True)
+        for idx, sheet in enumerate(sheets[:20]):
+            title = str(sheet.get('name') or f'Sheet{idx + 1}')[:31]
+            ws = wb.create_sheet(title=title)
+            headers = sheet.get('headers') or []
+            rows = sheet.get('rows') or []
+            if headers:
+                ws.append([str(h) for h in headers])
+                for cell in ws[1]:
+                    cell.font = header_font
+            for row in rows[:100000]:
+                ws.append([
+                    (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool)
+                     else ('' if v is None else str(v)))
+                    for v in (row if isinstance(row, (list, tuple)) else [row])
+                ])
+            # Kolon genişliklerini başlığa göre kabaca ayarla
+            for col_idx, h in enumerate(headers, start=1):
+                ws.column_dimensions[get_column_letter(col_idx)].width = max(12, min(32, len(str(h)) + 4))
+
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        filename = str(data.get('filename') or 'hrma_export.xlsx')
+        if not filename.endswith('.xlsx'):
+            filename += '.xlsx'
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename,
+        )
+    except ImportError:
+        return jsonify({
+            'status': 'error',
+            'error': 'openpyxl is not installed on the server; falling back to CSV is recommended.'
+        }), 501
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
 @app.route('/api/export-pdf/<report_type>', methods=['POST'])

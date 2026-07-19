@@ -169,7 +169,7 @@ HRMA requires `numpy<2`. If another tool upgraded NumPy:
 pip install "numpy<2"
 ```
 
-If you are on Python 3.14, downgrade to 3.10-3.13 — the compiled
+If you are on Python 3.14, downgrade to 3.10-3.13, because the compiled
 dependencies have no 3.14 wheels yet, and `hrma/run.py` refuses unsupported
 interpreters with a clear message.
 

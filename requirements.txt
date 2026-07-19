@@ -15,6 +15,7 @@ matplotlib>=3.7.0
 
 # Data analysis
 pandas>=2.0.0
+openpyxl>=3.1.0        # /api/export-xlsx insan-dostu Excel dışa aktarma (v2.5.2)
 
 # 3D CAD and geometry
 shapely>=2.0.0         # star grain gerçek yanma-yüzeyi modeli (poligon ofseti)

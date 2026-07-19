@@ -7,7 +7,19 @@ SRC="/Users/apple/Desktop/dosyalar/HRMA"
 W="$B/win/payload"
 
 echo "[1/6] Gömülü Python..."
-rm -rf "$W"
+# macOS Finder/Spotlight, silme sürerken .DS_Store dosyalarını YENİDEN yaratıyor;
+# bu durumda rm -rf "Directory not empty" ile düşüyor ve set -e yüzünden derleme
+# yarıda kalıyor (2026-07-20'de payload bu şekilde yarım silinmiş halde kaldı).
+# Önce .DS_Store'ları temizle, sonra ağacı sil ve gerçekten gittiğini doğrula.
+if [ -d "$W" ]; then
+    find "$W" -name '.DS_Store' -delete 2>/dev/null || true
+    rm -rf "$W" 2>/dev/null || true
+    if [ -d "$W" ]; then
+        find "$W" -name '.DS_Store' -delete 2>/dev/null || true
+        rm -rf "$W"
+    fi
+fi
+[ -d "$W" ] && { echo "HATA: $W silinemedi, derleme durduruldu"; exit 1; }
 mkdir -p "$W/python" "$W/libs" "$W/app"
 unzip -q "$B/runtime/python-embed-win.zip" -d "$W/python"
 

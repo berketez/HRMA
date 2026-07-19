@@ -15,28 +15,40 @@
     if (typeof window === 'undefined' || !window.AnalysisDock) return;
 
     const U = window.AnalysisDock.ui;
+    const T = U.t;                       // çeviri kısayolu
 
     // Anahtarlar safety_analysis.py sözlükleriyle birebir
     const PROPELLANTS = [
-        ['composite', 'Composite (APCP/HTPB)'],
-        ['double_base', 'Double base (NC/NG)'],
-        ['composite_db', 'Composite double base'],
-        ['liquid_biprop', 'Liquid bipropellant'],
-        ['liquid_monoprop', 'Liquid monopropellant'],
-        ['solid_monoprop', 'Solid monopropellant (AP)'],
+        ['composite', 'Composite (APCP/HTPB)', 'prop.composite'],
+        ['double_base', 'Double base (NC/NG)', 'prop.doubleBase'],
+        ['composite_db', 'Composite double base', 'prop.compositeDb'],
+        ['liquid_biprop', 'Liquid bipropellant', 'prop.liquidBiprop'],
+        ['liquid_monoprop', 'Liquid monopropellant', 'prop.liquidMonoprop'],
+        ['solid_monoprop', 'Solid monopropellant (AP)', 'prop.solidMonoprop'],
     ];
     const FACILITIES = [
-        ['test_stand', 'Test stand'],
-        ['manufacturing', 'Manufacturing'],
-        ['transport', 'Transport'],
-        ['launch', 'Launch site'],
+        ['test_stand', 'Test stand', 'fac.testStand'],
+        ['manufacturing', 'Manufacturing', 'fac.manufacturing'],
+        ['transport', 'Transport', 'fac.transport'],
+        ['launch', 'Launch site', 'fac.launch'],
     ];
     const MOTOR_TYPES = [
-        ['hybrid', 'Hybrid'],
-        ['liquid', 'Liquid'],
-        ['solid', 'Solid'],
+        ['hybrid', 'Hybrid', 'motor.hybrid'],
+        ['liquid', 'Liquid', 'motor.liquid'],
+        ['solid', 'Solid', 'motor.solid'],
     ];
 
+    // Dil değişiminde tazelenmesi için render sırasında kurulur
+    function areaLabels() {
+        return {
+            structural: T('risk.structural', 'Structural'),
+            pressure: T('risk.pressure', 'Pressure'),
+            thermal: T('risk.thermal', 'Thermal'),
+            explosive: T('risk.explosive', 'Explosive'),
+            toxic: T('risk.toxic', 'Toxic'),
+            fire: T('risk.fire', 'Fire'),
+        };
+    }
     const AREA_LABELS = {
         structural: 'Structural', pressure: 'Pressure', thermal: 'Thermal',
         explosive: 'Explosive', toxic: 'Toxic', fire: 'Fire',
@@ -87,10 +99,15 @@
     function riskMatrixHtml(risk) {
         const rm = risk.risk_matrix || {};
         const axes = rm.axes || {};
-        const likelihood = axes.likelihood
-            || ['Rare', 'Unlikely', 'Possible', 'Likely', 'Frequent'];
-        const severity = axes.severity
-            || ['Negligible', 'Minor', 'Major', 'Critical', 'Catastrophic'];
+        const likelihood = axes.likelihood || [
+            T('risk.rare', 'Rare'), T('risk.unlikely', 'Unlikely'),
+            T('risk.possible', 'Possible'), T('risk.likely', 'Likely'),
+            T('risk.frequent', 'Frequent')];
+        const severity = axes.severity || [
+            T('risk.negligible', 'Negligible'), T('risk.minor', 'Minor'),
+            T('risk.major', 'Major'), T('risk.critical', 'Critical'),
+            T('risk.catastrophic', 'Catastrophic')];
+        const LBL = areaLabels();
         const risks = risk.individual_risks || {};
 
         // Hücre → köşegen chip eşlemesi
@@ -124,7 +141,7 @@
                 const key = li + ':' + si;
                 const cellChips = (chips[key] || []).map(function (area) {
                     return `<span class="hd-rm-chip" data-risk="${area}"
-                        title="${AREA_LABELS[area] || area}: score ${U.fmt(risks[area], 1)} / 5"
+                        title="${LBL[area] || area}: ${T('common.score', 'score')} ${U.fmt(risks[area], 1)} / 5"
                         style="font-family:var(--hd-mono); font-size:0.6rem;
                         border:1px solid var(--hd-ink-dim, #7d97a5); border-radius:4px;
                         padding:1px 5px; color:var(--hd-ink, #cfe8f2);
@@ -143,25 +160,27 @@
         }
         html += '</div>';
         html += `<p style="font-size:0.68rem; color:var(--hd-ink-faint, #46606d);
-            font-family:var(--hd-mono); margin:4px 0 10px;">
-            Rows: likelihood · Columns: severity · Single-score risks are placed on
-            the diagonal (score maps to both axes).</p>`;
+            font-family:var(--hd-mono); margin:4px 0 10px;">${
+            T('panel.safety.matrixNote',
+              'Rows: likelihood · Columns: severity · Single-score risks are placed on '
+              + 'the diagonal (score maps to both axes).')}</p>`;
         return html;
     }
 
     function priorityTable(risk) {
         const pri = risk.mitigation_priority || [];
         if (!pri.length) return '';
+        const LBL = areaLabels();
         let html = `<table style="${U.TBL}">
             <thead><tr>
-                <th style="${U.TD} text-align:left;">Priority</th>
-                <th style="${U.TD} text-align:left;">Risk Area</th>
-                <th style="${U.TD}">Score</th>
+                <th style="${U.TD} text-align:left;">${T('panel.safety.priority', 'Priority')}</th>
+                <th style="${U.TD} text-align:left;">${T('panel.safety.riskArea', 'Risk Area')}</th>
+                <th style="${U.TD}">${T('panel.safety.scoreCol', 'Score')}</th>
             </tr></thead><tbody>`;
         pri.forEach(function (p) {
             html += `<tr>
                 <td style="${U.TD} font-family:var(--hd-mono);">#${p.priority}</td>
-                <td style="${U.TD}"><strong>${AREA_LABELS[p.area] || p.area}</strong></td>
+                <td style="${U.TD}"><strong>${LBL[p.area] || p.area}</strong></td>
                 <td style="${U.TD} text-align:center;">${scoreCell(p.risk_score)}</td>
             </tr>`;
         });
@@ -170,28 +189,35 @@
 
     function pressureVesselBlock(press) {
         if (!press || !Object.keys(press).length) return '';
-        let html = U.sectionTitle('Pressure Vessel Summary');
+        let html = U.sectionTitle(T('panel.safety.secVessel', 'Pressure Vessel Summary'));
         html += `<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">`
-            + U.statCard('Operating', U.fmt(press.operating_pressure_bar, 1), 'bar')
-            + U.statCard('Design', U.fmt(press.design_pressure_bar, 1), 'bar')
-            + U.statCard('Proof test', U.fmt(press.proof_pressure_bar, 1), 'bar')
-            + U.statCard('Hydrostatic test', U.fmt(press.hydrostatic_test_pressure_bar, 1), 'bar')
-            + U.statCard('Burst target', U.fmt(press.required_burst_pressure_bar, 1), 'bar', 'warn',
-                'Minimum required burst pressure')
+            + U.statCard(T('panel.safety.pOperating', 'Operating'),
+                U.fmt(press.operating_pressure_bar, 1), 'bar')
+            + U.statCard(T('panel.safety.pDesign', 'Design'),
+                U.fmt(press.design_pressure_bar, 1), 'bar')
+            + U.statCard(T('panel.safety.pProof', 'Proof test'),
+                U.fmt(press.proof_pressure_bar, 1), 'bar')
+            + U.statCard(T('panel.safety.pHydro', 'Hydrostatic test'),
+                U.fmt(press.hydrostatic_test_pressure_bar, 1), 'bar')
+            + U.statCard(T('panel.safety.pBurst', 'Burst target'),
+                U.fmt(press.required_burst_pressure_bar, 1), 'bar', 'warn',
+                T('panel.safety.pBurstTip', 'Minimum required burst pressure'))
             + '</div>';
         const rows = [];
         if (press.vessel_classification) {
-            rows.push(['Vessel classification',
+            rows.push([T('panel.safety.vesselClass', 'Vessel classification'),
                 U.badge(String(press.vessel_classification).replace(/_/g, ' '), 'info')]);
         }
         if (press.inspection_requirements) {
-            rows.push(['Inspection', press.inspection_requirements]);
+            rows.push([T('panel.safety.inspection', 'Inspection'), press.inspection_requirements]);
         }
         if (press.applicable_codes && press.applicable_codes.length) {
-            rows.push(['Applicable codes', press.applicable_codes.join(' · ')]);
+            rows.push([T('panel.safety.codes', 'Applicable codes'),
+                       press.applicable_codes.join(' · ')]);
         }
         if (press.safety_devices_required && press.safety_devices_required.length) {
-            rows.push(['Required safety devices', press.safety_devices_required.join(' · ')]);
+            rows.push([T('panel.safety.devices', 'Required safety devices'),
+                       press.safety_devices_required.join(' · ')]);
         }
         if (rows.length) html += U.kvTable(rows);
         return html;
@@ -202,19 +228,20 @@
         let badges = '';
         const boolBadge = function (label, ok) {
             if (ok == null) return '';
-            return U.badge(label + (ok ? ': OK' : ': FAIL'), ok ? 'ok' : 'err');
+            return U.badge(label + ': ' + (ok ? T('common.ok', 'OK') : T('common.fail', 'FAIL')),
+                           ok ? 'ok' : 'err');
         };
         badges += boolBadge('NFPA', comp.nfpa_compliance);
         badges += boolBadge('OSHA', comp.osha_compliance);
         badges += boolBadge('DOT', comp.dot_compliance);
         if (comp.insurance_requirements === 'REQUIRES_REVIEW') {
-            badges += U.badge('INSURANCE: REVIEW', 'warn');
+            badges += U.badge(T('panel.safety.insuranceReview', 'INSURANCE: REVIEW'), 'warn');
         }
         if (comp.local_regulations === 'REQUIRES_REVIEW') {
-            badges += U.badge('LOCAL REGS: REVIEW', 'warn');
+            badges += U.badge(T('panel.safety.localRegsReview', 'LOCAL REGS: REVIEW'), 'warn');
         }
         if (!badges) return '';
-        return U.sectionTitle('Compliance')
+        return U.sectionTitle(T('panel.safety.secCompliance', 'Compliance'))
             + `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`;
     }
 
@@ -226,8 +253,10 @@
         // ---- Üst rozetler ----
         let badges = '';
         if (risk.risk_level) {
-            badges += U.badge('OVERALL RISK: ' + risk.risk_level, riskLevelKind(risk.risk_level),
-                'Weighted overall score ' + U.fmt(risk.overall_risk_score, 2) + ' / 5');
+            badges += U.badge(T('panel.safety.overallRisk', 'OVERALL RISK') + ': ' + risk.risk_level,
+                riskLevelKind(risk.risk_level),
+                U.tf('panel.safety.overallScoreTip', { value: U.fmt(risk.overall_risk_score, 2) },
+                     'Weighted overall score {value} / 5'));
         }
         if (risk.acceptability) {
             const acc = String(risk.acceptability);
@@ -236,26 +265,29 @@
                     : acc === 'ACCEPTABLE_WITH_CONTROLS' ? 'warn' : 'err');
         }
         if (risk.overall_risk_score != null) {
-            badges += U.badge('SCORE: ' + U.fmt(risk.overall_risk_score, 2) + ' / 5',
+            badges += U.badge(T('panel.safety.scoreBadge', 'SCORE') + ': '
+                + U.fmt(risk.overall_risk_score, 2) + ' / 5',
                 bandKind(scoreBand(risk.overall_risk_score)));
         }
         let html = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`;
 
         // ---- Bireysel riskler ----
-        html += U.sectionTitle('Individual Risks (1 = lowest, 5 = highest)');
+        const LBL = areaLabels();
+        html += U.sectionTitle(T('panel.safety.secIndividual',
+            'Individual Risks (1 = lowest, 5 = highest)'));
         html += U.kvTable(Object.keys(AREA_LABELS)
             .filter(function (a) { return risks[a] != null; })
-            .map(function (a) { return [AREA_LABELS[a], scoreCell(risks[a])]; }));
+            .map(function (a) { return [LBL[a], scoreCell(risks[a])]; }));
 
         // ---- Azaltım öncelikleri ----
         const pt = priorityTable(risk);
         if (pt) {
-            html += U.sectionTitle('Mitigation Priority');
+            html += U.sectionTitle(T('panel.safety.secMitigation', 'Mitigation Priority'));
             html += pt;
         }
 
         // ---- 5x5 risk matrisi ----
-        html += U.sectionTitle('Risk Matrix (5×5)');
+        html += U.sectionTitle(T('panel.safety.secMatrix', 'Risk Matrix (5×5)'));
         html += riskMatrixHtml(risk);
 
         // ---- Basınçlı kap özeti ----
@@ -265,7 +297,8 @@
         html += complianceBadges(s.compliance);
 
         // ---- Öneriler ----
-        html += U.listBlock('Recommendations', s.recommendations, 'info');
+        html += U.listBlock(T('common.recommendations', 'Recommendations'),
+                            s.recommendations, 'info');
 
         root.innerHTML = html;
     }
@@ -273,20 +306,21 @@
     window.AnalysisDock.register({
         id: 'safety',
         title: 'Comprehensive Safety — Risk Assessment & Pressure Vessel',
+        titleKey: 'panel.safety.title',
         category: 'SAFETY',
         endpoint: '/analyze_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['motor_type', 'Motor Type', 'hybrid', MOTOR_TYPES],
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10],
-            ['thrust', 'Thrust (N)', 1000, 50],
-            ['burn_time', 'Burn Time (s)', 10, 0.5],
-            ['propellant_mass', 'Propellant Mass (kg)', 5, 0.5],
-            ['propellant_type', 'Propellant Type', 'composite', PROPELLANTS],
-            ['facility_type', 'Facility Type', 'test_stand', FACILITIES],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005],
-            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001],
+            ['motor_type', 'Motor Type', 'hybrid', MOTOR_TYPES, 'common.f.motorType'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK'],
+            ['thrust', 'Thrust (N)', 1000, 50, 'common.f.thrustN'],
+            ['burn_time', 'Burn Time (s)', 10, 0.5, 'common.f.burnTimeS'],
+            ['propellant_mass', 'Propellant Mass (kg)', 5, 0.5, 'common.f.propellantMassKg'],
+            ['propellant_type', 'Propellant Type', 'composite', PROPELLANTS, 'common.f.propellantType'],
+            ['facility_type', 'Facility Type', 'test_stand', FACILITIES, 'common.f.facilityType'],
+            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
+            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
         ],
         fromResults: function (r) {
             const m = (r && r.motor) || r || {};
