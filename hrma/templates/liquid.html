@@ -4127,9 +4127,12 @@ Please provide:
 
                 // Collect chart data (if any plots exist) — bu sayfadaki GERÇEK plot ID'leri
                 const charts = [];
-                const plotDivs = ['liquid_motor_kesit', 'altitude_plot', 'altitude_analysis_plot',
-                                  'altitude_profile_plot', 'engine_diagram', 'cad_visualization'];
-                
+                // Summary raporu sunucuda grafik kullanmaz — 3D kesit/CAD
+                // JSON'u megabaytlarca olabildiğinden boşuna gönderilmez.
+                const plotDivs = (reportType === 'summary') ? []
+                    : ['liquid_motor_kesit', 'altitude_plot', 'altitude_analysis_plot',
+                       'altitude_profile_plot', 'engine_diagram', 'cad_visualization'];
+
                 for (const plotId of plotDivs) {
                     const plotDiv = document.getElementById(plotId);
                     if (plotDiv && plotDiv._fullLayout) {
@@ -4152,12 +4155,17 @@ Please provide:
                 };
                 
                 // Make API call
+                // Emniyet: sunucu render'ı asılırsa buton sonsuza kadar
+                // "Generating PDF..." kalmasın (2026-07-20 saha hatası) —
+                // 3 dk sonra istek iptal edilir, finally butonu geri açar.
                 const response = await fetch(`/api/export-pdf/${reportType}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(requestData)
+                    body: JSON.stringify(requestData),
+                    signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+                        ? AbortSignal.timeout(180000) : undefined
                 });
                 
                 if (response.ok) {

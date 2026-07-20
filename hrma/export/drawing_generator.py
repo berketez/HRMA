@@ -53,6 +53,23 @@ def _dims_mm(motor_results):
     }
 
 
+def _render_or_raise(fig, width, height):
+    """Teknik çizim figürünü PNG'ye çevirir; render edilemezse yükseltir.
+
+    chart_render katmanı kaleido asılmasını zaman aşımıyla keser (Windows
+    2026-07-20 saha hatası). Teknik çizimler shape-temellidir → matplotlib
+    emniyet çizicisi anlamlı görüntü üretemez (allow_fallback=False); None
+    dönerse RuntimeError yükseltilir ve çağıran sayfa mevcut except yoluyla
+    'render failed' notunu basar — istek asla asılı kalmaz.
+    """
+    from hrma.export.chart_render import figure_png
+    png = figure_png(fig, width=width, height=height, scale=2,
+                     allow_fallback=False)
+    if not png:
+        raise RuntimeError('chart renderer (kaleido) unavailable or timed out')
+    return png
+
+
 # ---------------------------------------------------------------------------
 # PDF çizim paketi
 # ---------------------------------------------------------------------------
@@ -74,7 +91,7 @@ def _cross_section_png(motor_results, width=1500, height=520):
     fig.update_yaxes(gridcolor='rgba(30,60,90,0.15)',
                      tickfont=dict(color='#1a2733'),
                      title_font=dict(color='#1a2733'))
-    return pio.to_image(fig, format='png', width=width, height=height, scale=2)
+    return _render_or_raise(fig, width=width, height=height)
 
 
 def _injector_face_png(motor_results, size=700):
@@ -131,7 +148,7 @@ def _injector_face_png(motor_results, size=700):
         yaxis=dict(title='mm', range=[-R * 1.15, R * 1.15]),
         showlegend=False, width=size, height=size,
     )
-    return pio.to_image(fig, format='png', width=size, height=size, scale=2)
+    return _render_or_raise(fig, width=size, height=size)
 
 
 def generate_drawing_pdf(motor_results, out_path=None):

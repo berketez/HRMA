@@ -4405,15 +4405,25 @@
             const statusEl = document.getElementById('reportStatus');
             if (statusEl) statusEl.textContent = i18nText('adv.js.pdfGenerating', 'Generating PDF report...');
             try {
+                // Emniyet: sunucu render'ı asılırsa durum metni sonsuza kadar
+                // "Generating..." kalmasın (2026-07-20 saha hatası).
                 const response = await fetch(`/api/export-pdf/${reportType}`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         motor_data: currentResults.motor,
                         analysis_results: currentResults
-                    })
+                    }),
+                    signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+                        ? AbortSignal.timeout(180000) : undefined
                 });
-                if (!response.ok) throw new Error('HTTP ' + response.status);
+                if (!response.ok) {
+                    // Sunucu {error: ...} ayrıntısı gönderiyor — kullanıcıya ulaştır
+                    // (solid/liquid ile aynı teşhis kabiliyeti).
+                    const errorData = await response.json().catch(() => null);
+                    throw new Error((errorData && errorData.error)
+                        ? errorData.error : ('HTTP ' + response.status));
+                }
                 const blob = await response.blob();
                 const name = currentResults.motor.motor_name || 'HRMA_Motor';
                 triggerBlobDownload(blob, `${name}_${reportType}_report.pdf`);

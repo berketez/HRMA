@@ -648,22 +648,26 @@ class PDFReportGenerator:
         """Grafik girdisini PNG baytlarına çevirir; başarısızsa None.
 
         İki biçim desteklenir (geriye dönük uyum korunur):
-          1. Plotly figür JSON'u  -> kaleido ile yüksek çözünürlüklü PNG
+          1. Plotly figür JSON'u  -> chart_render.figure_png (kaleido zaman
+             aşımı korumalı + matplotlib emniyet çizicisi). Kaleido'nun
+             Windows'ta hiç yanıt vermeden asılması PDF isteğini sonsuza
+             kadar kilitliyordu (2026-07-20 saha hatası) — artık kilitlemez.
           2. base64 kodlu PNG/JPEG -> olduğu gibi çözülür
-        kaleido kurulu değilse (paketli sürümde eksik olabilir) çökme
-        YOKTUR: None döner, çağıran bölüm 'chart unavailable' notu basar.
+        Render başarısızsa çökme YOKTUR: None döner, çağıran bölüm
+        'chart unavailable' notu basar.
         """
         payload = self._parse_plotly_payload(chart_data)
         if payload is not None:
             try:
+                from hrma.export.chart_render import figure_png
                 fig = go.Figure(payload)
                 self._apply_print_theme(fig)
-                return pio.to_image(
-                    fig, format='png',
+                return figure_png(
+                    fig,
                     width=CHART_EXPORT_WIDTH_PX,
                     height=CHART_EXPORT_HEIGHT_PX,
                     scale=CHART_EXPORT_SCALE)
-            except Exception as exc:  # kaleido yok / figür bozuk
+            except Exception as exc:  # figür bozuk / render katmanı hatası
                 print(f"Chart render skipped: {exc}")
                 return None
         # base64 gövde (data URI öneki olabilir)
@@ -779,16 +783,20 @@ class PDFReportGenerator:
 
         Çözünürlük sabitleri modül başında tanımlıdır (baskı kalitesi);
         çağıran özel bir boyut isterse parametreyle ezebilir. Figür koyu
-        temadan baskı temasına burada da çevrilir (tek nokta).
+        temadan baskı temasına burada da çevrilir (tek nokta). Render
+        chart_render katmanından geçer (kaleido asılma koruması).
         """
         try:
+            from hrma.export.chart_render import figure_png
             fig_dict = (plotly_json if isinstance(plotly_json, dict)
                         else json.loads(plotly_json))
             fig = go.Figure(fig_dict)
             self._apply_print_theme(fig)
 
-            img_bytes = pio.to_image(fig, format=format, width=width,
-                                     height=height, scale=scale)
+            img_bytes = figure_png(fig, width=width, height=height,
+                                   scale=scale, fmt=format)
+            if not img_bytes:
+                return ""
             return base64.b64encode(img_bytes).decode()
 
         except Exception as e:

@@ -4279,8 +4279,11 @@ Please provide:
                 // yoktu → hiç grafik yakalanmıyordu). _fullLayout kontrolü
                 // Plotly olmayan/boş div'leri güvenle atlar.
                 const charts = [];
-                const plotDivs = ['thrust_plot', 'pressure_plot', 'solid_motor_kesit', 'cad_visualization', 'altitude_plot'];
-                
+                // Summary raporu sunucuda grafik kullanmaz — 3D kesit/CAD
+                // JSON'u megabaytlarca olabildiğinden boşuna gönderilmez.
+                const plotDivs = (reportType === 'summary') ? []
+                    : ['thrust_plot', 'pressure_plot', 'solid_motor_kesit', 'cad_visualization', 'altitude_plot'];
+
                 for (const plotId of plotDivs) {
                     const plotDiv = document.getElementById(plotId);
                     if (plotDiv && plotDiv._fullLayout) {
@@ -4303,12 +4306,17 @@ Please provide:
                 };
                 
                 // Make API call
+                // Emniyet: sunucu render'ı asılırsa buton sonsuza kadar
+                // "Generating PDF..." kalmasın (2026-07-20 saha hatası) —
+                // 3 dk sonra istek iptal edilir, finally butonu geri açar.
                 const response = await fetch(`/api/export-pdf/${reportType}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(requestData)
+                    body: JSON.stringify(requestData),
+                    signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+                        ? AbortSignal.timeout(180000) : undefined
                 });
                 
                 if (response.ok) {
