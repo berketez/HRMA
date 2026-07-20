@@ -14,7 +14,7 @@ kaç vaka olduğu bilinmediği için kod tabanının tamamı tarandı.
 mı? İnanıyorsa gerçekten hesaplanıyor mu?*
 
 Sonuç: 65 bulgu (12 kritik, 39 major, 14 minor). Hepsi giderildi. **Hiçbir
-panel, grafik veya çıktı kaldırılmadı** — her biri gerçek hesapla beslendi,
+panel, grafik veya çıktı kaldırılmadı**; her biri gerçek hesapla beslendi,
 hesap mümkün olmayan yerler kullanıcının gördüğü noktada etiketlendi.
 
 ## Kritik düzeltmeler
@@ -35,7 +35,7 @@ uyarısı).
 
 **Nozul Mach alanı düzeltildi.** Iraksayan bir Newton iterasyonu ve keyfi
 geometri kullanılıyordu; yakınsak bölge süpersonik dalda çözülüyordu.
-Quasi-1D çözücüye bağlandı: giriş 0.274, boğaz tam 1.000, çıkış 3.604 —
+Quasi-1D çözücüye bağlandı: giriş 0.274, boğaz tam 1.000, çıkış 3.604,
 analitik izentropik çözümle birebir. Eski değerler 2000 kat sapıyordu.
 
 **Cidar ısı akısı alanı gerçek Bartz profilinden.** Sabit taban ve keyfi
@@ -91,7 +91,7 @@ seçilmeden hesaplanıyordu.
 ## Yeni yetenekler
 
 - **Tam çift dilli arayüz.** 3395 çeviri anahtarı (EN/TR birebir eşit).
-  Grafik metinleri dahil — eksen başlıkları, seri adları ve hover metinleri
+  Grafik metinleri dahil: eksen başlıkları, seri adları ve hover metinleri
   de çevriliyor.
 - **Katı yakıt propellant kataloğu.** 12 kayıt, 23 takma ad. Seçince
   özellikler doluyor; elle değiştirdiğin alan işaretlenip korunuyor.
