@@ -41,8 +41,9 @@ __all__ = [
 MARKER_BEGIN = "<!-- AUTO-CORRELATION:BEGIN -->"
 MARKER_END = "<!-- AUTO-CORRELATION:END -->"
 
-# hrma/validation/status_report.py -> repo kökü / VALIDATION_STATUS.md
-DEFAULT_STATUS_PATH = Path(__file__).resolve().parents[2] / "VALIDATION_STATUS.md"
+# hrma/validation/status_report.py -> repo kökü / docs/VALIDATION_STATUS.md
+# (v2.5.4 kök temizliği: gevşek .md dosyaları docs/ altına taşındı)
+DEFAULT_STATUS_PATH = Path(__file__).resolve().parents[2] / "docs" / "VALIDATION_STATUS.md"
 
 
 def _flatten_cell(cell: Dict[str, Any], layer: str) -> Dict[str, Any]:

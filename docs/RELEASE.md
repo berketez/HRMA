@@ -2,7 +2,7 @@
 
 How an HRMA version is built, published, and delivered to installed
 applications. The full build details live in
-[`packaging/README.md`](packaging/README.md); this document is the
+[`packaging/README.md`](../packaging/README.md); this document is the
 overview.
 
 ## Single Source of Version Truth
@@ -103,4 +103,4 @@ Release notes for shipped versions are kept in
 ## Support
 
 - Create an issue: https://github.com/berketez/HRMA/issues
-- Documentation: `README.md`, `USER_MANUAL.md`, `docs/`
+- Documentation: `README.md`, `docs/USER_MANUAL.md`, `docs/`

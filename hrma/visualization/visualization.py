@@ -1784,8 +1784,11 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
                 mode="gauge+number+delta",
                 value=eff_pct,
                 domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': "eta_c* x eta_kinetic (%)",
-                       'font': {'size': 13}},
+                # Başlık BİLEREK yok: subplot_titles'tan gelen "Combustion /
+                # Kinetic Efficiency" annotation'ı ile aynı noktaya basılıp
+                # üst üste biniyordu (saha fotoğrafı 2026-07-20). Formül
+                # (eta_c* x eta_kinetic) altta hover/nota değil sayının
+                # yüzde soneki yeterli — _perf_gauge_panel emsali.
                 number={'suffix': ' %', 'valueformat': '.2f'},
                 # Referans = ideal kayan-denge (kayıpsız) hâl
                 delta={'reference': 100.0, 'valueformat': '.2f'},
@@ -1983,52 +1986,72 @@ def create_real_time_dashboard(motor_data, time_data):
                        'Propellant Mass', 'Burn Rate', 'Port Diameter'),
         specs=[[{'type': 'indicator'}, {'type': 'indicator'}, {'type': 'indicator'}],
                [{'type': 'indicator'}, {'type': 'indicator'}, {'type': 'indicator'}],
-               [{'type': 'scatter'}, {'type': 'scatter'}, {'type': 'scatter'}]]
+               [{'type': 'scatter'}, {'type': 'scatter'}, {'type': 'scatter'}]],
+        vertical_spacing=0.14
     )
-    
+    _style_subplot_titles(fig)
+
+    # Gösterge hücreleri: Indicator'ın kendi title'ı BİLEREK yok —
+    # subplot_titles annotation'ıyla aynı noktaya basılıp üst üste biniyordu
+    # (saha fotoğrafı 2026-07-20). Birim sayının sonekinde taşınır
+    # (_perf_gauge_panel emsali). Sıfır/eksik değerde 1.2*0 = [0, 0] ekseni
+    # gauge'u kırıyordu -> tam skala en az 1 olacak şekilde korunur.
+    def _gauge(value, suffix, bar_color, steps=None, full_scale=None):
+        v = float(value or 0.0)
+        full = full_scale if full_scale else max(v * 1.2, 1.0)
+        return go.Indicator(
+            mode="gauge+number",
+            value=v,
+            number={'suffix': suffix, 'font': {'size': 26}},
+            gauge={
+                'axis': {'range': [0, full], 'tickfont': {'size': 10}},
+                'bar': {'color': bar_color},
+                'steps': steps or [],
+            }
+        )
+
     # Current values indicators
     current_thrust = motor_data.get('thrust', 0)
     fig.add_trace(
-        go.Indicator(
-            mode="gauge+number",
-            value=current_thrust,
-            title={'text': "Thrust (N)"},
-            gauge={
-                'axis': {'range': [0, current_thrust * 1.2]},
-                'bar': {'color': "darkgreen"},
-                'steps': [{'range': [0, current_thrust * 0.8], 'color': "#46606d"}],
-            }
-        ),
+        _gauge(current_thrust, ' N', "darkgreen",
+               steps=[{'range': [0, float(current_thrust or 0.0) * 0.8],
+                       'color': "#46606d"}]),
         row=1, col=1
     )
-    
+
     current_pressure = motor_data.get('chamber_pressure', 0)
-    fig.add_trace(
-        go.Indicator(
-            mode="gauge+number",
-            value=current_pressure,
-            title={'text': "Chamber Pressure (bar)"},
-            gauge={
-                'axis': {'range': [0, current_pressure * 1.2]},
-                'bar': {'color': "darkblue"},
-            }
-        ),
-        row=1, col=2
-    )
-    
+    fig.add_trace(_gauge(current_pressure, ' bar', "darkblue"), row=1, col=2)
+
     current_mdot = motor_data.get('mdot_total', 0)
+    fig.add_trace(_gauge(current_mdot, ' kg/s', "darkorange"), row=1, col=3)
+
+    # 2. sıra (saha fotoğrafı 2026-07-20: başlıklar vardı ama gauge'lar hiç
+    # eklenmemişti -> Temperature / O/F Ratio / Isp hücreleri bomboştu).
+    # Değerler motor sonuç sözlüğünün gerçek anahtarlarından gelir
+    # (_compile_results: chamber_temperature, of_ratio, isp).
+    current_temp = motor_data.get('chamber_temperature', 0)
+    fig.add_trace(_gauge(current_temp, ' K', "#b3403a"), row=2, col=1)
+
+    current_of = motor_data.get('of_ratio', 0)
+    # O/F tipik 0-10 bandında; 1.2x tam skala iğneyi hep sağ uca yaslıyordu
     fig.add_trace(
-        go.Indicator(
-            mode="gauge+number",
-            value=current_mdot,
-            title={'text': "Mass Flow Rate (kg/s)"},
-            gauge={
-                'axis': {'range': [0, current_mdot * 1.2]},
-                'bar': {'color': "darkorange"},
-            }
-        ),
-        row=1, col=3
+        _gauge(current_of, '', "teal",
+               full_scale=max(float(current_of or 0.0) * 2.0, 1.0)),
+        row=2, col=2
     )
+
+    current_isp = motor_data.get('isp', 0)
+    fig.add_trace(_gauge(current_isp, ' s', "#7a5cc0"), row=2, col=3)
+
+    # Hücre başlığı bandını boşalt: gauge'un tepe tick etiketi (tam skalanın
+    # ~yarısına düşen değer) subplot başlığıyla aynı banda çizilebiliyor —
+    # veri bağımlı çakışma, 3 ajanlı inceleme render kanıtıyla yakaladı.
+    # Indicator domain'i hücre içinde aşağı sıkıştırılır; başlık üstte
+    # kendi şeridinde kalır.
+    for tr in fig.data:
+        if tr.type == 'indicator':
+            y0, y1 = tr.domain.y
+            tr.domain.y = [y0, y0 + 0.78 * (y1 - y0)]
     
     # Time history plots if available
     if time_data:
@@ -2070,11 +2093,15 @@ def create_real_time_dashboard(motor_data, time_data):
     
     fig.update_layout(
         title_text="Real-Time Motor Performance Dashboard",
+        # Figür başlığı üst marja sabitlenir; varsayılan yerleşimde 1. sıra
+        # gauge içeriğiyle çakışıyordu (saha fotoğrafı 2026-07-20)
+        title={'y': 0.985, 'yanchor': 'top'},
+        margin=dict(t=80),
         showlegend=False,
         height=900,
         autosize=True
     )
-    
+
     return _fig_json(fig)
 
 def create_3d_motor_visualization(motor_data):

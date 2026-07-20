@@ -62,7 +62,7 @@ automated correlation runner scores the predictions against it. The current
 correlation statistics (bias, median absolute percent error, RMS, per-quantity
 sample counts and worst-case tests) are machine-generated and change with every
 run, so they are **not duplicated here**. See the auto-generated correlation
-block in [VALIDATION_STATUS.md](VALIDATION_STATUS.md) (the section "Automated
+block in [VALIDATION_STATUS.md](docs/VALIDATION_STATUS.md) (the section "Automated
 correlation snapshot", between the `AUTO-CORRELATION` markers) for the live
 numbers. The signed-error convention there is `(predicted − measured) / measured
 × 100`; outliers are flagged but never dropped, and anomaly-flagged records are
@@ -71,7 +71,7 @@ aggregated separately from the main statistics.
 HRMA is a **preliminary-design and educational tool**, not a flight-qualification
 tool. Predicted performance should be cross-checked against an independent code
 (CEA / RPA / openMotor) and verified by physical testing before firing any motor.
-See [VALIDATION_STATUS.md](VALIDATION_STATUS.md) for full verification results,
+See [VALIDATION_STATUS.md](docs/VALIDATION_STATUS.md) for full verification results,
 uncertainty bands, and known limitations.
 
 ## Installation (No Python Required)

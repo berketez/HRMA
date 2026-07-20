@@ -51,8 +51,36 @@
                 radial-gradient(1px 1px at 58% 48%, rgba(170, 220, 255, 0.6), transparent 100%),
                 radial-gradient(1.5px 1.5px at 72% 30%, rgba(210, 240, 255, 0.85), transparent 100%),
                 radial-gradient(1px 1px at 86% 58%, rgba(180, 225, 255, 0.7), transparent 100%),
-                radial-gradient(1.5px 1.5px at 93% 14%, rgba(220, 244, 255, 0.8), transparent 100%);
+                radial-gradient(1.5px 1.5px at 93% 14%, rgba(220, 244, 255, 0.8), transparent 100%),
+                radial-gradient(1px 1px at 5% 72%, rgba(185, 228, 255, 0.65), transparent 100%),
+                radial-gradient(1.5px 1.5px at 19% 44%, rgba(215, 242, 255, 0.8), transparent 100%),
+                radial-gradient(1px 1px at 37% 80%, rgba(170, 220, 255, 0.55), transparent 100%),
+                radial-gradient(2px 2px at 51% 68%, rgba(235, 250, 255, 0.75), transparent 100%),
+                radial-gradient(1px 1px at 66% 12%, rgba(180, 225, 255, 0.6), transparent 100%),
+                radial-gradient(1.5px 1.5px at 79% 76%, rgba(212, 240, 255, 0.8), transparent 100%),
+                radial-gradient(1px 1px at 97% 40%, rgba(190, 230, 255, 0.65), transparent 100%),
+                /* Nebula soluğu: aynı elemanın SON katmanları — CSS'te önce
+                   listelenen katman üstte kalır, nebula böylece yıldızların
+                   gerçekten arkasına düşer (3 ajanlı inceleme bulgusu:
+                   ::before'a konursa 1. yıldız takımının üstüne boyanıyordu) */
+                radial-gradient(480px 300px at 24% 30%, rgba(96, 72, 190, 0.14), transparent 65%),
+                radial-gradient(560px 340px at 78% 62%, rgba(0, 140, 200, 0.12), transparent 65%);
             animation: twinkle 5s ease-in-out infinite alternate;
+        }
+        /* İkinci yıldız takımı: ayrı fazda parıldar — alan canlı görünür */
+        .hero-stars::after {
+            content: '';
+            position: absolute; inset: 0; pointer-events: none;
+            background-image:
+                radial-gradient(1px 1px at 9% 15%, rgba(190, 230, 255, 0.7), transparent 100%),
+                radial-gradient(1.5px 1.5px at 24% 84%, rgba(216, 242, 255, 0.8), transparent 100%),
+                radial-gradient(1px 1px at 33% 38%, rgba(175, 222, 255, 0.6), transparent 100%),
+                radial-gradient(2px 2px at 48% 90%, rgba(238, 250, 255, 0.85), transparent 100%),
+                radial-gradient(1px 1px at 63% 58%, rgba(182, 226, 255, 0.6), transparent 100%),
+                radial-gradient(1.5px 1.5px at 76% 8%, rgba(214, 241, 255, 0.8), transparent 100%),
+                radial-gradient(1px 1px at 90% 82%, rgba(188, 229, 255, 0.65), transparent 100%),
+                radial-gradient(1.5px 1.5px at 99% 64%, rgba(222, 245, 255, 0.75), transparent 100%);
+            animation: twinkle 7s ease-in-out 2.5s infinite alternate-reverse;
         }
         @keyframes twinkle { from { opacity: 0.55; } to { opacity: 1; } }
 

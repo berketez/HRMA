@@ -21,9 +21,9 @@ here are absent from the codebase.
 
 - [`README.md`](../../README.md) (repository root) — product overview,
   features, real project structure
-- [`USER_MANUAL.md`](../../USER_MANUAL.md) — installation and usage of the
+- [`USER_MANUAL.md`](../USER_MANUAL.md) — installation and usage of the
   actual application
-- [`VALIDATION_STATUS.md`](../../VALIDATION_STATUS.md) — what is verified,
+- [`VALIDATION_STATUS.md`](../VALIDATION_STATUS.md) — what is verified,
   what is not
 - [`docs/ANALIZ_PLATFORM_PLANI.md`](../ANALIZ_PLATFORM_PLANI.md) — analysis
   platform plan and its implementation status

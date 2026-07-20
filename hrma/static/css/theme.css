@@ -37,10 +37,26 @@ html { min-height: 100%; }
 
 body {
     font-family: var(--hd-sans);
+    /* Yıldız alanı (2026-07-20 isteği): ilk 5 katman birer yıldızlık
+       döşemedir — farklı döşeme boyutları örüntüyü kırar, alan rastgele
+       görünür. Body arka planında oldukları için her zaman İÇERİĞİN
+       ALTINDA kalırlar (panellerin üstüne benek binmez). */
     background:
+        radial-gradient(1.4px 1.4px at 27px 36px, rgba(214, 240, 255, 0.6), transparent 100%),
+        radial-gradient(1px 1px at 133px 152px, rgba(170, 220, 255, 0.42), transparent 100%),
+        radial-gradient(1.7px 1.7px at 231px 64px, rgba(232, 248, 255, 0.55), transparent 100%),
+        radial-gradient(1px 1px at 74px 218px, rgba(160, 215, 255, 0.35), transparent 100%),
+        radial-gradient(1.2px 1.2px at 306px 125px, rgba(205, 238, 255, 0.5), transparent 100%),
         radial-gradient(1100px 520px at 85% -10%, rgba(0, 140, 200, 0.15), transparent 60%),
         radial-gradient(900px 620px at -10% 30%, rgba(0, 90, 160, 0.10), transparent 55%),
+        radial-gradient(760px 500px at 72% 88%, rgba(96, 72, 190, 0.10), transparent 60%),
         linear-gradient(165deg, var(--hd-bg0) 0%, var(--hd-bg1) 60%, #070d18 100%);
+    background-size:
+        340px 260px, 470px 390px, 520px 310px, 390px 450px, 610px 370px,
+        auto, auto, auto, auto;
+    background-repeat:
+        repeat, repeat, repeat, repeat, repeat,
+        no-repeat, no-repeat, no-repeat, no-repeat;
     background-attachment: fixed;
     color: var(--hd-ink);
 }

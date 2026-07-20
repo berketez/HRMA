@@ -26,6 +26,10 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 import numpy, scipy, plotly, pandas, matplotlib, flask, waitress, trimesh
 print("temel paketler OK:", numpy.__version__, scipy.__version__, plotly.__version__)
 
+# /api/export-xlsx bağımlılığı — saha hatası 2026-07-20: bundle'da yoktu
+import openpyxl
+print("openpyxl OK:", openpyxl.__version__)
+
 import build123d
 print("build123d OK:", build123d.__version__)
 

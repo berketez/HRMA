@@ -1815,22 +1815,37 @@
         var currentResults = null;
         
         // UI Feedback Functions
+        // Bildirimler tek sabit noktaya değil dikey istife basılır: iki mesaj
+        // art arda gelince üst üste binip okunmaz oluyordu (saha ekran
+        // görüntüsü 2026-07-20, Excel export hatası + durum mesajı).
+        function _toastStack() {
+            let stack = document.getElementById('toast-stack');
+            if (!stack) {
+                stack = document.createElement('div');
+                stack.id = 'toast-stack';
+                stack.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999;'
+                    + ' display: flex; flex-direction: column; gap: 10px; align-items: flex-end;';
+                document.body.appendChild(stack);
+            }
+            return stack;
+        }
+
         function showMessage(message, type = 'info') {
-            const alertClass = type === 'error' ? 'alert-danger' : 
-                             type === 'success' ? 'alert-success' : 
+            const alertClass = type === 'error' ? 'alert-danger' :
+                             type === 'success' ? 'alert-success' :
                              type === 'warning' ? 'alert-warning' : 'alert-info';
-            
+
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert ${alertClass} alert-dismissible fade show`;
-            alertDiv.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+            alertDiv.style.cssText = 'max-width: 400px; margin: 0;';
             alertDiv.innerHTML = `
                 ${message}
                 <button type="button" class="close" onclick="this.parentElement.remove()">
                     <span>&times;</span>
                 </button>
             `;
-            
-            document.body.appendChild(alertDiv);
+
+            _toastStack().appendChild(alertDiv);
             setTimeout(() => alertDiv.remove(), 5000);
         }
         
@@ -4565,9 +4580,34 @@ Please provide:
                 _liquidExportStatus(T('liq.msg.excel_workbook_downloaded', 'Excel workbook downloaded'));
                 showSuccess(T('liq.msg.analysis_exported_as_excel_workbook', 'Analysis exported as Excel workbook'));
             } catch (e) {
-                _liquidExportStatus(T('liq.msg.excel_export_failed', 'Excel export failed: ') + e.message);
-                showError(T('liq.msg.excel_export_failed', 'Excel export failed: ') + e.message);
+                // openpyxl'siz derlemede (saha hatası 2026-07-20) kullanıcıyı ham
+                // sunucu hatasıyla baş başa bırakma: aynı sayfaları CSV indir
+                // (advanced.html deseni).
+                console.warn('XLSX export failed, falling back to CSV:', e);
+                _triggerLiquidDownload(_liquidSheetsToCsvBlob(sheets), fname.replace(/\.xlsx$/, '.csv'));
+                _liquidExportStatus(T('liq.msg.excel_csv_fallback',
+                    'Excel export unavailable on this build - exported CSV instead'));
+                showMessage(T('liq.msg.excel_csv_fallback',
+                    'Excel export unavailable on this build - exported CSV instead'), 'info');
             }
+        }
+
+        // sheets [{name, headers, rows}] -> tek CSV blob (bölüm başlıklı)
+        function _liquidSheetsToCsvBlob(sheets) {
+            const esc = function (v) {
+                const x = (v === null || v === undefined) ? '' : String(v);
+                return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x;
+            };
+            const lines = [];
+            sheets.forEach(function (sheet, i) {
+                if (i > 0) lines.push('');
+                lines.push('=== ' + (sheet.name || 'Sheet' + (i + 1)) + ' ===');
+                if (sheet.headers && sheet.headers.length) lines.push(sheet.headers.map(esc).join(','));
+                (sheet.rows || []).forEach(function (r) {
+                    lines.push((Array.isArray(r) ? r : [r]).map(esc).join(','));
+                });
+            });
+            return new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
         }
 
         // ==================================================================

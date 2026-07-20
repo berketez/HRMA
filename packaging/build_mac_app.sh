@@ -131,13 +131,16 @@ python3 -m pip install --target "$RES/libs" --no-deps --upgrade \
 # (OC_PythonException: Cannot find JS directory — 2026-07-14 vakası)
 [ -d "$RES/libs/webview/js" ] || { echo "HATA: webview/js eksik!"; exit 1; }
 [ -d "$RES/libs/reportlab" ] || { echo "HATA: reportlab eksik!"; exit 1; }
+# openpyxl: /api/export-xlsx — saha hatası 2026-07-20 (bundle'da yoktu)
+[ -d "$RES/libs/openpyxl" ] || { echo "HATA: openpyxl eksik!"; exit 1; }
 
 echo "[4/7] Uygulama kaynakları..."
 mkdir -p "$RES/app"
 rsync -a --exclude='__pycache__' "$SRC/hrma" "$RES/app/"
 rsync -a "$SRC/data" "$RES/app/"
 cp "$B/launcher.py" "$RES/app/launcher.py"
-cp "$SRC/icon.icns" "$RES/icon.icns"
+# v2.5.4 kök temizliği: icon.icns artık packaging/ altında
+cp "$B/icon.icns" "$RES/icon.icns"
 
 echo "[5/7] Temizlik..."
 rm -rf "$RES/libs/bin" 2>/dev/null || true   # --target'ın script stub'ları gereksiz (kaleido hariç — kontrol edilecek)

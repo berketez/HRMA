@@ -11,11 +11,11 @@ STL/STEP/DXF/drawing-PDF/report exports.
 | Document | Content |
 |---|---|
 | [`README.md`](../README.md) | Product overview, features, downloads, real project structure |
-| [`USER_MANUAL.md`](../USER_MANUAL.md) | Installation and usage: pages, Calculate workflow, Analysis Deck panels, exports, troubleshooting |
+| [`USER_MANUAL.md`](USER_MANUAL.md) | Installation and usage: pages, Calculate workflow, Analysis Deck panels, exports, troubleshooting |
 | [`INSTALL.md`](../INSTALL.md) | Source installation (developers) |
-| [`RELEASE.md`](../RELEASE.md) | How releases are built and published; how the in-app updater works |
-| [`VALIDATION_STATUS.md`](../VALIDATION_STATUS.md) | Verification anchors, known limitations, honest reliability envelope |
-| [`SPACE_CAPABILITY.md`](../SPACE_CAPABILITY.md) | Capability assessment for Karman-class preliminary design |
+| [`RELEASE.md`](RELEASE.md) | How releases are built and published; how the in-app updater works |
+| [`VALIDATION_STATUS.md`](VALIDATION_STATUS.md) | Verification anchors, known limitations, honest reliability envelope |
+| [`SPACE_CAPABILITY.md`](SPACE_CAPABILITY.md) | Capability assessment for Karman-class preliminary design |
 
 ## Documents in this directory
 

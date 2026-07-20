@@ -241,5 +241,5 @@ motor parameters and press Calculate on the hybrid/solid/liquid pages.
 
 ---
 
-**Need usage help?** See [USER_MANUAL.md](USER_MANUAL.md) and the main
+**Need usage help?** See [USER_MANUAL.md](docs/USER_MANUAL.md) and the main
 [README.md](README.md).
