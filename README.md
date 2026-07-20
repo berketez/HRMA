@@ -11,8 +11,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.5.3.exe**](https://github.com/berketez/HRMA/releases/download/v2.5.3/HRMA-Setup-2.5.3.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.5.3-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.5.3/HRMA-Setup-2.5.3-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-2.5.4.exe**](https://github.com/berketez/HRMA/releases/download/v2.5.4/HRMA-Setup-2.5.4.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.5.4-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.5.4/HRMA-Setup-2.5.4-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -84,8 +84,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.5.3.exe`](https://github.com/berketez/HRMA/releases/download/v2.5.3/HRMA-Setup-2.5.3.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.5.3-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.5.3/HRMA-Setup-2.5.3-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.5.4.exe`](https://github.com/berketez/HRMA/releases/download/v2.5.4/HRMA-Setup-2.5.4.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.5.4-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.5.4/HRMA-Setup-2.5.4-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -197,7 +197,7 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## Version
 
-**HRMA v2.5.3**
+**HRMA v2.5.4**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - Professional Rocket Propulsion Design Tool
