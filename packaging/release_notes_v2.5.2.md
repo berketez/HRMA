@@ -105,7 +105,7 @@ seçilmeden hesaplanıyordu.
 
 `tests/test_no_fabrication.py`: sonuç yolunda tohumsuz rastgelelik yasak;
 ana girdiler çıktıyı değiştirmek zorunda; bugün düzeltilen her uydurma
-kilitli. Toplam test sayısı 1311 → 2021.
+kilitli. Toplam test sayısı 1311 → 2169.
 
 ## Bilinen sınırlar
 
