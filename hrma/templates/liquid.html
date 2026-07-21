@@ -5022,6 +5022,15 @@ Please provide:
     <!-- Include Plotly for 3D visualization -->
     <script src="/static/vendor/plotly-1.58.5.min.js"></script>
     <script src="/static/js/plotly_dark.js"></script>
+    <!-- Grafik açıklama katmanı: her ana grafiğin altına "ne gösterir /
+         nasıl okunur" satırı ekler (plotly_dark.js'ten SONRA yüklenmeli) -->
+    <script src="/static/js/chart_captions.js"></script>
+    <!-- v2.5.5: proje kaydet/yükle şeridi + dış format içe aktarma katmanı
+         (plotly_dark + chart_captions'tan SONRA, sayfa scriptlerinden ÖNCE;
+         import_ui.js, sixdof_panel ve validation panelinden önce yüklenmeli) -->
+    <script src="/static/js/import_ui.js"></script>
+    <script src="/static/js/project_bar.js"></script>
+    <script src="/static/js/step_import_ui.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls + parametrik motor simülasyon güvertesi -->
     <script src="/static/vendor/three-0.128.0.min.js"></script>
     <script src="/static/vendor/OrbitControls-0.128.0.js"></script>

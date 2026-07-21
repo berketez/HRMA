@@ -35,6 +35,22 @@ AIR_N2_MASS_FRACTION = 0.7686
 AIR_O2_MOLE_FRACTION = 0.21
 AIR_N2_MOLE_FRACTION = 0.79
 
+# ---------------------------------------------------------------------------
+# Optimum O/F arama önbelleği (v2.5.5 performans, davranış AYNI).
+#
+# find_optimum_of_ratio hibrit calculate() süresinin ~%85'idir (ölçüm:
+# 630/730 ms — minimize_scalar 24+ denge çözümü tetikler). Arama, girdileri
+# (yakıt bileşimi, oksitleyici, Pc, aralık, mekanizma) verilince
+# DETERMİNİSTİKTİR: minimize_scalar 'bounded' sabit yol izler ve Cantera
+# denge çözümü aynı girdiye aynı sonucu verir. Anahtar TAM değerlerle
+# (yuvarlama YOK) kurulur; isabet yalnız birebir aynı girdide olur ve
+# saklanan sonucun derin kopyası döner — çıktı bit-aynıdır. Modül
+# seviyesindedir ki her isteğin yeni analizör kurduğu API yolunda art arda
+# hesaplar (aynı yakıt/oksitleyici/Pc) aramayı yeniden ödemesin.
+# ---------------------------------------------------------------------------
+_OPTIMUM_OF_CACHE = {}
+_OPTIMUM_OF_CACHE_MAX = 16
+
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
 
@@ -53,23 +69,29 @@ class CombustionAnalyzer:
         self._equilibrium_cache = {}
 
         # Cantera gaz objesi - NASA-CEA veritabanı kullanarak
+        # _mechanism_id: yüklenen mekanizmanın kimliği — optimum O/F
+        # önbellek anahtarına girer (farklı mekanizma = farklı sonuç uzayı).
         self.gas = None
         self.cantera_available = False
+        self._mechanism_id = 'empirical'
         if CANTERA_AVAILABLE:
             try:
                 # Önce NASA-CEA veritabanını dene
                 self.gas = ct.Solution('nasa_gas.yaml')
                 self.cantera_available = True
+                self._mechanism_id = 'nasa_gas'
             except Exception:
                 try:
                     # GRI-Mech 3.0 detaylı kimya
                     self.gas = ct.Solution('gri30.yaml')
                     self.cantera_available = True
+                    self._mechanism_id = 'gri30'
                 except Exception:
                     try:
                         # H2/O2 basit mekanizma
                         self.gas = ct.Solution('h2o2.yaml')
                         self.cantera_available = True
+                        self._mechanism_id = 'h2o2'
                     except Exception:
                         self.cantera_available = False
         else:
@@ -1037,6 +1059,25 @@ class CombustionAnalyzer:
         uretilmez).
         """
 
+        # --- Önbellek (v2.5.5): anahtar TAM girdilerle kurulur (yuvarlama
+        # YOK) — isabet yalnız birebir aynı aramada olur ve arama
+        # deterministik olduğundan dönen kopya taze hesapla bit-aynıdır.
+        # Anahtarlanamayan girdi (ör. sıralanamayan bileşim) önbelleksiz yol.
+        cache_key = None
+        try:
+            cache_key = (
+                tuple(sorted((str(k), float(v))
+                             for k, v in fuel_composition.items())),
+                str(oxidizer_type),
+                float(chamber_pressure),
+                (float(of_range[0]), float(of_range[1])),
+                self._mechanism_id,
+            )
+        except (TypeError, ValueError, AttributeError, IndexError):
+            cache_key = None
+        if cache_key is not None and cache_key in _OPTIMUM_OF_CACHE:
+            return copy.deepcopy(_OPTIMUM_OF_CACHE[cache_key])
+
         def negative_isp(of_ratio):
             try:
                 results = self.analyze_combustion(fuel_composition, oxidizer_type, of_ratio, chamber_pressure)
@@ -1046,18 +1087,24 @@ class CombustionAnalyzer:
 
         # Optimize
         result = minimize_scalar(negative_isp, bounds=of_range, method='bounded')
-        
+
         optimum_of = result.x
         max_isp = -result.fun
-        
+
         # Get full analysis at optimum
         optimum_analysis = self.analyze_combustion(fuel_composition, oxidizer_type, optimum_of, chamber_pressure)
-        
-        return {
+
+        out = {
             'optimum_of_ratio': optimum_of,
             'maximum_isp': max_isp,
             'analysis': optimum_analysis
         }
+        if cache_key is not None:
+            # Kopya sakla: çağıran sonucu değiştirse bile önbellek bozulmaz
+            if len(_OPTIMUM_OF_CACHE) >= _OPTIMUM_OF_CACHE_MAX:
+                _OPTIMUM_OF_CACHE.pop(next(iter(_OPTIMUM_OF_CACHE)))
+            _OPTIMUM_OF_CACHE[cache_key] = copy.deepcopy(out)
+        return out
     
     def calculate_altitude_performance(self, motor_data: Dict, altitudes: List[float]) -> Dict:
         """Calculate performance at different altitudes"""

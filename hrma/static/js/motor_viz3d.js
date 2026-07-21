@@ -24,6 +24,23 @@
     var CUT_PHI_LENGTH = 1.5 * Math.PI;   // 270° dolu, 90° açık (açıklık φ=0'da)
     var RADIAL_SEGMENTS = 96;
 
+    // Yanma animasyonu performansı: grain katısı her karede değil, port
+    // yarıçapı en az bu kadar değişince yeniden kurulur (mm ve dış yarıçap
+    // oranı — hangisi büyükse). Aradaki karelerde parıltı silindiri mevcut
+    // mesh'e radyal ölçekle uydurulur (2026-07-21, görev 1).
+    var GRAIN_REBUILD_MIN_MM = 0.4;
+    var GRAIN_REBUILD_FRACTION = 0.01;
+
+    // Otomatik kalite bekçisi: son N karenin ortalama süresi eşiği aşarsa
+    // sahne kendiliğinden 'perf' moduna düşer (görev 3).
+    var AUTO_PERF_FRAME_WINDOW = 60;      // ölçüm penceresi (kare)
+    var AUTO_PERF_DT_LIMIT = 0.028;       // ortalama kare süresi eşiği (s)
+
+    // Plume fiziği (görev 6): radyal saçılım referans çıkış yarım açısı ve
+    // deniz seviyesinde ~ideal genişleme oranı (pe ≈ pa) yaklaşımı.
+    var PLUME_REF_EXIT_ANGLE_DEG = 8;
+    var IDEAL_EXPANSION_EPS = 8;
+
     // ------------------------------------------------------------------
     // Yardımcılar
     // ------------------------------------------------------------------
@@ -92,6 +109,49 @@
         return tex;
     }
 
+    // Prosedürel ortam haritası (görev 2): 6 küçük canvas'tan CubeTexture —
+    // üstte soğuk gri-mavi degrade (stüdyo tavan ışığı), altta koyu zemin,
+    // yan yüzlerde ufuk bandı. scene.environment'a atanır; r128'de
+    // MeshStandardMaterial'lar envMap'i buradan otomatik alır.
+    function makeEnvCubeTexture() {
+        var S = 64;
+        function face(draw) {
+            var c = makeCanvas(S, S);
+            draw(c.getContext('2d'));
+            return c;
+        }
+        function sideFace() {
+            // Ufuk bandı: üstte gökyüzü grisi, ortada parlak bant, altta koyu
+            return face(function (g) {
+                var gr = g.createLinearGradient(0, 0, 0, S);
+                gr.addColorStop(0.0, '#46586e');
+                gr.addColorStop(0.46, '#7c8ea2');
+                gr.addColorStop(0.54, '#232c38');
+                gr.addColorStop(1.0, '#0b0f15');
+                g.fillStyle = gr;
+                g.fillRect(0, 0, S, S);
+            });
+        }
+        var top = face(function (g) {
+            var gr = g.createLinearGradient(0, 0, 0, S);
+            gr.addColorStop(0, '#9db2c9');
+            gr.addColorStop(1, '#54677d');
+            g.fillStyle = gr;
+            g.fillRect(0, 0, S, S);
+        });
+        var bottom = face(function (g) {
+            g.fillStyle = '#0a0d12';
+            g.fillRect(0, 0, S, S);
+        });
+        // Yüz sırası: +X, -X, +Y (üst), -Y (alt), +Z, -Z
+        var tex = new THREE.CubeTexture([
+            sideFace(), sideFace(), top, bottom, sideFace(), sideFace()
+        ]);
+        tex.encoding = THREE.sRGBEncoding;   // canvas renkleri sRGB uzayında
+        tex.needsUpdate = true;
+        return tex;
+    }
+
     // Kesit-uyumlu halka (O-ring / snap ring): cutaway modunda 270° yay,
     // açıklığı lathe kesit boşluğuyla (φ=0 merkezli ±45°) hizalanır.
     // Torus θ→lathe φ eşlemesi: φ = 90°−θ (rotateX(π/2) sonrası);
@@ -134,9 +194,11 @@
         g.fillText(text, pad, h / 2 + 2);
         var tex = new THREE.CanvasTexture(c);
         tex.minFilter = THREE.LinearFilter;
-        // Ölçü etiketleri HUD niteliğinde: gövdenin arkasında kaybolmasın
+        // Ölçü etiketleri HUD niteliğinde: gövdenin arkasında kaybolmasın;
+        // ton eşleme dışı tutulur (ACES filmik eğri HUD metnini soldurmasın)
         var mat = new THREE.SpriteMaterial({
-            map: tex, transparent: true, depthWrite: false, depthTest: false
+            map: tex, transparent: true, depthWrite: false, depthTest: false,
+            toneMapped: false
         });
         var sp = new THREE.Sprite(mat);
         sp.renderOrder = 10;
@@ -331,6 +393,9 @@
                 cap.receiveShadow = false;
                 group.add(cap);
             });
+            // Taban geometri yalnız klon kaynağıdır, sahneye hiç girmez —
+            // GPU tarafı kopyası burada bırakılırsa sızıntı olur (görev 8)
+            capGeoBase.dispose();
         }
         return group;
     }
@@ -642,26 +707,29 @@
 
     function createMaterials() {
         var brushed = brushedTexture();
+        // envMapIntensity: scene.environment metallere yansıma verir; 0.6-0.8
+        // bandı yıkanmadan hacim kazandırır. Kesit yüzleri mat kalır (0.2).
         return {
             // Fırçalanmış alüminyum kasa: çevresel taşlama izi bump+roughness
             casing: new THREE.MeshStandardMaterial({
                 color: 0x9fabbc, metalness: 0.72, roughness: 0.42,
-                bumpMap: brushed, bumpScale: 0.12, roughnessMap: brushed
+                bumpMap: brushed, bumpScale: 0.12, roughnessMap: brushed,
+                envMapIntensity: 0.7
             }),
-            casingCut: new THREE.MeshStandardMaterial({ color: 0xc3ccd8, metalness: 0.15, roughness: 0.9, side: THREE.DoubleSide }),
-            nozzle: new THREE.MeshStandardMaterial({ color: 0x525c68, metalness: 0.78, roughness: 0.38 }),
-            nozzleCut: new THREE.MeshStandardMaterial({ color: 0x76818f, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide }),
+            casingCut: new THREE.MeshStandardMaterial({ color: 0xc3ccd8, metalness: 0.15, roughness: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
+            nozzle: new THREE.MeshStandardMaterial({ color: 0x525c68, metalness: 0.78, roughness: 0.38, envMapIntensity: 0.75 }),
+            nozzleCut: new THREE.MeshStandardMaterial({ color: 0x76818f, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
             // Grafit boğaz insert'i: koyu, mat, hafif yansımalı
-            graphite: new THREE.MeshStandardMaterial({ color: 0x23262a, metalness: 0.42, roughness: 0.78 }),
-            graphiteCut: new THREE.MeshStandardMaterial({ color: 0x393e45, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide }),
+            graphite: new THREE.MeshStandardMaterial({ color: 0x23262a, metalness: 0.42, roughness: 0.78, envMapIntensity: 0.5 }),
+            graphiteCut: new THREE.MeshStandardMaterial({ color: 0x393e45, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
             grain: new THREE.MeshStandardMaterial({ color: 0x6d4326, metalness: 0.0, roughness: 0.94 }),
             grainCut: new THREE.MeshStandardMaterial({ color: 0x936243, metalness: 0.0, roughness: 1.0, side: THREE.DoubleSide }),
             liner: new THREE.MeshStandardMaterial({ color: 0x23282e, metalness: 0.05, roughness: 0.9 }),
             linerCut: new THREE.MeshStandardMaterial({ color: 0x3a4046, metalness: 0.0, roughness: 1.0, side: THREE.DoubleSide }),
-            injector: new THREE.MeshStandardMaterial({ color: 0xb08d57, metalness: 0.85, roughness: 0.38 }),
-            injectorCut: new THREE.MeshStandardMaterial({ color: 0xd2b184, metalness: 0.2, roughness: 0.85, side: THREE.DoubleSide }),
-            bolt: new THREE.MeshStandardMaterial({ color: 0x343b44, metalness: 0.85, roughness: 0.4 }),
-            steel: new THREE.MeshStandardMaterial({ color: 0x6f7883, metalness: 0.9, roughness: 0.32 }),
+            injector: new THREE.MeshStandardMaterial({ color: 0xb08d57, metalness: 0.85, roughness: 0.38, envMapIntensity: 0.65 }),
+            injectorCut: new THREE.MeshStandardMaterial({ color: 0xd2b184, metalness: 0.2, roughness: 0.85, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
+            bolt: new THREE.MeshStandardMaterial({ color: 0x343b44, metalness: 0.85, roughness: 0.4, envMapIntensity: 0.6 }),
+            steel: new THREE.MeshStandardMaterial({ color: 0x6f7883, metalness: 0.9, roughness: 0.32, envMapIntensity: 0.7 }),
             // O-ring elastomeri: tam mat, simsiyah
             oring: new THREE.MeshStandardMaterial({ color: 0x121417, metalness: 0.0, roughness: 0.97 }),
             orifice: new THREE.MeshStandardMaterial({ color: 0x10151a, metalness: 0.2, roughness: 0.8 })
@@ -710,6 +778,10 @@
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.outputEncoding = THREE.sRGBEncoding;
+        // ACES filmik ton eşleme (r128'de mevcut): parlak alev/ışıklarda
+        // yumuşak doyum, metallerde daha doğal kontrast (görev 2)
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 1.1;
         this.renderer.domElement.style.display = 'block';
         this.container.appendChild(this.renderer.domElement);
 
@@ -726,6 +798,11 @@
         // arka planına karşı siyah kare artefaktı bırakıyordu
         this.scene.background = new THREE.Color(0x070d17);
         this.scene.fog = null;
+
+        // Ortam haritası: prosedürel küp doku — metaller düz gri yerine
+        // stüdyo yansıması alır (MeshStandardMaterial'lara otomatik uygulanır)
+        this._envTex = makeEnvCubeTexture();
+        this.scene.environment = this._envTex;
 
         // Işıklar: nötr anahtar + cyan/turuncu jant ışıkları (sci-fi ton)
         this.scene.add(new THREE.HemisphereLight(0x93a7c4, 0x0a0e14, 0.55));
@@ -1118,7 +1195,8 @@
         if (!this._glowMat) {
             this._glowMat = new THREE.MeshBasicMaterial({
                 color: 0xff8a2a, transparent: true, opacity: 0,
-                blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+                blending: THREE.AdditiveBlending, depthWrite: false,
+                side: THREE.DoubleSide, toneMapped: false
             });
         }
         this._glowMesh = null;
@@ -1128,7 +1206,8 @@
         if (!this._throatFlame) {
             this._throatFlame = new THREE.Sprite(new THREE.SpriteMaterial({
                 map: glowTexture('rgba(255,255,235,1)', 'rgba(255,140,40,0.85)'),
-                transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0
+                transparent: true, blending: THREE.AdditiveBlending,
+                depthWrite: false, opacity: 0, toneMapped: false
             }));
         }
         // Konum/ölçek her kurulumda tazelenir (update() geometri değiştirebilir)
@@ -1150,24 +1229,31 @@
         this._applyExplode(this._explodeF);
         this._applyHeatMap();
 
-        // Zemin: gölge düzlemi + ızgara
+        // Zemin: gölge düzlemi + ızgara. İlk kurulumda üretilir; sonraki
+        // kurulumlarda (tasarım modu boyut değiştirir) konum ve ölçek
+        // motorun güncel boyutuna göre tazelenir (görev 5a — bayatlamayı önler)
+        var floorY = -(this.dims.rcOut + this.dims.flangeLip) * 1.9;
         if (!this._floor) {
-            var floorY = -(this.dims.rcOut + this.dims.flangeLip) * 1.9;
             var shadowPlane = new THREE.Mesh(
                 new THREE.PlaneGeometry(this._totalLen * 4, this._totalLen * 4),
                 new THREE.ShadowMaterial({ opacity: 0.32 })
             );
             shadowPlane.rotation.x = -Math.PI / 2;
-            shadowPlane.position.y = floorY;
             shadowPlane.receiveShadow = true;
             this.scene.add(shadowPlane);
             var grid = new THREE.GridHelper(this._totalLen * 3, 30, 0x0e6f80, 0x123340);
             grid.material.transparent = true;
             grid.material.opacity = 0.35;
-            grid.position.y = floorY + 0.5;
             this.scene.add(grid);
             this._floor = shadowPlane;
+            this._grid = grid;
+            this._floorBaseLen = this._totalLen;   // ölçek referansı
         }
+        var fScale = this._totalLen / (this._floorBaseLen || this._totalLen);
+        this._floor.position.y = floorY;
+        this._floor.scale.setScalar(fScale);
+        this._grid.position.y = floorY + 0.5;
+        this._grid.scale.setScalar(fScale);
     };
 
     // Grain katısını verilen eşdeğer port yarıçapıyla yeniden kur.
@@ -1175,7 +1261,14 @@
     // ekstrüzyon; kesit görünümünde lathe gövde (iç = şeklin iç teğet
     // yarıçapı) + kesme yüzeylerinde GERÇEK kesit kapakları.
     MotorScene.prototype._rebuildGrain = function (rPort, force) {
-        if (!force && Math.abs(rPort - this._lastPortR) < 0.05) return;
+        // Eski eşik 0.05 mm idi — oynatma sırasında fiilen HER karede
+        // Lathe/Extrude geometrisi sıfırdan kuruluyordu. Eşik büyütüldü;
+        // aradaki karelerde parıltı silindiri radyal ölçekle güncellenir
+        // (görev 1). Kesin geometri force ile (kurulum, şekil değişimi,
+        // yanma sonu) her zaman alınabilir.
+        var epsMm = Math.max(GRAIN_REBUILD_MIN_MM,
+            GRAIN_REBUILD_FRACTION * this.dims.rGrainOut);
+        if (!force && Math.abs(rPort - this._lastPortR) < epsMm) return;
         this._lastPortR = rPort;
         var d = this.dims;
         var g = this.parts.grain;
@@ -1266,6 +1359,9 @@
         this._glowMesh = new THREE.Mesh(geo, this._glowMat);
         this._glowMesh.position.y = (d.zg0 + d.Lch) / 2; // portu + art odasını kapla
         this.assembly.add(this._glowMesh);
+        // Radyal ölçek animasyonu referansı: oynatma sırasında geometri
+        // yeniden kurulmaz, mevcut silindir rP/rBuilt oranıyla ölçeklenir
+        this._glowBuiltPort = Math.max(rPort, 1e-3);
     };
 
     // ------------------------------------------------------------------
@@ -1368,10 +1464,30 @@
     // Egzoz plume: iki katmanlı partikül sistemi + şok elmasları
     // ------------------------------------------------------------------
 
+    // Plume fizik türetimleri (görev 6): radyal saçılım tan(θ_exit) ile,
+    // şok elması aralığı/şiddeti genişleme oranından. Ölçüler extractDims'te.
+    MotorScene.prototype._plumeAero = function () {
+        var d = this.dims;
+        var thetaDeg = d.nozType === 'conical' ? d.halfAngle : d.thetaE;
+        var spread = Math.tan(THREE.MathUtils.degToRad(clamp(thetaDeg, 2, 35))) /
+            Math.tan(THREE.MathUtils.degToRad(PLUME_REF_EXIT_ANGLE_DEG));
+        var eps = Math.pow(d.re / Math.max(d.rt, 1e-3), 2);
+        // pe/pa yaklaşımı: eps ≈ IDEAL_EXPANSION_EPS deniz seviyesinde tam
+        // genişleme sayılır; sapma büyüdükçe elmaslar belirginleşir
+        var peOverPa = Math.pow(IDEAL_EXPANSION_EPS / Math.max(eps, 1.01), 1.15);
+        var mismatch = clamp(Math.abs(1 - peOverPa), 0, 1);
+        return {
+            spread: clamp(spread, 0.5, 3),
+            diamondSpacing: d.de * (0.7 + 0.5 * Math.sqrt(eps / IDEAL_EXPANSION_EPS)),
+            diamondStrength: 0.25 + 0.75 * mismatch
+        };
+    };
+
     MotorScene.prototype._buildPlume = function () {
         var d = this.dims;
         var N = 900;
         this._plumeN = N;
+        this._plumeInfo = this._plumeAero();
         var geo = new THREE.BufferGeometry();
         var pos = new Float32Array(N * 3);
         var col = new Float32Array(N * 3);
@@ -1383,12 +1499,17 @@
             size: Math.max(3, d.re * 0.55),
             map: glowTexture('rgba(255,255,255,1)', 'rgba(255,150,60,0.6)'),
             vertexColors: true, transparent: true, depthWrite: false,
-            blending: THREE.AdditiveBlending, sizeAttenuation: true
+            blending: THREE.AdditiveBlending, sizeAttenuation: true,
+            toneMapped: false
         });
         this._plume = new THREE.Points(geo, mat);
         this._plume.frustumCulled = false;
         this.model.add(this._plume);
         for (var i = 0; i < N; i++) this._resetParticle(i, true);
+        // Ölü partiküller hiç çizilmez: ilk 'aktif' indeks canlıdır (prefix
+        // sözleşmesi), aralık her karede _updatePlume'da güncellenir (görev 8)
+        this._plumeActive = 0;
+        geo.setDrawRange(0, 0);
 
         // Şok elmasları
         this._diamonds = [];
@@ -1396,7 +1517,8 @@
         for (var k = 0; k < nd; k++) {
             var s = new THREE.Sprite(new THREE.SpriteMaterial({
                 map: glowTexture('rgba(220,240,255,1)', 'rgba(90,170,255,0.5)'),
-                transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0
+                transparent: true, blending: THREE.AdditiveBlending,
+                depthWrite: false, opacity: 0, toneMapped: false
             }));
             this.model.add(s);
             this._diamonds.push(s);
@@ -1404,11 +1526,14 @@
         this._updateDiamondPositions();
     };
 
-    // Elmas konum/ölçekleri geometriye bağlı — update() sonrası da çağrılır
+    // Elmas konum/ölçekleri geometriye bağlı — update() sonrası da çağrılır.
+    // Aralık genişleme oranından türetilir: eps büyüdükçe hücreler uzar.
     MotorScene.prototype._updateDiamondPositions = function () {
         var d = this.dims;
+        var info = this._plumeInfo || (this._plumeInfo = this._plumeAero());
         for (var k = 0; k < this._diamonds.length; k++) {
-            this._diamonds[k].position.set(0, this._nozzleInfo.zExit + d.de * (0.9 + k * 1.25), 0);
+            this._diamonds[k].position.set(0,
+                this._nozzleInfo.zExit + d.de * 0.9 + k * info.diamondSpacing, 0);
             this._diamonds[k].scale.setScalar(d.re * (1.5 - k * 0.18));
         }
     };
@@ -1418,11 +1543,14 @@
         var st = this._pState;
         var pos = (this._plume && this._plume.geometry)
             ? this._plume.geometry.attributes.position.array : null;
+        var spread = this._plumeInfo ? this._plumeInfo.spread : 1;
         var rSpawn = d.re * 0.75 * Math.sqrt(Math.random());
         var phi = Math.random() * TAU;
         var speed = this._totalLen * (2.2 + Math.random() * 1.6); // mm/s ölçekli
         st[i * 5 + 0] = speed;
-        st[i * 5 + 1] = speed * (0.05 + 0.10 * Math.random()); // radyal saçılım
+        // Radyal saçılım çıkış yarım açısıyla ölçekli: bell (θe küçük) dar
+        // ve toplu, koni (θ büyük) geniş bir jet üretir (görev 6)
+        st[i * 5 + 1] = speed * (0.05 + 0.10 * Math.random()) * spread;
         st[i * 5 + 2] = phi;
         var maxLife = 0.35 + Math.random() * 0.5;
         st[i * 5 + 3] = scatter ? Math.random() * maxLife : 0;
@@ -1444,11 +1572,18 @@
         // Kalite anahtarı (perf modu) partikül tavanını düşürür
         var qf = this._qualityFactor || 1.0;
         var active = Math.floor(this._plumeN * qf * clamp(intensity, 0, 1));
+        // Ölü partiküller GPU'ya hiç gitmez: ilk 'active' indeks canlı kabul
+        // edilir (prefix sözleşmesi) + setDrawRange. Aktif sayı büyüyünce
+        // yeni açılan indeksler nozula ışınlanır — bayat konumda belirme
+        // olmaz; ayrıca öne-alma takası gereksizleşir (görev 8).
+        var prevActive = this._plumeActive || 0;
+        for (var a = prevActive; a < active; a++) this._resetParticle(a, false);
+        this._plumeActive = active;
+        geo.setDrawRange(0, active);
         // İtkiyle orantılı jet: eksenel hız ve plume boyu intensity ile ölçeklenir
         var velScale = 0.55 + 0.45 * clamp(intensity, 0, 1);
-        for (var i = 0; i < this._plumeN; i++) {
+        for (var i = 0; i < active; i++) {
             var o5 = i * 5, o3 = i * 3;
-            if (i >= active) { col[o3] = col[o3 + 1] = col[o3 + 2] = 0; continue; }
             st[o5 + 3] += dt;
             if (st[o5 + 3] >= st[o5 + 4]) {
                 this._resetParticle(i, false);
@@ -1475,9 +1610,13 @@
         geo.attributes.position.needsUpdate = true;
         geo.attributes.color.needsUpdate = true;
 
+        // Elmas şiddeti basınç uyumsuzluğuyla (|1 − pe/pa| yaklaşımı) ölçekli:
+        // ideale yakın genişlemede elmaslar söner, sapmada belirginleşir
+        var dstr = this._plumeInfo ? this._plumeInfo.diamondStrength : 1;
         for (var k = 0; k < this._diamonds.length; k++) {
             var flick = 0.75 + 0.25 * Math.sin(this._clock.elapsedTime * 37 + k * 2.4);
-            this._diamonds[k].material.opacity = intensity * (0.75 - k * 0.12) * flick;
+            this._diamonds[k].material.opacity =
+                intensity * (0.75 - k * 0.12) * flick * dstr;
         }
     };
 
@@ -1501,7 +1640,8 @@
         }
         var g = this._labelGroup = new THREE.Group();
         var lineMat = new THREE.LineBasicMaterial({
-            color: 0x39d6ec, transparent: true, opacity: 0.75, depthTest: false
+            color: 0x39d6ec, transparent: true, opacity: 0.75, depthTest: false,
+            toneMapped: false
         });
         var scaleBase = this._totalLen * 0.055;
 
@@ -1579,6 +1719,15 @@
 
     MotorScene.prototype._tick = function () {
         var dt = Math.min(this._clock.getDelta(), 0.05);
+        // Görünmezlik bekçisi (görev 3): konteyner display:none bir atanın
+        // altındaysa offsetParent null döner — render, simülasyon ve geometri
+        // işi tamamen atlanır; yalnız controls damping sönümü işletilir.
+        // (RAF döngüsü sürer; sekme geri gelince kaldığı yerden devam eder.
+        // Gizli-sekme kurulum/resize akışına dokunulmaz — 2026-07-13 dersleri.)
+        if (!this.container.offsetParent) {
+            this.controls.update();
+            return;
+        }
         var d = this.dims;
         var st = this.state;
 
@@ -1592,7 +1741,13 @@
         // Simülasyon zamanı
         if (st.playing) {
             st.time += dt * st.speed;
-            if (st.time >= d.burnTime) { st.time = d.burnTime; st.playing = false; }
+            if (st.time >= d.burnTime) {
+                st.time = d.burnTime;
+                st.playing = false;
+                // Yanma sonu: eşikli atlamaların bıraktığı son dilimi kapat —
+                // nihai geometri bir kez kesin kurulur
+                this._grainFinal = true;
+            }
         }
         var burning = st.playing && st.time < d.burnTime;
         // Throttle artık İKİLİ DEĞİL: transient eğri verildiyse plume/ışıklar
@@ -1626,12 +1781,20 @@
             this._heatMatCut.color.setScalar(amp);
         }
 
-        // Port regresyonu
+        // Port regresyonu: grain eşikli (GRAIN_REBUILD_*) yeniden kurulur;
+        // yanma sonunda son dilim force ile kapatılır (görev 1)
         var rP = portRadiusAt(d, st.time);
-        this._rebuildGrain(rP, false);
-        if (Math.abs(rP - (this._glowR || 0)) > 0.25) {
-            this._glowR = rP;
-            this._rebuildGlow(rP);
+        this._rebuildGrain(rP, this._grainFinal === true);
+        this._grainFinal = false;
+        // Parıltı silindiri: her karede geometri kurmak yerine mevcut mesh'e
+        // radyal ölçek uygulanır; oran aşırı sapınca bir kez tazelenir
+        if (this._glowMesh && d.motorType !== 'liquid' && this._glowBuiltPort) {
+            var sGlow = clamp(rP / this._glowBuiltPort, 0.5, 2.5);
+            if (sGlow > 2.0 || sGlow < 0.55) {
+                this._rebuildGlow(rP);
+            } else {
+                this._glowMesh.scale.set(sGlow, 1, sGlow);
+            }
         }
 
         // Yanma ışıkları + parıltı
@@ -1666,6 +1829,24 @@
         this.controls.autoRotate = st.autoRotate;
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
+
+        // Otomatik kalite bekçisi (görev 3): son AUTO_PERF_FRAME_WINDOW
+        // karenin ortalama süresi limiti aşarsa 'perf' moduna geçilir.
+        // Tek sefer tetiklenir — kullanıcı HQ'ya elle dönerse zorlanmaz;
+        // intro dolly'si sırasında (ısınma) ölçüm yapılmaz.
+        if (!this._perfMode && !this._autoPerfDone && this._introT >= 1) {
+            this._dtSum = (this._dtSum || 0) + dt;
+            this._dtCount = (this._dtCount || 0) + 1;
+            if (this._dtCount >= AUTO_PERF_FRAME_WINDOW) {
+                var dtAvg = this._dtSum / this._dtCount;
+                this._dtSum = 0;
+                this._dtCount = 0;
+                if (dtAvg > AUTO_PERF_DT_LIMIT) {
+                    this._autoPerfDone = true;
+                    this.setQuality('perf');   // hooks.onQualityChange deck'i bilgilendirir
+                }
+            }
+        }
 
         // HUD kancası
         if (this.hooks.onTick) {
@@ -1710,7 +1891,8 @@
         this.state.portShape = shape || 'circular';
         this._lastPortR = -1;
         this._rebuildGrain(portRadiusAt(this.dims, this.state.time), true);
-        this._glowR = -1;
+        // Parıltı da yeni kesitin iç teğet yarıçapına göre tazelenir
+        // (cache/ölçek referansı _rebuildGlow içinde sıfırlanır)
         this._rebuildGlow(portRadiusAt(this.dims, this.state.time));
         return this.state.portShape;
     };
@@ -1730,17 +1912,28 @@
     // (renderer/kamera korunur; boyut belirgin değiştiyse kamera yeniden oturur)
     MotorScene.prototype.update = function (motorData) {
         var oldLen = this._totalLen || 1;
+        var oldRad = (this.dims.rcOut + this.dims.flangeLip) || 1;
         this.dims = extractDims(motorData);
+        // Transient eğri bağlıysa zaman çizelgesi gerçek yanma süresinde
+        // kalır — tasarım modu güncellemesi burnTime'ı tasarım sabitine
+        // geri döndürmesin (görev 5c)
+        if (this._transient) this.dims.burnTime = this._transient.tEnd;
         this.state.time = clamp(this.state.time, 0, this.dims.burnTime);
         this._lastPortR = -1;
         this._buildMotor();
         this._buildLabels();
         if (this._plume) {
+            this._plumeInfo = this._plumeAero();   // yeni geometri → yeni jet fiziği
             this._updateDiamondPositions();
             this._plume.material.size = Math.max(3, this.dims.re * 0.55);
             for (var i = 0; i < this._plumeN; i++) this._resetParticle(i, true);
         }
-        if (Math.abs(this._totalLen - oldLen) / oldLen > 0.15) {
+        // Kamera refit: uzunluk VEYA dış yarıçap (rcOut+flangeLip) yüzde
+        // 15'ten fazla değiştiyse yeniden oturt (görev 5b — yalnız uzunluğa
+        // bakmak çap sliderında kadrajı bayat bırakıyordu)
+        var newRad = this.dims.rcOut + this.dims.flangeLip;
+        if (Math.abs(this._totalLen - oldLen) / oldLen > 0.15 ||
+            Math.abs(newRad - oldRad) / oldRad > 0.15) {
             this._fitCamera();
             this._introT = 1;
             this.camera.position.copy(this._camHome);
@@ -1826,12 +2019,29 @@
             this._buildMotor();     // detay geometrileri yeni segment sayısıyla
             this._buildLabels();
         }
-        return perf ? 'perf' : 'high';
+        var label = perf ? 'perf' : 'high';
+        // Deck / sayfa butonu gerçek durumu göstersin (otomatik perf düşüşü
+        // dahil) — kanca yoksa sessizce geçilir
+        if (this.hooks.onQualityChange) {
+            try { this.hooks.onQualityChange(label); } catch (e) { /* UI yok */ }
+        }
+        return label;
+    };
+    // PNG kare yakalama (görev 7): render hemen ardından senkron toDataURL —
+    // arabellek aynı görev içinde okunduğu için preserveDrawingBuffer gerekmez
+    MotorScene.prototype.snapshot = function () {
+        this.renderer.render(this.scene, this.camera);
+        return this.renderer.domElement.toDataURL('image/png');
     };
     MotorScene.prototype.dispose = function () {
         this._disposed = true;
         if (this._raf) cancelAnimationFrame(this._raf);
         if (this._ro) this._ro.disconnect();
+        // OrbitControls DOM dinleyicilerini bırak (görev 8 — sızıntı önlemi)
+        if (this.controls && this.controls.dispose) this.controls.dispose();
+        // Ortam küp dokusu sahne grafiğinde değil scene.environment'ta durur;
+        // traverse onu görmez, açıkça bırakılır
+        if (this._envTex) this._envTex.dispose();
         var self = this;
         this.scene.traverse(function (o) {
             if (o.geometry) o.geometry.dispose();
@@ -1881,6 +2091,8 @@
         setCameraPreset: function (name) { return viz ? viz.setCameraPreset(name) : null; },
         cycleCameraPreset: function () { return viz ? viz.cycleCameraPreset() : null; },
         setQuality: function (mode) { return viz ? viz.setQuality(mode) : null; },
+        // Görünür karenin PNG data-URL'i (indirme butonları için)
+        snapshot: function () { return viz ? viz.snapshot() : null; },
         get: function () { return viz; },
         dispose: function () { if (viz) { viz.dispose(); viz = null; } }
     };

@@ -295,6 +295,7 @@
             return;
         }
         lastData = data;
+        U.purgePlots(root);   // eski grafiklerin resize dinleyicileri sızmasın
         root.innerHTML = '';
         render(data, root);
         root.style.display = 'block';
@@ -396,7 +397,9 @@
                     yref: 'paper', line: { width: 1, dash: m[1] } });
             }
         });
-        Plotly.newPlot(plotEl, [{
+        // react: aynı div'e tekrar çizimde (çıktı seçici değişince) tam
+        // yıkım/yeniden kurulum yerine fark tabanlı güncelleme (plotly 1.34+)
+        Plotly.react(plotEl, [{
             type: 'bar',
             x: centers,
             y: counts,
@@ -422,13 +425,17 @@
         }
         const rows = ((data.sensitivity || {})[key] || []).slice(0, 6);
         if (!rows.length) {
+            // Önceki seçimden kalan canlı grafik varsa serbest bırak
+            // (textContent grafiği purge'suz siler, dinleyici sızar)
+            U.purgePlots(plotEl);
             plotEl.textContent = T('panel.uncertainty.noSensitivity',
                 'No sensitivity data available for this output.');
             return;
         }
         // |rho| azalan gelir; yatay barda en etkili en ÜSTTE dursun
         const ordered = rows.slice().reverse();
-        Plotly.newPlot(plotEl, [{
+        // react: seçici değişiminde aynı div'e fark tabanlı güncelleme
+        Plotly.react(plotEl, [{
             type: 'bar',
             orientation: 'h',
             x: ordered.map(function (r) { return r.rho; }),

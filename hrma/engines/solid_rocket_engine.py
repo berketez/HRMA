@@ -1,4 +1,5 @@
 import numpy as np
+from functools import lru_cache
 from scipy.integrate import odeint
 from scipy.optimize import fsolve, newton
 from scipy.interpolate import interp1d
@@ -12,6 +13,78 @@ try:
     SHAPELY_AVAILABLE = True
 except ImportError:
     SHAPELY_AVAILABLE = False
+
+
+# ---------------------------------------------------------------------------
+# Sabit shapely geometrilerinin önbelleği (v2.5.5 performans, davranış AYNI).
+#
+# İtki eğrisi döngüsü her zaman adımında kasa diskini, dış-çember şeridini ve
+# başlangıç port poligonunu SIFIRDAN kuruyordu; bunlar yalnız geometri
+# parametrelerinin fonksiyonudur ve poligon kurulumu deterministiktir — aynı
+# girdiler her çağrıda BİT-AYNI poligonu üretir. Önbellek anahtarı geometriyi
+# belirleyen TÜM parametreleri içerir; shapely geometrileri değişmez
+# (immutable) olduğundan paylaşım güvenlidir. Modül seviyesinde tutulur ki
+# Monte Carlo / UQ gibi aynı geometriyle YÜZLERCE motor örneği kuran yollar
+# da paylaşsın (ölçüm: star itki eğrisi 83 ms -> ~35 ms, wagon 142 -> ~55 ms).
+# ---------------------------------------------------------------------------
+@lru_cache(maxsize=64)
+def _cached_case_disk(r_go):
+    """Kasa iç kesit diski (yarıçap m) — _clipped_* kırpma geometrisi."""
+    return _ShapelyPoint(0.0, 0.0).buffer(r_go, quad_segs=96)
+
+
+@lru_cache(maxsize=64)
+def _cached_case_ring(r_go):
+    """Kasa çemberine oturan yayları yakalayan ince şerit (m)."""
+    return _cached_case_disk(r_go).boundary.buffer(max(1e-6, r_go * 1e-6))
+
+
+@lru_cache(maxsize=64)
+def _cached_star_polygon(n_pts, r_i, depth):
+    """Başlangıç star port kesiti — _star_port_polygon ile AYNI kurulum."""
+    verts = []
+    for k in range(n_pts):
+        a_tip = 2.0 * np.pi * k / n_pts
+        a_val = 2.0 * np.pi * (k + 0.5) / n_pts
+        r_p = r_i + depth
+        verts.append((r_p * np.cos(a_tip), r_p * np.sin(a_tip)))
+        verts.append((r_i * np.cos(a_val), r_i * np.sin(a_val)))
+    return _ShapelyPolygon(verts)
+
+
+@lru_cache(maxsize=64)
+def _cached_wagon_polygon(r_core, r_pitch):
+    """Wagon-wheel port kesiti — _wagon_port_polygon ile AYNI kurulum
+    (merkez + 6 çevre delik, sıralı union)."""
+    holes = [_ShapelyPoint(0.0, 0.0).buffer(r_core, quad_segs=48)]
+    for k in range(6):
+        a = 2.0 * np.pi * k / 6.0
+        holes.append(_ShapelyPoint(r_pitch * np.cos(a),
+                                   r_pitch * np.sin(a))
+                     .buffer(r_core, quad_segs=48))
+    port = holes[0]
+    for h in holes[1:]:
+        port = port.union(h)
+    return port
+
+
+@lru_cache(maxsize=64)
+def _cached_slot_quads(r_port, n_slots, width, depth):
+    """Radyal yuva ilkelleri — _radial_slot_primitives ile AYNI kurulum."""
+    half = width / 2.0
+    r_tip = r_port + depth
+    quads = []
+    for k in range(n_slots):
+        ang = 2.0 * np.pi * k / n_slots
+        ux, uy = np.cos(ang), np.sin(ang)
+        vx, vy = -uy, ux  # teğetsel birim vektör
+        quads.append(_ShapelyPolygon([
+            (half * vx, half * vy),
+            (r_tip * ux + half * vx, r_tip * uy + half * vy),
+            (r_tip * ux - half * vx, r_tip * uy - half * vy),
+            (-half * vx, -half * vy),
+        ]))
+    return tuple(quads)
 
 from hrma.constants import G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR, R_STAR_ICAO
 
@@ -1227,16 +1300,11 @@ class SolidRocketEngine:
         Ri + derinlikte; 2N köşe. Vadi filetoları ayrıca modellenmez — ofset
         (buffer) ilerledikçe köşeler fiziksel olarak zaten yuvarlanır.
         """
+        # Kurulum _cached_star_polygon'da (modül önbelleği): itki eğrisi her
+        # zaman adımında bu poligonu istiyor; aynı parametreler bit-aynı
+        # poligonu verdiğinden yeniden kurmak yerine paylaşılır.
         n_pts, depth = self._star_params()
-        r_i = self.D_core / 2.0
-        r_p = r_i + depth
-        verts = []
-        for k in range(n_pts):
-            a_tip = 2.0 * np.pi * k / n_pts
-            a_val = 2.0 * np.pi * (k + 0.5) / n_pts
-            verts.append((r_p * np.cos(a_tip), r_p * np.sin(a_tip)))
-            verts.append((r_i * np.cos(a_val), r_i * np.sin(a_val)))
-        return _ShapelyPolygon(verts)
+        return _cached_star_polygon(n_pts, self.D_core / 2.0, depth)
 
     def _wagon_port_polygon(self):
         """Wagon-wheel port kesiti: merkez + 6 çevre delik (shapely, metre).
@@ -1246,18 +1314,9 @@ class SolidRocketEngine:
         D_chamber/2 olduğu sürece delikler çakışmaz; çakışırsa union bunu
         geometrik olarak zaten doğru ele alır.
         """
-        r_core = self.D_core / 4.0
-        r_pitch = self.D_chamber / 4.0
-        holes = [_ShapelyPoint(0.0, 0.0).buffer(r_core, quad_segs=48)]
-        for k in range(6):
-            a = 2.0 * np.pi * k / 6.0
-            holes.append(_ShapelyPoint(r_pitch * np.cos(a),
-                                       r_pitch * np.sin(a))
-                         .buffer(r_core, quad_segs=48))
-        port = holes[0]
-        for h in holes[1:]:
-            port = port.union(h)
-        return port
+        # Kurulum _cached_wagon_polygon'da (modül önbelleği): 7 buffer + 6
+        # union'lık sabit kesit her zaman adımında yeniden kuruluyordu.
+        return _cached_wagon_polygon(self.D_core / 4.0, self.D_chamber / 4.0)
 
     # ------------------------------------------------------------------
     # Finocyl / slotted: radyal yuvalı port kesitleri (2026-07-19)
@@ -1282,21 +1341,11 @@ class SolidRocketEngine:
         Yuvalar merkezden (r=0) başlatılır ki port dairesiyle her koşulda
         birleşsinler; birleşim tek parça bir port kesiti verir.
         """
+        # Kurulum _cached_slot_quads'ta (modül önbelleği): yuva dörtgenleri
+        # web'den bağımsız sabitlerdir, her ofset çağrısında yeniden
+        # kurulmaları gereksizdi.
         r_port = self.D_core / 2.0
-        half = width / 2.0
-        r_tip = r_port + depth
-        quads = []
-        for k in range(n_slots):
-            ang = 2.0 * np.pi * k / n_slots
-            ux, uy = np.cos(ang), np.sin(ang)
-            vx, vy = -uy, ux  # teğetsel birim vektör
-            quads.append(_ShapelyPolygon([
-                (half * vx, half * vy),
-                (r_tip * ux + half * vx, r_tip * uy + half * vy),
-                (r_tip * ux - half * vx, r_tip * uy - half * vy),
-                (-half * vx, -half * vy),
-            ]))
-        return r_port, quads
+        return r_port, _cached_slot_quads(r_port, n_slots, width, depth)
 
     def _radial_slot_offset(self, n_slots, width, depth, web_thickness):
         """Web kadar ofsetlenmiş radyal-yuvalı port kesiti (shapely, metre).
@@ -1444,10 +1493,21 @@ class SolidRocketEngine:
 
         Yarıklar boyun tamamını kat ettiği için tek kesit yeterlidir.
         Ofset yine ilkellere dağıtılır (bkz. _radial_slot_offset).
+
+        Performans (v2.5.5): itki eğrisinin HER adımı aynı web ile iki kez
+        çağırır (calculate_burn_area + _port_flow_area). Tek girdilik memo
+        ikinci kurulumu atlar; aynı girdiler bit-aynı poligonu verdiğinden
+        davranış değişmez.
         """
         self._require_shapely('slotted')
         n, width, depth, _a, _c = self._slotted_params()
-        return self._radial_slot_offset(n, width, depth, web_thickness)
+        key = (self.D_core, n, width, depth, web_thickness)
+        memo = getattr(self, '_slot_offset_memo', None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        geom = self._radial_slot_offset(n, width, depth, web_thickness)
+        self._slot_offset_memo = (key, geom)
+        return geom
 
     def _slotted_port_polygon(self):
         """Slotted BAŞLANGIÇ port kesiti (web=0)."""
@@ -1499,13 +1559,15 @@ class SolidRocketEngine:
         bitmiş demektir ve yanan çevreden düşülür.
         """
         r_go = self.D_chamber / 2.0
-        disk = _ShapelyPoint(0.0, 0.0).buffer(r_go, quad_segs=96)
+        # Disk ve şerit sabittir — modül önbelleğinden okunur (her zaman
+        # adımında yeniden buffer'lamak profil ölçümünde en pahalı kalemdi).
+        disk = _cached_case_disk(r_go)
         inter = port_w.intersection(disk)
         if inter.is_empty:
             return 0.0
         per_total = inter.boundary.length
         # Dış çembere değen (yakıtı bitmiş) yaylar: ince halka kesişimi
-        ring = disk.boundary.buffer(max(1e-6, r_go * 1e-6))
+        ring = _cached_case_ring(r_go)
         touching = inter.boundary.intersection(ring)
         per_burn = per_total - getattr(touching, 'length', 0.0)
         return max(per_burn, 0.0)
@@ -1518,8 +1580,7 @@ class SolidRocketEngine:
         (d(alan)/dw = yanan çevre).
         """
         r_go = self.D_chamber / 2.0
-        disk = _ShapelyPoint(0.0, 0.0).buffer(r_go, quad_segs=96)
-        inter = port_w.intersection(disk)
+        inter = port_w.intersection(_cached_case_disk(r_go))
         return float(inter.area) if not inter.is_empty else np.pi * r_go ** 2
 
     def _offset_port_area(self, port0, web_thickness):
@@ -1557,7 +1618,29 @@ class SolidRocketEngine:
         Isp = I_toplam/(m_p·g0) tabanı bu hacimden gelir; tüm tipler için
         dairesel annulus kullanmak star'da %10, end-burner'da %8 hata,
         wagon'da belirsiz hata veriyordu (2026-07-13 formül teyidi, K2).
+
+        Performans (v2.5.5): calculate_performance zinciri bu saf fonksiyonu
+        7+ kez çağırır; shapely'li tiplerde her çağrı kırpılmış poligon alanı
+        hesaplıyordu. Sonuç, hacmi belirleyen TÜM geometri parametreleriyle
+        anahtarlanıp örnek içinde memoize edilir — aynı anahtar bit-aynı
+        değeri döndürür, davranış değişmez.
         """
+        key = (self.grain_type, self.D_chamber, self.D_core, self.L_grain)
+        if self.grain_type == 'star':
+            key += self._star_params()
+        elif self.grain_type == 'finocyl':
+            key += tuple(self._finocyl_params()[:4])
+        elif self.grain_type == 'slotted':
+            key += tuple(self._slotted_params()[:3])
+        memo = getattr(self, '_prop_volume_memo', None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        vol = self._propellant_volume_uncached()
+        self._prop_volume_memo = (key, vol)
+        return vol
+
+    def _propellant_volume_uncached(self):
+        """_propellant_volume'un gerçek hesabı (memo katmanı olmadan)."""
         r_outer = self.D_chamber / 2.0
         disk_area = np.pi * r_outer ** 2
         if self.grain_type == 'end_burner':

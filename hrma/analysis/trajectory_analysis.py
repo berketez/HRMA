@@ -863,4 +863,16 @@ class TrajectoryAnalyzer:
         fig.update_xaxes(title_text="Time (s)", row=3, col=1)
         fig.update_yaxes(title_text="Altitude (km)", row=3, col=1)
 
-        return fig.to_json()
+        # Tembel import: dongusel bagimlilik riskine karsi modul yerine
+        # fonksiyon icinde (engines -> analysis -> visualization zinciri).
+        from hrma.visualization.visualization import _fig_json, _match_time_axes
+
+        # Senkron zoom (v2.5.5): zaman ekseni paylasan dort panel birbirine
+        # 'matches' ile baglanir — birinde yakinlastirma hepsine uygulanir.
+        # Menzil ekseni (1,1) BILEREK haric: birimi km, zaman degil.
+        # plotly.js 1.58.5 'matches' destegi 1.45.0'dan beri var (teyitli).
+        _match_time_axes(fig, [(1, 2), (2, 1), (2, 2), (3, 1)])
+
+        # _fig_json: bdata'siz duz JSON — vendor plotly.js 1.58.5 uyumu
+        # (tek JSON kapisi, v2.5.5).
+        return _fig_json(fig)

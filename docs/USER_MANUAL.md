@@ -7,7 +7,7 @@ presents results in a dark-themed web interface with an interactive 3D
 digital twin, an Analysis Deck of engineering panels, and working CAD /
 drawing / report exports.
 
-This manual describes HRMA **v2.5.3**.
+This manual describes HRMA **v2.5.5**.
 
 > **Scope notice.** HRMA is a preliminary-design and educational tool built
 > on closed-form and 1D engineering correlations. It is not a
@@ -31,6 +31,8 @@ This manual describes HRMA **v2.5.3**.
 12. [Automatic Updates](#12-automatic-updates)
 13. [Troubleshooting](#13-troubleshooting)
 14. [Scope and Limitations](#14-scope-and-limitations)
+15. [Saving and Reusing Projects](#15-saving-and-reusing-projects)
+16. [Importing External Designs](#16-importing-external-designs)
 
 ---
 
@@ -38,7 +40,7 @@ This manual describes HRMA **v2.5.3**.
 
 ### Option A: Windows installer (recommended on Windows)
 
-1. Download `HRMA-Setup-2.5.3.exe` from the
+1. Download `HRMA-Setup-2.5.5.exe` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest).
 2. Double-click and follow the wizard (Next, Next, Install). The installer
    is per-user: no administrator rights are required.
@@ -49,7 +51,7 @@ Python and all libraries are bundled; no separate installation is needed.
 
 ### Option B: macOS disk image (recommended on macOS)
 
-1. Download `HRMA-Setup-2.5.3-macOS.dmg` from the
+1. Download `HRMA-Setup-2.5.5-macOS.dmg` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest)
    (Apple Silicon, macOS 11 or newer).
 2. Open the DMG and drag `HRMA` into `Applications`.
@@ -234,7 +236,7 @@ more) that appears after a successful calculation. Every panel:
 - renders tables, stat cards, and Plotly charts, with ok / warning / error
   badges.
 
-The 13 panels (introduced through v2.4.6, current in v2.5.3):
+The 13 panels (introduced through v2.4.6, current in v2.5.5):
 
 | Panel | Endpoint | Motor types | What it computes |
 |---|---|---|---|
@@ -393,12 +395,32 @@ coefficients back into the fuel inputs and re-run.
 
 At startup HRMA queries the GitHub Releases API for the repository
 `berketez/HRMA`. If a newer tagged version exists, a modal offers a
-one-click download of the platform-appropriate asset (`.dmg` on macOS,
-`.exe` on Windows) into your Downloads folder, with progress reporting.
-The updater selects the asset itself by file suffix; no URL from outside
-the GitHub API is ever used. If no matching asset exists, it falls back to
-opening the Releases page. When offline, the check fails silently and the
-app runs normally.
+one-click update. The updater selects the asset itself by file suffix
+(`.dmg` on macOS, `.exe` on Windows); no URL from outside the GitHub API
+is ever used. When offline, the check fails silently and the app runs
+normally.
+
+Since v2.5.5 the update is fully automatic: after you click "Update
+now", HRMA downloads the installer (verifying its size and, when GitHub
+provides one, its SHA-256 digest), closes itself, installs the new
+version silently and reopens on its own. No drag-and-drop and no
+"Replace?" dialog is involved.
+
+Safety behavior:
+
+- On macOS the old application is kept until the new version has
+  actually started; if the new version fails to launch, the previous
+  version is restored automatically.
+- If HRMA is running from source, from inside a mounted DMG, from a
+  non-writable location, or the disk is nearly full, the silent path is
+  skipped and the downloaded installer is simply opened for a manual
+  install (the pre-2.5.5 behavior).
+- Every step is logged to `Documents/HRMA/hrma_update_log.txt`. On any
+  failure the installer file is left in your Downloads folder and opened
+  so you can finish the update manually.
+- On Windows a small console window shows progress while the silent
+  install runs; do not close it — HRMA reopens automatically when it
+  finishes.
 
 ## 13. Troubleshooting
 
@@ -472,3 +494,57 @@ environment:
 Use HRMA to converge a design and narrow a test matrix. Cross-check any
 serious design against an independent tool (NASA CEA, RPA, openMotor) and
 verify by physical testing before firing any motor.
+
+## 15. Saving and Reusing Projects
+
+Since v2.5.5 every design page (hybrid, solid, liquid) has a project bar
+at the top: **Save / Save As / Open / New**. Projects are stored as
+`.hrma` files (plain JSON) under `Documents/HRMA/projects` — one file per
+project, portable and diff-friendly. A saved project contains all form
+inputs, the active tab states, any analysis-deck fields you edited by
+hand, and a small summary of the last computed results.
+
+Behavior notes:
+
+- An asterisk next to the project name marks unsaved changes; the browser
+  warns before you leave the page with unsaved work.
+- Opening a project of a different motor type redirects you to the right
+  page automatically (`?project=<name>` in the URL).
+- The landing page lists your most recent projects for one-click access.
+- Deleting a project moves it to `Documents/HRMA/projects/.trash` rather
+  than erasing it; corrupt files are flagged in the list but never crash
+  it. Loading never invents missing fields — a project written by a
+  different HRMA version loads with a warning instead of silent guesses.
+
+## 16. Importing External Designs
+
+v2.5.5 adds the reverse of the design workflow: bring an existing design
+into HRMA and turn it into numbers.
+
+**Thrust curve files (.eng RASP / .rse RockSim).** The validation panel
+(section 11) accepts these directly, alongside CSV. HRMA overlays the
+imported catalog/test curve on its own prediction and reports the same
+comparison metrics (total impulse, peak/average thrust, burn time, RMSE,
+grade). In the 6-DOF panel an imported motor file can also be selected as
+the thrust source, so you can fly your airframe on a catalog motor. An
+`.rse` file may contain several motors — a selector appears.
+
+**OpenRocket rockets (.ork).** The 6-DOF panel's "Import .ork" button
+maps the rocket's nose, body, fins and mass components onto HRMA's
+flight-dynamics inputs. Masses that OpenRocket stores only as
+density-times-geometry arrive marked *estimated* and stay editable. A
+mapping report lists everything that was mapped, approximated or skipped
+(parachutes and rail buttons do not affect the aerodynamic model, for
+example). If the file contains OpenRocket's own saved simulation results,
+HRMA shows a side-by-side comparison card after your 6-DOF run.
+
+**CAD solids (.step/.stp).** "Import from CAD (STEP)" on the design
+pages analyzes the solid, finds the motor axis and every cylindrical or
+conical surface, and proposes measurement candidates for throat, exit,
+chamber diameter/length and wall thickness on top of a cross-section
+drawing. Nothing is applied silently: you confirm or correct each
+dimension, then apply them to the design form, choose materials and
+propellants (a CAD file carries neither), and run the normal analysis.
+Suggestions that cannot be derived from the geometry are simply absent —
+HRMA does not guess. Assemblies prompt you to pick which solid to
+analyze; inch-unit files are converted to millimeters with a warning.

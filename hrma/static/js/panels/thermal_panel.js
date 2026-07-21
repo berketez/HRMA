@@ -283,6 +283,7 @@
         btn.addEventListener('click', async function () {
             btn.disabled = true;
             status.textContent = T('panel.thermal.computingAxial', 'COMPUTING AXIAL PROFILE…');
+            U.purgePlots(charts);   // eski grafiklerin resize dinleyicileri sızmasın
             charts.innerHTML = '';
             try {
                 const resp = await fetch(WALL_PROFILE_ENDPOINT, {

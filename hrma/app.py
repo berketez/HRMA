@@ -84,7 +84,11 @@ from hrma.visualization.visualization import (
     create_nozzle_mach_area_ratio_contour,
     create_wall_heat_flux_waterfall_plot,
     create_improved_motor_cross_section,
-    create_improved_injector_design
+    create_improved_injector_design,
+    # _fig_json: fig.to_json() yerine TEK JSON kapısı — plotly 6'nın bdata
+    # çıktısını vendor plotly.js 1.58.5'in çizebileceği düz listeye açar
+    # (boş grafik bugunun kökü). PALETTE: grafik serileri için ortak palet.
+    _fig_json, PALETTE
 )
 from hrma.export.motor_geometry import (
     solid_results_to_motor_geometry,
@@ -104,6 +108,16 @@ from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
+
+# v2.5.5 modüler API'ler: dış format importu (.eng/.rse/.ork), STEP/CAD
+# geometri analizi ve proje kaydet/yükle deposu Blueprint olarak yaşar
+# (rotalar kendi dosyalarında tam yollarıyla tanımlı, çakışma yok).
+from hrma.importers.api import importers_api
+from hrma.importers.step_api import step_import_api
+from hrma.utils.projects_api import projects_api
+app.register_blueprint(importers_api)
+app.register_blueprint(step_import_api)
+app.register_blueprint(projects_api)
 
 # Apply Windows-specific Flask configurations
 if platform.system() == 'Windows':
@@ -272,6 +286,15 @@ def update_download():
 def update_status():
     from hrma.utils.update_checker import download_status
     return jsonify(download_status())
+
+@app.route('/api/update/install', methods=['POST'])
+def update_install():
+    # Sessiz otomatik kurulum: indirme bittikten sonra arayüz burayı çağırır.
+    # "auto" modda uygulama kendini kapatır, yardımcı betik kurulumu yapıp
+    # HRMA'yı yeniden başlatır; kurulamayan ortamlarda kurulum dosyası
+    # açılır ("manual"). Dosya yolu istemciden alınmaz (self_install.py).
+    from hrma.utils.update_checker import start_install
+    return jsonify(start_install())
 
 @app.route('/api/update/open-download', methods=['POST'])
 def update_open_download():
@@ -1872,6 +1895,11 @@ def create_parametric_plot(results, sweep_param):
         )
     )
     
+    # Süpürülen parametrenin insan-okur adı (hover ve eksen başlıkları için)
+    sweep_label = sweep_param.replace('_', ' ').title()
+
+    # Seri renkleri merkezi paletten atanır (v2.5.5): kırmızı/mavi/yeşil
+    # CSS adları koyu temada tutarsız ve okunaksızdı.
     # Isp plot
     fig.add_trace(
         go.Scatter(
@@ -1879,12 +1907,14 @@ def create_parametric_plot(results, sweep_param):
             y=isp_values,
             mode='lines+markers',
             name='Specific Impulse',
-            line=dict(color='blue', width=3),
-            marker=dict(size=6)
+            line=dict(color=PALETTE[0], width=3),
+            marker=dict(size=6),
+            hovertemplate=(sweep_label + ': %{x:.4g}<br>'
+                           'Isp: %{y:.1f} s<extra></extra>')
         ),
         row=1, col=1
     )
-    
+
     # Thrust plot
     fig.add_trace(
         go.Scatter(
@@ -1892,12 +1922,14 @@ def create_parametric_plot(results, sweep_param):
             y=thrust_values,
             mode='lines+markers',
             name='Thrust',
-            line=dict(color='red', width=3),
-            marker=dict(size=6)
+            line=dict(color=PALETTE[1], width=3),
+            marker=dict(size=6),
+            hovertemplate=(sweep_label + ': %{x:.4g}<br>'
+                           'Thrust: %{y:.1f} N<extra></extra>')
         ),
         row=1, col=2
     )
-    
+
     # Mass plot
     fig.add_trace(
         go.Scatter(
@@ -1905,12 +1937,14 @@ def create_parametric_plot(results, sweep_param):
             y=mass_values,
             mode='lines+markers',
             name='Propellant Mass',
-            line=dict(color='green', width=3),
-            marker=dict(size=6)
+            line=dict(color=PALETTE[2], width=3),
+            marker=dict(size=6),
+            hovertemplate=(sweep_label + ': %{x:.4g}<br>'
+                           'Propellant Mass: %{y:.2f} kg<extra></extra>')
         ),
         row=2, col=1
     )
-    
+
     # Throat diameter plot
     fig.add_trace(
         go.Scatter(
@@ -1918,12 +1952,14 @@ def create_parametric_plot(results, sweep_param):
             y=throat_diameter_values,
             mode='lines+markers',
             name='Throat Diameter',
-            line=dict(color='orange', width=3),
-            marker=dict(size=6)
+            line=dict(color=PALETTE[3], width=3),
+            marker=dict(size=6),
+            hovertemplate=(sweep_label + ': %{x:.4g}<br>'
+                           'Throat Diameter: %{y:.2f} mm<extra></extra>')
         ),
         row=2, col=2
     )
-    
+
     # Add trajectory data if available
     if 'max_altitude' in results[0]:
         altitude_values = [r['max_altitude'] / 1000 for r in results]  # Convert to km
@@ -1933,36 +1969,40 @@ def create_parametric_plot(results, sweep_param):
                 y=altitude_values,
                 mode='lines+markers',
                 name='Max Altitude (km)',
-                line=dict(color='purple', width=3),
+                line=dict(color=PALETTE[4], width=3),
                 marker=dict(size=6),
-                yaxis='y5'
+                yaxis='y5',
+                hovertemplate=(sweep_label + ': %{x:.4g}<br>'
+                               'Max Altitude: %{y:.2f} km<extra></extra>')
             ),
             row=1, col=1
         )
-    
-    # Update layout
+
+    # Update layout — sabit width KALDIRILDI (v2.5.5): genişlik konteynere
+    # uyar (autosize), yükseklik panel sabitlemesi için korunur.
     fig.update_layout(
         title=dict(
-            text=f'Parametric Analysis: {sweep_param.replace("_", " ").title()} Sweep',
+            text=f'Parametric Analysis: {sweep_label} Sweep',
             x=0.5,
             font=dict(size=16, family='Arial')
         ),
         showlegend=False,
         height=600,
-        width=1000
+        autosize=True
     )
     
     # Update axis labels
-    fig.update_xaxes(title_text=sweep_param.replace('_', ' ').title(), row=1, col=1)
+    fig.update_xaxes(title_text=sweep_label, row=1, col=1)
     fig.update_yaxes(title_text='Isp (s)', row=1, col=1)
-    fig.update_xaxes(title_text=sweep_param.replace('_', ' ').title(), row=1, col=2)
+    fig.update_xaxes(title_text=sweep_label, row=1, col=2)
     fig.update_yaxes(title_text='Thrust (N)', row=1, col=2)
-    fig.update_xaxes(title_text=sweep_param.replace('_', ' ').title(), row=2, col=1)
+    fig.update_xaxes(title_text=sweep_label, row=2, col=1)
     fig.update_yaxes(title_text='Mass (kg)', row=2, col=1)
-    fig.update_xaxes(title_text=sweep_param.replace('_', ' ').title(), row=2, col=2)
+    fig.update_xaxes(title_text=sweep_label, row=2, col=2)
     fig.update_yaxes(title_text='Throat Diameter (mm)', row=2, col=2)
-    
-    return fig.to_json()
+
+    # _fig_json: bdata'sız düz JSON (vendor plotly.js 1.58.5 uyumu, v2.5.5)
+    return _fig_json(fig)
 
 @app.route('/api/comparative-analysis', methods=['POST'])
 def comparative_analysis():
@@ -2765,8 +2805,9 @@ def generate_3d():
                 width=800,
                 height=600
             )
-            
-            motor_3d_plot = fig.to_json()
+
+            # _fig_json: bdata'sız düz JSON (vendor plotly.js 1.58.5 uyumu)
+            motor_3d_plot = _fig_json(fig)
         
         return jsonify({
             'status': 'success',

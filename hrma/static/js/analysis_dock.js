@@ -145,6 +145,24 @@
         return `<h4 style="margin:14px 0 4px; color:var(--hd-ink-strong, #eaf7fb);">${text}</h4>`;
     }
 
+    // Kap içindeki Plotly grafiklerini innerHTML sıfırlanmadan ÖNCE serbest
+    // bırakır. plotly.js 1.58.5'te responsive:true her grafik için window'a
+    // bir resize dinleyicisi takar ve bunu yalnız Plotly.purge kaldırır;
+    // div'i purge'suz atmak dinleyiciyi + tüm iz verisini kalıcı sızdırır
+    // (her yeniden koşuda birikir). Paneller de AnalysisDock.ui.purgePlots
+    // üzerinden kullanır.
+    function purgePlots(el) {
+        if (!el || !window.Plotly || typeof Plotly.purge !== 'function') return;
+        const plots = el.querySelectorAll('.js-plotly-plot');
+        for (let i = 0; i < plots.length; i++) {
+            try { Plotly.purge(plots[i]); } catch (e) { /* zaten boş */ }
+        }
+        // querySelectorAll yalnız altları bulur; elemanın kendisi de grafik olabilir
+        if (el.classList && el.classList.contains('js-plotly-plot')) {
+            try { Plotly.purge(el); } catch (e) { /* zaten boş */ }
+        }
+    }
+
     // Uyarı / öneri kutusu (injector_panel uyarı bloğu deseni)
     function listBlock(title, items, kind) {
         if (!items || !items.length) return '';
@@ -350,6 +368,7 @@
             if (!resp.ok || data.status === 'error') {
                 throw new Error(data.error || ('HTTP ' + resp.status));
             }
+            purgePlots(root);           // eski grafiklerin resize dinleyicileri sızmasın
             root.innerHTML = '';
             lastData[spec.id] = data;          // dil değişiminde yeniden çizmek için sakla
             spec.render(data, root);
@@ -372,6 +391,7 @@
             const root = document.getElementById('ad_root_' + spec.id);
             if (!data || !root || root.style.display === 'none') return;
             try {
+                purgePlots(root);       // eski grafiklerin resize dinleyicileri sızmasın
                 root.innerHTML = '';
                 spec.render(data, root);
                 if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
@@ -479,6 +499,7 @@
             kvTable: kvTable,
             sectionTitle: sectionTitle,
             listBlock: listBlock,
+            purgePlots: purgePlots,
             fmt: fmt,
             pick: pick,
             kindColor: kindColor,

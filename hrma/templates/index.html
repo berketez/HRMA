@@ -428,6 +428,10 @@
         <p>HRMA v{{ app_version }} &nbsp;|&nbsp; <span data-i18n="footer.developedBy">Developed by:</span> Berke Tezgöçen &nbsp;|&nbsp; <span data-i18n="footer.ideaTesting">Idea &amp; Testing:</span> Ayberk Cem Aksoy &nbsp;|&nbsp; <span data-i18n="footer.tool">Professional Rocket Propulsion Design Tool</span></p>
     </div>
     <script src="/static/js/i18n.js"></script>
+    <!-- v2.5.5: "Recent Projects" şeridi (proj.* anahtarları i18n_common.js'te;
+         /api/projects yoksa ya da boşsa şerit hiç görünmez) -->
+    <script src="/static/js/i18n_common.js"></script>
+    <script src="/static/js/project_bar.js"></script>
     <script src="/static/js/update_check.js"></script>
     <script>
         // Dil seçici: tercihi localStorage'a yazar, sayfayı anında çevirir.

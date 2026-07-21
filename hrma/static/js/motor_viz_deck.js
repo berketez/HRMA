@@ -45,6 +45,11 @@
 
     function el(id) { return document.getElementById(id); }
 
+    // i18n köprüsü — i18n.js yoksa İngilizce yedek metin döner
+    function T(key, fallback) {
+        return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
+    }
+
     function isNum(v) { return typeof v === 'number' && isFinite(v); }
 
     function firstNum() {
@@ -182,6 +187,8 @@
             '      <button class="viz-btn" id="' + p + '_btn_cam">Cam: Iso</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_quality">HQ</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_speed">1&times;</button>' +
+            '      <button class="viz-btn" id="' + p + '_btn_frame">' +
+                       T('viz.btnFrame', 'Frame') + '</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_reset">Reset View</button>' +
             '    </div>' +
             '  </div>' +
@@ -267,6 +274,13 @@
                 var pcBar = isNum(s.pc) ? s.pc / PA_PER_BAR : staticPcBar;
                 setChip(p + '_pc', isNum(pcBar) ? pcBar.toFixed(1) : '—', 'bar',
                         s.burning && isNum(s.pc));
+            },
+            // Kalite değişimi (otomatik perf düşüşü dahil) HQ butonuna yansır
+            onQualityChange: function (mode) {
+                var qb = el(p + '_btn_quality');
+                if (!qb) return;
+                qb.textContent = mode === 'perf' ? 'PERF' : 'HQ';
+                qb.classList.toggle('active', mode === 'perf');
             }
         });
         if (!viz) return null;
@@ -313,6 +327,20 @@
         toggleBtn(p + '_btn_rot', 'autoRotate', viz.setAutoRotate);
         var resetBtn = el(p + '_btn_reset');
         if (resetBtn) resetBtn.onclick = function () { viz.resetCamera(); };
+
+        // Frame/PNG: görünür karenin PNG'sini indirir (senkron snapshot —
+        // preserveDrawingBuffer gerektirmez, motor_viz3d.js görev 7)
+        var frameBtn = el(p + '_btn_frame');
+        if (frameBtn) frameBtn.onclick = function () {
+            var url = viz.snapshot();
+            if (!url) return;
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'hrma_motor_' + opts.motorType + '_' + Date.now() + '.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
 
         // Kamera preset döngüsü (Iso → Side → Nozzle → Injector)
         var camBtn = el(p + '_btn_cam');

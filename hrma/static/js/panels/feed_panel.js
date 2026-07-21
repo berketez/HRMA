@@ -433,6 +433,7 @@
             if (!resp.ok || !data || data.status === 'error') {
                 throw new Error((data && data.error) || ('HTTP ' + resp.status));
             }
+            U.purgePlots(result);   // eski grafiklerin resize dinleyicileri sızmasın
             result.innerHTML = '';
             lastTabData[tab.key] = data;      // dil değişiminde yeniden çizmek için
             tab.render(data, result);
@@ -570,6 +571,7 @@
             const result = pane && pane.querySelector('.feed-result');
             if (!result || result.style.display === 'none') return;
             try {
+                U.purgePlots(result);   // eski grafiklerin resize dinleyicileri sızmasın
                 result.innerHTML = '';
                 tab.render(data, result);
                 if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(result);

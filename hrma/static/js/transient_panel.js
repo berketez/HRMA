@@ -207,9 +207,12 @@
         badges.innerHTML = html;
 
         // F(t) + Pc(t) çift eksen (plotly_dark otomatik koyu temalar)
+        // react: aynı div'e her koşuda / dil değişiminde tekrar çizilir;
+        // newPlot'un tam yıkım+kurulumu yerine fark tabanlı güncelleme
+        // (plotly 1.34+; ilk çizimde kendiliğinden newPlot'a düşer)
         const plotDiv = document.getElementById('tp_plot');
         plotDiv.style.display = 'block';
-        Plotly.newPlot(plotDiv, [
+        Plotly.react(plotDiv, [
             { x: tr.time, y: tr.thrust, name: T('transient.sThrust', 'Thrust [N]'),
               mode: 'lines', line: { width: 3 } },
             { x: tr.time, y: tr.chamber_pressure.map(p => p / 1e5),
@@ -229,7 +232,8 @@
         const tankDiv = document.getElementById('tp_tank_plot');
         if (tr.feed_mode === 'blowdown' && tr.tank_pressure && tr.tank_pressure.length) {
             tankDiv.style.display = 'block';
-            Plotly.newPlot(tankDiv, [
+            // react: aynı div'e tekrar çizim (bkz. tp_plot notu)
+            Plotly.react(tankDiv, [
                 { x: tr.time, y: tr.tank_pressure.map(p => p / 1e5),
                   name: T('transient.sTankP', 'Tank Pressure [bar]'), mode: 'lines',
                   line: { width: 3 } },

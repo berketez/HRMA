@@ -33,7 +33,11 @@
 
 /* ---------------- Taban ---------------- */
 
-html { min-height: 100%; }
+/* Kök eleman arka planı: sayfa sonunda esneyerek kaydırmada (macOS rubber
+   band / WebView2 overscroll) görünen alan tarayıcının BEYAZ tuvali yerine
+   tema zeminini göstersin (2026-07-21 isteği). body'nin sabit (fixed)
+   degrade arka planı görünür alanı kaplar; taşma bölgesini bu renk doldurur. */
+html { min-height: 100%; background: var(--hd-bg0, #04070d); }
 
 body {
     font-family: var(--hd-sans);

@@ -143,6 +143,7 @@ SPLASH_HTML = """<!DOCTYPE html>
 <title>Starting HRMA…</title>
 <style>
   html, body { height: 100%; margin: 0; }
+  html { background: #04070d; } /* overscroll'da beyaz alan görünmesin */
   body {
     display: flex; align-items: center; justify-content: center;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -407,6 +408,9 @@ def _try_native_window(url):
         webview.create_window(
             _pencere_baslik(version), url,
             width=1440, height=900, min_size=(1100, 700),
+            # Yerel pencerenin zemini: içerik yüklenmeden önceki an ve
+            # kaydırma taşması (overscroll) beyaz parlamasın (2026-07-21)
+            background_color="#04070d",
         )
         kwargs = {"private_mode": False, "storage_path": _ui_profile_dir()}
         if os.name == "nt":

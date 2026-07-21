@@ -497,12 +497,13 @@ function safePlotCreate(elementId, plotData) {
                 displayModeBar: true,
                 displaylogo: false,
                 modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+                // PNG dışa aktarım (v2.5.5): sabit 700x500 kaldırıldı —
+                // ekrandaki gerçek boyutun 2 katı çözünürlük alınır
+                // (plotly_dark.js dışa aktarım katmanıyla uyumlu).
                 toImageButtonOptions: {
                     format: 'png',
                     filename: elementId,
-                    height: 500,
-                    width: 700,
-                    scale: 1
+                    scale: 2
                 }
             };
             
@@ -2105,17 +2106,14 @@ async function calculateParametric() {
             }
         }
         
+        // Parametrik grafik de safePlotCreate üzerinden çizilir (v2.5.5):
+        // responsive config + yükseklik sabitleme + PNG dışa aktarım
+        // seçenekleri tek merkezden gelir.
         if (result.plot_data) {
-            let plotData;
-            // Handle both string and object plot data
-            if (typeof result.plot_data === 'string') {
-                plotData = JSON.parse(result.plot_data);
-            } else {
-                plotData = result.plot_data;
-            }
-            
-            Plotly.newPlot('parametric_plot', plotData.data, plotData.layout, {responsive: true});
-            
+            const pd = result.plot_data;
+            safePlotCreate('parametric_plot',
+                typeof pd === 'string' ? pd : JSON.stringify(pd));
+
             // Show the parametric tab if hidden
             const parametricTab = document.getElementById('parametric_tab');
             if (parametricTab && parametricTab.style.display === 'none') {
@@ -2123,8 +2121,9 @@ async function calculateParametric() {
             }
         } else if (result.plot) {
             // Alternative: check for 'plot' field
-            const plotData = typeof result.plot === 'string' ? JSON.parse(result.plot) : result.plot;
-            Plotly.newPlot('parametric_plot', plotData.data, plotData.layout, {responsive: true});
+            const pd = result.plot;
+            safePlotCreate('parametric_plot',
+                typeof pd === 'string' ? pd : JSON.stringify(pd));
         } else {
             showWarning(T('app.msg.paramNoPlot', 'No plot data received from parametric analysis'));
         }

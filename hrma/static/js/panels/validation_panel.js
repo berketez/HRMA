@@ -85,7 +85,8 @@
                     resize:vertical;"></textarea>
             </div>
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;">
-                <input type="file" id="vp_csv_file" accept=".csv,.txt,text/csv,text/plain"
+                <input type="file" id="vp_csv_file"
+                    accept=".csv,.txt,.eng,.rse,text/csv,text/plain"
                     style="font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5);">
                 <button class="btn" type="button" id="vp_run"
                     data-i18n="panel.validation.btnCompare">${T('panel.validation.btnCompare',
@@ -93,6 +94,13 @@
                 <span id="vp_pred_source" style="font-family:var(--hd-mono); font-size:0.72rem;
                     color:var(--hd-ink-dim, #7d97a5);"></span>
             </div>
+            <div style="font-family:var(--hd-mono); font-size:0.7rem;
+                color:var(--hd-ink-faint, #46606d); margin-top:4px;"
+                data-i18n="panel.validation.motorFileHint">${T('panel.validation.motorFileHint',
+                'Motor thrust-curve files (.eng RASP / .rse RockSim) are imported and '
+                + 'compared automatically when selected.')}</div>
+            <div id="vp_motor_bar" style="display:none; margin-top:8px; align-items:center;
+                gap:10px; flex-wrap:wrap;"></div>
         </div>`;
     }
 
@@ -128,10 +136,18 @@
             .addEventListener('change', function (ev) {
                 const file = ev.target.files && ev.target.files[0];
                 if (!file) return;
+                // .eng/.rse → motor dosyası içe aktarma akışı (backend
+                // /api/import/motor-file); diğer uzantılar CSV metni olarak
+                // textarea'ya yüklenir (mevcut davranış korunur).
+                const isMotorFile = /\.(eng|rse)$/i.test(file.name || '');
                 const reader = new FileReader();
                 reader.onload = function () {
-                    document.getElementById('vp_csv_text').value =
-                        String(reader.result || '');
+                    const text = String(reader.result || '');
+                    if (isMotorFile) {
+                        importMotorFile(text, file.name);
+                    } else {
+                        document.getElementById('vp_csv_text').value = text;
+                    }
                 };
                 reader.onerror = function () {
                     const st = document.getElementById('ad_status_' + PANEL_ID);
@@ -194,6 +210,7 @@
                 // CSV çözüldü ama karşılaştırma anlamsız (örtüşme yok vb.):
                 // backend 400 gövdesinde parsed taşır — yine de çizilir.
                 if (data && data.parsed) {
+                    U.purgePlots(root);   // eski grafiğin resize dinleyicisi sızmasın
                     root.innerHTML = '';
                     render({ parsed: data.parsed, comparison: null,
                              _predicted: pred }, root);
@@ -204,6 +221,7 @@
                 }
                 throw new Error((data && data.error) || ('HTTP ' + resp.status));
             }
+            U.purgePlots(root);   // eski grafiğin resize dinleyicisi sızmasın
             root.innerHTML = '';
             data._predicted = pred;
             render(data, root);
@@ -214,6 +232,171 @@
                                       'ERROR: {message}');
         } finally {
             btn.disabled = false;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Motor dosyası (.eng/.rse) içe aktarma — POST /api/import/motor-file
+    // Yanıttaki comparison, CSV akışıyla AYNI metrik şemasını taşır
+    // (sözleşme: hrma/importers/api.py) — mevcut render yolu yeniden
+    // kullanılır. Çok motorlu .rse dosyasında seçici gösterilir; seçim
+    // değişince seçili motorun eğrisi upload-csv ucuyla (aynı compare())
+    // yeniden karşılaştırılır.
+    // ------------------------------------------------------------------
+    let motorImport = null;   // { motors: [], selected: 0, fileWarnings: [] }
+
+    function motorBarEl() { return document.getElementById('vp_motor_bar'); }
+
+    function renderMotorBar() {
+        const bar = motorBarEl();
+        if (!bar) return;
+        if (!motorImport || !motorImport.motors.length) {
+            bar.style.display = 'none';
+            bar.innerHTML = '';
+            return;
+        }
+        bar.style.display = 'flex';
+        let html = '';
+        if (motorImport.motors.length > 1) {
+            const opts = motorImport.motors.map(function (m, i) {
+                const name = (m.meta && m.meta.name) || ('#' + i);
+                return '<option value="' + i + '"'
+                    + (i === motorImport.selected ? ' selected' : '') + '>'
+                    + String(name).replace(/[&<>"']/g, '') + '</option>';
+            }).join('');
+            html += '<label style="font-size:0.78rem;" data-i18n="panel.validation.motorSelect">'
+                + T('panel.validation.motorSelect', 'Motor (file contains multiple):')
+                + '</label><select id="vp_motor_select" style="max-width:240px;">'
+                + opts + '</select>';
+        }
+        bar.innerHTML = html;
+        const sel = document.getElementById('vp_motor_select');
+        if (sel) {
+            sel.addEventListener('change', function () {
+                motorImport.selected = parseInt(sel.value, 10) || 0;
+                recompareSelectedMotor();
+            });
+        }
+    }
+
+    function renderMotorResult(motor, comparison, pred) {
+        const status = document.getElementById('ad_status_' + PANEL_ID);
+        const root = document.getElementById('ad_root_' + PANEL_ID);
+        if (!root) return;
+        U.purgePlots(root);
+        root.innerHTML = '';
+        // Meta satırı: ad/üretici/çap/boy/kütleler + impuls sınıfı
+        if (window.HRMAImportUI && window.HRMAImportUI.metaLineHtml) {
+            const meta = document.createElement('div');
+            meta.innerHTML = window.HRMAImportUI.metaLineHtml(motor);
+            root.appendChild(meta.firstElementChild);
+        }
+        render({
+            parsed: { time: motor.time, thrust: motor.thrust,
+                      n_points: motor.time.length,
+                      warnings: motor.warnings || [] },
+            comparison: comparison || null,
+            _predicted: pred,
+        }, root);
+        // Dosya düzeyi uyarılar (motor uyarılarından ayrı, görünür olmalı)
+        if (motorImport && motorImport.fileWarnings.length) {
+            const div = document.createElement('div');
+            div.innerHTML = U.listBlock(
+                T('panel.validation.motorFileWarnings', 'Motor file warnings'),
+                motorImport.fileWarnings, 'warn');
+            root.appendChild(div);
+        }
+        root.style.display = 'block';
+        if (status) status.textContent = '';
+    }
+
+    async function importMotorFile(content, filename) {
+        const status = document.getElementById('ad_status_' + PANEL_ID);
+        if (!window.HRMAImportUI) {
+            if (status) status.textContent = T('panel.validation.importUnavailable',
+                'Motor file import module is not loaded on this page.');
+            return;
+        }
+        refreshPredictionSourceLabel();
+        const pred = predictedCurve();
+        if (status) status.textContent = T('panel.validation.importing',
+            'IMPORTING MOTOR FILE…');
+        try {
+            // Değişken adı BİLEREK 'data' değil: sözleşme bekçisi
+            // (tests/test_wave4a_contract.py) 'data.' erişimlerini upload-csv
+            // yanıtına, 'mfres.' erişimlerini /api/import/motor-file yanıtına
+            // karşı doğrular — iki uç farklı şemadadır.
+            const mfres = await window.HRMAImportUI.postMotorFile(
+                content, filename,
+                pred ? { time: pred.time, thrust: pred.thrust } : null);
+            motorImport = { motors: mfres.motors || [],
+                            selected: mfres.selected_index || 0,
+                            fileWarnings: mfres.warnings || [] };
+            renderMotorBar();
+            renderMotorResult(mfres.motor, mfres.comparison, pred);
+        } catch (err) {
+            // Karşılaştırma örtüşmedi ama dosya çözüldüyse eğri yine çizilir
+            // (upload-csv 400 gövde deseniyle aynı sözleşme)
+            if (err.partial && Array.isArray(err.partial.motors)
+                && err.partial.motors.length) {
+                motorImport = { motors: err.partial.motors, selected: 0,
+                                fileWarnings: err.partial.warnings || [] };
+                renderMotorBar();
+                renderMotorResult(err.partial.motors[0], null, pred);
+                if (status) {
+                    status.textContent = U.tf('panel.validation.comparisonError',
+                        { message: err.message }, 'COMPARISON ERROR: {message}');
+                }
+                return;
+            }
+            console.error('HRMA motor file import failed:', err);
+            if (status) {
+                status.textContent = U.tf('panel.validation.importFailed',
+                    { message: err.message }, 'MOTOR FILE IMPORT FAILED: {message}');
+            }
+            if (window.HRMAImportUI.toast) {
+                window.HRMAImportUI.toast(err.message, 'err');
+            }
+        }
+    }
+
+    // Seçili motoru yeniden karşılaştır: eğri CSV'ye çevrilip upload-csv
+    // ucuna gönderilir — CSV akışıyla birebir aynı compare() metrikleri
+    async function recompareSelectedMotor() {
+        if (!motorImport || !motorImport.motors.length) return;
+        const status = document.getElementById('ad_status_' + PANEL_ID);
+        const motor = motorImport.motors[motorImport.selected]
+            || motorImport.motors[0];
+        refreshPredictionSourceLabel();
+        const pred = predictedCurve();
+        if (status) status.textContent = T('panel.validation.comparing', 'COMPARING…');
+        try {
+            const body = {
+                csv_text: window.HRMAImportUI.csvFromCurve(motor.time, motor.thrust),
+            };
+            if (pred) body.predicted_curve = { time: pred.time, thrust: pred.thrust };
+            const resp = await fetch(ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            let data = null;
+            try { data = await resp.json(); } catch (e) { data = null; }
+            if (!resp.ok || !data || data.status === 'error') {
+                renderMotorResult(motor, null, pred);
+                if (status && data && data.error) {
+                    status.textContent = U.tf('panel.validation.comparisonError',
+                        { message: data.error }, 'COMPARISON ERROR: {message}');
+                }
+                return;
+            }
+            renderMotorResult(motor, data.comparison, pred);
+        } catch (err) {
+            console.error('HRMA motor recompare failed:', err);
+            if (status) {
+                status.textContent = U.tf('common.errorPrefix',
+                    { message: err.message }, 'ERROR: {message}');
+            }
         }
     }
 
@@ -370,6 +553,8 @@
         _predictedCurve: predictedCurve,
         _metricCards: metricCards,
         _augmentSection: augmentSection,
+        _importMotorFile: importMotorFile,
+        _recompareSelectedMotor: recompareSelectedMotor,
         run: runValidation,
     };
 })();

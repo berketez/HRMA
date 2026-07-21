@@ -1,3 +1,5 @@
+import copy
+import time
 import numpy as np
 from scipy.optimize import fsolve, newton, minimize_scalar
 from scipy.interpolate import interp1d, interp2d
@@ -8,6 +10,21 @@ from typing import Dict, List, Optional, Tuple
 
 from hrma.constants import G_0, R_UNIVERSAL, PA_PER_BAR
 warnings.filterwarnings('ignore')
+
+# ---------------------------------------------------------------------------
+# Web yakıt verisi süreç içi memo'su (v2.5.5 performans).
+#
+# web_api.get_comprehensive_data pickle önbelleğine rağmen HER motor
+# örneğinde en az bir CANLI ağ isteği yapıyor (SpaceX telemetri isteği
+# başarısız olunca stale-if-error yoluna düşüyor ama isteğin kendisi her
+# seferinde atılıyor: ölçüm ~0.7 s/koşu; ağ yokken 30 s zaman aşımı).
+# Aynı (yakıt, oksitleyici, Pc, MR) için sonuç, web_api'nin KENDİ TTL'i
+# (cache_ttl = 1 saat) boyunca süreç içinde saklanır — tazelik sözleşmesi
+# pickle katmanıyla AYNI kalır, yalnız başarısız isteğin her koşuda
+# tekrarı önlenir. Değerler derin kopyayla girer/çıkar (mutasyon izole).
+# ---------------------------------------------------------------------------
+_WEB_DATA_MEMO = {}
+_WEB_DATA_MEMO_MAX = 8
 
 # ---------------------------------------------------------------------------
 # TASARIM SABİTLERİ (2026-07-19 uydurma denetimi)
@@ -782,16 +799,28 @@ class LiquidRocketEngine:
         try:
             # Import web API module
             from hrma.data.web_propellant_api import web_api
-            
+
             print(f"Fetching live propellant data for {self.fuel_type}/{self.oxidizer_type}...")
-            
-            # Get comprehensive real-time data
-            web_data = web_api.get_comprehensive_data(
-                fuel=self.fuel_type,
-                oxidizer=self.oxidizer_type,
-                pressure=self.P_c,
-                mixture_ratio=self.MR
-            )
+
+            # Süreç içi memo: web_api'nin kendi TTL'i içindeyse ağa hiç
+            # çıkmadan aynı veriyi kullan (tazelik sözleşmesi değişmez;
+            # başarısız telemetri isteğinin her koşuda tekrarı önlenir).
+            memo_key = (str(self.fuel_type), str(self.oxidizer_type),
+                        float(self.P_c), float(self.MR))
+            hit = _WEB_DATA_MEMO.get(memo_key)
+            if hit is not None and (time.time() - hit[0]) < web_api.cache_ttl:
+                web_data = copy.deepcopy(hit[1])
+            else:
+                # Get comprehensive real-time data
+                web_data = web_api.get_comprehensive_data(
+                    fuel=self.fuel_type,
+                    oxidizer=self.oxidizer_type,
+                    pressure=self.P_c,
+                    mixture_ratio=self.MR
+                )
+                if len(_WEB_DATA_MEMO) >= _WEB_DATA_MEMO_MAX:
+                    _WEB_DATA_MEMO.pop(next(iter(_WEB_DATA_MEMO)))
+                _WEB_DATA_MEMO[memo_key] = (time.time(), copy.deepcopy(web_data))
             
             # Extract and format data
             fuel_props = web_data['fuel_properties']

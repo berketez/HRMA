@@ -73,6 +73,9 @@ def pick_asset(assets, platform=None):
                 "name": asset.get("name"),
                 "url": asset.get("browser_download_url"),
                 "size": asset.get("size") or 0,
+                # GitHub API asset özeti ("sha256:<hex>") — indirme sonrası
+                # bütünlük doğrulaması için (yoksa boyut kontrolüyle yetinilir)
+                "digest": asset.get("digest") or "",
             }
     return None
 
@@ -139,10 +142,12 @@ def download_status():
         return dict(_download)
 
 
-def _run_download(url, name, size):
+def _run_download(url, name, size, digest=""):
     tmp_path = os.path.join(_downloads_dir(), name + ".download")
     final_path = os.path.join(_downloads_dir(), name)
     try:
+        import hashlib
+        hasher = hashlib.sha256()
         req = urllib.request.Request(
             url, headers={"User-Agent": "HRMA-UpdateChecker/" + __version__}
         )
@@ -155,14 +160,26 @@ def _run_download(url, name, size):
                 if not chunk:
                     break
                 out.write(chunk)
+                hasher.update(chunk)
                 done += len(chunk)
                 if total:
                     with _download_lock:
                         _download["pct"] = int(done * 100 / total)
+        # Bütünlük: eksik/yarım inmiş ya da bozulmuş dosyayla kurulum
+        # denenmesin. Boyut GitHub API'nin bildirdiğiyle, içerik de (API
+        # digest verdiyse) SHA-256 özetiyle karşılaştırılır.
+        if total and done != total:
+            raise IOError("incomplete download: %d of %d bytes" % (done, total))
+        if digest.startswith("sha256:"):
+            got = hasher.hexdigest()
+            if got != digest.split(":", 1)[1].strip().lower():
+                raise IOError("sha256 mismatch: downloaded file is corrupted")
         os.replace(tmp_path, final_path)
         with _download_lock:
             _download.update(state="done", pct=100, path=final_path)
-        _open_installer(final_path)
+        # Kurulum burada BAŞLATILMAZ: arayüz /api/update/install ile sessiz
+        # otomatik kurulumu tetikler; otomatik kurulamayan ortamlarda
+        # (kaynak kod, yazılamayan hedef) oradan _open_installer'a düşülür.
     except Exception as exc:
         try:
             os.remove(tmp_path)
@@ -203,6 +220,36 @@ def open_download_in_browser():
                 "error": "%s: %s" % (type(exc).__name__, exc)}
 
 
+def start_install():
+    """İndirilen güncellemeyi kurar — mümkünse tam otomatik.
+
+    "auto" modda platforma özgü yardımcı betik bağımsız süreç olarak
+    başlatılır ve uygulama kendini kapatır; kurulum ile yeniden açılış
+    kullanıcı dokunmadan tamamlanır. Otomatik kurulamayan ortamlarda
+    (kaynak koddan çalışma, yazılamayan hedef, betik başlatma hatası)
+    "manual" moda düşülür: kurulum dosyası işletim sistemine açtırılır
+    (eski davranış). Kurulacak dosya yolu istemciden alınmaz.
+    """
+    with _download_lock:
+        st = dict(_download)
+    if st["state"] != "done" or not st["path"] or not os.path.isfile(st["path"]):
+        return {"started": False, "reason": "no downloaded installer"}
+
+    from hrma.utils import self_install
+    plan = self_install.plan_install(
+        st["path"], installer_size=os.path.getsize(st["path"]))
+    if plan["mode"] == "auto":
+        launched = self_install.launch_helper(plan, st["path"])
+        if launched.get("launched"):
+            self_install.schedule_app_exit()
+            return {"started": True, "mode": "auto", "log": launched.get("log")}
+        plan = {"mode": "manual", "reason": launched.get("error", "helper failed")}
+
+    _open_installer(st["path"])
+    return {"started": True, "mode": "manual",
+            "reason": plan.get("reason"), "path": st["path"]}
+
+
 def start_download():
     """Platforma uygun asset'i ~/Downloads'a indirmeye başlar (arka planda).
 
@@ -222,7 +269,8 @@ def start_download():
 
     threading.Thread(
         target=_run_download,
-        args=(asset["url"], asset["name"], asset.get("size") or 0),
+        args=(asset["url"], asset["name"], asset.get("size") or 0,
+              asset.get("digest") or ""),
         daemon=True,
     ).start()
     return {"started": True, "name": asset["name"], "size": asset.get("size") or 0}

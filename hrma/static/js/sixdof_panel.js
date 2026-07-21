@@ -52,6 +52,12 @@
 
     const MODE_KEY = 'hrma.sixdof.massMode';   // localStorage anahtarı
 
+    // v2.5.5 içe aktarma durumu: .eng/.rse itki eğrisi + .ork kayıtları
+    let importedMotors = [];            // /api/import/motor-file MOTOR listesi
+    let importedIdx = 0;                // seçili motor
+    let orkSavedSims = null;            // .ork saved_simulations (Run sonrası kart)
+    let orkFileName = null;
+
     // Tema renkleri (CSS değişkeni + koyu tema yedeği) — badge'lerle aynı set
     const COLORS = {
         red: 'var(--hd-red, #ff5d73)',
@@ -218,9 +224,21 @@
 
     function compRowHtml(c) {
         const cell = 'style="width:100%; box-sizing:border-box;"';
-        return '<tr>' +
-            '<td style="padding:2px 4px;"><input type="text" class="sd-c-name" value="' +
-                escapeHtml(c.name) + '" ' + cell + '></td>' +
+        // estimated:true (.ork geometri+yoğunluk tahmini) satırları görsel
+        // işaret taşır ve düzenlenebilir kalır (uydurma-veri-yasağı: tahmin
+        // olduğu kullanıcıya açıkça gösterilir)
+        const estMark = c.estimated
+            ? '<span title="' + escapeHtml(c.note || T('sixdof.orkEstimatedTip',
+                    'Estimated from geometry and material density — edit as needed.'))
+                + '" style="color:' + COLORS.orange + '; font-family:var(--hd-mono);'
+                + ' font-size:0.7rem; margin-left:4px;">'
+                + T('sixdof.est', 'est.') + '</span>'
+            : '';
+        return '<tr' + (c.estimated ? ' data-estimated="1"' : '') + '>' +
+            '<td style="padding:2px 4px;' +
+                (c.estimated ? ' border-left:2px solid ' + COLORS.orange + ';' : '') +
+                '"><input type="text" class="sd-c-name" value="' +
+                escapeHtml(c.name) + '" ' + cell + '>' + estMark + '</td>' +
             '<td style="padding:2px 4px;"><input type="number" class="sd-c-mass" value="' +
                 c.mass + '" step="0.1" min="0" ' + cell + '></td>' +
             '<td style="padding:2px 4px;"><input type="number" class="sd-c-x" value="' +
@@ -281,6 +299,50 @@
         '</div>';
     }
 
+    // İtki kaynağı seçici + motor dosyası (.eng/.rse) + .ork içe aktarma
+    // kutusu (v2.5.5 — backend: /api/import/motor-file, /api/import/ork)
+    function importControlsHtml() {
+        return `
+            <div class="form-group" style="grid-column: 1 / -1;">
+                <label data-i18n="sixdof.thrustSource">${T('sixdof.thrustSource',
+                    'Thrust source')}</label>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <select id="sd_thrust_src" style="max-width:280px;">
+                        <option value="auto" data-i18n="sixdof.srcAuto">${T('sixdof.srcAuto',
+                            'Page result / form values (default)')}</option>
+                        <option value="imported" data-i18n="sixdof.srcImported">${
+                            T('sixdof.srcImported', 'Imported motor file (.eng/.rse)')}</option>
+                    </select>
+                    <input type="file" id="sd_motor_file" accept=".eng,.rse"
+                        style="display:none; font-size:0.78rem; color:${COLORS.dim};">
+                    <select id="sd_motor_select" style="display:none; max-width:220px;"></select>
+                    <span id="sd_motor_status" style="font-family:var(--hd-mono);
+                        font-size:0.72rem; color:${COLORS.dim};"></span>
+                </div>
+            </div>`;
+    }
+
+    function orkBoxHtml() {
+        return `
+        <div style="margin:14px 0; border:1px solid var(--hd-line, rgba(128,128,128,0.25));
+                border-radius:8px; padding:12px;">
+            <h3 style="margin:0 0 8px 0; font-size:0.95rem;" data-i18n="sixdof.orkTitle">${
+                T('sixdof.orkTitle', 'OpenRocket Import (.ork)')}</h3>
+            <div style="font-size:0.78rem; color:${COLORS.dim}; margin-bottom:8px;"
+                data-i18n="sixdof.orkIntro">${T('sixdof.orkIntro',
+                'Loads the rocket geometry into the aero fields (only values found in '
+                + 'the file — missing ones are left untouched) and the component masses '
+                + 'into the Mass & Balance table. Estimated rows are marked and editable.')}</div>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <input type="file" id="sd_ork_file" accept=".ork,.xml"
+                    style="font-size:0.78rem; color:${COLORS.dim};">
+                <span id="sd_ork_status" style="font-family:var(--hd-mono);
+                    font-size:0.72rem; color:${COLORS.dim};"></span>
+            </div>
+            <div id="sd_ork_report" style="margin-top:8px;"></div>
+        </div>`;
+    }
+
     function panelHtml(hasCurveSource) {
         const curveToggle = hasCurveSource ? `
             <div class="form-group" style="grid-column: 1 / -1;">
@@ -309,11 +371,13 @@
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin:12px 0;">
                 ${FIELDS.map(fieldHtml).join('')}
                 ${curveToggle}
+                ${importControlsHtml()}
                 <div class="form-group" style="align-self:end;">
                     <button class="btn" type="button" id="sd_run" data-i18n="sixdof.btnRun">${
                         T('sixdof.btnRun', 'Run 6-DOF')}</button>
                 </div>
             </div>
+            ${orkBoxHtml()}
             ${massBalanceHtml()}
             <div style="font-family:var(--hd-mono); font-size:0.8rem; color:${COLORS.dim}; margin:4px 0;">
                 <span data-i18n="sixdof.layoutNote">${T('sixdof.layoutNote',
@@ -325,9 +389,11 @@
                  font-family:var(--hd-mono); font-size:0.8rem; margin:8px 0;"></div>
             <div id="sd_status" style="font-family:var(--hd-mono); color:var(--hd-ink-dim); margin:6px 0;"></div>
             <div id="sd_badges" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;"></div>
+            <div id="sd_ork_compare" style="display:none; margin:8px 0;"></div>
             <div id="sd_plot_alt" class="plot-container" style="min-height:400px; display:none;"></div>
             <div id="sd_plot_alpha" class="plot-container" style="min-height:340px; display:none;"></div>
             <div id="sd_plot_track" class="plot-container" style="min-height:380px; display:none;"></div>
+            <div id="sd_plot_traj3d" class="plot-container" style="min-height:460px; display:none;"></div>
         </div>`;
     }
 
@@ -699,7 +765,12 @@
             }
         }
         const useCurveEl = $('sd_use_curve');
-        const requireThrustForm =
+        // İçe aktarılmış motor eğrisi seçili ve yüklüyse formdaki
+        // thrust/burn alanları zorunlu değildir (eğri dosyadan gelir)
+        const srcEl = $('sd_thrust_src');
+        const importedReady = !!(srcEl && srcEl.value === 'imported'
+            && importedMotors.length);
+        const requireThrustForm = !importedReady &&
             !(cfg.thrustProvider && (!useCurveEl || useCurveEl.checked));
         validateAll(requireThrustForm);
         const g = readGeometry();
@@ -739,14 +810,28 @@
         const badges = $('sd_badges');
         const runBtn = $('sd_run');
 
-        // İtki kaynağı: sayfa sağlayıcısı (transient/solid eğrisi) veya form
+        // İtki kaynağı önceliği: içe aktarılmış motor dosyası (seçiliyse) →
+        // sayfa sağlayıcısı (transient/solid eğrisi) → form değerleri
+        const srcEl = $('sd_thrust_src');
+        const wantImported = !!(srcEl && srcEl.value === 'imported');
+        let importedCurve = null;
+        if (wantImported) {
+            const im = importedMotors[importedIdx] || importedMotors[0];
+            if (!im) {
+                status.textContent = T('sixdof.noMotorLoaded',
+                    'Choose a motor file (.eng/.rse) first.');
+                return;
+            }
+            importedCurve = { time: im.time, thrust: im.thrust };
+        }
         const useCurveEl = $('sd_use_curve');
         let provided = null;
-        if (cfg.thrustProvider && (!useCurveEl || useCurveEl.checked)) {
+        if (!importedCurve && cfg.thrustProvider
+            && (!useCurveEl || useCurveEl.checked)) {
             try { provided = cfg.thrustProvider(); } catch (e) { provided = null; }
         }
-        const hasCurve = !!(provided && provided.thrust_curve &&
-            provided.thrust_curve.time && provided.thrust_curve.time.length > 3);
+        const hasCurve = !!(importedCurve || (provided && provided.thrust_curve &&
+            provided.thrust_curve.time && provided.thrust_curve.time.length > 3));
         const hasConst = !!(!hasCurve && provided && provided.thrust && provided.burn_time);
 
         // Doğrulama: geçersiz girdiyle Run yok
@@ -804,7 +889,9 @@
             payload.propellant_mass = num('sd_prop_m');
         }
 
-        if (hasCurve) {
+        if (importedCurve) {
+            payload.thrust_curve = importedCurve;
+        } else if (hasCurve) {
             payload.thrust_curve = provided.thrust_curve;
         } else if (hasConst) {
             payload.thrust = provided.thrust;
@@ -850,6 +937,323 @@
         }
     }
 
+    // ------------------------------------------------------------------
+    // Motor dosyası (.eng/.rse) itki kaynağı — /api/import/motor-file
+    // ------------------------------------------------------------------
+
+    function refreshImportControls() {
+        const srcEl = $('sd_thrust_src');
+        const fileEl = $('sd_motor_file');
+        const selEl = $('sd_motor_select');
+        if (!srcEl || !fileEl || !selEl) return;
+        const imported = srcEl.value === 'imported';
+        fileEl.style.display = imported ? 'inline-block' : 'none';
+        selEl.style.display = (imported && importedMotors.length > 1)
+            ? 'inline-block' : 'none';
+        if (imported && importedMotors.length > 1 && !selEl.options.length) {
+            fillMotorSelect();
+        }
+    }
+
+    function fillMotorSelect() {
+        const selEl = $('sd_motor_select');
+        if (!selEl) return;
+        selEl.innerHTML = importedMotors.map(function (m, i) {
+            const name = (m.meta && m.meta.name) || ('#' + i);
+            return '<option value="' + i + '"' + (i === importedIdx ? ' selected' : '')
+                + '>' + escapeHtml(name) + '</option>';
+        }).join('');
+    }
+
+    function setMotorStatus(text, colorVar) {
+        const el = $('sd_motor_status');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = colorVar || COLORS.dim;
+    }
+
+    // meta.prop_mass_kg önerisi: alan SESSİZCE ezilmez — doldurulur, turuncu
+    // vurgulanır ve durum satırında açıkça bildirilir (kullanıcı onayına açık)
+    function suggestPropMass(motor) {
+        const meta = (motor && motor.meta) || {};
+        if (typeof meta.prop_mass_kg !== 'number' || !isFinite(meta.prop_mass_kg)
+            || meta.prop_mass_kg <= 0) return;
+        const el = $('sd_prop_m');
+        if (!el || massMode === 'component') return;   // tabloda türetiliyor
+        el.value = meta.prop_mass_kg.toFixed(3);
+        el.style.borderColor = COLORS.orange;
+        el.style.boxShadow = '0 0 0 1px ' + COLORS.orange;
+        el.title = TF('sixdof.propMassSuggested', { m: meta.prop_mass_kg.toFixed(3) },
+            'Propellant mass filled from the motor file ({m} kg) — please review.');
+        setMotorStatus(TF('sixdof.propMassSuggested', { m: meta.prop_mass_kg.toFixed(3) },
+            'Propellant mass filled from the motor file ({m} kg) — please review.'),
+            COLORS.orange);
+        updateLive();
+    }
+
+    // İçe aktarılan motor listesini itki kaynağı olarak devreye al
+    // (.eng/.rse dosya seçiminden ve .ork gömülü motorundan ortak kullanılır)
+    function adoptImportedMotors(motors, sourceName) {
+        importedMotors = motors || [];
+        importedIdx = 0;
+        const srcEl = $('sd_thrust_src');
+        if (srcEl) srcEl.value = 'imported';
+        fillMotorSelect();
+        refreshImportControls();
+        const m = importedMotors[0];
+        if (m) {
+            setMotorStatus(TF('sixdof.usingMotor',
+                { name: (m.meta && m.meta.name) || sourceName || '?',
+                  n: m.time.length },
+                'Using imported motor: {name} ({n} points)'));
+            suggestPropMass(m);
+        }
+        updateLive();
+    }
+
+    async function onMotorFileChosen(file) {
+        if (!window.HRMAImportUI) return;
+        setMotorStatus(T('sixdof.importingMotor', 'IMPORTING MOTOR FILE…'));
+        try {
+            const text = await window.HRMAImportUI.readFileAsText(file);
+            const data = await window.HRMAImportUI.postMotorFile(text, file.name, null);
+            adoptImportedMotors(data.motors || [], file.name);
+        } catch (err) {
+            console.error('SixDofPanel motor file import failed:', err);
+            setMotorStatus(TF('sixdof.motorImportFailed', { message: err.message },
+                'Motor file import failed: {message}'), COLORS.red);
+            if (window.HRMAImportUI.toast) window.HRMAImportUI.toast(err.message, 'err');
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // OpenRocket .ork içe aktarma — /api/import/ork
+    // ------------------------------------------------------------------
+
+    // 6-DOF sözleşme anahtarı -> panel alan id'si (metre; null'lara DOKUNULMAZ)
+    const ORK_FIELD_MAP = {
+        nose_length: 'sd_nose_l',
+        body_diameter: 'sd_body_d',
+        body_length: 'sd_body_l',
+        fin_root_chord: 'sd_fin_root',
+        fin_tip_chord: 'sd_fin_tip',
+        fin_span: 'sd_fin_span',
+        fin_sweep: 'sd_fin_sweep',
+        fin_position: 'sd_fin_pos',
+    };
+
+    function setOrkStatus(text, colorVar) {
+        const el = $('sd_ork_status');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = colorVar || COLORS.dim;
+    }
+
+    function applyOrkAero(aero) {
+        let applied = 0;
+        const notes = [];
+        Object.keys(ORK_FIELD_MAP).forEach(function (key) {
+            const v = aero ? aero[key] : null;
+            if (typeof v !== 'number' || !isFinite(v)) return;   // null → dokunma
+            const el = $(ORK_FIELD_MAP[key]);
+            if (!el) return;
+            el.value = v;
+            applied += 1;
+        });
+        if (aero && typeof aero.nose_type === 'string' && aero.nose_type) {
+            const el = $('sd_nose_type');
+            if (el && ['ogive', 'conical', 'parabolic'].indexOf(aero.nose_type) !== -1) {
+                el.value = aero.nose_type;
+                applied += 1;
+            }
+        }
+        if (aero && typeof aero.fin_count === 'number' && isFinite(aero.fin_count)) {
+            const el = $('sd_fin_count');
+            if (el && ['3', '4'].indexOf(String(aero.fin_count)) !== -1) {
+                el.value = String(aero.fin_count);
+                applied += 1;
+            } else {
+                notes.push(TF('sixdof.finCountSkipped', { n: aero.fin_count },
+                    'Fin count {n} is not supported by this panel (3 or 4) — '
+                    + 'field left unchanged.'));
+            }
+        }
+        return { applied: applied, notes: notes };
+    }
+
+    function applyOrkComponents(components) {
+        if (!Array.isArray(components) || !components.length) return 0;
+        const tbody = $('sd_comp_body');
+        if (!tbody) return 0;
+        setMode('component', true);
+        tbody.innerHTML = '';
+        components.forEach(function (c) {
+            addComponentRow({
+                name: c.name || T('sixdof.colComponent', 'Component'),
+                mass: (typeof c.mass_kg === 'number' && isFinite(c.mass_kg))
+                    ? c.mass_kg : 0,
+                x: (typeof c.x_m === 'number' && isFinite(c.x_m)) ? c.x_m : 0,
+                propellant: !!c.propellant,
+                estimated: !!c.estimated,
+                note: c.note,
+            });
+        });
+        updateLive();
+        return components.length;
+    }
+
+    function orkListHtml(titleText, items) {
+        if (!Array.isArray(items) || !items.length) return '';
+        return '<div style="margin:4px 0;"><strong style="font-size:0.75rem;">'
+            + escapeHtml(titleText) + '</strong><ul style="margin:2px 0 0 18px;'
+            + ' font-size:0.72rem; color:' + COLORS.dim + ';">'
+            + items.map(function (x) { return '<li>' + escapeHtml(x) + '</li>'; }).join('')
+            + '</ul></div>';
+    }
+
+    function renderOrkReport(data, aeroResult, nComponents) {
+        const box = $('sd_ork_report');
+        if (!box) return;
+        let html = '';
+        // Uyarılar görünür olmalı (sözleşme: estimated/approximated kullanıcıya)
+        if (Array.isArray(data.warnings) && data.warnings.length) {
+            html += '<div style="border:1px solid ' + COLORS.orange + ';'
+                + ' border-radius:8px; padding:8px 12px; margin:6px 0;'
+                + ' color:' + COLORS.orange + '; font-size:0.75rem;">'
+                + '<strong>' + escapeHtml(T('sixdof.orkWarnings',
+                    'OpenRocket import warnings')) + '</strong>'
+                + '<ul style="margin:4px 0 0 18px;">'
+                + data.warnings.map(function (w) {
+                    return '<li>' + escapeHtml(w) + '</li>';
+                }).join('') + '</ul></div>';
+        }
+        (aeroResult.notes || []).forEach(function (n) {
+            html += '<div style="font-size:0.72rem; color:' + COLORS.orange + ';">'
+                + escapeHtml(n) + '</div>';
+        });
+        html += '<div style="font-family:var(--hd-mono); font-size:0.72rem;'
+            + ' color:' + COLORS.dim + '; margin:4px 0;">'
+            + escapeHtml(TF('sixdof.orkApplied', { n: aeroResult.applied },
+                'Applied {n} aero field(s) from the .ork file.'))
+            + (nComponents
+                ? ' ' + escapeHtml(TF('sixdof.componentsLoaded', { n: nComponents },
+                    '{n} component(s) loaded into the Mass & Balance table.'))
+                : '')
+            + '</div>';
+        // mapping_report: katlanabilir özet kutusu
+        const mr = data.mapping_report || {};
+        html += '<details style="margin:6px 0; font-size:0.75rem;">'
+            + '<summary style="cursor:pointer; color:' + COLORS.cyan + ';'
+            + ' font-family:var(--hd-mono);">'
+            + escapeHtml(T('sixdof.mappingReport', 'Mapping report')) + '</summary>'
+            + orkListHtml(T('sixdof.mrMapped', 'Mapped'), mr.mapped)
+            + orkListHtml(T('sixdof.mrApproximated', 'Approximated'), mr.approximated)
+            + orkListHtml(T('sixdof.mrSkipped', 'Skipped'), mr.skipped)
+            + '</details>';
+        // Gömülü motor: Görev 2 mekanizmasını yeniden kullan
+        if (Array.isArray(data.embedded_motors) && data.embedded_motors.length) {
+            html += '<button type="button" class="btn" id="sd_ork_use_motor"'
+                + ' style="padding:4px 12px; font-size:0.75rem;">'
+                + escapeHtml(T('sixdof.useEmbeddedMotor',
+                    'Use the motor embedded in the .ork file as thrust source'))
+                + '</button>';
+        }
+        box.innerHTML = html;
+        const useBtn = $('sd_ork_use_motor');
+        if (useBtn) {
+            useBtn.addEventListener('click', function () {
+                adoptImportedMotors(data.embedded_motors, orkFileName);
+            });
+        }
+    }
+
+    async function onOrkFileChosen(file) {
+        if (!window.HRMAImportUI) return;
+        setOrkStatus(T('sixdof.orkImporting', 'IMPORTING .ORK FILE…'));
+        try {
+            const data = await window.HRMAImportUI.postOrk(file);
+            orkFileName = file.name;
+            const aeroResult = applyOrkAero(data.aero || {});
+            const nComponents = applyOrkComponents(data.components);
+            orkSavedSims = (Array.isArray(data.saved_simulations)
+                && data.saved_simulations.length) ? data.saved_simulations : null;
+            renderOrkReport(data, aeroResult, nComponents);
+            setOrkStatus('');
+            const cmp = $('sd_ork_compare');
+            if (cmp) { cmp.style.display = 'none'; cmp.innerHTML = ''; }
+            updateLive();
+        } catch (err) {
+            console.error('SixDofPanel .ork import failed:', err);
+            setOrkStatus(TF('sixdof.orkImportFailed', { message: err.message },
+                'OpenRocket import failed: {message}'), COLORS.red);
+            if (window.HRMAImportUI.toast) window.HRMAImportUI.toast(err.message, 'err');
+        }
+    }
+
+    // Run SONRASI: OpenRocket kayıtlı simülasyonu vs HRMA 6-DOF kartı —
+    // yalnız iki tarafta da olan alanlar karşılaştırılır (fark %)
+    function renderOrkComparison(summary) {
+        const box = $('sd_ork_compare');
+        if (!box) return;
+        if (!orkSavedSims || !orkSavedSims.length || !summary) {
+            box.style.display = 'none';
+            box.innerHTML = '';
+            return;
+        }
+        const sim = orkSavedSims[0];
+        const rows = [];
+        function addRow(labelText, orVal, hrmaVal, digits, unit) {
+            if (typeof orVal !== 'number' || !isFinite(orVal)) return;
+            if (typeof hrmaVal !== 'number' || !isFinite(hrmaVal)) return;
+            const diff = orVal !== 0 ? (hrmaVal - orVal) / Math.abs(orVal) * 100 : NaN;
+            rows.push([labelText,
+                orVal.toFixed(digits) + ' ' + unit,
+                hrmaVal.toFixed(digits) + ' ' + unit,
+                isFinite(diff) ? ((diff >= 0 ? '+' : '') + diff.toFixed(1) + '%') : '--']);
+        }
+        addRow(T('sixdof.cmpApogee', 'Apogee'), sim.apogee_m, summary.apogee, 0, 'm');
+        addRow(T('sixdof.cmpMaxVelocity', 'Max velocity'), sim.max_velocity_ms,
+               summary.max_speed, 1, 'm/s');
+        addRow(T('sixdof.cmpMaxMach', 'Max Mach'), sim.max_mach, summary.max_mach, 2, '');
+        addRow(T('sixdof.cmpTimeToApogee', 'Time to apogee'), sim.time_to_apogee_s,
+               summary.apogee_time, 1, 's');
+        if (!rows.length) {
+            box.style.display = 'none';
+            box.innerHTML = '';
+            return;
+        }
+        const td = 'padding:4px 10px; border-bottom:1px solid'
+            + ' var(--hd-line, rgba(0,229,255,0.14)); font-size:0.8rem;';
+        box.style.display = 'block';
+        box.innerHTML =
+            '<div style="border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));'
+            + ' border-radius:8px; padding:10px 14px;">'
+            + '<div style="font-family:var(--hd-mono); font-size:0.75rem;'
+            + ' color:' + COLORS.cyan + '; margin-bottom:4px;">'
+            + escapeHtml(T('sixdof.orkCompareTitle',
+                'OpenRocket saved simulation vs HRMA 6-DOF'))
+            + (sim.name ? ' — ' + escapeHtml(sim.name) : '') + '</div>'
+            + '<table style="border-collapse:collapse;">'
+            + '<tr>'
+            + '<th style="' + td + ' text-align:left;"></th>'
+            + '<th style="' + td + ' text-align:left;">OpenRocket</th>'
+            + '<th style="' + td + ' text-align:left;">HRMA</th>'
+            + '<th style="' + td + ' text-align:left;">'
+            + escapeHtml(T('sixdof.cmpDiff', 'Diff')) + '</th></tr>'
+            + rows.map(function (r) {
+                return '<tr><td style="' + td + '"><strong>' + escapeHtml(r[0])
+                    + '</strong></td><td style="' + td + '">' + escapeHtml(r[1])
+                    + '</td><td style="' + td + '">' + escapeHtml(r[2])
+                    + '</td><td style="' + td + '">' + escapeHtml(r[3]) + '</td></tr>';
+            }).join('')
+            + '</table>'
+            + '<div style="font-size:0.7rem; color:' + COLORS.dim + '; margin-top:4px;">'
+            + escapeHtml(T('sixdof.orkCompareNote',
+                'Only fields present on both sides are compared. OpenRocket values '
+                + 'come from the simulation stored in the .ork file.')) + '</div>'
+            + '</div>';
+    }
+
     function render(data, usedCurve) {
         lastRender = { data: data, usedCurve: usedCurve };
         const s = data.summary;
@@ -884,6 +1288,9 @@
                 + s.end_reason.toUpperCase(), 'warn');
         }
         badges.innerHTML = html;
+
+        // .ork kayıtlı simülasyon karşılaştırma kartı (varsa)
+        renderOrkComparison(s);
 
         const altDiv = $('sd_plot_alt');
         altDiv.style.display = 'block';
@@ -926,6 +1333,65 @@
             yaxis: { title: T('sixdof.axisNorth', 'North [m]'), scaleanchor: 'x', scaleratio: 1 },
             height: 380,
         }, { responsive: true, displaylogo: false });
+
+        // 3B yörünge (v2.5.5): doğu/kuzey/irtifa uzayında uçuş hattı, Mach
+        // ile renklendirilir (colorbar); apoje işaretçisi + zemine kesikli
+        // izdüşüm izi. Veri /api/six-dof-analysis serisinde zaten var;
+        // scatter3d line colorbar'ı plotly.js 1.58.5'te destekli (trace
+        // modülü colorbar tanımında {container:'line'} girdisi mevcut).
+        // Koyu tema plotly_dark.js sarmalayıcısından otomatik gelir.
+        const trajDiv = $('sd_plot_traj3d');
+        if (trajDiv && ser.east && ser.north && ser.altitude &&
+            ser.altitude.length > 1) {
+            trajDiv.style.display = 'block';
+            // Apoje: serideki en yüksek irtifa örneği
+            let ia = 0;
+            for (let i = 1; i < ser.altitude.length; i++) {
+                if (ser.altitude[i] > ser.altitude[ia]) ia = i;
+            }
+            const groundZ = ser.altitude.map(function () { return 0; });
+            Plotly.newPlot(trajDiv, [
+                {
+                    type: 'scatter3d', mode: 'lines',
+                    x: ser.east, y: ser.north, z: ser.altitude,
+                    name: T('sixdof.sTrajectory', 'Trajectory'),
+                    line: {
+                        width: 6,
+                        color: ser.mach,
+                        // Tema paletiyle hizalı sıralı skala (cyan → sarı → kırmızı)
+                        colorscale: [[0, '#00e5ff'], [0.5, '#ffd166'], [1, '#ff5d73']],
+                        showscale: true,
+                        colorbar: { title: 'Mach', thickness: 14, len: 0.55 },
+                    },
+                },
+                {
+                    type: 'scatter3d', mode: 'lines',
+                    x: ser.east, y: ser.north, z: groundZ,
+                    name: T('sixdof.sGroundProj', 'Ground projection'),
+                    line: { width: 3, color: 'rgba(136, 153, 170, 0.6)', dash: 'dash' },
+                    hoverinfo: 'skip',
+                },
+                {
+                    type: 'scatter3d', mode: 'markers+text',
+                    x: [ser.east[ia]], y: [ser.north[ia]], z: [ser.altitude[ia]],
+                    name: T('sixdof.sApogee', 'Apogee'),
+                    marker: { size: 5, symbol: 'diamond', color: '#ffd166' },
+                    text: [T('sixdof.sApogee', 'Apogee')],
+                    textposition: 'top center',
+                    textfont: { size: 11 },
+                },
+            ], {
+                title: T('sixdof.chart3d',
+                    '3D Trajectory (East / North / Altitude) — colored by Mach'),
+                scene: {
+                    xaxis: { title: T('sixdof.axisEast', 'East [m]') },
+                    yaxis: { title: T('sixdof.axisNorth', 'North [m]') },
+                    zaxis: { title: T('sixdof.sAltitude', 'Altitude [m]') },
+                },
+                height: 460,
+                legend: { orientation: 'h', y: 1.02 },
+            }, { responsive: true, displaylogo: false });
+        }
     }
 
     // ------------------------------------------------------------------
@@ -967,6 +1433,43 @@
         });
         const useCurveEl = $('sd_use_curve');
         if (useCurveEl) useCurveEl.addEventListener('change', updateLive);
+
+        // İtki kaynağı seçici + motor dosyası + .ork içe aktarma olayları
+        const srcEl = $('sd_thrust_src');
+        if (srcEl) {
+            srcEl.addEventListener('change', function () {
+                refreshImportControls();
+                updateLive();
+            });
+        }
+        const motorFileEl = $('sd_motor_file');
+        if (motorFileEl) {
+            motorFileEl.addEventListener('change', function (ev) {
+                const file = ev.target.files && ev.target.files[0];
+                if (file) onMotorFileChosen(file);
+            });
+        }
+        const motorSelEl = $('sd_motor_select');
+        if (motorSelEl) {
+            motorSelEl.addEventListener('change', function () {
+                importedIdx = parseInt(motorSelEl.value, 10) || 0;
+                const m = importedMotors[importedIdx];
+                if (m) {
+                    setMotorStatus(TF('sixdof.usingMotor',
+                        { name: (m.meta && m.meta.name) || '?', n: m.time.length },
+                        'Using imported motor: {name} ({n} points)'));
+                    suggestPropMass(m);
+                }
+            });
+        }
+        const orkFileEl = $('sd_ork_file');
+        if (orkFileEl) {
+            orkFileEl.addEventListener('change', function (ev) {
+                const file = ev.target.files && ev.target.files[0];
+                if (file) onOrkFileChosen(file);
+            });
+        }
+        refreshImportControls();
 
         // Tablo olayları (delegasyon)
         const tbody = $('sd_comp_body');

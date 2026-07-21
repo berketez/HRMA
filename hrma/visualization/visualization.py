@@ -1,4 +1,5 @@
 import base64
+import functools
 import math
 
 import plotly.graph_objects as go
@@ -146,6 +147,27 @@ def _legend_below(y=-0.12):
     """Kalabalık legend'ı grafiğin altına yatay dizer (çakışma önleme)."""
     return dict(orientation='h', yanchor='top', y=y, x=0.5, xanchor='center',
                 bgcolor=DARK_LEGEND_BG, bordercolor=DARK_LEGEND_BORDER)
+
+
+def _match_time_axes(fig, cells):
+    """Aynı zaman eksenini paylaşan alt grafiklerde senkron zoom kurar.
+
+    cells: [(row, col), ...] — ilk hücrenin x ekseni referans alınır,
+    kalanlara ``matches`` bağlanır (plotly.js 1.45+ / paketli 1.58.5
+    destekler, dağıtımdaki bundle üzerinde teyit edildi 2026-07-21).
+    Tek hücre verilirse hiçbir şey yapılmaz. Eksen kimliği subplot
+    ızgarasından türetilir; indicator/domain hücreleri numaralandırmayı
+    kaydırdığı için sabit 'x2' benzeri adlar YAZILMAZ.
+    """
+    if not cells or len(cells) < 2:
+        return
+    try:
+        ref_axis = fig.get_subplot(row=cells[0][0], col=cells[0][1]).xaxis
+        ref = ref_axis.plotly_name.replace('axis', '')  # 'xaxis3' -> 'x3'
+    except Exception:
+        return
+    for r, c in cells[1:]:
+        fig.update_xaxes(matches=ref, row=r, col=c)
 
 
 def create_motor_plot(motor_data):
@@ -542,7 +564,8 @@ def create_injector_plot(injector_data, injector_type):
             marker=dict(
                 size=max(12, min(20, d_h_mm * 8)), 
                 color='lightblue', 
-                line=dict(color='darkblue', width=2),
+                # v2.5.5: darkblue → palet (JS COLOR_FIX ile aynı ton)
+                line=dict(color=PALETTE[6], width=2),
                 symbol='circle'
             ),
             name=f'Injection Holes ({n_holes})',
@@ -752,7 +775,8 @@ def create_injector_plot(injector_data, injector_type):
                 fill='toself',
                 fillcolor='rgba(255, 165, 0, 0.8)',
                 mode='lines',
-                line=dict(color='darkorange', width=2),
+                # v2.5.5: darkorange → palet (JS COLOR_FIX ile aynı ton)
+                line=dict(color=COL_WARN_HI, width=2),
                 name=f'Injection Slot' if i == 0 else '',
                 showlegend=i == 0,
                 hovertemplate=f'Slot {i+1}<br>Width: {w_mm:.2f} mm<br>Height: {h_mm:.2f} mm<br>Area: {w_mm * h_mm:.2f} mm²'
@@ -1043,7 +1067,8 @@ def _perf_gauge_panel(title, value, unit='m/s'):
                     # Dar ekranda gösterge ekseni etiketleri sayının üstüne
                     # biniyordu: yazı boyutu küçültüldü (2026-07-19)
                     'axis': {'range': [0, full], 'tickfont': {'size': 10}},
-                    'bar': {'color': "darkblue"},
+                    # v2.5.5: darkblue koyu zeminde kayboluyordu → palet
+                    'bar': {'color': PALETTE[6]},
                     'steps': steps,
                     'threshold': {
                         'line': {'color': COL_DANGER, 'width': 4},
@@ -1112,8 +1137,11 @@ def _perf_dual_axis_panel(title, x, primary, secondary, x_title):
             fig.update_yaxes(title_text=sec[3], secondary_y=True,
                              row=row, col=col)
 
+    # time_axis: aynı panodaki zaman panelleri senkron zoom için eşlenir
+    # (create_performance_plots sonunda _match_time_axes ile bağlanır).
     return {'title': title, 'spec': {'secondary_y': True},
-            'draw': draw, 'axes': axes}
+            'draw': draw, 'axes': axes,
+            'time_axis': x_title == 'Time (s)'}
 
 
 # --- Hibrit panelleri -------------------------------------------------------
@@ -1218,7 +1246,8 @@ def _perf_panel_regression(motor_data):
                          row=row, col=col)
 
     return {'title': 'Regression Rate & Port Growth',
-            'spec': {'secondary_y': True}, 'draw': draw, 'axes': axes}
+            'spec': {'secondary_y': True}, 'draw': draw, 'axes': axes,
+            'time_axis': True}
 
 
 # --- Katı motor panelleri ---------------------------------------------------
@@ -1473,6 +1502,12 @@ def create_performance_plots(motor_data, injector_data=None):
     for panel, (r, c, _span) in zip(panels, slots):
         panel['axes'](fig, r, c)
 
+    # Senkron zoom (v2.5.5): zaman ekseni taşıyan paneller (katı panoda
+    # F(t)/Pc(t) ve yanma alanı/Kn panelleri) birbirine 'matches' ile
+    # bağlanır — tek panel varsa (hibrit regresyon) hiçbir şey değişmez.
+    _match_time_axes(fig, [(r, c) for panel, (r, c, _s) in zip(panels, slots)
+                           if panel.get('time_axis')])
+
     return _fig_json(fig)
 
 def create_heat_transfer_plots(heat_data):
@@ -1688,6 +1723,47 @@ def _combustion_efficiency_breakdown(combustion_data, propellant=None):
     return total * 100.0, ' | '.join(parts)
 
 
+def _of_sweep_solve(fuel, ox, pc, lo, hi, n_points, analyzer=None):
+    """O/F taramasının denge çözümü — her nokta bir analyze_combustion.
+
+    Fizik burada; önbellekleme _of_sweep_solve_cached'te. Sonuç: (of, isp)
+    liste çifti ya da None (2'den az nokta çözüldüyse).
+    """
+    if analyzer is None:
+        from hrma.engines.combustion_analysis import CombustionAnalyzer
+        analyzer = CombustionAnalyzer(memoize=True)
+    of_vals, isp_vals = [], []
+    for of in np.linspace(float(lo), float(hi), int(n_points)):
+        try:
+            res = analyzer.analyze_combustion(dict(fuel), str(ox), float(of),
+                                              float(pc))
+        except Exception:
+            continue
+        isp = _perf_num((res.get('performance') or {}).get('isp'))
+        if isp is None:
+            continue
+        of_vals.append(float(of))
+        isp_vals.append(float(isp))
+    if len(of_vals) < 2:
+        return None
+    return of_vals, isp_vals
+
+
+@functools.lru_cache(maxsize=16)
+def _of_sweep_solve_cached(fuel_key, ox, pc, lo, hi, n_points):
+    """Modül seviyesi tarama önbelleği (v2.5.5).
+
+    Aynı yakıt/oksitleyici/Pc/aralık için tarama her panel isteğinde
+    yeniden ÇÖZÜLMESİN diye sonuç saklanır. Fizik SONUCU değişmez —
+    yalnız tekrar hesap önlenir. Anahtar hashlenebilir olmalı: yakıt
+    sözlüğü frozenset(items) olarak gelir. Değişmezlik için tuple döner.
+    """
+    out = _of_sweep_solve(dict(fuel_key), ox, pc, lo, hi, n_points)
+    if out is None:
+        return None
+    return tuple(out[0]), tuple(out[1])
+
+
 def _combustion_of_sweep(propellant, n_points=9):
     """Gerçek O/F taraması: her nokta bir analyze_combustion çağrısıdır.
 
@@ -1704,22 +1780,23 @@ def _combustion_of_sweep(propellant, n_points=9):
     if not fuel or not ox or not pc:
         return None
     lo, hi = propellant.get('of_range') or PERF_SURFACE_OF_RANGE
-    from hrma.engines.combustion_analysis import CombustionAnalyzer
-    analyzer = propellant.get('analyzer') or CombustionAnalyzer(memoize=True)
-    of_vals, isp_vals = [], []
-    for of in np.linspace(float(lo), float(hi), int(n_points)):
-        try:
-            res = analyzer.analyze_combustion(dict(fuel), str(ox), float(of), pc)
-        except Exception:
-            continue
-        isp = _perf_num((res.get('performance') or {}).get('isp'))
-        if isp is None:
-            continue
-        of_vals.append(float(of))
-        isp_vals.append(float(isp))
-    if len(of_vals) < 2:
+
+    # Çağıran kendi analyzer örneğini verdiyse önbellek ATLANIR (örneğin
+    # testler çözücü davranışını yamalayabilir); davranış birebir eski akış.
+    if propellant.get('analyzer') is not None:
+        return _of_sweep_solve(fuel, ox, pc, lo, hi, n_points,
+                               analyzer=propellant['analyzer'])
+
+    try:
+        key = (frozenset(dict(fuel).items()), str(ox), float(pc),
+               float(lo), float(hi), int(n_points))
+    except TypeError:
+        # Hashlenemeyen egzotik girdi: önbelleksiz çöz (davranış korunur)
+        return _of_sweep_solve(fuel, ox, pc, lo, hi, n_points)
+    cached = _of_sweep_solve_cached(*key)
+    if cached is None:
         return None
-    return of_vals, isp_vals
+    return list(cached[0]), list(cached[1])
 
 
 def create_combustion_analysis_plots(combustion_data, propellant=None):
@@ -2011,19 +2088,22 @@ def create_real_time_dashboard(motor_data, time_data):
         )
 
     # Current values indicators
+    # v2.5.5: darkgreen/darkblue/darkorange/teal adlı CSS renkleri
+    # koyu zeminde kayboluyordu → gauge bar renkleri merkezi paletten gelir
+    # (plotly_dark.js fixTrace ayrıca emniyet katmanı olarak düzeltir).
     current_thrust = motor_data.get('thrust', 0)
     fig.add_trace(
-        _gauge(current_thrust, ' N', "darkgreen",
+        _gauge(current_thrust, ' N', COL_SAFE,
                steps=[{'range': [0, float(current_thrust or 0.0) * 0.8],
                        'color': "#46606d"}]),
         row=1, col=1
     )
 
     current_pressure = motor_data.get('chamber_pressure', 0)
-    fig.add_trace(_gauge(current_pressure, ' bar', "darkblue"), row=1, col=2)
+    fig.add_trace(_gauge(current_pressure, ' bar', PALETTE[6]), row=1, col=2)
 
     current_mdot = motor_data.get('mdot_total', 0)
-    fig.add_trace(_gauge(current_mdot, ' kg/s', "darkorange"), row=1, col=3)
+    fig.add_trace(_gauge(current_mdot, ' kg/s', COL_WARN_HI), row=1, col=3)
 
     # 2. sıra (saha fotoğrafı 2026-07-20: başlıklar vardı ama gauge'lar hiç
     # eklenmemişti -> Temperature / O/F Ratio / Isp hücreleri bomboştu).
@@ -2035,7 +2115,7 @@ def create_real_time_dashboard(motor_data, time_data):
     current_of = motor_data.get('of_ratio', 0)
     # O/F tipik 0-10 bandında; 1.2x tam skala iğneyi hep sağ uca yaslıyordu
     fig.add_trace(
-        _gauge(current_of, '', "teal",
+        _gauge(current_of, '', PALETTE[0],
                full_scale=max(float(current_of or 0.0) * 2.0, 1.0)),
         row=2, col=2
     )
@@ -2090,7 +2170,12 @@ def create_real_time_dashboard(motor_data, time_data):
             ),
             row=3, col=3
         )
-    
+
+        # Senkron zoom (v2.5.5): 3. satırın üç paneli aynı zaman eksenini
+        # paylaşır — birinde yapılan yakınlaştırma diğerlerine de uygulanır
+        # (plotly.js 1.58.5 'matches' desteği 1.45.0'dan beri var, teyitli).
+        _match_time_axes(fig, [(3, 1), (3, 2), (3, 3)])
+
     fig.update_layout(
         title_text="Real-Time Motor Performance Dashboard",
         # Figür başlığı üst marja sabitlenir; varsayılan yerleşimde 1. sıra
@@ -2367,6 +2452,54 @@ def _resolve_surface_propellant(engine_data):
     return fuel, str(ox), supplied
 
 
+def _isp_surface_solve(fuel, oxidizer, pc_lo, pc_hi, of_lo, of_hi, n):
+    """Pc x O/F ızgarasında denge çözümü — figürden bağımsız saf hesap.
+
+    Döner: (ISP ndarray [n x n, NaN = çözülemeyen düğüm], failures,
+    first_error). Fizik değişmedi; yalnız create_..._3d_surface içinden
+    önbelleklenebilir bir birime taşındı (v2.5.5).
+    """
+    from hrma.engines.combustion_analysis import CombustionAnalyzer
+
+    pc_range = np.linspace(float(pc_lo), float(pc_hi), int(n))
+    of_range = np.linspace(float(of_lo), float(of_hi), int(n))
+    PC, OF = np.meshgrid(pc_range, of_range)
+
+    analyzer = CombustionAnalyzer(memoize=True)
+    ISP = np.full(PC.shape, np.nan)
+    failures = 0
+    first_error = None
+    for j in range(int(n)):           # O/F ekseni
+        for i in range(int(n)):       # Pc ekseni
+            try:
+                res = analyzer.analyze_combustion(
+                    dict(fuel), oxidizer, float(OF[j, i]), float(PC[j, i]))
+                isp = _perf_num((res.get('performance') or {}).get('isp'))
+                if isp is not None and isp > 0:
+                    ISP[j, i] = isp
+                else:
+                    failures += 1
+            except Exception as exc:
+                failures += 1
+                if first_error is None:
+                    first_error = str(exc)
+    return ISP, failures, first_error
+
+
+@functools.lru_cache(maxsize=16)
+def _isp_surface_solve_cached(fuel_key, oxidizer, pc_lo, pc_hi,
+                              of_lo, of_hi, n):
+    """Yüzey ızgarası önbelleği (v2.5.5): 49+ denge çözümü her panel
+    isteğinde tekrarlanmasın. Anahtar: frozenset(fuel.items()) + oksitleyici
+    + aralıklar + n. Dönen dizi paylaşıldığı için yazmaya KAPATILIR
+    (önbelleğin kazayla mutasyona uğramaması için).
+    """
+    ISP, failures, first_error = _isp_surface_solve(
+        dict(fuel_key), oxidizer, pc_lo, pc_hi, of_lo, of_hi, n)
+    ISP.flags.writeable = False
+    return ISP, failures, first_error
+
+
 def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
     """Isp surface over chamber pressure x O/F — solved, not shape-fitted.
 
@@ -2381,8 +2514,6 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
     ``optimal_of_ratio``, ``base_isp`` (design point marker only),
     ``pc_range``, ``of_range``, ``grid_n``.
     """
-    from hrma.engines.combustion_analysis import CombustionAnalyzer
-
     ed = engine_data or {}
     fuel, oxidizer, prop_supplied = _resolve_surface_propellant(ed)
 
@@ -2395,24 +2526,19 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
     of_range = np.linspace(float(of_lo), float(of_hi), n)
     PC, OF = np.meshgrid(pc_range, of_range)
 
-    analyzer = CombustionAnalyzer(memoize=True)
-    ISP = np.full(PC.shape, np.nan)
-    failures = 0
-    first_error = None
-    for j in range(n):            # O/F ekseni
-        for i in range(n):        # Pc ekseni
-            try:
-                res = analyzer.analyze_combustion(
-                    dict(fuel), oxidizer, float(OF[j, i]), float(PC[j, i]))
-                isp = _perf_num((res.get('performance') or {}).get('isp'))
-                if isp is not None and isp > 0:
-                    ISP[j, i] = isp
-                else:
-                    failures += 1
-            except Exception as exc:
-                failures += 1
-                if first_error is None:
-                    first_error = str(exc)
+    # 49+ denge çözümü her istekte tekrarlanmasın: ızgara çözümü modül
+    # seviyesi önbellekten gelir (v2.5.5). Tasarım noktası işaretleri ve
+    # başlık metinleri önbelleğin DIŞINDA kalır — engine_data'nın base_isp
+    # gibi alanları figürü etkilemeye devam eder, fizik sonucu değişmez.
+    try:
+        key = (frozenset(dict(fuel).items()), oxidizer,
+               float(pc_lo), float(pc_hi), float(of_lo), float(of_hi), n)
+        ISP, failures, first_error = _isp_surface_solve_cached(*key)
+    except TypeError:
+        # Hashlenemeyen egzotik yakıt girdisi: önbelleksiz çöz
+        ISP, failures, first_error = _isp_surface_solve(
+            fuel, oxidizer, float(pc_lo), float(pc_hi),
+            float(of_lo), float(of_hi), n)
 
     fig = go.Figure()
     fig.add_trace(go.Surface(

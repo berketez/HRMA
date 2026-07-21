@@ -180,6 +180,50 @@
                 });
         }
 
+        // İndirme bitti → sessiz otomatik kurulum. Sunucu "auto" derse
+        // uygulama kendini kapatır, yardımcı betik kurar ve yeniden açar;
+        // "manual" derse (kaynak kod, yazılamayan hedef) kurulum dosyası
+        // açılmıştır, eski yönerge metni gösterilir.
+        function startInstall(st) {
+            progressText.textContent = T('update.installing',
+                'Downloaded — preparing the installation…');
+            fetch('/api/update/install', { method: 'POST' })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (res.started && res.mode === 'auto') {
+                        updateBtn.style.display = 'none';
+                        laterBtn.style.display = 'none';
+                        skipBtn.style.display = 'none';
+                        manualRow.style.display = 'none';
+                        progressText.innerHTML = T('update.autoClose',
+                            'HRMA will close now and reopen automatically '
+                            + 'when the update is complete.');
+                    } else if (res.started) {
+                        progressText.innerHTML = T('update.done',
+                            'Downloaded — the installer has been opened. '
+                            + 'Close HRMA to complete the update.')
+                            + '<br><span style="font-size:11px;">'
+                            + T('update.fileLabel', 'File') + ': '
+                            + escapeHtml(res.path || st.path) + '</span>';
+                        laterBtn.textContent = T('common.ok', 'OK');
+                    } else {
+                        highlightManual();
+                        progressText.innerHTML = T('update.installFailed',
+                            'The installer could not be started — open the '
+                            + 'downloaded file from your Downloads folder.')
+                            + '<br><span style="font-size:11px;">'
+                            + T('update.fileLabel', 'File') + ': '
+                            + escapeHtml(st.path) + '</span>';
+                    }
+                })
+                .catch(function () {
+                    highlightManual();
+                    progressText.innerHTML = T('update.installFailed',
+                        'The installer could not be started — open the '
+                        + 'downloaded file from your Downloads folder.');
+                });
+        }
+
         // İlerleme takılırsa (pct uzun süre artmazsa) tarayıcı seçeneğini öne çıkar
         var STALL_LIMIT = Math.round(20000 / POLL_MS); // ~20 sn ilerlemesiz
         var lastPct = -1;
@@ -220,13 +264,7 @@
                         setTimeout(pollStatus, POLL_MS);
                     } else if (st.state === 'done') {
                         fill.style.width = '100%';
-                        progressText.innerHTML = T('update.done',
-                            'Downloaded — the installer has been opened. '
-                            + 'Close HRMA to complete the update.')
-                            + '<br><span style="font-size:11px;">'
-                            + T('update.fileLabel', 'File') + ': '
-                            + escapeHtml(st.path) + '</span>';
-                        laterBtn.textContent = T('common.ok', 'OK');
+                        startInstall(st);
                     } else if (st.state === 'error') {
                         highlightManual();
                         progressText.innerHTML = TF('update.error',

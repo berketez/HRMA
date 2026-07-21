@@ -248,6 +248,7 @@
                 // 400 gövdesi net mesaj taşır — panelde okunur gösterilir
                 throw new Error((data && data.error) || ('HTTP ' + resp.status));
             }
+            U.purgePlots(root);   // eski grafiğin resize dinleyicisi sızmasın
             root.innerHTML = '';
             render(data, root);
             root.style.display = 'block';

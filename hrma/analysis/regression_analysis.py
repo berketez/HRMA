@@ -231,11 +231,24 @@ class RegressionAnalyzer:
         yazar; uygulamanin yukledigi plotly.js 1.58.5 bu formati tanimadigi
         icin grafik BOS cizilir. Ayrica sabit width kaldirildi — kap
         genisligine gore responsive cizilsin.
+
+        v2.5.5: seri ve eksen renkleri merkezi PALETTE'e hizalandi (koyu
+        temada 'red'/'blue'/'green' CSS adlari tutarsizdi); JSON cikisi
+        _fig_json kapisindan gecer (bdata korumasi tek merkezden).
         """
+        # Tembel import: modul yukleme sirasinda dongusel bagimlilik riski
+        # olmasin (engines -> analysis -> visualization zinciri).
+        from hrma.visualization.visualization import PALETTE, _fig_json
 
         fig = go.Figure()
 
         time_axis = _as_list(regression_data['time'])
+
+        # Seri renkleri: kirmizi-ish/mavi-ish/yesil-ish anlam korunarak
+        # paletin koyu-tema-guvenli tonlarina esleme.
+        col_reg = PALETTE[3]    # regresyon hizi (#ff5d73)
+        col_port = PALETTE[6]   # port capi (#7cc4ff)
+        col_flux = PALETTE[2]   # oksitleyici akisi (#2dd4a8)
 
         # Regression rate vs time
         fig.add_trace(go.Scatter(
@@ -243,7 +256,7 @@ class RegressionAnalyzer:
             y=_as_list(regression_data['regression_rate']),
             mode='lines',
             name='Regression Rate',
-            line=dict(color='red', width=3),
+            line=dict(color=col_reg, width=3),
             hovertemplate='Time: %{x:.1f} s<br>Regression Rate: %{y:.3f} mm/s<extra></extra>'
         ))
 
@@ -253,7 +266,7 @@ class RegressionAnalyzer:
             y=_as_list(regression_data['port_diameter']),
             mode='lines',
             name='Port Diameter',
-            line=dict(color='blue', width=3, dash='dash'),
+            line=dict(color=col_port, width=3, dash='dash'),
             yaxis='y2',
             hovertemplate='Time: %{x:.1f} s<br>Port Diameter: %{y:.1f} mm<extra></extra>'
         ))
@@ -264,7 +277,7 @@ class RegressionAnalyzer:
             y=_as_list(regression_data['oxidizer_flux']),
             mode='lines',
             name='Oxidizer Mass Flux',
-            line=dict(color='green', width=2),
+            line=dict(color=col_flux, width=2),
             yaxis='y3',
             visible='legendonly',
             hovertemplate='Time: %{x:.1f} s<br>G_ox: %{y:.0f} kg/m²/s<extra></extra>'
@@ -283,21 +296,27 @@ class RegressionAnalyzer:
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)'
             ),
+            # Eksen basligi/tick renkleri kendi serisinin PALETTE rengiyle
+            # hizali (v2.5.5) — hangi eksenin hangi seriye ait oldugu
+            # koyu zeminde de okunur kalir.
             yaxis=dict(
-                title=dict(text='Regression Rate (mm/s)', font=dict(color='red')),
-                tickfont=dict(color='red'),
+                title=dict(text='Regression Rate (mm/s)',
+                           font=dict(color=col_reg)),
+                tickfont=dict(color=col_reg),
                 side='left'
             ),
             yaxis2=dict(
-                title=dict(text='Port Diameter (mm)', font=dict(color='blue')),
-                tickfont=dict(color='blue'),
+                title=dict(text='Port Diameter (mm)',
+                           font=dict(color=col_port)),
+                tickfont=dict(color=col_port),
                 anchor='x',
                 overlaying='y',
                 side='right'
             ),
             yaxis3=dict(
-                title=dict(text='G_ox (kg/m²/s)', font=dict(color='green')),
-                tickfont=dict(color='green'),
+                title=dict(text='G_ox (kg/m²/s)',
+                           font=dict(color=col_flux)),
+                tickfont=dict(color=col_flux),
                 anchor='free',
                 overlaying='y',
                 side='right',
@@ -323,6 +342,9 @@ class RegressionAnalyzer:
         growth_pct = ((final_port / initial_port - 1.0) * 100.0
                       if initial_port > 0 else 0.0)
 
+        # v2.5.5: beyaz zemin + siyah kenarli kutu KALDIRILDI — koyu temada
+        # goz aliyordu. plotly_dark.js annotation'lara koyu zemin pilini ve
+        # okunur yazi rengini kendisi uygular (tek merkezden tema).
         fig.add_annotation(
             x=0.02, y=0.98,
             xref='paper', yref='paper',
@@ -335,24 +357,23 @@ class RegressionAnalyzer:
             ),
             showarrow=False,
             align='left',
-            bgcolor='rgba(255, 255, 255, 0.9)',
-            bordercolor='black',
-            borderwidth=1,
             font=dict(size=10)
         )
 
-        return fig.to_json()
+        return _fig_json(fig)
     
     def compare_fuel_types(self, base_conditions: Dict) -> str:
         """Yakıt türü karşılaştırma grafiği (Plotly JSON).
 
         Eksen dizileri _as_list ile listeye cevrilir (bkz. create_regression_plot
-        bdata notu); sabit width kaldirildi.
+        bdata notu); sabit width kaldirildi. v2.5.5: JSON cikisi _fig_json
+        kapisindan gecer, seri renkleri merkezi PALETTE'ten atanir.
         """
+        from hrma.visualization.visualization import PALETTE, _fig_json
 
         fig = go.Figure()
 
-        colors = ['red', 'blue', 'green', 'orange', 'purple']
+        colors = PALETTE
 
         # Her yakıt türü için regresyon eğrisi
         for i, (fuel_type, fuel_props) in enumerate(self.fuel_properties.items()):
@@ -393,7 +414,7 @@ class RegressionAnalyzer:
             height=500
         )
 
-        return fig.to_json()
+        return _fig_json(fig)
 
 # Global instance
 regression_analyzer = RegressionAnalyzer()

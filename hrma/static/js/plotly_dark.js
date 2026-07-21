@@ -36,7 +36,9 @@
     var COLOR_FIX = {
         'black': '#d7e3ee', '#000': '#d7e3ee', '#000000': '#d7e3ee',
         'rgb(0,0,0)': '#d7e3ee', 'darkblue': '#7cc4ff', 'navy': '#7cc4ff',
-        'darkgreen': '#5fd6a5', 'darkred': '#ff7a85', 'saddlebrown': '#c98a55'
+        'darkgreen': '#5fd6a5', 'darkred': '#ff7a85', 'saddlebrown': '#c98a55',
+        // v2.5.5 gauge emniyet katmanı: koyu gösterge renkleri de düzeltilir
+        'darkorange': '#ff8c33', 'teal': '#2dd4a8'
     };
 
     function fixColor(c) {
@@ -52,6 +54,22 @@
             if (tr.marker.line) tr.marker.line.color = fixColor(tr.marker.line.color);
         }
         if (tr.textfont) tr.textfont.color = fixColor(tr.textfont.color);
+        // v2.5.5 emniyet katmanı: gauge (indicator) renkleri — sunucu tarafı
+        // paletten beslenmemiş eski/yabancı figürlerde koyu bar/step/threshold
+        // renkleri koyu zeminde kayboluyordu. Python tarafı zaten PALETTE
+        // kullanır; burası yalnız kaçakları yakalar.
+        if (tr.gauge && typeof tr.gauge === 'object') {
+            var g = tr.gauge;
+            if (g.bar) g.bar.color = fixColor(g.bar.color);
+            if (Array.isArray(g.steps)) {
+                g.steps.forEach(function (st) {
+                    if (st && typeof st === 'object') st.color = fixColor(st.color);
+                });
+            }
+            if (g.threshold && g.threshold.line) {
+                g.threshold.line.color = fixColor(g.threshold.line.color);
+            }
+        }
     }
 
     function darkenAxis(ax) {
@@ -327,6 +345,101 @@
         tLayout(layout, tr);
     }
 
+    /* ==================================================================
+       PNG DIŞA AKTARIM KATMANI (v2.5.5)
+       ==================================================================
+       Sorun: sayfa temasında paper_bgcolor saydamdır (yıldızlı zemin
+       görünsün diye); modebar'ın kamera düğmesi bu yüzden SAYDAM PNG
+       üretiyordu — beyaz zeminde açılınca açık renkli yazılar okunmuyordu.
+
+       Çözüm iki parça:
+       1) Plotly.downloadImage sarmalanır: dışa aktarım ANINDA layout'a
+          geçici opak koyu zemin (#08101c) yazılır, çağrı döner dönmez geri
+          alınır. plotly.js 1.58.5 to_image.js layout'u çağrı İÇİNDE senkron
+          klonladığı için (extendDeep) bu güvenlidir; ekrandaki grafik hiç
+          yeniden çizilmez.
+       2) Modebar'ın yerleşik kamera düğmesi downloadImage'ı registry
+          üzerinden çağırdığından (sarmalamayı GÖRMEZ), yerleşik düğme
+          kaldırılıp aynı ikonla sarmalanmış downloadImage'ı çağıran eşdeğer
+          düğme eklenir. Varsayılan dışa aktarım: png, scale 2 — width/height
+          BİLEREK verilmez, ekrandaki boyutun 2 katı çözünürlük alınır.
+    */
+    var EXPORT_BG = '#08101c';
+    var EXPORT_IMAGE_DEFAULTS = { format: 'png', scale: 2 };
+    var CAMERA_ICON = Plotly.Icons && Plotly.Icons.camera;
+
+    (function wrapDownloadImage() {
+        var orig = Plotly.downloadImage && Plotly.downloadImage.bind(Plotly);
+        if (!orig) return;
+        Plotly.downloadImage = function (gd, opts) {
+            var el = (typeof gd === 'string') ? document.getElementById(gd) : gd;
+            var lay = el && el.layout;
+            if (!lay || typeof lay !== 'object') return orig(gd, opts);
+            var hadPaper = Object.prototype.hasOwnProperty.call(lay, 'paper_bgcolor');
+            var prevPaper = lay.paper_bgcolor;
+            lay.paper_bgcolor = EXPORT_BG;
+            try {
+                return orig(el, opts);
+            } finally {
+                // to_image layout'u yukarıdaki çağrı içinde senkron klonladı;
+                // ekrandaki grafiğe dokunmadan hemen geri alınabilir.
+                if (hadPaper) lay.paper_bgcolor = prevPaper;
+                else delete lay.paper_bgcolor;
+            }
+        };
+    })();
+
+    var TO_IMAGE_BUTTON = {
+        __hrmaToImage: true,
+        name: 'toImage',
+        title: 'Download plot as a png',
+        icon: CAMERA_ICON,
+        click: function (gd) {
+            var opts = Object.assign({}, EXPORT_IMAGE_DEFAULTS,
+                (gd && gd._context && gd._context.toImageButtonOptions) || {});
+            Plotly.downloadImage(gd, opts);
+        }
+    };
+
+    function hasOurToImageButton(ctx) {
+        return !!(ctx && Array.isArray(ctx.modeBarButtonsToAdd) &&
+            ctx.modeBarButtonsToAdd.some(function (b) {
+                return b && b.__hrmaToImage;
+            }));
+    }
+
+    /* Config'i dışa aktarım katmanıyla zenginleştirir. Sayfanın verdiği
+       config nesnesi MUTASYONA uğratılmaz (sığ kopya döner); config hiç
+       verilmemişse ve grafik daha önce işlenmişse bağlama dokunulmaz
+       (react'te mevcut ayarları ezmemek için undefined döner). */
+    function applyExportConfig(el, config) {
+        var gd = (typeof el === 'string') ? document.getElementById(el) : el;
+        var ctx = gd && gd._context;
+        if (config === undefined || config === null) {
+            if (hasOurToImageButton(ctx)) return config;
+            config = {};
+        }
+        if (typeof config !== 'object' || Array.isArray(config)) return config;
+        var cfg = Object.assign({}, config);
+        // Varsayılan: png + 2x çözünürlük; sabit width/height DAYATILMAZ
+        // (ekrandaki gerçek en-boy oranı korunur). Sayfa override edebilir.
+        cfg.toImageButtonOptions = Object.assign({}, EXPORT_IMAGE_DEFAULTS,
+            (ctx && ctx.toImageButtonOptions) || {},
+            cfg.toImageButtonOptions || {});
+        if (CAMERA_ICON) {
+            var rem = (cfg.modeBarButtonsToRemove ||
+                       (ctx && ctx.modeBarButtonsToRemove) || []).slice();
+            if (rem.indexOf('toImage') === -1) rem.push('toImage');
+            cfg.modeBarButtonsToRemove = rem;
+            var add = (cfg.modeBarButtonsToAdd ||
+                       (ctx && ctx.modeBarButtonsToAdd) || [])
+                .filter(function (b) { return !(b && b.__hrmaToImage); });
+            add.push(TO_IMAGE_BUTTON);
+            cfg.modeBarButtonsToAdd = add;
+        }
+        return cfg;
+    }
+
     function wrap(fnName) {
         var orig = Plotly[fnName] && Plotly[fnName].bind(Plotly);
         if (!orig) return;
@@ -337,6 +450,7 @@
                 maybeBottomLegend(data, layout);
                 maybeUnifiedHover(data, layout);
                 translateFigure(data, layout);
+                config = applyExportConfig(el, config);
             } catch (e) {
                 console.warn('HRMA dark theme patch failed, rendering as-is:', e);
             }
