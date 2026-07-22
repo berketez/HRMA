@@ -1,0 +1,59 @@
+name: tests
+
+# HRMA test paketi — dışarıdan doğrulanabilirlik için (2026-07-23).
+# Amaç: "şu kadar test geçiyor" iddiasının bağımsız olarak tekrar
+# üretilebilmesi. Testler depoda yayımlıdır (tests/), bu iş akışı da onları
+# temiz bir makinede sıfırdan kurup koşar.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # RocketCEA kaynaktan derleniyor (paketlenmiş NASA CEA Fortran kodu),
+      # bu yüzden gfortran gerekiyor. Grafik/PDF üreten testler için de
+      # başsız (headless) çalışma ortamı hazırlanır.
+      - name: Sistem bağımlılıkları
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran
+
+      - name: Python bağımlılıkları
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Cantera OPSİYONELDİR (kurulu değilse çözücü ampirik yola düşer),
+          # ama denge kimyası testlerinin gerçekten koşması için kuruluyor.
+          pip install cantera
+          pip install pytest
+
+      - name: Test paketi
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: .
+        run: |
+          pytest tests/ -q --junitxml=pytest-report.xml
+
+      - name: Test raporu (başarısız koşuda da yüklenir)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: pytest-report.xml
+          if-no-files-found: ignore
