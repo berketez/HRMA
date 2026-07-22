@@ -502,17 +502,22 @@ def _run_liquid(record: Dict[str, Any]) -> Dict[str, Any]:
     enjekte edilir — motor .get(...) zincirleriyle kendi referans
     yogunluklarina duser, web fetch HIC cagrilmaz.
 
-    Model-formu notu: HRMA sivi Isp/c* zinciri sabit-Pc CEA referans
-    tablosuna demirlidir (MR sapma cezali); kayittaki Pc luleyi etkiler ama
-    Isp referansini olceklemez. engine_spec kiyasi bu nedenle 'HRMA ciktisi
-    kamu spec'iyle tutarli mi' testidir, bagimsiz ilk-ilke tahmini degil —
-    rapor okuru icin adapter_notes'a yazilir.
+    Model-formu notu (2026-07-22 guncellendi): HRMA sivi Isp/c* zinciri artik
+    kayittaki GERCEK (Pc, O/F) noktasinda RocketCEA ile cozulur ve teslim
+    verim zinciri uygulanir. Bu nedenle kayitta YAYIMLANMIS tasarim
+    girdileri -- genisleme orani ve cevrim tipi -- motora GIRDI olarak
+    verilir; bunlar ``geometry`` blogundadir, ``measured`` degildir, yani
+    olculen performansi modele geri beslemek DEGILDIR. Genisleme orani
+    verilmezse motor ortam-eslenik (deniz seviyesi optimum) lule tasarlar;
+    ust kademe motorlarinda bu buyuk bir fark yaratir ve adapter_notes'a
+    acikca yazilir.
     """
     from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
 
     result = _base_result(record)
     inp = convert_block(record.get("inputs"))
     meas = convert_block(record.get("measured"))
+    geo = record.get("geometry") or {}
     fuel_key, ox_key = _propellant_keys(record)
 
     _fill_measured(result, meas)

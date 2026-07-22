@@ -170,8 +170,18 @@ def _compute_rocketcea(
     # ayrılması CEA tarafından işaretlenir; biz sayıyı döndürürüz).
     isp_vac_s = None
     isp_sl_s = None
+    isp_vac_frozen_s = None
     if eps:
         isp_vac_s = float(c.get_Isp(Pc=pc_psia, MR=mr, eps=eps))
+        # DONMUŞ (frozen, ODF) genişleme: kimyasal kinetik kaybının ALT
+        # sınırı. Gerçek lüle akışı her zaman donmuş ile kayan-denge (ODE)
+        # arasındadır (Bray 1959 ani-donma analizi; JANNAF/TDK pratiği).
+        # Çağıran taraf bu iki değerin arasını kinetik verimle harmanlar.
+        try:
+            isp_vac_frozen_s = float(c.get_Isp(
+                Pc=pc_psia, MR=mr, eps=eps, frozen=1, frozenAtThroat=0))
+        except Exception:
+            isp_vac_frozen_s = None
         amb_bar = ambient_bar if ambient_bar else STD_SEA_LEVEL_BAR
         try:
             isp_amb, _mode = c.estimate_Ambient_Isp(
@@ -203,6 +213,7 @@ def _compute_rocketcea(
         'gamma_throat': float(gamma_throat),
         'mw_g_mol': float(mw_g_mol),
         'isp_vac_s': isp_vac_s,
+        'isp_vac_frozen_s': isp_vac_frozen_s,
         'isp_sl_s': isp_sl_s,
         'cp_chamber': cp_chamber,
         'mole_fractions': mole_fractions,
@@ -236,6 +247,9 @@ def _from_fallback(fallback: Dict[str, Any], pc_bar: float, eps: Optional[float]
         'gamma_throat': _read_alias(fallback, 'gamma_throat') or gamma_ch,
         'mw_g_mol': _read_alias(fallback, 'mw_g_mol', 'mw'),
         'isp_vac_s': _read_alias(fallback, 'isp_vac_s', 'isp_vac'),
+        # Statik tabloda donmuş genişleme değeri YOKTUR (kinetik bandı
+        # yalnız canlı CEA yolunda çözülür).
+        'isp_vac_frozen_s': _read_alias(fallback, 'isp_vac_frozen_s'),
         'isp_sl_s': _read_alias(fallback, 'isp_sl_s', 'isp_sl'),
         'cp_chamber': _read_alias(fallback, 'cp_chamber'),
         'mole_fractions': fallback.get('mole_fractions'),
@@ -264,6 +278,7 @@ def _not_modelled(pc_bar: float, reason: str) -> Dict[str, Any]:
         'gamma_throat': None,
         'mw_g_mol': None,
         'isp_vac_s': None,
+        'isp_vac_frozen_s': None,
         'isp_sl_s': None,
         'cp_chamber': None,
         'mole_fractions': None,
@@ -316,7 +331,7 @@ def get_combustion_properties(
     --------
     dict :
         c_star_m_s, tc_k, gamma_chamber, gamma_throat, mw_g_mol,
-        isp_vac_s, isp_sl_s, cp_chamber, mole_fractions,
+        isp_vac_s, isp_vac_frozen_s, isp_sl_s, cp_chamber, mole_fractions,
         source ('rocketcea' | 'static_table' | 'not_modelled'),
         validity {pc_range_ok, real_gas_warning, extrapolated, note}.
 

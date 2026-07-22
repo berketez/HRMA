@@ -155,6 +155,16 @@ LAMBDA_PARABOLIC = 0.975       # Parabolik kontur
 LAMBDA_CONICAL_15DEG = 0.983   # 15 derece yarı açılı konik (1+cos(15°))/2 = 0.98296
 LAMBDA_CONICAL_20DEG = 0.970   # 20 derece yarı açılı konik (1+cos(20°))/2 = 0.96985
 
+# -----------------------------------------------------------------------------
+# Lüle sürtünme / sınır tabaka itki kaybı kesri
+# -----------------------------------------------------------------------------
+# Yaklaşık sürtünme + sınır tabaka itki kaybı; tipik bant %0.5-2
+# (Sutton & Biblarz, "Rocket Propulsion Elements" 9. baskı, Böl. 3.5).
+# TEK TANIM YERİ (CLAUDE.md kural 11): hem nozzle_flow_1d.NozzleFlow1D
+# varsayılanı hem sıvı motor teslim-Isp zinciri bu değeri kullanır — daha
+# önce ikisi ayrı ayrı 0.015 yazıyordu.
+NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT = 0.015
+
 
 def lambda_conical(half_angle_deg: float) -> float:
     """Konik nozzle diverjans düzeltme faktörünü hesaplar.

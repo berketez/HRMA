@@ -8,7 +8,9 @@ import warnings
 import requests
 from typing import Dict, List, Optional, Tuple
 
-from hrma.constants import G_0, R_UNIVERSAL, PA_PER_BAR
+from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, LAMBDA_BELL,
+                            NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT,
+                            lambda_conical)
 warnings.filterwarnings('ignore')
 
 # ---------------------------------------------------------------------------
@@ -82,11 +84,31 @@ PERF_MAP_MR_SPAN = 0.45          # optimum O/F etrafında +-%45 tarama
 PERF_MAP_PC_MIN_BAR, PERF_MAP_PC_MAX_BAR = 20.0, 500.0
 PERF_MAP_ALT_MAX_M = 100000.0
 
-# Vakum Isp referans alan oranı: statik tablo "Area ratio 200:1" çapasıyla
-# aynı sözleşme (bkz. tablo yorumları). CEA canlı çağrısı da vakum
-# referansını bu eps'te üretir ki tablo/CEA kaynakları karşılaştırılabilir
-# kalsın (uçmuş üst kademe lüleleri ~200-300; Sutton & Biblarz 9th ed. Ch. 3).
+# İTİCİ KAPASİTE referansı için alan oranı: statik tablonun "Area ratio
+# 200:1" çapasıyla aynı sözleşme. DİKKAT (2026-07-22 doğruluk düzeltmesi):
+# bu SADECE "bu itici çifti çok uzun bir lülede ne verir" kapasite sayısıdır,
+# motorun performansı DEĞİLDİR. Motorun Isp'si kendi genişleme oranında
+# (kullanıcı ε'su ya da ortam-eşlenik ε) çözülür — bkz.
+# _design_expansion_ratio / _finalize_performance_reference.
 VACUUM_REFERENCE_EPS = 200.0
+
+# --- TESLİM (delivered) performans zinciri --------------------------------
+# CEA IDEAL (kayıpsız, tek boyutlu, denge) değer verir. Gerçek motorun
+# teslim Isp'si dört mekanizmayla düşer (JANNAF basitleştirilmiş performans
+# metodolojisi; Sutton & Biblarz 9th ed. Böl. 3.5, Huzel & Huang Böl. 1-4):
+#     Isp_teslim = Isp_CEA(ε) · η_c* · λ_sapma · η_sürtünme · η_kinetik
+# HRMA bu zincirin ÜÇÜNÜ hesaplar (λ konturdan, η_sürtünme kaynaklı tipik
+# değerden, η_kinetik CEA donmuş/kayan bandından); η_c* enjektör/karışım
+# kalitesine bağlıdır ve tasarım girdilerinden TÜRETİLEMEZ — kullanıcı
+# 'combustion_efficiency' girmezse 1.0 alınır (ek varsayım YOK) ve bu durum
+# çıktıda açıkça etiketlenir. Bunun sonucu: HRMA'nın varsayılan Isp'si
+# "mükemmel enerji salımı" üst sınırıdır; gerçek motorların η_c*'ı
+# 0.92-0.99 bandındadır (Sutton & Biblarz 9th ed. Böl. 5).
+DELIVERED_ETA_CSTAR_DEFAULT = 1.0
+# Sürtünme / sınır tabaka itki kaybı kesri. hrma.constants içinde TEK
+# tanımlıdır ve nozzle_flow_1d ile AYNI değerdir (tipik %0.5-2,
+# Sutton & Biblarz 9th ed. Böl. 3.5).
+# (NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT hrma.constants'tan import edilir.)
 
 # Kriyojenik soğutucu giriş sıcaklığı varsayılanları [K] — kullanıcı
 # coolant_inlet_temp girmediyse kullanılır ve etiketlenir. Değerler NBP
@@ -496,14 +518,12 @@ class LiquidRocketEngine:
         # --- yanma verimi (c* verimi) --------------------------------------
         # Sutton & Biblarz 9th ed. Eq. 3-31: c*_delivered = eta_c* · c*_teorik,
         # Isp da aynı oranda ölçeklenir. Girdi yoksa 1.0 (davranış değişmez).
+        # 2026-07-22: çarpma burada YAPILMAZ — teslim verim zinciri tek yerde
+        # (_finalize_performance_reference / _calculate_mixture_ratio_effects)
+        # uygulanır; iki yerde uygulanırsa η_c* ÇİFT SAYILIR.
         eta_c = self._override_val('combustion_efficiency', 50.0, 100.0,
                                    'Combustion efficiency', ' %')
         self.eta_c_star = 1.0 if eta_c is None else eta_c / 100.0
-        if eta_c is not None:
-            self.c_star = self.c_star * self.eta_c_star
-            self.c_star_effective = self.c_star
-            self.isp_sl = self.isp_sl * self.eta_c_star
-            self.isp_vac = self.isp_vac * self.eta_c_star
 
         # --- hazne geometrisi ----------------------------------------------
         self.L_star = self._override_val(
@@ -653,6 +673,12 @@ class LiquidRocketEngine:
                 "Throat diameter is a solver OUTPUT: it is sized from the "
                 "mass balance for the commanded thrust and chamber pressure, "
                 "so the entered value is reported for comparison only.")
+
+        # --- performans referansının SON hali -------------------------------
+        # Tüm girdiler bağlandıktan sonra (genişleme oranı, lüle tipi, c*
+        # verimi, L*) CEA çözümü motorun gerçek tasarım noktasında yenilenir
+        # ve teslim verim zinciri uygulanır.
+        self._finalize_performance_reference()
 
     def unwired_inputs(self):
         """Çözücünün BİLİNÇLİ olarak kullanmadığı form alanları.
@@ -864,6 +890,20 @@ class LiquidRocketEngine:
         self.nozzle_cf_ratio = 1.0
         if eps_user is None:
             return
+        # 2026-07-22: canlı CEA yolunda Isp ZATEN kullanıcının ε'sunda
+        # çözülmüştür (bkz. _solve_design_expansion); burada bir kez daha
+        # CF oranıyla ölçeklemek ÇİFT SAYIM olur. Yalnız ayrılma uyarısı ve
+        # çıkış basıncı bilgisi üretilir.
+        if (getattr(self, 'combustion_data_source', '') == 'rocketcea'
+                and abs(float(getattr(self, 'design_reference_expansion_ratio',
+                                      -1.0)) - float(eps_user)) < 1e-6):
+            try:
+                _, pe_user = self._cf_at(eps_user, self.P_a)
+                self.exit_pressure_fixed_bar = pe_user
+                self._warn_flow_separation(eps_user, pe_user)
+            except Exception:
+                pass
+            return
         g = float(self.gamma)
         try:
             # Ortam-eşlenik (optimum) genişleme oranı — deniz seviyesi
@@ -895,9 +935,15 @@ class LiquidRocketEngine:
             isp_vac_new = self.isp_vac
         self.isp_sl = isp_sl_new
         self.isp_vac = isp_vac_new
-        # Aşırı genişleme -> akış ayrılması (Summerfield ölçütü). Ayrılan
-        # lülede gerçek deniz seviyesi itkisi ideal CF'nin öngördüğünden
-        # YÜKSEK olur; bu model ayrılmayı çözmez, bu yüzden söylenir.
+        self._warn_flow_separation(eps_user, pe_user)
+
+    def _warn_flow_separation(self, eps_user, pe_user):
+        """Aşırı genişleme -> akış ayrılması (Summerfield ölçütü) uyarısı.
+
+        Ayrılan lülede gerçek deniz seviyesi itkisi ideal CF'nin
+        öngördüğünden YÜKSEK olur; bu model ayrılmayı çözmez, bu yüzden
+        kullanıcıya açıkça söylenir.
+        """
         if pe_user < NOZZLE_SEPARATION_PRESSURE_RATIO * self.P_a:
             self._warn(
                 f"Expansion ratio {eps_user:g} gives an exit pressure of "
@@ -1267,6 +1313,9 @@ class LiquidRocketEngine:
         key = (self.fuel_type, self.oxidizer_type)
         if key in combinations:
             props = combinations[key]
+            # Girdi katmanı bittikten sonra CEA referansı motorun GERÇEK
+            # tasarım ε'sunda yenilenir; fallback sözlüğü o zaman da gerekir.
+            self._table_props = props
             self.propellant_name = props['name']
             
             # Base performance properties
@@ -1399,21 +1448,26 @@ class LiquidRocketEngine:
                 self._warn_real_gas()
             return
 
-        # 2) Deniz seviyesi: CEA gamma'sıyla ortam-eşlenik eps, ambient Isp
-        g = float(vac['gamma_chamber'])
-        try:
-            m_opt = np.sqrt(2.0 / (g - 1.0)
-                            * ((self.P_c / self.P_a) ** ((g - 1.0) / g) - 1.0))
-            eps_sl = float(self._area_ratio_from_mach(max(m_opt, 1.0001), g))
-            eps_sl = max(eps_sl, 1.6)
-        except Exception:
-            eps_sl = 16.0  # tablo yorumundaki tipik SL alan oranı (son çare)
-        sl = cea_bridge.get_combustion_properties(
+        # 2) MOTORUN KENDİ lülesinde çözüm (2026-07-22 doğruluk düzeltmesi).
+        #
+        # DOĞRULUK REGRESYONUNUN KÖK NEDENİ: ilk entegrasyonda hem vakum hem
+        # deniz seviyesi Isp'si SABİT referans alan oranlarından okunuyordu
+        # (vakum ε=200, SL ortam-eşlenik ε). Bir motorun vakum Isp'si kendi
+        # genişleme oranına kuvvetle bağlıdır (RS-25 ε=69'da 462.8 s, ε=200'de
+        # 478.1 s — %3.3 fark), bu yüzden ε=200 referansı motor tahmini olarak
+        # kullanıldığında sistematik ve büyük bir aşırı-tahmin doğuruyordu.
+        # Artık her iki Isp de TASARIM ε'sunda (kullanıcı girdisi ya da
+        # ortam-eşlenik lüle) çözülür; ε=200 yalnız 'itici kapasitesi'
+        # referansı olarak raporlanır.
+        eps_design, gamma_eff, iterations = self._solve_design_expansion(
+            cea_bridge, fallback, float(vac['gamma_chamber']))
+
+        des = cea_bridge.get_combustion_properties(
             self.fuel_type, self.oxidizer_type, float(self.P_c),
-            float(self.MR), expansion_ratio=eps_sl,
+            float(self.MR), expansion_ratio=eps_design,
             ambient_bar=float(self.P_a), fallback=fallback)
 
-        isp_sl = sl.get('isp_sl_s')
+        isp_sl = des.get('isp_sl_s')
         if isp_sl is None:
             # Ambient kestirimi başarısızsa: SL Isp = vakum Isp x CF oranı
             # yerine tablo değeri korunur (uydurma katsayı eklenmez).
@@ -1432,15 +1486,36 @@ class LiquidRocketEngine:
         self.propellant_name = getattr(self, 'propellant_name',
                                        f"{self.fuel_type.upper()}/"
                                        f"{self.oxidizer_type.upper()}")
-        self.isp_vac_ref = float(vac['isp_vac_s'])
+        # IDEAL (kayıpsız CEA) referanslar — teslim verim zinciri bunların
+        # üstüne _delivered_performance_efficiency ile uygulanır.
+        self.isp_vac_ref = float(des['isp_vac_s'])
         self.isp_sl_ref = float(isp_sl)
         self.c_star_ref = float(vac['c_star_m_s'])
+        self.isp_vac_frozen_ref = des.get('isp_vac_frozen_s')
         self.T_c = float(vac['tc_k'])
-        self.gamma_ref = float(vac['gamma_chamber'])
+        # gamma: izentropik alan/CF bağıntılarında CEA'nın DENGE oda gamma'sı
+        # (LOX/LH2'de ~1.147) kullanılamaz — o cp'si reaksiyon ısısını içeren
+        # bir termodinamik türevdir, lüle genişlemesinin efektif üssü değil.
+        # gamma_eff, CF_1D(ε, γ) = g0·Isp_CEA(ε)/c*_CEA denklemini sağlayan
+        # EŞDEĞER izentropik üstür (Sutton & Biblarz 9th ed. Böl. 3: gamma
+        # lüle boyunca değişir, pratikte ortalama/eşdeğer bir değer kullanılır).
+        self.gamma_chamber_cea = float(vac['gamma_chamber'])
+        self.gamma_throat_cea = float(vac.get('gamma_throat')
+                                      or vac['gamma_chamber'])
+        self.gamma_ref = float(gamma_eff)
+        self.gamma_effective_source = (
+            f"equivalent isentropic exponent reproducing the CEA thrust "
+            f"coefficient at epsilon={eps_design:.1f} "
+            f"(CEA chamber gamma {self.gamma_chamber_cea:.4f}, "
+            f"throat {self.gamma_throat_cea:.4f}); {iterations} iteration(s)")
         self.mw = float(vac['mw_g_mol'])
         if vac.get('cp_chamber'):
             self.cp_chamber = float(vac['cp_chamber'])
-        self.sl_reference_expansion_ratio = eps_sl
+        self.design_reference_expansion_ratio = float(eps_design)
+        self.sl_reference_expansion_ratio = float(eps_design)
+        # İtici KAPASİTE referansı (motor performansı değil, bkz. sabit yorumu)
+        self.isp_vac_capability_ref = float(vac['isp_vac_s'])
+        self.isp_vac_capability_eps = VACUUM_REFERENCE_EPS
         if self.combustion_validity.get('real_gas_warning'):
             self._warn_real_gas()
 
@@ -1451,7 +1526,84 @@ class LiquidRocketEngine:
             self.optimal_mr = getattr(self, 'optimal_mr', float(self.MR))
             self.optimal_mr_thrust = getattr(self, 'optimal_mr_thrust',
                                              float(self.MR))
-            self._calculate_mixture_ratio_effects()
+        self._calculate_mixture_ratio_effects()
+
+    def _matched_expansion_ratio(self, gamma):
+        """Ortam basıncına eşlenik (optimum) genişleme oranı.
+
+        M_e = sqrt(2/(γ-1)·[(P_c/P_a)^((γ-1)/γ) − 1]); ε = A/A*(M_e)
+        (Sutton & Biblarz 9th ed., Eq. 3-25 ve 3-14).
+        """
+        g = float(gamma)
+        m_opt = np.sqrt(2.0 / (g - 1.0)
+                        * ((self.P_c / self.P_a) ** ((g - 1.0) / g) - 1.0))
+        return max(float(self._area_ratio_from_mach(max(m_opt, 1.0001), g)),
+                   1.6)
+
+    def _equivalent_gamma(self, eps, cf_target):
+        """CF_1D(ε, γ, vakum) = cf_target denklemini sağlayan eşdeğer γ.
+
+        CEA'nın (çok türlü, denge) genişlemesini HRMA'nın tek-γ izentropik
+        bağıntılarına taşıyan köprüdür; hiçbir kalibrasyon katsayısı içermez.
+        Kök bulunamazsa None döner (çağıran CEA boğaz gamma'sına düşer).
+        """
+        from scipy.optimize import brentq
+
+        def residual(g):
+            cf, _ = self._cf_ideal(eps, g, 0.0)
+            return cf - cf_target
+
+        try:
+            lo, hi = 1.05, 1.45
+            if residual(lo) * residual(hi) > 0:
+                return None
+            return float(brentq(residual, lo, hi, xtol=1e-6))
+        except Exception:
+            return None
+
+    def _cf_ideal(self, expansion_ratio, gamma, ambient_bar):
+        """(CF, P_e[bar]) — self.gamma'dan BAĞIMSIZ, γ parametreli sürüm."""
+        g = float(gamma)
+        m_e = self._mach_from_area_ratio_supersonic(expansion_ratio, g)
+        pe_bar = self.P_c * (1.0 + (g - 1.0) / 2.0 * m_e ** 2) ** (-g / (g - 1.0))
+        cf = (self._cf_momentum(pe_bar / self.P_c, g)
+              + expansion_ratio * (pe_bar - ambient_bar) / self.P_c)
+        return float(cf), float(pe_bar)
+
+    def _solve_design_expansion(self, cea_bridge, fallback, gamma_seed):
+        """(ε_tasarım, γ_eşdeğer, iterasyon) — motorun KENDİ lülesi.
+
+        Kullanıcı genişleme oranı girdiyse ε sabittir ve yalnız γ_eşdeğer
+        çözülür. Girmediyse ε ortam-eşlenik lüledir; ε ile γ birbirine bağlı
+        olduğundan sabit-nokta iterasyonu yapılır (2-3 tur yeter).
+        """
+        eps_user = getattr(self, 'expansion_ratio_input', None)
+        gamma = float(gamma_seed)
+        eps = (float(eps_user) if eps_user is not None
+               else self._matched_expansion_ratio(gamma))
+        iterations = 0
+        for _ in range(4):
+            iterations += 1
+            data = cea_bridge.get_combustion_properties(
+                self.fuel_type, self.oxidizer_type, float(self.P_c),
+                float(self.MR), expansion_ratio=eps, fallback=fallback)
+            isp_vac = data.get('isp_vac_s')
+            c_star = data.get('c_star_m_s')
+            if not isp_vac or not c_star:
+                break
+            g_new = self._equivalent_gamma(eps, isp_vac * self.g0 / c_star)
+            if g_new is None:
+                gamma = float(data.get('gamma_throat') or gamma)
+                break
+            gamma = g_new
+            if eps_user is not None:
+                break
+            eps_new = self._matched_expansion_ratio(gamma)
+            converged = abs(eps_new - eps) <= 1e-3 * max(eps, 1.0)
+            eps = eps_new
+            if converged:
+                break
+        return float(eps), float(gamma), iterations
 
     def _warn_real_gas(self):
         """Pc >= 300 bar ideal-gaz CEA uyarısı (kullanıcıya görünür)."""
@@ -1460,6 +1612,204 @@ class LiquidRocketEngine:
             f"(>= 300 bar): the CEA solution is ideal-gas (no fugacity / "
             f"real-gas correction); treat c*, Tc and Isp as upper-bound "
             f"estimates.")
+
+    # ------------------------------------------------------------------
+    # TESLİM (delivered) performans zinciri — 2026-07-22 doğruluk düzeltmesi
+    # ------------------------------------------------------------------
+    def _divergence_efficiency(self):
+        """(λ, kaynak) — lüle sapma verimi, SEÇİLEN kontura göre.
+
+        Konik lülede λ = (1+cos α)/2 (Sutton & Biblarz 9th ed., Eq. 3-34);
+        çan (bell) konturunda bu bağıntı geçerli DEĞİLDİR (çıkış açısı küçük
+        olsa da akış tam eksenel değildir), bu yüzden Rao-optimize çan için
+        yayımlanmış λ değeri kullanılır (hrma.constants.LAMBDA_BELL = 0.985,
+        Sutton & Biblarz 9th ed.) — her iki değer de merkezî sabit
+        dosyasındadır, burada yeniden tanımlanmaz.
+        """
+        ntype = getattr(self, 'nozzle_type', NOZZLE_TYPE_DEFAULT)
+        geom = NOZZLE_TYPE_GEOMETRY.get(ntype,
+                                        NOZZLE_TYPE_GEOMETRY[NOZZLE_TYPE_DEFAULT])
+        if ntype == 'conical':
+            lam = float(lambda_conical(geom['half_angle']))
+            src = (f"conical divergence lambda=(1+cos {geom['half_angle']:.1f} "
+                   f"deg)/2 (Sutton & Biblarz 9th ed., Eq. 3-34)")
+        else:
+            lam = float(LAMBDA_BELL)
+            src = ("published Rao-optimised bell divergence factor "
+                   "(hrma.constants.LAMBDA_BELL, Sutton & Biblarz 9th ed.)")
+            if not geom.get('modelled', True):
+                src += (f"; the '{ntype}' contour itself is not modelled and "
+                        f"is treated as an 80% bell")
+        return lam, src
+
+    def _kinetic_efficiency(self, isp_shifting, isp_frozen, throat_diameter):
+        """(η_kinetik, tanı) — sonlu-hız kimyası kaybı.
+
+        Gerçek lüle akışı DONMUŞ (ODF) ile KAYAN DENGE (ODE) arasındadır.
+        Harman kesri, HRMA'nın kendi (bu görevden ÖNCE yazılmış ve
+        kaynaklandırılmış) `hrma.analysis.kinetic_efficiency` 'engineering'
+        seviyesinden gelir: Damköhler benzeri parametre, oda kalış süresi
+        t_res = L*·rho_c·c*/P_c (Sutton & Biblarz 9th ed. Eq. 8-9) ve
+        üç-cisimli rekombinasyon zamanı tau ∝ P^-2 (Bray 1959; Vincenti &
+        Kruger Böl. 8). Buradaki hiçbir katsayı bu görevde ayarlanmadı.
+
+        CEA donmuş değeri yoksa (statik tablo yolu) kinetik kayıp
+        ÇÖZÜLMEZ: η = 1.0 ve tanı 'not_modelled'.
+        """
+        if not isp_shifting or not isp_frozen or isp_frozen >= isp_shifting:
+            return 1.0, {'model': 'not_modelled',
+                         'note': ('CEA frozen expansion value unavailable; '
+                                  'the finite-rate (kinetic) loss is not '
+                                  'resolved and no loss is applied.')}
+        try:
+            from hrma.analysis.kinetic_efficiency import KineticEfficiency
+            mw = float(getattr(self, 'mw', 22.0))
+            rho_c = (float(self.P_c) * PA_PER_BAR
+                     / ((R_UNIVERSAL / mw) * float(self.T_c)))
+            cres = {
+                'performance': {'c_star': float(self.c_star_ref),
+                                'isp_frozen': float(isp_frozen),
+                                'isp_shifting': float(isp_shifting)},
+                'conditions': {'chamber': {'P': float(self.P_c),
+                                           'T': float(self.T_c)}},
+                'compositions': {'chamber': {'molecular_weight': mw,
+                                             'density': rho_c}},
+            }
+            res = KineticEfficiency().evaluate(
+                combustion_results=cres, fidelity='engineering',
+                chamber_pressure=float(self.P_c),
+                characteristic_length=float(getattr(self, 'L_star',
+                                                    L_STAR_DEFAULT_M)),
+                throat_diameter=throat_diameter)
+        except Exception as exc:
+            return 1.0, {'model': 'not_modelled',
+                         'note': f'kinetic correlation unavailable ({exc})'}
+        eta = float(res['isp_predicted']) / float(isp_shifting)
+        return eta, {
+            'model': 'kinetic_efficiency (engineering, JANNAF-style blend)',
+            'isp_shifting_s': float(isp_shifting),
+            'isp_frozen_s': float(isp_frozen),
+            'isp_predicted_s': float(res['isp_predicted']),
+            'kinetic_loss_pct': float(res['kinetic_loss_pct']),
+            'loss_band_pct': list(res['loss_band_pct']),
+            'damkohler': res['diagnostics'].get('damkohler'),
+            'note': res['model_note'],
+        }
+
+    def _estimate_throat_diameter(self, isp_sl_ideal):
+        """Geometri henüz çözülmeden boğaz çapı KESTİRİMİ [m] veya None.
+
+        Kinetik korelasyonun boyut faktörü için gerekir (büyük lüle daha
+        yavaş genişler, akış dengeye daha yakın kalır). d_t = 2·sqrt(A_t/π),
+        A_t = ṁ·c*/(P_c·C_D), ṁ = F/(Isp_sl·g0). Kullanıcı boğaz çapı
+        girdiyse doğrudan o kullanılır.
+        """
+        d_user = getattr(self, 'throat_diameter_input_m', None)
+        if d_user:
+            return float(d_user)
+        try:
+            if not isp_sl_ideal or isp_sl_ideal <= 0:
+                return None
+            mdot = float(self.F) / (float(isp_sl_ideal) * self.g0)
+            cd = self._throat_discharge_coefficient()
+            a_t = mdot * float(self.c_star_ref) / (float(self.P_c)
+                                                   * PA_PER_BAR * cd)
+            return float(2.0 * np.sqrt(a_t / np.pi))
+        except Exception:
+            return None
+
+    def _delivered_performance_efficiency(self):
+        """CEA IDEAL -> TESLİM Isp verim zinciri (tek doğruluk kaynağı).
+
+        Isp_teslim = Isp_CEA(ε) · η_c* · λ_sapma · η_sürtünme · η_kinetik
+        c*_teslim  = c*_CEA · η_c*
+        (JANNAF basitleştirilmiş performans metodolojisi; Sutton & Biblarz
+        9th ed. Böl. 3.5.)
+
+        η_c* kullanıcı 'combustion_efficiency' girdisinden gelir; GİRİLMEZSE
+        1.0 alınır — enjektör/karışım kalitesi tasarım girdilerinden
+        türetilemez ve UYDURULMAZ. Bunun anlamı çıktıda açıkça yazılır:
+        varsayılan sonuç 'mükemmel enerji salımı' üst sınırıdır.
+        """
+        eta_cs = float(getattr(self, 'eta_c_star', DELIVERED_ETA_CSTAR_DEFAULT)
+                       or DELIVERED_ETA_CSTAR_DEFAULT)
+        cs_source = ('user input (combustion efficiency)'
+                     if 'combustion_efficiency' in self.overrides
+                     else ('not supplied -> ideal energy release (1.000) '
+                           'assumed; real engines deliver 0.92-0.99 '
+                           '(Sutton & Biblarz 9th ed., Ch. 5)'))
+        lam, lam_source = self._divergence_efficiency()
+        eta_f = 1.0 - NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT
+        f_source = (f"{NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT * 100:.1f}% "
+                    f"friction / boundary-layer thrust loss (typical 0.5-2%, "
+                    f"Sutton & Biblarz 9th ed. Sec. 3.5; shared constant with "
+                    f"the quasi-1D nozzle model)")
+        d_t = self._estimate_throat_diameter(getattr(self, 'isp_sl_ref', None))
+        eta_kin, kin_diag = self._kinetic_efficiency(
+            getattr(self, 'isp_vac_ref', None),
+            getattr(self, 'isp_vac_frozen_ref', None), d_t)
+        eta_nozzle = lam * eta_f * eta_kin
+        return {
+            'eta_c_star': eta_cs,
+            'eta_c_star_source': cs_source,
+            'lambda_divergence': lam,
+            'lambda_divergence_source': lam_source,
+            'eta_friction': eta_f,
+            'eta_friction_source': f_source,
+            'eta_kinetic': eta_kin,
+            'kinetic': kin_diag,
+            'eta_nozzle': eta_nozzle,
+            'eta_isp': eta_cs * eta_nozzle,
+            'throat_diameter_estimate_m': d_t,
+            'model': ('JANNAF-style delivered-performance chain: '
+                      'Isp_delivered = Isp_CEA(eps) x eta_c* x lambda_div x '
+                      'eta_friction x eta_kinetic; c*_delivered = c*_CEA x '
+                      'eta_c* (Sutton & Biblarz 9th ed. Sec. 3.5)'),
+        }
+
+    def _finalize_performance_reference(self):
+        """Girdi katmanı bittikten sonra performans referansını tazeler.
+
+        _set_propellant_properties kurucunun BAŞINDA çalışır; kullanıcının
+        genişleme oranı / lüle tipi / c* verimi girdileri henüz okunmamıştır.
+        Bu adım, girdiler bağlandıktan sonra:
+          1) CEA çözümünü motorun GERÇEK tasarım ε'sunda yeniler,
+          2) teslim verim zincirini kurar ve uygular.
+        Statik tablo yolunda (RocketCEA yok) yalnız η_c* uygulanır: tablo
+        değerleri zaten teslim seviyesine demirli sayılardır (örn. LH2/LOX
+        451.8 s = RS-25 teslim Isp'si), üstlerine ikinci bir lüle kaybı
+        zinciri binerse ÇİFT SAYIM olur.
+        """
+        if getattr(self, 'combustion_data_source', '') == 'rocketcea':
+            try:
+                self._resolve_combustion_reference(
+                    getattr(self, '_table_props', None))
+            except Exception as exc:
+                self._warn(f"Combustion reference could not be refreshed at "
+                           f"the design expansion ratio ({exc}); the initial "
+                           f"CEA solution is kept.")
+            self._delivered_eff = self._delivered_performance_efficiency()
+            self._calculate_mixture_ratio_effects()
+            return
+
+        # Statik tablo / muhafazakâr tahmin yolu: eski davranış (yalnız η_c*).
+        eta_cs = float(getattr(self, 'eta_c_star', 1.0) or 1.0)
+        if eta_cs != 1.0 and hasattr(self, 'c_star'):
+            self.c_star = self.c_star * eta_cs
+            self.c_star_effective = self.c_star
+            self.isp_sl = self.isp_sl * eta_cs
+            self.isp_vac = self.isp_vac * eta_cs
+        self._delivered_eff = {
+            'eta_c_star': eta_cs,
+            'eta_c_star_source': ('user input (combustion efficiency)'
+                                  if 'combustion_efficiency' in self.overrides
+                                  else 'not supplied -> 1.000'),
+            'eta_nozzle': 1.0,
+            'eta_isp': eta_cs,
+            'model': ('static anchor table path: the tabulated Isp values are '
+                      'already delivered-level anchors, so no additional '
+                      'nozzle-loss chain is applied (double counting)'),
+        }
 
     def _calculate_mixture_ratio_effects(self):
         """Calculate O/F ratio dependent performance (high precision)
@@ -1484,10 +1834,37 @@ class LiquidRocketEngine:
         if getattr(self, 'combustion_data_source', '') == 'rocketcea':
             self.gamma = float(self.gamma_ref)
             self.mr_efficiency = 1.0
-            self.isp_sl = self.isp_sl_ref
-            self.isp_vac = self.isp_vac_ref
-            self.c_star = self.c_star_ref
+            # Referanslar CEA IDEAL değerleridir; TESLİM zinciri burada
+            # uygulanır (tek yer — bu fonksiyon başka noktalardan da
+            # çağrılabildiği için verim her çağrıda tutarlı kalır).
+            eff = getattr(self, '_delivered_eff', None) or {}
+            eta_isp = float(eff.get('eta_isp', 1.0))
+            eta_cs = float(eff.get('eta_c_star', 1.0))
+            self.isp_vac = self.isp_vac_ref * eta_isp
+            self.c_star = self.c_star_ref * eta_cs
             self.c_star_effective = self.c_star
+            # Deniz seviyesi Isp'si vakum Isp'sinden TAM bağıntıyla türetilir:
+            #   F_sl = F_vac − P_a·A_e   ->   Isp_sl = Isp_vac − P_a·A_e/(ṁ·g0)
+            #   A_e/ṁ = ε·c*_teslim/(P_c·C_D)
+            # (Sutton & Biblarz 9th ed., Eq. 3-29). Bu ayrılmamış akış için
+            # KESİN bir özdeşliktir ve motorun kendi ε'suyla tutarlıdır;
+            # CEA'nın estimate_Ambient_Isp kestirimi ise aşırı genişlemede
+            # kendi ayrılma varsayımını uygular (RS-25 ε=69'da 376 s verir,
+            # ayrılmamış özdeşlik 367 s — ölçülen 366 s). Ayrılma riski
+            # ayrıca uyarı olarak bildirilir.
+            eps_ref = float(getattr(self, 'design_reference_expansion_ratio',
+                                    0.0) or 0.0)
+            isp_sl_exact = None
+            if eps_ref > 0:
+                cd = self._throat_discharge_coefficient()
+                dp = (self.P_a * PA_PER_BAR * eps_ref * self.c_star
+                      / (self.P_c * PA_PER_BAR * cd * self.g0))
+                isp_sl_exact = self.isp_vac - dp
+            if isp_sl_exact is not None and isp_sl_exact > 0:
+                self.isp_sl_cea_ambient_ref = self.isp_sl_ref * eta_isp
+                self.isp_sl = float(isp_sl_exact)
+            else:
+                self.isp_sl = self.isp_sl_ref * eta_isp
             print(f"Effective C* set: {self.c_star_effective:.1f} m/s "
                   f"(RocketCEA at Pc={self.P_c:g} bar, MR={self.MR:g})")
             return
