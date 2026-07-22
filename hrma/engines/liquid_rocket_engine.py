@@ -47,6 +47,14 @@ CONTRACTION_RATIO_MIN, CONTRACTION_RATIO_MAX = 1.5, 60.0
 # n = floor(pi * D_hazne / (w + land)) — sabit 80/180 değil.
 COOLING_CHANNEL_WIDTH_DEFAULT_M = 3.0e-3
 COOLING_CHANNEL_HEIGHT_DEFAULT_M = 2.0e-3
+# Kanal yüksekliği (derinliği) tasarım serbestliğidir (formda girdisi yok):
+# hız hedefi aşılırsa yükseklik hedefe göre BÜYÜTÜLÜR ve etiketlenir.
+# Hedef hız 40 m/s: yüksek basınçlı motor rejeneratif tasarım bandı
+# 30-60 m/s ortası (Huzel & Huang Ch. 4; NASA SP-8087 "Liquid Rocket
+# Engine Fluid-Cooled Combustion Chambers" tasarım pratiği).
+COOLANT_CHANNEL_TARGET_VELOCITY_MS = 40.0
+# Frezeli kanal pratik derinlik üst sınırı (Huzel & Huang Ch. 4).
+COOLING_CHANNEL_HEIGHT_MAX_M = 10.0e-3
 COOLING_CHANNEL_LAND_DEFAULT_M = 1.5e-3      # kanallar arası kaburga kalınlığı
 COOLING_CHANNEL_COUNT_MIN, COOLING_CHANNEL_COUNT_MAX = 4, 2000
 # İşlenmiş kanal yüzeyi mutlak pürüzlülüğü [m] (Ra 3.2 um, form varsayılanı).
@@ -130,6 +138,30 @@ CYCLE_SOLVER_NAME = {
     'expander': 'expander',
     'full_flow_staged': 'full_flow_staged_combustion',
 }
+
+# Rejeneratif ceket liner (sıcak cidar) kalınlığı [m] — 1B istasyon-marşlı
+# süperkritik çözüm için. Frezeli kanallı bakır/inconel liner pratiği
+# 0.5-2 mm (Huzel & Huang, "Modern Engineering for Design of
+# Liquid-Propellant Rocket Engines", Ch. 4). Yapısal dış cidar ayrıdır.
+REGEN_LINER_THICKNESS_M = 1.0e-3
+
+# Rejeneratif ceketin kapladığı azami genişleme oranı: ana yanma odası
+# ceketi tipik olarak ε≈5-6'ya kadar frezeli kanallıdır (RS-25 ana yanma
+# odası ε≈5-6, ötesi tüp demeti/ışınımsal bölge — Sutton & Biblarz 9th ed.
+# Ch. 8 rejeneratif ceket anlatımı). Lüle bunun ötesine uzuyorsa o bölgenin
+# soğutması bu modelde ÇÖZÜLMEZ ve çıktıda açıkça söylenir.
+REGEN_JACKET_EPS_MAX = 6.0
+
+# Film soğutmada film sıvısının ısı alabileceği üst sıcaklık, sıcak cidar
+# hedef sıcaklığıyla sınırlanır (film cidarı korurken cidar hedefinden
+# sıcak olamaz). Enerji dengesi modeli: Huzel & Huang Ch. 4 (film debisi =
+# yutulan ısı / birim kütle ısı kapasitesi); entalpiler CoolProp gerçek-gaz
+# değerleridir (CH4/H2), RP-1 için duyulur ısı (cp·ΔT) alt sınırıdır.
+FILM_COOLANT_CP_FALLBACK_J_KGK = {'rp1': 2090.0}  # MIL-DTL-25576 sıvı cp
+
+# CoolProp akışkan adları (film/pressurant entalpi hesapları için).
+COOLPROP_FLUID_NAME = {'methane': 'Methane', 'lh2': 'ParaHydrogen',
+                       'lox': 'Oxygen'}
 
 # Yanma süresi [s]: kullanıcı max_burn_duration vermezse VARSAYIM olarak
 # kullanılır ve çıktıda 'burn_time_source' ile etiketlenir.
@@ -1260,10 +1292,16 @@ class LiquidRocketEngine:
             self.isp_coeffs = props['isp_coeffs']
             self.gamma_coeffs = props['gamma_coeffs']
             self.cstar_coeffs = props['cstar_coeffs']
-            
+
+            # CANLI CEA köprüsü (2026-07-22 Raptor entegrasyonu, denetim
+            # bulgusu 2c): yanma verisi artık GERÇEK (Pc, MR) noktasında
+            # RocketCEA'dan çözülür; 100 bar statik tablo yalnız RocketCEA
+            # kullanılamadığında fallback olarak kalır ve kaynak etiketlenir.
+            self._resolve_combustion_reference(props)
+
             # Calculate actual properties based on mixture ratio
             self._calculate_mixture_ratio_effects()
-            
+
         else:
             # Fallback for unknown combinations with conservative estimates
             self.propellant_name = f"{self.fuel_type.upper()}/{self.oxidizer_type.upper()}"
@@ -1277,14 +1315,152 @@ class LiquidRocketEngine:
             self.rho_ox = 1200
             self.optimal_mr = 2.5
             self.optimal_mr_thrust = 2.2
-            
+
             # Default advanced properties
             self.cp_chamber = 2000
             self.mu_chamber = 6e-5
             self.pr_chamber = 0.73
             self.frozen_performance = False
             self.dissociation_temp = 3000
-    
+
+            # Tabloda olmayan çift: kaynak etiketi DÜRÜSTÇE 'conservative
+            # estimate'. (cea_bridge bu çifti eşleyebiliyorsa canlı CEA yine
+            # denenir — örn. hydrazine/h2o2 gibi tablo dışı ama kartı olan
+            # çiftler.)
+            self.combustion_data_source = 'conservative_estimate'
+            self.combustion_validity = {
+                'pc_range_ok': False, 'real_gas_warning': False,
+                'extrapolated': True,
+                'note': ('Propellant pair not in the built-in table; '
+                         'conservative placeholder values.')}
+            try:
+                self._resolve_combustion_reference(None)
+            except Exception:
+                pass
+            if self.combustion_data_source == 'conservative_estimate':
+                self._warn(
+                    f"Propellant pair {self.fuel_type}/{self.oxidizer_type} "
+                    f"is not in the combustion database and could not be "
+                    f"solved with CEA; conservative placeholder performance "
+                    f"values are used.")
+
+    # ------------------------------------------------------------------
+    # CANLI CEA köprüsü (2026-07-22 Raptor entegrasyonu, denetim madde 1)
+    # ------------------------------------------------------------------
+    def _resolve_combustion_reference(self, table_props):
+        """Yanma referanslarını GERÇEK (Pc, MR) CEA çözümüyle değiştirir.
+
+        Sözleşme (cea_bridge.get_combustion_properties):
+        * Vakum referansı VACUUM_REFERENCE_EPS (=200) alan oranında çözülür —
+          statik tablonun "Area ratio 200:1" çapasıyla aynı sözleşme.
+        * Deniz seviyesi Isp'si, CEA gamma'sıyla hesaplanan ortam-eşlenik
+          (optimum) genişleme oranındaki ambient Isp'dir — tablonun
+          "optimized expansion" sözleşmesinin karşılığı.
+        * RocketCEA yoksa/başarısızsa statik tablo değerleri AYNEN korunur
+          ve kaynak 'static_table' olarak etiketlenir (davranış değişmez).
+        * Pc >= 300 bar'da cea_bridge real_gas_warning bayrağı kullanıcı
+          uyarısına çevrilir (ideal-gaz CEA; fugasite düzeltmesi yok).
+
+        Ayarlanan durum: isp_vac_ref / isp_sl_ref / c_star_ref / T_c /
+        gamma_ref / mw / cp_chamber (varsa) + combustion_data_source,
+        combustion_validity.
+        """
+        from hrma.engines import cea_bridge
+
+        fallback = None
+        if table_props is not None:
+            fallback = {
+                'c_star': table_props['c_star'], 'T_c': table_props['T_c'],
+                'gamma': table_props['gamma'], 'mw': table_props['mw'],
+                'isp_vac': table_props['isp_vac'],
+                'isp_sl': table_props['isp_sl'],
+                'cp_chamber': table_props.get('cp_chamber'),
+            }
+
+        # 1) Vakum referansı (eps = 200, tablo çapası sözleşmesi)
+        vac = cea_bridge.get_combustion_properties(
+            self.fuel_type, self.oxidizer_type, float(self.P_c),
+            float(self.MR), expansion_ratio=VACUUM_REFERENCE_EPS,
+            fallback=fallback)
+
+        self.combustion_data_source = vac['source']
+        self.combustion_validity = dict(vac.get('validity') or {})
+
+        if vac['source'] != 'rocketcea':
+            # Fallback yolu: tablo değerleri zaten atandı; yalnız kaynak ve
+            # geçerlilik bayrakları raporlanır. 'not_modelled' ise (ne CEA ne
+            # tablo) mevcut muhafazakâr değerler kalır ve çağıran uyarır.
+            if vac['source'] == 'static_table':
+                self._warn(
+                    'RocketCEA is unavailable; combustion data comes from '
+                    'the static Pc=100 bar anchor table (no chamber-pressure '
+                    'dependence).')
+            if self.combustion_validity.get('real_gas_warning'):
+                self._warn_real_gas()
+            return
+
+        # 2) Deniz seviyesi: CEA gamma'sıyla ortam-eşlenik eps, ambient Isp
+        g = float(vac['gamma_chamber'])
+        try:
+            m_opt = np.sqrt(2.0 / (g - 1.0)
+                            * ((self.P_c / self.P_a) ** ((g - 1.0) / g) - 1.0))
+            eps_sl = float(self._area_ratio_from_mach(max(m_opt, 1.0001), g))
+            eps_sl = max(eps_sl, 1.6)
+        except Exception:
+            eps_sl = 16.0  # tablo yorumundaki tipik SL alan oranı (son çare)
+        sl = cea_bridge.get_combustion_properties(
+            self.fuel_type, self.oxidizer_type, float(self.P_c),
+            float(self.MR), expansion_ratio=eps_sl,
+            ambient_bar=float(self.P_a), fallback=fallback)
+
+        isp_sl = sl.get('isp_sl_s')
+        if isp_sl is None:
+            # Ambient kestirimi başarısızsa: SL Isp = vakum Isp x CF oranı
+            # yerine tablo değeri korunur (uydurma katsayı eklenmez).
+            isp_sl = (fallback or {}).get('isp_sl')
+            if isp_sl is None:
+                # tablo da yoksa bu çift için SL referansı üretilemez
+                self.combustion_data_source = 'not_modelled'
+                self.combustion_validity['note'] = (
+                    'Sea-level Isp could not be estimated (no ambient CEA '
+                    'solution and no fallback table value).')
+                return
+            self._warn(
+                'CEA ambient-Isp estimate failed; the sea-level Isp '
+                'reference falls back to the static table value.')
+
+        self.propellant_name = getattr(self, 'propellant_name',
+                                       f"{self.fuel_type.upper()}/"
+                                       f"{self.oxidizer_type.upper()}")
+        self.isp_vac_ref = float(vac['isp_vac_s'])
+        self.isp_sl_ref = float(isp_sl)
+        self.c_star_ref = float(vac['c_star_m_s'])
+        self.T_c = float(vac['tc_k'])
+        self.gamma_ref = float(vac['gamma_chamber'])
+        self.mw = float(vac['mw_g_mol'])
+        if vac.get('cp_chamber'):
+            self.cp_chamber = float(vac['cp_chamber'])
+        self.sl_reference_expansion_ratio = eps_sl
+        if self.combustion_validity.get('real_gas_warning'):
+            self._warn_real_gas()
+
+        # Tablo dışı çift CEA ile çözüldüyse temel alanların tamamı artık
+        # tanımlı olmalı (isp/c* zinciri _calculate_mixture_ratio_effects
+        # üzerinden kurulur).
+        if table_props is None:
+            self.optimal_mr = getattr(self, 'optimal_mr', float(self.MR))
+            self.optimal_mr_thrust = getattr(self, 'optimal_mr_thrust',
+                                             float(self.MR))
+            self._calculate_mixture_ratio_effects()
+
+    def _warn_real_gas(self):
+        """Pc >= 300 bar ideal-gaz CEA uyarısı (kullanıcıya görünür)."""
+        self._warn(
+            f"Chamber pressure {self.P_c:g} bar is in the real-gas regime "
+            f"(>= 300 bar): the CEA solution is ideal-gas (no fugacity / "
+            f"real-gas correction); treat c*, Tc and Isp as upper-bound "
+            f"estimates.")
+
     def _calculate_mixture_ratio_effects(self):
         """Calculate O/F ratio dependent performance (high precision)
 
@@ -1299,6 +1475,22 @@ class LiquidRocketEngine:
           kuadratik ceza ile azaliyor — referansi asla asmaz.
         """
         mr = self.MR
+
+        # CANLI CEA yolu (2026-07-22): referanslar ZATEN gerçek (Pc, MR)
+        # noktasının CEA çözümüdür — optimuma demirli kuadratik MR cezası
+        # (eski vekil model) UYGULANMAZ; uygulanırsa gerçek CEA taramasının
+        # üstüne ikinci (uydurma) bir ceza binerdi. gamma da aynı çözümden
+        # gelir; polinom fit yalnız statik tablo yolunda kullanılır.
+        if getattr(self, 'combustion_data_source', '') == 'rocketcea':
+            self.gamma = float(self.gamma_ref)
+            self.mr_efficiency = 1.0
+            self.isp_sl = self.isp_sl_ref
+            self.isp_vac = self.isp_vac_ref
+            self.c_star = self.c_star_ref
+            self.c_star_effective = self.c_star
+            print(f"Effective C* set: {self.c_star_effective:.1f} m/s "
+                  f"(RocketCEA at Pc={self.P_c:g} bar, MR={self.MR:g})")
+            return
 
         # Ensure mixture ratio is within reasonable bounds
         mr_bounded = max(0.5, min(mr, 10.0))
@@ -1382,8 +1574,17 @@ class LiquidRocketEngine:
         term3 = ((self.gamma + 1) / 2) ** exponent  # [(gamma + 1)/2]^-[(gamma + 1)/(gamma - 1)/2]
         
         # CONSISTENCY FIX: Use simplified throat area formula for all calculations
-        # A_t = mdot_total × c_star_effective / (P_c[Pa] × CD_throat)
-        self.A_t = self.mdot_total * self.c_star_effective / (P_c_pa * self.CD_throat)
+        # A_t = mdot_ana_oda × c_star_effective / (P_c[Pa] × CD_throat)
+        # Açık çevrim muhasebesi (2026-07-22): mdot_total POMPALANAN toplam
+        # debidir; gaz jeneratörü / tap-off türbin debisi ana odadan GEÇMEZ.
+        # Boğaz, ana oda debisiyle boyutlanır: ṁ_ana = ṁ_toplam × kesir
+        # (kesir = 1 − ṁ_türbin/ṁ_toplam, _apply_cycle_accounting kurar;
+        # kapalı çevrimlerde 1.0). Sutton & Biblarz 9th ed., Ch. 6 açık
+        # çevrim debi muhasebesi.
+        mc_frac = float(getattr(self, '_main_chamber_flow_fraction', 1.0))
+        self.mdot_main_chamber = self.mdot_total * mc_frac
+        self.A_t = (self.mdot_main_chamber * self.c_star_effective
+                    / (P_c_pa * self.CD_throat))
         self.d_t = 2.0 * np.sqrt(self.A_t / np.pi)  # Result in meters
         
         # Validation with safety limits
@@ -1527,7 +1728,26 @@ class LiquidRocketEngine:
     def calculate_cooling_requirements(self):
         """High-precision cooling system analysis with advanced heat transfer"""
         # Advanced heat transfer calculations based on Bartz correlation
-        
+
+        # Süreç içi memo (2026-07-22): süperkritik istasyon marşı (CoolProp)
+        # pahalıdır ve bu fonksiyon aynı koşuda birçok kez çağrılır
+        # (_design_cooling_lines, _calculate_heat_flux, çevrim dengesi, ısıl
+        # koruma). Girdi anahtarı değişmedikçe sonuç yeniden hesaplanmaz
+        # (derin kopya döner — mutasyon izolasyonu).
+        memo_key = (
+            round(float(self.P_c), 9), round(float(self.T_c), 6),
+            round(float(getattr(self, 'd_t', 0.0) or 0.0), 12),
+            round(float(getattr(self, 'd_e', 0.0) or 0.0), 12),
+            round(float(getattr(self, 'mdot_fuel', 0.0) or 0.0), 12),
+            self.cooling_type, self.fuel_type,
+            round(float(getattr(self, 'film_cooling_percent', 0.0)), 6),
+            round(float(getattr(self, 'coolant_flow_fraction', 1.0)), 9),
+            getattr(self, 'cooling_channels_input', None),
+        )
+        cached = getattr(self, '_cooling_memo', None)
+        if cached is not None and cached[0] == memo_key:
+            return copy.deepcopy(cached[1])
+
         # Engine geometry
         # DENETIM DUZELTMESI (Bulgu 5): eski kod chamber_length = c_star*1.2/1000
         # ile karakteristik HIZ c* (m/s) ile karakteristik UZUNLUK L*'i (m)
@@ -1678,18 +1898,36 @@ class LiquidRocketEngine:
         nozzle_axial_length = L_conv + L_div
 
         total_heat_load = Q_chamber + Q_nozzle
-        
+
+        # --- Film soğutma (2026-07-22, denetim madde 6) --------------------
+        # Eski ölü bayrak (self.film_cooling hiç set edilmiyordu) kaldırıldı;
+        # film_cooling_percent girdisi enerji dengesi modeline bağlandı.
+        film = self._film_cooling_analysis(
+            q_dot_chamber, chamber_diameter, chamber_length)
+        film_cooling_flow = film['film_cooling_flow_kg_s']
+        # Film tarafından yutulan ısı rejeneratif soğutucuya GELMEZ
+        # (enerji dengesi; Huzel & Huang Ch. 4 film soğutma muhasebesi).
+        heat_to_regen = max(total_heat_load - film['film_heat_absorbed_w'],
+                            0.0)
+
         # Cooling system sizing
         coolant_flow = 0
         pressure_drop = 0
         coolant_temp_rise = 0
-        
+
         # Kanal sayısı/kesiti: kullanıcı girdisi ya da hazne çevresinden
         # hesap (sabit 80 değil — 2026-07-19 denetimi).
         n_channels, channel_width, channel_height, channel_source = \
             self._cooling_channel_geometry()
         v_coolant = 0.0
         reynolds = 0.0
+        # Süperkritik istasyon-marşlı çözüm sonucu (metan/LH2 rejeneratif).
+        regen_march = None
+        peak_heat_flux_kw = None   # marş çözerse oradan, yoksa Bartz'tan
+        wall_temp_source = ('user input (max wall temperature)'
+                            if getattr(self, 'max_wall_temp_input', None)
+                            is not None else
+                            'assumed (cooling-type default)')
         if self.cooling_type in ('regenerative', 'film_cooling', 'dump_cooling'):
             # Use fuel as coolant (most common)
             coolant_flow_fraction = getattr(self, 'coolant_flow_fraction',
@@ -1697,6 +1935,10 @@ class LiquidRocketEngine:
             coolant_flow = self.mdot_fuel * coolant_flow_fraction
 
             # Fuel properties for cooling
+            # (2026-07-22: metan/LH2 için bu NBP sabitleri yalnız süperkritik
+            # istasyon marşı KURULAMADIĞINDA yedek olarak kalır; marş
+            # kurulursa cp/yoğunluk/viskozite CoolProp (T,P) bağımlıdır ve
+            # cidar sıcaklığı ÇÖZÜLÜR — denetim bulgusu 2e.)
             if self.fuel_type == 'rp1':
                 cp_coolant = 2090  # J/kg·K
                 rho_coolant = 815   # kg/m³
@@ -1721,13 +1963,33 @@ class LiquidRocketEngine:
                 mu_coolant = self.mu_fuel
             rho_coolant = self.rho_fuel
 
-            # Temperature rise calculation
-            coolant_temp_rise = total_heat_load / (coolant_flow * cp_coolant)
+            # Temperature rise calculation (film kredisi düşülmüş yük)
+            coolant_temp_rise = heat_to_regen / (coolant_flow * cp_coolant)
 
             # Kanal boyu: hazne + YAKINSAK koni + ıraksak koni (eski hâli
             # yakınsak koniyi hiç saymıyordu; basınç düşümü bu uzunlukla
             # doğru orantılı olduğundan sistematik olarak düşük çıkıyordu).
             channel_length = chamber_length + nozzle_axial_length
+
+            # Kanal DERİNLİĞİ tasarım serbestliğidir (formda girdisi yok):
+            # varsayılan kesitle hız tasarım hedefini aşıyorsa derinlik
+            # hedefe göre büyütülür (üst sınıra kadar) ve etiketlenir —
+            # büyük motorlarda 2 mm sabit derinlik fiziksel olmayan
+            # 300+ m/s hızlar ve binlerce bar ΔP üretiyordu (2026-07-22).
+            v_probe = coolant_flow / (n_channels * rho_coolant
+                                      * channel_width * channel_height)
+            if v_probe > COOLANT_CHANNEL_TARGET_VELOCITY_MS:
+                h_target = coolant_flow / (
+                    n_channels * rho_coolant * channel_width
+                    * COOLANT_CHANNEL_TARGET_VELOCITY_MS)
+                h_new = min(max(h_target, channel_height),
+                            COOLING_CHANNEL_HEIGHT_MAX_M)
+                if h_new > channel_height:
+                    channel_height = h_new
+                    channel_source += (
+                        '; channel height auto-sized for the '
+                        f'{COOLANT_CHANNEL_TARGET_VELOCITY_MS:.0f} m/s '
+                        'design velocity target (Huzel & Huang Ch. 4)')
 
             # Hydraulic diameter
             D_h = 4 * (channel_width * channel_height) / (2 * (channel_width + channel_height))
@@ -1751,6 +2013,50 @@ class LiquidRocketEngine:
             # Pressure drop
             pressure_drop = (f * rho_coolant * (v_coolant**2) * channel_length) / (2 * D_h)
             pressure_drop /= 1e5  # Convert Pa to bar
+
+            # --- Süperkritik metan/LH2: 1B istasyon-marşlı EŞ-ÇÖZÜM -------
+            # (2026-07-22, denetim madde 4 / bulgu 2e). Sabit cp=3480 toplu
+            # ΔT hesabı ve varsayılan 800 K cidar yerine RegenCooling
+            # Jackson korelasyonlu marşı: cidar sıcaklığı ÇÖZÜLÜR, soğutucu
+            # özellikleri CoolProp (T,P) bağımlıdır, ΔP sürtünme+ivmelenme
+            # içerir. Marş kurulamazsa (CoolProp aralık dışı, ceket
+            # kapanmıyor) yukarıdaki yedek zincir kalır ve durum AÇIKÇA
+            # raporlanır — sahte sayı üretilmez.
+            if (self.cooling_type == 'regenerative'
+                    and self.fuel_type in ('methane', 'lh2')):
+                try:
+                    regen_march = self._solve_supercritical_regen(
+                        coolant_flow, n_channels, channel_width,
+                        channel_height)
+                except Exception as exc:
+                    regen_march = None
+                    self._warn(
+                        f"Supercritical {self.fuel_type} regenerative march "
+                        f"could not be solved ({exc}); the lumped NBP-"
+                        f"property estimate is reported instead and the "
+                        f"wall temperature remains an assumption.")
+                if regen_march is not None:
+                    s = regen_march['summary']
+                    # Toplam yük/tepe akı/ΔT/ΔP/cidar: marştan (tek kaynak).
+                    # Hazne/lüle payı marş toplamına oranla ölçeklenir
+                    # (bölüşüm legacy integralin şeklinden, toplam marştan).
+                    scale = (s['total_heat_W'] / total_heat_load
+                             if total_heat_load > 0 else 1.0)
+                    Q_chamber *= scale
+                    Q_nozzle *= scale
+                    total_heat_load = s['total_heat_W']
+                    heat_to_regen = total_heat_load
+                    coolant_temp_rise = s['coolant_dT_K']
+                    pressure_drop = s['total_pressure_drop_bar']
+                    v_coolant = s['max_coolant_velocity_m_s']
+                    reynolds = s['min_reynolds']
+                    T_wall_hot = s['max_wall_hot_K']
+                    T_wall_cold = s['max_wall_cold_K']
+                    peak_heat_flux_kw = s['peak_heat_flux_MW_m2'] * 1000.0
+                    wall_temp_source = ('solved (1D supercritical station '
+                                        'march, Jackson correlation)')
+                    for w in s.get('warnings', []):
+                        self._warn(f"Regen march: {w}")
 
         elif self.cooling_type == 'ablative':
             # Ablative cooling - no active coolant flow
@@ -1785,24 +2091,27 @@ class LiquidRocketEngine:
                 f"fuel boiling point {t_boil:.0f} K; the single-phase cooling "
                 f"model no longer applies at the channel outlet.")
 
-        # Film cooling (if applicable)
-        film_cooling_flow = 0
-        if hasattr(self, 'film_cooling') and self.film_cooling:
-            film_cooling_flow = 0.05 * self.mdot_fuel  # 5% of fuel for film cooling
-        
-        return {
+        result = {
             'total_heat_load': total_heat_load / 1000,  # kW
             'chamber_heat_load': Q_chamber / 1000,  # kW
             'nozzle_heat_load': Q_nozzle / 1000,  # kW
             # OPUS DENETİM DÜZELTMESİ (minor): tepe akı BOĞAZDADIR, haznede
-            # değil (Bartz alan ölçeklemesi (At/A)^0.9 boğazda 1'e gider)
-            'peak_heat_flux': h_g_throat * (self.T_c - T_wall_hot) / 1000,  # kW/m² (boğaz)
+            # değil (Bartz alan ölçeklemesi (At/A)^0.9 boğazda 1'e gider).
+            # 2026-07-22: süperkritik marş çözüldüyse tepe akı ORADAN gelir
+            # (çözülmüş cidarla eş-çözüm), yoksa Bartz varsayılan cidarla.
+            'peak_heat_flux': (peak_heat_flux_kw
+                               if peak_heat_flux_kw is not None
+                               else h_g_throat * (self.T_c - T_wall_hot)
+                               / 1000),  # kW/m² (boğaz)
             'chamber_heat_flux': q_dot_chamber / 1000,  # kW/m²
             'coolant_flow_rate': coolant_flow,  # kg/s
             'coolant_temperature_rise': coolant_temp_rise,  # K
             'cooling_pressure_drop': pressure_drop,  # bar
             'wall_temperature_hot': T_wall_hot,  # K
             'wall_temperature_cold': T_wall_cold,  # K
+            # 2026-07-22 (denetim madde 3): cidar sıcaklığının VARSAYIM mı
+            # ÇÖZÜM mü olduğu artık açıkça raporlanır.
+            'wall_temperature_source': wall_temp_source,
             'chamber_diameter': chamber_diameter * 1000,  # mm
             'chamber_length': chamber_length * 1000,  # mm
             'nozzle_length': nozzle_length * 1000,  # mm (ıraksak: boğaz→çıkış)
@@ -1832,9 +2141,221 @@ class LiquidRocketEngine:
             'l_star': L_star,  # m
             'contraction_ratio': (chamber_diameter / self.d_t) ** 2,
             'bartz_coefficient': h_g_throat,  # W/m²·K
-            'film_cooling_flow': film_cooling_flow  # kg/s
+            'film_cooling_flow': film_cooling_flow,  # kg/s
+            # --- Film soğutma dökümü (2026-07-22, madde 6) ---
+            'film_cooling': film,
+            'heat_load_to_regen_coolant': heat_to_regen / 1000,  # kW
         }
-    
+        if regen_march is not None:
+            # Süperkritik marş özeti + istasyon dizileri (UI grafiği için).
+            result['regen_supercritical'] = {
+                'summary': regen_march['summary'],
+                'model_note': regen_march['model_note'],
+                'jacket_expansion_ratio': regen_march['jacket_eps'],
+                'jacket_note': regen_march['jacket_note'],
+                'inlet_temp_K': regen_march['inlet_temp_K'],
+                'inlet_pressure_bar': regen_march['inlet_pressure_bar'],
+                'inlet_pressure_basis': regen_march['inlet_pressure_basis'],
+                'coolant_correlation':
+                    regen_march['summary'].get('coolant_correlation'),
+            }
+            result['coolant_inlet_temperature'] = regen_march['inlet_temp_K']
+            result['coolant_exit_temperature'] = (
+                regen_march['summary']['coolant_exit_temp_K'])
+            result['coolant_exit_pressure_bar'] = (
+                regen_march['summary']['coolant_exit_pressure_bar'])
+        else:
+            if (self.cooling_type == 'regenerative'
+                    and self.fuel_type in ('methane', 'lh2')):
+                result['regen_supercritical'] = 'not_modelled'
+
+        self._cooling_memo = (memo_key, copy.deepcopy(result))
+        return result
+
+    def _film_cooling_analysis(self, q_dot_chamber, chamber_diameter,
+                               chamber_length):
+        """Film soğutma enerji dengesi (2026-07-22, denetim madde 6).
+
+        Model — Huzel & Huang Ch. 4 sıvı film soğutma tasarım muhasebesi:
+        film debisinin birim kütle ısı alma kapasitesi, hazne duvarına gelen
+        akıyla karşılaştırılır; film TÜKENENE kadar duvarı korur:
+
+            L_film = ṁ_film · Δh_film / (q_hazne · π · D_hazne)
+
+        Δh_film (yutulabilir entalpi):
+        * CH4/LH2: CoolProp GERÇEK entalpi farkı h(T_limit, Pc) − h(T_in, Pc)
+          — süperkritik oda basıncında faz geçişi yoktur, gizli ısı ayrı
+          terim olarak eklenmez (Bell et al. 2014, CoolProp).
+        * RP-1: CoolProp'ta yok; duyulur ısı cp·ΔT alt sınırı kullanılır
+          (MIL-DTL-25576 sıvı cp) ve buharlaşma katkısı 'not_modelled'
+          olarak beyan edilir (muhafazakâr).
+        T_limit = sıcak cidar hedef sıcaklığı (film cidarı korurken cidar
+        hedefinden sıcak olamaz). Film tükenişi SONRASI gaz-film etkinliği
+        (adyabatik duvar sıcaklığı sönümü) modellenmez ve açıkça söylenir
+        (NASA SP-8124 kapsamındaki korelasyon ayrı iştir).
+        """
+        pct = float(getattr(self, 'film_cooling_percent', 0.0) or 0.0)
+        out = {
+            'film': 'none' if pct <= 0 else 'liquid-film energy balance',
+            'film_cooling_percent': pct,
+            'film_cooling_flow_kg_s': 0.0,
+            'film_heat_absorbed_w': 0.0,
+            'film_covered_length_mm': 0.0,
+            'film_coverage_fraction_of_chamber': 0.0,
+            'downstream_gas_film_effectiveness': 'not_modelled',
+            'model': ('film coolant heat-sink energy balance '
+                      '(Huzel & Huang Ch. 4); real-gas enthalpies from '
+                      'CoolProp for CH4/H2, sensible-heat lower bound '
+                      'for RP-1'),
+        }
+        if pct <= 0:
+            return out
+
+        mdot_film = pct / 100.0 * float(self.mdot_fuel)
+        t_in = float(getattr(self, 'coolant_inlet_temp',
+                             COOLANT_INLET_TEMP_DEFAULT_K))
+        t_limit, _ = self._wall_temperatures()
+        pc_pa = float(self.P_c) * PA_PER_BAR
+
+        dh = None
+        basis = None
+        fluid = COOLPROP_FLUID_NAME.get(self.fuel_type)
+        if fluid is not None:
+            try:
+                import CoolProp.CoolProp as CP
+                t_max_eos = float(CP.PropsSI('Tmax', fluid))
+                t_hi = min(float(t_limit), t_max_eos - 1.0)
+                dh = (CP.PropsSI('H', 'T', t_hi, 'P', pc_pa, fluid)
+                      - CP.PropsSI('H', 'T', max(t_in, 60.0), 'P', pc_pa,
+                                   fluid))
+                basis = (f'CoolProp real-gas enthalpy rise {t_in:.0f} K -> '
+                         f'{t_hi:.0f} K at Pc')
+            except Exception:
+                dh = None
+        if dh is None:
+            cp_l = FILM_COOLANT_CP_FALLBACK_J_KGK.get(
+                self.fuel_type, float(getattr(self, 'cp_coolant_input', None)
+                                      or 2000.0))
+            dh = cp_l * max(t_limit - t_in, 0.0)
+            basis = (f'sensible heat cp*(T_wall_target - T_in) lower bound '
+                     f'(cp={cp_l:.0f} J/kgK); vaporization credit '
+                     f'not_modelled')
+        if dh <= 0:
+            self._warn('Film cooling analysis: no absorbable enthalpy '
+                       '(inlet temperature at/above the wall target); film '
+                       'credit is zero.')
+            return out
+
+        # Film hazne silindirini enjektör yüzünden itibaren korur.
+        q_wall = max(float(q_dot_chamber), 1.0)   # W/m²
+        capacity_w = mdot_film * dh               # W
+        l_film = capacity_w / (q_wall * np.pi * max(chamber_diameter, 1e-6))
+        coverage = min(l_film / max(chamber_length, 1e-9), 1.0)
+        absorbed = q_wall * np.pi * chamber_diameter * min(l_film,
+                                                           chamber_length)
+
+        out.update({
+            'film_cooling_flow_kg_s': mdot_film,
+            'film_heat_absorbed_w': float(absorbed),
+            'film_covered_length_mm': float(min(l_film, chamber_length)
+                                            * 1000.0),
+            'film_unclipped_length_mm': float(l_film * 1000.0),
+            'film_coverage_fraction_of_chamber': float(coverage),
+            'film_enthalpy_basis': basis,
+            'film_absorbable_enthalpy_J_kg': float(dh),
+        })
+        if coverage < 1.0:
+            self._warn(
+                f"Film cooling flow ({pct:g}% of fuel) protects only "
+                f"{coverage * 100:.0f}% of the chamber barrel length; the "
+                f"remaining wall relies on the primary cooling circuit.")
+        return out
+
+    def _solve_supercritical_regen(self, coolant_flow, n_channels,
+                                   channel_width, channel_height):
+        """Metan/LH2 rejeneratif ceketin 1B süperkritik istasyon marşı.
+
+        RegenCooling (Jackson korelasyonu + CoolProp gerçek gaz + entalpi
+        marşı + fin modeli) ile ÇÖZÜLMÜŞ cidar sıcaklığı, soğutucu çıkış
+        durumu ve kanal ΔP'si döner. Girdi sözleşmesi:
+
+        * Ceket kapsamı: ε = min(lüle ε'su, REGEN_JACKET_EPS_MAX) — ana oda
+          ceketi pratiği (Sutton Ch. 8); lüle bunun ötesine uzuyorsa o bölge
+          bu modelde soğutulmaz ve jacket_note ile beyan edilir.
+        * Kanal giriş basıncı: REGEN_CHANNEL_INLET_PRESSURE_FACTOR × Pc
+          (etiketli varsayım; sonuç ΔP pompa zincirine ayrıca işlenir).
+        * Giriş sıcaklığı: kullanıcı kriyojenik-dışı form varsayılanını
+          (300 K) değiştirmediyse CRYO_COOLANT_INLET_DEFAULT_K kullanılır ve
+          uyarı üretilir (300 K metan/LH2 pompa çıkışı fiziksel değildir).
+        """
+        from hrma.analysis.regen_cooling import RegenCooling
+
+        coolant_key = {'methane': 'methane', 'lh2': 'hydrogen'}[self.fuel_type]
+
+        t_in = getattr(self, 'coolant_inlet_temp',
+                       COOLANT_INLET_TEMP_DEFAULT_K)
+        cryo_default = CRYO_COOLANT_INLET_DEFAULT_K.get(self.fuel_type)
+        if cryo_default is not None and (
+                t_in is None
+                or abs(float(t_in) - COOLANT_INLET_TEMP_DEFAULT_K) < 1e-9):
+            # Form her zaman 300 K yolluyor; kriyojenik yakıtta bu değer
+            # 'düşünülmemiş varsayılan' kabul edilir ve NBP+pompa ısınması
+            # varsayılanına çekilir (kullanıcı 300 K'yi BİLEREK istiyorsa
+            # 300'den farklı ama yakın bir değer girebilir).
+            if t_in is not None:
+                self._warn(
+                    f"Coolant inlet temperature left at the generic 300 K "
+                    f"form default; for {self.fuel_type} the cryogenic pump "
+                    f"discharge default {cryo_default:g} K is used instead "
+                    f"(NIST NBP + pump heating).")
+            t_in = cryo_default
+        t_in = float(t_in)
+
+        p_in_bar = REGEN_CHANNEL_INLET_PRESSURE_FACTOR * float(self.P_c)
+        eps_jacket = min(float(self.expansion_ratio), REGEN_JACKET_EPS_MAX)
+        jacket_note = (
+            'regenerative jacket modelled to expansion ratio '
+            f'{eps_jacket:g}; ' + (
+                f'the nozzle extension beyond it (to {self.expansion_ratio:.0f}) '
+                'is NOT cooled by this model (radiative/film extension '
+                'not modelled).' if self.expansion_ratio > eps_jacket + 1e-9
+                else 'the full nozzle is inside the jacket.'))
+
+        material, mat_key = self._material_record()
+        rc = RegenCooling(
+            chamber_pressure=float(self.P_c) * PA_PER_BAR,
+            chamber_temperature=float(self.T_c),
+            gamma=float(self.gamma),
+            molecular_weight=float(self.mw),
+            throat_diameter=float(self.d_t),
+            expansion_ratio=eps_jacket,
+            coolant=coolant_key,
+            coolant_mdot=max(float(coolant_flow), 1e-6),
+            coolant_inlet_temp=t_in,
+            coolant_inlet_pressure=p_in_bar * PA_PER_BAR,
+            n_channels=int(n_channels),
+            channel_width=float(channel_width),
+            channel_height=float(channel_height),
+            wall_thickness=REGEN_LINER_THICKNESS_M,
+            wall_material=mat_key,
+            wall_roughness=float(getattr(
+                self, 'channel_roughness_m',
+                COOLING_CHANNEL_ROUGHNESS_DEFAULT_M)),
+            motor_data={'chamber_diameter': self._chamber_diameter(),
+                        'mdot_total': float(self.mdot_total),
+                        'nozzle_type': getattr(self, 'nozzle_type',
+                                               NOZZLE_TYPE_DEFAULT)},
+        )
+        march = rc.solve()
+        march['jacket_eps'] = eps_jacket
+        march['jacket_note'] = jacket_note
+        march['inlet_temp_K'] = t_in
+        march['inlet_pressure_bar'] = p_in_bar
+        march['inlet_pressure_basis'] = (
+            f'{REGEN_CHANNEL_INLET_PRESSURE_FACTOR:g} x Pc assumption '
+            '(pump discharge to injector; Sutton Ch. 6 cycle schematics)')
+        return march
+
     def calculate_injector_design(self):
         """High-precision injector design with advanced fluid mechanics"""
         
@@ -2101,6 +2622,15 @@ class LiquidRocketEngine:
                 'mu_ox': ox_viscosity,
                 'mu_fuel': fuel_viscosity,
             }
+            # --- GAZ-GAZ ana oda enjeksiyonu (2026-07-22, denetim madde 5) --
+            # FFSC'de ana odaya İKİ ÖN YAKICI EGZOZU (gaz) girer; sıvı SPI
+            # modeli fiziksel olarak yanlış sınıftır. Çevrim çözümü mevcutsa
+            # (main_chamber.inlet_streams iki gaz akışı) enjektör gaz-gaz
+            # shear-coax modeliyle çözülür; akım koşulları (T0, P0, gamma,
+            # MW) ÇEVRİM ÇÖZÜMÜNDEN gelir, varsayılan sabit yoktur.
+            gas_spec = self._gas_gas_injector_spec()
+            if gas_spec is not None:
+                inj_spec = gas_spec
             detail = design_injector(inj_spec)
             if detail.get('status') == 'success':
                 oxc, fc = detail['ox_circuit'], detail.get('fuel_circuit')
@@ -2120,9 +2650,27 @@ class LiquidRocketEngine:
                 smd = detail['atomization'].get('smd_ox_um')
                 if smd:
                     result['droplet_diameter'] = smd  # microns (modül SMD'si)
+                if detail.get('injector_type') == 'gas_gas_coaxial':
+                    result['injector_type'] = 'gas_gas_coaxial'
+                    result['main_injection_phase'] = 'gas-gas'
+                    result['gas_gas_geometry'] = detail.get('gas_gas_geometry')
+                    # Gaz-gaz'da damlacık yok — SMD alanı dürüstçe boşalır.
+                    result['droplet_diameter'] = None
+                    result['droplet_diameter_basis'] = (
+                        'not_modelled (gas-gas injection: no liquid droplets)')
         except Exception as _inj_err:
             warnings.warn(f'injector_design modülü kullanılamadı, eski '
                           f'enjektör hesabı korundu: {_inj_err}')
+
+        # Staged combustion (tek ön yakıcı): ana oda GAZ+SIVI karışık beslenir
+        # (RS-25 tarzı). Gaz devresinin ΔP/Pc'si çevrim akım koşullarından
+        # sıkıştırılabilir orifis modeliyle raporlanır; gaz-sıvı coax eleman
+        # GEOMETRİSİ bu sürümde modellenmez ve açıkça etiketlenir.
+        hot_gas = self._staged_hot_gas_circuit()
+        if hot_gas is not None:
+            result['hot_gas_circuit'] = hot_gas
+            result['main_injection_phase'] = 'gas-liquid'
+            result['gas_liquid_element_model'] = 'not_modelled'
 
         # Kullanıcı eleman sayısı verdiyse SON SÖZ ONUNDUR: detay modülü kendi
         # desen sayısını yazmış olabilir, orifis çapları toplam alandan
@@ -2731,10 +3279,18 @@ class LiquidRocketEngine:
         tank_bar = ((getattr(self, 'feed_pressure_input_bar', None)
                      or PUMP_TANK_PRESSURE_DEFAULT_BAR) if pressure_fed
                     else PUMP_TANK_PRESSURE_DEFAULT_BAR)
-        ox = self._design_pump(mdot_ox, self.rho_ox,
-                               drops['pump_discharge_pressure_ox'], tank_bar)
-        fuel = self._design_pump(mdot_fuel, self.rho_fuel,
-                                 drops['pump_discharge_pressure_fuel'],
+        # Pompa basma basıncı: çevrim çözümü varsa ONDAN (ön yakıcı merdiveni
+        # + rejeneratif ΔP dahil — _analyze_detailed_feed_system ile TEK
+        # kaynak), yoksa Pc + hat/enjektör zinciri.
+        disch_ox = drops['pump_discharge_pressure_ox']
+        disch_fuel = drops['pump_discharge_pressure_fuel']
+        cyc = getattr(self, '_cycle_result', None)
+        if (cyc and cyc.get('status') == 'converged'
+                and cyc.get('pump_discharge_ox_bar')):
+            disch_ox = float(cyc['pump_discharge_ox_bar'])
+            disch_fuel = float(cyc['pump_discharge_fuel_bar'])
+        ox = self._design_pump(mdot_ox, self.rho_ox, disch_ox, tank_bar)
+        fuel = self._design_pump(mdot_fuel, self.rho_fuel, disch_fuel,
                                  tank_bar)
         total_pump_power = (ox['design_power'] + fuel['design_power']) * 1000.0
         eta_turbine = TURBINE_EFFICIENCY_DEFAULT
@@ -2934,6 +3490,216 @@ class LiquidRocketEngine:
                             f'coefficient K={FEED_K_FILTER:g}'),
         }
     
+    # ------------------------------------------------------------------
+    # ÇEVRİM GÜÇ DENGESİ entegrasyonu (2026-07-22, denetim madde 2/3)
+    # ------------------------------------------------------------------
+    def _cycle_line_dps(self):
+        """(hat ΔP_ox, hat ΔP_yakıt, drops) [bar] — enjektör kalemi HARİÇ.
+
+        Çevrim çözücüsü enjektör düşümünü ΔP/Pc oranı olarak kendisi
+        uygular; buraya yalnız tank çıkışı + vana + filtre + hat kalemleri
+        gider (çift sayma yasak).
+        """
+        drops = self._calculate_feed_system_pressure_drops()
+        keys = ('tank_outlet', 'main_valve', 'filters', 'feed_lines')
+        line_ox = float(sum(drops['oxidizer_line'][k] for k in keys))
+        line_fuel = float(sum(drops['fuel_line'][k] for k in keys))
+        return line_ox, line_fuel, drops
+
+    def _injector_dp_fraction(self):
+        """Enjektör ΔP/Pc oranı: kullanıcı girdisi > tip tablosu (tek kaynak)."""
+        dp_user = getattr(self, 'injector_dp_input_bar', None)
+        if dp_user is not None and self.P_c > 0:
+            return float(dp_user) / float(self.P_c)
+        return INJECTOR_TYPE_DP_FRACTION.get(self.injector_type,
+                                             INJECTOR_TYPE_DP_FRACTION_DEFAULT)
+
+    def _solve_cycle_balance(self, force=False):
+        """Çevrim güç dengesini cycle_power_balance.solve_cycle ile kapatır.
+
+        Denetim bulgusu (Bölüm 2a/2b/2f): staged/expander/tap_off seçimleri
+        aynı gaz-jeneratörü hesabına düşüyor, güç dengesi kapanmıyor, türbin
+        debisi Isp'den düşülmüyor, FFSC yoktu. Artık:
+
+        * Pompa çıkış basıncı zinciri: Pc + enjektör ΔP + hat kalemleri +
+          REJENERATİF KANAL ΔP (eskiden eksikti, satır ~2833-2849) +
+          (staged/FFSC) ön yakıcı basınç merdiveni — çözücünün içinde.
+        * Açık çevrimlerde (GG/tap-off) Isp kaybı debi-ağırlıklı karışımla
+          hesaplanır; hem deniz seviyesi hem vakum ortamı için çözülür.
+        * Desteklenmeyen yakıt/çevrim kombinasyonları sahte sayı üretmez:
+          {'status': 'not_modelled', 'reason': ...} döner.
+
+        Sonuç ``self._cycle_result`` içinde önbelleklenir (force ile tazele).
+        """
+        if not force and getattr(self, '_cycle_result', None) is not None:
+            return self._cycle_result
+
+        solver_name = CYCLE_SOLVER_NAME.get(
+            getattr(self, 'engine_cycle', 'gas_generator'))
+        out = {'status': 'not_modelled', 'engine_cycle': self.engine_cycle,
+               'solver_cycle': solver_name}
+        if solver_name is None:
+            out['reason'] = f"unknown engine cycle '{self.engine_cycle}'"
+            self._cycle_result = out
+            return out
+
+        try:
+            from hrma.engines.cycle_power_balance import solve_cycle
+        except Exception as exc:  # modül/scipy eksikliği — dürüst etiket
+            out['reason'] = f'cycle_power_balance unavailable ({exc})'
+            self._cycle_result = out
+            return out
+
+        if not hasattr(self, 'mdot_total'):
+            self.calculate_nozzle_geometry()
+
+        # Rejeneratif ceket ΔP'si ve ısı yükü (soğutma çözümünden — madde 3).
+        regen_dp_bar = 0.0
+        regen_heat_kw = None
+        if self.cooling_type in ('regenerative', 'dump_cooling'):
+            try:
+                cooling = self.calculate_cooling_requirements()
+                regen_dp_bar = float(cooling.get('cooling_pressure_drop', 0.0))
+                regen_heat_kw = float(cooling.get('total_heat_load', 0.0))
+            except Exception:
+                pass
+
+        line_ox, line_fuel, _ = self._cycle_line_dps()
+
+        kwargs = dict(
+            rho_ox=float(self.rho_ox), rho_fuel=float(self.rho_fuel),
+            pump_inlet_ox_bar=PUMP_TANK_PRESSURE_DEFAULT_BAR,
+            pump_inlet_fuel_bar=PUMP_TANK_PRESSURE_DEFAULT_BAR,
+            line_dp_ox_bar=line_ox, line_dp_fuel_bar=line_fuel,
+            regen_dp_bar=regen_dp_bar,
+            injector_dp_frac=self._injector_dp_fraction(),
+            eta_pump_ox=float(getattr(self, 'pump_efficiency',
+                                      PUMP_EFFICIENCY_DEFAULT)),
+            eta_pump_fuel=float(getattr(self, 'pump_efficiency',
+                                        PUMP_EFFICIENCY_DEFAULT)),
+            eta_turbine=TURBINE_EFFICIENCY_DEFAULT,
+            preburner_mode=getattr(self, 'preburner_mode', 'fuel_rich'),
+            regen_heat_kw=regen_heat_kw,
+        )
+        # TIT ve türbin PR yalnız KULLANICI girdiyse geçilir; girilmediyse
+        # çözücünün çevrime özgü KAYNAKLI varsayılanları kullanılır
+        # (GAS_GENERATOR_TEMP_DEFAULT_K genel amaçlı eski sabittir, staged
+        # ox-rich sınırlarını bilmez).
+        if 'generator_gas_temp' in self.overrides:
+            kwargs['tit_K'] = float(self.turbine_inlet_temp)
+        if 'turbine_expansion_ratio' in self.overrides:
+            kwargs['turbine_pr'] = float(self.turbine_pressure_ratio)
+        if self.engine_cycle == 'pressure_fed':
+            kwargs['tank_pressure_bar'] = float(
+                getattr(self, 'feed_pressure_input_bar', None)
+                or PUMP_TANK_PRESSURE_DEFAULT_BAR)
+        if self.engine_cycle == 'expander':
+            kwargs['fuel_inlet_temp_K'] = CRYO_COOLANT_INLET_DEFAULT_K.get(
+                self.fuel_type)
+
+        # Ana oda (teslim edilmemiş) Isp'leri: çift sayma kilidi — açık
+        # çevrim kaybı uygulandıktan sonra bile çözücüye HEP ana oda Isp'si
+        # gider (isp_sl_main), motor Isp'si değil.
+        isp_main_sl = float(getattr(self, 'isp_sl_main', self.isp_sl))
+        isp_main_vac = float(getattr(self, 'isp_vac_main', self.isp_vac))
+
+        try:
+            sol = solve_cycle(solver_name, float(self.P_c),
+                              float(self.mdot_total), float(self.MR),
+                              self.fuel_type, self.oxidizer_type,
+                              ambient_pressure_bar=float(self.P_a),
+                              isp_main_s=isp_main_sl, **kwargs)
+        except ValueError as exc:
+            out['reason'] = str(exc)
+            self._cycle_result = out
+            return out
+        except Exception as exc:
+            out['reason'] = f'{type(exc).__name__}: {exc}'
+            self._cycle_result = out
+            return out
+
+        out = sol.to_dict()
+        out['engine_cycle'] = self.engine_cycle
+        out['solver_cycle'] = solver_name
+        out['status'] = 'converged' if sol.converged else 'not_converged'
+        out['isp_main_sl_s'] = isp_main_sl
+        out['isp_main_vac_s'] = isp_main_vac
+        out['mdot_total_pumped_kg_s'] = float(self.mdot_total)
+
+        # Açık çevrimde vakum tarafı: aynı denge, vakum ortamıyla (türbin
+        # egzozunun vakumda daha yüksek Isp'si kayıp hesabına girer).
+        if sol.converged and sol.isp_mode == 'open_cycle_mixture_average':
+            out['isp_engine_sl_s'] = sol.isp_engine_s
+            out['isp_loss_sl_s'] = sol.isp_loss_s
+            try:
+                sol_vac = solve_cycle(solver_name, float(self.P_c),
+                                      float(self.mdot_total), float(self.MR),
+                                      self.fuel_type, self.oxidizer_type,
+                                      ambient_pressure_bar=1e-6,
+                                      isp_main_s=isp_main_vac, **kwargs)
+                if sol_vac.converged and sol_vac.isp_engine_s is not None:
+                    out['isp_engine_vac_s'] = sol_vac.isp_engine_s
+                    out['isp_loss_vac_s'] = sol_vac.isp_loss_s
+                    out['secondary_exhaust_isp_vac_s'] = \
+                        sol_vac.secondary_exhaust_isp_s
+            except Exception:
+                pass
+        elif sol.converged:
+            out['isp_engine_sl_s'] = isp_main_sl
+            out['isp_engine_vac_s'] = isp_main_vac
+            out['isp_loss_sl_s'] = sol.isp_loss_s
+            out['isp_loss_vac_s'] = sol.isp_loss_s
+
+        self._cycle_result = out
+        return out
+
+    def _apply_cycle_accounting(self):
+        """Açık çevrim Isp kaybını TESLİM Isp'ye işler (bir kez, debi tutarlı).
+
+        Muhasebe (Sutton Ch. 6): motor Isp'si = (ṁ_ana·Isp_ana +
+        ṁ_türbin·Isp_egzoz)/ṁ_toplam. Komuta edilen itki motor SEVİYESİNDE
+        korunur: ṁ_toplam = F/(Isp_motor·g0) pompalanan toplamdır; ana oda
+        boğazı (A_t) pompalanan toplamın türbin debisi DÜŞÜLMÜŞ kısmıyla
+        boyutlanır (_main_chamber_flow_fraction). Kapalı çevrimlerde kayıp
+        sıfırdır ve hiçbir şey değişmez. Çift sayma kilidi: ana oda Isp'si
+        isp_sl_main/isp_vac_main olarak saklanır; çözücüye hep o gider.
+        """
+        cyc = self._solve_cycle_balance()
+        if cyc.get('status') != 'converged':
+            return cyc
+        if cyc.get('isp_mode') != 'open_cycle_mixture_average':
+            # Kapalı çevrim / pressure-fed: kayıp yok; ana oda debi kesri
+            # yine de raporlanır (türbin debisi kapalı çevrimde ana odaya
+            # döner, boğaz TOPLAM debiyle boyutlanır).
+            return cyc
+        if getattr(self, '_cycle_isp_applied', False):
+            return cyc
+
+        # Ana oda Isp'lerini kilitle (çift sayma koruması).
+        self.isp_sl_main = float(self.isp_sl)
+        self.isp_vac_main = float(self.isp_vac)
+
+        for _ in range(3):
+            isp_sl_eng = cyc.get('isp_engine_sl_s')
+            isp_vac_eng = cyc.get('isp_engine_vac_s')
+            if not isp_sl_eng or not isp_vac_eng:
+                break
+            rel = abs(isp_sl_eng - self.isp_sl) / max(self.isp_sl, 1e-9)
+            self.isp_sl = float(isp_sl_eng)
+            self.isp_vac = float(isp_vac_eng)
+            pumped = cyc.get('mdot_total_pumped_kg_s') or self.mdot_total
+            bleed = cyc.get('turbine_mdot_total_kg_s', 0.0)
+            self._main_chamber_flow_fraction = float(
+                max(1.0 - bleed / max(pumped, 1e-9), 0.5))
+            # Yeni motor Isp'siyle debi/boğaz güncellenir, denge yeniden
+            # kapatılır (kayıp debiyle zayıf değişir; 2-3 tur yeter).
+            self.calculate_nozzle_geometry()
+            cyc = self._solve_cycle_balance(force=True)
+            if rel < 1e-4:
+                break
+        self._cycle_isp_applied = True
+        return cyc
+
     def _estimate_feed_system_mass(self) -> float:
         """Besleme sistemi kuru kütlesi [kg] — bileşen dökümüyle TEK kaynak.
 
@@ -3340,7 +4106,13 @@ class LiquidRocketEngine:
         }
 
     def _analyze_detailed_feed_system(self):
-        """Comprehensive feed system analysis with turbopump performance maps"""
+        """Comprehensive feed system analysis with turbopump performance maps
+
+        2026-07-22 (denetim madde 2): pompa çıkış basınçları artık ÇEVRİM
+        çözümünden gelir (staged/FFSC'de ön yakıcı basınç merdiveni +
+        rejeneratif ΔP dahil). Çevrim çözülemiyorsa eski Pc+hat zinciri
+        korunur ve kaynak etiketlenir.
+        """
 
         mdot_total = getattr(self, 'mdot_total',
                              self.F / (getattr(self, 'isp_sl', 300.0) * G_0))
@@ -3348,6 +4120,24 @@ class LiquidRocketEngine:
         mdot_fuel = getattr(self, 'mdot_fuel', mdot_total / (1 + self.MR))
 
         drops = self._calculate_feed_system_pressure_drops()
+        cycle_solution = self._solve_cycle_balance()
+        if (cycle_solution.get('status') == 'converged'
+                and cycle_solution.get('pump_discharge_ox_bar')):
+            # Çevrim kapanışından gelen GERÇEK basma basınçları (rejeneratif
+            # ΔP ve ön yakıcı merdiveni dahil) pompa tasarımını sürer.
+            drops = dict(drops)
+            drops['pump_discharge_pressure_ox'] = float(
+                cycle_solution['pump_discharge_ox_bar'])
+            drops['pump_discharge_pressure_fuel'] = float(
+                cycle_solution['pump_discharge_fuel_bar'])
+            drops['discharge_pressure_source'] = (
+                'cycle power balance (preburner ladder + regenerative '
+                'channel drop included)')
+        else:
+            drops = dict(drops)
+            drops['discharge_pressure_source'] = (
+                'chamber pressure plus line/injector losses (cycle balance '
+                'not available)')
         # Tank basıncı: BASINÇ BESLEMELİ çevrimde kullanıcının 'feed pressure'
         # girdisi tankın kendisidir; turbopompalı çevrimde tank yalnız NPSH
         # için basınçlandırılır ve feed_pressure pompa ÇIKIŞ hedefidir.
@@ -3415,37 +4205,76 @@ class LiquidRocketEngine:
         gg_mdot = mdot_total * GAS_GENERATOR_FLOW_FRACTION
         gg_chamber_pressure = self.P_c * GAS_GENERATOR_PRESSURE_RATIO
 
+        # Çevrim çözümü varsa türbin/ön yakıcı kartı ONDAN gelir (sabit %5
+        # GG debisi ve genel PR varsayımı yerine kapanan denge — madde 2).
+        turbine_card = {
+            'type': 'Single-stage axial',
+            'power_output': turbine_power,  # kW
+            'inlet_temperature': t_in,  # K
+            'inlet_temperature_source': (
+                'user input (gas generator temperature)'
+                if 'generator_gas_temp' in self.overrides
+                else 'assumed gas-generator temperature'),
+            'pressure_ratio': pr,
+            'efficiency': eta_turbine * 100.0,  # %
+            'rotational_speed': ox_pump['rotational_speed'],  # rpm
+            'blade_tip_speed': blade_tip_speed,  # m/s
+            'specific_work_J_kg': delta_h,
+            'mass_flow_rate': turbine_mdot,  # kg/s
+            'model': ('isentropic single-stage work with U/C0='
+                      f'{TURBINE_VELOCITY_RATIO:g} optimum velocity '
+                      'ratio'),
+        }
+        gg_card = {
+            'mass_flow_rate': gg_mdot,  # kg/s
+            'mixture_ratio': 0.8,  # Rich mixture for temperature control
+            'chamber_pressure': gg_chamber_pressure,  # bar
+            'temperature': t_in,  # K
+            'flow_fraction': GAS_GENERATOR_FLOW_FRACTION * 100  # %
+        }
+        if (cycle_solution.get('status') == 'converged'
+                and cycle_solution.get('shafts')):
+            shaft0 = cycle_solution['shafts'][0]
+            turb0 = shaft0.get('turbine') or {}
+            turbine_card.update({
+                'power_output': cycle_solution['turbine_power_total_W'] / 1e3,
+                'inlet_temperature': turb0.get('inlet_temp_K', t_in),
+                'inlet_temperature_source': 'cycle power balance solution',
+                'pressure_ratio': turb0.get('pressure_ratio', pr),
+                'mass_flow_rate':
+                    cycle_solution['turbine_mdot_total_kg_s'],
+                'specific_work_J_kg': turb0.get('specific_work_J_kg',
+                                                delta_h),
+                'shaft_count': len(cycle_solution['shafts']),
+                'model': ('cycle power balance (per-shaft closure; see '
+                          'engine_cycle_solution)'),
+            })
+            if cycle_solution.get('preburners'):
+                pb0 = cycle_solution['preburners'][0]
+                gg_card = {
+                    'mass_flow_rate': pb0['mdot_total_kg_s'],
+                    'mixture_ratio': pb0['of_ratio'],
+                    'chamber_pressure': pb0['pressure_bar'],
+                    'temperature': pb0['temperature_K'],
+                    'flow_fraction': (
+                        pb0['mdot_total_kg_s'] / max(mdot_total, 1e-9)
+                        * 100.0),
+                    'mode': pb0.get('mode'),
+                    'source': 'cycle power balance solution',
+                }
+
         return {
             'feed_system_type': self.feed_system_type,
             'engine_cycle': getattr(self, 'engine_cycle', 'gas_generator'),
+            # Tam çevrim kapanışı (mil başına döküm, ön yakıcılar, Isp
+            # muhasebesi, uyarılar) — UI çevrim paneli bunu okur.
+            'engine_cycle_solution': cycle_solution,
+            'pump_discharge_source': drops.get('discharge_pressure_source'),
             'turbopump_analysis': {
                 'oxidizer_pump': ox_pump,
                 'fuel_pump': fuel_pump,
-                'turbine': {
-                    'type': 'Single-stage axial',
-                    'power_output': turbine_power,  # kW
-                    'inlet_temperature': t_in,  # K
-                    'inlet_temperature_source': (
-                        'user input (gas generator temperature)'
-                        if 'generator_gas_temp' in self.overrides
-                        else 'assumed gas-generator temperature'),
-                    'pressure_ratio': pr,
-                    'efficiency': eta_turbine * 100.0,  # %
-                    'rotational_speed': ox_pump['rotational_speed'],  # rpm
-                    'blade_tip_speed': blade_tip_speed,  # m/s
-                    'specific_work_J_kg': delta_h,
-                    'mass_flow_rate': turbine_mdot,  # kg/s
-                    'model': ('isentropic single-stage work with U/C0='
-                              f'{TURBINE_VELOCITY_RATIO:g} optimum velocity '
-                              'ratio'),
-                },
-                'gas_generator': {
-                    'mass_flow_rate': gg_mdot,  # kg/s
-                    'mixture_ratio': 0.8,  # Rich mixture for temperature control
-                    'chamber_pressure': gg_chamber_pressure,  # bar
-                    'temperature': t_in,  # K
-                    'flow_fraction': GAS_GENERATOR_FLOW_FRACTION * 100  # %
-                }
+                'turbine': turbine_card,
+                'gas_generator': gg_card,
             },
             'turbopump_required': not pressure_fed,
             'tank_pressure_bar': tank_bar,
