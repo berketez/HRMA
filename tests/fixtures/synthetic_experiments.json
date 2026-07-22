@@ -1,0 +1,307 @@
+[
+  {
+    "schema_version": "1.0",
+    "test_id": "AIAA_2019_Hybrid_01",
+    "record_type": "static_fire",
+    "motor_type": "hybrid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - university-scale N2O/HTPB hybrid archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "N2O/HTPB", "oxidizer": "n2o", "fuel": "htpb"},
+    "geometry": {"injector_type": "showerhead", "nozzle_type": "conical", "grain_geometry": "cylindrical"},
+    "inputs": {"chamber_pressure_bar": 25.0, "of_ratio": 6.5, "thrust_n": 1250.0, "burn_time_s": 8.5},
+    "measured": {
+      "isp_s": 235.0,
+      "mass_flow_total_kgps": 0.45,
+      "chamber_temperature_k": 3200.0,
+      "chamber_pressure_trace_bar": {
+        "time_s": [0.0, 2.0, 4.0, 6.0, 8.5],
+        "value": [24.3, 26.1, 25.7, 24.9, 25.4]
+      }
+    },
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.03, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.02, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.04, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. 2026-07-17: eski hrma/validation/experimental_validation.py modulunden yeni semaya tasindi. Uretilmis sinus+tohumlu-gurultu zaman serileri fiksture alinmadi; buradaki kisa basinc izi yalnizca egri dogrulamasini calistirmak icin elle yazilmis sentetik degerlerdir."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "AIAA_2020_Hybrid_02",
+    "record_type": "static_fire",
+    "motor_type": "hybrid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - N2O/paraffin hybrid archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "N2O/Paraffin", "oxidizer": "n2o", "fuel": "paraffin"},
+    "geometry": {"injector_type": "pintle", "nozzle_type": "bell", "grain_geometry": "cylindrical"},
+    "inputs": {"chamber_pressure_bar": 20.0, "of_ratio": 7.2, "thrust_n": 890.0, "burn_time_s": 12.0},
+    "measured": {"isp_s": 245.0, "mass_flow_total_kgps": 0.38, "chamber_temperature_k": 3100.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.025, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.02, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.035, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. 2026-07-17: eski experimental_validation.py modulunden tasindi; uretilmis zaman serileri birakildi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "JPL_2018_Liquid_01",
+    "record_type": "static_fire",
+    "motor_type": "liquid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - LOX/RP-1 archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "LOX/RP-1", "oxidizer": "lox", "fuel": "rp1"},
+    "geometry": {"injector_type": "showerhead", "nozzle_type": "bell"},
+    "inputs": {"chamber_pressure_bar": 70.0, "of_ratio": 2.56, "thrust_n": 4450.0, "burn_time_s": 15.0},
+    "measured": {"isp_s": 311.0, "mass_flow_total_kgps": 1.42, "chamber_temperature_k": 3600.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.015, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.01, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.02, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. Isp=311 s bu cevrim icin vakum sinifi bir degerdir, 70 bar deniz seviyesi olcumu DEGILDIR (SL gaz-jeneratoru LOX/RP-1 tipik ~260-285 s). 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "SPACEX_2017_Liquid_01",
+    "record_type": "static_fire",
+    "motor_type": "liquid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - subscale LOX/CH4 archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "LOX/LCH4", "oxidizer": "lox", "fuel": "lch4"},
+    "geometry": {"injector_type": "pintle", "nozzle_type": "bell"},
+    "inputs": {"chamber_pressure_bar": 100.0, "of_ratio": 3.6, "thrust_n": 3050.0, "burn_time_s": 20.0},
+    "measured": {"isp_s": 334.0, "mass_flow_total_kgps": 0.95, "chamber_temperature_k": 3520.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.01, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.008, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.015, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. Raptor test verisi DEGILDIR (gercek Raptor: ~2.2 MN itki, ~300 bar Pc). 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "ATK_2016_Solid_01",
+    "record_type": "static_fire",
+    "motor_type": "solid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - large APCP solid motor archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "APCP", "oxidizer": "ap", "fuel": "apcp_composite"},
+    "geometry": {"nozzle_type": "conical", "grain_geometry": "BATES"},
+    "inputs": {"chamber_pressure_bar": 68.0, "thrust_n": 2200.0, "burn_time_s": 85.0},
+    "measured": {"isp_s": 265.0, "mass_flow_total_kgps": 0.85, "chamber_temperature_k": 3400.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.02, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.015, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.025, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. Kati motor: eski kayittaki of_ratio=0.0 yer tutucusu tasinirken birakildi. 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "UNIV_2019_Solid_01",
+    "record_type": "static_fire",
+    "motor_type": "solid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - university-scale AP/Al/HTPB star-grain archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "AP/Al/HTPB", "oxidizer": "ap", "fuel": "htpb_al"},
+    "geometry": {"nozzle_type": "bell", "grain_geometry": "star"},
+    "inputs": {"chamber_pressure_bar": 45.0, "thrust_n": 580.0, "burn_time_s": 12.0},
+    "measured": {"isp_s": 268.0, "mass_flow_total_kgps": 0.22, "chamber_temperature_k": 3300.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.035, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.025, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.04, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "MIT_2020_Hybrid_01",
+    "record_type": "static_fire",
+    "motor_type": "hybrid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - student-scale GOX/PE hybrid archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "GOX/PE", "oxidizer": "gox", "fuel": "pe"},
+    "geometry": {"injector_type": "simple_orifice", "nozzle_type": "conical", "grain_geometry": "cylindrical"},
+    "inputs": {"chamber_pressure_bar": 18.0, "of_ratio": 2.8, "thrust_n": 320.0, "burn_time_s": 6.5},
+    "measured": {"isp_s": 185.0, "mass_flow_total_kgps": 0.12, "chamber_temperature_k": 2950.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.05, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.04, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.06, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "CALTECH_2018_Liquid_01",
+    "record_type": "static_fire",
+    "motor_type": "liquid",
+    "source": {
+      "citation": "Synthetic reference (not experimental) - N2O4/MMH hypergolic archetype",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "N2O4/MMH", "oxidizer": "n2o4", "fuel": "mmh"},
+    "geometry": {"injector_type": "swirl", "nozzle_type": "bell"},
+    "inputs": {"chamber_pressure_bar": 35.0, "of_ratio": 1.6, "thrust_n": 890.0, "burn_time_s": 8.0},
+    "measured": {"isp_s": 295.0, "mass_flow_total_kgps": 0.29, "chamber_temperature_k": 3150.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.02, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.018, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.03, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test"],
+    "notes": "SYNTHETIC fixture. 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "BENCHMARK_Hybrid_Standard",
+    "record_type": "static_fire",
+    "motor_type": "hybrid",
+    "source": {
+      "citation": "Synthetic benchmark (not experimental) - textbook-level hybrid operating point",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "N2O/HTPB", "oxidizer": "n2o", "fuel": "htpb"},
+    "geometry": {"injector_type": "showerhead", "nozzle_type": "bell", "grain_geometry": "cylindrical"},
+    "inputs": {"chamber_pressure_bar": 30.0, "of_ratio": 6.8, "thrust_n": 1500.0, "burn_time_s": 10.0},
+    "measured": {"isp_s": 240.0, "mass_flow_total_kgps": 0.55, "chamber_temperature_k": 3250.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.01, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.005, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.015, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test", "benchmark_point"],
+    "notes": "SYNTHETIC benchmark point (zaman serisi yok). 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "BENCHMARK_Liquid_Standard",
+    "record_type": "static_fire",
+    "motor_type": "liquid",
+    "source": {
+      "citation": "Synthetic benchmark (not experimental) - textbook-level LOX/RP-1 operating point",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "LOX/RP-1", "oxidizer": "lox", "fuel": "rp1"},
+    "geometry": {"injector_type": "showerhead", "nozzle_type": "bell"},
+    "inputs": {"chamber_pressure_bar": 70.0, "of_ratio": 2.56, "thrust_n": 4450.0, "burn_time_s": 15.0},
+    "measured": {"isp_s": 311.0, "mass_flow_total_kgps": 1.42, "chamber_temperature_k": 3600.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.005, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.003, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.01, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test", "benchmark_point"],
+    "notes": "SYNTHETIC benchmark point (zaman serisi yok). 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  },
+  {
+    "schema_version": "1.0",
+    "test_id": "BENCHMARK_Solid_Standard",
+    "record_type": "static_fire",
+    "motor_type": "solid",
+    "source": {
+      "citation": "Synthetic benchmark (not experimental) - textbook-level APCP operating point",
+      "doi": null,
+      "access": "synthetic",
+      "confidence": "low",
+      "date_checked": "2026-07-17"
+    },
+    "propellants": {"combination": "APCP", "oxidizer": "ap", "fuel": "apcp_composite"},
+    "geometry": {"nozzle_type": "conical", "grain_geometry": "BATES"},
+    "inputs": {"chamber_pressure_bar": 70.0, "thrust_n": 2200.0, "burn_time_s": 60.0},
+    "measured": {"isp_s": 265.0, "mass_flow_total_kgps": 0.82, "chamber_temperature_k": 3400.0},
+    "measurement_uncertainty": {
+      "thrust_n": {"value": 0.008, "type": "relative", "coverage_k": null},
+      "chamber_pressure_bar": {"value": 0.005, "type": "relative", "coverage_k": null},
+      "isp_s": {"value": 0.012, "type": "relative", "coverage_k": null}
+    },
+    "units_original": "SI: bar, N, s, kg/s, K (eski sentetik modul)",
+    "digitized": false,
+    "synthetic": true,
+    "tags": ["fixture", "pipeline_test", "benchmark_point"],
+    "notes": "SYNTHETIC benchmark point (zaman serisi yok). 2026-07-17: eski experimental_validation.py modulunden tasindi."
+  }
+]

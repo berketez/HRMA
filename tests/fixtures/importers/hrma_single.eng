@@ -1,0 +1,8 @@
+; HRMA sentetik test motoru — RASP .eng bicimi
+; Elle uretildi (tests/fixtures/importers); gercek bir motoru temsil etmez.
+; Beklenen el hesabi: ortuk (0,0) ile impuls = 5 + 180 + 5 = 190 N·s,
+; tepe itki 100 N, %5 esikli yanma suresi 1.99 s.
+HRMA-K100 54 400 0-6 0.500 1.200 HRMA
+0.1 100.0
+1.9 100.0
+2.0 0.0

@@ -1,0 +1,52 @@
+<openrocket version="1.8" creator="HRMA-sentetik-fixture">
+ <rocket>
+  <name>HRMA Iki Kademeli Test</name>
+  <subcomponents>
+   <stage>
+    <name>Sustainer</name>
+    <subcomponents>
+     <nosecone>
+      <name>Burun</name>
+      <length>0.25</length>
+      <shape>conical</shape>
+      <aftradius>0.04</aftradius>
+      <thickness>0.002</thickness>
+      <material type="bulk" density="1050.0">Polistiren</material>
+     </nosecone>
+     <bodytube>
+      <name>Ust govde</name>
+      <length>0.8</length>
+      <radius>0.04</radius>
+      <thickness>0.0015</thickness>
+      <material type="bulk" density="680.0">Kraft fenolik</material>
+      <subcomponents>
+       <trapezoidfinset>
+        <name>Ust kanatlar</name>
+        <fincount>4</fincount>
+        <rootchord>0.12</rootchord>
+        <tipchord>0.06</tipchord>
+        <height>0.08</height>
+        <sweeplength>0.03</sweeplength>
+        <thickness>0.003</thickness>
+        <material type="bulk" density="680.0">Kontrplak</material>
+        <position type="bottom">0.0</position>
+       </trapezoidfinset>
+      </subcomponents>
+     </bodytube>
+    </subcomponents>
+   </stage>
+   <stage>
+    <name>Booster</name>
+    <subcomponents>
+     <bodytube>
+      <name>Alt govde</name>
+      <length>0.6</length>
+      <radius>0.04</radius>
+      <thickness>0.0015</thickness>
+      <material type="bulk" density="680.0">Kraft fenolik</material>
+     </bodytube>
+    </subcomponents>
+   </stage>
+  </subcomponents>
+ </rocket>
+</openrocket>

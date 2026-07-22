@@ -1,0 +1,42 @@
+<openrocket version="1.8" creator="HRMA-sentetik-fixture">
+ <rocket>
+  <name>HRMA Serbest Kanat Testi</name>
+  <subcomponents>
+   <stage>
+    <name>Sustainer</name>
+    <subcomponents>
+     <nosecone>
+      <name>Burun</name>
+      <length>0.3</length>
+      <shape>ellipsoid</shape>
+      <aftradius>0.05</aftradius>
+      <thickness>0.002</thickness>
+      <material type="bulk" density="1050.0">Polistiren</material>
+     </nosecone>
+     <bodytube>
+      <name>Govde</name>
+      <length>1.2</length>
+      <radius>0.05</radius>
+      <thickness>0.0015</thickness>
+      <material type="bulk" density="680.0">Kraft fenolik</material>
+      <subcomponents>
+       <freeformfinset>
+        <name>Serbest kanatlar</name>
+        <fincount>4</fincount>
+        <thickness>0.003</thickness>
+        <material type="bulk" density="680.0">Kontrplak</material>
+        <axialoffset method="bottom">0.0</axialoffset>
+        <finpoints>
+         <point x="0.0" y="0.0"/>
+         <point x="0.05" y="0.12"/>
+         <point x="0.15" y="0.12"/>
+         <point x="0.2" y="0.0"/>
+        </finpoints>
+       </freeformfinset>
+      </subcomponents>
+     </bodytube>
+    </subcomponents>
+   </stage>
+  </subcomponents>
+ </rocket>
+</openrocket>

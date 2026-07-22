@@ -29,7 +29,13 @@ packaging/runtime/
 packaging/hrma_stub
 packaging/*.exe
 packaging/*.dmg
-tests/
+# Test paketi 2026-07-23'te YAYIMLANDI: dışarıdan doğrulanabilirlik, iddia
+# edilen test sayısının bağımsız olarak tekrar üretilebilmesi için. Yalnız
+# derlenmiş bytecode ve koşum artıkları dışarıda kalır.
+tests/__pycache__/
+tests/.pytest_cache/
+validation_results.png
+validation_results.json
 
 # Kişisel AI talimat/mem dosyası public repoya girmez
 docs/CLAUDE.md

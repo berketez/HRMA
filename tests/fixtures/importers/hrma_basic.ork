@@ -1,0 +1,58 @@
+<openrocket version="1.8" creator="HRMA-sentetik-fixture">
+ <rocket>
+  <name>HRMA Test Roketi</name>
+  <subcomponents>
+   <stage>
+    <name>Sustainer</name>
+    <subcomponents>
+     <nosecone>
+      <name>Burun</name>
+      <length>0.3</length>
+      <shape>ogive</shape>
+      <aftradius>0.05</aftradius>
+      <thickness>0.002</thickness>
+      <material type="bulk" density="1050.0">Polistiren</material>
+     </nosecone>
+     <bodytube>
+      <name>Govde</name>
+      <length>1.2</length>
+      <radius>auto</radius>
+      <thickness>0.0015</thickness>
+      <material type="bulk" density="680.0">Kraft fenolik</material>
+      <subcomponents>
+       <trapezoidfinset>
+        <name>Kanatlar</name>
+        <fincount>3</fincount>
+        <rootchord>0.2</rootchord>
+        <tipchord>0.1</tipchord>
+        <height>0.12</height>
+        <sweeplength>0.05</sweeplength>
+        <thickness>0.003</thickness>
+        <material type="bulk" density="680.0">Kontrplak</material>
+        <axialoffset method="bottom">0.0</axialoffset>
+       </trapezoidfinset>
+       <masscomponent>
+        <name>Aviyonik</name>
+        <mass>0.35</mass>
+        <packedlength>0.1</packedlength>
+        <packeddiameter>0.05</packeddiameter>
+        <axialoffset method="top">0.2</axialoffset>
+       </masscomponent>
+       <parachute>
+        <name>Ana parasut</name>
+        <diameter>0.9</diameter>
+       </parachute>
+      </subcomponents>
+     </bodytube>
+    </subcomponents>
+   </stage>
+  </subcomponents>
+ </rocket>
+ <simulations>
+  <simulation status="uptodate">
+   <name>Simulasyon 1</name>
+   <flightdata maxaltitude="1234.5" maxvelocity="210.0" maxmach="0.62"
+    timetoapogee="17.2" flighttime="120.0" groundhitvelocity="5.1"/>
+  </simulation>
+ </simulations>
+</openrocket>

@@ -1,0 +1,33 @@
+<engine-database>
+ <engine-list>
+  <engine mfg="HRMA" code="HRMA-K190" Type="Hybrid" dia="54." len="400."
+   initWt="1200." propWt="500." delays="0" Itot="190." avgThrust="95.5"
+   peakThrust="100." burn-time="1.99" Isp="180.">
+   <comments>Sentetik test motoru 1 — beyan edilen Itot eğriyle tutarlı.</comments>
+   <data>
+    <eng-data t="0." f="0." m="500." cg="200."/>
+    <eng-data t="0.1" f="100." m="480." cg="199."/>
+    <eng-data t="1.9" f="100." m="30." cg="185."/>
+    <eng-data t="2.0" f="0." m="0." cg="180."/>
+   </data>
+  </engine>
+  <engine mfg="HRMA" code="HRMA-M2" Type="reloadable" dia="75." len="600."
+   initWt="3000." propWt="1500." delays="6-10" Itot="500." peakThrust="100.">
+   <comments>Sentetik test motoru 2 — beyan edilen Itot bilerek tutarsız (uyari testi).</comments>
+   <data>
+    <eng-data t="0." f="0."/>
+    <eng-data t="0.1" f="100."/>
+    <eng-data t="1.9" f="100."/>
+    <eng-data t="2.0" f="0."/>
+   </data>
+  </engine>
+  <engine mfg="HRMA" code="HRMA-BROKEN" Type="single-use" dia="24." len="70."
+   initWt="100." propWt="60." delays="P">
+   <comments>Sentetik bozuk motor — sifir impuls, dosya uyarisiyla atlanmali.</comments>
+   <data>
+    <eng-data t="0." f="0."/>
+    <eng-data t="1.0" f="0."/>
+   </data>
+  </engine>
+ </engine-list>
+</engine-database>

@@ -220,4 +220,16 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+## Tests
+
+The test suite lives in `tests/` and runs on every push via
+[GitHub Actions](.github/workflows/tests.yml):
+
+```bash
+pip install -r requirements.txt
+MPLBACKEND=Agg PYTHONPATH=. pytest tests/ -q
+```
+
+Test counts quoted in release notes can therefore be reproduced independently.
