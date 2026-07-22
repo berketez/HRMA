@@ -560,10 +560,37 @@ def _run_liquid(record: Dict[str, Any]) -> Dict[str, Any]:
         thrust_known = False
         result["assumed_defaults"]["thrust_n"] = 10000.0
 
-    result["adapter_notes"].append(
-        "HRMA sivi Isp/c* zinciri CEA referans tablosuna demirlidir (MR "
-        "sapma cezali); kayit Pc'si Isp referansini olceklemez. Kiyas 'HRMA "
-        "ciktisi spec ile tutarli mi' anlamindadir.")
+    # --- Yayimlanmis TASARIM geometrisi motora girdi olarak verilir --------
+    # Genisleme orani ve cevrim tipi kaydin ``geometry`` blogundadir; bunlar
+    # olculen PERFORMANS degil, motorun yayimlanmis tasarim tanimidir. Vakum
+    # Isp'si genisleme oranina kuvvetle baglidir (RS-25: eps=69 -> 462.8 s,
+    # eps=200 -> 478.1 s), bu yuzden gercek eps verilmezse model kendi
+    # ortam-eslenik lulesini tasarlar ve ust kademe motorlarinda sistematik
+    # asiri-tahmin dogar. Verilmediginde davranis eskisi gibi kalir ve
+    # adapter_notes'a acikca yazilir.
+    overrides = {}
+    eps_record = (geo.get("expansion_ratio")
+                  # F-1 gibi uzatmali/uzatmasiz iki degeri olan kayitlarda
+                  # ucusan konfigurasyon uzatmalidir (SA-503 capasi).
+                  or geo.get("expansion_ratio_with_extension"))
+    if eps_record is not None:
+        overrides["nozzle_expansion_ratio"] = float(eps_record)
+        result["adapter_notes"].append(
+            f"Genisleme orani kayittan alindi (eps={float(eps_record):g}, "
+            "yayimlanmis tasarim geometrisi — olculen performans DEGIL); "
+            "Isp bu lulede cozulur.")
+    else:
+        result["adapter_notes"].append(
+            "Kayitta genisleme orani yok; model ortam-eslenik (deniz seviyesi "
+            "optimum) lule tasarlar. Ust kademe motorlarinda vakum Isp'si bu "
+            "nedenle dusuk tahmin edilebilir.")
+
+    cycle_record = geo.get("cycle")
+    if cycle_record:
+        overrides["engine_cycle"] = str(cycle_record)
+        result["adapter_notes"].append(
+            f"Cevrim tipi kayittan alindi ({cycle_record}); acik cevrimlerde "
+            "turbin egzozu teslim Isp'sine yansir.")
 
     engine = LiquidRocketEngine(
         thrust=f_n,
@@ -572,6 +599,7 @@ def _run_liquid(record: Dict[str, Any]) -> Dict[str, Any]:
         fuel_type=fuel_key,
         oxidizer_type=ox_key,
         propellant_data={fuel_key: {}, ox_key: {}},  # AGSIZ: fetch yolu kapali
+        overrides=overrides or None,
     )
     res = engine.calculate_performance()
 

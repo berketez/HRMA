@@ -670,6 +670,10 @@
     <script src="/static/js/app.js"></script>
     <script src="/static/js/transient_panel.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
+    <!-- Enjektör kesit şemaları: injector_panel.js window.InjectorSchematics
+         yoksa şema kutusunu SESSİZCE gizliyordu (denetim bulgusu 2026-07-22)
+         — bu etiket olmadan tamamlanmış özellik ölü kalıyor. -->
+    <script src="/static/js/injector_schematics.js"></script>
     <script src="/static/js/injector_panel.js"></script>
     <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->
     <script src="/static/js/analysis_dock.js"></script>

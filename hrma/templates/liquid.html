@@ -7,6 +7,13 @@
          var) ama okunabilirlik için çekirdek önce yükleniyor. -->
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/i18n_pages.js"></script>
+    <!-- Kabuk: Sürüm Notları + Ayarlar (dil seçimi dahil). Bağlantılar
+         gezinme şeridine çalışma anında eklenir; anahtarlar i18n_shell.js'te.
+         2026-07-22'ye kadar bu bileşenler yalnız Ana Sayfa'daydı, alt
+         sayfalarda dil değiştirilemiyordu. -->
+    <script src="/static/js/i18n_shell.js"></script>
+    <script src="/static/js/release_notes.js"></script>
+    <script src="/static/js/settings_panel.js"></script>
     <title data-i18n="liq.ui.liquid_motor_analysis_motor_analysis_tool">Liquid Motor Analysis - Motor Analysis Tool</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -5037,6 +5044,10 @@ Please provide:
     <script src="/static/js/motor_viz3d.js"></script>
     <script src="/static/js/motor_viz_deck.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
+    <!-- Enjektör kesit şemaları: injector_panel.js window.InjectorSchematics
+         yoksa şema kutusunu SESSİZCE gizliyordu (denetim bulgusu 2026-07-22)
+         — bu etiket olmadan tamamlanmış özellik ölü kalıyor. -->
+    <script src="/static/js/injector_schematics.js"></script>
     <script src="/static/js/injector_panel.js"></script>
     <script>
         // 6-DOF uçuş paneli — sıvı motorda sabit itki (sürekli rejim).
