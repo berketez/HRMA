@@ -43,12 +43,14 @@ jobs:
           pip install cantera
           pip install pytest
 
-      # build123d (STEP export) numpy>=2 istiyor, bizim pinimiz numpy<2 —
-      # bu yüzden zorunlu listede DEĞİL. Kurulabilirse STEP testleri de koşar,
-      # kurulamazsa pytest.importorskip ile atlanır; koşu bu yüzden KIRILMAZ.
-      - name: build123d (opsiyonel, STEP export testleri için)
-        continue-on-error: true
-        run: pip install build123d
+      # build123d (STEP export) CI'da BİLEREK kurulmuyor: 0.11.x numpy>=2
+      # istiyor ve kurulduğunda numpy'yi 1.26'dan 2.5'e yükseltip tüm paketi
+      # kırıyor (np.trapz numpy 2'de kaldırıldı — 2026-07-23 CI koşusunda 194
+      # test bu yüzden düştü). STEP testleri pytest.importorskip ile atlanır.
+      # Kalıcı çözüm numpy 2 geçişidir; ayrı iş olarak planlandı.
+      - name: Ortam teyidi (numpy pini korunuyor mu)
+        run: |
+          python -c "import numpy; print('numpy', numpy.__version__); assert numpy.__version__.startswith('1.'), 'numpy<2 pini bozuldu'"
 
       - name: Test paketi
         env:

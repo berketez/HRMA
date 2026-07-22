@@ -71,13 +71,25 @@ opens automatically.
 ### Optional extras
 
 ```bash
-pip install build123d "numpy<2"   # true STEP solid export
 pip install cantera               # High-Fidelity kinetic level
 ```
 
-Without these, the STEP export returns an explanatory error and kinetic
-requests gracefully fall back to the Engineering level. The desktop
-installers bundle build123d already.
+Without it, kinetic requests gracefully fall back to the Engineering level.
+
+**STEP export (`build123d`) — separate environment required.** build123d
+0.11.x declares `numpy>=2`, while HRMA pins `numpy<2` (see the ABI note at
+the top of this file). Installing it into the pinned environment silently
+upgrades NumPy to 2.x and breaks the solver — verified on CI 2026-07-23,
+where the upgrade removed `np.trapz` and failed 194 tests. So:
+
+- In the pinned environment, STEP export is unavailable; the endpoint returns
+  an explanatory error rather than failing silently, and STEP tests skip.
+- To use STEP export from source, create a **separate** environment with
+  NumPy 2.x, or use the desktop installers, which bundle a working
+  build123d/NumPy combination.
+
+Migrating HRMA itself to NumPy 2 (16 `np.trapz` call sites) is planned as a
+separate task; it would remove this split.
 
 ## File Structure
 

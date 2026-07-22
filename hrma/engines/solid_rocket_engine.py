@@ -2253,28 +2253,42 @@ class SolidRocketEngine:
         }
     
     def _calculate_flight_simulation(self):
-        """Flight simulation like other systems"""
-        # Simplified trajectory calculation
-        thrust_profile = np.linspace(self.P_c * 0.8, self.P_c * 1.2, 100)
-        
+        """Uçuş büyüklükleri MOTOR seviyesinde hesaplanamaz — 'not_modelled'.
+
+        2026-07-23 denetimi (dış inceleme bulgusu): bu metot apoje 3500 m,
+        maksimum hız 450 m/s, maksimum ivme 8.5 g, uçuş süresi 45 s, itki/
+        ağırlık 4.2, stabilite marjı 2.1, Cd 0.45, faydalı yük 0.5 kg ve
+        GÖREV BAŞARI OLASILIĞI 0.92 değerlerini HESAPLAMADAN döndürüyordu.
+        Hepsi sabit yazılmıştı ve doğrudan sonuç sözlüğüne giriyordu.
+
+        Bu büyüklüklerin hiçbiri motor verisinden türetilemez: araç kuru
+        kütlesi, gövde çapı, sürükleme katsayısı, fırlatma açısı ve rüzgâr
+        bilinmeden apoje de, T/W de, stabilite marjı da tanımsızdır. Görev
+        başarı olasılığı ise güvenilirlik verisi olmadan tümüyle uydurmadır.
+
+        Doğru yol: uçuş büyüklükleri araç parametreleriyle birlikte
+        ``hrma.analysis.trajectory_analysis.TrajectoryAnalyzer`` (2-DOF,
+        sürüklemeli) ya da ``six_dof_trajectory`` ile çözülür; motor bu
+        çözüme itki eğrisi ve kütle akışı olarak GİRDİ verir. Uygulama bunu
+        zaten ayrı uçuş analizi akışında yapar.
+
+        Bu metot artık sahte sayı üretmez; ne modellenmediğini ve nereye
+        bakılacağını açıkça bildirir (bkz. tests/test_no_fabrication.py).
+        """
         return {
-            'trajectory_analysis': {
-                'apogee_altitude_m': self._estimate_apogee(),
-                'max_velocity_ms': self._estimate_max_velocity(),
-                'max_acceleration_g': self._estimate_max_acceleration(),
-                'flight_time_s': self._estimate_flight_time()
-            },
-            'vehicle_dynamics': {
-                'thrust_to_weight_initial': 4.2,
-                'thrust_to_weight_average': 3.8,
-                'stability_margin': 2.1,
-                'drag_coefficient': 0.45
-            },
-            'mission_capability': {
-                'payload_capacity_kg': 0.5,
-                'altitude_capability_m': 3500,
-                'mission_success_probability': 0.92
-            }
+            'status': 'not_modelled',
+            'reason': (
+                'Uçuş büyüklükleri (apoje, hız, ivme, T/W, stabilite marjı, '
+                'faydalı yük) araç parametreleri olmadan motor verisinden '
+                'türetilemez. Görev başarı olasılığı ayrıca güvenilirlik '
+                'verisi gerektirir ve bu modelde yoktur.'),
+            'use_instead': (
+                'Uçuş analizi akışı: TrajectoryAnalyzer (2-DOF, sürüklemeli) '
+                'veya six_dof_trajectory — motorun itki eğrisi ve kütle akışı '
+                'girdi olarak verilir, araç kütlesi/çapı/Cd ayrıca istenir.'),
+            'trajectory_analysis': None,
+            'vehicle_dynamics': None,
+            'mission_capability': None,
         }
     
     def run_monte_carlo(self, n_samples=300, seed=42):
