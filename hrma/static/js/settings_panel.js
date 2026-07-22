@@ -303,9 +303,15 @@
     }
 
     /* aux-links'teki statik bağlantıyı canlandır (data-i18n niteliği burada:
-       bkz. release_notes.js'teki not — anahtar i18n_shell.js'te yaşıyor). */
+       bkz. release_notes.js'teki not — anahtar i18n_shell.js'te yaşıyor).
+
+       Çapa yoksa (alt sayfalar: solid/liquid/advanced/formulas — bunlarda
+       index'in aux-links şeridi bulunmaz) gezinme şeridine kendi
+       bağlantısını ekler. Böylece her sayfaya eklemek üç script etiketi
+       olur, sayfa başına HTML cerrahisi gerekmez. Şerit de yoksa sessizce
+       vazgeçilir (window.hrmaShowSettings yine çağrılabilir). */
     function mountLink() {
-        var link = document.getElementById('settingsLink');
+        var link = document.getElementById('settingsLink') || injectNavLink();
         if (!link) return;
         link.setAttribute('data-i18n', 'link.settings');
         link.textContent = T('link.settings', 'Settings');
@@ -313,6 +319,22 @@
             ev.preventDefault();
             openModal();
         });
+    }
+
+    /* Gezinme şeridine (.nav-links) bağlantı ekler ve döndürür. Aynı id iki
+       kez oluşmasın diye önce varlık denetimi yapılır. */
+    function injectNavLink() {
+        var nav = document.querySelector('.nav-links');
+        if (!nav) return null;
+        var a = document.createElement('a');
+        a.id = 'settingsLink';
+        a.href = '#';
+        a.setAttribute('data-shell-aux', '1');
+        // Şeride eklenen İLK yardımcı bağlantı sağa yaslanır; sonrakiler
+        // onun yanına dizilir (release_notes.js aynı sözleşmeyi kullanır).
+        if (!nav.querySelector('[data-shell-aux]')) a.style.marginLeft = 'auto';
+        nav.appendChild(a);
+        return a;
     }
 
     window.hrmaShowSettings = openModal;

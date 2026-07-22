@@ -213,8 +213,25 @@
        (statik HTML'de değil) verilir: index.html'in data-i18n anahtarları
        i18n.js ÇEKİRDEĞİNDE aranır (tests/test_i18n.py sözleşmesi), bu
        anahtar ise i18n_shell.js'te yaşar. */
+    /* Çapa yoksa (alt sayfalarda index'in aux-links şeridi bulunmaz)
+       gezinme şeridine kendi bağlantısını ekler; şerit de yoksa sessizce
+       vazgeçer (window.hrmaShowReleaseNotes yine çağrılabilir). */
+    function injectNavLink() {
+        var nav = document.querySelector('.nav-links');
+        if (!nav) return null;
+        var a = document.createElement('a');
+        a.id = 'releaseNotesLink';
+        a.href = '#';
+        a.setAttribute('data-shell-aux', '1');
+        // Şeride eklenen İLK yardımcı bağlantı sağa yaslanır; sonrakiler
+        // onun yanına dizilir (settings_panel.js aynı sözleşmeyi kullanır).
+        if (!nav.querySelector('[data-shell-aux]')) a.style.marginLeft = 'auto';
+        nav.appendChild(a);
+        return a;
+    }
+
     function mountLink() {
-        var link = document.getElementById('releaseNotesLink');
+        var link = document.getElementById('releaseNotesLink') || injectNavLink();
         if (!link) return;
         link.setAttribute('data-i18n', 'link.releaseNotes');
         link.textContent = T('link.releaseNotes', 'Release Notes');
