@@ -21,7 +21,17 @@ openpyxl>=3.1.0        # /api/export-xlsx insan-dostu Excel dışa aktarma (v2.5
 shapely>=2.0.0         # star grain gerçek yanma-yüzeyi modeli (poligon ofseti)
 trimesh>=3.20.0
 manifold3d>=2.0.0      # trimesh boolean backend (enjektör orifis delikleri)
-build123d>=0.11.0      # gerçek STEP export (OCC tabanlı, ~500 MB)
+# build123d (gerçek STEP export, OCC tabanlı ~500 MB) OPSİYONELDİR ve bu
+# dosyadan BİLEREK çıkarılmıştır: 0.11.x metadata'sı numpy>=2 istiyor, bizim
+# numpy<2 pinimizle çakışıyor ve `pip install -r requirements.txt` TEMİZ bir
+# makinede tümüyle çözümsüz kalıyordu (CI ilk koşusunda yakalandı,
+# 2026-07-23). Kod build123d yokluğunu zaten açıkça ele alıyor: STEP export
+# istendiğinde kullanıcıya net mesaj döner, sessizce düşmez
+# (hrma/app.py:2490), testler de pytest.importorskip ile atlar.
+# STEP export isteyenler ayrıca kurar:
+#     pip install build123d
+# (numpy 2.x'e yükseltmek istemiyorsanız conda ortamı önerilir; numpy<2 pini
+#  2026-07-12 kurulum kazasının sonucudur, yukarıdaki nota bakınız.)
 ezdxf>=1.1.0           # DXF imalat çizimleri
 
 # Static chart export (teknik çizim PDF'leri)

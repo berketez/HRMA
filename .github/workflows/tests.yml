@@ -43,6 +43,13 @@ jobs:
           pip install cantera
           pip install pytest
 
+      # build123d (STEP export) numpy>=2 istiyor, bizim pinimiz numpy<2 —
+      # bu yüzden zorunlu listede DEĞİL. Kurulabilirse STEP testleri de koşar,
+      # kurulamazsa pytest.importorskip ile atlanır; koşu bu yüzden KIRILMAZ.
+      - name: build123d (opsiyonel, STEP export testleri için)
+        continue-on-error: true
+        run: pip install build123d
+
       - name: Test paketi
         env:
           MPLBACKEND: Agg
