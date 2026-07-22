@@ -1799,6 +1799,25 @@ def _combustion_of_sweep(propellant, n_points=9):
     return list(cached[0]), list(cached[1])
 
 
+def _propellant_from_combustion_data(combustion_data):
+    """Kimlik parametresi verilmediyse çözücü çıktısındaki 'inputs'
+    bloğundan türetir (analyze_combustion koşunun girdi kimliğini sonuca
+    yazar). Eski/eksik sözlükte None döner; tarama çeyreği o zaman
+    'not available' notuyla kalır — kimlik uydurulmaz."""
+    if not isinstance(combustion_data, dict):
+        return None
+    ins = combustion_data.get('inputs')
+    if not isinstance(ins, dict):
+        return None
+    fuel = ins.get('fuel_composition')
+    ox = ins.get('oxidizer_type')
+    pc = _perf_num(ins.get('chamber_pressure'))
+    if not fuel or not ox or not pc:
+        return None
+    return {'fuel_composition': fuel, 'oxidizer_type': ox,
+            'chamber_pressure': pc}
+
+
 def create_combustion_analysis_plots(combustion_data, propellant=None):
     """Combustion dashboard fed by the equilibrium solver (no placeholders).
 
@@ -1814,6 +1833,12 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
         function.
     """
     from plotly.subplots import make_subplots
+
+    # Çağıran kimliği geçirmediyse çözücü çıktısının 'inputs' bloğundan
+    # türet — app.py çağrıları kimliği ayrıca taşımıyor (saha bulgusu
+    # 2026-07-22: Isp vs O/F çeyreği bu yüzden hep boş kalıyordu).
+    if not propellant:
+        propellant = _propellant_from_combustion_data(combustion_data)
 
     fig = make_subplots(
         rows=2, cols=2,

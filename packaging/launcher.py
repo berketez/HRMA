@@ -332,8 +332,18 @@ def _menu_check_updates():
 
 
 def _menu_open_outputs():
+    """Çıktı klasörünü işletim sisteminin dosya yöneticisinde açar (çapraz platform).
+
+    macOS 'open', Windows os.startfile, diğerlerinde 'xdg-open'. Windows menü
+    ögesi de bu işlevi çağırdığından tek platforma bağlı kalamaz."""
+    out = _outputs_dir()
     try:
-        subprocess.Popen(["open", _outputs_dir()])
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", out])
+        elif os.name == "nt":
+            os.startfile(out)  # noqa: S606  # yalnız Windows'ta tanımlı
+        else:
+            subprocess.Popen(["xdg-open", out])
     except Exception:
         traceback.print_exc()
 
@@ -374,6 +384,51 @@ def _macos_menu():
                           lambda: webbrowser.open(GITHUB_URL + "/releases/latest")),
         ]),
     ]
+
+
+def _windows_menu():
+    """Windows menü çubuğu (pencereye tutturulan MenuStrip).
+
+    pywebview winforms arka ucu (set_window_menu) '__app__' başlıklı menüyü
+    yok sayar — o yalnız macOS uygulama menüsü kavramıdır. Bu yüzden macOS'ta
+    uygulama menüsüne konan eylemler (Check for Updates, Open Output Folder)
+    Windows'ta GÖRÜNÜR bir 'HRMA' üst menüsüne alınır; 'Help' menüsü ise
+    olduğu gibi görünür (düzenli başlıklı menüler winforms tarafından
+    render edilir). webview.start(menu=...) ile verilir.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import webview.menu as wm
+    except Exception:
+        return None
+    return [
+        wm.Menu("HRMA", [
+            wm.MenuAction("Check for Updates…", _menu_check_updates),
+            wm.MenuAction("Open Output Folder", _menu_open_outputs),
+        ]),
+        wm.Menu("Help", [
+            wm.MenuAction("Release Notes…", _menu_release_notes),
+            wm.MenuAction("HRMA on GitHub",
+                          lambda: webbrowser.open(GITHUB_URL)),
+            wm.MenuAction("Releases and Downloads",
+                          lambda: webbrowser.open(GITHUB_URL + "/releases/latest")),
+        ]),
+    ]
+
+
+def _native_menu():
+    """Platforma göre yerel pencere menüsü döndürür.
+
+    macOS: uygulama menüsü (__app__) + Help — mevcut davranış.
+    Windows: görünür HRMA + Help menü çubuğu.
+    Diğer (Linux vb.): menü verilmez (None) — eski davranış korunur.
+    """
+    if sys.platform == "darwin":
+        return _macos_menu()
+    if os.name == "nt":
+        return _windows_menu()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +483,7 @@ def _try_native_window(url):
         if os.name == "nt":
             # WebView2 dışındaki eski motorlara (mshtml vb.) düşülmesin
             kwargs["gui"] = "edgechromium"
-        menu = _macos_menu()
+        menu = _native_menu()
         if menu:
             kwargs["menu"] = menu
         webview.start(**kwargs)

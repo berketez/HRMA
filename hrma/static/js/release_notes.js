@@ -4,18 +4,39 @@
  * canlandırır: /api/changelog'dan paketle gelen changelog.json okunur,
  * koyu temalı bir modalda sürüm + tarih başlıklarıyla listelenir.
  *
+ * Çift dillilik (2026-07-22): changelog.json her sürüm için notes_en ve
+ * notes_tr taşır. Modal, aktif arayüz dilini (window.I18N.lang) kullanarak
+ * doğru dildeki gövdeyi seçer — Türkçe arayüzde Türkçe, İngilizce arayüzde
+ * İngilizce. Modal açıkken dil değişirse (I18N.onChange) gövde yeni dilde
+ * yeniden çizilir; modal kapalıyken değişirse bir sonraki açılışta yeni
+ * dil gelir (openModal her açılışta aktif dili yeniden okur).
+ *
  * Güvenlik: sürüm notu gövdesi önce HTML-escape edilir, sonra YALNIZ şu
  * üç dönüşüm uygulanır: '## ' başlık, '- ' madde imi, '**kalın**'.
  * Başka markdown işlenmez (XSS yüzeyi bilinçli olarak dar).
  *
- * Not gövdesi ham release metnidir, çeviri DENENMEZ; yalnız modal
- * başlığı/kapat düğmesi i18n anahtarlıdır (i18n_shell.js).
+ * Modal başlığı/kapat düğmesi gibi UI metinleri i18n anahtarlıdır
+ * (i18n_shell.js) ve zaten çift dillidir.
  */
 (function () {
     'use strict';
 
     function T(key, fallback) {
         return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
+    }
+
+    /* Aktif arayüz dili ('en' | 'tr'); I18N yoksa İngilizce'ye düş. */
+    function activeLang() {
+        return (window.I18N && window.I18N.lang) || 'en';
+    }
+
+    /* Sürüm kaydından aktif dile uygun not gövdesini seç. Aktif dil yoksa
+       diğer dile, o da yoksa (eski şema toleransı) düz 'notes'a düş — modal
+       hiçbir durumda boş kalmasın. */
+    function pickNotes(v) {
+        if (!v) return '';
+        var lang = activeLang();
+        return v['notes_' + lang] || v.notes_en || v.notes_tr || v.notes || '';
     }
 
     function el(tag, style, html) {
@@ -80,7 +101,7 @@
         block.appendChild(head);
         block.appendChild(el('div',
             'font-size:12.5px;line-height:1.6;color:var(--hd-ink-dim, #7d97a5);',
-            renderNotes(v.notes || '')));
+            renderNotes(pickNotes(v))));
         return block;
     }
 
@@ -111,9 +132,11 @@
 
         var body = el('div',
             'flex:1;overflow-y:auto;min-height:80px;padding-right:6px;');
-        body.appendChild(el('div',
+        var loading = el('div',
             'font-size:13px;color:var(--hd-ink-dim, #7d97a5);',
-            escapeHtml(T('shell.releaseNotes.loading', 'Loading release notes…'))));
+            escapeHtml(T('shell.releaseNotes.loading', 'Loading release notes…')));
+        loading.setAttribute('data-i18n', 'shell.releaseNotes.loading');
+        body.appendChild(loading);
         box.appendChild(body);
 
         var closeBtn = el('button',
@@ -125,12 +148,45 @@
             'font-family:var(--hd-sans, sans-serif);',
             escapeHtml(T('shell.close', 'Close')));
         closeBtn.setAttribute('data-i18n', 'shell.close');
-        closeBtn.onclick = function () { wrap.remove(); };
         box.appendChild(closeBtn);
 
+        // Getirilen sürümler; dil değişince yeniden çizim için saklanır.
+        var loadedVersions = null;
+        var unsubscribe = null;
+
+        function close() {
+            if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+            wrap.remove();
+        }
+        closeBtn.onclick = close;
         wrap.addEventListener('click', function (ev) {
-            if (ev.target === wrap) wrap.remove();
+            if (ev.target === wrap) close();
         });
+
+        /* Gövdeyi aktif dilde (yeniden) çiz. Veri henüz gelmediyse yükleniyor
+           metni durur; boş/hatalı durumda i18n anahtarlı mesaj gösterilir. */
+        function renderBody() {
+            if (loadedVersions === null) return;
+            body.innerHTML = '';
+            if (!loadedVersions.length) {
+                var empty = el('div',
+                    'font-size:13px;color:var(--hd-ink-dim, #7d97a5);',
+                    escapeHtml(T('shell.releaseNotes.empty', 'No release notes found.')));
+                empty.setAttribute('data-i18n', 'shell.releaseNotes.empty');
+                body.appendChild(empty);
+                return;
+            }
+            for (var i = 0; i < loadedVersions.length; i++) {
+                body.appendChild(buildVersionBlock(loadedVersions[i]));
+            }
+        }
+
+        // Modal açıkken dil değişirse: başlık/kapat metni data-i18n ile
+        // I18N.apply() tarafından zaten tazelenir; not gövdelerini burada
+        // elle yeni dilde yeniden çiziyoruz.
+        if (window.I18N && window.I18N.onChange) {
+            unsubscribe = window.I18N.onChange(function () { renderBody(); });
+        }
 
         wrap.appendChild(box);
         document.body.appendChild(wrap);
@@ -138,21 +194,11 @@
         fetch('/api/changelog')
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                body.innerHTML = '';
-                var versions = (data && data.versions) || [];
-                if (!versions.length) {
-                    var empty = el('div',
-                        'font-size:13px;color:var(--hd-ink-dim, #7d97a5);',
-                        escapeHtml(T('shell.releaseNotes.empty', 'No release notes found.')));
-                    empty.setAttribute('data-i18n', 'shell.releaseNotes.empty');
-                    body.appendChild(empty);
-                    return;
-                }
-                for (var i = 0; i < versions.length; i++) {
-                    body.appendChild(buildVersionBlock(versions[i]));
-                }
+                loadedVersions = (data && data.versions) || [];
+                renderBody();
             })
             .catch(function () {
+                loadedVersions = null;
                 body.innerHTML = '';
                 var err = el('div',
                     'font-size:13px;color:var(--hd-ink-dim, #7d97a5);',
@@ -178,7 +224,8 @@
         });
     }
 
-    // Yerel pencere menüsü (macOS Help > "Release Notes…") buradan tetikler
+    // Yerel pencere menüsü (macOS Help > "Release Notes…", Windows HRMA/Help
+    // menüsü) buradan tetikler.
     window.hrmaShowReleaseNotes = openModal;
 
     if (document.readyState === 'loading') {

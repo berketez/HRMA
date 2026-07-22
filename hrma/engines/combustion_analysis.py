@@ -339,7 +339,16 @@ class CombustionAnalyzer:
                 'throat': {'P': throat_pressure, 'T': throat_temperature},
                 'exit': {'P': exit_pressure, 'T': exit_temperature}
             },
-            'performance': performance
+            'performance': performance,
+            # Koşunun girdi kimliği: O/F tarama paneli gibi tüketiciler,
+            # çağıran kimliği ayrıca geçirmediğinde taramayı bu bloktan
+            # kurar (uydurma değil — çözücüye giren değerlerin kendisi).
+            'inputs': {
+                'fuel_composition': dict(fuel_composition),
+                'oxidizer_type': oxidizer_type,
+                'of_ratio': of_ratio,
+                'chamber_pressure': chamber_pressure,
+            }
         }
 
         if cache_key is not None:
