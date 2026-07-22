@@ -70,6 +70,17 @@ class TrajectoryAnalyzer:
         # Geopotential height conversion için referans yarıçap (US Std Atm 1976)
         self.R_geopotential = 6356766.0  # m
 
+        # --- Fırlatma sahası katmanı (v1, 2026-07-22) -------------------
+        # g_surface: SAHADAKİ yerel yerçekimi (enlem + rakım). Yalnız ağırlık
+        # ve T/W'ye girer. self.g0 (=9.80665) DEĞİŞMEZ: Isp tanımı, ideal
+        # delta-v ve USSA 1976 basınç formülleri onunla yazılır.
+        # Varsayılanlar tam olarak eski davranışı verir (regresyon kilidi:
+        # g_surface == g0, sıcaklık kayması 0, basınç oranı 1).
+        self.g_surface = G_0        # m/s², saha yerel yerçekimi
+        self.site_temp_offset_k = 0.0   # ölçülen/standart-dışı gün ΔT
+        self.site_pressure_ratio = 1.0  # ölçülen yüzey basıncı / ISA
+        self.launch_site = None     # launch_site.resolve_launch_site() çıktısı
+
         self.atmosphere_model = 'standard'  # 'standard' or 'custom'
 
         # Default vehicle parameters
@@ -91,6 +102,36 @@ class TrajectoryAnalyzer:
         self.vehicle_diameter = diameter
         self.drag_coefficient = drag_coefficient
         self.vehicle_length = length
+
+    # ------------------------------------------------------------------
+    # FIRLATMA SAHASI: konum -> yerel g + yüzey atmosfer datumu
+    # ------------------------------------------------------------------
+    def set_launch_site(self, site: Optional[Dict]) -> None:
+        """hrma.analysis.launch_site.resolve_launch_site() çıktısını uygular.
+
+        Etkisi YALNIZCA üç yerdedir:
+          1. Ağırlık terimi (dinamikteki g) -> g_surface
+          2. İtki/ağırlık oranı              -> g_surface
+          3. Atmosfer datumu (ΔT, P oranı)   -> ISA profili kaydırılır
+
+        DOKUNULMAYANLAR: Isp, ideal delta-v ve USSA 1976 basınç bağıntıları
+        standart g0 = 9.80665 ile hesaplanmaya devam eder.
+
+        site None ya da boşsa tüm alanlar varsayılana döner ve sonuçlar
+        saha katmanı hiç eklenmemiş gibi BİREBİR aynı olur.
+        """
+        if not site:
+            self.g_surface = G_0
+            self.site_temp_offset_k = 0.0
+            self.site_pressure_ratio = 1.0
+            self.launch_site = None
+            return
+        self.launch_site = site
+        g_local = site.get('gravity_local_m_s2')
+        self.g_surface = float(g_local) if g_local else G_0
+        self.site_temp_offset_k = float(site.get('temperature_offset_k', 0.0) or 0.0)
+        ratio = site.get('pressure_ratio', 1.0)
+        self.site_pressure_ratio = float(ratio) if ratio else 1.0
 
     # ------------------------------------------------------------------
     # AERODİNAMİK: Mach-bağımlı sürükleme katsayısı
@@ -189,10 +230,29 @@ class TrajectoryAnalyzer:
         isp = motor_data['isp']  # s
         propellant_mass = motor_data['propellant_mass_total']  # kg
 
+        # --- Fırlatma sahası (opsiyonel) ---------------------------------
+        # 'launch_site' anahtarı verilmişse (launch_site.resolve_launch_site
+        # çıktısı) yerel g + saha rakımı + yüzey T/P datumu uygulanır.
+        # Yalnız 'launch_latitude' verilmişse enlemden yerel g türetilir.
+        # Hiçbiri yoksa hiçbir şey değişmez (regresyon kilidi).
+        site = launch_params.get('launch_site')
+        if site is None and launch_params.get('launch_latitude') is not None:
+            from hrma.analysis.launch_site import local_gravity
+            site = {
+                'gravity_local_m_s2': local_gravity(
+                    float(launch_params['launch_latitude']),
+                    float(launch_params.get('launch_altitude', 0) or 0.0)),
+                'latitude_deg': float(launch_params['launch_latitude']),
+            }
+        self.set_launch_site(site)
+
         # Extract launch parameters
         # launch_angle = YÜKSELİŞ AÇISI (ufuktan), 90° = dikey yukarı.
         launch_angle = np.radians(launch_params.get('launch_angle', 85))  # degrees to radians
         launch_altitude = launch_params.get('launch_altitude', 0)  # m
+        if site and site.get('elevation_m') is not None and \
+                launch_params.get('launch_altitude') is None:
+            launch_altitude = float(site['elevation_m'])
         wind_speed = launch_params.get('wind_speed', 0)  # m/s
         wind_direction = np.radians(launch_params.get('wind_direction', 0))  # degrees to radians
 
@@ -229,7 +289,7 @@ class TrajectoryAnalyzer:
             trajectory_data, motor_data, launch_params
         )
 
-        return {
+        result = {
             'trajectory': trajectory_data,
             'performance': performance_metrics,
             'motor_data': motor_data,
@@ -542,9 +602,11 @@ class TrajectoryAnalyzer:
         # standart fırlatma aracı konvansiyonu). Kuru (yanma-sonu) kütle
         # kullanmak T/W'yi (m_kuru+m_yakıt)/m_kuru katı şişirir → ray-çıkış
         # >1.5 stabilite kuralına karşı TEHLİKELİ derecede iyimser sonuç verir.
+        # AĞIRLIK terimi saha yerçekimini kullanır (W = m·g_yerel). Saha
+        # verilmemişse g_surface == g0 → eski sayı birebir korunur.
         loaded_mass = self.vehicle_mass_dry + motor_data['propellant_mass_total']
-        thrust_to_weight = motor_data['thrust'] / (loaded_mass * self.g0)
-        total_impulse_to_weight = motor_data['total_impulse'] / (loaded_mass * self.g0)
+        thrust_to_weight = motor_data['thrust'] / (loaded_mass * self.g_surface)
+        total_impulse_to_weight = motor_data['total_impulse'] / (loaded_mass * self.g_surface)
 
         # Efficiency metrics
         burnout_altitude = trajectory['phases']['powered']['max_altitude_powered']
@@ -555,6 +617,8 @@ class TrajectoryAnalyzer:
 
         # Safety metrics
         landing_velocity = trajectory['phases']['descent']['landing_velocity']
+        # Yük faktörü (g cinsinden ivme) STANDART g0 ile ifade edilir —
+        # havacılık konvansiyonu; saha yerçekimiyle ölçeklenmez.
         max_g_force = max_acceleration / self.g0
 
         return {
@@ -644,6 +708,13 @@ class TrajectoryAnalyzer:
             T = T_top
             P = P_top * np.exp(-self.g0 * M_AIR * (H - H_TABLE_TOP) / (R_STAR_ICAO * T_top))
 
+        # Saha datumu (standart-dışı gün): sıcaklık profili sabit ΔT ile
+        # kaydırılır, basınç profili ölçülen yüzey basıncı oranıyla ölçeklenir
+        # (MIL-STD-210 sıcak/soğuk gün mantığı; OpenRocket/RASAero paritesi).
+        # Varsayılan (0.0, 1.0) sonucu DEĞİŞTİRMEZ.
+        T = float(T) + self.site_temp_offset_k
+        P = float(P) * self.site_pressure_ratio
+
         # Sayısal güvenlik tabanı: T ve P fiziksel olarak pozitif kalmalı.
         T = max(float(T), 150.0)   # mezosfer/termosfer alt sınırı (~150-190 K)
         P = max(float(P), 1e-9)    # vakuma yakın taban (negatif/sıfır engelle)
@@ -664,8 +735,11 @@ class TrajectoryAnalyzer:
         """
         rho, _P, _T, _a = self._atm_full(altitude)
 
-        # Gravity variation with altitude (ters kare yasası)
-        g = self.g0 * (self.R_earth / (self.R_earth + max(altitude, 0.0))) ** 2
+        # Gravity variation with altitude (ters kare yasası).
+        # Taban değer SAHA yerçekimidir (enlem bağımlı, WGS84 Somigliana);
+        # saha ayarlanmamışsa g_surface == G_0 olduğundan eski sonuç birebir
+        # korunur. Isp/ideal-dV bu değeri KULLANMAZ (bkz. set_launch_site).
+        g = self.g_surface * (self.R_earth / (self.R_earth + max(altitude, 0.0))) ** 2
 
         return rho, g
 

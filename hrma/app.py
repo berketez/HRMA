@@ -420,8 +420,72 @@ def calculate():
                 slot_width=data.get('slot_width', 0),
                 slot_height=data.get('slot_height', 0)
             )
-        
+        elif data.get('injector_type', 'showerhead') == 'impingement':
+            # 2026-07-22 denetim bulgusu: form 6 alan gönderiyordu, çözücüye
+            # HİÇBİRİ ulaşmıyordu. Eşleşenler bağlandı; eşleşmeyenler aşağıda
+            # 'unused_inputs' ile AÇIKÇA bildirilir (sessiz yutma yasak).
+            d_orif = data.get('orifice_diameter') or 0
+            injector.set_impingement_params(
+                n_pairs=data.get('element_pairs', 0) or 0,
+                impingement_angle=data.get('impingement_angle')
+                or 2 * IMPINGEMENT_HALF_ANGLE_DEG,
+                # Kullanıcı delik çapını sabitlediyse arama bandı o değere
+                # kilitlenir; vermediyse model kendi bandında çözer.
+                hole_diameter_min=d_orif if d_orif > 0 else 0.3,
+                hole_diameter_max=d_orif if d_orif > 0 else 2.0,
+            )
+        elif data.get('injector_type', 'showerhead') == 'coaxial':
+            # İç jet debi payı, kullanıcının verdiği geometriden TÜRETİLİR:
+            # f_inner = A_ic / (A_ic + A_anulus). Oran ölçekten bağımsız
+            # olduğu için modelin debi-alan çözümüyle tutarlı kalır.
+            d_in = data.get('inner_diameter') or 0
+            d_out = data.get('outer_annulus_diameter') or 0
+            f_inner = None
+            if d_in > 0 and d_out > d_in:
+                a_in = d_in ** 2
+                a_ann = d_out ** 2 - d_in ** 2
+                f_inner = a_in / (a_in + a_ann)
+            if f_inner is not None:
+                injector.set_coaxial_params(inner_flow_fraction=f_inner)
+
         injector_results = injector.calculate()
+
+        # --- Tüketilmeyen enjektör girdileri AÇIKÇA raporlanır -------------
+        # Bu projede sessizce yutulan girdi yoktur: modelin kabul etmediği ya
+        # da SONUÇ olarak hesapladığı alanlar kullanıcıya gerekçesiyle döner.
+        _inj_type = data.get('injector_type', 'showerhead')
+        _unused = []
+        if _inj_type == 'impingement':
+            if data.get('impingement_distance'):
+                _unused.append(('impingement_distance',
+                                'model bu mesafeyi çarpışma açısı ve delik '
+                                'çapından HESAPLAR; sonuçtaki değere bakınız'))
+            if data.get('momentum_ratio'):
+                _unused.append(('momentum_ratio',
+                                'bu yol benzer-akışkan (like-on-like) doublet '
+                                'modeller; momentum oranı ölçütü farklı-akışkan '
+                                'çarpışmada geçerlidir'))
+            _pat = data.get('impingement_pattern')
+            if _pat and _pat not in ('like_on_like', 'doublet'):
+                _unused.append(('impingement_pattern',
+                                f"'{_pat}' düzeni bu yolda modellenmiyor; tam "
+                                'çözüm için Enjektör Tasarımı panelini '
+                                'kullanınız (doublet/triplet/like/coax-swirl)'))
+        elif _inj_type == 'coaxial':
+            if data.get('recess_length'):
+                _unused.append(('recess_length',
+                                'model girintiyi iç jet çapından HESAPLAR; '
+                                'sonuçtaki değere bakınız'))
+            if data.get('n_elements'):
+                _unused.append(('n_elements',
+                                'bu yol tek koaksiyel eleman boyutlandırır; '
+                                'çok elemanlı dizilim için Enjektör Tasarımı '
+                                'panelini kullanınız'))
+        if _unused and isinstance(injector_results, dict):
+            injector_results['unused_inputs'] = [
+                {'field': f, 'reason': r} for f, r in _unused]
+            injector_results.setdefault('warnings', []).extend(
+                f"Input '{f}' was not consumed: {r}" for f, r in _unused)
 
         # Fizik limiti doğrulaması (ValidationSystem, Sutton & Biblarz +
         # NASA SP-8089 aralıkları): rapor üretilemezse /calculate ASLA

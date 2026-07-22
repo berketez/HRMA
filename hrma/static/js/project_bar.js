@@ -87,6 +87,25 @@
         });
     }
 
+    // Ana yol import_ui.js'tir (advanced/liquid/solid). Ana sayfada import_ui
+    // yüklü DEĞİLDİR, bu yüzden aşağıdaki yedek çalışır. İki uygulama da AYNI
+    // istif kabını (#hrma-toast-stack) kullanır: bildirimler üst üste binmez,
+    // alt kenardan yukarı dizilir (bkz. import_ui.js'teki İSTİFLEME notu).
+    var TOAST_HOST_ID = 'hrma-toast-stack';
+
+    function toastHost() {
+        var host = document.getElementById(TOAST_HOST_ID);
+        if (host) return host;
+        host = document.createElement('div');
+        host.id = TOAST_HOST_ID;
+        host.style.cssText =
+            'position:fixed; right:18px; bottom:18px; z-index:99995;' +
+            'display:flex; flex-direction:column; gap:8px; align-items:flex-end;' +
+            'pointer-events:none;';
+        document.body.appendChild(host);
+        return host;
+    }
+
     function toast(message, kind) {
         if (window.HRMAImportUI && window.HRMAImportUI.toast) {
             window.HRMAImportUI.toast(message, kind);
@@ -98,15 +117,20 @@
             var c = colors[kind] || colors.info;
             var node = document.createElement('div');
             node.style.cssText =
-                'position:fixed; right:18px; bottom:18px; z-index:99995;' +
                 'max-width:420px; padding:12px 16px; font-size:0.82rem;' +
                 'font-family:var(--hd-mono, monospace); color:' + c + ';' +
                 'background:var(--hd-panel-solid, #0a1524); border:1px solid ' + c + ';' +
-                'border-radius:var(--hd-radius-sm, 8px);';
+                'border-radius:var(--hd-radius-sm, 8px); pointer-events:auto;' +
+                'box-shadow:var(--hd-shadow, 0 14px 44px rgba(0,0,0,0.42));';
             node.textContent = String(message);
-            document.body.appendChild(node);
+            toastHost().appendChild(node);
             setTimeout(function () {
-                if (node.parentNode) node.parentNode.removeChild(node);
+                var host = node.parentNode;
+                if (host) host.removeChild(node);
+                if (host && host.id === TOAST_HOST_ID && !host.firstChild
+                    && host.parentNode) {
+                    host.parentNode.removeChild(host);
+                }
             }, 6000);
         } catch (e) { /* sessiz */ }
     }

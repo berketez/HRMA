@@ -41,6 +41,28 @@
     // ------------------------------------------------------------------
     // Küçük toast bildirimi (koyu tema; sayfa fonksiyonlarına bağımlı değil)
     // ------------------------------------------------------------------
+    // İSTİFLEME (2026-07-23): toast'lar eskiden tek tek
+    // `position:fixed; right:18px; bottom:18px` ile basılıyordu; iki bildirim
+    // 6 sn'lik ömür penceresinde üst üste gelirse TAM ÜSTÜNE biniyor ve
+    // alttaki hiç okunamıyordu (ör. "Proje kaydedildi" + "Dosya içe aktarıldı").
+    // Artık ortak bir sabit kap kullanılır, bildirimler alt kenardan yukarı
+    // doğru dizilir. Kap id ile idempotent oluşturulur: project_bar.js'teki
+    // yedek uygulama da aynı kabı bulur, iki dosya birbirine bağımlı olmaz.
+    var TOAST_HOST_ID = 'hrma-toast-stack';
+
+    function toastHost() {
+        var host = document.getElementById(TOAST_HOST_ID);
+        if (host) return host;
+        host = document.createElement('div');
+        host.id = TOAST_HOST_ID;
+        host.style.cssText =
+            'position:fixed; right:18px; bottom:18px; z-index:99995;' +
+            'display:flex; flex-direction:column; gap:8px; align-items:flex-end;' +
+            'pointer-events:none;';
+        document.body.appendChild(host);
+        return host;
+    }
+
     function toast(message, kind) {
         try {
             var colors = { ok: 'var(--hd-green, #2dd4a8)', err: 'var(--hd-red, #ff5d73)',
@@ -48,16 +70,21 @@
             var c = colors[kind] || colors.info;
             var node = document.createElement('div');
             node.style.cssText =
-                'position:fixed; right:18px; bottom:18px; z-index:99995;' +
                 'max-width:420px; padding:12px 16px; font-size:0.82rem;' +
                 'font-family:var(--hd-mono, monospace); color:' + c + ';' +
                 'background:var(--hd-panel-solid, #0a1524); border:1px solid ' + c + ';' +
-                'border-radius:var(--hd-radius-sm, 8px);' +
+                'border-radius:var(--hd-radius-sm, 8px); pointer-events:auto;' +
                 'box-shadow:var(--hd-shadow, 0 14px 44px rgba(0,0,0,0.42));';
             node.textContent = String(message);
-            document.body.appendChild(node);
+            toastHost().appendChild(node);
             setTimeout(function () {
-                if (node.parentNode) node.parentNode.removeChild(node);
+                var host = node.parentNode;
+                if (host) host.removeChild(node);
+                // Kap boşaldıysa DOM'da kalıntı bırakma
+                if (host && host.id === TOAST_HOST_ID && !host.firstChild
+                    && host.parentNode) {
+                    host.parentNode.removeChild(host);
+                }
             }, 6000);
         } catch (e) { /* toast asla sayfayı kırmaz */ }
     }

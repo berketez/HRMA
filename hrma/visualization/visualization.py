@@ -478,14 +478,24 @@ def create_motor_plot(motor_data):
         height=600,
         plot_bgcolor='white',
         annotations=annotations,
-        margin=dict(t=80, b=80, l=100, r=60)
+        # b: 80 -> 125, alttaki yedek-şema uyarısına yer açmak için
+        margin=dict(t=80, b=125, l=100, r=60)
     )
+    # Uyarı BAŞLIK BANDINA değil çizim alanının ALTINA basılır (2026-07-23).
+    # Eski hâli x=0.5, y=1.06, yref='paper' idi: t=80 ve height=600 ile çizim
+    # alanı ~440 px, yani annotation çizim alanının yalnız ~26 px üstünde
+    # kalıyor ve aynı 80 px'lik bantta ortalanmış 18 px'lik başlıkla üst üste
+    # biniyordu. Alt kenar kalıbı bu dosyada zaten kullanılıyor (y=-0.14/-0.06
+    # emsalleri). Metin ayrıca iki satıra bölündü: Plotly annotation'ı width
+    # verilmedikçe satır kaydırmaz, ~130 karakterlik tek satır dar konteynerde
+    # yatay olarak taşıyordu.
     fig.add_annotation(
-        x=0.5, y=1.06, xref='paper', yref='paper', showarrow=False,
+        x=0.0, y=-0.20, xref='paper', yref='paper', xanchor='left',
+        showarrow=False, align='left',
         text=('Fallback schematic — the solver nozzle contour was not '
-              'available for this run; nozzle proportions are drawn, not '
-              'computed.'),
-        font=dict(size=11, color=COL_WARN_HI), align='center')
+              'available for this run;<br>nozzle proportions are drawn, '
+              'not computed.'),
+        font=dict(size=11, color=COL_WARN_HI))
 
     return _fig_json(fig)
 

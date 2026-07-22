@@ -1273,6 +1273,12 @@
     <script src="/static/js/update_check.js"></script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/i18n_formulas.js"></script>
+    <!-- update_check.js'in metinleri (update.* + common.ok, 22 anahtar)
+         i18n_common.js'te yaşar. Diğer sayfalarda bu sözlüğü analysis_dock.js
+         kendiliğinden enjekte eder (bkz. analysis_dock.js "Sözlük güvencesi"),
+         ama bu sayfada güverte yok -> Türkçe'deyken güncelleme modalı
+         tamamen İngilizce açılıyordu. Sözlük burada doğrudan yüklenir. -->
+    <script src="/static/js/i18n_common.js"></script>
     <!-- Kabuk: Sürüm Notları + Ayarlar (dil seçimi dahil). Bağlantılar
          gezinme şeridine çalışma anında eklenir; anahtarlar i18n_shell.js'te. -->
     <script src="/static/js/i18n_shell.js"></script>

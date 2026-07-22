@@ -3316,6 +3316,23 @@
                 data.n_slots = parseInt(document.getElementById('n_slots')?.value || 6);
                 data.slot_width = parseFloat(document.getElementById('slot_width')?.value || 0);
                 data.slot_height = parseFloat(document.getElementById('slot_height')?.value || 0);
+            } else if (injectorType === 'impingement') {
+                // 2026-07-22 denetim bulgusu: impingement ve coaxial tiplerinde
+                // form 6+4 alan üretiyordu ama HİÇBİRİ gönderilmiyordu — girdiler
+                // sessizce çöpe gidiyordu. Artık hepsi gönderilir; çözücünün
+                // tüketmediği alanlar yanıtta 'unused_inputs' olarak AÇIKÇA
+                // raporlanır (sessiz yutma yasak).
+                data.impingement_pattern = document.getElementById('impingement_pattern')?.value || 'like_on_like';
+                data.impingement_angle = parseFloat(document.getElementById('impingement_angle')?.value || 60);
+                data.element_pairs = parseInt(document.getElementById('element_pairs')?.value || 0);
+                data.orifice_diameter = parseFloat(document.getElementById('orifice_diameter')?.value || 0);
+                data.impingement_distance = parseFloat(document.getElementById('impingement_distance')?.value || 0);
+                data.momentum_ratio = parseFloat(document.getElementById('momentum_ratio')?.value || 0);
+            } else if (injectorType === 'coaxial') {
+                data.inner_diameter = parseFloat(document.getElementById('inner_diameter')?.value || 0);
+                data.outer_annulus_diameter = parseFloat(document.getElementById('outer_annulus_diameter')?.value || 0);
+                data.recess_length = parseFloat(document.getElementById('recess_length')?.value || 0);
+                data.n_elements = parseInt(document.getElementById('n_elements')?.value || 0);
             }
             
             // Ensure all required parameters have values
