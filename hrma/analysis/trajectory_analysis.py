@@ -301,6 +301,12 @@ class TrajectoryAnalyzer:
                 'cross_sectional_area': cross_sectional_area
             }
         }
+        # Fırlatma sahası uygulandıysa çözümün hangi konumda yapıldığı
+        # sonuçla birlikte döner (rapor/UI bunu gösterir); saha yoksa anahtar
+        # eklenmez ve çıktı sözleşmesi eskisiyle birebir aynı kalır.
+        if self.launch_site:
+            result['launch_site'] = self.launch_site
+        return result
 
     def _aero_drag_components(self, vx: float, vz: float, rho: float,
                              altitude: float, area: float, cd_override: Optional[float],
