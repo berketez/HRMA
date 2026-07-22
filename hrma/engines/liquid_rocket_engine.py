@@ -2356,6 +2356,119 @@ class LiquidRocketEngine:
             '(pump discharge to injector; Sutton Ch. 6 cycle schematics)')
         return march
 
+    def _gas_gas_injector_spec(self):
+        """FFSC ana odası için gaz-gaz enjektör spec'i (çevrim çözümünden).
+
+        Yalnız full_flow_staged çevrimde ve çevrim dengesi kapanmışsa dolu
+        döner: ana odaya giren İKİ ön yakıcı egzozunun (T0, P0) akım
+        koşulları çevrim çözümünden, gaz bileşimi (gamma, MW) ön yakıcı CEA
+        çözümünden gelir — varsayılan sabit yok (uydurma yasağı). Koşullar
+        sağlanmıyorsa None (sıvı model + uyarı yolu).
+        """
+        if getattr(self, 'engine_cycle', '') != 'full_flow_staged':
+            return None
+        cyc = getattr(self, '_cycle_result', None)
+        if not cyc or cyc.get('status') != 'converged':
+            return None
+        streams = (cyc.get('main_chamber') or {}).get('inlet_streams') or []
+        gas_streams = [s for s in streams if s.get('phase') == 'gas']
+        if len(gas_streams) != 2:
+            return None
+        preburners = {p.get('mode'): p for p in (cyc.get('preburners') or [])}
+        pb_f = preburners.get('fuel_rich')
+        pb_ox = preburners.get('ox_rich')
+        if not pb_f or not pb_ox:
+            return None
+
+        def _stream(label_part):
+            for s in gas_streams:
+                if label_part in str(s.get('label', '')):
+                    return s
+            return None
+
+        s_fuel = _stream('fuel-rich')
+        s_ox = _stream('ox-rich')
+        if s_fuel is None or s_ox is None:
+            return None
+
+        spec = {
+            'motor_type': 'liquid',
+            'injector_type': 'gas_gas_coaxial',
+            'Pc_bar': float(self.P_c),
+            'mdot_ox': float(s_ox['mdot_kg_s']),
+            'mdot_fuel': float(s_fuel['mdot_kg_s']),
+            'gas_ox': {
+                'T0_K': float(s_ox['temperature_K']),
+                'P0_bar': float(s_ox['pressure_bar']),
+                'gamma': float(pb_ox['gas']['gamma']),
+                'MW': float(pb_ox['gas']['molecular_weight']),
+            },
+            'gas_fuel': {
+                'T0_K': float(s_fuel['temperature_K']),
+                'P0_bar': float(s_fuel['pressure_bar']),
+                'gamma': float(pb_f['gas']['gamma']),
+                'MW': float(pb_f['gas']['molecular_weight']),
+            },
+        }
+        cd_user = getattr(self, 'injector_cd_input', None)
+        if cd_user is not None:
+            spec['cd'] = float(cd_user)
+        return spec
+
+    def _staged_hot_gas_circuit(self):
+        """Staged combustion'da ana odaya giren SICAK GAZ devresinin durumu.
+
+        Tek ön yakıcılı staged çevrimde ana oda gaz+sıvı karışık beslenir
+        (RS-25 tarzı): türbin egzozu gaz devresi sıkıştırılabilir orifis
+        modeliyle (Anderson, "Modern Compressible Flow" Ch. 3 — injector
+        modülündeki compressible_orifice_flow) çözülüp raporlanır; gaz-sıvı
+        coax ELEMAN geometrisi bu sürümde modellenmez ('not_modelled').
+        FFSC bu yoldan geçmez (orada tam gaz-gaz model çalışır).
+        """
+        if getattr(self, 'engine_cycle', '') != 'staged_combustion':
+            return None
+        cyc = getattr(self, '_cycle_result', None)
+        if not cyc or cyc.get('status') != 'converged':
+            return None
+        streams = (cyc.get('main_chamber') or {}).get('inlet_streams') or []
+        gas_streams = [s for s in streams if s.get('phase') == 'gas']
+        preburners = cyc.get('preburners') or []
+        if len(gas_streams) != 1 or not preburners:
+            return None
+        s = gas_streams[0]
+        gas = preburners[0].get('gas') or {}
+        if not gas.get('gamma') or not gas.get('molecular_weight'):
+            return None
+        try:
+            from hrma.engines.injector_design import compressible_orifice_flow
+            r_sp = R_UNIVERSAL / float(gas['molecular_weight'])
+            st = compressible_orifice_flow(
+                0.85, 1.0, float(s['pressure_bar']) * PA_PER_BAR,
+                float(s['temperature_K']), float(gas['gamma']), r_sp,
+                float(self.P_c) * PA_PER_BAR)
+        except Exception:
+            return None
+        p0 = float(s['pressure_bar'])
+        dp = p0 - float(self.P_c)
+        area_m2 = float(s['mdot_kg_s']) / max(st['mass_flux'], 1e-12)
+        return {
+            'label': s.get('label'),
+            'mdot_kg_s': float(s['mdot_kg_s']),
+            'T0_K': float(s['temperature_K']),
+            'P0_bar': p0,
+            'delta_p_bar': dp,
+            'dp_pc_ratio': dp / max(float(self.P_c), 1e-9),
+            'velocity_m_s': float(st['v_exit_m_s']),
+            'mach': float(st['mach']),
+            'choked': bool(st['choked']),
+            'total_area_mm2': area_m2 * 1e6,
+            'cd_assumed': 0.85,
+            'model': ('compressible orifice flow (Anderson, Modern '
+                      'Compressible Flow, Ch. 3); stream state from the '
+                      'cycle power balance'),
+            'element_geometry': 'not_modelled (gas-liquid coax element)',
+        }
+
     def calculate_injector_design(self):
         """High-precision injector design with advanced fluid mechanics"""
         
