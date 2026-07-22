@@ -67,8 +67,69 @@ PERF_MAP_MR_POINTS = 13
 PERF_MAP_PC_POINTS = 11
 PERF_MAP_ALT_POINTS = 13
 PERF_MAP_MR_SPAN = 0.45          # optimum O/F etrafında +-%45 tarama
-PERF_MAP_PC_MIN_BAR, PERF_MAP_PC_MAX_BAR = 20.0, 300.0
+# Üst sınır 300 -> 500 bar (2026-07-22 Raptor entegrasyonu): yanma verisi
+# artık cea_bridge ile GERÇEK Pc'de çözüldüğünden 300 bar kırpması kalktı.
+# 300 bar üzerinde cea_bridge real_gas_warning bayrağı kullanıcıya gösterilir
+# (CEA ideal-gaz çözümü; fugasite/gerçek-gaz düzeltmesi yok).
+PERF_MAP_PC_MIN_BAR, PERF_MAP_PC_MAX_BAR = 20.0, 500.0
 PERF_MAP_ALT_MAX_M = 100000.0
+
+# Vakum Isp referans alan oranı: statik tablo "Area ratio 200:1" çapasıyla
+# aynı sözleşme (bkz. tablo yorumları). CEA canlı çağrısı da vakum
+# referansını bu eps'te üretir ki tablo/CEA kaynakları karşılaştırılabilir
+# kalsın (uçmuş üst kademe lüleleri ~200-300; Sutton & Biblarz 9th ed. Ch. 3).
+VACUUM_REFERENCE_EPS = 200.0
+
+# Kriyojenik soğutucu giriş sıcaklığı varsayılanları [K] — kullanıcı
+# coolant_inlet_temp girmediyse kullanılır ve etiketlenir. Değerler NBP
+# (NIST WebBook: CH4 111.7 K, para-H2 20.3 K) + pompa ısınma payıdır.
+CRYO_COOLANT_INLET_DEFAULT_K = {'methane': 115.0, 'lh2': 25.0}
+
+# Süperkritik istasyon-marşlı soğutma çözümü için kanal giriş basıncı
+# tahmini: P_giris ~ 1.5 x Pc (rejeneratif ceket pompa çıkışı ile enjektör
+# arasındadır; staged/FFSC zincirinde pompa çıkışı 1.5-2.5 x Pc mertebesine
+# çıkar — Sutton 9th ed. Ch. 6 çevrim şemaları). ETİKETLİ varsayımdır;
+# kanal ΔP sonucu pompa zincirine ayrıca işlenir.
+REGEN_CHANNEL_INLET_PRESSURE_FACTOR = 1.5
+
+# Enjektör tipi -> ΔP/Pc oranı (NASA SP-8089 chug kılavuzu bandı içinde
+# tip bazlı seçim; calculate_injector_design ve çevrim çözücüsü AYNI
+# tabloyu kullanır — tek tanım yeri).
+INJECTOR_TYPE_DP_FRACTION = {
+    'impinging': 0.22,    # flight-proven impinging
+    'coaxial': 0.18,      # coax shear (düşük ΔP)
+    'showerhead': 0.28,   # atomizasyon için yüksek ΔP
+    'pintle': 0.15,       # düşük ΔP (kısılabilir)
+}
+INJECTOR_TYPE_DP_FRACTION_DEFAULT = 0.20
+
+# Sıvı enjektörde chug (düşük frekans) kararlılık alt sınırı ΔP/Pc
+# (NASA SP-8089 "Liquid Rocket Engine Injectors": %15-20 bandı).
+CHUG_DP_PC_MIN_LIQUID = 0.15
+CHUG_DP_PC_RECOMMENDED_LIQUID = 0.20
+
+# İlk enine (tanjansiyel) akustik mod katsayısı: f_1T = alpha * a / (pi * D_c),
+# alpha = 1.8412 (J1' Bessel türevinin ilk sıfırı; Harrje & Reardon,
+# NASA SP-194 "Liquid Propellant Rocket Combustion Instability").
+FIRST_TANGENTIAL_MODE_COEFF = 1.8412
+
+# Kısma (throttle) taraması: %40-100 itki bandı (denetim raporu madde 8).
+THROTTLE_SCAN_FRACTIONS = (0.40, 0.55, 0.70, 0.85, 1.00)
+
+# Film soğutma girdi bandı (% yakıt debisi). Tarihsel film debileri ana
+# debinin %1-10'u mertebesindedir (Huzel & Huang Ch. 4); üst sınır geniş
+# bırakılır, aşırı değer uyarı üretir.
+FILM_COOLING_PCT_MAX = 30.0
+
+# Motor arayüz çevrim adı -> cycle_power_balance çözücü adı eşlemesi.
+CYCLE_SOLVER_NAME = {
+    'pressure_fed': 'pressure_fed',
+    'gas_generator': 'gas_generator',
+    'tap_off': 'tap_off',
+    'staged_combustion': 'staged_combustion',
+    'expander': 'expander',
+    'full_flow_staged': 'full_flow_staged_combustion',
+}
 
 # Yanma süresi [s]: kullanıcı max_burn_duration vermezse VARSAYIM olarak
 # kullanılır ve çıktıda 'burn_time_source' ile etiketlenir.
@@ -517,7 +578,8 @@ class LiquidRocketEngine:
             'Turbine expansion ratio') or TURBINE_PRESSURE_RATIO_DEFAULT
         cycle = self._override_choice(
             'engine_cycle', {'pressure_fed', 'gas_generator',
-                             'staged_combustion', 'expander', 'tap_off'},
+                             'staged_combustion', 'expander', 'tap_off',
+                             'full_flow_staged'},
             'Engine cycle')
         if cycle is not None:
             self.engine_cycle = cycle
@@ -528,6 +590,24 @@ class LiquidRocketEngine:
             self.engine_cycle = ('pressure_fed'
                                  if self.feed_system_type == 'pressure_fed'
                                  else 'gas_generator')
+        # Staged combustion ön yakıcı tipi (fuel_rich | ox_rich). FFSC'de iki
+        # ön yakıcı zaten sabittir (biri fuel-rich, biri ox-rich).
+        self.preburner_mode = (self._override_choice(
+            'preburner_type', {'fuel_rich', 'ox_rich'}, 'Preburner type')
+            or 'fuel_rich')
+        # Film soğutma debisi (% yakıt debisi). Girilmediyse 0 -> film yok.
+        v = self._override_val('film_cooling_percent', 0.0,
+                               FILM_COOLING_PCT_MAX,
+                               'Film cooling flow', ' %')
+        self.film_cooling_percent = 0.0 if v is None else v
+        # Basınçlandırma tipi seçimi (autogenous yalnız CH4/LH2 + LOX
+        # turbopompalı konfigürasyonda sayısal olarak boyutlandırılır).
+        self.pressurization_choice = self._override_choice(
+            'pressurization_type', {'auto', 'autogenous', 'helium',
+                                    'nitrogen'}, 'Pressurization type')
+        # Derin kısma alt sınırı (% itki) — kısma taramasıyla karşılaştırılır.
+        self.min_throttle_pct = self._override_val(
+            'min_throttle', 5.0, 100.0, 'Minimum throttle', ' %')
 
         # --- girdi tutarlılık denetimleri -----------------------------------
         if (self.chamber_diameter_input_m is not None

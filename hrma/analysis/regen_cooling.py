@@ -85,6 +85,65 @@ Coolant properties:
     CoolProp fluid, so its internal table is always used. Property source is
     selectable and can be forced to the internal table for reproducibility.
 
+Supercritical methane / hydrogen coolants (added 2026-07-22):
+  - ``coolant='methane'`` and ``coolant='hydrogen'`` are supported with FULL
+    (T, P)-dependent properties from CoolProp (Bell et al. 2014, Ind. Eng.
+    Chem. Res. 53(6)): methane EOS Setzmann & Wagner (1991, J. Phys. Chem.
+    Ref. Data 20), hydrogen as PARA-hydrogen (Leachman et al. 2009, J. Phys.
+    Chem. Ref. Data 38 — rocket-grade LH2 is >99 % para at NBP). CoolProp is
+    MANDATORY for these coolants: there is no internal table and no constant
+    fallback (fabricated-value guard); an out-of-range state raises an
+    explicit ValueError.
+  - The coolant march for these fluids is ENTHALPY based:
+        h2 = h1 + dQ/mdot,   T = T(P, h)
+    instead of dT = dQ/(mdot*cp). Near the pseudo-critical temperature the
+    cp(T) peak (e.g. CH4: T_pc ~ 199-252 K for 60-300 bar) makes the cp form
+    inaccurate; the enthalpy form is exact for steady single-phase flow.
+  - Coolant-side heat transfer at supercritical pressure uses the Jackson
+    forced-convection correlation with wall-to-bulk property-ratio
+    corrections (Jackson & Hall 1979, in Kakac & Spalding eds., "Turbulent
+    Forced Convection in Channels and Bundles", Vol. 2; restated in Jackson
+    2013, Nucl. Eng. Des. 264):
+        Nu_b = 0.0183 Re_b^0.82 Pr_b^0.5 (rho_w/rho_b)^0.3 (cp_bar/cp_b)^n
+    with cp_bar = (h_w - h_b)/(T_w - T_b) and the piecewise n exponent based
+    on T_b, T_w and the pseudo-critical temperature T_pc (cp-maximum at the
+    local pressure). This correlation family is the standard engineering
+    model for supercritical-methane rocket cooling channels (e.g. Urbano &
+    Nasuti 2013, J. Thermophys. Heat Transfer 27(2)). Because Nu depends on
+    the cold-wall temperature, the station wall balance solves the coupled
+    (h_g, h_c, T_wall_hot, T_wall_cold) fixed point with damping.
+  - Coolant-side area on this path uses the channel-land EXTENDED-SURFACE
+    (fin) model (``fin_area_ratio``, default on via ``fin_effect=True``):
+    the two channel side walls act as straight rectangular fins,
+    eta_f = tanh(mL)/(mL), m = sqrt(2 h_c/(k_w t_land)) (Incropera &
+    DeWitt 6th ed. Ch. 3.6; lands-as-fins treatment per Huzel & Huang
+    Ch. 4). The legacy water/RP-1 path keeps its original coolant-side
+    area = gas-side area assumption unchanged.
+  - Channel pressure drop adds the ACCELERATION (momentum) term to the
+    Darcy-Weisbach friction term:
+        dP_acc = G^2 * (1/rho_out - 1/rho_in)
+    (1D steady momentum balance, constant-area duct; Collier & Thome,
+    "Convective Boiling and Condensation", 3rd ed., Ch. 2).
+  - If the local channel pressure is BELOW the coolant critical pressure the
+    solver falls back to Dittus-Boelter and checks the local saturation
+    temperature: bulk or cold-wall temperatures at/near T_sat raise explicit
+    boiling-risk warnings (the model itself remains single phase — boiling
+    is NOT modelled, it is flagged).
+
+Integration API (for the liquid-engine chain; kept module-local here):
+  - Inputs: coolant + coolant_mdot [kg/s] + coolant_inlet_temp [K] +
+    coolant_inlet_pressure [Pa], channel geometry (n_channels, width, height,
+    wall_thickness, wall_material, roughness), nozzle geometry (throat/exit
+    diameter or expansion ratio) and the gas-side state (chamber P/T, gamma,
+    MW or a full ``motor_data`` dict — Bartz flux is computed internally from
+    the shared HeatTransferAnalyzer single source).
+  - Call ``RegenCooling(...).solve()``. Outputs: ``summary`` block with
+    coolant_exit_temp_K (T_out), coolant_exit_pressure_bar (P_out),
+    max_wall_hot_K (Twall_max), pressure-drop split
+    (friction/acceleration), warnings list; plus per-station arrays
+    (x_mm, T_wall_hot_K, T_wall_cold_K, T_coolant_K, P_coolant_bar, q_MW_m2,
+    velocity_m_s, coolant enthalpy for methane/hydrogen).
+
 Coking:
   - RP-1 begins to coke (form carbon deposits) when the fuel-side (cold) wall
     temperature exceeds ~561 K. A warning is raised when any station's
@@ -122,6 +181,13 @@ __all__ = [
     'water_properties',
     'rp1_properties',
     'RP1_COKING_TEMP_K',
+    'jackson_nu',
+    'jackson_exponent_n',
+    'pseudocritical_temperature',
+    'acceleration_dp',
+    'fin_area_ratio',
+    'SUPERCRITICAL_COOLANT_FLUIDS',
+    'BOILING_MARGIN_K',
 ]
 
 # ---------------------------------------------------------------------------
@@ -137,11 +203,31 @@ RE_LAMINAR_MAX = 2300.0
 # Dittus-Boelter türbülan geçerlilik tabanı (Incropera 6. baskı Eq. 8.60).
 RE_TURBULENT_FLOOR = 1.0e4
 
-N_STATIONS_MIN = 20
-N_STATIONS_MAX = 50
+# Rejeneratif soğutma marşının kendi istasyon klampı (testlerle çapalı 20/50).
+# nozzle_flow_1d'nin 30/60 klampından BİLEREK farklı — ayrı modül, ayrı
+# ayrıklaştırma politikası; ad çakışması olmasın diye REGEN_ önekiyle.
+REGEN_N_STATIONS_MIN = 20
+REGEN_N_STATIONS_MAX = 50
 
 FLOW_COUNTERFLOW = 'counterflow'  # soğutucu çıkış -> boğaz -> kamara (varsayılan)
 FLOW_COFLOW = 'coflow'            # soğutucu kamara -> boğaz -> çıkış
+
+# Süperkritik-yetenekli soğutucular -> CoolProp akışkan adları.
+# Metan: Setzmann & Wagner (1991) EOS. Hidrojen: PARA-hidrojen
+# (Leachman ve ark. 2009) — roket LH2'si NBP'de >%99 para izomeridir;
+# normal (%75 orto) hidrojen değil.
+SUPERCRITICAL_COOLANT_FLUIDS = {
+    'methane': 'Methane',
+    'hydrogen': 'ParaHydrogen',
+}
+
+# Kaynama-riski tarama marjı [K]: kritik-altı basınçta yığın sıcaklığı yerel
+# Tsat'a bu kadar yaklaşınca uyarı üretilir. Mühendislik tarama eşiğidir
+# (fiziksel sabit değil); uyarı metninde açıkça belirtilir.
+BOILING_MARGIN_K = 10.0
+
+# Pseudo-kritik sıcaklık önbelleği: (akışkan, 0.5 bar kovalı basınç) -> T_pc.
+_PSEUDOCRITICAL_CACHE: Dict = {}
 
 # ---------------------------------------------------------------------------
 # Soğutucu özellik tabloları (sıcaklığa bağlı, doğrusal interpolasyon)
@@ -277,6 +363,166 @@ def darcy_weisbach_dp(friction_factor: float, length: float,
             * 0.5 * density * velocity * velocity)
 
 
+def fin_area_ratio(channel_width: float, channel_height: float,
+                   pitch: float, land_thickness: float,
+                   h_coolant: float, k_wall: float) -> float:
+    """Coolant-side extended-surface (fin) area ratio A_eff/A_gas.
+
+    Milled-channel regen liners expose the channel bottom PLUS the two side
+    walls (lands) to the coolant; the lands act as straight rectangular fins
+    of thickness t_land and height h_ch. Standard treatment (Huzel & Huang,
+    "Modern Engineering for Design of Liquid-Propellant Rocket Engines",
+    Ch. 4 — channel lands as fins; Incropera & DeWitt 6th ed. Ch. 3.6):
+
+        eta_f = tanh(m*h_ch) / (m*h_ch),   m = sqrt(2*h_c / (k_w * t_land))
+        A_eff/A_gas = (w + 2*eta_f*h_ch) / pitch
+
+    (adiabatic fin tip, Incropera Eq. 3.86; m from Eq. 3.85 with
+    P/A_c ~ 2/t for a thin rectangular fin). Each land is shared by two
+    neighbouring channels, so per channel-pitch exactly one land (two half
+    sides) is counted: w + 2*eta*h over the pitch.
+    """
+    if pitch <= 0.0 or channel_width <= 0.0 or channel_height <= 0.0:
+        raise ValueError("pitch, channel width and height must be positive.")
+    if h_coolant <= 0.0 or k_wall <= 0.0:
+        raise ValueError("h_coolant and k_wall must be positive.")
+    t_land = max(land_thickness, 1.0e-5)   # sayısal taban (kanallar sığmıyorsa
+    #                                        ayrı GEOMETRY uyarısı zaten var)
+    m_fin = math.sqrt(2.0 * h_coolant / (k_wall * t_land))
+    m_l = m_fin * channel_height
+    eta_f = math.tanh(m_l) / m_l if m_l > 1.0e-9 else 1.0
+    return (channel_width + 2.0 * eta_f * channel_height) / pitch
+
+
+def acceleration_dp(mass_flux: float, rho_in: float, rho_out: float) -> float:
+    """Acceleration (momentum) pressure drop [Pa] in a constant-area duct.
+
+        dP_acc = G^2 * (1/rho_out - 1/rho_in),   G = mdot/A_c  [kg/m^2/s]
+
+    One-dimensional steady momentum balance for a constant-area channel
+    (Collier & Thome, "Convective Boiling and Condensation", 3rd ed., Ch. 2,
+    acceleration pressure-gradient term). Positive when the heated fluid
+    expands (rho_out < rho_in) — significant for supercritical coolants whose
+    density changes strongly along the channel.
+    """
+    if rho_in <= 0.0 or rho_out <= 0.0:
+        raise ValueError("Densities must be positive [kg/m^3].")
+    return mass_flux * mass_flux * (1.0 / rho_out - 1.0 / rho_in)
+
+
+def jackson_exponent_n(t_bulk: float, t_wall: float, t_pc: float) -> float:
+    """Jackson property-ratio exponent n for the (cp_bar/cp_b)^n term.
+
+    Piecewise form (Jackson & Hall 1979; Jackson 2013, Nucl. Eng. Des. 264):
+
+        n = 0.4                                    T_w <= T_pc  or  T_b >= 1.2*T_pc
+        n = 0.4 + 0.2*(T_w/T_pc - 1)               T_b <= T_pc < T_w
+        n = 0.4 + 0.2*(T_w/T_pc - 1)
+                * (1 - 5*(T_b/T_pc - 1))           T_pc < T_b < 1.2*T_pc, T_b < T_w
+
+    Continuous across the regime boundaries (checked in tests).
+    """
+    if t_pc <= 0.0 or t_bulk <= 0.0 or t_wall <= 0.0:
+        raise ValueError("Temperatures must be positive [K].")
+    if t_wall <= t_pc or t_bulk >= 1.2 * t_pc:
+        return 0.4
+    if t_bulk <= t_pc:
+        return 0.4 + 0.2 * (t_wall / t_pc - 1.0)
+    return (0.4 + 0.2 * (t_wall / t_pc - 1.0)
+            * (1.0 - 5.0 * (t_bulk / t_pc - 1.0)))
+
+
+def jackson_nu(reynolds: float, prandtl: float, rho_wall_over_bulk: float,
+               cp_bar_over_bulk: float, n_exponent: float) -> float:
+    """Jackson supercritical forced-convection Nusselt number.
+
+        Nu_b = 0.0183 * Re_b^0.82 * Pr_b^0.5
+               * (rho_w/rho_b)^0.3 * (cp_bar/cp_b)^n
+
+    Jackson & Hall (1979), in Kakac & Spalding (eds.), "Turbulent Forced
+    Convection in Channels and Bundles", Vol. 2; restated in Jackson (2013),
+    Nucl. Eng. Des. 264. cp_bar = (h_w - h_b)/(T_w - T_b) is the integrated
+    mean specific heat between bulk and wall. Standard engineering model for
+    supercritical-pressure cooling channels (applied to CH4 rocket cooling in
+    e.g. Urbano & Nasuti 2013, J. Thermophys. Heat Transfer 27(2)).
+    """
+    if reynolds <= 0.0:
+        raise ValueError("Reynolds number must be positive.")
+    if prandtl <= 0.0:
+        raise ValueError("Prandtl number must be positive.")
+    if rho_wall_over_bulk <= 0.0 or cp_bar_over_bulk <= 0.0:
+        raise ValueError("Property ratios must be positive.")
+    return (0.0183 * reynolds ** 0.82 * prandtl ** 0.5
+            * rho_wall_over_bulk ** 0.3 * cp_bar_over_bulk ** n_exponent)
+
+
+def pseudocritical_temperature(fluid: str, pressure: float) -> float:
+    """Pseudo-critical temperature T_pc(P) [K] at a supercritical pressure.
+
+    Defined as the temperature of the isobaric cp maximum at P > P_crit
+    (standard definition; Jackson 2013, Nucl. Eng. Des. 264), searched over
+    the band [T_crit, min(2*T_crit, T_max)]: a coarse grid locates the
+    maximum (cp(T) is NOT globally unimodal — the ideal-gas cp rise at high
+    T creates a second branch, so a bare golden-section can walk to the
+    wrong side), then a golden-section refinement narrows it to ~0.05 K.
+    If the maximum sits at the band edge the edge value is returned: at very
+    high reduced pressures the pseudo-critical line fades out and the
+    Jackson regime classification then degenerates to the plain n = 0.4
+    form — a bounded, documented behaviour. Results are cached per (fluid,
+    0.5-bar pressure bin). Raises for P <= P_crit (pseudo-critical
+    temperature is undefined there; use T_sat) and without CoolProp.
+    """
+    if not _HAS_COOLPROP:
+        raise RuntimeError("CoolProp is required for "
+                           "pseudocritical_temperature().")
+    p_crit = float(_CP_PropsSI('Pcrit', fluid))
+    if pressure <= p_crit:
+        raise ValueError(
+            f"Pseudo-critical temperature is defined only above the critical "
+            f"pressure ({p_crit / 1e5:.2f} bar for {fluid}); "
+            f"got {pressure / 1e5:.2f} bar.")
+    key = (fluid, int(round(pressure / 5.0e4)))  # 0.5 bar kova
+    if key in _PSEUDOCRITICAL_CACHE:
+        return _PSEUDOCRITICAL_CACHE[key]
+    t_crit = float(_CP_PropsSI('Tcrit', fluid))
+    t_max = float(_CP_PropsSI('Tmax', fluid))
+    lo = t_crit
+    hi = min(2.0 * t_crit, t_max)
+
+    def _cp(t: float) -> float:
+        return float(_CP_PropsSI('C', 'T', t, 'P', pressure, fluid))
+
+    # 1) Kaba ızgara: global maksimumun komşuluğunu bul (bimodal koruması).
+    grid = np.linspace(lo, hi, 96)
+    cp_grid = np.array([_cp(t) for t in grid])
+    i_max = int(np.argmax(cp_grid))
+    if i_max == 0 or i_max == len(grid) - 1:
+        # İç maksimum yok — pseudo-kritik çizgi bu basınçta silinmiş.
+        t_pc = float(grid[i_max])
+        _PSEUDOCRITICAL_CACHE[key] = t_pc
+        return t_pc
+    a = float(grid[i_max - 1])
+    b = float(grid[i_max + 1])
+
+    # 2) Altın-oran incelmesi (~0.05 K hassasiyet), tek tepeli aralıkta.
+    invphi = (math.sqrt(5.0) - 1.0) / 2.0
+    c = b - invphi * (b - a)
+    d = a + invphi * (b - a)
+    fc, fd = _cp(c), _cp(d)
+    while (b - a) > 0.05:
+        if fc > fd:
+            b, d, fd = d, c, fc
+            c = b - invphi * (b - a)
+            fc = _cp(c)
+        else:
+            a, c, fc = c, d, fd
+            d = a + invphi * (b - a)
+            fd = _cp(d)
+    t_pc = 0.5 * (a + b)
+    _PSEUDOCRITICAL_CACHE[key] = t_pc
+    return t_pc
+
+
 # ===========================================================================
 # Ana sınıf
 # ===========================================================================
@@ -306,7 +552,10 @@ class RegenCooling:
     exit_diameter, expansion_ratio : float, optional
         Nozzle exit diameter [m], or the area expansion ratio (>1) instead.
     coolant : str
-        'water' or 'rp1'.
+        'water', 'rp1', 'methane' (aliases ch4/lch4) or 'hydrogen' (aliases
+        h2/lh2). Methane/hydrogen REQUIRE CoolProp and use full
+        (T, P)-dependent properties with an enthalpy-based march and the
+        Jackson supercritical coolant-side correlation (module docstring).
     coolant_mdot : float
         Total coolant mass flow rate through all channels [kg/s].
     coolant_inlet_temp : float
@@ -333,7 +582,13 @@ class RegenCooling:
         'approximate'). Only affects the turbulent friction factor.
     coolant_props_source : str
         'auto' (default: CoolProp for water if available, else table; table
-        for RP-1), 'table' (force internal tables), or 'coolprop'.
+        for RP-1), 'table' (force internal tables), or 'coolprop'. 'table'
+        is INVALID for methane/hydrogen (no table exists).
+    fin_effect : bool
+        Apply the coolant-side extended-surface (channel-land fin) area model
+        (``fin_area_ratio``; Huzel & Huang Ch. 4, Incropera Ch. 3.6). Applies
+        ONLY to the methane/hydrogen path; the water/RP-1 legacy path always
+        keeps coolant-side area = gas-side area (behaviour contract).
     motor_data : dict, optional
         Repo-style motor dictionary forwarded to the contour sampler and the
         gas-property resolver (chamber diameter, nozzle type, bell angles,
@@ -361,6 +616,7 @@ class RegenCooling:
                  flow_direction: str = FLOW_COUNTERFLOW,
                  wall_roughness: float = 5.0e-6,
                  coolant_props_source: str = 'auto',
+                 fin_effect: bool = True,
                  motor_data: Optional[Dict] = None):
         # --- doğrulamalar (İngilizce hata metinleri: kullanıcıya görünür) ---
         if not (chamber_pressure > 0.0):
@@ -378,9 +634,28 @@ class RegenCooling:
             coolant = 'rp1'
         elif coolant in ('water', 'h2o'):
             coolant = 'water'
+        elif coolant in ('methane', 'ch4', 'lch4'):
+            coolant = 'methane'
+        elif coolant in ('hydrogen', 'h2', 'lh2'):
+            coolant = 'hydrogen'
         else:
-            raise ValueError("coolant must be 'water' or 'rp1'.")
+            raise ValueError("coolant must be 'water', 'rp1', 'methane' or "
+                             "'hydrogen'.")
         self.coolant = coolant
+
+        # Metan/hidrojen: CoolProp ZORUNLU — dahili tablo yok, sabit değere
+        # sessiz düşüş yok (uydurma-veri bekçisiyle uyumlu açık politika).
+        if coolant in SUPERCRITICAL_COOLANT_FLUIDS:
+            if coolant_props_source == 'table':
+                raise ValueError(
+                    f"coolant='{coolant}' has no internal property table — "
+                    "CoolProp is mandatory (coolant_props_source must be "
+                    "'auto' or 'coolprop'). Refusing to substitute constant "
+                    "properties.")
+            if not _HAS_COOLPROP:
+                raise ValueError(
+                    f"coolant='{coolant}' requires CoolProp for (T, P)-"
+                    "dependent properties, but CoolProp is not installed.")
 
         if not (coolant_mdot > 0.0):
             raise ValueError("coolant_mdot must be positive [kg/s].")
@@ -445,11 +720,44 @@ class RegenCooling:
         self.channel_width = float(channel_width)
         self.channel_height = float(channel_height)
         self.wall_thickness = float(wall_thickness)
-        self.n_stations = int(min(max(int(n_stations), N_STATIONS_MIN),
-                                  N_STATIONS_MAX))
+        self.n_stations = int(min(max(int(n_stations), REGEN_N_STATIONS_MIN),
+                                  REGEN_N_STATIONS_MAX))
         self.flow_direction = flow_direction
         self.wall_roughness = float(wall_roughness)
         self.coolant_props_source = coolant_props_source
+        # Fin (kanal sırtı) genişletilmiş-yüzey modeli: YALNIZ metan/hidrojen
+        # süperkritik yolunda uygulanır. Su/RP-1 yolu eski davranış
+        # sözleşmesini (soğutucu alanı = gaz alanı) birebir korur.
+        self.fin_effect = bool(fin_effect)
+
+        # --- süperkritik-yetenekli soğutucu: EOS sınırları + giriş durumu ---
+        self._cp_fluid = SUPERCRITICAL_COOLANT_FLUIDS.get(self.coolant)
+        if self._cp_fluid is not None:
+            self.coolant_pcrit = float(_CP_PropsSI('Pcrit', self._cp_fluid))
+            self.coolant_tcrit = float(_CP_PropsSI('Tcrit', self._cp_fluid))
+            self._fluid_tmin = float(_CP_PropsSI('Tmin', self._cp_fluid))
+            self._fluid_tmax = float(_CP_PropsSI('Tmax', self._cp_fluid))
+            self._fluid_pmax = float(_CP_PropsSI('pmax', self._cp_fluid))
+            if not (self._fluid_tmin <= self.coolant_inlet_temp
+                    <= self._fluid_tmax):
+                raise ValueError(
+                    f"coolant_inlet_temp {self.coolant_inlet_temp:.1f} K is "
+                    f"outside the {self._cp_fluid} EOS range "
+                    f"[{self._fluid_tmin:.1f}, {self._fluid_tmax:.1f}] K.")
+            if self.coolant_inlet_pressure > self._fluid_pmax:
+                raise ValueError(
+                    f"coolant_inlet_pressure {self.coolant_inlet_pressure/1e5:.1f} "
+                    f"bar exceeds the {self._cp_fluid} EOS limit "
+                    f"{self._fluid_pmax/1e5:.0f} bar.")
+            # Giriş durumunu hemen çöz — aralık dışıysa AÇIK hata (erken).
+            self._coolant_properties(self.coolant_inlet_temp,
+                                     self.coolant_inlet_pressure)
+        else:
+            self.coolant_pcrit = None
+            self.coolant_tcrit = None
+            self._fluid_tmin = None
+            self._fluid_tmax = None
+            self._fluid_pmax = None
 
         # Türetilmiş kanal büyüklükleri
         self.channel_area = self.channel_width * self.channel_height  # m^2
@@ -490,6 +798,33 @@ class RegenCooling:
     # ------------------------------------------------------------------
     # Soğutucu özellik çözümü (CoolProp veya tablo)
     # ------------------------------------------------------------------
+    def _cp_call(self, output: str, name1: str, value1: float,
+                 name2: str, value2: float) -> float:
+        """CoolProp PropsSI wrapper for the supercritical coolant fluid.
+
+        Raises an EXPLICIT ValueError on any failure or non-finite result —
+        no silent fallback to constants (fabricated-value guard policy).
+        """
+        try:
+            val = float(_CP_PropsSI(output, name1, value1, name2, value2,
+                                    self._cp_fluid))
+        except Exception as exc:
+            raise ValueError(
+                f"CoolProp evaluation failed for {self._cp_fluid} "
+                f"({output} at {name1}={value1:.6g}, {name2}={value2:.6g}): "
+                f"{exc}. Coolant state is outside the EOS range — the model "
+                "does not substitute constant values.") from exc
+        if not math.isfinite(val):
+            raise ValueError(
+                f"CoolProp returned a non-finite {output} for "
+                f"{self._cp_fluid} at {name1}={value1:.6g}, "
+                f"{name2}={value2:.6g}.")
+        return val
+
+    def _saturation_temperature(self, pressure: float) -> float:
+        """T_sat [K] at ``pressure`` (valid only below the critical pressure)."""
+        return self._cp_call('T', 'P', pressure, 'Q', 0.0)
+
     def _coolant_properties(self, temperature: float,
                             pressure: float) -> Dict[str, float]:
         """Local coolant transport properties at (T, P).
@@ -497,7 +832,26 @@ class RegenCooling:
         Water may use CoolProp (single-phase liquid); RP-1 always uses the
         internal table (no single CoolProp fluid). Falls back to the table on
         any CoolProp failure (e.g. two-phase state) with a flag.
+
+        Methane / hydrogen ALWAYS use CoolProp (density, cp, conductivity,
+        viscosity AND mass enthalpy at the local (T, P)); any failure raises
+        an explicit error — there is no table and no constant fallback.
         """
+        if self.coolant in SUPERCRITICAL_COOLANT_FLUIDS:
+            rho = self._cp_call('D', 'T', temperature, 'P', pressure)
+            cp = self._cp_call('C', 'T', temperature, 'P', pressure)
+            k = self._cp_call('L', 'T', temperature, 'P', pressure)
+            mu = self._cp_call('V', 'T', temperature, 'P', pressure)
+            h = self._cp_call('Hmass', 'T', temperature, 'P', pressure)
+            if rho <= 0.0 or cp <= 0.0 or k <= 0.0 or mu <= 0.0:
+                raise ValueError(
+                    f"Non-physical CoolProp properties for {self._cp_fluid} "
+                    f"at T={temperature:.1f} K, P={pressure/1e5:.1f} bar.")
+            return {
+                'density': rho, 'cp': cp, 'conductivity': k,
+                'viscosity': mu, 'prandtl': cp * mu / k,
+                'enthalpy': h, 'clamped': False, 'source': 'coolprop',
+            }
         want_cp = (self.coolant_props_source == 'coolprop'
                    or (self.coolant_props_source == 'auto'))
         if self.coolant == 'water' and want_cp and _HAS_COOLPROP:
@@ -602,6 +956,101 @@ class RegenCooling:
         return h_g, q, t_wall_hot, t_wall_cold
 
     # ------------------------------------------------------------------
+    # Süperkritik istasyon dengesi (Jackson — cidar özellik oranlı)
+    # ------------------------------------------------------------------
+    def _station_wall_balance_sc(self, taw: float, t_bulk: float,
+                                 p_bulk: float, bulk: Dict, reynolds: float,
+                                 throat_d: float, c_star: float,
+                                 rc_over_dt: float, gas: Dict,
+                                 area_ratio_local: float, mach: float,
+                                 k_wall: float, t_pc: float,
+                                 r_local: float):
+        """Coupled wall balance with the Jackson supercritical coolant Nu.
+
+        Unlike the Dittus-Boelter path, the coolant-side coefficient depends
+        on the COLD-wall temperature through the (rho_w/rho_b) and
+        (cp_bar/cp_b) property ratios (Jackson & Hall 1979). The fixed point
+        over (T_wall_hot, T_wall_cold) is solved with damped iteration:
+
+            q = (Taw - T_bulk) / (1/h_g(T_hot) + t_w/k_w + 1/(h_c*A_r))
+            T_hot  <- Taw   - q/h_g,    T_cold <- T_bulk + q/(h_c*A_r)
+
+        where A_r is the coolant-side extended-surface (channel-land fin)
+        area ratio (``fin_area_ratio``; = 1 when ``fin_effect`` is False).
+        Wall-side properties are evaluated at (min(T_cold, T_max_EOS), P);
+        clamping at the EOS limit is COUNTED and reported as an explicit
+        warning (the wall-limit warnings fire independently).
+
+        ``r_local`` is the local gas-side inner radius [m] (sets the channel
+        pitch for the fin geometry).
+
+        Returns (h_g, q, T_wall_hot, T_wall_cold, h_c, nu, a_ratio,
+        converged, wall_props_clamped).
+        """
+        r_cond = self.wall_thickness / k_wall       # m^2*K/W
+        allowable = self.material.get('allowable_temperature', 1000.0)
+        t_wall_hot = max(min(allowable, 0.8 * taw), t_bulk)
+        t_wall_cold = t_bulk + 30.0
+        rho_b = bulk['density']
+        cp_b = bulk['cp']
+        h_b = bulk['enthalpy']
+        k_b = bulk['conductivity']
+        pr_b = bulk['prandtl']
+        # Kanal adımı (soğutucu tarafı çevresi / kanal sayısı) — fin geometrisi
+        pitch = (2.0 * math.pi * (r_local + self.wall_thickness)
+                 / self.n_channels)
+        land = pitch - self.channel_width
+        damping = 0.6            # sabit nokta sönümü (cp_bar hassasiyeti için)
+        tol = 1.0e-3             # K
+        h_g = 0.0
+        h_c = 0.0
+        q = 0.0
+        nu = 0.0
+        a_ratio = 1.0
+        converged = False
+        wall_props_clamped = False
+        for _ in range(100):
+            # Cidar tarafı özellik değerlendirme sıcaklığı (EOS içinde tut).
+            t_eval = min(max(t_wall_cold, self._fluid_tmin), self._fluid_tmax)
+            if t_eval != t_wall_cold:
+                wall_props_clamped = True
+            rho_w = self._cp_call('D', 'T', t_eval, 'P', p_bulk)
+            h_w = self._cp_call('Hmass', 'T', t_eval, 'P', p_bulk)
+            if abs(t_eval - t_bulk) > 0.1:
+                # cp_bar = (h_w - h_b)/(T_w - T_b): entegre ortalama özgül ısı
+                cp_bar = (h_w - h_b) / (t_eval - t_bulk)
+            else:
+                cp_bar = cp_b
+            if cp_bar <= 0.0:
+                cp_bar = cp_b  # h(T) monoton — negatif çıkamaz; sayısal koruma
+            n_exp = jackson_exponent_n(t_bulk, t_eval, t_pc)
+            nu = jackson_nu(reynolds, pr_b, rho_w / rho_b,
+                            cp_bar / cp_b, n_exp)
+            h_c = nu * k_b / self.hydraulic_diameter
+            if self.fin_effect:
+                a_ratio = fin_area_ratio(self.channel_width,
+                                         self.channel_height, pitch, land,
+                                         h_c, k_wall)
+            h_g = self._hta._bartz_coefficient(
+                throat_d, self.chamber_pressure, c_star, gas,
+                self.chamber_temperature, t_wall_hot, rc_over_dt,
+                area_ratio_local=area_ratio_local, mach_local=mach)
+            r_cool = 1.0 / (h_c * a_ratio)
+            r_total = 1.0 / h_g + r_cond + r_cool
+            q = (taw - t_bulk) / r_total
+            new_hot = taw - q / h_g
+            new_cold = t_bulk + q * r_cool
+            if (abs(new_hot - t_wall_hot) < tol
+                    and abs(new_cold - t_wall_cold) < tol):
+                t_wall_hot, t_wall_cold = new_hot, new_cold
+                converged = True
+                break
+            t_wall_hot += damping * (new_hot - t_wall_hot)
+            t_wall_cold += damping * (new_cold - t_wall_cold)
+        return (h_g, q, t_wall_hot, t_wall_cold, h_c, nu, a_ratio, converged,
+                wall_props_clamped)
+
+    # ------------------------------------------------------------------
     # Ana çözüm: istasyon marşı
     # ------------------------------------------------------------------
     def solve(self) -> Dict:
@@ -666,8 +1115,27 @@ class RegenCooling:
         t_c = self.coolant_inlet_temp
         p_c = self.coolant_inlet_pressure
         total_heat_W = 0.0
-        enthalpy_rise = 0.0           # J/kg (cp*dT integrali)
+        enthalpy_rise = 0.0           # J/kg (cp*dT integrali / h marşı)
         min_re = np.inf
+
+        # --- süperkritik (metan/hidrojen) marş durumu: entalpi tabanlı ---
+        sc_mode = self.coolant in SUPERCRITICAL_COOLANT_FLUIDS
+        h_bulk = 0.0
+        h_inlet = 0.0
+        coolant_h = np.full(n, np.nan)   # J/kg (yalnız sc modda dolar)
+        fin_ratio = np.ones(n)           # A_eff/A_gas (sc modda hesaplanır)
+        dp_friction_total = 0.0
+        dp_accel_total = 0.0
+        n_jackson = 0                    # Jackson kullanılan istasyon sayısı
+        n_db_subcritical = 0             # kritik-altı Dittus-Boelter istasyonu
+        wall_balance_unconverged = 0
+        jackson_wall_clamped = 0
+        bulk_boiling_stations = 0
+        near_boiling_stations = 0
+        wall_boiling_stations = 0
+        if sc_mode:
+            h_inlet = self._coolant_properties(t_c, p_c)['enthalpy']
+            h_bulk = h_inlet
 
         for step, idx in enumerate(order):
             # --- soğutucu tarafı katsayısı (yerel yığın özellikleriyle) ---
@@ -680,14 +1148,53 @@ class RegenCooling:
 
             v = self.mdot_per_channel / (rho * self.channel_area)  # m/s
             re = rho * v * self.hydraulic_diameter / mu
-            nu = dittus_boelter_nu(re, pr, heating=True)
-            h_c = nu * k_c / self.hydraulic_diameter               # W/m^2/K
 
-            # --- kuple gaz-cidar dengesi ---
-            h_g, q, tw_hot, tw_cold = self._station_wall_balance(
-                taw[idx], t_c, h_c, throat_d, c_star, rc_over_dt, gas,
-                area_ratio_local=1.0 / area_ratio[idx], mach=mach[idx],
-                k_wall=k_wall)
+            if sc_mode and p_c > self.coolant_pcrit:
+                # --- süperkritik bölge: Jackson + kuple cidar dengesi ---
+                t_pc_local = pseudocritical_temperature(self._cp_fluid, p_c)
+                (h_g, q, tw_hot, tw_cold, h_c, nu, a_ratio, converged,
+                 clamped) = self._station_wall_balance_sc(
+                    taw[idx], t_c, p_c, props, re, throat_d, c_star,
+                    rc_over_dt, gas, area_ratio_local=1.0 / area_ratio[idx],
+                    mach=mach[idx], k_wall=k_wall, t_pc=t_pc_local,
+                    r_local=r_m[idx])
+                fin_ratio[idx] = a_ratio
+                n_jackson += 1
+                if not converged:
+                    wall_balance_unconverged += 1
+                if clamped:
+                    jackson_wall_clamped += 1
+            else:
+                nu = dittus_boelter_nu(re, pr, heating=True)
+                h_c = nu * k_c / self.hydraulic_diameter           # W/m^2/K
+
+                h_c_eff = h_c
+                if sc_mode and self.fin_effect:
+                    # Fin alan oranı (h_c cidara bağlı değil -> kapalı form).
+                    pitch = (2.0 * math.pi * (r_m[idx] + self.wall_thickness)
+                             / self.n_channels)
+                    a_ratio = fin_area_ratio(
+                        self.channel_width, self.channel_height, pitch,
+                        pitch - self.channel_width, h_c, k_wall)
+                    fin_ratio[idx] = a_ratio
+                    h_c_eff = h_c * a_ratio
+
+                # --- kuple gaz-cidar dengesi ---
+                h_g, q, tw_hot, tw_cold = self._station_wall_balance(
+                    taw[idx], t_c, h_c_eff, throat_d, c_star, rc_over_dt, gas,
+                    area_ratio_local=1.0 / area_ratio[idx], mach=mach[idx],
+                    k_wall=k_wall)
+
+                if sc_mode:
+                    # Kritik-altı basınç: kaynama riski denetimi (yerel Tsat).
+                    n_db_subcritical += 1
+                    t_sat = self._saturation_temperature(p_c)
+                    if t_c >= t_sat:
+                        bulk_boiling_stations += 1
+                    elif t_c > t_sat - BOILING_MARGIN_K:
+                        near_boiling_stations += 1
+                    if tw_cold > t_sat:
+                        wall_boiling_stations += 1
 
             # istasyon çıktıları
             t_coolant[idx] = t_c
@@ -700,6 +1207,8 @@ class RegenCooling:
             h_gas[idx] = h_g
             h_cool[idx] = h_c
             min_re = min(min_re, re)
+            if sc_mode:
+                coolant_h[idx] = h_bulk
 
             # --- segment (idx -> sonraki marş istasyonu): ısı + basınç ---
             if step < len(order) - 1:
@@ -709,16 +1218,45 @@ class RegenCooling:
                 r_mean = 0.5 * (r_m[idx] + r_m[nxt])
                 dA = 2.0 * math.pi * r_mean * ds                          # m^2
                 dQ = q * dA                                               # W
-                # soğutucu sıcaklık artışı (yerel cp ile)
-                dT = dQ / (self.coolant_mdot * cp)
                 total_heat_W += dQ
-                enthalpy_rise += cp * dT
                 # basınç düşümü (Darcy-Weisbach + Haaland), kanal eğik uzunluğu
                 f = haaland_friction_factor(re, self.wall_roughness / self.hydraulic_diameter)
                 dP = darcy_weisbach_dp(f, ds, self.hydraulic_diameter, rho, v)
-                # marş: bir sonraki istasyona taşı
-                t_c = t_c + dT
-                p_c = p_c - dP
+                if sc_mode:
+                    # ENTALPİ marşı: h2 = h1 + dQ/mdot, T = T(P, h).
+                    # Pseudo-kritik cp tepesinde dT = dQ/(m*cp) formunun
+                    # sıcaklık hatasını önler (modül üst dokümantasyonu).
+                    dh = dQ / self.coolant_mdot
+                    h_next = h_bulk + dh
+                    p_tmp = p_c - dP
+                    if p_tmp <= 0.0:
+                        raise ValueError(
+                            "Coolant pressure fell to zero during the march "
+                            "(friction) — channel geometry/mdot infeasible.")
+                    # İvmelenme (momentum) terimi: yoğunluk değişimi.
+                    rho_next = self._cp_call('D', 'P', p_tmp, 'Hmass', h_next)
+                    g_flux = self.mdot_per_channel / self.channel_area
+                    dP_acc = acceleration_dp(g_flux, rho, rho_next)
+                    p_next = p_tmp - dP_acc
+                    if p_next <= 0.0:
+                        raise ValueError(
+                            "Coolant pressure fell to zero during the march "
+                            "(acceleration) — channel geometry/mdot "
+                            "infeasible.")
+                    t_next = self._cp_call('T', 'P', p_next, 'Hmass', h_next)
+                    dp_friction_total += dP
+                    dp_accel_total += dP_acc
+                    enthalpy_rise += dh
+                    t_c, p_c, h_bulk = t_next, p_next, h_next
+                else:
+                    # soğutucu sıcaklık artışı (yerel cp ile) — su/RP-1
+                    # davranışı BİREBİR korunur (regresyon sözleşmesi).
+                    dT = dQ / (self.coolant_mdot * cp)
+                    enthalpy_rise += cp * dT
+                    dp_friction_total += dP
+                    # marş: bir sonraki istasyona taşı
+                    t_c = t_c + dT
+                    p_c = p_c - dP
 
         # --- özet ---
         t_out = t_c                     # marş sonundaki soğutucu sıcaklığı
@@ -794,6 +1332,73 @@ class RegenCooling:
             except Exception:
                 pass
 
+        # --- süperkritik soğutucu (metan/hidrojen) sınır denetimleri ---
+        t_pc_inlet = None
+        if sc_mode:
+            fluid_label = self._cp_fluid
+            if self.coolant_inlet_pressure <= self.coolant_pcrit:
+                warnings_list.append(
+                    f"SUBCRITICAL PRESSURE: {fluid_label} inlet pressure "
+                    f"{self.coolant_inlet_pressure/1e5:.1f} bar is below the "
+                    f"critical pressure {self.coolant_pcrit/1e5:.1f} bar — "
+                    f"boiling is possible; the model stays single phase and "
+                    f"only FLAGS the risk (no two-phase model).")
+            else:
+                t_pc_inlet = pseudocritical_temperature(
+                    self._cp_fluid, self.coolant_inlet_pressure)
+                t_cool_min = float(np.min(t_coolant))
+                t_cool_max = float(np.max(t_coolant))
+                if t_cool_min < t_pc_inlet < t_cool_max:
+                    warnings_list.append(
+                        f"NOTE: coolant bulk temperature crosses the "
+                        f"pseudo-critical temperature "
+                        f"({t_pc_inlet:.0f} K at inlet pressure) along the "
+                        f"channel — strong property variation; the enthalpy "
+                        f"march and Jackson property-ratio corrections "
+                        f"account for it to first order.")
+            if bulk_boiling_stations > 0:
+                warnings_list.append(
+                    f"BOILING: coolant bulk temperature reaches/exceeds the "
+                    f"local saturation temperature at "
+                    f"{bulk_boiling_stations} station(s) (subcritical "
+                    f"pressure) — single-phase assumption violated; results "
+                    f"there are not valid.")
+            elif near_boiling_stations > 0:
+                warnings_list.append(
+                    f"BOILING RISK: coolant bulk temperature is within "
+                    f"{BOILING_MARGIN_K:.0f} K (screening margin) of the "
+                    f"local saturation temperature at "
+                    f"{near_boiling_stations} station(s).")
+            if wall_boiling_stations > 0:
+                warnings_list.append(
+                    f"NUCLEATE BOILING RISK: coolant-side wall temperature "
+                    f"exceeds the local saturation temperature at "
+                    f"{wall_boiling_stations} station(s) (subcritical "
+                    f"pressure) — wall boiling not modelled.")
+            if wall_balance_unconverged > 0:
+                warnings_list.append(
+                    f"CONVERGENCE: the coupled wall balance did not converge "
+                    f"to 1e-3 K at {wall_balance_unconverged} station(s) — "
+                    f"wall temperatures there carry iteration residual.")
+            if jackson_wall_clamped > 0:
+                warnings_list.append(
+                    f"NOTE: Jackson wall-side property ratios evaluated at "
+                    f"the {fluid_label} EOS temperature limit "
+                    f"({self._fluid_tmax:.0f} K) at {jackson_wall_clamped} "
+                    f"station(s) — the coolant-side coefficient there is an "
+                    f"extrapolation (wall-limit warnings apply "
+                    f"independently).")
+
+        if sc_mode:
+            if n_jackson > 0 and n_db_subcritical > 0:
+                coolant_correlation = 'jackson+dittus_boelter(subcritical)'
+            elif n_jackson > 0:
+                coolant_correlation = 'jackson'
+            else:
+                coolant_correlation = 'dittus_boelter(subcritical)'
+        else:
+            coolant_correlation = 'dittus_boelter'
+
         summary = {
             'coolant': self.coolant,
             'wall_material': self.wall_material,
@@ -819,24 +1424,67 @@ class RegenCooling:
             'coking': coking,
             'coking_threshold_K': RP1_COKING_TEMP_K if self.coolant == 'rp1' else None,
             'flow_direction': self.flow_direction,
+            'coolant_correlation': coolant_correlation,
+            'pressure_drop_friction_bar': dp_friction_total / 1e5,
+            'pressure_drop_acceleration_bar': dp_accel_total / 1e5,
+            'coolant_critical_pressure_bar': (
+                self.coolant_pcrit / 1e5 if sc_mode else None),
+            'coolant_critical_temperature_K': (
+                self.coolant_tcrit if sc_mode else None),
+            'coolant_pseudocritical_T_K': t_pc_inlet,
+            'coolant_inlet_enthalpy_J_kg': h_inlet if sc_mode else None,
+            'coolant_exit_enthalpy_J_kg': h_bulk if sc_mode else None,
+            'supercritical_pressure': (
+                bool(self.coolant_inlet_pressure > self.coolant_pcrit)
+                if sc_mode else None),
+            'fin_effect': self.fin_effect if sc_mode else None,
+            'fin_area_ratio_max': (float(np.max(fin_ratio))
+                                   if sc_mode else None),
             'warnings': warnings_list,
         }
 
-        model_note = (
-            "1D regenerative-cooling station march (analysis mode). Gas side: "
-            "Bartz correlation (Sutton & Biblarz 9th ed. Eq. 8-22) driven by the "
-            "adiabatic-wall temperature. Coolant side: Dittus-Boelter "
-            "Nu=0.023 Re^0.8 Pr^0.4 (Incropera Eq. 8.60; valid Re>=1e4, "
-            "0.6<=Pr<=160). Wall: thin flat-plate radial conduction, coolant-side "
-            "area = gas-side area (fin efficiency ~1, 'approximate'). Pressure "
-            "drop: Darcy-Weisbach with the Haaland friction factor. RP-1 "
-            "properties are approximate engineering values; coking threshold "
-            f"{RP1_COKING_TEMP_K:.0f} K (Huzel & Huang Ch. 4). Single-phase "
-            "coolant assumed; no boiling / supercritical model. Channel "
-            "dimensions are user inputs (no auto-sizing)."
-        )
+        if sc_mode:
+            model_note = (
+                "1D regenerative-cooling station march (analysis mode), "
+                "supercritical-coolant path. Gas side: Bartz correlation "
+                "(Sutton & Biblarz 9th ed. Eq. 8-22) driven by the "
+                "adiabatic-wall temperature. Coolant side: Jackson "
+                "supercritical correlation Nu=0.0183 Re^0.82 Pr^0.5 "
+                "(rho_w/rho_b)^0.3 (cp_bar/cp_b)^n (Jackson & Hall 1979; "
+                "Jackson 2013, Nucl. Eng. Des. 264) above the critical "
+                "pressure, Dittus-Boelter (Incropera Eq. 8.60) below it with "
+                "explicit boiling-risk flags. Coolant properties: CoolProp "
+                f"(T,P)-dependent for {self._cp_fluid} (Bell et al. 2014); "
+                "no internal table, out-of-range states raise. Coolant march "
+                "is ENTHALPY based (h2=h1+dQ/mdot, T=T(P,h)) — exact through "
+                "the pseudo-critical cp peak. Wall: thin flat-plate radial "
+                "conduction; coolant-side area uses the channel-land "
+                "extended-surface (fin) model when fin_effect=True "
+                "(eta=tanh(mL)/mL, Incropera Ch. 3.6; lands-as-fins per "
+                "Huzel & Huang Ch. 4), else area = gas-side area; the "
+                "coupled gas/wall/coolant balance is solved per station "
+                "(damped fixed point). Pressure drop: Darcy-Weisbach with the "
+                "Haaland friction factor PLUS the acceleration term "
+                "G^2*d(1/rho) (Collier & Thome 3rd ed. Ch. 2). Two-phase "
+                "boiling is NOT modelled (flagged only). Channel dimensions "
+                "are user inputs (no auto-sizing)."
+            )
+        else:
+            model_note = (
+                "1D regenerative-cooling station march (analysis mode). Gas side: "
+                "Bartz correlation (Sutton & Biblarz 9th ed. Eq. 8-22) driven by the "
+                "adiabatic-wall temperature. Coolant side: Dittus-Boelter "
+                "Nu=0.023 Re^0.8 Pr^0.4 (Incropera Eq. 8.60; valid Re>=1e4, "
+                "0.6<=Pr<=160). Wall: thin flat-plate radial conduction, coolant-side "
+                "area = gas-side area (fin efficiency ~1, 'approximate'). Pressure "
+                "drop: Darcy-Weisbach with the Haaland friction factor. RP-1 "
+                "properties are approximate engineering values; coking threshold "
+                f"{RP1_COKING_TEMP_K:.0f} K (Huzel & Huang Ch. 4). Single-phase "
+                "coolant assumed; no boiling / supercritical model. Channel "
+                "dimensions are user inputs (no auto-sizing)."
+            )
 
-        return {
+        result = {
             # --- istenen çekirdek istasyon dizileri (x artan sırada) ---
             'x_mm': x_mm.tolist(),
             'T_wall_hot_K': t_wall_hot.tolist(),
@@ -864,3 +1512,10 @@ class RegenCooling:
             'summary': summary,
             'model_note': model_note,
         }
+        if sc_mode:
+            # İstasyon yığın entalpisi [kJ/kg] ve fin alan oranı — yalnız
+            # metan/hidrojen yolunda (su/RP-1 çıktı sözleşmesi değişmez;
+            # JSON'a NaN sızdırmayız).
+            result['coolant_enthalpy_kJ_kg'] = (coolant_h / 1e3).tolist()
+            result['fin_area_ratio'] = fin_ratio.tolist()
+        return result

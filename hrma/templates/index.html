@@ -421,6 +421,12 @@
 
         <div class="aux-links">
             <a class="aux-link" href="/formulas" data-i18n="link.formulas">Formula Reference</a>
+            <!-- Sürüm Notları / Ayarlar: data-i18n nitelikleri release_notes.js ve
+                 settings_panel.js tarafından çalışma anında verilir (anahtarlar
+                 i18n_shell.js'te; index'in statik data-i18n anahtarları i18n.js
+                 çekirdeğinde aranır — tests/test_i18n.py sözleşmesi) -->
+            <a class="aux-link" href="#" id="releaseNotesLink">Release Notes</a>
+            <a class="aux-link" href="#" id="settingsLink">Settings</a>
         </div>
     </div>
 
@@ -431,9 +437,15 @@
     <!-- v2.5.5: "Recent Projects" şeridi (proj.* anahtarları i18n_common.js'te;
          /api/projects yoksa ya da boşsa şerit hiç görünmez) -->
     <script src="/static/js/i18n_common.js"></script>
+    <script src="/static/js/i18n_shell.js"></script>
     <script src="/static/js/project_bar.js"></script>
     <script src="/static/js/update_check.js"></script>
+    <!-- Sürüm Notları modalı + Ayarlar paneli (anahtarlar i18n_shell.js'te) -->
+    <script src="/static/js/release_notes.js"></script>
+    <script src="/static/js/settings_panel.js"></script>
     <script>
+        // Ayarlar paneli sürümü buradan okur (tek kaynak: hrma/__init__.py)
+        window.HRMA_APP_VERSION = '{{ app_version }}';
         // Dil seçici: tercihi localStorage'a yazar, sayfayı anında çevirir.
         // i18n.js yüklenemezse seçici sessizce devre dışı kalır (sayfa bozulmaz).
         (function () {

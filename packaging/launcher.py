@@ -338,6 +338,17 @@ def _menu_open_outputs():
         traceback.print_exc()
 
 
+def _menu_release_notes():
+    """macOS Help menüsü 'Release Notes…' — arayüzdeki sürüm notları modalını açar."""
+    try:
+        import webview
+        if webview.windows:
+            webview.windows[0].evaluate_js(
+                "window.hrmaShowReleaseNotes && window.hrmaShowReleaseNotes()")
+    except Exception:
+        traceback.print_exc()
+
+
 def _macos_menu():
     """Uygulama menüsüne HRMA'ya özgü ögeler (About'un hemen altına) + Help.
 
@@ -356,6 +367,7 @@ def _macos_menu():
             wm.MenuAction("Open Output Folder", _menu_open_outputs),
         ]),
         wm.Menu("Help", [
+            wm.MenuAction("Release Notes…", _menu_release_notes),
             wm.MenuAction("HRMA on GitHub",
                           lambda: webbrowser.open(GITHUB_URL)),
             wm.MenuAction("Releases and Downloads",

@@ -306,6 +306,25 @@ def update_open_download():
     from hrma.utils.update_checker import open_download_in_browser
     return jsonify(open_download_in_browser())
 
+@app.route('/api/changelog')
+def changelog():
+    # Sürüm notları: paketle gelen hrma/data/changelog.json okunur
+    # (GitHub Releases gövdelerinden derlenir; ağ gerektirmez, çevrimdışı
+    # çalışır). Yol, hrma/data/offline_store.py ile aynı kalıpla paket
+    # köküne göre çözülür — kaynak kurulumda da paketli kurulumda da aynı.
+    # Dosya yoksa/bozuksa 500 atılmaz, boş liste döner (arayüz mesaj basar).
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'data', 'changelog.json')
+    try:
+        with open(path, encoding='utf-8') as fh:
+            data = json.load(fh)
+        versions = data.get('versions', []) if isinstance(data, dict) else []
+        if not isinstance(versions, list):
+            versions = []
+    except (OSError, ValueError):
+        versions = []
+    return jsonify({'versions': versions})
+
 @app.route('/test-simple')
 def test_simple():
     return '<h1>SIMPLE TEST</h1><p>If you see this, Flask is working!</p><a href="/">Home Page</a>'

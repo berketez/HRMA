@@ -63,6 +63,48 @@ RHO_GAS_DEFAULT = 5.0          # kg/m³ — T_c/MW verilmezse varsayılan oda ga
 ORIFICE_D_PREF_MM = (0.5, 2.5) # tercih edilen delik çapı bandı
 DEFAULT_CONSTRAINTS = {'d_min_mm': 0.3, 'd_max_mm': 3.0, 'n_max': 120}
 
+# ---------------------------------------------------------------------------
+# Gaz-gaz (sıkıştırılabilir) enjeksiyon sabitleri — FFSC/staged combustion
+# ana odaları (iki ön yakıcıdan ox-zengin + yakıt-zengin GAZ girer).
+# Kaynaklar:
+#  - J.D. Anderson, "Modern Compressible Flow" 3. baskı, Böl. 3
+#    (izentropik orifis/lüle kütle debisi, kritik basınç oranı P*/P0).
+#  - NASA SP-8089 (1976) — enjektör ΔP/Pc kararlılık ilkesi (SIVI içindir;
+#    gaz-gaz bandı aşağıda MÜHENDİSLİK KILAVUZU olarak etiketlenmiştir).
+#  - Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 8-9
+#    (koaksiyel/shear enjektör, momentum-akı oranı).
+#  - S. Pal, R.J. Santoro ve ark. (Penn State) GO2/GH2 tek-eleman shear-coax
+#    yanma çalışmaları — momentum-akı oranının karışıma etkisi.
+GAS_GAS_CD_DEFAULT = 0.85       # kontürlü gaz enjektör postu tipik Cd (band 0.8-0.9)
+GAS_POST_D_PREF_MM = (2.0, 8.0) # iç post tercih çap bandı (gaz postu, imalat pratiği)
+GAS_ELEMENT_N_MAX = 5000        # eleman sayısı üst sınırı (gaz-gaz)
+GAS_POST_WALL_MIN_MM = 0.5      # post/anülüs ara duvarı imalat alt sınırı
+GAS_POST_WALL_T_OVER_D = 0.1    # post et kalınlığı ≈ 0.1·d_post (min ile sınırlı)
+GAS_ANNULUS_GAP_MIN_MM = 0.2    # anülüs boşluğu imalat alt sınırı
+# Gaz-gaz ΔP/Pc kararlılık bandı — MÜHENDİSLİK KILAVUZU (etiketli, uydurma
+# değil): SP-8089'un %15-20 sınırı SIVI enjektörler içindir (kavitasyon,
+# hidrolik flip, damlacık atomizasyonu mekanizmaları). Gaz-gaz elemanlarda
+# bu mekanizmalar yoktur; gaz enjektörler tipik olarak daha düşük ΔP/Pc ile
+# çalışır (Sutton & Biblarz Böl. 8). Tek yetkili gaz-gaz standardı
+# bulunmadığından muhafazakâr band kullanıldı ve varsayım raporlanır.
+GAS_DP_PC_MIN = 0.08            # mutlak alt sınır (altında oda-besleme kuplaj riski artar)
+GAS_DP_PC_RECOMMENDED = 0.10    # önerilen alt sınır
+# Momentum-akı oranı J = (ρv²)_dış / (ρv²)_iç iyi karışım bandı — MÜHENDİSLİK
+# KILAVUZU (koaksiyel momentum-akı çalışmaları, Pal & Santoro; Sutton &
+# Biblarz Böl. 9). Kesin optimum eleman geometrisine bağlıdır.
+GAS_GAS_J_GOOD = (1.0, 10.0)
+
+GAS_GAS_REFERENCES = [
+    'J.D. Anderson, Modern Compressible Flow 3. baskı, Böl. 3 '
+    '(izentropik orifis debisi, kritik basınç oranı)',
+    'NASA SP-8089 (1976) — ΔP/Pc kararlılık ilkesi (sıvı; gaz-gaz bandı '
+    'mühendislik kılavuzu olarak etiketli)',
+    'Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 8-9 '
+    '(koaksiyel enjektör, momentum-akı oranı)',
+    'S. Pal, R.J. Santoro ve ark. (Penn State) GO2/GH2 shear-coax yanma '
+    'çalışmaları — momentum-akı oranı ve karışım',
+]
+
 # N₂O doyma ENTROPİSİ [J/(kg·K)]: T[K], s_l, s_v — CoolProp/Span-Wagner'dan
 # üretildi (2026-07-13); tank_blowdown._SAT_TABLE ile aynı sıcaklık ızgarası.
 # İzentropik HEM çıkış hâli (s₂=s₁) için gereklidir; ana doyma tablosunda
@@ -314,6 +356,156 @@ def pintle_spray_angle(tmr):
 
 
 # ---------------------------------------------------------------------------
+# Sıkıştırılabilir (gaz) orifis akışı — gaz-gaz enjeksiyon
+# ---------------------------------------------------------------------------
+
+def critical_pressure_ratio(gamma):
+    """Boğulma (kritik) basınç oranı P*/P0 = (2/(γ+1))^(γ/(γ−1)).
+
+    Bu orandan (dahil) küçük arka-basınç oranlarında akış boğulur ve kütle
+    debisi arka basınçtan bağımsız olur. Kaynak: Anderson, Modern
+    Compressible Flow 3. baskı, Böl. 3 (izentropik lüle/orifis).
+    """
+    gamma = float(gamma)
+    if gamma <= 1.0:
+        raise ValueError('gamma > 1 olmalı (sıkıştırılabilir gaz)')
+    return float((2.0 / (gamma + 1.0)) ** (gamma / (gamma - 1.0)))
+
+
+def compressible_orifice_flow(cd, area_m2, p0_pa, t0_k, gamma, r_specific,
+                              p_back_pa):
+    """Sıkıştırılabilir orifis akışı — izentropik, boğulma (choked) ayrımlı.
+
+    Kütle debisi (Anderson Böl. 3; NASA SP-8089 form):
+      choked  (P_back/P0 ≤ P*/P0):
+        ṁ = Cd·A·P0·√(γ/(R·T0))·(2/(γ+1))^((γ+1)/(2(γ−1)))
+        → arka basınçtan BAĞIMSIZ (sabit).
+      unchoked (P_back/P0 > P*/P0):
+        ṁ = Cd·A·P0·√( (2γ/((γ−1)R·T0))·(Pr^(2/γ) − Pr^((γ+1)/γ)) ),  Pr=P_back/P0
+        → arka basınca bağlı, Pr→1'de ṁ→0 (monoton).
+    İki dal kritik oranda süreklidir (izentropik akı maksimumu boğulmadadır).
+
+    Birimler SI: p [Pa], T [K], R [J/(kg·K)], A [m²] → ṁ [kg/s].
+    R_specific = R_universal / MW; boyutsuz Cd akı katsayısıdır.
+
+    Döner: {'mdot_kg_s','mass_flux','choked','mach','p_exit_pa','t_exit_k',
+            'rho_exit','v_exit_m_s','pr_crit','pr'} — mass_flux = ṁ/A (Cd dahil).
+    """
+    gamma = float(gamma)
+    r_specific = float(r_specific)
+    if gamma <= 1.0:
+        raise ValueError('gamma > 1 olmalı')
+    if r_specific <= 0.0:
+        raise ValueError('R (özgül gaz sabiti) pozitif olmalı')
+    if p0_pa <= 0.0 or t0_k <= 0.0:
+        raise ValueError('P0 ve T0 pozitif olmalı')
+    if p_back_pa < 0.0:
+        raise ValueError('Arka basınç negatif olamaz')
+
+    pr = p_back_pa / p0_pa
+    pr_crit = critical_pressure_ratio(gamma)
+    g1 = gamma - 1.0
+
+    if pr <= pr_crit:  # boğulmuş
+        flux = (p0_pa * np.sqrt(gamma / (r_specific * t0_k))
+                * (2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (2.0 * g1)))
+        p_exit = p0_pa * pr_crit
+        t_exit = t0_k * 2.0 / (gamma + 1.0)
+        mach = 1.0
+        v_exit = np.sqrt(gamma * r_specific * t_exit)
+        choked = True
+    else:              # subsonik
+        term = max(pr ** (2.0 / gamma) - pr ** ((gamma + 1.0) / gamma), 0.0)
+        flux = p0_pa * np.sqrt((2.0 * gamma / (g1 * r_specific * t0_k)) * term)
+        p_exit = p_back_pa
+        t_exit = t0_k * pr ** (g1 / gamma)
+        mach = np.sqrt(max((2.0 / g1) * (pr ** (-g1 / gamma) - 1.0), 0.0))
+        v_exit = mach * np.sqrt(gamma * r_specific * t_exit)
+        choked = False
+
+    mass_flux = float(cd * flux)
+    return {
+        'mdot_kg_s': float(mass_flux * area_m2),
+        'mass_flux': mass_flux,                 # kg/(s·m²), Cd dahil
+        'choked': bool(choked),
+        'mach': float(mach),
+        'p_exit_pa': float(p_exit),
+        't_exit_k': float(t_exit),
+        'rho_exit': float(p_exit / (r_specific * t_exit)),
+        'v_exit_m_s': float(v_exit),
+        'pr_crit': float(pr_crit),
+        'pr': float(pr),
+    }
+
+
+def _gas_r_specific(gas, name):
+    """Özgül gaz sabiti R [J/(kg·K)]: doğrudan 'R' veya 'MW'den (kg/kmol).
+
+    Varsayılan YOK — ön yakıcı egzoz koşulu dışarıdan (çevrim çözücüsünden)
+    gelmelidir. R verilmişse o kazanır (MW gölgede kalır).
+    """
+    r = gas.get('R')
+    if r is not None:
+        if float(r) <= 0.0:
+            raise ValueError(f"{name}: R pozitif olmalı")
+        return float(r)
+    mw = gas.get('MW', gas.get('mw'))
+    if mw is None:
+        raise ValueError(
+            f"{name}: özgül gaz sabiti için 'R' (J/kg·K) veya 'MW' (kg/kmol) "
+            "zorunlu (ön yakıcı egzoz bileşimi — varsayılan yok)")
+    if float(mw) <= 0.0:
+        raise ValueError(f"{name}: MW pozitif olmalı (kg/kmol)")
+    return R_UNIVERSAL / float(mw)
+
+
+def _require_gas_stream(spec, key, name):
+    """Gaz akım sözlüğünü doğrula: T0_K, P0_bar, gamma zorunlu (varsayılan yok)."""
+    gas = spec.get(key)
+    if not isinstance(gas, dict):
+        raise ValueError(
+            f"gas_gas_coaxial: '{key}' sözlüğü zorunlu "
+            "(T0_K, P0_bar, gamma, ve MW veya R)")
+    for k in ('T0_K', 'P0_bar', 'gamma'):
+        if gas.get(k) is None:
+            raise ValueError(
+                f"{name}: '{k}' zorunlu — ön yakıcı egzoz koşulu dışarıdan "
+                "verilmelidir (varsayılan sabit konmaz)")
+    if float(gas['P0_bar']) <= 0.0 or float(gas['T0_K']) <= 0.0:
+        raise ValueError(f"{name}: P0_bar ve T0_K pozitif olmalı")
+    if float(gas['gamma']) <= 1.0:
+        raise ValueError(f"{name}: gamma > 1 olmalı")
+    return gas
+
+
+def _plan_gas_elements(total_area_m2, warnings_tr, name,
+                       pref_mm=GAS_POST_D_PREF_MM, n_max=GAS_ELEMENT_N_MAX):
+    """Toplam iç-post alanını, post çapını tercih bandına (2-8 mm) oturtan
+    n elemana böl. Bandın içindeki EN KÜÇÜK n (en büyük çap) seçilir; band
+    tutturulamazsa sınır çözümü + uyarı."""
+    d_lo, d_hi = pref_mm[0] * 1e-3, pref_mm[1] * 1e-3
+    if total_area_m2 <= 0:
+        raise ValueError(f"{name}: toplam post alanı pozitif olmalı")
+    for n in range(1, n_max + 1):
+        d = np.sqrt(4.0 * total_area_m2 / (np.pi * n))
+        if d <= d_hi:
+            if d < d_lo:
+                warnings_tr.append(
+                    f"{name}: iç post çapı d={d*1e3:.2f} mm tercih bandının "
+                    f"({pref_mm[0]:.1f}-{pref_mm[1]:.1f} mm) altında "
+                    "(düşük debi / küçük eleman).")
+            return int(n), float(d)
+    # n_max ile bile post bandın üstünde: sınır çözümü
+    n = n_max
+    d = np.sqrt(4.0 * total_area_m2 / (np.pi * n))
+    warnings_tr.append(
+        f"{name}: eleman üst sınırı n={n_max} ile post çapı d={d*1e3:.2f} mm "
+        f"tercih bandının üstünde. Debi çok yüksek; eleman sınırını artırın "
+        "veya P0'ı yükseltin.")
+    return int(n), float(d)
+
+
+# ---------------------------------------------------------------------------
 # Delik planı ve manifold
 # ---------------------------------------------------------------------------
 
@@ -491,8 +683,242 @@ def _solve_circuit(name, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
 # Ana giriş noktası
 # ---------------------------------------------------------------------------
 
+def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
+    """Gaz-gaz shear-coax enjektör (FFSC/staged combustion ana odası).
+
+    İç jet (varsayılan ox-zengin gaz) + dış anülüs (yakıt-zengin gaz), her
+    ikisi de sıkıştırılabilir orifis akışı. Girdi olarak HER İKİ akımın ön
+    yakıcı egzoz koşulları (T0, P0, gamma, MW/R) dışarıdan gelir — varsayılan
+    sabit yoktur. Karışım kriteri momentum-akı oranı J ve hız oranı VR.
+
+    Atomizasyon/SMD gaz-gaz için ANLAMSIZDIR (damlacık yok) → None döner.
+    """
+    pc_bar = float(spec['Pc_bar'])
+    pc_pa = pc_bar * PA_PER_BAR
+
+    mdot_ox = spec.get('mdot_ox')
+    mdot_fuel = spec.get('mdot_fuel')
+    if not mdot_ox or mdot_ox <= 0:
+        raise ValueError('gas_gas_coaxial: mdot_ox pozitif olmalı (kg/s)')
+    if not mdot_fuel or mdot_fuel <= 0:
+        raise ValueError('gas_gas_coaxial: mdot_fuel zorunlu (kg/s, > 0) — '
+                         'ana oda iki ön yakıcıdan beslenir')
+
+    gas_ox = _require_gas_stream(spec, 'gas_ox', 'oksitleyici gazı')
+    gas_fuel = _require_gas_stream(spec, 'gas_fuel', 'yakıt gazı')
+
+    cd = spec.get('cd')
+    if cd is None:
+        cd = GAS_GAS_CD_DEFAULT
+        assumptions_tr.append(
+            f"Gaz postu akı katsayısı Cd={GAS_GAS_CD_DEFAULT} varsayıldı "
+            "(kontürlü gaz enjektör postu, band 0.8-0.9; 'cd' ile ezilebilir).")
+    cd = float(cd)
+
+    inner_stream = str(spec.get('inner_stream', 'ox')).lower()
+    if inner_stream not in ('ox', 'fuel'):
+        raise ValueError("inner_stream 'ox' veya 'fuel' olmalı")
+    if spec.get('inner_stream') is None:
+        assumptions_tr.append(
+            "İç post = oksitleyici gazı, dış anülüs = yakıt gazı varsayıldı "
+            "(gaz-gaz coax tipik dizilim; 'inner_stream' ile değiştirilebilir).")
+
+    # Akım koşulları (birim alan → mass_flux; alan bağımsız)
+    r_ox = _gas_r_specific(gas_ox, 'oksitleyici gazı')
+    r_fuel = _gas_r_specific(gas_fuel, 'yakıt gazı')
+    p0_ox = float(gas_ox['P0_bar']) * PA_PER_BAR
+    p0_fuel = float(gas_fuel['P0_bar']) * PA_PER_BAR
+    g_ox = float(gas_ox['gamma'])
+    g_fuel = float(gas_fuel['gamma'])
+    t0_ox = float(gas_ox['T0_K'])
+    t0_fuel = float(gas_fuel['T0_K'])
+
+    if p0_ox <= pc_pa:
+        raise ValueError(
+            f"oksitleyici gazı: P0={p0_ox/PA_PER_BAR:.1f} bar ≤ Pc={pc_bar:.1f} "
+            "bar — besleme basıncı oda basıncını aşmalı (ΔP > 0)")
+    if p0_fuel <= pc_pa:
+        raise ValueError(
+            f"yakıt gazı: P0={p0_fuel/PA_PER_BAR:.1f} bar ≤ Pc={pc_bar:.1f} "
+            "bar — besleme basıncı oda basıncını aşmalı (ΔP > 0)")
+
+    st_ox = compressible_orifice_flow(cd, 1.0, p0_ox, t0_ox, g_ox, r_ox, pc_pa)
+    st_fuel = compressible_orifice_flow(cd, 1.0, p0_fuel, t0_fuel, g_fuel,
+                                        r_fuel, pc_pa)
+
+    a_ox = mdot_ox / max(st_ox['mass_flux'], 1e-12)      # m² toplam ox alanı
+    a_fuel = mdot_fuel / max(st_fuel['mass_flux'], 1e-12)  # m² toplam yakıt alanı
+
+    # Eleman sayısı iç akımın (post) alanından belirlenir
+    if inner_stream == 'ox':
+        inner_area, inner_name = a_ox, 'oksitleyici postu'
+        outer_area = a_fuel
+    else:
+        inner_area, inner_name = a_fuel, 'yakıt postu'
+        outer_area = a_ox
+    n, d_inner = _plan_gas_elements(inner_area, warnings_tr, inner_name)
+
+    a_ann_e = outer_area / n
+    t_wall = max(GAS_POST_WALL_MIN_MM * 1e-3, GAS_POST_WALL_T_OVER_D * d_inner)
+    d_post_outer = d_inner + 2.0 * t_wall                 # anülüs iç çapı
+    gap = (np.sqrt(d_post_outer ** 2 + 4.0 * a_ann_e / np.pi)
+           - d_post_outer) / 2.0
+    d_elem_outer = d_post_outer + 2.0 * gap
+    if gap * 1e3 < GAS_ANNULUS_GAP_MIN_MM:
+        warnings_tr.append(
+            f"Anülüs boşluğu {gap*1e3:.2f} mm < {GAS_ANNULUS_GAP_MIN_MM} mm "
+            "imalat alt sınırı (dış akım debisi düşük / eleman fazla).")
+
+    # Momentum-akı oranı ve hız oranı (inner=post, outer=anülüs)
+    if inner_stream == 'ox':
+        rho_in, v_in = st_ox['rho_exit'], st_ox['v_exit_m_s']
+        rho_out, v_out = st_fuel['rho_exit'], st_fuel['v_exit_m_s']
+    else:
+        rho_in, v_in = st_fuel['rho_exit'], st_fuel['v_exit_m_s']
+        rho_out, v_out = st_ox['rho_exit'], st_ox['v_exit_m_s']
+    j_mom = (rho_out * v_out ** 2) / max(rho_in * v_in ** 2, 1e-12)
+    vr = v_out / max(v_in, 1e-9)
+    j_ok = GAS_GAS_J_GOOD[0] <= j_mom <= GAS_GAS_J_GOOD[1]
+    if not j_ok:
+        warnings_tr.append(
+            f"Momentum-akı oranı J={j_mom:.2f} iyi karışım bandının "
+            f"({GAS_GAS_J_GOOD[0]:.0f}-{GAS_GAS_J_GOOD[1]:.0f}) dışında "
+            "(mühendislik kılavuzu): karışım/yanma verimi düşebilir. "
+            "Akım P0/geometrisini gözden geçirin.")
+
+    def _circuit(name, mdot, p0_pa_, st, is_inner):
+        dp_bar = (p0_pa_ - pc_pa) / PA_PER_BAR
+        d_char = d_inner if is_inner else gap
+        return {
+            'mdot_kg_s': float(mdot),
+            'delta_p_bar': float(dp_bar),
+            'dp_pc_ratio': float(dp_bar / pc_bar),
+            'p0_bar': float(p0_pa_ / PA_PER_BAR),
+            'velocity_m_s': float(st['v_exit_m_s']),
+            'mach': float(st['mach']),
+            'choked': bool(st['choked']),
+            'exit_temp_K': float(st['t_exit_k']),
+            'exit_pressure_bar': float(st['p_exit_pa'] / PA_PER_BAR),
+            'exit_density_kg_m3': float(st['rho_exit']),
+            'cd': float(cd),
+            'cd_basis': 'gaz postu akı katsayısı (kompresibl orifis)',
+            'n_orifices': int(n),
+            'orifice_d_mm': float(d_char * 1e3),
+            'total_area_mm2': float((a_ox if name == 'oksitleyici'
+                                     else a_fuel) * 1e6),
+            'flow_model': ('compressible-choked' if st['choked']
+                           else 'compressible-unchoked'),
+            'critical_pressure_ratio': float(st['pr_crit']),
+            'pressure_ratio': float(st['pr']),
+            'nhne': None,
+            'cavitation_number': None,   # gaz akışında kavitasyon yok
+            'hydraulic_flip_risk': False,
+        }
+
+    ox_circuit = _circuit('oksitleyici', mdot_ox, p0_ox, st_ox,
+                          is_inner=(inner_stream == 'ox'))
+    fuel_circuit = _circuit('yakıt', mdot_fuel, p0_fuel, st_fuel,
+                            is_inner=(inner_stream == 'fuel'))
+
+    # Kararlılık: gaz-gaz için ayrı (daha düşük) ΔP/Pc bandı
+    dp_pc_ox = ox_circuit['dp_pc_ratio']
+    dp_pc_f = fuel_circuit['dp_pc_ratio']
+    worst = min(dp_pc_ox, dp_pc_f)
+    chug_ok = worst >= GAS_DP_PC_MIN
+    if not chug_ok:
+        warnings_tr.append(
+            f"ΔP/Pc = {worst:.2f} < {GAS_DP_PC_MIN} (gaz-gaz alt sınırı) → "
+            "oda-besleme kuplajı / düşük frekans kararsızlık riski. Ön yakıcı "
+            "basıncını artırın.")
+    elif worst < GAS_DP_PC_RECOMMENDED:
+        warnings_tr.append(
+            f"ΔP/Pc = {worst:.2f}, önerilen gaz-gaz alt sınırı "
+            f"{GAS_DP_PC_RECOMMENDED}'un altında (mühendislik kılavuzu): "
+            "kararlılık marjı düşük.")
+    assumptions_tr.append(
+        f"Gaz-gaz ΔP/Pc bandı ({GAS_DP_PC_MIN}-{GAS_DP_PC_RECOMMENDED}+) "
+        "mühendislik kılavuzudur; SP-8089'un %15-20'si SIVI enjektör içindir "
+        "(kavitasyon/atomizasyon), gaz-gaz'da bu mekanizmalar yoktur.")
+
+    stability = {
+        'dp_pc_ratio_ox': float(dp_pc_ox),
+        'dp_pc_ratio_fuel': float(dp_pc_f),
+        'chug_ok': bool(chug_ok),
+        'chug_rule': (f'dP/Pc >= {GAS_DP_PC_MIN}-{GAS_DP_PC_RECOMMENDED} '
+                      '(gaz-gaz mühendislik kılavuzu; SP-8089 sıvı içindir)'),
+        'feed_coupling_warning_tr': None,
+        'acoustic_note_tr': ('Yüksek frekans (akustik) analiz kapsam dışı; '
+                             'gaz-gaz ana odalarda enine modlar birincil risk, '
+                             'baffle/kavite literatürüne bakınız.'),
+    }
+
+    momentum = {
+        'momentum_ratio': float(j_mom),   # J = (ρv²)_dış/(ρv²)_iç
+        'velocity_ratio': float(vr),      # VR = v_dış/v_iç
+        'rupe_factor': None,
+        'tmr': None,
+        'target': f"J∈[{GAS_GAS_J_GOOD[0]:.0f},{GAS_GAS_J_GOOD[1]:.0f}] "
+                  "(iyi karışım, kılavuz)",
+        'ok': bool(j_ok),
+        'basis': 'momentum-akı oranı (shear-coax karışım kriteri)',
+    }
+
+    gas_gas_geometry = {
+        'inner_stream': inner_stream,
+        'n_elements': int(n),
+        'inner_post_d_mm': float(d_inner * 1e3),
+        'post_wall_mm': float(t_wall * 1e3),
+        'annulus_gap_mm': float(gap * 1e3),
+        'element_outer_d_mm': float(d_elem_outer * 1e3),
+        'inner_velocity_m_s': float(v_in),
+        'outer_velocity_m_s': float(v_out),
+        'inner_density_kg_m3': float(rho_in),
+        'outer_density_kg_m3': float(rho_out),
+        'momentum_flux_ratio_J': float(j_mom),
+        'velocity_ratio_VR': float(vr),
+    }
+
+    desc = (f"{n} adet gaz-gaz shear-coax eleman "
+            f"(iç {inner_stream} postu d={d_inner*1e3:.2f} mm, anülüs boşluğu "
+            f"{gap*1e3:.2f} mm, eleman D={d_elem_outer*1e3:.2f} mm); "
+            f"J={j_mom:.2f}, VR={vr:.2f}")
+
+    return {
+        'status': 'success',
+        'motor_type': spec.get('motor_type'),
+        'injector_type': 'gas_gas_coaxial',
+        'ox_circuit': ox_circuit,
+        'fuel_circuit': fuel_circuit,
+        'pattern': {
+            'description_tr': desc,
+            'n_elements': int(n),
+            'impingement': None,
+        },
+        'atomization': {
+            # Gaz-gaz: damlacık yok → SMD anlamsız (sahte sayı DÖNMEZ)
+            'smd_ox_um': None,
+            'smd_fuel_um': None,
+            'correlation': 'not_modelled',
+            'spray_cone_half_angle_deg': None,
+            'note_tr': ('Gaz-gaz enjeksiyonda sıvı damlacık yoktur; SMD '
+                        'atomizasyon korelasyonları uygulanmaz. Karışım '
+                        'türbülanslı shear ile momentum-akı oranından '
+                        'değerlendirilir (J, VR).'),
+        },
+        'momentum': momentum,
+        'pintle_geometry': None,
+        'swirl_geometry': None,
+        'gas_gas_geometry': gas_gas_geometry,
+        'stability': stability,
+        'warnings_tr': warnings_tr,
+        'assumptions_tr': assumptions_tr,
+        'references': REFERENCES + GAS_GAS_REFERENCES,
+    }
+
+
 _VALID_TYPES = ('showerhead', 'impinging_doublet', 'impinging_triplet',
-                'like_impinging', 'pintle', 'coax_swirl', 'swirl')
+                'like_impinging', 'pintle', 'coax_swirl', 'swirl',
+                'gas_gas_coaxial')
 
 
 def design_injector(spec):
@@ -521,6 +947,22 @@ def design_injector(spec):
     pc_bar = spec.get('Pc_bar')
     if not pc_bar or pc_bar <= 0:
         raise ValueError('Pc_bar pozitif olmalı (bar)')
+
+    # Gaz-gaz shear-coax (FFSC/staged combustion ana odası) — sıvı faz
+    # devrelerinden tamamen ayrı sıkıştırılabilir akış dalı.
+    if inj_type == 'gas_gas_coaxial':
+        if motor_type != 'liquid':
+            raise ValueError(
+                "gas_gas_coaxial yalnız sıvı (staged combustion / FFSC) motor "
+                "için geçerlidir; ana odaya ön yakıcılardan gaz girer")
+        g_warnings, g_assumptions = [], []
+        try:
+            return _design_gas_gas_coaxial(spec, g_warnings, g_assumptions)
+        except ValueError:
+            raise
+        except Exception as exc:  # sayısal çöküş
+            return {'status': 'error',
+                    'error': f'Gaz-gaz tasarımı çözülemedi: {exc}'}
 
     mdot_fuel = spec.get('mdot_fuel')
     if motor_type == 'liquid':

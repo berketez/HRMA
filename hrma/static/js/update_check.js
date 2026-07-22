@@ -345,10 +345,20 @@
     // Yerel pencere menüsü (macOS "Check for Updates…") buradan tetikler
     window.hrmaCheckForUpdates = checkNow;
 
+    // Ayarlar paneli açılış denetimini kapatabilir (settings_panel.js,
+    // localStorage.hrma_update_autocheck: 'on' varsayılan, 'off' = atla).
+    // Yalnız OTOMATİK denetim atlanır; menü / "Şimdi denetle" yine çalışır.
+    var autocheckOff = false;
+    try {
+        autocheckOff = localStorage.getItem('hrma_update_autocheck') === 'off';
+    } catch (e) { /* özel mod */ }
+
     // Sayfa otursun, ağır grafikler yüklensin diye küçük gecikmeyle sor
-    if (document.readyState === 'complete') {
-        setTimeout(checkNow, 2500);
-    } else {
-        window.addEventListener('load', function () { setTimeout(checkNow, 2500); });
+    if (!autocheckOff) {
+        if (document.readyState === 'complete') {
+            setTimeout(checkNow, 2500);
+        } else {
+            window.addEventListener('load', function () { setTimeout(checkNow, 2500); });
+        }
     }
 })();
