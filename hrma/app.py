@@ -9,7 +9,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import (Flask, render_template, request, jsonify, send_file,
+                   send_from_directory)
 from flask_cors import CORS
 import numpy as np
 import json
@@ -243,6 +244,20 @@ def inject_app_version():
     # Şablonlar sürümü tek kaynaktan gösterir (hrma/__init__.py)
     from hrma import __version__
     return {'app_version': __version__}
+
+@app.route('/favicon.ico')
+def favicon():
+    """Tarayıcının kendiliğinden istediği /favicon.ico yolu.
+
+    Dosya hrma/static/favicon.ico'da duruyordu ama kök yol tanımlı olmadığı
+    için her sayfa yüklemesinde 404 üretiliyordu (uzun süredir bilinen
+    kozmetik hata, 2026-07-23'te kapatıldı). Simge, uygulama ikonunun
+    (packaging/icon_1024.png) çok boyutlu ICO türevidir.
+    """
+    return send_from_directory(
+        os.path.join(app.root_path, 'static'), 'favicon.ico',
+        mimetype='image/vnd.microsoft.icon')
+
 
 @app.route('/')
 def index():
