@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-nk33-n1-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "J. Hulka, J.S. Forde, R.E. Werling (Aerojet), V.S. Anisimov, V.A. Kozlov, I.P. Kositsin (N.D. Kuznetsov SSTC), 'Modification and Verification Testing of a Russian NK-33 Rocket Engine for Reusable and Restartable Applications', AIAA 98-3361, PRA 044-98, 1998; abstract + s.2, s.12",
+    "doi": null,
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-23",
+    "data_extraction": "text",
+    "extraction_note": "Birincil AIAA 98-3361 PDF'inden dogrudan okundu (lpre.de/resources/articles/AIAA-1998-3361.pdf): oda basinci 2109 psia (100% guc seviyesi, s.2), ana yanma odasi MR 2.59 (s.2), vakum Isp 331 s (abstract), deniz seviyesi Isp 297+/-3 s (s.12), yakit-zengin... duzeltme: OKSITLEYICI-zengin kademeli yanma (s.2 'staged combustion, pump-fed... oxidizer-rich combustion gas to drive... turbine'), LOX/kerosen (RP-1). Isp hesaplarinin 3sigma dogrulugu +/-%1.3 (s.11). Genisleme orani AIAA metninde sayisal verilmedi; 27.7 ikincil derlemelerden (Wikipedia/Astronautix, capraz tutarli) auxiliary girdi olarak eklendi ve burada isaretlendi. [access orijinal etiketi: 'conference_paper']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "rp1",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "rp1"
+  },
+  "geometry": {
+    "expansion_ratio": 27.7,
+    "cycle": "staged_combustion"
+  },
+  "inputs": {
+    "chamber_pressure_psia": 2109,
+    "of_ratio": 2.59
+  },
+  "measured": {
+    "isp_vac_s": 331,
+    "isp_sl_s": 297
+  },
+  "units_original": "psia, s, - (AIAA 98-3361 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "staged_combustion",
+    "oxidizer_rich",
+    "lox_rp1",
+    "russia"
+  ],
+  "notes": "Sovyet N-1 ay araci 1. kademe motoru (N.D. Kuznetsov), sonradan Aerojet AJ26 / Antares / Soyuz-2.1v. OKSITLEYICI-zengin kademeli yanma — Batida uzun sure ulasilamayan yuksek Pc hidrokarbon ucu. Pc/MR/Isp_vac/Isp_sl BIRINCIL AIAA belgesinden; genisleme orani 27.7 ikincil (auxiliary, isaretli). Itki (ikincil: ~1510 kN SL / ~1680 kN vak) measured'a YAZILMADI — kaydin skorlanan icerigi (Isp) birincil kalsin diye. Onbrunör MR 58, Pc 4670 psia, gaz sicakligi 670 R (s.2) — ic tasarim referansi."
+}

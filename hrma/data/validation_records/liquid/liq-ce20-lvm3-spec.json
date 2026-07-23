@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-ce20-lvm3-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "ISRO yayimlanmis degerleri, ikincil derlemelerde capraz tutarli: Wikipedia CE-20 + ISRO uprated-CE20 test duyurulari (2025). ISRO resmi bicimsel datasheet yayimlamaz.",
+    "doi": null,
+    "access": "webpage",
+    "confidence": "medium",
+    "date_checked": "2026-07-23",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar Wikipedia CE-20 + ISRO test duyurularindan tutarli okundu: oda basinci 6 MPa (60 bar), MR 5.05, genisleme orani 100, Isp_vac 442 s, nominal itki 200 kN (180-220 kN kisma), gaz jeneratoru cevrimi, LOX/LH2, kuru kutle 588 kg. ISRO bicimsel datasheet yayimlamadigi icin confidence 'medium'. [access orijinal etiketi: 'secondary_compilation']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 100,
+    "cycle": "gas_generator",
+    "dry_mass_kg": 588
+  },
+  "inputs": {
+    "chamber_pressure_bar": 60,
+    "of_ratio": 5.05
+  },
+  "measured": {
+    "thrust_vac_kn": 200,
+    "isp_vac_s": 442
+  },
+  "units_original": "kN, s, MPa->bar, - (ikincil derleme)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "gas_generator",
+    "upper_stage",
+    "india_isro",
+    "secondary_source"
+  ],
+  "notes": "LVM3 kriyojenik ust kademe motoru (ISRO LPSC) — ilk Hint gaz jeneratoru kriyojenik motoru. Dusuk Pc (60 bar) + yuksek genisleme (100) ust kademe; RS-68'den (gaz jeneratoru ama eps 21.5 ilk kademe) farkli nokta. Confidence medium (ISRO bicimsel datasheet yok; Wikipedia + resmi test duyurulari). MR 5.05 nominal; yukseltilmis 22-ton surumu 216 kN'ye cikar (ayri kayit yapilmadi)."
+}

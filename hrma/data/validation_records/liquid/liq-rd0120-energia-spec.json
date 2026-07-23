@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-rd0120-energia-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "KBKhA (Chemical Automatics Design Bureau) yayimlanmis degerleri, ikincil derlemelerde capraz tutarli: Astronautix RD-0120, Wikipedia RD-0120. Birincil KBKhA datasheet bu oturumda erisilemedi.",
+    "doi": null,
+    "access": "webpage",
+    "confidence": "medium",
+    "date_checked": "2026-07-23",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar Astronautix + Wikipedia RD-0120'den tutarli okundu: oda basinci 21.9 MPa (219 bar), MR 6.0, genisleme orani 85.7, Isp_vac 455 s / Isp_sl 354 s, yakit-zengin kademeli yanma, LOX/LH2, itki vak 1961.3 kN / SL 1526 kN. Birincil KBKhA datasheet erisilemedigi icin confidence 'medium'. [access orijinal etiketi: 'secondary_compilation']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 85.7,
+    "cycle": "staged_combustion"
+  },
+  "inputs": {
+    "chamber_pressure_bar": 219,
+    "of_ratio": 6.0
+  },
+  "measured": {
+    "thrust_sl_kn": 1526,
+    "thrust_vac_kn": 1961,
+    "isp_sl_s": 354,
+    "isp_vac_s": 455
+  },
+  "units_original": "kN, s, MPa->bar, - (ikincil derleme)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "staged_combustion",
+    "large_scale",
+    "russia",
+    "secondary_source"
+  ],
+  "notes": "Energia roketi ana motoru (KBKhA), SSME/RS-25'in Sovyet muadili — yakit-zengin kademeli yanma LOX/LH2. RS-25'ten (Pc 206 bar, eps 69) farkli nokta: daha yuksek genisleme (85.7). Confidence medium (ikincil kaynak). Isp_vac 455 s SSME sinifi yuksek performans."
+}

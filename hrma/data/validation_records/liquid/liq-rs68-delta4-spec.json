@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-rs68-delta4-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "Purdue University AAE Propulsion web veritabani, RS-68 sayfasi (Aerojet Rocketdyne/Boeing Rocketdyne uretici veri fisini cogaltir); Wikipedia RS-68 ile capraz kontrol",
+    "doi": null,
+    "access": "webpage",
+    "confidence": "medium",
+    "date_checked": "2026-07-23",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar Purdue AAE RS-68 sayfasindan okundu (engineering.purdue.edu/AAE/research/propulsion/Info/rockets/solids/liquids/rs68): deniz seviyesi itki 650000 lb, vakum itki 745000 lb, Isp_sl 365 s, Isp_vac 410 s, oda basinci 1410 psia, MR 6:1, genisleme orani 21.5:1, LOX/LH2. Cevrim (gas generator) Purdue'da '????' idi; RS-68'in acik-cevrim gaz jeneratoru oldugu evrensel belgeli (kriyojenik ilk kademe ablatif lule). Confidence 'medium': birincil uretici fisi degil, cogaltim; sayilar Wikipedia RS-68 (Isp 365/410, SL ~660000 lbf) ile tutarli. RS-68A (yukseltilmis) FARKLI motor — bu kayit ORIJINAL RS-68. [access orijinal etiketi: 'secondary_datasheet_reproduction']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 21.5,
+    "cycle": "gas_generator"
+  },
+  "inputs": {
+    "chamber_pressure_psia": 1410,
+    "of_ratio": 6.0
+  },
+  "measured": {
+    "thrust_sl_lbf": 650000,
+    "thrust_vac_lbf": 745000,
+    "isp_sl_s": 365,
+    "isp_vac_s": 410
+  },
+  "units_original": "lbf, s, psia, - (Purdue/uretici fisi orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "gas_generator",
+    "large_scale",
+    "usa"
+  ],
+  "notes": "Delta IV ana motoru (Aerojet Rocketdyne). Dusuk genisleme (21.5) LOX/LH2 gaz jeneratoru ilk kademe — RS-25/LE-7A kademeli yanmasinin tersi ucu; ablatif soğutmali lule nedeniyle dusuk Isp (410 s vak). Ikincil cogaltim (medium); SL/vak itki orani + Isp_sl/Isp_vac lule modeli icin ek capa. RS-68A varyanti (Pc ~1488 psi, Isp_vac 411.9) AYRI motordur, bu kayda dahil DEGIL."
+}

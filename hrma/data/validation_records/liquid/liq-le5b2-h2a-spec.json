@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-le5b2-h2a-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "D. Terakado et al., '2nd qualification test series results of the upper stage engine LE-5B-3 for H3 rocket', 8th EUCASS, 2019, DOI 10.13009/EUCASS2019-626, s.3 Tablo 1 (LE-5B-2 karsilastirma sutunu)",
+    "doi": "10.13009/EUCASS2019-626",
+    "access": "open",
+    "confidence": "high",
+    "date_checked": "2026-07-23",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar EUCASS2019-626 PDF Tablo 1 LE-5B-2 sutunundan dogrudan okundu (https://www.eucass.eu/doi/EUCASS2019-0626.pdf): vakum itki 137.2 kN, vakum Isp 446.8 s, MR 5.0, oda basinci 3.58 MPa, genisleme orani 110, cevrim 'Expander bleed', firing duration 534 s, kutle 298 kg, boy 2.79 m. [access orijinal etiketi: 'conference_paper']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 110,
+    "cycle": "expander",
+    "length_m": 2.79,
+    "dry_mass_kg": 298
+  },
+  "inputs": {
+    "chamber_pressure_mpa": 3.58,
+    "of_ratio": 5.0
+  },
+  "measured": {
+    "thrust_vac_kn": 137.2,
+    "isp_vac_s": 446.8
+  },
+  "units_original": "kN, s, MPa, kg, m, - (EUCASS2019-626 Tablo 1 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "expander_bleed",
+    "upper_stage",
+    "japan_jaxa"
+  ],
+  "notes": "H-IIA/H-IIB 2. kademe motoru (JAXA/MHI), LE-5B-3'un onceki uretim surumu. LE-5B-3 (liq-le5b3-h3-spec) ile ayni geometri (genisleme 110, boy 2.79) ve MR 5.0; yalniz Pc 3.58 vs 3.61 MPa ve Isp 446.8 vs 448.0 s farki — kucuk-fark hassasiyet cifti."
+}

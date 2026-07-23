@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-vinci-ariane6-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "ArianeGroup Vinci veri fisi (docslib.org/doc/11643959 uzerinde cogaltilmis uretici tablosu); P. Alliot, J-F. Delange, V. De Korver, J-M. Sannino, A. Lekeux, B. Vieille, 'VINCI, the European reference for Ariane 6 upper stage cryogenic propulsive system', 6th EUCASS, 2015 (birincil, cevrim/itki/MR-bandi teyidi); ESA 'The engines of Ariane 6' (genisleme orani 240)",
+    "doi": null,
+    "access": "vendor_datasheet",
+    "confidence": "medium",
+    "date_checked": "2026-07-23",
+    "data_extraction": "table",
+    "extraction_note": "Pc 60 bar, Isp 457.2 s, MR 6.1, itki 180 kN ArianeGroup veri fisinden (docslib cogaltimi) okundu; ayrica 130 kN dusuk-itki noktasi 45 bar/MR 5.5/458.2 s. EUCASS 2015 (Snecma/Airbus Safran/ESA-CNES) birincil olarak itki 180 kN, expander cevrim, 'typically MR=5.7/6.2', LOX/LH2 ve sabit radyatif kompozit lule uzatmasini DOGRUDAN teyit eder (okundu). Genisleme orani 240 ESA/ArianeGroup kamu tanimindan (ikincil); veri fisinde eps yoktu. Confidence 'medium': Pc/Isp uretici fisinin cogaltimi + eps ikincil. [access orijinal etiketi: 'vendor_datasheet_reproduced']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 240,
+    "cycle": "expander",
+    "nozzle_exit_diameter_m": 1.84,
+    "length_m": 3.22
+  },
+  "inputs": {
+    "chamber_pressure_bar": 60,
+    "of_ratio": 6.1
+  },
+  "measured": {
+    "thrust_vac_kn": 180,
+    "isp_vac_s": 457.2
+  },
+  "units_original": "kN, s, bar, m, - (ArianeGroup veri fisi orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "expander_cycle",
+    "upper_stage",
+    "europe_esa",
+    "high_expansion"
+  ],
+  "notes": "Ariane 6 ust kademe motoru (ArianeGroup). KAPALI expander cevrim (bleed degil), sabit kompozit lule; cok yuksek genisleme (240) + dusuk Pc (60 bar) -> yuksek vakum Isp 457.2 s. Genisleme orani 240 kritik girdi (verilmezse HRMA deniz-seviyesi optimum lule tasarlar ve Isp'yi ~70-80 s dusuk tahmin eder); 240 ESA/ArianeGroup kamu degeridir (ikincil, isaretlendi). MR 6.1 nominal nokta; EUCASS 2015 paper calisma bandini MR 5.7/6.2 verir. 130 kN dusuk-itki noktasi (45 bar, MR 5.5, Isp 458.2 s) ayri kayit yapilmadi."
+}

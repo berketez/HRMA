@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-le7a-h2a-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "D. Watanabe et al., 'Combustion Stability Improvement of LE-9 Engine for Booster Stage of H3 Launch Vehicle', Mitsubishi Heavy Industries Technical Review Vol. 53 No. 4 (Aralik 2016), s.30 Tablo 1 (LE-7A karsilastirma sutunu)",
+    "doi": null,
+    "access": "vendor_datasheet",
+    "confidence": "high",
+    "date_checked": "2026-07-23",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar MHI Technical Review 53(4) PDF Tablo 1 LE-7A sutunundan dogrudan okundu (https://www.mhi.com/technology/review/sites/g/files/jwhtju2326/files/tr/pdf/e534/e534028.pdf): vakum itki 1098 kN, MR 5.9, oda basinci 12.3 MPa (ana yanma odasi), Isp 440 s, genisleme orani 47, cevrim 'two-stage combustion cycle' (= yakit-zengin kademeli yanma). [access orijinal etiketi: 'manufacturer_technical_review']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 47,
+    "cycle": "staged_combustion",
+    "length_m": 3.7,
+    "dry_mass_kg": 1800
+  },
+  "inputs": {
+    "chamber_pressure_mpa": 12.3,
+    "of_ratio": 5.9
+  },
+  "measured": {
+    "thrust_vac_kn": 1098,
+    "isp_vac_s": 440
+  },
+  "units_original": "kN, s, MPa, - (MHI Technical Review 53(4) Tablo 1 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "staged_combustion",
+    "japan_jaxa"
+  ],
+  "notes": "H-IIA/H-IIB 1. kademe ana motoru (JAXA/MHI). 12.3 MPa 'main combustion chamber' basincidir (MHI Tablo 1 dipnotu). MHI 'two-stage combustion cycle' = yakit-zengin kademeli yanma; HRMA cevrimi 'staged_combustion'. Yuksek Pc + genisleme 47 = 1. kademe. Ikincil kaynaklarda genisleme orani 51.9 dolasir; MHI birincil tablosu 47 verir, 47 kullanildi."
+}

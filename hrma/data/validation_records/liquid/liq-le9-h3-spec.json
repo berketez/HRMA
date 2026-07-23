@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-le9-h3-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "D. Watanabe, H. Manako, T. Onga, T. Tamura, K. Ikeda, M. Isono, 'Combustion Stability Improvement of LE-9 Engine for Booster Stage of H3 Launch Vehicle', Mitsubishi Heavy Industries Technical Review Vol. 53 No. 4 (Aralik 2016), s.30 Tablo 1 'LE-9 engine specifications'",
+    "doi": null,
+    "access": "vendor_datasheet",
+    "confidence": "high",
+    "date_checked": "2026-07-23",
+    "data_extraction": "table",
+    "extraction_note": "Sayilar MHI Technical Review 53(4) PDF Tablo 1'den dogrudan okundu (https://www.mhi.com/technology/review/sites/g/files/jwhtju2326/files/tr/pdf/e534/e534028.pdf): vakum itki 1471 kN, MR (engine mixture rate) 5.9, oda basinci 10.0 MPa, Isp 426 s, genisleme orani 37, cevrim 'expander bleed cycle'. MHI urun sayfasi (mhi.com/business/.../h3-first-stage-engine-le-9) '150 ton' (=1471 kN) ve '425 sec' verir; JAXA H3 sayfasi cevrimi 'expander bleed' teyit eder. [access orijinal etiketi: 'manufacturer_technical_review']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "lh2",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "lh2"
+  },
+  "geometry": {
+    "expansion_ratio": 37,
+    "cycle": "expander",
+    "length_m": 3.8,
+    "dry_mass_kg": 2400
+  },
+  "inputs": {
+    "chamber_pressure_mpa": 10.0,
+    "of_ratio": 5.9
+  },
+  "measured": {
+    "thrust_vac_kn": 1471,
+    "isp_vac_s": 426
+  },
+  "units_original": "kN, s, MPa, - (MHI Technical Review 53(4) Tablo 1 orijinal birimleri)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "expander_bleed",
+    "japan_jaxa"
+  ],
+  "notes": "H3 1. kademe ana motoru (JAXA/MHI). Cevrim 'expander bleed' — HRMA cevrim anahtari 'expander' olarak esitlendi (acik/bleed expander; kapali expander degil, adaptor bunu model-formu farki olarak isaretler; bleed dumpi kucuk pozitif Isp sapmasi dogurur). Genisleme orani 37 nispeten dusuk (1. kademe). Ayni MHI Tablo 1 LE-7A (liq-le7a-h2a-spec) ve LE-5B'yi de listeler."
+}

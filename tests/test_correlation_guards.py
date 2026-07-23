@@ -47,8 +47,14 @@ from hrma.validation.correlation_runner import run_correlation
 # nokta yolu adaptör v2 işi), 4'ü (Heydari S4A1 swirl serisi) v1 eksenel
 # model kapsamı dışı olduğundan anomaly bayraklı — anomali katmanında
 # izlenir. BASELINE değerleri bu yüzden aynı kaldı.
+# Hash güncellemesi (2026-07-23, dünya-çapı genişletme): 199 -> 209 kayıt.
+# 10 yeni GERÇEK sıvı motor eklendi (kaynaklı, çoğu birincil ajans belgesi):
+# LE-9/LE-7A/LE-5B-2/LE-5B-3 (JAXA-MHI), NK-33/RD-180/RD-0120 (Rusya),
+# Vinci (ESA/ArianeGroup), RS-68 (ABD), CE-20 (ISRO). Sıvı vakum Isp örneklemi
+# n=4 -> n=14'e, 6 ülkeye çıktı — dış denetimin "n çok küçük" eleştirisine
+# yanıt. Ana istatistik iyileşti/genişledi, aşağıda BILINÇLI güncellendi.
 EXPECTED_DB_HASH = (
-    "c64e8d7b715bbc1dfffddcb9cc38989015685dfe6b5ff3b1026ec032ae1800bd")
+    "2ee2a86bbd6968e4d0c7d4a5f770665cc31094b6c0ba6e1dc2fb9d6971d9eca4")
 
 # (motor, quantity) -> (bias_pct, median_ape_pct, n)
 BASELINE = {
@@ -58,8 +64,12 @@ BASELINE = {
     ("hybrid", "port_diameter_final"): (-9.4, 10.1, 18),
     ("hybrid", "regression_rate"): (-20.2, 35.1, 35),
     ("hybrid", "thrust"): (9.6, 9.1, 18),
-    ("liquid", "isp_vac"): (3.0, 2.8, 4),
-    ("liquid", "thrust_vac"): (0.7, 0.7, 1),
+    # 2026-07-23 dünya-çapı genişletme: n=4 -> n=14 (6 ülke). medAPE %2.8 ->
+    # %1.20, bias +0.93. Örneklem 3.5 kat büyüdü ve hata düştü — taban bilinçli
+    # sıkılaştırıldı. isp_sl de artık skorlanıyor (n=4).
+    ("liquid", "isp_vac"): (0.93, 1.20, 14),
+    ("liquid", "isp_sl"): (2.03, 2.06, 4),
+    ("liquid", "thrust_vac"): (-0.39, 0.16, 4),
     ("solid", "burn_rate"): (-0.4, 0.5, 27),
 }
 

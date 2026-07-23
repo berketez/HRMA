@@ -223,3 +223,73 @@ source_id olarak kullanılmadı; iç-tutarlılık ve çevrim sınıflandırma re
   beklenen mertebede; saçma değer yok.
 - Doğrulama betiği: şema tamlığı + tip + tutarlılık; `python3` ile çalıştırıldı,
   hata yok (rapor final metninde).
+
+---
+---
+
+# EK BÖLÜM — Dünya çapı `engine_spec` çapası genişletmesi (2026-07-23)
+
+Bu bölüm YUKARIDAKİNDEN AYRIDIR. Yukarısı `liquid_engines.json` karşılaştırma tablosunun
+kaynaklarıdır; bu bölüm `validation_records/liquid/liq-*.json` **korelasyon doğrulama
+kayıtlarına** eklenen 10 yeni dünya-çapı motorun kaynaklarıdır (dış denetim "n çok küçük"
+uyarısına yanıt). Tüm URL erişim tarihi: **2026-07-23**.
+
+Yöntem: Her sayı yayımlanmış birincil belgeden (ajans/üretici datasheet, konferans
+bildirisi, NTRS/AIAA) DOĞRUDAN okundu; okunamayanlar çapraz-tutarlı ikincil derlemelerden
+alınıp `confidence: medium` + `secondary_source` etiketiyle işaretlendi. Wikipedia tek
+başına kaynak sayılmadı.
+
+Erişilemeyen birincil kaynaklar (bu oturum): `npoenergomash.ru` (TLS handshake hatası),
+`web.archive.org` (WebFetch engelli), jina MCP (401), Safran sayfaları (301 → jenerik).
+
+## Eklenen 10 kayıt
+
+| test_id | Motor | Ülke/Ajans | Yakıt | Isp_vac (s) | Pc | ε | Çevrim | Conf. | Ana kaynak (erişim 2026-07-23) |
+|---|---|---|---|---|---|---|---|---|---|
+| liq-le9-h3-spec | LE-9 | Japonya / JAXA-MHI | LOX/LH2 | 426 | 10.0 MPa | 37 | expander bleed | high | MHI Technical Review 53(4) Dec 2016, Tablo 1: https://www.mhi.com/technology/review/sites/g/files/jwhtju2326/files/tr/pdf/e534/e534028.pdf |
+| liq-le7a-h2a-spec | LE-7A | Japonya / JAXA-MHI | LOX/LH2 | 440 | 12.3 MPa (ana oda) | 47 | staged (two-stage) | high | MHI Technical Review 53(4) Dec 2016, Tablo 1 (aynı PDF) |
+| liq-le5b3-h3-spec | LE-5B-3 | Japonya / JAXA-MHI | LOX/LH2 | 448.0 | 3.61 MPa | 110 | expander bleed | high | Terakado ve ark. EUCASS 2019, DOI 10.13009/EUCASS2019-626, Tablo 1: https://www.eucass.eu/doi/EUCASS2019-0626.pdf |
+| liq-le5b2-h2a-spec | LE-5B-2 | Japonya / JAXA-MHI | LOX/LH2 | 446.8 | 3.58 MPa | 110 | expander bleed | high | EUCASS 2019-626, Tablo 1 (aynı PDF) |
+| liq-vinci-ariane6-spec | Vinci | Avrupa / ArianeGroup | LOX/LH2 | 457.2 | 60 bar | 240 | expander (kapalı) | medium | ArianeGroup fişi (docslib.org/doc/11643959) + EUCASS 2015 VINCI bildirisi (Alliot ve ark., birincil) + ESA (ε 240) |
+| liq-nk33-n1-spec | NK-33 | Rusya / Kuznetsov | LOX/RP-1 | 331 | 2109 psia | 27.7* | staged (ox-rich) | high | Hulka ve ark. AIAA 98-3361, 1998: https://lpre.de/resources/articles/AIAA-1998-3361.pdf |
+| liq-rs68-delta4-spec | RS-68 | ABD / Aerojet Rocketdyne | LOX/LH2 | 410 | 1410 psia | 21.5 | gas generator | medium | Purdue AAE Propulsion RS-68 (üretici fişi çoğaltımı): https://engineering.purdue.edu/AAE/research/propulsion/Info/rockets/solids/liquids/rs68 |
+| liq-rd180-atlas-spec | RD-180 | Rusya / Energomash | LOX/RP-1 | 338 | 256.6 bar | 36.4 | staged (ox-rich) | medium | Astronautix + Wikipedia + AeroSpaceGuide RD-180 (çapraz tutarlı; Energomash birincili erişilemedi) |
+| liq-ce20-lvm3-spec | CE-20 | Hindistan / ISRO | LOX/LH2 | 442 | 6 MPa | 100 | gas generator | medium | Wikipedia CE-20 + ISRO test duyuruları (ISRO biçimsel datasheet yayımlamaz) |
+| liq-rd0120-energia-spec | RD-0120 | Rusya / KBKhA | LOX/LH2 | 455 | 219 bar | 85.7 | staged | medium | Astronautix + Wikipedia RD-0120 (çapraz tutarlı; KBKhA birincili erişilemedi) |
+
+*NK-33 ε=27.7 ikincilden (AIAA metninde sayısal yoktu); Pc/MR/Isp birincil AIAA'dan.
+
+## Birincil okuma notları (hangi belgeden hangi sayı)
+
+- **LE-9/LE-7A/LE-5B (MHI TR 53(4) Tablo 1, doğrudan PDF okundu):** LE-9 = 1471 kN vak, MR 5.9, Pc 10.0 MPa, Isp 426 s, ε 37, "expander bleed cycle". LE-7A = 1098 kN, MR 5.9, Pc 12.3 MPa (ana oda), Isp 440 s, ε 47, "two-stage combustion". LE-5B = 137 kN, MR 5.0, Pc 3.6 MPa, Isp 448 s, ε 110. MHI ürün sayfası LE-9 "150 ton (1471 kN), 425 sec" teyidi.
+- **LE-5B-2/-3 (EUCASS 2019-626 Tablo 1, doğrudan PDF okundu):** ikisi de 137.2 kN, MR 5.0, ε 110, expander bleed. LE-5B-2: Pc 3.58 MPa / Isp 446.8 s / 298 kg / 534 s. LE-5B-3: Pc 3.61 MPa / Isp 448.0 s / 303 kg / 740 s. Yazarlar JAXA + MHI.
+- **Vinci (ArianeGroup fişi + EUCASS 2015, doğrudan PDF okundu):** fiş 180 kN / Isp 457.2 s / Pc 60 bar / MR 6.1 (+ 130 kN / 45 bar / MR 5.5 / 458.2 s ikinci nokta). EUCASS 2015 (Snecma/Airbus Safran/ESA-CNES) birincil: 180 kN, expander, "typically MR=5.7/6.2", sabit radyatif kompozit lüle. ε 240 ESA/ArianeGroup kamu değeri (ikincil).
+- **NK-33 (AIAA 98-3361, doğrudan PDF okundu):** Pc 2109 psia (100% güç, s.2), ana oda MR 2.59 (s.2), Isp_vac 331 s (abstract), Isp_sl 297±3 s (s.12), oksitleyici-zengin kademeli yanma, LOX/kerosen. Isp hesap 3σ ±%1.3.
+- **RS-68 (Purdue AAE):** SL 650000 lb, vak 745000 lb, Isp_sl 365 s, Isp_vac 410 s, Pc 1410 psia, MR 6:1, ε 21.5, LOX/LH2. Gaz jeneratörü çevrimi evrensel belgeli. RS-68A AYRI motor (dahil değil).
+
+## Adaptör doğrulaması (PYTHONPATH=. adapt_record, hepsi status=ok)
+
+Tüm 10 kayıt 'ok' döndü; Isp hata yüzdesi (HRMA tahmin vs ölçülen, hepsi pozitif = ideal
+CEA c* model-formu sapması, ROCETS ±%4 bandı içinde):
+LE-9 +2.4% · LE-7A +0.3% · LE-5B-3 +0.8% · LE-5B-2 +1.1% · Vinci +0.9% ·
+NK-33 vak +2.9%/SL +2.4% · RS-68 vak +3.6%/SL +1.7% · RD-180 vak +3.0%/SL +3.3% ·
+CE-20 +2.5% · RD-0120 vak -0.5%/SL +0.7%.
+(LE-9 sapması "expander bleed → kapalı expander" eşlemesinin bilinen küçük etkisi.)
+
+## Elenen / eklenmeyen motorlar (ve neden)
+
+- **Merlin Vacuum (MVac):** SpaceX Isp_vac 348 s verir ama Pc/MR YAYIMLAMAZ → `insufficient_inputs`. EKLENMEDİ (mevcut liq-merlin1d-thrust-spec yalnız-itki).
+- **Raptor 2, BE-4:** Üretici resmî Isp/Pc/MR datasheet yok (yalnız itki/beyan) → EKLENMEDİ.
+- **RL10C-1/-1-1/-3, RL10B-2:** L3Harris itki/Isp/MR verir ama Pc + ε VERMEZ → `insufficient_inputs`. EKLENMEDİ (mevcut liq-rl10a33a birincil RL10 çapası var).
+- **Vikas (ISRO):** itici belirsiz (UDMH/N2O4 vs UH25 — UH25 HRMA'da YOK); güvenilir MR yok → EKLENMEDİ.
+- **RD-170/171/191:** RD-180 ile aynı termodinamik nokta (Pc/MR/ε) — tekrar örneklem değil; aile RD-180 ile temsil edildi.
+- **HM7B:** birincil datasheet erişilemedi (Safran 301, satnow 403); Wikipedia'dan öte kaynak yok → EKLENMEDİ (aday: Pc ~37 bar, ε 83.1, Isp 444.6, MR 5.0).
+- **YF-77/YF-100/YF-115 (CASC, Çin):** yalnız düşük kaliteli/tutarsız ikincil; birincil CASC belgesi yok → EKLENMEDİ.
+- **CE-7.5 (ISRO):** MR için güvenilir kaynak yok (Pc/Isp var) → EKLENMEDİ.
+
+## Örneklem etkisi
+
+- Önce: 12 sıvı kaydın çoğu ABD (RS-25, F-1, J-2, Merlin, RL10) + 1 Avrupa (Vulcain 2.1).
+- Sonra: +10 kayıt, 5 ülke/ajans — Japonya (×4 high), Avrupa (×1), Rusya (×3: NK-33 high, RD-180, RD-0120), Hindistan (×1), ABD (×1).
+- Pc bandı 36 bar → 256 bar; genişleme oranı 21.5 → 240'a yayıldı. Yakıt: LOX/LH2 (staged+expander+GG) ve LOX/RP-1 (ox-rich staged).
+- Hâlâ eksik: Çin (CASC) hiç yok; hipergolik sıvı (N2O4/UDMH-MMH) hâlâ zayıf; geniş hibrit static-fire ayrı iş.

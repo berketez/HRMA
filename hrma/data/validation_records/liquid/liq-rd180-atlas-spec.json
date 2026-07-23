@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "test_id": "liq-rd180-atlas-spec",
+  "record_type": "engine_spec",
+  "motor_type": "liquid",
+  "source": {
+    "citation": "NPO Energomash yayimlanmis katalog degerleri, ikincil derlemelerde capraz tutarli: Astronautix RD-180 sayfasi, Wikipedia RD-180, AeroSpaceGuide RD-180. Energomash resmi sitesi (npoenergomash.ru) bu oturumda TLS hatasiyla erisilemedi.",
+    "doi": null,
+    "access": "webpage",
+    "confidence": "medium",
+    "date_checked": "2026-07-23",
+    "data_extraction": "text",
+    "extraction_note": "Sayilar 3 bagimsiz ikincil derlemede tutarli okundu (Astronautix/Wikipedia/AeroSpaceGuide): oda basinci 261.7 kgf/cm2 = 256.6 bar (kaynaklar 26.7 MPa/3870 psi olarak da verir; ~%2 saçilim), MR 2.72, genisleme orani 36.4, Isp_vac 338 s / Isp_sl 311 s (bazi kaynaklar 339/313), oksitleyici-zengin kademeli yanma, LOX/RP-1, itki SL 3830 kN / vak 4152 kN. BIRINCIL Energomash datasheet ERISILEMEDIGI icin confidence 'medium' — sayilar Energomash yayimidir ama ikincilden okundu. [access orijinal etiketi: 'secondary_compilation']"
+  },
+  "propellants": {
+    "oxidizer": "lox",
+    "fuel": "rp1",
+    "hrma_oxidizer_key": "lox",
+    "hrma_fuel_key": "rp1"
+  },
+  "geometry": {
+    "expansion_ratio": 36.4,
+    "cycle": "staged_combustion"
+  },
+  "inputs": {
+    "chamber_pressure_bar": 256.6,
+    "of_ratio": 2.72
+  },
+  "measured": {
+    "thrust_sl_kn": 3830,
+    "thrust_vac_kn": 4152,
+    "isp_sl_s": 311,
+    "isp_vac_s": 338
+  },
+  "units_original": "kN, s, bar (kgf/cm2'den), - (ikincil derleme; Energomash orijinali kgf/cm2)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "engine_spec_anchor",
+    "flight_heritage",
+    "staged_combustion",
+    "oxidizer_rich",
+    "lox_rp1",
+    "russia",
+    "secondary_source"
+  ],
+  "notes": "Atlas V / (RD-171 ailesinin iki-odali yarisi) ana motoru (NPO Energomash). Cok yuksek Pc (256.6 bar) oksitleyici-zengin kademeli yanma LOX/kerosen — NK-33'ten (145 bar) farkli, daha yuksek basinc noktasi. RD-170/171/191 termodinamik olarak ayni noktadir (ayni Pc/MR/eps); tekrar olmasin diye yalniz RD-180 eklendi (aile temsilcisi). Confidence medium (ikincil kaynak, Energomash birincili erisilemedi)."
+}
