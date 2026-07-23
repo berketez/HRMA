@@ -1553,6 +1553,18 @@
                 </button>
             </div>
 
+            <!-- Çevrim güç dengesi + kısma + autogenous paneli (2026-07-23).
+                 Kaynaklar: detailed_feed_system.engine_cycle_solution,
+                 throttle_map, autogenous_pressurization, combustion_data_source
+                 ve combustion_validity. Veri gelmezse panel gizli kalır. -->
+            <div id="cyclePanel" class="panel" style="display: none;">
+                <h2 data-i18n="liq.cyc.panel_title">Engine Cycle, Throttle &amp; Pressurization</h2>
+                <div id="cycleBadges" style="margin:8px 0;"></div>
+                <div id="cycleSummary" style="margin:10px 0;"></div>
+                <div id="throttleMapBox" style="margin:14px 0;"></div>
+                <div id="autogenousBox" style="margin:14px 0;"></div>
+            </div>
+
             <!-- Uyarı paneli (hibrit/advanced deseni). Kaynaklar: validation.*,
                  warnings ve motorun girdi denetimi input_warnings. Hiçbiri
                  gelmezse panel gizli kalır. -->
@@ -2547,6 +2559,9 @@
             if (results.detailed_feed_system) {
                 updateFeedSystemTab(results.detailed_feed_system);
             }
+
+            // Çevrim + kısma + autogenous paneli (2026-07-23)
+            updateCyclePanel(results);
             
             // Combustion Analysis
             if (results.combustion_analysis) {
@@ -2657,6 +2672,120 @@
             return chartDiv;
         }
         
+        // Çevrim güç dengesi + yanma kaynağı rozeti + kısma haritası +
+        // autogenous paneli. Tüm metinler i18n; sayı yoksa satır atlanır.
+        function updateCyclePanel(results) {
+            var panel = document.getElementById('cyclePanel');
+            if (!panel) return;
+            var badges = document.getElementById('cycleBadges');
+            var summ = document.getElementById('cycleSummary');
+            var tbox = document.getElementById('throttleMapBox');
+            var abox = document.getElementById('autogenousBox');
+            badges.innerHTML = ''; summ.innerHTML = '';
+            tbox.innerHTML = ''; abox.innerHTML = '';
+            var shown = false;
+
+            function esc(s) {
+                return String(s).replace(/[&<>"]/g, function (c) {
+                    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+                });
+            }
+            function badge(text, kind) {
+                var col = kind === 'ok' ? '#2dd4a8'
+                    : kind === 'warn' ? '#ff8c33' : '#6fd3e6';
+                return '<span style="display:inline-block;margin:2px 6px 2px 0;'
+                    + 'padding:3px 10px;border-radius:12px;font-size:12px;'
+                    + 'border:1px solid ' + col + ';color:' + col + ';">'
+                    + esc(text) + '</span>';
+            }
+
+            // 1) Yanma verisi kaynağı rozeti + gerçek-gaz uyarısı
+            var src = results.combustion_data_source;
+            if (src === 'rocketcea') {
+                badges.innerHTML += badge(T('liq.cyc.badge_cea', 'Combustion: NASA CEA @ real Pc'), 'ok');
+            } else if (src === 'static_table') {
+                badges.innerHTML += badge(T('liq.cyc.badge_table', 'Combustion: static 100-bar table'), 'warn');
+            }
+            var val = results.combustion_validity || {};
+            if (val.real_gas_warning) {
+                badges.innerHTML += badge(T('liq.cyc.badge_realgas', 'Real-gas warning (Pc>300 bar, CEA ideal-gas)'), 'warn');
+                shown = true;
+            }
+            if (src) shown = true;
+
+            // 2) Çevrim kapanış özeti
+            var fs = results.detailed_feed_system || {};
+            var sol = fs.engine_cycle_solution || {};
+            var rows = [];
+            if (fs.engine_cycle)
+                rows.push([T('liq.cyc.cycle', 'Engine cycle'), esc(fs.engine_cycle)]);
+            if (sol.status)
+                rows.push([T('liq.cyc.balance', 'Power balance'), esc(sol.status)]);
+            if (sol.pump_discharge_ox_bar)
+                rows.push([T('liq.cyc.pump_ox', 'Ox pump discharge'), sol.pump_discharge_ox_bar.toFixed(0) + ' bar']);
+            if (sol.pump_discharge_fuel_bar)
+                rows.push([T('liq.cyc.pump_fuel', 'Fuel pump discharge'), sol.pump_discharge_fuel_bar.toFixed(0) + ' bar']);
+            if (sol.shaft_power_kw)
+                rows.push([T('liq.cyc.shaft_power', 'Turbopump shaft power'), (sol.shaft_power_kw / 1000).toFixed(1) + ' MW']);
+            if (sol.isp_loss_s)
+                rows.push([T('liq.cyc.gg_loss', 'Open-cycle Isp loss'), sol.isp_loss_s.toFixed(1) + ' s']);
+            if (rows.length) {
+                summ.innerHTML = '<table style="width:100%;border-collapse:collapse;">'
+                    + rows.map(function (r) {
+                        return '<tr><td style="padding:3px 8px;color:var(--hd-ink-dim,#7d97a5);">'
+                            + r[0] + '</td><td style="padding:3px 8px;text-align:right;">'
+                            + r[1] + '</td></tr>';
+                    }).join('') + '</table>';
+                shown = true;
+            }
+
+            // 3) Kısma haritası
+            var tm = results.throttle_map || {};
+            if (tm.points && tm.points.length) {
+                var h = '<h3 style="font-size:14px;margin:6px 0;">'
+                    + esc(T('liq.cyc.throttle_map', 'Throttle map (chug margin)')) + '</h3>';
+                h += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+                h += '<tr style="color:var(--hd-ink-dim,#7d97a5);">'
+                    + '<th style="text-align:left;padding:3px 6px;">' + esc(T('liq.cyc.throttle', 'Throttle')) + '</th>'
+                    + '<th style="text-align:right;padding:3px 6px;">' + esc(T('liq.cyc.col_pc', 'Pc (bar)')) + '</th>'
+                    + '<th style="text-align:right;padding:3px 6px;">' + esc(T('liq.cyc.col_isp', 'Isp_vac (s)')) + '</th>'
+                    + '<th style="text-align:right;padding:3px 6px;">' + esc(T('liq.cyc.chug', 'Chug margin')) + '</th></tr>';
+                tm.points.forEach(function (p) {
+                    var chugCol = p.chug_rating === 'chug_risk' ? '#ff5d73'
+                        : p.chug_rating === 'chug_margin_marginal' ? '#ff8c33' : '#2dd4a8';
+                    h += '<tr>'
+                        + '<td style="padding:3px 6px;">' + (p.throttle_fraction * 100).toFixed(0) + '%</td>'
+                        + '<td style="padding:3px 6px;text-align:right;">' + p.chamber_pressure_bar.toFixed(0) + '</td>'
+                        + '<td style="padding:3px 6px;text-align:right;">' + (p.isp_vacuum ? p.isp_vacuum.toFixed(1) : '-') + '</td>'
+                        + '<td style="padding:3px 6px;text-align:right;color:' + chugCol + ';">' + esc(p.chug_rating) + '</td></tr>';
+                });
+                h += '</table>';
+                h += '<p style="font-size:11px;color:var(--hd-ink-dim,#7d97a5);margin-top:4px;">'
+                    + esc(T('liq.cyc.throttle_note', 'Transient throttle response not modelled; each point is a steady-state solution.')) + '</p>';
+                tbox.innerHTML = h;
+                shown = true;
+            }
+
+            // 4) Autogenous basınçlandırma
+            var ag = results.autogenous_pressurization || {};
+            if (ag.status === 'ok') {
+                abox.innerHTML = '<h3 style="font-size:14px;margin:6px 0;">'
+                    + esc(T('liq.cyc.autogenous', 'Autogenous pressurization')) + '</h3>'
+                    + '<p style="font-size:13px;">'
+                    + esc(T('liq.cyc.autogenous_gas', 'Pressurant gas drawn from propellants')) + ': '
+                    + '<strong>' + ag.total_pressurant_gas_kg.toFixed(1) + ' kg</strong>'
+                    + (ag.fraction_of_propellant ? ' (' + (ag.fraction_of_propellant * 100).toFixed(2) + '% ' + esc(T('liq.cyc.of_propellant', 'of propellant')) + ')' : '')
+                    + '</p>';
+                shown = true;
+            } else if (ag.status === 'not_applicable') {
+                abox.innerHTML = '<p style="font-size:12px;color:var(--hd-ink-dim,#7d97a5);">'
+                    + esc(T('liq.cyc.autogenous', 'Autogenous pressurization')) + ': '
+                    + esc(ag.reason || T('liq.cyc.not_applicable', 'not applicable for this configuration')) + '</p>';
+            }
+
+            panel.style.display = shown ? '' : 'none';
+        }
+
         function updateFeedSystemTab(feedSystem) {
             // Add detailed turbopump analysis
             console.log(T('liq.msg.feed_system_data', 'Feed system data:'), feedSystem);
