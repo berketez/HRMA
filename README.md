@@ -1,5 +1,8 @@
 # HRMA - High-Fidelity Rocket Motor Analysis
 
+[![tests](https://github.com/berketez/HRMA/actions/workflows/tests.yml/badge.svg)](https://github.com/berketez/HRMA/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D digital twin of your motor.
 
 ## Just Want to Use HRMA? Download the Installer
