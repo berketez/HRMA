@@ -41,3 +41,10 @@ validation_results.json
 docs/CLAUDE.md
 packaging/mac_server_test.log
 packaging/*.log
+
+# STEP test fikstürleri build123d ile KOŞUM SIRASINDA üretilir
+# (tests/test_step_import.py: motor_step vb. fixture'ları export_step çağırır).
+# İçlerinde üretim zaman damgası olduğu için her koşuda değişip çalışma
+# ağacını kirletiyorlardı. build123d yoksa ilgili testler zaten importorskip
+# ile atlanır, dosyalara ihtiyaç duyulmaz.
+tests/fixtures/step/
