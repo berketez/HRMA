@@ -268,6 +268,81 @@ def blowdown_pressurant(propellant_volume, initial_ullage_volume,
     }
 
 
+# Autogenous basınçlandırma gaz özellikleri (ısıtılmış itici buharı).
+# cp: sabit basınç özgül ısısı [J/(kg·K)], R: özgül gaz sabiti [J/(kg·K)].
+# Kaynak: NIST Webbook (gaz fazı, oda basıncı mertebesinde) + Sutton &
+# Biblarz 9. baskı Böl. 6 (autogenous/self-pressurization).
+AUTOGENOUS_GAS = {
+    # Gaz haldeki metan (~300 K): R = 8314.46/16.04
+    'methane': {'R': 518.3, 'cp': 2230.0, 'name': 'gaseous methane (GCH4)'},
+    # Gaz oksijen (~300 K): R = 8314.46/32.00
+    'oxygen': {'R': 259.8, 'cp': 918.0, 'name': 'gaseous oxygen (GOX)'},
+    # Gaz hidrojen (~300 K): R = 8314.46/2.016
+    'hydrogen': {'R': 4124.0, 'cp': 14300.0, 'name': 'gaseous hydrogen (GH2)'},
+}
+
+# Autogenous besleme gazının tanka giriş sıcaklığı [K]: itici, ısı
+# değiştiriciden (soğutma ceketi / ön yakıcı musluğu) geçip ısıtılarak
+# tanka gaz olarak döner. Değerler uçmuş motorların tipik autogenous
+# besleme sıcaklığı bandındadır (Huzel & Huang Ch. 5). ETİKETLİ varsayım.
+AUTOGENOUS_FEED_TEMP_K = {'methane': 250.0, 'oxygen': 250.0, 'hydrogen': 200.0}
+
+
+def autogenous_pressurant(propellant_volume, tank_pressure, propellant,
+                          feed_temperature=None, expulsion_efficiency=0.95):
+    """Autogenous (kendinden) basınçlandırma gaz debisi ve kütlesi.
+
+    Autogenous basınçlandırmada ayrı bir inert gaz şişesi (helyum/azot) YOKTUR:
+    iticinin bir kısmı ısı değiştiriciden geçirilip gaz hâline getirilerek kendi
+    tankına geri beslenir (LOX tankı GOX ile, metan tankı GCH4 ile). Raptor,
+    Starship ve birçok modern metan/LOX motoru bu yolu kullanır; helyum
+    lojistiğini ve ortak-kütle sorununu ortadan kaldırır.
+
+    Model (ideal gaz, düzenlenmiş/regulated tank — Sutton & Biblarz 9. baskı
+    Böl. 6, Eş. 6-1): boşalan itici hacmini SABİT tank basıncında dolduran gaz
+    envanteri
+        m_gas = P_tank · V_p / (R · T_besleme) / η_boşaltma
+    Burada R gazın özgül sabiti, T_besleme gazın tanka giriş sıcaklığıdır.
+    Bu kütle iticiden ALINIR (tanka geri döner ama itki üretmez), bu yüzden
+    sistem bütçesine 'iticiden çalınan pay' olarak işlenir.
+
+    Desteklenmeyen itici için sahte sayı ÜRETMEZ: {'status': 'not_modelled'}.
+    """
+    key = str(propellant).strip().lower()
+    alias = {'lox': 'oxygen', 'lch4': 'methane', 'ch4': 'methane',
+             'lh2': 'hydrogen', 'gox': 'oxygen', 'gch4': 'methane'}
+    key = alias.get(key, key)
+    if key not in AUTOGENOUS_GAS:
+        return {'status': 'not_modelled', 'reason':
+                f"autogenous basınçlandırma '{propellant}' için modellenmedi "
+                f"(desteklenen: {sorted(AUTOGENOUS_GAS)})"}
+    gas = AUTOGENOUS_GAS[key]
+    T = float(feed_temperature if feed_temperature is not None
+              else AUTOGENOUS_FEED_TEMP_K[key])
+    eta = float(expulsion_efficiency)
+    if propellant_volume <= 0 or tank_pressure <= 0 or T <= 0 or eta <= 0:
+        return {'status': 'error', 'reason': 'girdi pozitif olmalı'}
+    m_gas = float(tank_pressure) * float(propellant_volume) / (gas['R'] * T) / eta
+    # Gazı üretmek için gereken ısı: sıvıyı besleme sıcaklığına ısıtmak.
+    # Kaba enerji göstergesi (ısı değiştirici yükü mertebesi) — kaynaklı
+    # varsayım, tam ısıl çözüm değil.
+    heat_duty_j = m_gas * gas['cp'] * max(T - 90.0, 0.0)  # ~90 K kriyojenik taban
+    return {
+        'status': 'ok',
+        'gas': gas['name'],
+        'feed_temperature_k': T,
+        'gas_mass_kg': m_gas,
+        'gas_specific_R': gas['R'],
+        'approx_heat_duty_j': heat_duty_j,
+        'model_note': (
+            'Autogenous (kendinden) basınçlandırma: itici, ısı değiştiriciden '
+            'geçirilip gaz olarak kendi tankına geri beslenir (ayrı helyum '
+            'şişesi yok). İdeal-gaz, düzenlenmiş tank; Sutton & Biblarz 9. '
+            'baskı Böl. 6, Eş. 6-1. Besleme sıcaklığı etiketli varsayımdır.'),
+        'confidence': 'medium',
+    }
+
+
 def analyze_pressurant(mode='regulated', **kwargs):
     """Dispatch to :func:`regulated_pressurant` or :func:`blowdown_pressurant`."""
     m = str(mode).strip().lower()
@@ -275,4 +350,6 @@ def analyze_pressurant(mode='regulated', **kwargs):
         return regulated_pressurant(**kwargs)
     if m == 'blowdown':
         return blowdown_pressurant(**kwargs)
-    raise ValueError("mode must be 'regulated' or 'blowdown'")
+    if m == 'autogenous':
+        return autogenous_pressurant(**kwargs)
+    raise ValueError("mode must be 'regulated', 'blowdown', or 'autogenous'")

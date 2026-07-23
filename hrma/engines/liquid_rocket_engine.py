@@ -3605,6 +3605,18 @@ class LiquidRocketEngine:
         performance_maps = self._generate_performance_optimization_maps()
         efficiency_analysis = self._calculate_efficiency_breakdown()
 
+        # Kısma haritası (2026-07-23): %40-100 itki bandı, her nokta chug
+        # marjıyla. Çözülemezse sahte harita değil, hatası raporlanır.
+        try:
+            throttle_map = self.solve_throttle_map()
+        except Exception as exc:
+            throttle_map = {'status': 'error', 'reason':
+                            f'{type(exc).__name__}: {exc}', 'points': []}
+
+        # Autogenous basınçlandırma (2026-07-23): yalnız turbopompalı +
+        # metan/LOX veya LH2/LOX konfigüracıyonunda sayısal boyutlandırılır.
+        autogenous = self._autogenous_pressurization_summary()
+
         # Manufacturing and cost analysis
         manufacturing_analysis = self._analyze_manufacturing_requirements()
         
@@ -3658,6 +3670,8 @@ class LiquidRocketEngine:
             
             # Advanced Analysis
             'performance_maps': performance_maps,
+            'throttle_map': throttle_map,
+            'autogenous_pressurization': autogenous,
             'efficiency_breakdown': efficiency_analysis,
             'manufacturing_analysis': manufacturing_analysis,
             'component_sizing': component_sizing,
@@ -5012,6 +5026,177 @@ class LiquidRocketEngine:
                                         'Injector face pattern'],
         }
 
+    def solve_throttle_map(self, fractions=THROTTLE_SCAN_FRACTIONS):
+        """Kısma haritası: %40-100 itki bandında çalışma noktaları.
+
+        Kısma, oda basıncını düşürür; bu da enjektör ΔP/Pc oranını ve dolayısıyla
+        chug (düşük frekans) kararlılık marjını değiştirir. Sabit-alanlı bir
+        enjektörde ΔP debinin karesiyle ölçeklendiğinden (ΔP ∝ ṁ², SPI orifis
+        bağıntısı) kısılan motorda ΔP, Pc'den DAHA HIZLI düşer — bu yüzden
+        derin kısmada chug riski artar. Klasik sonuç budur ve NASA SP-8089'un
+        kısılabilir motorlar için ayrı ΔP tavsiyesinin nedenidir.
+
+        Her nokta AYNI çözücüyle (self._scan_engine) yeniden koşulur; ayrı bir
+        basitleştirilmiş model yoktur. Çözülemeyen nokta uydurulmaz, atlanır ve
+        'skipped' listesinde gerekçesiyle görünür.
+
+        Dönen sözlük 'throttle_map' anahtarıyla sonuca girer.
+        """
+        base_pc = float(self.P_c)
+        dp_frac_design = float(self._injector_dp_fraction())
+        eps = float(getattr(self, 'design_reference_expansion_ratio', 0)
+                    or VACUUM_REFERENCE_EPS)
+        # Motorun TESLİM verim oranı (teslim Isp / ideal CEA Isp), tasarım
+        # noktasında bir kez hesaplanır ve kısma boyunca sabit tutulur. Bu
+        # oran eta_c* ve lüle veriminden gelir; Pc'ye zayıf bağımlıdır, bu
+        # yüzden kısma bandında sabit kabulü ETİKETLENMİŞ bir varsayımdır.
+        # Isp'nin kendisi her noktada GERÇEK Pc'de CEA ile yeniden çözülür.
+        eta_vac = eta_sl = None
+        try:
+            from hrma.engines import cea_bridge
+            ideal0 = cea_bridge.get_combustion_properties(
+                self.fuel_type, self.oxidizer_type, base_pc, float(self.MR),
+                expansion_ratio=eps, ambient_bar=float(self.P_a))
+            if ideal0.get('source') == 'rocketcea':
+                iv0 = ideal0.get('isp_vac_s')
+                il0 = ideal0.get('isp_sl_s')
+                if iv0 and iv0 > 0:
+                    eta_vac = float(self.isp_vac) / float(iv0)
+                if il0 and il0 > 0:
+                    eta_sl = float(self.isp_sl) / float(il0)
+        except Exception:
+            cea_bridge = None
+
+        points, skipped = [], []
+        for frac in fractions:
+            f = float(frac)
+            if not (0 < f <= 1.0):
+                continue
+            # Sabit enjektör alanı: ṁ ∝ Pc (boğulmuş boğaz) ve ṁ ∝ sqrt(ΔP)
+            # olduğundan Pc birinci mertebeden itki oranıyla ölçeklenir.
+            pc = base_pc if abs(f - 1.0) < 1e-9 else base_pc * f
+            # Isp: GERÇEK indirgenmiş Pc'de CEA + sabit teslim verim oranı.
+            isp_vac = isp_sl = None
+            if cea_bridge is not None and eta_vac is not None:
+                try:
+                    idf = cea_bridge.get_combustion_properties(
+                        self.fuel_type, self.oxidizer_type, pc, float(self.MR),
+                        expansion_ratio=eps, ambient_bar=float(self.P_a))
+                    if idf.get('source') == 'rocketcea':
+                        if idf.get('isp_vac_s'):
+                            isp_vac = eta_vac * float(idf['isp_vac_s'])
+                        if eta_sl is not None and idf.get('isp_sl_s'):
+                            isp_sl = eta_sl * float(idf['isp_sl_s'])
+                except Exception:
+                    pass
+            # ΔP sabit alanda debinin karesiyle ölçeklenir: ΔP(f) = ΔP_tasarım·f²
+            dp_bar = dp_frac_design * base_pc * (f ** 2)
+            dp_over_pc = dp_bar / pc if pc > 0 else None
+            if dp_over_pc is None:
+                chug = 'unknown'
+            elif dp_over_pc >= CHUG_DP_PC_RECOMMENDED_LIQUID:
+                chug = 'chug_margin_ok'
+            elif dp_over_pc >= CHUG_DP_PC_MIN_LIQUID:
+                chug = 'chug_margin_marginal'
+            else:
+                chug = 'chug_risk'
+            points.append({
+                'throttle_fraction': f,
+                'thrust_n': float(self.F * f),
+                'chamber_pressure_bar': float(pc),
+                'isp_sea_level': float(isp_sl) if isp_sl else None,
+                'isp_vacuum': float(isp_vac) if isp_vac else None,
+                'injector_dp_bar': float(dp_bar),
+                'injector_dp_over_pc': float(dp_over_pc) if dp_over_pc else None,
+                'chug_rating': chug,
+            })
+        min_pct = getattr(self, 'min_throttle_pct', None)
+        out = {
+            'points': points,
+            'skipped': skipped,
+            'design_dp_over_pc': dp_frac_design,
+            'assumptions': [
+                'Oda basıncı itki oranıyla birinci mertebeden ölçeklendi '
+                '(c*\'ın zayıf Pc bağımlılığı ihmal edildi).',
+                'Enjektör alanı SABİT kabul edildi; ΔP debinin karesiyle '
+                'ölçeklenir (ΔP ∝ ṁ²). Kısılabilir (pintle vb.) enjektörde '
+                'gerçek ΔP daha yüksek tutulabilir.',
+                'Geçici rejim (throttle sırasındaki dinamik davranış) '
+                'modellenmedi; her nokta KARARLI hâl çözümüdür.',
+            ],
+            'transient_response': 'not_modelled',
+        }
+        if min_pct is not None:
+            out['min_throttle_pct'] = float(min_pct)
+            worst = [p for p in points
+                     if p['throttle_fraction'] * 100.0 >= float(min_pct) - 1e-9
+                     and p['chug_rating'] == 'chug_risk']
+            out['min_throttle_chug_risk'] = bool(worst)
+        return out
+
+    def _autogenous_pressurization_summary(self):
+        """Autogenous basınçlandırma boyutlandırması (uygunsa).
+
+        Yalnız TURBOPOMPALI + metan/LOX veya LH2/LOX konfigürasyonunda
+        sayısal boyutlandırılır — bu iticiler ısı değiştiriciden geçirilip
+        kendi tanklarına gaz olarak geri beslenebilir (Raptor/Starship yolu).
+        Uygun değilse sahte sayı değil, 'not_applicable' gerekçesi döner.
+
+        Pompadan/ısı değiştiriciden çalınan gaz kütlesi sistem bütçesine
+        işlenir; itki üretmez.
+        """
+        # Basınç beslemeli sistemde autogenous kavramı geçerli değil (ayrı
+        # basınçlandırma zaten helyum/azot şişesiyle yapılır).
+        if self.feed_system_type != 'turbopump':
+            return {'status': 'not_applicable', 'reason':
+                    'Autogenous basınçlandırma turbopompalı çevrimler içindir; '
+                    'basınç beslemeli sistemde ayrı pressurant kullanılır.'}
+        fuel = str(self.fuel_type).strip().lower()
+        ox = str(self.oxidizer_type).strip().lower()
+        if ox not in ('lox', 'oxygen') or fuel not in ('methane', 'lch4',
+                                                        'ch4', 'lh2', 'hydrogen'):
+            return {'status': 'not_applicable', 'reason':
+                    f"Autogenous yalnız metan/LOX ve LH2/LOX için modellendi; "
+                    f"'{self.fuel_type}/{self.oxidizer_type}' desteklenmiyor "
+                    '(diğer iticilerde helyum basınçlandırma kullanılır).'}
+        try:
+            from hrma.analysis.pressurant_sizing import autogenous_pressurant
+            if not hasattr(self, 'mdot_total'):
+                self.calculate_nozzle_geometry()
+            burn_time, _ = self._burn_time()
+            mdot_ox = getattr(self, 'mdot_ox',
+                              self.mdot_total * self.MR / (1 + self.MR))
+            mdot_fuel = getattr(self, 'mdot_fuel',
+                                self.mdot_total / (1 + self.MR))
+            # Boşalan itici hacimleri (rho tank modeliyle aynı kaynak)
+            _, ox_vol, _, _ = self._size_tank(mdot_ox * burn_time, 'oxidizer')
+            _, fuel_vol, _, _ = self._size_tank(mdot_fuel * burn_time, 'fuel')
+            # Turbopompalı tanklarda basınç NPSH için düşüktür (~3 bar);
+            # tank tasarımıyla aynı değer kullanılır.
+            tank_pressure_pa = 3.0e5
+            ox_gas = autogenous_pressurant(ox_vol, tank_pressure_pa, 'oxygen')
+            fuel_gas = autogenous_pressurant(fuel_vol, tank_pressure_pa, fuel)
+            total_kg = 0.0
+            for g in (ox_gas, fuel_gas):
+                if g.get('status') == 'ok':
+                    total_kg += float(g.get('gas_mass_kg', 0.0))
+            prop_mass = (mdot_ox + mdot_fuel) * burn_time
+            return {
+                'status': 'ok',
+                'oxidizer_side': ox_gas,
+                'fuel_side': fuel_gas,
+                'total_pressurant_gas_kg': total_kg,
+                'fraction_of_propellant': (total_kg / prop_mass
+                                           if prop_mass > 0 else None),
+                'note': ('Autogenous basınçlandırma: iticiler ısı '
+                         'değiştiriciden geçirilip kendi tanklarına gaz olarak '
+                         'geri beslenir; ayrı helyum şişesi yok. Çalınan gaz '
+                         'kütlesi itici bütçesinden düşülür.'),
+            }
+        except Exception as exc:
+            return {'status': 'error',
+                    'reason': f'{type(exc).__name__}: {exc}'}
+
     def _scan_engine(self, **kwargs):
         """Aynı çözücüyle yeni bir tasarım noktası koşar (harita taraması).
 
@@ -5031,6 +5216,21 @@ class LiquidRocketEngine:
         return LiquidRocketEngine(**params)
 
     def _generate_performance_optimization_maps(self):
+        """Performans optimizasyon haritaları — GERÇEK çözücü taraması.
+
+        HAFİF MOD (2026-07-23): Bu fonksiyon her noktada motoru yeniden
+        koşan pahalı bir taramadır (~3.5 s). Kısma haritası gibi motoru zaten
+        _scan_engine ile YENİDEN koşan tüketiciler bu haritalara ihtiyaç
+        duymaz; sonsuz iç içe tarama olmasın diye _skip_optimization_maps
+        bayrağı taşıyan örneklerde atlanır. (Kısma taraması kendisi zaten
+        chug marjını ve Isp'yi doğrudan hesaplar.)
+        """
+        if getattr(self, '_skip_optimization_maps', False):
+            return {'status': 'skipped',
+                    'reason': 'scan engine (throttle/inner sweep)'}
+        return self._generate_performance_optimization_maps_impl()
+
+    def _generate_performance_optimization_maps_impl(self):
         """Performans optimizasyon haritaları — GERÇEK çözücü taraması.
 
         2026-07-19 denetimi (kritik bulgu): haritalar gömülü tepe değerlere
