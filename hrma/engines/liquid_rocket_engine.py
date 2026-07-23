@@ -4940,14 +4940,78 @@ class LiquidRocketEngine:
                 'momentum_ratio': momentum_ratio,
                 'optimal_momentum_ratio': optimal_momentum_ratio
             },
-            'stability_analysis': {
-                'acoustic_frequency': a_chamber / (2 * chamber_length),  # Hz
-                'combustion_response_time': mixing_time * 1000,  # ms
-                'stability_rating': 'Stable',
-                'damping_mechanisms': ['Acoustic liners', 'Baffles', 'Variable geometry']
-            }
+            'stability_analysis': self._stability_assessment(
+                a_chamber, chamber_length, chamber_diameter, mixing_time)
         }
     
+    def _stability_assessment(self, a_chamber, chamber_length, chamber_diameter,
+                              mixing_time):
+        """Yanma kararlılığı: HESAPLANABİLİR ölçütler + dürüst 'unknown'.
+
+        SAHA HATASI (2026-07-23 denetimi): burada 'stability_rating' HER motor
+        için sabit 'Stable' yazıyordu ve yanına sabit bir sönümleme mekanizması
+        listesi konuyordu. Girdilerden bağımsız bir "kararlı" hükmü, roket
+        yazılımında verilebilecek en tehlikeli sahte çıktılardan biridir.
+
+        Artık yalnız hesaplanabilir olan hesaplanır:
+          - 1L (boyuna) mod: f = a / (2·L)          [açık-açık boru yaklaşımı]
+          - 1T (ilk teğetsel) mod: f = 1.8412·a/(π·D)
+            (Harrje & Reardon, NASA SP-194; Bessel J1' ilk sıfırı)
+          - chug (düşük frekans) marjı: ΔP_enjektör / Pc, NASA SP-8089'un
+            %15-20 bandına göre
+        Yüksek frekanslı akustik kararlılık (akustik-yanma bağlaşımı) bu
+        modelde ÇÖZÜLMÜYOR; 'acoustic_analysis' alanı bunu açıkça söyler ve
+        genel hüküm ancak chug ölçütünden türetilir — belirlenemiyorsa
+        'unknown' döner. Sönümleme mekanizmaları da tasarım TAVSİYESİDİR,
+        motorda var oldukları iddia edilmez.
+        """
+        f_1l = a_chamber / (2.0 * chamber_length) if chamber_length > 0 else None
+        f_1t = (FIRST_TANGENTIAL_MODE_COEFF * a_chamber
+                / (np.pi * chamber_diameter)) if chamber_diameter > 0 else None
+        # ΔP/Pc tek kaynaktan gelir: kullanıcı girdisi varsa o, yoksa enjektör
+        # tipinin tablo değeri (_injector_dp_fraction — çevrim çözücüsü de
+        # aynı fonksiyonu kullanır, iki ayrı doğru olmaz).
+        try:
+            dp_pc = float(self._injector_dp_fraction())
+        except Exception:
+            dp_pc = None
+        if dp_pc is None or not np.isfinite(dp_pc) or dp_pc <= 0:
+            rating, reason = 'unknown', (
+                'Enjektör basınç düşümü bilinmiyor; chug marjı hesaplanamadı.')
+        elif dp_pc >= CHUG_DP_PC_RECOMMENDED_LIQUID:
+            rating, reason = 'chug_margin_ok', (
+                'ΔP/Pc = %.3f, NASA SP-8089 tavsiye eşiğinin (%.2f) üstünde.'
+                % (dp_pc, CHUG_DP_PC_RECOMMENDED_LIQUID))
+        elif dp_pc >= CHUG_DP_PC_MIN_LIQUID:
+            rating, reason = 'chug_margin_marginal', (
+                'ΔP/Pc = %.3f, alt sınır (%.2f) ile tavsiye eşiği (%.2f) '
+                'arasında.' % (dp_pc, CHUG_DP_PC_MIN_LIQUID,
+                               CHUG_DP_PC_RECOMMENDED_LIQUID))
+        else:
+            rating, reason = 'chug_risk', (
+                'ΔP/Pc = %.3f, NASA SP-8089 alt sınırının (%.2f) altında — '
+                'düşük frekanslı (chug) kararsızlık riski.'
+                % (dp_pc, CHUG_DP_PC_MIN_LIQUID))
+        return {
+            'acoustic_frequency': f_1l,                 # Hz (1L modu)
+            'first_longitudinal_hz': f_1l,
+            'first_tangential_hz': f_1t,
+            'combustion_response_time': mixing_time * 1000,   # ms
+            'injector_dp_over_pc': dp_pc,
+            'chug_rating': rating,
+            'chug_basis': reason,
+            # Genel kararlılık hükmü VERİLMEZ: yüksek frekanslı akustik
+            # bağlaşım modellenmiyor, dolayısıyla "kararlı" denemez.
+            'stability_rating': 'unknown',
+            'acoustic_analysis': 'not_modelled',
+            'acoustic_analysis_note': (
+                'Akustik-yanma bağlaşımı (yüksek frekanslı kararsızlık) bu '
+                'modelde çözülmüyor; yalnız mod frekansları ve chug marjı '
+                'raporlanır.'),
+            'damping_recommendations': ['Acoustic liners', 'Baffles',
+                                        'Injector face pattern'],
+        }
+
     def _scan_engine(self, **kwargs):
         """Aynı çözücüyle yeni bir tasarım noktası koşar (harita taraması).
 

@@ -235,8 +235,14 @@ class PDFReportGenerator:
             story.append(PageBreak())
             story.extend(self._create_charts_section(charts))
         
-        # Technical Appendix
-        if report_type == 'complete':
+        # Technical Appendix — 'technical' raporun ASIL içeriği budur
+        # (metodoloji, denklemler, NASA kaynakları). 2026-07-23'e kadar yalnız
+        # 'complete' alıyordu; 'technical' ise yönetici özetsiz + eksiz kalıp
+        # 'complete'in eksik bir kopyası oluyordu. Üç rapor artık ayrışır:
+        #   summary   -> özet + yapılandırma + sonuçlar
+        #   technical -> yapılandırma + sonuçlar + grafikler + teknik ek
+        #   complete  -> hepsi
+        if report_type in ('complete', 'technical'):
             story.append(PageBreak())
             story.extend(self._create_technical_appendix(motor_data, analysis_results))
         
@@ -809,9 +815,19 @@ class PDFReportGenerator:
             motor_data, analysis_results, [], 'summary'
         )
 
-    def generate_technical_report(self, motor_data: Dict, analysis_results: Dict, 
+    def generate_technical_report(self, motor_data: Dict, analysis_results: Dict,
                                 charts: List[str]) -> bytes:
-        """Generate a complete technical report with all charts"""
+        """Teknik rapor: yönetici özeti YOK, teknik ek VAR.
+
+        SAHA HATASI (2026-07-23 denetimi): bu metot 'technical' yerine
+        'complete' geçiriyordu, yani "Technical Report" ile "Complete Report"
+        kullanıcıya BİREBİR aynı belgeyi indiriyordu (çıktı farkı sıfırdı).
+        Artık üç rapor gerçekten ayrışır:
+          summary   -> yönetici özeti + yapılandırma + sonuçlar (grafiksiz)
+          technical -> yapılandırma + sonuçlar + grafikler + teknik ek
+                       (yönetici özeti yok; hedef okuyucu mühendis)
+          complete  -> hepsi
+        """
         return self.generate_motor_analysis_report(
-            motor_data, analysis_results, charts, 'complete'
+            motor_data, analysis_results, charts, 'technical'
         )
