@@ -66,14 +66,20 @@ def run_server():
             app.run(host='127.0.0.1', port=8080, debug=False, threaded=True, use_reloader=False)
     else:
         # Unix-like systems (Mac/Linux)
+        # debug=False ZORUNLU (2026-07-23 kararlılık/güvenlik denetimi):
+        # debug=True, Werkzeug etkileşimli hata ayıklayıcısını açar. O ekran
+        # tarayıcıdan KEYFİ PYTHON KODU çalıştırmaya izin verir; 127.0.0.1'e
+        # bağlı olsa bile aynı makinedeki herhangi bir web sayfası (DNS
+        # rebinding / kurbanın tarayıcısı üzerinden) erişebilir. Windows yolu
+        # zaten debug=False idi; macOS/Linux yolu açık kalmıştı.
         try:
             from gunicorn.app.wsgiapp import WSGIApplication
             print("Using Gunicorn server (Unix optimized)")
             # Note: Gunicorn setup would go here, but Flask dev server is simpler for this use case
-            app.run(host='127.0.0.1', port=8080, debug=True, threaded=True, use_reloader=False)
+            app.run(host='127.0.0.1', port=8080, debug=False, threaded=True, use_reloader=False)
         except ImportError:
             print("Using Flask dev server")
-            app.run(host='127.0.0.1', port=8080, debug=True, threaded=True, use_reloader=False)
+            app.run(host='127.0.0.1', port=8080, debug=False, threaded=True, use_reloader=False)
 
 if __name__ == '__main__':
     try:

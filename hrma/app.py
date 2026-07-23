@@ -15,6 +15,7 @@ from flask_cors import CORS
 import numpy as np
 import json
 import io
+import math
 import contextlib
 import platform
 
@@ -179,14 +180,35 @@ def sanitize_json_values(obj):
         except Exception:
             return "unknown_type"
 
+def _reject_non_finite(value, name):
+    """NaN ve sonsuz değerleri reddeder.
+
+    KARARLILIK DENETİMİ BULGUSU (2026-07-23): IEEE-754'te NaN ile yapılan HER
+    karşılaştırma False döner, bu yüzden `value < min or value > max` kontrolü
+    NaN'ı SESSİZCE geçiriyordu. Sonuç: /calculate_solid'e chamber_pressure=NaN
+    gönderildiğinde yanıt HTTP 200 ve "successful" oluyor, ama 124 çıktı alanı
+    0.0 dönüyor ve kesit grafiği sessizce kayboluyordu. Kullanıcı hesabın
+    çöktüğünü anlamıyordu.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number, given: {value!r}")
+    if math.isnan(v) or math.isinf(v):
+        raise ValueError(f"{name} must be a finite number, given: {value}")
+    return v
+
+
 def validate_input_range(value, min_val, max_val, name):
     """Validate input values within physical limits"""
+    value = _reject_non_finite(value, name)
     if value < min_val or value > max_val:
         raise ValueError(f"{name} value must be between {min_val}-{max_val}, given: {value}")
     return True
 
 def validate_positive(value, name):
     """Positive value check"""
+    value = _reject_non_finite(value, name)
     if value <= 0:
         raise ValueError(f"{name} must be positive, given: {value}")
     return True
@@ -3426,14 +3448,20 @@ def trajectory_analysis():
             print("Full traceback:")
             traceback.print_exc()
             
-            # Fallback plot
-            trajectory_plot = json.dumps({
-                'data': [{'x': [0, 10], 'y': [0, 1000], 'type': 'scatter', 'name': 'Trajectory'}],
-                'layout': {'title': 'Trajectory Analysis', 'xaxis': {'title': 'Time (s)'}, 'yaxis': {'title': 'Altitude (m)'}}
-            })
-        
+            # UYDURMA GRAFİK SÖKÜLDÜ (2026-07-23 kararlılık denetimi):
+            # burada 0 s'de 0 m, 10 s'de 1000 m gösteren SAHTE bir yörünge
+            # çiziliyordu ve yanıt 'status': 'success' dönüyordu. Kullanıcı,
+            # çizimin çöktüğünü anlamadan uydurma bir yörüngeye bakıyordu.
+            # Artık grafik yerine hata bilgisi döner; çözüm verisi
+            # (trajectory_data) hesaplandığı için yanıt yine gönderilir ama
+            # grafiğin ÜRETİLEMEDİĞİ açıkça bildirilir.
+            trajectory_plot = None
+            plot_error_message = (
+                'Yörünge grafiği üretilemedi: %s' % plot_error)
+
         return jsonify({
             'status': 'success',
+            'plot_error': locals().get('plot_error_message'),
             'trajectory_data': sanitize_json_values(results),
             'plot_data': trajectory_plot,
             'engine_data': {

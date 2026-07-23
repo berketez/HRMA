@@ -20,6 +20,14 @@ import warnings
 # Art-yanma odası boyu L* hacminden çözülür; aşağıdaki oranlarla
 # kelepçelenir (çok kısa = yanma tamamlanmaz, çok uzun = ölü ağırlık).
 # Kaynak: Sutton & Biblarz 9. baskı Böl. 8/16; Chiaverini & Kuo (2007).
+# Yanma integrasyonu adım sayısı ÜST SINIRI (2026-07-23 kararlılık denetimi).
+# Adım sayısı t_b ve port çapından türetiliyor ve tavansızdı: uç girdilerde
+# (burn_time=1e12 -> 5.6 trilyon adım) süreç fiilen kilitleniyor, dakikalarca
+# dönüp megabaytlarca uyarı günlüğü üretiyordu. Geçerli tasarım aralığının en
+# kötü hâli ~17 000 adımdır; bu tavan onun on katından fazla olduğu için
+# meşru hesapların çözünürlüğünü ETKİLEMEZ, yalnız kilitlenmeyi keser.
+MAX_BURN_INTEGRATION_STEPS = 200_000
+
 PRE_CHAMBER_D_FACTOR = 0.5
 POST_CHAMBER_D_FACTOR_MIN = 0.3
 POST_CHAMBER_D_FACTOR_MAX = 3.0
@@ -823,10 +831,26 @@ class HybridRocketEngine:
         # Sabit 10 adım yerine dt = t_b/200 taban çözünürlüğü; ek olarak ilk
         # adımdaki çap artışı başlangıç çapının %1'ini geçmeyecek şekilde adım
         # sayısı artırılır (ilk adım sıçraması koruması).
+        # ÜST SINIR ZORUNLU (2026-07-23 kararlılık denetimi): bu ifade tavansızdı
+        # ve uç girdilerde programı fiilen kilitliyordu — burn_time=1e12 için
+        # 5.6 TRİLYON adım, thrust=1e-9 için 56 milyon adım hesaplanıyor, süreç
+        # dakikalarca dönüp megabaytlarca hata günlüğü üretiyordu (paketli
+        # uygulamada bu, kullanıcının Belgeler klasörüne akıyor).
+        # 200 000 adım, geçerli tasarım aralığının en kötü hâlinin (~17 000)
+        # on katından fazlasıdır; sayısal çözünürlük kaybı yok, kilitlenme yok.
+        # Sınıra dayanılırsa sessiz geçilmez: uyarı üretilir.
         num_steps = max(
             200,
             int(np.ceil(self.t_b * 2 * self.r_dot_initial / (0.01 * self.D_port_initial)))
         )
+        if num_steps > MAX_BURN_INTEGRATION_STEPS:
+            warnings.warn(
+                f"Yanma integrasyonu {num_steps:,} adım isteyecekti; "
+                f"{MAX_BURN_INTEGRATION_STEPS:,} adımda sınırlandırıldı. "
+                "Bu, girdilerin (yanma süresi / itki / port çapı) fiziksel "
+                "aralık dışında olduğunu gösterir; sonuçlar güvenilir değildir."
+            )
+            num_steps = MAX_BURN_INTEGRATION_STEPS
         dt = self.t_b / num_steps
         D_port = self.D_port_initial
 

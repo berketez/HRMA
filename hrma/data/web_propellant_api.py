@@ -716,11 +716,22 @@ end
             'fuel_properties': fuel_props,
             'oxidizer_properties': ox_props,
             'combustion_data': combustion_data,
-            'flight_validation': self.fetch_spacex_telemetry(),
+            # ÖLÜ AĞ ÇAĞRISI SÖKÜLDÜ (2026-07-23 performans denetimi):
+            # burada her toplu veri çekiminde SpaceX API'sine 30 saniye zaman
+            # aşımlı bir istek atılıyordu. Sonuç motorda yalnız
+            # self.flight_validation'a atanıyor ve HİÇBİR yerde okunmuyordu
+            # (şablon, JS, sonuç sözlüğü — hiçbiri). Ölçüm: uç nokta HTTP 525
+            # döndürüyor, sıvı motor taramasının %40'ını yiyor ve servis
+            # yavaşladığında 30 saniyelik asılma riski taşıyor.
+            # Anahtar KALDIRILMADI: sessizce yok olmak yerine durumu bildiriyor.
+            'flight_validation': {'status': 'not_fetched', 'reason':
+                                  'Uçuş telemetrisi hiçbir hesapta '
+                                  'kullanılmıyordu; çağrı kaldırıldı. '
+                                  'fetch_spacex_telemetry() elle çağrılabilir.'},
             'summary': {
                 'combination': f"{fuel.upper()}/{oxidizer.upper()}",
                 'data_freshness': datetime.now().isoformat(),
-                'sources_used': ['NIST Webbook', 'NASA CEA', 'SpaceX API'],
+                'sources_used': ['NIST Webbook', 'NASA CEA'],
                 'confidence': 'high' if all_success else 'medium'
             }
         }

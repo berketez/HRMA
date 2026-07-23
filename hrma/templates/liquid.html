@@ -822,8 +822,25 @@
                         <option value="pressure_fed" data-i18n="liq.ui.pressure_fed">Pressure-Fed</option>
                         <option value="gas_generator" data-i18n="liq.ui.gas_generator">Gas Generator</option>
                         <option value="staged_combustion" data-i18n="liq.ui.staged_combustion">Staged Combustion</option>
+                        <option value="full_flow_staged" data-i18n="liq.ui.full_flow_staged">Full-Flow Staged Combustion</option>
                         <option value="expander" data-i18n="liq.ui.expander_cycle">Expander Cycle</option>
                         <option value="tap_off" data-i18n="liq.ui.tap_off_cycle">Tap-Off Cycle</option>
+                    </select>
+                </div>
+                <!-- Ön yakıcı tipi yalnız staged combustion icin anlamlidir:
+                     FFSC'de iki on yakici zaten sabittir (biri yakitca, biri
+                     oksitleyicice zengin), bu yuzden secim gizlenir. -->
+                <div class="form-group" id="preburner_type_group" style="display:none;">
+                    <label>
+                        <span data-i18n="liq.ui.preburner_type">Preburner Type</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.preburner_type_tip">Staged combustion runs its preburner either fuel-rich (RS-25, RD-0120) or oxidizer-rich (RD-180, NK-33). This sets the turbine drive gas and the pump pressure ladder. Full-flow staged combustion uses both and needs no choice here.</span>
+                        </div>
+                    </label>
+                    <select id="preburner_type">
+                        <option value="fuel_rich" data-i18n="liq.ui.preburner_fuel_rich">Fuel-Rich</option>
+                        <option value="ox_rich" data-i18n="liq.ui.preburner_ox_rich">Oxidizer-Rich</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -3360,6 +3377,11 @@
                 
                 // Feed system
                 engine_cycle: document.getElementById('engine_cycle').value,
+                // Ön yakıcı tipi yalnız staged combustion'da gönderilir;
+                // FFSC iki ön yakıcıyı da zaten kullanır, pressure-fed ve
+                // expander'da ön yakıcı yoktur.
+                preburner_type: (document.getElementById('engine_cycle').value === 'staged_combustion'
+                    ? document.getElementById('preburner_type').value : undefined),
                 thrust: parseFloat(document.getElementById('thrust').value) || 10000,
                 chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value) || 100,
                 feed_pressure: parseFloat(document.getElementById('feed_pressure').value) || 130,
@@ -5055,6 +5077,20 @@ Please provide:
         // bir kap YOK, .container'a düşer ve HESAP YAPILMADAN görünür olur
         // (2026-07-19 bulgusu; katı sayfada da aynı hata vardı). Çapa #results
         // içinde olduğundan panel ancak sonuç bölümü açılınca görünür.
+        // Ön yakıcı tipi seçimi yalnız staged combustion'da görünür.
+        // (FFSC'de iki ön yakıcı sabittir; diğer çevrimlerde ön yakıcı yoktur.)
+        document.addEventListener('DOMContentLoaded', function () {
+            var cycleSel = document.getElementById('engine_cycle');
+            var pbGroup = document.getElementById('preburner_type_group');
+            function syncPreburnerVisibility() {
+                if (!cycleSel || !pbGroup) return;
+                pbGroup.style.display =
+                    (cycleSel.value === 'staged_combustion') ? '' : 'none';
+            }
+            if (cycleSel) cycleSel.addEventListener('change', syncPreburnerVisibility);
+            syncPreburnerVisibility();
+        });
+
         document.addEventListener('DOMContentLoaded', function () {
             SixDofPanel.init({
                 anchorId: 'analysis-dock-anchor',

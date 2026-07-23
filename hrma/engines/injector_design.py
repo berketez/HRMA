@@ -173,10 +173,30 @@ def _n2o_s_v(T):
     return float(np.interp(T, _N2O_ENTROPY_TABLE[:, 0], _N2O_ENTROPY_TABLE[:, 2]))
 
 
+def _n2o_tsat_grid():
+    """Doyma eğrisi ızgarası (240-306 K, 0.5 K adım) — BİR KEZ kurulur.
+
+    PERFORMANS DENETİMİ BULGUSU (2026-07-23): bu ızgara _n2o_tsat_from_p
+    içinde HER ÇAĞRIDA yeniden kuruluyordu; 133 noktanın her biri için
+    _SAT.psat() çalışıyordu. HEM/NHNE debisi boğulma taraması yaptığı için
+    fonksiyon tek bir enjektör hesabında yüzlerce kez çağrılıyor. Izgarayı
+    modül seviyesine almak fonksiyonu ~140 kat hızlandırır; ızgara girdiden
+    BAĞIMSIZ olduğu için çıktı bit düzeyinde aynıdır (ölçülen fark 0.000 K).
+    """
+    global _N2O_TSAT_GRID
+    if _N2O_TSAT_GRID is None:
+        grid_T = np.arange(240.0, 306.5, 0.5)
+        grid_P = np.array([_SAT.psat(t) for t in grid_T])
+        _N2O_TSAT_GRID = (grid_T, grid_P)
+    return _N2O_TSAT_GRID
+
+
+_N2O_TSAT_GRID = None
+
+
 def _n2o_tsat_from_p(p_pa):
     """Doyma sıcaklığı P'den (tablo ters interpolasyonu)."""
-    grid_T = np.arange(240.0, 306.5, 0.5)
-    grid_P = np.array([_SAT.psat(t) for t in grid_T])
+    grid_T, grid_P = _n2o_tsat_grid()
     p = float(np.clip(p_pa, grid_P[0], grid_P[-1]))
     return float(np.interp(p, grid_P, grid_T))
 
