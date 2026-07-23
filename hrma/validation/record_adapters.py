@@ -145,6 +145,15 @@ BASE_ALIASES: Dict[str, str] = {
     "chamber_pressure_max": "chamber_pressure_peak",
     "pressure_max": "chamber_pressure_peak",
     "max_pressure": "chamber_pressure_peak",
+    # Enjektör yüzü basıncı, motor testlerinde oda basıncının STANDART ölçüm
+    # noktasıdır (basınç ölçeri oraya konur; RL10 CR-190786 Tablo 1-5 bu
+    # sütunu böyle verir). Yığılma kaybı nedeniyle enjektör yüzü basıncı,
+    # lüle girişindeki durgunluk basıncından tipik olarak %1-2 yüksektir
+    # (Sutton & Biblarz 9. baskı Böl. 8) — ön tasarım karşılaştırması için
+    # bu fark ihmal edilebilir ve adapter_notes'ta belirtilir.
+    # 2026-07-23'e kadar bu takma ad yoktu ve RL10'un BEŞ gerçek ateşleme
+    # kaydı "chamber_pressure eksik" diye eleniyordu.
+    "chamber_pressure_injector_face": "chamber_pressure",
 }
 
 FULL_RUN_RECORD_TYPES = frozenset({
@@ -613,6 +622,18 @@ def _run_liquid(record: Dict[str, Any]) -> Dict[str, Any]:
         # Motor F girdisini deniz seviyesi itkisi olarak yorumlar;
         # vakum itkisi F * (Isp_vac/Isp_sl) ile MODEL tahminidir.
         predictions["thrust_vac"] = float(res["thrust_vacuum"])  # N
+        if "thrust_sl" in result["consumed_measured"]:
+            # ZAYIF KANIT UYARISI (dış denetim, 2026-07-23): itki girdisi
+            # ÖLÇÜLEN deniz seviyesi itkisinden geldiğinde, vakum itkisi
+            # tahmini F_sl x (Isp_vac/Isp_sl) olur — yani aslında yalnız Isp
+            # ORANI sınanır, itkinin kendisi değil. Boğaz alanı da itkiye göre
+            # boyutlandığı için bu, bağımsız bir tahminden çok kapanış
+            # kontrolüdür. Düşük hata yüzdesi "HRMA itkiyi %0.2 doğrulukla
+            # öngörüyor" diye OKUNAMAZ; rapor okuru bunu görmeli.
+            result["adapter_notes"].append(
+                "ZAYIF KANIT: thrust_vac tahmini, GIRDI olarak tuketilen "
+                "olculen thrust_sl'den Isp orani ile turetilmistir; bagimsiz "
+                "itki tahmini degil, tutarlilik kontroludur.")
     else:
         result["adapter_notes"].append(
             "Itki girdisi kayitta yok (10 kN varsayildi); itki tahminleri "

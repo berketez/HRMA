@@ -14,8 +14,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.5.5.exe**](https://github.com/berketez/HRMA/releases/download/v2.5.5/HRMA-Setup-2.5.5.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.5.5-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.5.5/HRMA-Setup-2.5.5-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-2.6.0.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.0-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -57,7 +57,35 @@ you can ignore them entirely.
 
 HRMA's thermochemistry is cross-checked against **NASA CEA** (via RocketCEA):
 hybrid combustion (c\*, Tc, Isp) agrees within **≤1.5 %** across all supported
-fuel/oxidizer pairs, and liquid c\* within **<2 %**. 1,000+ automated tests pass.
+fuel/oxidizer pairs, and liquid c\* within **<2 %**. The test suite runs on a
+clean machine on every push — see the badge at the top of this page for the
+current count and result.
+
+**How to read the liquid-engine numbers (v2.6.0).** Against four published
+engine operating points, the median absolute error in vacuum specific impulse
+is 1.0 %. That figure supports one specific claim and no more: *given the real
+operating point (chamber pressure, mixture ratio) and the real published
+expansion ratio, HRMA reproduces the published specific impulse.* It does not
+demonstrate accuracy when the nozzle geometry is not yet known, which is the
+situation in actual preliminary design. Two further caveats are stated
+explicitly rather than buried:
+
+- **The sample is very small (n = 4)** and the engines are not a random or
+  representative sample. No claim about typical accuracy, error distribution,
+  variance, or any sigma-level reliability can be made from it. A
+  distribution-free demonstration that 99.73 % of results stay inside an error
+  bound, at 95 % confidence, would require on the order of a thousand
+  independent samples; establishing a defensible error distribution first
+  would reduce that to a few dozen. Growing this database is ongoing work.
+- **Two different protocols are mixed in that median.** For the three engines
+  whose published expansion ratio is in the record, the median error is 0.74 %.
+  The fourth (Vulcain 2.1) has no published expansion ratio in the record, so
+  the model designs its own ambient-matched nozzle and under-predicts vacuum
+  Isp by 4.1 % — that gap is mostly a missing-geometry assumption, not model
+  error.
+- Where a *measured* quantity is consumed as a solver input, the corresponding
+  "prediction" is labelled as a consistency check rather than independent
+  evidence in the correlation output.
 
 As of the **v2.5.0 Confidence Release**, HRMA also carries a git-tracked
 database of real, fully-cited firing data (hybrid, solid and liquid), and an
@@ -87,8 +115,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.5.5.exe`](https://github.com/berketez/HRMA/releases/download/v2.5.5/HRMA-Setup-2.5.5.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.5.5-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.5.5/HRMA-Setup-2.5.5-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.6.0.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.0-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
