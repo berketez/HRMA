@@ -3672,6 +3672,12 @@ class LiquidRocketEngine:
             'performance_maps': performance_maps,
             'throttle_map': throttle_map,
             'autogenous_pressurization': autogenous,
+            # Yanma verisi kaynağı rozeti (UI): CEA @ gerçek Pc mi statik tablo
+            # mu, ve gerçek-gaz uyarısı (Pc>300 bar'da CEA ideal-gaz çözümü).
+            'combustion_data_source': getattr(self, 'combustion_data_source',
+                                              'unknown'),
+            'combustion_validity': dict(getattr(self, 'combustion_validity',
+                                                {}) or {}),
             'efficiency_breakdown': efficiency_analysis,
             'manufacturing_analysis': manufacturing_analysis,
             'component_sizing': component_sizing,
@@ -4169,7 +4175,15 @@ class LiquidRocketEngine:
                                       PUMP_EFFICIENCY_DEFAULT)),
             eta_pump_fuel=float(getattr(self, 'pump_efficiency',
                                         PUMP_EFFICIENCY_DEFAULT)),
-            eta_turbine=TURBINE_EFFICIENCY_DEFAULT,
+            # Türbin verimi çevrim SINIFINA göre seçilsin (2026-07-23): sabit
+            # 0.65 gaz-jeneratörü (açık çevrim, yüksek PR impuls kademesi)
+            # değeridir; staged/FFSC/expander türbinleri düşük PR'de %78+
+            # verim alır (NASA SP-8110, RS-25 HPFTP %81). eta_turbine=None
+            # verince çözücü çevrim sınıfına göre seçer. Bu satır 0.65
+            # zorladığı sürece FFSC güç dengesi yüksek Pc'de KAPANMAZ.
+            # Kullanıcı generator_gas_temp/turbine PR girdiyse aşağıda ayrıca
+            # geçilir; türbin verimini kullanıcı ayrı override etmiyor.
+            eta_turbine=None,
             preburner_mode=getattr(self, 'preburner_mode', 'fuel_rich'),
             regen_heat_kw=regen_heat_kw,
         )

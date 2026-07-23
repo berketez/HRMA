@@ -118,10 +118,27 @@ STAGED_PR_TYPICAL = (1.3, 2.2)
 # Kök arama aralığı (fizik aralığının dışına çıkılırsa uyarı üretilir).
 PR_SOLVE_MIN, PR_SOLVE_MAX = 1.02, 4.0
 
-# Pompa/türbin verim varsayılanları (Sutton 9th ed. Table 10-3 aralıkları;
-# ana pompalar 0.65-0.80, türbinler 0.4-0.8).
+# Pompa verim varsayılanı (Sutton 9th ed. Table 10-3; ana pompalar 0.65-0.80).
 ETA_PUMP_DEFAULT = 0.75
-ETA_TURBINE_DEFAULT = 0.65
+
+# Türbin verimi ÇEVRİM SINIFINA bağlıdır — tek bir sabit fiziksel değildir.
+# NASA SP-8110 "Liquid Rocket Engine Turbines" (1974), s. 17 ve fig. 13-14:
+#   * Açık çevrim (gaz jeneratörü / tap-off): türbin YÜKSEK basınç oranında
+#     (egzoz atmosfere) çalışan kısmi-giriş impuls kademesidir; iki sıralı
+#     hız-bileşik türbinlerin ölçülen verimi %35-65 bandındadır.
+#   * Kapalı çevrim (staged / full-flow staged / expander): türbin egzozu
+#     ana odaya boşaldığı için basınç oranı DÜŞÜK tutulur; bu da türbini
+#     "daha verimli hız-oranı bölgesinde" çalıştırır ve SP-8110'un birebir
+#     ifadesiyle bu türbinler "%80'in üzerinde verime ulaşabilir".
+# Ölçülen doğrulama (RS-25/SSME, Block IIA, Boeing/Rocketdyne SSME Orientation
+# 1998): HPFTP türbini %81.1, HPOTP türbini %74.6. Kapalı çevrim varsayılanı
+# bu iki ölçülen değerin ortasında (0.78) ve SP-8110 alt sınırının altında
+# muhafazakâr seçilmiştir. Açık çevrim varsayılanı F-1 sınıfı GG türbini
+# pratiğiyle uyumludur (Sutton 9th ed. Table 10-3).
+ETA_TURBINE_OPEN_DEFAULT = 0.65
+ETA_TURBINE_CLOSED_DEFAULT = 0.78
+# Geriye dönük uyumluluk (eski tek-değer sabiti açık çevrim değerine eşittir).
+ETA_TURBINE_DEFAULT = ETA_TURBINE_OPEN_DEFAULT
 
 # Açık çevrim bleed oranı makullük sınırları: %25 üstü uyarı, %50 üstü
 # yakınsamadı kabul edilir (tarihsel GG motorlarında oran %1.5-7;
@@ -421,7 +438,7 @@ def solve_cycle(cycle_type: str,
                 INJECTOR_DP_FRAC_PREBURNER_DEFAULT,
                 eta_pump_ox: float = ETA_PUMP_DEFAULT,
                 eta_pump_fuel: float = ETA_PUMP_DEFAULT,
-                eta_turbine: float = ETA_TURBINE_DEFAULT,
+                eta_turbine: Optional[float] = None,
                 tit_K: Optional[float] = None,
                 preburner_mode: str = 'fuel_rich',
                 turbine_pr: Optional[float] = None,
@@ -437,6 +454,11 @@ def solve_cycle(cycle_type: str,
     KAYNAKLI varsayılanlarla gelir ve çözümde ``assumptions`` listesine
     yazılır. ``isp_main_s`` verilirse açık çevrimlerde Isp kaybı hesaplanır;
     verilmezse kayıp 'not_modelled' etiketlenir (uydurulmaz).
+
+    ``eta_turbine`` None bırakılırsa çevrim SINIFINA göre seçilir: açık çevrim
+    (GG/tap-off) için 0.65, kapalı çevrim (staged/FFSC/expander) için 0.78.
+    Gerekçe ve kaynak ETA_TURBINE_OPEN_DEFAULT / ETA_TURBINE_CLOSED_DEFAULT
+    sabitlerinin başındadır (NASA SP-8110). Sayı verilirse aynen kullanılır.
     """
     if cycle_type not in _VALID_CYCLES:
         raise ValueError(f"Unknown cycle_type {cycle_type!r}; valid options: "
@@ -447,6 +469,31 @@ def solve_cycle(cycle_type: str,
         raise ValueError('pc_bar, mdot_total and mr must be positive')
 
     sol = CycleSolution(cycle_type=cycle_type)
+
+    # Türbin verimi çevrim SINIFINA göre varsayılır (kullanıcı vermediyse).
+    # Fiziksel gerekçe: açık çevrim türbinleri yüksek basınç oranlı kısmi-giriş
+    # impuls kademesidir (%35-65), kapalı çevrim türbinleri düşük basınç oranlı
+    # tam-giriş reaksiyon türbinidir ve %80 üzeri verime ulaşır (NASA SP-8110,
+    # s. 17 ve fig. 13-14; RS-25 ölçülen 0.746-0.811). Tek bir 0.65 değeri
+    # kapalı yüksek-Pc çevrimlerde türbin gücünü ~%20 eksik hesaplar ve güç
+    # dengesini yüksek oda basıncında YALANCI olarak açık bırakır.
+    if eta_turbine is None:
+        if cycle_type in ('gas_generator', 'tap_off'):
+            eta_turbine = ETA_TURBINE_OPEN_DEFAULT
+            if cycle_type != 'pressure_fed':
+                sol.assumptions.append(
+                    f'Turbine efficiency assumed {eta_turbine:.2f} for the '
+                    f'open cycle (high-pressure-ratio partial-admission '
+                    f'impulse turbine; NASA SP-8110 fig. 13-14, 35-65% band).')
+        else:
+            eta_turbine = ETA_TURBINE_CLOSED_DEFAULT
+            if cycle_type != 'pressure_fed':
+                sol.assumptions.append(
+                    f'Turbine efficiency assumed {eta_turbine:.2f} for the '
+                    f'closed cycle (low-pressure-ratio full-admission reaction '
+                    f'turbine; NASA SP-8110 p. 17 ">80%"; RS-25 measured HPFTP '
+                    f'0.811 / HPOTP 0.746).')
+
     if rho_ox is None:
         rho_ox = DENSITY_NBP_KG_M3[oxidizer]
         sol.assumptions.append(
@@ -795,13 +842,28 @@ def solve_cycle(cycle_type: str,
                     bracket = (a, b)
                     break
             if bracket is None:
+                # En iyi (en küçük açık) durum türbin gücü artığının TEPE
+                # noktasıdır; PR_SOLVE_MAX'taki artık değil (artık PR* sonrası
+                # yeniden düşer). Eksiği tepe noktasından raporla.
+                best_pr = float(grid[int(np.argmax(vals))])
+                best_deficit = -max(vals) / 1e6
+                turb_frac = mdot_turb / mdot_total
                 sol.warnings.append(
-                    f'Staged-combustion power balance does not close for '
-                    f'any turbine pressure ratio in '
-                    f'[{PR_SOLVE_MIN:g}, {PR_SOLVE_MAX:g}]: the turbine '
-                    f'cannot supply the pump power at the temperature '
-                    f'limit. Deficit at PR={PR_SOLVE_MAX:g}: '
-                    f'{-resid(PR_SOLVE_MAX) / 1e6:.1f} MW.')
+                    f'Staged-combustion power balance does not close for any '
+                    f'turbine pressure ratio in [{PR_SOLVE_MIN:g}, '
+                    f'{PR_SOLVE_MAX:g}]. At the {tit:.0f} K {preburner_mode} '
+                    f'preburner limit only {mdot_turb:.0f} of {mdot_total:.0f} '
+                    f'kg/s ({turb_frac:.0%}) drives the single turbine, so its '
+                    f'power ceiling stays {best_deficit:.1f} MW below the pump '
+                    f'demand even at the most favourable pressure ratio '
+                    f'(PR={best_pr:.2f}); raising the pressure ratio further '
+                    f'only widens the gap. A single preburner passes only part '
+                    f'of the propellant through the turbine, so this chamber '
+                    f'pressure is out of reach at the material temperature '
+                    f'limit. Full-flow staged combustion (all propellant '
+                    f'through two turbines) removes this limit — which is why '
+                    f'high-pressure methane engines such as Raptor use the '
+                    f'full-flow architecture rather than a single preburner.')
                 sol.not_modelled.append('power_balance')
                 sol.converged = False
                 return sol
@@ -974,7 +1036,10 @@ def solve_cycle(cycle_type: str,
                         return {'pr': pr, 'p_avail': p_avail,
                                 'p_pump': p_pump, 'discharge_bar': disch,
                                 'p_pb': p_pb}
-                return None
+                # Kök yok: en iyi (en küçük açık) durumu teşhis için döndür.
+                return {'pr': None, 'best_deficit_W': -max(vals),
+                        'best_pr': float(grid[int(np.argmax(vals))]),
+                        'mdot_turb': mdot_turb}
 
             res_f = solve_shaft(pb_f['gas'], tit_f, mdot_turb_f,
                                 m_fuel_total, rho_fuel, eta_pump_fuel,
@@ -983,13 +1048,20 @@ def solve_cycle(cycle_type: str,
             res_ox = solve_shaft(pb_ox['gas'], tit_ox, mdot_turb_ox,
                                  m_ox_total, rho_ox, eta_pump_ox,
                                  pump_inlet_ox_bar, line_dp_ox_bar)
-            if res_f is None or res_ox is None:
-                side = 'fuel' if res_f is None else 'oxidizer'
+            if res_f['pr'] is None or res_ox['pr'] is None:
+                bad = res_f if res_f['pr'] is None else res_ox
+                side = 'fuel-rich' if res_f['pr'] is None else 'oxidizer-rich'
                 sol.warnings.append(
-                    f'FFSC {side}-shaft power balance does not close for '
-                    f'any turbine pressure ratio in [{PR_SOLVE_MIN:g}, '
-                    f'{PR_SOLVE_MAX:g}] at the preburner temperature '
-                    f'limit; the cycle is infeasible at this design point.')
+                    f'FFSC {side} shaft power balance does not close for any '
+                    f'turbine pressure ratio in [{PR_SOLVE_MIN:g}, '
+                    f'{PR_SOLVE_MAX:g}]. Its {bad["mdot_turb"]:.0f} kg/s '
+                    f'turbine flow at the preburner temperature limit leaves a '
+                    f'{bad["best_deficit_W"] / 1e6:.1f} MW power shortfall '
+                    f'against the pump even at the most favourable pressure '
+                    f'ratio (PR={bad["best_pr"]:.2f}); a higher pressure ratio '
+                    f'only widens the gap. The cycle is infeasible at this '
+                    f'design point with the given efficiencies and temperature '
+                    f'limits.')
                 sol.not_modelled.append('power_balance')
                 sol.converged = False
                 return sol

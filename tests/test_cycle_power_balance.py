@@ -19,12 +19,19 @@ import pytest
 
 from hrma.engines.cycle_power_balance import (
     CycleSolution,
+    ETA_TURBINE_CLOSED_DEFAULT,
+    ETA_TURBINE_OPEN_DEFAULT,
     STAGED_PR_TYPICAL,
     solve_cycle,
     solve_preburner_of,
 )
 
 RESIDUAL_TOL = 1e-6
+
+# Görev doğrulama çapaları için sabit yoğunluklar (NBP; NIST WebBook).
+RHO_LOX = 1141.0
+RHO_CH4 = 422.0
+RHO_LH2 = 70.85
 
 
 def _rs25():
@@ -313,3 +320,147 @@ class TestDataclassContract:
         assert not sol.converged
         assert sol.isp_mode == 'not_modelled'
         assert sol.isp_loss_s is None
+
+
+class TestTurbineEfficiencyDefault:
+    """Türbin verimi çevrim SINIFINA göre varsayılmalı (NASA SP-8110).
+
+    Açık çevrim (yüksek PR, kısmi-giriş impuls) 0.65; kapalı çevrim (düşük PR,
+    tam-giriş reaksiyon) 0.78. Tek bir 0.65 değeri kapalı yüksek-Pc çevrimde
+    türbin gücünü eksik hesaplar ve dengeyi yalancı olarak açık bırakırdı.
+    """
+
+    def test_closed_default_above_open_default(self):
+        # Fiziksel sıralama: kapalı çevrim türbini açık çevrimden verimli.
+        assert ETA_TURBINE_CLOSED_DEFAULT > ETA_TURBINE_OPEN_DEFAULT
+        # RS-25 ölçülen bandı (HPOTP 0.746 - HPFTP 0.811) içinde.
+        assert 0.746 <= ETA_TURBINE_CLOSED_DEFAULT <= 0.811
+
+    def test_open_cycle_uses_open_default_when_unset(self):
+        sol = solve_cycle('gas_generator', 97.0, 305.0, 2.36, 'rp1',
+                          isp_main_s=282.0)
+        assert sol.converged
+        assert (sol.shafts[0]['turbine']['efficiency']
+                == pytest.approx(ETA_TURBINE_OPEN_DEFAULT))
+        assert any('open cycle' in a for a in sol.assumptions)
+
+    def test_closed_cycle_uses_closed_default_when_unset(self):
+        sol = solve_cycle('staged_combustion', 206.0, 470.0, 6.0, 'lh2',
+                          rho_ox=RHO_LOX, rho_fuel=RHO_LH2)
+        assert sol.converged
+        assert (sol.shafts[0]['turbine']['efficiency']
+                == pytest.approx(ETA_TURBINE_CLOSED_DEFAULT))
+        assert any('closed cycle' in a for a in sol.assumptions)
+
+    def test_explicit_efficiency_is_honoured(self):
+        # Kullanıcı değeri varsayılanı EZMELİ (sessizce değiştirilmez).
+        sol = solve_cycle('staged_combustion', 206.0, 470.0, 6.0, 'lh2',
+                          rho_ox=RHO_LOX, rho_fuel=RHO_LH2, eta_turbine=0.60)
+        assert sol.shafts[0]['turbine']['efficiency'] == pytest.approx(0.60)
+
+
+class TestHighPcConvergence:
+    """Görev senaryosu: yüksek oda basıncında (300 bar) çevrim dengesi.
+
+    Raptor sınıfı FFSC (metan/LOX, Pc=300 bar) fiziksel olarak KAPANMALI ve
+    pompa çıkışları literatür bandında (600-850 bar) SONUÇ olarak çıkmalı.
+    Tek ön yakıcılı staged combustion aynı noktada fiziksel olarak kapanmaz
+    (türbinden geçen debi sınırlı) — bu durumda sahte sayı değil, dürüst
+    'not_modelled' dönmeli.
+    """
+
+    def test_ffsc_methane_300bar_converges_bare_defaults(self):
+        # Görevin birebir yeniden üretim çağrısı (eta_turbine verilmez).
+        sol = solve_cycle('full_flow_staged_combustion', 300.0, 700.0, 3.6,
+                          'methane', 'lox', rho_ox=RHO_LOX, rho_fuel=RHO_CH4)
+        assert sol.converged
+        assert sol.power_residual_rel < RESIDUAL_TOL
+        # Pompa çıkışları Raptor bandında (SONUÇ, hardcode değil).
+        assert 600.0 <= sol.pump_discharge_ox_bar <= 850.0
+        assert 600.0 <= sol.pump_discharge_fuel_bar <= 850.0
+        # İki mil, iki ön yakıcı, tüm debi türbinlerden geçer.
+        assert {s['name'] for s in sol.shafts} == {'fuel', 'ox'}
+        assert sol.turbine_mdot_total_kg_s == pytest.approx(700.0, rel=1e-6)
+
+    def test_ffsc_methane_300bar_shaft_balance_closes(self):
+        sol = solve_cycle('full_flow_staged_combustion', 300.0, 700.0, 3.6,
+                          'methane', 'lox', rho_ox=RHO_LOX, rho_fuel=RHO_CH4)
+        for shaft in sol.shafts:
+            assert shaft['power_residual_rel'] < RESIDUAL_TOL
+            assert shaft['turbine']['efficiency'] == pytest.approx(
+                ETA_TURBINE_CLOSED_DEFAULT)
+
+    def test_single_preburner_staged_methane_300bar_honest_not_modelled(self):
+        # Tek fuel-rich ön yakıcı 300 bar metanı kapatamaz — bu FIZIKSEL.
+        # Sahte yakınsama YASAK; dürüst 'not_modelled' + sayısal gerekçe.
+        sol = solve_cycle('staged_combustion', 300.0, 700.0, 3.6, 'methane',
+                          'lox', rho_ox=RHO_LOX, rho_fuel=RHO_CH4)
+        assert not sol.converged
+        assert 'power_balance' in sol.not_modelled
+        assert sol.pump_discharge_ox_bar is None
+        assert sol.pump_discharge_fuel_bar is None
+        # Uyarı fiziksel gerekçeyi (sınırlı türbin debisi + tam-akış çözümü)
+        # sayıyla açıklamalı.
+        msg = ' '.join(sol.warnings)
+        assert 'does not close' in msg
+        assert 'MW' in msg and 'kg/s' in msg
+        assert 'full-flow' in msg.lower()
+
+    def test_open_cycle_unaffected_by_closed_default(self):
+        # GG (açık çevrim) yeni kapalı-çevrim varsayılanından ETKİLENMEZ.
+        sol = solve_cycle('gas_generator', 97.0, 305.0, 2.36, 'rp1',
+                          isp_main_s=282.0)
+        assert sol.converged
+        assert sol.shafts[0]['turbine']['efficiency'] == pytest.approx(
+            ETA_TURBINE_OPEN_DEFAULT)
+
+
+class TestHighPcRegressionAnchors:
+    """Düşük/orta Pc durumları yakınsamaya DEVAM etmeli (regresyon çapası).
+
+    Verim düzeltmesi sadece kapanmayan yüksek-Pc durumu açar; çalışan
+    durumları BOZMAMALI. Sayılar hafifçe değişir (doğru, daha yüksek türbin
+    verimi -> biraz düşük basınç oranı) ama makul bantta kalır.
+    """
+
+    ANCHORS = [
+        ('staged_combustion', 50.0, 120.0, 3.6, 'methane', RHO_CH4, 60.0, 90.0),
+        ('full_flow_staged_combustion', 50.0, 120.0, 3.6, 'methane', RHO_CH4,
+         55.0, 90.0),
+        ('staged_combustion', 100.0, 250.0, 3.6, 'methane', RHO_CH4, 130.0,
+         200.0),
+        ('full_flow_staged_combustion', 100.0, 250.0, 3.6, 'methane', RHO_CH4,
+         120.0, 190.0),
+    ]
+
+    @pytest.mark.parametrize('cyc,pc,mdot,mr,fuel,rho_f,lo,hi', ANCHORS)
+    def test_low_mid_pc_still_converges(self, cyc, pc, mdot, mr, fuel, rho_f,
+                                        lo, hi):
+        sol = solve_cycle(cyc, pc, mdot, mr, fuel, 'lox', rho_ox=RHO_LOX,
+                          rho_fuel=rho_f)
+        assert sol.converged
+        assert sol.power_residual_rel < RESIDUAL_TOL
+        assert lo <= sol.pump_discharge_ox_bar <= hi
+        assert lo <= sol.pump_discharge_fuel_bar <= hi
+
+    def test_rs25_like_206bar_stays_in_band(self):
+        # 206 bar LH2 staged (RS-25 çapası) yakınsamaya devam eder ve gerçek
+        # HPFTP çıkışı (~410 bar, 5950 psia) bandında kalır. Doğru türbin
+        # verimiyle (0.78) değer 419 -> ~378 bar'a iner; ikisi de gerçek
+        # 410 bar'ın ±%15'i içindedir.
+        sol = solve_cycle('staged_combustion', 206.0, 470.0, 6.0, 'lh2',
+                          'lox', rho_ox=RHO_LOX, rho_fuel=RHO_LH2)
+        assert sol.converged
+        assert 350.0 <= sol.pump_discharge_fuel_bar <= 480.0
+        pr = sol.shafts[0]['turbine']['pressure_ratio']
+        assert STAGED_PR_TYPICAL[0] <= pr <= STAGED_PR_TYPICAL[1]
+
+    def test_rs25_explicit_efficiency_test_anchor_unchanged(self):
+        # Test paketinin RS-25 çapası eta_turbine=0.75 AÇIKÇA geçtiği için
+        # varsayılan değişiminden ETKİLENMEZ (fuel çıkışı band içinde kalır).
+        sol = solve_cycle('staged_combustion', 206.4, 512.0, 6.03, 'lh2',
+                          preburner_mode='fuel_rich', regen_dp_bar=30.0,
+                          eta_pump_ox=0.75, eta_pump_fuel=0.75,
+                          eta_turbine=0.75, tit_K=1000.0)
+        assert sol.converged
+        assert 450.0 * 0.7 <= sol.pump_discharge_fuel_bar <= 480.0 * 1.3
