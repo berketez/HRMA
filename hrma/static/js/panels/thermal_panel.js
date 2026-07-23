@@ -450,13 +450,34 @@
         ],
         fromResults: function (r) {
             const m = (r && r.motor) || r || {};
+            // BİRİM SÖZLEŞMESİ UYARISI (2026-07-23 saha denetimi):
+            // Çözücü sözlüğünde uzunluk birimleri TÜRDEŞ DEĞİL —
+            //   katı motor : chamber/core/exit/throat çapları ve grain boyu MİLİMETRE
+            //   sıvı motor : chamber_diameter ve chamber_length MİLİMETRE,
+            //                buna karşılık throat_diameter ve exit_diameter METRE
+            // Bu panelin alanları METRE etiketli. Önceden dönüştürme YAPILMIYOR,
+            // 100 mm'lik oda ekranda 100 m olarak beliriyordu. Aşağıdaki
+            // yardımcı, değeri fiziksel makullüğe göre değil KAYNAK ANAHTARIN
+            // bilinen birimine göre çevirir (tahmin yok).
+            const mmToM = (v) => (Number.isFinite(v) ? v / 1000 : undefined);
+            // Toplam kütle akışı: 'mdot_total' anahtarı hiçbir çözücüde
+            // ÜRETİLMİYOR (alan bu yüzden hep varsayılanda kalıyordu). Sıvı
+            // motorda karşılığı 'total_mass_flow'; katı motorda ortalama akış
+            // yakıt kütlesi / yanma süresinden türetilir (ortalama değerdir,
+            // anlık tepe akışı değil).
+            let mdot = Number.isFinite(m.total_mass_flow) ? m.total_mass_flow
+                : undefined;
+            if (mdot === undefined
+                && Number.isFinite(m.propellant_mass) && m.burn_time > 0) {
+                mdot = m.propellant_mass / m.burn_time;
+            }
             return {
                 chamber_pressure: m.chamber_pressure,
                 chamber_temperature: m.chamber_temperature,
-                chamber_diameter: m.chamber_diameter,
-                chamber_length: m.chamber_length,
+                chamber_diameter: mmToM(m.chamber_diameter),
+                chamber_length: mmToM(m.chamber_length),
                 burn_time: m.burn_time,
-                mdot_total: m.mdot_total,
+                mdot_total: mdot,
             };
         },
         render: render,
