@@ -37,11 +37,11 @@ jobs:
       - name: Python bağımlılıkları
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # requirements-dev.txt zaten requirements.txt'i içeriyor (-r ile).
+          pip install -r requirements-dev.txt
           # Cantera OPSİYONELDİR (kurulu değilse çözücü ampirik yola düşer),
           # ama denge kimyası testlerinin gerçekten koşması için kuruluyor.
           pip install cantera
-          pip install pytest
 
       # build123d (STEP export) CI'da BİLEREK kurulmuyor: 0.11.x numpy>=2
       # istiyor ve kurulduğunda numpy'yi 1.26'dan 2.5'e yükseltip tüm paketi

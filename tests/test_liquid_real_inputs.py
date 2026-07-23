@@ -171,7 +171,13 @@ SENSITIVITY_CASES = [
     ('fuel_viscosity', 0.02),
     ('oxidizer_viscosity', 0.004),
     ('fuel_heat_capacity', 3500),
-    ('of_max_isp', 3.6),
+    # ('of_max_isp', 3.6) KALDIRILDI (2026-07-23): optimum karışım oranı artık
+    # GİRDİ değil, ÇIKTI. Çözücü gerçek Pc'de CEA taraması yapıp maksimum
+    # vakum Isp'sini veren O/F'yi hesaplıyor (RP-1/LOX 2.62, LH2/LOX 4.09,
+    # metan/LOX 3.23 — literatürle uyumlu). Elle girilen değer hesabı
+    # etkileyemez, bu yüzden formdan da kaldırıldı ve sonuç panelinde
+    # hesaplanmış değer gösteriliyor. Ölü girdi bırakmak yerine girdiyi
+    # kaldırmak: bkz. liquid.html "Optimal O/F (computed)".
     ('of_min', 1.0),
     ('engine_life_cycles', 900),
 ]
@@ -203,15 +209,30 @@ def test_pressure_fed_uses_the_feed_pressure_input():
 
 
 def test_no_overrides_keeps_the_reference_chain():
-    """Override YOKKEN Isp/c* zinciri (CEA demirli) aynen korunmalı.
+    """Override YOKKEN Isp/c* zinciri sabit kalmalı (taban kilidi).
 
     Korelasyon koşucusu ve UQ adaptörü motoru override'sız kurar; bu testin
     kırılması korelasyon istatistiklerinin kaydığı anlamına gelir.
+
+    TABAN GÜNCELLENDİ (2026-07-23, v2.6.0 CEA entegrasyonu). Eski değerler
+    (isp_sl 311.758, isp_vac 353.153, c* 1823.16) Pc=100 bar'a demirli statik
+    tablodan ve SABİT eps=200 vakum referansından geliyordu; yani hiçbir
+    gerçek lüleye ait değildi. Yeni zincir yanmayı GERÇEK (Pc, O/F) noktasında
+    RocketCEA ile çözüyor ve Isp'yi motorun KENDİ genişleme oranında veriyor.
+
+    Varsayılan motor: RP-1/LOX, Pc=100 bar, O/F=2.5, F=10 kN, ortam-eşlenik
+    lüle -> eps=13.22, T_c=3707 K, gamma=1.148. Bu değerler literatürle
+    tutarlıdır (RP-1/LOX c* ~1780-1830 m/s; Merlin-1D deniz seviyesi teslim
+    Isp 282 s @ eps=16, ideal ~300 s — Sutton & Biblarz 9. baskı Böl. 5).
+    c* yalnız %0.8 kaydı (1823 -> 1809); asıl fark Isp'nin artık gerçek
+    lülede çözülmesinden geliyor. Değişimin doğruluğa etkisi ölçüldü:
+    gerçek motorlara karşı vakum Isp medAPE %8.9 -> %1.0
+    (bkz. tests/test_correlation_guards.py).
     """
     _, plain = run_engine(None)
-    assert plain['isp_sea_level'] == pytest.approx(311.758, abs=1e-2)
-    assert plain['isp_vacuum'] == pytest.approx(353.153, abs=1e-2)
-    assert plain['c_star'] == pytest.approx(1823.16, abs=1e-1)
+    assert plain['isp_sea_level'] == pytest.approx(298.371, abs=1e-2)
+    assert plain['isp_vacuum'] == pytest.approx(323.590, abs=1e-2)
+    assert plain['c_star'] == pytest.approx(1808.88, abs=1e-1)
     assert plain['burn_time_source'].startswith('assumed')
     assert plain['burn_time'] == BURN_TIME_DEFAULT_S
 

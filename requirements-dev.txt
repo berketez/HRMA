@@ -1,0 +1,16 @@
+# HRMA test/geliştirme bağımlılıkları.
+# Uygulamayı çalıştırmak için gerekli DEĞİLDİR; yalnız test paketini koşmak
+# içindir. CI de bu dosyayı kurar (.github/workflows/tests.yml).
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   MPLBACKEND=Agg PYTHONPATH=. pytest tests/ -q
+
+-r requirements.txt
+
+pytest>=8.0.0
+pypdf>=5.0.0           # üretilen PDF raporlarının içeriğini doğrulayan testler
+
+# NOT: build123d ve OCP (STEP export testleri) BİLEREK yok — numpy>=2
+# istiyorlar, HRMA ise numpy<2 pinli. Kurulunca numpy 2.x'e yükseliyor ve
+# np.trapz kayboluyor (2026-07-23 CI koşusunda 194 test düştü). O testler
+# pytest.importorskip ile atlanır; ayrıntı INSTALL.md'de.

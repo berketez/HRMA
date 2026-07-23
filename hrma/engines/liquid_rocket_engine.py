@@ -1,5 +1,6 @@
 import copy
 import time
+from functools import lru_cache
 import numpy as np
 from scipy.optimize import fsolve, newton, minimize_scalar
 from scipy.interpolate import interp1d, interp2d
@@ -91,6 +92,59 @@ PERF_MAP_ALT_MAX_M = 100000.0
 # (kullanıcı ε'su ya da ortam-eşlenik ε) çözülür — bkz.
 # _design_expansion_ratio / _finalize_performance_reference.
 VACUUM_REFERENCE_EPS = 200.0
+
+# Optimum O/F taraması (2026-07-23): canlı CEA yolunda maksimum Isp veren
+# karışım oranı ARTIK hesaplanır, kullanıcıdan alınmaz. Band, kimyasal
+# iticilerin pratik O/F aralığını kapsayacak genişliktedir (LH2/LOX ~4-6,
+# RP-1/LOX ~2.2-2.8, N2O4/MMH ~1.6-2.2, metan/LOX ~3.2-3.8; Sutton &
+# Biblarz 9. baskı Böl. 5 tabloları). Tepe, parabolik uydurmayla ızgara
+# adımının altına indirilir.
+OF_OPTIMUM_SCAN_BAND = (0.8, 8.0)
+OF_OPTIMUM_SCAN_POINTS = 25
+
+
+@lru_cache(maxsize=256)
+def _optimal_mr_scan_cached(fuel, oxidizer, pc_bar, eps, n_points):
+    """Maksimum vakum Isp veren O/F — CEA taraması, önbellekli.
+
+    Optimum yalnız (itici çifti, Pc, referans eps) fonksiyonudur; motorun
+    itkisi, geometrisi ya da çevrimi onu değiştirmez. Bu yüzden modül
+    seviyesinde önbelleğe alınır: kullanıcı formda başka bir alanı
+    oynattığında 25 CEA çağrısı TEKRAR yapılmaz (soğuk tarama ~3-12 s
+    sürüyordu; sıcak isabet anlıktır). Argümanlar hashlenebilir olsun diye
+    yuvarlanmış skalerlerdir.
+
+    Çözülemezse None döner — çağıran 'not_solved' etiketi koyar, sahte
+    optimum ÜRETİLMEZ.
+    """
+    from hrma.engines import cea_bridge
+    lo, hi = OF_OPTIMUM_SCAN_BAND
+    mrs = np.linspace(lo, hi, int(n_points))
+    isps = []
+    for mr in mrs:
+        try:
+            props = cea_bridge.get_combustion_properties(
+                fuel, oxidizer, float(pc_bar), float(mr),
+                expansion_ratio=float(eps))
+        except Exception:
+            isps.append(None)
+            continue
+        isps.append(props.get('isp_vac_s')
+                    if props.get('source') == 'rocketcea' else None)
+    valid = [v for v in isps if v is not None]
+    if not valid:
+        return None
+    k = int(np.argmax([v if v is not None else -1.0 for v in isps]))
+    best = float(mrs[k])
+    # Tepe komşularıyla parabolik iyileştirme (ızgara adımının altına iner)
+    if 0 < k < len(mrs) - 1 and None not in (isps[k - 1], isps[k + 1]):
+        y0, y1, y2 = isps[k - 1], isps[k], isps[k + 1]
+        denom = (y0 - 2.0 * y1 + y2)
+        if denom != 0:
+            delta = 0.5 * (y0 - y2) / denom
+            if abs(delta) <= 1.0:
+                best = float(mrs[k] + delta * float(mrs[1] - mrs[0]))
+    return best
 
 # --- TESLİM (delivered) performans zinciri --------------------------------
 # CEA IDEAL (kayıpsız, tek boyutlu, denge) değer verir. Gerçek motorun
@@ -1526,7 +1580,41 @@ class LiquidRocketEngine:
             self.optimal_mr = getattr(self, 'optimal_mr', float(self.MR))
             self.optimal_mr_thrust = getattr(self, 'optimal_mr_thrust',
                                              float(self.MR))
+        # CANLI CEA yolunda optimum O/F ARTIK HESAPLANIR (2026-07-23).
+        # Eskiden statik tablodan okunuyor ya da kullanıcının 'of_max_isp'
+        # girdisinden alınıyordu; ikisi de gerçek Pc'deki kimyayı temsil
+        # etmiyordu. Optimum, itici çiftinin ve oda basıncının bir SONUCUdur,
+        # kullanıcı tercihi değildir — bu yüzden çözülür ve raporlanır.
+        if self.combustion_data_source == 'rocketcea':
+            self._solve_optimal_mixture_ratio(cea_bridge, fallback)
         self._calculate_mixture_ratio_effects()
+
+    def _solve_optimal_mixture_ratio(self, cea_bridge, fallback,
+                                     n_points=OF_OPTIMUM_SCAN_POINTS):
+        """Vakum Isp'yi maksimize eden O/F'yi CEA taramasıyla çözer.
+
+        Tarama bandı stokiyometri etrafında geniş tutulur ve çözüm parabolik
+        tepe uydurmasıyla ızgara adımının altına iner. cea_bridge çağrıları
+        önbelleklidir; aynı (yakıt, oksitleyici, Pc) için tarama bir kez
+        yapılır. Çözülemezse mevcut değerler korunur ve sessizce geçilmez —
+        'optimal_mr_source' alanı hangi yoldan geldiğini bildirir.
+
+        NOT: Maksimum İTKİ O/F'si maksimum Isp'ninkinden daha yüksektir
+        (yoğunluk-itki dengesi); ayrı bir tarama gerektirdiği ve tasarım
+        noktası seçiminde ikincil olduğu için burada Isp optimumundan
+        türetilmez — kaynağı 'not_modelled' olarak işaretlenir.
+        """
+        eps = float(getattr(self, 'design_reference_expansion_ratio', 0)
+                    or VACUUM_REFERENCE_EPS)
+        best_mr = _optimal_mr_scan_cached(
+            str(self.fuel_type), str(self.oxidizer_type),
+            round(float(self.P_c), 1), round(eps, 2), int(n_points))
+        if best_mr is None:
+            self.optimal_mr_source = 'not_solved'
+            return
+        self.optimal_mr = float(best_mr)
+        self.optimal_mr_source = 'cea_scan'
+        self.optimal_mr_thrust_source = 'not_modelled'
 
     def _matched_expansion_ratio(self, gamma):
         """Ortam basıncına eşlenik (optimum) genişleme oranı.

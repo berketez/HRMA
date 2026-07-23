@@ -741,25 +741,23 @@
                     </label>
                     <input type="number" id="stoichiometric_of" value="3.4" step="0.1">
                 </div>
+                <!-- "O/F for Max Isp" ve "O/F for Max Thrust" GİRDİ alanları
+                     2026-07-23'te kaldırıldı: optimum karışım oranı itici
+                     çiftinin ve oda basıncının bir SONUCUdur, kullanıcı
+                     tercihi değildir. Çözücü artık gerçek Pc'de CEA taraması
+                     yapıp maksimum Isp veren O/F'yi HESAPLIYOR ve sonuç
+                     panelinde raporluyor (optimal_mixture_ratio, kaynak
+                     etiketiyle). Girdi olarak kalsaydı hesabı hiç
+                     etkilemeyen ölü bir alan olurdu. -->
                 <div class="form-group">
                     <label>
-                        <span data-i18n="liq.ui.o_f_for_max_isp">O/F for Max Isp</span>
+                        <span data-i18n="liq.ui.optimal_of_computed">Optimal O/F (computed)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="liq.ui.mixture_ratio_that_maximizes_specific_impulse">Mixture ratio that maximizes specific impulse. Usually slightly fuel-rich from stoichiometric. LOX/RP-1: 2.77, LOX/LH2: 6.0, LOX/Methane: 3.8. Used for upper stage optimization.</span>
+                            <span class="tooltip-text" data-i18n="liq.ui.optimal_of_computed_tip">The mixture ratio that maximizes vacuum specific impulse is solved from chemical equilibrium at your chamber pressure, not entered by hand. It appears in the results panel once you run the analysis.</span>
                         </div>
                     </label>
-                    <input type="number" id="of_max_isp" value="2.77" step="0.01">
-                </div>
-                <div class="form-group">
-                    <label>
-                        <span data-i18n="liq.ui.o_f_for_max_thrust">O/F for Max Thrust</span>
-                        <div class="tooltip">
-                            <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="liq.ui.mixture_ratio_that_maximizes_thrust_mass">Mixture ratio that maximizes thrust (mass flow × exhaust velocity). Usually more fuel-rich than max Isp ratio. LOX/RP-1: 2.27, LOX/LH2: 5.5, LOX/Methane: 3.2. Used for booster applications.</span>
-                        </div>
-                    </label>
-                    <input type="number" id="of_max_thrust" value="2.27" step="0.01">
+                    <output id="of_max_isp_computed" class="computed-field" data-i18n="liq.ui.computed_after_run">solved during analysis</output>
                 </div>
                 <div class="form-group">
                     <label>
@@ -2438,8 +2436,8 @@
             // O/F optimization
             document.getElementById('mixture_ratio').value = '2.5';
             document.getElementById('stoichiometric_of').value = '3.4';
-            document.getElementById('of_max_isp').value = '2.77';
-            document.getElementById('of_max_thrust').value = '2.27';
+            // of_max_isp / of_max_thrust artık GİRDİ değil (2026-07-23):
+            // optimum O/F CEA taramasıyla hesaplanıp sonuçta raporlanıyor.
             document.getElementById('of_min').value = '2.0';
             document.getElementById('of_max').value = '3.2';
             document.getElementById('throttling_of_strategy').value = 'constant';
@@ -3351,8 +3349,10 @@
                 // O/F optimization
                 mixture_ratio: parseFloat(document.getElementById('mixture_ratio').value) || 2.5,
                 stoichiometric_of: parseFloat(document.getElementById('stoichiometric_of').value) || 3.4,
-                of_max_isp: parseFloat(document.getElementById('of_max_isp').value) || 2.77,
-                of_max_thrust: parseFloat(document.getElementById('of_max_thrust').value) || 2.27,
+                // of_max_isp / of_max_thrust GÖNDERİLMİYOR (2026-07-23):
+                // çözücü optimum O/F'yi gerçek Pc'de CEA taramasıyla kendisi
+                // buluyor; elle girilen değer hesabı etkilemediği için ölü
+                // girdi olurdu (bkz. tests/test_liquid_real_inputs.py).
                 of_min: parseFloat(document.getElementById('of_min').value) || 2.0,
                 of_max: parseFloat(document.getElementById('of_max').value) || 3.2,
                 throttling_of_strategy: document.getElementById('throttling_of_strategy').value,

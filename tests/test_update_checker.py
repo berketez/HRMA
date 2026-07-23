@@ -144,9 +144,19 @@ def test_check_yeni_surum_var(monkeypatch):
     assert r["available"] is True
     assert r["latest"] == "v99.0.0"
     assert r["current"] == __version__
-    assert r["asset"] is not None
-    beklenen = ".dmg" if sys.platform == "darwin" else ".exe"
-    assert r["asset"]["name"].endswith(beklenen)
+    # Kurulum paketi YALNIZ macOS (.dmg) ve Windows (.exe) icin yayimlanir;
+    # Linux kaynaktan calisir ve pick_asset orada BILEREK None doner (arayuz
+    # o durumda Releases sayfasini acar, bkz. update_checker.pick_asset).
+    # Eski hali "darwin degilse Windows'tur" varsayiyordu ve Linux CI'da
+    # kiriliyordu (2026-07-23).
+    if sys.platform == "darwin":
+        assert r["asset"] is not None
+        assert r["asset"]["name"].endswith(".dmg")
+    elif sys.platform in ("win32", "cygwin"):
+        assert r["asset"] is not None
+        assert r["asset"]["name"].endswith(".exe")
+    else:
+        assert r["asset"] is None
 
 
 def test_check_ayni_surum_guncelleme_yok(monkeypatch):
