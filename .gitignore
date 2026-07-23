@@ -48,3 +48,6 @@ packaging/*.log
 # ağacını kirletiyorlardı. build123d yoksa ilgili testler zaten importorskip
 # ile atlanır, dosyalara ihtiyaç duyulmaz.
 tests/fixtures/step/
+
+# Ajan/doğrulama geçici çıktıları (ekran görüntüleri, harness)
+scratchpad/
