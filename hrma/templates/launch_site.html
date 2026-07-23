@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- i18n: çekirdek + bu sayfanın sözlüğü + kabuk (dil seçici/ayarlar).
+         Yükleme sırası önemsiz (register kuyruğu var). -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n_launch_site.js"></script>
+    <script src="/static/js/i18n_shell.js"></script>
+    <script src="/static/js/release_notes.js"></script>
+    <script src="/static/js/settings_panel.js"></script>
+    <title data-i18n="site.title">Launch Site &amp; Flight Path</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--hd-sans, 'Inter', sans-serif);
+            background: var(--hd-bg0, #04070d);
+            color: var(--hd-ink, #cfe8f2);
+            overflow: hidden;
+        }
+        /* Sayfa yerleşimi: üst şerit + tam ekran küre + üstüne binen HUD */
+        #ls-shell { position: fixed; inset: 0; display: flex; flex-direction: column; }
+        #ls-topbar {
+            display: flex; align-items: center; gap: 16px;
+            padding: 10px 18px; z-index: 30;
+            background: var(--hd-panel, rgba(10,19,33,0.88));
+            border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+            backdrop-filter: blur(8px);
+        }
+        #ls-topbar h1 {
+            font-size: 15px; font-weight: 600; letter-spacing: 0.3px;
+            color: var(--hd-ink-strong, #eaf7fb);
+        }
+        #ls-topbar .sub { font-size: 12px; color: var(--hd-ink-dim, #7d97a5); }
+        #ls-topbar .spacer { flex: 1; }
+        .ls-link {
+            font-size: 12px; color: var(--hd-cyan-soft, #3af2ff);
+            text-decoration: none; padding: 6px 12px; border-radius: 8px;
+            border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+        }
+        .ls-link:hover { border-color: var(--hd-line-strong, rgba(0,229,255,0.42)); }
+
+        #ls-stage { position: relative; flex: 1; min-height: 0; }
+        #ls-globe { position: absolute; inset: 0; cursor: crosshair; }
+
+        .ls-panel {
+            position: absolute; z-index: 20;
+            background: var(--hd-panel, rgba(10,19,33,0.88));
+            border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+            border-radius: var(--hd-radius, 14px);
+            box-shadow: var(--hd-shadow, 0 14px 44px rgba(0,0,0,0.42));
+            backdrop-filter: blur(9px);
+            padding: 14px 15px;
+        }
+        .ls-panel h2 {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+            color: var(--hd-cyan, #00e5ff); margin-bottom: 10px; font-weight: 600;
+        }
+        #ls-left { top: 14px; left: 14px; width: 288px; max-height: calc(100% - 28px); overflow-y: auto; }
+        #ls-right { top: 14px; right: 14px; width: 300px; max-height: calc(100% - 28px); overflow-y: auto; }
+        #ls-cursor {
+            position: absolute; z-index: 20; left: 50%; top: 12px; transform: translateX(-50%);
+            font-family: var(--hd-mono, monospace); font-size: 12px;
+            padding: 6px 14px; border-radius: 999px;
+            background: rgba(6,14,26,0.82); border: 1px solid var(--hd-line, rgba(0,229,255,0.2));
+            color: var(--hd-ink, #cfe8f2); pointer-events: none; white-space: nowrap;
+        }
+        #ls-cursor b { color: var(--hd-cyan-soft, #3af2ff); }
+
+        .ls-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .ls-field { flex: 1; }
+        .ls-field label {
+            display: block; font-size: 10px; color: var(--hd-ink-dim, #7d97a5);
+            text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px;
+        }
+        .ls-field input, .ls-field select {
+            width: 100%; padding: 6px 8px; font-size: 13px;
+            font-family: var(--hd-mono, monospace);
+            background: var(--hd-inset, rgba(6,14,26,0.85));
+            border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+            border-radius: 8px; color: var(--hd-ink-strong, #eaf7fb);
+        }
+        .ls-btn {
+            width: 100%; padding: 9px 12px; font-size: 13px; font-weight: 600;
+            cursor: pointer; border-radius: 9px; margin-top: 4px;
+            background: linear-gradient(180deg, rgba(0,229,255,0.18), rgba(0,229,255,0.06));
+            border: 1px solid var(--hd-line-strong, rgba(0,229,255,0.42));
+            color: var(--hd-ink-strong, #eaf7fb);
+        }
+        .ls-btn:hover { background: linear-gradient(180deg, rgba(0,229,255,0.3), rgba(0,229,255,0.1)); }
+        .ls-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .ls-btn.accent {
+            background: linear-gradient(180deg, rgba(255,140,51,0.26), rgba(255,140,51,0.08));
+            border-color: rgba(255,140,51,0.5);
+        }
+        .ls-btn.accent:hover { background: linear-gradient(180deg, rgba(255,140,51,0.4), rgba(255,140,51,0.14)); }
+        .ls-btnrow { display: flex; gap: 8px; }
+        .ls-btnrow .ls-btn { margin-top: 0; }
+
+        .ls-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 3px 0; }
+        .ls-kv .k { color: var(--hd-ink-dim, #7d97a5); }
+        .ls-kv .v { font-family: var(--hd-mono, monospace); color: var(--hd-ink-strong, #eaf7fb); text-align: right; }
+        .ls-sep { height: 1px; background: var(--hd-line, rgba(0,229,255,0.14)); margin: 11px 0; }
+
+        .ls-check { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 7px 0; color: var(--hd-ink, #cfe8f2); cursor: pointer; }
+        .ls-check input { accent-color: var(--hd-cyan, #00e5ff); }
+        .ls-hint { font-size: 10.5px; color: var(--hd-ink-faint, #46606d); line-height: 1.5; margin-top: 3px; }
+
+        /* Zaman kaydırıcı + oynatım */
+        .ls-player { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+        .ls-iconbtn {
+            width: 34px; height: 34px; flex: none; cursor: pointer; border-radius: 8px;
+            background: var(--hd-inset, rgba(6,14,26,0.85));
+            border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+            color: var(--hd-ink-strong, #eaf7fb); font-size: 14px;
+        }
+        .ls-iconbtn:hover { border-color: var(--hd-line-strong, rgba(0,229,255,0.42)); }
+        #ls-time { flex: 1; accent-color: var(--hd-orange, #ff8c33); }
+        #ls-tlabel { font-family: var(--hd-mono, monospace); font-size: 11px; color: var(--hd-ink-dim, #7d97a5); min-width: 62px; text-align: right; }
+
+        /* Alt şerit: ölçek + dürüstlük notları */
+        #ls-scalebar {
+            position: absolute; z-index: 20; left: 14px; bottom: 14px;
+            font-family: var(--hd-mono, monospace); font-size: 11px;
+            color: var(--hd-ink, #cfe8f2);
+            background: rgba(6,14,26,0.8); border: 1px solid var(--hd-line, rgba(0,229,255,0.18));
+            border-radius: 8px; padding: 8px 11px; max-width: 340px;
+        }
+        #ls-scalebar .bar { height: 4px; background: var(--hd-ink-strong, #eaf7fb); border-radius: 2px; margin: 5px 0 3px; transition: width 0.1s; }
+        #ls-notes {
+            position: absolute; z-index: 20; right: 14px; bottom: 14px;
+            max-width: 340px; font-size: 10.5px; line-height: 1.55;
+            color: var(--hd-ink-dim, #7d97a5);
+            background: rgba(6,14,26,0.8); border: 1px solid var(--hd-line, rgba(0,229,255,0.18));
+            border-left: 3px solid var(--hd-orange, #ff8c33);
+            border-radius: 8px; padding: 9px 12px;
+        }
+        #ls-notes .warn { color: var(--hd-orange, #ff8c33); }
+
+        /* Gösterge (legend) çipleri */
+        .ls-legend { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+        .ls-chip { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--hd-ink, #cfe8f2); }
+        .ls-chip .sw { width: 22px; height: 3px; border-radius: 2px; flex: none; }
+        .ls-chip.dash .sw { background: repeating-linear-gradient(90deg, #4fd0e0 0 4px, transparent 4px 7px); height: 3px; }
+        .ls-ev { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--hd-ink, #cfe8f2); padding: 2px 0; }
+        .ls-ev .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+        .ls-ev .t { font-family: var(--hd-mono, monospace); color: var(--hd-ink-dim, #7d97a5); margin-left: auto; }
+
+        #ls-status { font-size: 11px; color: var(--hd-ink-dim, #7d97a5); margin-top: 6px; min-height: 14px; }
+        .ls-lang { display: flex; gap: 4px; }
+        .ls-lang button {
+            font-size: 11px; padding: 4px 9px; border-radius: 7px; cursor: pointer;
+            background: var(--hd-inset, rgba(6,14,26,0.85));
+            border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+            color: var(--hd-ink, #cfe8f2);
+        }
+        .ls-lang button.on { border-color: var(--hd-cyan, #00e5ff); color: var(--hd-cyan-soft, #3af2ff); }
+    </style>
+    <link rel="stylesheet" href="/static/css/fonts.css">
+    <link rel="stylesheet" href="/static/css/theme.css">
+</head>
+<body>
+<div id="ls-shell">
+    <div id="ls-topbar">
+        <div>
+            <h1 data-i18n="site.title">Launch Site &amp; Flight Path</h1>
+            <div class="sub" data-i18n="site.subtitle">Pick any point on Earth, then watch the solved flight path</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="ls-lang" id="ls-lang">
+            <button data-lang="en">EN</button>
+            <button data-lang="tr">TR</button>
+        </div>
+        <a class="ls-link" href="/" data-i18n="site.back">Back to app</a>
+    </div>
+
+    <div id="ls-stage">
+        <div id="ls-globe"></div>
+        <div id="ls-cursor"><span data-i18n="site.cursorReadout">Cursor</span>: <b id="ls-cur-lat">--</b>, <b id="ls-cur-lon">--</b></div>
+
+        <!-- SOL: saha seçimi + çözümü -->
+        <div class="ls-panel" id="ls-left">
+            <h2 data-i18n="site.selected">Selected site</h2>
+            <div class="ls-hint" data-i18n="site.selectHint">Rotate with drag, zoom with wheel, click the globe to pick a point.</div>
+            <div class="ls-row" style="margin-top:10px">
+                <div class="ls-field">
+                    <label data-i18n="site.lat">Latitude</label>
+                    <input id="ls-lat" type="number" step="0.0001" value="28.6084">
+                </div>
+                <div class="ls-field">
+                    <label data-i18n="site.lon">Longitude</label>
+                    <input id="ls-lon" type="number" step="0.0001" value="-80.6043">
+                </div>
+            </div>
+            <button class="ls-btn" id="ls-apply" data-i18n="site.apply">Apply</button>
+
+            <div class="ls-field" style="margin-top:10px">
+                <label data-i18n="site.presets">Shortcuts (not a limit — any point is selectable)</label>
+                <select id="ls-presets"></select>
+            </div>
+
+            <div class="ls-sep"></div>
+            <label class="ls-check">
+                <input type="checkbox" id="ls-online">
+                <span data-i18n="site.online">Use online enrichment (Open-Meteo)</span>
+            </label>
+            <button class="ls-btn" id="ls-resolve" data-i18n="site.resolve">Resolve site</button>
+            <div id="ls-resolve-out" style="margin-top:10px; display:none">
+                <div class="ls-kv"><span class="k" data-i18n="site.elevation">Elevation</span><span class="v" id="ls-r-elev">--</span></div>
+                <div class="ls-kv"><span class="k" data-i18n="site.terrainRelief">Terrain relief (3×3 cell)</span><span class="v" id="ls-r-relief">--</span></div>
+                <div class="ls-kv"><span class="k" data-i18n="site.gravityLocal">Local gravity g(φ,h)</span><span class="v" id="ls-r-glocal">--</span></div>
+                <div class="ls-kv"><span class="k" data-i18n="site.gravityStd">Standard g₀ (Isp uses this)</span><span class="v" id="ls-r-gstd">--</span></div>
+                <div class="ls-kv"><span class="k" data-i18n="site.temp">Temperature</span><span class="v" id="ls-r-temp">--</span></div>
+                <div class="ls-kv"><span class="k" data-i18n="site.pressure">Pressure</span><span class="v" id="ls-r-press">--</span></div>
+                <div class="ls-kv"><span class="k" data-i18n="site.earthRotSpeed">Earth rotation speed (info only)</span><span class="v" id="ls-r-erot">--</span></div>
+            </div>
+            <div id="ls-status"></div>
+        </div>
+
+        <!-- SAĞ: uçuş yolu + oynatım -->
+        <div class="ls-panel" id="ls-right">
+            <h2 data-i18n="site.flight">Flight path</h2>
+            <button class="ls-btn accent" id="ls-fly" data-i18n="site.launch">Fly this site</button>
+
+            <div class="ls-player">
+                <button class="ls-iconbtn" id="ls-playpause" title="Play/Pause">&#9658;</button>
+                <input id="ls-time" type="range" min="0" max="1000" value="0" disabled>
+                <span id="ls-tlabel">0.0 s</span>
+            </div>
+            <div class="ls-btnrow">
+                <button class="ls-iconbtn" id="ls-reset" title="Reset" style="width:auto;flex:1" data-i18n="site.reset">Reset</button>
+                <button class="ls-iconbtn" id="ls-view-site" title="Zoom to site" style="width:auto;flex:1" data-i18n="site.viewSite">Zoom to site</button>
+                <button class="ls-iconbtn" id="ls-view-globe" title="Whole Earth" style="width:auto;flex:1" data-i18n="site.viewGlobe">View whole Earth</button>
+            </div>
+
+            <label class="ls-check">
+                <input type="checkbox" id="ls-exagg">
+                <span data-i18n="site.exaggerate">Exaggerate altitude</span>
+            </label>
+            <div class="ls-hint" data-i18n="site.exaggerateHint">Off by default — scale is true. Only enlarges the vertical for readability.</div>
+            <label class="ls-check">
+                <input type="checkbox" id="ls-follow">
+                <span data-i18n="site.follow">Camera follows rocket</span>
+            </label>
+
+            <div class="ls-sep"></div>
+            <div class="ls-kv"><span class="k" data-i18n="site.apogeeReadout">Apogee</span><span class="v" id="ls-apogee">--</span></div>
+            <div class="ls-kv"><span class="k" data-i18n="site.rangeReadout">Downrange</span><span class="v" id="ls-range">--</span></div>
+            <div class="ls-kv"><span class="k" data-i18n="site.alt">Altitude</span><span class="v" id="ls-alt">--</span></div>
+            <div class="ls-kv"><span class="k" data-i18n="site.speedReadout">Speed</span><span class="v" id="ls-speed">--</span></div>
+
+            <div class="ls-sep"></div>
+            <h2 data-i18n="site.legend">Legend</h2>
+            <div class="ls-legend">
+                <div class="ls-chip"><span class="sw" style="background:#ff8c33"></span><span data-i18n="site.flightPathLabel">Flight path (solved 6-DOF)</span></div>
+                <div class="ls-chip dash"><span class="sw"></span><span data-i18n="site.groundTrackLabel">Ground track — Earth rotation NOT modelled</span></div>
+            </div>
+            <div style="margin-top:8px">
+                <div class="ls-hint" data-i18n="site.events">Events (derived from the solution)</div>
+                <div id="ls-events"></div>
+            </div>
+        </div>
+
+        <!-- Ölçek göstergesi (hep ekranda) -->
+        <div id="ls-scalebar">
+            <span data-i18n="site.scale">Scale</span>: <b id="ls-scale-len">--</b>
+            <div class="bar" id="ls-scale-line" style="width:100px"></div>
+            <span data-i18n="site.camAltitude">Camera altitude</span>: <b id="ls-scale-cam">--</b>
+        </div>
+
+        <!-- Dürüstlük notları -->
+        <div id="ls-notes">
+            <div><span class="warn" data-i18n="site.earthRotNote">Earth rotation and Coriolis are not modelled in v1; the ground track is a flat-Earth projection.</span></div>
+            <div id="ls-texnote" style="margin-top:5px; display:none" data-i18n="site.textureNote">At close zoom the global texture/DEM (~9 km cells) holds no local terrain detail — no fake terrain is drawn.</div>
+        </div>
+    </div>
+</div>
+
+<!-- Three.js (SABİT sürüm) -> OrbitControls -> küre modülü. Sıra ZORUNLU. -->
+<script src="/static/vendor/three-0.128.0.min.js"></script>
+<script src="/static/vendor/OrbitControls-0.128.0.js"></script>
+<script src="/static/js/launch_site_globe.js"></script>
+<script>
+(function () {
+    'use strict';
+    var I18N = window.I18N;
+    function t(k, fb) { return (I18N && I18N.t) ? I18N.t(k, fb) : (fb || k); }
+    function el(id) { return document.getElementById(id); }
+
+    // ---- Küreyi başlat ----
+    var globe = new window.LaunchSiteGlobe(el('ls-globe'), {
+        onReady: function () { setStatus(''); },
+        onError: function (code) {
+            if (code === 'three_missing' || code === 'webgl_failed')
+                setStatus(t('site.globeError', 'The 3D globe could not be started (WebGL required).'));
+        },
+        onCursor: function (ll) {
+            el('ls-cur-lat').textContent = fmtLat(ll.lat);
+            el('ls-cur-lon').textContent = fmtLon(ll.lon);
+        },
+        onSelect: function (ll) {
+            el('ls-lat').value = ll.lat.toFixed(4);
+            el('ls-lon').value = ll.lon.toFixed(4);
+            el('ls-resolve-out').style.display = 'none';
+        },
+        onTime: function (s) { updatePlayUI(s); }
+    });
+    // Başlangıç sahası: KSC
+    globe.selectSite(28.6084, -80.6043, { silent: true });
+    globe.viewGlobe();
+    // Hata ayıklama / otomatik test için küre örneğini aç (zararsız tutamak)
+    window.launchGlobe = globe;
+
+    function setStatus(m) { el('ls-status').textContent = m || ''; }
+    function fmtLat(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'N' : 'S'); }
+    function fmtLon(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'E' : 'W'); }
+
+    // ---- Saha seçimi kontrolleri ----
+    el('ls-apply').addEventListener('click', function () {
+        var la = parseFloat(el('ls-lat').value), lo = parseFloat(el('ls-lon').value);
+        if (isFinite(la) && isFinite(lo)) { globe.selectSite(la, lo, { frame: true }); }
+    });
+
+    // Hazır saha kısayolları (küçük gömülü liste; kısıt değil)
+    var PRESETS = [
+        ['ksc', 'Kennedy Space Center LC-39A', 28.6084, -80.6043],
+        ['baikonur', 'Baikonur 1/5 (Gagarin Start)', 45.9200, 63.3422],
+        ['kourou', 'Kourou ELA-3', 5.2390, -52.7683],
+        ['mahia', 'Rocket Lab LC-1 (Mahia)', -39.2617, 177.8650],
+        ['esrange', 'Esrange (Kiruna)', 67.8931, 21.1043],
+        ['everest', 'Mount Everest (yüksek arazi)', 27.9881, 86.9250],
+        ['sinop', 'Sinop (TR)', 42.0231, 35.1531]
+    ];
+    (function fillPresets() {
+        var sel = el('ls-presets');
+        var opt0 = document.createElement('option');
+        opt0.value = ''; opt0.textContent = '—'; sel.appendChild(opt0);
+        PRESETS.forEach(function (p) {
+            var o = document.createElement('option');
+            o.value = p[0]; o.textContent = p[1]; o.dataset.lat = p[2]; o.dataset.lon = p[3];
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', function () {
+            var o = sel.options[sel.selectedIndex];
+            if (!o.value) return;
+            var la = parseFloat(o.dataset.lat), lo = parseFloat(o.dataset.lon);
+            el('ls-lat').value = la.toFixed(4); el('ls-lon').value = lo.toFixed(4);
+            globe.selectSite(la, lo, { frame: true });
+        });
+    })();
+
+    // ---- Saha çözümü (sunucu ucu; yoksa zarifçe geç) ----
+    el('ls-resolve').addEventListener('click', function () {
+        var la = parseFloat(el('ls-lat').value), lo = parseFloat(el('ls-lon').value);
+        if (!isFinite(la) || !isFinite(lo)) return;
+        var online = el('ls-online').checked ? 1 : 0;
+        setStatus(t('site.resolving', 'Resolving…'));
+        fetch('/api/launch-site/resolve', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ latitude: la, longitude: lo, use_online: !!online })
+        }).then(function (r) {
+            if (!r.ok) throw new Error('nowire');
+            return r.json();
+        }).then(function (d) {
+            var s = d.site || d;
+            el('ls-resolve-out').style.display = 'block';
+            el('ls-r-elev').textContent = fmtM(s.elevation_m);
+            el('ls-r-relief').textContent = (s.terrain_relief_m != null)
+                ? fmtM(s.terrain_relief_m) : '--';
+            el('ls-r-glocal').textContent = num(s.gravity_local_m_s2, 5) + ' m/s²';
+            el('ls-r-gstd').textContent = num(s.gravity_standard_m_s2, 5) + ' m/s²';
+            el('ls-r-temp').textContent = num(s.temperature_k, 1) + ' K';
+            el('ls-r-press').textContent = num(s.pressure_pa / 1000, 2) + ' kPa';
+            el('ls-r-erot').textContent = num(s.earth_rotation_speed_m_s, 1) + ' m/s';
+            globe._siteElevM = s.elevation_m || 0;
+            setStatus('');
+        }).catch(function () {
+            setStatus(t('site.resolveUnavailable',
+                'Site resolver endpoint is not wired yet.'));
+        });
+    });
+
+    // ---- Uçuş: 6-DOF çözücüyü çağır, yolu küreye koy ----
+    el('ls-fly').addEventListener('click', function () {
+        var la = parseFloat(el('ls-lat').value), lo = parseFloat(el('ls-lon').value);
+        if (!isFinite(la) || !isFinite(lo)) return;
+        el('ls-fly').disabled = true;
+        setStatus(t('site.launching', 'Solving flight…'));
+        // Örnek araç + eğik atış (görünür yer izi için) — hepsi çözücüye girer.
+        var body = {
+            body_diameter: 0.15, body_length: 3.0, nose_length: 0.5, nose_type: 'ogive',
+            dry_mass: 25, propellant_mass: 18, thrust: 6500, burn_time: 7.5, cd0: 0.5,
+            fin_count: 4, fin_root_chord: 0.22, fin_tip_chord: 0.1, fin_span: 0.13, fin_sweep: 0.08,
+            launch_elevation_deg: 84, launch_azimuth_deg: 90, rail_length: 6,
+            wind_speed: 6, wind_direction_deg: 270, t_max: 400
+        };
+        fetch('/api/six-dof-analysis', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); }).then(function (d) {
+            el('ls-fly').disabled = false;
+            if (d.status !== 'success' || !d.series) {
+                setStatus(t('site.solveError', 'The flight solver returned an error.')); return;
+            }
+            globe.opts.burnTime = body.burn_time;
+            globe.opts.endReason = d.summary.end_reason;
+            globe.opts.playbackSpeed = Math.max(1, (d.summary.apogee_time || 20) / 12);
+            var h0 = globe._siteElevM || 0;
+            globe.setFlightPath(d.series, la, lo, h0);
+            el('ls-time').disabled = false;
+            renderEvents();
+            setStatus('');
+        }).catch(function () {
+            el('ls-fly').disabled = false;
+            setStatus(t('site.solveError', 'The flight solver returned an error.'));
+        });
+    });
+
+    // ---- Oynatım kontrolleri ----
+    el('ls-playpause').addEventListener('click', function () { globe.toggle(); });
+    el('ls-reset').addEventListener('click', function () { globe.resetPlay(); });
+    el('ls-view-site').addEventListener('click', function () { globe.viewSite(); });
+    el('ls-view-globe').addEventListener('click', function () { globe.viewGlobe(); });
+    el('ls-exagg').addEventListener('change', function () {
+        globe.setExaggeration(this.checked ? globe.readableExaggeration() : 1);
+    });
+    el('ls-follow').addEventListener('change', function () { globe.setFollow(this.checked); });
+    el('ls-time').addEventListener('input', function () {
+        globe.seek(parseFloat(this.value) / 1000);
+    });
+
+    function updatePlayUI(s) {
+        el('ls-playpause').innerHTML = s.playing ? '&#10074;&#10074;' : '&#9658;';
+        if (!el('ls-time').matches(':active'))
+            el('ls-time').value = Math.round(s.frac * 1000);
+        el('ls-tlabel').textContent = s.t.toFixed(1) + ' s';
+        el('ls-alt').textContent = fmtKmM(s.alt);
+        if (s.speed != null) el('ls-speed').textContent = s.speed.toFixed(0) + ' m/s';
+        if (s.apogee != null) el('ls-apogee').textContent = fmtKmM(s.apogee);
+        if (s.range != null) el('ls-range').textContent = fmtKmM(s.range);
+    }
+
+    function renderEvents() {
+        var box = el('ls-events'); box.innerHTML = '';
+        var evs = globe._events || [];
+        var labels = { liftoff: 'site.liftoff', burnout: 'site.burnout',
+            apogee: 'site.apogee', impact: 'site.impact', end: 'site.end' };
+        evs.forEach(function (e) {
+            var row = document.createElement('div'); row.className = 'ls-ev';
+            var dot = document.createElement('span'); dot.className = 'dot';
+            dot.style.background = '#' + e.color.toString(16).padStart(6, '0');
+            var name = document.createElement('span');
+            name.textContent = t(labels[e.key] || e.key, e.key);
+            var tm = document.createElement('span'); tm.className = 't';
+            tm.textContent = e.t.toFixed(1) + ' s · ' + fmtKmM(e.alt);
+            row.appendChild(dot); row.appendChild(name); row.appendChild(tm);
+            box.appendChild(row);
+        });
+    }
+
+    // ---- Ölçek göstergesi (her ~150 ms) ----
+    setInterval(function () {
+        var info = globe.getScaleInfo();
+        if (!info) return;
+        var lenM = info.metersPerPixel * 100;   // 100 px'lik bar
+        el('ls-scale-len').textContent = fmtDist(lenM);
+        el('ls-scale-cam').textContent = fmtDist(Math.max(0, info.camAltitudeM));
+        el('ls-texnote').style.display = info.textureCoarse ? 'block' : 'none';
+    }, 150);
+
+    // ---- Biçimleyiciler ----
+    function num(v, d) { return (v == null || !isFinite(v)) ? '--' : Number(v).toFixed(d); }
+    function fmtM(v) { return (v == null || !isFinite(v)) ? '--' : Math.round(v) + ' m'; }
+    function fmtKmM(v) {
+        if (v == null || !isFinite(v)) return '--';
+        return Math.abs(v) >= 1000 ? (v / 1000).toFixed(2) + ' km' : Math.round(v) + ' m';
+    }
+    function fmtDist(m) {
+        if (!isFinite(m)) return '--';
+        return m >= 1000 ? (m / 1000).toFixed(m >= 100000 ? 0 : 1) + ' km' : Math.round(m) + ' m';
+    }
+
+    // ---- Dil ----
+    function markLang() {
+        var cur = (I18N && I18N.lang) || 'en';
+        Array.prototype.forEach.call(document.querySelectorAll('#ls-lang button'),
+            function (b) { b.classList.toggle('on', b.dataset.lang === cur); });
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('#ls-lang button'), function (b) {
+        b.addEventListener('click', function () {
+            if (I18N && I18N.setLang) I18N.setLang(b.dataset.lang);
+            markLang();
+        });
+    });
+    if (I18N && I18N.apply) { I18N.apply(document.body); markLang(); }
+    if (I18N && I18N.onChange) I18N.onChange(function () {
+        I18N.apply(document.body); markLang(); renderEvents();
+    });
+})();
+</script>
+</body>
+</html>

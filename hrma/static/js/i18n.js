@@ -128,6 +128,7 @@
 
             'btn.launch': 'Launch Designer',
             'link.formulas': 'Formula Reference',
+            'link.launch_site': 'Launch Site (3D Earth)',
 
             'footer.developedBy': 'Developed by:',
             'footer.ideaTesting': 'Idea & Testing:',
@@ -181,6 +182,7 @@
 
             'btn.launch': 'Tasarımcıyı Aç',
             'link.formulas': 'Formül Referansı',
+            'link.launch_site': 'Fırlatma Sahası (3B Dünya)',
 
             'footer.developedBy': 'Geliştiren:',
             'footer.ideaTesting': 'Fikir ve Test:',

@@ -47,6 +47,7 @@ from hrma.validation.motor_validation import motor_validator
 
 # Analysis
 from hrma.analysis.regression_analysis import regression_analyzer
+from hrma.analysis.launch_site import resolve_launch_site
 from hrma.analysis.safety_analysis import SafetyAnalyzer
 from hrma.analysis.structural_analysis import StructuralAnalyzer
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
@@ -300,6 +301,12 @@ def liquid():
 @app.route('/formulas')
 def formulas():
     return render_template('formulas.html')
+
+@app.route('/launch-site')
+def launch_site_page():
+    """İnteraktif 3B Dünya küresi: fırlatma sahası seçimi + uçuş yolu
+    animasyonu (2026-07-23). Fizik hrma/analysis/launch_site.py'de."""
+    return render_template('launch_site.html')
 
 @app.route('/test')
 def test():
@@ -1040,6 +1047,39 @@ def six_dof_analysis():
     except ValueError as e:
         return jsonify({'status': 'error', 'error': str(e)}), 400
     except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/launch-site/resolve', methods=['POST'])
+def launch_site_resolve():
+    """Konumdan tam saha tanımı: rakım (DEM) + yerel g (WGS84) + yüzey atmosfer.
+
+    Girdi (JSON): latitude, longitude [zorunlu]; elevation_m, temperature_k,
+    pressure_pa [ops. elle datum]; use_online [ops. bool, Open-Meteo].
+
+    KRİTİK: gravity_local_m_s2 enlem+rakımla değişir ama gravity_standard_m_s2
+    her zaman 9.80665'tir (Isp/ideal-dV zinciri buna dokunmaz).
+    """
+    try:
+        data = request.json or {}
+        if data.get('latitude') is None or data.get('longitude') is None:
+            return jsonify({'status': 'error',
+                            'error': 'latitude and longitude are required'}), 400
+        site = resolve_launch_site(
+            float(data['latitude']), float(data['longitude']),
+            elevation_m=(float(data['elevation_m'])
+                         if data.get('elevation_m') not in (None, '') else None),
+            temperature_k=(float(data['temperature_k'])
+                           if data.get('temperature_k') not in (None, '') else None),
+            pressure_pa=(float(data['pressure_pa'])
+                         if data.get('pressure_pa') not in (None, '') else None),
+            use_online=bool(data.get('use_online', False)),
+        )
+        return jsonify(sanitize_json_values({'status': 'success', 'site': site}))
+    except (TypeError, ValueError) as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
