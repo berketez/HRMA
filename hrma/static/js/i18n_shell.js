@@ -13,6 +13,7 @@
         en: {
             'link.releaseNotes': 'Release Notes',
             'link.settings': 'Settings',
+            'link.userGuide': 'User Guide',
 
             'shell.close': 'Close',
 
@@ -32,6 +33,7 @@
             'shell.settings.upToDate': 'You are up to date: v{version}',
             'shell.settings.updateFound': 'New version found: v{version} — opening the update window.',
             'shell.settings.checkFailed': 'Could not reach the update server.',
+            'shell.settings.rateLimited': 'GitHub is rate limiting this network — try again in a few minutes.',
             'shell.settings.skippedVersion': 'Skipped version: v{version}',
             'shell.settings.noSkipped': 'No skipped version.',
             'shell.settings.skipReset': 'Reset skipped version',
@@ -43,6 +45,7 @@
         tr: {
             'link.releaseNotes': 'Sürüm Notları',
             'link.settings': 'Ayarlar',
+            'link.userGuide': 'Kullanma Kılavuzu',
 
             'shell.close': 'Kapat',
 
@@ -62,6 +65,7 @@
             'shell.settings.upToDate': 'Güncelsiniz: v{version}',
             'shell.settings.updateFound': 'Yeni sürüm bulundu: v{version} — güncelleme penceresi açılıyor.',
             'shell.settings.checkFailed': 'Güncelleme sunucusuna ulaşılamadı.',
+            'shell.settings.rateLimited': 'GitHub bu ağa istek sınırı uyguluyor — birkaç dakika sonra tekrar deneyin.',
             'shell.settings.skippedVersion': 'Atlanan sürüm: v{version}',
             'shell.settings.noSkipped': 'Atlanan sürüm yok.',
             'shell.settings.skipReset': 'Atlanan sürümü sıfırla',

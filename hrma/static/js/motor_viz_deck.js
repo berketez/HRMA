@@ -10,7 +10,7 @@
  * Kullanım:
  *   MotorVizDeck.create('container_id', motorData, {
  *       title: 'MOTOR SIMULATION',
- *       subtitle: 'PARAMETRIC DIGITAL TWIN',
+ *       subtitle: 'PARAMETRIC 3D MODEL',
  *       motorType: 'solid' | 'liquid' | 'hybrid',   // motorData.viz_motor_type'ı ezer
  *       portShape: 'star' | 'multiport' | ...        // başlangıç port kesiti
  *   })
@@ -227,7 +227,7 @@
 
         opts = Object.assign({
             title: 'MOTOR SIMULATION',
-            subtitle: 'PARAMETRIC DIGITAL TWIN — LIVE GEOMETRY FROM SOLVER OUTPUT',
+            subtitle: 'PARAMETRIC 3D MODEL — LIVE GEOMETRY FROM SOLVER OUTPUT',
             motorType: motorData.viz_motor_type || 'hybrid',
             portShape: 'circular'
         }, opts || {});

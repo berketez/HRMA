@@ -19,12 +19,24 @@ import json
 import time
 import threading
 import urllib.request
+import urllib.parse
 
 from hrma import __version__
 
 GITHUB_REPO = "berketez/HRMA"
 RELEASES_API = "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO
 RELEASES_PAGE = "https://github.com/%s/releases/latest" % GITHUB_REPO
+# API'siz yedek yol (2026-07-24 saha hatası): api.github.com anonim istemciye
+# saatte 60 istek verir ve limit IP başınadır — paylaşımlı/NAT arkası bir ağda
+# (yurt, ofis, mobil operatör) kullanıcı tek istek bile yapmadan limit dolu
+# olabilir, o zaman güncelleme tamamen ölüyordu. Aşağıdaki iki adres normal
+# web sayfası yoludur, API kotasına tabi değildir:
+#   /releases/latest         → 302 ile /releases/tag/<etiket>'e yönlenir
+#   /releases/expanded_assets/<etiket> → asset bağlantılarını içeren parça
+RELEASES_ATOM = "https://github.com/%s/releases.atom" % GITHUB_REPO
+ASSETS_FRAGMENT = "https://github.com/%s/releases/expanded_assets/%%s" % GITHUB_REPO
+# Yedek yoldan gelen indirme adresi yalnız bu önekle kabul edilir (URL enjeksiyonu)
+DOWNLOAD_PREFIX = "https://github.com/%s/releases/download/" % GITHUB_REPO
 
 # API yanıtı bu süre boyunca önbellekte tutulur (aynı oturumda her sayfa
 # yenilemesinde GitHub'a gitmemek için; anonim limit 60 istek/saat).
@@ -92,11 +104,113 @@ def _fetch_latest_release(timeout_s=8):
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
+def _is_rate_limited(exc):
+    """Hatanın GitHub API kota aşımı (403/429) olup olmadığını söyler."""
+    code = getattr(exc, "code", None)
+    return code in (403, 429)
+
+
+def _fetch_tag_via_page(timeout_s=8):
+    """En son yayın etiketini API'siz alır: /releases/latest 302 ile
+    /releases/tag/<etiket>'e yönlenir, yönlendirmenin geldiği adresten
+    etiket okunur."""
+    req = urllib.request.Request(
+        RELEASES_PAGE,
+        headers={"User-Agent": "HRMA-UpdateChecker/" + __version__},
+        method="HEAD",
+    )
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        final_url = resp.geturl() or ""
+    match = re.search(r"/releases/tag/([^/?#]+)", final_url)
+    if not match:
+        raise IOError("could not resolve latest tag from %r" % final_url)
+    return urllib.parse.unquote(match.group(1))
+
+
+def parse_asset_links(html):
+    """expanded_assets HTML parçasından indirme bağlantılarını çıkarır.
+
+    Yalnızca bu deponun releases/download öneki taşıyan bağlantılar kabul
+    edilir: sayfaya karışmış başka bir depo/host bağlantısı indirme adresi
+    olarak kullanılamaz (URL enjeksiyonuna kapalı). Boyut ve sha256 özeti bu
+    yolda gelmez; indirme sırasında Content-Length ile doğrulanır.
+    """
+    assets = []
+    seen = set()
+    for href in re.findall(r'href="([^"]+/releases/download/[^"]+)"', html or ""):
+        full = urllib.parse.urljoin("https://github.com/", href)
+        if not full.startswith(DOWNLOAD_PREFIX):
+            continue
+        name = urllib.parse.unquote(full.rsplit("/", 1)[-1])
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        assets.append({"name": name, "browser_download_url": full,
+                       "size": 0, "digest": ""})
+    return assets
+
+
+def _fetch_assets_via_page(tag, timeout_s=8):
+    """Etikete ait asset bağlantılarını API'siz alır (expanded_assets parçası)."""
+    url = ASSETS_FRAGMENT % urllib.parse.quote(tag, safe="")
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "HRMA-UpdateChecker/" + __version__}
+    )
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        html = resp.read().decode("utf-8", errors="replace")
+    return parse_asset_links(html)
+
+
+def _fetch_notes_via_atom(tag, timeout_s=8):
+    """Yayın notlarını API'siz alır (Atom akışı). Başarısızsa boş döner."""
+    try:
+        import xml.etree.ElementTree as ET
+        req = urllib.request.Request(
+            RELEASES_ATOM,
+            headers={"User-Agent": "HRMA-UpdateChecker/" + __version__},
+        )
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            root = ET.fromstring(resp.read())
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        for entry in root.findall("a:entry", ns):
+            entry_id = (entry.findtext("a:id", "", ns) or "")
+            link = entry.find("a:link", ns)
+            href = (link.get("href") if link is not None else "") or ""
+            if entry_id.endswith("/" + tag) or href.endswith("/" + tag):
+                content = entry.findtext("a:content", "", ns) or ""
+                text = re.sub(r"<[^>]+>", "", content)  # kaba HTML temizliği
+                return re.sub(r"\n{3,}", "\n\n", text).strip()[:4000]
+    except Exception:
+        pass
+    return ""
+
+
+def _fetch_latest_release_fallback():
+    """API kotası dolduğunda/API ulaşılamadığında devreye giren yol.
+
+    GitHub'ın normal web sayfası uçlarını kullanır; dönen sözlük API
+    yanıtıyla aynı alanları taşır (draft/prerelease burada yapısal olarak
+    imkânsızdır: /releases/latest zaten taslak ve ön sürümleri atlar).
+    """
+    tag = _fetch_tag_via_page()
+    return {
+        "tag_name": tag,
+        "draft": False,
+        "prerelease": False,
+        "html_url": "https://github.com/%s/releases/tag/%s" % (
+            GITHUB_REPO, urllib.parse.quote(tag, safe="")),
+        "assets": _fetch_assets_via_page(tag),
+        "body": "",
+        "_source": "page",
+    }
+
+
 def check_for_update(force=False):
     """Güncelleme durumunu döndürür; sonuç CACHE_TTL_S boyunca önbellekli.
 
     Dönen sözlük her zaman aynı şemadadır:
-    {available, current, latest, notes, page_url, asset, error}
+    {available, current, latest, notes, page_url, asset, error, error_kind,
+     source}
     """
     with _cache_lock:
         onceki = _cache["result"]
@@ -113,9 +227,32 @@ def check_for_update(force=False):
         "page_url": RELEASES_PAGE,
         "asset": None,
         "error": None,
+        # Arayüz kullanıcıya doğru cümleyi kurabilsin diye hatanın türü:
+        # "rate_limit" (kota doldu, biraz sonra düzelir) / "network" (ağ yok)
+        "error_kind": None,
+        # Sonucun hangi yoldan geldiği: "api" | "page" (yedek) | None (hata)
+        "source": None,
     }
+    api_error = None
     try:
         release = _fetch_latest_release()
+        result["source"] = "api"
+    except Exception as exc:  # ağ yok / kota / 404 (hiç release yok)
+        api_error = exc
+        # API kotası dolu ya da API'ye ulaşılamıyor → sayfa yoluna düş.
+        # Bu yol API kotasına tabi değildir; kullanıcı güncellemeyi görür.
+        try:
+            release = _fetch_latest_release_fallback()
+            result["source"] = "page"
+        except Exception as exc2:
+            rate = _is_rate_limited(api_error)
+            result["error"] = "%s: %s" % (type(api_error).__name__, api_error)
+            result["error_kind"] = "rate_limit" if rate else "network"
+            # Yedek yol da başarısızsa ikinci hatayı da taşı (teşhis için)
+            result["error_fallback"] = "%s: %s" % (type(exc2).__name__, exc2)
+            release = None
+
+    if release is not None:
         tag = release.get("tag_name") or release.get("name") or ""
         result["latest"] = tag
         if is_newer(tag) and not release.get("draft") and not release.get("prerelease"):
@@ -123,8 +260,9 @@ def check_for_update(force=False):
             result["notes"] = (release.get("body") or "")[:4000]
             result["page_url"] = release.get("html_url") or RELEASES_PAGE
             result["asset"] = pick_asset(release.get("assets"))
-    except Exception as exc:  # ağ yok / limit / 404 (hiç release yok) — sorun değil
-        result["error"] = "%s: %s" % (type(exc).__name__, exc)
+            # Yedek yolda API notları gelmez; Atom akışından tamamla
+            if not result["notes"] and result["source"] == "page":
+                result["notes"] = _fetch_notes_via_atom(tag)
 
     with _cache_lock:
         _cache["checked_at"] = time.time()
@@ -142,9 +280,30 @@ def download_status():
         return dict(_download)
 
 
+def _cleanup_stale_downloads(keep=""):
+    """Yarım kalmış .download dosyalarını siler.
+
+    Uygulama indirme sürerken kapatılırsa (güncelleme akışında olağan) yarım
+    dosya İndirilenler klasöründe kalıyordu; kullanıcı bunu bozuk bir kurulum
+    dosyası sanabilir (2026-07-24 saha gözlemi).
+    """
+    try:
+        d = _downloads_dir()
+        for fname in os.listdir(d):
+            if (fname.startswith("HRMA-") and fname.endswith(".download")
+                    and fname != keep):
+                try:
+                    os.remove(os.path.join(d, fname))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
 def _run_download(url, name, size, digest=""):
     tmp_path = os.path.join(_downloads_dir(), name + ".download")
     final_path = os.path.join(_downloads_dir(), name)
+    _cleanup_stale_downloads(keep=os.path.basename(tmp_path))
     try:
         import hashlib
         hasher = hashlib.sha256()

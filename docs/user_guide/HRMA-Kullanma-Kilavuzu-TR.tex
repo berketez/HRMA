@@ -1,0 +1,372 @@
+% HRMA Kullanma Kılavuzu (Türkçe) — xelatex ile derlenir
+% Derleme: xelatex HRMA-Kullanma-Kilavuzu-TR.tex (iki kez, içindekiler için)
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{fontspec}
+\usepackage[turkish]{babel}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.4cm, top=2.6cm, bottom=2.6cm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{parskip}
+\tcbuselibrary{skins,breakable}
+
+% ---- Renk paleti (uygulamanın koyu temasıyla uyumlu) ----
+\definecolor{hrmacyan}{HTML}{0891A8}
+\definecolor{hrmadark}{HTML}{0A1524}
+\definecolor{hrmaink}{HTML}{1B2A3A}
+\definecolor{hrmagray}{HTML}{5A6B7A}
+\definecolor{hrmapanel}{HTML}{EEF4F8}
+\definecolor{hrmawarn}{HTML}{B26A00}
+
+\hypersetup{
+  colorlinks=true, linkcolor=hrmacyan, urlcolor=hrmacyan,
+  pdftitle={HRMA Kullanma Kılavuzu}, pdfauthor={Berke Tezgöçen}
+}
+
+% ---- Başlık biçimleri ----
+\titleformat{\section}{\Large\bfseries\color{hrmacyan}}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\large\bfseries\color{hrmadark}}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.4em}{0.6em}
+
+% ---- Üst/alt bilgi ----
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{hrmagray}HRMA — Roket Motoru Analiz Paketi}
+\fancyhead[R]{\small\color{hrmagray}Kullanma Kılavuzu}
+\fancyfoot[C]{\small\color{hrmagray}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ---- Kutu stilleri ----
+\newtcolorbox{notkutu}{
+  colback=hrmapanel, colframe=hrmacyan, boxrule=0.6pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, breakable}
+\newtcolorbox{uyarikutu}{
+  colback=yellow!8, colframe=hrmawarn, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, breakable}
+
+% Görsel + açıklama yardımcı komutu
+\newcommand{\gorsel}[2]{%
+  \begin{center}
+  \fbox{\includegraphics[width=0.96\linewidth]{#1}}\\[3pt]
+  {\small\color{hrmagray}\itshape #2}
+  \end{center}}
+
+\begin{document}
+% Türkçe babel '=' ':' '!' karakterlerini kısayol yapıyor; bu, enumitem/tcolorbox
+% gibi paketlerin anahtar=değer sözdizimini bozuyor. Kısayolları kapatıyoruz.
+\shorthandoff{=:!}
+
+% ================= KAPAK =================
+\begin{titlepage}
+\centering
+\vspace*{2.5cm}
+{\fontsize{54}{60}\selectfont\bfseries\color{hrmadark}HRMA}\\[4pt]
+{\Large\color{hrmacyan}Yüksek Doğruluklu Roket Motoru Analiz ve Tasarım Paketi}\\[6pt]
+{\large\color{hrmagray}Hibrit • Katı • Sıvı Roket Motorları}\\[2.2cm]
+
+{\Huge\bfseries\color{hrmadark}Kullanma Kılavuzu}\\[10pt]
+{\large\color{hrmagray}Örnekli, adım adım anlatım}\\[3cm]
+
+{\large Sürüm 2.6.1 \quad|\quad Temmuz 2026}\\[6pt]
+{\small\color{hrmagray}Geliştiren: Berke Tezgöçen \quad•\quad Fikir \& Test: Ayberk Cem Aksoy}\\[1.5cm]
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{Kapsam.} HRMA; ön tasarım ve eğitim amaçlı, kapalı-biçim ve
+bir-boyutlu mühendislik bağıntılarına dayanan bir çözümleme aracıdır.
+Uçuşa elverişlilik (flight qualification) aracı \emph{değildir}. Sonuçlar
+uçuş öncesi bağımsız bir kodla (CEA / RPA / openMotor) ve fiziksel testle
+doğrulanmalıdır. Ayrıntı için kılavuzun sonundaki ``Kapsam ve Sınırlar''
+bölümüne bakın.
+\end{notkutu}
+\end{titlepage}
+
+% ================= İÇİNDEKİLER =================
+\tableofcontents
+\newpage
+
+% ================= 1. GİRİŞ =================
+\section{HRMA Nedir?}
+
+HRMA (Roket Motoru Analiz Paketi), hibrit, katı ve sıvı roket motorlarının
+ön tasarımı ve çözümlemesi için geliştirilmiş bir masaüstü uygulamasıdır.
+Uygulama, yerel bir hesaplama motorunu (Flask) kendi penceresinde çalıştırır
+ve sonuçları koyu temalı, etkileşimli bir arayüzde sunar: gerçek çözücü
+çıktısından üretilen 3B motor modeli, mühendislik panellerinden oluşan bir
+Analiz Güvertesi ve çalışan CAD / teknik resim / rapor dışa aktarımları.
+
+\textbf{Kimler için?} Roket takımları, lisans/lisansüstü öğrenciler,
+öğretim üyeleri ve motor fiziğini uçtan uca görmek isteyen herkes. Program
+size bir motoru \emph{sıfırdan} tasarlatmaz; verdiğiniz parametrelerden
+geometri, performans ve uyarılar üretir; siz de bunları mühendislik
+muhakemesiyle değerlendirirsiniz.
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{Her şey yerelde ve çevrimdışı çalışır.} Girdiğiniz hiçbir tasarım
+verisi bilgisayarınızdan çıkmaz. Programın internete eriştiği tek an,
+açılışta yeni sürüm olup olmadığını GitHub'dan sorduğu andır; bu da
+başarısız olursa program normal çalışmaya devam eder.
+\end{notkutu}
+
+\subsection{Bu kılavuz nasıl kullanılır?}
+
+Kılavuz, tek bir \textbf{örnek motor} üzerinden ilerler: HTPB yakıtı ve sıvı
+N\textsubscript{2}O oksitleyici kullanan, 1000~N itkili, 10~s yanma süreli
+bir hibrit motor. Aynı adımlar katı ve sıvı motorlar için de geçerlidir;
+farklar ilgili bölümlerde belirtilmiştir. Ekran görüntüleri doğrudan
+uygulamadan alınmıştır.
+
+% ================= 2. KURULUM =================
+\section{Kurulum ve İlk Açılış}
+
+\subsection{Kurulum}
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Windows 10/11:} \texttt{HRMA-Setup-2.6.1.exe} dosyasını
+  indirin, çift tıklayın ve sihirbazı izleyin (İleri, İleri, Kur). Kurulum
+  kullanıcı bazlıdır; yönetici hakkı gerekmez. Windows SmartScreen imzasız
+  olduğu için uyarabilir: ``Ek bilgi'' $\rightarrow$ ``Yine de çalıştır''.
+  \item \textbf{macOS 11+ (Apple Silicon):} \texttt{HRMA-Setup-2.6.1-macOS.dmg}
+  dosyasını açın ve \texttt{HRMA} simgesini \texttt{Applications} klasörüne
+  sürükleyin. İlk açılışta uygulamaya sağ tıklayıp ``Aç'' deyin (imzasız
+  uygulamalar için Gatekeeper bunu bir kez ister).
+\end{itemize}
+
+Python ve tüm kütüphaneler paketin içindedir; ayrıca bir kurulum gerekmez.
+
+\subsection{İlk açılış}
+
+Uygulama, hesaplama motorları arka planda yüklenirken yaklaşık bir saniye
+içinde bir açılış ekranı gösterir, ardından ana sayfayı kendi penceresinde
+açar. Ana sayfada üç motor tipi kartı ve formüller sayfasına bir bağlantı
+bulunur.
+
+\gorsel{img/tr-00-home.png}{Ana sayfa: üç motor tipini (Hibrit, Katı, Sıvı)
+seçebileceğiniz kartlar ve üst şeritte dil seçici, Sürüm Notları, Kullanma
+Kılavuzu ve Ayarlar bağlantıları.}
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{Dil.} Sağ üstteki seçiciden arayüzü Türkçe veya İngilizce
+yapabilirsiniz; seçim tüm sayfalarda ve grafik metinlerinde geçerlidir.
+Bu kılavuzun İngilizce sürümü de uygulamayla birlikte gelir.
+\end{notkutu}
+
+% ================= 3. ARAYÜZ =================
+\section{Ana Sayfalar}
+
+Uygulamanın beş ana sayfası vardır:
+
+\begin{center}
+\begin{tabular}{@{}>{\raggedright}p{3.2cm} p{2.2cm} p{8.5cm}@{}}
+\toprule
+\textbf{Sayfa} & \textbf{Yol} & \textbf{Amaç} \\
+\midrule
+Ana Sayfa & \texttt{/} & Motor tipi seçimi ve formül başvurusu \\
+Hibrit Tasarımcı & \texttt{/hybrid} & Tam hibrit motor tasarımı (en kapsamlı sayfa) \\
+Katı Tasarımcı & \texttt{/solid} & Grain geometrisi, balistik, Monte Carlo \\
+Sıvı Tasarımcı & \texttt{/liquid} & Besleme sistemi, enjektör, rejeneratif soğutma, çevrim \\
+Formüller & \texttt{/formulas} & Çözücülerin kullandığı denklemler (MathJax) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Üç tasarımcı sayfası da aynı yapıyı paylaşır: bir girdi formu, bir Hesapla
+düğmesi, sonuç göstergeleri (HUD), bağımsız paneller (geçici rejim /
+enjektör / 6-SD), Analiz Güvertesi, 3B model ve dışa aktarma düğmeleri.
+
+% ================= 4. ÖRNEK =================
+\section{Örnek: Bir Hibrit Motor Tasarlayalım}
+
+Bu bölümde baştan sona bir örnek yapacağız. \texttt{/hybrid} sayfasını açın.
+
+\subsection{1. Adım — Parametreleri girin}
+
+Form yukarıdan aşağıya doğru mantıklı varsayılanlarla gelir. Örneğimiz için
+şu değerleri kullanıyoruz (çoğu zaten varsayılan):
+
+\begin{center}
+\begin{tabular}{@{}p{5.5cm} p{4cm} p{4.5cm}@{}}
+\toprule
+\textbf{Alan} & \textbf{Değer} & \textbf{Açıklama} \\
+\midrule
+Motor Adı & \texttt{Ornek-H1} & Rapor ve dışa aktarmalarda kullanılır \\
+İrtifa & \texttt{0 m} & Deniz seviyesi (ortam basıncı otomatik) \\
+İtki & \texttt{1000 N} & Hedeflenen itki düzeyi \\
+Yanma Süresi & \texttt{10 s} & Toplam impuls buradan türetilir \\
+O/F Oranı & \texttt{2.5} & Oksitleyici/yakıt kütle oranı \\
+Oda Basıncı & \texttt{20 bar} & Yanma odası basıncı \\
+Tank Basıncı & \texttt{50 bar} & Oda basıncını yeterince aşmalı \\
+Yakıt & \texttt{HTPB} & Regresyon katsayıları otomatik gelir \\
+Oksitleyici & \texttt{N\textsubscript{2}O (sıvı)} & Yoğunluk sıcaklıkla güncellenir \\
+Enjektör & \texttt{Showerhead} & Tip başına parametreler \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\gorsel{img/tr-01-form.png}{Girdi formu. ``Optimumu Bul'' düğmesi O/F oranını
+c* açısından en iyi değere tarar. Her alandaki ``?'' simgesi kısa bir
+açıklama gösterir.}
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{0 = otomatik.} Genişleme oranı, oda çapı, port çapı gibi alanlara
+\texttt{0} girerseniz çözücü o boyutu kendisi belirler. Kendi verinizi
+(örneğin statik ateşten türettiğiniz regresyon katsayıları) girerek
+varsayılanları ezebilirsiniz.
+\end{notkutu}
+
+\subsection{2. Adım — Hesaplayın}
+
+\textbf{Hesapla} düğmesine basın. Çözücü, formu \texttt{/calculate} ucuna
+gönderir ve birkaç saniye içinde sonuçları doldurur.
+
+\gorsel{img/tr-02-results.png}{Sonuç göstergeleri (Performans Özeti),
+Uyarılar paneli ve tasarım tabloları. Örneğimizde Özgül İtki 185.6~s,
+İtki 1000~N, Oda Basıncı 20~bar, Kütle Debisi 0.549~kg/s ve Yapısal
+Asgari Emniyet Katsayısı 2.89 çıktı.}
+
+\textbf{Sonuçları okurken:}
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Performans Özeti (HUD):} Manşet sayılar — itki, toplam
+  impuls, Isp, c*, CF, oda basıncı, boğaz ve çıkış çapları, kütle debileri
+  ve bir emniyet durumu rozeti.
+  \item \textbf{Uyarılar paneli:} Çözücüden ve doğrulama sisteminden gelen
+  tasarım-ölçütü mesajları. \textbf{Sayılara güvenmeden önce bunları
+  okuyun.} Örneğimizde üç uyarı var: c* normal aralığın hemen altında
+  ($1325$ m/s), genişleme oranı düşük ($\varepsilon = 3.4$) ve ``flash
+  boiling'' (ani kaynama) riski. Bunlar hata değil; tasarımın hangi
+  varsayımlarla sınırda olduğunu söyler.
+  \item \textbf{Tasarım tabloları:} Tam geometri — lüle kontur ölçüleri ve
+  açıları, grain/port geometrisi, enjektör planı, cidar kalınlığı.
+\end{itemize}
+
+\begin{uyarikutu}
+\small\color{hrmadark}
+\textbf{Uyarılar bir özelliktir, kusur değil.} HRMA, hesaplayamadığı bir
+şeye sayı uydurmak yerine açıkça uyarır veya ``modellenmedi'' der.
+Kırmızı/turuncu bir uyarı gördüğünüzde, o parametreyi el hesabıyla veya
+bağımsız bir kodla çapraz kontrol edin.
+\end{uyarikutu}
+
+\subsection{3. Adım — 3B modeli inceleyin}
+
+Sonuçların altında, çözücünün ürettiği geometriden canlı kurulan bir 3B
+motor modeli bulunur. Kesit, ölçüler, patlatılmış görünüm, ısı haritası ve
+yanma animasyonu düğmeleriyle modeli inceleyebilirsiniz.
+
+\gorsel{img/tr-03-3d.png}{3B motor simülasyonu (kesit görünümü). Ölçüler
+doğrudan çözücü çıktısından gelir: oda çapı 83.5~mm, boğaz çapı 21.7~mm,
+çıkış çapı 40.2~mm, toplam uzunluk 1377~mm. Alt şeritteki zaman çubuğu
+yanma boyunca port çapının nasıl büyüdüğünü canlandırır.}
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{Etkileşimli tasarım modu.} Bir hesaplamadan sonra oda çapı, L* ve
+genişleme oranı kaydırıcıları geometriyi yaklaşık bir saniyede yeniden
+hesaplar; 3B model ve kesit görünümü, tam bir yeniden hesaplama olmadan
+anında güncellenir.
+\end{notkutu}
+
+\subsection{4. Adım — Grafikler ve kesit}
+
+Performans grafikleri (itki eğrisi, basınç, regresyon hızı ve port büyümesi)
+uygulamanın koyu temasında ve tamamen çevrimdışı çizilir. Kesit görünümü,
+çözücünün kullandığı geometriden üretilen ölçekli bir mühendislik çizimidir.
+
+\gorsel{img/tr-02-results.png}{Örnekte regresyon hızı yanma boyunca
+azalırken (port genişledikçe kütle akısı düşer) port çapı büyür.}
+
+\subsection{5. Adım — Dışa aktarın}
+
+Sonuç panelindeki dışa aktarma düğmeleriyle şunları üretebilirsiniz:
+teknik resim ve rapor PDF'leri, CAD dosyaları (STEP kesit eşleme dahil) ve
+CSV/Excel veri tabloları. Çıktılar \texttt{Belgeler/HRMA} klasörüne yazılır.
+
+% ================= 5. DİĞER MOTOR TİPLERİ =================
+\section{Katı ve Sıvı Motorlar}
+
+Katı ve sıvı sayfaları aynı deseni izler; yalnız girdiler tipe özeldir.
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Katı motor (\texttt{/solid}):} Grain geometrisi (BATES,
+  finocyl, slotted vb.), segment sayısı, propelan ailesi (KNDX, KNSB, APCP
+  ve dahası), balistik ve Monte Carlo belirsizlik çözümlemesi. Yanma hızı
+  için \texttt{a} ve \texttt{n} katsayıları veri tabanından gelir.
+  \item \textbf{Sıvı motor (\texttt{/liquid}):} Propelan çifti, besleme
+  sistemi tipi ve \textbf{güç çevrimi} (basınç beslemeli, gaz jeneratörlü,
+  tap-off, staged combustion, FFSC, expander). Çevrim güç dengesi çözücüsü
+  pompa ve türbin güçlerinin kapanıp kapanmadığını kontrol eder. Ayrıca
+  süperkritik CH\textsubscript{4}/H\textsubscript{2} rejeneratif soğutma ve
+  gaz-gaz enjektör yolu vardır. Yanma termokimyası, motorun \emph{gerçek}
+  oda basıncında, O/F oranında ve genişleme oranında RocketCEA ile çözülür.
+\end{itemize}
+
+% ================= 6. KAPSAM =================
+\section{Kapsam ve Sınırlar (Mutlaka Okuyun)}
+
+HRMA güçlü bir ön tasarım ve eğitim aracıdır, ancak sınırlarını bilmek
+şarttır:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Ön tasarım seviyesi.} Modeller kapalı-biçim ve 1B
+  bağıntılardır. Turbopompa haritaları, kavitasyon, rotordinamik, yatak
+  ömrü, başlatma/durdurma geçici rejimleri ve 2B/3B eşlenik ısı transferi
+  \emph{yoktur}.
+  \item \textbf{Doğrulama (validation) sınırlı.} Sıvı vakum Isp'si, gerçek
+  çalışma noktası ve yayımlanmış geometri verildiğinde 14 motorluk bir
+  örneklemde $\sim\%1.2$ medyan hatayla yeniden üretiliyor. Bu, ``bilinen
+  noktada Isp'yi iyi tahmin eder'' demeye yeter; ``sıfırdan bilinmeyen bir
+  motorun uçuş performansını bu hatayla tahmin eder'' demeye \emph{yetmez}.
+  Hibrit tarafında regresyon hızı ve oda basıncı hataları çok daha büyüktür
+  (\%13--35). Güncel sayılar için \texttt{docs/VALIDATION\_STATUS.md}.
+  \item \textbf{Uçuşa elverişlilik değil.} HRMA, uçacak bir motorun nihai
+  tasarımını, güvenlik kararını veya kalifikasyonunu tek başına
+  desteklemez. Bunlar için yorulma/creep analizi, fiziksel test ve resmi
+  bir V\&V süreci gerekir.
+\end{itemize}
+
+\begin{uyarikutu}
+\small\color{hrmadark}
+\textbf{Altın kural.} HRMA bir başlangıç noktasıdır. Kritik her sonucu
+bağımsız bir kodla (CEA / RPA / openMotor) ve mümkünse statik ateş testiyle
+doğrulayın. Programı kullanmayı bilmek, tek başına roket motoru mühendisi
+olmak değildir.
+\end{uyarikutu}
+
+% ================= 7. GÜNCELLEME =================
+\section{Otomatik Güncelleme}
+
+HRMA açılışta GitHub Releases üzerinden yeni sürüm olup olmadığını denetler.
+Yeni sürüm varsa bir pencere çıkar: \textbf{Şimdi güncelle}, \textbf{Daha
+sonra} veya \textbf{Bu sürümü atla}. ``Şimdi güncelle'' derseniz uygulama
+kurulumu indirir, kendini kapatır, sessizce kurar ve otomatik yeniden açılır.
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{Sürüm 2.6.1 notu.} macOS'ta güncelleme kurulumu birkaç dakika
+sürebilir ve bu sırada bir bildirim gösterilir; kurulum bitene kadar
+uygulamayı elle açmayın. Ağınız GitHub'ın istek sınırına takılırsa
+(paylaşımlı ağlarda olabilir) program artık normal sürüm sayfalarına
+düşerek güncellemeyi yine de bulur.
+\end{notkutu}
+
+\vspace{1cm}
+\begin{center}
+\color{hrmagray}\small
+HRMA v2.6.1 — Roket Motoru Analiz Paketi\\
+\href{https://github.com/berketez/HRMA}{github.com/berketez/HRMA}
+\end{center}
+
+\end{document}

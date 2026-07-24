@@ -3338,12 +3338,11 @@ class SolidRocketEngine:
                 'loading_density_kgm3': float(loading_density),
                 'volumetric_efficiency_percent': float(volumetric_eff),
             },
-            'performance_optimization': {
-                'optimal_expansion_ratio': 25,
-                'optimal_chamber_pressure_bar': 45,
-                'optimal_grain_geometry': 'BATES with progressive enhancement',
-                'performance_margin_percent': 15
-            }
+            # NOT: Eskiden burada, analiz edilen motordan bağımsız sabit
+            # değerler döndüren bir "optimum" bloğu vardı (sabit genişleme
+            # oranı, oda basıncı ve marj). Hiçbir yerde tüketilmiyordu ve
+            # uydurma çıktıydı — 2.6.1 uydurma temizliğinde kaldırıldı.
+            # Bekçi: tests/test_no_fabrication.py.
         }
     
     # Helper methods for calculations

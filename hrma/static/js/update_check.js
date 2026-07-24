@@ -195,9 +195,14 @@
                         laterBtn.style.display = 'none';
                         skipBtn.style.display = 'none';
                         manualRow.style.display = 'none';
+                        // Kopyalama birkaç dakika sürüyor ve bu sırada ekranda
+                        // hiçbir şey olmuyor; süreyi ve "elle açma" uyarısını
+                        // açıkça yaz (2026-07-24 saha hatası: kullanıcı
+                        // güncellemenin çöktüğünü sanıp eski sürümü açtı).
                         progressText.innerHTML = T('update.autoClose',
-                            'HRMA will close now and reopen automatically '
-                            + 'when the update is complete.');
+                            'HRMA will close now and reopen automatically when the '
+                            + 'update is complete. This usually takes 2-4 minutes — '
+                            + 'please do not open HRMA yourself meanwhile.');
                     } else if (res.started) {
                         progressText.innerHTML = T('update.done',
                             'Downloaded — the installer has been opened. '
@@ -296,7 +301,7 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    function toast(msg) {
+    function toast(msg, actionLabel) {
         var old = document.getElementById('hrma-update-toast');
         if (old) old.remove();
         var t = el('div',
@@ -310,8 +315,29 @@
             'box-shadow:var(--hd-shadow, 0 14px 44px rgba(0,0,0,0.42));');
         t.id = 'hrma-update-toast';
         t.textContent = msg;
+        // Hata durumunda çıkış yolu: tek tıkla sürümler sayfası (elle indirme)
+        if (actionLabel) {
+            t.style.cssText += 'max-width:420px;text-align:center;line-height:1.5;';
+            var link = el('a',
+                'display:block;margin-top:8px;color:var(--hd-cyan, #00e5ff);' +
+                'cursor:pointer;text-decoration:underline;font-weight:600;');
+            link.textContent = actionLabel;
+            link.onclick = function () {
+                fetch('/api/update/open-download', { method: 'POST' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (res) {
+                        if (!res.opened && res.url) window.open(res.url, '_blank');
+                    })
+                    .catch(function () {
+                        window.open('https://github.com/berketez/HRMA/releases/latest',
+                                    '_blank');
+                    });
+                t.remove();
+            };
+            t.appendChild(link);
+        }
         document.body.appendChild(t);
-        setTimeout(function () { t.remove(); }, 4200);
+        setTimeout(function () { t.remove(); }, actionLabel ? 12000 : 4200);
     }
 
     function checkNow(force) {
@@ -322,10 +348,22 @@
             .then(function (info) {
                 if (!info.available || !info.latest) {
                     if (force) {
-                        toast((info.error || !info.current)
-                            ? T('update.unreachable', 'Could not reach the update server.')
-                            : TF('update.upToDate', { version: info.current },
-                                 'HRMA v{version} is up to date.'));
+                        if (info.error || !info.current) {
+                            // Kota aşımı geçicidir ve ağdaki başka bir kullanıcıdan
+                            // da kaynaklanabilir — kullanıcıya gerçek nedeni ve
+                            // elle indirme yolunu göster (2026-07-24 saha hatası).
+                            var rateLimited = info.error_kind === 'rate_limit';
+                            toast(rateLimited
+                                ? T('update.rateLimited',
+                                    'GitHub is rate limiting this network right now. '
+                                    + 'Try again in a few minutes, or open the releases page.')
+                                : T('update.unreachable',
+                                    'Could not reach the update server.'),
+                                T('update.openReleases', 'Open the releases page'));
+                        } else {
+                            toast(TF('update.upToDate', { version: info.current },
+                                     'HRMA v{version} is up to date.'));
+                        }
                     }
                     return;
                 }
@@ -338,7 +376,10 @@
                 buildModal(info);
             })
             .catch(function () {
-                if (force) toast(T('update.unreachable', 'Could not reach the update server.'));
+                if (force) {
+                    toast(T('update.unreachable', 'Could not reach the update server.'),
+                          T('update.openReleases', 'Open the releases page'));
+                }
             });
     }
 

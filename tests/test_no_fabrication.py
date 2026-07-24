@@ -186,6 +186,20 @@ class TestFallbacksAreLabelled:
         assert safety['status'] != 'SAFE', (
             'Cidari servis sinirinin %90 seviyesinde olan motor SAFE gorunmemeli')
 
+    def test_solid_advanced_performance_has_no_hardcoded_optimum(self):
+        """Kati motorun advanced_performance ciktisi, analiz edilen motordan
+        bagimsiz sabit 'performance_optimization' blogu DONDURMEMELI (2026-07-24
+        dis denetim bulgusu: genisleme orani 25, oda basinci 45 bar, %15 marj
+        uydurma degerlerdi, hicbir yerde tuketilmiyordu, kaldirildi)."""
+        from hrma.engines.solid_rocket_engine import SolidRocketEngine
+        import inspect
+        src = inspect.getsource(SolidRocketEngine._calculate_advanced_performance)
+        assert 'performance_optimization' not in src, \
+            'Kaldirilan sabit performance_optimization blogu geri gelmis'
+        assert 'BATES with progressive enhancement' not in src, \
+            'Uydurma sabit optimum grain geometrisi geri gelmis'
+
+
 class TestPropertyEndpointsReportProvenance:
     """Özellik uçları kaynağı hakkında yalan söylememeli."""
 

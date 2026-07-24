@@ -93,7 +93,7 @@
             'page.title': 'HRMA — Rocket Motor Analysis Suite',
             'hero.badge': 'SYSTEM ONLINE — SOLVER READY',
             'hero.tagline': 'High-Fidelity Rocket Motor Analysis & Design Suite',
-            'hero.sub': 'Parametric Solvers · NASA CEA Validated · Digital Twin Visualization',
+            'hero.sub': 'Parametric Solvers · NASA CEA Validated · Interactive 3D Model',
 
             'cap.regression': 'Regression-coupled ballistics',
             'cap.nozzle': 'Rao nozzle contours',
@@ -147,7 +147,7 @@
             'page.title': 'HRMA — Roket Motoru Analiz Paketi',
             'hero.badge': 'SİSTEM ÇEVRİMİÇİ — ÇÖZÜCÜ HAZIR',
             'hero.tagline': 'Yüksek Doğruluklu Roket Motoru Analiz ve Tasarım Paketi',
-            'hero.sub': 'Parametrik Çözücüler · NASA CEA Doğrulamalı · Dijital İkiz Görselleştirme',
+            'hero.sub': 'Parametrik Çözücüler · NASA CEA Doğrulamalı · Etkileşimli 3B Model',
 
             'cap.regression': 'Regresyon bağlaşık balistik',
             'cap.nozzle': 'Rao lüle konturları',

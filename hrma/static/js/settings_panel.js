@@ -215,6 +215,11 @@
                     } else if (info.current && !info.error) {
                         checkStatus.textContent = TF('shell.settings.upToDate',
                             { version: info.current }, 'You are up to date: v{version}');
+                    } else if (info.error_kind === 'rate_limit') {
+                        // GitHub kota aşımı geçicidir (2026-07-24 saha hatası)
+                        checkStatus.textContent = T('shell.settings.rateLimited',
+                            'GitHub is rate limiting this network — '
+                            + 'try again in a few minutes.');
                     } else {
                         checkStatus.textContent = T('shell.settings.checkFailed',
                             'Could not reach the update server.');

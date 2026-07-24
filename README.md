@@ -3,7 +3,7 @@
 [![tests](https://github.com/berketez/HRMA/actions/workflows/tests.yml/badge.svg)](https://github.com/berketez/HRMA/actions/workflows/tests.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D digital twin of your motor.
+A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D model of your motor built live from the solver output.
 
 ## Just Want to Use HRMA? Download the Installer
 
@@ -14,8 +14,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.6.0.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.0-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-2.6.1.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.1-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -26,7 +26,7 @@ you can ignore them entirely.
 
 - **Three Motor Types**: Hybrid (HTPB/N2O, etc.), Solid (APCP, KNSB, etc.), Liquid (RP-1/LOX, LH2/LOX, etc.)
 - **Optimal Design Output**: Nozzle angles, grain geometry, injector sizing, wall thickness, all calculated from first principles
-- **3D Digital Twin (Three.js/WebGL)**: Parametric motor simulation built live from solver output: cutaway view, burn animation driven by the computed port regression history, exploded view, dimension labels, and exhaust plume
+- **Interactive 3D Model (Three.js/WebGL)**: Parametric motor visualization built live from solver output: cutaway view, burn animation driven by the computed port regression history, exploded view, dimension labels, and exhaust plume
 - **Interactive Design Mode**: Chamber diameter / L* / expansion ratio sliders with ~1 s geometry recompute (`/api/quick-geometry`); 3D model and 2D cross-section update live
 - **Grain Port Cross-Sections**: Circular, star, multi-port, and finocyl port shapes (area-equivalent visualization; ballistics solved with the circular-equivalent port)
 - **Wall Heat-Flux Map**: Chamber/nozzle surface colored by Bartz-distributed heat flux with real q and T_wall anchors from the heat transfer module
@@ -61,31 +61,36 @@ fuel/oxidizer pairs, and liquid c\* within **<2 %**. The test suite runs on a
 clean machine on every push — see the badge at the top of this page for the
 current count and result.
 
-**How to read the liquid-engine numbers (v2.6.0).** Against four published
-engine operating points, the median absolute error in vacuum specific impulse
-is 1.0 %. That figure supports one specific claim and no more: *given the real
-operating point (chamber pressure, mixture ratio) and the real published
-expansion ratio, HRMA reproduces the published specific impulse.* It does not
-demonstrate accuracy when the nozzle geometry is not yet known, which is the
-situation in actual preliminary design. Two further caveats are stated
-explicitly rather than buried:
+**How to read the liquid-engine numbers (v2.6.1).** Across fourteen published
+engine operating points from six countries, the median absolute error in vacuum
+specific impulse is about 1.2 % (bias +0.9 %). That figure supports one specific
+claim and no more: *given the real operating point (chamber pressure, mixture
+ratio) and the real published expansion ratio, HRMA reproduces the published
+specific impulse.* It does not demonstrate accuracy when the nozzle geometry is
+not yet known, which is the situation in actual preliminary design. Three
+caveats are stated explicitly rather than buried:
 
-- **The sample is very small (n = 4)** and the engines are not a random or
+- **The sample is still small (n = 14)** and the engines are not a random or
   representative sample. No claim about typical accuracy, error distribution,
   variance, or any sigma-level reliability can be made from it. A
   distribution-free demonstration that 99.73 % of results stay inside an error
   bound, at 95 % confidence, would require on the order of a thousand
   independent samples; establishing a defensible error distribution first
   would reduce that to a few dozen. Growing this database is ongoing work.
-- **Two different protocols are mixed in that median.** For the three engines
-  whose published expansion ratio is in the record, the median error is 0.74 %.
-  The fourth (Vulcain 2.1) has no published expansion ratio in the record, so
-  the model designs its own ambient-matched nozzle and under-predicts vacuum
-  Isp by 4.1 % — that gap is mostly a missing-geometry assumption, not model
-  error.
+- **The worst single case is a missing-geometry assumption, not model error.**
+  The largest miss in the set (Vulcain 2.1) has no published expansion ratio in
+  the record, so the model designs its own ambient-matched nozzle and
+  under-predicts vacuum Isp by about 4 %; engines whose published expansion
+  ratio is in the record do markedly better.
 - Where a *measured* quantity is consumed as a solver input, the corresponding
   "prediction" is labelled as a consistency check rather than independent
   evidence in the correlation output.
+
+The exact, always-current per-quantity figures (including the hybrid regression
+rate, chamber pressure and Isp errors, which remain much larger) are
+machine-generated — see the `AUTO-CORRELATION` block in
+[VALIDATION_STATUS.md](docs/VALIDATION_STATUS.md), never hand-edited numbers
+here.
 
 As of the **v2.5.0 Confidence Release**, HRMA also carries a git-tracked
 database of real, fully-cited firing data (hybrid, solid and liquid), and an
@@ -115,8 +120,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.6.0.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.0-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.0/HRMA-Setup-2.6.0-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.6.1.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.1-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -205,7 +210,7 @@ HRMA/
    - Grain geometry (web thickness, segments, Kn range)
    - Injector sizing (orifice diameter, pressure drop)
    - Performance metrics (Isp, c*, CF, thrust curve)
-   - Interactive 3D digital twin (cutaway, burn animation, heat map)
+   - Interactive 3D model (cutaway, burn animation, heat map)
    - Exportable STL/CAD files generated from the real solver geometry
 
 ## Key Equations
@@ -228,18 +233,20 @@ $$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
 
 ## Version
 
-**HRMA v2.5.4**
+**HRMA v2.6.1**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
-- Professional Rocket Propulsion Design Tool
-- Last Updated: July 2026 (Confidence Release line: Monte Carlo uncertainty
-  quantification with sensitivity tornado, 199-record fully-cited
-  real-experiment validation database with automatic correlation report and
-  baseline guard tests, database-driven KNDX/KNSB burn-rate presets, visible
-  liquid 3D engine simulation deck, 13-panel Analysis Deck, quasi-1D nozzle
-  flow, staged combustion kinetics, Leckner gas-emissivity radiation, NHNE
-  injector design, native desktop window with automatic updates via GitHub
-  Releases)
+- A preliminary-design and educational rocket-propulsion analysis tool
+  (not a flight-qualification tool — see the scope note above)
+- Last Updated: July 2026. Recent work: real-operating-point liquid
+  thermochemistry via RocketCEA, a cycle power-balance solver (pressure-fed,
+  gas-generator, tap-off, staged combustion, FFSC, expander), supercritical
+  regenerative cooling, a real-experiment validation database (~209 fully
+  cited records) with an automatic correlation report and baseline guard
+  tests, Monte Carlo uncertainty quantification, a 13-panel Analysis Deck,
+  quasi-1D nozzle flow, staged-combustion kinetics, Leckner gas-emissivity
+  radiation, NHNE injector design, a 3D launch-site view, and a native
+  desktop window with automatic updates via GitHub Releases
 
 ## Ready to Design?
 

@@ -176,13 +176,92 @@ def test_check_prerelease_gosterilmez(monkeypatch):
     assert r["available"] is False
 
 
-def test_check_ag_hatasi_sessiz(monkeypatch):
-    def patla(**kw):
+def _ag_yok(monkeypatch, api_exc=None):
+    """Hem API hem de yedek sayfa yolunu kapatır (test ağa çıkmaz)."""
+    def patla_api(**kw):
+        raise api_exc or OSError("ağ yok")
+
+    def patla_sayfa(*a, **kw):
         raise OSError("ağ yok")
-    monkeypatch.setattr(uc, "_fetch_latest_release", patla)
+    monkeypatch.setattr(uc, "_fetch_latest_release", patla_api)
+    monkeypatch.setattr(uc, "_fetch_tag_via_page", patla_sayfa)
+    monkeypatch.setattr(uc, "_fetch_assets_via_page", patla_sayfa)
+
+
+def test_check_ag_hatasi_sessiz(monkeypatch):
+    _ag_yok(monkeypatch)
     r = uc.check_for_update(force=True)
     assert r["available"] is False
     assert "OSError" in r["error"]
+    assert r["error_kind"] == "network"
+    assert r["source"] is None
+
+
+# ---------------- API kotası dolduğunda yedek sayfa yolu ----------------
+# 2026-07-24 saha hatası: api.github.com anonim istemciye saatte 60 istek
+# verir ve limit IP başınadır; kota dolunca güncelleme tamamen ölüyordu.
+
+ASSET_HTML = """
+<div>
+  <a href="/berketez/HRMA/releases/download/v9.9.0/HRMA-Setup-9.9.0-macOS.dmg">dmg</a>
+  <a href="/berketez/HRMA/releases/download/v9.9.0/HRMA-Setup-9.9.0.exe">exe</a>
+  <a href="/berketez/HRMA/releases/download/v9.9.0/HRMA-Setup-9.9.0.exe">exe tekrar</a>
+  <a href="https://github.com/kotu/zararli/releases/download/v1/virus.dmg">yabancı</a>
+</div>
+"""
+
+
+def test_asset_baglantilari_ayristirilir():
+    assets = uc.parse_asset_links(ASSET_HTML)
+    adlar = [a["name"] for a in assets]
+    assert adlar == ["HRMA-Setup-9.9.0-macOS.dmg", "HRMA-Setup-9.9.0.exe"]  # tekrar yok
+    assert all(a["browser_download_url"].startswith(uc.DOWNLOAD_PREFIX) for a in assets)
+
+
+def test_baska_depo_baglantisi_reddedilir():
+    """Sayfaya karışan yabancı depo bağlantısı indirme adresi olamaz."""
+    kotu = '<a href="https://github.com/kotu/zararli/releases/download/v1/x.dmg">x</a>'
+    assert uc.parse_asset_links(kotu) == []
+
+
+def test_kota_asiminda_sayfa_yoluna_dusulur(monkeypatch):
+    """API 403 verse bile güncelleme sayfa yolundan bulunur."""
+    import urllib.error
+
+    def kota_dolu(**kw):
+        raise urllib.error.HTTPError(uc.RELEASES_API, 403, "rate limit exceeded",
+                                     {}, None)
+    monkeypatch.setattr(uc, "_fetch_latest_release", kota_dolu)
+    monkeypatch.setattr(uc, "_fetch_tag_via_page", lambda **kw: "v99.0.0")
+    monkeypatch.setattr(uc, "_fetch_assets_via_page",
+                        lambda tag, **kw: uc.parse_asset_links(ASSET_HTML))
+    monkeypatch.setattr(uc, "_fetch_notes_via_atom", lambda tag, **kw: "notlar")
+
+    r = uc.check_for_update(force=True)
+    assert r["available"] is True
+    assert r["latest"] == "v99.0.0"
+    assert r["source"] == "page"
+    assert r["error"] is None          # kullanıcı hata görmez, güncelleme görür
+    assert r["notes"] == "notlar"      # notlar Atom akışından tamamlanır
+    assert r["asset"]["url"].startswith(uc.DOWNLOAD_PREFIX)
+    assert r["page_url"].endswith("/releases/tag/v99.0.0")
+
+
+def test_kota_asimi_ve_sayfa_da_olurse_tur_bildirilir(monkeypatch):
+    import urllib.error
+    _ag_yok(monkeypatch, api_exc=urllib.error.HTTPError(
+        uc.RELEASES_API, 403, "rate limit exceeded", {}, None))
+    r = uc.check_for_update(force=True)
+    assert r["available"] is False
+    assert r["error_kind"] == "rate_limit"   # arayüz doğru cümleyi kurabilsin
+    assert "error_fallback" in r             # teşhis için ikinci hata da taşınır
+
+
+def test_sayfa_yolunda_platform_disi_asset_secilmez(monkeypatch):
+    """Yalnız .dmg olan bir yayında Windows'a asset verilmez (tarayıcıya düşer)."""
+    sadece_dmg = ('<a href="/berketez/HRMA/releases/download/v9.9.0/'
+                  'HRMA-Setup-9.9.0-macOS.dmg">dmg</a>')
+    assert uc.pick_asset(uc.parse_asset_links(sadece_dmg), platform="win32") is None
 
 
 def test_check_cache_kullanilir(monkeypatch):

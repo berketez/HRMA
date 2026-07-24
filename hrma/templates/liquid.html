@@ -13,6 +13,7 @@
          sayfalarda dil değiştirilemiyordu. -->
     <script src="/static/js/i18n_shell.js"></script>
     <script src="/static/js/release_notes.js"></script>
+    <script src="/static/js/user_guide.js"></script>
     <script src="/static/js/settings_panel.js"></script>
     <title data-i18n="liq.ui.liquid_motor_analysis_motor_analysis_tool">Liquid Motor Analysis - Motor Analysis Tool</title>
     <style>
@@ -3794,7 +3795,7 @@ Please provide:
                 vizPanel.style.display = 'block';
                 const deck = MotorVizDeck.create('liquid_3d_view', buildLiquidVizData(results), {
                     title: T('liq.msg.liquid_engine_simulation', 'LIQUID ENGINE SIMULATION'),
-                    subtitle: T('liq.msg.parametric_digital_twin_live_geometry_from', 'PARAMETRIC DIGITAL TWIN — LIVE GEOMETRY FROM SOLVER OUTPUT'),
+                    subtitle: T('liq.msg.parametric_digital_twin_live_geometry_from', 'PARAMETRIC 3D MODEL — LIVE GEOMETRY FROM SOLVER OUTPUT'),
                     motorType: 'liquid'
                 });
                 // deck null (WebGL/konteyner sorunu) → boş panel gösterme

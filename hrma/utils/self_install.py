@@ -214,9 +214,20 @@ echo "pid=$PID dmg=$DMG target=$TARGET"
 
 MNT=""
 
+# Kullaniciya gorunur geri bildirim (2026-07-24 saha hatasi): uygulama
+# kapandiktan sonra kopyalama birkac dakika suruyor ve macOS'ta ekranda
+# hicbir sey olmuyordu; kullanici guncellemenin coktugunu sanip eski
+# surumu elle aciyordu. Windows yardimcisinin konsol penceresinin karsiligi
+# olarak burada sistem bildirimi kullanilir.
+notify() {
+    osascript -e "display notification \"$1\" with title \"HRMA\" subtitle \"$2\"" \
+        >/dev/null 2>&1 || true
+}
+
 fallback() {
     echo "FALLBACK: $1 - opening the DMG for manual installation"
     if [ -n "$MNT" ]; then hdiutil detach "$MNT" -force >/dev/null 2>&1; fi
+    notify "Automatic update could not finish. The installer has been opened - please install it manually." "Update"
     open "$DMG"
     exit 1
 }
@@ -248,9 +259,11 @@ esac
 sleep 1  # dosya tanitici birakma payi
 
 # 2) DMG'yi baglan
+notify "Installing the update. This takes a few minutes; HRMA reopens by itself. Please do not open HRMA meanwhile." "Update in progress"
 MNT="$(mktemp -d /tmp/hrma-update-XXXXXX)" || { MNT=""; fallback "mktemp failed"; }
 hdiutil attach -nobrowse -noverify -noautoopen -readonly \
     -mountpoint "$MNT" "$DMG" || fallback "hdiutil attach failed"
+echo "mounted: $MNT ($(date +%T))"
 
 SRC=""
 for cand in "$MNT"/*.app; do
@@ -264,10 +277,12 @@ BASE="$(basename "$TARGET")"
 STAGING="$PARENT/.$BASE.update.$$"
 OLD="$PARENT/.$BASE.old.$$"
 rm -rf "$STAGING"
+echo "copying ($(date +%T))..."
 if ! ditto "$SRC" "$STAGING"; then
     rm -rf "$STAGING"
     fallback "copy (ditto) failed"
 fi
+echo "copied ($(date +%T))"
 detach_dmg
 
 # 3b) Staging butunlugu: yarim kopyayla takas YAPILMAZ
@@ -310,6 +325,7 @@ if [ -z "$STARTED" ]; then
     fallback "update failed, previous version restored"
 fi
 rm -rf "$OLD"
+notify "HRMA has been updated and is opening now." "Update complete"
 echo "=== HRMA update complete: $(date) ==="
 """
 

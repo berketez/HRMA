@@ -1,0 +1,365 @@
+% HRMA User Guide (English) — compile with xelatex
+% Build: xelatex HRMA-User-Guide-EN.tex (twice, for the table of contents)
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{fontspec}
+\usepackage[english]{babel}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.4cm, top=2.6cm, bottom=2.6cm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{parskip}
+\tcbuselibrary{skins,breakable}
+
+\definecolor{hrmacyan}{HTML}{0891A8}
+\definecolor{hrmadark}{HTML}{0A1524}
+\definecolor{hrmaink}{HTML}{1B2A3A}
+\definecolor{hrmagray}{HTML}{5A6B7A}
+\definecolor{hrmapanel}{HTML}{EEF4F8}
+\definecolor{hrmawarn}{HTML}{B26A00}
+
+\hypersetup{
+  colorlinks=true, linkcolor=hrmacyan, urlcolor=hrmacyan,
+  pdftitle={HRMA User Guide}, pdfauthor={Berke Tezgocen}
+}
+
+\titleformat{\section}{\Large\bfseries\color{hrmacyan}}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\large\bfseries\color{hrmadark}}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.4em}{0.6em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{hrmagray}HRMA — Rocket Motor Analysis Suite}
+\fancyhead[R]{\small\color{hrmagray}User Guide}
+\fancyfoot[C]{\small\color{hrmagray}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\newtcolorbox{notebox}{
+  colback=hrmapanel, colframe=hrmacyan, boxrule=0.6pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, breakable}
+\newtcolorbox{warnbox}{
+  colback=yellow!8, colframe=hrmawarn, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, breakable}
+
+\newcommand{\fig}[2]{%
+  \begin{center}
+  \fbox{\includegraphics[width=0.96\linewidth]{#1}}\\[3pt]
+  {\small\color{hrmagray}\itshape #2}
+  \end{center}}
+
+\begin{document}
+
+% ================= COVER =================
+\begin{titlepage}
+\centering
+\vspace*{2.5cm}
+{\fontsize{54}{60}\selectfont\bfseries\color{hrmadark}HRMA}\\[4pt]
+{\Large\color{hrmacyan}Rocket Motor Analysis \& Design Suite}\\[6pt]
+{\large\color{hrmagray}Hybrid • Solid • Liquid Rocket Motors}\\[2.2cm]
+
+{\Huge\bfseries\color{hrmadark}User Guide}\\[10pt]
+{\large\color{hrmagray}A step-by-step worked example}\\[3cm]
+
+{\large Version 2.6.1 \quad|\quad July 2026}\\[6pt]
+{\small\color{hrmagray}Developed by: Berke Tezgocen \quad•\quad Idea \& Testing: Ayberk Cem Aksoy}\\[1.5cm]
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{Scope.} HRMA is a preliminary-design and educational tool built on
+closed-form and one-dimensional engineering correlations. It is \emph{not}
+a flight-qualification tool. Predicted performance should be cross-checked
+against an independent code (CEA / RPA / openMotor) and verified by physical
+testing before firing any motor. See ``Scope and Limitations'' at the end of
+this guide.
+\end{notebox}
+\end{titlepage}
+
+% ================= CONTENTS =================
+\tableofcontents
+\newpage
+
+% ================= 1. INTRODUCTION =================
+\section{What is HRMA?}
+
+HRMA (Rocket Motor Analysis Suite) is a desktop application for the
+preliminary design and analysis of hybrid, solid, and liquid rocket motors.
+It runs a local calculation engine (Flask) inside its own native window and
+presents results in a dark-themed, interactive interface: an interactive 3D
+model built live from the solver output, an Analysis Deck of engineering
+panels, and working CAD / drawing / report exports.
+
+\textbf{Who is it for?} Rocket teams, undergraduate and graduate students,
+faculty, and anyone who wants to see motor physics end to end. The program
+does not design a motor \emph{from scratch} for you; it produces geometry,
+performance and warnings from the parameters you enter, which you then judge
+with engineering reasoning.
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{Everything runs locally and offline.} None of your design data
+leaves your computer. The only time the program reaches the internet is at
+startup, when it asks GitHub whether a newer version exists; if that fails,
+the program continues to work normally.
+\end{notebox}
+
+\subsection{How to use this guide}
+
+The guide follows a single \textbf{example motor}: a hybrid using HTPB fuel
+and liquid N\textsubscript{2}O oxidizer, 1000~N thrust, 10~s burn time. The
+same steps apply to solid and liquid motors; the differences are noted in
+their sections. All screenshots are taken directly from the application.
+
+% ================= 2. INSTALL =================
+\section{Installation and First Launch}
+
+\subsection{Installation}
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Windows 10/11:} Download \texttt{HRMA-Setup-2.6.1.exe},
+  double-click and follow the wizard (Next, Next, Install). The installer is
+  per-user; no administrator rights are required. Windows SmartScreen may
+  warn because the installer is unsigned: click ``More info'', then ``Run
+  anyway''.
+  \item \textbf{macOS 11+ (Apple Silicon):} Open
+  \texttt{HRMA-Setup-2.6.1-macOS.dmg} and drag \texttt{HRMA} into
+  \texttt{Applications}. On first launch, right-click the app and choose
+  ``Open'' (Gatekeeper requires this once for unsigned apps).
+\end{itemize}
+
+Python and all libraries are bundled; no separate installation is needed.
+
+\subsection{First launch}
+
+The app shows a splash screen within about a second while the calculation
+engines load in the background, then opens the home page in its own window.
+The home page has three motor-type cards and a link to the formula reference.
+
+\fig{img/en-00-home.png}{The home page: cards to choose a motor type
+(Hybrid, Solid, Liquid), with the language selector, Release Notes, User
+Guide and Settings links in the top bar.}
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{Language.} The selector in the top-right switches the interface
+between English and Turkish; the choice applies to every page, including
+chart text. A Turkish edition of this guide ships with the application too.
+\end{notebox}
+
+% ================= 3. PAGES =================
+\section{Main Pages}
+
+The application has five main pages:
+
+\begin{center}
+\begin{tabular}{@{}>{\raggedright}p{3.2cm} p{2.2cm} p{8.5cm}@{}}
+\toprule
+\textbf{Page} & \textbf{URL} & \textbf{Purpose} \\
+\midrule
+Home & \texttt{/} & Motor-type selection and formula reference \\
+Hybrid Designer & \texttt{/hybrid} & Full hybrid motor design (the most complete page) \\
+Solid Designer & \texttt{/solid} & Grain geometry, ballistics, Monte Carlo \\
+Liquid Designer & \texttt{/liquid} & Feed system, injector, regen cooling, cycle \\
+Formulas & \texttt{/formulas} & The equations used by the solvers (MathJax) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All three designer pages share the same structure: an input form, a
+Calculate button, a results HUD, standalone panels (transient / injector /
+6-DOF), the Analysis Deck, the 3D model, and export buttons.
+
+% ================= 4. WORKED EXAMPLE =================
+\section{Worked Example: Designing a Hybrid Motor}
+
+In this section we work through a complete example. Open the \texttt{/hybrid}
+page.
+
+\subsection{Step 1 — Enter the parameters}
+
+The form comes with sensible defaults, top to bottom. For our example we use
+these values (most are already the defaults):
+
+\begin{center}
+\begin{tabular}{@{}p{5cm} p{4cm} p{5cm}@{}}
+\toprule
+\textbf{Field} & \textbf{Value} & \textbf{Note} \\
+\midrule
+Motor Name & \texttt{Example-H1} & Used in reports and exports \\
+Altitude & \texttt{0 m} & Sea level (ambient pressure auto) \\
+Thrust & \texttt{1000 N} & Target thrust level \\
+Burn Time & \texttt{10 s} & Total impulse is derived from this \\
+O/F Ratio & \texttt{2.5} & Oxidizer/fuel mass ratio \\
+Chamber Pressure & \texttt{20 bar} & Combustion chamber pressure \\
+Tank Pressure & \texttt{50 bar} & Must exceed chamber pressure enough \\
+Fuel & \texttt{HTPB} & Regression coefficients auto-filled \\
+Oxidizer & \texttt{N\textsubscript{2}O (liquid)} & Density updates with temperature \\
+Injector & \texttt{Showerhead} & Type-specific parameters \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\fig{img/en-01-form.png}{The input form. The ``Find Optimum'' button sweeps
+the O/F ratio for the c*-optimal value. The ``?'' next to each field shows a
+short explanation.}
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{0 = automatic.} Enter \texttt{0} into fields such as expansion
+ratio, chamber diameter or port diameter and the solver sizes them itself.
+Override the defaults with your own data (for example regression
+coefficients fitted from a static fire).
+\end{notebox}
+
+\subsection{Step 2 — Calculate}
+
+Press \textbf{Calculate}. The solver sends the form to \texttt{/calculate}
+and populates the results within a few seconds.
+
+\fig{img/en-02-results.png}{The results HUD (Performance Summary), the
+Warnings panel, and the design tables. In our example the Specific Impulse
+is 185.6~s, thrust 1000~N, chamber pressure 20~bar, mass flow 0.549~kg/s,
+and the minimum structural safety factor 2.89.}
+
+\textbf{Reading the results:}
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Performance Summary (HUD):} The headline numbers — thrust,
+  total impulse, Isp, c*, CF, chamber pressure, throat and exit diameters,
+  mass flows, and a safety-state badge.
+  \item \textbf{Warnings panel:} Design-criteria messages from the solver
+  and the validation system. \textbf{Read these before trusting the
+  numbers.} Our example raises three: c* just below its normal range
+  ($1325$ m/s), a low expansion ratio ($\varepsilon = 3.4$), and a flash
+  boiling risk. These are not errors; they tell you where the design sits at
+  a limit and under which assumptions.
+  \item \textbf{Design tables:} Full geometry — nozzle contour dimensions
+  and angles, grain/port geometry, injector plan, wall thickness.
+\end{itemize}
+
+\begin{warnbox}
+\small\color{hrmadark}
+\textbf{Warnings are a feature, not a defect.} Rather than invent a number
+for something it cannot compute, HRMA warns explicitly or says
+``not modelled''. When you see a red/orange warning, cross-check that
+quantity by hand or with an independent code.
+\end{warnbox}
+
+\subsection{Step 3 — Inspect the 3D model}
+
+Below the results is a 3D motor model built live from the geometry the
+solver produced. Use the cutaway, dimensions, exploded, heat-map and burn
+animation buttons to inspect it.
+
+\fig{img/en-03-3d.png}{The 3D motor simulation (cutaway view). Dimensions
+come straight from the solver output: chamber diameter 83.5~mm, throat
+21.7~mm, exit 40.2~mm, total length 1377~mm. The timeline at the bottom
+animates how the port diameter grows through the burn.}
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{Interactive design mode.} After a calculation, the chamber diameter,
+L* and expansion-ratio sliders recompute geometry in about a second; the 3D
+model and cross-section update live without a full recalculation.
+\end{notebox}
+
+\subsection{Step 4 — Charts and cross-section}
+
+Performance charts (thrust curve, pressure, regression rate and port growth)
+are drawn in the app's dark theme, fully offline. The cross-section is a
+scaled engineering drawing generated from the same geometry the solver used.
+
+\fig{img/en-05-cross.png}{The motor cross-section with a full legend:
+chamber wall, liner, fuel grain, injector plate, nozzle, and the final port
+diameter at burnout, all dimensioned in mm.}
+
+\subsection{Step 5 — Export}
+
+The export buttons in the results panel produce: drawing and report PDFs,
+CAD files (including STEP cross-section mapping) and CSV/Excel data tables.
+Outputs are written to the \texttt{Documents/HRMA} folder.
+
+% ================= 5. OTHER MOTOR TYPES =================
+\section{Solid and Liquid Motors}
+
+The solid and liquid pages follow the same pattern; only the inputs are
+type-specific.
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Solid motor (\texttt{/solid}):} Grain geometry (BATES,
+  finocyl, slotted, etc.), number of segments, propellant family (KNDX,
+  KNSB, APCP and more), ballistics and Monte Carlo uncertainty analysis. The
+  burn-rate \texttt{a} and \texttt{n} coefficients come from a database.
+  \item \textbf{Liquid motor (\texttt{/liquid}):} Propellant pair, feed
+  system type and \textbf{power cycle} (pressure-fed, gas-generator,
+  tap-off, staged combustion, FFSC, expander). A cycle power-balance solver
+  checks whether the pump and turbine powers close. It also has supercritical
+  CH\textsubscript{4}/H\textsubscript{2} regenerative cooling and a
+  gas-gas injector path. Combustion thermochemistry is solved with RocketCEA
+  at the motor's \emph{real} chamber pressure, O/F ratio and expansion ratio.
+\end{itemize}
+
+% ================= 6. SCOPE =================
+\section{Scope and Limitations (Please Read)}
+
+HRMA is a capable preliminary-design and educational tool, but knowing its
+limits is essential:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Preliminary-design level.} The models are closed-form and
+  1D correlations. Turbopump maps, cavitation, rotordynamics, bearing life,
+  startup/shutdown transients and 2D/3D conjugate heat transfer are
+  \emph{not} present.
+  \item \textbf{Validation is limited.} Given the real operating point and
+  the published geometry, liquid vacuum Isp is reproduced with about
+  $\sim1.2\%$ median error over a 14-engine sample. That supports ``predicts
+  Isp well at a known point'', \emph{not} ``predicts the flight performance
+  of an unknown motor from scratch to that error''. On the hybrid side the
+  regression-rate and chamber-pressure errors are much larger (13--35\%).
+  For current figures see \texttt{docs/VALIDATION\_STATUS.md}.
+  \item \textbf{Not flight qualification.} HRMA alone does not support the
+  final design, safety decision or qualification of a motor that will fly.
+  That requires fatigue/creep analysis, physical testing and a formal V\&V
+  process.
+\end{itemize}
+
+\begin{warnbox}
+\small\color{hrmadark}
+\textbf{The golden rule.} HRMA is a starting point. Cross-check every
+critical result with an independent code (CEA / RPA / openMotor) and, where
+possible, with a static fire test. Knowing how to use the program is not, by
+itself, being a rocket engine engineer.
+\end{warnbox}
+
+% ================= 7. UPDATES =================
+\section{Automatic Updates}
+
+At startup HRMA checks GitHub Releases for a newer version. If one exists, a
+window appears: \textbf{Update now}, \textbf{Later}, or \textbf{Skip this
+version}. Choosing ``Update now'' downloads the installer, closes the app,
+installs silently, and reopens automatically.
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{Version 2.6.1 note.} On macOS the update install can take a few
+minutes, during which a notification is shown; do not open the app by hand
+until it finishes. If your network hits GitHub's request limit (possible on
+shared networks), the program now falls back to the ordinary release pages
+and still finds the update.
+\end{notebox}
+
+\vspace{1cm}
+\begin{center}
+\color{hrmagray}\small
+HRMA v2.6.1 — Rocket Motor Analysis Suite\\
+\href{https://github.com/berketez/HRMA}{github.com/berketez/HRMA}
+\end{center}
+
+\end{document}

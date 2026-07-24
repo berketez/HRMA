@@ -1,6 +1,13 @@
 {
   "versions": [
     {
+      "version": "2.6.1",
+      "date": "2026-07-24",
+      "title": "Update reliability",
+      "notes_en": "# HRMA v2.6.1\n\nEmergency fix for automatic updates.\n\n**Updates kept working when GitHub throttles the network**\n- The update check used only the GitHub REST API, which allows anonymous\n  clients 60 requests per hour *per IP address*. On a shared or NAT'd network\n  (dorm, office, mobile carrier) that quota can already be exhausted by\n  someone else, and HRMA then reported \"Could not reach the update server\"\n  even though a new version was published.\n- HRMA now falls back to GitHub's ordinary release pages, which are not\n  subject to the API quota: the latest tag is resolved from the\n  `/releases/latest` redirect, installer links from the release's asset\n  fragment, and the release notes from the Atom feed.\n- Only download links belonging to this repository are accepted on the\n  fallback path, so a foreign link on the page can never become the\n  installer URL.\n- When both paths fail, the message now states the real cause (rate limit\n  vs. no network) and offers a one-click link to the releases page.\n\n**Documentation**\n- New illustrated user guide (English and Turkish) with a complete worked\n  example, shipped as a PDF with the application and available in `docs/`.\n",
+      "notes_tr": "# HRMA v2.6.1\n\nOtomatik güncelleme için acil düzeltme.\n\n**GitHub ağa istek sınırı uygularken güncelleme artık çalışıyor**\n- Güncelleme denetimi yalnızca GitHub REST API'sini kullanıyordu; bu API\n  anonim istemcilere *IP adresi başına* saatte 60 istek veriyor. Paylaşımlı\n  ya da NAT arkasındaki bir ağda (yurt, ofis, mobil operatör) bu kota\n  başkası tarafından çoktan tüketilmiş olabiliyor ve yeni sürüm yayımlanmış\n  olsa bile HRMA \"Güncelleme sunucusuna ulaşılamadı\" diyordu.\n- HRMA artık API kotasına tabi olmayan olağan GitHub sürüm sayfalarına\n  düşüyor: en son etiket `/releases/latest` yönlendirmesinden, kurulum\n  dosyası bağlantıları sürümün asset parçasından, sürüm notları da Atom\n  akışından alınıyor.\n- Yedek yolda yalnızca bu depoya ait indirme bağlantıları kabul edilir;\n  sayfaya karışan yabancı bir bağlantı kurulum adresi olamaz.\n- Her iki yol da başarısız olursa mesaj gerçek nedeni söylüyor (kota aşımı\n  mı, ağ yok mu) ve tek tıkla sürümler sayfasını açan bir bağlantı sunuyor.\n\n**Belgeler**\n- Uçtan uca işlenmiş örnek içeren resimli kullanma kılavuzu (Türkçe ve\n  İngilizce); uygulamayla birlikte PDF olarak geliyor, `docs/` altında da\n  bulunuyor.\n"
+    },
+    {
       "version": "2.6.0",
       "date": "2026-07-23",
       "title": "Accuracy and transparency",

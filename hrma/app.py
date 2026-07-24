@@ -282,6 +282,60 @@ def favicon():
         mimetype='image/vnd.microsoft.icon')
 
 
+# ---- Kullanma kılavuzu (uygulamayla birlikte gelen PDF) ----
+# Kılavuz iki dilde hazırlanır ve hrma/static/docs altında paketlenir, böylece
+# internet olmadan da açılır. Arayüz bu ucu çağırır; PDF sistemin kendi
+# görüntüleyicisinde açılır (pywebview penceresi PDF göstermez).
+
+USER_GUIDE_FILES = {
+    'tr': 'HRMA-Kullanma-Kilavuzu-TR.pdf',
+    'en': 'HRMA-User-Guide-EN.pdf',
+}
+USER_GUIDE_URL = 'https://github.com/berketez/HRMA/tree/main/docs/user_guide'
+
+
+def _user_guide_path(lang):
+    """Dile uygun kılavuz dosyasının yolu (yoksa None).
+
+    Dosya adı istemciden GELMEZ: yalnızca yukarıdaki sabit eşlemeden seçilir,
+    dolayısıyla dizin gezinme (path traversal) mümkün değildir.
+    """
+    name = USER_GUIDE_FILES.get('tr' if str(lang).lower().startswith('tr') else 'en')
+    path = os.path.join(app.root_path, 'static', 'docs', name)
+    return path if os.path.isfile(path) else None
+
+
+@app.route('/api/user-guide/open', methods=['POST'])
+def user_guide_open():
+    lang = request.args.get('lang', 'en')
+    path = _user_guide_path(lang)
+    if not path:
+        # Kılavuz paketlenmemişse (kaynaktan çalışma) çevrimiçi sürüme yönlendir
+        return jsonify({'opened': False, 'url': USER_GUIDE_URL})
+    try:
+        import subprocess
+        if sys.platform == 'darwin':
+            subprocess.Popen(['open', path])
+        elif os.name == 'nt':
+            os.startfile(path)  # noqa: yalnızca Windows'ta var
+        else:
+            subprocess.Popen(['xdg-open', path])
+        return jsonify({'opened': True, 'path': path})
+    except Exception as exc:
+        return jsonify({'opened': False, 'url': USER_GUIDE_URL,
+                        'error': '%s: %s' % (type(exc).__name__, exc)})
+
+
+@app.route('/api/user-guide/status')
+def user_guide_status():
+    """Arayüz, kılavuz paketlenmişse bağlantıyı gösterir."""
+    return jsonify({
+        'available': {lang: bool(_user_guide_path(lang))
+                      for lang in USER_GUIDE_FILES},
+        'url': USER_GUIDE_URL,
+    })
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -5353,6 +5407,11 @@ def correlation_report():
 
 
 if __name__ == '__main__':
-    # Gerçek giriş noktası hrma/run.py (waitress, 8080); bu blok yalnız geliştirme içindir.
-    print("Starting Motor Analysis on port 8080...")
-    app.run(debug=True, port=8080, host='127.0.0.1')
+    # Gerçek giriş noktası hrma/run.py (waitress, 8080); bu blok yalnız
+    # geliştirme içindir. debug VARSAYILAN OLARAK KAPALIDIR: Flask debug modu
+    # Werkzeug'un interaktif hata ayıklayıcısını açar ve localhost'ta bile
+    # rastgele kod çalıştırılmasına izin verebilir (2026-07-24 denetim bulgusu).
+    # Açıkça istemek için HRMA_DEBUG=1 ortam değişkeni kullanılır.
+    debug = os.environ.get('HRMA_DEBUG', '') in ('1', 'true', 'True')
+    print("Starting Motor Analysis on port 8080..." + (" [debug]" if debug else ""))
+    app.run(debug=debug, port=8080, host='127.0.0.1')

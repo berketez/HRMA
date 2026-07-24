@@ -157,9 +157,9 @@ markers is machine-generated; the rest of this document remains hand-written.
 <!-- AUTO-CORRELATION:BEGIN -->
 *This block is auto-generated from the real-experiment correlation run; do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
-- Generated: 2026-07-18 (runner v1, adapter v1)
-- Experiment DB content hash: `c64e8d7b715bbc1dfffddcb9cc38989015685dfe6b5ff3b1026ec032ae1800bd`
-- Records: 199 total, scored 80, insufficient inputs 112, not supported (v1) 7, runner errors 0
+- Generated: 2026-07-24 (runner v1, adapter v1)
+- Experiment DB content hash: `2ee2a86bbd6968e4d0c7d4a5f770665cc31094b6c0ba6e1dc2fb9d6971d9eca4`
+- Records: 209 total, scored 95, insufficient inputs 107, not supported (v1) 7, runner errors 0
 - Signed error convention: (predicted - measured) / measured x 100. Outliers are flagged, never dropped; anomaly-flagged records are aggregated separately.
 
 | Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test |
@@ -170,8 +170,9 @@ markers is machine-generated; the rest of this document remains hand-written.
 | hybrid | port_diameter_final | main | 18 | -9.4 | 10.1 | 10.6 | hyb-rezaei2018-htpb-n2o-t65 |
 | hybrid | regression_rate | main | 35 | -20.2 | 35.1 | 35.8 | hyb-rezaei2018-htpb-n2o-t69 |
 | hybrid | thrust | main | 18 | +9.6 | 9.1 | 10.5 | hyb-rezaei2018-htpb-n2o-t69 |
-| liquid | isp_vac | main | 4 | +3.0 | 2.8 | 4.0 | liq-j2-sa503-1968-mr55-spec |
-| liquid | thrust_vac | main | 1 | +0.7 | 0.7 | 0.7 | liq-rs25-109pct-spec |
+| liquid | isp_sl | main | 4 | +2.0 | 2.1 | 2.2 | liq-rd180-atlas-spec |
+| liquid | isp_vac | main | 14 | +0.9 | 1.2 | 2.2 | liq-vulcain21-2020-spec |
+| liquid | thrust_vac | main | 4 | -0.4 | 0.2 | 0.6 | liq-rd0120-energia-spec |
 | solid | burn_rate | main | 27 | -0.4 | 0.5 | 2.0 | sol-nakka1999-knsb-p09 |
 | hybrid | c_star | anomaly | 4 | +13.7 | 13.5 | 15.5 | hyb-heydari2017-htpb-n2o-s4a1-3 |
 | hybrid | chamber_pressure | anomaly | 13 | +53.2 | 32.6 | 98.2 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
