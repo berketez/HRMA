@@ -226,7 +226,14 @@ def test_baska_depo_baglantisi_reddedilir():
 
 def test_kota_asiminda_sayfa_yoluna_dusulur(monkeypatch):
     """API 403 verse bile güncelleme sayfa yolundan bulunur."""
+    import sys as _sys
     import urllib.error
+
+    # pick_asset platforma göre .dmg/.exe seçer; Linux'ta (CI) ikisi de yok
+    # ve asset None döner. Bu test yedek yolun asset ÜRETTİĞİNİ doğruladığı
+    # için platformu darwin'e sabitliyoruz (yoksa Linux runner'da r["asset"]
+    # None olur — 2026-07-24 CI kırılması).
+    monkeypatch.setattr(_sys, "platform", "darwin")
 
     def kota_dolu(**kw):
         raise urllib.error.HTTPError(uc.RELEASES_API, 403, "rate limit exceeded",
