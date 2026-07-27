@@ -12,12 +12,17 @@ girdiyi değiştirdiğinde, o girdiye fiziksel olarak bağlı olan çıktı DEĞ
 zorundadır.
 """
 
-import warnings
-
 import numpy as np
 import pytest
 
-warnings.filterwarnings('ignore')
+# NOT (2026-07-25): burada argümansız ``warnings.filterwarnings('ignore')``
+# vardı. Argümansız çağrı SÜREÇ GENELİNDE catch-all filtre kurar; bu test
+# dosyası toplandığı anda tüm oturumda numpy'nin sıfıra bölme/geçersiz değer
+# uyarılarını susturuyordu (pytest'in kendi uyarı özeti dâhil). Kaldırıldı —
+# gerçekten susturulması gereken bir uyarı çıkarsa dar kapsamlı
+# ``pytest.warns`` / ``warnings.catch_warnings()`` ile ve gerekçesiyle
+# yapılır. Kaldırıldıktan sonra bu dosyada bastırılan gerçek bir uyarı
+# çıkmadı (koşu temiz).
 
 from hrma.analysis.safety_analysis import (
     SAFETY_MODEL,
@@ -335,12 +340,39 @@ class TestOverridesActuallyApply:
         assert a['mass_utilization']['propellant_mass_fraction'] != 0.75
 
     def test_defaults_are_unchanged_without_overrides(self):
-        """Override yokken davranış birebir korunur (korelasyon bekçileri)."""
+        """Override yokken davranış birebir korunur (korelasyon bekçileri).
+
+        Çapa 2026-07-25'te YENİDEN ÖLÇÜLDÜ. Eski değer 6807.73 N idi; onu
+        İKİ AYRI fizik düzeltmesi taşıdı ve ikisi de aşağıda ayrıştırıldı:
+
+        F024 (yanma hızı varsayılanı) — kurucunun a = 0.005 varsayılanı
+        'r[mm/s] = 5.0*P[MPa]^0.35' fitinin MPa TABANLI katsayısıdır, motor
+        ise onu BAR ile değerlendiriyordu; yanma hızı 10^0.35 = 2.2387 kat
+        şişiyordu. Varsayılan merkezi kataloğa (APCP, a = 0.0022334) çekildi.
+
+        F068 (sabit geometrili nozulda CF) — eski CF her basınçta anlık
+        optimum genişleme (Pe = Pa) varsayıyordu, yani ulaşılabilir EN BÜYÜK
+        değeri veriyordu. Ölçüm (bu motor, a = 0.005 sabit): CF tasarım
+        basıncında birebir aynı (Pc = 40 bar -> 1.4983), yanma kuyruğunda
+        ayrışıyor (Pc = 8 bar -> eski 1.1945, yeni 0.9063; eski %31.8 fazla).
+        Tepe itki ve yanma süresi bu yüzden DEĞİŞMEDİ (10811.99 N / 2.1863 s),
+        toplam impuls %1.51 düştü (14883.67 -> 14659.04 N·s).
+
+        Ayrıştırma: a = 0.005 sabit tutulunca yeni kod 6704.94 N verir
+        (yalnız F068 etkisi). Oradan katalog katsayısına geçiş 3063.68 N'e
+        indirir (yalnız F024 etkisi). Aşağıdaki ikinci ve üçüncü iddia bu
+        ayrıştırmanın bekçisidir — çapa kayarsa hangi düzeltmenin kaydırdığı
+        doğrudan okunur.
+        """
         res = solid()
         # v2.5.2 (Codex bulgusu): impuls hesabi son adimi atliyordu; terminal
-        # tukenis ornegi eklenince ortalama itki %0.18 kaydi (6819.89 ->
-        # 6807.73). Eski deger duzeltilen bugin ciktisiydi.
-        assert res['average_thrust'] == pytest.approx(6807.73, abs=0.5)
+        # tukenis ornegi eklenince ortalama itki %0.18 kaymisti. O kapanis
+        # davranisi hâlâ yerinde; asagidaki deger onun F024+F068 sonrasi hâli.
+        assert res['average_thrust'] == pytest.approx(3063.68, abs=0.5)
+        legacy_a = solid(burn_rate_a=0.005)
+        assert legacy_a['average_thrust'] == pytest.approx(6704.94, abs=0.5)
+        # F068 tepe itkiye dokunmaz (tasarim basincinda CF ayni)
+        assert legacy_a['max_thrust'] == pytest.approx(10811.99, abs=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -555,3 +587,159 @@ class TestConstantsAreCentralised:
         assert sigma_y == SOLID_CASE_DESIGN['yield_strength_pa']
         assert sf == SOLID_CASE_DESIGN['design_safety_factor']
         assert t_wall >= SOLID_CASE_DESIGN['min_wall_thickness_m']
+
+
+# ---------------------------------------------------------------------------
+# F067 — erozif yanma raporu uydurma bir doğruydu
+#
+# Eski kod:
+#     'erosive_enhancement_percent': min(25, mass_flux / 100 * 5)
+#     'port_diameter_effect': 'Moderate'
+# Bu doğrunun motorun KENDİ erozif modeliyle hiçbir ilgisi yoktu ve kaynağı
+# da yoktu. Ölçüm (G = 1000 kg/m²s, D_p/D_ç = 0.3): eski satır %25 (50'den
+# kırpılmış) raporluyordu, çözücünün fiilen uyguladığı artış ise APCP tablo
+# katsayısıyla (k = 0.0136) +%3.31 — kullanıcıya gösterilen sayı hesaba
+# gireninin 7.6 katıydı ve G > 500'ün her yerinde 25 tavanına yapışıyordu.
+# 'Moderate' de hiçbir hesaba dayanmayan sabit metindi.
+# Kaynak (uygulanan model): Lenoir & Robillard (1957) indirgenmiş vekili;
+# Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 12.
+# ---------------------------------------------------------------------------
+class TestErosiveReportMatchesTheSolver:
+
+    def _engine(self, **ov):
+        return SolidRocketEngine(chamber_diameter=100, grain_length=500,
+                                 core_diameter=30, chamber_pressure=40,
+                                 overrides=(ov or None))
+
+    def test_reported_enhancement_is_the_applied_enhancement(self):
+        """Raporlanan artış, burn_rate() içinde FİİLEN uygulanan artıştır."""
+        eng = self._engine()
+        curve = eng.calculate_thrust_curve()
+        report = eng._calculate_erosive_effects(curve)
+        factors = np.asarray(curve['erosive_factor'], dtype=float)
+        assert report['model_applied'] is True
+        assert report['erosive_enhancement_percent'] == pytest.approx(
+            (factors[0] - 1.0) * 100.0, rel=1e-12)
+        assert report['erosive_enhancement_max_percent'] == pytest.approx(
+            (float(np.nanmax(factors)) - 1.0) * 100.0, rel=1e-12)
+        # Eski uydurma dogru bu kosuda 25 tavanina yapisirdi (G >> 500).
+        assert report['mass_flux_max_kg_m2s'] > 500.0
+        assert report['erosive_enhancement_max_percent'] < 25.0
+
+    def test_report_tracks_the_erosive_coefficient(self):
+        """k degistiginde raporlanan artis da degismeli (olu sabit degil)."""
+        weak = self._engine(erosive_k=0.0002)
+        strong = self._engine(erosive_k=0.02)
+        r_weak = weak._calculate_erosive_effects(weak.calculate_thrust_curve())
+        r_strong = strong._calculate_erosive_effects(
+            strong.calculate_thrust_curve())
+        assert r_strong['erosive_enhancement_max_percent'] > 10.0 * r_weak[
+            'erosive_enhancement_max_percent']
+        assert r_weak['erosive_coefficient_k'] == pytest.approx(0.0002)
+        assert r_strong['erosive_coefficient_k'] == pytest.approx(0.02)
+
+    def test_port_diameter_effect_is_computed_not_the_word_moderate(self):
+        """'Moderate' sabit metni yerine hesaplanmis geometrik carpan."""
+        eng = self._engine()
+        report = eng._calculate_erosive_effects(eng.calculate_thrust_curve())
+        assert 'port_diameter_effect' not in report
+        d_ratio = eng.D_core / eng.D_chamber
+        assert report['port_diameter_factor_initial'] == pytest.approx(
+            max(d_ratio, 0.05) ** -0.2, rel=1e-12)
+        # Modelin bilinen zayifligi ('buyuklugu dusuk tahmin eder') beyan edilir
+        assert 'UNDERPREDICT' in report['model_limitation'].upper()
+
+    def test_threshold_is_respected(self):
+        """Esik altinda (G <= 100) hicbir erozif artis uygulanmaz."""
+        eng = self._engine()
+        assert eng._erosive_factor(100.0, 0.3) == 1.0
+        assert eng._erosive_factor(99.0, 0.3) == 1.0
+        assert eng._erosive_factor(1000.0, 0.3) > 1.0
+
+
+# ---------------------------------------------------------------------------
+# F071 — boğaz erozyonu hiç yoktu, 'erosion_factor' alanı ölüydü
+#
+# Eski kod A_t'yi tasarım noktasında bir kez hesaplayıp koşu boyunca SABİT
+# tutuyor, docstring bunu 'gerçek motorda boğaz rijittir' diye
+# gerekçelendiriyordu. Grafit/fenolik boğaz rijit DEĞİLDİR: difüzyon
+# kontrollü oksidasyonla geriler. solid.html'in 'erosion_factor' alanı her
+# koşuda backend'e gidiyor ama HİÇBİR YERDE okunmuyordu.
+# Kaynak: Thakre & Yang, 'Chemical Erosion of Graphite and Refractory Metal
+# Nozzles in Solid-Propellant Rocket Motors', J. Propulsion and Power 24(4),
+# 2008; Bartz 1957 (h_g ~ Pc^0.8); Geisler grafit bandı 0.05-0.25 mm/s.
+# Model tek tanım noktasında: transient_ballistics.ThroatErosionModel.
+# ---------------------------------------------------------------------------
+class TestThroatErosionIsWired:
+
+    def _engine(self, **ov):
+        return SolidRocketEngine(grain_type='end_burner', chamber_diameter=100,
+                                 grain_length=500, core_diameter=30,
+                                 chamber_pressure=40, overrides=(ov or None))
+
+    def test_erosion_factor_field_is_no_longer_dead(self):
+        """Uzun yanma + kucuk bogaz: erozyon acilinca sayilar KIMILDAR.
+
+        Olcum (end-burner, APCP, Pc = 40 bar, a_ref = 0.15 mm/s grafit):
+          A_t  4.6135e-05 -> 1.6811e-04 m2  (+%264)
+          d_t  7.66 -> 14.63 mm
+          yanma sonu Pc  40.0 -> 5.47 bar
+          yanma sonu itki  276.5 -> 51.9 N
+        Rijit bogazla bu koşuda basınç sabit 40 bar kalıyordu.
+        """
+        rigid = self._engine().calculate_thrust_curve()
+        eroded = self._engine(erosion_factor=0.15).calculate_thrust_curve()
+
+        assert rigid['throat_erosion']['enabled'] is False
+        assert rigid['throat_area_final'] == pytest.approx(
+            rigid['throat_area'], rel=1e-12)
+
+        assert eroded['throat_erosion']['enabled'] is True
+        assert eroded['throat_area_final'] > 2.0 * eroded['throat_area']
+        assert float(eroded['pressure'][-1]) < 0.5 * float(
+            rigid['pressure'][-1])
+        assert float(eroded['thrust'][-1]) < 0.5 * float(rigid['thrust'][-1])
+
+    def test_rigid_throat_assumption_is_declared_not_silent(self):
+        """Erozyon kapaliyken varsayimin ADI raporda yazar."""
+        rigid = self._engine().calculate_thrust_curve()
+        assert 'rigid-throat assumption' in rigid['throat_erosion']['basis']
+        assert rigid['throat_erosion']['input_field'].startswith(
+            'erosion_factor')
+
+    @pytest.mark.parametrize('overrides, code', [
+        ({}, 'warn.solid.rigid_throat_assumption'),
+        ({'erosion_factor': 0.15}, 'warn.solid.throat_erosion_significant'),
+        ({'erosion_factor': 0.001},
+         'warn.solid.throat_erosion_coeff_off_band'),
+    ])
+    def test_each_case_produces_its_warning(self, overrides, code):
+        """Uc durumun ucu de kullaniciya gorunur (sessiz kabul yok).
+
+        0.001 mm/s solid.html varsayilanidir ve grafitin yayimlanmis
+        bandinin (0.05-0.15 mm/s) 50 kat altindadir -> sorgulanir.
+        """
+        res = self._engine(**overrides).calculate_performance()
+        codes = {w['code'] for w in (res.get('design_warnings') or [])}
+        assert code in codes, sorted(codes)
+
+    def test_short_fat_throat_motor_is_not_nagged(self):
+        """Kisa yanma + buyuk bogazda rijit varsayim uyarisi CIKMAZ.
+
+        Uyari gurultu olmamali: BATES, Pc = 40 bar, t_b ~ 2.2 s, d_t ~ 45 mm
+        kosusunda ongorulen alan artisi esigin (%5) altinda kalir.
+        """
+        res = solid()
+        codes = {w['code'] for w in (res.get('design_warnings') or [])}
+        assert 'warn.solid.rigid_throat_assumption' not in codes
+
+    def test_model_is_the_shared_one_not_a_copy(self):
+        """Formul transient_ballistics'te tek yerde tanimli (CLAUDE.md k.11)."""
+        from hrma.analysis.transient_ballistics import ThroatErosionModel
+        eng = self._engine(erosion_factor=0.15)
+        model = eng._throat_erosion_model()
+        assert isinstance(model, ThroatErosionModel)
+        assert model.a_ref_mm_s == pytest.approx(0.15)
+        # r_dot = a_ref * (Pc/70 bar)^0.8
+        assert model.rate_m_s(40e5) == pytest.approx(
+            0.15 * (40.0 / 70.0) ** 0.8 / 1000.0, rel=1e-12)

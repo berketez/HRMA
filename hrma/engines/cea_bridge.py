@@ -53,6 +53,14 @@ REAL_GAS_PC_BAR = 300.0
 PC_RANGE_MIN_BAR = 10.0
 PC_RANGE_MAX_BAR = 500.0
 
+# Statik fallback tablosunun Isp ÇAPASI: alan oranı ε = 200 ("Area ratio 200:1",
+# liquid_rocket_engine.py::VACUUM_REFERENCE_EPS). Bu modül o dosyayı IMPORT ETMEZ
+# (dairesel bağımlılık yasağı), bu yüzden çapa burada da tanımlıdır; çağıran
+# taraf fallback sözlüğüne 'isp_vac_eps' / 'eps_anchor' koyarak kendi çapasını
+# bildirebilir. Bkz. v2.6.2 fizik denetimi, bulgu F089.
+FALLBACK_EPS_ANCHOR = 200.0
+_EPS_ANCHOR_TOL = 0.5   # bu farkın altındaki ε istekleri çapayla aynı sayılır
+
 # Önbelleğe alınacak yuvarlama hassasiyetleri (görev sözleşmesi)
 _PC_ROUND = 0        # bar tam sayı
 _MR_ROUND = 2        # O/F iki ondalık
@@ -182,13 +190,26 @@ def _compute_rocketcea(
                 Pc=pc_psia, MR=mr, eps=eps, frozen=1, frozenAtThroat=0))
         except Exception:
             isp_vac_frozen_s = None
-        amb_bar = ambient_bar if ambient_bar else STD_SEA_LEVEL_BAR
-        try:
-            isp_amb, _mode = c.estimate_Ambient_Isp(
-                Pc=pc_psia, MR=mr, eps=eps, Pamb=amb_bar * BAR_TO_PSIA)
-            isp_sl_s = float(isp_amb)
-        except Exception:
-            isp_sl_s = None
+        # DÜZELTME (v2.6.2 fizik denetimi, bulgu F090): eskiden `if ambient_bar`
+        # yazıyordu; 0.0 bar (VAKUM) falsy olduğu için sessizce deniz seviyesine
+        # düşüyor ve "vakum Isp'si istedim" diyene 1.01325 bar cevabı dönüyordu
+        # (LH2/LOX Pc=206.4 bar MR=6.03 eps=69: 387.46 s yerine 462.75 s
+        # olmalıydı, %16.3 hata). Artık yalnız None varsayılana düşer.
+        amb_bar = ambient_bar if ambient_bar is not None else STD_SEA_LEVEL_BAR
+        if amb_bar <= 0.0:
+            # Tam vakumda itki bağıntısı F = ṁ·v_e + (p_e - p_a)·A_e ile
+            # p_a = 0 için doğrudan vakum itkisine indirgenir; ortam Isp'si
+            # TANIM GEREĞİ vakum Isp'sine eşittir (Sutton & Biblarz 9. baskı,
+            # Eq. 3-29). RocketCEA.estimate_Ambient_Isp(Pamb=0) ise
+            # ZeroDivisionError verir, o yüzden CEA'ya hiç sorulmaz.
+            isp_sl_s = isp_vac_s
+        else:
+            try:
+                isp_amb, _mode = c.estimate_Ambient_Isp(
+                    Pc=pc_psia, MR=mr, eps=eps, Pamb=amb_bar * BAR_TO_PSIA)
+                isp_sl_s = float(isp_amb)
+            except Exception:
+                isp_sl_s = None
 
     # Oda mol kesirleri (istasyon 0 = oda). Yalnız anlamlı türler (>=1e-4).
     mole_fractions = None
@@ -345,7 +366,10 @@ def get_combustion_properties(
             pc_key = round(float(pc_bar), _PC_ROUND)
             mr_key = round(float(mr), _MR_ROUND)
             eps_key = round(float(expansion_ratio), _EPS_ROUND) if expansion_ratio else None
-            amb_key = round(float(ambient_bar), _AMB_ROUND) if ambient_bar else None
+            # F090: 0.0 bar geçerli bir girdidir (vakum) — `if ambient_bar`
+            # onu None'a çevirip deniz seviyesine düşürüyordu.
+            amb_key = (round(float(ambient_bar), _AMB_ROUND)
+                       if ambient_bar is not None else None)
 
             core = _compute_rocketcea(fuel_card, ox_card, pc_key, mr_key, eps_key, amb_key)
 

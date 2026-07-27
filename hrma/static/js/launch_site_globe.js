@@ -17,8 +17,10 @@
  * DÜRÜSTLÜK
  * ---------
  *  - Yalnız çözücü verisi çizilir (6-DOF / düzlemsel). Sahte yörünge yok.
- *  - Yer izi (ground track) "Dünya dönüşü modellenmedi" diye etiketlenir;
- *    Dünya dönüşü/Coriolis v1'de modellenmiyor (bkz. launch_site.NOT_MODELLED).
+ *  - Yer izi (ground track), çözücünün ENU serisinin teğet-düzlem jeodezik
+ *    izdüşümüdür (enu_to_geodetic ile birebir). Dünya dönüşü/Coriolis'in
+ *    modellenme durumu TEK yetkili kaynak launch_site.NOT_MODELLED'de beyan
+ *    edilir; küre kendiliğinden bir modelleme iddiası ÜRETMEZ, o beyana uyar.
  *  - Yakın zoomda küresel doku/DEM (~9 km) yerel arazi detayı içermez;
  *    sahte arazi/doku ÜRETİLMEZ, kullanıcı bir notla uyarılır.
  *  - Balistik uçuşa "orbit" denmez.
@@ -53,6 +55,26 @@
     var GLOBAL_DIST = GLOBE_R * 2.6;         // "tüm Dünya" görünümü
     // Yakın zoomda "doku detayı yok" notunun tetiklendiği kamera yüksekliği [m]
     var TEXTURE_NOTE_ALT_M = 400000.0;
+
+    // ---- GIBS uydu karo yaması (patch mesh) sabitleri ----
+    // Yakın zoomda taban Blue Marble (~9 km) yerine NASA GIBS karoları (~500 m)
+    // her karonun KENDİ yama geometrisine bindirilir. Karolar backend
+    // /api/tile üzerinden gelir (hrma/analysis/tile_cache.py); istemci yalnız
+    // hangi karonun gerektiğini hesaplar, URL/host kurmaz.
+    var TILE_LAYER = 'bluemarble';        // varsayılan statik katman (tile_cache allowlist)
+    var TILE_MIN_ZOOM = 4;                // z<4: taban yeterli, patch yüklenmez
+    var TILE_MAX_ZOOM = 7;                // bluemarble z0-7 (backend max_zoom ile aynı)
+    var TILE_PATCH_R = 2;                 // merkez etrafı (2R+1)² blok (tipik 5×5)
+    var TILE_PATCH_R_MAX = 3;             // hard cap → en fazla 7×7
+    var TILE_PATCH_SEG = 8;              // yama S×S vertex (küresel eğrilik için)
+    var TILE_RADIUS = GLOBE_R * 1.0004;  // taban(GLOBE_R) üstü, sınırlar(1.001) altı → z-fighting yok
+    var TILE_LRU_MAX = 128;              // GPU bellek: üstündeki en eski mesh THREE dispose
+    var TILE_UPDATE_MS = 250;           // patch güncelleme kısması (her karede değil)
+    // WMTS EPSG:4326 (CRS84) karo matris geometrisi — tile_cache.py'nin
+    // AYNI formülünün istemci kopyası (hangi karo gerekiyor kararı için).
+    // İkisi değişirse birlikte güncellenmeli (rule#11 çapraz-referans).
+    var TILE_Z0_MPP = 62617.5;          // ekvator m/px @ z0 (0.5625°/px · 111319.49 m/°)
+    function tileSpanDeg(z) { return 288.0 / Math.pow(2, z); }   // karo derecesi = 288/2^z
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
     function deg2rad(d) { return d * Math.PI / 180.0; }
@@ -186,6 +208,13 @@
         // Uçuş yolu grupları (sonradan doldurulur)
         this.flightGroup = new THREE.Group();
         scene.add(this.flightGroup);
+
+        // GIBS karo yamaları ayrı grupta (arazi; uçuş yolundan bağımsız yaşar)
+        this._tileGroup = new THREE.Group();
+        scene.add(this._tileGroup);
+        this._tiles = new Map();        // anahtar layer:z:x:y -> {mesh,t,loading}
+        this._tileNextT = 0;            // patch güncelleme kısma zamanı
+        this._tileAnyFail = false;      // en az bir karo yüklenemedi (offline notu)
 
         this._bindEvents();
         this._resize();
@@ -498,7 +527,8 @@
         this._trailLine.geometry.setDrawRange(0, 2);
         this.flightGroup.add(this._trailLine);
 
-        // Yer izi (soluk camgöbeği, kesikli) — "Dünya dönüşü modellenmedi"
+        // Yer izi (soluk camgöbeği, kesikli) — çözüm ENU serisinin teğet-düzlem
+        // jeodezik izdüşümü; Dünya dönüşü/Coriolis beyanı launch_site.NOT_MODELLED'de
         var g2 = new THREE.BufferGeometry().setFromPoints(this._groundPoints);
         this._groundLine = new THREE.Line(g2, new THREE.LineDashedMaterial({
             color: 0x4fd0e0, transparent: true, opacity: 0.55,
@@ -571,6 +601,9 @@
         // ögeleri temizle; kalıcı saha iğnesi (parent hâlâ var) korunur.
         if (this._scalables)
             this._scalables = this._scalables.filter(function (s) { return !!s.obj.parent; });
+        // NOT: GIBS karo yamaları BİLEREK burada silinmez — arazi uçuş yolundan
+        // bağımsızdır (her yeni uçuşta titreme/yeniden-yükleme olmaz). Bellek
+        // _pruneTiles (LRU) ile yönetilir; tam temizlik yalnız dispose()'ta.
     };
 
     LaunchSiteGlobe.prototype.setExaggeration = function (factor) {
@@ -691,6 +724,165 @@
         };
     };
 
+    // ---- GIBS uydu karo yaması (patch mesh) --------------------------------
+    // Ön yüz durum kancası: patch aktif mi + attribution + herhangi bir karo
+    // başarısız oldu mu (offline notu). HTML/i18n bunu okuyarak "NASA GIBS —
+    // Blue Marble (~500 m)" atıfını ya da çevrimdışı notunu gösterir.
+    LaunchSiteGlobe.prototype.getTileInfo = function () {
+        var active = !!(this._tiles && this._tiles.size > 0);
+        return {
+            active: active,
+            layer: TILE_LAYER,
+            attribution: 'NASA GIBS — Blue Marble Shaded Relief + Bathymetry (~500 m)',
+            anyFail: !!this._tileAnyFail,
+            count: this._tiles ? this._tiles.size : 0
+        };
+    };
+
+    // Kameranın baktığı bölgeye gereken karo bloğunu belirle, eksikleri yükle,
+    // uzaktakileri LRU ile buda. Yalnız yakın zoomda (kamera < 400 km) çalışır;
+    // her karede DEĞİL, TILE_UPDATE_MS kısmasıyla.
+    LaunchSiteGlobe.prototype._updateTilePatch = function () {
+        var now = performance.now();
+        if (now < this._tileNextT) return;
+        this._tileNextT = now + TILE_UPDATE_MS;
+
+        var info = this.getScaleInfo();
+        if (!info) return;
+        // Uzaktaysak yeni karo yükleme; mevcutlar LRU ile budanır (aşağıda).
+        if (!(info.camAltitudeM < TEXTURE_NOTE_ALT_M)) { this._pruneTiles(); return; }
+        var mpx = info.metersPerPixel;
+        if (!(mpx > 0)) return;
+
+        // z seçimi: ekvator m/px @ z0 = TILE_Z0_MPP; z = log2(z0/mpx).
+        var z = Math.round(Math.log2(TILE_Z0_MPP / mpx));
+        z = clamp(z, TILE_MIN_ZOOM, TILE_MAX_ZOOM);
+
+        // Kameranın baktığı yüzey noktası = controls.target yönü (yerel görünümde
+        // yüzeye çapalı). Merkeze çok yakınsa (global görünüm) atla.
+        if (this.controls.target.length() < 1e-3) return;
+        var c = vec3ToLatLon(this.controls.target);
+
+        var span = tileSpanDeg(z);
+        var mw = Math.ceil(360.0 / span), mh = Math.ceil(180.0 / span);
+        var cx = Math.floor((c.lon + 180.0) / span);
+        var cy = Math.floor((90.0 - c.lat) / span);
+        var R = Math.min(TILE_PATCH_R, TILE_PATCH_R_MAX);
+
+        for (var dy = -R; dy <= R; dy++) {
+            var ty = cy + dy;
+            if (ty < 0 || ty >= mh) continue;             // kutup kırpma (singularity yok)
+            for (var dx = -R; dx <= R; dx++) {
+                var tx = (((cx + dx) % mw) + mw) % mw;      // tarih çizgisi sarmalama
+                var key = TILE_LAYER + ':' + z + ':' + tx + ':' + ty;
+                if (this._tiles.has(key)) this._touchTile(key);
+                else this._buildTilePatch(TILE_LAYER, z, tx, ty);
+            }
+        }
+        this._pruneTiles();
+    };
+
+    // Tek karo için kendi yama geometrisi + dokuyu backend'den yükle.
+    LaunchSiteGlobe.prototype._buildTilePatch = function (layer, z, tx, ty) {
+        var THREE = global.THREE, self = this;
+        var key = layer + ':' + z + ':' + tx + ':' + ty;
+        // Rezervasyon (aynı karo iki kez yüklenmesin); mesh doku gelince eklenir.
+        this._tiles.set(key, { mesh: null, t: performance.now(), loading: true });
+        var url = '/api/tile/' + layer + '/' + z + '/' + tx + '/' + ty;
+        new THREE.TextureLoader().load(url, function (tex) {
+            if (self._disposed) { tex.dispose(); return; }
+            var entry = self._tiles.get(key);
+            if (!entry || !entry.loading) { tex.dispose(); return; }  // budanmış/iptal
+            tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
+            tex.encoding = THREE.sRGBEncoding || tex.encoding;
+            tex.anisotropy = Math.min(8, self.renderer.capabilities.getMaxAnisotropy());
+            var mesh = self._makeTileMesh(z, tx, ty, tex);
+            self._tileGroup.add(mesh);
+            entry.mesh = mesh; entry.loading = false; entry.t = performance.now();
+        }, undefined, function () {
+            // Offline / GIBS erişilemez / 503 → SAHTE doku YOK, mesh EKLENMEZ.
+            // Taban Blue Marble o hücrede görünür (kısmi yükleme kabul).
+            self._tiles.delete(key);
+            self._tileAnyFail = true;
+        });
+    };
+
+    // Karo -> küresel yama geometrisi. SphereGeometry UV'sine GÜVENİLMEZ; UV
+    // doğrudan enlem/boylamdan türetilir → taban küre UV konvansiyonundan
+    // bağımsız, iç tutarlı.
+    LaunchSiteGlobe.prototype._makeTileMesh = function (z, tx, ty, tex) {
+        var THREE = global.THREE;
+        var span = tileSpanDeg(z);
+        var lonW = -180.0 + tx * span;
+        var latN = 90.0 - ty * span;
+        var latS = latN - span;
+        var S = TILE_PATCH_SEG, row = S + 1;
+        var pos = [], uv = [], idx = [];
+        for (var iy = 0; iy <= S; iy++) {
+            var fy = iy / S;
+            var lat = latS + fy * span;                 // güneyden kuzeye
+            for (var ix = 0; ix <= S; ix++) {
+                var fx = ix / S;
+                var lon = lonW + fx * span;
+                var p = latLonToVec3(lat, lon, TILE_RADIUS);
+                pos.push(p.x, p.y, p.z);
+                // u = batı→doğu, v = güney→kuzey. THREE varsayılan flipY=true ile
+                // (taban dokuyla aynı): görüntünün üstü(kuzey)→v=1, altı(güney)→v=0.
+                uv.push(fx, fy);
+            }
+        }
+        for (var jy = 0; jy < S; jy++)
+            for (var jx = 0; jx < S; jx++) {
+                var a = jy * row + jx, b = a + 1, cc = a + row, d = cc + 1;
+                idx.push(a, cc, b, b, cc, d);
+            }
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        var mat = new THREE.MeshPhongMaterial({
+            map: tex, shininess: 4, specular: 0x0a0e12 });   // headlight ile tutarlı
+        return new THREE.Mesh(geo, mat);
+    };
+
+    // LRU: dokunulan karoyu Map'in sonuna taşı (insertion-order tazeleme).
+    LaunchSiteGlobe.prototype._touchTile = function (key) {
+        var e = this._tiles.get(key);
+        if (e) { this._tiles.delete(key); this._tiles.set(key, e); e.t = performance.now(); }
+    };
+
+    // Cap aşımında en eski (Map ilk anahtar) karoları dispose et.
+    LaunchSiteGlobe.prototype._pruneTiles = function () {
+        if (!this._tiles) return;
+        while (this._tiles.size > TILE_LRU_MAX) {
+            var oldest = this._tiles.keys().next().value;
+            var e = this._tiles.get(oldest);
+            this._tiles.delete(oldest);
+            this._disposeTileEntry(e);
+        }
+    };
+
+    LaunchSiteGlobe.prototype._disposeTileEntry = function (e) {
+        if (!e) return;
+        e.loading = false;                       // in-flight yükleme iptal işareti
+        if (!e.mesh) return;
+        if (e.mesh.parent) e.mesh.parent.remove(e.mesh);
+        if (e.mesh.geometry) e.mesh.geometry.dispose();
+        if (e.mesh.material) {
+            if (e.mesh.material.map) e.mesh.material.map.dispose();
+            e.mesh.material.dispose();
+        }
+    };
+
+    LaunchSiteGlobe.prototype._clearTilePatches = function () {
+        if (!this._tiles) return;
+        var self = this;
+        this._tiles.forEach(function (e) { self._disposeTileEntry(e); });
+        this._tiles.clear();
+        this._tileAnyFail = false;
+    };
+
     // ---- Ana döngü ---------------------------------------------------------
     LaunchSiteGlobe.prototype._animate = function () {
         var self = this;
@@ -702,6 +894,8 @@
                 self._headlight.position.copy(self.camera.position);
             // yüzey işaretçilerini ekran-sabit boyuta ölçekle
             self._updateScalables();
+            // yakın zoomda GIBS uydu karo yamalarını güncelle (kısmalı)
+            self._updateTilePatch();
             // animasyon ilerlet
             if (self._playing && self._flight) {
                 var now = performance.now();
@@ -738,6 +932,7 @@
         this._disposed = true;
         if (this._raf) cancelAnimationFrame(this._raf);
         this.clearFlightPath();
+        this._clearTilePatches();        // GIBS karo mesh/doku GPU belleğini boşalt
         if (this.renderer) {
             this.renderer.dispose();
             if (this.renderer.domElement && this.renderer.domElement.parentNode)

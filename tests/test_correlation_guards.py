@@ -24,10 +24,17 @@ Bekçi mantığı (ARGE spec 5.2 + Berke onaylı K kararları):
 Dürüstlük notları:
 - solid burn_rate hücresi IN-SAMPLE'dır (katsayılar aynı veri setinin
   kaynak fitinden; bkz. hrma/data/burn_rate_db.py) — %0.5 medAPE bağımsız
-  tahmin becerisi DEĞİLDİR, implementasyon doğrulamasıdır.
-- hibrit isp/thrust tabanı (%9.1) önceki sürümdeki %3.0'dan YÜKSEKTİR:
+  tahmin becerisi DEĞİLDİR, implementasyon doğrulamasıdır. Bu bilgi artık
+  makine-okunur: hücrede n_in_sample alanı (F007, 2026-07-27).
+- hibrit isp tabanı (%9.1) önceki sürümdeki %3.0'dan YÜKSEKTİR:
   eski değer, c* eksiği ile CF fazlasının birbirini iptal etmesiydi
   (2026-07-18 incelemesi). Taban dürüst değerden donduruldu.
+- F022 (2026-07-27): eski tabandaki ("hybrid", "thrust") hücresi BİLEREK
+  KALDIRILDI. thrust = mdot_kayıt*g0*Isp_model olduğundan thrust hatası isp
+  hatasının cebirsel kopyasıydı (18 ortak testte |isp_err - thrust_err|
+  maks 0.055 yüzde puanı); adaptör artık zincirdeki ilk ölçülen halkayı
+  (isp) skorlayıp kalanını derived_bases ile skor dışı bırakıyor. Ayrı bir
+  test hücrenin GERİ GELMEMESİNİ garantiler (test_f022_thrust_cell_absent).
 
 Koşu maliyeti: tam korelasyon ~15-20 s (module-scoped fixture, tek koşu).
 """
@@ -63,7 +70,7 @@ BASELINE = {
     ("hybrid", "isp"): (9.6, 9.1, 18),
     ("hybrid", "port_diameter_final"): (-9.4, 10.1, 18),
     ("hybrid", "regression_rate"): (-20.2, 35.1, 35),
-    ("hybrid", "thrust"): (9.6, 9.1, 18),
+    # ("hybrid", "thrust") tabanı F022 ile bilinçli kaldırıldı (üstteki not).
     # 2026-07-23 dünya-çapı genişletme: n=4 -> n=14 (6 ülke). medAPE %2.8 ->
     # %1.20, bias +0.93. Örneklem 3.5 kat büyüdü ve hata düştü — taban bilinçli
     # sıkılaştırıldı. isp_sl de artık skorlanıyor (n=4).
@@ -171,3 +178,91 @@ def test_anomaly_records_not_in_cells(corr, cells):
     for key, cell in cells.items():
         leaked = anomaly_ids & {e["test_id"] for e in cell["entries"]}
         assert not leaked, f"{key}: anomali kayıtları ana hücreye sızdı: {leaked}"
+
+
+# --- 2026-07-27 fizik denetimi bekçileri (F006/F007/F022 + F008 eki) ---------
+
+def test_f022_thrust_cell_absent(cells):
+    """Hibrit thrust/thrust_mean/total_impulse hücreleri GERİ GELEMEZ (F022).
+
+    thrust = mdot_kayıt * g0 * Isp_model — isp hatasının cebirsel kopyası;
+    total_impulse = thrust * (tüketilen burn_time) üçüncü kopya. Tek
+    karşılaştırma tabloda 2-3 bağımsız hücre (her biri n=18) gibi görünüyordu
+    (Oberkampf & Roy 2010, Böl. 12: bağımlı çıktılar ayrı doğrulama metriği
+    sayılmaz). isp hücresi zincirin skorlanan tek halkasıdır.
+    """
+    for quantity in ("thrust", "thrust_mean", "total_impulse"):
+        assert ("hybrid", quantity) not in cells, (
+            f"('hybrid', '{quantity}') hücresi yeniden ortaya çıktı — F022 "
+            f"cebirsel kopya zinciri (record_adapters._HYBRID_ALGEBRAIC_"
+            f"COPY_CHAIN) bozulmuş olabilir.")
+    assert ("hybrid", "isp") in cells, (
+        "F022 zincirin İLK halkası olan isp hücresini de düşürmüş — yalnız "
+        "kopyalar skor dışı kalmalıydı.")
+
+
+def test_f006_campaign_fields_present(cells):
+    """Her hücre kayıt/kampanya ikilisini taşımalı (F006, pseudoreplication).
+
+    Ölçülen gerçek (2026-07-27 tam koşu): hybrid c_star/isp n=18 -> 1 kampanya
+    (rezaei2018), hybrid Pc/regresyon n=35 -> 2, solid burn_rate n=27 -> 2;
+    yalnız sıvı isp_vac gerçekten bağımsız (n=14 -> 14 ayrı motor).
+    """
+    for key, cell in cells.items():
+        assert "n_campaigns" in cell and cell["n_campaigns"] >= 1, key
+        assert cell["n_campaigns"] <= cell["n"], key
+    # Kümelenme gerçeği: hibrit c_star tek kampanyadır; n bağımsız örnek
+    # sayısı gibi OKUNAMAZ. Kampanya sayısı artarsa (yeni veri) bu sınır
+    # bilinçli güncellenir.
+    assert cells[("hybrid", "c_star")]["n_campaigns"] < \
+        cells[("hybrid", "c_star")]["n"]
+    assert cells[("liquid", "isp_vac")]["n_campaigns"] == \
+        cells[("liquid", "isp_vac")]["n"], (
+        "liquid isp_vac hücresi kampanya-bağımsızlığını kaybetti (aynı "
+        "kaynaktan çok kayıt eklendiyse taban bilinçli güncellenmeli).")
+
+
+def test_f007_in_sample_flags_visible(cells):
+    """IN-SAMPLE/ZAYIF-KANIT bayrakları hücre istatistiğinde görünmeli (F007).
+
+    Ölçülen gerçek: solid burn_rate 27/27 in-sample (fit kaynak kayıtları
+    burn_rate_db.BURN_RATE_LAWS'ta), hybrid regression_rate 17/35 in-sample
+    (parafin a-n katsayıları Karabeyoglu kampanyasından — veri sızıntısı
+    hiçbir belgede yazmıyordu), liquid thrust_vac 4/4 weak-evidence
+    (tüketilen thrust_sl'den türetilmiş). Bu sayılar SIFIRA düşerse bayrak
+    zinciri (adapter quantity_flags -> _aggregate -> _cell) kopmuş demektir.
+    """
+    sb = cells[("solid", "burn_rate")]
+    assert sb["n_in_sample"] == sb["n"], (
+        f"solid burn_rate {sb['n_in_sample']}/{sb['n']} in-sample — hücrenin "
+        f"TAMAMI fit kaynak verisidir; bayrak kaybı medAPE %0.5'in bağımsız "
+        f"tahmin gibi yayılmasına yol açar.")
+    rr = cells[("hybrid", "regression_rate")]
+    assert rr["n_in_sample"] >= 17, (
+        f"hybrid regression_rate in-sample sayısı {rr['n_in_sample']} < 17 — "
+        f"Karabeyoglu kampanya tespiti (_HYBRID_FIT_SOURCE_TOKENS) bozulmuş.")
+    tv = cells[("liquid", "thrust_vac")]
+    assert tv["n_weak_evidence"] == tv["n"], (
+        f"liquid thrust_vac {tv['n_weak_evidence']}/{tv['n']} weak-evidence — "
+        f"tüketilen thrust_sl'den türetilen skorlar bağımsız kanıt değildir.")
+
+
+def test_f008_measurement_uncertainty_read(cells):
+    """Kayıtların bildirdiği ölçüm belirsizliği istatistiğe taşınmalı (F008 eki).
+
+    2026-07-27 öncesinde koşucu measurement_uncertainty bloğunu HİÇ
+    okumuyordu. Ölçülen gerçek: hybrid c_star hücresinin 18 girişinin 18'i
+    ±%0.81 (rezaei2018 Tablo 1) bildiriyor; hücre medAPE %2.3 — model hatası
+    ölçüm saçılmasının ~3 katı, yani ayrışabilir durumda ve artık rapor bunu
+    SÖYLÜYOR. coverage_k mevcut DB'de hep null olduğundan normalize hata
+    (E_n) üretilmez — k uydurulmaz.
+    """
+    cs = cells[("hybrid", "c_star")]
+    assert cs["n_with_measurement_u"] >= 18, (
+        "hybrid c_star ölçüm-belirsizliği sayacı düştü — "
+        "_measurement_uncertainty_map zinciri kopmuş olabilir.")
+    assert cs["median_measurement_u_pct"] == pytest.approx(0.81, abs=0.05)
+    # Belirsizlik bildirmeyen hücrede alan dürüstçe boş kalır (uydurma yok).
+    sb = cells[("solid", "burn_rate")]
+    assert sb["n_with_measurement_u"] == 0
+    assert sb["median_measurement_u_pct"] is None

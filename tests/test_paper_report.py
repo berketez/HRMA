@@ -198,7 +198,10 @@ class TestGenerateReport:
                                   timestamp=FIXED_TS)
         md = open(info["markdown"], encoding="utf-8").read()
         # Detay tablo basligi (to_markdown'dan)
-        assert "| Motor | Quantity | N |" in md
+          # v2.6.2 (F007): sütun "N" -> "N (campaigns)". Sayılan şey bağımsız
+        # örnek değil KAMPANYA olduğu için başlık bunu açıkça söylüyor;
+        # aynı motorun yakın çalışma noktaları tek kampanya sayılır.
+        assert "| Motor | Quantity | N (campaigns) |" in md
         # Hucre satiri: motor tipi + buyukluk
         assert "hybrid" in md
         assert "c_star" in md

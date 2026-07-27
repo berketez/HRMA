@@ -63,6 +63,26 @@ Boru basınç sınıfı (ince-cidar hoop, YEREL yazıldı — pressure_vessel mo
   (varsayılan 1.5; mühendislik faktörü, 'approximate') veya kullanıcı boru
   basınç sınıfını doğrudan verir.
 
+Aşağı salınım ve kolon ayrılması (2026-07-25 fizik denetimi, F030):
+
+    p_asagi = P_calisma - dP        (yansıma sonrası ters salınım)
+
+  Joukowsky darbesi vanada +dP kadar YUKARI çıkar; dalga rezervuardan
+  yansıyıp döndüğünde aynı büyüklükte AŞAĞI salınım üretir. Aşağı salınım
+  sıvının buhar basıncının altına inerse sıvı sütunu kopar (kolon ayrılması /
+  geçici kavitasyon); boşluk çöküp sütunlar yeniden birleştiğinde oluşan
+  darbe Joukowsky değerini ~2 KATA kadar aşabilir. Bu durumda Joukowsky
+  tepe basıncı ÜST SINIR DEĞİLDİR.
+      Wylie, E.B. & Streeter, V.L., "Fluid Transients", McGraw-Hill (1978),
+      Bölüm 9 (kolon ayrılması / kavitasyonlu geçici akış);
+      Bergant, A., Simpson, A.R. & Tijsseling, A.S., "Water hammer with
+      column separation: A historical review", J. Fluids and Structures 22
+      (2006) 135-171 — birleşme darbesinin Joukowsky'yi aşması belgelenmiştir.
+
+  Bu modül aşağı salınımı hesaplar, sıvının buhar basıncıyla kıyaslar ve
+  ayrılma öngörülürse hem uyarı üretir hem de emniyet hükmünü tahmini
+  birleşme tepe basıncı üzerinden verir (fail-closed).
+
 Birimler: sınıf API'si SI (Pa, kg/s, m, s); kullanıcıya görünen özet
 alanlar bar/mm/ms cinsinden de sunulur. Tüm kullanıcı metinleri İngilizce.
 """
@@ -101,6 +121,11 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
         'source': ('Wylie & Streeter, "Fluid Transients" (1978); White, '
                    '"Fluid Mechanics" 7th ed. Table A.3: K ~= 2.19 GPa, '
                    'a ~= 1481 m/s, rho ~= 998 kg/m3 at 20 C. Well established.'),
+        'vapor_pressure_Pa': 2339.0,
+        'vapor_pressure_ref_K': 293.15,
+        'vapor_pressure_source': ('NIST/IAPWS saturation pressure of water at '
+                                  '293.15 K = 2.339 kPa (White, "Fluid '
+                                  'Mechanics" 7th ed. Table A.5).'),
     },
     'n2o': {
         'name': 'Liquid nitrous oxide (~293 K, near saturation)',
@@ -116,6 +141,17 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
                    'saturated-liquid table at 293 K). Highly compressible and '
                    'self-pressurizing near saturation -> large uncertainty; '
                    'verify for the actual tank state.'),
+        # 293.15 K doygunluk basıncı: deponun KENDİ tank_blowdown._SAT_TABLE
+        # kaydından (291 K: 4.8106 MPa, 294 K: 5.1507 MPa) doğrusal
+        # interpolasyonla 5.054 MPa. Tablo CoolProp/Span-Wagner kaynaklıdır.
+        'vapor_pressure_Pa': 5.054e6,
+        'vapor_pressure_ref_K': 293.15,
+        'vapor_pressure_source': ('Saturation pressure of N2O at 293.15 K '
+                                  '(~50.5 bar), interpolated from the repo '
+                                  'tank_blowdown saturated table (CoolProp / '
+                                  'Span-Wagner). A self-pressurizing N2O feed '
+                                  'line sits essentially AT its vapor '
+                                  'pressure -> any downsurge flashes.'),
     },
     'rp1': {
         'name': 'RP-1 kerosene (~290 K)',
@@ -127,6 +163,14 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
                    'sound data (a ~= 1250-1350 m/s, rho ~= 800-820 kg/m3); '
                    'NASA/NIST RP-1 property surveys. Batch- and temperature-'
                    'dependent -> verify for the actual propellant lot.'),
+        'vapor_pressure_Pa': 700.0,
+        'vapor_pressure_ref_K': 290.0,
+        'vapor_pressure_source': ('APPROXIMATE: RP-1 is a low-volatility '
+                                  'kerosene cut; its vapor pressure near 290 K '
+                                  'is of order 0.3-1 kPa (kerosene-class '
+                                  'data, MIL-DTL-25576 volatility limits). '
+                                  'Batch-dependent -> supply '
+                                  'vapor_pressure_Pa for the actual lot.'),
     },
     'lox': {
         'name': 'Liquid oxygen (~90 K, normal boiling point)',
@@ -138,8 +182,22 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
                    'sound (a ~= 900 m/s) and density (rho ~= 1141 kg/m3) near '
                    'the normal boiling point; strongly temperature/pressure '
                    'dependent -> verify for the actual feed conditions.'),
+        'vapor_pressure_Pa': 101325.0,
+        'vapor_pressure_ref_K': 90.19,
+        'vapor_pressure_source': ('By definition of the normal boiling point: '
+                                  'LOX at 90.19 K sits at 1 atm saturation '
+                                  '(NIST). Sub-cooled feeds tolerate a deeper '
+                                  'downsurge -> supply vapor_pressure_Pa for '
+                                  'the actual feed temperature.'),
     },
 }
+
+# Kolon ayrılması sonrası birleşme darbesi çarpanı (Joukowsky'ye göre).
+# Bergant, Simpson & Tijsseling (2006) derlemesinde birleşme darbesinin
+# Joukowsky değerini aştığı, pratikte ~2 katına kadar çıkabildiği belgelenmiş.
+# Bu bir MERTEBE kestirimidir ('approximate'), karakteristikler yöntemiyle
+# yapılmış bir çözüm değildir; fail-closed olsun diye kullanılır.
+COLUMN_SEPARATION_PEAK_FACTOR = 2.0
 
 # Paslanmaz (ss_304) varsayılan boru malzemesi: malzeme verilmediğinde veya
 # çözülemediğinde bu kullanılır (görev şartı: "yoksa paslanmaz varsayılan").
@@ -276,7 +334,8 @@ class WaterHammerAnalyzer:
                 pipe_mawp_bar: Optional[float] = None,
                 bulk_modulus_Pa: Optional[float] = None,
                 density_kg_m3: Optional[float] = None,
-                delta_v_m_s: Optional[float] = None) -> Dict:
+                delta_v_m_s: Optional[float] = None,
+                vapor_pressure_Pa: Optional[float] = None) -> Dict:
         """Su koçu analizi.
 
         Args:
@@ -302,6 +361,11 @@ class WaterHammerAnalyzer:
             bulk_modulus_Pa, density_kg_m3: Sıvı özelliklerini override eder.
             delta_v_m_s: Kapanmadaki hız değişimi [m/s]; None -> tam kapanma
                 (dv = akış hızı).
+            vapor_pressure_Pa: Sıvının çalışma sıcaklığındaki buhar
+                (doygunluk) basıncı [Pa] — aşağı salınım/kolon ayrılması
+                kontrolü için. None -> FLUID_PROPERTIES tablosundaki anma
+                değeri. Özel sıvıda verilmezse kontrol yapılamaz ve bu
+                açıkça uyarı olarak bildirilir (sessiz 'SAFE' verilmez).
 
         Returns:
             Sözlük: wave_speed_m_s, critical_closure_time_ms,
@@ -325,6 +389,9 @@ class WaterHammerAnalyzer:
                 'density_kg_m3': float(density_kg_m3),
                 'confidence': 'user',
                 'source': 'User-supplied bulk modulus and density (override).',
+                'vapor_pressure_Pa': None,
+                'vapor_pressure_ref_K': None,
+                'vapor_pressure_source': None,
             }
         else:
             if fluid_key not in FLUID_PROPERTIES:
@@ -441,6 +508,68 @@ class WaterHammerAnalyzer:
 
         peak_pressure = p_work + dp_applied  # Pa
 
+        # ------------------------------------------------------------------
+        # AŞAĞI SALINIM + KOLON AYRILMASI (F030, 2026-07-25 fizik denetimi).
+        #
+        # Joukowsky darbesi simetriktir: vanada +dP kadar yukarı salınımdan
+        # sonra dalga rezervuardan yansıyıp döndüğünde aynı büyüklükte AŞAĞI
+        # salınım oluşur (Wylie & Streeter, "Fluid Transients" (1978), Böl. 1
+        # dalga diyagramı). Aşağı salınım sıvının buhar basıncının altına
+        # inerse sıvı sütunu kopar; boşluk çöküp sütunlar birleştiğinde oluşan
+        # darbe Joukowsky değerini ~2 kata kadar aşabilir (Wylie & Streeter
+        # Böl. 9; Bergant, Simpson & Tijsseling, J. Fluids and Structures 22
+        # (2006) 135-171). Eskiden bu kontrol HİÇ yoktu: N2O 50 bar / 10 m/s
+        # hattında aşağı salınım 11.7 bar iken N2O'nun 293 K buhar basıncı
+        # ~50.5 bar olmasına rağmen 'SAFE' dönüyordu; LOX 30 bar / 8 m/s'de
+        # aşağı salınım -46.7 bar (NEGATİF MUTLAK BASINÇ) ve uyarı listesi
+        # tamamen boştu.
+        # ------------------------------------------------------------------
+        if vapor_pressure_Pa is not None:
+            if not (isinstance(vapor_pressure_Pa, (int, float))
+                    and math.isfinite(vapor_pressure_Pa)
+                    and vapor_pressure_Pa >= 0.0):
+                raise ValueError(
+                    "vapor_pressure_Pa must be a non-negative finite pressure "
+                    f"(got {vapor_pressure_Pa!r}).")
+            p_vap = float(vapor_pressure_Pa)
+            p_vap_source = 'user_supplied'
+        else:
+            p_vap = fluid_rec.get('vapor_pressure_Pa')
+            p_vap_source = ('fluid_table' if p_vap is not None
+                            else 'unavailable')
+
+        p_downsurge = p_work - dp_applied      # Pa (mutlak)
+        column_separation: Optional[bool] = None
+        rejoin_peak = None
+        if p_vap is None:
+            warnings.append(
+                "Fluid vapor pressure is unknown (custom fluid) — the "
+                "downsurge cannot be checked against column separation. The "
+                "Joukowsky peak below is NOT guaranteed to be the upper "
+                "bound; supply vapor_pressure_Pa.")
+        else:
+            column_separation = p_downsurge < p_vap
+            if column_separation:
+                rejoin_peak = (p_work
+                               + COLUMN_SEPARATION_PEAK_FACTOR * dp_applied)
+                if p_downsurge <= 0.0:
+                    warnings.append(
+                        f"Downsurge reaches {p_downsurge / 1e5:.2f} bar "
+                        "absolute — a negative absolute pressure is "
+                        "unphysical, so the liquid column WILL rupture "
+                        "(full vapour cavity at the valve).")
+                warnings.append(
+                    f"COLUMN SEPARATION predicted: the reflected downsurge "
+                    f"({p_downsurge / 1e5:.2f} bar) falls below the fluid "
+                    f"vapour pressure ({p_vap / 1e5:.3f} bar at "
+                    f"{fluid_rec.get('vapor_pressure_ref_K')} K). The liquid "
+                    "column ruptures and the rejoining shock can exceed the "
+                    f"Joukowsky rise — an estimated "
+                    f"{COLUMN_SEPARATION_PEAK_FACTOR:g}x gives "
+                    f"{rejoin_peak / 1e5:.1f} bar. The Joukowsky peak is NOT "
+                    "an upper bound here (Wylie & Streeter Ch. 9; Bergant et "
+                    "al. 2006); slow the valve or raise the line pressure.")
+
         # --- boru basınç sınıfı: ince-cidar hoop (yerel; İTHAL yok) ---
         # sigma = P*r_i/t  ->  P = sigma*t/r_i  (Shigley Bölüm 3, Barlow)
         p_yield = sigma_y * t_wall / r_i          # akma başlangıcı basıncı
@@ -471,9 +600,15 @@ class WaterHammerAnalyzer:
                 "operation.")
 
         # --- emniyet durumu ---
-        if peak_pressure <= p_mawp:
+        # Hüküm, kolon ayrılması öngörüldüğünde TAHMİNİ BİRLEŞME TEPESİ
+        # üzerinden verilir (fail-closed): Joukowsky değeri o rejimde üst
+        # sınır değildir. peak_pressure_bar alanı Joukowsky tepesi olarak
+        # KORUNUR (geriye dönük sözleşme); hüküm ayrı alanla raporlanır.
+        p_design = peak_pressure if rejoin_peak is None else max(peak_pressure,
+                                                                 rejoin_peak)
+        if p_design <= p_mawp:
             status = self.STATUS_SAFE
-        elif peak_pressure <= p_yield:
+        elif p_design <= p_yield:
             status = self.STATUS_MARGINAL
             warnings.append(
                 "Peak transient pressure exceeds the rated MAWP but stays "
@@ -484,6 +619,16 @@ class WaterHammerAnalyzer:
             warnings.append(
                 "Peak transient pressure exceeds the hoop yield pressure — "
                 "risk of permanent deformation or rupture.")
+
+        # Malzeme varsayıldıysa 'SAFE' hükmü verilemez (fail-closed): basınç
+        # sınıfı tahmin edilen bir malzemenin dayanımından türetilmiştir.
+        if resolved_material != pipe_material and status == self.STATUS_SAFE:
+            status = self.STATUS_MARGINAL
+            warnings.append(
+                "Safety verdict downgraded to MARGINAL: the pipe pressure "
+                "rating is derived from an ASSUMED material "
+                f"('{DEFAULT_PIPE_MATERIAL}'), not the one requested — supply "
+                "a known pipe_material or pipe_mawp_bar to certify SAFE.")
 
         # --- kapanma süresi önerisi ---
         recommendation, recommended_close_ms = self._closure_recommendation(
@@ -512,6 +657,22 @@ class WaterHammerAnalyzer:
             'working_pressure_bar': float(p_work / 1e5),
             'peak_pressure_Pa': float(peak_pressure),
             'peak_pressure_bar': float(peak_pressure / 1e5),
+            # --- aşağı salınım / kolon ayrılması (F030) ---
+            'downsurge_pressure_Pa': float(p_downsurge),
+            'downsurge_pressure_bar': float(p_downsurge / 1e5),
+            'vapor_pressure_Pa': (None if p_vap is None else float(p_vap)),
+            'vapor_pressure_bar': (None if p_vap is None
+                                   else float(p_vap / 1e5)),
+            'vapor_pressure_source': p_vap_source,
+            'vapor_pressure_ref_K': fluid_rec.get('vapor_pressure_ref_K'),
+            'column_separation': column_separation,
+            'column_separation_peak_factor': (
+                None if rejoin_peak is None else COLUMN_SEPARATION_PEAK_FACTOR),
+            'column_separation_peak_bar': (None if rejoin_peak is None
+                                           else float(rejoin_peak / 1e5)),
+            # Emniyet hükmünün dayandığı basınç: kolon ayrılması yoksa
+            # Joukowsky tepesi, varsa tahmini birleşme tepesi (fail-closed).
+            'design_peak_pressure_bar': float(p_design / 1e5),
             'pipe': {
                 'material': resolved_material,
                 'material_name': mat.get('name', resolved_material),
@@ -556,8 +717,11 @@ class WaterHammerAnalyzer:
             },
             'assumptions': [
                 "Lumped Joukowsky/Allievi model; not a method-of-"
-                "characteristics solution (no line friction, no cavitation, "
-                "single pipe, rigid upstream reservoir).",
+                "characteristics solution (no line friction, single pipe, "
+                "rigid upstream reservoir). Cavitation is not simulated, but "
+                "the reflected downsurge p_work - dP is checked against the "
+                "fluid vapour pressure and column separation is flagged "
+                "(Wylie & Streeter Ch. 9; Bergant et al. 2006).",
                 "Elastic-pipe wave speed a = sqrt(K/rho)/sqrt(1+K*D/(E*t)) "
                 "with restraint factor c1 = 1 (Wylie & Streeter Eq. 1-10).",
                 "Slow-closure reduction is the first-order linear (Michaud) "

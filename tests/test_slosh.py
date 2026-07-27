@@ -142,15 +142,47 @@ class TestBaffleDamping:
         assert wide['damping_ratio'] > narrow['damping_ratio']
 
     def test_damping_hand_calc(self):
-        """Miles Eq. 4: 2.83*exp(-4.60*d)*A^1.5, A=1-(1-w)^2."""
+        """Miles Eq. 4: 2.83*exp(-4.60*d)*A^1.5*sqrt(eta/R), A=1-(1-w)^2."""
         m = CylindricalTankSlosh(**REF)
-        w, d = 0.2, 0.1
+        w, d, eta = 0.2, 0.1, 0.05
         area = 1.0 - (1.0 - w) ** 2
-        expected = 2.83 * math.exp(-4.60 * d) * area ** 1.5
-        res = m.baffle_damping(width_ratio=w, depth_ratio=d)
+        expected = 2.83 * math.exp(-4.60 * d) * area ** 1.5 * math.sqrt(eta)
+        res = m.baffle_damping(width_ratio=w, depth_ratio=d, amplitude_ratio=eta)
         assert res['damping_ratio'] == pytest.approx(expected, rel=1e-9)
         assert res['blocked_area_ratio'] == pytest.approx(area, rel=1e-12)
+        assert res['amplitude_ratio'] == pytest.approx(eta)
         assert res['confidence'] == 'approximate'
+
+    def test_amplitude_factor_present(self):
+        """sqrt(eta/R) terimi atlanırsa yakalansın — v2.6.2 regresyon bekçisi.
+
+        Terim eksikken kod örtük olarak eta/R = 1 (dalga genligi = tank
+        yaricapi) varsayiyordu; bu, modulun ilan ettigi dogrusal kucuk-genlik
+        teorisiyle celisir ve sonumlemeyi HER ZAMAN fazla tahmin ediyordu.
+        Slosh kararliliginda fazla sonumleme KONSERVATIF DEGILDIR.
+        """
+        m = CylindricalTankSlosh(**REF)
+        lo = m.baffle_damping(0.2, 0.1, amplitude_ratio=0.01)['damping_ratio']
+        hi = m.baffle_damping(0.2, 0.1, amplitude_ratio=0.04)['damping_ratio']
+        # 4x genlik -> 2x sonumleme (karekok bagimliligi)
+        assert hi / lo == pytest.approx(2.0, rel=1e-9)
+
+    def test_single_baffle_damping_physically_plausible(self):
+        """Tek halka bafl sonumlemesi olculen banda (~%1-10) dusmeli.
+
+        Genlik terimi eksikken w/R=0.2, d/R=0.1 icin %38.6 cikiyordu.
+        """
+        m = CylindricalTankSlosh(**REF)
+        z = m.baffle_damping(0.2, 0.1)['damping_ratio']
+        assert 0.005 <= z <= 0.15, f'tek bafl icin {z:.3f} fiziksel degil'
+
+    def test_amplitude_envelope_flagged(self):
+        """Dogrusal teori zarfi disindaki genlik isaretlenmeli."""
+        m = CylindricalTankSlosh(**REF)
+        assert m.baffle_damping(0.2, 0.1, amplitude_ratio=0.05).get(
+            'amplitude_out_of_envelope') is None
+        assert m.baffle_damping(0.2, 0.1, amplitude_ratio=0.9).get(
+            'amplitude_out_of_envelope') is True
 
     def test_damping_band_brackets_nominal(self):
         m = CylindricalTankSlosh(**REF)
@@ -165,6 +197,28 @@ class TestBaffleDamping:
         check = m.baffle_damping(rec['recommended_width_ratio'], depth)
         assert check['damping_ratio'] == pytest.approx(target, rel=1e-6)
         assert rec['achievable_with_single_baffle']
+
+    def test_recommend_baffle_round_trips_at_any_amplitude(self):
+        """Oneri ile degerlendirme AYNI genlikte tutarli olmali.
+
+        Genlik terimi yalnizca birinde bulunursa oneri sessizce dar cikar
+        (eta/R=0.05'te ~2.8x). Bu test iki yonu birbirine kilitler.
+        """
+        m = CylindricalTankSlosh(**REF)
+        for eta in (0.01, 0.05, 0.1):
+            rec = m.recommend_baffle(target_damping=0.02, depth_ratio=0.05,
+                                     amplitude_ratio=eta)
+            back = m.baffle_damping(rec['recommended_width_ratio'], 0.05,
+                                    amplitude_ratio=eta)
+            assert back['damping_ratio'] == pytest.approx(0.02, rel=1e-6)
+            assert rec['amplitude_ratio'] == pytest.approx(eta)
+
+    def test_smaller_amplitude_needs_wider_baffle(self):
+        """Kucuk genlikte ayni sonumleme icin DAHA GENIS bafl gerekir."""
+        m = CylindricalTankSlosh(**REF)
+        wide = m.recommend_baffle(0.02, 0.05, amplitude_ratio=0.01)
+        narrow = m.recommend_baffle(0.02, 0.05, amplitude_ratio=0.10)
+        assert wide['recommended_width_ratio'] > narrow['recommended_width_ratio']
 
 
 class TestFrequencyCoincidence:

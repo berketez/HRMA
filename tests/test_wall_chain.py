@@ -139,7 +139,9 @@ class TestTwoSafetyFactorReport:
         sa = res['safety_analysis']
         assert sa['thermal_margin_ratio'] > 0.85
         assert sa['status'] in ('MARGINAL', 'UNSAFE')
-        assert any('service limit' in r for r in sa['recommendations'])
+        # D-track: öneriler artık {code,params,severity}; metin frontend'de.
+        assert any(r['code'] == 'warn.structural.thermal_margin_service_limit'
+                   for r in sa['recommendations'])
 
     def test_safe_motor_has_empty_explanation(self, struct):
         """UNSAFE olmayan durumda açıklama alanı boş kalır."""

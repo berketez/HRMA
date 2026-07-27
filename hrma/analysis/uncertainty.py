@@ -34,12 +34,13 @@ Duyarlilik:
 Yeni pip bagimliligi YOKTUR (numpy + scipy; ikisi de kurulu ve pinli).
 """
 
+import math
 import time
 import warnings
 from dataclasses import dataclass, asdict
 
 import numpy as np
-from scipy.stats import spearmanr, truncnorm
+from scipy.stats import norm, spearmanr, truncnorm
 
 try:  # savunmaci fallback (spec 5.1); bundle'da scipy zaten sart
     from scipy.stats import qmc as _qmc
@@ -68,12 +69,26 @@ LEVEL_BUDGETS = {
 NOMINAL_RTOL = 1e-9
 # Patlayan ornek uyari esigi (task: 5 ustuyse sonucta uyari)
 FAILED_SAMPLE_WARN_THRESHOLD = 5
+# Patlayan ornek ORAN esigi (%). 2026-07-25 fizik denetimi (F084): sabit "5
+# ornek" esigi kaynaksiz bir sihirli sayidir ve n ile olceklenmez — n=3000'de
+# 5 basarisizlik onemsiz, n=50'de dagilimi bozar. Oran tabanli esik eklendi;
+# AYRICA her basarisizlikta (esik altinda bile) 'failure_diagnostics' bloku
+# uretilir, cunku basarisiz ornekler girdi uzayinda rastgele DEGIL tipik
+# olarak tek kuyrukta kumelenir (MNAR; Little & Rubin, "Statistical Analysis
+# with Missing Data", 3. baski, Bol. 1-2) ve tam-vaka analizi yanlidir.
+FAILED_SAMPLE_WARN_RATE_PERCENT = 1.0
 # Histogram kutu sayisi (Berke onayli cekirdek sozlesmesi: 20 kutu)
 HISTOGRAM_BINS = 20
+# Duyarlilik gurultu tabani icin coklu-kiyas alfasi (Sidak duzeltmesi).
+SENSITIVITY_ALPHA = 0.05
 
 _SENSITIVITY_METHOD_NOTE = (
     'Spearman rank correlation on the MC sample; captures monotonic '
-    'effects only (non-monotonic interactions are not resolved).'
+    'effects only (non-monotonic interactions are not resolved). '
+    'Latin Hypercube guarantees marginal stratification but not zero '
+    'between-column sample correlation, so |rho| below the reported '
+    'noise_floor (Sidak-corrected, ~z/sqrt(n-1)) is indistinguishable from '
+    'zero and is flagged significant=false.'
 )
 
 
@@ -95,6 +110,18 @@ class UncertainInput:
         low/high: fiziksel kirpma sinirlari (truncnorm) / uniform araligi.
         applies_to: hangi motor girdisini etkiledigi (dokumantasyon).
         source_note: literatur kunyesi (Ingilizce; API yanitinda yankilanir).
+        nominal_override: Ornek #0'da kullanilacak deger (None ise mode'un
+            dogal nominali). VARLIK SEBEBI (2026-07-25 fizik denetimi F029):
+            spec 7.3 nominal koşusunun DETERMINISTIK yolla (ana sayfa
+            /calculate*) BIREBIR ayni girdiyi gormesini sart kosar. 'absolute'
+            modda nominal = mean'dir; ama deterministik yol o parametreyi hic
+            uygulamiyorsa (or. eta_c_star: /calculate teorik c* raporlar) UQ
+            nominali ana sayfadan sapar ve hicbir kontrol bunu yakalamaz —
+            1e-9'luk tutarlilik kapisi fabrikayi KENDISIYLE karsilastirdigi
+            icin bu asimetrinin disindadir. nominal_override ile nominal,
+            deterministik yolun ornik degerine sabitlenir; dagilimin kendisi
+            (mean/sigma) DEGISMEZ, dolayisiyla ortalama kaymasi
+            'mean_shift_percent' alaninda GORUNUR kalir (bastirilmaz).
     """
 
     name: str
@@ -106,6 +133,7 @@ class UncertainInput:
     high: float = 1.0
     applies_to: str = ''
     source_note: str = ''
+    nominal_override: float = None
 
     def __post_init__(self):
         if self.dist not in ('truncnorm', 'uniform'):
@@ -125,6 +153,8 @@ class UncertainInput:
 
     def nominal_value(self):
         """Ornek #0'da kullanilacak nominal deger (spec 7.3)."""
+        if self.nominal_override is not None:
+            return float(self.nominal_override)
         if self.mode == 'multiplier':
             return 1.0
         if self.mode == 'offset':
@@ -185,14 +215,27 @@ DEFAULT_UQ_MODELS = {
                 'literature fits (Zilliac & Karabeyoglu, AIAA 2006-4504, '
                 'Table 2 fits). Kept narrow and independent of lambda_r by '
                 'approved design (a-n correlation note above).')),
+        # nominal_override=1.0: ana sayfa /calculate rotasi eta_c_star'i HIC
+        # gecmiyor (HybridRocketEngine varsayilani None -> teorik c*). Nominal
+        # 0.93 birakildiginda UQ paneli Isp=214.2 s, ana sayfa 230.3 s
+        # gosteriyordu — TAM -%7.00 sessiz sapma (2026-07-25 fizik denetimi
+        # F029, olculdu). eta_c*'in TANIMI dogru (Sutton & Biblarz 9. baski
+        # Denk. 3-31: c*_teslim = eta_c* * c*_teorik); hata iki yolun
+        # asimetrik uygulamasiydi. Dagilim aynen korundu: MC ortalamasi hala
+        # ~0.93'te ve fark 'mean_shift_percent' ile GORUNUR raporlanir.
         'eta_c_star': UncertainInput(
             name='eta_c_star', dist='truncnorm', mode='absolute',
             mean=0.93, sigma=0.03, low=0.80, high=1.00,
+            nominal_override=1.0,
             applies_to='HybridRocketEngine(eta_c_star=...) delivered c*',
             source_note=(
                 'Mixing-limited combustion efficiency 0.85-0.95 typical for '
                 'hybrids; 0.92-0.99 for liquids (Sutton & Biblarz, Rocket '
-                'Propulsion Elements 9th ed., Ch. 5 and 16).')),
+                'Propulsion Elements 9th ed., Ch. 5 and 16). Nominal is '
+                'pinned to 1.0 (theoretical c*) so that the UQ nominal '
+                'matches the deterministic /calculate result; the '
+                'distribution mean (0.93) therefore appears as a negative '
+                'mean_shift_percent instead of a silent nominal offset.')),
         'cd_injector': UncertainInput(
             name='cd_injector', dist='truncnorm', mode='absolute',
             mean=0.70, sigma=0.05, low=0.5, high=0.9,
@@ -248,14 +291,20 @@ DEFAULT_UQ_MODELS = {
             source_note='Composition tolerance (NASA SP-8064, 1971).'),
     },
     'liquid': {
+        # nominal_override=1.0 — hibritteki ile ayni gerekce (F029). Sivi
+        # tarafta olculen sapma -%4.00'ti (Isp 287.1 vs 299.1 s). Cift sayim
+        # yok: liquid_rocket_engine.DELIVERED_ETA_CSTAR_DEFAULT = 1.0.
         'eta_c_star': UncertainInput(
             name='eta_c_star', dist='truncnorm', mode='absolute',
             mean=0.96, sigma=0.02, low=0.88, high=1.00,
+            nominal_override=1.0,
             applies_to='combustion (c*) efficiency',
             source_note=(
                 'Well-designed liquid injectors deliver 0.92-0.99 c* '
                 'efficiency (Sutton & Biblarz, Rocket Propulsion Elements '
-                '9th ed.).')),
+                '9th ed.). Nominal is pinned to 1.0 so that the UQ nominal '
+                'matches the deterministic /calculate_liquid result; the '
+                'distribution mean (0.96) shows up as mean_shift_percent.')),
         'mixture_ratio': UncertainInput(
             name='mixture_ratio', dist='truncnorm', mode='multiplier',
             mean=1.0, sigma=0.02, low=0.9, high=1.1,
@@ -347,12 +396,25 @@ def sample_inputs(distributions, n_samples, seed=42, sampler='lhs',
         sampler: 'lhs' (varsayilan; ayni N'de kestirim varyansi plain MC'den
             dusuk) | 'mc' (plain Monte Carlo; bootstrap/istatistik testleri
             icin korunur).
-        nominal_first: True ise 0. satir nominal vektore SABITLENIR
-            (spec 7.3 — deterministik tutarlilik garantisinin on kosulu).
-            Tabakalama testleri icin False verilebilir.
+        nominal_first: True ise nominal vektor LHS matrisinin ONUNE EK SATIR
+            olarak eklenir (donen matris (N+1) x d olur; 0. satir nominal,
+            1..N satirlari tam bir N-tabakali LHS'tir). Tabakalama testleri
+            icin False verilebilir.
 
     Returns:
-        (X, names): X (N x d) float matrisi, names sutun adlari listesi.
+        (X, names): X ((N+1) x d, nominal_first=True) veya (N x d) float
+        matrisi, names sutun adlari listesi.
+
+    Not (2026-07-25 fizik denetimi F192): 2026-07-25 oncesinde nominal vektor
+    LHS matrisinin 0. satirinin UZERINE yaziliyordu. LHS'in tanimi geregi her
+    boyut N tabakaya bolunur ve HER tabakadan tam bir ornek alinir (McKay,
+    Beckman & Conover, Technometrics 21(2), 1979); uzerine yazma o tabakayi
+    bosaltip merkez bolgeyi ikinci kez doldurdugu icin ornek artik kesin LHS
+    DEGILDI. Olculen bozulma (hibrit regression_lambda sutunu, seed=7,
+    N=200): sutun ortalamasi 1.000143 -> 0.999165, std 0.145630 -> 0.144970
+    (dagilim nominale dogru cekiliyor ve hafifce daraliyor). Nominal artik EK
+    satirdir: hem spec 7.3 determinizm kapisi korunur hem de istatistige giren
+    N ornek bozulmamis LHS'tir (kosucu 0. satiri istatistige katmaz).
     """
     names = list(distributions.keys())
     d = len(names)
@@ -374,8 +436,10 @@ def sample_inputs(distributions, n_samples, seed=42, sampler='lhs',
     for j, name in enumerate(names):
         X[:, j] = distributions[name].ppf(u[:, j])
     if nominal_first:
-        for j, name in enumerate(names):
-            X[0, j] = distributions[name].nominal_value()
+        nominal_row = np.array(
+            [distributions[name].nominal_value() for name in names],
+            dtype=float).reshape(1, d)
+        X = np.vstack([nominal_row, X])  # tabakalama bozulmadan basa eklenir
     return X, names
 
 
@@ -415,15 +479,51 @@ def _stats_block(values, nominal):
     }
 
 
-def spearman_sensitivity(X, y, names):
+def sensitivity_noise_floor(n, d, alpha=SENSITIVITY_ALPHA):
+    """Sifir-etki altinda beklenen |Spearman rho| gurultu tabani.
+
+    Sifir gercek korelasyon altinda ornek Spearman katsayisi yaklasik
+    N(0, 1/(n-1)) dagilir (buyuk n; Kendall & Stuart, "The Advanced Theory of
+    Statistics", sira korelasyonunun sifir hipotezi altindaki varyansi). d
+    parametre AYNI ANDA sinandigi icin coklu-kiyas duzeltmesi gerekir; Sidak:
+    alpha_eff = 1 - (1-alpha)^(1/d).
+
+    Neden gerekli (2026-07-25 fizik denetimi F083): LHS yalniz MARJINAL
+    tabakalamayi garantiler, sutunlar arasi ornek korelasyonunu sifirlamaz
+    (Iman & Conover, Communications in Statistics B11(3), 1982). Olculdu
+    (d=6, 60 tohum): N=200'de sutunlar arasi |r| ortalama 0.145, maks 0.246;
+    modele HIC girmeyen bir parametre N=200'de rutin olarak |rho| ~0.10-0.20
+    "duyarlilik" gosteriyordu ve siralamada gercek ama zayif bir parametrenin
+    USTUNE cikabiliyordu. Bu tabanin altindaki rho'lar 'significant=False'
+    ile ayirt-edilemez isaretlenir (deger yine de raporlanir — gizlenmez).
+    """
+    n = int(n)
+    d = max(int(d), 1)
+    if n < 4:
+        return 1.0
+    alpha_eff = 1.0 - (1.0 - float(alpha)) ** (1.0 / d)
+    z = float(norm.ppf(1.0 - alpha_eff / 2.0))
+    return float(min(1.0, z / math.sqrt(n - 1)))
+
+
+def spearman_sensitivity(X, y, names, noise_floor=None):
     """Girdi sutunlari ile cikti vektoru arasinda Spearman siralamasi.
 
+    Args:
+        X, y, names: ornek matrisi, cikti vektoru, sutun adlari.
+        noise_floor: |rho| ayirt-edilebilirlik esigi. None ise
+            ``sensitivity_noise_floor(len(y), len(names))`` kullanilir.
+
     Returns:
-        |rho| azalan sirali [{'param': ad, 'spearman': rho}] listesi.
-        Sabit sutun/cikti icin rho = 0.0 (spearmanr NaN dondurur; temizlenir).
+        |rho| azalan sirali [{'param', 'spearman', 'noise_floor',
+        'significant'}] listesi. Sabit sutun/cikti icin rho = 0.0
+        (spearmanr NaN dondurur; temizlenir).
     """
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float)
+    if noise_floor is None:
+        noise_floor = sensitivity_noise_floor(len(y), len(names))
+    noise_floor = float(noise_floor)
     out = []
     y_const = np.std(y) == 0.0
     for j, name in enumerate(names):
@@ -438,7 +538,9 @@ def spearman_sensitivity(X, y, names):
                                                           np.nan)))
         if not np.isfinite(rho):
             rho = 0.0
-        out.append({'param': name, 'spearman': rho})
+        out.append({'param': name, 'spearman': rho,
+                    'noise_floor': noise_floor,
+                    'significant': bool(abs(rho) > noise_floor)})
     out.sort(key=lambda r: abs(r['spearman']), reverse=True)
     return out
 
@@ -554,19 +656,21 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
             'consistency': {'nominal_check': 'failed'},
         }
 
-    # 2) Ornek matrisi (satir 0 = nominal vektor)
+    # 2) Ornek matrisi: satir 0 = nominal REFERANS PROBU (istatistige girmez),
+    #    satir 1..N = bozulmamis N-tabakali LHS (F192; sample_inputs notu).
     X, names = sample_inputs(distributions, n_samples, seed=seed,
                              sampler=sampler, nominal_first=True)
-    n = X.shape[0]
+    n_eval = X.shape[0]        # nominal prob dahil degerlendirme sayisi
+    n = n_eval - 1             # istatistige giren ornek sayisi
 
     # 3) MC dongusu (tek thread — spec 6.3: multiprocessing bilincli dislandi)
     collected = {key: [] for key in output_keys}
     kept_rows = []
     failed = []
-    progress_step = max(1, n // 50)
+    progress_step = max(1, n_eval // 50)
     loop_t0 = time.perf_counter()
 
-    for i in range(n):
+    for i in range(n_eval):
         sample = {name: float(X[i, j]) for j, name in enumerate(names)}
         try:
             result = engine_factory(sample)
@@ -595,6 +699,14 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
                 return _diverged_result(
                     f'UQ path diverged from deterministic path ({detail})',
                     seed, sampler, n, output_keys, nominal_outputs)
+            # Nominal prob istatistige GIRMEZ (F192): tabakalanmis LHS
+            # ornegini nominale dogru cekmemesi icin yalniz kapi gorevi gorur.
+            if progress_callback is not None:
+                try:
+                    progress_callback(1, n_eval)
+                except Exception:
+                    pass
+            continue
 
         kept_rows.append(i)
         for key in output_keys:
@@ -602,7 +714,7 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
 
         if progress_callback is not None and (i + 1) % progress_step == 0:
             try:
-                progress_callback(i + 1, n)
+                progress_callback(i + 1, n_eval)
             except Exception:
                 pass  # ilerleme raporu hesabi dusurmesin
 
@@ -614,6 +726,7 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
 
     # 4) Istatistik + duyarlilik
     X_ok = X[kept_rows, :]
+    noise_floor = sensitivity_noise_floor(n_ok, len(names))
     outputs_stats = {}
     sensitivity = {}
     mean_shift = {}
@@ -622,14 +735,17 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
         outputs_stats[key] = block
         mean_shift[key] = block.get('mean_shift_percent', 0.0)
         sensitivity[key] = spearman_sensitivity(
-            X_ok, np.asarray(collected[key]), names)
+            X_ok, np.asarray(collected[key]), names, noise_floor=noise_floor)
     sensitivity['method_note'] = _SENSITIVITY_METHOD_NOTE
+    sensitivity['noise_floor'] = noise_floor
 
     wall_s = time.perf_counter() - t0
     result = {
         'status': 'success',
         'uq_version': UQ_VERSION,
-        'n_samples': n,
+        'n_samples': n,               # istatistige giren ornek sayisi
+        'n_evaluations': n_eval,      # + nominal referans probu
+        'n_effective': n_ok,          # basarisizlar dusuldukten sonra (F084)
         'failed_samples': len(failed),
         'n_failed_runs': len(failed),  # spec 7.2 sozlesme adi (es deger)
         'failed_detail': failed[:10],  # ilk 10 hata (yanit sismesin)
@@ -650,15 +766,68 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
         },
         'timing': {
             'wall_s': wall_s,
-            'per_sample_ms': loop_wall / n * 1000.0,
+            'per_sample_ms': loop_wall / n_eval * 1000.0,
         },
     }
-    if len(failed) > FAILED_SAMPLE_WARN_THRESHOLD:
-        result['warning'] = (
-            f"{len(failed)} / {n} ornek basarisiz oldu "
-            f"(esik {FAILED_SAMPLE_WARN_THRESHOLD}); dagilim istatistikleri "
-            "yanli olabilir — basarisiz bolge dagilimdan dislandi.")
+    if failed:
+        result['failure_diagnostics'] = _failure_diagnostics(
+            X, X_ok, names, failed, n)
+        rate = 100.0 * len(failed) / n
+        if (len(failed) > FAILED_SAMPLE_WARN_THRESHOLD
+                or rate > FAILED_SAMPLE_WARN_RATE_PERCENT):
+            result['warning'] = (
+                f"{len(failed)} / {n} ornek basarisiz oldu (%{rate:.1f}; "
+                f"esik %{FAILED_SAMPLE_WARN_RATE_PERCENT:.1f} veya "
+                f"{FAILED_SAMPLE_WARN_THRESHOLD} ornek); dagilim "
+                "istatistikleri yanli olabilir — basarisiz bolge dagilimdan "
+                "dislandi, kuyruk yuzdelikleri (P5/P95) SINIRDIR.")
     return result
+
+
+def _failure_diagnostics(X, X_ok, names, failed, n):
+    """Basarisiz orneklerin girdi uzayindaki konumunu raporlar (F084).
+
+    Neden (2026-07-25 fizik denetimi): patlayan ornekler girdi uzayinda
+    rastgele DEGIL, tipik olarak tek bir kuyrukta kumelenir (yakinsamama,
+    fiziksel olmayan geometri). Bunlari sessizce atmak dagilimi tek yonlu
+    kirpar: ortalama kayar, std ve kuyruk yuzdelikleri DARALIR. Olculdu
+    (yapay model y=100x, yalniz ust kuyruk patliyor, n=1000, %4.8
+    basarisizlik): raporlanan ortalama 98.62 (gercek 100.00), std 13.28
+    (gercek 15.00, -%11.5), P95 119.59 (gercek 124.67, -%4.1) — yani
+    belirsizlik bandi sistematik olarak DAR gosteriliyordu ve hicbir alan
+    bunu bildirmiyordu. Cozum: her parametre icin basarisiz orneklerin
+    ortalamasi ile basarililarin ortalamasi arasindaki standartlastirilmis
+    fark. |shift| buyukse basarisizlik o parametrenin kuyrugunda kumelenmis
+    demektir (MNAR; Little & Rubin 3. baski Bol. 1-2), dolayisiyla dagilim
+    o yonde kirpilmistir.
+    """
+    failed_idx = [f['index'] for f in failed]
+    X_bad = X[failed_idx, :]
+    shifts = []
+    for j, name in enumerate(names):
+        kept_mean = float(np.mean(X_ok[:, j]))
+        kept_std = float(np.std(X_ok[:, j]))
+        bad_mean = float(np.mean(X_bad[:, j]))
+        shift = (bad_mean - kept_mean) / kept_std if kept_std > 0 else 0.0
+        shifts.append({
+            'param': name,
+            'failed_mean': bad_mean,
+            'kept_mean': kept_mean,
+            'standardized_shift': float(shift),
+        })
+    shifts.sort(key=lambda s: abs(s['standardized_shift']), reverse=True)
+    worst = abs(shifts[0]['standardized_shift']) if shifts else 0.0
+    return {
+        'n_failed': len(failed),
+        'failure_rate_percent': 100.0 * len(failed) / n,
+        'input_shift': shifts,
+        'clustered': bool(worst >= 0.5),
+        'note': (
+            'Failed samples are excluded from the statistics. If '
+            '|standardized_shift| is large for a parameter, the failures are '
+            'clustered in that parameter tail, so the reported std and the '
+            'P5/P95 tails are BOUNDS (too narrow), not unbiased estimates.'),
+    }
 
 
 def _diverged_result(message, seed, sampler, n, output_keys, nominal_outputs):

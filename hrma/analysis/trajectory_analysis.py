@@ -21,6 +21,10 @@ DÜZELTME NOTU (2026-06): Eski kod sin/cos'u TERS kullanıyordu
 yöne veriyordu (apogee=0, roket yere paralel gidiyordu). Aşağıdaki kod
 yükseliş açısı konvansiyonunu kullanır: vertical=sin(theta), horiz=cos(theta).
 
+RÜZGAR YÖNÜ: ``wind_direction`` rüzgârın GELDİĞİ yöndür (meteorolojik
+standart, WMO). Hava kütlesi hız vektörü bu yönün tersidir:
+v_hava = −V·(cos φ, sin φ). Kardeş 6-DOF modülü aynı konvansiyonu kullanır.
+
 RÜZGAR: Aerodinamik kuvvetler HAVAYA GÖRE bağıl hızdan hesaplanır.
   v_rel = v_arac - v_ruzgar ;  Drag = -0.5*rho*Cd*A*|v_rel|*v_rel
 İtki ve yerçekimi atalet çerçevesinde etki eder; yalnızca sürükleme
@@ -46,6 +50,36 @@ from hrma.constants import (
 # R_specific_air = 287.053 J/(kg*K) (CRC Handbook; ISO 2533).
 GAMMA_AIR = 1.4
 R_SPECIFIC_AIR = R_STAR_ICAO / M_AIR  # = 8.31432/0.0289644 ≈ 287.05 J/(kg*K)
+
+# --- KURTARMA SİSTEMİ (paraşüt) varsayılanları ---------------------------
+# F080 (v2.6.2): paraşüt alanı eskiden ``_calculate_descent_flight`` içine
+# 2.0 m² olarak SABİT KODLANMIŞTI ve kullanıcı girdisi yoktu; buna rağmen
+# ``landing_velocity`` bir GÜVENLİK metriği olarak raporlanıyordu.
+# ÖLÇÜLDÜ (20 kg kuru araç): raporlanan iniş hızı 10.70 m/s; alan 0.5 m²
+# olsaydı ~21 m/s, 5 m² olsaydı ~6.8 m/s — yani metrik tamamen sabit koda
+# bağlıydı. Artık alan kullanıcı girdisidir; verilmezse aşağıdaki değer
+# AÇIKÇA "varsayım" olarak işaretlenir ve uyarı üretilir (uydurma bir
+# araç-ölçekli tasarım kuralı türetilmez).
+DEFAULT_PARACHUTE_AREA_M2 = 2.0
+
+# Paraşüt sürükleme katsayısı. ALAN KONVANSİYONU: İZDÜŞÜM (projected)
+# alanı S_p. İçi boş yarımküre için Cd_p ≈ 1.42 (Hoerner, "Fluid-Dynamic
+# Drag", 1965, Böl. 3). DİKKAT: Knacke, "Parachute Recovery Systems Design
+# Manual" (1992) tabloları NOMİNAL alan S_0 tabanlıdır ve aynı paraşüt için
+# Cd_0 ≈ 0.62-0.80 verir; iki sayı farklı alan tanımına aittir. Eski kod
+# Cd=1.4'ü Knacke'ye atfediyordu — atıf yanlıştı, sayı (izdüşüm alanıyla
+# kullanıldığı sürece) doğru. Kullanıcı Knacke tabanlı Cd_0 girmek isterse
+# alanı da nominal alan olarak vermelidir.
+DEFAULT_PARACHUTE_CD = 1.4
+
+# Apojeden sonra paraşütün açılmasına kadar geçen gecikme [s] (modelin
+# kendi varsayımı; gerçek sistemde zaman gecikmeli/barometrik ayırma).
+DEFAULT_PARACHUTE_DEPLOY_DELAY_S = 2.0
+
+
+def _mk_warning(code, severity='warning', **params):
+    """Uyarı sözleşmesi: ``{code, params, severity}`` (v2.6.2 D-track)."""
+    return {'code': code, 'params': params, 'severity': severity}
 
 
 def _as_list(values) -> list:
@@ -90,6 +124,45 @@ class TrajectoryAnalyzer:
         # Gerçek Cd Mach sayısına göre _drag_coefficient_mach() ile ölçeklenir.
         self.drag_coefficient = 0.5
         self.vehicle_length = 2.0  # m
+
+        # --- Kurtarma sistemi (F080) ------------------------------------
+        # None = kullanıcı vermedi -> varsayım kullanılır ve işaretlenir.
+        self.parachute_area = None          # m² (izdüşüm alanı)
+        self.parachute_cd = DEFAULT_PARACHUTE_CD
+        self.parachute_deploy_delay = DEFAULT_PARACHUTE_DEPLOY_DELAY_S
+
+        # Bu koşuda üretilen uyarılar ({code, params, severity})
+        self.warnings = []
+
+    def set_recovery_parameters(self, parachute_area: Optional[float] = None,
+                                parachute_cd: Optional[float] = None,
+                                deploy_delay: Optional[float] = None) -> None:
+        """Kurtarma (paraşüt) parametrelerini ayarlar — F080.
+
+        parachute_area: paraşüt İZDÜŞÜM alanı [m²]. None/geçersiz -> varsayım.
+        parachute_cd:   izdüşüm alanı tabanlı Cd (varsayılan 1.4, Hoerner).
+        deploy_delay:   apojeden sonra açılma gecikmesi [s].
+        """
+        if parachute_area is not None:
+            try:
+                a = float(parachute_area)
+            except (TypeError, ValueError):
+                a = float('nan')
+            self.parachute_area = a if np.isfinite(a) and a > 0.0 else None
+        if parachute_cd is not None:
+            try:
+                c = float(parachute_cd)
+            except (TypeError, ValueError):
+                c = float('nan')
+            if np.isfinite(c) and c > 0.0:
+                self.parachute_cd = c
+        if deploy_delay is not None:
+            try:
+                t = float(deploy_delay)
+            except (TypeError, ValueError):
+                t = float('nan')
+            if np.isfinite(t) and t >= 0.0:
+                self.parachute_deploy_delay = t
 
     def set_vehicle_parameters(self, mass_dry: float, diameter: float,
                                drag_coefficient: float = 0.5, length: float = 2.0):
@@ -203,11 +276,28 @@ class TrajectoryAnalyzer:
     def _wind_vector(wind_speed: float, wind_direction_rad: float) -> Tuple[float, float]:
         """Rüzgar hız vektörünü (yatay, dikey) döndürür.
 
-        wind_direction: rüzgarın ESTİĞİ yön; basitleştirilmiş 2B düzlemde
-        +x (downrange) bileşeni cos ile alınır. Dikey rüzgar ihmal (vz_wind=0)
-        çünkü meteorolojik rüzgar yataydır (standart varsayım, McCoy 1999).
+        KONVANSIYON (F082 düzeltmesi, v2.6.2): ``wind_direction`` rüzgârın
+        GELDİĞİ yöndür (meteorolojik standart: "kuzey rüzgârı" = kuzeyden
+        esen). Dolayısıyla hava kütlesinin hız vektörü o yönün TERSİDİR:
+
+            v_hava = −V · (cos φ, sin φ)
+
+        Eski kod ``+V·cos φ`` kullanıyor ve docstring'inde rüzgârın "ESTİĞİ
+        yön" diyordu; kardeş modül ``six_dof_trajectory.__init__`` ise doğru
+        konvansiyonu (``self.wind = −V·[cos, sin, 0]``) uyguluyordu. Aynı
+        üründe aynı isimli girdi iki panelde TERS anlam taşıyordu.
+
+        ÖLÇÜLDÜ (15 m/s rüzgâr, 85° atış, 20 kg araç): wind_direction=0 için
+        menzil +6395.9 m raporlanıyordu; doğru konvansiyonda −6395.9 m
+        (rüzgâr kuzeyden estiği için araç güneye sürüklenir). Konvansiyon
+        işareti yüzünden iniş noktası ~10.5 km ötelenmiş oluyordu.
+
+        Dikey rüzgar ihmal (vz_wind=0) çünkü meteorolojik rüzgâr yataydır.
+
+        Kaynak: WMO rüzgâr yönü tanımı (rüzgâr yönü = geldiği yön);
+        McCoy, "Modern Exterior Ballistics", 1999 (aynı konvansiyon).
         """
-        vx_wind = wind_speed * np.cos(wind_direction_rad)
+        vx_wind = -wind_speed * np.cos(wind_direction_rad)
         vz_wind = 0.0  # yatay rüzgar varsayımı
         return vx_wind, vz_wind
 
@@ -259,6 +349,34 @@ class TrajectoryAnalyzer:
         # Rüzgar vektörü (atalet çerçevesinde, hava kütlesi hızı)
         wind_vec = self._wind_vector(wind_speed, wind_direction)
 
+        # Kurtarma sistemi girdileri (F080). launch_params'ta verilmişse
+        # setter üzerinden uygulanır; verilmemişse önceki set_recovery_
+        # parameters çağrısı ya da varsayım geçerli kalır.
+        #
+        # DURUM SIZINTISI KORUMASI: bir anahtar AÇIKÇA verilmişse o alan
+        # TAMAMEN bu isteğin girdisinden belirlenir — önce varsayılana
+        # döndürülür, sonra verilen değer uygulanır. Gerekçe: uygulama
+        # katmanı modül düzeyinde TEK bir TrajectoryAnalyzer örneği
+        # paylaşıyor; reset olmadan bir önceki isteğin paraşütü sonraki
+        # isteğe sızar ve kullanıcı ``parachute_area: null`` gönderse bile
+        # kendi girmediği bir alandan türetilmiş iniş hızı görür. Anahtar
+        # HİÇ yoksa (eski çağıranlar) davranış birebir eskisi gibidir.
+        self.warnings = []
+        _recovery_defaults = (
+            ('parachute_area', 'parachute_area', None),
+            ('parachute_cd', 'parachute_cd', DEFAULT_PARACHUTE_CD),
+            ('parachute_deploy_delay', 'parachute_deploy_delay',
+             DEFAULT_PARACHUTE_DEPLOY_DELAY_S),
+        )
+        if any(k in launch_params for k, _a, _d in _recovery_defaults):
+            for key, attr, default in _recovery_defaults:
+                if key in launch_params:
+                    setattr(self, attr, default)
+            self.set_recovery_parameters(
+                parachute_area=launch_params.get('parachute_area'),
+                parachute_cd=launch_params.get('parachute_cd'),
+                deploy_delay=launch_params.get('parachute_deploy_delay'))
+
         # Calculate vehicle parameters
         total_mass_loaded = self.vehicle_mass_dry + propellant_mass
         cross_sectional_area = np.pi * (self.vehicle_diameter / 2) ** 2
@@ -306,6 +424,10 @@ class TrajectoryAnalyzer:
         # eklenmez ve çıktı sözleşmesi eskisiyle birebir aynı kalır.
         if self.launch_site:
             result['launch_site'] = self.launch_site
+        # v2.6.2 uyarı sözleşmesi: {code, params, severity} listesi.
+        # Uyarı yoksa anahtar EKLENMEZ (çıktı sözleşmesi eskisiyle aynı kalır).
+        if self.warnings:
+            result['warnings'] = list(self.warnings)
         return result
 
     def _aero_drag_components(self, vx: float, vz: float, rho: float,
@@ -415,6 +537,28 @@ class TrajectoryAnalyzer:
         sol = solve_ivp(powered_flight_dynamics, t_span, y0, t_eval=t_eval,
                         method='RK45', rtol=1e-8, atol=1e-9)
 
+        # YANMA-SONU (burnout) ÖRNEKLEME — v2.6.2 fizik denetimi (bulgu F028).
+        #
+        # Güçlü faz bilerek burn_time + 2 s'ye kadar entegre ediliyor (geçiş
+        # payı). Fakat yanma-sonu büyüklükleri bu aralığın SONUNDAN veya
+        # TEPESİNDEN okunuyordu: ``max_altitude_powered = np.max(sol.y[1])``
+        # 2 saniyelik serbest tırmanışı da içerdiği için yanma-sonu irtifası
+        # değil, o penceredeki en yüksek nokta oluyordu.
+        #
+        # ÖLÇÜLDÜ (F=3000 N, t_b=4 s, m_kuru=20 kg, m_yakıt=8 kg, 85°):
+        #   gerçek yanma-sonu irtifa 806.7 m  -> raporlanan 1487.0 m (+%84.3)
+        #   gerçek yanma-sonu hız    399.7 m/s -> raporlanan 300.8 m/s (−%24.7)
+        # İrtifa şişerken hızın düşmesi, iki büyüklüğün FARKLI anlardan
+        # okunmasındandı (biri tepe, diğeri pencere sonu).
+        #
+        # Doğrusu: yanma-sonu = motor kesme anı; hepsi t = burn_time'da ve
+        # AYNI anda örneklenir (Sutton & Biblarz, Böl. 4 burnout tanımı).
+        t_bo = float(np.clip(burn_time, sol.t[0], sol.t[-1]))
+        bo = {name: float(np.interp(t_bo, sol.t, arr))
+              for name, arr in (('x', sol.y[0]), ('z', sol.y[1]),
+                                ('vx', sol.y[2]), ('vz', sol.y[3]),
+                                ('mass', sol.y[4]))}
+
         return {
             'time': sol.t,
             'position_x': sol.y[0],
@@ -423,8 +567,13 @@ class TrajectoryAnalyzer:
             'velocity_z': sol.y[3],
             'mass': sol.y[4],
             'final_state': [sol.y[0][-1], sol.y[1][-1], sol.y[2][-1], sol.y[3][-1], sol.y[4][-1]],
-            'max_altitude_powered': np.max(sol.y[1]),
-            'burnout_time': burn_time
+            # Pencere tepesi — yanma-sonu DEĞİL; adı bunu açıkça söylüyor.
+            'max_altitude_powered': float(np.max(sol.y[1])),
+            'burnout_time': burn_time,
+            # t = burn_time'da eşzamanlı örneklenmiş gerçek yanma-sonu durumu
+            'burnout_state': [bo['x'], bo['z'], bo['vx'], bo['vz'], bo['mass']],
+            'burnout_altitude': bo['z'],
+            'burnout_velocity': float(np.hypot(bo['vx'], bo['vz'])),
         }
 
     def _calculate_coasting_flight(self, initial_state: List, cross_sectional_area: float,
@@ -484,9 +633,28 @@ class TrajectoryAnalyzer:
 
     def _calculate_descent_flight(self, apogee_state: List, cross_sectional_area: float,
                                   wind_vec: Tuple[float, float]) -> Dict:
-        """Calculate descent flight phase (with recovery system)"""
+        """Calculate descent flight phase (with recovery system).
+
+        F080 (v2.6.2): paraşüt alanı/Cd artık KULLANICI GİRDİSİDİR
+        (``set_recovery_parameters`` ya da launch_params['parachute_area']).
+        Verilmezse DEFAULT_PARACHUTE_AREA_M2 kullanılır, sonuç
+        ``parachute_area_assumed=True`` ile işaretlenir ve uyarı üretilir —
+        çünkü ``landing_velocity`` bir güvenlik metriği olarak okunuyor ve
+        araçtan bağımsız sabit bir alandan türetilmiş olması gizlenemez.
+        """
 
         mass = apogee_state[4]  # constant during descent
+
+        # Kurtarma parametrelerinin çözümü
+        area_assumed = self.parachute_area is None
+        chute_area = (DEFAULT_PARACHUTE_AREA_M2 if area_assumed
+                      else float(self.parachute_area))
+        chute_cd = float(self.parachute_cd)
+        deploy_delay = float(self.parachute_deploy_delay)
+        if area_assumed:
+            self.warnings.append(_mk_warning(
+                'warn.trajectory.parachute_area_assumed', 'warning',
+                area=round(chute_area, 3), cd=round(chute_cd, 3)))
 
         def descent_dynamics(t, y):
             """Dynamics during descent"""
@@ -495,13 +663,13 @@ class TrajectoryAnalyzer:
             # Atmospheric properties
             rho, g = self._get_atmospheric_properties(z)
 
-            # Drag coefficient changes with recovery system deployment.
-            # Paraşüt apogee'den ~2 s sonra açılır. Paraşüt için SABİT Cd
-            # uygundur (Mach düşük, paraşüt aero verisi: Knacke "Parachute
-            # Recovery Systems Design Manual", 1992 -> hemisferik paraşüt Cd~1.4).
-            if t > 2:
-                cd_override = 1.4   # Parachute deployed (Knacke 1992)
-                area_current = 2.0  # m² - parachute reference area
+            # Kurtarma sistemi açılınca sürükleme paraşüte geçer. Paraşüt için
+            # SABİT Cd uygundur (Mach düşük). Cd izdüşüm alanı tabanlıdır
+            # (Hoerner 1965: içi boş yarımküre Cd_p ≈ 1.42) — bkz.
+            # DEFAULT_PARACHUTE_CD notu.
+            if t > deploy_delay:
+                cd_override = chute_cd
+                area_current = chute_area
             else:
                 # Henüz açılmamış: gövde sürüklemesi, Mach-bağımlı.
                 cd_override = None
@@ -545,7 +713,12 @@ class TrajectoryAnalyzer:
             'velocity_z': sol.y[3],
             'landing_time': sol.t[-1],
             'landing_velocity': np.sqrt(sol.y[2][-1] ** 2 + sol.y[3][-1] ** 2),
-            'landing_position_x': sol.y[0][-1]
+            'landing_position_x': sol.y[0][-1],
+            # F080: iniş hızının hangi kurtarma sisteminden çıktığı görünür
+            'parachute_area_m2': chute_area,
+            'parachute_cd': chute_cd,
+            'parachute_deploy_delay_s': deploy_delay,
+            'parachute_area_assumed': bool(area_assumed),
         }
 
     def _combine_flight_phases(self, powered: Dict, coasting: Dict, descent: Dict) -> Dict:
@@ -614,15 +787,22 @@ class TrajectoryAnalyzer:
         thrust_to_weight = motor_data['thrust'] / (loaded_mass * self.g_surface)
         total_impulse_to_weight = motor_data['total_impulse'] / (loaded_mass * self.g_surface)
 
-        # Efficiency metrics
-        burnout_altitude = trajectory['phases']['powered']['max_altitude_powered']
-        burnout_velocity = np.sqrt(
-            trajectory['phases']['powered']['velocity_x'][-1] ** 2 +
-            trajectory['phases']['powered']['velocity_z'][-1] ** 2
-        )
+        # Efficiency metrics — YANMA-SONU (F028, v2.6.2)
+        # Eski kod iki büyüklüğü FARKLI anlardan okuyordu:
+        #   irtifa  <- max_altitude_powered (burn_time+2 s penceresinin TEPESİ)
+        #   hız     <- pencerenin SON adımı (burn_time+2 s)
+        # ÖLÇÜLDÜ (F=3000 N, t_b=4 s, m_kuru=20 kg, m_yakıt=8 kg, 85°):
+        #   raporlanan 1487.0 m / 300.8 m/s; gerçek yanma-sonu 806.7 m /
+        #   399.7 m/s. altitude_efficiency de aynı oranda şişiyordu (%37.8).
+        # _calculate_powered_flight artık t=burn_time'da EŞZAMANLI örneklenmiş
+        # burnout_altitude/burnout_velocity üretiyor; metrikler onu okur.
+        powered = trajectory['phases']['powered']
+        burnout_altitude = float(powered['burnout_altitude'])
+        burnout_velocity = float(powered['burnout_velocity'])
 
         # Safety metrics
-        landing_velocity = trajectory['phases']['descent']['landing_velocity']
+        descent = trajectory['phases']['descent']
+        landing_velocity = descent['landing_velocity']
         # Yük faktörü (g cinsinden ivme) STANDART g0 ile ifade edilir —
         # havacılık konvansiyonu; saha yerçekimiyle ölçeklenmez.
         max_g_force = max_acceleration / self.g0
@@ -635,7 +815,12 @@ class TrajectoryAnalyzer:
                 'max_g_force': max_g_force,
                 'total_flight_time': total_flight_time,
                 'range_distance': range_distance,
-                'landing_velocity': landing_velocity
+                'landing_velocity': landing_velocity,
+                # F080: iniş hızı hangi paraşütten çıktı — varsayımsa görünür
+                'parachute_area_m2': descent.get('parachute_area_m2'),
+                'parachute_cd': descent.get('parachute_cd'),
+                'landing_velocity_assumed': bool(
+                    descent.get('parachute_area_assumed', False)),
             },
             'motor_performance': {
                 'thrust_to_weight_ratio': thrust_to_weight,
@@ -645,11 +830,19 @@ class TrajectoryAnalyzer:
                 'altitude_efficiency': burnout_altitude / max_altitude * 100 if max_altitude > 0 else 0.0  # %
             },
             'phase_breakdown': {
-                'powered_flight_time': trajectory['phases']['powered']['burnout_time'],
+                'powered_flight_time': powered['burnout_time'],
                 'coasting_time': trajectory['phases']['coasting']['apogee_time'],
-                'descent_time': trajectory['phases']['descent']['landing_time'],
-                'apogee_time': (trajectory['phases']['powered']['burnout_time'] +
-                                trajectory['phases']['coasting']['apogee_time'])
+                'descent_time': descent['landing_time'],
+                # F028: apoje zamanı MUTLAK uçuş zamanıdır. Serbest faz
+                # t = powered['time'][-1] = burn_time + 2 s'de başlar (güçlü
+                # faz geçiş payıyla entegre edilir), fakat eski kod ofset
+                # olarak burnout_time (=burn_time) kullanıyordu → apoje 2 s
+                # ERKEN raporlanıyordu. ÖLÇÜLDÜ: raporlanan 24.47 s,
+                # birleşik yörüngenin gerçek tepe zamanı 26.47 s.
+                # _combine_flight_phases zaten powered['time'][-1] ofsetini
+                # kullanıyor; burası artık onunla TUTARLI.
+                'apogee_time': (float(powered['time'][-1]) +
+                                float(trajectory['phases']['coasting']['apogee_time']))
             }
         }
 

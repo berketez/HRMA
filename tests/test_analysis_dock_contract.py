@@ -445,6 +445,27 @@ class TestSafetyResponseContract:
                             'dot_compliance'], 'compliance')
         assert isinstance(s['recommendations'], list)
 
+    def test_compliance_never_claims_conformity(self, safety_json):
+        """Uygunluk alanları hüküm ÜRETMEMELİ — yalnız NOT_EVALUATED.
+
+        Bu alanlar eskiden koşulsuz ``True`` dönüyor ve arayüzde yeşil
+        "NFPA: OK" rozeti olarak çiziliyordu; backend'in kendi yorumları
+        gerçek bir kontrol yapılmadığını söylüyordu. Gerçek uygunluk
+        değerlendirmesi requirement karşılaştırması, saha bilgisi ve yetkili
+        bir değerlendirici ister — hiçbiri yazılıma girdi değil.
+        """
+        comp = safety_json['safety_analysis']['compliance']
+        for key in ('nfpa_compliance', 'osha_compliance', 'dot_compliance',
+                    'local_regulations', 'insurance_requirements'):
+            assert comp[key] == 'NOT_EVALUATED', (
+                f'{key} bir uygunluk hükmü üretiyor ({comp[key]!r}); '
+                'yazılım mevzuat uygunluğu değerlendiremez.'
+            )
+        # Model riski kabul edilebilirliği mevzuat uygunluğu DEĞİLDİR;
+        # eski 'overall_compliance' adı bu ikisini karıştırıyordu.
+        assert 'overall_compliance' not in comp
+        assert 'model_risk_acceptability' in comp
+
 
 # ---------------------------------------------------------------------------
 # 3. 501 bekçileri

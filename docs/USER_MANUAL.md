@@ -7,7 +7,7 @@ presents results in a dark-themed web interface with an interactive 3D
 digital twin, an Analysis Deck of engineering panels, and working CAD /
 drawing / report exports.
 
-This manual describes HRMA **v2.5.5**.
+This manual describes HRMA **v2.6.2**.
 
 > **Scope notice.** HRMA is a preliminary-design and educational tool built
 > on closed-form and 1D engineering correlations. It is not a
@@ -24,7 +24,7 @@ This manual describes HRMA **v2.5.5**.
 5. [Reading the Results](#5-reading-the-results)
 6. [Standalone Panels: Transient, Injector, 6-DOF](#6-standalone-panels-transient-injector-6-dof)
 7. [The Analysis Deck](#7-the-analysis-deck)
-8. [3D Digital Twin](#8-3d-digital-twin)
+8. [Interactive 3D Model](#8-3d-digital-twin)
 9. [Exports](#9-exports)
 10. [Kinetic Fidelity Levels](#10-kinetic-fidelity-levels)
 11. [Validating Against Your Own Test Data](#11-validating-against-your-own-test-data)
@@ -40,7 +40,7 @@ This manual describes HRMA **v2.5.5**.
 
 ### Option A: Windows installer (recommended on Windows)
 
-1. Download `HRMA-Setup-2.5.5.exe` from the
+1. Download `HRMA-Setup-2.6.2.exe` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest).
 2. Double-click and follow the wizard (Next, Next, Install). The installer
    is per-user: no administrator rights are required.
@@ -51,7 +51,7 @@ Python and all libraries are bundled; no separate installation is needed.
 
 ### Option B: macOS disk image (recommended on macOS)
 
-1. Download `HRMA-Setup-2.5.5-macOS.dmg` from the
+1. Download `HRMA-Setup-2.6.2-macOS.dmg` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest)
    (Apple Silicon, macOS 11 or newer).
 2. Open the DMG and drag `HRMA` into `Applications`.
@@ -236,7 +236,7 @@ more) that appears after a successful calculation. Every panel:
 - renders tables, stat cards, and Plotly charts, with ok / warning / error
   badges.
 
-The 13 panels (introduced through v2.4.6, current in v2.5.5):
+The 13 panels (introduced through v2.4.6, current in v2.6.2):
 
 | Panel | Endpoint | Motor types | What it computes |
 |---|---|---|---|
@@ -324,7 +324,7 @@ The live correlation numbers change whenever the database changes, so treat the
 panel (and the auto-generated block in VALIDATION_STATUS.md) as the current
 source of truth rather than any figure quoted elsewhere.
 
-## 8. 3D Digital Twin
+## 8. Interactive 3D Model
 
 The Three.js/WebGL viewer builds a parametric 3D motor directly from the
 solver output, not a canned model. Features:
@@ -548,3 +548,47 @@ propellants (a CAD file carries neither), and run the normal analysis.
 Suggestions that cannot be derived from the geometry are simply absent —
 HRMA does not guess. Assemblies prompt you to pick which solid to
 analyze; inch-unit files are converted to millimeters with a warning.
+
+## 17. Flying Your Motor (Launch Site)
+
+New in v2.6.2. The launch-site page takes the motor you just calculated and
+flies it, so you can see what the design actually does before you build it.
+
+**Getting your motor there.** Calculate a motor on any design page (hybrid,
+solid or liquid). The result is handed to the launch-site page automatically —
+open **Launch Site** from the navigation and it is already loaded, named, with
+its real thrust curve where the solver produced one. You can also load a saved
+`.hrma` project; because a project file stores your inputs rather than the full
+solution, the motor is recomputed on the server first.
+
+**What is locked and what is yours.** Fields that came from the motor —
+thrust, burn time, propellant mass, engine inert mass — are read-only and
+marked. They are results, not opinions. The airframe around the motor is yours:
+body diameter and length, dry mass, fin count and span, launch elevation and
+azimuth.
+
+Two things worth knowing:
+
+- **Airframe dry mass excludes the engine.** The solver adds engine inert mass
+  and airframe dry mass together; propellant is tracked separately. Do not
+  include the motor's own structure in the airframe figure or it is counted
+  twice.
+- **The default fins give a stable vehicle.** If you zero them out you will get
+  an unstable one, and HRMA will say so rather than quietly animate it.
+
+**Picking a site.** Click anywhere on the globe, type coordinates, or use a
+shortcut. Site latitude is passed to the solver, so Earth rotation (Coriolis)
+is modelled rather than assumed away — a small effect for a sounding rocket,
+but a real one.
+
+**Satellite imagery.** Zooming in loads NASA GIBS tiles (Blue Marble, about
+500 m per pixel) and caches them on disk, so a site you revisit loads
+instantly. The cache has a size cap; you can clear it from the panel. Offline,
+no substitute texture is drawn — the base map simply stays coarse, and the
+note under the globe says so.
+
+**Stability gate.** Playback controls stay disabled until a flight is solved.
+If the solved vehicle tumbles or its static margin falls below one calibre,
+they stay disabled: the trajectory is still drawn so you can see what went
+wrong, but HRMA will not animate a rocket that would not fly.
+

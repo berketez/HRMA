@@ -130,12 +130,24 @@ ETA_PUMP_DEFAULT = 0.75
 #     ana odaya boşaldığı için basınç oranı DÜŞÜK tutulur; bu da türbini
 #     "daha verimli hız-oranı bölgesinde" çalıştırır ve SP-8110'un birebir
 #     ifadesiyle bu türbinler "%80'in üzerinde verime ulaşabilir".
-# Ölçülen doğrulama (RS-25/SSME, Block IIA, Boeing/Rocketdyne SSME Orientation
-# 1998): HPFTP türbini %81.1, HPOTP türbini %74.6. Kapalı çevrim varsayılanı
-# bu iki ölçülen değerin ortasında (0.78) ve SP-8110 alt sınırının altında
-# muhafazakâr seçilmiştir. Açık çevrim varsayılanı F-1 sınıfı GG türbini
-# pratiğiyle uyumludur (Sutton 9th ed. Table 10-3).
+# Ölçülen doğrulama (RS-25/SSME Block IIA): "Space Shuttle Main Engine
+# Orientation", Rocketdyne Propulsion & Power (Boeing), BC98-04, Haziran 1998,
+# "Key Performance Parameters" tabloları — HPFTP türbin verimi %81.1, HPOTP
+# türbin verimi %74.6 (ikisi de %104.5 RPL'de; HPFTP PR 1.50, HPOTP PR 1.53).
+# ATIF 2026-07-25'te BELGE İNDİRİLİP DOĞRULANDI (denetimde "doğrulanamadı"
+# işaretliydi; belge gerçekten bu iki sayıyı içeriyor, uydurma DEĞİL).
+# Kapalı çevrim varsayılanı bu iki ölçülen değerin ortasında (0.78) ve
+# SP-8110'un ">%80" ifadesinin altında muhafazakâr seçilmiştir.
+#
+# DÜRÜSTLÜK ETİKETİ (2026-07-25 fizik denetimi): açık çevrim varsayılanı 0.65,
+# SP-8110'un doğrulanmış %35-65 bandının ÜST UCUDUR — bant ortası 0.50'dir.
+# Yani açık çevrim varsayılanı İYİMSERDİR: 0.50 ile GG bleed debisi ve
+# dolayısıyla açık çevrim Isp kaybı ~%30 artar (F-1 örneğinde Isp kaybı
+# 2.26 s -> ~2.7 s). Kullanıcı eta_turbine vererek bandın istediği yerinde
+# çalışabilir; varsayılan seçim F-1 sınıfı GG türbini pratiğiyle uyumludur
+# (Sutton 9th ed. Table 10-3).
 ETA_TURBINE_OPEN_DEFAULT = 0.65
+ETA_TURBINE_OPEN_BAND = (0.35, 0.65)   # NASA SP-8110 s.15-17 ölçülen bant
 ETA_TURBINE_CLOSED_DEFAULT = 0.78
 # Geriye dönük uyumluluk (eski tek-değer sabiti açık çevrim değerine eşittir).
 ETA_TURBINE_DEFAULT = ETA_TURBINE_OPEN_DEFAULT
@@ -183,6 +195,16 @@ _FUEL_SYNONYMS = {'rp1': 'rp1', 'rp-1': 'rp1', 'kerosene': 'rp1',
 _OX_SYNONYMS = {'lox': 'lox', 'o2': 'lox', 'oxygen': 'lox'}
 
 _CEA_CACHE: Dict = {}
+
+
+def _w(code: str, severity: str = "warning", **params) -> Dict:
+    """i18n uyarısı: sabit İngilizce metin YERİNE ``{code, params, severity}``.
+
+    Dil frontend'e taşınır; ``TF(code, params)`` metni kurar. ``severity`` ∈
+    {"critical", "warning", "info"}. Çevrim uyarıları için varsayılan
+    "warning"; varsayımlar (assumptions) "info".
+    """
+    return {"code": code, "params": params, "severity": severity}
 
 
 def _norm_fuel(name: str) -> str:
@@ -266,8 +288,7 @@ def solve_preburner_of(fuel: str, oxidizer: str, p_bar: float, tit_K: float,
     cea = _get_cea(fuel, oxidizer)
     if cea is None:
         return {'status': 'not_modelled', 'warnings': [
-            'RocketCEA is not importable; preburner gas properties cannot '
-            'be computed.']}
+            _w('warn.cycle.preburner_cea_unavailable', 'warning')]}
     pc_psia = p_bar * _BAR_TO_PSIA
 
     def t_of(mr):
@@ -287,20 +308,17 @@ def solve_preburner_of(fuel: str, oxidizer: str, p_bar: float, tit_K: float,
     t_min, t_max = (t_lo, t_hi) if increasing else (t_hi, t_lo)
     if tit_K <= t_min:
         mr = lo if increasing else hi
-        warnings.append(
-            f"Requested turbine inlet temperature {tit_K:.0f} K is below "
-            f"the {t_min:.0f} K reachable at the O/F search bound; the "
-            f"preburner O/F is clamped to {mr:g} and the resulting "
-            f"temperature is {t_min:.0f} K.")
+        warnings.append(_w("warn.cycle.preburner_tit_below_bound", "warning",
+                           tit=round(float(tit_K), 0), t_min=round(float(t_min), 0),
+                           mr=round(float(mr), 3)))
         props = preburner_gas_properties(fuel, oxidizer, mr, p_bar)
         return {'status': 'clamped', 'mr': mr, 'warnings': warnings,
                 'gas': props}
     if tit_K >= t_max:
         mr = hi if increasing else lo
-        warnings.append(
-            f"Requested turbine inlet temperature {tit_K:.0f} K exceeds the "
-            f"{t_max:.0f} K reachable at the O/F search bound; the "
-            f"preburner O/F is clamped to {mr:g}.")
+        warnings.append(_w("warn.cycle.preburner_tit_above_bound", "warning",
+                           tit=round(float(tit_K), 0), t_max=round(float(t_max), 0),
+                           mr=round(float(mr), 3)))
         props = preburner_gas_properties(fuel, oxidizer, mr, p_bar)
         return {'status': 'clamped', 'mr': mr, 'warnings': warnings,
                 'gas': props}
@@ -313,7 +331,14 @@ def solve_preburner_of(fuel: str, oxidizer: str, p_bar: float, tit_K: float,
 
 def _turbine_specific_work(gas: Dict, tit_K: float, pr: float,
                            eta_turbine: float) -> float:
-    """Gerçek türbin özgül işi [J/kg] (Sutton Ch. 10, izentropik iş × η)."""
+    """Gerçek türbin özgül işi [J/kg] (Sutton Ch. 10, izentropik iş × η).
+
+    GEÇERLİLİK ZARFI (v2.6.2 fizik denetimi, bulgu F010): bu bağıntı termik
+    mükemmel gaz varsayar ve YALNIZ yanma gazı dallarında (GG / tap-off /
+    staged / FFSC; CEA çıktısı, Tr > 4.5) kullanılır. Expander çevriminin
+    yoğun süperkritik itici akışkanında GEÇERSİZDİR — orada
+    ``_turbine_work_real_gas`` kullanılır (aynı bulgunun düzeltmesi).
+    """
     gamma = gas['gamma']
     x = (gamma - 1.0) / gamma
     return eta_turbine * gas['cp_J_kgK'] * tit_K * (1.0 - pr ** (-x))
@@ -324,6 +349,45 @@ def _turbine_exit_temp(gas: Dict, tit_K: float, pr: float,
     gamma = gas['gamma']
     x = (gamma - 1.0) / gamma
     return tit_K * (1.0 - eta_turbine * (1.0 - pr ** (-x)))
+
+
+def _turbine_work_real_gas(fluid: str, t_in_K: float, p_in_Pa: float,
+                           pr: float, eta_turbine: float):
+    """GERÇEK GAZ türbin özgül işi [J/kg] ve çıkış sıcaklığı [K].
+
+    v2.6.2 fizik denetimi, bulgu F010 düzeltmesi.
+
+    Neden ayrı bir fonksiyon: expander çevriminde türbin akışkanı yanma gazı
+    DEĞİL, yoğun süperkritik itici buharıdır (CH4 ~277 K / 133 bar; H2
+    ~40-130 K / 45-70 bar). Bu rejimde ``_turbine_specific_work``un dayandığı
+    TERMİK MÜKEMMEL GAZ bağıntısı γ = cp/(cp − R) GEÇERSİZDİR: cp − cv >> R
+    olduğu için γ ciddi biçimde yanlış çıkar (metan 133 bar/277 K'de kod
+    γ = 1.16, gerçek cp/cv = 2.08) ve türbin işi %40-50 FAZLA hesaplanır —
+    expander güç dengesi yalancı biçimde İYİMSER kapanır.
+
+    Doğrusu izentropik entalpi düşümünü doğrudan almaktır:
+        s1 = s(T_in, p_in);  h2s = h(p_in/PR, s1);  Δh = η·(h1 − h2s)
+    Bu, izentropik verim tanımının kendisidir (Sutton & Biblarz 9. baskı
+    Böl. 10) ve hiçbir ideal gaz varsayımı içermez. Gerçek gaz özellikleri:
+    CoolProp 6.8.0 (NIST REFPROP tabanlı; H2: Leachman 2009, CH4: Setzmann &
+    Wagner 1991 EOS).
+
+    Yanma gazı dalları (GG / tap-off / staged / FFSC) bu fonksiyonu KULLANMAZ:
+    orada CEA zaten ideal gaz çözer ve Tr > 4.5 olduğu için termik mükemmel
+    gaz bağıntısı geçerlidir (RS-25'e karşı doğrulandı).
+
+    Returns
+    -------
+    (dh_J_kg, t_exit_K)
+    """
+    import CoolProp.CoolProp as CP
+    h1 = float(CP.PropsSI('H', 'T', t_in_K, 'P', p_in_Pa, fluid))
+    s1 = float(CP.PropsSI('S', 'T', t_in_K, 'P', p_in_Pa, fluid))
+    p_out = p_in_Pa / max(pr, 1.0 + 1e-12)
+    h2s = float(CP.PropsSI('H', 'P', p_out, 'S', s1, fluid))
+    dh = eta_turbine * (h1 - h2s)
+    t_exit = float(CP.PropsSI('T', 'P', p_out, 'H', h1 - dh, fluid))
+    return dh, t_exit
 
 
 def _pump_power_w(mdot: float, dp_bar: float, rho: float, eta: float) -> float:
@@ -409,11 +473,16 @@ def _pump_dict(propellant, mdot, inlet_bar, discharge_bar, power_w, eta,
     return d
 
 
-def _turbine_dict(mdot, tit, p_in_bar, pr, gas, eta, dh, power_w):
+def _turbine_dict(mdot, tit, p_in_bar, pr, gas, eta, dh, power_w,
+                  exit_temp_K=None):
+    """Türbin raporu. ``exit_temp_K`` verilirse mükemmel-gaz bağıntısı yerine
+    o kullanılır (expander dalı gerçek gaz çıkış sıcaklığını CoolProp'tan
+    hesaplar; orada γ bağıntısı geçersizdir)."""
     return {'mdot_kg_s': mdot, 'inlet_temp_K': tit,
             'inlet_pressure_bar': p_in_bar, 'pressure_ratio': pr,
             'exit_pressure_bar': p_in_bar / pr,
-            'exit_temp_K': _turbine_exit_temp(gas, tit, pr, eta),
+            'exit_temp_K': (_turbine_exit_temp(gas, tit, pr, eta)
+                            if exit_temp_K is None else float(exit_temp_K)),
             'specific_work_J_kg': dh, 'efficiency': eta, 'power_W': power_w,
             'gas': gas}
 
@@ -441,6 +510,7 @@ def solve_cycle(cycle_type: str,
                 eta_turbine: Optional[float] = None,
                 tit_K: Optional[float] = None,
                 preburner_mode: str = 'fuel_rich',
+                tit_ox_K: Optional[float] = None,
                 turbine_pr: Optional[float] = None,
                 regen_heat_kw: Optional[float] = None,
                 fuel_inlet_temp_K: Optional[float] = None,
@@ -459,6 +529,16 @@ def solve_cycle(cycle_type: str,
     (GG/tap-off) için 0.65, kapalı çevrim (staged/FFSC/expander) için 0.78.
     Gerekçe ve kaynak ETA_TURBINE_OPEN_DEFAULT / ETA_TURBINE_CLOSED_DEFAULT
     sabitlerinin başındadır (NASA SP-8110). Sayı verilirse aynen kullanılır.
+
+    ``tit_ox_K`` YALNIZ full_flow_staged_combustion çevriminde anlamlıdır:
+    FFSC'de İKİ ayrı ön yakıcı vardır ve ``tit_K`` yakıt-zengin milin türbin
+    giriş sıcaklığıdır. Ox-zengin mil eskiden koşulsuz 750 K'ye sabitliydi;
+    2026-07-25 fizik denetimi (F009) bunun ox milinin enerji marjını yapay
+    olarak daralttığını, eşit derecede savunulabilir girdilerle var olan bir
+    motorun 'güç dengesi kurulamıyor' diye reddedildiğini ölçtü. Artık
+    kullanıcıya açıktır; verilmezse yine 750 K (RD-170 ailesi ~772 K,
+    Sutton 9. baskı Böl. 6 ORSC) ve TIT_OX_RICH_LIMIT_K = 850 K üstünde
+    metal tutuşma uyarısı üretilir.
     """
     if cycle_type not in _VALID_CYCLES:
         raise ValueError(f"Unknown cycle_type {cycle_type!r}; valid options: "
@@ -481,36 +561,30 @@ def solve_cycle(cycle_type: str,
         if cycle_type in ('gas_generator', 'tap_off'):
             eta_turbine = ETA_TURBINE_OPEN_DEFAULT
             if cycle_type != 'pressure_fed':
-                sol.assumptions.append(
-                    f'Turbine efficiency assumed {eta_turbine:.2f} for the '
-                    f'open cycle (high-pressure-ratio partial-admission '
-                    f'impulse turbine; NASA SP-8110 fig. 13-14, 35-65% band).')
+                sol.assumptions.append(_w(
+                    'warn.cycle.turbine_eff_open_assumed', 'info',
+                    eta=eta_turbine))
         else:
             eta_turbine = ETA_TURBINE_CLOSED_DEFAULT
             if cycle_type != 'pressure_fed':
-                sol.assumptions.append(
-                    f'Turbine efficiency assumed {eta_turbine:.2f} for the '
-                    f'closed cycle (low-pressure-ratio full-admission reaction '
-                    f'turbine; NASA SP-8110 p. 17 ">80%"; RS-25 measured HPFTP '
-                    f'0.811 / HPOTP 0.746).')
+                sol.assumptions.append(_w(
+                    'warn.cycle.turbine_eff_closed_assumed', 'info',
+                    eta=eta_turbine))
 
     if rho_ox is None:
         rho_ox = DENSITY_NBP_KG_M3[oxidizer]
-        sol.assumptions.append(
-            f'Oxidizer density taken as the NBP value {rho_ox:g} kg/m3 '
-            f'(NIST WebBook).')
+        sol.assumptions.append(_w('warn.cycle.ox_density_nbp', 'info',
+                                  rho=rho_ox))
     if rho_fuel is None:
         rho_fuel = DENSITY_NBP_KG_M3[fuel]
-        sol.assumptions.append(
-            f'Fuel density taken as the NBP value {rho_fuel:g} kg/m3 '
-            f'(NIST WebBook / MIL-DTL-25576 for RP-1).')
+        sol.assumptions.append(_w('warn.cycle.fuel_density_nbp', 'info',
+                                  rho=rho_fuel))
 
     m_ox_total, m_fuel_total = _flow_split(mdot_total, mr)
     inj_dp_liq = injector_dp_frac * pc_bar
     inj_dp_gas = gas_injector_dp_frac * pc_bar
-    sol.assumptions.append(
-        f'Liquid injector pressure drop {injector_dp_frac:.0%} of Pc '
-        f'(NASA SP-8089 chug-stability guidance 15-20%).')
+    sol.assumptions.append(_w('warn.cycle.liquid_injector_dp', 'info',
+                              frac=injector_dp_frac))
 
     # ------------------------------------------------------------------
     # PRESSURE FED — pompa yok, tank basıncı yeterlilik kontrolü.
@@ -532,21 +606,17 @@ def solve_cycle(cycle_type: str,
         sol.isp_engine_s = isp_main_s
         sol.power_residual_rel = 0.0
         if tank_pressure_bar is None:
-            sol.warnings.append(
-                'Pressure-fed cycle: no tank pressure was supplied, so the '
-                'feasibility margin cannot be checked; the required tank '
-                'pressures are reported.')
+            sol.warnings.append(_w('warn.cycle.pressure_fed_no_tank_pressure', 'warning'))
             sol.converged = True
         else:
             margin = tank_pressure_bar - max(req_ox, req_fuel)
             sol.tank_pressure_margin_bar = margin
             sol.converged = margin >= 0.0
             if margin < 0.0:
-                sol.warnings.append(
-                    f'Pressure-fed cycle infeasible: tank pressure '
-                    f'{tank_pressure_bar:g} bar is {-margin:.1f} bar below '
-                    f'the {max(req_ox, req_fuel):.1f} bar required by the '
-                    f'chamber, injector and line losses.')
+                sol.warnings.append(_w('warn.cycle.pressure_fed_infeasible', 'critical',
+                                       tank=round(float(tank_pressure_bar), 3),
+                                       deficit=round(float(-margin), 1),
+                                       required=round(float(max(req_ox, req_fuel)), 1)))
         return sol
 
     # Ortak sıvı zincirleri (ana odaya sıvı basan hatlar için).
@@ -559,15 +629,12 @@ def solve_cycle(cycle_type: str,
     if cycle_type in ('gas_generator', 'tap_off'):
         tit = float(tit_K if tit_K is not None else TIT_DEFAULT_K[cycle_type])
         if tit > TIT_UNCOOLED_LIMIT_K:
-            sol.warnings.append(
-                f'Turbine inlet temperature {tit:.0f} K exceeds the '
-                f'{TIT_UNCOOLED_LIMIT_K:.0f} K uncooled-blade practical '
-                f'limit (Sutton Ch. 10 / NASA SP-8110); blade cooling or a '
-                f'lower gas-generator temperature is required.')
+            sol.warnings.append(_w('warn.cycle.tit_exceeds_uncooled', 'warning',
+                                   tit=round(float(tit), 0),
+                                   limit=round(float(TIT_UNCOOLED_LIMIT_K), 0)))
         if tit_K is None:
-            sol.assumptions.append(
-                f'Turbine inlet temperature assumed {tit:.0f} K '
-                f'(uncooled-turbine practice, Sutton Ch. 10 / NASA SP-8110).')
+            sol.assumptions.append(_w('warn.cycle.tit_assumed_uncooled', 'info',
+                                      tit=round(float(tit), 0)))
 
         if cycle_type == 'gas_generator':
             # GG her iki pompa çıkışından beslenir; GG odası en düşük
@@ -580,13 +647,8 @@ def solve_cycle(cycle_type: str,
             # edilir (varsayım).
             p_gas = pc_bar
             source_name = 'tap_off_bleed'
-            sol.assumptions.append(
-                'Tap-off duct pressure loss neglected; bleed gas enters the '
-                'turbine at chamber pressure.')
-            sol.assumptions.append(
-                'Tap-off gas modelled as fuel-rich boundary-layer combustion '
-                'products at the turbine temperature limit (J-2S flight '
-                'practice; Sutton 9th ed. Ch. 6).')
+            sol.assumptions.append(_w('warn.cycle.tapoff_duct_loss_neglected', 'info'))
+            sol.assumptions.append(_w('warn.cycle.tapoff_gas_model', 'info'))
 
         pb = solve_preburner_of(fuel, oxidizer, p_gas, tit, 'fuel_rich')
         sol.warnings.extend(pb.get('warnings', []))
@@ -600,22 +662,17 @@ def solve_cycle(cycle_type: str,
         pr = float(turbine_pr if turbine_pr is not None
                    else OPEN_CYCLE_TURBINE_PR_DEFAULT)
         if turbine_pr is None:
-            sol.assumptions.append(
-                f'Open-cycle turbine pressure ratio assumed {pr:g} '
-                f'(F-1 class gas-generator turbine, Sutton 9th ed. '
-                f'Table 10-3).')
+            sol.assumptions.append(_w('warn.cycle.open_cycle_pr_assumed', 'info',
+                                      pr=round(float(pr), 3)))
         if pr > OPEN_CYCLE_TURBINE_PR_WARN:
-            sol.warnings.append(
-                f'Turbine pressure ratio {pr:g} exceeds the practical '
-                f'{OPEN_CYCLE_TURBINE_PR_WARN:g} single-body limit '
-                f'(Huzel & Huang Ch. 6); a multi-stage unit is implied.')
+            sol.warnings.append(_w('warn.cycle.turbine_pr_exceeds_single_body', 'warning',
+                                   pr=round(float(pr), 3),
+                                   limit=round(float(OPEN_CYCLE_TURBINE_PR_WARN), 3)))
         p_exit = p_gas / pr
         if p_exit <= ambient_pressure_bar:
-            sol.warnings.append(
-                f'Turbine exit pressure {p_exit:.2f} bar is not above the '
-                f'ambient {ambient_pressure_bar:.2f} bar; the requested '
-                f'pressure ratio cannot be realised and no exhaust thrust '
-                f'is credited.')
+            sol.warnings.append(_w('warn.cycle.turbine_exit_below_ambient', 'warning',
+                                   p_exit=round(float(p_exit), 2),
+                                   ambient=round(float(ambient_pressure_bar), 2)))
 
         dh = _turbine_specific_work(gas, tit, pr, eta_turbine)
 
@@ -649,18 +706,13 @@ def solve_cycle(cycle_type: str,
         bleed_frac = mdot_bleed / mdot_total
         if bleed_frac > BLEED_FRACTION_FAIL:
             sol.converged = False
-            sol.warnings.append(
-                f'Open-cycle power balance does not close: the required '
-                f'bleed flow is {bleed_frac:.0%} of the total flow. The '
-                f'pump pressure rise or the turbine conditions are '
-                f'infeasible for this cycle.')
+            sol.warnings.append(_w('warn.cycle.open_cycle_bleed_infeasible', 'critical',
+                                   pct=round(float(bleed_frac * 100), 0)))
             sol.not_modelled.append('power_balance')
             return sol
         if bleed_frac > BLEED_FRACTION_WARN:
-            sol.warnings.append(
-                f'Bleed flow fraction {bleed_frac:.0%} is far above the '
-                f'1.5-7% historical gas-generator range (Sutton Ch. 6); '
-                f'the design point is likely infeasible.')
+            sol.warnings.append(_w('warn.cycle.open_cycle_bleed_high', 'warning',
+                                   pct=round(float(bleed_frac * 100), 0)))
 
         turbine_power = mdot_bleed * dh
         p_turbine_in = p_gas
@@ -711,9 +763,7 @@ def solve_cycle(cycle_type: str,
         else:
             sol.isp_mode = 'not_modelled'
             sol.not_modelled.append('isp_loss')
-            sol.warnings.append(
-                'Main-chamber Isp was not supplied (isp_main_s); the '
-                'open-cycle Isp loss is not modelled rather than guessed.')
+            sol.warnings.append(_w('warn.cycle.open_cycle_isp_not_supplied', 'warning'))
         sol.converged = True
         return sol
 
@@ -725,30 +775,23 @@ def solve_cycle(cycle_type: str,
             raise ValueError("preburner_mode must be 'fuel_rich' or "
                              "'ox_rich'")
         if preburner_mode == 'ox_rich' and fuel == 'lh2':
-            sol.warnings.append(
-                'Oxidizer-rich preburner with LH2 has no flight precedent '
-                'and the CEA ox-rich fit is unvalidated for this pair; '
-                'results should be treated with caution.')
+            sol.warnings.append(_w('warn.cycle.ox_rich_lh2_no_precedent', 'warning'))
         default_key = ('staged_fuel_rich' if preburner_mode == 'fuel_rich'
                        else 'staged_ox_rich')
         tit = float(tit_K if tit_K is not None else TIT_DEFAULT_K[default_key])
         limit = (TIT_UNCOOLED_LIMIT_K if preburner_mode == 'fuel_rich'
                  else TIT_OX_RICH_LIMIT_K)
         if tit > limit:
-            sol.warnings.append(
-                f'Preburner temperature {tit:.0f} K exceeds the '
-                f'{limit:.0f} K practical limit for a {preburner_mode} '
-                f'preburner (Sutton Ch. 6/10; RD-170 practice for ox-rich).')
+            sol.warnings.append(_w('warn.cycle.preburner_temp_exceeds_limit', 'warning',
+                                   tit=round(float(tit), 0), limit=round(float(limit), 0),
+                                   mode=preburner_mode))
         if tit_K is None:
-            sol.assumptions.append(
-                f'Preburner temperature assumed {tit:.0f} K '
-                f'({preburner_mode}; RS-25 / RD-170 class practice).')
+            sol.assumptions.append(_w('warn.cycle.preburner_temp_assumed', 'info',
+                                      tit=round(float(tit), 0), mode=preburner_mode))
 
         p_te = pc_bar + inj_dp_gas          # türbin çıkışı ana enjektöre
-        sol.assumptions.append(
-            f'Turbine exhaust feeds the main injector with a hot-gas '
-            f'pressure drop of {gas_injector_dp_frac:.0%} of Pc '
-            f'(Huzel & Huang Ch. 4 injector guidance; assumption).')
+        sol.assumptions.append(_w('warn.cycle.staged_hot_gas_injector_drop', 'info',
+                                  pct=round(float(gas_injector_dp_frac * 100), 0)))
 
         # O/F, ön yakıcı basıncına zayıf bağlıdır -> dış iterasyon.
         p_pb_guess = p_te * 1.7
@@ -769,20 +812,18 @@ def solve_cycle(cycle_type: str,
                 pb_fuel = m_fuel_total
                 pb_ox = mr_pb * pb_fuel
                 if pb_ox > m_ox_total:
-                    sol.warnings.append(
-                        'Preburner oxidizer demand exceeds the total '
-                        'oxidizer flow; the temperature constraint cannot '
-                        'be met at this engine mixture ratio.')
+                    sol.warnings.append(_w(
+                        'warn.cycle.preburner_ox_demand_exceeds_total',
+                        'critical'))
                     sol.not_modelled.append('power_balance')
                     return sol
             else:
                 pb_ox = m_ox_total
                 pb_fuel = pb_ox / mr_pb
                 if pb_fuel > m_fuel_total:
-                    sol.warnings.append(
-                        'Preburner fuel demand exceeds the total fuel flow; '
-                        'the temperature constraint cannot be met at this '
-                        'engine mixture ratio.')
+                    sol.warnings.append(_w(
+                        'warn.cycle.preburner_fuel_demand_exceeds_total',
+                        'critical'))
                     sol.not_modelled.append('power_balance')
                     return sol
             mdot_turb = pb_ox + pb_fuel
@@ -848,22 +889,12 @@ def solve_cycle(cycle_type: str,
                 best_pr = float(grid[int(np.argmax(vals))])
                 best_deficit = -max(vals) / 1e6
                 turb_frac = mdot_turb / mdot_total
-                sol.warnings.append(
-                    f'Staged-combustion power balance does not close for any '
-                    f'turbine pressure ratio in [{PR_SOLVE_MIN:g}, '
-                    f'{PR_SOLVE_MAX:g}]. At the {tit:.0f} K {preburner_mode} '
-                    f'preburner limit only {mdot_turb:.0f} of {mdot_total:.0f} '
-                    f'kg/s ({turb_frac:.0%}) drives the single turbine, so its '
-                    f'power ceiling stays {best_deficit:.1f} MW below the pump '
-                    f'demand even at the most favourable pressure ratio '
-                    f'(PR={best_pr:.2f}); raising the pressure ratio further '
-                    f'only widens the gap. A single preburner passes only part '
-                    f'of the propellant through the turbine, so this chamber '
-                    f'pressure is out of reach at the material temperature '
-                    f'limit. Full-flow staged combustion (all propellant '
-                    f'through two turbines) removes this limit — which is why '
-                    f'high-pressure methane engines such as Raptor use the '
-                    f'full-flow architecture rather than a single preburner.')
+                sol.warnings.append(_w(
+                    'warn.cycle.staged_power_balance_infeasible', 'critical',
+                    pr_min=PR_SOLVE_MIN, pr_max=PR_SOLVE_MAX, tit=tit,
+                    preburner_mode=preburner_mode, mdot_turb=mdot_turb,
+                    mdot_total=mdot_total, turb_frac=turb_frac,
+                    deficit_mw=best_deficit, best_pr=best_pr))
                 sol.not_modelled.append('power_balance')
                 sol.converged = False
                 return sol
@@ -878,11 +909,10 @@ def solve_cycle(cycle_type: str,
         sol.warnings.extend(pb.get('warnings', []))
 
         if not (STAGED_PR_TYPICAL[0] <= pr_root <= STAGED_PR_TYPICAL[1]):
-            sol.warnings.append(
-                f'Solved turbine pressure ratio {pr_root:.2f} lies outside '
-                f'the {STAGED_PR_TYPICAL[0]:g}-{STAGED_PR_TYPICAL[1]:g} '
-                f'range typical of staged-combustion turbines '
-                f'(Sutton Ch. 6).')
+            sol.warnings.append(_w(
+                'warn.cycle.staged_pr_outside_typical', 'warning',
+                pr=pr_root, pr_lo=STAGED_PR_TYPICAL[0],
+                pr_hi=STAGED_PR_TYPICAL[1]))
 
         gas = pb['gas']
         mr_pb = pb['mr']
@@ -947,35 +977,38 @@ def solve_cycle(cycle_type: str,
     if cycle_type == 'full_flow_staged_combustion':
         tit_f = float(tit_K if tit_K is not None
                       else TIT_DEFAULT_K['ffsc_fuel_rich'])
-        tit_ox = float(TIT_DEFAULT_K['ffsc_ox_rich'])
-        if tit_K is None:
-            sol.assumptions.append(
-                f'Preburner temperatures assumed {tit_f:.0f} K (fuel-rich '
-                f'shaft) and {tit_ox:.0f} K (ox-rich shaft); RS-25 / RD-170 '
-                f'class practice.')
+        # F009 (2026-07-25): ox-zengin mil TIT'i artık kullanıcıya AÇIK.
+        tit_ox = float(tit_ox_K if tit_ox_K is not None
+                       else TIT_DEFAULT_K['ffsc_ox_rich'])
+        if tit_K is None and tit_ox_K is None:
+            sol.assumptions.append(_w(
+                'warn.cycle.ffsc_preburner_temps_assumed', 'info',
+                tit_fuel=tit_f, tit_ox=tit_ox))
+        elif tit_ox_K is not None:
+            sol.assumptions.append(_w(
+                'warn.cycle.ffsc_both_tits_user', 'info',
+                tit_fuel=tit_f, tit_ox=tit_ox))
         else:
             # Kullanıcı TIT'i yakıt-zengin mile uygulanır; ox-zengin taraf
-            # kendi malzeme sınırıyla kalır.
-            sol.assumptions.append(
-                f'User turbine inlet temperature {tit_f:.0f} K applied to '
-                f'the fuel-rich shaft; the ox-rich shaft keeps the '
-                f'{tit_ox:.0f} K material limit.')
+            # varsayılan malzeme sınırıyla kalır (tit_ox_K ile ezilebilir).
+            sol.assumptions.append(_w(
+                'warn.cycle.ffsc_user_tit_fuel_shaft',  'info',
+                tit_fuel=tit_f, tit_ox=tit_ox))
         if tit_f > TIT_UNCOOLED_LIMIT_K:
-            sol.warnings.append(
-                f'Fuel-rich preburner temperature {tit_f:.0f} K exceeds the '
-                f'{TIT_UNCOOLED_LIMIT_K:.0f} K uncooled-blade limit '
-                f'(Sutton Ch. 10 / NASA SP-8110).')
+            sol.warnings.append(_w(
+                'warn.cycle.ffsc_fuel_rich_exceeds_uncooled', 'warning',
+                tit_fuel=tit_f, limit=TIT_UNCOOLED_LIMIT_K))
+        if tit_ox > TIT_OX_RICH_LIMIT_K:
+            # Ox-zengin sıcak gazda metal tutuşma riski (RD-170 pratiği ~772 K;
+            # Sutton 9. baskı Böl. 6). Kullanıcı bandı aşarsa sessiz kalınmaz.
+            sol.warnings.append(_w(
+                'warn.cycle.ffsc_ox_rich_exceeds_limit', 'warning',
+                tit_ox=tit_ox, limit=TIT_OX_RICH_LIMIT_K))
 
         p_te = pc_bar + inj_dp_gas
-        sol.assumptions.append(
-            f'Both turbine exhausts feed the main injector as gas with a '
-            f'{gas_injector_dp_frac:.0%} of Pc hot-gas injector drop '
-            f'(assumption; Huzel & Huang Ch. 4).')
-        sol.assumptions.append(
-            'Cross feeds (fuel to the ox-rich preburner, oxidizer to the '
-            'fuel-rich preburner) are tapped from the opposite pump '
-            'discharge; their extra boost power is not modelled separately '
-            '(small flows, Raptor-style architecture).')
+        sol.assumptions.append(_w(
+            'warn.cycle.ffsc_hot_gas_injector_drop', 'info',
+            frac=gas_injector_dp_frac))
 
         # Ön yakıcı O/F'leri (basınca zayıf bağlılık -> dış iterasyon).
         p_fpb_guess, p_opb_guess = p_te * 1.7, p_te * 1.7
@@ -1009,17 +1042,37 @@ def solve_cycle(cycle_type: str,
             mdot_turb_ox = opb_ox + opb_fuel
 
             def solve_shaft(gas, tit, mdot_turb, pump_mdot, rho, eta_pump,
-                            inlet_bar, extra_dp_bar):
-                """Tek milin PR kökü: türbin gücü = pompa gücü."""
+                            inlet_bar, extra_dp_bar, cross_mdot=0.0,
+                            cross_feed_bar=0.0):
+                """Tek milin PR kökü: türbin gücü = pompa gücü.
+
+                ``cross_mdot`` / ``cross_feed_bar`` (F103, 2026-07-25): bu
+                milin pompaladığı iticinin KARŞI ön yakıcıya giden küçük
+                payı ve o payın gerektirdiği besleme basıncı. FFSC'de ox-zengin
+                ön yakıcı YAKITLA, yakıt-zengin ön yakıcı OKSİTLEYİCİYLE
+                beslenir; iki ön yakıcının basıncı farklı olduğu için biri
+                diğerinin pompa çıkışının ÜSTÜNDE kalabilir. Ölçüldü (Raptor
+                300 bar): ox ön yakıcısına giden 8.43 kg/s yakıt 774.3 bar
+                istiyordu, yakıt pompası 628.8 bar veriyordu — 145.6 bar açık,
+                sessizce yok sayılıyordu. Gerçek FFSC motorlarında bu iş bir
+                kick/boost kademesiyle yapılır; staged dalı aynı muhasebeyi
+                zaten uyguluyordu (RS-25 HPOTP ana+boost, NASA SP-8107),
+                FFSC dalında simetri eksikti.
+                """
                 def powers(pr):
                     p_pb = p_te * pr
                     disch = (p_pb * (1.0 + preburner_injector_dp_frac)
                              + extra_dp_bar)
                     p_pump = _pump_power_w(pump_mdot, disch - inlet_bar,
                                            rho, eta_pump)
+                    # Çapraz besleme boost kademesi: yalnız karşı ön yakıcı
+                    # bu milin çıkışından YÜKSEKTEyse güç harcanır.
+                    p_boost = _pump_power_w(cross_mdot,
+                                            max(cross_feed_bar - disch, 0.0),
+                                            rho, eta_pump)
                     p_avail = mdot_turb * _turbine_specific_work(
                         gas, tit, pr, eta_turbine)
-                    return p_avail, p_pump, disch, p_pb
+                    return (p_avail, p_pump + p_boost, disch, p_pb, p_boost)
 
                 def resid(pr):
                     p_avail, p_pump = powers(pr)[:2]
@@ -1032,36 +1085,43 @@ def solve_cycle(cycle_type: str,
                     if fa <= 0.0 <= fb or fa >= 0.0 >= fb:
                         pr = float(brentq(resid, a, b, xtol=1e-13,
                                           rtol=1e-15))
-                        p_avail, p_pump, disch, p_pb = powers(pr)
+                        p_avail, p_pump, disch, p_pb, p_boost = powers(pr)
                         return {'pr': pr, 'p_avail': p_avail,
                                 'p_pump': p_pump, 'discharge_bar': disch,
-                                'p_pb': p_pb}
+                                'p_pb': p_pb, 'p_boost': p_boost,
+                                'cross_feed_bar': cross_feed_bar,
+                                'cross_mdot': cross_mdot}
                 # Kök yok: en iyi (en küçük açık) durumu teşhis için döndür.
                 return {'pr': None, 'best_deficit_W': -max(vals),
                         'best_pr': float(grid[int(np.argmax(vals))]),
                         'mdot_turb': mdot_turb}
 
+            # Karşı ön yakıcının besleme basıncı (dış iterasyon tahmininden).
+            opb_feed_bar = (p_opb_guess * (1.0 + preburner_injector_dp_frac)
+                            + line_dp_fuel_bar)   # ox ön yakıcısına YAKIT
+            fpb_feed_bar = (p_fpb_guess * (1.0 + preburner_injector_dp_frac)
+                            + line_dp_ox_bar)     # yakıt ön yakıcısına OKS
             res_f = solve_shaft(pb_f['gas'], tit_f, mdot_turb_f,
                                 m_fuel_total, rho_fuel, eta_pump_fuel,
                                 pump_inlet_fuel_bar,
-                                regen_dp_bar + line_dp_fuel_bar)
+                                regen_dp_bar + line_dp_fuel_bar,
+                                cross_mdot=opb_fuel,
+                                cross_feed_bar=opb_feed_bar)
             res_ox = solve_shaft(pb_ox['gas'], tit_ox, mdot_turb_ox,
                                  m_ox_total, rho_ox, eta_pump_ox,
-                                 pump_inlet_ox_bar, line_dp_ox_bar)
+                                 pump_inlet_ox_bar, line_dp_ox_bar,
+                                 cross_mdot=fpb_ox,
+                                 cross_feed_bar=fpb_feed_bar)
             if res_f['pr'] is None or res_ox['pr'] is None:
                 bad = res_f if res_f['pr'] is None else res_ox
-                side = 'fuel-rich' if res_f['pr'] is None else 'oxidizer-rich'
-                sol.warnings.append(
-                    f'FFSC {side} shaft power balance does not close for any '
-                    f'turbine pressure ratio in [{PR_SOLVE_MIN:g}, '
-                    f'{PR_SOLVE_MAX:g}]. Its {bad["mdot_turb"]:.0f} kg/s '
-                    f'turbine flow at the preburner temperature limit leaves a '
-                    f'{bad["best_deficit_W"] / 1e6:.1f} MW power shortfall '
-                    f'against the pump even at the most favourable pressure '
-                    f'ratio (PR={bad["best_pr"]:.2f}); a higher pressure ratio '
-                    f'only widens the gap. The cycle is infeasible at this '
-                    f'design point with the given efficiencies and temperature '
-                    f'limits.')
+                # Dilsiz kod: metni frontend kurar (TF ile çevrilir).
+                side = 'fuel_rich' if res_f['pr'] is None else 'ox_rich'
+                sol.warnings.append(_w(
+                    'warn.cycle.ffsc_shaft_balance_infeasible', 'critical',
+                    side=side, pr_min=PR_SOLVE_MIN, pr_max=PR_SOLVE_MAX,
+                    mdot_turb=bad['mdot_turb'],
+                    deficit_mw=bad['best_deficit_W'] / 1e6,
+                    best_pr=bad['best_pr']))
                 sol.not_modelled.append('power_balance')
                 sol.converged = False
                 return sol
@@ -1078,12 +1138,10 @@ def solve_cycle(cycle_type: str,
         for name, res in shaft_results.items():
             if not (STAGED_PR_TYPICAL[0] <= res['pr']
                     <= STAGED_PR_TYPICAL[1]):
-                sol.warnings.append(
-                    f'FFSC {name}-shaft turbine pressure ratio '
-                    f"{res['pr']:.2f} lies outside the "
-                    f'{STAGED_PR_TYPICAL[0]:g}-{STAGED_PR_TYPICAL[1]:g} '
-                    f'range typical of staged-combustion turbines '
-                    f'(Sutton Ch. 6).')
+                sol.warnings.append(_w(
+                    'warn.cycle.ffsc_shaft_pr_outside_typical', 'warning',
+                    shaft=name, pr=res['pr'], pr_lo=STAGED_PR_TYPICAL[0],
+                    pr_hi=STAGED_PR_TYPICAL[1]))
 
         res_f, res_ox = shaft_results['fuel'], shaft_results['ox']
         gas_f, gas_o = pb_f['gas'], pb_ox['gas']
@@ -1097,11 +1155,27 @@ def solve_cycle(cycle_type: str,
         sol.pump_power_total_W = res_f['p_pump'] + res_ox['p_pump']
         sol.turbine_power_total_W = res_f['p_avail'] + res_ox['p_avail']
         sol.turbine_mdot_total_kg_s = mdot_turb_f + mdot_turb_ox
+        # Çapraz besleme boost kademeleri (F103): sıfırdan büyükse raporla.
+        def _cross_note(res, propellant, target):
+            if res.get('p_boost', 0.0) <= 0.0:
+                return None
+            return (f"includes a cross-feed boost stage: "
+                    f"{res['cross_mdot']:.2f} kg/s of {propellant} raised to "
+                    f"{res['cross_feed_bar']:.1f} bar for the {target} "
+                    f"preburner ({res['p_boost'] / 1e6:.3f} MW)")
+
+        note_f = _cross_note(res_f, 'fuel', 'ox-rich')
+        note_ox = _cross_note(res_ox, 'oxidizer', 'fuel-rich')
+        if note_f or note_ox:
+            sol.assumptions.append(_w(
+                'warn.cycle.ffsc_cross_feed_boost', 'info',
+                boost_fuel_mw=round(res_f.get('p_boost', 0.0) / 1e6, 4),
+                boost_ox_mw=round(res_ox.get('p_boost', 0.0) / 1e6, 4)))
         fuel_shaft = _shaft_dict(
             'fuel',
             [_pump_dict('fuel', m_fuel_total, pump_inlet_fuel_bar,
                         res_f['discharge_bar'], res_f['p_pump'],
-                        eta_pump_fuel)],
+                        eta_pump_fuel, note=note_f)],
             _turbine_dict(mdot_turb_f, tit_f, res_f['p_pb'], res_f['pr'],
                           gas_f, eta_turbine, dh_f, res_f['p_avail']),
             res_f['p_pump'], res_f['p_avail'])
@@ -1109,7 +1183,7 @@ def solve_cycle(cycle_type: str,
             'ox',
             [_pump_dict('oxidizer', m_ox_total, pump_inlet_ox_bar,
                         res_ox['discharge_bar'], res_ox['p_pump'],
-                        eta_pump_ox)],
+                        eta_pump_ox, note=note_ox)],
             _turbine_dict(mdot_turb_ox, tit_ox, res_ox['p_pb'],
                           res_ox['pr'], gas_o, eta_turbine, dh_o,
                           res_ox['p_avail']),
@@ -1155,96 +1229,132 @@ def solve_cycle(cycle_type: str,
     # ------------------------------------------------------------------
     if cycle_type == 'expander':
         if regen_heat_kw is None:
-            sol.warnings.append(
-                'Expander cycle requires the regenerative heat pickup '
-                '(regen_heat_kw); without it the turbine inlet state cannot '
-                'be computed and the power balance is not modelled.')
+            sol.warnings.append(_w(
+                'warn.cycle.expander_requires_regen_heat', 'critical'))
             sol.not_modelled += ['turbine_inlet_state', 'power_balance']
             return sol
         fluid = COOLPROP_FLUID.get(fuel)
         if fluid is None:
-            sol.warnings.append(
-                f'Expander cycle with {fuel} is not supported: no real-gas '
-                f'property source is available for it (CoolProp), and RP-1 '
-                f'expander engines have no flight precedent.')
+            sol.warnings.append(_w(
+                'warn.cycle.expander_fuel_unsupported', 'critical',
+                fuel=fuel))
             sol.not_modelled += ['turbine_inlet_state', 'power_balance']
             return sol
         t_f0 = float(fuel_inlet_temp_K if fuel_inlet_temp_K is not None
                      else FUEL_NBP_K[fuel])
         if fuel_inlet_temp_K is None:
-            sol.assumptions.append(
-                f'Fuel pump inlet temperature assumed at the NBP '
-                f'{t_f0:g} K (NIST WebBook).')
+            sol.assumptions.append(_w(
+                'warn.cycle.fuel_pump_inlet_nbp_assumed', 'info',
+                temp_k=t_f0))
 
         p_te = pc_bar + inj_dp_gas
         # Türbin giriş sıcaklığı: ceket enerji dengesi
         # h_out = h(T0, p) + Q/ṁ (CoolProp gerçek gaz; pseudo-kritik cp
         # tepesi dahil).
         import CoolProp.CoolProp as CP
-        p_ref = p_te * 1.7 * PA_PER_BAR      # başlangıç basınç tahmini
-        try:
-            h_in = CP.PropsSI('H', 'T', t_f0, 'P', p_ref, fluid)
-            h_out = h_in + regen_heat_kw * 1000.0 / m_fuel_total
-            tit = float(CP.PropsSI('T', 'H', h_out, 'P', p_ref, fluid))
-            cp_turb = float(CP.PropsSI('C', 'T', tit, 'P', p_ref, fluid))
-        except Exception as exc:
-            sol.warnings.append(
-                f'CoolProp could not evaluate the coolant state '
-                f'({exc}); the expander balance is not modelled.')
-            sol.not_modelled += ['turbine_inlet_state', 'power_balance']
-            return sol
-        sol.assumptions.append(
-            'Coolant-side gas properties evaluated with CoolProp at the '
-            'initial discharge-pressure estimate; the weak pressure '
-            'dependence of cp at turbine conditions is neglected.')
-        r_sp = R_UNIVERSAL / FUEL_MOLAR_MASS_KG_KMOL[fuel]
-        gamma_t = cp_turb / max(cp_turb - r_sp, 1e-6)
-        gas = {'temperature_K': tit, 'molecular_weight':
-               FUEL_MOLAR_MASS_KG_KMOL[fuel], 'cp_J_kgK': cp_turb,
-               'gamma': gamma_t,
-               'model': ('real-gas cp from CoolProp at the turbine inlet '
-                         'state; gamma from cp/(cp - R/MW)')}
 
-        def powers(pr):
-            disch_f = p_te * pr + regen_dp_bar + line_dp_fuel_bar
-            p_fp = _pump_power_w(m_fuel_total, disch_f - pump_inlet_fuel_bar,
-                                 rho_fuel, eta_pump_fuel)
-            p_op = _pump_power_w(m_ox_total,
-                                 disch_ox_main - pump_inlet_ox_bar,
-                                 rho_ox, eta_pump_ox)
-            p_avail = m_fuel_total * _turbine_specific_work(gas, tit, pr,
-                                                            eta_turbine)
-            return p_avail, p_op + p_fp, p_op, p_fp, disch_f
+        # DIŞ İTERASYON (2026-07-25 fizik denetimi F036): eskiden türbin giriş
+        # durumu SABİT bir tahminde (p_ref = p_te·1.7) okunuyor, PR çözüldükten
+        # sonra bir daha güncellenmiyordu. Gerçek türbin giriş basıncı
+        # p_te·PR'dir. Kriyojenik H2'de özellikler basınca çok duyarlıdır
+        # (CoolProp, Leachman 2009 EOS: 40 K'de cp = 23112 J/kgK @40 bar,
+        # 16221 @64 bar -> %-30), bu yüzden staged/FFSC dallarındaki gibi bir
+        # dış iterasyon eklendi: özellikler p_te·PR'de yeniden okunur.
+        pr_root = 1.7                        # başlangıç PR tahmini
+        gas = None
+        tit = float('nan')
+        outer_used = 0
+        for outer in range(6):
+            outer_used = outer + 1
+            p_ref = p_te * pr_root * PA_PER_BAR   # türbin girişi [Pa]
+            try:
+                h_in = CP.PropsSI('H', 'T', t_f0, 'P', p_ref, fluid)
+                h_out = h_in + regen_heat_kw * 1000.0 / m_fuel_total
+                tit = float(CP.PropsSI('T', 'H', h_out, 'P', p_ref, fluid))
+                cp_turb = float(CP.PropsSI('C', 'T', tit, 'P', p_ref, fluid))
+                cv_turb = float(CP.PropsSI('O', 'T', tit, 'P', p_ref, fluid))
+            except Exception as exc:
+                sol.warnings.append(_w(
+                    'warn.cycle.coolprop_state_failed', 'critical',
+                    error=str(exc)))
+                sol.not_modelled += ['turbine_inlet_state', 'power_balance']
+                return sol
+            r_sp = R_UNIVERSAL / FUEL_MOLAR_MASS_KG_KMOL[fuel]
+            # v2.6.2 fizik denetimi, bulgu F010: 'gamma' artık GERÇEK
+            # cp/cv'dir (raporlama için). Termik mükemmel gaz değeri
+            # cp/(cp−R) yalnız karşılaştırma amacıyla saklanır — türbin
+            # işinde ARTIK KULLANILMAZ (bkz. _turbine_work_real_gas; eski
+            # bağıntı CH4 133 bar/277 K'de işi %43 FAZLA hesaplıyordu).
+            gas = {'temperature_K': tit,
+                   'molecular_weight': FUEL_MOLAR_MASS_KG_KMOL[fuel],
+                   'cp_J_kgK': cp_turb, 'cv_J_kgK': cv_turb,
+                   'gamma': float(cp_turb / max(cv_turb, 1e-9)),
+                   'gamma_thermally_perfect': float(
+                       cp_turb / max(cp_turb - r_sp, 1e-6)),
+                   'inlet_pressure_bar': float(p_ref / PA_PER_BAR),
+                   'model': ('real-gas CoolProp state at the turbine inlet '
+                             '(p = p_te*PR); turbine work from the isentropic '
+                             'enthalpy drop, NOT from a perfect-gas gamma')}
 
-        def resid(pr):
-            p_avail, p_req = powers(pr)[:2]
-            return p_avail - p_req
+            def powers(pr, _p_ref=p_ref, _tit=tit):
+                disch_f = p_te * pr + regen_dp_bar + line_dp_fuel_bar
+                p_fp = _pump_power_w(m_fuel_total,
+                                     disch_f - pump_inlet_fuel_bar,
+                                     rho_fuel, eta_pump_fuel)
+                p_op = _pump_power_w(m_ox_total,
+                                     disch_ox_main - pump_inlet_ox_bar,
+                                     rho_ox, eta_pump_ox)
+                # Türbin girişi p_te·pr; özellikler _p_ref'te sabitlenmiş
+                # dış iterasyon adımının durumundan gelir, ama izentropik
+                # düşüm gerçek giriş basıncından alınır.
+                dh_pr, _ = _turbine_work_real_gas(
+                    fluid, _tit, p_te * pr * PA_PER_BAR, pr, eta_turbine)
+                p_avail = m_fuel_total * dh_pr
+                return p_avail, p_op + p_fp, p_op, p_fp, disch_f
 
-        grid = np.linspace(PR_SOLVE_MIN, PR_SOLVE_MAX, 40)
-        vals = [resid(g) for g in grid]
-        bracket = None
-        for a, b, fa, fb in zip(grid[:-1], grid[1:], vals[:-1], vals[1:]):
-            if fa <= 0.0 <= fb or fa >= 0.0 >= fb:
-                bracket = (a, b)
+            def resid(pr):
+                p_avail, p_req = powers(pr)[:2]
+                return p_avail - p_req
+
+            grid = np.linspace(PR_SOLVE_MIN, PR_SOLVE_MAX, 40)
+            vals = [resid(g) for g in grid]
+            bracket = None
+            for a, b, fa, fb in zip(grid[:-1], grid[1:], vals[:-1], vals[1:]):
+                if fa <= 0.0 <= fb or fa >= 0.0 >= fb:
+                    bracket = (a, b)
+                    break
+            if bracket is None:
+                # Artık fonksiyonunun TEPE noktası en iyi durumdur (türbin işi
+                # PR ile doyarken pompa gücü doğrusal büyür).
+                best_pr = float(grid[int(np.argmax(vals))])
+                deficit = -max(vals)
+                sol.warnings.append(_w(
+                    'warn.cycle.expander_power_balance_infeasible', 'critical',
+                    regen_heat_kw=regen_heat_kw,
+                    pump_power_mw=powers(best_pr)[1] / 1e6,
+                    pr_max=PR_SOLVE_MAX, deficit_mw=deficit / 1e6))
+                sol.not_modelled.append('power_balance')
+                sol.converged = False
+                return sol
+            pr_new = float(brentq(resid, bracket[0], bracket[1], xtol=1e-13,
+                                  rtol=1e-15))
+            converged_outer = abs(pr_new - pr_root) / max(pr_root, 1e-9) < 1e-4
+            pr_root = pr_new
+            if converged_outer:
                 break
-        if bracket is None:
-            deficit = -resid(PR_SOLVE_MAX)
-            sol.warnings.append(
-                f'Expander power balance does not close: the chamber heat '
-                f'pickup ({regen_heat_kw:g} kW) cannot supply the '
-                f'{powers(PR_SOLVE_MAX)[1] / 1e6:.2f} MW pump power at any '
-                f'turbine pressure ratio up to {PR_SOLVE_MAX:g} '
-                f'(deficit {deficit / 1e6:.2f} MW). This is the natural '
-                f'expander power limit — the cycle suits small engines '
-                f'(Sutton Ch. 6).')
-            sol.not_modelled.append('power_balance')
-            sol.converged = False
-            return sol
-        pr_root = float(brentq(resid, bracket[0], bracket[1], xtol=1e-13,
-                               rtol=1e-15))
+
+        sol.assumptions.append(_w(
+            'warn.cycle.expander_real_gas_turbine', 'info',
+            gamma_real=round(float(gas['gamma']), 3),
+            gamma_perfect=round(float(gas['gamma_thermally_perfect']), 3)))
+        sol.assumptions.append(_w(
+            'warn.cycle.expander_inlet_pressure_iterated', 'info',
+            iterations=outer_used,
+            p_in_bar=round(float(p_te * pr_root), 1)))
         p_avail, p_req, p_op, p_fp, disch_f = powers(pr_root)
-        dh = _turbine_specific_work(gas, tit, pr_root, eta_turbine)
-        sol.iterations = 1
+        dh, t_exit_turb = _turbine_work_real_gas(
+            fluid, tit, p_te * pr_root * PA_PER_BAR, pr_root, eta_turbine)
+        sol.iterations = outer_used
         sol.pump_discharge_fuel_bar = disch_f
         sol.pump_discharge_ox_bar = disch_ox_main
         sol.pump_power_fuel_W = p_fp
@@ -1258,7 +1368,8 @@ def solve_cycle(cycle_type: str,
             _pump_dict('fuel', m_fuel_total, pump_inlet_fuel_bar, disch_f,
                        p_fp, eta_pump_fuel)]
         turbine = _turbine_dict(m_fuel_total, tit, p_te * pr_root, pr_root,
-                                gas, eta_turbine, dh, p_avail)
+                                gas, eta_turbine, dh, p_avail,
+                                exit_temp_K=t_exit_turb)
         sol.shafts = [_shaft_dict('main', pumps, turbine, p_req, p_avail)]
         sol.power_residual_rel = sol.shafts[0]['power_residual_rel']
         sol.main_chamber = {
@@ -1268,8 +1379,7 @@ def solve_cycle(cycle_type: str,
                  'pressure_bar': pc_bar + inj_dp_liq, 'phase': 'liquid'},
                 {'label': 'heated fuel (turbine exhaust)',
                  'mdot_kg_s': m_fuel_total, 'pressure_bar': p_te,
-                 'temperature_K': _turbine_exit_temp(gas, tit, pr_root,
-                                                     eta_turbine),
+                 'temperature_K': float(t_exit_turb),
                  'phase': 'gas'}]}
         sol.isp_mode = 'closed_cycle_no_loss'
         sol.isp_loss_s = 0.0

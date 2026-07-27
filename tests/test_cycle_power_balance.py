@@ -28,6 +28,29 @@ from hrma.engines.cycle_power_balance import (
 
 RESIDUAL_TOL = 1e-6
 
+
+def _codes(items):
+    """Uyarı/varsayım listesinden kod kümesi çıkarır.
+
+    v2.6.2'de uyarı sözleşmesi düz metinden ``{code, params, severity}``
+    sözlüğüne geçti (``_w()``); eski düz metin biçimi de kabul edilir.
+    """
+    out = set()
+    for w in items or []:
+        if isinstance(w, dict) and w.get('code'):
+            out.add(w['code'])
+        elif isinstance(w, str):
+            out.add(w)
+    return out
+
+
+def _params_of(items, code):
+    """Belirli bir kodun parametre sözlüğünü döndürür (yoksa boş sözlük)."""
+    for w in items or []:
+        if isinstance(w, dict) and w.get('code') == code:
+            return w.get('params') or {}
+    return {}
+
 # Görev doğrulama çapaları için sabit yoğunluklar (NBP; NIST WebBook).
 RHO_LOX = 1141.0
 RHO_CH4 = 422.0
@@ -231,12 +254,24 @@ class TestExpander:
         assert any('heated fuel' in lab for lab in labels)
 
     def test_power_limit_reported_not_faked(self):
-        # Büyük motor + yetersiz ısı alımı: expander doğal güç sınırı.
+        """Büyük motor + yetersiz ısı alımı: expander doğal güç sınırı.
+
+        v2.6.2 uyarı sözleşmesi güncellemesi: eskiden ``'power limit' in w``
+        şeklinde İngilizce metin aranıyordu; uyarılar artık
+        ``{code, params, severity}`` sözlüğü. Metin yerine KOD ve sayısal
+        parametreler sınanır (metin frontend'de i18n ile kurulur).
+        """
         sol = solve_cycle('expander', 200.0, 600.0, 3.6, 'methane',
                           regen_dp_bar=40.0, regen_heat_kw=20000.0)
         assert not sol.converged
         assert 'power_balance' in sol.not_modelled
-        assert any('power limit' in w for w in sol.warnings)
+        code = 'warn.cycle.expander_power_balance_infeasible'
+        assert code in _codes(sol.warnings)
+        p = _params_of(sol.warnings, code)
+        # Güç açığı sayıyla raporlanmalı (sahte yakınsama değil).
+        assert p['deficit_mw'] > 0.0
+        assert p['pump_power_mw'] > 0.0
+        assert p['regen_heat_kw'] == pytest.approx(20000.0)
 
     def test_missing_heat_input_is_not_modelled(self):
         sol = solve_cycle('expander', 30.0, 15.0, 5.5, 'lh2')
@@ -250,7 +285,8 @@ class TestBoundaries:
                           tank_pressure_bar=20.0)
         assert not sol.converged
         assert sol.tank_pressure_margin_bar < 0.0
-        assert any('infeasible' in w for w in sol.warnings)
+        assert any(w['code'] == 'warn.cycle.pressure_fed_infeasible'
+                   for w in sol.warnings)
 
     def test_pressure_fed_positive_margin_converges(self):
         sol = solve_cycle('pressure_fed', 20.0, 5.0, 2.1, 'rp1',
@@ -262,12 +298,14 @@ class TestBoundaries:
     def test_excessive_tit_warns(self):
         sol = solve_cycle('gas_generator', 97.0, 305.0, 2.36, 'rp1',
                           tit_K=1250.0, isp_main_s=282.0)
-        assert any('uncooled-blade' in w for w in sol.warnings)
+        assert any(w['code'] == 'warn.cycle.tit_exceeds_uncooled'
+                   for w in sol.warnings)
 
     def test_ox_rich_lh2_warns(self):
         sol = solve_cycle('staged_combustion', 200.0, 500.0, 6.0, 'lh2',
                           preburner_mode='ox_rich')
-        assert any('no flight precedent' in w for w in sol.warnings)
+        assert any(w['code'] == 'warn.cycle.ox_rich_lh2_no_precedent'
+                   for w in sol.warnings)
 
     def test_unknown_cycle_rejected(self):
         with pytest.raises(ValueError):
@@ -337,20 +375,28 @@ class TestTurbineEfficiencyDefault:
         assert 0.746 <= ETA_TURBINE_CLOSED_DEFAULT <= 0.811
 
     def test_open_cycle_uses_open_default_when_unset(self):
+        """v2.6.2: varsayım metni yerine KOD sınanır (uyarı sözleşmesi)."""
         sol = solve_cycle('gas_generator', 97.0, 305.0, 2.36, 'rp1',
                           isp_main_s=282.0)
         assert sol.converged
         assert (sol.shafts[0]['turbine']['efficiency']
                 == pytest.approx(ETA_TURBINE_OPEN_DEFAULT))
-        assert any('open cycle' in a for a in sol.assumptions)
+        code = 'warn.cycle.turbine_eff_open_assumed'
+        assert code in _codes(sol.assumptions)
+        assert _params_of(sol.assumptions, code)['eta'] == pytest.approx(
+            ETA_TURBINE_OPEN_DEFAULT)
 
     def test_closed_cycle_uses_closed_default_when_unset(self):
+        """v2.6.2: varsayım metni yerine KOD sınanır (uyarı sözleşmesi)."""
         sol = solve_cycle('staged_combustion', 206.0, 470.0, 6.0, 'lh2',
                           rho_ox=RHO_LOX, rho_fuel=RHO_LH2)
         assert sol.converged
         assert (sol.shafts[0]['turbine']['efficiency']
                 == pytest.approx(ETA_TURBINE_CLOSED_DEFAULT))
-        assert any('closed cycle' in a for a in sol.assumptions)
+        code = 'warn.cycle.turbine_eff_closed_assumed'
+        assert code in _codes(sol.assumptions)
+        assert _params_of(sol.assumptions, code)['eta'] == pytest.approx(
+            ETA_TURBINE_CLOSED_DEFAULT)
 
     def test_explicit_efficiency_is_honoured(self):
         # Kullanıcı değeri varsayılanı EZMELİ (sessizce değiştirilmez).
@@ -391,20 +437,31 @@ class TestHighPcConvergence:
                 ETA_TURBINE_CLOSED_DEFAULT)
 
     def test_single_preburner_staged_methane_300bar_honest_not_modelled(self):
-        # Tek fuel-rich ön yakıcı 300 bar metanı kapatamaz — bu FIZIKSEL.
-        # Sahte yakınsama YASAK; dürüst 'not_modelled' + sayısal gerekçe.
+        """Tek fuel-rich ön yakıcı 300 bar metanı kapatamaz — bu FIZIKSEL.
+
+        Sahte yakınsama YASAK; dürüst 'not_modelled' + sayısal gerekçe.
+        v2.6.2 uyarı sözleşmesi: eskiden ``' '.join(sol.warnings)`` ile
+        İngilizce metinde 'does not close' / 'MW' / 'full-flow' aranıyordu;
+        uyarılar artık sözlük olduğu için join TypeError veriyordu. Aynı
+        gerekçe artık KOD + sayısal parametrelerle sınanır: sınırlı türbin
+        debisi (mdot_turb < mdot_total) ve güç açığı (deficit_mw).
+        """
         sol = solve_cycle('staged_combustion', 300.0, 700.0, 3.6, 'methane',
                           'lox', rho_ox=RHO_LOX, rho_fuel=RHO_CH4)
         assert not sol.converged
         assert 'power_balance' in sol.not_modelled
         assert sol.pump_discharge_ox_bar is None
         assert sol.pump_discharge_fuel_bar is None
-        # Uyarı fiziksel gerekçeyi (sınırlı türbin debisi + tam-akış çözümü)
-        # sayıyla açıklamalı.
-        msg = ' '.join(sol.warnings)
-        assert 'does not close' in msg
-        assert 'MW' in msg and 'kg/s' in msg
-        assert 'full-flow' in msg.lower()
+        code = 'warn.cycle.staged_power_balance_infeasible'
+        assert code in _codes(sol.warnings)
+        p = _params_of(sol.warnings, code)
+        # Sayısal gerekçe: güç açığı + türbinden geçen SINIRLI debi payı.
+        assert p['deficit_mw'] > 0.0
+        assert p['mdot_total'] == pytest.approx(700.0, rel=1e-9)
+        assert 0.0 < p['mdot_turb'] < p['mdot_total']
+        assert p['turb_frac'] == pytest.approx(
+            p['mdot_turb'] / p['mdot_total'], rel=1e-9)
+        assert p['preburner_mode'] == 'fuel_rich'
 
     def test_open_cycle_unaffected_by_closed_default(self):
         # GG (açık çevrim) yeni kapalı-çevrim varsayılanından ETKİLENMEZ.
@@ -464,3 +521,108 @@ class TestHighPcRegressionAnchors:
                           eta_turbine=0.75, tit_K=1000.0)
         assert sol.converged
         assert 450.0 * 0.7 <= sol.pump_discharge_fuel_bar <= 480.0 * 1.3
+
+
+class TestExpanderRealGasTurbine:
+    """v2.6.2 fizik denetimi, bulgu F010: expander türbini GERÇEK GAZ işi.
+
+    Expander çevriminde türbin akışkanı yoğun süperkritik itici buharıdır
+    (CH4 ~277 K / 133 bar; H2 40-130 K / 45-70 bar). Termik mükemmel gaz
+    bağıntısı γ = cp/(cp−R) bu rejimde geçersizdir; türbin işi izentropik
+    entalpi düşümünden (CoolProp 6.8.0, NIST REFPROP tabanlı EOS'lar)
+    alınmalıdır. Sayısal çapalar denetim kataloğunun ölçümleridir.
+    """
+
+    # Katalog noktası: metan expander çözüm noktası (TIT=276.8 K,
+    # p_in=132.7 bar, PR=1.923, eta_t=0.78).
+    CH4_T, CH4_P, CH4_PR, ETA = 276.8, 132.7e5, 1.923, 0.78
+
+    @staticmethod
+    def _perfect_gas_dh(fluid, mw, t_K, p_Pa, pr, eta):
+        """Eski (hatalı) termik mükemmel gaz işi — karşılaştırma tabanı."""
+        import CoolProp.CoolProp as CP
+        from hrma.constants import R_UNIVERSAL
+        from hrma.engines.cycle_power_balance import _turbine_specific_work
+        cp = float(CP.PropsSI('C', 'T', t_K, 'P', p_Pa, fluid))
+        r_sp = R_UNIVERSAL / mw
+        gas = {'cp_J_kgK': cp, 'gamma': cp / (cp - r_sp)}
+        return _turbine_specific_work(gas, t_K, pr, eta)
+
+    def test_dense_methane_real_gas_work_matches_audit_anchor(self):
+        # Katalog ölçümü: gerçek gaz izentropik düşüm ~48.8 kJ/kg.
+        from hrma.engines.cycle_power_balance import _turbine_work_real_gas
+        dh, t_exit = _turbine_work_real_gas('Methane', self.CH4_T, self.CH4_P,
+                                            self.CH4_PR, self.ETA)
+        assert dh == pytest.approx(48.8e3, rel=0.02)
+        # Genişleme soğutur; çıkış girişten düşük ama fiziksel bantta.
+        assert 200.0 < t_exit < self.CH4_T
+
+    def test_perfect_gas_formula_overestimates_dense_methane(self):
+        # Katalog ölçümü: eski bağıntı aynı noktada ~69.8 kJ/kg -> +%43 FAZLA.
+        from hrma.engines.cycle_power_balance import _turbine_work_real_gas
+        dh_perfect = self._perfect_gas_dh('Methane', 16.043, self.CH4_T,
+                                          self.CH4_P, self.CH4_PR, self.ETA)
+        dh_real, _ = _turbine_work_real_gas('Methane', self.CH4_T, self.CH4_P,
+                                            self.CH4_PR, self.ETA)
+        assert dh_perfect == pytest.approx(69.8e3, rel=0.02)
+        assert (dh_perfect - dh_real) / dh_real > 0.35
+
+    def test_real_gamma_far_from_thermally_perfect_in_dense_regime(self):
+        # Katalog ölçümü: gamma_kod=1.17 vs gerçek cp/cv=2.02 (CH4 133 bar).
+        import CoolProp.CoolProp as CP
+        from hrma.constants import R_UNIVERSAL
+        cp = CP.PropsSI('C', 'T', self.CH4_T, 'P', self.CH4_P, 'Methane')
+        cv = CP.PropsSI('O', 'T', self.CH4_T, 'P', self.CH4_P, 'Methane')
+        r_sp = R_UNIVERSAL / 16.043
+        assert cp / (cp - r_sp) == pytest.approx(1.17, abs=0.02)
+        assert cp / cv == pytest.approx(2.02, abs=0.05)
+
+    def test_real_gas_reduces_to_perfect_gas_in_ideal_limit(self):
+        # Doğrulama: ideal gaz zarfında (CH4 800 K / 5 bar, Tr~4.2) iki
+        # formül aynı sonucu vermeli (<%0.5 fark). Yanma gazı dallarının
+        # mükemmel gaz bağıntısını korumasının gerekçesi de budur.
+        from hrma.engines.cycle_power_balance import _turbine_work_real_gas
+        dh_perfect = self._perfect_gas_dh('Methane', 16.043, 800.0, 5e5,
+                                          1.9, self.ETA)
+        dh_real, _ = _turbine_work_real_gas('Methane', 800.0, 5e5, 1.9,
+                                            self.ETA)
+        assert dh_real == pytest.approx(dh_perfect, rel=0.005)
+
+    def test_exit_temperature_energy_consistent(self):
+        # Δh_gerçek = h(T_in,p_in) − h(T_exit,p_out) birebir kapanmalı.
+        import CoolProp.CoolProp as CP
+        from hrma.engines.cycle_power_balance import _turbine_work_real_gas
+        dh, t_exit = _turbine_work_real_gas('Methane', self.CH4_T, self.CH4_P,
+                                            self.CH4_PR, self.ETA)
+        h1 = CP.PropsSI('H', 'T', self.CH4_T, 'P', self.CH4_P, 'Methane')
+        h2 = CP.PropsSI('H', 'T', t_exit, 'P', self.CH4_P / self.CH4_PR,
+                        'Methane')
+        assert h1 - h2 == pytest.approx(dh, rel=1e-6)
+
+    def test_expander_solution_reports_real_gamma_and_flag(self):
+        # Çözüm çıktısında gamma GERÇEK cp/cv olmalı ve gerçek gaz modeli
+        # varsayım koduyla beyan edilmeli (dürüstlük etiketi).
+        sol = _rl10()
+        assert sol.converged
+        codes = _codes(sol.assumptions)
+        assert 'warn.cycle.expander_real_gas_turbine' in codes
+        p = _params_of(sol.assumptions, 'warn.cycle.expander_real_gas_turbine')
+        gas = sol.shafts[0]['turbine']['gas']
+        assert gas['gamma'] == pytest.approx(
+            gas['cp_J_kgK'] / gas['cv_J_kgK'], rel=1e-9)
+        assert p['gamma_real'] == pytest.approx(gas['gamma'], abs=5e-3)
+        # Termik mükemmel değer yalnız karşılaştırma için saklanır.
+        assert 'gamma_thermally_perfect' in gas
+
+    def test_marginal_methane_expander_now_honestly_infeasible(self):
+        # Eski bağıntı bu noktada işi %43 fazla hesapladığı için denge
+        # YALANCI kapanıyordu; gerçek gazla açık kalmalı ve açık sayısal
+        # gerekçeyle raporlanmalı (asla-uydurma ilkesi).
+        sol = solve_cycle('expander', 60.0, 50.0, 3.4, 'methane',
+                          regen_dp_bar=15.0, regen_heat_kw=8000.0,
+                          eta_turbine=0.78)
+        assert not sol.converged
+        assert 'power_balance' in sol.not_modelled
+        code = 'warn.cycle.expander_power_balance_infeasible'
+        assert code in _codes(sol.warnings)
+        assert _params_of(sol.warnings, code)['deficit_mw'] > 0.0

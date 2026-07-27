@@ -22,6 +22,7 @@ from datetime import datetime
 import numpy as np
 
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+from hrma.utils.input_guard import safe_name
 
 try:
     from build123d import (
@@ -78,7 +79,8 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     has_injector = motor_type in ('hybrid', 'liquid')
 
     md = motor_results or {}
-    name = md.get('motor_name') or 'HRMA_MOTOR'
+    # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
+    name = safe_name(md.get('motor_name'))
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     if out_dir is None:
         out_dir = os.path.join(tempfile.gettempdir(), f'hrma_step_{stamp}')
@@ -172,8 +174,33 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     return files
 
 
+# Tank STEP zarfı: bu sınırların dışındaki ölçü bir birim hatasının işaretidir,
+# geçerli bir tasarım değil. Sessizce devam etmek yerine hata verilir.
+_TANK_MIN_MM, _TANK_MAX_MM = 10.0, 10_000.0
+
+
 def generate_tank_step(tank_data, out_dir=None):
-    """Sıvı motor tankları için gerçek STEP (silindir + yarıküre başlıklar)."""
+    """Sıvı motor tankları için gerçek STEP (silindir + yarıküre başlıklar).
+
+    BİRİM SÖZLEŞMESİ: ``diameter`` ve ``length`` **milimetre** cinsindendir —
+    modülün geri kalanı ve üretilen AP214 dosyası da mm kullanır.
+
+    v2.6.2 düzeltmesi (1000× birim hatası):
+    Bu fonksiyon girdiyi METRE varsayıp 1000 ile çarpıyordu. Fakat çağıran
+    adaptör (``cad_export.generate_tank_cad``) sıvı motorun ürettiği
+    ``dimensions.diameter`` değerini geçiriyor ve o değer ZATEN mm.
+    Sonuç: 300 mm'lik bir tank 300.000 mm = **300 metre** olarak kuruluyordu.
+    Hata yalnız varsayılan yolda görünmüyordu, çünkü varsayılan 0.3 metre
+    cinsindendi ve ×1000 ile doğru 300 mm'yi veriyordu — yani veri geldiğinde
+    bozuluyor, gelmediğinde doğru çalışıyordu.
+
+    Daha kötüsü: OpenCascade 300 metrelik silindir + küre birleşimini kuramayıp
+    SESSİZCE boş bir katı döndürüyordu. İstisna fırlamadığı için
+    ``cad_export`` içindeki "STEP_NOT_AVAILABLE" emniyet yolu hiç tetiklenmiyor,
+    kullanıcı geçerli görünen ama içi tamamen boş bir STEP dosyası indiriyordu.
+    Bu yüzden aşağıda hem zarf denetimi hem de üretilen katının boş olmadığı
+    kontrolü var.
+    """
     _require()
 
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -184,8 +211,16 @@ def generate_tank_step(tank_data, out_dir=None):
     files = {}
     for key in ('fuel_tank', 'oxidizer_tank'):
         td = (tank_data or {}).get(key) or {}
-        D = _num(td.get('diameter'), 0.3) * 1000
-        Lc = _num(td.get('length'), 0.8) * 1000
+        # Girdi ZATEN mm — burada ölçek dönüşümü YOK (bkz. docstring).
+        D = _num(td.get('diameter'), 300.0)
+        Lc = _num(td.get('length'), 800.0)
+        for label, val in (('diameter', D), ('length', Lc)):
+            if not (_TANK_MIN_MM <= val <= _TANK_MAX_MM):
+                raise ValueError(
+                    f'{key}.{label} = {val:g} mm is outside the physical '
+                    f'envelope [{_TANK_MIN_MM:g}, {_TANK_MAX_MM:g}] mm. '
+                    'This usually means the value was supplied in metres '
+                    'instead of millimetres.')
         r = D / 2
         with BuildPart() as bp:
             with Locations((Lc / 2, 0, 0)):

@@ -20,10 +20,29 @@ Ana fizik:
   sayısıyla hydraulic-flip bayrağı; N₂O besleme kuplajı notu (NTRS 20190001326).
 """
 
+from typing import Dict
+
 import numpy as np
 
 from hrma.constants import R_UNIVERSAL, PA_PER_BAR
-from hrma.analysis.tank_blowdown import N2OSaturation
+from hrma.analysis.tank_blowdown import N2OSaturation, N2O_T_CRIT
+
+
+def _w(code: str, severity: str = "warning", **params) -> Dict:
+    """i18n uyarısı: sabit metin YERİNE ``{code, params, severity}``.
+
+    Dil tamamen frontend'e taşınır; ``TF(code, params)`` metni kurar.
+    ``severity`` ∈ {"critical", "warning", "info"} — uyarılar
+    "warning"/"critical", varsayımlar (assumptions) "info". Kod kataloğu:
+    ``docs/v262_specs/D_codes_injector.md``.
+    """
+    return {"code": code, "params": params, "severity": severity}
+
+
+# Devre/akım etiketleri — YALNIZ ValueError metinleri için (hata kanalı hâlâ
+# metin döndürür; uyarı/varsayım kanalı {code} kullanır).
+_CIRCUIT_LABEL_TR = {'ox': 'oksitleyici', 'fuel': 'yakıt'}
+_GAS_POST_LABEL_TR = {'ox': 'oksitleyici postu', 'fuel': 'yakıt postu'}
 
 # ---------------------------------------------------------------------------
 # Modül sabitleri (ARGE raporu A.2-A.9)
@@ -62,6 +81,35 @@ ANNULUS_GAP_MIN_MM = 0.3       # imalat alt sınırı
 RHO_GAS_DEFAULT = 5.0          # kg/m³ — T_c/MW verilmezse varsayılan oda gazı
 ORIFICE_D_PREF_MM = (0.5, 2.5) # tercih edilen delik çapı bandı
 DEFAULT_CONSTRAINTS = {'d_min_mm': 0.3, 'd_max_mm': 3.0, 'n_max': 120}
+
+# ---------------------------------------------------------------------------
+# Sıvı özellikleri: yüzey gerilimi σ ve dinamik viskozite μ
+#
+# v2.6.2 DÜZELTMESİ (fizik denetimi F012/F040): σ ve μ varsayılanları
+# AKIŞKANDAN BAĞIMSIZ sabitlerdi (σ=0.02 N/m, μ=2e-4 Pa·s). N₂O için ikisi de
+# kaba yanlıştır: N₂O kritik noktaya (309.52 K) yakın çalıştığı için 293 K'de
+# σ ≈ 1.75 mN/m (0.02'nin 1/11'i) ve μ ≈ 6.3e-5 Pa·s'dir (2e-4'ün 1/3.2'si).
+# Elkotb SMD ∝ σ^0.737·ν^0.385 olduğundan hata birleşerek damlacık boyutunu
+# ~9 KAT şişiriyordu. Frontend bu alanları HİÇ göndermediği için varsayılan
+# her kullanıcı koşusunda devredeydi.
+#
+# Kaynak: NIST WebBook / ESDU — N₂O σ ≈ 1.75 mN/m ve μ_l ≈ 6.3e-5 Pa·s
+# @ 293 K; LOX σ ≈ 13 mN/m ve μ_l ≈ 1.9e-4 Pa·s @ 90 K (doyma).
+# Depo içi ikinci teyit: hrma/utils/injector_design.py::SIGMA_OX.
+SIGMA_LIQUID_REF = {'n2o': (0.00175, 293.15), 'lox': (0.013, 90.0)}
+MU_LIQUID_REF = {'n2o': (6.3e-5, 293.15), 'lox': (1.9e-4, 90.0)}
+# Bilinmeyen akışkan (ve yakıt devresi) için jenerik hidrokarbon değerleri:
+# RP-1/etanol σ ≈ 0.022-0.023 N/m, μ ≈ 1.5e-3...2e-3 Pa·s @ 293 K. Burada
+# muhafazakâr (eski davranışla aynı) değerler korunur ve VARSAYIM olarak
+# raporlanır — akışkan bilinmediği için tablo değeri uydurulmaz.
+SIGMA_GENERIC = 0.02
+MU_GENERIC = 2e-4
+# Guggenheim (1945) karşılık-gelen-haller bağıntısı: σ ∝ (1−T/Tc)^(11/9).
+# Poling, Prausnitz & O'Connell, "The Properties of Gases and Liquids"
+# 5. baskı Böl. 12'de aynı üs kullanılır. N₂O 280-305 K arasında σ 3 KAT
+# değiştiği için sabit değer yetersizdir; NIST referans noktasına
+# çapalanmış bu ölçekleme kullanılır.
+_GUGGENHEIM_EXP = 11.0 / 9.0
 
 # ---------------------------------------------------------------------------
 # Gaz-gaz (sıkıştırılabilir) enjeksiyon sabitleri — FFSC/staged combustion
@@ -325,16 +373,44 @@ def smd_impinging(d_jet_m, v_jet, rho_l, sigma_n_m, c_imp=C_IMP_SMD):
     return float(c_imp * d_jet_m * we ** (-1.0 / 3.0))
 
 
+# Giffen–Muraszew geometrik katsayısı: K = (π/(4√2))·√((1−X)³/X²).
+# v2.6.2 fizik denetimi, bulgu F001 (KRİTİK).
+#
+# v2.6.2 düzeltmesi: burada √(32/π²) = 1.80063 yazılıydı — doğrusunun TAM
+# TERSİ (1.80063 × 0.55536 = 1.000000). Hata modülün kendi içinde çelişki
+# yaratıyordu: aynı fonksiyondaki sinθ = (π/2)·Cd/(K(1+√X)) bağıntısı
+# Lefebvre'in K = A_p/(D_s·d_o) tanımına aittir, dolayısıyla iki bağıntı
+# 32/π² = 3.242 kat farklı K tanımı kullanıyordu.
+#
+# Fiziksel kanıt: ters katsayıyla ulaşılabilen EN BÜYÜK sprey yarı açısı
+# 15.9° idi; gerçek basınçlı-swirl (simplex) atomizörler rutin olarak
+# 30-60° yarı açı verir. Cd de 2.0-2.7 kat düşük çıkıyor ve doğrudan
+# enjeksiyon alanına girdiği için (A = ṁ/(Cd·√(2ρΔP))) toplam delik alanı
+# 1.7-2.7 KAT fazla boyutlanıyordu.
+#
+# Doğrulama: X=0.5 → K=0.3927, Cd=0.2887 (Lefebvre & McDonell, Atomization
+# and Sprays 2. baskı, Böl. 6 simplex atomizör tablolarıyla uyumlu; tipik
+# simplex Cd 0.25-0.45).
+_SWIRL_GEOMETRIC_COEF = np.pi / (4.0 * np.sqrt(2.0))  # = √(π²/32) = 0.55536
+
+
 def swirl_solve(K):
     """Giffen–Muraszew çözümü: K → {'X','cd','theta_deg','film_t_ratio'}.
 
-    K = √(32/π²)·√((1−X)³/X²) bağıntısından X kök araması (0<X<1);
+    K = (π/(4√2))·√((1−X)³/X²) bağıntısından X kök araması (0<X<1);
     Cd = √((1−X)³/(1+X));  sinθ = (π/2)·Cd/(K·(1+√X));
     film kalınlığı oranı t/r_o = 1−√X.
+
+    K, Lefebvre tanımıyla atomizör sabitidir: K = A_p/(D_s·d_o)
+    (A_p: teğetsel giriş kanalı toplam alanı, D_s: girdap odası çapı,
+    d_o: çıkış orifis çapı).
+
+    Kaynak: Giffen & Muraszew (1953); Lefebvre & McDonell, *Atomization and
+    Sprays*, 2. baskı, Böl. 6.
     """
     if K <= 0:
         raise ValueError('Swirl atomizör sabiti K pozitif olmalı')
-    coef = np.sqrt(32.0 / np.pi ** 2)
+    coef = _SWIRL_GEOMETRIC_COEF
 
     def f(x):
         return coef * np.sqrt((1.0 - x) ** 3 / x ** 2) - K
@@ -355,9 +431,41 @@ def swirl_solve(K):
             'film_t_ratio': float(1.0 - np.sqrt(X))}
 
 
+# swirl_K_from_theta'nın arama aralığı K ∈ [_SWIRL_K_MIN, _SWIRL_K_MAX] olup
+# bu, çözülebilir yarı açı zarfını belirler (ölçüldü: K=20 → 3.67°,
+# K=0.02 → 71.24°). Zarf dışı hedefler kırpılır ve kullanıcıya uyarı verilir.
+_SWIRL_K_MIN, _SWIRL_K_MAX = 0.02, 20.0
+_SWIRL_THETA_MIN_DEG, _SWIRL_THETA_MAX_DEG = 3.7, 71.2
+
+
+def swirl_X_from_cd(cd):
+    """Verilen deşarj katsayısından hava çekirdeği oranını çöz (ters çözüm).
+
+    Cd = √((1−X)³/(1+X)) bağıntısı X'te monoton azalandır; bisection ile
+    tersi alınır. Buradan K = (π/(4√2))·√((1−X)³/X²) ve
+    sinθ = (π/2)·Cd/(K(1+√X)) türetilebilir — yani Cd bilinen bir simplex
+    atomizörün girdap geometrisi ve sprey açısı KAPALI olarak belirlidir.
+
+    Kaynak: Giffen & Muraszew (1953); Lefebvre & McDonell, *Atomization and
+    Sprays*, 2. baskı, Böl. 6.
+    """
+    cd = float(cd)
+    if not (0.0 < cd < 1.0):
+        raise ValueError('Swirl atomizör Cd değeri 0 < Cd < 1 olmalı '
+                         '(X→0 sınırında Cd→1)')
+    lo, hi = 1e-9, 1.0 - 1e-9   # f(X) = √((1−X)³/(1+X)) − Cd, X'te azalan
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if np.sqrt((1.0 - mid) ** 3 / (1.0 + mid)) > cd:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
 def swirl_K_from_theta(theta_target_deg):
     """Hedef sprey yarı açısından K çöz (iç içe kök araması, monoton)."""
-    lo, hi = 0.02, 20.0
+    lo, hi = _SWIRL_K_MIN, _SWIRL_K_MAX
     for _ in range(200):
         mid = 0.5 * (lo + hi)
         th = swirl_solve(mid)['theta_deg']
@@ -366,6 +474,46 @@ def swirl_K_from_theta(theta_target_deg):
         else:
             hi = mid
     return 0.5 * (lo + hi)
+
+
+def liquid_surface_tension(fluid, T_K=None):
+    """Sıvı yüzey gerilimi σ [N/m] — akışkan tablosundan, T verilirse ölçekli.
+
+    N₂O için Guggenheim ölçeklemesi uygulanır:
+        σ(T) = σ_ref·((1−T/Tc)/(1−T_ref/Tc))^(11/9),  Tc = 309.52 K.
+    Bilinmeyen akışkanda jenerik değer döner.
+
+    Döner: (sigma [N/m], basis) — basis ∈ {'table','table_T_scaled','generic'}.
+    Kaynak: NIST WebBook (referans nokta); Guggenheim (1945) / Poling ve ark.
+    5. baskı Böl. 12 (sıcaklık ölçeklemesi).
+    """
+    key = str(fluid or '').lower()
+    if key not in SIGMA_LIQUID_REF:
+        return SIGMA_GENERIC, 'generic'
+    sigma_ref, t_ref = SIGMA_LIQUID_REF[key]
+    if key != 'n2o' or T_K is None:
+        return sigma_ref, 'table'
+    # Kritik noktanın üstünde sıvı yoktur; 0.5 K güvenlik payıyla kırpılır.
+    t = float(min(float(T_K), N2O_T_CRIT - 0.5))
+    ratio = (1.0 - t / N2O_T_CRIT) / (1.0 - t_ref / N2O_T_CRIT)
+    return float(sigma_ref * max(ratio, 1e-9) ** _GUGGENHEIM_EXP), 'table_T_scaled'
+
+
+def liquid_viscosity(fluid, T_K=None):
+    """Sıvı dinamik viskozitesi μ [Pa·s] — akışkan tablosundan (referans T).
+
+    Sıcaklık bağımlılığı MODELLENMEZ (güvenilir tablo/korelasyon bu modülde
+    yok); referans sıcaklık varsayım olarak raporlanır — uydurma korelasyon
+    yazmak yerine sınır açıkça bildirilir.
+
+    Döner: (mu [Pa·s], T_ref [K] veya None, basis).
+    Kaynak: NIST WebBook — N₂O μ_l ≈ 6.3e-5 Pa·s @ 293 K; LOX ≈ 1.9e-4 @ 90 K.
+    """
+    key = str(fluid or '').lower()
+    if key not in MU_LIQUID_REF:
+        return MU_GENERIC, None, 'generic'
+    mu_ref, t_ref = MU_LIQUID_REF[key]
+    return float(mu_ref), float(t_ref), 'table'
 
 
 def pintle_spray_angle(tmr):
@@ -498,30 +646,40 @@ def _require_gas_stream(spec, key, name):
     return gas
 
 
-def _plan_gas_elements(total_area_m2, warnings_tr, name,
+def _plan_gas_elements(total_area_m2, warnings, stream,
                        pref_mm=GAS_POST_D_PREF_MM, n_max=GAS_ELEMENT_N_MAX):
     """Toplam iç-post alanını, post çapını tercih bandına (2-8 mm) oturtan
     n elemana böl. Bandın içindeki EN KÜÇÜK n (en büyük çap) seçilir; band
-    tutturulamazsa sınır çözümü + uyarı."""
+    tutturulamazsa sınır çözümü + uyarı.
+
+    ``stream`` ∈ {'ox', 'fuel'} — iç postun hangi akımı taşıdığı (uyarı kodu
+    bundan seçilir; dil frontend'de kurulur).
+    """
     d_lo, d_hi = pref_mm[0] * 1e-3, pref_mm[1] * 1e-3
     if total_area_m2 <= 0:
-        raise ValueError(f"{name}: toplam post alanı pozitif olmalı")
+        raise ValueError(
+            f"{_GAS_POST_LABEL_TR[stream]}: toplam post alanı pozitif olmalı")
     for n in range(1, n_max + 1):
         d = np.sqrt(4.0 * total_area_m2 / (np.pi * n))
         if d <= d_hi:
             if d < d_lo:
-                warnings_tr.append(
-                    f"{name}: iç post çapı d={d*1e3:.2f} mm tercih bandının "
-                    f"({pref_mm[0]:.1f}-{pref_mm[1]:.1f} mm) altında "
-                    "(düşük debi / küçük eleman).")
+                warnings.append(_w(
+                    'warn.injector.gas_inner_post_below_pref_band_ox'
+                    if stream == 'ox' else
+                    'warn.injector.gas_inner_post_below_pref_band_fuel',
+                    'warning',
+                    d_mm=round(float(d) * 1e3, 2),
+                    band_lo_mm=round(float(pref_mm[0]), 1),
+                    band_hi_mm=round(float(pref_mm[1]), 1)))
             return int(n), float(d)
     # n_max ile bile post bandın üstünde: sınır çözümü
     n = n_max
     d = np.sqrt(4.0 * total_area_m2 / (np.pi * n))
-    warnings_tr.append(
-        f"{name}: eleman üst sınırı n={n_max} ile post çapı d={d*1e3:.2f} mm "
-        f"tercih bandının üstünde. Debi çok yüksek; eleman sınırını artırın "
-        "veya P0'ı yükseltin.")
+    warnings.append(_w(
+        'warn.injector.gas_element_limit_post_above_pref_band_ox'
+        if stream == 'ox' else
+        'warn.injector.gas_element_limit_post_above_pref_band_fuel',
+        'warning', n_max=int(n_max), d_mm=round(float(d) * 1e3, 2)))
     return int(n), float(d)
 
 
@@ -529,7 +687,7 @@ def _plan_gas_elements(total_area_m2, warnings_tr, name,
 # Delik planı ve manifold
 # ---------------------------------------------------------------------------
 
-def _plan_orifices(total_area_m2, constraints, warnings_tr, n_fixed=None):
+def _plan_orifices(total_area_m2, constraints, warnings, n_fixed=None):
     """Toplam alanı, çapı tercihen 0.5-2.5 mm bandına oturtan n deliğe böl.
 
     n_fixed verilirse delik sayısı sabitlenir (yalnız çap çözülür) — kullanıcı
@@ -546,13 +704,17 @@ def _plan_orifices(total_area_m2, constraints, warnings_tr, n_fixed=None):
             raise ValueError('Delik sayısı en az 1 olmalı')
         d = np.sqrt(4.0 * total_area_m2 / (np.pi * n))
         if not (d_min <= d <= d_max):
-            warnings_tr.append(
-                f"Sabitlenen n={n} ile delik çapı d={d*1e3:.2f} mm imalat "
-                f"bandının ({d_min*1e3:.1f}-{d_max*1e3:.1f} mm) dışında.")
+            warnings.append(_w(
+                'warn.injector.fixed_n_outside_manufacturing_band', 'warning',
+                n=int(n), d_mm=round(float(d) * 1e3, 2),
+                d_min_mm=round(float(d_min) * 1e3, 1),
+                d_max_mm=round(float(d_max) * 1e3, 1)))
         elif not (d_lo <= d <= d_hi):
-            warnings_tr.append(
-                f"Sabitlenen n={n} ile d={d*1e3:.2f} mm tercih bandının "
-                "(0.5-2.5 mm) dışında.")
+            warnings.append(_w(
+                'warn.injector.fixed_n_outside_pref_band', 'warning',
+                n=int(n), d_mm=round(float(d) * 1e3, 2),
+                band_lo_mm=round(float(ORIFICE_D_PREF_MM[0]), 1),
+                band_hi_mm=round(float(ORIFICE_D_PREF_MM[1]), 1)))
         return n, float(d)
 
     best = None
@@ -566,21 +728,25 @@ def _plan_orifices(total_area_m2, constraints, warnings_tr, n_fixed=None):
         n = n_max
         d = np.sqrt(4.0 * total_area_m2 / (np.pi * n))
         if d > d_max:
-            warnings_tr.append(
-                f"Delik kısıtlarıyla (n≤{n_max}, d≤{d_max*1e3:.1f} mm) istenen"
-                f" debi tek katmanda sağlanamıyor: d={d*1e3:.2f} mm gerekti."
-                " Delik sayısı üst sınırını artırın veya ΔP'yi yükseltin.")
+            warnings.append(_w(
+                'warn.injector.orifice_plan_infeasible', 'warning',
+                n_max=int(n_max), d_max_mm=round(float(d_max) * 1e3, 1),
+                d_mm=round(float(d) * 1e3, 2)))
         elif d > d_hi:
-            warnings_tr.append(
-                f"Delik çapı tercih bandının (0.5-2.5 mm) üstünde: "
-                f"d={d*1e3:.2f} mm (n üst sınırı {n_max} yetersiz).")
+            warnings.append(_w(
+                'warn.injector.orifice_d_above_pref_band', 'warning',
+                d_mm=round(float(d) * 1e3, 2), n_max=int(n_max),
+                band_lo_mm=round(float(ORIFICE_D_PREF_MM[0]), 1),
+                band_hi_mm=round(float(ORIFICE_D_PREF_MM[1]), 1)))
         elif d < d_min:
             n = max(1, int(np.floor(4.0 * total_area_m2 / (np.pi * d_min ** 2))))
             n = min(n, n_max)
             d = np.sqrt(4.0 * total_area_m2 / (np.pi * n))
-            warnings_tr.append(
-                f"Delik çapı tercih bandının (0.5-2.5 mm) altında:"
-                f" d={d*1e3:.2f} mm (imalat alt sınırına yakın).")
+            warnings.append(_w(
+                'warn.injector.orifice_d_below_pref_band', 'warning',
+                d_mm=round(float(d) * 1e3, 2),
+                band_lo_mm=round(float(ORIFICE_D_PREF_MM[0]), 1),
+                band_hi_mm=round(float(ORIFICE_D_PREF_MM[1]), 1)))
         best = (n, d)
     n, d = best
     return int(n), float(d)
@@ -600,11 +766,16 @@ def _manifold(mdot, rho, v_orifice):
 # Devre çözümü (ox veya fuel)
 # ---------------------------------------------------------------------------
 
-def _solve_circuit(name, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
-                   T_K, inlet, l_over_d, constraints, warnings_tr,
-                   assumptions_tr, cd_override=None, cd_basis_override=None,
+def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
+                   T_K, inlet, l_over_d, constraints, warnings,
+                   assumptions, cd_override=None, cd_basis_override=None,
                    n_fixed=None):
-    """Tek devre (ox/fuel) akış + delik planı + manifold + flip çözümü."""
+    """Tek devre (ox/fuel) akış + delik planı + manifold + flip çözümü.
+
+    ``circuit`` ∈ {'ox', 'fuel'} — dil-nötr devre kimliği. Uyarı kodu bundan
+    seçilir; ValueError metinleri ``_CIRCUIT_LABEL_TR`` etiketini kullanır.
+    """
+    name = _CIRCUIT_LABEL_TR[circuit]
     spec_p_feed_given = p_feed_bar is not None
     if p_feed_bar is None:
         p_feed_bar = pc_bar * (1.0 + dp_ratio)
@@ -617,15 +788,32 @@ def _solve_circuit(name, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
         p_sat_bar = _SAT.psat(T_K) / PA_PER_BAR
         # Kendinden basınçlı doymuş tank: p_feed verilmemişse P₁ = P_sat
         # (ARGE Ö2 örneğiyle tutarlı — ΔP burada tasarım değişkeni değil,
-        # tank sıcaklığının sonucudur). Verilmişse doymayı aşamaz.
+        # tank sıcaklığının sonucudur).
+        #
+        # v2.6.2 DÜZELTMESİ (F039): kullanıcı p_feed verdiğinde eski kod
+        # P₁ = min(p_feed, P_sat) ile doymanın ÜSTÜNÜ yasaklıyordu. Helyum ile
+        # süper-şarj edilmiş (aşırı soğutulmuş) N₂O tankı yaygın bir uçuş
+        # konfigürasyonudur ve P₁ > P_sat tamamen geçerlidir; NHNE bunu zaten
+        # doğru ele alır (κ = √((P₁−P₂)/(P_v−P₂)) büyür → SPI'ye yaklaşır).
+        # Kelepçe, 70 bar süper-şarjda birim alan debisini %61 düşürüp
+        # enjeksiyon alanını ~1.6 kat fazla boyutlandırıyordu.
+        # Kaynak: Dyer ve ark. AIAA 2007-5702 (NHNE aşırı-soğutulmuş dalı);
+        # Zilliac & Karabeyoglu AIAA 2005-3549 (süper-şarjlı N₂O beslemesi).
         if spec_p_feed_given:
-            p1_bar = min(p_feed_bar, p_sat_bar)
+            p1_bar = p_feed_bar
+            if p1_bar > p_sat_bar:
+                assumptions.append(_w(
+                    'warn.injector.n2o_supercharged_feed', 'info',
+                    p_feed_bar=round(float(p1_bar), 2),
+                    p_sat_bar=round(float(p_sat_bar), 2),
+                    T_K=round(float(T_K), 1)))
         else:
             p1_bar = p_sat_bar
         if rho is None:
             rho = _SAT.rho_l(T_K)
-            assumptions_tr.append(
-                f"ρ_ox doyma tablosundan alındı: {rho:.0f} kg/m³ (T={T_K:.1f} K)")
+            assumptions.append(_w(
+                'warn.injector.rho_ox_from_saturation_table', 'info',
+                rho=round(float(rho), 0), T_K=round(float(T_K), 1)))
     else:
         p1_bar = p_feed_bar
         if rho is None:
@@ -653,7 +841,7 @@ def _solve_circuit(name, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
         flow_model = 'SPI'
     total_area = mdot / max(g_eff, 1e-12)
 
-    n, d = _plan_orifices(total_area, constraints, warnings_tr, n_fixed=n_fixed)
+    n, d = _plan_orifices(total_area, constraints, warnings, n_fixed=n_fixed)
     a_total = n * np.pi * d ** 2 / 4.0
     # Efektif enjeksiyon hızı (SPI özdeşliğinden; NHNE'de sıvı giriş hızı)
     v_inj = float(cd * np.sqrt(2.0 * dp_pa / rho))
@@ -672,14 +860,18 @@ def _solve_circuit(name, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
         p_v_bar = p_sat_bar
     else:
         p_v_bar = 0.05  # depolanabilir sıvılar için ~hava basıncı altı varsayım
-        assumptions_tr.append(
-            f"{name}: buhar basıncı ~{p_v_bar} bar varsayıldı (K_c hesabı)")
+        assumptions.append(_w(
+            'warn.injector.vapor_pressure_assumed_ox' if circuit == 'ox' else
+            'warn.injector.vapor_pressure_assumed_fuel', 'info',
+            p_v_bar=float(p_v_bar)))
     k_c = (p1_bar - p_v_bar) / max(p1_bar - pc_bar, 1e-9)
     flip = hydraulic_flip_risk(inlet, l_over_d, k_c)
     if flip:
-        warnings_tr.append(
-            f"{name}: hydraulic flip riski (keskin giriş, L/D={l_over_d:g}, "
-            f"K_c={k_c:.2f} < {FLIP_KC_LIMIT}). Çözüm: radüslü giriş veya L/D ≥ 5.")
+        warnings.append(_w(
+            'warn.injector.hydraulic_flip_risk_ox' if circuit == 'ox' else
+            'warn.injector.hydraulic_flip_risk_fuel', 'warning',
+            l_over_d=float(l_over_d), k_c=round(float(k_c), 2),
+            limit=float(FLIP_KC_LIMIT)))
 
     return {
         'mdot_kg_s': float(mdot),
@@ -703,7 +895,7 @@ def _solve_circuit(name, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
 # Ana giriş noktası
 # ---------------------------------------------------------------------------
 
-def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
+def _design_gas_gas_coaxial(spec, warnings, assumptions):
     """Gaz-gaz shear-coax enjektör (FFSC/staged combustion ana odası).
 
     İç jet (varsayılan ox-zengin gaz) + dış anülüs (yakıt-zengin gaz), her
@@ -730,18 +922,16 @@ def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
     cd = spec.get('cd')
     if cd is None:
         cd = GAS_GAS_CD_DEFAULT
-        assumptions_tr.append(
-            f"Gaz postu akı katsayısı Cd={GAS_GAS_CD_DEFAULT} varsayıldı "
-            "(kontürlü gaz enjektör postu, band 0.8-0.9; 'cd' ile ezilebilir).")
+        assumptions.append(_w(
+            'warn.injector.gas_post_cd_assumed', 'info',
+            cd=float(GAS_GAS_CD_DEFAULT)))
     cd = float(cd)
 
     inner_stream = str(spec.get('inner_stream', 'ox')).lower()
     if inner_stream not in ('ox', 'fuel'):
         raise ValueError("inner_stream 'ox' veya 'fuel' olmalı")
     if spec.get('inner_stream') is None:
-        assumptions_tr.append(
-            "İç post = oksitleyici gazı, dış anülüs = yakıt gazı varsayıldı "
-            "(gaz-gaz coax tipik dizilim; 'inner_stream' ile değiştirilebilir).")
+        assumptions.append(_w('warn.injector.gas_inner_stream_assumed', 'info'))
 
     # Akım koşulları (birim alan → mass_flux; alan bağımsız)
     r_ox = _gas_r_specific(gas_ox, 'oksitleyici gazı')
@@ -771,12 +961,12 @@ def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
 
     # Eleman sayısı iç akımın (post) alanından belirlenir
     if inner_stream == 'ox':
-        inner_area, inner_name = a_ox, 'oksitleyici postu'
+        inner_area = a_ox
         outer_area = a_fuel
     else:
-        inner_area, inner_name = a_fuel, 'yakıt postu'
+        inner_area = a_fuel
         outer_area = a_ox
-    n, d_inner = _plan_gas_elements(inner_area, warnings_tr, inner_name)
+    n, d_inner = _plan_gas_elements(inner_area, warnings, inner_stream)
 
     a_ann_e = outer_area / n
     t_wall = max(GAS_POST_WALL_MIN_MM * 1e-3, GAS_POST_WALL_T_OVER_D * d_inner)
@@ -785,9 +975,10 @@ def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
            - d_post_outer) / 2.0
     d_elem_outer = d_post_outer + 2.0 * gap
     if gap * 1e3 < GAS_ANNULUS_GAP_MIN_MM:
-        warnings_tr.append(
-            f"Anülüs boşluğu {gap*1e3:.2f} mm < {GAS_ANNULUS_GAP_MIN_MM} mm "
-            "imalat alt sınırı (dış akım debisi düşük / eleman fazla).")
+        warnings.append(_w(
+            'warn.injector.gas_annulus_gap_below_min', 'warning',
+            gap_mm=round(float(gap) * 1e3, 2),
+            min_mm=float(GAS_ANNULUS_GAP_MIN_MM)))
 
     # Momentum-akı oranı ve hız oranı (inner=post, outer=anülüs)
     if inner_stream == 'ox':
@@ -800,11 +991,11 @@ def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
     vr = v_out / max(v_in, 1e-9)
     j_ok = GAS_GAS_J_GOOD[0] <= j_mom <= GAS_GAS_J_GOOD[1]
     if not j_ok:
-        warnings_tr.append(
-            f"Momentum-akı oranı J={j_mom:.2f} iyi karışım bandının "
-            f"({GAS_GAS_J_GOOD[0]:.0f}-{GAS_GAS_J_GOOD[1]:.0f}) dışında "
-            "(mühendislik kılavuzu): karışım/yanma verimi düşebilir. "
-            "Akım P0/geometrisini gözden geçirin.")
+        warnings.append(_w(
+            'warn.injector.gas_momentum_flux_out_of_band', 'warning',
+            j=round(float(j_mom), 2),
+            j_lo=round(float(GAS_GAS_J_GOOD[0]), 0),
+            j_hi=round(float(GAS_GAS_J_GOOD[1]), 0)))
 
     def _circuit(name, mdot, p0_pa_, st, is_inner):
         dp_bar = (p0_pa_ - pc_pa) / PA_PER_BAR
@@ -846,19 +1037,17 @@ def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
     worst = min(dp_pc_ox, dp_pc_f)
     chug_ok = worst >= GAS_DP_PC_MIN
     if not chug_ok:
-        warnings_tr.append(
-            f"ΔP/Pc = {worst:.2f} < {GAS_DP_PC_MIN} (gaz-gaz alt sınırı) → "
-            "oda-besleme kuplajı / düşük frekans kararsızlık riski. Ön yakıcı "
-            "basıncını artırın.")
+        warnings.append(_w(
+            'warn.injector.gas_dp_pc_below_min', 'warning',
+            dp_pc=round(float(worst), 2), min=float(GAS_DP_PC_MIN)))
     elif worst < GAS_DP_PC_RECOMMENDED:
-        warnings_tr.append(
-            f"ΔP/Pc = {worst:.2f}, önerilen gaz-gaz alt sınırı "
-            f"{GAS_DP_PC_RECOMMENDED}'un altında (mühendislik kılavuzu): "
-            "kararlılık marjı düşük.")
-    assumptions_tr.append(
-        f"Gaz-gaz ΔP/Pc bandı ({GAS_DP_PC_MIN}-{GAS_DP_PC_RECOMMENDED}+) "
-        "mühendislik kılavuzudur; SP-8089'un %15-20'si SIVI enjektör içindir "
-        "(kavitasyon/atomizasyon), gaz-gaz'da bu mekanizmalar yoktur.")
+        warnings.append(_w(
+            'warn.injector.gas_dp_pc_below_recommended', 'warning',
+            dp_pc=round(float(worst), 2),
+            recommended=float(GAS_DP_PC_RECOMMENDED)))
+    assumptions.append(_w(
+        'warn.injector.gas_dp_pc_band_is_guidance', 'info',
+        min=float(GAS_DP_PC_MIN), recommended=float(GAS_DP_PC_RECOMMENDED)))
 
     stability = {
         'dp_pc_ratio_ox': float(dp_pc_ox),
@@ -866,7 +1055,7 @@ def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
         'chug_ok': bool(chug_ok),
         'chug_rule': (f'dP/Pc >= {GAS_DP_PC_MIN}-{GAS_DP_PC_RECOMMENDED} '
                       '(gaz-gaz mühendislik kılavuzu; SP-8089 sıvı içindir)'),
-        'feed_coupling_warning_tr': None,
+        'feed_coupling_note': None,
         'acoustic_note_tr': ('Yüksek frekans (akustik) analiz kapsam dışı; '
                              'gaz-gaz ana odalarda enine modlar birincil risk, '
                              'baffle/kavite literatürüne bakınız.'),
@@ -930,8 +1119,9 @@ def _design_gas_gas_coaxial(spec, warnings_tr, assumptions_tr):
         'swirl_geometry': None,
         'gas_gas_geometry': gas_gas_geometry,
         'stability': stability,
-        'warnings_tr': warnings_tr,
-        'assumptions_tr': assumptions_tr,
+        # v2.6.2 (D-track): dil-nötr {code, params, severity} kayıtları
+        'warnings': warnings,
+        'assumptions': assumptions,
         'references': REFERENCES + GAS_GAS_REFERENCES,
     }
 
@@ -999,7 +1189,7 @@ def design_injector(spec):
                 f"'{inj_type}' hibritte desteklenmez (tek akışkan): "
                 "showerhead, swirl, pintle veya like_impinging kullanın")
 
-    warnings_tr, assumptions_tr = [], []
+    warnings, assumptions = [], []
     constraints = dict(DEFAULT_CONSTRAINTS)
     constraints.update(spec.get('orifice_constraints') or {})
 
@@ -1019,18 +1209,25 @@ def design_injector(spec):
         K = sw_in.get('K')
         theta_t = sw_in.get('theta_target_deg', 45.0)
         if K is None:
-            # Giffen–Muraszew sinθ bağıntısının tavanı ~18°: bunun üstündeki
-            # hedefler çözülemez (K→0, Cd→0 çöküşü). Ulaşılamaz hedefte tipik
-            # atomizör sabiti K=1'e düşülür ve uyarı verilir.
-            if theta_t > 16.0:
-                K = 1.0
-                warnings_tr.append(
-                    f"Swirl sprey yarı açısı hedefi {theta_t:.0f}° "
-                    "Giffen–Muraszew bağıntısının tavanının (~18°) üstünde; "
-                    "tipik K=1.0 ile tasarlandı (θ≈13°). Daha geniş koni için "
-                    "deneysel kalibrasyon gerekir.")
-            else:
-                K = swirl_K_from_theta(theta_t)
+            # Çözücü zarfı: swirl_K_from_theta K ∈ [0.02, 20] aralığında arar,
+            # bu da θ ∈ [3.7°, 71.2°] demektir. Bu aralıktaki her hedef tam
+            # olarak çözülür (varsayılan 45° dahil).
+            #
+            # v2.6.2 öncesinde burada "θ > 16° çözülemez → K=1.0" yedeği vardı.
+            # O sınır fiziksel değildi; _SWIRL_GEOMETRIC_COEF'in tersine
+            # çevrilmiş olmasının SEMPTOMUYDU (ters katsayıyla ulaşılabilen en
+            # büyük yarı açı 15.9°'ydi). Katsayı düzeltilince yedek hem
+            # gereksiz hem zararlı hale geldi: varsayılan 45° hedefinde
+            # tetiklenip kullanıcının hedefini sessizce 29.8°'ye eziyordu.
+            if not (_SWIRL_THETA_MIN_DEG <= theta_t <= _SWIRL_THETA_MAX_DEG):
+                warnings.append(_w(
+                    'warn.injector.swirl_theta_target_unreachable', 'warning',
+                    theta_target_deg=round(float(theta_t), 1),
+                    theta_min_deg=_SWIRL_THETA_MIN_DEG,
+                    theta_max_deg=_SWIRL_THETA_MAX_DEG))
+                theta_t = float(np.clip(theta_t, _SWIRL_THETA_MIN_DEG,
+                                        _SWIRL_THETA_MAX_DEG))
+            K = swirl_K_from_theta(theta_t)
         sw = swirl_solve(K)
         cd_override = sw['cd']
         cd_basis_override = (f"Giffen–Muraszew swirl: K={K:.3f} → X={sw['X']:.3f}"
@@ -1040,17 +1237,17 @@ def design_injector(spec):
 
     try:
         ox = _solve_circuit(
-            'oksitleyici', mdot_ox, spec.get('rho_ox'), pc_bar, dp_ox,
+            'ox', mdot_ox, spec.get('rho_ox'), pc_bar, dp_ox,
             spec.get('p_feed_bar'), fluid_ox, spec.get('T_ox_K'),
-            inlet_ox, l_over_d, constraints, warnings_tr, assumptions_tr,
+            inlet_ox, l_over_d, constraints, warnings, assumptions,
             cd_override=cd_override, cd_basis_override=cd_basis_override,
             n_fixed=spec.get('n_orifices_ox'))
         fuel = None
         if mdot_fuel:
             fuel = _solve_circuit(
-                'yakıt', mdot_fuel, spec.get('rho_fuel'), pc_bar, dp_f,
+                'fuel', mdot_fuel, spec.get('rho_fuel'), pc_bar, dp_f,
                 spec.get('p_feed_bar_fuel'), 'generic', None,
-                inlet_f, l_over_d, constraints, warnings_tr, assumptions_tr,
+                inlet_f, l_over_d, constraints, warnings, assumptions,
                 n_fixed=spec.get('n_orifices_fuel'))
     except ValueError:
         raise
@@ -1066,14 +1263,42 @@ def design_injector(spec):
         rho_gas = pc_bar * PA_PER_BAR / ((R_UNIVERSAL / mw) * T_c)
     else:
         rho_gas = RHO_GAS_DEFAULT
-        assumptions_tr.append(
-            f"Oda gazı yoğunluğu varsayıldı: {RHO_GAS_DEFAULT} kg/m³ "
-            "(T_c_K + mw_gas verilirse hesaplanır)")
+        assumptions.append(_w(
+            'warn.injector.chamber_gas_density_assumed', 'info',
+            rho_gas=float(RHO_GAS_DEFAULT)))
 
-    sigma_ox = spec.get('sigma_ox', 0.02)
-    sigma_f = spec.get('sigma_fuel', 0.02)
-    mu_ox = spec.get('mu_ox', 2e-4)
-    mu_f = spec.get('mu_fuel', 2e-4)
+    # Sıvı özellikleri (σ, μ) — kullanıcı vermezse AKIŞKANA GÖRE tablodan
+    # (v2.6.2 F012/F040). Eski davranış her akışkan için σ=0.02, μ=2e-4
+    # kullanıyordu; N₂O'da bu σ'yı 11 kat, μ'yü 3.2 kat şişiriyor ve Elkotb
+    # SMD'sini ~9 kat aşırı tahmin ettiriyordu.
+    sigma_ox = spec.get('sigma_ox')
+    if sigma_ox is None:
+        sigma_ox, sig_basis = liquid_surface_tension(fluid_ox, spec.get('T_ox_K'))
+        assumptions.append(_w(
+            'warn.injector.liquid_props_assumed_ox', 'info',
+            fluid=str(fluid_ox), sigma_n_m=float(round(sigma_ox, 6)),
+            sigma_basis=sig_basis))
+    sigma_f = spec.get('sigma_fuel')
+    if sigma_f is None:
+        sigma_f = SIGMA_GENERIC
+    mu_ox = spec.get('mu_ox')
+    if mu_ox is None:
+        mu_ox, mu_t_ref, mu_basis = liquid_viscosity(fluid_ox)
+        assumptions.append(_w(
+            'warn.injector.liquid_viscosity_assumed_ox', 'info',
+            fluid=str(fluid_ox), mu_pa_s=float(mu_ox),
+            T_ref_K=(float(mu_t_ref) if mu_t_ref is not None else None),
+            basis=mu_basis))
+    mu_f = spec.get('mu_fuel')
+    if mu_f is None:
+        mu_f = MU_GENERIC
+    if fuel is not None and (spec.get('sigma_fuel') is None
+                             or spec.get('mu_fuel') is None):
+        # Yakıt akışkanı spec'te tanımlı değil (fluid_fuel alanı yok) → jenerik
+        # hidrokarbon değerleri kullanılır ve AÇIKÇA varsayım olarak bildirilir.
+        assumptions.append(_w(
+            'warn.injector.liquid_props_assumed_fuel', 'info',
+            sigma_n_m=float(sigma_f), mu_pa_s=float(mu_f)))
 
     # ------------------------------------------------------------------
     # Tip özel geometri + momentum + atomizasyon
@@ -1118,20 +1343,37 @@ def design_injector(spec):
             rho_f_l = fuel['_rho']
             smd_fuel_um = smd_impinging(d_f_m, v_f, rho_f_l, sigma_f) * 1e6
             mr = (mdot_fuel * v_f) / (mdot_ox * v_ox)
-            rupe = (rho_f_l * v_f ** 2 * d_f_m) / (rho_ox_l * v_ox ** 2 * d_ox_m)
+            # Rupe kriteri (JPL Progress Report 20-195, 1953): ρv²d oranı.
+            # UYGULAMA ZARFI UYARISI (v2.6.2 F041): her iki devre de
+            # v = Cd·√(2ΔP/ρ) ile çözüldüğünden ρv² = 2·ΔP·Cd² olur; iki devre
+            # AYNI ΔP ve AYNI Cd kullanıyorsa yoğunluk ve hız tamamen
+            # sadeleşir ve kriter Rupe ≡ d_f/d_ox'a çöker — yani bağımsız bir
+            # şey ölçmez. Formül doğrudur, ama kullanıcı "Rupe tamam" ibaresini
+            # gerçek bir karışım teyidi sanmamalıdır. Devrelerin ΔP'si
+            # (dp_ratio_ox / dp_ratio_fuel veya p_feed_bar_fuel) ayrı
+            # seçildiğinde kriter bağımsızlaşır.
+            rho_v2_ox = rho_ox_l * v_ox ** 2
+            rho_v2_f = rho_f_l * v_f ** 2
+            rupe = (rho_v2_f * d_f_m) / (rho_v2_ox * d_ox_m)
+            if abs(rho_v2_f / max(rho_v2_ox, 1e-12) - 1.0) < 0.02:
+                assumptions.append(_w(
+                    'warn.injector.rupe_criterion_degenerate', 'info',
+                    rupe=round(float(rupe), 3),
+                    d_ratio=round(float(d_f_m / max(d_ox_m, 1e-12)), 3)))
             target = spec.get('target_velocity_ratio', 1.0)
             ok = MR_BAND[0] <= mr <= MR_BAND[1]
             momentum = {'momentum_ratio': float(mr), 'rupe_factor': float(rupe),
                         'tmr': None, 'target': float(target), 'ok': bool(ok)}
             if not ok:
-                warnings_tr.append(
-                    f"Doublet momentum oranı MR={mr:.2f} hedef bandın "
-                    f"({MR_BAND[0]}-{MR_BAND[1]}) dışında: bileşke fan eksenden "
-                    "sapar. Yakıt ΔP'sini/delik planını ayarlayın.")
+                warnings.append(_w(
+                    'warn.injector.doublet_momentum_out_of_band', 'warning',
+                    mr=round(float(mr), 2), band_lo=float(MR_BAND[0]),
+                    band_hi=float(MR_BAND[1])))
             if not (MR_BAND[0] <= rupe <= MR_BAND[1]):
-                warnings_tr.append(
-                    f"Rupe karışım faktörü {rupe:.2f} optimum banttan "
-                    "(0.7-1.3) uzak: karışım verimi düşer (Rupe, JPL 1953).")
+                warnings.append(_w(
+                    'warn.injector.rupe_factor_off_optimum', 'warning',
+                    rupe=round(float(rupe), 2), band_lo=float(MR_BAND[0]),
+                    band_hi=float(MR_BAND[1])))
             n_elements = min(ox['n_orifices'], fuel['n_orifices'])
             desc = (f"{n_elements} çift unlike doublet, 2θ={2*half:.0f}°, "
                     f"serbest jet {FREE_JET_LD:.0f}·d_j")
@@ -1150,15 +1392,15 @@ def design_injector(spec):
             desc = (f"{n_elements} adet O-F-O triplet (dış 2×oks., orta yakıt), "
                     f"2θ={2*half:.0f}°")
             if not ok:
-                warnings_tr.append(
-                    f"Triplet TMR={tmr:.2f} bandın dışında; dış/orta momentum "
-                    "dengesini gözden geçirin.")
+                warnings.append(_w(
+                    'warn.injector.triplet_tmr_out_of_band', 'warning',
+                    tmr=float(tmr)))
         else:  # like_impinging (kendi içinde çarpışan çiftler)
             n_elements = max(1, ox['n_orifices'] // 2)
             desc = (f"{n_elements} adet like-doublet (aynı akışkan çiftleri), "
                     f"2θ={2*half:.0f}° — blowapart riski yok")
-            assumptions_tr.append(
-                'Like-impinging: MR/Rupe unlike çarpışmaya özgüdür, raporlanmaz')
+            assumptions.append(_w(
+                'warn.injector.like_impinging_no_mr', 'info'))
 
     elif inj_type == 'pintle' and fuel is None:
         # Hibrit (tek akışkan) pintle: yakıt grain'den geldiği için pintle
@@ -1190,9 +1432,9 @@ def design_injector(spec):
         bf = n_holes * d_hole / (np.pi * d_p_m)
         t_ann = (np.sqrt(d_p_m ** 2 + 4.0 * a_ann / np.pi) - d_p_m) / 2.0
         if t_ann * 1e3 < ANNULUS_GAP_MIN_MM:
-            warnings_tr.append(
-                f"Pintle anülüs boşluğu {t_ann*1e3:.2f} mm < "
-                f"{ANNULUS_GAP_MIN_MM} mm imalat sınırı")
+            warnings.append(_w(
+                'warn.injector.pintle_annulus_below_min', 'warning',
+                gap_mm=float(t_ann * 1e3), min_mm=ANNULUS_GAP_MIN_MM))
         tmr = f_rad / max(1.0 - f_rad, 1e-9)
         theta = pintle_spray_angle(tmr)
         momentum = {'momentum_ratio': None, 'rupe_factor': None,
@@ -1210,13 +1452,12 @@ def design_injector(spec):
             'single_fluid': True,
         }
         if not (PINTLE_BF_BAND[0] <= bf <= PINTLE_BF_BAND[1]):
-            warnings_tr.append(
-                f"Pintle BF={bf:.2f} TRW bandının ({PINTLE_BF_BAND[0]}-"
-                f"{PINTLE_BF_BAND[1]}) dışında")
-        assumptions_tr.append(
-            f"Hibrit pintle tek akışkanlıdır: oksitleyici alanının %{f_rad*100:.0f}"
-            "'i radyal deliklere, kalanı anülüse ayrıldı; sprey açısı bu iki "
-            "ox akımının momentum oranından türetildi (yakıt grain'den gelir).")
+            warnings.append(_w(
+                'warn.injector.pintle_bf_out_of_band', 'warning',
+                bf=float(bf), lo=PINTLE_BF_BAND[0], hi=PINTLE_BF_BAND[1]))
+        assumptions.append(_w(
+            'warn.injector.hybrid_pintle_single_fluid', 'info',
+            radial_pct=float(f_rad * 100.0)))
         smd_ox = smd_impinging(d_hole, v_ox, rho_ox_l, sigma_ox)
         correlation = 'impinging-We13'
         spray_half = theta
@@ -1249,9 +1490,9 @@ def design_injector(spec):
         bf = n_holes * d_hole / (np.pi * d_p_m)
         t_ann = (np.sqrt(d_p_m ** 2 + 4.0 * a_ann / np.pi) - d_p_m) / 2.0
         if t_ann * 1e3 < ANNULUS_GAP_MIN_MM:
-            warnings_tr.append(
-                f"Pintle anülüs boşluğu {t_ann*1e3:.2f} mm < "
-                f"{ANNULUS_GAP_MIN_MM} mm imalat sınırı")
+            warnings.append(_w(
+                'warn.injector.pintle_annulus_below_min', 'warning',
+                gap_mm=float(t_ann * 1e3), min_mm=ANNULUS_GAP_MIN_MM))
         tmr = (mdot_fuel * v_f) / max(mdot_ox * v_ox, 1e-12)
         theta = pintle_spray_angle(tmr)
         momentum = {'momentum_ratio': None, 'rupe_factor': None,
@@ -1267,9 +1508,9 @@ def design_injector(spec):
             'radial_hole_d_mm': float(d_hole * 1e3),
         }
         if not (PINTLE_BF_BAND[0] <= bf <= PINTLE_BF_BAND[1]):
-            warnings_tr.append(
-                f"Pintle BF={bf:.2f} TRW bandının ({PINTLE_BF_BAND[0]}-"
-                f"{PINTLE_BF_BAND[1]}) dışında")
+            warnings.append(_w(
+                'warn.injector.pintle_bf_out_of_band', 'warning',
+                bf=float(bf), lo=PINTLE_BF_BAND[0], hi=PINTLE_BF_BAND[1]))
         smd_ox = smd_impinging(d_hole, np.hypot(v_ox, v_f), rho_f_l, sigma_f)
         smd_fuel_um = smd_ox * 1e6  # çarpışan tabaka ortak kırılımı
         correlation = 'impinging-We13'
@@ -1283,21 +1524,42 @@ def design_injector(spec):
         K, sw = swirl_geom
         r_o = d_ox_m / 2.0
         r_s = 2.5 * r_o                     # tipik swirl odası oranı
-        a_p = K * np.pi * r_s * r_o         # teğet giriş toplam alanı
+        # Teğet giriş toplam alanı (ELEMAN BAŞINA): atomizör sabitinin
+        # tanımından K = A_p/(D_s·d_o) = A_p/(4·r_s·r_o) → A_p = 4·K·r_s·r_o.
+        #
+        # v2.6.2 DÜZELTMESİ (F014): burada 4 yerine π yazılıydı (a_p = K·π·r_s·r_o),
+        # yani teğet port alanı π/4 = 0.785 kat, giriş çapı 0.886 kat kayıyordu.
+        # Kaynak: Lefebvre & McDonell, Atomization and Sprays 2. baskı Böl. 6
+        # (simplex atomizör sabiti tanımı).
+        a_p = 4.0 * K * r_s * r_o
         n_inlets = 3
         d_inlet = np.sqrt(4.0 * a_p / (np.pi * n_inlets))
         swirl_geometry = {
             'K': float(K), 'X_air_core': sw['X'], 'cd_swirl': sw['cd'],
-            'swirl_number': float(np.pi * r_o * r_s / max(a_p, 1e-12)),
+            # 'swirl_number' KALDIRILDI (F014): dönen büyüklük π·r_o·r_s/A_p =
+            # 1/K idi; bu, standart girdap sayısı S (eksenel açısal momentum
+            # akısı / (R × eksenel momentum akısı), Gupta-Lilley-Syred, Swirl
+            # Flows 1984) DEĞİLDİR ve zaten K ile birebir aynı bilgiyi taşıyor.
+            # Yerine gerçek geometrik büyüklük raporlanır.
+            'tangential_inlet_area_mm2': float(a_p * 1e6),
             'film_thickness_mm': float(sw['film_t_ratio'] * r_o * 1e3),
             'tangential_inlets': n_inlets,
             'inlet_d_mm': float(d_inlet * 1e3),
+            'exit_orifice_d_mm': float(d_ox_m * 1e3),
+            'swirl_chamber_d_mm': float(2.0 * r_s * 1e3),
         }
         spray_half = sw['theta_deg']
-        smd_ox = smd_lefebvre_swirl(sigma_ox, mu_ox, mdot_ox,
+        # Lefebvre basınç-swirl korelasyonu TEK atomizöre kalibre edilmiştir:
+        # ṁ_L = eleman başına sıvı debisi (v2.6.2 F013 düzeltmesi — eskiden
+        # TOPLAM ox debisi geçiliyordu; SMD ∝ ṁ^0.25 olduğu için n=38 elemanlı
+        # tipik tasarımda 38^0.25 = 2.48 KAT aşırı tahmin).
+        # Kaynak: Lefebvre & McDonell, Atomization and Sprays 2. baskı Böl. 6.
+        mdot_ox_per_element = mdot_ox / max(ox['n_orifices'], 1)
+        smd_ox = smd_lefebvre_swirl(sigma_ox, mu_ox, mdot_ox_per_element,
                                     ox['delta_p_bar'] * PA_PER_BAR, rho_gas)
         correlation = 'Lefebvre-swirl'
-        assumptions_tr.append('Swirl odası yarıçapı r_s = 2.5·r_o varsayıldı')
+        assumptions.append(_w(
+            'warn.injector.swirl_chamber_radius_assumed', 'info'))
         desc = (f"{'Koaksiyel ' if inj_type == 'coax_swirl' else ''}basınç-swirl: "
                 f"K={K:.3f}, 2θ={2*sw['theta_deg']:.0f}°, "
                 f"film {sw['film_t_ratio']*r_o*1e3:.2f} mm")
@@ -1305,8 +1567,8 @@ def design_injector(spec):
             nu_f = mu_f / fuel['_rho']
             smd_fuel_um = smd_elkotb(nu_f, sigma_f, fuel['_rho'], rho_gas,
                                      fuel['delta_p_bar'] * PA_PER_BAR) * 1e6
-            assumptions_tr.append(
-                'Swirl (sıvı): merkez oksitleyici swirl, yakıt dış devre (SPI)')
+            assumptions.append(_w(
+                'warn.injector.swirl_liquid_circuit', 'info'))
 
     # ------------------------------------------------------------------
     # Kararlılık
@@ -1317,33 +1579,26 @@ def design_injector(spec):
         (dp_pc_f is None or dp_pc_f >= CHUG_DP_PC_MIN)
     if not chug_ok:
         worst = min([r for r in (dp_pc_ox, dp_pc_f) if r is not None])
-        warnings_tr.append(
-            f"ΔP/Pc = {worst:.2f} < {CHUG_DP_PC_MIN} → chug (düşük frekans "
-            "kararsızlık) riski. Enjektör basınç düşümünü artırın "
-            "(NASA SP-8089).")
+        warnings.append(_w('warn.injector.chug_risk', 'warning',
+                           ratio=float(worst), min_ratio=CHUG_DP_PC_MIN))
 
     feed_note = None
     if fluid_ox == 'n2o':
         if dp_pc_ox < CHUG_DP_PC_RECOMMENDED:
-            feed_note = ("Kendinden basınçlı N₂O'da ΔP/Pc ≥ 0.20 önerilir; "
-                         "iki-faz boğulmuş orifis akustik izolasyon sağlar "
-                         "(NTRS 20190001326). Mevcut oran düşük: tank-besleme "
-                         "kuplajı riski.")
-            warnings_tr.append(feed_note)
+            feed_note = _w('warn.injector.n2o_feed_coupling_risk', 'warning',
+                           recommended=CHUG_DP_PC_RECOMMENDED,
+                           ratio=float(dp_pc_ox))
+            warnings.append(feed_note)
         else:
-            feed_note = ("N₂O orifisi doymuş girişte boğulur; boğulmuş akış "
-                         "besleme sistemini odadan akustik olarak izole eder "
-                         "(NTRS 20190001326).")
+            feed_note = _w('warn.injector.n2o_choked_isolation', 'info')
 
     stability = {
         'dp_pc_ratio_ox': float(dp_pc_ox),
         'dp_pc_ratio_fuel': (float(dp_pc_f) if dp_pc_f is not None else None),
         'chug_ok': bool(chug_ok),
         'chug_rule': 'dP/Pc >= 0.15-0.20 (NASA SP-8089)',
-        'feed_coupling_warning_tr': feed_note,
-        'acoustic_note_tr': ('Yüksek frekans (akustik) analiz kapsam dışı; '
-                             'Pc > 50 bar ve F > 5 kN tasarımlarda baffle/'
-                             'kavite literatürüne bakınız.'),
+        'feed_coupling_note': feed_note,
+        'acoustic_note': _w('warn.injector.acoustic_out_of_scope', 'info'),
     }
 
     # İç kullanım alanını sözleşme dışı tutmak için temizle
@@ -1374,7 +1629,7 @@ def design_injector(spec):
         'pintle_geometry': pintle_geometry,
         'swirl_geometry': swirl_geometry,
         'stability': stability,
-        'warnings_tr': warnings_tr,
-        'assumptions_tr': assumptions_tr,
+        'warnings': warnings,
+        'assumptions': assumptions,
         'references': REFERENCES,
     }

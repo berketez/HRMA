@@ -107,12 +107,12 @@ ATTRIBUTION_LINES = {
 # arayüzde gösterilir; "sessizce yok sayıldı" durumu oluşmaz.
 NOT_MODELLED = {
     'earth_rotation': (
-        'Earth rotation transport velocity (up to 465.1*cos(lat) m/s eastward) '
-        'is not coupled into the 6-DOF solver; flat-Earth launch-site inertial '
-        'frame is used.'),
-    'coriolis': (
-        'Coriolis acceleration (2*Omega x v) is not integrated; affects impact '
-        'point / range safety, not apogee or delta-v.'),
+        'The 6-DOF solver uses a launch-anchored ROTATING tangent-plane frame: '
+        'Coriolis acceleration (2*Omega x v) IS integrated during free flight, '
+        'and the centrifugal term is folded into WGS84 normal gravity. Only the '
+        'Earth-rotation TRANSPORT velocity (up to 465.1*cos(lat) m/s eastward, '
+        'the frame carry-along speed) remains out of scope; it affects the '
+        'inertial launch-velocity budget, not apogee or delta-v.'),
     'gravity_anomaly': (
         'Local gravity anomalies (Bouguer / isostatic) are not modelled; WGS84 '
         'ellipsoidal NORMAL gravity is used.'),
@@ -121,8 +121,10 @@ NOT_MODELLED = {
         'day (optionally re-anchored to measured surface T/P).'),
 }
 
-# Dünya dönüş açısal hızı — yalnız BİLGİLENDİRME amaçlı doğu-atış hızı
-# göstergesi için (fiziğe bağlanmaz, bkz. NOT_MODELLED['earth_rotation']).
+# Dünya dönüş açısal hızı. Burada enleme bağlı doğu-atış TAŞIMA hızı
+# göstergesi (earth_rotation_speed) için kullanılır; taşıma hızı 6-DOF
+# fiziğine bağlanmaz (bkz. NOT_MODELLED['earth_rotation']). Coriolis ivmesi
+# ise six_dof_trajectory.py'de AYNI değerle (yerel OMEGA_EARTH) modellenir.
 # Kaynak: IERS Konvansiyonları 2010, ω_E = 7.292115e-5 rad/s.
 OMEGA_EARTH = 7.292115e-5  # rad/s
 

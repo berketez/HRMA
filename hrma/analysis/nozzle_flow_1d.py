@@ -651,6 +651,19 @@ class NozzleFlow1D:
 
         # --- rejim sınıflandırması ---
         regime = self._classify_regime(float(area_ratio[-1]))
+        # v2.6.2 fizik denetimi, bulgu F144: boğulmamış (unchoked) lülede
+        # boğazda M < 1'dir; alan-Mach bağıntısının SÜPERSONİK dalı geçersizdir
+        # ve debi yalnız P_c'den belirlenemez (çıkış koşulu gerekir).
+        # Kaynak: Anderson, "Modern Compressible Flow", 3. baskı, Böl. 5.4.
+        # _classify_regime dokümantasyonu bu durumda "results are limited to
+        # the classification" diyordu ama solve() yine de tam süpersonik
+        # çözümü üretip performans bloğunu dolduruyordu.
+        # ÖLÇÜLDÜ (P_c = 1.0 bar, P_a = 0.9999 bar, ε = 25): rejim etiketi
+        # 'unchoked' doğru çıkarken aynı çıktı exit_M = 3.913,
+        # mdot = 0.1196 kg/s ve thrust = −4546.5 N (NEGATİF İTKİ) raporluyordu.
+        # Artık performans/kayıp sayıları None döner; istasyon dizileri
+        # yalnızca varsayımsal boğulmuş referans olarak, açık etiketle kalır.
+        unchoked = (regime['type'] == self.REGIME_UNCHOKED)
         separation = None
         shock = None
         # İzantropik (tam akışlı) çıkış hâli — itki karşılaştırmaları için sakla
@@ -693,19 +706,23 @@ class NozzleFlow1D:
         eps_exit = float(area_ratio[-1])
         # Tam akışlı (attached) izantropik itki — referans
         thrust_full_flow = mdot * u_exit_isen + (p_exit_isen - pa) * a_exit
+        # Momentum ve basınç terimleri AYRI tutulur: dağılma/sürtünme
+        # düzeltmeleri yalnız momentum terimine uygulanır (bulgu F143).
         if separation is not None:
             # Etkin çıkış = ayrılma düzlemi (Summerfield):
             a_sep = separation['area_ratio'] * a_throat_area
-            thrust = (mdot * separation['velocity_m_s']
-                      + (separation['effective_exit_pressure_Pa'] - pa) * a_sep)
+            momentum_thrust = mdot * separation['velocity_m_s']
+            pressure_thrust = (separation['effective_exit_pressure_Pa'] - pa) * a_sep
+            thrust = momentum_thrust + pressure_thrust
             exit_state = {
                 'pressure_Pa': separation['effective_exit_pressure_Pa'],
                 'velocity_m_s': separation['velocity_m_s'],
                 'mach': separation['mach'],
             }
         else:
-            thrust = (mdot * float(velocity[-1])
-                      + (float(pressure[-1]) - pa) * a_exit)
+            momentum_thrust = mdot * float(velocity[-1])
+            pressure_thrust = (float(pressure[-1]) - pa) * a_exit
+            thrust = momentum_thrust + pressure_thrust
             exit_state = {
                 'pressure_Pa': float(pressure[-1]),
                 'velocity_m_s': float(velocity[-1]),
@@ -740,7 +757,21 @@ class NozzleFlow1D:
                            "at the mean of the initial and exit wall angles "
                            "(Huzel & Huang Ch. 1 equivalent-cone treatment) "
                            "— approximate.")
-        thrust_effective = thrust * lambda_div * (1.0 - self.friction_loss_fraction)
+        # v2.6.2 fizik denetimi, bulgu F143: dağılma (divergence) ve sürtünme
+        # düzeltmeleri YALNIZCA momentum terimine uygulanır —
+        #     F = lambda·(1 − f)·mdot·v_e + (P_e − P_a)·A_e
+        # Kaynak: Sutton & Biblarz, "Rocket Propulsion Elements", 9. baskı,
+        # Eş. 3-34 (lambda = (1+cos α)/2 konik dağılma düzeltmesi momentum
+        # itkisine uygulanır); aynı konvansiyon Huzel & Huang, NASA SP-125,
+        # Böl. 1.
+        # ESKİ DAVRANIŞ: thrust_effective = thrust·lambda·(1 − f), yani basınç
+        # terimi de ölçekleniyordu. Basınç terimi negatifken (aşırı genişleme)
+        # bu kayıp yerine SAHTE KAZANÇ üretiyordu.
+        # ÖLÇÜLDÜ (P_c = 70 bar, T_c = 3500 K, γ = 1.2, D_t = 0.10 m, ε = 25,
+        # konik 15°): vakumda 98071.2 -> 98237.0 N (+%0.169), deniz
+        # seviyesinde (ayrılmış rejim) 82434.8 -> 82160.7 N (−%0.333).
+        thrust_effective = (lambda_div * (1.0 - self.friction_loss_fraction)
+                            * momentum_thrust) + pressure_thrust
 
         losses = {
             'method': 'approximate',
@@ -749,12 +780,19 @@ class NozzleFlow1D:
             'divergence_half_angle_deg': float(np.degrees(theta_exit)),
             'initial_wall_angle_deg': float(np.degrees(theta_n)),
             'friction_loss_fraction': self.friction_loss_fraction,
+            # Ayrık terimler (bulgu F143 dürüstlük alanları)
+            'momentum_thrust_N': float(momentum_thrust),
+            'pressure_thrust_N': float(pressure_thrust),
+            'correction_applies_to': 'momentum_term_only',
             'thrust_effective_N': float(thrust_effective),
             'CF_effective': float(thrust_effective / (pc * a_throat_area)),
             'note': (lambda_note + " Friction/boundary-layer loss is a "
                      "single bookkeeping fraction (typical 0.5-2 %, Sutton "
                      "9th ed. Sec. 3.5; Huzel & Huang Ch. 1), NOT a "
-                     "boundary-layer solution."),
+                     "boundary-layer solution. Both corrections scale the "
+                     "MOMENTUM thrust only: F_eff = lambda*(1-f)*mdot*v_e "
+                     "+ (Pe-Pa)*Ae (Sutton & Biblarz 9th ed. Eq. 3-34); the "
+                     "pressure-thrust term is left untouched."),
         }
 
         # --- eksenel Bartz coupling (ithal korelasyon; kopya yok) ---

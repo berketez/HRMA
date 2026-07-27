@@ -375,7 +375,19 @@ class TestPressurantContract:
 
     def test_regulated_hand_calc(self, press_reg):
         """İzotermal m = P_tank·V_p/(R·T0); adiabatik > izotermal;
-        recommended = adiabatik sınır (Sutton Eq. 6-1)."""
+        recommended = şişe envanteri − kalıntı (kapalı-form enerji dengesi).
+
+        TEST GÜNCELLENDİ (2026-07-25, F054 fizik düzeltmesi): eskiden
+        ``recommended_delivered_mass_kg == adiabatic['gas_mass_kg']``
+        bekleniyordu. O sözleşme tutarsızdı — teslim kütlesi TAM ADYABATİK
+        sınırdan (en soğuk/en ağır ullage) alınırken şişe boşalması İZOTERMAL
+        kabul ediliyor ve şişe hacmi 1.39x-1.76x şişiyordu. Modül artık
+        Sutton & Biblarz 9. baskı Böl. 6 (Eş. 6-1 ailesi) / Huzel & Huang
+        Böl. 5 kapalı-form adyabatik enerji dengesiyle boyutlanıyor;
+        izotermal/adyabatik kütleler yalnızca TEŞHİS SINIRLARIDIR, boyutlama
+        tabanı değildir. Bu yüzden test yeni sözleşmeyi sınıyor:
+        teslim = depolanan − kalıntı ve iki teşhis sınırının arasında.
+        """
         R = press_reg['R_specific']
         T0 = press_reg['isothermal']['final_temperature_K']
         p_tank = PRESS_REGULATED_INPUT['tank_pressure'] * 1e5
@@ -386,8 +398,15 @@ class TestPressurantContract:
         assert (press_reg['adiabatic']['gas_mass_kg']
                 > press_reg['isothermal']['gas_mass_kg']), (
             "adiabatik (soğuk, yoğun gaz) izotermalden fazla kütle olmalı")
+        st = press_reg['storage']
         assert press_reg['recommended_delivered_mass_kg'] == pytest.approx(
-            press_reg['adiabatic']['gas_mass_kg'], rel=1e-12)
+            st['stored_mass_kg'] - st['residual_mass_kg'], rel=1e-12), (
+            "teslim kütlesi = depolanan − kalıntı olmalı (enerji dengesi)")
+        assert (press_reg['isothermal']['gas_mass_kg']
+                <= press_reg['recommended_delivered_mass_kg']
+                <= press_reg['adiabatic']['gas_mass_kg']), (
+            "teslim kütlesi izotermal/adyabatik teşhis sınırları arasında "
+            "olmalı")
 
     def test_regulated_bottle_count(self, press_reg):
         """bottle_count = ceil(V_bottle / 50 L)."""

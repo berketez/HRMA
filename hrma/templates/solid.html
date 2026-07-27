@@ -2186,10 +2186,48 @@
                 (results && results.validation_warnings) || [],
                 (results && results.safety_warnings) || []
             );
+            // D-track sözleşmesi: backend {code, params, severity} döndürür.
+            // Kod TF()'den geçirilmezse String(w) "[object Object]" basar —
+            // v2.6.2'de bu regresyon yaşandı ve KRİTİK uyarıları (ör.
+            // warn.solid.burn_rate_exponent_ge_one) okunmaz hale getirdi.
+            //
+            // İÇ İÇE KAYITLAR: bazı uyarıların parametresi kendisi bir uyarı
+            // kaydı ya da kayıt LİSTESİDİR (ör. warn.solid.bates_envelope'un
+            // `options` alanı, kendi warn.solid.opt_* kodlarıyla). I18N.tf
+            // sayı olmayan parametreyi String(v) ile bastığı için bunlar da
+            // "[object Object]" üretirdi. Bu yüzden çeviri ÖZYİNELEMELİDİR:
+            // önce parametreler çözülür, sonra dış metin kurulur.
+            function localizeWarning(w, depth) {
+                depth = depth || 0;
+                if (w === null || w === undefined) return '';
+                if (typeof w === 'string') return w;
+                if (Array.isArray(w)) {
+                    return w.map(function (x) { return localizeWarning(x, depth + 1); })
+                            .filter(function (s) { return s; })
+                            .join(' · ');
+                }
+                if (typeof w !== 'object') return String(w);
+                if (!w.code) return w.message || w.text || JSON.stringify(w);
+                // Özyineleme derinliği sınırı: bozuk/döngüsel veri sonsuz
+                // döngüye girmesin (kullanıcıya asılı sayfa göstermektense
+                // ham kodu göstermek yeğdir).
+                if (depth > 4) return w.code;
+                const p = {};
+                Object.keys(w.params || {}).forEach(function (k) {
+                    const v = w.params[k];
+                    p[k] = (v && typeof v === 'object')
+                        ? localizeWarning(v, depth + 1)
+                        : v;
+                });
+                return (window.I18N && window.I18N.tf)
+                    ? window.I18N.tf(w.code, p, w.fallback || w.code)
+                    : (w.fallback || w.code);
+            }
+
             const items = raw.filter(function (w) { return w; }).map(function (w) {
                 if (typeof w === 'string') return { message: w, level: 'regular' };
                 return {
-                    message: w.message || w.text || String(w),
+                    message: localizeWarning(w),
                     level: (w.level || w.severity || 'regular').toLowerCase()
                 };
             });
@@ -2751,6 +2789,10 @@
                 }
                 
                 currentResults = results;
+                // A1 — uçuş köprüsü (bkz. app.js'teki eş çağrı).
+                if (window.FlightHandoff) {
+                    window.FlightHandoff.publish(results, { motor_type: 'solid' });
+                }
                 displayResults(results);
                 // Analysis Dock önerilerini en güncel sonuçla tazele
                 // (kullanıcının elle değiştirdiği alanlar ezilmez)
@@ -4495,6 +4537,9 @@ Please provide:
             });
         })();
     </script>
+    <!-- A1 uçuş köprüsü: hesap sonucunu tek Python normalize'ından
+         geçirip localStorage'a yazar; /launch-site oradan okur. -->
+    <script src="/static/js/flight_handoff.js"></script>
     <script src="/static/js/update_check.js"></script>
 </body>
 </html>

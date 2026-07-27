@@ -10,6 +10,17 @@ from dataclasses import dataclass
 
 from hrma.data.materials_db import get_material
 
+
+def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
+    """Yapılandırılmış iki-dilli uyarı/öneri kaydı (D-track sözleşmesi).
+
+    Backend dilsiz kalır; frontend ``TF(code, params)`` ile metni kurar.
+    Şema: ``{code: 'warn.<subsystem>.<slug>', params: {...}, severity: ...}``.
+    Katalog: docs/v262_specs/D_codes_analysis.md.
+    """
+    return {'code': code, 'params': params, 'severity': severity}
+
+
 # ---------------------------------------------------------------------------
 # Emniyet modeli sabitleri — TEK tanım noktası (magic number yasağı).
 # Bu blok dışında sayısal sabit yazılmaz; testler de buradan okur.
@@ -1110,42 +1121,68 @@ class SafetyAnalyzer:
     # For brevity, I'll include key remaining methods
     
     def _check_safety_compliance(self, risk_assessment: Dict) -> Dict:
-        """Check compliance with safety standards and regulations"""
-        
-        compliance_status = {
-            'overall_compliance': risk_assessment['acceptability'] in ['ACCEPTABLE', 'ACCEPTABLE_WITH_CONTROLS'],
-            'nfpa_compliance': True,  # Would check specific NFPA requirements
-            'osha_compliance': True,  # Would check OSHA requirements
-            'dot_compliance': True,   # Would check DOT transport requirements
-            'local_regulations': 'REQUIRES_REVIEW',
-            'insurance_requirements': 'REQUIRES_REVIEW'
+        """Mevzuat uygunluğunun DEĞERLENDİRİLMEDİĞİNİ açıkça bildirir.
+
+        Bu fonksiyon eskiden ``nfpa_compliance``/``osha_compliance``/
+        ``dot_compliance`` alanlarını koşulsuz ``True`` döndürüyordu; kod
+        yorumları ("Would check specific NFPA requirements") gerçek bir kontrol
+        yapılmadığını zaten söylüyordu. Arayüz bunları yeşil "NFPA: OK" rozeti
+        olarak çiziyordu — motorun büyüklüğünden, iticisinden ve kullanım
+        yerinden tamamen bağımsız olarak. Bu, kullanıcıda yanlış bir otorite
+        algısı yaratıyordu.
+
+        Gerçek uygunluk değerlendirmesi madde-madde requirement karşılaştırması,
+        tesis/saha bilgisi, yerel mevzuat ve yetkili bir değerlendirici gerektirir;
+        bunların hiçbiri yazılıma girdi olarak verilmiyor. Bu yüzden alanlar
+        ``NOT_EVALUATED`` döner ve arayüz bunu yetkiliye yönlendiren nötr bir
+        bilgi olarak gösterir.
+
+        Uygunluk hükmü üretmek isteyen bir sürüm, önce requirement kimliği,
+        kanıt ve değerlendirici alanlarını şemaya eklemek zorundadır.
+        """
+        return {
+            # Risk skoru kabul edilebilirliği MODELİN kendi ölçütüdür;
+            # mevzuat uygunluğu DEĞİLDİR. Ad bu ayrımı taşır.
+            'model_risk_acceptability': risk_assessment['acceptability'],
+            'nfpa_compliance': 'NOT_EVALUATED',
+            'osha_compliance': 'NOT_EVALUATED',
+            'dot_compliance': 'NOT_EVALUATED',
+            'local_regulations': 'NOT_EVALUATED',
+            'insurance_requirements': 'NOT_EVALUATED',
+            'disclaimer_code': 'warn.safety.compliance_not_evaluated',
         }
-        
-        return compliance_status
     
     def _generate_safety_recommendations(self, risk_assessment: Dict) -> List[str]:
         """Generate prioritized safety recommendations"""
         
         recommendations = []
-        
+
         if risk_assessment['acceptability'] == 'UNACCEPTABLE':
-            recommendations.append('CRITICAL: Do not proceed - unacceptable risk level')
-            recommendations.append('Redesign required to reduce fundamental hazards')
-        
+            recommendations.append(_mk_warning(
+                'warn.safety.do_not_proceed', 'critical'))
+            recommendations.append(_mk_warning(
+                'warn.safety.redesign_required', 'critical'))
+
         if risk_assessment['individual_risks']['structural'] >= 4.0:
-            recommendations.append('Increase structural safety factors')
-            recommendations.append('Consider higher strength materials')
-        
+            recommendations.append(_mk_warning(
+                'warn.safety.increase_structural_sf', 'warning'))
+            recommendations.append(_mk_warning(
+                'warn.safety.higher_strength_materials', 'warning'))
+
         if risk_assessment['individual_risks']['explosive'] >= 4.0:
-            recommendations.append('Implement blast-resistant design')
-            recommendations.append('Increase safety distances')
-        
+            recommendations.append(_mk_warning(
+                'warn.safety.blast_resistant_design', 'warning'))
+            recommendations.append(_mk_warning(
+                'warn.safety.increase_safety_distances', 'warning'))
+
         if risk_assessment['individual_risks']['toxic'] >= 3.0:
-            recommendations.append('Implement toxic gas detection systems')
-            recommendations.append('Provide appropriate PPE and training')
-        
+            recommendations.append(_mk_warning(
+                'warn.safety.toxic_gas_detection', 'warning'))
+            recommendations.append(_mk_warning(
+                'warn.safety.ppe_and_training', 'info'))
+
         # Add more recommendations based on specific risks...
-        
+
         return recommendations
     
     # Deterministik yardımcı hesaplar (2026-07-14'te gerçek
@@ -1221,12 +1258,17 @@ class SafetyAnalyzer:
     # mevzuat yerine geçmez, danışma amaçlıdır.
     # ------------------------------------------------------------------
 
-    def _determine_pressure_safety_devices(self, chamber_pressure: float) -> List[str]:
-        devices = ['Pressure relief valve sized for full flow', 'Burst disc (secondary relief)']
+    def _determine_pressure_safety_devices(self, chamber_pressure: float) -> List[Dict]:
+        # {code,params,severity} kaydı döner (D-track); safety_panel bunları
+        # TF() ile çevirir. safety_devices_required alanı frontend'de gösterilir.
+        devices = [
+            _mk_warning('warn.safety.relief_valve_full_flow', 'info'),
+            _mk_warning('warn.safety.burst_disc_secondary', 'info'),
+        ]
         if chamber_pressure > 20:
-            devices.append('Remote pressure monitoring with automatic abort')
+            devices.append(_mk_warning('warn.safety.remote_pressure_abort', 'info'))
         if chamber_pressure > 100:
-            devices.append('Redundant transducers (2oo3 voting) and hard-wired cutoff')
+            devices.append(_mk_warning('warn.safety.redundant_transducers', 'info'))
         return devices
 
     def _classify_explosive_hazard(self, tnt_equivalent: float) -> str:

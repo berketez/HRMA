@@ -101,10 +101,40 @@ class TestDivergenceEfficiency:
                 conical['performance']['divergence_efficiency'])
 
     def test_bell_lambda_range(self, designer):
-        # theta_e=8° → lambda = 0.5(1+cos8°) ≈ 0.995
+        """lambda, GENİŞLEME ORANINA bağlı olmalı (Rao) — sabit 8° değil.
+
+        v2.6.2 fizik denetimi (F051): bell nozul çıkış açısı theta_e KODA
+        SABİT 8 derece yazılıydı, oysa Rao'nun %80 bell tasarımında hem
+        theta_n hem theta_e genişleme oranının fonksiyonudur (Rao 1958;
+        Sutton & Biblarz 9. baskı Şekil 3-14; Huzel & Huang Şekil 4-15).
+        Sabit 8 derece ancak eps ~ 50-100 için doğrudur.
+
+        Bu test eskiden eps=10'da lambda=0.9951 bekliyordu — yani eps~100'ün
+        değerini. Doğrusu eps=10'da theta_e ~ 14 derece ve lambda ~ 0.985.
+        """
         res = designer.design_nozzle(0.001, EPS, PC, PE, 'bell', gamma=GAMMA)
         lam = res['performance']['divergence_efficiency']
-        assert lam == pytest.approx(0.9951, abs=2e-3)
+        # lambda = 0.5*(1+cos theta_e) -> theta_e = arccos(2*lambda-1)
+        theta_e = np.degrees(np.arccos(2.0 * lam - 1.0))
+        assert 11.0 <= theta_e <= 17.0, (
+            f'eps={EPS} icin theta_e={theta_e:.1f} derece — Rao bandi disinda')
+        assert lam == pytest.approx(0.9851, abs=2e-3)
+
+    def test_lambda_increases_with_expansion_ratio(self, designer):
+        """Asıl regresyon bekçisi: lambda eps ile DEĞİŞMELİ.
+
+        Sabit theta_e geri gelirse bu test kırılır — tek bir nokta değerini
+        kilitlemek yerine eps bağımlılığının kendisini kilitler.
+        """
+        lams = [designer.design_nozzle(0.001, e, PC, _exit_pressure(GAMMA, e, PC),
+                                       'bell', gamma=GAMMA
+                                       )['performance']['divergence_efficiency']
+                for e in (10.0, 25.0, 50.0, 100.0)]
+        assert all(b > a for a, b in zip(lams, lams[1:])), (
+            f'lambda genisleme oraniyla artmiyor: {lams} '
+            '(theta_e yine sabitlenmis olabilir)')
+        # Yuksek eps'te Rao ucu ~8 dereceye yaklasir (eski sabit deger)
+        assert lams[-1] == pytest.approx(0.9957, abs=3e-3)
 
 
 class TestDiscreteLossModel:
@@ -117,13 +147,28 @@ class TestDiscreteLossModel:
                     p['two_phase_efficiency'] * p['kinetic_efficiency'])
         assert p['nozzle_efficiency'] == pytest.approx(expected, rel=1e-9)
 
-    def test_default_reproduces_legacy_098(self, designer):
-        # Gaz-faz bell varsayılanları eski tek-faktör 0.98'i ±%0.1 içinde üretmeli
-        res = designer.design_nozzle(0.001, EPS, PC, PE, 'bell', gamma=GAMMA)
-        eta = res['performance']['nozzle_efficiency']
-        assert eta == pytest.approx(0.98, abs=1.0e-3), (
-            f"Varsayılan eta_nozzle {eta:.5f}, legacy 0.98'den çok uzak"
-        )
+    def test_default_matches_legacy_098_at_high_expansion(self, designer):
+        """Eski tek-faktör 0.98 değeri artık YÜKSEK eps'te karşılanmalı.
+
+        v2.6.2 (F051): bu test eskiden eps=10'da eta=0.98 bekliyordu. O beklenti
+        theta_e'nin SABİT 8 derece olmasına dayanıyordu — yani legacy 0.98'in
+        kendisi de eps~100 geometrisinden türemişti. theta_e artık Rao'ya göre
+        eps ile değiştiği için eps=10'da gerçek eta ~0.970, eps=100'de ~0.981.
+
+        Yani legacy değer YANLIŞ DEĞİLDİ, YANLIŞ YERE UYGULANIYORDU.
+        """
+        high = designer.design_nozzle(0.001, 100.0, PC,
+                                      _exit_pressure(GAMMA, 100.0, PC),
+                                      'bell', gamma=GAMMA)
+        assert high['performance']['nozzle_efficiency'] == pytest.approx(
+            0.98, abs=2.0e-3)
+
+        # Dusuk eps'te daha dusuk olmali (daha genis cikis acisi = daha cok kayip)
+        low = designer.design_nozzle(0.001, EPS, PC, PE, 'bell', gamma=GAMMA)
+        assert low['performance']['nozzle_efficiency'] < high['performance'][
+            'nozzle_efficiency']
+        assert low['performance']['nozzle_efficiency'] == pytest.approx(
+            0.97042, abs=2.0e-3)
 
     def test_legacy_efficiency_override(self, designer):
         # efficiency=<sayı> geçilirse legacy tek-faktör davranışı korunmalı

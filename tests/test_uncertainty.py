@@ -76,11 +76,26 @@ def test_level_budgets_constants():
 # ---------------------------------------------------------------------------
 
 def test_lhs_sample_count_and_shape():
+    """2026-07-27 güncellendi (fizik denetimi F192): nominal vektör artık LHS
+    matrisinin 0. satırının ÜZERİNE yazılmıyor, ÖNÜNE ek satır olarak
+    ekleniyor — üzerine yazma bir tabakayı boşaltıp merkez bölgeyi ikinci kez
+    doldurduğu için örnek kesin LHS olmaktan çıkıyordu (McKay, Beckman &
+    Conover 1979; bkz. sample_inputs docstring, ölçülen bozulma dahil).
+    Test eski (N, d) şeklini kodluyordu; YANLIŞ olan testti, davranış değil:
+    nominal_first=True (varsayılan) artık (N+1) x d döndürür ve satır 0
+    nominal referans probudur (istatistiğe girmez)."""
     dists = _toy_distributions()
     X, names = sample_inputs(dists, 137, seed=42)
-    assert X.shape == (137, len(dists))
+    assert X.shape == (138, len(dists))  # satır 0 = nominal referans probu
     assert names == list(dists.keys())
     assert np.all(np.isfinite(X))
+    for j, name in enumerate(names):
+        assert X[0, j] == dists[name].nominal_value()
+    # nominal_first=False: bozulmamış N-tabakalı LHS'in kendisi; 1..N
+    # satırları onunla birebir aynı olmalı (nominal ekleme LHS'i değiştirmez)
+    X2, _ = sample_inputs(dists, 137, seed=42, nominal_first=False)
+    assert X2.shape == (137, len(dists))
+    assert np.array_equal(X[1:], X2)
 
 
 def test_lhs_stratification_each_stratum_once():
@@ -113,7 +128,11 @@ def test_sample_zero_is_nominal_vector():
     row0 = dict(zip(names, X[0]))
     assert row0['regression_lambda'] == 1.0
     assert row0['regression_n_delta'] == 0.0
-    assert row0['eta_c_star'] == pytest.approx(0.93)
+    # v2.6.2 (F029): orneklem #0 nominali artik DETERMINISTIK yolla hizali.
+    # /calculate teorik c* raporlar (eta_c_star'i UYGULAMAZ), dolayisiyla UQ
+    # nominali de 1.0 olmali; 0.93 beklemek UQ ile ana sayfayi birbirinden
+    # ayiriyordu ve hicbir kontrol bunu yakalamiyordu (nominal_override).
+    assert row0['eta_c_star'] == pytest.approx(1.0)
 
 
 def test_sampled_values_respect_bounds():
@@ -262,7 +281,11 @@ def test_spearman_shape_and_ranking():
                           output_keys=['y'])
     sens = res['sensitivity']['y']
     assert isinstance(sens, list) and len(sens) == 3
-    assert set(sens[0]) == {'param', 'spearman'}
+    # v2.6.2 (F035): kayda 'noise_floor' eklendi — |rho| bu esigin altindaysa
+    # duyarlilik ORNEKLEME GURULTUSUNDEN ayirt edilemez. Sozlesme genisledi,
+    # eski iki alan korunuyor.
+    assert {'param', 'spearman'} <= set(sens[0])
+    assert 'noise_floor' in sens[0]
     # |rho| azalan sıralı
     rhos = [abs(s['spearman']) for s in sens]
     assert rhos == sorted(rhos, reverse=True)
@@ -467,10 +490,16 @@ def test_hybrid_fast_budget_end_to_end():
     isp_sens = {s['param']: s['spearman'] for s in res['sensitivity']['isp']}
     assert isp_sens['eta_c_star'] > 0.5
     assert res['sensitivity']['c_star'][0]['param'] == 'eta_c_star'
-    # Nominal Isp, deterministik uq_mode nominaliyle aynı olmalı
+    # Nominal Isp, DETERMİNİSTİK yolun ürettiğiyle aynı olmalı.
+    #
+    # v2.6.2 (F029): karşılaştırma artık eta_c_star=1.0 ile yapılır. /calculate
+    # teorik c* raporlar, yani eta_c_star'ı UYGULAMAZ; UQ nominalini 0.93 ile
+    # kurmak UQ'yu ana sayfadan ayırıyordu (Isp 225.4 vs 242.3, tam 1/0.93
+    # oranı) ve hiçbir kontrol bu sapmayı yakalamıyordu. nominal_override
+    # ikisini birbirine kilitler — bu test o kilidin bekçisidir.
     from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
     det = HybridRocketEngine(track_performance=False, uq_mode=True,
-                             eta_c_star=0.93, **HYBRID_BASE).calculate()
+                             eta_c_star=1.0, **HYBRID_BASE).calculate()
     assert res['nominal']['isp'] == pytest.approx(det['isp'], rel=1e-9)
 
     # Rapor için örnek başına süreyi görünür kıl (pytest -s ile)

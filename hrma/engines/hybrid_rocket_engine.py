@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Dict
 from scipy.optimize import fminbound, minimize_scalar, brentq
 from hrma.engines.combustion_analysis import CombustionAnalyzer
 from hrma.engines.nozzle_design import NozzleDesigner
@@ -32,12 +33,81 @@ PRE_CHAMBER_D_FACTOR = 0.5
 POST_CHAMBER_D_FACTOR_MIN = 0.3
 POST_CHAMBER_D_FACTOR_MAX = 3.0
 
+
+def _w(code: str, severity: str = "warning", **params) -> Dict:
+    """i18n uyarısı: dile bağlı sabit metin YERİNE yapısal kayıt.
+
+    Sözleşme solid_rocket_engine.py::_w ile BİREBİR aynıdır:
+    ``{"code", "params", "severity"}``, severity ∈ {critical, warning, info}.
+    Kod adlandırması: ``warn.hybrid.<slug>``.
+
+    v2.6.2 GEREKÇE (Codex denetim bulgusu): hibrit motorda kullanıcıya uyarı
+    ULAŞTIRAN KANAL YOKTU — her uyarı ``warnings.warn`` ile sunucu konsoluna
+    gidiyordu. Enjektör modülü çöküp basit Bernoulli hesabına düşse bile
+    kullanıcı bunu göremiyordu. Artık tüm uyarılar sonuç sözlüğündeki
+    ``warnings`` listesine de konur (katı/sıvı motorlarla aynı sözleşme).
+    """
+    return {"code": code, "params": params, "severity": severity}
+
+
+# Regresyon katsayısı tablosunun (hrma/data/propellant_database.py ->
+# HYBRID_REGRESSION_COEFFICIENTS) her satırının HANGİ OKSİTLEYİCİ ile
+# ölçüldüğü. Sayısal değil, kaynak/kapsam meta verisidir; o dosyadaki atıf
+# yorumlarından birebir okunur:
+#   htpb    -> N2O  (Doran et al., AIAA 2007-5352)
+#   abs     -> N2O  (Whitmore & Peterson, JPP 29(3) 2013)
+#   paraffin-> GOX  (Karabeyoglu et al., JPP 20(6) 2004 SP-1a;
+#                    Zilliac & Karabeyoglu AIAA 2006-4504 Tablo 2)
+#   pe      -> O2   (HDPE/O2, Zilliac & Karabeyoglu Tablo 2)
+#   pmma    -> O2   (Greiner & Frederick verisi, aynı tablo)
+# v2.6.2 fizik denetimi bulgusu F020: kod bugüne dek oksitleyiciyi HİÇ
+# kullanmıyordu; N2O katsayılarını LOX/GOX motorlarına sessizce uyguluyordu.
+# Hibrit regresyon oksitleyiciye kuvvetle bağlıdır (alev sıcaklığı, blowing
+# parametresi ve radyasyon payı farklıdır; HTPB/GOX ile HTPB/N2O arasında a
+# tipik olarak 2 kata varan fark gösterir) — Sutton & Biblarz 9. baskı Böl. 16;
+# Chiaverini & Kuo, AIAA Progress Vol. 218 (2007).
+REGRESSION_COEFF_OXIDIZER_BASIS = {
+    'htpb': 'n2o',
+    'abs': 'n2o',
+    'paraffin': 'gox',
+    'pe': 'o2',
+    'pmma': 'o2',
+}
+
+# Aynı tabloda "yayınlanmış, hakemli bir korelasyon bulunamadı" notuyla
+# DOĞRULANMAMIŞ olarak korunan yakıtlar. Tasarım için kullanılmamalıdır;
+# kullanıcı bunu görmeliydi ama hiçbir yerde söylenmiyordu (F020 eki).
+UNVALIDATED_REGRESSION_FUELS = ('pla', 'carbon', 'aluminum', 'al2o3')
+
+# HTPB katsayısının doğrulama veritabanına karşı ÖLÇÜLEN sapması (F019).
+# n=0.555 sabit tutulup DB'nin HTPB kayıtlarına (n=43 test, carmicino2013 ve
+# rezaei2018 kampanyaları) en iyi a arandığında a=6.24e-5 çıkıyor; koddaki
+# 3.68e-5 değerinin 1.70 KATI. Bu, koddaki modelin HTPB regresyonunu
+# sistematik olarak DÜŞÜK tahmin ettiği anlamına gelir (bias −%39.5,
+# medAPE %46.6) — ve bu GÜVENLİ OLMAYAN yöndür: yakıt debisi düşük, O/F
+# yüksek tahmin edilir, grain ~%25 fazla uzun boyutlandırılır ve web
+# gerçekte tahminden ~%25 ERKEN tükenir.
+# Katsayı DEĞİŞTİRİLMEDİ (birincil kaynak Doran et al. AIAA 2007-5352'nin
+# tam metni doğrulanamadı; "asla uydurma" ilkesi gereği ölçülen sapma
+# uyarı olarak bildirilir, sessizce yeni bir sayı uydurulmaz).
+HTPB_COEFF_DB_BIAS_PCT = -39.5
+HTPB_COEFF_DB_MEDAPE_PCT = 46.6
+
 # Port çapının kamara iç çapına oranı için üst sınır. Yakıt grain'i portu
 # SARDIĞINDAN port her zaman kamaradan küçüktür; kalan et kalınlığı
 # (D_ch − D_port)/2 yapısal ve yanma açısından gereklidir. Web tükenmesi bu
 # orana ulaşınca ilan edilir. TEK TANIM YERİ (CLAUDE.md kural 11): hem
 # time-marching sınırı hem de girdi doğrulaması bu sabiti kullanır.
 PORT_TO_CHAMBER_MAX_RATIO = 0.8
+
+# Tasarım noktasında grain BOYU ile regresyon hızı arasındaki sabit-nokta
+# iterasyonunun durdurma ölçütleri (v2.6.2 fizik denetimi, bulgu F133).
+# TEK TANIM YERİ (CLAUDE.md kural 11). Bağıl tolerans, iç (r_dot) çözücünün
+# 1e-6 bağıl toleransından belirgin biçimde gevşek TUTULMAZ ama onun sayısal
+# gürültüsünün altına da inilmez: 1e-8, iki mertebe altında kalıp iç çözücünün
+# adım-sayısı sıçramalarından etkilenmeyecek güvenli aralıktır.
+GRAIN_LENGTH_FIXED_POINT_TOL = 1e-8
+GRAIN_LENGTH_FIXED_POINT_MAX_ITER = 60
 
 
 class HybridRocketEngine:
@@ -49,13 +119,33 @@ class HybridRocketEngine:
                  regression_n=None, fuel_density=None, 
                  combustion_type='infinite', chamber_diameter_input=0,
                  fuel_type='htpb', motor_name='', motor_description='',
-                 initial_gox=None, flux_mode='total', track_performance=True,
+                 initial_gox=None, flux_mode='ox', track_performance=True,
                  oxidizer_type='n2o', uq_mode=False, combustion_analyzer=None,
                  eta_c_star=None, precomputed_optimum_of=None,
                  injector_type='showerhead', initial_port_diameter=None,
-                 tank_temperature=None):
+                 tank_temperature=None, port_count=1,
+                 throat_erosion_rate=None):
         
+        # Tasarım uyarıları (v2.6.2): kullanıcıya ULAŞAN kanal. Liste her
+        # şeyden ÖNCE kurulur; aksi hâlde erken üretilen uyarılar kaybolur
+        # (katı motorda aynı tuzağa düşülmüştü, bkz. solid __init__ yorumu).
+        self.design_warnings = []
+        # Varsayılan/eksik girdiyle mi çalışıldı? design_summary.status bu
+        # bayrağı okur — eksik girdiyle "OPTIMIZED" demek yanlıştır.
+        self._defaults_used = []
+        # Bir alt modül çöküp yedek (fallback) yola düşüldü mü?
+        self._fallback_used = []
+
         # Handle thrust/burn_time vs total_impulse input
+        if total_impulse is None:
+            # Bu dalda eksik girdi yerine sabit yer tutucu (1000 N / 10 s)
+            # kullanılır; kullanıcı bunun bir TASARIM olmadığını bilmelidir.
+            if thrust is None:
+                self._defaults_used.append('thrust')
+            if burn_time is None:
+                self._defaults_used.append('burn_time')
+        elif thrust is None and burn_time is None:
+            self._defaults_used.append('burn_time')
         if total_impulse is not None:
             self.I_total = total_impulse  # N*s
             if thrust is not None:
@@ -138,6 +228,44 @@ class HybridRocketEngine:
         # buna bağlıdır. None ise enjektör modülü varsayılanı kullanılır.
         self.tank_temperature = (float(tank_temperature)
                                  if tank_temperature is not None else None)
+
+        # --- Port sayısı N (v2.6.2 fizik denetimi, bulgu F046) ---
+        # Eskiden model TÜM grain'leri tek dairesel port varsayıyordu; port
+        # sayısı ne girdi ne çıktıydı. N portlu grain'de her portun akısı
+        # G_ox = mdot_ox/(N·A_tek_port), yanma çevresi ise N·π·D'dir. Tek-port
+        # varsayımı N portlu geometride G_ox'u N kat büyütür, çevreyi N kat
+        # küçültür: r ∝ N^n, mdot_f ∝ N^(n−1) (n=0.555, N=4 için r ~2.2 kat
+        # yüksek, mdot_f ~%45 düşük). Doğrulama DB'sinde çok portlu kayıt VAR
+        # (hyb-amroc1993-htpb-lox-dm01-*), bunlar tek-port modeliyle koşuluyordu.
+        # Kaynak: Sutton & Biblarz 9. baskı Böl. 16 (çok portlu grain akı
+        # dağılımı); Story, "Large-Scale Hybrid Motor Testing", NTRS 20060047689.
+        try:
+            self.port_count = int(port_count) if port_count else 1
+        except (TypeError, ValueError):
+            self.port_count = 1
+        if self.port_count < 1:
+            raise ValueError(
+                f"port_count must be a positive integer (got {port_count}); "
+                "a hybrid grain needs at least one combustion port.")
+        if self.port_count > 1:
+            # Çok portlu grain'de portlar arası etkileşim, kanat (web) kalınlığı
+            # ve merkezi port yerleşimi modellenmiyor: N eşdeğer dairesel port
+            # varsayılır. Bu, alan/çevre ölçeklemesini DOĞRU yapar ama port
+            # birleşmesini (burn-through) yakalamaz.
+            self.design_warnings.append(_w(
+                'warn.hybrid.multi_port_equivalent_model', 'info',
+                port_count=self.port_count))
+
+        # --- Boğaz erozyonu [m/s, YARIÇAP artış hızı] (bulgu F047) ---
+        # Hibritte grafit/fenolik boğaz oksitleyici-zengin akışta erozyona
+        # uğrar; At büyüdükçe Pc = mdot·c*/At düşer, CF ve Isp düşer. Katı
+        # motor modülünde erozyon modeli var, hibritte YOKTU ve tasarım noktası
+        # sabit-Pc raporladığı için kullanıcı bu düşüşü hiç görmüyordu.
+        # None/0 => modellenmiyor (açık uyarı üretilir).
+        if throat_erosion_rate is None:
+            self.throat_erosion_rate = 0.0
+        else:
+            self.throat_erosion_rate = max(0.0, float(throat_erosion_rate))
 
         self.g0 = G_0  # m/s^2 (BIPM standart, hrma.constants)
 
@@ -235,6 +363,38 @@ class HybridRocketEngine:
 
         # Get properties for selected fuel type (default to HTPB if not found)
         fuel_key = self.fuel_type.lower()
+        # v2.6.2: bilinmeyen yakıt SESSİZCE HTPB'ye düşüyordu. Kullanıcı
+        # "PLA seçtim" sanırken HTPB regresyon katsayılarıyla koşuyordu;
+        # design_summary.status bunu 'OPTIMIZED' diye rapor ediyordu.
+        if fuel_key not in fuel_properties:
+            self._defaults_used.append(f'fuel_properties({fuel_key}->htpb)')
+        if (fuel_key not in HYBRID_REGRESSION_COEFFICIENTS
+                and (self.a is None or self.n is None)):
+            # (a, n) kullanıcıdan gelmediyse ve tabloda karşılığı yoksa
+            # HTPB katsayısı KULLANILIYOR demektir — sessiz kalmak yasak.
+            self._defaults_used.append(f'regression_coefficients({fuel_key}->htpb)')
+            self.design_warnings.append(_w(
+                'warn.hybrid.fuel_regression_fallback', 'warning',
+                fuel=fuel_key))
+        # v2.6.2 (F020 eki): UNVALIDATED_REGRESSION_FUELS listesi tanımlıydı ama
+        # HİÇ OKUNMUYORDU. Tabloda karşılığı OLAN ama hakemli kaynağı OLMAYAN
+        # yakıtlar (pla/carbon/aluminum/al2o3) sessizce tasarım için
+        # kullanılıyor, kullanıcı katsayının doğrulanmamış olduğunu hiçbir
+        # yerde görmüyordu.
+        if (fuel_key in UNVALIDATED_REGRESSION_FUELS
+                and (self.a is None or self.n is None)):
+            self.design_warnings.append(_w(
+                'warn.hybrid.unvalidated_regression_fuel', 'warning',
+                fuel=fuel_key))
+        # v2.6.2 (F019): HTPB katsayısının doğrulama veritabanına karşı ÖLÇÜLEN
+        # sapması. Sabitler tanımlıydı ama hiçbir uyarıya bağlanmamıştı; katsayı
+        # bilinçli olarak DEĞİŞTİRİLMEDİĞİ için (bkz. HTPB_COEFF_DB_BIAS_PCT
+        # yorumu) sapmanın kullanıcıya bildirilmesi tek dürüst yoldur.
+        if fuel_key in ('htpb', 'abs') and (self.a is None or self.n is None):
+            self.design_warnings.append(_w(
+                'warn.hybrid.htpb_coeff_bias', 'warning',
+                bias_pct=HTPB_COEFF_DB_BIAS_PCT,
+                medape_pct=HTPB_COEFF_DB_MEDAPE_PCT))
         props = fuel_properties.get(fuel_key, fuel_properties['htpb'])
         regression = HYBRID_REGRESSION_COEFFICIENTS.get(
             fuel_key, HYBRID_REGRESSION_COEFFICIENTS['htpb']
@@ -295,7 +455,9 @@ class HybridRocketEngine:
         if self.chamber_diameter_input > 0:
             self.D_ch = self.chamber_diameter_input
         else:
-            self.D_ch = self.D_port_final * 1.5
+            # N portlu grain'de kamara, N portun TOPLAM alanını sarmalıdır:
+            # eşdeğer port çapı sqrt(N)·D_tek (F046).
+            self.D_ch = self.D_port_final * np.sqrt(self.port_count) * 1.5
         # v2.5.2 (Codex bulgusu hybrid:827) — SON kapı: grain portu sarmalı.
         # Yüklenen yakıt kütlesi (π/4)·(D_ch² − D_port_ilk²)·L_grain ile
         # hesaplandığından D_ch <= D_port_ilk durumunda NEGATİF kütle çıkar.
@@ -627,12 +789,18 @@ class HybridRocketEngine:
         # Kullanici epsilon verirse bu fonksiyon zaten cagrilmaz (calculate()).
         return max(1.01, min(epsilon, 250))
     
-    def _calculate_thrust_coefficient(self):
+    def _calculate_thrust_coefficient(self, epsilon=None, chamber_pressure=None):
         """Calculate thrust coefficient using isentropic nozzle flow (Sutton Eq. 3-30).
 
         Exit Mach number is solved from the area-Mach relation via Brent's method,
         then Pe is computed from isentropic pressure relation.  The old code set
         Pe = Pa (perfect expansion) which zeroed out the pressure thrust term.
+
+        v2.6.2 (bulgu F047): epsilon / chamber_pressure DIŞARIDAN verilebilir.
+        Boğaz erozyonu At'yi büyüttüğünde geometri (Ae sabit) ε'yi ve kütle
+        dengesi Pc'yi değiştirir; CF bu yeni noktada YENİDEN hesaplanmalıdır.
+        Argüman verilmezse tasarım noktası (self.epsilon, self.P_c) kullanılır
+        ve davranış birebir eskisiyle aynı kalır.
         """
         # Diverjans duzeltme faktorleri (hrma.constants'tan):
         #   bell      -> 0.985 (Rao optimize)
@@ -652,7 +820,8 @@ class HybridRocketEngine:
         self.lambda_eff = lambda_eff
 
         gamma = self.gamma
-        eps = self.epsilon  # expansion ratio Ae/At
+        eps = self.epsilon if epsilon is None else float(epsilon)
+        P_c = self.P_c if chamber_pressure is None else float(chamber_pressure)
 
         # --- Step 1: Solve exit Mach number from area-Mach relation ---
         # A/A* = (1/Me) * [ (2/(gamma+1)) * (1 + (gamma-1)/2 * Me^2) ]^((gamma+1)/(2*(gamma-1)))
@@ -779,9 +948,13 @@ class HybridRocketEngine:
         # (G_ox = mdot_ox / A_port), girdi değil. Çap verilmediyse eski yol:
         # G_ox = mdot_ox / A_port  =>  A_port = mdot_ox / G_ox_design
         # (bulgu #1 düzeltmesi; G_ox_design varsayılanı 350 kg/m²·s).
+        # v2.6.2 (F046): N portlu grain. D_port TEK portun çapıdır; akı toplam
+        # port alanından hesaplanır: G_ox = mdot_ox / (N · A_tek).
+        N_port = self.port_count
         if self.initial_port_diameter is not None:
             self.D_port_initial = self.initial_port_diameter
-            A_port_initial = np.pi * (self.D_port_initial / 2.0) ** 2
+            A_single_initial = np.pi * (self.D_port_initial / 2.0) ** 2
+            A_port_initial = N_port * A_single_initial
             G_ox_initial = self.mdot_ox / A_port_initial
             self.G_ox_design = G_ox_initial
             if G_ox_initial > 600:
@@ -792,8 +965,9 @@ class HybridRocketEngine:
                 )
         else:
             G_ox_initial = self.G_ox_design  # kg/m²·s
-            A_port_initial = self.mdot_ox / G_ox_initial
-            self.D_port_initial = 2 * np.sqrt(A_port_initial / np.pi)
+            A_port_initial = self.mdot_ox / G_ox_initial   # TOPLAM port alanı
+            A_single_initial = A_port_initial / N_port
+            self.D_port_initial = 2 * np.sqrt(A_single_initial / np.pi)
 
         # --- Regresyon hızı: Marxman toplam-akı bağıntısı (denetim bulgusu) ---
         # r = a · G_total^n, G_total = G_ox + G_fuel (Marxman & Gilbert 1963;
@@ -805,12 +979,53 @@ class HybridRocketEngine:
         # Not: ilk grain boyu tahmini gerektiğinden, L_grain'i önce mdot_f
         # hedefinden (tasarım O/F) türetip sonra Marxman ile tutarlılaştırırız.
         # Başlangıç L_grain tahmini (yalnız G_ox ile, alt sınır):
+        # N portlu grain'de yanma çevresi N·π·D'dir (F046).
         r_dot_ox_only = self.a * G_ox_initial ** self.n
         self.L_grain = self.mdot_f / (
-            self.rho_f * np.pi * self.D_port_initial * r_dot_ox_only
+            self.rho_f * N_port * np.pi * self.D_port_initial * r_dot_ox_only
         )
 
-        # Marxman G_total ile başlangıç regresyon hızı (iteratif).
+        # --- Grain boyu <-> regresyon hızı SABİT-NOKTA kapanışı ---
+        # v2.6.2 fizik denetimi, bulgu F133: flux_mode='total' iken L_grain ile
+        # r_dot KARŞILIKLI bağımlıdır — L → mdot_f → G_fuel → G_total → r → L.
+        # Eski kod bu çevrimi TEK GEÇİŞ yapıyordu: r_dot yalnız-G_ox ile
+        # kurulan (daha uzun) başlangıç L'sinde bir kez hesaplanıyor, ardından
+        # L bu r ile yeniden çözülüyor ama r GERİ GÜNCELLENMİYORDU. Sonuçta
+        # saklanan (r_dot_initial, G_total_initial) ikilisi saklanan L_grain
+        # ile tutarsız kalıyor, yakıt üretim kapanışı
+        # mdot_f = rho_f·N·π·D·L·r_dot bozuluyordu.
+        # Çevrim şu haritanın sabit noktasıyla kapatılır:
+        #     L_{k+1} = mdot_f / (rho_f · N · π · D · r(L_k))
+        # Harita büzülmedir: d ln r / d ln L = n·φ/(1 − n·φ) (φ = G_fuel/G_total,
+        # tasarım noktasında φ ≈ (sf/OF)/(1 + sf/OF), O/F=6 için ~0.08), yani
+        # eğim |−x| « 1 ve birkaç adımda yakınsar.
+        # flux_mode='ox' iken r, L'den bağımsızdır: harita ilk adımda sabit
+        # noktaya oturur, eski davranış BİREBİR korunur (etki sıfır).
+        # Kaynak: iç tutarlılık gereği (yakıt üretim kapanışı, Sutton & Biblarz
+        # 9. baskı Böl. 16) — harici katsayı/korelasyon eklenmemiştir.
+        L_iter = self.L_grain
+        reg0 = None
+        grain_iterations = 0
+        grain_converged = False
+        for grain_iterations in range(1, GRAIN_LENGTH_FIXED_POINT_MAX_ITER + 1):
+            reg0 = RegressionAnalyzer.regression_rate(
+                self.a, self.n, G_ox_initial,
+                rho_f=self.rho_f, port_diameter=self.D_port_initial,
+                grain_length=L_iter, flux_mode=self.flux_mode
+            )
+            L_next = self.mdot_f / (
+                self.rho_f * N_port * np.pi * self.D_port_initial
+                * reg0['r_dot']
+            )
+            rel_change = abs(L_next - L_iter) / max(abs(L_next), 1e-12)
+            L_iter = L_next
+            if rel_change < GRAIN_LENGTH_FIXED_POINT_TOL:
+                grain_converged = True
+                break
+
+        self.L_grain = L_iter
+        # Yakınsanan L ile SON değerlendirme: saklanan r_dot/G_total artık
+        # saklanan L_grain'in tam karşılığıdır (tutarsızlık kalmaz).
         reg0 = RegressionAnalyzer.regression_rate(
             self.a, self.n, G_ox_initial,
             rho_f=self.rho_f, port_diameter=self.D_port_initial,
@@ -819,13 +1034,23 @@ class HybridRocketEngine:
         self.r_dot_initial = reg0['r_dot']
         self.r_dot = self.r_dot_initial  # For compatibility
         self.G_total_initial = reg0['G_total']
-
-        # L_grain'i Marxman r_dot ile yeniden tutarlılaştır: hedef yakıt
-        # debisi (tasarım O/F'den mdot_f) Marxman regresyonuyla sağlanmalı.
-        # mdot_f = rho_f·π·D·L·r_dot_marxman  =>  L_grain (güncel)
-        self.L_grain = self.mdot_f / (
-            self.rho_f * np.pi * self.D_port_initial * self.r_dot_initial
-        )
+        self._grain_length_iterations = grain_iterations
+        self._grain_length_converged = bool(grain_converged)
+        if not grain_converged:
+            # Sessiz yakınsamama yasak: son iterat kullanılıyorsa kullanıcı
+            # bunu bilmeli (aynı sözleşme regression_analysis.py'de de var).
+            warnings.warn(
+                f"Grain boyu <-> regresyon hızı sabit-nokta iterasyonu "
+                f"{GRAIN_LENGTH_FIXED_POINT_MAX_ITER} adımda yakınsamadı "
+                f"(n={self.n}, son bağıl değişim {rel_change:.2e}); son "
+                f"iterat kullanılıyor.",
+                RuntimeWarning
+            )
+            self.design_warnings.append(_w(
+                'warn.hybrid.grain_length_not_converged', 'warning',
+                max_iter=GRAIN_LENGTH_FIXED_POINT_MAX_ITER,
+                n=round(float(self.n), 3),
+                rel_change=float(f"{rel_change:.3e}")))
 
         # --- Euler time-marching (denetim bulgusu #5 düzeltmesi) ---
         # Sabit 10 adım yerine dt = t_b/200 taban çözünürlüğü; ek olarak ilk
@@ -862,7 +1087,12 @@ class HybridRocketEngine:
         # çapı port sonundan türetildiği için (D_ch = 1.5·D_port_final,
         # yani D_port_final ≈ 0.67·D_ch < 0.8·D_ch) sınır kendiliğinden sağlanır.
         if self.chamber_diameter_input > 0:
-            max_port = PORT_TO_CHAMBER_MAX_RATIO * self.chamber_diameter_input
+            # N portlu grain'de sınır ALAN üzerinden kurulur: toplam port alanı
+            # kamara kesitinin (0.8)² katını geçmemeli. Tek port çapı cinsinden
+            # bu, D_tek <= 0.8·D_ch/sqrt(N) demektir (N=1'de eski ifadeyle
+            # birebir aynı).
+            max_port = (PORT_TO_CHAMBER_MAX_RATIO
+                        * self.chamber_diameter_input / np.sqrt(N_port))
             if max_port <= self.D_port_initial:
                 # v2.5.2 DÜZELTMESİ (Codex bulgusu, hybrid:827): eski kod
                 # burada UYARIP sınırı sonsuza çekiyordu. Bu, imkansız
@@ -879,7 +1109,9 @@ class HybridRocketEngine:
                     f"surround the port, so the chamber diameter has to exceed "
                     f"the port diameter divided by "
                     f"{PORT_TO_CHAMBER_MAX_RATIO:g} "
-                    f"(minimum {self.D_port_initial / PORT_TO_CHAMBER_MAX_RATIO * 1000:.1f} mm). "
+                    f"(minimum "
+                    f"{self.D_port_initial * np.sqrt(N_port) / PORT_TO_CHAMBER_MAX_RATIO * 1000:.1f} mm "
+                    f"for {N_port} port(s)). "
                     f"Increase the chamber diameter or reduce the port "
                     f"diameter / oxidizer mass flux."
                 )
@@ -906,7 +1138,7 @@ class HybridRocketEngine:
             t_now = i * dt
             self._port_time_history.append(t_now)
             self._port_diameter_history.append(D_port)
-            A_port = np.pi * (D_port / 2)**2
+            A_port = N_port * np.pi * (D_port / 2)**2   # TOPLAM port alanı
             G_ox = self.mdot_ox / A_port  # kg/m²·s oksitleyici akış yoğunluğu
 
             # Marxman regresyon hızı: r = a · G_total^n (G_total iteratif).
@@ -917,8 +1149,9 @@ class HybridRocketEngine:
             )
             r_dot = reg['r_dot']  # m/s
 
-            # Anlık yakıt üretimi ve O/F (kayma izleme)
-            mdot_f_inst = self.rho_f * np.pi * D_port * self.L_grain * r_dot
+            # Anlık yakıt üretimi ve O/F (kayma izleme) — N portun toplamı
+            mdot_f_inst = (self.rho_f * N_port * np.pi * D_port
+                           * self.L_grain * r_dot)
             of_inst = self.mdot_ox / mdot_f_inst if mdot_f_inst > 0 else self.OF
 
             # Anlık c*/Isp (O/F shift -> performans, bulgu #2). Tablo
@@ -940,15 +1173,23 @@ class HybridRocketEngine:
                     "Port çapı 0.8·D_kamara sınırına ulaştı — web yanma süresi "
                     "bitmeden tükendi, grain tasarımını gözden geçirin"
                 )
+                # v2.6.2: bu, tasarımın İSTENEN yanma süresini tutturamadığı
+                # anlamına gelir; design_summary.status bunu okur.
+                self.design_warnings.append(_w(
+                    'warn.hybrid.web_exhausted_early', 'critical',
+                    t_web=round(float(t_now + dt), 2),
+                    t_burn=round(float(self.t_b), 2)))
                 break
 
         self.D_port_final = D_port
         # Seriye son noktayı ekle (erken web tükenmesinde son adım zamanı)
-        self._port_time_history.append(t_now + dt if web_exhausted else self.t_b)
+        t_end = t_now + dt if web_exhausted else self.t_b
+        self.t_burn_effective = t_end
+        self._port_time_history.append(t_end)
         self._port_diameter_history.append(D_port)
 
-        # Final oxidizer flux hesaplama
-        A_port_final = np.pi * (self.D_port_final / 2)**2
+        # Final oxidizer flux hesaplama (TOPLAM port alanı, F046)
+        A_port_final = N_port * np.pi * (self.D_port_final / 2)**2
         self.G_ox_final = self.mdot_ox / A_port_final
 
         # Yanma sonu Marxman regresyonu ve anlık yakıt debisi / O/F (bulgu #6)
@@ -959,25 +1200,48 @@ class HybridRocketEngine:
         )
         r_dot_final = reg_final['r_dot']
         self.G_total_final = reg_final['G_total']
-        self.mdot_f_final = self.rho_f * np.pi * self.D_port_final * self.L_grain * r_dot_final
+        self.mdot_f_final = (self.rho_f * N_port * np.pi * self.D_port_final
+                             * self.L_grain * r_dot_final)
         self.OF_final = self.mdot_ox / self.mdot_f_final if self.mdot_f_final > 0 else self.OF
 
-        # Zaman-ortalamalı regresyon oranı (Marxman, port-ortalama G_ox).
-        # G_total iterasyonu ortalama G_ox'ta tekrar çözülür ki ortalama r
-        # tutarlı olsun (yalnız uç noktaların aritmetik ortalaması değil).
-        G_ox_avg = (G_ox_initial + self.G_ox_final) / 2  # Aritmetik ortalama daha stabil
+        # --- Ortalama regresyon hızı (v2.6.2 FİZİK DENETİMİ, bulgu F045) ---
+        # ESKİ TANIM: uç noktaların ARİTMETİK ORTALAMA AKISINDA değerlendirilen
+        # ANLIK regresyon (r = a·G_ort^n). Bu, deneysel literatürün ve
+        # doğrulama veritabanının measured.regression_rate_avg alanının
+        # raporladığı büyüklük DEĞİLDİR; oradaki büyüklük UZAY-ZAMAN
+        # ORTALAMASIDIR: r̄ = (D_final − D_initial)/(2·t_b).
+        # İki tanım aynı değildir: (i) r = a·G^n, n<1 için G'de içbükeydir,
+        # Jensen eşitsizliği gereği a·ort(G)^n >= ort(a·G^n); (ii) G_ox(t) ∝ D⁻²
+        # azalan-dışbükey olduğundan uç nokta aritmetik ortalaması gerçek zaman
+        # ortalamasının üstündedir. Sonuç: eski tanım modelin gerçek sapmasını
+        # sistematik olarak MASKELİYORDU.
+        # DOĞRULAMA: veritabanında hem r̄ hem D_i/D_f/t_b veren 4 kayıtta
+        # (D_f−D_i)/(2·t_b) ile yayımlanan r̄ arasındaki medAPE %0.11 —
+        # yani ölçülen büyüklüğün tanımı budur, tartışmaya yer yok.
+        # Model D_final'ı ZATEN hesapladığı için bu tanım bedelsiz ve tam
+        # tutarlıdır (aynı zamanda m_f_grain ile birebir uyumludur).
+        # Kaynak: Chiaverini & Kuo, "Fundamentals of Hybrid Rocket Combustion
+        # and Propulsion", AIAA Progress Vol. 218 (2007), Böl. 2; Karabeyoglu
+        # et al., JPP 20(6) 2004 — veri indirgeme (çap ölçümü) bölümü.
+        # Web erken tükendiyse GERÇEK yanma süresi kullanılır (aksi hâlde
+        # ortalama, hiç yaşanmamış bir süreye bölünürdü).
+        self.r_dot_avg = ((self.D_port_final - self.D_port_initial)
+                          / (2.0 * t_end)) if t_end > 0 else self.r_dot_initial
+        # Akı-ortalama tanımı da şeffaflık için saklanır (eski çıktı; hangi
+        # tanımın raporlandığı karşılaştırılabilsin diye).
+        G_ox_avg = (G_ox_initial + self.G_ox_final) / 2
         reg_avg = RegressionAnalyzer.regression_rate(
             self.a, self.n, G_ox_avg,
             rho_f=self.rho_f, port_diameter=(self.D_port_initial + self.D_port_final) / 2,
             grain_length=self.L_grain, flux_mode=self.flux_mode
         )
-        self.r_dot_avg = reg_avg['r_dot']
+        self.r_dot_at_avg_flux = reg_avg['r_dot']
 
         # Grain'in fiilen ürettiği yakıt kütlesi (denetim bulgusu #6):
-        # m_f = rho_f · (V_grain_initial − V_grain_final)
-        #     = rho_f · (π/4) · (D_final² − D_initial²) · L_grain
+        # m_f = rho_f · N · (V_port_final − V_port_initial)
+        #     = rho_f · N · (π/4) · (D_final² − D_initial²) · L_grain
         self.m_f_grain = (
-            self.rho_f * (np.pi / 4.0)
+            self.rho_f * N_port * (np.pi / 4.0)
             * (self.D_port_final**2 - self.D_port_initial**2)
             * self.L_grain
         )

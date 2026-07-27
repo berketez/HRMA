@@ -168,7 +168,11 @@ class TestWindResponse:
                 aero=_standard_rocket(), dry_mass=8.0, propellant_mass=4.0,
                 thrust=1200.0, burn_time=6.0, cd0=0.45,
                 wind_speed=8.0, wind_direction_deg=wdir,
-                launch_elevation_deg=90.0)
+                launch_elevation_deg=90.0,
+                # Coriolis izotropiyi KIRAR (doğu sürüklenmesi rüzgâr yönünden
+                # bağımsız eklenir) → bu test yalnız q̇ Hamilton-sırası aero
+                # izotropisini denetler, o yüzden Coriolis'siz koşulur.
+                coriolis=False)
             results[name] = solver.solve(t_max=200.0)
 
         ap = {k: v['apogee'] for k, v in results.items()}
@@ -322,3 +326,65 @@ class TestMassProperties:
         m, r = 10.0, aero.d / 2.0
         assert solver._inertia(m)[1] == pytest.approx(
             m * (3.0 * r * r + aero.L ** 2) / 12.0, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# F061 — pitch/yaw sönüm katsayısı C_mq
+# ---------------------------------------------------------------------------
+class TestPitchDamping:
+    """v2.6.2 fizik denetimi bulgusu F061 kilidi.
+
+    Eski kod ``c_mq = −C_Nα·(arm/d)²`` kullanıyordu; doğru türev
+    ``C_mq = −2·C_Nα·(arm/d)²``. Türetme: q pitch hızı CP'de Δα = q·l/V
+    indükler → M = −q̄·S·C_Nα·l²·q/V; M = q̄·S·d·C_mq·(q·d/2V) ile
+    eşitlenince 2 çarpanı çıkar. ÖLÇÜLDÜ: kod/analitik oranı tam 0.5000
+    (α=0, q=1 rad/s, V=250 m/s, h=1000 m).
+    """
+
+    @staticmethod
+    def _pitch_moment(q_rate, V=250.0, h=1000.0, t=7.0):
+        """_derivatives'in uyguladığı pitch momentini w_dot'tan geri çıkarır."""
+        solver = SixDOFTrajectory(
+            aero=_standard_rocket(), dry_mass=8.0, propellant_mass=4.0,
+            thrust=1200.0, burn_time=6.0, cd0=0.45,
+            wind_speed=0.0, launch_elevation_deg=90.0, coriolis=False)
+        solver._r0 = np.zeros(3)
+        q = _quat_from_elevation_azimuth(90.0, 0.0)
+        # Dik atış, hız tamamen +z → gövde ekseniyle hizalı, α = 0
+        y = np.concatenate([[0.0, 0.0, h], [0.0, 0.0, V], q,
+                            [0.0, q_rate, 0.0]])
+        m = solver._mass_at(t)
+        x_cg = solver._cg_at(t)
+        I = np.array(solver._inertia(m, x_cg))[[0, 1, 1]]
+        w_b = y[10:13]
+        w_dot = solver._derivatives(t, y)[10:13]
+        M_b = w_dot * I + np.cross(w_b, I * w_b)
+        return float(M_b[1]), solver, x_cg, m
+
+    def test_matches_analytic_damping_moment(self):
+        """Uygulanan sönüm momenti analitik −q̄·S·C_Nα·l²·q/V ile birebir."""
+        from hrma.analysis.six_dof_trajectory import _atmosphere
+        V, h, q_rate = 250.0, 1000.0, 1.0
+        M_code, solver, x_cg, _ = self._pitch_moment(q_rate, V=V, h=h)
+        aero = solver.aero
+        rho, _ = _atmosphere(h + solver.launch_altitude)
+        arm = aero.x_cp - x_cg
+        M_analytic = -(0.5 * rho * V ** 2) * aero.S_ref * \
+            aero.cn_alpha * arm ** 2 * q_rate / V
+        assert M_code == pytest.approx(M_analytic, rel=1e-12)
+        # Eski (yarım) katsayı artık kabul edilmiyor
+        assert M_code != pytest.approx(0.5 * M_analytic, rel=1e-6)
+
+    def test_damping_opposes_rotation(self):
+        """Sönüm momenti dönüş yönüne KARŞI ve hıza doğrusal."""
+        M_pos, _, _, _ = self._pitch_moment(1.0)
+        M_neg, _, _, _ = self._pitch_moment(-1.0)
+        M_double, _, _, _ = self._pitch_moment(2.0)
+        assert M_pos < 0.0 < M_neg
+        assert M_neg == pytest.approx(-M_pos, rel=1e-12)
+        assert M_double == pytest.approx(2.0 * M_pos, rel=1e-12)
+
+    def test_zero_rate_gives_zero_damping(self):
+        """q=0 → sönüm momenti sıfır (α=0'da toplam pitch momenti de sıfır)."""
+        M_zero, _, _, _ = self._pitch_moment(0.0)
+        assert M_zero == pytest.approx(0.0, abs=1e-12)

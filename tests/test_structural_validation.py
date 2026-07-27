@@ -166,15 +166,57 @@ class TestBuckling:
         assert out['buckling_status'] == 'CRITICAL'
 
     def test_pressure_tension_credit_reduces_net_compression(self, analyzer):
-        # Ic basinc kredisi: ayni basma yuku, basincli kabukta daha yuksek SF.
+        """Ic basinc kredisi BASINCLI yuk durumunda net basmayi azaltir.
+
+        TEST GUNCELLENDI (F075, 2026-07-25): eski surum krediyi RAPORLANAN
+        (yoneten) emniyet faktorunde ariyordu — yani ustteki
+        'axial_buckling_safety_factor' alaninda. Bu, modulun yalnizca
+        BASINCLI durumu degerlendirdigi eski davranisti. Burkulma gercekte
+        BASINCSIZ durumda (nakliye, montaj on-yuku, atesleme oncesi/kapanis,
+        ucus atalet yuku) kritiktir; artik iki yuk durumu da hesaplaniyor ve
+        YONETEN (dusuk SF'li) olan raporlaniyor. Kredi yalnizca yardim ettigi
+        icin yoneten durum daima basincsizdir ve iki cagrinin raporlanan
+        SF'si esittir — eski iddia (wet > dry) artik YANLIS davranisi
+        kodluyordu. Kredi etkisi 'pressurized' tani alanlarindan sinanir.
+        """
         mat = analyzer.materials['steel_4130']
         r, t, F = 0.5, 0.001, 4.0e5
         dry = analyzer._check_buckling(0.0, r, t, 2.0, mat,
                                        axial_compression_force=F)
         wet = analyzer._check_buckling(5e5, r, t, 2.0, mat,
                                        axial_compression_force=F)
+        # Kredi basincli durumda net basmayi dusurur -> SF yukselir.
+        assert (wet['axial_buckling_safety_factor_pressurized']
+                > dry['axial_buckling_safety_factor_pressurized'])
+        assert (wet['applied_axial_stress_pressurized_MPa']
+                < dry['applied_axial_stress_pressurized_MPa'])
+        # Basincsiz durumda kredi YOKTUR: iki cagri ayni.
+        assert (wet['axial_buckling_safety_factor_unpressurized']
+                == pytest.approx(
+                    dry['axial_buckling_safety_factor_unpressurized']))
+        # Yoneten (raporlanan) durum daima basincsizdir.
+        assert wet['governing_load_case'] == 'unpressurized'
         assert (wet['axial_buckling_safety_factor']
-                > dry['axial_buckling_safety_factor'])
+                == pytest.approx(
+                    wet['axial_buckling_safety_factor_unpressurized']))
+
+    def test_buckling_credit_uses_meop_not_design_pressure(self, analyzer):
+        """F075(b): stabilize kredi MEOP'tan alinir, 1.5*Pc'den DEGIL.
+
+        Kredi net basmadan CIKARILDIGI icin tasarim basinciyla hesaplamak
+        konservatif degildir (daha yuksek basinc net basmayi azaltir).
+        analyze_structure artik _check_buckling'e chamber_pressure gecer.
+        """
+        Pc_bar = 50.0
+        res = analyzer.analyze_structure(
+            {'chamber_pressure': Pc_bar, 'chamber_diameter': 0.15,
+             'chamber_length': 0.5, 'throat_diameter': 0.05,
+             'burn_time': 10.0, 'thrust': 5.0e5},
+            material='steel_4130', design_pressure_factor=1.5)
+        b = res['buckling_analysis']
+        assert b['stabilizing_pressure_bar'] == pytest.approx(Pc_bar)
+        # Tasarim basinci (1.5*Pc) DEGIL:
+        assert b['stabilizing_pressure_bar'] < 1.5 * Pc_bar
 
     def test_external_pressure_buckling_present(self, analyzer):
         mat = analyzer.materials['steel_4130']
@@ -258,7 +300,9 @@ class TestThermalEffectOnSafetyFactor:
         assert sa['thermal_margin_ratio'] > 0.85
         # ...ve bu durumu SAFE olmaktan cikariyor.
         assert sa['status'] in ('MARGINAL', 'UNSAFE')
-        assert any('service limit' in r for r in sa['recommendations'])
+        # D-track: öneriler artık {code,params,severity}; metin frontend'de.
+        assert any(r['code'] == 'warn.structural.thermal_margin_service_limit'
+                   for r in sa['recommendations'])
 
     def test_thermal_stress_superposition_and_cooled_gradient(self, analyzer):
         """Termal gerilme lineer superpozisyonla eklenir.
@@ -326,19 +370,61 @@ class TestThermalEffectOnSafetyFactor:
         assert sa['thermal_margin_ratio'] > 0.85
         assert sa['status'] in ('MARGINAL', 'UNSAFE')
 
+    def test_service_limit_uses_peak_wall_temperature(self, analyzer):
+        """F074: servis siniri TEPE (ic yuz) sicaklikta sinanmali.
+
+        'cooled_gradient' senaryosu yonettiginde derating sicakligi ORTALAMA
+        cidar sicakligidir (0.5*(T_ic+T_dis)); servis sinirinin asilmasi ise
+        SICAK yuzde olur. Eski surum servis kontrolunu de ortalamayla yapiyor,
+        sicak yuz limiti astiginda bile exceeds=False raporluyordu.
+        OLCULDU (steel_4130, servis siniri 811 K): T_ic=860 K, T_dis=560 K ->
+        eski oran 0.8755 / exceeds False; dogru deger 860/811 = 1.0604 ve
+        exceeds True. Kaynak: MMPDS kisa-sureli maruziyet sinirlari (tepe
+        metal sicakligina uygulanir).
+        """
+        md = {'chamber_pressure': 50.0, 'chamber_diameter': 0.15,
+              'chamber_length': 0.5, 'throat_diameter': 0.05,
+              'burn_time': 10.0,
+              'wall_temperature_hot': 860.0, 'wall_temperature_cold': 560.0}
+        res = analyzer.analyze_structure(md, material='steel_4130',
+                                         design_pressure_factor=1.5)
+        sa = res['safety_analysis']
+        T_service = analyzer.materials['steel_4130']['max_service_temp']
+        assert sa['peak_wall_temperature_K'] == pytest.approx(860.0)
+        # Derating tabani ORTALAMA kalmali (tasima kapasitesi kesit ortalamasi).
+        assert sa['derating_wall_temperature_K'] == pytest.approx(710.0)
+        assert sa['thermal_margin_ratio'] == pytest.approx(860.0 / T_service,
+                                                           rel=1e-9)
+        assert sa['thermal_margin_ratio'] > 1.0
+        assert sa['exceeds_max_service_temp_peak'] is True
+        assert sa['status'] == 'UNSAFE'
+        # Rapor katmani da tepe-tabanli bayragi gormeli.
+        assert res['thermal_analysis']['exceeds_max_service_temp_peak'] is True
+
+        # Ikinci olcum noktasi (katalog): 790/740 K -> 0.9741 (sinir bandi).
+        md2 = dict(md, wall_temperature_hot=790.0, wall_temperature_cold=740.0)
+        sa2 = analyzer.analyze_structure(
+            md2, material='steel_4130',
+            design_pressure_factor=1.5)['safety_analysis']
+        assert sa2['thermal_margin_ratio'] == pytest.approx(790.0 / T_service,
+                                                            rel=1e-9)
+        assert sa2['exceeds_max_service_temp_peak'] is False
+
     def test_recommendations_flag_thermal_and_thin_wall(self, analyzer):
         res = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',
                                          design_pressure_factor=1.5)
-        recs = ' '.join(res['safety_analysis']['recommendations']).lower()
+        # D-track: öneriler artık {code,params,severity}; metin frontend'de.
+        codes = {r['code'] for r in res['safety_analysis']['recommendations']}
         # v2.5.2: sogutmasiz cidarda uyari 'termal gerilme baskin' degil,
         # 'cidar servis sinirina yakin' seklinde gelir (dogru mekanizma).
-        assert 'service limit' in recs or 'derating' in recs
+        assert ('warn.structural.thermal_margin_service_limit' in codes
+                or 'warn.structural.severe_derating' in codes)
         # Kalin-cidar uyarisi kalin rejimde gelmeli (senaryo-ayrimli modelde
         # referans vaka ince cidara dustugunden 4x faktorle zorlanir)
         res4 = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',
                                           design_pressure_factor=4.0)
-        recs4 = ' '.join(res4['safety_analysis']['recommendations']).lower()
-        assert 'thin-wall' in recs4 or 'thick-wall' in recs4
+        codes4 = {r['code'] for r in res4['safety_analysis']['recommendations']}
+        assert 'warn.structural.thin_wall_invalid' in codes4
 
     def test_buckling_included_in_minimum_safety_factor(self, analyzer):
         res = analyzer.analyze_structure(REF_MOTOR, material='steel_4130',

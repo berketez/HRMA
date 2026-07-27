@@ -5,6 +5,19 @@
 
 A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D model of your motor built live from the solver output.
 
+![HRMA hybrid motor results](docs/user_guide/img/en-02-results.png)
+
+*Solver output for a hybrid motor: performance, geometry and warnings — every
+number on this page is computed, and anything that is not computed says so.*
+
+| | |
+|---|---|
+| ![Design form](docs/user_guide/img/en-01-form.png) | ![3D model](docs/user_guide/img/en-03-3d.png) |
+| **Design input** — three motor families share one form; fields the solver does not use are marked, not silently ignored. | **Interactive 3D model** — built from the solver's own geometry, not a stock illustration. Cutaway, burn animation and exploded view. |
+| ![Charts](docs/user_guide/img/en-04-charts.png) | ![Cross-section](docs/user_guide/img/en-05-cross.png) |
+| **Performance charts** — thrust, pressure and O/F histories from the integrated burn. | **Engineering cross-section** — the same contour that drives STEP, DXF and STL export. |
+
+
 ## Just Want to Use HRMA? Download the Installer
 
 **You do not need Python, the source code, or anything on this page.** Grab the
@@ -14,8 +27,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.6.1.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.1-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-2.6.2.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.2-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -61,7 +74,7 @@ fuel/oxidizer pairs, and liquid c\* within **<2 %**. The test suite runs on a
 clean machine on every push — see the badge at the top of this page for the
 current count and result.
 
-**How to read the liquid-engine numbers (v2.6.1).** Across fourteen published
+**How to read the liquid-engine numbers (v2.6.2).** Across fourteen published
 engine operating points from six countries, the median absolute error in vacuum
 specific impulse is about 1.2 % (bias +0.9 %). That figure supports one specific
 claim and no more: *given the real operating point (chamber pressure, mixture
@@ -120,8 +133,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.6.1.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.1-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.1/HRMA-Setup-2.6.1-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.6.2.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.2-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -213,40 +226,54 @@ HRMA/
    - Interactive 3D model (cutaway, burn animation, heat map)
    - Exportable STL/CAD files generated from the real solver geometry
 
-## Key Equations
-
-**Thrust Coefficient:**
-
-$$C_F = \lambda \sqrt{\frac{2\gamma^2}{\gamma-1} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{\gamma-1}} \left[1-\left(\frac{P_e}{P_c}\right)^{\frac{\gamma-1}{\gamma}}\right]} + \frac{(P_e - P_a) \cdot \varepsilon}{P_c}$$
-
-**Characteristic Velocity:**
-
-$$c^* = \frac{\sqrt{\gamma R T_c}}{\gamma \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}}}$$
-
-**Throat Area:**
-
-$$A_t = \frac{\dot{m} \cdot c^*}{P_c}$$
-
-**Burn Rate (solid):**
-
-$$r = a \cdot P_c^n \quad \text{(Saint-Robert's law)}$$
-
 ## Version
 
-**HRMA v2.6.1**
+**HRMA v2.6.2**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - A preliminary-design and educational rocket-propulsion analysis tool
   (not a flight-qualification tool — see the scope note above)
-- Last Updated: July 2026. Recent work: real-operating-point liquid
-  thermochemistry via RocketCEA, a cycle power-balance solver (pressure-fed,
-  gas-generator, tap-off, staged combustion, FFSC, expander), supercritical
-  regenerative cooling, a real-experiment validation database (~209 fully
-  cited records) with an automatic correlation report and baseline guard
-  tests, Monte Carlo uncertainty quantification, a 13-panel Analysis Deck,
-  quasi-1D nozzle flow, staged-combustion kinetics, Leckner gas-emissivity
-  radiation, NHNE injector design, a 3D launch-site view, and a native
-  desktop window with automatic updates via GitHub Releases
+- Last Updated: July 2026
+
+**v2.6.2 is an audit release.** Two independent reviews — an external source
+audit and a line-by-line physics audit of every equation in the code —
+produced over 300 findings. Rather than list features, here is what the audit
+found and what changed, because that is the more useful thing to know about a
+tool you are about to trust with a number:
+
+- **A swirl-injector coefficient was inverted.** The largest spray half-angle
+  the code could produce was 15.9°; real pressure-swirl atomisers routinely
+  reach 30–60°, and orifice area came out 1.7–2.7× oversized.
+- **The chamber-wall safety factor was tautological.** Sizing and verification
+  used the same allowable, so the reported factor was always
+  `safety_factor × 1.2` — identical at 5, 20 and 50 bar. Sizing and
+  verification are now separate modes.
+- **A tank STEP export applied its 1000× unit conversion twice**, so a 300 mm
+  tank was built as 300 metres and the CAD kernel silently returned an empty
+  solid.
+- **`NaN` and `∞` were converted to `0.0` and `1e10`** on the way out, so a
+  diverged solver looked like a real measurement. They are now `null` and
+  render as a dash.
+- **Regulatory-compliance fields returned an unconditional `True`** and were
+  drawn as green "OK" badges regardless of motor or propellant. Removed — the
+  software does not evaluate compliance and now says so.
+
+The full list, with the measured numerical effect of each finding, is in
+[`docs/v262_specs/PHYSICS_AUDIT.md`](docs/v262_specs/PHYSICS_AUDIT.md).
+A machine-checked release gate ([`tests/test_v262_release_gate.py`](tests/test_v262_release_gate.py))
+now asserts that each of these fixes is still in place and that every declared
+feature is actually reachable from the UI — the recurring failure mode in this
+codebase has been modules that were written but never wired up.
+
+Underneath that: real-operating-point liquid thermochemistry via RocketCEA, a
+cycle power-balance solver (pressure-fed, gas-generator, tap-off, staged
+combustion, FFSC, expander), supercritical regenerative cooling, a
+real-experiment validation database with an automatic correlation report and
+baseline guard tests, Monte Carlo uncertainty quantification, a 13-panel
+Analysis Deck, quasi-1D nozzle flow, staged-combustion kinetics, Leckner
+gas-emissivity radiation, NHNE injector design, a 3D launch site that flies
+the motor you just designed over NASA satellite imagery, and a native desktop
+window with automatic updates.
 
 ## Ready to Design?
 

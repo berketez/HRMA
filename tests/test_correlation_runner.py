@@ -213,11 +213,39 @@ class TestHybridAdapterRezaei:
         # mdot_fuel = mdot_ox/OF aritmetik kimliktir; skorlanamaz
         assert rr["scores"]["mdot_fuel"]["status"] == "skipped_derived"
 
+    def test_algebraic_copies_are_not_scored_separately(self, run):
+        """thrust/thrust_mean/total_impulse Isp'nin CEBİRSEL KOPYASIDIR.
+
+        v2.6.2 doğrulama denetimi (F022): hibrit yolunda
+        ``thrust = mdot_kayıt · g0 · Isp_model`` olduğu için itki hatası
+        Isp hatasıyla ÖZDEŞTİR (tam DB ölçümü: 18 ortak testte
+        |isp_err − thrust_err| en fazla 0.055 yüzde puanı). Bunları ayrı
+        doğrulama büyüklüğü gibi skorlamak AYNI karşılaştırmayı tabloda
+        2-3 bağımsız hücre (her biri n=18) gibi göstermek demekti.
+
+        Kaynak: Oberkampf & Roy, *Verification and Validation in Scientific
+        Computing*, CUP 2010, Böl. 12 — bağımlı çıktılar ayrı doğrulama
+        metriği sayılmaz.
+
+        Zincirin ÖLÇÜLEN İLK halkası skorlanır, kalanlar skor dışı kalır.
+        """
+        rr = run["records"][0]
+        assert rr["scores"]["isp"]["status"] == "scored", (
+            'zincirin ilk halkası (isp) skorlanmalı')
+        for copy_q in ("thrust", "thrust_mean", "total_impulse"):
+            st = rr["scores"].get(copy_q, {}).get("status")
+            if st is None:
+                continue  # bu kayıtta ölçüm yok
+            assert st != "scored", (
+                f'{copy_q} isp ile aynı kanıttan geliyor, ayrı skorlanmamalı '
+                f'(durum: {st})')
+
     def test_scored_quantities_and_physical_bands(self, run):
         rr = run["records"][0]
         scored = {q: s for q, s in rr["scores"].items()
                   if s["status"] == "scored"}
-        for quantity in ("c_star", "isp", "chamber_pressure", "thrust",
+        # thrust BİLEREK yok: isp'nin cebirsel kopyası (F022, üstteki teste bak)
+        for quantity in ("c_star", "isp", "chamber_pressure",
                          "regression_rate", "port_diameter_final"):
             assert quantity in scored, (quantity, rr["scores"])
         # Fiziksel bantlar (eşik bekçiliği G4'ün işi; burada yalnız akıl
@@ -225,7 +253,6 @@ class TestHybridAdapterRezaei:
         assert 1300 < scored["c_star"]["predicted_si"] < 1700
         assert 150 < scored["isp"]["predicted_si"] < 260
         assert 15e5 < scored["chamber_pressure"]["predicted_si"] < 45e5
-        assert 100 < scored["thrust"]["predicted_si"] < 400
         assert 2e-4 < scored["regression_rate"]["predicted_si"] < 1.2e-3
         # İşaret sözleşmesi: error_pct = (pred-meas)/meas*100
         s = scored["c_star"]
@@ -496,7 +523,10 @@ class TestMarkdown:
         ]
         run = cr.run_correlation(records=records)
         md = cr.to_markdown(run)
-        assert "| Motor | Quantity | N |" in md
+          # v2.6.2 (F007): sütun "N" -> "N (campaigns)". Sayılan şey bağımsız
+        # örnek değil KAMPANYA olduğu için başlık bunu açıkça söylüyor;
+        # aynı motorun yakın çalışma noktaları tek kampanya sayılır.
+        assert "| Motor | Quantity | N (campaigns) |" in md
         assert "sol-fixture-strand-m1" in md
         assert "Anomaly-flagged records" in md
         assert run["db_content_hash"] in md

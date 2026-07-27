@@ -48,10 +48,21 @@ def _injector(injector_type, **kw):
 class TestUtilsContract:
     @pytest.mark.parametrize('injector_type', UTILS_TYPES)
     def test_contract_keys_present(self, injector_type):
+        """v2.6.2 güncellemesi (fizik denetimi F043): eski test TÜM tiplerde
+        Cd=0.7 (düz orifis girdisi) bekliyordu. Basınç-swirl atomizörde deşarj
+        katsayısı bağımsız bir girdi DEĞİLDİR — Giffen–Muraszew çözümünden
+        gelir (Cd = √((1−X)³/(1+X)); Lefebvre & McDonell Böl. 6, tipik simplex
+        bandı 0.2-0.45). Bu yüzden swirl'de Cd artık GM değeridir ve
+        'discharge_coefficient_basis' alanıyla raporlanır; diğer tiplerde
+        yapıcının düz orifis Cd'si (0.7) korunur."""
         r = _injector(injector_type).calculate()
         for key in CONTRACT_KEYS:
             assert key in r, f'{injector_type}: sözleşme anahtarı eksik: {key}'
-        assert r['discharge_coefficient'] == pytest.approx(0.7)
+        if injector_type == 'swirl':
+            assert 0.2 <= r['discharge_coefficient'] <= 0.45
+            assert 'Giffen-Muraszew' in r['discharge_coefficient_basis']
+        else:
+            assert r['discharge_coefficient'] == pytest.approx(0.7)
         # Enjeksiyon alanı mm² ve pozitif; tüm tiplerde AYNI anahtar
         assert r['injection_area'] > 0
         assert r['weber_number'] > 0
@@ -99,11 +110,21 @@ class TestUtilsContract:
         assert user['pressure_drop_bar'] == pytest.approx(9.0)
 
     def test_user_density_wins_over_nist(self):
-        """Kullanıcının verdiği yoğunluk NIST/CoolProp tarafından EZİLMEZ."""
+        """Kullanıcının verdiği yoğunluk NIST/CoolProp tarafından EZİLMEZ.
+
+        v2.6.2 güncellemesi (fizik denetimi F042): eski test ideal (vena
+        contracta) Bernoulli hızını v = √(2ΔP/ρ) bekliyordu; raporlanan alan
+        GEOMETRİK alan (A = ṁ/(Cd√(2ρΔP))) olduğu için o hız 'injection_area'
+        ile tutarsızdı (ṁ = ρ·A·v sağlanmıyordu). Doğru rapor hızı
+        süreklilikten v = ṁ/(ρA) = Cd·√(2ΔP/ρ)'dir (Sutton & Biblarz Böl. 8;
+        kardeş modül engines/injector_design.py::_solve_circuit ile aynı
+        tanım). ρ bağımlılığı (1/√ρ) aynen korunur — testin asıl amacı olan
+        'kullanıcı yoğunluğu kazanır' iddiası hâlâ bu satırla sınanıyor."""
         r = _injector('showerhead', oxidizer_density=900.0).calculate()
         assert r['density_source'] == DENSITY_SOURCE_USER
-        # Hız ρ'ya bağlı: v = sqrt(2ΔP/ρ)
-        expected_v = np.sqrt(2 * r['pressure_drop_bar'] * 1e5 / 900.0)
+        # Süreklilik hızı: v = ṁ/(ρA) = Cd·√(2ΔP/ρ)
+        expected_v = r['discharge_coefficient'] * np.sqrt(
+            2 * r['pressure_drop_bar'] * 1e5 / 900.0)
         assert r['exit_velocity'] == pytest.approx(expected_v, rel=1e-9)
 
     def test_oxidizer_type_is_configurable(self):

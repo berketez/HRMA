@@ -46,6 +46,10 @@ GERÇEK kopma basıncı (her iki modda da raporlanır):
     Van Nostrand Reinhold (membran limit yükü kestirimi) — 'approximate'.
   * İkisinin MİNİMUMU 'actual_burst' olarak raporlanır (konservatif).
   * burst_margin = actual_burst / required_burst
+  * Cidar kalınlığı verilmediğinde (otomatik boyutlandırma) kalınlık, AYNI
+    min(Faupel, ince cidar) fonksiyonunun sayısal kökünden alınır ve hedef
+    açıkça MARGINAL_BURST_MARGIN × required_burst'tür — boyutlandırma ile
+    kabul kriteri arasındaki tutarsızlık böyle kapatılır (F021, 2026-07-25).
         required_burst:  aiaa_s080 → 2.0 × MEOP  (S-080 burst faktörü)
                          asme_viii → 3.5 × MEOP  (Div 1'in σ_u üzerindeki
                          tasarım marjının kopmaya yansıtılması — yorumsal,
@@ -94,6 +98,32 @@ MARGINAL_BURST_MARGIN = 1.2
 
 ROOM_TEMPERATURE_K = 293.15
 
+# --- Kriyojenik zarf (v2.6.2 fizik denetimi, bulgu F148) ------------------
+# materials_db derating eğrileri YALNIZCA yüksek sıcaklık için tanımlıdır
+# (en düşük nokta tipik 20 C). LOX (90 K), LN2 (77 K), LH2 (20 K) gibi
+# kriyojenik tank sıcaklıklarında eğri dışına çıkılır; kod oda sıcaklığı
+# değerine sabitlenir. DAYANIM açısından bu konservatiftir (metaller kriyoda
+# güçlenir), ancak SÜNEKLİK açısından değildir: HMK (bcc) ferritik/martenzitik
+# çelikler sünek-gevrek geçiş sıcaklığının (DBTT) altında gevrek kırılır.
+# Bu yüzden zarf dışı çalışma sessiz kalmaz, uyarı üretilir.
+# Kaynak: ASME BPVC VIII-1 UCS-66 (karbon/düşük alaşımlı çelikler için
+# MDMT/darbe testi gereği) ve UHA-51 (östenitik — YMK — paslanmazların
+# düşük sıcaklık darbe testi muafiyetleri); MMPDS / MIL-HDBK-5 düşük
+# sıcaklık bölümleri.
+CRYOGENIC_WARNING_TEMPERATURE_K = 200.0
+
+# Sünek-gevrek geçişi (DBTT) oda sıcaklığı civarında veya üstünde olan,
+# yani kriyojenik servis için darbe testi/malzeme yeterlilik doğrulaması
+# ZORUNLU olan malzeme aileleri (HMK kafes: ferritik/martenzitik çelikler,
+# Mo ve W refrakterleri). Östenitik paslanmazlar, alüminyum, bakır ve
+# nikel esaslı alaşımlar (YMK kafes) bu listede DEĞİLDİR — onlar kriyoda
+# sünekliğini korur (ASME BPVC VIII-1 UHA-51 muafiyetleri).
+DBTT_SENSITIVE_MATERIALS = (
+    'steel', 'steel_4130', 'steel_4340',   # karbon / düşük alaşımlı çelik
+    'ss_17_4ph',                           # martenzitik çökelme sertleşmeli
+    'molybdenum_tzm', 'tungsten',          # HMK refrakterler
+)
+
 
 class PressureVesselAnalyzer:
     """ASME VIII / AIAA S-080 basınçlı kap boyutlandırma + Faupel kopma analizi.
@@ -121,16 +151,29 @@ class PressureVesselAnalyzer:
         desen: materials_db kaydındaki derating_curve ({T_C: koruma oranı},
         MMPDS / MIL-HDBK-5 Fig. 2.3.1.1.1) üzerinde lineer interpolasyon;
         eğri dışında uç değerde sabitlenir; eğri yoksa konservatif 0.5.
+
+        v2.6.2 fizik denetimi, bulgu F148: eğriler yalnız YÜKSEK sıcaklık
+        için tanımlı olduğundan (en düşük nokta tipik 20 C) kriyojenik
+        çalışmada zarf dışına çıkılır. Zarf ihlali artık sessiz değil:
+        'below_curve_envelope' / 'curve_min_temp_C' / 'is_cryogenic'
+        alanlarıyla raporlanır ve analyze() bunlardan uyarı üretir.
         """
         temp_C = temperature_K - 273.15
         curve = mat.get('derating_curve')
+        curve_min_C: Optional[float] = None
+        below_envelope = False
         if not curve:
             retention = 0.5  # eğri yok → konservatif orta-seviye kayıp
         else:
             temps = sorted(curve.keys())
             factors = [curve[t] for t in temps]
+            curve_min_C = float(temps[0])
             if temp_C <= temps[0]:
                 retention = factors[0]
+                # Eğrinin en düşük noktasının ALTI: oda sıcaklığı özellikleri
+                # kullanılıyor demektir (dayanımda konservatif, süneklikte
+                # DEĞİL) — bunu çağırana bildir.
+                below_envelope = temp_C < temps[0]
             elif temp_C >= temps[-1]:
                 retention = factors[-1]
             else:
@@ -140,6 +183,10 @@ class PressureVesselAnalyzer:
             'temperature_K': temperature_K,
             'temperature_C': temp_C,
             'strength_retention_factor': retention,
+            'curve_min_temp_C': curve_min_C,
+            'below_curve_envelope': below_envelope,
+            'is_cryogenic': bool(temperature_K
+                                 < CRYOGENIC_WARNING_TEMPERATURE_K),
             'derated_yield_strength_Pa': mat['yield_strength'] * retention,
             'derated_ultimate_strength_Pa': mat['ultimate_strength'] * retention,
             'room_temp_yield_strength_Pa': mat['yield_strength'],
@@ -203,6 +250,76 @@ class PressureVesselAnalyzer:
         """
         D_mean = inner_diameter_m + wall_thickness_m
         return 2.0 * ultimate_Pa * wall_thickness_m / D_mean
+
+    @classmethod
+    def actual_burst_pressure(cls, yield_Pa: float, ultimate_Pa: float,
+                              inner_radius_m: float,
+                              wall_thickness_m: float) -> float:
+        """Kabul kriterinde kullanılan GERÇEK kopma basıncı [Pa].
+
+        actual_burst = min(Faupel kalın-cidar, ince-cidar plastik limit)
+        — konservatif olan alınır. Hem durum kararı hem de otomatik
+        boyutlandırma AYNI bu fonksiyondan beslenir (F021 düzeltmesi).
+        """
+        burst_faupel = cls.burst_pressure_faupel(
+            yield_Pa, ultimate_Pa, inner_radius_m, wall_thickness_m)
+        burst_thin = cls.burst_pressure_thin_wall(
+            ultimate_Pa, 2.0 * inner_radius_m, wall_thickness_m)
+        return min(burst_faupel, burst_thin)
+
+    @classmethod
+    def thickness_for_burst_target(cls, yield_Pa: float, ultimate_Pa: float,
+                                   inner_radius_m: float,
+                                   target_burst_Pa: float,
+                                   tol: float = 1e-9) -> float:
+        """target_burst_Pa'yı SAĞLAYAN en küçük cidar kalınlığı [m].
+
+        FİZİK DENETİMİ F021 (2026-07-25): eski sürüm boyutlandırmayı yalnız
+        ince-cidar ORTALAMA-ÇAP formunu (2·σu·t/(D+t)) tam eşitlikle çözerek
+        yapıyordu; hedef marj örtük olarak 1.000 idi. Kabul kriteri ise
+        (a) min(Faupel, ince cidar) kullanıyor — Faupel bu rejimde ~%0.3 daha
+        düşük — ve (b) MARGINAL_BURST_MARGIN = 1.2 istiyor. Sonuç: modül kendi
+        ürettiği minimum kalınlığı kendi kriterinde bırakıyordu (ASME modunda
+        20-60 bar'da doğrudan FAIL, geri kalan her yerde MARGINAL).
+
+        Düzeltme: boyutlandırma, kabul kriterinin kullandığı AYNI
+        ``actual_burst_pressure`` fonksiyonundan SAYISAL KÖKE gider. Fonksiyon
+        t'de kesin monoton artan olduğundan (Faupel ∝ ln(1+t/R), ince cidar
+        ∝ t/(D+t)) ikiye bölme (bisection) garantili yakınsar.
+
+        Ulaşılamayan hedefte (ince cidar limiti t→∞ için 2·σ_u'ya doyar)
+        float('inf') döner; çağıran bunu uyarıya çevirir.
+        """
+        if target_burst_Pa <= 0:
+            return 0.0
+        # İnce-cidar membran limiti t → ∞ için 2·σ_u'ya doyar: hedef bunun
+        # üstündeyse hiçbir kalınlık yetmez.
+        if target_burst_Pa >= 2.0 * ultimate_Pa:
+            return float('inf')
+
+        def f(t: float) -> float:
+            return cls.actual_burst_pressure(
+                yield_Pa, ultimate_Pa, inner_radius_m, t) - target_burst_Pa
+
+        lo = 1e-9 * inner_radius_m
+        hi = inner_radius_m
+        # Üst sınırı hedefi aşana kadar genişlet (t/R ≤ 2^40 pratik tavan).
+        for _ in range(40):
+            if f(hi) >= 0.0:
+                break
+            hi *= 2.0
+        else:
+            return float('inf')
+
+        for _ in range(200):
+            mid = 0.5 * (lo + hi)
+            if f(mid) >= 0.0:
+                hi = mid
+            else:
+                lo = mid
+            if hi - lo <= tol * max(hi, inner_radius_m):
+                break
+        return hi
 
     # ------------------------------------------------------------------
     # Girdi doğrulama
@@ -326,6 +443,37 @@ class PressureVesselAnalyzer:
                 f"room-temperature values at {temperature_K - 273.15:.0f} C "
                 "(MMPDS-style retention curve).")
 
+        # v2.6.2 fizik denetimi, bulgu F148 — kriyojenik zarf ihlali.
+        # Derating eğrisinin altında kalındığında oda sıcaklığı özellikleri
+        # kullanılır; bu dayanımda konservatif, gevrek kırılmada DEĞİLDİR.
+        if derating['below_curve_envelope']:
+            warnings.append(
+                f"Design temperature {temperature_K - 273.15:.0f} C is below "
+                "the lowest point of the material derating curve "
+                f"({derating['curve_min_temp_C']:.0f} C) — room-temperature "
+                "strength is assumed. Real metals gain strength when cold, so "
+                "this is conservative for strength but says NOTHING about "
+                "low-temperature toughness.")
+        if derating['is_cryogenic']:
+            base = (f"Cryogenic service ({temperature_K:.0f} K): material "
+                    "suitability must be verified against the ductile-to-"
+                    "brittle transition temperature (DBTT); this module does "
+                    "not model low-temperature fracture toughness.")
+            if material in DBTT_SENSITIVE_MATERIALS:
+                warnings.append(
+                    base + " WARNING: this material family (ferritic / "
+                    "martensitic steel or bcc refractory) is DBTT-sensitive "
+                    "and is NOT exempt from low-temperature impact testing "
+                    "(ASME BPVC VIII-1 UCS-66) — brittle fracture risk. "
+                    "Consider an austenitic stainless, aluminium or nickel "
+                    "alloy for cryogenic tanks.")
+            else:
+                warnings.append(
+                    base + " Austenitic stainless, aluminium, copper and "
+                    "nickel alloys stay ductile when cold (ASME BPVC VIII-1 "
+                    "UHA-51 exemptions), but the specific grade and weld "
+                    "procedure still require qualification.")
+
         # --- Mod bazlı izin verilen gerilme ve gerekli kalınlık ---
         # ASME izin verilen gerilmeler (tasarım ve test/oda sıcaklığı):
         S_design = self._asme_allowable(sy, su)
@@ -351,35 +499,68 @@ class PressureVesselAnalyzer:
             S_head = S_design
             E_head = E
         else:  # aiaa_s080
-            # İnce cidar hoop (iç yarıçap, konservatif):
-            #   proof (akma):  1.5·P·r/σ_y ; burst (kopma): 2.0·P·r/σ_u
-            t_req = max(AIAA_PROOF_FACTOR * P * R / sy,
-                        AIAA_BURST_FACTOR * P * R / su)
+            # v2.6.2 fizik denetimi, bulgu F149 — ORTALAMA yarıçap membran
+            # formu. Eskiden σ = P·r_iç/t kullanılıyor ve docstring bunu
+            # "konservatif" diye niteliyordu; bu TERSTİR: σ = P·r/t'de r
+            # büyüdükçe σ büyür, dolayısıyla r_iç üç seçeneğin (iç/orta/dış)
+            # EN AZ konservatif olanıdır. Ortalama yarıçap r_ort = r + t/2
+            # ile kapalı çözüm:
+            #   proof: 1.5·P·(R + t/2)/t <= σ_y  ->  t = 1.5·P·R/(σ_y − 0.75·P)
+            #   burst: 2.0·P·(R + t/2)/t <= σ_u  ->  t = 2.0·P·R/(σ_u − 1.0·P)
+            # Bu, ASME UG-27(c)(1)'deki 0.6·P teriminin S-080 karşılığıdır.
+            # Kaynak: Shigley's Mechanical Engineering Design, ince cidarlı
+            # basınçlı kap (ortalama yarıçap membran formu);
+            # ASME BPVC VIII-1 UG-27(c)(1).
+            denom_y = sy - 0.5 * AIAA_PROOF_FACTOR * P
+            denom_u = su - 0.5 * AIAA_BURST_FACTOR * P
+            if denom_y <= 0 or denom_u <= 0:
+                raise ValueError(
+                    "Design pressure too high for this material: the "
+                    "mean-radius membrane equation has no positive solution "
+                    "(proof or burst pressure reaches the derated strength). "
+                    "Choose a stronger material or lower MEOP.")
+            t_req = max(AIAA_PROOF_FACTOR * P * R / denom_y,
+                        AIAA_BURST_FACTOR * P * R / denom_u)
             # Başlıklar: UG-32 formu + S-080 eşdeğer izin verilen gerilme
             S_head = min(sy / AIAA_PROOF_FACTOR, su / AIAA_BURST_FACTOR)
             E_head = E
 
         # --- Kullanılacak kalınlık ---
         if wall_thickness_mm is None:
-            # 2026-07-15 düzeltmesi: kod-formu t_req iç-yarıçap hoop tabanlı,
-            # gerçek kopma kontrolü ise ortalama-çap ince-cidar (2·σu·t/(D+t))
-            # kullanır — yalnız t_req ile boyutlanınca burst_margin ≈ 0.98
-            # çıkıp otomatik boyutlandırma sistematik FAIL basıyordu. Gerekli
-            # kopmayı da SAĞLAYAN kalınlık birlikte gözetilir:
-            #   2·σu·t/(2R + t) ≥ P_burst_req  →  t ≥ 2R·P_b/(2σu − P_b)
+            # F021 (2026-07-25): boyutlandırma hedefi ile KABUL KRİTERİ artık
+            # aynı fonksiyondan besleniyor. Eski sürüm yalnız ince-cidar
+            # ortalama-çap formunu tam eşitlikle çözüyordu (örtük hedef marj
+            # 1.000); kriter ise min(Faupel, ince) ve >= 1.2 istiyordu, bu
+            # yüzden otomatik boyutlandırma hiçbir basınçta PASS üretemiyordu.
+            # Şimdi hedef açıkça MARGINAL_BURST_MARGIN × gerekli burst ve
+            # kalınlık actual_burst_pressure()'ın sayısal kökünden geliyor.
             if mode == 'aiaa_s080':
                 p_burst_req = AIAA_BURST_FACTOR * P
             else:
                 p_burst_req = ASME_UTS_MARGIN * P
-            t_burst_req = (2.0 * R * p_burst_req / (2.0 * su - p_burst_req)
-                           if 2.0 * su > p_burst_req else float('inf'))
-            t = max(t_req, t_burst_req)
+            target_burst = MARGINAL_BURST_MARGIN * p_burst_req
+            t_burst_req = self.thickness_for_burst_target(sy, su, R,
+                                                          target_burst)
+            if not math.isfinite(t_burst_req):
+                # İnce-cidar membran limiti 2·σ_u'ya doyuyor: hedef kopma
+                # basıncı hiçbir kalınlıkla sağlanamaz.
+                warnings.append(
+                    "Auto-sizing cannot reach the required burst pressure "
+                    f"({target_burst / 1e5:.1f} bar = "
+                    f"{MARGINAL_BURST_MARGIN:.1f} x {p_burst_req / 1e5:.1f} "
+                    "bar) with this material at any wall thickness — the "
+                    "thin-wall plastic limit saturates at 2*UTS. Choose a "
+                    "stronger material or lower MEOP.")
+                t = t_req
+            else:
+                t = max(t_req, t_burst_req)
+                warnings.append(
+                    "Wall thickness not supplied — sized to satisfy both the "
+                    f"code minimum ({t_req * 1e3:.3f} mm) and a burst margin "
+                    f"of {MARGINAL_BURST_MARGIN:.1f} against the required "
+                    f"burst pressure ({t_burst_req * 1e3:.3f} mm); "
+                    f"using {t * 1e3:.3f} mm.")
             auto_sized = True
-            warnings.append(
-                "Wall thickness not supplied — sized to satisfy both the "
-                f"code minimum ({t_req * 1e3:.3f} mm) and the burst "
-                f"requirement ({t_burst_req * 1e3:.3f} mm); "
-                f"using {t * 1e3:.3f} mm.")
         else:
             t = wall_thickness_mm / 1e3
             auto_sized = False
@@ -399,8 +580,11 @@ class PressureVesselAnalyzer:
             mawp = S_design * E * t / (R + 0.6 * t)        # UG-27 geri formu
         else:
             # S-080: hem proof-akma hem burst-kopma kriterini sağlayan MEOP.
-            mawp = min(sy * t / (AIAA_PROOF_FACTOR * R),
-                       su * t / (AIAA_BURST_FACTOR * R))
+            # F149: t_req ile TAM TERSİNİR olması için burada da ortalama
+            # yarıçap (R + t/2) kullanılır.
+            r_mean = R + t / 2.0
+            mawp = min(sy * t / (AIAA_PROOF_FACTOR * r_mean),
+                       su * t / (AIAA_BURST_FACTOR * r_mean))
 
         # --- Test / proof / gerekli burst basınçları ---
         proof_pressure = AIAA_PROOF_FACTOR * P             # S-080 proof
@@ -413,6 +597,8 @@ class PressureVesselAnalyzer:
             required_burst = ASME_UTS_MARGIN * P
 
         # --- GERÇEK kopma basıncı: Faupel + ince cidar plastik limit ---
+        # (min'i = actual_burst_pressure(); otomatik boyutlandırma da AYNI
+        #  fonksiyonun kökünü alır — F021 tutarlılık düzeltmesi.)
         burst_faupel = self.burst_pressure_faupel(sy, su, R, t)
         burst_thin = self.burst_pressure_thin_wall(su, D, t)
         actual_burst = min(burst_faupel, burst_thin)

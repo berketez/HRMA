@@ -112,6 +112,20 @@ cp -R "$B/mac/libs" "$RES/libs"
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea "$RES/libs/"
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea-*.dist-info "$RES/libs/" 2>/dev/null || true
 
+# cantera (+ ruamel.yaml bağımlılığı): denge termokimyası, ~17 MB.
+# v2.6.2'de eklendi. Bundle'da YOKTU ve eksikliği SESSİZDİ: CombustionAnalyzer
+# import hatasında `_fallback_equilibrium_composition`'a düşüyor, o da ürün
+# bileşimini itici çiftinden BAĞIMSIZ sabit bir sözlükten veriyordu (LOX/HTPB
+# gibi azotsuz bir çiftte bile %54 N2, ortalama molekül ağırlığı her çiftte
+# 29,6 g/mol). Ölçülen c* hatası %4,4-13,4 ve kullanıcıya hiçbir uyarı yok.
+# Hibrit yanma analizi paneli bu sınıftan beslendiği için hata kullanıcıya
+# ulaşıyordu (hrma/app.py:723).
+# Windows tarafında requirements_bundle.txt üzerinden geliyor; macOS'ta
+# mac/libs önceden hazırlanmış bir dizin olduğu için buraya elle kopyalanır.
+for _pkg in cantera ruamel; do
+    cp -R /opt/anaconda3/lib/python3.12/site-packages/"$_pkg"* "$RES/libs/" 2>/dev/null || true
+done
+
 # pywebview (yerel WKWebView penceresi) + pyobjc ailesi — marker sorunu
 # yüzünden --no-deps + açık liste (bkz. build_win_payload.sh notu).
 # mac/libs eski bir kopyadan geliyorsa bile bu adım güncel tutar.
@@ -133,6 +147,11 @@ python3 -m pip install --target "$RES/libs" --no-deps --upgrade \
 [ -d "$RES/libs/reportlab" ] || { echo "HATA: reportlab eksik!"; exit 1; }
 # openpyxl: /api/export-xlsx — saha hatası 2026-07-20 (bundle'da yoktu)
 [ -d "$RES/libs/openpyxl" ] || { echo "HATA: openpyxl eksik!"; exit 1; }
+# cantera: yokluğu SESSİZ ve sonuç YANLIŞ (sabit ürün bileşimi, c* %4-13 hata).
+# Derleme burada durmalı; kullanıcı uydurma termokimyayla paket almamalı.
+[ -d "$RES/libs/cantera" ] || { echo "HATA: cantera eksik! (yanma analizi sahte bileşime düşer)"; exit 1; }
+# rocketcea: sıvı motor gerçek çalışma noktası termokimyası
+[ -d "$RES/libs/rocketcea" ] || { echo "HATA: rocketcea eksik!"; exit 1; }
 
 echo "[4/7] Uygulama kaynakları..."
 mkdir -p "$RES/app"

@@ -62,7 +62,8 @@ _ALLOWED_TOP_KEYS = frozenset([
     'format', 'format_version', 'name', 'description', 'motor_type',
     'inputs', 'results_summary', 'app_version', 'created_at', 'updated_at',
 ])
-_ALLOWED_INPUT_KEYS = frozenset(['fields', 'dynamic', 'ui_state', 'dock_overrides'])
+_ALLOWED_INPUT_KEYS = frozenset(
+    ['fields', 'dynamic', 'ui_state', 'dock_overrides', 'airframe'])
 
 
 # --- Hata sınıfları ---------------------------------------------------------
@@ -216,6 +217,29 @@ def _validate_fields(fields: Any) -> None:
                 f'payload.inputs.fields.{key}: non-finite number is not allowed')
 
 
+def _validate_airframe(airframe: Any) -> None:
+    """inputs.airframe: uçan-araç gövde/kanat parametreleri — düz skaler sözlük.
+
+    _validate_fields ile AYNI kural (uydurma-veri-yasağı): değerler yalnız
+    str/num/bool; iç içe nesne/liste ve None reddedilir. Bu alan launch_site
+    airframe panelinin (gövde çapı/boyu, burun, kanatlar, cd0, fırlatma
+    açıları, rüzgar, latitude vb.) .hrma içine gidiş-dönüşünü sağlar.
+    """
+    if not isinstance(airframe, dict):
+        raise ProjectValidationError('payload.inputs.airframe must be an object')
+    for key, value in airframe.items():
+        if not isinstance(key, str) or not key:
+            raise ProjectValidationError(
+                'payload.inputs.airframe keys must be non-empty strings')
+        if value is None or not isinstance(value, _SCALAR_TYPES):
+            raise ProjectValidationError(
+                f'payload.inputs.airframe.{key}: value must be a string, '
+                'number or boolean (nested objects are not allowed)')
+        if not _is_finite_number(value):
+            raise ProjectValidationError(
+                f'payload.inputs.airframe.{key}: non-finite number is not allowed')
+
+
 def _validate_results_summary(summary: Any) -> None:
     """results_summary: düz sözlük, skaler değerler (özet amaçlı)."""
     if not isinstance(summary, dict):
@@ -238,7 +262,7 @@ def validate_payload(payload: Any) -> None:
     Zorunlu: format=="hrma-project", format_version==1,
     motor_type in {hybrid, solid, liquid}, inputs.fields (düz sözlük).
     Opsiyonel: name, description, inputs.dynamic, inputs.ui_state,
-    inputs.dock_overrides, results_summary.
+    inputs.dock_overrides, inputs.airframe (uçan-araç panosu), results_summary.
     """
     if not isinstance(payload, dict):
         raise ProjectValidationError('payload must be a JSON object')
@@ -285,6 +309,9 @@ def validate_payload(payload: Any) -> None:
             if not isinstance(inputs[key], dict):
                 raise ProjectValidationError(f'payload.inputs.{key} must be an object')
             _validate_json_tree(inputs[key], f'payload.inputs.{key}')
+
+    if 'airframe' in inputs:
+        _validate_airframe(inputs['airframe'])
 
     if 'results_summary' in payload:
         _validate_results_summary(payload['results_summary'])

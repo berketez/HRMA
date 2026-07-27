@@ -10,8 +10,13 @@ from scipy.interpolate import griddata
 import json
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-import warnings
-warnings.filterwarnings('ignore')
+import warnings  # noqa: F401  (modül içi uyarı üretimi için)
+
+# v2.6.2: buradaki ``warnings.filterwarnings('ignore')`` KALDIRILDI.
+# Argümansız çağrı SÜREÇ GENELİNDE catch-all filtre kurar — kapsam bu modül
+# değil, tüm Python süreci. Bu modülü içe aktarmak, uygulamanın her yerinde
+# numpy'nin sıfıra bölme / geçersiz değer uyarılarını öldürüyordu ve
+# NaN üreten hatalar sessizce ilerleyip çıktıda 0.0 olarak görünüyordu.
 
 @dataclass
 class CFDGrid:

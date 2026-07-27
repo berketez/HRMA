@@ -11,7 +11,10 @@ Bu dosya üç şeyi kilitler:
      (ortalama itki ve süre toleransı SOLID_DESIGN_POINT['tolerance']).
   2. Boyutlandırılan BATES/end-burner eğrisi makul düzdür (tepe/ortalama).
   3. Hedef fiziksel olarak ulaşılamıyorsa motor SESSİZCE yanlış sayı
-     üretmez — açık İngilizce uyarı ve design_point.achieved=False döner.
+     üretmez — açık uyarı kaydı ve design_point.achieved=False döner.
+     (v2.6.2 D-track: uyarılar artık sabit metin değil {code, params,
+     severity} kaydıdır; dil frontend'e taşındı. Testler metin yerine KOD
+     sınar — çeviri değişse bile bekçi ayakta kalır.)
 
 Ayrıca hedef verilmediğinde davranışın birebir eskisi gibi kaldığı
 (geometri girdisi tek belirleyici) doğrulanır — korelasyon doğrulama yolu
@@ -38,6 +41,19 @@ BATES_FEASIBLE = [
     (30000.0, 3.0),
 ]
 
+# BATES zarfının DIŞINDA kalan referans hedef (tek tanım noktası — üç ayrı
+# dürüstlük testi bu çifti kullanır).
+#
+# 2026-07-25 (F024 düzeltmesi sonrası yeniden çapalandı): eskiden 2000 N / 5 s
+# idi. O çift, kurucunun MPa tabanlı a = 0.005 varsayılanıyla (r ≈ 19.7 mm/s
+# @ 50 bar) zarf dışındaydı. F024 varsayılanı merkezi katalog değerine
+# (a = 0.0022334, r ≈ 8.8 mm/s @ 50 bar) çekince aynı hedef ULAŞILABİLİR
+# hâle geldi — web 98 mm'den 44 mm'ye indi, yığın küçüldü, yanan yüzey
+# 2000 N'e sığdı. Test artık DÜZELTİLMİŞ yanma hızıyla zarf dışında kalan
+# çifti kullanır: 2000 N / 10 s → web 88 mm (eski senaryonun web'ine denk).
+# Sınanan davranış (uydurma yerine dürüst rapor) aynen korunur.
+BATES_INFEASIBLE = (2000.0, 10.0)
+
 # Sigara yanması her hedefi tutturur (yanan yüzey sabit, profil nötr).
 END_BURNER_TARGETS = [
     (1000.0, 2.0),
@@ -54,6 +70,19 @@ def _engine(**overrides):
         if key in overrides:
             base[key] = overrides.pop(key)
     return SolidRocketEngine(overrides=overrides, **base)
+
+
+def _codes(warnings):
+    """Uyarı kayıtlarının kod kümesi ({code, params, severity} sözleşmesi)."""
+    return {w['code'] for w in (warnings or [])}
+
+
+def _params(warnings, code):
+    """Verilen kodun params sözlüğü (yoksa KeyError ile testi düşürür)."""
+    for w in (warnings or []):
+        if w['code'] == code:
+            return w['params']
+    raise KeyError(f'{code} uyarısı üretilmedi: {[w["code"] for w in warnings]}')
 
 
 def _curve_stats(engine):
@@ -197,21 +226,23 @@ def test_sized_motor_mass_matches_impulse():
 # ---------------------------------------------------------------------------
 
 def test_infeasible_bates_target_reports_instead_of_pretending():
-    """Prompt'taki asıl senaryo: 2000 N / 5 s / APCP / 50 bar / BATES.
+    """Zarf dışı senaryo: 2000 N / 10 s / APCP / 50 bar / BATES.
 
-    Bu hedef BATES zarfının DIŞINDADIR (50 bar'da APCP ~20 mm/s geriler →
-    5 s için ~98 mm web; o webteki en küçük yığının uç yüzeyleri bile
+    Bu hedef BATES zarfının DIŞINDADIR (50 bar'da APCP 8.8 mm/s geriler →
+    10 s için 88 mm web; o webteki en küçük yığının uç yüzeyleri bile
     2000 N'in izin verdiğinden fazla alan üretir). Motor bunu uydurmak
     yerine söylemek zorundadır.
+
+    Hedef çifti BATES_INFEASIBLE'da; oradaki not yeniden çapalama gerekçesini
+    (F024 yanma hızı varsayılanı düzeltmesi) açıklar.
     """
-    eng = _engine(thrust=2000.0, burn_time=5.0)
+    eng = _engine(thrust=BATES_INFEASIBLE[0], burn_time=BATES_INFEASIBLE[1])
     dp = eng.design_point
     assert dp is not None
     assert dp['achieved'] is False
     assert dp['sizing_applied'] is False
     assert eng.design_warnings, 'ulaşılamayan hedef sessizce yutuldu'
-    note = ' '.join(eng.design_warnings)
-    assert 'BATES envelope' in note
+    assert 'warn.solid.bates_envelope' in _codes(eng.design_warnings)
     # Geometri girdisine dönülmüş olmalı (uydurma boyut yok)
     assert eng.D_chamber == pytest.approx(0.100)
     assert eng.L_grain == pytest.approx(0.500)
@@ -219,13 +250,19 @@ def test_infeasible_bates_target_reports_instead_of_pretending():
 
 
 def test_infeasible_note_is_actionable_and_self_consistent():
-    """Uyarıda verilen minimum itki gerçekten ulaşılabilir olmalı."""
-    eng = _engine(thrust=2000.0, burn_time=5.0)
-    note = eng.design_warnings[0]
-    # "raise average thrust to at least <F> N" değerini sök ve dene
-    marker = 'at least '
-    f_min = float(note.split(marker, 1)[1].split(' N', 1)[0])
-    better = _engine(thrust=f_min * 1.05, burn_time=5.0)
+    """Uyarıda verilen minimum itki gerçekten ulaşılabilir olmalı.
+
+    Değer artık metinden sökülmez; ``options`` içindeki
+    ``warn.solid.opt_raise_thrust`` kaydının parametresinden okunur.
+    """
+    eng = _engine(thrust=BATES_INFEASIBLE[0], burn_time=BATES_INFEASIBLE[1])
+    params = _params(eng.design_warnings, 'warn.solid.bates_envelope')
+    options = {o['code']: o['params'] for o in params['options']}
+    assert 'warn.solid.opt_lower_chamber_pressure' in options
+    assert 'warn.solid.opt_select_end_burner' in options
+    f_min = float(options['warn.solid.opt_raise_thrust']
+                  ['min_average_thrust_N'])
+    better = _engine(thrust=f_min * 1.05, burn_time=BATES_INFEASIBLE[1])
     assert better.design_point['sizing_applied'] is True, better.design_point
 
 
@@ -233,26 +270,53 @@ def test_star_grain_target_is_not_silently_ignored():
     """Boyutlandırma desteklenmeyen grain tipinde açık uyarı verilir."""
     eng = _engine(grain_type='star', thrust=5000.0, burn_time=3.0)
     assert eng.design_warnings
-    assert 'BATES and end-burner' in eng.design_warnings[0]
+    assert eng.design_warnings[0]['code'] == 'warn.solid.sizing_unsupported_grain'
+    assert eng.design_warnings[0]['params']['grain_type'] == 'star'
     # geometri değişmemiş olmalı
     assert eng.D_chamber == pytest.approx(0.100)
 
 
-def test_warnings_are_english_and_emoji_free():
-    """Kullanıcıya görünen tüm metinler İngilizce ve emojisiz olmalı."""
+def test_warnings_are_language_free_records():
+    """Kullanıcıya görünen uyarılar backend'de DİLSİZ olmalı (D-track).
+
+    Eskiden bu test metinlerin İngilizce + emojisiz olduğunu sınıyordu;
+    artık backend hiç metin üretmiyor, yalnız {code, params, severity}
+    kaydı üretiyor. Bekçi: şema geçerliliği + kod ad alanı + params
+    içinde serbest metin (dil) taşınmaması.
+    """
     engines = [
-        _engine(thrust=2000.0, burn_time=5.0),           # zarf dışı
+        _engine(thrust=BATES_INFEASIBLE[0],
+                burn_time=BATES_INFEASIBLE[1]),           # zarf dışı
         _engine(),                                        # ham geometri
         _engine(grain_type='star', thrust=5000.0, burn_time=3.0),
     ]
-    texts = []
+    records = []
     for eng in engines:
         res = eng.calculate_performance()
-        texts.extend(res.get('design_warnings') or [])
-    assert texts, 'hiç uyarı üretilmedi'
-    for text in texts:
-        assert text.isascii(), text
-        assert not any(ch in text for ch in 'çğıöşüÇĞİÖŞÜ'), text
+        records.extend(res.get('design_warnings') or [])
+    assert records, 'hiç uyarı üretilmedi'
+    _assert_valid_warning_records(records)
+
+
+def _assert_valid_warning_records(records):
+    """{code, params, severity} sözleşmesini özyinelemeli doğrular."""
+    for rec in records:
+        assert isinstance(rec, dict), rec
+        assert set(rec) == {'code', 'params', 'severity'}, rec
+        assert isinstance(rec['code'], str) and rec['code'].startswith(
+            'warn.solid.'), rec
+        assert rec['code'].isascii(), rec
+        assert rec['severity'] in ('critical', 'warning', 'info'), rec
+        assert isinstance(rec['params'], dict), rec
+        for key, value in rec['params'].items():
+            if key == 'options':
+                _assert_valid_warning_records(value)
+                continue
+            # Sayı, bool, None serbest; string yalnız KİMLİK alanlarında
+            # (grain_type, material) — cümle taşımamalı.
+            if isinstance(value, str):
+                assert ' ' not in value.strip(), (
+                    f'{rec["code"]}.{key} serbest metin taşıyor: {value!r}')
 
 
 # ---------------------------------------------------------------------------
@@ -267,17 +331,17 @@ def test_default_geometry_flags_choked_port_and_erosive_flux():
     erozif rejiminin sonucudur — kullanıcı bunu görmelidir.
     """
     res = _engine().calculate_performance()
-    notes = ' '.join(res.get('design_warnings') or [])
-    assert 'Port-to-throat area ratio' in notes
-    assert 'erosive-burning' in notes
+    codes = _codes(res.get('design_warnings'))
+    assert 'warn.solid.port_to_throat_low' in codes
+    assert 'warn.solid.initial_mass_flux_high' in codes
 
 
 def test_healthy_sized_motor_has_no_port_warning():
     """İyi boyutlandırılmış motorda port uyarısı çıkmamalı (uyarı gürültü değil)."""
     res = _engine(grain_type='end_burner', thrust=5000.0,
                   burn_time=4.0).calculate_performance()
-    notes = ' '.join(res.get('design_warnings') or [])
-    assert 'Port-to-throat area ratio' not in notes
+    assert 'warn.solid.port_to_throat_low' not in _codes(
+        res.get('design_warnings'))
 
 
 # ---------------------------------------------------------------------------
@@ -285,21 +349,51 @@ def test_healthy_sized_motor_has_no_port_warning():
 # ---------------------------------------------------------------------------
 
 def test_no_target_means_no_sizing():
-    """Hedef verilmeyen çağrıda geometri ve eğri dokunulmadan kalır."""
+    """Hedef verilmeyen çağrıda geometri ve eğri dokunulmadan kalır.
+
+    Sayısal çapa 2026-07-25'te YENİDEN ÖLÇÜLDÜ (F024 düzeltmesi). Eski
+    değerler (tepe 12060.6 N, süre 2.024960 s) kurucunun MPa tabanlı
+    a = 0.005 varsayılanının çıktısıydı; o katsayı bar ile değerlendirildiği
+    için yanma hızı 10^0.35 = 2.2387 kat şişiyordu. Varsayılan merkezi
+    kataloğa (a = 0.0022334, APCP) çekilince aynı koşu 5008.16 N tepe /
+    4.487814 s verdi.
+
+    Teyit (aşağıdaki ikinci blok): aynı motor ``burn_rate_a=0.005`` ile
+    kurulduğunda tepe itki ve boğaz alanı SON BASAMAĞINA KADAR eski değere
+    döner (12060.600863912117 N; A_t = 0.0015761860795333138 m²). Yanma
+    süresi 2.024959740 -> 2.024973188 s, yani 1.3e-5 s (%0.00066) kayar;
+    bu F179'un artığıdır (koşu boyunca ``current_temp += 0.001*dt`` diye
+    kaynaksız bir sahte ısınma vardı, kaldırıldı). 2.02 s'lik koşuda 0.002 K
+    demek; σp = 0.0042 /K ile 8e-6 göreli yanma hızı — ölçülen kaymanın
+    büyüklüğüyle uyumlu. Sonuç: eğri yolunda F024 dışında regresyon yok.
+    """
     eng = _engine()
     assert eng.design_point is None
     assert eng.D_chamber == pytest.approx(0.100)
     assert eng.L_grain == pytest.approx(0.500)
     assert eng.D_core == pytest.approx(0.030)
     stats = _curve_stats(eng)
-    # 2026-07-19 ölçümü (bug raporundaki değerler) — sabit referans
-    assert stats['peak'] == pytest.approx(12060.6, rel=1e-3)
+    # 2026-07-25 ölçümü (F024 sonrası katalog yanma hızı) — sabit referans
+    assert stats['peak'] == pytest.approx(5008.16, rel=1e-3)
     # v2.5.2 (Codex bulgusu): yanma suresi ve impuls son integrasyon adimini
     # atliyordu — ornekler t ilerlemeden once saklaniyor, son web artisindan
     # sonraki araligi trapz disarida birakiyordu. Terminal tukenis ornegi
-    # eklendikten sonra sure yarim adim uzadi (2.02 -> 2.024960). Eski deger
-    # bugin kendisini donduruyordu.
-    assert stats['burn_time'] == pytest.approx(2.024960, abs=1e-5)
+    # eklendikten sonra sure yarim adim uzadi. Bu kapanis davranisi hâlâ
+    # yerinde; asagidaki deger onun F024 sonrasi karsiligidir.
+    assert stats['burn_time'] == pytest.approx(4.487814, abs=1e-5)
+
+    # F024'un tek suclu oldugunun bekcisi: eski (hatali) katsayiyla eski
+    # sayilar geri gelmeli (docstring'deki olcume bak).
+    legacy = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
+                               chamber_pressure=50, burn_rate_a=0.005)
+    legacy_curve = legacy.calculate_thrust_curve()
+    legacy_peak = float(np.asarray(legacy_curve['thrust']).max())
+    assert legacy_peak == pytest.approx(12060.600863912117, rel=1e-12)
+    assert float(legacy_curve['throat_area']) == pytest.approx(
+        0.0015761860795333138, rel=1e-12)
+    # F179 artigi: sure 1.3e-5 s kayar, bu yuzden tolerans 1e-4 s
+    assert float(legacy_curve['time'][-1]) == pytest.approx(
+        2.024960, abs=1e-4)
 
 
 def test_thrust_coefficient_matches_curve():
@@ -314,23 +408,34 @@ def test_thrust_coefficient_matches_curve():
 
 
 def test_endpoint_reports_design_point():
-    """/calculate_solid çıktısında tasarım noktası raporu yer almalı."""
-    from hrma.app import app
+    """/calculate_solid çıktısında tasarım noktası raporu yer almalı.
 
+    ``burn_rate_a`` 2026-07-25'te AÇIKÇA gönderilir. Eskiden gönderilmiyordu
+    ve test app.py'nin ``data.get('burn_rate_a', 0.005)`` yedeğine yaslanmış
+    oluyordu — yani F024'te düzeltilen MPa tabanlı katsayının kendisine.
+    Bekçi, uç noktanın varsayılanına değil motorun davranışına bakmalı;
+    o varsayılan düzeltilince test sessizce kırılmasın diye katsayı istekte
+    veriliyor.
+    """
+    from hrma.app import app
+    from hrma.engines.solid_rocket_engine import (
+        DEFAULT_BURN_RATE_A, DEFAULT_BURN_RATE_N,
+    )
+
+    base = {'chamber_pressure': 50, 'propellant_type': 'apcp',
+            'burn_rate_a': DEFAULT_BURN_RATE_A,
+            'burn_rate_n': DEFAULT_BURN_RATE_N}
     client = app.test_client()
-    resp = client.post('/calculate_solid', json={
-        'thrust': 2000, 'burn_time': 5, 'chamber_pressure': 50,
-        'propellant_type': 'apcp', 'grain_type': 'bates',
-    })
+    resp = client.post('/calculate_solid', json=dict(
+        base, thrust=BATES_INFEASIBLE[0], burn_time=BATES_INFEASIBLE[1],
+        grain_type='bates'))
     assert resp.status_code == 200
     data = resp.get_json()
     assert data['design_point']['achieved'] is False
     assert data['design_warnings']
 
-    resp2 = client.post('/calculate_solid', json={
-        'thrust': 2000, 'burn_time': 5, 'chamber_pressure': 50,
-        'propellant_type': 'apcp', 'grain_type': 'end_burner',
-    })
+    resp2 = client.post('/calculate_solid', json=dict(
+        base, thrust=2000, burn_time=5, grain_type='end_burner'))
     data2 = resp2.get_json()
     assert data2['design_point']['achieved'] is True
     assert data2['average_thrust'] == pytest.approx(2000.0, rel=TOL)

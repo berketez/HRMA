@@ -222,6 +222,12 @@ async function calculate() {
         }
         
         currentResults = results;
+        // A1 — uçuş köprüsü: sonucu /launch-site'ın okuyacağı tek şemaya
+        // çevirtip localStorage'a yaz. Hesap akışını ASLA bozmaz (modül tüm
+        // hataları yutar); araç yoksa uçuş sayfası örnek araca düşer.
+        if (window.FlightHandoff) {
+            window.FlightHandoff.publish(results, { motor_type: 'hybrid' });
+        }
         displayCalculationResults(results);
         
         // Enable export buttons
@@ -979,10 +985,43 @@ function displayWarnings(warnings, validation) {
         return;
     }
 
+    // D-track sözleşmesi (v2.6.2): backend uyarıları düz metin yerine
+    // {code, params, severity} sözlüğü olarak döndürür. Sözlük doğrudan
+    // şablona gömülürse ekrana "[object Object]" basılır — bu regresyon
+    // v2.6.2'de yaşandı ve kritik uyarıları okunmaz hale getirdi.
+    //
+    // İç içe kayıtlar: bazı uyarıların parametresi kendisi bir uyarı kaydı ya
+    // da kayıt listesidir (ör. warn.solid.bates_envelope'un `options` alanı),
+    // bu yüzden çeviri özyinelemelidir. AnalysisDock aynı mantığı
+    // U.warnText olarak dışa açıyor; yüklüyse onu kullan, değilse yerel eş.
+    function warnToText(w, depth) {
+        if (window.AnalysisDock && window.AnalysisDock.ui
+            && window.AnalysisDock.ui.warnText) {
+            return window.AnalysisDock.ui.warnText(w);
+        }
+        depth = depth || 0;
+        if (w === null || w === undefined) return '';
+        if (typeof w === 'string') return w;
+        if (Array.isArray(w)) {
+            return w.map(x => warnToText(x, depth + 1)).filter(Boolean).join(' · ');
+        }
+        if (typeof w !== 'object') return String(w);
+        if (!w.code) return w.message || w.text || JSON.stringify(w);
+        if (depth > 4) return w.code;
+        const p = {};
+        Object.keys(w.params || {}).forEach(k => {
+            const v = w.params[k];
+            p[k] = (v && typeof v === 'object') ? warnToText(v, depth + 1) : v;
+        });
+        return (window.I18N && window.I18N.tf)
+            ? window.I18N.tf(w.code, p, w.fallback || w.code)
+            : (w.fallback || w.code);
+    }
+
     const item = (label, text, cls) =>
         `<div class="warning-item ${cls}">` +
         `<span class="warning-tag">${label}</span>` +
-        `<span class="warning-text">${text}</span></div>`;
+        `<span class="warning-text">${warnToText(text)}</span></div>`;
 
     let html = '';
     if (validation && validation.overall_status) {

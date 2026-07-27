@@ -77,11 +77,27 @@ class TestASMEHandCalcs:
         assert out['mawp_bar'] == pytest.approx(133.70, rel=1e-3)
 
     def test_mawp_roundtrip_consistency(self, pv):
-        """Gerekli kalınlıkla MAWP geri hesabı MEOP'u vermeli (UG-27 tersinirliği)."""
+        """Gerekli kalınlıkla MAWP geri hesabı MEOP'u vermeli (UG-27 tersinirliği).
+
+        F021 (2026-07-25) GÜNCELLEMESİ: test eskiden otomatik boyutlandırma
+        çıktısını kullanıyordu ve örtük olarak "kullanılan kalınlık = kod
+        minimumu" varsayıyordu. Otomatik boyutlandırma artık kabul kriterinin
+        istediği 1.2 kopma marjına göre daha KALIN cidar seçtiği için MAWP de
+        MEOP'un üstüne çıkar (bu doğrudur: MAWP as-built cidarın kapasitesidir).
+        UG-27 tersinirliği bu yüzden required_thickness_mm doğrudan verilerek
+        sınanır — sınanan özdeşlik aynıdır.
+        """
+        sized = pv.analyze(meop_bar=60.0, inner_diameter_mm=150.0,
+                           material='steel_4130', wall_thickness_mm=None,
+                           code_mode='asme_viii')
         out = pv.analyze(meop_bar=60.0, inner_diameter_mm=150.0,
-                         material='steel_4130', wall_thickness_mm=None,
+                         material='steel_4130',
+                         wall_thickness_mm=sized['required_thickness_mm'],
                          code_mode='asme_viii')
         assert out['mawp_bar'] == pytest.approx(60.0, rel=1e-6)
+        # Otomatik boyutlandırma kod minimumundan ince olamaz.
+        assert (sized['wall_thickness_used_mm']
+                >= sized['required_thickness_mm'] - 1e-12)
 
     def test_head_thicknesses_ug32(self, asme):
         out = asme()
@@ -249,15 +265,53 @@ class TestStatus:
 # ---------------------------------------------------------------------------
 class TestAutoSizingAndRobustness:
     def test_auto_thickness_when_not_given(self, pv):
+        """F021 (2026-07-25): otomatik boyutlandırma KENDİ kabul kriterini geçmeli.
+
+        Eski test "kullanılan kalınlık = kod minimumu" ve "FAIL değil" diyordu;
+        bu, modülün kendi ürettiği cidarı MARGINAL/FAIL bırakan tutarsızlığı
+        (ölçüldü: asme_viii 20 bar margin=0.9977 FAIL) kodluyordu. Boyutlandırma
+        artık kabul kriteriyle aynı fonksiyonun kökünden geldiği için sonuç
+        PASS ve marj tam olarak MARGINAL_BURST_MARGIN'dir.
+        """
         out = pv.analyze(meop_bar=60.0, inner_diameter_mm=150.0,
                          material='steel_4130', wall_thickness_mm=None)
         assert out['auto_sized'] is True
-        assert out['wall_thickness_used_mm'] == pytest.approx(
-            out['required_thickness_mm'], rel=1e-12)
-        # Kod minimumu burst gereksinimini de sağlamalı (FAIL olmamalı):
-        assert out['status'] != 'FAIL'
-        assert out['burst_margin'] >= 1.0
+        # Kod minimumundan ince olamaz:
+        assert (out['wall_thickness_used_mm']
+                >= out['required_thickness_mm'] - 1e-12)
+        # ...ve kabul kriterini kendi kendine sağlar:
+        assert out['status'] == 'PASS'
+        assert out['burst_margin'] == pytest.approx(MARGINAL_BURST_MARGIN,
+                                                    rel=1e-6)
         assert any('not supplied' in w for w in out['warnings'])
+
+    def test_auto_sizing_passes_across_pressures_and_modes(self, pv):
+        """F021 regresyon bekçisi: hiçbir basınç/mod bileşiminde FAIL/MARGINAL yok.
+
+        Denetimde ölçülen kırılma: asme_viii oto-boyut 20 bar -> 0.9977 FAIL,
+        60 bar -> 0.9997 FAIL, 120/200/400 bar -> MARGINAL; aiaa_s080 ise her
+        basınçta MARGINAL. Artık hepsi PASS olmalı.
+        """
+        for mode in ('asme_viii', 'aiaa_s080'):
+            for meop in (20.0, 60.0, 120.0, 200.0, 400.0):
+                out = pv.analyze(meop_bar=meop, inner_diameter_mm=150.0,
+                                 material='steel_4130',
+                                 wall_thickness_mm=None, code_mode=mode)
+                assert out['status'] == 'PASS', (mode, meop, out['status'])
+                assert out['burst_margin'] >= MARGINAL_BURST_MARGIN - 1e-9
+
+    def test_burst_sizing_root_matches_acceptance_function(self, pv):
+        """Boyutlandırma kökü ile kabul kriteri AYNI fonksiyondan gelmeli."""
+        sy = 460e6 * 1.0
+        su = 730e6 * 1.0
+        R = 0.075
+        target = 1.2 * 2.0 * 60e5           # 1.2 x (2.0 x 60 bar)
+        t = pv.thickness_for_burst_target(sy, su, R, target)
+        assert pv.actual_burst_pressure(sy, su, R, t) == pytest.approx(
+            target, rel=1e-6)
+        # Ulaşılamaz hedef (ince cidar limiti 2*UTS'ye doyar) -> sonsuz.
+        assert not math.isfinite(
+            pv.thickness_for_burst_target(sy, su, R, 3.0 * su))
 
     def test_thick_wall_transition_warning(self, aiaa):
         """t/r = 20/75 = 0.267 > 0.1 → ince cidar geçerlilik uyarısı."""

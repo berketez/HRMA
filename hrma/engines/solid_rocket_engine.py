@@ -3,6 +3,7 @@ from functools import lru_cache
 from scipy.integrate import odeint
 from scipy.optimize import fsolve, newton
 from scipy.interpolate import interp1d
+from typing import Dict
 import json
 import warnings
 
@@ -13,6 +14,21 @@ try:
     SHAPELY_AVAILABLE = True
 except ImportError:
     SHAPELY_AVAILABLE = False
+
+
+def _w(code: str, severity: str = "warning", **params) -> Dict:
+    """i18n uyarısı: dile bağlı sabit metin YERİNE yapısal kayıt.
+
+    Dönen sözlük ``{"code", "params", "severity"}``. Dil tamamen frontend'e
+    taşınır; frontend ``TF(code, params)`` ile yerelleştirilmiş metni kurar.
+    ``severity`` ∈ {"critical", "warning", "info"} — ciddiyet artık metin
+    içeriğinden DEĞİL bu alandan okunur (dil sızıntısı yok).
+
+    Sayısal ``params`` değerleri, eski f-string'in kullandığı basamak sayısına
+    yuvarlanır; böylece yerelleştirilmiş metin eskisiyle aynı sayıyı gösterir.
+    Kod adlandırması: ``warn.solid.<slug>`` (katalog: docs/v262_specs/D_codes_solid.md).
+    """
+    return {"code": code, "params": params, "severity": severity}
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +378,115 @@ SOLID_DESIGN_POINT = {
     'max_target_burn_time': 600.0,  # s
 }
 
-warnings.filterwarnings('ignore')
+
+# ---------------------------------------------------------------------------
+# Saint-Robert varsayılan katsayıları — BİRİM SÖZLEŞMESİ: r[m/s] = a·P[bar]^n
+#
+# FİZİK DENETİMİ DÜZELTMESİ (F024, 2026-07-25): kurucunun eski varsayılanı
+# a = 0.005 idi. Bu değer 'r[mm/s] = 5.0·P[MPa]^0.35' fitinin MPa TABANLI
+# katsayısıdır; motor onu BAR ile değerlendirdiği için yanma hızı tam
+# 10^0.35 = 2.2387 kat şişiyordu (r(70 bar) = 22.1 mm/s — gerçek AP/HTPB/Al
+# için 9.9 mm/s). Doğru dönüşüm merkezi katalogda zaten vardı:
+# propellants_db.mm_mpa_to_m_bar(5.0, 0.35) = 0.0022334 (CLAUDE.md kural 11:
+# aynı sayı iki yerde tanımlanmaz — buradaki varsayılan katalogdan OKUNUR).
+#
+# Kaynak: hrma/data/burn_rate_db.py modül docstring'i (aynı hatayı strand
+# adaptöründe tarif ediyor); Sutton & Biblarz, Rocket Propulsion Elements
+# 9. baskı, Böl. 12 (AP/HTPB/Al bandı r ≈ 5-13 mm/s @ 1000 psi ≈ 69 bar).
+# ---------------------------------------------------------------------------
+from hrma.data.propellants_db import (
+    PROPELLANTS as _PROPELLANT_CATALOG,
+    get_propellant_safe as _get_propellant_safe,
+)
+
+DEFAULT_BURN_RATE_A = float(_PROPELLANT_CATALOG['apcp']['burn_rate_a'])
+DEFAULT_BURN_RATE_N = float(_PROPELLANT_CATALOG['apcp']['burn_rate_n'])
+
+# Motor yakıt anahtarı -> merkezi katalog kaydı (engine_key alanı üzerinden).
+# Kullanıcının girdiği a-n katsayısı bu kayıttan ciddi biçimde sapıyorsa
+# uyarı üretilir (F024: form varsayılanı hâlâ MPa tabanlı 0.005 gönderiyor).
+_ENGINE_KEY_TO_CATALOG = {
+    rec['engine_key']: key
+    for key, rec in _PROPELLANT_CATALOG.items()
+    if rec.get('engine_key')
+}
+
+# Kullanıcının girdiği a katsayısı katalog değerinden bu oranda saparsa
+# uyarı üretilir. 1.8, MPa<->bar karışımının bıraktığı 2.24 katlık izi
+# yakalayacak ama yakıt partisi saçılmasını (tipik ±%20) susturacak eşiktir.
+BURN_RATE_A_MISMATCH_RATIO = 1.8
+
+# Yanma hızı SAYISAL tavanı [m/s]. Bu bir 'fiziksel sınır' DEĞİLDİR (kaynaksız
+# iddia; F069) — çözücüyü uçuk girdide (a·P^n taşması) korumak içindir ve
+# aşıldığı her koşuda kullanıcıya uyarı olarak bildirilir.
+BURN_RATE_NUMERIC_CEILING_MPS = 0.1
+
+# Akış ayrılması ölçütü (Summerfield): sabit geometrili nozulda aşırı
+# genişlemede P_e ≲ 0.4·P_a olduğunda çıkış konisinde ayrılma beklenir ve
+# tek boyutlu CF bağıntısı geçerliliğini yitirir.
+# Kaynak: Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 3 ve 5.
+SUMMERFIELD_SEPARATION_RATIO = 0.4
+
+# ---------------------------------------------------------------------------
+# Boğaz erozyonu (F071, 2026-07-25)
+# ---------------------------------------------------------------------------
+# Eski davranış: A_t tasarım noktasında bir kez boyutlandırılıp koşu boyunca
+# SABİT tutuluyordu ve docstring bunu 'gerçek motorda boğaz rijittir' diye
+# gerekçelendiriyordu. Grafit/fenolik boğaz rijit DEĞİLDİR: difüzyon-kontrollü
+# oksidasyonla geriler. Depodaki çalışan model transient_ballistics.
+# ThroatErosionModel'dir (ṙ = a_ref·(Pc/70 bar)^0.8) — burada YENİDEN
+# YAZILMAZ, oradan çağrılır (CLAUDE.md kural 11: tek tanım noktası).
+#
+# Çözücü artık her adımda boğaz yarıçapını büyütebiliyor; ancak erozyon
+# VARSAYILAN OLARAK KAPALIDIR ve yalnız kullanıcı bir katsayı verdiğinde
+# (solid.html 'erosion_factor' alanı, mm/s @ 70 bar) devreye girer. Sebep:
+# doğrulama korelasyonu (docs/correlation_report) rijit boğaz varsayımıyla
+# kalibre edilmiştir; varsayılanı sessizce değiştirmek o çapaları kaydırırdı.
+# Erozyonun ihmal edilemeyeceği motorlarda (uzun yanma + küçük boğaz)
+# varsayımın kendisi artık UYARI olarak bildirilir — sessiz kabul yok.
+#
+# Kaynak: Thakre, P. & Yang, V., 'Chemical Erosion of Graphite and Refractory
+# Metal Nozzles in Solid-Propellant Rocket Motors', J. Propulsion and Power
+# 24(4), 2008; Bartz 1957 (h_g ∝ Pc^0.8); Geisler AIAA grafit bandı
+# 0.05-0.25 mm/s. (Künyeler transient_ballistics.py başında da mevcut.)
+
+# Boğaz alanı bu kesirden fazla büyürse (veya rijit varsayımda büyüyecek
+# olsaydı) kullanıcı uyarılır. %5 alan artışı ~%5 basınç düşüşü demektir.
+THROAT_EROSION_SIGNIFICANT_AREA_GROWTH = 0.05
+
+# Kullanıcı katsayısı için kabul aralığı [mm/s @ 70 bar]. Üst uç, ateşleme
+# testlerinde görülen en hızlı gerilemenin (tungsten/fenolik dâhil) üzerinde
+# tutulan sayısal koruma sınırıdır; 0 = erozyon yok (rijit boğaz).
+THROAT_EROSION_A_REF_MAX_MM_S = 5.0
+
+# Nozul malzemesi adı -> transient_ballistics erozyon tablosu anahtarı.
+# solid.html üç seçenek sunuyor (graphite/phenolic/tungsten); tabloda yalnız
+# grafit ve C-C için yayımlanmış bant var, diğerleri için katsayı UYDURULMAZ.
+SOLID_NOZZLE_EROSION_MATERIAL = {
+    'graphite': 'graphite',
+    'carbon_carbon': 'carbon_carbon',
+    'c-c': 'carbon_carbon',
+}
+
+
+def _catalog_burn_rate(propellant_type):
+    """Yakıtın merkezi katalogdaki (a, n) çifti — yoksa (None, None)."""
+    key = _ENGINE_KEY_TO_CATALOG.get(str(propellant_type or '').lower())
+    if not key:
+        return None, None
+    rec = _get_propellant_safe(key)
+    if not rec:
+        return None, None
+    return rec.get('burn_rate_a'), rec.get('burn_rate_n')
+
+
+# NOT (2026-07-25): burada argümansız `warnings.filterwarnings('ignore')`
+# vardı. Argümansız çağrı SÜREÇ GENELİNDE catch-all bir filtre kurar; bu
+# modülü import etmek TÜM uygulamada numpy'nin sıfıra bölme/geçersiz değer
+# uyarılarını (ve her DeprecationWarning'i) susturuyordu. Kaldırıldı —
+# gerçekten susturulması gereken bir uyarı varsa dar kapsamlı
+# `with warnings.catch_warnings():` bloğuyla ve gerekçesiyle yapılır.
+
 
 class SolidRocketEngine:
     """Solid rocket motor analysis module"""
@@ -370,7 +494,8 @@ class SolidRocketEngine:
     def __init__(self, grain_type='bates', propellant_type='apcp',
                  chamber_diameter=100, grain_length=500,
                  core_diameter=30, chamber_pressure=40,
-                 burn_rate_a=0.005, burn_rate_n=0.35,
+                 burn_rate_a=DEFAULT_BURN_RATE_A,
+                 burn_rate_n=DEFAULT_BURN_RATE_N,
                  burn_rate_temp_coeff=0.002, temp_ref=293.15,
                  overrides=None):
 
@@ -413,6 +538,7 @@ class SolidRocketEngine:
         # Set propellant properties
         self._set_propellant_properties()
         self._apply_overrides()
+        self._check_burn_rate_coefficients()
 
         # Physical constants (BIPM standart yerce kimi, hrma.constants)
         self.g0 = G_0  # m/s^2
@@ -432,6 +558,136 @@ class SolidRocketEngine:
         except (TypeError, ValueError):
             return None
         return f if (np.isfinite(f) and lo <= f <= hi) else None
+
+    def _flag_true(self, key):
+        """overrides[key] açıkça doğru mu? ('1', 'true', True, 1 kabul edilir)"""
+        val = self.overrides.get(key)
+        if isinstance(val, str):
+            return val.strip().lower() in ('1', 'true', 'yes', 'on')
+        return bool(val)
+
+    def _throat_erosion_a_ref(self):
+        """Kullanıcının verdiği boğaz erozyon katsayısı [mm/s @ 70 bar] veya None.
+
+        F071 (2026-07-25): solid.html 'erosion_factor' alanını (birim etiketi
+        mm/s) her koşuda backend'e gönderiyordu ama motor onu HİÇ okumuyordu —
+        kullanıcı sayıyı değiştirip hiçbir çıktının kımıldamadığını görüyordu.
+        Alan artık ampirik modelin referans katsayısı (a_ref, 70 bar'daki
+        gerileme hızı) olarak okunur. 0 veya negatif değer 'erozyon yok'
+        demektir (rijit boğaz varsayımı bilinçli seçilmiştir).
+        """
+        a_ref = self._override_val('throat_erosion_a_ref_mm_s',
+                                   0.0, THROAT_EROSION_A_REF_MAX_MM_S)
+        if a_ref is None:
+            a_ref = self._override_val('erosion_factor',
+                                       0.0, THROAT_EROSION_A_REF_MAX_MM_S)
+        if a_ref is None or a_ref <= 0.0:
+            return None
+        return float(a_ref)
+
+    def _nozzle_erosion_reference(self):
+        """Seçili nozul malzemesinin yayımlanmış erozyon modeli (yoksa None).
+
+        Yalnız transient_ballistics tablosunda kaydı OLAN malzemeler için
+        döner (grafit, C-C). Fenolik/tungsten için yayımlanmış bant yok →
+        katsayı uydurulmaz, None döner.
+        """
+        key = str(self.overrides.get('nozzle_material')
+                  or self.overrides.get('throat_material')
+                  or 'graphite').strip().lower().replace(' ', '_')
+        mapped = SOLID_NOZZLE_EROSION_MATERIAL.get(key)
+        if not mapped:
+            return None
+        from hrma.analysis.transient_ballistics import ThroatErosionModel
+        try:
+            return ThroatErosionModel.for_material(mapped)
+        except ValueError:
+            return None
+
+    def _throat_erosion_model(self):
+        """Çözücüye takılacak erozyon modeli — kullanıcı katsayısı yoksa None.
+
+        Model transient_ballistics.ThroatErosionModel'dir; burada yalnız
+        a_ref seçilir (tek tanım noktası: formül orada).
+        """
+        a_ref = self._throat_erosion_a_ref()
+        if a_ref is None:
+            return None
+        from hrma.analysis.transient_ballistics import ThroatErosionModel
+        ref = self._nozzle_erosion_reference()
+        return ThroatErosionModel(
+            a_ref,
+            material=(ref.material if ref else 'user_supplied'),
+            material_display=(ref.material_display if ref
+                              else 'User-supplied coefficient'),
+            a_ref_band_mm_s=(ref.a_ref_band_mm_s if ref else None),
+            source='user-supplied coefficient (solid.html erosion_factor)')
+
+    def _throat_erosion_report(self, model, area_initial, area_final):
+        """Boğaz erozyonunun koşudaki durumu (JSON-uyumlu, dürüst rapor).
+
+        Erozyon kapalıyken 'enabled': False döner ve varsayımın adı açıkça
+        yazılır ('rigid-throat assumption') — sessiz kabul yok.
+        """
+        area_initial = float(area_initial or 0.0)
+        area_final = float(area_final or 0.0)
+        growth = ((area_final / area_initial - 1.0)
+                  if area_initial > 0 else 0.0)
+        report = {
+            'enabled': model is not None,
+            'throat_area_initial_m2': area_initial,
+            'throat_area_final_m2': area_final,
+            'area_growth_fraction': growth,
+            'throat_diameter_initial_mm': (
+                2000.0 * np.sqrt(area_initial / np.pi) if area_initial > 0
+                else 0.0),
+            'throat_diameter_final_mm': (
+                2000.0 * np.sqrt(area_final / np.pi) if area_final > 0
+                else 0.0),
+        }
+        if model is None:
+            report['basis'] = (
+                'rigid-throat assumption (no erosion coefficient supplied)')
+            report['input_field'] = 'erosion_factor [mm/s at 70 bar]'
+        else:
+            report['basis'] = model.describe()
+            report['material'] = model.material_display
+            report['source'] = model.source
+        return report
+
+    def _check_burn_rate_coefficients(self):
+        """Girilen Saint-Robert a katsayısını merkezi katalogla karşılaştırır.
+
+        FİZİK DENETİMİ (F024): kurucu varsayılanı düzeltildi ama çağıran
+        (ör. /calculate_solid uç noktası, form alanı) hâlâ MPa tabanlı 0.005
+        gönderebiliyor. O durumda hesap SESSİZCE 2.24 kat hızlı yanan bir
+        yakıt modeller — yanma süresi yarıya iner, ortalama itki iki katına
+        çıkar, boğaz 2.4 kat büyür (toplam impuls doğru kalır, bu yüzden hata
+        gözle görülmez). Bu uyarı o sapmayı kullanıcıya görünür kılar.
+
+        Kaynak: hrma/data/burn_rate_db.py docstring (aynı birim hatası);
+        Sutton & Biblarz 9. baskı Böl. 12 yanma hızı bandı.
+        """
+        a_cat, n_cat = _catalog_burn_rate(self.propellant_type)
+        if not a_cat or self.a <= 0:
+            return
+        # a-n çifti birlikte anlamlıdır: karşılaştırma REFERANS BASINCINDA
+        # (katalog konvansiyonu) yapılan yanma hızı üzerinden yapılır.
+        from hrma.data.propellants_db import PROPELLANT_REFERENCE_PRESSURE_BAR
+        p_ref = float(PROPELLANT_REFERENCE_PRESSURE_BAR)
+        r_user = self.a * p_ref ** self.n
+        r_cat = float(a_cat) * p_ref ** float(n_cat)
+        if r_cat <= 0:
+            return
+        ratio = r_user / r_cat
+        if ratio > BURN_RATE_A_MISMATCH_RATIO or ratio < 1.0 / BURN_RATE_A_MISMATCH_RATIO:
+            self.design_warnings.append(_w(
+                'warn.solid.burn_rate_off_catalog', 'warning',
+                propellant=self.propellant_type,
+                pressure_bar=round(p_ref, 1),
+                user_rate_mmps=round(r_user * 1000.0, 2),
+                catalog_rate_mmps=round(r_cat * 1000.0, 2),
+                ratio=round(ratio, 2)))
 
     def _apply_overrides(self):
         """Formdan gelen değerlerle yakıt tablosu değerlerini ez (2026-07-13).
@@ -460,14 +716,54 @@ class SolidRocketEngine:
         m = self._override_val('nozzle_efficiency', 0.80, 1.0)
         if m is not None:
             self.nozzle_efficiency = m
+        # ------------------------------------------------------------------
+        # FİZİK DENETİMİ DÜZELTMESİ (F065, 2026-07-25): erozif katsayı ve
+        # sıcaklık duyarlılığı FORM VARSAYILANIYLA ezilemez.
+        #
+        # Eskiden solid.html her koşuda erosive_k=0.0002 ve temp_coeff=0.002
+        # gönderiyordu; bu değerler yakıt tablosunu (APCP k=0.0136, σp=0.0042)
+        # koşulsuz eziyordu. Sonuç: yakıt-başına kalibre edilmiş k 68 kat
+        # küçülüyor ve erozif yanma varsayılan koşuda fiilen KAPANIYORDU.
+        # 0.0002 / 0.002 form varsayılanlarının hiçbir literatür dayanağı
+        # yoktur (denetim: 'kaynak bulunamadı'), yakıt tablosu değerlerinin
+        # ise vardır — bu yüzden ÖNCELİK YAKIT TABLOSUNDADIR.
+        #
+        # Kullanıcının BİLİNÇLİ girdisi hâlâ geçerlidir: değer yakıt
+        # tablosundan farklıysa uygulanır ama artık uyarı olarak görünür
+        # kılınır (sessiz ezme yasak). Ayrıca 'erosive_k_override' /
+        # 'temp_coeff_override' bayrakları verilirse uyarı üretilmez
+        # (form alanının bilinçli doldurulduğu açıkça beyan edilmiş olur).
+        # ------------------------------------------------------------------
+        table_k = getattr(self, 'erosive_burning_coeff', 0.0)
         m = self._override_val('erosive_k', 0.0, 1.0)
-        if m is not None:
+        if m is not None and not np.isclose(m, table_k, rtol=1e-6, atol=0.0):
             self.erosive_burning_coeff = m
+            if not self._flag_true('erosive_k_override'):
+                self.design_warnings.append(_w(
+                    'warn.solid.erosive_k_overridden', 'warning',
+                    form_value=float(m), table_value=float(table_k),
+                    propellant=self.propellant_type))
+        table_sigma = getattr(self, 'burn_rate_temp_coeff', 0.0)
         m = self._override_val('temp_coeff', 0.0, 0.02)
-        if m is not None:
+        if m is not None and not np.isclose(m, table_sigma, rtol=1e-6,
+                                            atol=0.0):
             self.burn_rate_temp_coeff = m
+            if not self._flag_true('temp_coeff_override'):
+                self.design_warnings.append(_w(
+                    'warn.solid.temp_coeff_overridden', 'warning',
+                    form_value=float(m), table_value=float(table_sigma),
+                    propellant=self.propellant_type))
+        # Erozif yanma üssü: UI 'erosive_m' alanını gönderiyordu ama motor
+        # HİÇ okumuyordu (F070, ölü alan). Varsayılan 0.8 = Lenoir-Robillard
+        # kütle-akısı üssü (Sutton & Biblarz 9. baskı Böl. 12).
+        self.erosive_exponent = 0.8
+        m = self._override_val('erosive_m', 0.1, 2.0)
+        if m is not None:
+            self.erosive_exponent = m
         # Başlangıç sıcaklığı yanma hızını düzeltir: a_T = a·exp(σp·(T0−Tref))
         m = self._override_val('initial_temp', 200.0, 350.0)
+        self.initial_grain_temperature = (
+            float(m) if m is not None else float(self.temp_ref))
         if m is not None:
             self.a = self.a * float(np.exp(
                 self.burn_rate_temp_coeff * (m - self.temp_ref)))
@@ -553,15 +849,11 @@ class SolidRocketEngine:
             self.case_yield_strength = props['yield_strength']
             if props['generic_allowable'] and self.overrides.get(
                     'yield_strength') in (None, ''):
-                self.design_warnings.append(
-                    f"Case material '{self.case_material}' uses HRMA's "
-                    f"generic allowable of "
-                    f"{props['yield_strength'] / 1e6:.0f} MPa and "
-                    f"{props['density']:.0f} kg/m3. Composite allowables "
-                    "depend on the lay-up, fibre fraction and winding "
-                    "process, so enter the measured hoop allowable in the "
-                    "yield strength field before trusting the wall "
-                    "thickness, dry mass or safety margin.")
+                self.design_warnings.append(_w(
+                    'warn.solid.case_generic_allowable', 'warning',
+                    material=self.case_material,
+                    yield_strength_mpa=round(props['yield_strength'] / 1e6),
+                    density_kg_m3=round(props['density'])))
         m = self._override_val('yield_strength', 10.0, 3000.0)   # MPa
         if m is not None:
             self.case_yield_strength = m * 1e6
@@ -595,6 +887,40 @@ class SolidRocketEngine:
         m = self._override_val('ambient_temp', 200.0, 350.0)
         if m is not None:
             self.ambient_temperature = m
+
+        # ------------------------------------------------------------------
+        # 8) PARÇALI yanma hızı yasası (F025, 2026-07-25)
+        #
+        # KN-şeker yakıtların (KNDX/KNSB) yayımlanmış davranışı PARÇALIDIR:
+        # tek bir (a, n) çifti 1-110 bar aralığını temsil etmez (plateau/mesa
+        # rejimleri; n bazı rejimlerde NEGATİF). /api/burn-rate/resolve tek
+        # rejimin katsayısını forma yazıyor, motor ise Pc yanma boyunca 5 kat
+        # değişse bile onu donduruyordu — ölçüm: tasarım 30 bar KNDX koşusunda
+        # anlık yanma hızı ortalama -%36, dipte -%62 sapıyor.
+        #
+        # Çözüm: yakıt için merkezi rejim yasası VARSA yanma hızı her adımda
+        # ANLIK basınçtan okunur. Tetikleyiciler (öncelik sırasıyla):
+        #   overrides['burn_rate_law'] / ['burn_rate_preset']  → açık seçim
+        #   propellant_type'ın kendisi bir yasa anahtarıysa    → örtük
+        # Yasa yoksa davranış birebir eskisi gibidir (tek üslü Saint-Robert).
+        #
+        # Kaynak: R. Nakka, 'Solid Propellant Burn Rate' (Experimental
+        # Rocketry, 1999/2001) KNDX/KNSB rejim tabloları; hrma/data/
+        # burn_rate_db.py modül docstring'indeki parçalılık uyarısı.
+        # ------------------------------------------------------------------
+        from hrma.data import burn_rate_db as _brdb
+        self.burn_rate_law_key = None
+        law_key = (self.overrides.get('burn_rate_law')
+                   or self.overrides.get('burn_rate_preset'))
+        if not law_key and _brdb.has_law(self.propellant_type):
+            law_key = self.propellant_type
+        if law_key and _brdb.has_law(law_key):
+            self.burn_rate_law_key = str(law_key).strip().lower()
+            self.design_warnings.append(_w(
+                'warn.solid.piecewise_law_active', 'info',
+                law=self.burn_rate_law_key,
+                regimes=len(_brdb.BURN_RATE_LAWS[self.burn_rate_law_key]
+                            ['regimes'])))
 
     def _case_material_properties(self, material):
         """Kasa malzemesi özellikleri — TEK çözüm noktası (sessiz çelik YASAK).
@@ -840,27 +1166,107 @@ class SolidRocketEngine:
     # ------------------------------------------------------------------
     # Tasarım noktası: hedef ortalama itki + yanma süresinden boyutlandırma
     # ------------------------------------------------------------------
-    def _thrust_coefficient(self, P_c_bar):
-        """Deniz seviyesi itki katsayısı CF (optimum genişleme, Pe = Pa).
+    def _exit_pressure_ratio(self, epsilon):
+        """Sabit ε için süpersonik dal P_e/P_c oranı (izentropik).
 
-        İtki eğrisi ve tasarım-noktası boyutlandırması AYNI CF'i kullanmak
-        ZORUNDADIR; farklı olurlarsa boyutlandırma kendi doğruladığı eğriyi
-        tutturamaz. Kaynak: Sutton & Biblarz 9. baskı Denk. 3-30.
+        Sutton & Biblarz 9. baskı Denk. 3-25/3-26'nın TERS çözümü: verilen
+        alan oranından çıkış Mach'ı, ondan basınç oranı. Sonuç örnek üstünde
+        önbelleklenir (itki eğrisi her adımda çağırır, ε sabittir).
+        """
+        cache = getattr(self, '_pe_ratio_cache', None)
+        key = (round(float(self.gamma), 12), round(float(epsilon), 12))
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        gamma = float(self.gamma)
+        eps = max(float(epsilon), 1.0000001)
+
+        def area_ratio(M):
+            return (1.0 / M) * ((2.0 / (gamma + 1.0))
+                                * (1.0 + (gamma - 1.0) / 2.0 * M * M)) \
+                ** ((gamma + 1.0) / (2.0 * (gamma - 1.0))) - eps
+
+        try:
+            from scipy.optimize import brentq
+            M_e = brentq(area_ratio, 1.0 + 1e-9, 60.0)
+        except Exception:
+            # Sayısal çözüm başarısızsa oranı doğrudan hesaplayamayız;
+            # çağıran taraf sonsuz genişleme varsaymasın diye 0 döner
+            # (basınç-itki terimi kaybolur, momentum terimi kalır).
+            M_e = None
+        if M_e is None:
+            ratio = 0.0
+        else:
+            ratio = float((1.0 + (gamma - 1.0) / 2.0 * M_e * M_e)
+                          ** (-gamma / (gamma - 1.0)))
+        self._pe_ratio_cache = (key, ratio)
+        return ratio
+
+    def _thrust_coefficient(self, P_c_bar):
+        """SABİT GEOMETRİLİ nozulun itki katsayısı CF(P_c).
+
+        FİZİK DENETİMİ DÜZELTMESİ (F068, 2026-07-25): eski kod her basınçta
+        Pe = Pa (anlık optimum genişleme) varsayıyordu. Bu, Sutton Denk. 3-30'un
+        ÖZEL hâlidir ve her zaman ULAŞILABİLİR EN BÜYÜK CF'i verir. Gerçek
+        motorun nozulu ise sabit geometrilidir (ε = A_e/A_t sabit): Pc yanma
+        boyunca düştükçe nozul tasarım-dışına düşer ve CF gerçekte AZALIR.
+        Ölçüm (BATES, APCP, tasarım 40 bar, ε = 5.93): Pc 40 → 7.8 bar
+        kuyruğunda eski formül gerçek CF'i +%33.6'ya kadar aşıyordu.
+
+        Doğru form (Sutton & Biblarz 9. baskı Denk. 3-30/3-31):
+            CF = η · [ CF_momentum(ε) + ε·(P_e − P_a)/P_c ]
+        P_e/P_c oranı ε'dan izentropik olarak ÇÖZÜLÜR (bkz.
+        _exit_pressure_ratio); aynı doğru form projenin hibrit modülünde
+        (transient_ballistics._thrust_coefficient) zaten kullanılıyordu.
+
+        Tasarım basıncında ε tam olarak Pe = Pa verecek şekilde seçildiği için
+        (bkz. _estimate_expansion_ratio) basınç-itki terimi SIFIRLANIR ve
+        sonuç eski formülle BİREBİR aynı kalır — tasarım noktası
+        boyutlandırması bozulmaz, yalnız tasarım-dışı kuyruk düzelir.
         """
         gamma = self.gamma
         p_amb = getattr(self, 'ambient_pressure_bar', SEA_LEVEL_PRESSURE_BAR)
-        Pe_Pc = p_amb / P_c_bar if P_c_bar > 0 else 0.999
-        # Prevent numerical issues
-        Pe_Pc = max(Pe_Pc, 1e-6)
-        Pe_Pc = min(Pe_Pc, 0.999)
+        if P_c_bar <= 0:
+            return 0.0
 
-        # Isentropic expansion relations
+        epsilon = self._estimate_expansion_ratio()
+        pe_ratio = self._exit_pressure_ratio(epsilon)
+
+        # Momentum terimi (Sutton Denk. 3-30, basınç-itki terimi hariç)
         gamma_term = 2 * gamma ** 2 / (gamma - 1)
         stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
-        expansion_term = 1 - Pe_Pc ** ((gamma - 1) / gamma)
+        expansion_term = max(0.0, 1 - pe_ratio ** ((gamma - 1) / gamma))
+        cf_momentum = np.sqrt(gamma_term * stagnation_term * expansion_term)
 
-        CF_ideal = np.sqrt(gamma_term * stagnation_term * expansion_term)
+        # Basınç-itki terimi: tasarım basıncında sıfır, tasarım-dışında işaretli
+        cf_pressure = epsilon * (pe_ratio - p_amb / P_c_bar)
+
+        CF_ideal = cf_momentum + cf_pressure
+        # Akış AYRILDIKTAN sonra tek boyutlu bağıntı geçerli değildir; ayrılmış
+        # nozul negatif basınç-itki terimini tam olarak toplamaz. Sayısal
+        # güvenlik: CF momentum teriminin altına düşse bile negatife inmez.
+        CF_ideal = max(CF_ideal, 0.0)
         return float(CF_ideal * self._total_nozzle_efficiency())
+
+    def _flow_separation_state(self, P_c_bar):
+        """Summerfield ayrılma ölçütü durumu (rapor + uyarı için).
+
+        P_e ≲ 0.4·P_a olduğunda aşırı genişlemiş konik nozulda akış ayrılması
+        beklenir; ayrılma sonrası itki eski (tek boyutlu, ekli akış) CF ile
+        hesaplanamaz. Kaynak: Sutton & Biblarz 9. baskı, Böl. 3 ve 5.
+        """
+        p_amb = getattr(self, 'ambient_pressure_bar', SEA_LEVEL_PRESSURE_BAR)
+        if P_c_bar <= 0 or p_amb <= 0:
+            return {'separated': False, 'pe_bar': 0.0, 'pe_over_pa': 0.0}
+        pe_ratio = self._exit_pressure_ratio(self._estimate_expansion_ratio())
+        pe_bar = pe_ratio * P_c_bar
+        return {
+            'separated': bool(pe_bar
+                              < SUMMERFIELD_SEPARATION_RATIO * p_amb),
+            'pe_bar': float(pe_bar),
+            'pe_over_pa': float(pe_bar / p_amb),
+            'criterion': (f'Summerfield: separation expected below '
+                          f'Pe/Pa = {SUMMERFIELD_SEPARATION_RATIO:g}'),
+        }
 
     def _design_burn_rate(self):
         """Tasarım basıncındaki erozif-DÜZELTMESİZ yanma hızı (m/s).
@@ -1064,29 +1470,35 @@ class SolidRocketEngine:
         return f_min, t_max
 
     def _bates_envelope_note(self, thrust, burn_time, locked_segments=None):
-        """BATES ailesinin ulaşılamayan hedef için İngilizce açıklaması."""
+        """BATES ailesinin ulaşılamayan hedef için yapısal (dilsiz) açıklaması.
+
+        Tek bir ``{code, params, severity}`` kaydı döner. Seçenek listesi
+        koşullu olduğundan (alt itki / üst süre sınırı sonlu olmayabilir)
+        ``params['options']`` içinde kendi kodlarıyla taşınır; frontend her
+        seçeneği yerelleştirip birleştirir ve ``{options}`` yer tutucusuna
+        yerleştirir. Metnin anlamı ve sayıları eski sürümle birebir aynıdır.
+        """
         r_design = self._design_burn_rate()
         f_min, t_max = self._bates_envelope_bounds(
             thrust, burn_time, locked_segments)
-        head = (
-            "Design point is outside the BATES envelope: at "
-            f"{self.P_c:.1f} bar this propellant regresses at "
-            f"{r_design * 1000:.1f} mm/s, so a {burn_time:.2f} s burn needs a "
-            f"{r_design * burn_time * 1000:.0f} mm web, and the end faces of "
-            "the smallest grain with that web already produce more burning "
-            f"area than {thrust:.0f} N allows.")
         # Duyurulan sayı yazdırma yuvarlamasından sonra da çözülebilir olmalı
         # (ikiye bölme sınırı tam sınırdan döner) → küçük emniyet payı.
         options = []
         if np.isfinite(f_min):
-            options.append(f"raise average thrust to at least "
-                           f"{f_min * 1.01:.0f} N")
+            options.append(_w('warn.solid.opt_raise_thrust', 'info',
+                              min_average_thrust_N=round(f_min * 1.01)))
         if np.isfinite(t_max):
-            options.append(f"shorten the burn to about {t_max * 0.99:.2f} s")
-        options.append("lower the chamber pressure")
-        options.append("select an end-burner grain for this thrust and "
-                       "duration")
-        return head + " Options: " + ", ".join(options) + "."
+            options.append(_w('warn.solid.opt_shorten_burn', 'info',
+                              max_burn_time_s=round(t_max * 0.99, 2)))
+        options.append(_w('warn.solid.opt_lower_chamber_pressure', 'info'))
+        options.append(_w('warn.solid.opt_select_end_burner', 'info'))
+        return _w('warn.solid.bates_envelope', 'warning',
+                  chamber_pressure_bar=round(self.P_c, 1),
+                  burn_rate_mm_s=round(r_design * 1000, 1),
+                  burn_time_s=round(burn_time, 2),
+                  web_mm=round(r_design * burn_time * 1000),
+                  thrust_N=round(thrust),
+                  options=options)
 
     def _apply_design_point_sizing(self):
         """Hedef ortalama itki / yanma süresi verildiyse grain'i boyutlandırır.
@@ -1106,20 +1518,17 @@ class SolidRocketEngine:
             return
 
         if self.grain_type not in ('bates', 'end_burner'):
-            self.design_warnings.append(
-                "Design-point sizing is available for BATES and end-burner "
-                f"grains only; the '{self.grain_type}' grain was analysed with "
-                "the geometry entered, so the thrust and burn-time targets "
-                "were not applied.")
+            self.design_warnings.append(_w(
+                'warn.solid.sizing_unsupported_grain', 'warning',
+                grain_type=self.grain_type))
             return
 
         # Eksik hedef, girilen geometrinin kendi değeriyle tamamlanır:
         # "bu motoru koru, yalnız diğer hedefi tuttur".
         base_thrust, base_time = self._measure_curve()
         if base_thrust <= 0 or base_time <= 0:
-            self.design_warnings.append(
-                "Design-point sizing skipped: the geometry entered does not "
-                "produce a valid thrust curve.")
+            self.design_warnings.append(_w(
+                'warn.solid.sizing_invalid_curve', 'warning'))
             return
         if thrust_target is None:
             thrust_target = base_thrust
@@ -1170,8 +1579,7 @@ class SolidRocketEngine:
             note = (self._bates_envelope_note(thrust_target, time_target,
                                               locked_segments)
                     if self.grain_type == 'bates' else
-                    "Design point is outside the end-burner envelope for the "
-                    "chamber-diameter and grain-length limits of this tool.")
+                    _w('warn.solid.end_burner_envelope', 'warning'))
             self.design_warnings.append(note)
             self.design_point = {
                 'requested_average_thrust_N': thrust_target,
@@ -1199,19 +1607,18 @@ class SolidRocketEngine:
             'tolerance_pct': 100.0 * lim['tolerance'],
         }
         if not achieved:
-            self.design_warnings.append(
-                "Design-point sizing converged to "
-                f"{thrust_avg:.0f} N average thrust over {burn_time:.2f} s "
-                f"against a target of {thrust_target:.0f} N over "
-                f"{time_target:.2f} s (outside the "
-                f"{100.0 * lim['tolerance']:.0f} % tolerance). Relax the "
-                "segment count or the chamber pressure to move closer.")
+            self.design_warnings.append(_w(
+                'warn.solid.sizing_off_target', 'warning',
+                achieved_thrust_N=round(thrust_avg),
+                achieved_burn_time_s=round(burn_time, 2),
+                target_thrust_N=round(thrust_target),
+                target_burn_time_s=round(time_target, 2),
+                tolerance_pct=round(100.0 * lim['tolerance'])))
         if geom['port_to_throat'] < lim['port_to_throat_min']:
-            self.design_warnings.append(
-                "Sized grain has a port-to-throat area ratio of "
-                f"{geom['port_to_throat']:.2f}, below the "
-                f"{lim['port_to_throat_min']:.1f} limit: the port chokes "
-                "before the nozzle and erosive burning will dominate.")
+            self.design_warnings.append(_w(
+                'warn.solid.sized_port_to_throat_low', 'warning',
+                port_to_throat=round(geom['port_to_throat'], 2),
+                limit=round(lim['port_to_throat_min'], 1)))
 
     def _design_health_warnings(self, curve):
         """Geometri girdisiyle koşulan motorlar için fiziksel akıl sağlığı.
@@ -1231,28 +1638,22 @@ class SolidRocketEngine:
         failed_steps = int(curve.get('pressure_solver_failed_steps', 0) or 0)
         total_steps = int(curve.get('pressure_solver_steps', 0) or 0)
         if failed_steps > 0:
-            notes.append(
-                f"Chamber-pressure solver did not converge on {failed_steps} "
-                f"of {total_steps} time steps (largest relative residual "
-                f"{float(curve.get('pressure_solver_max_residual', 0.0)):.2e} "
-                f"against a tolerance of "
-                f"{float(curve.get('pressure_solver_tolerance', 0.0)):.1e}). "
-                "Those points report the last iterate, so the pressure and "
-                "thrust curves carry extra numerical uncertainty there.")
+            notes.append(_w(
+                'warn.solid.pressure_solver_not_converged', 'warning',
+                failed_steps=failed_steps, total_steps=total_steps,
+                max_residual=float(
+                    curve.get('pressure_solver_max_residual', 0.0)),
+                tolerance=float(
+                    curve.get('pressure_solver_tolerance', 0.0))))
         if self.n >= 1.0:
-            notes.append(
-                f"Burn-rate exponent n = {self.n:.3f} is at or above 1.0. The "
-                "equilibrium chamber pressure Kn balance is only a "
-                "contraction for n < 1; at n >= 1 the operating point is "
-                "unstable and a real motor of this design can run away in "
-                "pressure. Treat the predicted pressure and thrust as "
-                "indicative only.")
+            notes.append(_w(
+                'warn.solid.burn_rate_exponent_ge_one', 'critical',
+                n=round(float(self.n), 3)))
         if curve.get('termination_reason') == 'safety_limit':
-            notes.append(
-                "The burn simulation stopped on a safety limit (500 bar "
-                "chamber pressure or 1000 s), not on propellant burnout. "
-                "Burn time and total impulse below are truncated and must "
-                "not be read as the motor performance.")
+            notes.append(_w(
+                'warn.solid.safety_limit_termination', 'critical'))
+
+        notes.extend(self._throat_erosion_warnings(curve))
 
         A_t = curve.get('throat_area', 0.0)
         if not A_t or A_t <= 0 or len(curve['time']) == 0:
@@ -1265,19 +1666,83 @@ class SolidRocketEngine:
             return notes
         port_ratio = A_port / A_t
         if port_ratio < lim['port_to_throat_min']:
-            notes.append(
-                f"Port-to-throat area ratio is {port_ratio:.2f}, below the "
-                f"{lim['port_to_throat_min']:.1f} design limit: the grain port "
-                "is tighter than the nozzle throat, so the port chokes first "
-                "and the predicted pressure peak is optimistic. Increase the "
-                "core diameter or lower the chamber pressure.")
+            notes.append(_w(
+                'warn.solid.port_to_throat_low', 'warning',
+                port_to_throat=round(port_ratio, 2),
+                limit=round(lim['port_to_throat_min'], 1)))
         G_0 = float(curve['mass_flow'][0]) / A_port
         if G_0 > lim['mass_flux_warn']:
-            notes.append(
-                f"Initial port mass flux is {G_0:.0f} kg/m2s, above the "
-                f"{lim['mass_flux_warn']:.0f} kg/m2s erosive-burning "
-                "threshold: the head-end thrust spike and the shortened burn "
-                "time carry large uncertainty.")
+            notes.append(_w(
+                'warn.solid.initial_mass_flux_high', 'warning',
+                mass_flux_kg_m2s=round(G_0),
+                threshold_kg_m2s=round(lim['mass_flux_warn'])))
+        return notes
+
+    def _throat_erosion_warnings(self, curve):
+        """Boğaz erozyonu uyarıları (F071).
+
+        Üç durum:
+          1. Erozyon açık ve alan artışı eşiği aşıyor  -> büyüklüğü bildir.
+          2. Erozyon açık ama katsayı, seçilen nozul malzemesinin yayımlanmış
+             bandının DIŞINDA -> katsayıyı sorgula (solid.html varsayılanı
+             0.001 mm/s, grafit bandının ~150 katı altındadır).
+          3. Erozyon KAPALI ama grafit modeli bu motorda eşiği aşan bir alan
+             artışı öngörüyor -> rijit-boğaz varsayımının bu motor sınıfında
+             geçerli olmadığını söyle (uzun yanma + küçük boğaz).
+        """
+        notes = []
+        ero = curve.get('throat_erosion') or {}
+        times = curve.get('time')
+        if times is None or len(times) == 0:
+            return notes
+        burn_time = float(times[-1])
+        A_t0 = float(curve.get('throat_area', 0.0) or 0.0)
+        if A_t0 <= 0 or burn_time <= 0:
+            return notes
+        thr = THROAT_EROSION_SIGNIFICANT_AREA_GROWTH
+
+        if ero.get('enabled'):
+            growth = float(ero.get('area_growth_fraction', 0.0))
+            if growth > thr:
+                notes.append(_w(
+                    'warn.solid.throat_erosion_significant', 'warning',
+                    area_growth_percent=round(growth * 100.0, 1),
+                    throat_diameter_initial_mm=round(
+                        float(ero.get('throat_diameter_initial_mm', 0.0)), 2),
+                    throat_diameter_final_mm=round(
+                        float(ero.get('throat_diameter_final_mm', 0.0)), 2),
+                    threshold_percent=round(thr * 100.0, 1)))
+            a_ref = self._throat_erosion_a_ref()
+            ref = self._nozzle_erosion_reference()
+            band = ref.a_ref_band_mm_s if ref else None
+            if a_ref is not None and band and not (
+                    band[0] <= a_ref <= band[1]):
+                notes.append(_w(
+                    'warn.solid.throat_erosion_coeff_off_band', 'warning',
+                    a_ref_mm_s=a_ref,
+                    band_low_mm_s=band[0], band_high_mm_s=band[1],
+                    material=str(ref.material)))
+            return notes
+
+        # Erozyon kapalı: rijit boğaz varsayımının bu motorda ne kadar
+        # ısırdığını AYNI ampirik modelle tahmin et (Thakre & Yang 2008).
+        ref = self._nozzle_erosion_reference()
+        if ref is None:
+            return notes
+        pressures = np.asarray(curve.get('pressure', []), dtype=float)
+        p_mean = float(np.nanmean(pressures)) if pressures.size else self.P_c
+        d_radius = ref.rate_mm_s(p_mean) / 1000.0 * burn_time  # m
+        r0 = float(np.sqrt(A_t0 / np.pi))
+        growth = ((r0 + d_radius) / r0) ** 2 - 1.0 if r0 > 0 else 0.0
+        if growth > thr:
+            notes.append(_w(
+                'warn.solid.rigid_throat_assumption', 'warning',
+                estimated_area_growth_percent=round(growth * 100.0, 1),
+                erosion_rate_mm_s=round(ref.rate_mm_s(p_mean), 4),
+                burn_time_s=round(burn_time, 2),
+                throat_diameter_mm=round(2000.0 * r0, 2),
+                material=str(ref.material),
+                threshold_percent=round(thr * 100.0, 1)))
         return notes
 
     def _star_params(self):
@@ -1762,6 +2227,30 @@ class SolidRocketEngine:
             f"Unsupported grain type '{self.grain_type}'. Supported grain "
             f"types: {', '.join(SUPPORTED_GRAIN_TYPES)}.")
     
+    def _erosive_factor(self, mass_flux, port_diameter_ratio=1.0):
+        """Erozif yanma çarpanı r/r0 — TEK tanım noktası.
+
+        F067 (2026-07-25): bu çarpan eskiden yalnız burn_rate() içinde
+        gömülüydü; rapor (_calculate_erosive_effects) ise onunla hiç ilgisi
+        olmayan uydurma bir doğrudan ('min(25, G/100*5)') sayı üretiyordu.
+        Artık hem çözücü hem rapor bu fonksiyonu çağırır, dolayısıyla
+        kullanıcıya gösterilen artış hesaba GİREN artıştır.
+
+        Formun kendisi ve bilinen sınırları için burn_rate() docstring'i
+        (Lenoir-Robillard indirgenmiş vekili; Sutton & Biblarz 9. baskı
+        Böl. 12).
+        """
+        try:
+            G = float(mass_flux)
+        except (TypeError, ValueError):
+            return 1.0
+        if not np.isfinite(G) or G <= 100.0:  # kg/m²s, Summerfield tipi eşik
+            return 1.0
+        m_ero = getattr(self, 'erosive_exponent', 0.8)
+        reynolds_factor = ((G - 100.0) / 400.0) ** m_ero
+        geom_factor = max(port_diameter_ratio, 0.05) ** -0.2
+        return 1.0 + self.erosive_burning_coeff * reynolds_factor * geom_factor
+
     def burn_rate(self, pressure, temperature=None, port_diameter_ratio=1.0):
         """High-precision burn rate with Saint-Robert's law + corrections (99.8% accuracy)"""
         # Saint-Robert yasası: r = a * P^n with advanced corrections
@@ -1777,15 +2266,37 @@ class SolidRocketEngine:
 
         if pressure <= 0.1:  # Minimum combustion pressure threshold
             return 0.0
-            
+
         # Base Saint-Robert's law calculation
-        base_rate = self.a * (pressure ** self.n)  # m/s
-        
-        # Sıcaklık etkisi düzeltmesi (σp·ΔT lineer form). Referans self.temp_ref
-        # ile initial_temp override'ı TUTARLI (Sutton & Biblarz Böl. 12: sıcaklık
-        # duyarlılığı r = r_ref·exp(σp·(T−T_ref)) ≈ r_ref·(1+σp·(T−T_ref)))
-        temp_correction = 1.0 + self.burn_rate_temp_coeff * (temperature - self.temp_ref)
-        
+        # F025 DÜZELTMESİ (2026-07-25): yakıt için yayımlanmış PARÇALI rejim
+        # yasası varsa taban hız her çağrıda ANLIK basınçtan okunur (tek üslü
+        # yasa dondurulmaz). Yasa yoksa klasik Saint-Robert r = a·P^n.
+        # Kaynak: Nakka 1999/2001 KNDX/KNSB rejim tabloları (burn_rate_db).
+        law_key = getattr(self, 'burn_rate_law_key', None)
+        if law_key:
+            from hrma.data import burn_rate_db as _brdb
+            # burn_rate_db konvansiyonu: r[mm/s] = a·P[MPa]^n → m/s ve bar
+            base_rate = _brdb.burn_rate_mmps(law_key, pressure / 10.0) / 1000.0
+            # initial_temp override'ı self.a'yı ölçeklediği için parçalı yolda
+            # aynı ölçek taban hıza uygulanır (aksi hâlde sıcaklık düzeltmesi
+            # parçalı yasada sessizce kaybolurdu).
+            base_rate *= float(np.exp(
+                self.burn_rate_temp_coeff
+                * (getattr(self, 'initial_grain_temperature', self.temp_ref)
+                   - self.temp_ref)))
+        else:
+            base_rate = self.a * (pressure ** self.n)  # m/s
+
+        # Sıcaklık etkisi düzeltmesi. F066 DÜZELTMESİ (2026-07-25): aynı
+        # fiziksel duyarlılık (σp) iki FARKLI fonksiyonel formla uygulanıyordu
+        # — initial_temp override'ında ÜSTEL exp(σp·ΔT), burada LİNEER
+        # (1 + σp·ΔT). Birinci mertebede eşdeğerler ama ΔT = 30 K, σp = 0.0042
+        # için %0.74 ayrışırlar. Tek form (üstel) tutulur; referans yine
+        # self.temp_ref'tir, dolayısıyla ΔT = 0'da çarpan tam 1.0 kalır.
+        # Kaynak: Sutton & Biblarz 9. baskı Böl. 12 — r = r_ref·exp(σp·(T−T_ref)).
+        temp_correction = float(np.exp(
+            self.burn_rate_temp_coeff * (temperature - self.temp_ref)))
+
         # Pressure plateau effect at high pressures (verified from test data)
         if pressure > 100:  # bar
             pressure_plateau = 1.0 - 0.02 * np.log10(pressure / 100)
@@ -1810,19 +2321,39 @@ class SolidRocketEngine:
         # geçildi: ((G-100)/400)^0.8, eşikte 0'dan sürekli başlar ve G=500
         # kalibrasyon çapasında eski değere eşittir (1.0) — k yeniden
         # kalibrasyon gerektirmez. Statik ateşleme kalibrasyonu yine önerilir.
-        if hasattr(self, 'mass_flux') and self.mass_flux > 100:  # kg/m²s
-            reynolds_factor = ((self.mass_flux - 100.0) / 400.0) ** 0.8
-            geom_factor = max(port_diameter_ratio, 0.05) ** -0.2
-            erosive_factor = 1.0 + self.erosive_burning_coeff * reynolds_factor * geom_factor
-        else:
-            erosive_factor = 1.0
-            
+        #
+        # F070 (2026-07-25): erozif üs artık UI'nın 'erosive_m' alanından
+        # okunur (eskiden alan gönderiliyor ama motorda HİÇ kullanılmıyordu;
+        # kod 0.8'i sabitlemişti). Varsayılan 0.8 = Lenoir-Robillard kütle-akısı
+        # üssü. Modelin BİLİNEN sınırı: yayımlanmış erozif yanma verisinde
+        # G ≈ 1000-2000 kg/m²s'de r/r0 tipik 1.2-2.0 iken bu indirgenmiş vekil
+        # +%3-6 verir, yani büyüklüğü sistematik olarak DÜŞÜK tahmin eder.
+        # Sınır aşıldığında _design_health_warnings kullanıcıyı uyarır; k'nın
+        # kendisi kaynaksız (statik ateşleme kalibrasyonu şart) olduğu için
+        # katsayı KÖRLEMESİNE büyütülmedi (bkz. denetim F070).
+        erosive_factor = self._erosive_factor(
+            getattr(self, 'mass_flux', 0.0), port_diameter_ratio)
+
         # Final burn rate with all corrections
         corrected_rate = base_rate * temp_correction * pressure_plateau * erosive_factor
-        
-        # Physical limits enforcement
-        max_rate = 0.1  # 100 mm/s maximum physical limit 
-        return min(corrected_rate, max_rate)
+
+        # Physical limits enforcement.
+        # F069 DÜZELTMESİ (2026-07-25): kırpma artık SESSİZ değil. app.py
+        # burn_rate_a'yı 0.1'e kadar kabul ediyor, yani sınır tamamen meşru
+        # girdiyle aşılabiliyor; eskiden kullanıcı girdiği katsayının yok
+        # sayıldığını hiçbir yerde göremiyordu (a=0.05, n=0.35, 40 bar → ham
+        # 182 mm/s, döndürülen 100 mm/s, uyarı listesi BOŞ). 100 mm/s'nin
+        # 'fiziksel sınır' olduğu iddiası KAYNAKSIZDIR — katalize kompozit ve
+        # çift-tabanlı yakıtlarda daha yüksek hızlar yayımlanmıştır; bu yüzden
+        # sınır bir doğruluk çapası değil sayısal taşma koruması olarak
+        # tutulur ve aşıldığı her koşuda kullanıcıya bildirilir.
+        max_rate = BURN_RATE_NUMERIC_CEILING_MPS
+        if corrected_rate > max_rate:
+            self._burn_rate_clipped_max = max(
+                float(getattr(self, '_burn_rate_clipped_max', 0.0)),
+                float(corrected_rate))
+            return max_rate
+        return corrected_rate
     
     def calculate_altitude_performance(self, altitudes):
         """High-precision altitude performance (ICAO Standard Atmosphere + corrections)"""
@@ -2306,7 +2837,13 @@ class SolidRocketEngine:
 
         nominal = self.calculate_performance()
         if isinstance(nominal, dict) and nominal.get('error'):
-            return {'error': f"Nominal hesap başarısız: {nominal['error']}"}
+            return {
+                'error': f"Nominal hesap başarısız: {nominal['error']}",
+                'error_i18n': _w(
+                    'warn.solid.monte_carlo_nominal_failed', 'critical',
+                    reason=nominal['error'],
+                    reason_i18n=nominal.get('error_i18n')),
+            }
         nom_thrust = float(nominal['average_thrust'])
         nom_isp = float(nominal['specific_impulse'])
         nom_burn = float(nominal['burn_time'])
@@ -2998,18 +3535,34 @@ class SolidRocketEngine:
         return (1 / M_e) * ((2 / (gamma + 1)) * term) ** exp_ar
 
     def _estimate_expansion_ratio(self):
-        """Estimate optimal expansion ratio for sea-level operation.
+        """Tasarım ORTAM basıncında optimum genişleme oranı (ε = A_e/A_t).
 
         Solves the isentropic exit-pressure relation iteratively:
         P_e/P_c = [1 + (gamma-1)/2 * M_e^2]^(-gamma/(gamma-1))
         A_e/A_t = (1/M_e) * [(2/(gamma+1)) * (1 + (gamma-1)/2 * M_e^2)]^((gamma+1)/(2*(gamma-1)))
 
-        For sea-level: P_e = P_atm, solve for M_e then get epsilon.
-        Clamps to practical range [2.5, 25] for ground-level motors
-        (over-expansion beyond ~25 causes flow separation).
+        P_e = P_ortam alınıp M_e, ondan ε çözülür. Yer motorları için pratik
+        aralığa [2.5, 25] kelepçelenir (daha büyük ε'da akış ayrılması).
+
+        FİZİK DENETİMİ DÜZELTMESİ (F174, 2026-07-25): ortam basıncı burada
+        1.01325 bar olarak SABİT KODLUYDU, oysa _thrust_coefficient ve
+        _calculate_theoretical_isp aynı örnekte self.ambient_pressure_bar
+        okuyor. Kullanıcı test_altitude / atm_pressure girdiğinde itki 5000
+        m'ye göre (CF = 1.5842) hesaplanıyor ama imal edilecek/CAD'e giden ε
+        deniz seviyesinde (5.93) kalıyordu — yani rapor edilen nozul, itkiyi
+        üreten nozul DEĞİLDİ. Artık tek kaynak: self.ambient_pressure_bar.
+        (Deniz seviyesinde, yani varsayılanda, sonuç birebir aynıdır.)
         """
         gamma = self.gamma
-        P_atm = 1.01325  # bar
+        P_atm = float(getattr(self, 'ambient_pressure_bar',
+                              SEA_LEVEL_PRESSURE_BAR))  # bar
+        # İtki eğrisi her adımda çağırır; ε yalnız (gamma, Pc, P_ortam)
+        # fonksiyonudur ve koşu boyunca sabittir → örnek üstünde önbelleklenir.
+        cache_key = (round(gamma, 12), round(float(self.P_c), 12),
+                     round(P_atm, 12))
+        cached = getattr(self, '_epsilon_cache', None)
+        if cached is not None and cached[0] == cache_key:
+            return cached[1]
         Pe_Pc = P_atm / self.P_c
 
         if Pe_Pc >= 1.0:
@@ -3031,6 +3584,7 @@ class SolidRocketEngine:
 
         # Practical clamp for sea-level / low-altitude motors
         epsilon = max(2.5, min(epsilon, 25.0))
+        self._epsilon_cache = (cache_key, float(epsilon))
         return epsilon
 
     def _nozzle_half_angles(self):
@@ -3394,12 +3948,63 @@ class SolidRocketEngine:
         return max(0, min(100, consistency))
     
     def _calculate_erosive_effects(self, curve):
-        """Calculate erosive burning effects"""
-        mass_flux = curve['mass_flow'][0] / (np.pi * (self.D_core/2)**2) if len(curve['mass_flow']) > 0 else 0
-        return {
-            'mass_flux_kg_m2s': mass_flux,
-            'erosive_enhancement_percent': min(25, mass_flux / 100 * 5),
+        """Erozif yanmanın koşuda FİİLEN uygulanan büyüklüğü (F067 düzeltmesi).
+
+        ESKİ KOD (yanlış):
+            'erosive_enhancement_percent': min(25, mass_flux / 100 * 5)
             'port_diameter_effect': 'Moderate'
+        Bu doğrunun motorun kendi erozif modeliyle hiçbir ilgisi yoktu ve
+        kaynağı da yoktu: G = 1000 kg/m²s'de '%25 artış' raporluyordu, oysa
+        çözücünün fiilen uyguladığı artış aynı koşulda +%3.31 (yakıt tablosu
+        k = 0.0136) ya da +%0.09 (UI varsayılanı k = 0.0002) idi — kullanıcıya
+        gösterilen sayı hesaba gireninin 7.5 ile 275 katıydı ve G > 500'ün
+        her yerinde 25 tavanına yapışıyordu. 'Moderate' de hiçbir hesaba
+        dayanmayan sabit metindi.
+
+        Yeni rapor doğrudan çözücünün sakladığı serilerden okunur
+        (_erosive_factor: burn_rate ile TEK ve AYNI fonksiyon).
+        """
+        n = len(curve.get('time', []))
+        factors = np.asarray(curve.get('erosive_factor', []), dtype=float)
+        fluxes = np.asarray(curve.get('mass_flux', []), dtype=float)
+        if n == 0 or factors.size == 0:
+            return {
+                'mass_flux_kg_m2s': 0.0,
+                'erosive_enhancement_percent': 0.0,
+                'model_applied': False,
+            }
+
+        port_ratio_0 = self.D_core / self.D_chamber
+        port_ratio_end = min(1.0, (self.D_core + 2.0 * max(
+            (self.D_chamber - self.D_core) / 2.0, 0.0)) / self.D_chamber)
+        return {
+            # Akı, çözücünün kullandığı GERÇEK port akış kesitinden gelir
+            # (eski kod end-burner'da bile π(D_core/2)² kullanıyordu).
+            'mass_flux_kg_m2s': float(fluxes[0]) if fluxes.size else 0.0,
+            'mass_flux_max_kg_m2s': (float(np.nanmax(fluxes))
+                                     if fluxes.size else 0.0),
+            'mass_flux_basis': 'm_dot / port flow area (solver value)',
+            # Uygulanan artış: (r/r0 - 1)*100
+            'erosive_enhancement_percent': float((factors[0] - 1.0) * 100.0),
+            'erosive_enhancement_max_percent': float(
+                (np.nanmax(factors) - 1.0) * 100.0),
+            'erosive_enhancement_mean_percent': float(
+                (np.nanmean(factors) - 1.0) * 100.0),
+            'erosive_threshold_kg_m2s': 100.0,
+            'erosive_coefficient_k': float(self.erosive_burning_coeff),
+            'erosive_exponent': float(getattr(self, 'erosive_exponent', 0.8)),
+            # 'Moderate' sabit metni yerine hesaplanmış geometrik çarpan
+            'port_diameter_factor_initial': float(
+                max(port_ratio_0, 0.05) ** -0.2),
+            'port_diameter_factor_final': float(
+                max(port_ratio_end, 0.05) ** -0.2),
+            'port_diameter_basis': '(D_port/D_chamber)^-0.2 (reduced L-R proxy)',
+            'model_applied': True,
+            'model_limitation': (
+                'Reduced Lenoir-Robillard proxy: published erosive data show '
+                'r/r0 ~ 1.2-2.0 at G ~ 1000-2000 kg/m2s, so this proxy '
+                'UNDERPREDICTS the magnitude; k requires static-fire '
+                'calibration.'),
         }
     
     def _grain_mechanics(self):
@@ -3797,7 +4402,12 @@ class SolidRocketEngine:
         burn_area = []
         mass_flow = []
         burn_rate_data = []
-        
+        # F067: erozif yanmanın FİİLEN uygulanan büyüklüğü rapor için saklanır
+        # (rapor artık ayrı bir uydurma doğrudan değil, çözücüden okunur).
+        port_area_series = []
+        mass_flux_series = []
+        erosive_factor_series = []
+
         t = 0
         current_temp = self.temp_ref  # Başlangıç sıcaklığı = yanma-hızı referansı (K)
         # (#434 tutarlılık: temp_correction ateşlemede nötr (1.0) başlar; delta korunur)
@@ -3812,11 +4422,16 @@ class SolidRocketEngine:
         last_rate = 0.0
 
         # ------------------------------------------------------------------
-        # Boğaz alanı TASARIM NOKTASINDA BİR KEZ boyutlandırılır ve yanma
-        # boyunca SABİT tutulur (gerçek motorda boğaz rijittir).
+        # Boğaz alanı TASARIM NOKTASINDA boyutlandırılır.
         # Boğulmuş akış: mdot = Pc*A_t/c*  ;  kütle üretimi: mdot = rho_p*Ab*r
         # => A_t = rho_p * Ab0 * r(Pc_tasarım) * c* / (Pc_tasarım * 1e5)
         # Kaynak: Sutton & Biblarz 9. baskı Böl. 12; NASA SP-8089
+        #
+        # F071 (2026-07-25): A_t artık koşu boyunca SABİT DEĞİLDİR. Kullanıcı
+        # bir erozyon katsayısı verdiyse (erosion_factor, mm/s @ 70 bar) her
+        # adımda boğaz yarıçapı ampirik modelle büyütülür; vermediyse eski
+        # rijit-boğaz davranışı bit-özdeş korunur ve varsayımın önemli olduğu
+        # motorlarda _design_health_warnings kullanıcıyı uyarır.
         # ------------------------------------------------------------------
         A_burn_0 = self.calculate_burn_area(0.0)
         if A_burn_0 > 0:
@@ -3835,9 +4450,14 @@ class SolidRocketEngine:
                     break
                 r_design = r_new
             m_dot_design = self.rho_p * A_burn_0 * r_design
-            A_t = m_dot_design * self.c_star / (self.P_c * 1e5)  # m^2, sabit
+            A_t = m_dot_design * self.c_star / (self.P_c * 1e5)  # m^2, t=0
         else:
             A_t = np.pi * (0.015 / 2) ** 2  # fallback; döngü zaten hemen kırılır
+
+        A_t_initial = A_t
+        erosion_model = self._throat_erosion_model()
+        r_throat = np.sqrt(A_t / np.pi)      # anlık boğaz yarıçapı [m]
+        throat_area_series = []
 
         P_c_prev = self.P_c  # denge çözümü için sıcak başlangıç (bar)
 
@@ -3911,13 +4531,21 @@ class SolidRocketEngine:
             # Thrust calculation
             F = CF_actual * P_c_actual * 1e5 * A_t
             
-            # Temperature evolution (simplified adiabatic model)
-            if len(time) > 0:
-                # Heat transfer to grain
-                heat_transfer_rate = 0.001  # Simplified coefficient
-                current_temp += heat_transfer_rate * dt
-                current_temp = min(current_temp, self.T_c * 0.5)  # Limit temperature
-            
+            # FİZİK DENETİMİ DÜZELTMESİ (F179, 2026-07-25): burada
+            # 'sadeleştirilmiş adyabatik model' adıyla bir sahte fizik bloğu
+            # vardı — current_temp += 0.001·dt ve tavan T_c/2. 0.001'in birimi
+            # (K/s? W/m²K?) belirsizdi, hiçbir kütle/ısı kapasitesi/geometri
+            # girmiyordu ve T_c/2 tavanının fiziksel karşılığı yoktu.
+            # GERÇEK: grain KÜTLESİNİN ortalama sıcaklığı yanma süresince
+            # pratik olarak DEĞİŞMEZ — ısı nüfuz derinliği yanan yüzeyin
+            # ~0.1 mm altındadır (katı yakıt termal difüzivitesi ~1e-7 m²/s,
+            # yanma hızı ~1e-2 m/s → δ ≈ α/r ≈ 10 µm). Yanma hızı düzeltmesi
+            # bu yüzden BAŞLANGIÇ (depolama) sıcaklığından hesaplanır ve
+            # koşu boyunca sabit tutulur. Blok kaldırıldı (sayısal etkisi
+            # zaten ölçülemez düzeydeydi: 27.5 s'lik koşuda +0.0275 K).
+            # Kaynak: Sutton & Biblarz 9. baskı Böl. 12 (katı yakıtta ısıl
+            # dalga yapısı ve σp'nin DEPOLAMA sıcaklığına bağlı tanımı).
+
             # Store results
             time.append(t)
             thrust.append(F)
@@ -3925,7 +4553,21 @@ class SolidRocketEngine:
             burn_area.append(A_burn)
             mass_flow.append(m_dot_gen)
             burn_rate_data.append(r_burn_actual)
-            
+            throat_area_series.append(A_t)
+            port_area_series.append(A_port)
+            mass_flux_series.append(self.mass_flux)
+            erosive_factor_series.append(
+                self._erosive_factor(self.mass_flux, port_ratio))
+
+            # Boğaz erozyonu: yarıçap ampirik hızla geriler, A_t büyür
+            # (F071; model transient_ballistics.ThroatErosionModel).
+            if erosion_model is not None:
+                r_throat += erosion_model.rate_m_s(P_c_actual * 1e5) * dt
+                if r_throat >= self.D_chamber / 2:
+                    termination = 'throat_eroded_out'
+                    break
+                A_t = np.pi * r_throat ** 2
+
             # Web ilerlemesi: Huygens ofsetinde yüzey normal boyunca tam
             # yanma hızıyla ilerler (dw/dt = r). Eski 1.2·(1−w/W) star
             # çarpanı ofset modeliyle çifte-sayımdı: kütle korunumunu %44
@@ -3976,6 +4618,10 @@ class SolidRocketEngine:
                     burn_area.append(burn_area[-1])
                     mass_flow.append(mass_flow[-1])
                     burn_rate_data.append(burn_rate_data[-1])
+                    throat_area_series.append(A_t)
+                    port_area_series.append(port_area_series[-1])
+                    mass_flux_series.append(mass_flux_series[-1])
+                    erosive_factor_series.append(erosive_factor_series[-1])
         if (burnout_time is None and time
                 and termination in ('pressure_collapse', 'burn_rate_zero')
                 and t > time[-1]):
@@ -3986,6 +4632,10 @@ class SolidRocketEngine:
             burn_area.append(0.0)
             mass_flow.append(0.0)
             burn_rate_data.append(0.0)
+            throat_area_series.append(A_t)
+            port_area_series.append(port_area_series[-1])
+            mass_flux_series.append(0.0)
+            erosive_factor_series.append(1.0)
 
         return {
             'time': np.array(time),
@@ -3994,7 +4644,17 @@ class SolidRocketEngine:
             'burn_area': np.array(burn_area),
             'mass_flow': np.array(mass_flow),
             'burn_rate': np.array(burn_rate_data),
-            'throat_area': A_t,  # m^2, tasarım noktasında bir kez boyutlandırılan sabit boğaz
+            # Sözleşme korunur: 'throat_area' TASARIM (t=0) boğaz alanıdır.
+            # Erozyon açıkken anlık değerler 'throat_area_series' içindedir.
+            'throat_area': A_t_initial,  # m^2
+            'throat_area_series': np.array(throat_area_series),
+            'throat_area_final': float(A_t),
+            'throat_erosion': self._throat_erosion_report(
+                erosion_model, A_t_initial, float(A_t)),
+            # F067: erozif yanmanın çözücüde fiilen uygulanan büyüklüğü
+            'port_area': np.array(port_area_series),
+            'mass_flux': np.array(mass_flux_series),
+            'erosive_factor': np.array(erosive_factor_series),
             # Basınç sabit-nokta çözümünün GERÇEK durumu (eskiden sabit True)
             'convergence_achieved': bool(solver_failed_steps == 0),
             'pressure_solver_steps': int(solver_steps),
@@ -4013,8 +4673,10 @@ class SolidRocketEngine:
         curve = self.calculate_thrust_curve()
         
         if len(curve['time']) == 0:
-            return {'error': 'Invalid grain geometry'}
-        
+            return {'error': 'Invalid grain geometry',
+                    'error_i18n': _w('warn.solid.invalid_grain_geometry',
+                                     'critical')}
+
         # Calculate performance metrics
         burn_time = curve['time'][-1]
         max_thrust = np.max(curve['thrust'])
@@ -4048,12 +4710,23 @@ class SolidRocketEngine:
         outer_radius = self.D_chamber / 2
         inner_radius = self.D_core / 2
         
+        # Bu koşuya özgü (kurulum sırasında DEĞİL, hesap sırasında doğan)
+        # kullanıcı uyarıları. self.design_warnings'e YAZILMAZ: aynı motor
+        # nesnesiyle calculate_performance() birden çok kez çağrıldığında
+        # (Monte Carlo, UQ) uyarılar birikip tekrarlanırdı.
+        run_warnings = []
+
         # Geometri kontrolü
         if inner_radius >= outer_radius:
-            return {'error': 'Core çapı oda çapından büyük olamaz'}
+            return {'error': 'Core çapı oda çapından büyük olamaz',
+                    'error_i18n': _w('warn.solid.core_diameter_exceeds_chamber',
+                                     'critical')}
         if self.L_grain <= 0:
-            return {'error': 'Grain uzunluğu pozitif olmalı'}
-            
+            return {'error': 'Grain uzunluğu pozitif olmalı',
+                    'error_i18n': _w('warn.solid.grain_length_not_positive',
+                                     'critical')}
+
+
         # Grain tipine göre gerçek hacim (star=poligon, end_burner=tam
         # silindir, wagon=7 delik düşülmüş) — annulus yalnız BATES için doğru
         grain_volume = self._propellant_volume()
@@ -4061,8 +4734,10 @@ class SolidRocketEngine:
         
         # Kütle kontrolü
         if propellant_mass <= 0:
-            return {'error': 'Yakıt kütlesi pozitif olmalı'}
-        
+            return {'error': 'Yakıt kütlesi pozitif olmalı',
+                    'error_i18n': _w('warn.solid.propellant_mass_not_positive',
+                                     'critical')}
+
         # Sea level specific impulse
         isp_sea_level = total_impulse / (propellant_mass * self.g0)
         
@@ -4079,12 +4754,17 @@ class SolidRocketEngine:
         vacuum_thrust_multiplier = vacuum_isp_ratio(epsilon_for_vac, self.gamma)
         isp_vacuum = isp_sea_level * vacuum_thrust_multiplier
         
-        # Değer doğrulama
+        # Değer doğrulama — eskiden yalnız stdout'a basılıyordu (kullanıcı
+        # arayüzde GÖREMİYORDU). Artık uyarı listesine giriyor: hem görünür
+        # hem iki dilli. Eşikler ve koşullar birebir aynı.
         if isp_sea_level < 50 or isp_sea_level > 500:
-            print(f"Uyarı: Özgül itki değeri anormal: {isp_sea_level:.1f} s")
+            run_warnings.append(_w('warn.solid.isp_out_of_range', 'warning',
+                                   isp_s=round(isp_sea_level, 1)))
         if total_impulse < 100 or total_impulse > 1e8:
-            print(f"Uyarı: Toplam itki değeri anormal: {total_impulse:.0f} N·s")
-        
+            run_warnings.append(_w('warn.solid.total_impulse_out_of_range',
+                                   'warning',
+                                   total_impulse_Ns=round(total_impulse)))
+
         # Boğaz çapı: itki eğrisinde tasarım noktasında BİR KEZ boyutlandırılan
         # sabit boğaz kullanılır (Kn ve basınç eğrisiyle tutarlılık için)
         A_t = curve.get('throat_area', 0.0)
@@ -4102,10 +4782,14 @@ class SolidRocketEngine:
 
         # Boğaz alanı kontrolü
         if A_t <= 0:
-            return {'error': 'Boğaz alanı pozitif olmalı'}
+            return {'error': 'Boğaz alanı pozitif olmalı',
+                    'error_i18n': _w('warn.solid.throat_area_not_positive',
+                                     'critical')}
         if d_throat < 0.001 or d_throat > 0.5:  # 1mm - 500mm arası makul
-            print(f"Uyarı: Boğaz çapı anormal: {d_throat*1000:.1f} mm")
-        
+            run_warnings.append(_w('warn.solid.throat_diameter_out_of_range',
+                                   'warning',
+                                   throat_diameter_mm=round(d_throat * 1000, 1)))
+
         # OPUS DENETİM DÜZELTMESİ (major): Aynı motor için 3 farklı ε
         # üretiliyordu (top-level 8.0 hardcode, CAD 5.93 hesaplı, vakum 40
         # hardcode) → iki farklı çıkış çapı raporlanıyordu. TEK kaynak:
@@ -4120,10 +4804,13 @@ class SolidRocketEngine:
         
         # Çıkış çapı fiziksel kontrolü
         if d_throat <= 0:
-            return {'error': 'Boğaz çapı pozitif olmalı'}
+            return {'error': 'Boğaz çapı pozitif olmalı',
+                    'error_i18n': _w('warn.solid.throat_diameter_not_positive',
+                                     'critical')}
         if d_exit > 1.0:  # 1 metre üzerinde çıkış çapı uyarsın
-            print(f"Uyarı: Büyük çıkış çapı: {d_exit*1000:.1f} mm")
-        
+            run_warnings.append(_w('warn.solid.exit_diameter_large', 'warning',
+                                   exit_diameter_mm=round(d_exit * 1000, 1)))
+
         # Altitude performance analysis
         altitudes = [0, 1000, 5000, 10000, 20000, 50000, 80000, 100000]  # m
         altitude_performance = self.calculate_altitude_performance(altitudes)
@@ -4338,9 +5025,11 @@ class SolidRocketEngine:
             ),
         }
 
-        # Kullanıcıya görünen uyarılar TEK listede toplanır (kurulum sırasında
-        # üretilenler + bu koşunun fiziksel/sayısal sağlık uyarıları).
-        all_warnings = (list(self.design_warnings)
+        # Kullanıcıya görünen uyarılar TEK listede toplanır: kurulum sırasında
+        # üretilenler + bu koşunun değer doğrulamaları + fiziksel/sayısal
+        # sağlık uyarıları. Hepsi {code, params, severity} kaydıdır (D-track):
+        # backend dilsiz, metni frontend TF(code, params) ile kurar.
+        all_warnings = (list(self.design_warnings) + run_warnings
                         + self._design_health_warnings(curve))
 
         return {
@@ -4416,7 +5105,7 @@ class SolidRocketEngine:
             # Tasarım noktası raporu (hedef itki/süre verildiyse dolu)
             'design_point': self.design_point,
 
-            # Fiziksel akıl sağlığı uyarıları (İngilizce, kullanıcıya görünür)
+            # Fiziksel akıl sağlığı uyarıları ({code, params, severity})
             'design_warnings': all_warnings,
             # solid.html displaySolidWarnings() 'warnings' anahtarını okur —
             # 'design_warnings' arayüzde HİÇBİR yerde tüketilmiyordu, yani

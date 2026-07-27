@@ -16,6 +16,10 @@ Durum değişkenleri: (T, m_l, m_v). Her adımda:
 Sıvı tükenince faz 'vapor'a geçer ve kalan buhar adyabatik ideal-gaz
 genleşmesiyle (γ≈1.27) modellenir — hibrit tasarımında sıvı tükenmesi
 fiilen yanma sonudur, buhar fazı yalnızca kuyruk (tail-off) tahminidir.
+Bu kuyruk modeline N₂O ÜÇLÜ NOKTASI (182.33 K / 87.84 kPa, NIST WebBook)
+tabanı konmuştur: adyabatik bağıntının kendisi doğrudur ama alt sınırsız
+uygulandığında modeli üçlü noktanın çok altına, fiziksel olmayan
+sıcaklık/basınçlara götürür (bkz. ``N2OTankBlowdown._vapor_step``).
 
 Özellik kaynağı: CoolProp (NIST REFPROP tabanlı) varsa doğrudan; yoksa
 CoolProp'tan üretilmiş gömülü doygunluk tablosu (240-306 K) ile doğrusal
@@ -40,7 +44,36 @@ except ImportError:
 
 # N₂O kritik nokta (NIST): modelin üst geçerlilik sınırı olarak kullanılır
 N2O_T_CRIT = 309.52   # K
-N2O_GAMMA_VAPOR = 1.27  # buhar fazı adyabatik üssü (kuyruk tahmini için)
+
+# Buhar (kuyruk) fazı adyabatik üssü — İDEAL GAZ değeri.
+#
+# ZARF BEYANI (v2.6.2 fizik denetimi, bulgu F187)
+# ------------------------------------------------
+# 1.27 değeri N₂O'nun İDEAL GAZ gamma'sıdır ve bu haliyle DOĞRUDUR:
+# CoolProp 6.8.0 (N₂O: Lemmon & Span 2006 EOS) ile 300 K / 1 bar'da
+# cp/cv = 1.2795 ölçüldü. Ancak bu üssün KULLANILDIĞI yer sıvı tükendiği
+# andaki DOYGUN BUHAR halidir (tipik olarak ~293 K / ~50 bar) ve orada
+# ideal gaz varsayımının kendisi geçersizdir. AYNI KAYNAKLA ÖLÇÜLDÜ:
+#   T [K]   gamma_gerçek (doygun buhar)   rho_gerçek / rho_ideal
+#   293.15  3.107  (1.279'un 2.43 katı)   158.0 / 91.2 kg/m³  (%-42.3)
+#   280.0   2.173                         104.5 / 70.1 kg/m³  (%-32.9)
+#   260.0   1.708                          57.6 / 44.6 kg/m³  (%-22.5)
+#   240.0   1.522                          30.7 / 26.2 kg/m³  (%-14.7)
+# Gerçek gamma'yı (3.107) ideal gaz bağıntısına KOYMUYORUZ: P/P0=(m/m0)^γ
+# ve T/T0=(m/m0)^(γ−1) bağıntıları ideal gaz + sabit cp türetimidir; içine
+# gerçek-akışkan cp/cv'si sokmak tutarsız bir melez üretir (ve kaynaksız bir
+# katsayı uydurmak olur). Bunun yerine sabit ideal-gaz değeri korunur, zarf
+# ihlali ``_begin_vapor_phase`` içinde AÇIKÇA raporlanır ve durum sözlüğüne
+# ``vapor_ideal_gas`` bayrağı düşülür. Kuyruk fazı hibrit tasarımında yanma
+# sonrasıdır; tasarım noktası sonuçlarını etkilemez.
+N2O_GAMMA_VAPOR = 1.27
+
+# N₂O üçlü noktası (NIST WebBook; CoolProp 6.8.0 ile teyit edildi:
+# Ttriple = 182.33 K, ptriple = 87837 Pa). Buhar (kuyruk) fazının ALT
+# fiziksel sınırıdır: bu noktanın altında N₂O katılaşır, sürekli gaz
+# genleşmesi bağıntısı anlamını yitirir.
+N2O_T_TRIPLE = 182.33      # K
+N2O_P_TRIPLE = 87837.0     # Pa
 
 # CoolProp/Span-Wagner'dan üretilmiş doygunluk tablosu (2026-07-12):
 # T[K], Psat[Pa], rho_l, rho_v [kg/m³], h_l, h_v, u_l, u_v [J/kg]
@@ -74,13 +107,33 @@ _T_MIN, _T_MAX = float(_SAT_TABLE[0, 0]), float(_SAT_TABLE[-1, 0])
 
 
 class N2OSaturation:
-    """N₂O doygunluk özellikleri: CoolProp varsa EOS, yoksa gömülü tablo."""
+    """N₂O doygunluk özellikleri: CoolProp varsa EOS, yoksa gömülü tablo.
+
+    Tablo yolu 240-306 K bandı DIŞINDA sorgulanırsa değer banda kenetlenir.
+    Kenetleme artık sessiz değildir (v2.6.2 fizik denetimi, bulgu F184):
+    ``clamped`` bayrağı ve ``clamp_t_min/clamp_t_max`` en uç sorgu
+    sıcaklıklarını tutar; tank bunları okuyup kullanıcıya raporlar.
+    """
 
     def __init__(self, use_coolprop=True):
         self.use_coolprop = bool(use_coolprop and COOLPROP_AVAILABLE)
+        # F184: tablo bandı dışına taşan sorguların defteri
+        self.clamped = False
+        self.clamped_calls = 0
+        self.clamp_t_min = float('inf')
+        self.clamp_t_max = float('-inf')
 
     def _interp(self, T, col):
-        T = float(np.clip(T, _T_MIN, _T_MAX))
+        T_req = float(T)
+        if T_req < _T_MIN or T_req > _T_MAX:
+            # F184: banda kenetlenen sorgu artık deftere işleniyor. Kenetlenen
+            # anda dönen değer bandın KENARININ değeridir (ör. 240 K'de
+            # Psat = 11.88 bar), sorulan sıcaklığın fiziksel değeri değildir.
+            self.clamped = True
+            self.clamped_calls += 1
+            self.clamp_t_min = min(self.clamp_t_min, T_req)
+            self.clamp_t_max = max(self.clamp_t_max, T_req)
+        T = float(np.clip(T_req, _T_MIN, _T_MAX))
         return float(np.interp(T, _SAT_TABLE[:, 0], _SAT_TABLE[:, col]))
 
     def _cp(self, T, output, quality):
@@ -136,6 +189,17 @@ class N2OTankBlowdown:
         self.m_v = V_v * self.props.rho_v(self.T)   # kg buhar (ullage)
         self.phase = 'two_phase'
         self._history = []
+        # Buhar (kuyruk) fazı zarf bayrağı (F077): üçlü nokta tabanına
+        # ulaşıldığında False olur ve warnings'e bir kez açıklama eklenir.
+        self.vapor_model_valid = True
+        # F184: iki-faz çözümü 240-306 K doygunluk bandına kenetlendiğinde
+        # True olur; kenetli adımların P/T değerleri bant KENARININ değeridir.
+        self.out_of_band = False
+        self.band_clamped_steps = 0
+        # F187: buhar kuyruğu ideal-gaz bağıntısıyla yürüyor mu (faz 'vapor'
+        # olduğu sürece True) — durum sözlüğünde raporlanır.
+        self.vapor_ideal_gas = False
+        self.warnings = []
 
     @classmethod
     def from_oxidizer_mass(cls, oxidizer_mass, initial_temperature=293.15,
@@ -214,10 +278,17 @@ class N2OTankBlowdown:
         f_hi, _, _ = self._internal_energy(T_hi, m_total)
         f_hi -= U_target
         if f_lo > 0:
-            # Hedef enerji bandın altında (aşırı soğuma) → banda kenetle
+            # Hedef enerji bandın altında (aşırı soğuma) → banda kenetle.
+            # F184: kenetleme artık sessiz DEĞİL — bayrak + tek seferlik uyarı.
             self.T = T_lo
+            self._flag_out_of_band('below')
         elif f_hi < 0:
             self.T = T_hi
+            if T_hi >= _T_MAX - 1e-9:
+                # Yalnız bandın ÜST kenarına dayandıysa zarf ihlalidir;
+                # T_hi = T+2 K braketine dayanma zarf ihlali değildir
+                # (blowdown'da sıcaklık düşer, 2 K'lik braket yeterlidir).
+                self._flag_out_of_band('above')
         else:
             for _ in range(60):
                 T_mid = 0.5 * (T_lo + T_hi)
@@ -238,24 +309,114 @@ class N2OTankBlowdown:
 
         return self._pack_state(dt, mdot_out)
 
+    def _flag_out_of_band(self, side):
+        """İki-faz çözümünün 240-306 K bandına kenetlendiğini raporlar.
+
+        DÜZELTME (v2.6.2 fizik denetimi, bulgu F184)
+        --------------------------------------------
+        Eskiden ``if f_lo > 0: self.T = T_lo`` satırı SESSİZCE çalışıyordu:
+        ne uyarı üretiliyor ne de durum sözlüğünde bir bayrak vardı. Kenetlenen
+        adımda raporlanan basınç artık fiziksel çözüm değil, bant tabanının
+        değeridir (240 K → Psat = 11.878 bar) ve bu değer kullanıcıya P(t)
+        eğrisi olarak çizilmektedir. ÖLÇÜLDÜ (bu depoda, tablo yolu):
+          * from_oxidizer_mass(16.5 kg, 243 K), ṁ=1.2 kg/s, 20 s →
+            iki-faz adımlarının 140'ı bant tabanına kenetlendi ve hepsi
+            aynı 11.878 bar'ı bildirdi; ÜRETİLEN UYARI SAYISI: 0.
+          * from_oxidizer_mass(3.0 kg, 241 K), ṁ=0.4 kg/s, 12 s → 118 adım.
+          * Nominal senaryoda (293.15 K başlangıç) kenetli adım YOK — bulgu
+            yalnız düşük başlangıç sıcaklığı senaryolarını etkiler.
+        Bandın kaynağı gömülü CoolProp/Span-Wagner doygunluk tablosudur
+        (240-306 K); N₂O kritik noktası 309.52 K (NIST WebBook).
+        """
+        self.band_clamped_steps += 1
+        if self.out_of_band:
+            return
+        self.out_of_band = True
+        edge_T = _T_MIN if side == 'below' else _T_MAX
+        edge_P = self.props.psat(edge_T)
+        self.warnings.append(
+            f"MODEL BAND: the two-phase solution hit the "
+            f"{_T_MIN:.0f}-{_T_MAX:.0f} K saturation-table band "
+            f"({'lower' if side == 'below' else 'upper'} edge, {edge_T:.0f} K "
+            f"/ {edge_P / 1e5:.2f} bar) and is CLAMPED there. Temperature and "
+            f"pressure reported from this instant on are the band-edge values, "
+            f"not a physical solution — the tank state left the validity "
+            f"envelope of the embedded N2O saturation data (CoolProp/"
+            f"Span-Wagner table; N2O critical point 309.52 K, NIST WebBook).")
+
     def _begin_vapor_phase(self):
-        """Sıvı tükendi: kalan buharı adyabatik ideal-gaz olarak modelle."""
+        """Sıvı tükendi: kalan buharı adyabatik ideal-gaz olarak modelle.
+
+        F187: bu geçişte ideal-gaz varsayımının ÖLÇÜLEN geçersizlik boyutu
+        kullanıcıya bildirilir (bkz. ``N2O_GAMMA_VAPOR`` sabitinin başındaki
+        zarf beyanı). Kuyruk fazı hibrit yanışında yanma sonrasıdır.
+        """
         self.phase = 'vapor'
         self._vapor_pressure = self.props.psat(self.T)
         self._vapor_T = self.T
         self._vapor_m0 = max(self.m_v, 1e-9)
         self._vapor_P0 = self._vapor_pressure
+        if not self.vapor_ideal_gas:
+            self.vapor_ideal_gas = True
+            self.warnings.append(
+                f"IDEAL-GAS TAIL-OFF: the liquid is exhausted at "
+                f"{self.T:.1f} K / {self._vapor_P0 / 1e5:.1f} bar and the "
+                f"remaining vapour is expanded with the IDEAL-GAS adiabatic "
+                f"relation (gamma = {N2O_GAMMA_VAPOR}, the ideal-gas value of "
+                f"N2O: CoolProp 6.8.0 cp/cv at 300 K / 1 bar = 1.279). At the "
+                f"SATURATED-VAPOUR state where it is applied the assumption "
+                f"does not hold: the real cp/cv at 293 K saturated vapour is "
+                f"3.107 (2.4x) and the real vapour density 158.0 kg/m3 versus "
+                f"91.2 kg/m3 from p/(RT) (-42%). The tail-off curve is an "
+                f"order-of-magnitude estimate only; the liquid-phase results "
+                f"up to this instant are unaffected.")
 
     def _vapor_step(self, dm, dt, mdot_requested):
         """Buhar (kuyruk) fazı: sabit hacimde kütle çekilen adyabatik gaz.
 
-        Sabit V'de P/P0 = (m/m0)^γ (adyabatik + ideal gaz) yaklaşımı.
+        Sabit V'de P/P0 = (m/m0)^γ, T/T0 = (m/m0)^(γ−1) (adyabatik + ideal
+        gaz) yaklaşımı. Bağıntının türetimi doğrudur, ancak ZARFI sınırlıdır.
+
+        ÜÇLÜ NOKTA TABANI (2026-07-25 fizik denetimi, F077)
+        ---------------------------------------------------
+        Eskiden ``ratio`` yalnız 1e-6 ile taban yapılıyordu ve başka hiçbir
+        fiziksel sınır yoktu. Her adımda buharın en fazla %80'i çekildiği için
+        oran geometrik olarak küçülüyor ve model N₂O'yu üçlü noktasının
+        (182.33 K / 87.84 kPa, NIST WebBook) çok altına götürüyordu. ÖLÇÜLDÜ
+        (bu depoda, CoolProp açık):
+          * from_oxidizer_mass(16.5 kg, 293.15 K), ṁ=1.2 kg/s, 14 s →
+            sıvı ~12.5 s'de bitiyor (doğru), sonra T_son = 166.0 K,
+            P_son = 3.01 bar — üçlü noktanın 16 K ALTINDA.
+          * T_init = 253 K senaryosunda T_min = 26.2 K, P_min = 3.6e-4 bar;
+          * from_oxidizer_mass(2.0 kg), ṁ=1.0 kg/s, 5 s → T_son = 6.6 K.
+        Bu değerler fiziksel olarak imkânsızdır ve P(t)/T(t) eğrisi kullanıcıya
+        çizilmektedir. Artık T ve P üçlü noktada kenetlenir, ``vapor_model_valid``
+        False olur ve bir kez uyarı üretilir. Kütle defteri (m_v) bozulmadan
+        korunur; yalnız durum değişkenleri kenetlenir.
         """
         dm = min(dm, 0.8 * self.m_v)  # buharın tamamı tek adımda çekilemez
         self.m_v -= dm
         ratio = max(self.m_v / self._vapor_m0, 1e-6)
-        self._vapor_pressure = self._vapor_P0 * ratio ** N2O_GAMMA_VAPOR
-        self.T = self._vapor_T * ratio ** (N2O_GAMMA_VAPOR - 1.0)
+        p_ad = self._vapor_P0 * ratio ** N2O_GAMMA_VAPOR
+        t_ad = self._vapor_T * ratio ** (N2O_GAMMA_VAPOR - 1.0)
+
+        if t_ad <= N2O_T_TRIPLE or p_ad <= N2O_P_TRIPLE:
+            # Üçlü noktanın altı: sürekli gaz genleşmesi geçersiz (katılaşma).
+            self._vapor_pressure = min(self._vapor_pressure, N2O_P_TRIPLE)
+            self.T = min(self.T, N2O_T_TRIPLE)
+            if self.vapor_model_valid:
+                self.vapor_model_valid = False
+                self.warnings.append(
+                    "Vapour tail-off reached the N2O triple point "
+                    f"({N2O_T_TRIPLE:.2f} K / {N2O_P_TRIPLE / 1e3:.1f} kPa, "
+                    "NIST WebBook): the adiabatic ideal-gas expansion is no "
+                    "longer valid below this state (the fluid would freeze). "
+                    "Pressure and temperature are clamped at the triple point "
+                    "and the tail-off beyond this instant is NOT modelled — "
+                    "treat the burn as over.")
+        else:
+            self._vapor_pressure = p_ad
+            self.T = t_ad
         delivered = dm / dt if dt > 0 else 0.0
         return self._pack_state(dt, delivered)
 
@@ -268,6 +429,9 @@ class N2OTankBlowdown:
             'm_vapor': self.vapor_mass,
             'phase': self.phase,
             'mdot_delivered': mdot_delivered,
+            # F077: buhar kuyruğu üçlü nokta tabanına dayandıysa bu adımın
+            # P/T değerleri kenetlenmiştir, fiziksel bir çözüm değildir.
+            'vapor_model_valid': bool(self.vapor_model_valid),
         }
         self._history.append(state)
         return state
@@ -290,4 +454,6 @@ class N2OTankBlowdown:
             'liquid_mass': np.array(ml),
             'vapor_mass': np.array(mv),
             'phase': self.phase,
+            'vapor_model_valid': bool(self.vapor_model_valid),
+            'warnings': list(self.warnings),
         }

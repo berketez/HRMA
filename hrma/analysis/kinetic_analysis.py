@@ -9,8 +9,22 @@ from scipy.optimize import fsolve, minimize_scalar
 import json
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-import warnings
-warnings.filterwarnings('ignore')
+import warnings  # noqa: F401  (modül içi uyarı üretimi için)
+
+# v2.6.2: buradaki ``warnings.filterwarnings('ignore')`` KALDIRILDI.
+# Argümansız çağrı süreç geneli catch-all filtre kurar; bu modülü içe aktarmak
+# tüm uygulamada numpy uyarılarını bastırıyordu (sessiz NaN zinciri).
+
+
+def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
+    """Yapılandırılmış iki-dilli uyarı/öneri kaydı (D-track sözleşmesi).
+
+    Backend dilsiz kalır; frontend ``TF(code, params)`` ile metni kurar.
+    Şema: ``{code: 'warn.<subsystem>.<slug>', params: {...}, severity: ...}``.
+    Katalog: docs/v262_specs/D_codes_analysis.md.
+    """
+    return {'code': code, 'params': params, 'severity': severity}
+
 
 @dataclass
 class KineticSpecies:
@@ -765,22 +779,27 @@ class NozzleKineticAnalyzer:
         """Generate recommendations based on kinetic analysis"""
         
         recommendations = []
-        
+
         if abs(isp_loss_fraction) > 0.05:
-            recommendations.append('Significant kinetic losses detected - consider nozzle design optimization')
-        
+            recommendations.append(_mk_warning(
+                'warn.kinetic.significant_losses', 'warning'))
+
         if reaction_completeness < 0.7:
-            recommendations.append('Low reaction completeness - increase residence time or chamber temperature')
-        
+            recommendations.append(_mk_warning(
+                'warn.kinetic.low_completeness', 'warning'))
+
         if abs(isp_loss_fraction) > 0.10:
-            recommendations.append('CRITICAL: Severe kinetic losses - redesign required')
-        
+            recommendations.append(_mk_warning(
+                'warn.kinetic.severe_losses', 'critical'))
+
         if reaction_completeness > 0.95:
-            recommendations.append('Good reaction completeness - kinetic effects minimal')
-        
+            recommendations.append(_mk_warning(
+                'warn.kinetic.good_completeness', 'info'))
+
         if not recommendations:
-            recommendations.append('Kinetic analysis shows acceptable performance')
-        
+            recommendations.append(_mk_warning(
+                'warn.kinetic.acceptable_performance', 'info'))
+
         return recommendations
     
     def _compare_with_equilibrium(self, kinetic_solution: List[Dict], chamber_conditions: Dict) -> Dict:
@@ -871,16 +890,21 @@ class NozzleKineticAnalyzer:
         recommendations = []
         
         isp_loss = abs(performance_analysis['isp_loss_fraction'])
-        
+
         if isp_loss > 0.05:
-            recommendations.append('Consider longer nozzle for increased residence time')
-            recommendations.append('Evaluate area distribution for better kinetic performance')
-        
+            recommendations.append(_mk_warning(
+                'warn.kinetic.longer_nozzle', 'info'))
+            recommendations.append(_mk_warning(
+                'warn.kinetic.area_distribution', 'info'))
+
         if performance_analysis['reaction_completeness'] < 0.8:
-            recommendations.append('Increase chamber length for better mixing')
-            recommendations.append('Consider staged combustion for more complete reactions')
-        
-        return recommendations if recommendations else ['Current nozzle design appears adequate']
+            recommendations.append(_mk_warning(
+                'warn.kinetic.increase_chamber_length', 'info'))
+            recommendations.append(_mk_warning(
+                'warn.kinetic.staged_combustion', 'info'))
+
+        return recommendations if recommendations else [
+            _mk_warning('warn.kinetic.nozzle_adequate', 'info')]
     
     def _generate_operating_recommendations(self, performance_analysis: Dict) -> List[str]:
         """Generate operating condition recommendations"""
@@ -888,10 +912,13 @@ class NozzleKineticAnalyzer:
         recommendations = []
         
         if performance_analysis['reaction_completeness'] < 0.7:
-            recommendations.append('Increase chamber temperature to accelerate reactions')
-            recommendations.append('Consider higher chamber pressure for better kinetics')
-        
-        return recommendations if recommendations else ['Operating conditions appear suitable']
+            recommendations.append(_mk_warning(
+                'warn.kinetic.increase_chamber_temperature', 'warning'))
+            recommendations.append(_mk_warning(
+                'warn.kinetic.higher_chamber_pressure', 'info'))
+
+        return recommendations if recommendations else [
+            _mk_warning('warn.kinetic.operating_suitable', 'info')]
     
     def _generate_propellant_recommendations(self, kinetic_solution: List[Dict]) -> List[str]:
         """Generate propellant-related recommendations"""
@@ -903,9 +930,11 @@ class NozzleKineticAnalyzer:
         
         for species, concentration in final_comp.items():
             if species in ['H2', 'O2'] and concentration > 0.01:  # Significant unreacted oxidizer/fuel
-                recommendations.append(f'High {species} concentration at exit - consider mixture ratio adjustment')
-        
-        return recommendations if recommendations else ['Propellant utilization appears good']
+                recommendations.append(_mk_warning(
+                    'warn.kinetic.high_species_exit', 'warning', species=species))
+
+        return recommendations if recommendations else [
+            _mk_warning('warn.kinetic.propellant_good', 'info')]
     
     def _extract_species_profiles(self, kinetic_solution: List[Dict]) -> Dict:
         """Extract species concentration profiles along nozzle"""

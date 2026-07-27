@@ -24,6 +24,7 @@ from datetime import datetime
 import numpy as np
 
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+from hrma.utils.input_guard import safe_name
 
 
 def _num(v, fb):
@@ -159,7 +160,8 @@ def generate_drawing_pdf(motor_results, out_path=None):
     from reportlab.pdfgen import canvas as rl_canvas
 
     d = _dims_mm(motor_results)
-    name = (motor_results or {}).get('motor_name') or 'HRMA_MOTOR'
+    # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
+    name = safe_name((motor_results or {}).get('motor_name'))
     stamp = datetime.now().strftime('%Y-%m-%d')
 
     if out_path is None:
@@ -284,7 +286,8 @@ def generate_dxf(motor_results, out_path=None):
     import ezdxf
 
     d = _dims_mm(motor_results)
-    name = (motor_results or {}).get('motor_name') or 'HRMA_MOTOR'
+    # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
+    name = safe_name((motor_results or {}).get('motor_name'))
     if out_path is None:
         out_path = os.path.join(
             tempfile.gettempdir(),

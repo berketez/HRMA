@@ -272,6 +272,12 @@ def _interp_table(table: np.ndarray, temperature: float) -> Dict[str, float]:
         'viscosity': mu,
         'prandtl': cp * mu / k,
         'clamped': bool(temperature < t_col[0] or temperature > t_col[-1]),
+        # DÜZELTME (v2.6.2, fizik denetimi F057): tablo bandı da döndürülür.
+        # 'clamped' bayrağı tek başına üretiliyordu ama solve() içinde HİÇ
+        # okunmuyordu; klamplanan istasyonlar için uyarı üretilebilsin diye
+        # bandın uçları da çağırana taşınıyor.
+        'table_t_min_K': float(t_col[0]),
+        'table_t_max_K': float(t_col[-1]),
     }
 
 
@@ -314,6 +320,54 @@ def dittus_boelter_nu(reynolds: float, prandtl: float,
         raise ValueError("Prandtl number must be positive.")
     n = 0.4 if heating else 0.3
     return 0.023 * reynolds ** 0.8 * prandtl ** n
+
+
+#: Dittus-Boelter geçerlilik zarfı (Incropera & DeWitt 6. baskı Eq. 8.60).
+#: Korelasyonun kendi bildirilen saçılımı yaklaşık +/-%25'tir.
+DB_RE_MIN = 1.0e4
+DB_PR_MIN, DB_PR_MAX = 0.6, 160.0
+DB_LD_MIN = 10.0
+DB_REPORTED_SCATTER_PCT = 25.0
+
+
+def dittus_boelter_envelope(reynolds: float, prandtl: float,
+                            length_over_diameter: float = None) -> dict:
+    """Dittus-Boelter geçerlilik zarfını tarar (v2.6.2 fizik denetimi, F154).
+
+    Kodda yalnız Reynolds taranıyordu; Prandtl bandı ve giriş-uzunluğu
+    (L/D >= 10, tam gelişmiş türbülanslı akış) koşulu hiç denetlenmiyordu.
+    Zarf dışında korelasyon hâlâ bir sayı üretir ama o sayının bildirilen
+    +/-%25 saçılımı geçerli değildir — kullanıcı bunu bilmeden ısı akısına
+    güvenemez.
+
+    Ayrıca büyük cidar/yığın özellik farkında Dittus-Boelter'in bilinen
+    sapması için Sieder-Tate (mu_b/mu_w)^0.14 düzeltmesi UYGULANMAZ; bu da
+    burada niceliksel olarak beyan edilir.
+
+    Dönüş: ``{'in_envelope': bool, 'violations': [...], 'scatter_pct': 25.0}``
+    """
+    violations = []
+    if reynolds < DB_RE_MIN:
+        violations.append(
+            f'Re={reynolds:.3g} < {DB_RE_MIN:.0g} (tam türbülanslı değil; '
+            'geçiş rejiminde korelasyon geçersizdir)')
+    if not (DB_PR_MIN <= prandtl <= DB_PR_MAX):
+        violations.append(
+            f'Pr={prandtl:.3g} bandın [{DB_PR_MIN}, {DB_PR_MAX}] dışında')
+    if length_over_diameter is not None and length_over_diameter < DB_LD_MIN:
+        violations.append(
+            f'L/D={length_over_diameter:.3g} < {DB_LD_MIN:.0f} (giriş bölgesi; '
+            'yerel Nu tam gelişmiş değerin üzerindedir)')
+    return {
+        'in_envelope': not violations,
+        'violations': violations,
+        'scatter_pct': DB_REPORTED_SCATTER_PCT,
+        'sieder_tate_correction_applied': False,
+        'note': ('Dittus-Boelter reported scatter is about '
+                 f'+/-{DB_REPORTED_SCATTER_PCT:.0f}%; the Sieder-Tate '
+                 '(mu_b/mu_w)^0.14 correction for large wall-to-bulk property '
+                 'differences is NOT applied.'),
+    }
 
 
 def hydraulic_diameter_rect(width: float, height: float) -> float:
@@ -1130,6 +1184,11 @@ class RegenCooling:
         n_db_subcritical = 0             # kritik-altı Dittus-Boelter istasyonu
         wall_balance_unconverged = 0
         jackson_wall_clamped = 0
+        # F057: tablo bandı dışına taşan (özellikleri donmuş) istasyon sayacı
+        table_clamped_stations = 0
+        table_clamp_t_min = math.inf
+        table_clamp_t_max = -math.inf
+        table_band: Optional[tuple] = None
         bulk_boiling_stations = 0
         near_boiling_stations = 0
         wall_boiling_stations = 0
@@ -1145,6 +1204,16 @@ class RegenCooling:
             k_c = props['conductivity']
             mu = props['viscosity']
             pr = props['prandtl']
+
+            # F057: tablo yolunda banda klamplanan istasyonları kaydet.
+            # Klamp, özellikleri banda DONDURUR (rho/mu/Pr sabit kalır) —
+            # sessizce yapılırsa kullanıcı geçerlilik zarfı dışına çıktığını
+            # göremez. Uyarı marş sonunda toplu üretilir.
+            if props.get('clamped'):
+                table_clamped_stations += 1
+                table_clamp_t_min = min(table_clamp_t_min, t_c)
+                table_clamp_t_max = max(table_clamp_t_max, t_c)
+                table_band = (props['table_t_min_K'], props['table_t_max_K'])
 
             v = self.mdot_per_channel / (rho * self.channel_area)  # m/s
             re = rho * v * self.hydraulic_diameter / mu
@@ -1302,6 +1371,29 @@ class RegenCooling:
                 f"coking threshold (Huzel & Huang Ch. 4) — carbon deposition "
                 f"and channel fouling likely.")
 
+        # DÜZELTME (v2.6.2, fizik denetimi F057): soğutucu özellik TABLOSUNUN
+        # geçerlilik zarfı dışına taşan istasyonlar artık bildiriliyor.
+        # Önceki davranışta _interp_table'ın 'clamped' bayrağı üretiliyor ama
+        # hiç okunmuyordu; RP-1 tablosu 500 K'de, su tablosu 400 K'de bittiği
+        # için tipik bir RP-1 devresinde 500 K üstü her istasyon sessizce
+        # DONMUŞ özellik kullanıyordu. Ölçüm (su, 459 K / 80 bar, CoolProp
+        # referanslı): klamplı tablo mu=2.17e-4 verir (gerçek 1.47e-4, %48
+        # yüksek), Pr=1.342 (gerçek 0.960); sabit mdot'ta h_c oranı 0.856 —
+        # yani h_c %14 EKSİK çıkar. RP-1 için referans veri olmadığından
+        # sapma ölçülemez, bu yüzden uyarı sayısal düzeltme değil zarf
+        # bildirimi yapar. Kaynak: Incropera & DeWitt 6th ed. Table A.6 (su,
+        # 280-400 K bandı); RP-1 tablosu 'approximate' mühendislik derlemesi.
+        if table_clamped_stations > 0 and table_band is not None:
+            warnings_list.append(
+                f"PROPERTY RANGE: {self.coolant} bulk temperature leaves the "
+                f"internal property table band "
+                f"({table_band[0]:.0f}-{table_band[1]:.0f} K) at "
+                f"{table_clamped_stations} station(s) "
+                f"(T_bulk {table_clamp_t_min:.0f}-{table_clamp_t_max:.0f} K); "
+                f"properties there are FROZEN at the nearest band edge — "
+                f"transport properties and the coolant-side coefficient are "
+                f"an extrapolation outside the source validity envelope.")
+
         # akış rejimi uyarısı (Dittus-Boelter türbülan geçerliliği)
         if min_re < RE_TURBULENT_FLOOR:
             warnings_list.append(
@@ -1440,6 +1532,10 @@ class RegenCooling:
             'fin_effect': self.fin_effect if sc_mode else None,
             'fin_area_ratio_max': (float(np.max(fin_ratio))
                                    if sc_mode else None),
+            # F057: tablo geçerlilik zarfı denetimi (panel/rapor görünürlüğü)
+            'property_table_clamped_stations': table_clamped_stations,
+            'property_table_band_K': (list(table_band) if table_band is not None
+                                      else None),
             'warnings': warnings_list,
         }
 

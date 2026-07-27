@@ -113,7 +113,10 @@ class TestFirstRunSchema:
         md = fresh_report['markdown']
         assert md.startswith('# HRMA correlation summary')
         assert fresh_report['db_hash'] in md
-        assert '| Motor | Quantity | N |' in md
+          # v2.6.2 (F007): sütun "N" -> "N (campaigns)". Sayılan şey bağımsız
+        # örnek değil KAMPANYA olduğu için başlık bunu açıkça söylüyor;
+        # aynı motorun yakın çalışma noktaları tek kampanya sayılır.
+        assert '| Motor | Quantity | N (campaigns) |' in md
         assert not any(ord(ch) > 0x2500 for ch in md), 'emoji/simge yasak'
 
 

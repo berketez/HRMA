@@ -9,7 +9,7 @@ import json
 import logging
 import warnings
 from typing import Dict, List, Tuple, Optional
-from scipy.optimize import minimize_scalar, fsolve
+from scipy.optimize import minimize_scalar, fsolve, brentq
 
 # Cantera opsiyonel bağımlılık (paper: "where available").
 # Kurulu değilse modül import edilebilir kalır ve ampirik yola düşer.
@@ -186,7 +186,8 @@ class CombustionAnalyzer:
     def analyze_combustion(self, fuel_composition: Dict, oxidizer_type: str,
                           of_ratio: float, chamber_pressure: float,
                           chamber_temperature: float = None,
-                          eta_c_star: Optional[float] = None) -> Dict:
+                          eta_c_star: Optional[float] = None,
+                          expansion_ratio: Optional[float] = None) -> Dict:
         """
         Comprehensive combustion analysis
 
@@ -205,6 +206,14 @@ class CombustionAnalyzer:
                 "Fundamentals of Hybrid Rocket Combustion and Propulsion",
                 AIAA Prog. Astro. & Aero. Vol. 218, 2007, Bölüm 1 ve 10;
                 ayrıca Sutton & Biblarz 9. baskı, Eş. 3-31 c*-verimi tanımı).
+            expansion_ratio: Opsiyonel lüle alan oranı ε = Ae/At. VERİLİRSE
+                çıkış istasyonu (p_e, T_e, bileşim, isp, cf) bu ε'dan
+                izentropik alan-Mach bağıntısıyla çözülür (Sutton & Biblarz
+                9. baskı, Eş. 3-14). Verilmezse çıkış istasyonu ISA deniz
+                seviyesi basıncına (1.01325 bar) çapalanır ve sonuç sözlüğünde
+                conditions['exit']['basis'] = 'sea_level_default' olarak
+                işaretlenir. (v2.6.2 öncesi bu değer SABİT 1.0 bar idi ve
+                motorun gerçek ε'sını hiç görmüyordu — bulgu F034.)
 
         Returns:
             Complete combustion analysis results
@@ -225,6 +234,10 @@ class CombustionAnalyzer:
                     int(round(float(chamber_pressure) * 10)),   # Pc  @ 0.1 bar
                     None if chamber_temperature is None
                     else int(round(float(chamber_temperature) * 10)),
+                    # ε çıkış istasyonunu (p_e, T_e, bileşim, isp, cf)
+                    # değiştirdiği için anahtara GİRMELİDİR (v2.6.2/F034).
+                    None if expansion_ratio is None
+                    else int(round(float(expansion_ratio) * 100)),
                 )
             except (TypeError, ValueError):
                 cache_key = None  # anahtarlanamayan girdi: önbelleksiz devam
@@ -277,7 +290,26 @@ class CombustionAnalyzer:
             elements, throat_pressure, throat_temperature, 'throat'
         )
 
-        exit_pressure = 1.0  # Sea level
+        # --- Çıkış istasyonu basıncı ---
+        # v2.6.2 FİZİK DENETİMİ (bulgu F034): burası SABİT 1.0 bar yazılıydı.
+        # Yani raporlanan exit_temperature / exit_composition / performance
+        # ['isp'] / ['cf'] ve calculate_altitude_performance tablosunun tamamı
+        # kullanıcının girdiği ε ne olursa olsun 'deniz seviyesine eşlenik
+        # lüle' değerleriydi (ölçüldü: htpb/n2o O/F=6 Pc=20 bar -> p_e=1.0 bar
+        # sabitinden türeyen efektif ε yalnızca 3.74). Ayrıca ISA deniz
+        # seviyesi 1.01325 bar'dır, 1.0 değil (hrma.constants içinde mevcut).
+        #
+        # Artık: expansion_ratio verilirse p_e izentropik alan-Mach
+        # bağıntısından ε ve oda γ'sı ile çözülür (Sutton & Biblarz 9. baskı,
+        # Eş. 3-14 + Eş. 3-7); verilmezse ISA deniz seviyesi çapası korunur ve
+        # bu durum çıktıda 'exit_pressure_basis' ile dürüstçe bildirilir.
+        if expansion_ratio is not None and float(expansion_ratio) > 1.0:
+            exit_pressure = self._exit_pressure_from_expansion(
+                float(expansion_ratio), gamma_chamber, chamber_pressure)
+            exit_pressure_basis = 'expansion_ratio'
+        else:
+            exit_pressure = isa_pressure(0.0) * BAR_PER_PA  # 1.01325 bar (ISA)
+            exit_pressure_basis = 'sea_level_default'
         exit_temperature = self._calculate_exit_temperature(
             chamber_temperature, chamber_pressure, exit_pressure, gamma=gamma_chamber
         )
@@ -337,7 +369,12 @@ class CombustionAnalyzer:
             'conditions': {
                 'chamber': {'P': chamber_pressure, 'T': chamber_temperature},
                 'throat': {'P': throat_pressure, 'T': throat_temperature},
-                'exit': {'P': exit_pressure, 'T': exit_temperature}
+                # 'basis': çıkış basıncının nereden geldiği (F034 dürüstlük
+                # alanı). 'expansion_ratio' = motorun gerçek ε'sından
+                # izentropik çözüm; 'sea_level_default' = ε verilmedi, ISA
+                # deniz seviyesi çapası kullanıldı (isp/cf o lülenin değeri).
+                'exit': {'P': exit_pressure, 'T': exit_temperature,
+                         'basis': exit_pressure_basis}
             },
             'performance': performance,
             # Koşunun girdi kimliği: O/F tarama paneli gibi tüketiciler,
@@ -556,11 +593,32 @@ class CombustionAnalyzer:
         stokiyometride tepe yapan bir zarf ile ölçeklenir:
 
           φ = O_gerekli / O_mevcut   (>1 yakıt-zengin, <1 fakir)
-          f(φ) = 1 / (1 + 0.25·ln²φ),  f ∈ [0.35, 1]
+          f(φ) = 1 / (1 + a·ln²φ),  f ∈ [0.35, 1]
 
         Zarf, hidrokarbon/N₂O-LOX sistemlerinin CEA eğrilerinin kaba
-        biçimini yakalar (φ≈2'de ~0.89, φ≈9.6'da ~0.44 → ~1400 K); fallback
-        hassas değildir ama artık en azından FİZİKSEL EĞİLİMİ taşır.
+        biçimini yakalar; fallback hassas değildir ama FİZİKSEL EĞİLİMİ taşır.
+
+        v2.6.2 FİZİK DENETİMİ — KATSAYI YENİDEN KALİBRASYONU (bulgu F033).
+        Eski katsayılar (a=0.25, basınç katsayısı k=0.05) kaynaksızdı ve
+        RocketCEA referansına karşı SİSTEMATİK OLARAK SICAK veriyordu.
+        Ölçülen (Pc=20 bar, N2O/HTPB + LOX/HTPB, 18 O/F noktası):
+        eski model bağıl hata +%(-0.7 … +39.7), RMS %15.4 ve bias belirgin
+        pozitif. Yeni katsayılar aynı 18 noktalık CEA taramasına en küçük
+        kareler ile uyduruldu: RMS %6.1, bias ~sıfır.
+
+          * Basınç katsayısı k: 0.05 -> 0.0413. RocketCEA ile 1-200 bar
+            taraması (N2O/HTPB MR=6,7; LOX/HTPB MR=2.0,2.5; LOX/RP-1 MR=2.5;
+            GOX/HTPB MR=2.2) T_c(200 bar)/T_c(1 bar) = 1.17…1.26 verir; bu
+            altı taramaya uydurulan k ortalaması 0.0413'tür (eski 0.05, ilgili
+            aralıkta %26.5 artış öngörüyordu, CEA %17-26).
+          * Zarf keskinliği a: 0.25 -> 0.45. Eski değer yakıt-zengin uçta
+            fazla sıcaktı (N2O/HTPB O/F=2'de +%18.5, LOX/HTPB O/F=0.8'de
+            +%39.7); a=0.45 ile bu iki nokta -%10.2 ve +%7.9'a iner.
+
+        Tepe konumu (φ=1) modelin yapısal kısıtıdır; gerçekte tepe hafif
+        yakıt-zengin taraftadır (LOX/HTPB'de φ≈1.16). Tek parametreli zarf
+        bunu taşıyamaz; kalan hata bandı (±%10) fallback için kabul edilmiştir.
+        DOĞRU sonuç için Cantera (ya da RocketCEA yolu) kullanılmalıdır.
         """
         base_temp = 3200.0  # K (stokiyometriye yakın hidrokarbon/oksitleyici)
         if elements.get('AL', 0) > 0.1:
@@ -580,12 +638,13 @@ class CombustionAnalyzer:
         o_needed = 2.0 * n_C + 0.5 * n_H + 1.5 * n_AL
         if n_O > 1e-9 and o_needed > 1e-9:
             phi = o_needed / n_O
-            factor = 1.0 / (1.0 + 0.25 * np.log(phi) ** 2)
+            factor = 1.0 / (1.0 + self._EMP_PHI_SHARPNESS * np.log(phi) ** 2)
             factor = float(np.clip(factor, 0.35, 1.0))
         else:
             factor = 1.0  # denge kurulamıyorsa eski davranış
 
-        return base_temp * factor * (1.0 + 0.05 * np.log(pressure))
+        return base_temp * factor * (
+            1.0 + self._EMP_PRESSURE_COEFF * np.log(max(pressure, 1e-3)))
 
     def _calculate_reactant_enthalpy(self, fuel_composition: Optional[Dict],
                                      oxidizer_type: Optional[str],
@@ -756,74 +815,169 @@ class CombustionAnalyzer:
     
     # Fallback yolunda kullanılan tür molekül ağırlıkları [kg/kmol] — NIST-JANAF
     _FALLBACK_SPECIES_MW = {
-        'CO2': 44.01, 'CO': 28.01, 'H2O': 18.015, 'H2': 2.016,
-        'N2': 28.014, 'OH': 17.007, 'H': 1.008, 'O': 15.999,
-        'NO': 30.006, 'AL2O3_l': 101.96, 'AL2O3_s': 101.96,
+        'CO2': 44.0095, 'CO': 28.0101, 'H2O': 18.01528, 'H2': 2.01588,
+        'N2': 28.0134, 'O2': 31.9988, 'OH': 17.007, 'H': 1.008, 'O': 15.999,
+        'NO': 30.006, 'AL2O3_l': 101.96, 'AL2O3_s': 101.96, 'AL': 26.982,
     }
+
+    # Atom kütleleri [g/mol] — IUPAC 2021 standart atom ağırlıkları
+    _ATOMIC_MASS = {'C': 12.011, 'H': 1.008, 'O': 15.999,
+                    'N': 14.007, 'AL': 26.982}
+
+    # Su-gaz kayması (water-gas shift) denge sabiti:
+    #     CO + H2O <-> CO2 + H2 ,  K = (X_CO2·X_H2)/(X_CO·X_H2O)
+    # ln K = A/T + B. Katsayılar NASA polinom termodinamiğinden (GRI-Mech 3.0
+    # / NASA-JANAF standart Gibbs enerjileri) 1500-4000 K bandında en küçük
+    # kareler ile çıkarıldı; bant içi en büyük sapma K'de %6.7'dir.
+    # (Denge sabiti mol sayısı korunduğu için BASINÇTAN bağımsızdır.)
+    _WGS_LNK_A = 2918.8606
+    _WGS_LNK_B = -2.96062
+
+    # Al2O3 ergime sıcaklığı [K] (NIST-JANAF) — yoğuşmuş faz etiketi için
+    _AL2O3_MELT_K = 2327.0
+
+    # Ampirik alev sıcaklığı zarfı katsayıları (yalnız Cantera YOKKEN etkin).
+    # RocketCEA taramasına uydurulmuştur — gerekçe ve ölçüm için
+    # _empirical_flame_temperature docstring'ine bakın (bulgu F033).
+    _EMP_PRESSURE_COEFF = 0.0413   # T ~ (1 + k·ln P);  eski kaynaksız değer 0.05
+    _EMP_PHI_SHARPNESS = 0.45      # f(φ) = 1/(1 + a·ln²φ); eski kaynaksız değer 0.25
+
+    def _atom_balance_composition(self, elements: Dict,
+                                  temperature: float) -> Dict[str, float]:
+        """Elemental kütle kesirlerinden ürün MOL kesirlerini çözer.
+
+        Bkz. _fallback_equilibrium_composition docstring'i (yöntem, kaynak,
+        sınırlamalar). Döndürülen sözlük mol kesirleridir (toplam 1.0).
+
+        Girdi `elements`: {'C','H','O','N','AL'} -> kg element / kg karışım.
+        """
+        m = self._ATOMIC_MASS
+        # mol/kg karışım
+        n_c = max(elements.get('C', 0.0), 0.0) * 1000.0 / m['C']
+        n_h = max(elements.get('H', 0.0), 0.0) * 1000.0 / m['H']
+        n_o = max(elements.get('O', 0.0), 0.0) * 1000.0 / m['O']
+        n_n = max(elements.get('N', 0.0), 0.0) * 1000.0 / m['N']
+        n_al = max(elements.get('AL', 0.0), 0.0) * 1000.0 / m['AL']
+
+        moles: Dict[str, float] = {}
+
+        # 1) Alüminyum: 2 Al + 3/2 O2 -> Al2O3 (O atom talebi 3 mol / mol Al2O3)
+        n_al2o3 = min(n_al / 2.0, n_o / 3.0) if n_al > 0.0 else 0.0
+        if n_al2o3 > 0.0:
+            key = 'AL2O3_l' if temperature >= self._AL2O3_MELT_K else 'AL2O3_s'
+            moles[key] = n_al2o3
+            # Oksitlenemeyen alüminyum artığı (aşırı yakıt-zengin metalize)
+            n_al_left = n_al - 2.0 * n_al2o3
+            if n_al_left > 1e-9:
+                moles['AL'] = n_al_left
+        o_free = max(n_o - 3.0 * n_al2o3, 0.0)
+
+        # 2) C ve H arasında oksijen paylaşımı
+        o_needed = 2.0 * n_c + 0.5 * n_h          # tam oksidasyon talebi
+        if o_free >= o_needed:
+            # Oksijen fazlası (yakıt-fakir): tam oksidasyon + artık O2
+            a, b = n_c, 0.0                        # CO2, CO
+            c, d = n_h / 2.0, 0.0                  # H2O, H2
+            o2_excess = 0.5 * (o_free - o_needed)
+            if o2_excess > 1e-9:
+                moles['O2'] = o2_excess
+        elif n_c <= 1e-12:
+            # Karbonsuz yakıt (ör. saf Al ya da H2): O tümüyle H2O'ya gider
+            a = b = 0.0
+            c = min(o_free, n_h / 2.0)
+            d = max(n_h / 2.0 - c, 0.0)
+        else:
+            # Yakıt-zengin: su-gaz kayması dengesi
+            # b = n_c - a ; c = o_free - n_c - a ; d = n_h/2 - c
+            # K = a·d/(b·c)  ->  (1-K)a² + (P + K·o_free)a - K·n_c(o_free-n_c) = 0
+            # (P = n_h/2 - o_free + n_c)
+            k_wgs = float(np.exp(self._WGS_LNK_A / max(temperature, 300.0)
+                                 + self._WGS_LNK_B))
+            p_lin = n_h / 2.0 - o_free + n_c
+            aa = 1.0 - k_wgs
+            bb = p_lin + k_wgs * o_free
+            cc = -k_wgs * n_c * (o_free - n_c)
+            # a fiziksel bandı: CO2 hem karbonla hem oksijenle sınırlı
+            a_max = max(min(n_c, 0.5 * o_free), 0.0)
+            if abs(aa) < 1e-12:
+                a = -cc / bb if abs(bb) > 1e-12 else 0.0
+            else:
+                disc = max(bb * bb - 4.0 * aa * cc, 0.0)
+                root_hi = (-bb + np.sqrt(disc)) / (2.0 * aa)
+                root_lo = (-bb - np.sqrt(disc)) / (2.0 * aa)
+                a = root_hi if 0.0 <= root_hi <= a_max else root_lo
+            a = float(np.clip(a, 0.0, a_max))
+            b = max(n_c - a, 0.0)
+            c = max(o_free - n_c - a, 0.0)
+            d = max(n_h / 2.0 - c, 0.0)
+
+        for name, val in (('CO2', a), ('CO', b), ('H2O', c), ('H2', d)):
+            if val > 1e-12:
+                moles[name] = val
+
+        # 3) Azot -> N2 (fallback'te NO/NO2 ihmal, bkz. docstring sınırlamalar)
+        if n_n > 1e-12:
+            moles['N2'] = 0.5 * n_n
+
+        total = sum(moles.values())
+        if total <= 0.0:
+            # Hiçbir ürün türetilemedi (tüm elementler sıfır): fiziksel olmayan
+            # girdi. Sessizce sahte bileşim döndürmek yerine açık hata ver.
+            raise ValueError(
+                "Fallback equilibrium: elemental composition is empty; "
+                "cannot derive product species.")
+        return {sp: n / total for sp, n in moles.items()}
 
     def _fallback_equilibrium_composition(self, elements: Dict, pressure: float,
                                         temperature: float, station: str) -> Dict:
-        """Fallback equilibrium model for when Cantera is not available.
+        """Cantera yokken kullanılan denge bileşimi modeli (atom dengesi + WGS).
 
-        DİKKAT — SÖZLEŞME: Cantera yolu (_calculate_equilibrium_composition)
-        ile AYNI şekilde dönmelidir: {'species', 'temperature', 'pressure',
-        'density', 'molecular_weight', 'cp', 'cv', 'gamma', 'gamma_frozen',
-        'enthalpy', 'entropy'}. Eski sürüm yalnız düz tür-kesri sözlüğü
-        döndürüyordu; tüketiciler comp['gamma'] okuduğu için Cantera'sız
-        makinelerde /calculate KeyError('gamma') ile 400 dönüyordu
-        (2026-07-12 saha hatası). Termodinamik skalarlar burada ideal-gaz +
-        tipik yanma gazı yaklaşımlarıyla KABA tahmindir; doğruluk için
-        Cantera kurulmalıdır (fallback'e düşüş zaten loglanıyor).
+        DÜZELTME (v2.6.2 fizik denetimi, bulgu F005). ESKİ DAVRANIŞ: istasyona
+        göre SABİT bir tür sözlüğü ({'CO2':0.22,'CO':0.08,'H2O':0.12,
+        'N2':0.54,...}) döndürülüyordu. Bileşim itici çiftinden TAMAMEN
+        bağımsızdı: LOX/HTPB gibi hiç azot içermeyen bir çiftte bile ürünlerin
+        %54'ü N2 sayılıyor, karışım molekül ağırlığı her çiftte 29.6 g/mol'e
+        çakılıyordu. Ölçülen etki (RocketCEA referansına karşı, cantera kapalı):
+        htpb/n2o O/F=6 Pc=20 bar c* -%4.4; htpb/lox O/F=2 Pc=40 bar c* -%13.4.
+        Cantera requirements.txt'te OLMADIĞI için bu yol temiz kurulumda
+        VARSAYILANDIR — yani hata gerçek kullanıcıya ulaşıyordu.
+
+        YENİ DAVRANIŞ — elemental atom dengesinden türetilen kapalı-form çözüm:
+          1) Al önce oksitlenir: 2 Al + 3/2 O2 -> Al2O3 (yoğuşmuş).
+             (Al2O3 oluşum entalpisi tüm ana ürünlerden büyüktür; CEA
+             çözümlerinde alüminyum pratikte tam oksitlenir — Sutton &
+             Biblarz 9. baskı Böl. 12, metalize yakıtlar.)
+          2) Kalan oksijen C ve H arasında paylaşılır. Oksijen fazlaysa tam
+             oksidasyon (CO2 + H2O + artık O2), yakıt zenginse CO/CO2 ve
+             H2/H2O dağılımı su-gaz kayması dengesinden çözülür:
+                 C dengesi : a + b = n_C            (a=CO2, b=CO)
+                 H dengesi : c + d = n_H/2          (c=H2O, d=H2)
+                 O dengesi : 2a + b + c = n_O_kalan
+                 WGS       : K(T) = a·d / (b·c)
+             Bu dört denklem a için TEK bir ikinci derece denkleme indirgenir
+             (aşağıda), yani iterasyon gerekmez.
+          3) N tümüyle N2'ye gider (fallback'te NO/NO2 ihmal).
+
+        BİLİNEN SINIRLAMA: ayrışma (OH, H, O, NO) modellenmez. Bu, karışım
+        molekül ağırlığını gerçek denge değerinden SİSTEMATİK OLARAK ~%1.5-2
+        YÜKSEK verir (ölçüldü: htpb/n2o 26.32 vs CEA 25.88 = +%1.7;
+        htpb/lox 23.14 vs CEA 22.78 = +%1.6) ve dolayısıyla c*'ı biraz DÜŞÜK
+        (konservatif) verir. Eski sabit sözlüğün hatası aynı vakalarda
+        +%14.4 ve +%30.0 idi. Kesin sonuç için Cantera kurulmalıdır.
+
+        Kaynak: kütle/atom korunumu (Gordon & McBride, NASA RP-1311 Part I,
+        element denge kısıtları); su-gaz kayması dengesi için NASA-JANAF
+        standart Gibbs enerjileri (bkz. _WGS_LNK_A/_WGS_LNK_B).
+
+        SÖZLEŞME: Cantera yolu (_calculate_equilibrium_composition) ile AYNI
+        şekilde döner: {'species', 'temperature', 'pressure', 'density',
+        'molecular_weight', 'cp', 'cv', 'gamma', 'gamma_frozen', 'enthalpy',
+        'entropy'}. (Eski sürüm yalnız düz tür-kesri sözlüğü döndürüyordu;
+        tüketiciler comp['gamma'] okuduğu için Cantera'sız makinelerde
+        /calculate KeyError('gamma') ile 400 dönüyordu — 2026-07-12 saha
+        hatası.)
         """
-        composition = {}
-
-        if station == 'chamber':
-            # High temperature, major species
-            composition = {
-                'CO2': 0.22,
-                'CO': 0.08,
-                'H2O': 0.12,
-                'H2': 0.02,
-                'N2': 0.54,
-                'OH': 0.015,
-                'H': 0.001,
-                'O': 0.001,
-                'NO': 0.002,
-                'AL2O3_l': elements.get('AL', 0) * 0.5  # Liquid alumina
-            }
-        elif station == 'throat':
-            # Partially frozen composition
-            composition = {
-                'CO2': 0.24,
-                'CO': 0.06,
-                'H2O': 0.13,
-                'H2': 0.015,
-                'N2': 0.545,
-                'OH': 0.008,
-                'H': 0.0005,
-                'O': 0.0005,
-                'NO': 0.001,
-                'AL2O3_s': elements.get('AL', 0) * 0.5  # Solidified alumina
-            }
-        else:  # exit
-            # Frozen composition, condensed species
-            composition = {
-                'CO2': 0.26,
-                'CO': 0.04,
-                'H2O': 0.14,
-                'H2': 0.01,
-                'N2': 0.55,
-                'OH': 0.001,
-                'H': 0.0001,
-                'O': 0.0001,
-                'NO': 0.0001,
-                'AL2O3_s': elements.get('AL', 0) * 0.5
-            }
-        
-        # Normalize to ensure sum = 1
-        total = sum(composition.values())
-        if total > 0:
-            composition = {species: frac/total for species, frac in composition.items()}
+        composition = self._atom_balance_composition(elements, temperature)
 
         # ---- Cantera sözleşmesiyle aynı şekle getir ----
         # Karışım molekül ağırlığı: MW = Σ X_i·M_i (mol kesirleri üzerinden)
@@ -868,9 +1022,59 @@ class CombustionAnalyzer:
             'gamma_frozen': gamma_est,
             'enthalpy': h_mass,
             'entropy': s_mass,
-            'source': 'empirical_fallback',
+            'source': 'atom_balance_fallback',
+            # Kullanıcıya görünür dürüstlük bayrağı: bu istasyon Cantera denge
+            # çözümünden DEĞİL, atom dengesi + su-gaz kayması yaklaşımından
+            # gelmiştir (ayrışma modellenmez, MW ~%2 yüksek).
+            'warning': {
+                'code': 'warn.combustion.equilibrium_fallback',
+                'params': {'station': station},
+                'severity': 'warning',
+            },
         }
     
+    def _exit_pressure_from_expansion(self, expansion_ratio: float, gamma: float,
+                                      chamber_pressure: float) -> float:
+        """ε = Ae/At ve γ'dan izentropik çıkış basıncını (bar) çözer.
+
+        İzentropik alan-Mach bağıntısı (Sutton & Biblarz 9. baskı, Eş. 3-14):
+            A_e/A_t = (1/M)·[ (2/(γ+1))·(1 + (γ-1)/2·M²) ] ^ ((γ+1)/(2(γ-1)))
+        süpersonik kökü brentq ile çözülür, sonra izentropik basınç bağıntısı
+        (Eş. 3-7) uygulanır:
+            p_e = p_c / (1 + (γ-1)/2·M_e²) ^ (γ/(γ-1))
+
+        Not: bu yöntem F034 düzeltmesinin (çıkış istasyonunu motorun gerçek
+        genişleme oranına bağlama) sayısal çekirdeğidir; çağıran
+        analyze_combustion'dır. ε <= 1 ya da yakınsama başarısızlığında oda
+        basıncına eşlenik güvenli değer yerine ISA deniz seviyesi çapası
+        döndürülür (çağıran zaten bu durumu 'sea_level_default' sayar).
+        """
+        eps = float(expansion_ratio)
+        g = float(gamma)
+        if eps <= 1.0 or not (1.0 < g < 2.0):
+            return isa_pressure(0.0) * BAR_PER_PA
+
+        exponent = (g + 1.0) / (2.0 * (g - 1.0))
+
+        def area_ratio(M: float) -> float:
+            return (1.0 / M) * ((2.0 / (g + 1.0))
+                                * (1.0 + 0.5 * (g - 1.0) * M * M)) ** exponent
+
+        try:
+            M_e = brentq(lambda M: area_ratio(M) - eps, 1.0 + 1e-6, 60.0,
+                         xtol=1e-10, maxiter=200)
+        except (ValueError, RuntimeError):
+            logger.warning(
+                "Alan-Mach çözümü yakınsamadı (eps=%.3f, gamma=%.4f); "
+                "çıkış basıncı ISA deniz seviyesine çapalanıyor.", eps, g)
+            return isa_pressure(0.0) * BAR_PER_PA
+
+        p_e = chamber_pressure / (
+            (1.0 + 0.5 * (g - 1.0) * M_e * M_e) ** (g / (g - 1.0)))
+        # Sayısal taban: mutlak sıfır basınç ileride log/oran alan tüketicileri
+        # bozar. 1e-6 bar (~0.1 Pa) fiziksel olarak "vakum" mertebesidir.
+        return float(max(p_e, 1e-6))
+
     def _calculate_exit_temperature(self, T_chamber: float, P_chamber: float, P_exit: float,
                                     gamma: Optional[float] = None) -> float:
         """Calculate exit temperature using isentropic expansion.
@@ -1339,6 +1543,11 @@ class CombustionAnalyzer:
                 'cp': cp_j / 1000.0,       # kJ/kg·K
                 'cv': cv_j / 1000.0,       # kJ/kg·K
                 'gamma': gamma_local,
+                # v2.6.2 fizik denetimi, bulgu F095: istasyon MW'si artık
+                # KAYDEDİLİYOR. R_mix zaten ondan türetiliyordu ama değerin
+                # kendisi atılıyor, aşağıdaki ortalama da sabit 30.0 ile
+                # dolduruluyordu. R_universal/R_mix özdeşliğiyle geri alınır.
+                'molecular_weight': self.R_universal / R_mix,  # kg/kmol
                 'speed_of_sound': a,  # m/s
                 'density': rho,       # kg/m³
                 'temperature': T,     # K
@@ -1361,33 +1570,108 @@ class CombustionAnalyzer:
             'flow_properties': {
                 'mass_averaged_gamma': sum(p['gamma'] for p in properties.values()) / 3,
                 'mass_averaged_cp': sum(p['cp'] for p in properties.values()) / 3,
-                'mass_averaged_mw': sum(30.0 for _ in properties.values()) / 3  # Simplified
+                # v2.6.2 fizik denetimi, bulgu F095: burada
+                # `sum(30.0 for _ in properties.values()) / 3` yazılıydı — yani
+                # istasyon sayısı kadar 30.0 toplanıp bölünüyordu; sonuç HER
+                # ZAMAN 30.0 ve hesaplanan bileşimle hiçbir ilgisi yok.
+                # Gerçek istasyon MW'leri aynı fonksiyonda zaten mevcut.
+                'mass_averaged_mw': (sum(p['molecular_weight']
+                                         for p in properties.values())
+                                     / len(properties))
             }
         }
     
     def _calculate_isentropic_efficiency(self, properties: Dict) -> float:
-        """Calculate nozzle isentropic efficiency"""
-        
-        # Actual enthalpy drop
-        h_actual = properties['chamber']['enthalpy'] - properties['exit']['enthalpy']
-        
-        # Isentropic enthalpy drop (simplified calculation)
-        # Üs (gamma-1)/gamma hesaplanan oda gamma'sından türetilir; eski kod
-        # gamma=1.4 (hava) değerine karşılık gelen sabit 0.286 kullanıyordu.
-        T_c = properties['chamber']['temperature']
-        gamma_c = properties['chamber'].get('gamma', 1.25)
-        T_e_isentropic = T_c * (properties['exit']['pressure'] /
-                                properties['chamber']['pressure'])**((gamma_c - 1.0) / gamma_c)
-        
-        # Simplified isentropic enthalpy
-        cp_avg = properties['chamber']['cp']
-        h_isentropic = cp_avg * (T_c - T_e_isentropic)
-        
-        # Efficiency
-        eta_s = h_actual / max(h_isentropic, 0.001)
-        
-        return min(1.0, max(0.8, eta_s))  # Clamp between 80% and 100%
-    
+        """Tabloya yazılan oda->çıkış genişlemesinin izentropik verimi [-].
+
+        DÜZELTME (v2.6.2 fizik denetimi, bulgu F032). ESKİ DAVRANIŞ: pay ile
+        payda FARKLI tabandaydı. Pay h_oda - h_çıkış idi ve bu entalpiler
+        oluşum entalpisini içeren KAYAN-DENGE (shifting) değerleridir —
+        rekombinasyon ısısını da taşırlar. Payda ise DONMUŞ (frozen) cp ile
+        cp_oda·(T_c - T_e,izentropik) olarak kuruluyordu. Oran bu yüzden
+        yapısal olarak 1'in üstüne çıkıyor, [0.8, 1.0] kırpması bunu
+        maskeliyordu; fonksiyon fiilen HER ZAMAN 1.0 döndürüyordu (ölçüldü:
+        htpb/n2o O/F=6 Pc=20 bar, eps=10 -> ham oran 1.2539, raporlanan 1.0).
+
+        YENİ TANIM — pay ve payda AYNI tabanda (istasyon tablosunun kendi
+        entalpi/entropi fonksiyonları), Gibbs bağıntısından türetilir. Sabit
+        basınçta dh = T·ds olduğundan, çıkış basıncında gerçek izentropik
+        (s = s_oda) entalpi birinci mertebeden
+
+            h_e,izentropik = h_e - T_e·(s_e - s_oda)
+
+        yazılır ve
+
+            eta_s = (h_oda - h_e) / [ (h_oda - h_e) + T_e·(s_e - s_oda) ]
+
+        elde edilir. Entropi üretimi sıfırsa (ideal) eta_s = 1; entropi
+        üretildikçe 1'in altına iner. Kırpma YOKTUR: sayı artık bilgi taşır.
+
+        DOĞRULAMA (bu depoda ölçüldü, htpb/n2o O/F=6 Pc=20 bar; payda ayrıca
+        Cantera'da gas.SP + equilibrate('SP') ile TAM izentropik denge
+        çözülerek bağımsız hesaplandı):
+            eps=4   eta_lin=0.9314  eta_tam=0.9330  (fark %0.2)
+            eps=10  eta_lin=0.8917  eta_tam=0.8977  (fark %0.7)
+            eps=25  eta_lin=0.8738  eta_tam=0.8846  (fark %1.2)
+            eps=60  eta_lin=0.8669  eta_tam=0.8820  (fark %1.7)
+        Doğrusallaştırma hatası genişleme oranıyla büyür ama %2'nin altında
+        kalır; buna karşılık bu form Cantera'sız (atom dengesi) yolda da
+        çalışır ve ek denge çözümü maliyeti getirmez.
+
+        YORUM: değer, TABLOLANAN çıkış istasyonunun (tek-gamma izentropik
+        sıcaklıktan türetilmiş) ideal genişlemeye göre verimidir; bir donanım
+        kaybı ölçüsü DEĞİLDİR. Motorun raporlanan Isp'i buradan gelmez —
+        performance['isp'] ayrıca _calculate_frozen_shifting_isp içinde tam
+        izentropik denge çözümüyle (gas.SP + equilibrate) hesaplanır. Bu alan
+        istasyon tablosunun kendi iç tutarlılığını gösterir.
+
+        SINIRLAMA (Cantera kurulu DEĞİLKEN): istasyon entalpi/entropileri
+        atom-dengesi yolundan (yalnız duyulur terim + kaba, sıcaklığa bağlı
+        gamma tahmini) gelir. Bu zincir entropi-tutarlı değildir; ölçüldü
+        (htpb/n2o O/F=6 Pc=20 bar): ham oran eps=None'da 1.907, eps=60'ta
+        1.208 — yani s_çıkış < s_oda çıkıyor. Bu modelde entropi üretimi
+        tanımsız olduğundan sonuç fiziksel üst sınır olan 1.0'a (ideal
+        genişleme) sabitlenir; uydurma bir kayıp sayısı ÜRETİLMEZ. Anlamlı
+        (1'den küçük) değer için Cantera gerekir.
+
+        Kaynak: Gibbs bağıntısı dh = T·ds + v·dp (sabit p'de dh = T·ds);
+        izentropik verim tanımı Sutton & Biblarz, "Rocket Propulsion
+        Elements" 9. baskı Böl. 3 (ideal ve gerçek genişleme karşılaştırması).
+        """
+        h_c = properties['chamber']['enthalpy']
+        h_e = properties['exit']['enthalpy']
+        s_c = properties['chamber']['entropy']
+        s_e = properties['exit']['entropy']
+        T_e = properties['exit']['temperature']
+
+        h_actual = h_c - h_e                       # kJ/kg
+        ds_gen = s_e - s_c                         # kJ/(kg·K)
+        h_isentropic = h_actual + T_e * ds_gen     # kJ/kg (aynı taban)
+
+        if h_actual <= 0.0 or h_isentropic <= 0.0:
+            # Genişleme yok / fiziksel olmayan istasyon çifti: sahte bir sayı
+            # uydurmak yerine tanımsız-ama-nötr 1.0 döndürülür ve loglanır.
+            logger.warning(
+                "İzentropik verim tanımsız (h_act=%.3f, h_is=%.3f kJ/kg); "
+                "1.0 raporlanıyor.", h_actual, h_isentropic)
+            return 1.0
+
+        eta_s = h_actual / h_isentropic
+        # Üst sınır 1.0: ds_gen < 0 (entropi ÜRETİLMEMİŞ, yani istasyon
+        # zinciri termodinamik olarak tutarsız) durumunda oran 1'i aşar.
+        # Fiziksel üst sınır 1'dir; aşım bir MODEL tutarsızlığıdır, loglanır.
+        if eta_s > 1.0:
+            # Cantera'sız (atom dengesi) yolda BEKLENEN durum — bkz. docstring
+            # "SINIRLAMA". Cantera varken görülürse istasyon zinciri gerçekten
+            # tutarsızdır; her iki halde de fiziksel üst sınır 1.0 döndürülür.
+            logger.debug(
+                "İzentropik verim ham oranı 1'i aştı (%.4f): çıkış istasyonu "
+                "entropisi oda entropisinden küçük; 1.0 (ideal) raporlanıyor.",
+                eta_s)
+            return 1.0
+        return float(eta_s)
+
+
     def calculate_thrust_at_altitudes(self, total_impulse: float, motor_data: Dict, 
                                     altitudes: List[float]) -> Dict:
         """Calculate thrust at different altitudes from total impulse"""

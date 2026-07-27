@@ -12,7 +12,15 @@ from typing import Dict, List, Optional, Tuple
 from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, LAMBDA_BELL,
                             NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT,
                             lambda_conical)
-warnings.filterwarnings('ignore')
+# v2.6.2: buradaki ``warnings.filterwarnings('ignore')`` KALDIRILDI.
+# Argümansız çağrı SÜREÇ GENELİNDE catch-all filtre kurar — kapsam bu modül
+# değil, tüm Python süreci. Yani sıvı motor modülünü içe aktarmak (app.py her
+# açılışta yapıyor) uygulamanın tamamında numpy'nin sıfıra bölme / geçersiz
+# değer uyarılarını öldürüyordu. Ampirik teyit: modülü import ettikten sonra
+# ``np.float64(1.0)/np.float64(0.0)`` hiçbir RuntimeWarning basmadan inf
+# döndürüyordu. Bu, NaN'ın sessizce çıktıya sızmasının ilk halkasıydı.
+# Belirli bir uyarıyı bastırmak gerekirse dar kapsamlı yapılmalı:
+#   warnings.filterwarnings('ignore', category=..., module=r'hrma\.engines\..*')
 
 # ---------------------------------------------------------------------------
 # Web yakıt verisi süreç içi memo'su (v2.5.5 performans).
@@ -467,10 +475,23 @@ class LiquidRocketEngine:
     # ------------------------------------------------------------------
     # Form girdisi bağlama katmanı (2026-07-19 uydurma denetimi, bulgu 1)
     # ------------------------------------------------------------------
-    def _warn(self, message):
-        """Kullanıcıya görünecek girdi uyarısı biriktirir (İngilizce metin)."""
-        if message not in self.design_warnings:
-            self.design_warnings.append(message)
+    def _warn(self, code, severity="warning", **params):
+        """Kullanıcıya görünecek uyarıyı i18n kaydı olarak biriktirir.
+
+        v2.6.2 (D-track): backend dilsizdir. Sabit İngilizce metin YERİNE
+        ``{"code", "params", "severity"}`` sözlüğü biriktirilir; metni
+        frontend ``TF(code, params)`` ile kurar. Sözleşme
+        cycle_power_balance._w / validation_system._w ile birebir aynıdır.
+
+        ``code``: ``warn.liquid.<slug>``. ``severity`` ∈ {"critical",
+        "warning", "info"}. ``params``: metne gömülü tüm değişkenler.
+
+        Yineleme davranışı korunur: aynı (code, params, severity) üçlüsü
+        listeye iki kez girmez (eski kod aynı METNİ iki kez eklemiyordu).
+        """
+        record = {"code": code, "params": params, "severity": severity}
+        if record not in self.design_warnings:
+            self.design_warnings.append(record)
 
     def _override_val(self, key, lo, hi, label=None, unit=''):
         """overrides[key] sonlu ve [lo, hi] içindeyse float döndürür.
@@ -485,16 +506,17 @@ class LiquidRocketEngine:
         try:
             f = float(raw)
         except (TypeError, ValueError):
-            self._warn(f"{label or key} input '{raw}' is not a number and was "
-                       f"ignored.")
+            self._warn('warn.liquid.input_not_a_number', 'warning',
+                       field=key, field_label_en=(label or key), raw=str(raw))
             return None
         if not np.isfinite(f):
-            self._warn(f"{label or key} input is not finite and was ignored.")
+            self._warn('warn.liquid.input_not_finite', 'warning',
+                       field=key, field_label_en=(label or key))
             return None
         if not (lo <= f <= hi):
-            self._warn(f"{label or key} input {f:g}{unit} is outside the "
-                       f"accepted range {lo:g}-{hi:g}{unit} and was ignored; "
-                       f"the solver default is used instead.")
+            self._warn('warn.liquid.input_out_of_range', 'warning',
+                       field=key, field_label_en=(label or key),
+                       value=float(f), unit=unit, lo=float(lo), hi=float(hi))
             return None
         return f
 
@@ -505,8 +527,8 @@ class LiquidRocketEngine:
             return None
         text = str(raw).strip().lower()
         if text not in allowed:
-            self._warn(f"{label or key} option '{raw}' is not recognised by "
-                       f"the solver and was ignored.")
+            self._warn('warn.liquid.option_not_recognised', 'warning',
+                       field=key, field_label_en=(label or key), raw=str(raw))
             return None
         return text
 
@@ -558,8 +580,7 @@ class LiquidRocketEngine:
         self.of_scan_max = self._override_val('of_max', 0.2, 20.0, 'O/F maximum')
         if (self.of_scan_min is not None and self.of_scan_max is not None
                 and self.of_scan_min >= self.of_scan_max):
-            self._warn("O/F minimum must be smaller than O/F maximum; the "
-                       "entered scan band was ignored.")
+            self._warn('warn.liquid.of_scan_band_invalid', 'warning')
             self.of_scan_min = self.of_scan_max = None
 
         # O/F optimum değiştiyse MR verim cezası ve Isp/c* yeniden hesaplanır.
@@ -718,15 +739,10 @@ class LiquidRocketEngine:
         # --- girdi tutarlılık denetimleri -----------------------------------
         if (self.chamber_diameter_input_m is not None
                 and self.contraction_ratio_input is not None):
-            self._warn(
-                "Chamber diameter and contraction ratio were both entered; "
-                "the explicit chamber diameter takes precedence and the "
-                "contraction ratio is recomputed from it.")
+            self._warn('warn.liquid.chamber_diameter_overrides_contraction',
+                       'info')
         if self.throat_diameter_input_m is not None:
-            self._warn(
-                "Throat diameter is a solver OUTPUT: it is sized from the "
-                "mass balance for the commanded thrust and chamber pressure, "
-                "so the entered value is reported for comparison only.")
+            self._warn('warn.liquid.throat_diameter_is_output', 'info')
 
         # --- performans referansının SON hali -------------------------------
         # Tüm girdiler bağlandıktan sonra (genişleme oranı, lüle tipi, c*
@@ -787,12 +803,13 @@ class LiquidRocketEngine:
             d_c = self.chamber_diameter_input_m
             cr = (d_c / d_t) ** 2
             if not (CONTRACTION_RATIO_MIN <= cr <= CONTRACTION_RATIO_MAX):
-                self._warn(
-                    f"Chamber diameter {d_c * 1000:.1f} mm gives a contraction "
-                    f"ratio of {cr:.1f} against the {d_t * 1000:.1f} mm throat, "
-                    f"outside the {CONTRACTION_RATIO_MIN:g}-"
-                    f"{CONTRACTION_RATIO_MAX:g} band; the solver default "
-                    f"sizing is used instead.")
+                self._warn('warn.liquid.contraction_ratio_out_of_band',
+                           'warning',
+                           d_c_mm=round(float(d_c) * 1000.0, 1),
+                           cr=round(float(cr), 1),
+                           d_t_mm=round(float(d_t) * 1000.0, 1),
+                           cr_min=float(CONTRACTION_RATIO_MIN),
+                           cr_max=float(CONTRACTION_RATIO_MAX))
             else:
                 return max(d_c, CHAMBER_DIAMETER_MIN_M)
         if getattr(self, 'contraction_ratio_input', None) is not None:
@@ -821,8 +838,9 @@ class LiquidRocketEngine:
         try:
             return get_material_safe(key)
         except KeyError:
-            self._warn(f"Chamber material '{key}' is not in the material "
-                       f"database; {CHAMBER_MATERIAL_DEFAULT} is used.")
+            self._warn('warn.liquid.chamber_material_unknown', 'warning',
+                       material=str(key),
+                       fallback=str(CHAMBER_MATERIAL_DEFAULT))
             return get_material_safe(CHAMBER_MATERIAL_DEFAULT)
 
     def _wall_temperatures(self):
@@ -856,11 +874,11 @@ class LiquidRocketEngine:
         if getattr(self, 'cooling_channels_input', None) is not None:
             n = int(self.cooling_channels_input)
             if n * width > np.pi * d_ref:
-                self._warn(
-                    f"{n} cooling channels of {width * 1000:.1f} mm width do "
-                    f"not fit around the {d_ref * 1000:.1f} mm throat "
-                    f"circumference; {n_geom} channels is the geometric "
-                    f"maximum at constant channel width.")
+                self._warn('warn.liquid.cooling_channels_do_not_fit',
+                           'warning', n=int(n),
+                           width_mm=round(float(width) * 1000.0, 1),
+                           d_ref_mm=round(float(d_ref) * 1000.0, 1),
+                           n_geom=int(n_geom))
             source = 'user input'
         else:
             n = n_geom
@@ -967,9 +985,8 @@ class LiquidRocketEngine:
             cf_opt, _ = self._cf_at(eps_opt, self.P_a)
             cf_user, pe_user = self._cf_at(eps_user, self.P_a)
         except Exception as exc:  # sayısal çözüm başarısız -> düzeltme yok
-            self._warn(f"Nozzle expansion ratio {eps_user:g} could not be "
-                       f"solved isentropically ({exc}); the matched-expansion "
-                       f"nozzle is used instead.")
+            self._warn('warn.liquid.expansion_ratio_unsolved', 'warning',
+                       eps=float(eps_user), detail=str(exc))
             return
         if not (np.isfinite(cf_opt) and cf_opt > 0 and np.isfinite(cf_user)):
             return
@@ -982,10 +999,9 @@ class LiquidRocketEngine:
             self.P_a * PA_PER_BAR * eps_user * self.c_star_effective
             / (self.P_c * PA_PER_BAR * cd * self.g0))
         if isp_vac_new > self.isp_vac:
-            self._warn(
-                f"Expansion ratio {eps_user:g} would exceed the CEA vacuum "
-                f"reference for this propellant pair; vacuum Isp is capped at "
-                f"{self.isp_vac:.1f} s.")
+            self._warn('warn.liquid.vacuum_isp_capped', 'warning',
+                       eps=float(eps_user),
+                       isp_vac=round(float(self.isp_vac), 1))
             isp_vac_new = self.isp_vac
         self.isp_sl = isp_sl_new
         self.isp_vac = isp_vac_new
@@ -999,12 +1015,10 @@ class LiquidRocketEngine:
         kullanıcıya açıkça söylenir.
         """
         if pe_user < NOZZLE_SEPARATION_PRESSURE_RATIO * self.P_a:
-            self._warn(
-                f"Expansion ratio {eps_user:g} gives an exit pressure of "
-                f"{pe_user:.3f} bar at sea level, below the "
-                f"{NOZZLE_SEPARATION_PRESSURE_RATIO:g} x ambient separation "
-                f"criterion; the flow would separate and the sea-level Isp "
-                f"reported here (ideal over-expansion) is conservative.")
+            self._warn('warn.liquid.flow_separation', 'warning',
+                       eps=float(eps_user),
+                       pe_bar=round(float(pe_user), 3),
+                       ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
 
     def _fetch_web_propellant_data(self):
         """Fetch real-time propellant data from NIST/NASA/SpaceX APIs"""
@@ -1441,11 +1455,9 @@ class LiquidRocketEngine:
             except Exception:
                 pass
             if self.combustion_data_source == 'conservative_estimate':
-                self._warn(
-                    f"Propellant pair {self.fuel_type}/{self.oxidizer_type} "
-                    f"is not in the combustion database and could not be "
-                    f"solved with CEA; conservative placeholder performance "
-                    f"values are used.")
+                self._warn('warn.liquid.propellant_pair_not_in_database',
+                           'warning', fuel=str(self.fuel_type),
+                           oxidizer=str(self.oxidizer_type))
 
     # ------------------------------------------------------------------
     # CANLI CEA köprüsü (2026-07-22 Raptor entegrasyonu, denetim madde 1)
@@ -1494,10 +1506,7 @@ class LiquidRocketEngine:
             # geçerlilik bayrakları raporlanır. 'not_modelled' ise (ne CEA ne
             # tablo) mevcut muhafazakâr değerler kalır ve çağıran uyarır.
             if vac['source'] == 'static_table':
-                self._warn(
-                    'RocketCEA is unavailable; combustion data comes from '
-                    'the static Pc=100 bar anchor table (no chamber-pressure '
-                    'dependence).')
+                self._warn('warn.liquid.rocketcea_unavailable', 'warning')
             if self.combustion_validity.get('real_gas_warning'):
                 self._warn_real_gas()
             return
@@ -1533,9 +1542,7 @@ class LiquidRocketEngine:
                     'Sea-level Isp could not be estimated (no ambient CEA '
                     'solution and no fallback table value).')
                 return
-            self._warn(
-                'CEA ambient-Isp estimate failed; the sea-level Isp '
-                'reference falls back to the static table value.')
+            self._warn('warn.liquid.cea_ambient_isp_failed', 'warning')
 
         self.propellant_name = getattr(self, 'propellant_name',
                                        f"{self.fuel_type.upper()}/"
@@ -1695,11 +1702,8 @@ class LiquidRocketEngine:
 
     def _warn_real_gas(self):
         """Pc >= 300 bar ideal-gaz CEA uyarısı (kullanıcıya görünür)."""
-        self._warn(
-            f"Chamber pressure {self.P_c:g} bar is in the real-gas regime "
-            f"(>= 300 bar): the CEA solution is ideal-gas (no fugacity / "
-            f"real-gas correction); treat c*, Tc and Isp as upper-bound "
-            f"estimates.")
+        self._warn('warn.liquid.real_gas_regime', 'warning',
+                   pc_bar=float(self.P_c))
 
     # ------------------------------------------------------------------
     # TESLİM (delivered) performans zinciri — 2026-07-22 doğruluk düzeltmesi
@@ -1873,9 +1877,8 @@ class LiquidRocketEngine:
                 self._resolve_combustion_reference(
                     getattr(self, '_table_props', None))
             except Exception as exc:
-                self._warn(f"Combustion reference could not be refreshed at "
-                           f"the design expansion ratio ({exc}); the initial "
-                           f"CEA solution is kept.")
+                self._warn('warn.liquid.combustion_reference_refresh_failed',
+                           'warning', detail=str(exc))
             self._delivered_eff = self._delivered_performance_efficiency()
             self._calculate_mixture_ratio_effects()
             return
@@ -2495,11 +2498,8 @@ class LiquidRocketEngine:
                         channel_height)
                 except Exception as exc:
                     regen_march = None
-                    self._warn(
-                        f"Supercritical {self.fuel_type} regenerative march "
-                        f"could not be solved ({exc}); the lumped NBP-"
-                        f"property estimate is reported instead and the "
-                        f"wall temperature remains an assumption.")
+                    self._warn('warn.liquid.regen_march_failed', 'warning',
+                               fuel=str(self.fuel_type), detail=str(exc))
                 if regen_march is not None:
                     s = regen_march['summary']
                     # Toplam yük/tepe akı/ΔT/ΔP/cidar: marştan (tek kaynak).
@@ -2521,7 +2521,10 @@ class LiquidRocketEngine:
                     wall_temp_source = ('solved (1D supercritical station '
                                         'march, Jackson correlation)')
                     for w in s.get('warnings', []):
-                        self._warn(f"Regen march: {w}")
+                        # Alt modülün (regen_cooling) kendi metni params.detail
+                        # olarak taşınır; o modül D-track kapsamı dışında.
+                        self._warn('warn.liquid.regen_march_note', 'warning',
+                                   detail=str(w))
 
         elif self.cooling_type == 'ablative':
             # Ablative cooling - no active coolant flow
@@ -2532,18 +2535,17 @@ class LiquidRocketEngine:
         # (hesap yine yapılır — kullanıcı kanal sayısını/kesitini görsün).
         if coolant_flow > 0:
             if v_coolant > COOLANT_VELOCITY_LIMIT_MS:
-                self._warn(
-                    f"Coolant channel velocity {v_coolant:.0f} m/s exceeds the "
-                    f"{COOLANT_VELOCITY_LIMIT_MS:.0f} m/s practical limit for "
-                    f"{n_channels} channels of "
-                    f"{channel_width * 1000:.1f} x {channel_height * 1000:.1f} "
-                    f"mm; increase the channel count or section.")
+                self._warn('warn.liquid.coolant_velocity_above_limit',
+                           'warning', v_coolant=round(float(v_coolant)),
+                           limit=round(float(COOLANT_VELOCITY_LIMIT_MS)),
+                           n_channels=int(n_channels),
+                           width_mm=round(float(channel_width) * 1000.0, 1),
+                           height_mm=round(float(channel_height) * 1000.0, 1))
             if pressure_drop > COOLANT_DP_FRACTION_LIMIT * self.P_c:
-                self._warn(
-                    f"Coolant pressure drop {pressure_drop:.1f} bar is "
-                    f"{pressure_drop / max(self.P_c, 1e-9) * 100:.0f}% of the "
-                    f"chamber pressure; the feed system would have to supply "
-                    f"it on top of the injector drop.")
+                self._warn('warn.liquid.coolant_pressure_drop_high', 'warning',
+                           dp_bar=round(float(pressure_drop), 1),
+                           pct=round(float(pressure_drop)
+                                     / max(float(self.P_c), 1e-9) * 100.0))
 
         # Soğutucu çıkış sıcaklığı kaynama noktasını aşıyorsa sessiz kalınmaz
         # (girdi: fuel_boiling_point; tek fazlı akış varsayımı bozulur).
@@ -2551,10 +2553,9 @@ class LiquidRocketEngine:
                          COOLANT_INLET_TEMP_DEFAULT_K) + coolant_temp_rise
         t_boil = getattr(self, 'fuel_boiling_point', None)
         if t_boil is not None and coolant_flow > 0 and t_exit > t_boil:
-            self._warn(
-                f"Coolant exit temperature {t_exit:.0f} K exceeds the entered "
-                f"fuel boiling point {t_boil:.0f} K; the single-phase cooling "
-                f"model no longer applies at the channel outlet.")
+            self._warn('warn.liquid.coolant_exit_above_boiling', 'warning',
+                       t_exit=round(float(t_exit)),
+                       t_boil=round(float(t_boil)))
 
         result = {
             'total_heat_load': total_heat_load / 1000,  # kW
@@ -2706,9 +2707,7 @@ class LiquidRocketEngine:
                      f'(cp={cp_l:.0f} J/kgK); vaporization credit '
                      f'not_modelled')
         if dh <= 0:
-            self._warn('Film cooling analysis: no absorbable enthalpy '
-                       '(inlet temperature at/above the wall target); film '
-                       'credit is zero.')
+            self._warn('warn.liquid.film_cooling_no_enthalpy', 'warning')
             return out
 
         # Film hazne silindirini enjektör yüzünden itibaren korur.
@@ -2730,10 +2729,9 @@ class LiquidRocketEngine:
             'film_absorbable_enthalpy_J_kg': float(dh),
         })
         if coverage < 1.0:
-            self._warn(
-                f"Film cooling flow ({pct:g}% of fuel) protects only "
-                f"{coverage * 100:.0f}% of the chamber barrel length; the "
-                f"remaining wall relies on the primary cooling circuit.")
+            self._warn('warn.liquid.film_cooling_partial_coverage', 'warning',
+                       pct=float(pct),
+                       coverage_pct=round(float(coverage) * 100.0))
         return out
 
     def _solve_supercritical_regen(self, coolant_flow, n_channels,
@@ -2768,11 +2766,9 @@ class LiquidRocketEngine:
             # varsayılanına çekilir (kullanıcı 300 K'yi BİLEREK istiyorsa
             # 300'den farklı ama yakın bir değer girebilir).
             if t_in is not None:
-                self._warn(
-                    f"Coolant inlet temperature left at the generic 300 K "
-                    f"form default; for {self.fuel_type} the cryogenic pump "
-                    f"discharge default {cryo_default:g} K is used instead "
-                    f"(NIST NBP + pump heating).")
+                self._warn('warn.liquid.coolant_inlet_cryo_default', 'info',
+                           fuel_type=self.fuel_type,
+                           cryo_default_K=round(float(cryo_default), 1))
             t_in = cryo_default
         t_in = float(t_in)
 
@@ -3030,11 +3026,9 @@ class LiquidRocketEngine:
             delta_P_fuel = delta_P_ox = float(dp_user)
             pressure_drop_factor = delta_P_ox / max(self.P_c, 1e-9)
             if not (0.05 <= pressure_drop_factor <= 0.40):
-                self._warn(
-                    f"Injector pressure drop {dp_user:g} bar is "
-                    f"{pressure_drop_factor * 100:.0f}% of the chamber "
-                    f"pressure; NASA SP-8089 recommends 15-25% for chug "
-                    f"stability.")
+                self._warn('warn.liquid.injector_dp_outside_sp8089', 'warning',
+                           dp_bar=float(dp_user),
+                           dp_percent=round(pressure_drop_factor * 100.0))
         else:
             delta_P_fuel = pressure_drop_factor * self.P_c  # bar (NASA SP-8089)
             delta_P_ox = pressure_drop_factor * self.P_c    # bar (NASA SP-8089)
@@ -3132,11 +3126,9 @@ class LiquidRocketEngine:
             if entered is None or computed <= 0:
                 continue
             if abs(entered - computed) / computed > INPUT_CONSISTENCY_TOLERANCE:
-                self._warn(
-                    f"{label}: the solver computes {computed:.2f}{unit} from "
-                    f"the injector pressure drop, discharge coefficient and "
-                    f"mass flow; the entered {entered:g}{unit} is reported for "
-                    f"comparison only.")
+                self._warn('warn.liquid.entered_value_is_comparison_only', 'info',
+                           label=label, computed=round(float(computed), 2),
+                           entered=float(entered), unit=unit)
         
         # Mixing efficiency calculation
         mixing_length = 0.05  # 50mm typical mixing length
@@ -3469,10 +3461,9 @@ class LiquidRocketEngine:
                 # Sayisal cozum dusrse ortam-eslenik dala geri don (etiketli)
                 exit_mach = np.sqrt(2 / (gamma - 1)
                                     * ((self.P_c / pressure_atm)**((gamma-1)/gamma) - 1))
-                self._warn(
-                    f"Exit Mach could not be solved from the area ratio "
-                    f"{eps_here:.2f} at {alt:.0f} m; the ambient-matched value "
-                    f"is reported instead.")
+                self._warn('warn.liquid.exit_mach_unsolved', 'warning',
+                           expansion_ratio=round(float(eps_here), 2),
+                           altitude_m=round(float(alt)))
             # Cikis statik basinci ve basinc-itki terimi: irtifayla DEGISEN
             # buyukluk budur (cikis Mach'i degil). Sekil olarak raporlanir ki
             # arayuz "Mach neden sabit?" sorusunu veriyle cevaplayabilsin.
@@ -3991,9 +3982,7 @@ class LiquidRocketEngine:
             return float(cooling.get('peak_heat_flux', 0.0)) * 1000.0
         except Exception:
             # Hesap düşerse UYDURMA değer döndürülmez.
-            self._warn("Wall heat flux could not be computed for the cooling "
-                       "line layout; the value is reported as zero rather "
-                       "than assumed.")
+            self._warn('warn.liquid.wall_heat_flux_unavailable', 'warning')
             return 0.0
     
     @staticmethod
@@ -4317,9 +4306,7 @@ class LiquidRocketEngine:
             return float(masses['feed_system'] + masses['turbopump_assembly'])
         except Exception:
             # Hesap düşerse UYDURMA taban değer döndürülmez.
-            self._warn("Feed system dry mass could not be derived from the "
-                       "component breakdown; it is reported as zero rather "
-                       "than assumed.")
+            self._warn('warn.liquid.feed_dry_mass_unavailable', 'warning')
             return 0.0
     
     def _design_propellant_tanks(self):
@@ -4370,13 +4357,58 @@ class LiquidRocketEngine:
         else:  # turbopump
             tank_pressure = 300000  # 3 bar for NPSH
         
-        # Wall thickness calculation (thin-walled pressure vessel)
-        material_strength = 350e6  # Pa (typical for Al-Li alloy)
-        safety_factor = 2.5
+        # Cidar kalınlığı (ince cidarlı basınçlı kap).
+        #
+        # v2.6.2 düzeltmesi — malzeme TEK KAYNAKTAN okunuyor:
+        # Burada ``material_strength = 350e6  # Al-Li alloy`` ve aşağıda
+        # ``material_density = 2700  # aluminum`` satır içi sabitleri vardı.
+        # İkisi BİRBİRİYLE ÇELİŞİYORDU: etiket Al-Li diyordu ama 2700 kg/m³
+        # saf alüminyumun (6061) yoğunluğu; Al-Li alaşımları ~2540 kg/m³.
+        # Ayrıca değerler materials_db'den GELMİYORDU, oysa yapısal, termal ve
+        # emniyet modüllerinin hepsi o veritabanını kullanıyor — tank
+        # boyutlandırma tek başına kopmuş bir adaydı ve kullanıcıya gösterilen
+        # tank kütlesi/kütle oranı bu yüzden LH2 durumunda ~4.3 kat iyimser
+        # çıkabiliyordu.
+        # Artık dayanım ve yoğunluk AYNI kayıttan okunur, dolayısıyla
+        # çelişemezler; malzeme adı da çıktıda raporlanır.
+        tank_material = getattr(self, 'tank_material', None) or 'al_2024_t3'
+        from hrma.data.materials_db import get_material_safe
+        try:
+            # get_material_safe -> (kayıt, kanonik_anahtar) çifti döndürür
+            _mat, tank_material = get_material_safe(tank_material)
+        except KeyError as exc:
+            raise ValueError(
+                f"Unknown tank material '{tank_material}'. "
+                "Tank sizing requires a material present in materials_db; "
+                "no generic fallback is applied."
+            ) from exc
+        material_strength = float(_mat['yield_strength'])   # Pa
+        material_density = float(_mat['density'])           # kg/m^3
+        # Emniyet katsayısı bir MALZEME ÖZELLİĞİ değil, tasarım kararıdır:
+        # çağıran verebilsin diye öznitelik olarak okunur.
+        safety_factor = float(getattr(self, 'tank_safety_factor', 2.5))
         allowable_stress = material_strength / safety_factor
         
+        # Yakıt tankı AYRI malzeme kullanabilir. Kriyojenik hidrojen alüminyum
+        # alaşımlarında geçirgenlik/gevrekleşme sorunları çıkardığı için pratikte
+        # paslanmaz seçilir; kod bunu ETİKETTE zaten söylüyordu ("Stainless Steel
+        # 316L") ama KALINLIK ve KÜTLEYİ alüminyum özellikleriyle hesaplıyordu.
+        # v2.6.2: etiket ile hesap aynı kayda bağlandı.
+        fuel_tank_material = getattr(self, 'fuel_tank_material', None)
+        if fuel_tank_material is None:
+            fuel_tank_material = 'steel' if self.fuel_type == 'lh2' else tank_material
+        try:
+            _fmat, fuel_tank_material = get_material_safe(fuel_tank_material)
+        except KeyError as exc:
+            raise ValueError(
+                f"Unknown fuel tank material '{fuel_tank_material}'."
+            ) from exc
+        fuel_material_strength = float(_fmat['yield_strength'])
+        fuel_material_density = float(_fmat['density'])
+        fuel_allowable_stress = fuel_material_strength / safety_factor
+
         ox_wall_thickness = (tank_pressure * ox_tank_diameter/2) / allowable_stress
-        fuel_wall_thickness = (tank_pressure * fuel_tank_diameter/2) / allowable_stress
+        fuel_wall_thickness = (tank_pressure * fuel_tank_diameter/2) / fuel_allowable_stress
         
         # Minimum practical thickness
         ox_wall_thickness = max(ox_wall_thickness, 0.003)  # 3mm minimum
@@ -4390,9 +4422,12 @@ class LiquidRocketEngine:
         ox_tank_surface_area = np.pi * ox_tank_diameter * ox_tank_length + 2 * np.pi * (ox_tank_diameter/2)**2
         fuel_tank_surface_area = np.pi * fuel_tank_diameter * fuel_tank_length + 2 * np.pi * (fuel_tank_diameter/2)**2
         
-        material_density = 2700  # kg/m³ (aluminum)
+        # material_density yukarıda materials_db kaydından okundu — burada
+        # SATIR İÇİ 2700 kg/m³ yazılıydı ve dayanım değeriyle çelişiyordu
+        # (etiket Al-Li, yoğunluk saf alüminyum). Yeniden atama yapılmaz;
+        # tek kaynak korunur.
         ox_tank_mass = ox_tank_surface_area * ox_wall_thickness * material_density
-        fuel_tank_mass = fuel_tank_surface_area * fuel_wall_thickness * material_density
+        fuel_tank_mass = fuel_tank_surface_area * fuel_wall_thickness * fuel_material_density
         
         # Add internal structure mass
         ox_tank_mass += ox_tank_internals['mass_breakdown']['total_mass']
@@ -4416,7 +4451,14 @@ class LiquidRocketEngine:
                     'ullage_volume': (ox_tank_volume - ox_volume_req) * 1000  # liters
                 },
                 'structural': {
-                    'material': 'Aluminum-Lithium 2195',
+                    # Etiket, dayanım ve yoğunluk AYNI materials_db kaydından.
+                    # Eskiden buraya sabit 'Aluminum-Lithium 2195' yazılıyordu
+                    # ama hesap 350 MPa / 2700 kg/m³ kullanıyordu — Al-Li 2195'in
+                    # akma dayanımı ~560 MPa'dır, yani etiket ile sayı tutmuyordu.
+                    'material': _mat.get('name', tank_material),
+                    'material_key': tank_material,
+                    'yield_strength_mpa': material_strength / 1e6,
+                    'density_kg_m3': material_density,
                     'pressure_rating': tank_pressure / 1e5,  # bar
                     'safety_factor': safety_factor,
                     'tank_mass': ox_tank_mass,  # kg
@@ -4441,7 +4483,11 @@ class LiquidRocketEngine:
                     'ullage_volume': (fuel_tank_volume - fuel_volume_req) * 1000  # liters
                 },
                 'structural': {
-                    'material': 'Aluminum-Lithium 2195' if self.fuel_type != 'lh2' else 'Stainless Steel 316L',
+                    # Etiket ile hesap tek kaynaktan (bkz. oksitleyici tankı notu).
+                    'material': _fmat.get('name', fuel_tank_material),
+                    'material_key': fuel_tank_material,
+                    'yield_strength_mpa': fuel_material_strength / 1e6,
+                    'density_kg_m3': fuel_material_density,
                     'pressure_rating': tank_pressure / 1e5,  # bar
                     'safety_factor': safety_factor,
                     'tank_mass': fuel_tank_mass,  # kg
@@ -4624,10 +4670,8 @@ class LiquidRocketEngine:
             rpm = PUMP_MAX_SPEED_RPM
             omega = rpm * 2.0 * np.pi / 60.0
             speed_source = f'capped at the {PUMP_MAX_SPEED_RPM:.0f} rpm practical limit'
-            self._warn(
-                f"The cavitation limit would allow a shaft speed above "
-                f"{PUMP_MAX_SPEED_RPM:.0f} rpm for this small flow rate; the "
-                f"pump speed is capped at the practical limit.")
+            self._warn('warn.liquid.pump_speed_capped', 'info',
+                       limit_rpm=round(float(PUMP_MAX_SPEED_RPM)))
 
         beta2 = np.radians(PUMP_BLADE_EXIT_ANGLE_DEG)
         slip = 1.0 - np.pi * np.sin(beta2) / PUMP_BLADE_COUNT  # Stodola
@@ -4680,10 +4724,9 @@ class LiquidRocketEngine:
         npsh_req = ((omega * np.sqrt(max(q, 1e-12))
                      / PUMP_SUCTION_SPECIFIC_SPEED) ** (4.0 / 3.0)) / g0
         if npsh_req > npsh_avail:
-            self._warn(
-                f"Pump NPSH required ({npsh_req:.1f} m) exceeds the available "
-                f"NPSH ({npsh_avail:.1f} m) at the assumed tank pressure; "
-                f"raise the tank pressure or add an inducer.")
+            self._warn('warn.liquid.npsh_insufficient', 'critical',
+                       npsh_required_m=round(float(npsh_req), 1),
+                       npsh_available_m=round(float(npsh_avail), 1))
         return {
             'design_flow_rate': mdot,                     # kg/s
             'volumetric_flow_m3_s': q,
@@ -4752,21 +4795,19 @@ class LiquidRocketEngine:
         if pressure_fed:
             tank_bar = feed_input or PUMP_TANK_PRESSURE_DEFAULT_BAR
             if tank_bar < drops['pump_discharge_pressure_ox']:
-                self._warn(
-                    f"Pressure-fed cycle: the entered feed (tank) pressure "
-                    f"{tank_bar:g} bar is below the "
-                    f"{drops['pump_discharge_pressure_ox']:.1f} bar needed to "
-                    f"push the propellant through the lines and the injector "
-                    f"into a {self.P_c:g} bar chamber.")
+                self._warn('warn.liquid.pressure_fed_tank_too_low', 'critical',
+                           tank_bar=float(tank_bar),
+                           required_bar=round(float(
+                               drops['pump_discharge_pressure_ox']), 1),
+                           chamber_bar=float(self.P_c))
         else:
             tank_bar = PUMP_TANK_PRESSURE_DEFAULT_BAR
             if feed_input is not None and feed_input < drops[
                     'pump_discharge_pressure_ox']:
-                self._warn(
-                    f"Entered feed pressure {feed_input:g} bar is below the "
-                    f"{drops['pump_discharge_pressure_ox']:.1f} bar pump "
-                    f"discharge pressure required by the chamber pressure and "
-                    f"the computed line/injector losses.")
+                self._warn('warn.liquid.feed_pressure_below_pump_discharge', 'warning',
+                           feed_bar=float(feed_input),
+                           required_bar=round(float(
+                               drops['pump_discharge_pressure_ox']), 1))
         ox_pump = self._design_pump(mdot_ox, self.rho_ox,
                                     drops['pump_discharge_pressure_ox'],
                                     tank_bar)
@@ -4789,11 +4830,10 @@ class LiquidRocketEngine:
         if p_in:
             pr_from_inlet = max(p_in / self.P_a, 1.2)
             if abs(pr_from_inlet - pr) / pr > INPUT_CONSISTENCY_TOLERANCE:
-                self._warn(
-                    f"Turbine inlet pressure {p_in:g} bar implies an expansion "
-                    f"ratio of {pr_from_inlet:.1f} against ambient, while the "
-                    f"entered turbine expansion ratio is {pr:.1f}; the entered "
-                    f"expansion ratio is used.")
+                self._warn('warn.liquid.turbine_pr_inconsistent', 'warning',
+                           inlet_bar=float(p_in),
+                           pr_from_inlet=round(float(pr_from_inlet), 1),
+                           pr_entered=round(float(pr), 1))
         # Δh = cp·T_in·(1 − PR^(−(γ−1)/γ)) (izentropik iş, Sutton Ch. 10)
         delta_h = (TURBINE_GAS_CP_J_KGK * t_in
                    * (1.0 - pr ** (-(TURBINE_GAS_GAMMA - 1.0)
@@ -4801,11 +4841,9 @@ class LiquidRocketEngine:
         c0 = np.sqrt(2.0 * delta_h)                   # spouting velocity, m/s
         blade_tip_speed = TURBINE_VELOCITY_RATIO * c0
         if blade_tip_speed > TURBINE_TIP_SPEED_LIMIT_MS:
-            self._warn(
-                f"Single-stage turbine blade tip speed {blade_tip_speed:.0f} "
-                f"m/s exceeds the {TURBINE_TIP_SPEED_LIMIT_MS:.0f} m/s "
-                f"practical limit at this pressure ratio and inlet "
-                f"temperature; a multi-stage turbine would be required.")
+            self._warn('warn.liquid.turbine_tip_speed_exceeded', 'warning',
+                       tip_speed_ms=round(float(blade_tip_speed)),
+                       limit_ms=round(float(TURBINE_TIP_SPEED_LIMIT_MS)))
         turbine_mdot = turbine_power * 1000.0 / max(delta_h * eta_turbine, 1.0)
 
         gg_mdot = mdot_total * GAS_GENERATOR_FLOW_FRACTION
@@ -5562,11 +5600,11 @@ class LiquidRocketEngine:
             t_used = self.wall_thickness_input_m
             thickness_source = 'user input (chamber wall thickness)'
             if t_used < t_required:
-                self._warn(
-                    f"Chamber wall thickness {t_used * 1000:.2f} mm is below "
-                    f"the {t_required * 1000:.2f} mm required for "
-                    f"{material.get('name', mat_key)} at safety factor "
-                    f"{sf:.2f}; the reported stress margin is negative.")
+                self._warn('warn.liquid.wall_thickness_below_required', 'critical',
+                           t_used_mm=round(float(t_used) * 1000, 2),
+                           t_required_mm=round(float(t_required) * 1000, 2),
+                           material=material.get('name', mat_key),
+                           safety_factor=round(float(sf), 2))
         else:
             for std in STANDARD_WALL_THICKNESS_MM:
                 if std / 1000.0 >= t_required:

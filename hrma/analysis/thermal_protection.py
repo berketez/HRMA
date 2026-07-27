@@ -308,9 +308,22 @@ class ThermalProtectionAnalyzer:
         (sabit özellik varsayımı — kısa yanma heat-sink kullanım alanı,
         Sutton & Biblarz 9th ed. Ch. 8.4).
 
+        DÜZELTME (v2.6.2, fizik denetimi F078): sabit özellikli iletim modeli
+        FAZ DEĞİŞİMİ içermez; sıcaklık erime noktasını aştığı anda profil
+        fiziksel anlamını yitirir (gizli ısı soğurulmaz, erimiş katman akıp
+        gitmez). Önceden yalnız YAPISAL servis sınırı (max_service_temp)
+        kıyaslanıyordu — çelik için 811 K — ve model erimiş çeliğin 1100 K
+        üstünde bir profilini çizmeye devam ediyordu. Artık erime noktası
+        ayrıca kıyaslanır, erime anı raporlanır ve profilin geçersizleştiği
+        ``model_valid=False`` bayrağıyla açıkça bildirilir.
+        Kaynak: formül hatası değil, Sutton & Biblarz 9th ed. Ch. 8.4
+        heat-sink yönteminin varsayım zarfı (kısa yanma, cidar erime altında
+        kalır).
+
         Returns:
             Sözlük: x_m, T_profile_K, T_inner_K, T_outer_K,
             max_service_temp_K, exceeds_limit, time_to_limit_s,
+            melting_point_K, exceeds_melting, time_to_melting_s, model_valid,
             absorbed_energy_J_m2, stored_energy_J_m2, dt_s, Fo, Bi, ...
         """
         if h_gas_W_m2K < 0:
@@ -331,6 +344,12 @@ class ThermalProtectionAnalyzer:
         rho = float(mat['density'])
         cp = float(mat['specific_heat'])
         limit_K = float(mat['max_service_temp'])
+        # F078: erime noktası ayrı bir zarf sınırıdır — servis sınırı YAPISAL
+        # (sürünme) eşiktir ve erime noktasının altındadır (ör. karbon çelik
+        # 811 K servis / 1773 K erime). Kayıtta yoksa servis sınırına düşülür
+        # (uydurma değer üretilmez; o durumda erime denetimi servis sınırıyla
+        # çakışır ve muhafazakâr yönde kalır).
+        melting_K = float(mat.get('melting_point', limit_K))
         alpha = k / (rho * cp)
 
         L = float(wall_thickness_m)
@@ -351,8 +370,11 @@ class ThermalProtectionAnalyzer:
 
         absorbed = 0.0          # ∫ q_in dt [J/m^2]
         time_to_limit: Optional[float] = None
+        time_to_melt: Optional[float] = None
         if T[0] >= limit_K:
             time_to_limit = 0.0
+        if T[0] >= melting_K:
+            time_to_melt = 0.0
 
         hist_t: List[float] = [0.0]
         hist_Tw: List[float] = [float(T[0])]
@@ -372,6 +394,11 @@ class ThermalProtectionAnalyzer:
                 # Adım içinde lineer interpolasyonla kesişme anı
                 frac = (limit_K - T[0]) / (Tn[0] - T[0])
                 time_to_limit = t_now - dt + frac * dt
+            if time_to_melt is None and Tn[0] >= melting_K:
+                # F078: erime anı (aynı lineer interpolasyon). Bu andan
+                # SONRAKİ profil fiziksel değildir — faz değişimi modellenmez.
+                frac = (melting_K - T[0]) / (Tn[0] - T[0])
+                time_to_melt = t_now - dt + frac * dt
             T = Tn
 
             if store_history:
@@ -382,6 +409,24 @@ class ThermalProtectionAnalyzer:
         weights = np.full(n, dx)
         weights[0] = weights[-1] = dx / 2.0
         stored = float(np.sum(rho * cp * (T - T_initial_K) * weights))
+
+        # F078: erime hükmü. Faz değişimi modellenmediği için erime noktası
+        # aşıldığında T_profile_K/T_max_K sayısal olarak üretilmeye devam
+        # eder ama FİZİKSEL DEĞİLDİR; bunu açıkça bildiriyoruz.
+        melted = bool(float(np.max(T)) >= melting_K or time_to_melt is not None)
+        if melted:
+            validity_note = (
+                f"MODEL INVALID beyond melting: the computed wall temperature "
+                f"reaches {float(np.max(T)):.0f} K, at or above the "
+                f"{mat['name']} melting point {melting_K:.0f} K"
+                + (f" (reached at t = {time_to_melt:.3f} s)"
+                   if time_to_melt is not None else "")
+                + ". This constant-property conduction model has no phase "
+                  "change, so the temperature profile after melting is not "
+                  "physical — it only shows that the uncooled wall burns "
+                  "through. Use active cooling or an ablative liner.")
+        else:
+            validity_note = None
 
         x = np.linspace(0.0, L, n)
         result = {
@@ -414,13 +459,23 @@ class ThermalProtectionAnalyzer:
                                   or time_to_limit is not None),
             'time_to_limit_s': time_to_limit,
             'margin_to_limit_K': limit_K - float(T[0]),
+            # --- F078: erime zarfı ---
+            'melting_point_K': melting_K,
+            'exceeds_melting': melted,
+            'time_to_melting_s': time_to_melt,
+            'margin_to_melting_K': melting_K - float(np.max(T)),
+            'model_valid': not melted,
+            'validity_note': validity_note,
             'absorbed_energy_J_m2': absorbed,
             'stored_energy_J_m2': stored,
             'model_note': (
                 "Simplified model: 1-D planar explicit FD heat sink, "
                 "constant properties, gas-side convection only "
-                "(radiation neglected), adiabatic outer face. Bartz h_g "
-                "is an input from the heat transfer module."),
+                "(radiation neglected), adiabatic outer face, NO phase "
+                "change (latent heat of fusion not absorbed, molten layer "
+                "not removed) — the profile is only physical while the wall "
+                "stays below its melting point. Bartz h_g is an input from "
+                "the heat transfer module."),
         }
         if store_history:
             result['history'] = {'t_s': hist_t, 'T_inner_K': hist_Tw}
@@ -434,15 +489,29 @@ class ThermalProtectionAnalyzer:
                               T_recovery_K: float,
                               emissivity: Optional[float] = None,
                               material: Optional[str] = None,
+                              view_factor: float = 1.0,
+                              q_gas_radiation_W_m2: float = 0.0,
                               tol_K: float = 1e-6) -> Dict:
         """Radyasyon-soğutmalı nozul uzantısı denge cidar sıcaklığı.
 
         Enerji dengesi (Sutton & Biblarz 9th ed. Ch. 8.6):
-            h_g * (T_recovery - T_w) = eps * sigma * T_w^4
-        Bisection ile çözülür (f monoton azalan, kök [0, T_recovery]).
+            h_g * (T_recovery - T_w) + q_gas_rad = F * eps * sigma * T_w^4
+        Bisection ile çözülür (sağ taraf artan, sol taraf azalan → tek kök).
 
-        Varsayımlar: kararlı hâl, tek taraflı uzaya ışınım (görüş faktörü
-        1, çevre ~0 K), eksenel iletim ve dış taşınım ihmal — approximate.
+        DÜZELTME (v2.6.2, fizik denetimi F079): denklem doğruydu ama iki
+        fiziksel terim SESSİZCE ihmal ediliyordu ve her ikisi de T_w'yi
+        EKSİK tahmin ettiriyordu (güvensiz yön, çünkü bu değer doğrudan
+        C-103 1640 K / C-C 1920 K malzeme seçim kararını veriyor):
+          (a) Uzantının iç yüzeyi kendini görür → uzaya görüş faktörü F < 1,
+              net ışınım kaybı F kadar azalır (kendini gören kesir aynı
+              sıcaklıkta olduğu için net alışverişi ~sıfırdır).
+          (b) Gelen gaz ışınımı (Leckner sınıfı q_rad) ısı girdisidir.
+        Her ikisi artık AÇIK GİRDİ. Varsayılanlar (F=1, q_gas_rad=0) eski
+        davranışı bire bir korur; ihmal edildiklerinde sonucun güvensiz
+        yönde olduğu ``unconservative`` bayrağı ve notuyla bildirilir.
+
+        Varsayımlar: kararlı hâl, çevre ~0 K (uzay), eksenel iletim ve dış
+        taşınım ihmal — approximate.
 
         Malzeme limiti: merkezi DB'de varsa 'allowable_temperature'
         (termal servis sınırı; ör. ss_316 → 1073 K). C-103 / C-C merkezi
@@ -456,15 +525,25 @@ class ThermalProtectionAnalyzer:
             emissivity: Yüzey yayıcılığı (0-1]. None → malzeme kaydından.
             material: İsteğe bağlı malzeme adı (merkezi DB anahtarı veya
                 'niobium_c103' / 'carbon_carbon').
+            view_factor: Yüzeyden uzaya görüş faktörü (0, 1]. Varsayılan 1
+                (tam görüş). Uzantı yarım açısına bağlıdır; kullanıcı
+                geometrisinden gelir, bu modül TAHMİN ETMEZ.
+            q_gas_radiation_W_m2: Gelen gaz ışınım akısı [W/m^2] (ör.
+                heat_transfer_analysis Leckner çıktısı). Varsayılan 0.
 
         Returns:
-            Sözlük: T_wall_eq_K, q_W_m2, emissivity, service_limit_K,
-            within_limit, margin_K, model_note, source, ...
+            Sözlük: T_wall_eq_K, q_W_m2, emissivity, view_factor,
+            service_limit_K, within_limit, margin_K, unconservative,
+            unconservative_note, model_note, source, ...
         """
         if h_gas_W_m2K <= 0:
             raise ValueError("h_gas_W_m2K must be positive")
         if T_recovery_K <= 0:
             raise ValueError("T_recovery_K must be positive")
+        if not (0.0 < view_factor <= 1.0):
+            raise ValueError("view_factor must be in (0, 1]")
+        if q_gas_radiation_W_m2 < 0:
+            raise ValueError("q_gas_radiation_W_m2 must be non-negative")
 
         mat_name = None
         mat_source = None
@@ -496,13 +575,22 @@ class ThermalProtectionAnalyzer:
 
         h = float(h_gas_W_m2K)
         Tr = float(T_recovery_K)
+        F = float(view_factor)
+        q_gas = float(q_gas_radiation_W_m2)
         eps_sigma = emissivity * STEFAN_BOLTZMANN
+        eps_sigma_F = eps_sigma * F
 
         def f(Tw: float) -> float:
-            return h * (Tr - Tw) - eps_sigma * Tw ** 4
+            return h * (Tr - Tw) + q_gas - eps_sigma_F * Tw ** 4
 
-        # f(0) = h*Tr > 0, f(Tr) = -eps*sigma*Tr^4 < 0 → kök garantili
+        # f(0) = h*Tr + q_gas > 0 ve f kesin azalan. q_gas > 0 iken kök Tr'nin
+        # ÜSTÜNE çıkabilir (gaz ışınımı taşınımı ters çevirir), bu yüzden üst
+        # sınır f(hi) < 0 olana dek genişletilir.
         lo, hi = 0.0, Tr
+        for _ in range(60):
+            if f(hi) < 0.0:
+                break
+            hi *= 2.0
         for _ in range(200):
             mid = 0.5 * (lo + hi)
             if f(mid) > 0.0:
@@ -514,12 +602,35 @@ class ThermalProtectionAnalyzer:
         Tw = 0.5 * (lo + hi)
         q_eq = h * (Tr - Tw)
 
+        # F079: ihmal edilen terimlerin yönü. F=1 ve q_gas_rad=0 bırakıldıysa
+        # çözüm T_w'yi EKSİK verir; malzeme seçim kararı bu yüzden iyimserdir.
+        omissions: List[str] = []
+        if F >= 1.0:
+            omissions.append(
+                "view factor to space assumed 1 (the extension interior sees "
+                "itself, so F < 1 in reality)")
+        if q_gas <= 0.0:
+            omissions.append(
+                "incident gas radiation not included (pass "
+                "q_gas_radiation_W_m2 from the heat-transfer module)")
+        unconservative = bool(omissions)
+        unconservative_note = None
+        if unconservative:
+            unconservative_note = (
+                "Non-conservative: " + "; ".join(omissions)
+                + ". Both omissions push the equilibrium wall temperature "
+                  "DOWN, so the material verdict below is optimistic. Supply "
+                  "view_factor and q_gas_radiation_W_m2 for a bounding "
+                  "estimate.")
+
         result = {
             'T_wall_eq_K': Tw,
             'q_W_m2': q_eq,
             'q_conv_W_m2': q_eq,
-            'q_rad_W_m2': eps_sigma * Tw ** 4,
+            'q_gas_radiation_W_m2': q_gas,
+            'q_rad_W_m2': eps_sigma_F * Tw ** 4,
             'emissivity': emissivity,
+            'view_factor': F,
             'h_gas_W_m2K': h,
             'T_recovery_K': Tr,
             'material': material,
@@ -528,11 +639,16 @@ class ThermalProtectionAnalyzer:
             'within_limit': (None if limit_K is None
                              else bool(Tw <= limit_K)),
             'margin_K': (None if limit_K is None else limit_K - Tw),
+            'unconservative': unconservative,
+            'unconservative_note': unconservative_note,
             'model_note': (
                 "Simplified model: steady-state radiation-cooled "
-                "equilibrium, one-sided radiation to space (view factor "
-                "1, ~0 K surroundings), axial conduction neglected "
-                "(approximate)."),
+                "equilibrium h_g*(Tr-Tw) + q_gas_rad = F*eps*sigma*Tw^4 "
+                "(Sutton & Biblarz 9th ed. Ch. 8.6), ~0 K surroundings, "
+                "axial conduction and external convection neglected "
+                "(approximate). View factor F and incident gas radiation "
+                "are explicit inputs; their defaults (F=1, q_gas_rad=0) are "
+                "NON-CONSERVATIVE — both raise Tw when included."),
             'source': mat_source,
         }
         return result

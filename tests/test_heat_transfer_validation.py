@@ -194,6 +194,16 @@ def test_natural_cooling_flags_burn_through(analyzer):
     A steel chamber with only natural-convection cooling at 20 bar MUST be
     flagged as unsafe (this is the dangerous default the engine passes). The
     design heat flux must remain non-zero (not masked by a floating wall temp).
+
+    GÜNCELLEME (v2.6.2, fizik denetimi F011): bu test eskiden
+    'warn.thermal.wall_exceeds_service' bekliyordu. steel_4130 için
+    max_service_temperature = 2000 K, melting_point = 1705 K — yani servis
+    eşiği erime noktasının ÜSTÜNDEYDİ ve erimiş cidar yalnız 'servis sınırı
+    aşıldı' diye raporlanıyordu. Kritik eşik artık
+    min(max_service_temperature, melting_point) ile kurulduğu için bu senaryo
+    daha sert ve doğru olan 'warn.thermal.wall_exceeds_melting' üretir. Test,
+    kritik seviyenin korunduğunu ve erime bilgisinin görünür olduğunu
+    doğrular.
     """
     md = {
         'chamber_pressure': 20.0, 'chamber_temperature': 3000,
@@ -207,8 +217,16 @@ def test_natural_cooling_flags_burn_through(analyzer):
     assert g['wall_temperature_unphysical'] is True
     # Design heat flux must NOT collapse to zero (the masking bug).
     assert g['throat_heat_flux'] > 1e6, "Design throat flux collapsed (burn-through masked!)"
-    joined = " ".join(r['safety_analysis']['warnings']).lower()
-    assert 'burn-through' in joined or 'unsafe' in joined
+    # D-track: uyarılar artık {code,params,severity}; metin frontend'de.
+    warns = r['safety_analysis']['warnings']
+    codes = {w['code'] for w in warns}
+    assert 'warn.thermal.wall_exceeds_melting' in codes, (
+        f"Erimiş cidar erime koduyla bildirilmedi; üretilen kodlar: {sorted(codes)}")
+    melt = next(w for w in warns if w['code'] == 'warn.thermal.wall_exceeds_melting')
+    # Kritik seviye korunmalı ve erime noktası kullanıcıya görünür olmalı.
+    assert melt['severity'] == 'critical'
+    assert melt['params']['melting'] > 0
+    assert melt['params']['T_wall'] > melt['params']['melting']
 
 
 def test_regenerative_cooling_keeps_wall_cooler_than_natural(analyzer):

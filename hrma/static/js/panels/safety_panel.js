@@ -216,33 +216,37 @@
                        press.applicable_codes.join(' · ')]);
         }
         if (press.safety_devices_required && press.safety_devices_required.length) {
+            // D-track: backend {code,params,severity} döndürür; ham join()
+            // "[object Object] · [object Object]" basardı (v2.6.2 regresyonu).
             rows.push([T('panel.safety.devices', 'Required safety devices'),
-                       press.safety_devices_required.join(' · ')]);
+                       press.safety_devices_required.map(U.warnText).join(' · ')]);
         }
         if (rows.length) html += U.kvTable(rows);
         return html;
     }
 
+    // Mevzuat uygunluğu DEĞERLENDİRİLMİYOR.
+    //
+    // Eskiden burası backend'in koşulsuz True döndürdüğü alanları yeşil
+    // "NFPA: OK / OSHA: OK / DOT: OK" rozetleri olarak çiziyordu. Motorun
+    // büyüklüğü, iticisi ve kullanım yeri ne olursa olsun üçü de yeşildi;
+    // backend'in kod yorumları ("Would check specific NFPA requirements")
+    // gerçek bir kontrol yapılmadığını zaten söylüyordu. Bu, kullanıcıda
+    // yanlış bir otorite algısı yaratıyordu.
+    //
+    // Gerçek uygunluk değerlendirmesi madde-madde requirement karşılaştırması,
+    // saha bilgisi ve yetkili bir değerlendirici ister. Bunlar yazılıma girdi
+    // olarak verilmediği sürece burada hüküm gösterilmez.
     function complianceBadges(comp) {
         if (!comp || !Object.keys(comp).length) return '';
-        let badges = '';
-        const boolBadge = function (label, ok) {
-            if (ok == null) return '';
-            return U.badge(label + ': ' + (ok ? T('common.ok', 'OK') : T('common.fail', 'FAIL')),
-                           ok ? 'ok' : 'err');
-        };
-        badges += boolBadge('NFPA', comp.nfpa_compliance);
-        badges += boolBadge('OSHA', comp.osha_compliance);
-        badges += boolBadge('DOT', comp.dot_compliance);
-        if (comp.insurance_requirements === 'REQUIRES_REVIEW') {
-            badges += U.badge(T('panel.safety.insuranceReview', 'INSURANCE: REVIEW'), 'warn');
-        }
-        if (comp.local_regulations === 'REQUIRES_REVIEW') {
-            badges += U.badge(T('panel.safety.localRegsReview', 'LOCAL REGS: REVIEW'), 'warn');
-        }
-        if (!badges) return '';
-        return U.sectionTitle(T('panel.safety.secCompliance', 'Compliance'))
-            + `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`;
+        const note = T('panel.safety.complianceNotEvaluated',
+            'This software does not evaluate regulatory compliance. NFPA, OSHA, '
+            + 'DOT and local requirements must be assessed by a qualified EHS / '
+            + 'process-safety authority for your specific site, propellant and operation.');
+        return U.sectionTitle(T('panel.safety.secCompliance', 'Regulatory compliance'))
+            + `<div style="border:1px solid ${U.kindColor('warn')}; border-radius:8px;
+                 padding:10px 14px; margin:8px 0; color:${U.kindColor('warn')};">
+                 ${note}</div>`;
     }
 
     function render(data, root) {

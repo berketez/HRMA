@@ -30,6 +30,10 @@ anahtarlarini ``consumed_measured`` listesinde; tuketilen girdilerin aritmetik
 turevi olan buyuklukleri ``derived_bases`` listesinde acikca bildirir — kosucu
 bunlari skorlamaz. Varsayilan degerle kapatilan girdiler ``assumed_defaults``
 sozlugunde gorunur (durustluk: karsilastirmanin varsayimlari gizlenmez).
+Skorlanan ama BAGIMSIZ tahmin sayilamayacak buyuklukler ``quantity_flags``
+sozlugunde makine-okunur isaretlenir ('in_sample': fitin kendi kaynak veri
+seti; 'weak_evidence': tuketilen olcumden turetilmis tutarlilik kontrolu) —
+kosucu bu bayraklari hucre istatistigine ve markdown ozetine tasir (F007).
 
 Determinizm: adaptorler saf fonksiyondur; ayni kayit ayni tahmin. Rastgelelik
 ve ag erisimi yoktur (sivi motor yolu propellant_data enjeksiyonu ile AGSIZ
@@ -174,6 +178,40 @@ SKIP_V1_RECORD_TYPES = frozenset({
 _HYBRID_MAX_ITER = 12
 _HYBRID_RTOL = 1e-4
 
+# --- F022 (2026-07-27): hibritte cebirsel kopya zinciri ----------------------
+# thrust = mdot_kayit * g0 * Isp_model oldugu icin thrust hatasi isp hatasiyla
+# CEBIRSEL olarak aynidir (deney kaynaklari Isp'yi zaten F/(mdot*g0) diye
+# tanimlar; tam DB olcumu: 18 ortak testte |isp_err - thrust_err| maks 0.055
+# yuzde puani). thrust_mean ayni sayinin kopyasi, total_impulse = thrust *
+# (tuketilen burn_time) ucuncu kopyadir. Zincirdeki ILK olculen buyukluk
+# skorlanir, kalanlar derived_bases ile skor disi birakilir — modulun kendi
+# ilkesi: 'tuketilen girdilerin aritmetik turevleri skorlanmaz' (docstring;
+# ayni ilke _run_liquid::thrust_vac icin zaten uygulaniyordu). Genel ilke:
+# Oberkampf & Roy, 'Verification and Validation in Scientific Computing',
+# CUP 2010, Bol. 12 (bagimli ciktilar ayri dogrulama metrigi sayilmaz).
+_HYBRID_ALGEBRAIC_COPY_CHAIN = ("isp", "thrust", "thrust_mean",
+                                "total_impulse")
+
+# --- F007 eki (2026-07-27): hibrit regresyon fitlerinin kaynak kampanyalari --
+# HYBRID_REGRESSION_COEFFICIENTS (hrma/data/propellant_database.py) a-n
+# fitlerinin geldigi yayinlar (o dosyanin kendi kaynak yorumlarindan):
+#   htpb/abs : Doran et al., AIAA 2007-5352 (HTPB/N2O)
+#   paraffin : Karabeyoglu et al., JPP 20(6) 2004 / Zilliac & Karabeyoglu,
+#              AIAA 2006-4504 (ayni Stanford SP-1a kampanyasi; DB'deki
+#              'karabeyoglu2003' kayitlari bu kampanyanin verisidir)
+#   pe/pmma  : Zilliac & Karabeyoglu, AIAA 2006-4504 Tablo 2 derlemesi
+# Bir kaydin test_id'si veya kaynak kunyesi bu belirteclerden birini
+# iceriyorsa, o kaydin regression_rate skoru KENDI fit veri setine karsi
+# olculuyor demektir -> 'in_sample' bayragi (veri sizintisi tespiti; tam DB
+# olcumu: hybrid regression_rate hucresinin 17/35 girisi karabeyoglu2003).
+_HYBRID_FIT_SOURCE_TOKENS = {
+    "htpb": ("doran",),
+    "abs": ("doran",),
+    "paraffin": ("karabeyoglu", "zilliac"),
+    "pe": ("zilliac",),
+    "pmma": ("zilliac", "greiner", "federick"),
+}
+
 
 # --- Birim cevirisi ----------------------------------------------------------
 
@@ -267,6 +305,14 @@ def _base_result(record: Dict[str, Any]) -> Dict[str, Any]:
         "derived_bases": [],
         "assumed_defaults": {},
         "adapter_notes": [],
+        # F007 (2026-07-27): makine-okunur skor bayraklari {taban_ad: [bayrak]}.
+        # 'in_sample'      -> skor, fitin kendi kaynak veri setine karsi
+        #                     (implementasyon dogrulamasi, bagimsiz tahmin degil)
+        # 'weak_evidence'  -> skor, tuketilen olcumden turetilmis tutarlilik
+        #                     kontrolu. Onceden bu bilgi yalniz serbest-metin
+        #                     adapter_notes'taydi ve _aggregate/to_markdown'a
+        #                     HIC tasinmiyordu (fizik denetimi F007).
+        "quantity_flags": {},
         "convergence": None,
     }
 
@@ -494,6 +540,43 @@ def _run_hybrid(record: Dict[str, Any]) -> Dict[str, Any]:
         "regression_rate": float(regression),          # m/s (yanma ortalamasi)
         "port_diameter_final": float(res["port_diameter_final"]),  # m
     }
+
+    # F022: isp/thrust/thrust_mean/total_impulse cebirsel kopyalardir (modul
+    # sabiti _HYBRID_ALGEBRAIC_COPY_CHAIN yorumuna bakin). Olculen ILK halka
+    # skorlanir; kalan olculen halkalar derived_bases ile skor disi kalir —
+    # aksi halde ayni tek karsilastirma tabloda 2-3 bagimsiz hucre (her biri
+    # n=18) gibi gorunuyordu.
+    copy_chain_present = [b for b in _HYBRID_ALGEBRAIC_COPY_CHAIN
+                          if b in meas["si"]]
+    for base in copy_chain_present[1:]:
+        if base not in result["derived_bases"]:
+            result["derived_bases"].append(base)
+    if len(copy_chain_present) > 1:
+        result["adapter_notes"].append(
+            "ZAYIF KANIT (F022): thrust = mdot_kayit*g0*Isp_model ve "
+            "total_impulse = thrust*burn_time oldugundan bu buyuklukler "
+            "isp hatasinin cebirsel kopyasidir; yalniz "
+            f"'{copy_chain_present[0]}' skorlandi, "
+            f"{copy_chain_present[1:]} derived_bases ile skor disi "
+            "(tek karsilastirma, tek n).")
+
+    # F007 eki: regresyon hizi, kullanilan a-n fitinin KENDI kaynak
+    # kampanyasina karsi olculuyorsa bu bagimsiz tahmin degil implementasyon
+    # dogrulamasidir (veri sizintisi). Belirtec eslesmesi test_id + kaynak
+    # kunyesi uzerinden yapilir (_HYBRID_FIT_SOURCE_TOKENS yorumu).
+    if "regression_rate" in meas["si"]:
+        hay = " ".join([
+            str(record.get("test_id") or ""),
+            str((record.get("source") or {}).get("citation") or ""),
+        ]).lower()
+        tokens = _HYBRID_FIT_SOURCE_TOKENS.get(fuel_key, ())
+        if any(tok in hay for tok in tokens):
+            result["quantity_flags"]["regression_rate"] = ["in_sample"]
+            result["adapter_notes"].append(
+                "IN-SAMPLE: bu kaydin regresyon olcumu, kullanilan a-n "
+                "fitinin kaynak kampanyasindandir "
+                f"(yakit '{fuel_key}', belirtec {list(tokens)}); skor "
+                "bagimsiz tahmin degil implementasyon dogrulamasidir.")
     return result
 
 
@@ -634,6 +717,9 @@ def _run_liquid(record: Dict[str, Any]) -> Dict[str, Any]:
                 "ZAYIF KANIT: thrust_vac tahmini, GIRDI olarak tuketilen "
                 "olculen thrust_sl'den Isp orani ile turetilmistir; bagimsiz "
                 "itki tahmini degil, tutarlilik kontroludur.")
+            # F007: ayni bilgi makine-okunur bayrak olarak da tasinir —
+            # _aggregate/to_markdown serbest metni okuyamiyordu.
+            result["quantity_flags"]["thrust_vac"] = ["weak_evidence"]
     else:
         result["adapter_notes"].append(
             "Itki girdisi kayitta yok (10 kN varsayildi); itki tahminleri "
@@ -844,6 +930,11 @@ def _run_strand(record: Dict[str, Any]) -> Dict[str, Any]:
                 "IN-SAMPLE: bu kaydin olcumu, kullanilan a-n fitinin kaynak "
                 "veri setindedir; skor bagimsiz tahmin degil implementasyon "
                 "dogrulamasidir (bkz. burn_rate_db durustluk notu).")
+            # F007: not artik makine-okunur bayrak olarak hucreye/markdown'a
+            # tasinir (her iki tahmin adi da isaretlenir; kayit hangisiyle
+            # yazdiysa o skorlanir).
+            result["quantity_flags"]["burn_rate"] = ["in_sample"]
+            result["quantity_flags"]["regression_rate"] = ["in_sample"]
         if not burn_rate_db.in_range(prop_key, p_mpa):
             result["adapter_notes"].append(
                 f"Basinc {p_mpa:.3f} MPa kaynak fitin yayimlanmis araliginin "

@@ -32,6 +32,30 @@ from hrma.engines.solid_rocket_engine import (
 )
 
 
+# ---------------------------------------------------------------------------
+# D-track sözleşmesi (v2.6.2): uyarılar artık düz metin değil,
+# {code, params, severity} sözlüğü. Testler METİN yerine KOD sınar — bu hem
+# dilden bağımsızdır hem de metin düzenlemeleri testi kırmaz.
+# ---------------------------------------------------------------------------
+def _codes(warnings):
+    """Uyarı listesinden kod kümesi çıkarır (eski düz metin biçimini de kabul eder)."""
+    out = set()
+    for w in warnings or []:
+        if isinstance(w, dict) and w.get('code'):
+            out.add(w['code'])
+        elif isinstance(w, str):
+            out.add(w)
+    return out
+
+
+def _params_of(warnings, code):
+    """Belirli bir kodun parametre sözlüğünü döndürür (yoksa boş sözlük)."""
+    for w in warnings or []:
+        if isinstance(w, dict) and w.get('code') == code:
+            return w.get('params') or {}
+    return {}
+
+
 def _engine(grain_type='bates', **overrides):
     return SolidRocketEngine(
         grain_type=grain_type,
@@ -184,8 +208,8 @@ def test_convergence_flag_true_on_well_posed_case():
     curve = eng.calculate_thrust_curve(dt=0.01)
     assert curve['convergence_achieved'] is True
     assert curve['pressure_solver_failed_steps'] == 0
-    notes = ' '.join(eng.calculate_performance()['warnings'])
-    assert 'did not converge' not in notes
+    codes = _codes(eng.calculate_performance()['warnings'])
+    assert 'warn.solid.pressure_solver_not_converged' not in codes
 
 
 def test_convergence_flag_false_when_solver_fails():
@@ -202,9 +226,14 @@ def test_convergence_flag_false_when_solver_fails():
     assert curve['pressure_solver_max_residual'] > curve[
         'pressure_solver_tolerance']
 
-    notes = ' '.join(eng.calculate_performance()['warnings'])
-    assert 'did not converge' in notes, (
+    warns = eng.calculate_performance()['warnings']
+    assert 'warn.solid.pressure_solver_not_converged' in _codes(warns), (
         "Yakınsamama kullanıcıya görünen uyarıya dönüşmüyor.")
+    # Tanı sayıları uyarının içinde taşınmalı; yoksa kullanıcı ne kadar
+    # adımın kaçtığını göremez.
+    p = _params_of(warns, 'warn.solid.pressure_solver_not_converged')
+    assert p.get('failed_steps', 0) > 0
+    assert p.get('max_residual', 0) > p.get('tolerance', 0)
 
 
 def test_exponent_ge_one_is_flagged():
@@ -213,8 +242,9 @@ def test_exponent_ge_one_is_flagged():
         grain_type='bates', propellant_type='apcp', chamber_diameter=100,
         grain_length=500, core_diameter=30, chamber_pressure=40,
         burn_rate_a=0.005, burn_rate_n=1.0)
-    notes = ' '.join(eng.calculate_performance()['warnings'])
-    assert 'exponent' in notes and '1.0' in notes
+    warns = eng.calculate_performance()['warnings']
+    assert 'warn.solid.burn_rate_exponent_ge_one' in _codes(warns)
+    assert _params_of(warns, 'warn.solid.burn_rate_exponent_ge_one')['n'] == 1.0
 
 
 def test_solver_diagnostics_reach_the_result_payload():
@@ -251,16 +281,14 @@ def test_composite_case_is_not_silently_steel():
 def test_composite_case_warns_about_generic_allowable():
     """Jenerik kompozit izin verilen gerilmesi kullanıcıya beyan edilmeli."""
     res = _engine(case_material='composite').calculate_performance()
-    notes = ' '.join(res['warnings'])
-    assert 'composite' in notes and 'generic allowable' in notes
+    assert 'warn.solid.case_generic_allowable' in _codes(res['warnings'])
 
 
 def test_composite_with_explicit_yield_strength_has_no_warning():
     """Kullanıcı ölçülen dayanımı girdiyse jenerik uyarısı düşer."""
     res = _engine(case_material='composite',
                   yield_strength=650).calculate_performance()
-    notes = ' '.join(res['warnings'])
-    assert 'generic allowable' not in notes
+    assert 'warn.solid.case_generic_allowable' not in _codes(res['warnings'])
 
 
 def test_unknown_case_material_raises_instead_of_falling_back():

@@ -208,6 +208,60 @@ class TestStiffnessAndLoadSharing:
             .analyze(pressure_bar=10.0, seal_diameter_mm=100.0)
         assert not any('A2-70' in w for w in res_m8['warnings'])
 
+    def test_preload_scatter_applied_to_safety_factors(self):
+        """F031: ±%25 ön-yük saçılımı SF'lere fiilen uygulanmalı.
+
+        Denetim referans vakası (ölçüldü): M10 8.8, l=30 mm, çelik üye,
+        8 cıvata, 60 bar x 160 mm sızdırmazlık çapı. A_t=58 mm²,
+        S_p·A_t=33.64 kN, F_i=25.23 kN, C=0.16609, P_cıvata=15.08 kN.
+        Eski sürüm nominal n_proof=1.213 raporluyor, +%25 ön-yükte cıvatanın
+        proof dayanımını AŞTIĞINI (n=0.988) hiç görmüyordu.
+        Kaynak: NASA-STD-5020A Sec. 6.2; Shigley 10th ed. Sec. 8-8.
+        """
+        a = BoltedJointAnalyzer(size='M10', property_class='8.8',
+                                bolt_count=8, grip_length_mm=30.0,
+                                member_material='steel')
+        res = a.analyze(pressure_bar=60.0, seal_diameter_mm=160.0)
+        pre, sf = res['preload'], res['safety_factors']
+        F_i = pre['preload_N']
+        assert pre['preload_max_N'] == pytest.approx(1.25 * F_i, rel=1e-12)
+        assert pre['preload_min_N'] == pytest.approx(0.75 * F_i, rel=1e-12)
+        # Nominal değerler korunuyor (geriye dönük alanlar):
+        assert sf['proof_SF'] == pytest.approx(1.213, rel=2e-3)
+        assert sf['separation_factor_n0'] == pytest.approx(2.006, rel=2e-3)
+        # Yöneten (saçılım ucu) değerler:
+        assert sf['proof_SF_min'] == pytest.approx(0.988, rel=2e-3)
+        assert sf['separation_factor_n0_min'] == pytest.approx(1.505, rel=2e-3)
+        # ...ve proof aşımı artık uyarı üretiyor.
+        assert any('proof strength at maximum preload' in w
+                   for w in res['warnings'])
+
+    def test_scatter_factors_bracket_nominal(self):
+        """Saçılım uçları nominali doğru yönde sıkıştırmalı."""
+        res = analyze_bolted_joint(pressure_bar=20.0, seal_diameter_mm=120.0,
+                                   bolt_count=8, member_material='steel')
+        sf = res['safety_factors']
+        assert sf['proof_SF_min'] < sf['proof_SF']
+        assert sf['separation_factor_n0_min'] < sf['separation_factor_n0']
+        assert sf['overload_factor_nL_min'] < sf['overload_factor_nL']
+        # 0.75 ön-yükle ayrılma faktörü tam 0.75 katına inmeli (F_i lineer).
+        assert sf['separation_factor_n0_min'] == pytest.approx(
+            0.75 * sf['separation_factor_n0'], rel=1e-12)
+
+    def test_separation_decision_uses_minimum_preload(self):
+        """Ayrılma kararı MİNİMUM ön-yükte verilmeli (F031)."""
+        a = BoltedJointAnalyzer(size='M8', property_class='8.8',
+                                bolt_count=4, member_material='steel')
+        # F_i = 15.921 kN, C = 0.1843 -> nominal ayrılma yükü 19.52 kN/cıvata,
+        # minimum ön-yükte 14.64 kN/cıvata. Aradaki 17 kN nominalde 'ayrılmadı'
+        # görünür, saçılım altında ayrılır.
+        res = a.analyze(external_axial_load_n=4 * 17000.0)
+        assert res['separation']['separated_nominal_preload'] is False
+        assert res['separation']['separated'] is True
+        assert res['safety_factors']['separation_factor_n0'] > 1.0
+        assert res['safety_factors']['separation_factor_n0_min'] < 1.0
+        assert any('SEPARATION' in w for w in res['warnings'])
+
     def test_result_structure_json_friendly(self):
         res = analyze_bolted_joint(pressure_bar=30.0, seal_diameter_mm=150.0,
                                    bolt_count=12, size='M10',

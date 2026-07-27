@@ -11,7 +11,6 @@ if _REPO_ROOT not in sys.path:
 
 from flask import (Flask, render_template, request, jsonify, send_file,
                    send_from_directory)
-from flask_cors import CORS
 import numpy as np
 import json
 import io
@@ -74,6 +73,7 @@ from hrma.data.open_source_propellant_api import propellant_api
 from hrma.data.chemical_database import chemical_db
 from hrma.data.database_integrations import DatabaseManager
 
+import threading
 import traceback
 import warnings
 
@@ -110,7 +110,66 @@ from hrma.export.cad_visualization import MotorCADDesigner
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
+
+# İstek gövdesi üst sınırı (v2.6.2). Sınırsız bırakıldığında
+# /api/validation/upload-csv gibi uçlara keyfi büyüklükte gövde gönderilip
+# bellek tüketilebiliyordu. 32 MB, en büyük meşru girdiden (STEP/ork dosyası)
+# fazlasıyla geniş; aşan istekler Flask tarafından 413 ile reddedilir.
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
+
+#: 6-DOF entegrasyonu için üst zaman ufku [s]. Kaçış yörüngesinde araç yere
+#: dönmediği için sınırsız t_max bitmeyen entegrasyona yol açıyordu.
+_SIXDOF_T_MAX_LIMIT_S = 3600.0
+
+# GÜVENLİK — v2.6.2: joker CORS kaldırıldı.
+#
+# Burada eskiden argümansız ``CORS(app)`` vardı; flask-cors varsayılanı TÜM
+# rotalara ``Access-Control-Allow-Origin: *`` basar. Sunucu 127.0.0.1'e bağlı
+# olsa bile bu yeterli koruma değildi: kullanıcı HRMA açıkken kötü niyetli bir
+# siteye girdiğinde o sayfanın JS'i http://127.0.0.1:8080 uçlarına istek atıp
+# YANITI OKUYABİLİYORDU (normalde same-origin politikası okumayı engeller).
+# Bu, /download/stl yol-kaçışı açığıyla birleşince diskten dosya sızdırma
+# zinciri oluşturuyordu.
+#
+# HRMA tek kullanıcılı bir masaüstü uygulaması: arayüz sayfaları uygulamanın
+# KENDİ kökeninden servis edilir, yani çapraz köken erişimine hiç ihtiyaç yok.
+# CORS tamamen kapatıldı ve ayrıca yabancı kökenli durum değiştiren istekler
+# aşağıdaki süzgeçle reddediliyor.
+_ALLOWED_HOSTS = frozenset({
+    '127.0.0.1:8080', 'localhost:8080',
+    '127.0.0.1:5000', 'localhost:5000',
+})
+
+
+def _origin_host(value):
+    """'http://127.0.0.1:8080/x' -> '127.0.0.1:8080'; ayrıştırılamazsa None."""
+    if not value:
+        return None
+    try:
+        from urllib.parse import urlsplit
+        return urlsplit(value).netloc or None
+    except (ValueError, TypeError):
+        return None
+
+
+@app.before_request
+def _reject_cross_origin():
+    """Yabancı kökenden gelen durum değiştiren istekleri reddeder.
+
+    Tarayıcı, çapraz kökenli isteklerde ``Origin`` başlığını kendisi ekler ve
+    sayfa bunu değiştiremez; dolayısıyla bu denetim CSRF ve DNS-rebinding
+    saldırılarını kapatır. ``Origin`` yoksa (curl, aynı köken GET, native
+    webview) istek geçer — masaüstü kullanımını bozmamak için.
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+    origin = _origin_host(request.headers.get('Origin'))
+    if origin is not None and origin not in _ALLOWED_HOSTS:
+        return jsonify({
+            'status': 'error',
+            'error': 'Cross-origin request rejected',
+        }), 403
+    return None
 
 # v2.5.5 modüler API'ler: dış format importu (.eng/.rse/.ork), STEP/CAD
 # geometri analizi ve proje kaydet/yükle deposu Blueprint olarak yaşar
@@ -131,8 +190,36 @@ if platform.system() == 'Windows':
     except Exception as e:
         print(f"Could not apply Windows Flask fixes: {e}")
 
+#: Bir istek boyunca kaç sonlu-olmayan değerin null'a çevrildiğini sayar.
+#: Sunucu günlüğüne yazmak için; yanıt gövdesini etkilemez.
+_non_finite_seen = {'count': 0}
+
+
 def sanitize_json_values(obj):
-    """Recursively sanitize JSON values to handle NaN, Infinity and NumPy arrays"""
+    """JSON'a çevrilemeyen değerleri (NaN, Inf, NumPy dizileri) temizler.
+
+    v2.6.2 düzeltmesi — SESSİZ VERİ BOZULMASI:
+    Bu fonksiyon eskiden ``NaN → 0.0`` ve ``Inf → ±1e10`` dönüşümü yapıyordu.
+    Neredeyse TÜM API yanıtlarının son filtresi olduğu için (50 çağrı yeri),
+    hesabın içinde oluşan her sayısal hata kullanıcıya **geçerli bir ölçüm**
+    gibi görünüyordu: sıfıra bölme, negatif karekök veya ıraksayan bir çözücü
+    ekranda "0.00" olarak beliriyordu.
+
+    Girdi tarafı 2026-07-23'te kapatılmıştı (``_reject_non_finite``, NaN/Inf
+    girdi HTTP 400 alır) ama ÇIKTI tarafı açık kalmıştı — yani kullanıcının
+    verdiği sayılar temizken bile hesabın ürettiği NaN sızıyordu.
+
+    Bu, tek başına da bir zincirin son halkasıydı: dört üretim modülü
+    ``warnings.filterwarnings('ignore')`` çağırıyor (argümansız çağrı SÜREÇ
+    GENELİNDE catch-all filtre kurar), bu yüzden NaN'ı üreten numpy uyarısı da
+    bastırılıyordu. Zincir: sayısal hata → uyarı yok → NaN → 0.0 → panelde
+    gerçek sayı.
+
+    Yeni davranış: sonlu olmayan değer ``None`` (JSON ``null``) döner.
+    Ön yüzün sayı biçimleyicisi (``analysis_dock.js::fmt``) null ve sonlu
+    olmayan değerleri zaten "—" olarak gösterir, yani kullanıcı eksik olanı
+    eksik görür. Dönüşüm sunucu günlüğüne de sayılır.
+    """
     if isinstance(obj, dict):
         sanitized = {}
         for k, v in obj.items():
@@ -157,21 +244,19 @@ def sanitize_json_values(obj):
     elif isinstance(obj, (np.integer, np.floating)):
         try:
             val = float(obj)  # Convert NumPy numbers to Python numbers
-            if np.isnan(val):
-                return 0.0  # Replace NaN with 0
-            elif np.isinf(val):
-                return 1e10 if val > 0 else -1e10  # Replace infinity with large number
-            else:
-                return val
+            if not math.isfinite(val):
+                # NaN/Inf -> null. 0.0 döndürmek çözücü hatasını geçerli bir
+                # ölçüm gibi gösterirdi (bkz. fonksiyon docstring'i).
+                _non_finite_seen['count'] += 1
+                return None
+            return val
         except Exception:
-            return 0.0
+            return None
     elif isinstance(obj, float):
-        if np.isnan(obj):
-            return 0.0  # Replace NaN with 0 instead of None
-        elif np.isinf(obj):
-            return 1e10 if obj > 0 else -1e10  # Replace infinity with large number
-        else:
-            return obj
+        if not math.isfinite(obj):
+            _non_finite_seen['count'] += 1
+            return None
+        return obj
     elif isinstance(obj, (int, bool, str, type(None))):
         return obj
     else:
@@ -857,6 +942,25 @@ def quick_geometry():
     """
     try:
         data = request.json or {}
+
+        # GİRDİ DOĞRULAMASI (v2.6.2) — bu uç motor doğrulayıcısını HİÇ
+        # çağırmıyordu, dolayısıyla 1e6 bar gibi fiziksel olmayan değerler
+        # sessizce çözücüye giriyor ve "başarılı" bir geometri dönüyordu.
+        # Verilmemiş (None) alanlara dokunulmaz; motor sınıfı kendi
+        # varsayılanını kurar.
+        if data.get('chamber_pressure') is not None:
+            validate_input_range(data['chamber_pressure'], 1, 500,
+                                 "Chamber pressure (bar)")
+        if data.get('thrust') is not None:
+            validate_input_range(data['thrust'], 1, 1e7, "Thrust (N)")
+        if data.get('burn_time') is not None:
+            validate_input_range(data['burn_time'], 0.1, 1000, "Burn time (s)")
+        if data.get('of_ratio') is not None:
+            validate_input_range(data['of_ratio'], 0.1, 50, "O/F ratio")
+        if data.get('chamber_temperature') is not None:
+            validate_input_range(data['chamber_temperature'], 300, 6000,
+                                 "Chamber temperature (K)")
+
         engine = HybridRocketEngine(
             thrust=data.get('thrust'),
             burn_time=data.get('burn_time'),
@@ -1075,8 +1179,27 @@ def six_dof_analysis():
             launch_elevation_deg=float(data.get('launch_elevation_deg', 90.0)),
             launch_azimuth_deg=float(data.get('launch_azimuth_deg', 0.0)),
             rail_length=float(data.get('rail_length', 5.0)),
+            # B1 — Coriolis: çözücü enlem parametreli Coriolis ivmesini
+            # (−2·Ω×v) zaten destekliyordu ama bu uç değeri HİÇ geçirmiyordu,
+            # yani düz-Dünya varsayımı fiilen yürürlükteydi. Fırlatma sahası
+            # sayfası enlemi gönderiyor; enlem verilmezse çözücü kendi
+            # varsayılanına düşer ve davranış eskisiyle aynı kalır.
+            latitude_deg=(float(data['latitude_deg'])
+                          if data.get('latitude_deg') is not None else None),
+            launch_altitude=float(data.get('launch_altitude', 0.0)),
         )
-        res = solver.solve(t_max=float(data.get('t_max', 400.0)))
+        # t_max ÜST SINIRLI: sınırsız bırakıldığında kaçış yörüngesinde (araç
+        # asla yere dönmez) entegrasyon bitmiyor ve istek süresiz asılıyordu.
+        # 3600 s, atmosferik bir sounding roketi için fazlasıyla geniş.
+        t_max = float(data.get('t_max', 400.0))
+        if not (0.0 < t_max <= _SIXDOF_T_MAX_LIMIT_S):
+            return jsonify({
+                'status': 'error',
+                'error': (f't_max must be in (0, {_SIXDOF_T_MAX_LIMIT_S:g}] s; '
+                          'an unbounded horizon never terminates for escape '
+                          'trajectories.'),
+            }), 400
+        res = solver.solve(t_max=t_max)
 
         # Zaman serilerini ~300 noktaya seyrelt
         import numpy as _np
@@ -2476,15 +2599,151 @@ def validate_fuel_composition():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+#: /api/database-status sonucu için kısa ömürlü önbellek (değer, zaman damgası).
+_db_status_cache = {'value': None, 'ts': 0.0}
+#: Önbellek ömrü [s]. Bağlantı durumu saniyeler içinde değişen bir şey değil.
+_DB_STATUS_TTL_S = 120.0
+
+
 @app.route('/api/database-status', methods=['GET'])
 def check_database_status():
-    """Check status of all database connections"""
+    """Veri tabanı bağlantı durumu — önbellekli.
+
+    v2.6.2 performans düzeltmesi: bu uç her çağrıda CANLI NIST isteği yapıyor
+    ve istek ``timeout=10`` taşıyor. ``advanced.html`` sayfayı açarken bunu
+    tetiklediği için, ağ kesikken veya NIST yavaşken sayfa açılışı tam 10
+    saniye asılıyordu — üstelik her sekme değişiminde yeniden.
+
+    Durum bilgisi saniyeler içinde değişen bir şey olmadığından sonuç kısa
+    süreli önbelleğe alınır. ``?refresh=1`` ile zorla tazelenebilir.
+    """
+    import time as _time
+    force = request.args.get('refresh') in ('1', 'true', 'yes')
+    now = _time.monotonic()
+    if (not force and _db_status_cache['value'] is not None
+            and now - _db_status_cache['ts'] < _DB_STATUS_TTL_S):
+        cached = dict(_db_status_cache['value'])
+        cached['cached'] = True
+        cached['cache_age_s'] = round(now - _db_status_cache['ts'], 1)
+        return jsonify(cached)
     try:
         status = db_manager.test_connections()
+        _db_status_cache['value'] = status
+        _db_status_cache['ts'] = now
         return jsonify(status)
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ---------------------------------------------------------------------------
+# A2 — 3B Dünya uydu karoları (NASA GIBS) + kalıcı önbellek
+#
+# Mantığın tamamı hrma/analysis/tile_cache.py içinde ve Flask'tan bağımsız;
+# burası yalnız HTTP çevirisi yapar. Güvenlik kapıları (katman allowlist,
+# z/x/y aralığı, tarih regex'i, realpath önek denetimi) modülde uygulanır —
+# çıkış hostu sabit GIBS olduğu için SSRF yüzeyi yoktur.
+# ---------------------------------------------------------------------------
+
+@app.route('/api/tile/<layer_key>/<int:z>/<int:x>/<int:y>', methods=['GET'])
+def tile_proxy(layer_key, z, x, y):
+    """Tek bir uydu karosunu sunar (önbellekten ya da GIBS'ten çekerek).
+
+    Çevrimdışıyken sahte doku ÜRETİLMEZ: 503 döner ve ön yüz o karoyu atlar,
+    altındaki Blue Marble taban dokusu görünür kalır (kısmi yükleme kabul).
+    """
+    from hrma.analysis import tile_cache
+
+    res = tile_cache.resolve_tile(layer_key, z, x, y,
+                                  date=request.args.get('date'))
+    if not res.get('ok'):
+        payload = {k: v for k, v in res.items() if k != 'code'}
+        return jsonify(payload), res.get('code', 500)
+
+    resp = send_file(res['path'], mimetype=res['mimetype'])
+    # Karolar içerik-adresli (layer/date/z/x/y) — değişmezler.
+    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    resp.headers['X-Tile-Cached'] = '1' if res.get('cached') else '0'
+    resp.headers['X-Tile-Attribution'] = res.get('attribution', '')
+    return resp
+
+
+@app.route('/api/tile/cache/status', methods=['GET'])
+def tile_cache_status():
+    """Karo önbelleğinin disk kullanımı ve konumu."""
+    from hrma.analysis import tile_cache
+    return jsonify({'status': 'success', **tile_cache.cache_status(),
+                    'layers': tile_cache.list_layers()})
+
+
+@app.route('/api/tile/cache/clear', methods=['POST'])
+def tile_cache_clear():
+    """Karo önbelleğini boşaltır (kullanıcı isteğiyle)."""
+    from hrma.analysis import tile_cache
+    return jsonify({'status': 'success', **tile_cache.cache_clear()})
+
+
+# ---------------------------------------------------------------------------
+# A1 — Uçurulacak araç köprüsü
+#
+# Motor sayfaları ile /launch-site AYRI sayfalardır: launch-site'ta motor formu
+# ya da currentResults yoktur. Bu uç, üç motor tipinin BİRBİRİNDEN FARKLI alan
+# adlarını (hybrid/solid/liquid) tek şemaya indirger — normalize mantığı
+# hrma/analysis/flight_vehicle.py içinde tektir (parametre tutarlılığı kuralı).
+#
+# İki kaynak: 'results' (oturum köprüsü, hesap sonucu doğrudan gelir) ve
+# 'project' (.hrma dosyası; proje yalnız girdi + özet sakladığı için itki eğrisi
+# ve propelan kütlesi YENİDEN HESAPLANIR).
+# ---------------------------------------------------------------------------
+
+@app.route('/api/flight-vehicle', methods=['POST'])
+def flight_vehicle():
+    """Motor sonucunu ya da kayıtlı projeyi tek araç şemasına çevirir."""
+    from hrma.analysis import flight_vehicle as fv
+
+    data = request.get_json(silent=True) or {}
+    source = str(data.get('source') or 'results').lower()
+    try:
+        if source == 'results':
+            motor_type = str(data.get('motor_type') or '').lower()
+            results = data.get('results') or {}
+            if not motor_type or not results:
+                return jsonify({
+                    'status': 'error',
+                    'error': "source='results' requires 'motor_type' and 'results'",
+                }), 400
+            vehicle = fv.normalize(motor_type, results)
+
+        elif source == 'project':
+            name = data.get('name')
+            if not name:
+                return jsonify({'status': 'error',
+                                'error': "source='project' requires 'name'"}), 400
+            from hrma.utils import projects
+            # load_project -> (doc, warnings) çifti döndürür
+            doc, load_warnings = projects.load_project(name)
+            motor_type, vehicle = fv.recompute_from_project(doc)
+            if load_warnings:
+                vehicle['load_warnings'] = list(load_warnings)
+            # Proje airframe taşıyorsa geri ver — panel alanları doldurulsun.
+            airframe = ((doc.get('inputs') or {}).get('airframe')
+                        if isinstance(doc, dict) else None)
+            if airframe:
+                vehicle['airframe'] = airframe
+
+        else:
+            return jsonify({'status': 'error',
+                            'error': f"unknown source '{source}'"}), 400
+
+        return jsonify(sanitize_json_values(
+            {'status': 'success', 'vehicle': vehicle}))
+
+    except (ValueError, KeyError) as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 400
+    except FileNotFoundError as exc:
+        return jsonify({'status': 'error', 'error': str(exc)}), 404
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(exc)}), 500
+
 
 @app.route('/api/altitude-to-pressure', methods=['POST'])
 def altitude_to_pressure():
@@ -2941,18 +3200,49 @@ def generate_complete_design_package():
 
 @app.route('/download/stl/<filename>')
 def download_stl_file(filename):
-    """Download STL files"""
+    """cad_exports/ içindeki bir STL dosyasını indirir.
+
+    GÜVENLİK — v2.6.2 düzeltmesi (rastgele dosya okuma):
+    Burası eskiden ``send_file(f"./cad_exports/{filename}")`` yapıyordu; adı
+    hiç doğrulamıyordu. Flask'ın varsayılan ``string`` dönüştürücüsü ``/``
+    geçirmez ama TERS BÖLÜ geçirir; Windows'ta ``\\`` da yol ayracı olduğundan
+    ``/download/stl/..\\..\\..\\Windows\\win.ini`` cad_exports dizininin dışına
+    çıkıyordu. HRMA Windows'ta exe dağıttığı için bu gerçek bir açıktı ve
+    ``CORS(app)`` joker kuralıyla birleşince yanıt herhangi bir web sayfasından
+    okunabiliyordu: kullanıcı HRMA açıkken kötü niyetli bir siteye girdiğinde
+    o sayfa diskten dosya okuyup dışarı gönderebilirdi.
+
+    Üç katmanlı savunma: (1) ad yalnız güvenli karakterlerden oluşmalı ve
+    ``.stl`` ile bitmeli, (2) ``basename`` ile her türlü dizin bileşeni atılır,
+    (3) çözümlenmiş mutlak yolun gerçekten export dizini altında kaldığı
+    ``os.path.commonpath`` ile doğrulanır (sembolik bağlantı dahil).
+    """
+    import os
+    import re
+
+    # (1) Beyaz liste: harf/rakam/nokta/tire/alt çizgi + .stl uzantısı.
+    if not re.fullmatch(r'[A-Za-z0-9._-]{1,128}\.stl', filename or '',
+                        flags=re.IGNORECASE):
+        return jsonify({'error': 'Invalid filename'}), 400
+    # ".." bileşeni beyaz listeden geçebilir (nokta izinli) — açıkça reddet.
+    if '..' in filename:
+        return jsonify({'error': 'Invalid filename'}), 400
+
+    export_dir = os.path.realpath(os.path.join(os.getcwd(), 'cad_exports'))
+    # (2) Kalan her dizin bileşenini at.
+    candidate = os.path.realpath(os.path.join(export_dir,
+                                              os.path.basename(filename)))
+    # (3) Çözümlenen yol gerçekten export dizininin altında mı?
     try:
-        import os
-        
-        file_path = f"./cad_exports/{filename}"
-        if os.path.exists(file_path):
-            return send_file(file_path, as_attachment=True)
-        else:
-            return jsonify({'error': 'File not found'}), 404
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        if os.path.commonpath([export_dir, candidate]) != export_dir:
+            return jsonify({'error': 'Invalid filename'}), 400
+    except ValueError:
+        # Farklı sürücü harfleri (Windows) -> commonpath ValueError verir.
+        return jsonify({'error': 'Invalid filename'}), 400
+
+    if not os.path.isfile(candidate):
+        return jsonify({'error': 'File not found'}), 404
+    return send_file(candidate, as_attachment=True)
 
 @app.route('/api/export-simulation', methods=['POST'])
 def export_simulation_file():
@@ -3031,145 +3321,121 @@ def generate_3d():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+# /api/export-stl için zorunlu geometri alanları (motor tipine göre).
+# Bu alanlar OLMADAN üretilecek katı, kullanıcının tasarladığı motor değildir;
+# eksikse istek reddedilir (aşağıdaki fail-closed gerekçesine bakınız).
+_STL_REQUIRED_FIELDS = {
+    'hybrid': ('chamber_diameter', 'chamber_length', 'port_diameter'),
+    'solid':  ('chamber_diameter', 'chamber_length'),
+    'liquid': ('chamber_diameter', 'chamber_length'),
+}
+
+
 @app.route('/api/export-stl', methods=['POST'])
 def export_stl():
-    """Export motor design as STL file with comprehensive error handling"""
+    """Motor tasarımını STL olarak dışa aktarır — FAIL-CLOSED.
+
+    v2.6.2 düzeltmesi (sessiz veri bozulması):
+    Bu uç eskiden DÖRT ayrı yedek yola sahipti ve hepsi HTTP 200 dönüyordu:
+    CAD üretimi çökerse basitleştirilmiş geometri, STL yazımı çökerse
+    ``generate_basic_stl_content`` (toplam 6 üçgen: iki düzlemde birer
+    çeyrek-daire yelpazesi — kapalı katı değil, nozul yok, port yok, gövde
+    yok), o da çökerse TEK üçgenlik 10 mm'lik bir dosya. Ön yüz her durumda
+    "STL exported successfully" yazıyordu. Yani başarısız bir dışa aktarım,
+    başarılı bir indirme gibi görünüyordu.
+
+    Ayrıca eksik alanlar motor tipine göre sessizce dolduruluyordu
+    (hybrid→HTPB/N2O, solid→APCP/BATES, liquid→RP-1/LOX ve itkiden tahmini
+    port çapı ``0.02·√(F/1000)`` — kaynaksız, üstelik aynı kavram için kod
+    tabanında üç ayrı sihirli sayı vardı). Kullanıcıya bunun bir tahmin
+    olduğu hiçbir yerde söylenmiyordu.
+
+    Yeni davranış: eksik zorunlu geometri → 422; CAD/STL üretimi çökerse →
+    500 + yapılandırılmış hata. Görselleştirme amaçlı basit geometri artık
+    imalata gidebilecek bir dosya olarak dönmüyor.
+    """
     try:
-        data = request.json
+        data = request.json or {}
         motor_data = data.get('motor_data', {})
         motor_type = motor_data.get('motor_type', 'hybrid')
-        
-        # Validate export request
+
         is_valid, validation_msg = motor_validator.validate_export_request(data, 'stl')
         if not is_valid:
-            return jsonify({
-                'error': validation_msg,
-                'status': 'failed'
-            }), 400
-        
-        # Sanitize motor data for safe processing
+            return jsonify({'error': validation_msg, 'status': 'failed'}), 400
+
         motor_data = motor_validator.sanitize_export_data(motor_data)
-        
-        # Ensure critical parameters exist for different motor types
-        if motor_type == 'hybrid':
-            # Hybrid motor specific requirements
-            if 'fuel_type' not in motor_data:
-                motor_data['fuel_type'] = 'htpb'
-            if 'oxidizer_type' not in motor_data:
-                motor_data['oxidizer_type'] = 'n2o'
-            if 'port_diameter' not in motor_data and 'thrust' in motor_data:
-                # Estimate port diameter from thrust
-                motor_data['port_diameter'] = 0.02 * np.sqrt(motor_data['thrust'] / 1000)
-        elif motor_type == 'solid':
-            if 'propellant_type' not in motor_data:
-                motor_data['propellant_type'] = 'apcp'
-            if 'grain_geometry' not in motor_data:
-                motor_data['grain_geometry'] = 'bates'
-        elif motor_type == 'liquid':
-            if 'fuel_type' not in motor_data:
-                motor_data['fuel_type'] = 'rp1'
-            if 'oxidizer_type' not in motor_data:
-                motor_data['oxidizer_type'] = 'lox'
-        
-        # Generate 3D CAD model using the CAD designer
-        print(f"Generating 3D assembly for {motor_type} motor...")
-        print(f"Motor data: {json.dumps(motor_data, indent=2)}")
-        
-        try:
-            cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
-        except Exception as cad_error:
-            print(f"CAD generation error: {str(cad_error)}")
-            # Provide fallback basic geometry
-            cad_data = generate_fallback_cad_geometry(motor_data, motor_type)
-        
-        # Export STL files to disk
-        if cad_data and 'assembly_meshes' in cad_data:
-            print("Exporting STL files...")
-            try:
-                stl_files = cad_designer.export_stl_files(cad_data['assembly_meshes'])
-            except Exception as export_error:
-                print(f"STL export error: {str(export_error)}")
-                # Generate basic STL content directly
-                stl_content = generate_basic_stl_content(motor_data, motor_type)
-                motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
-                filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
-                
-                from flask import Response
-                return Response(
-                    stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content,
-                    mimetype='application/sla',
-                    headers={'Content-Disposition': f'attachment;filename={filename}'}
-                )
-            
-            # Read the main motor assembly STL file
-            if stl_files:
-                main_stl_path = None
-                for file_path in stl_files:
-                    if 'motor_assembly' in file_path.lower() or 'complete' in file_path.lower():
-                        main_stl_path = file_path
-                        break
-                
-                # If no main assembly found, use the first file
-                if not main_stl_path:
-                    main_stl_path = stl_files[0]
-                
-                # Read the STL file content
-                import os
-                if os.path.exists(main_stl_path):
-                    with open(main_stl_path, 'rb') as f:
-                        stl_content = f.read()
-                else:
-                    # Generate basic STL if file not found
-                    stl_content = generate_basic_stl_content(motor_data, motor_type)
-                    stl_content = stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content
-                
-                # Create filename from motor data
-                motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
-                filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
-                
-                # Create response with STL file
-                from flask import Response
-                return Response(
-                    stl_content,
-                    mimetype='application/sla',
-                    headers={'Content-Disposition': f'attachment;filename={filename}'}
-                )
-            else:
-                # Generate basic STL content as fallback
-                stl_content = generate_basic_stl_content(motor_data, motor_type)
-                motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
-                filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
-                
-                from flask import Response
-                return Response(
-                    stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content,
-                    mimetype='application/sla',
-                    headers={'Content-Disposition': f'attachment;filename={filename}'}
-                )
-        else:
-            # Generate basic STL content as final fallback
-            stl_content = generate_basic_stl_content(motor_data, motor_type)
-            motor_name = motor_data.get('motor_name', f'UZAYTEK_{motor_type.upper()}_Motor')
-            filename = f"{motor_name.replace(' ', '_')}_{motor_type}.stl"
-            
-            from flask import Response
-            return Response(
-                stl_content.encode('utf-8') if isinstance(stl_content, str) else stl_content,
-                mimetype='application/sla',
-                headers={'Content-Disposition': f'attachment;filename={filename}'}
-            )
-        
+
+        # Zorunlu geometri denetimi — "iyi niyetli varsayılan" YOK.
+        required = _STL_REQUIRED_FIELDS.get(motor_type,
+                                            _STL_REQUIRED_FIELDS['hybrid'])
+        missing = [f for f in required
+                   if motor_data.get(f) in (None, '', 0)]
+        if missing:
+            return jsonify({
+                'status': 'incomplete_geometry',
+                'error': ('Cannot export STL: required geometry is missing. '
+                          'These values define the exported solid and are not '
+                          'assumed on your behalf.'),
+                'missing_fields': missing,
+                'motor_type': motor_type,
+            }), 422
+
+        cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
+
+        if not cad_data or 'assembly_meshes' not in cad_data:
+            return jsonify({
+                'status': 'cad_failed',
+                'error': ('CAD assembly could not be generated for this motor. '
+                          'No placeholder geometry is returned — a simplified '
+                          'shape would not represent the analysed design.'),
+            }), 500
+
+        stl_files = cad_designer.export_stl_files(cad_data['assembly_meshes'])
+        if not stl_files:
+            return jsonify({
+                'status': 'stl_write_failed',
+                'error': 'CAD assembly succeeded but no STL file was written.',
+            }), 500
+
+        main_stl_path = next(
+            (p for p in stl_files
+             if 'motor_assembly' in p.lower() or 'complete' in p.lower()),
+            stl_files[0])
+
+        import os
+        if not os.path.exists(main_stl_path):
+            return jsonify({
+                'status': 'stl_missing',
+                'error': 'STL export reported success but the file is absent.',
+            }), 500
+
+        with open(main_stl_path, 'rb') as f:
+            stl_content = f.read()
+        if not stl_content.strip():
+            return jsonify({
+                'status': 'stl_empty',
+                'error': 'Generated STL file is empty.',
+            }), 500
+
+        # Dosya adı kullanıcı girdisinden geliyor -> başlık enjeksiyonuna karşı
+        # temizle (safe_name yalnız [A-Za-z0-9._-] bırakır).
+        from hrma.utils.input_guard import safe_name
+        name = safe_name(motor_data.get('motor_name')
+                         or f'UZAYTEK_{motor_type.upper()}_Motor')
+        filename = f"{name}_{motor_type}.stl"
+
+        from flask import Response
+        return Response(
+            stl_content,
+            mimetype='application/sla',
+            headers={'Content-Disposition': f'attachment;filename="{filename}"'}
+        )
+
     except Exception as e:
-        error_msg = f"STL Export Error: {str(e)}"
-        print(error_msg)
-        print(traceback.format_exc())
-        
-        # Return error response
+        traceback.print_exc()
         return jsonify({
-            'error': error_msg,
-            'details': str(e),
-            'traceback': traceback.format_exc(),
-            'status': 'failed'
+            'status': 'failed',
+            'error': f'STL export failed: {e}',
         }), 500
 
 def generate_basic_stl_content(motor_data, motor_type):
@@ -3639,6 +3905,15 @@ def analyze_structural_safety():
             'throat_diameter': throat_diameter,
             'burn_time': burn_time
         }
+        # İTKİ (v2.6.2, fizik denetimi F075): yapısal modül eksenel burkulmayı
+        # motorun kendi itkisinden gelen BASMA yüküyle hesaplar
+        # (structural_analysis:483 `motor_data.get('thrust', 0)`). Hiçbir çağıran
+        # bu anahtarı geçirmediği için eksenel kuvvet DAİMA 0 kalıyor, burkulma
+        # emniyet katsayısı sonsuz çıkıyor ve kontrol her zaman "SAFE" diyordu —
+        # yani burkulma kontrolü fiilen ölü koddu.
+        # Verilmezse eski davranış (saf iç basınç) korunur.
+        if data.get('thrust'):
+            motor_data['thrust'] = float(data['thrust'])
         # Termal senaryo bu uçta pasif kalıyordu: gaz sıcaklığı geçilmeyince
         # yapısal modül termal gerilmeyi hiç değerlendirmiyordu (2026-07-14).
         # İstemci gönderirse geçir; 0/boş "termal analizi atla" demektir.
@@ -5150,12 +5425,23 @@ def _uq_contract_body(motor_type, level, result):
             'p95': block['p95'],
             'histogram': block['histogram'],
         }
+    # sensitivity sözlüğü hem çıktı-başına SATIR LİSTESİ hem de skaler
+    # meta alanları taşır ('method_note', v2.6.2'de eklenen 'noise_floor').
+    # Skalerleri satır listesi sanıp döngüye sokmak TypeError üretiyordu;
+    # bu yüzden liste olmayan her değer meta kabul edilip aynen taşınır.
     sensitivity = {}
+    sensitivity_meta = {}
     for key, rows in result['sensitivity'].items():
-        if key == 'method_note':
+        if not isinstance(rows, (list, tuple)):
+            sensitivity_meta[key] = rows
             continue
         sensitivity[key] = [
-            {'param': row['param'], 'rho': row['spearman']} for row in rows
+            {'param': row['param'], 'rho': row['spearman'],
+             # Gürültü tabanı: |rho| bu değerin altındaysa duyarlılık
+             # örnekleme gürültüsünden ayırt edilemez (v2.6.2 fizik denetimi).
+             **({'noise_floor': row['noise_floor']}
+                if isinstance(row, dict) and 'noise_floor' in row else {})}
+            for row in rows
         ]
     body = {
         'status': 'ok',
@@ -5169,6 +5455,10 @@ def _uq_contract_body(motor_type, level, result):
         'outputs': outputs,
         'sensitivity': sensitivity,
         'sensitivity_method_note': result['sensitivity'].get('method_note'),
+        # Skaler meta alanları (ör. noise_floor): |rho| bu eşiğin altındaysa
+        # duyarlılık örnekleme gürültüsünden ayırt edilemez. Kullanıcı bunu
+        # görmeden sıralamaya anlam yükleyemez.
+        'sensitivity_meta': sensitivity_meta,
         'sampler': result['sampler'],
         'uq_version': result['uq_version'],
         'inputs_used': result['inputs_used'],
@@ -5322,6 +5612,16 @@ def uncertainty_analysis():
 
 _CORRELATION_CACHE = {}
 
+# Korelasyon koşusu tek seferde BİR kez çalışsın (v2.6.2).
+#
+# Koşu soğukta ~2 dakika sürüyor (Cantera denge çözümleri; docstring "~15-25 s"
+# diyordu ama DB 136 -> 209 kayda çıkınca güncellenmemişti). Flask geliştirme
+# sunucusu çok iş parçacıklı olduğu için, önbellek soğukken gelen iki eşzamanlı
+# istek AYNI ağır işi iki kez başlatıyordu: CPU ikiye katlanıyor, ikisi de
+# önbelleğe yazıyor ve kullanıcı iki katı bekliyordu. Kilit, ikinci isteğin
+# birincinin sonucunu beklemesini sağlar (sonra önbellekten anında döner).
+_CORRELATION_LOCK = threading.Lock()
+
 
 def _correlation_report_body(refresh=False):
     """Korelasyon rapor gövdesini kurar (modül-içi {db_hash: gövde} önbelleği).
@@ -5399,7 +5699,10 @@ def correlation_report():
         data = request.get_json(silent=True) or {}
         refresh = bool(data.get('refresh'))
     try:
-        body = _correlation_report_body(refresh=refresh)
+        # Kilit: eşzamanlı istekler ağır koşuyu tekrarlamaz. İlk istek koşar,
+        # ikincisi bekler ve kilidi aldığında önbellekten anında döner.
+        with _CORRELATION_LOCK:
+            body = _correlation_report_body(refresh=refresh)
     except Exception as exc:
         traceback.print_exc()
         return jsonify({'status': 'error', 'error': str(exc)}), 500

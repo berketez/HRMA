@@ -37,7 +37,12 @@ class NistWebBookAPI:
                 'Units': 'SI'
             }
             
-            response = self.session.get(self.BASE_URL, params=params, timeout=10)
+            # timeout: (bağlanma, okuma). v2.6.2: tek değerli timeout=10,
+            # ağ kesikken TAM 10 saniye asılmaya yol açıyordu ve bu uç sayfa
+            # açılışında tetikleniyordu. Bağlanma aşaması hızlı başarısız
+            # olmalı; erişilebilir bir sunucudan yanıt için 6 s yeterli.
+            response = self.session.get(self.BASE_URL, params=params,
+                                        timeout=(2.5, 6.0))
             response.raise_for_status()
             
             # Parse the HTML response to extract properties

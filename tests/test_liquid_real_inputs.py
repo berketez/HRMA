@@ -242,8 +242,14 @@ def test_out_of_range_input_warns_instead_of_silent_fallback():
     _, result = run_engine(dict(FORM_DEFAULTS, safety_factor=99.0))
     assert result['structural_analysis']['chamber_structure'][
         'safety_factor'] != 99.0
-    assert any('Safety factor' in w for w in result['input_warnings']), \
-        result['input_warnings']
+    # v2.6.2 D-track: input_warnings artik {code, params, severity} sozlugu.
+    # Metin yerine KOD + parametre sinanir (dilden bagimsiz, saglam).
+    warns = result['input_warnings']
+    hit = [w for w in warns
+           if isinstance(w, dict)
+           and w.get('code') == 'warn.liquid.input_out_of_range'
+           and (w.get('params') or {}).get('field') == 'safety_factor']
+    assert hit, warns
 
 
 def test_unwired_inputs_are_declared():

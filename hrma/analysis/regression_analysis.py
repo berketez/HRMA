@@ -2,22 +2,59 @@
 Regression Rate Analysis Module
 Hibrit roket yakıt regresyon hızı analizi ve görselleştirmesi
 
-Marxman difüzyon-limitli regresyon teorisi (Marxman & Gilbert, 9th Int.
+Marxman difüzyon-limitli regresyon TEORİSİ (Marxman & Gilbert, 9th Int.
 Symp. Combustion, 1963; Sutton & Biblarz, Rocket Propulsion Elements,
-9. baskı, Böl. 16) regresyon hızını YEREL TOPLAM kütle akısına bağlar:
+9. baskı, Böl. 16) regresyon hızını yerel TOPLAM kütle akısına bağlar:
 
-    r_dot = a · G_total^n,   G_total = G_ox + G_fuel
+    r_dot = a_teorik · G_total^0.8 · x^-0.2
 
-Yalnız G_ox kullanmak (eski sürüm), yakıt akısının önemli olduğu düşük
-O/F / düşük G_ox rejiminde regresyonu OLDUĞUNDAN DÜŞÜK tahmin eder
-(yakıt debisini ve dolayısıyla web tükenme süresini fazla iyimser gösterir
-— güvenli olmayan yön). Bu modül varsayılan olarak G_total kullanır;
-geriye uyum için G_ox modu opsiyoneldir.
+AMA: bu modülün kullandığı (a, n) çiftleri teorik değil DENEYSEL fitlerdir
+ve literatürde bu fitlerin korelasyon değişkeni OKSİTLEYİCİ akısıdır
+(Doran et al. AIAA 2007-5352; Zilliac & Karabeyoglu AIAA 2006-4504 Tablo 2 —
+her ikisi de r = a·G_ox^n formunda yayımlanmıştır).
+
+>>> v2.6.2 FİZİK DENETİMİ DÜZELTMESİ (bulgu F018) — VARSAYILAN 'ox' OLDU <<<
+G_ox tabanlı bir fit katsayısını G_total ile beslemek ÇİFT SAYIMDIR: yakıt
+akısının etkisi zaten a katsayısının içinde kalibre edilmiştir, üstüne bir de
+G_fuel eklenince r_dot sistematik olarak (1+1/OF)^n kadar şişer. ÖLÇÜLDÜ
+(HTPB a=3.68e-5, n=0.555, G_ox=350 kg/m²s): O/F=6'da +%9.8, O/F=2'de +%32.6,
+O/F=1.5'te +%45.8. Projenin kendi doğrulama katmanı (record_adapters.py::
+_run_hybrid) bu nedenle zaten flux_mode='ox' ile koşuyordu; ürün varsayılanı
+şimdi onunla HİZALANDI (parafin alt kümesinde 'ox' ile medAPE %6.9 / bias
++%9.4 — DB'deki en iyi hibrit performansı).
+
+Eski gerekçe ("G_ox-only regresyonu düşük tahmin eder, güvenli olmayan yön")
+YANLIŞ TEŞHİSTİ: sapmanın kaynağı akı tabanı değil, HTPB katsayısının
+kendisidir (bkz. F019 uyarısı warn.hybrid.htpb_coeff_bias). Akı tabanını
+değiştirerek katsayı hatasını kapatmak, iki hatayı üst üste bindirmektir.
+
+flux_mode='total' hâlâ seçilebilir (Marxman teorik formuna yakın davranış
+istenirse) ama bu durumda çift-sayım uyarısı üretilir.
+
+>>> v2.6.2 FİZİK DENETİMİ (bulgu F058) — YAKIT AKISI ARTIK BOY-ORTALAMASI <<<
+'total' modunda G_fuel eskiden port ÇIKIŞ değeriydi (tüm grain boyunca üretilen
+yakıt tek bir kesitten geçiyormuş gibi). Marxman'da G_total yereldir: baş uçta
+G_fuel = 0, kuyruk uçta tam değer; boy ortalaması çıkışın YARISIDIR. Docstring
+bunu "konservatif üst sınır" diye kabul ediyordu, ama sonuç (r_dot, port çapı,
+yakıt debisi) kullanıcıya doğrudan SAYI olarak sunulduğu için bu konservatiflik
+belirsizlik değil sistematik sapmadır. Varsayılan artık 'average'
+(bkz. FUEL_FLUX_STATION_FACTORS); eski davranış fuel_flux_station='exit' ile
+seçilebilir.
 """
 
 import numpy as np
 import plotly.graph_objects as go
 from typing import Dict, Tuple
+
+
+def _w(code: str, severity: str = "warning", **params) -> Dict:
+    """i18n uyarısı: dile bağlı sabit metin YERİNE yapısal kayıt.
+
+    Sözleşme solid_rocket_engine.py::_w ile birebir aynıdır:
+    ``{"code", "params", "severity"}``; severity ∈ {critical, warning, info}.
+    Kod adlandırması: ``warn.hybrid.<slug>``.
+    """
+    return {"code": code, "params": params, "severity": severity}
 # Regresyon katsayıları TEK yerde tanımlıdır (magic-number kuralı):
 # kaynak atıfları için hrma/data/propellant_database.py içindeki tabloya bakın.
 from hrma.data.propellant_database import HYBRID_REGRESSION_COEFFICIENTS as _REG
@@ -34,6 +71,26 @@ LIQUEFYING_FUELS = {
     # yakıt: korelasyon a/n entrainment etkisini içeriyor mu?
     'paraffin': {'entrainment_in_correlation': True},
 }
+
+# --- Yakıt akısının port boyunca konumu (v2.6.2 fizik denetimi, bulgu F058) ---
+# Marxman'da G_total YEREL bir büyüklüktür:
+#     G_total(x) = G_ox + (1/A_port) · ∫₀ˣ ρ_f·π·D·r dx'
+# Baş uçta (x=0) G_fuel = 0, kuyruk uçta (x=L) tam değerdir. Sabit r kabulüyle
+# integral x ile doğrusaldır, dolayısıyla BOY ORTALAMASI çıkış değerinin tam
+# YARISIDIR. Bu modül tek istasyonda çalıştığı için hangi istasyonu temsil
+# ettiği açıkça seçilmelidir:
+#   'average' (VARSAYILAN): boy-ortalamalı akı (çarpan 0.5). Tek istasyonlu
+#            model için doğru temsil budur; çıktı (r_dot, port çapı, yakıt
+#            debisi) kullanıcıya doğrudan SAYI olarak sunulduğundan
+#            "konservatif üst sınır" burada belirsizlik değil sistematik
+#            sapmadır.
+#   'exit'   : port çıkış değeri (çarpan 1.0) — eski davranış; kuyruk uçtaki
+#            en yüksek yerel regresyonu görmek istendiğinde seçilir.
+# Kaynak: Marxman & Gilbert, 9th Int. Symp. Combustion (1963); Sutton &
+# Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 16 (yerel akı tanımı);
+# Chiaverini & Kuo, AIAA Progress Vol. 218 (2007), Böl. 2.
+FUEL_FLUX_STATION_FACTORS = {'average': 0.5, 'exit': 1.0}
+DEFAULT_FUEL_FLUX_STATION = 'average'
 
 
 def _as_list(values) -> list:
@@ -65,39 +122,79 @@ class RegressionAnalyzer:
     def regression_rate(a: float, n: float, G_ox: float,
                         rho_f: float = None, port_diameter: float = None,
                         grain_length: float = None,
-                        flux_mode: str = 'total',
+                        flux_mode: str = 'ox',
+                        fuel_flux_station: str = DEFAULT_FUEL_FLUX_STATION,
                         max_iter: int = 50, tol: float = 1e-6) -> Dict:
-        """Marxman regresyon hızını tek bir port istasyonunda hesaplar.
+        """Regresyon hızını tek bir port istasyonunda hesaplar.
 
         r_dot = a · G^n  (SI: r [m/s], G [kg/m²·s])
 
         flux_mode:
-          'total' (VARSAYILAN, Marxman): G = G_ox + G_fuel. Yakıt akısı
-                  regresyon hızına bağlı olduğundan (G_fuel = mdot_f/A_port,
-                  mdot_f = rho_f·π·D·L·r_dot) sabit-nokta iterasyonu yapılır:
-                  r → mdot_f → G_fuel → G_total → r ... yakınsayana dek.
+          'ox' (VARSAYILAN): G = G_ox. Modülün (a, n) tablosu G_ox tabanlı
+                  DENEYSEL fitlerden gelir (Doran et al. AIAA 2007-5352;
+                  Zilliac & Karabeyoglu AIAA 2006-4504 Tablo 2), dolayısıyla
+                  katsayının kendi akı tabanıyla değerlendirilmesi TEK tutarlı
+                  seçenektir. v2.6.2 fizik denetimi bulgusu F018.
+          'total': G = G_ox + G_fuel (Marxman teorik formuna yakın). Yakıt
+                  akısı regresyon hızına bağlı olduğundan (G_fuel = mdot_f/
+                  A_port, mdot_f = rho_f·π·D·L·r_dot) sabit-nokta iterasyonu
+                  yapılır: r → mdot_f → G_fuel → G_total → r ... yakınsayana
+                  dek. DİKKAT: G_ox tabanlı katsayıyla birlikte kullanılırsa
+                  çift sayım olur (warn.hybrid.flux_mode_double_count).
                   Kaynak: Marxman & Gilbert (1963); Sutton & Biblarz 9th ed.,
                   Böl. 16; Chiaverini & Kuo, "Fundamentals of Hybrid Rocket
                   Combustion and Propulsion", AIAA Progress Vol. 218, 2007.
-          'ox'   : G = G_ox (eski/klasik korelasyon değişkeni — geriye uyum).
+
+        fuel_flux_station ('total' modunda anlamlıdır; bulgu F058):
+          'average' (VARSAYILAN): G_fuel port BOYUNCA ortalanır (çıkış
+                  değerinin yarısı). Marxman'da G_total yereldir; baş uçta
+                  G_fuel=0, kuyruk uçta tam değerdir. Tek istasyonlu bu model
+                  için doğru temsil boy-ortalamasıdır.
+          'exit': G_fuel port ÇIKIŞ değeridir (eski davranış). Yerel en yüksek
+                  regresyonu görmek istendiğinde seçilir; tasarım sayısı olarak
+                  raporlanırsa r_dot'u O/F=6'da ~%4, O/F=2'de ~%11 yukarı iter.
+          Bkz. FUEL_FLUX_STATION_FACTORS yorumundaki kaynaklar.
 
         'total' modu için rho_f, port_diameter (m) ve grain_length (m)
         zorunludur (G_fuel'in hesaplanabilmesi için). Verilmezse 'ox' moduna
-        düşülür ve uyarı döner.
+        düşülür ve DÖNEN SÖZLÜKTE uyarı bildirilir (v2.6.2: bu düşüş eskiden
+        tamamen sessizdi).
 
-        Döndürür: {'r_dot' [m/s], 'G_ox', 'G_fuel', 'G_total', 'mdot_f',
-                   'flux_used', 'iterations', 'converged'}
+        Döndürür: {'r_dot' [m/s], 'G_ox', 'G_fuel', 'G_fuel_exit', 'G_total',
+                   'mdot_f', 'flux_used', 'fuel_flux_station', 'iterations',
+                   'converged', 'warnings'}
+        'G_fuel' HESAPTA KULLANILAN akıdır (istasyon çarpanı uygulanmış);
+        'G_fuel_exit' port çıkışındaki ham değerdir; 'mdot_f' ise grain'in
+        TOPLAM yakıt üretimidir (istasyon seçiminden bağımsız fiziksel debi).
         """
         G_ox = max(G_ox, 1e-9)
+        warns = []
+        station = (fuel_flux_station or DEFAULT_FUEL_FLUX_STATION).lower()
+        if station not in FUEL_FLUX_STATION_FACTORS:
+            station = DEFAULT_FUEL_FLUX_STATION
+        station_factor = FUEL_FLUX_STATION_FACTORS[station]
 
         # G_total için gerekli geometri yoksa veya 'ox' modu istendiyse:
         if flux_mode == 'ox' or rho_f is None or port_diameter is None or grain_length is None:
+            if flux_mode == 'total':
+                # v2.6.2: sessiz mod düşüşü YASAK — kullanıcı hangi modelin
+                # koştuğunu bilmeli (Codex bulgusu: uyarı kanalı yok).
+                warns.append(_w('warn.hybrid.flux_mode_downgraded', 'info'))
             r_dot = a * G_ox ** n
             return {
-                'r_dot': r_dot, 'G_ox': G_ox, 'G_fuel': 0.0, 'G_total': G_ox,
-                'mdot_f': 0.0, 'flux_used': G_ox, 'iterations': 0,
-                'converged': True, 'mode': 'ox'
+                'r_dot': r_dot, 'G_ox': G_ox, 'G_fuel': 0.0,
+                'G_fuel_exit': 0.0, 'G_total': G_ox,
+                'mdot_f': 0.0, 'flux_used': G_ox,
+                'fuel_flux_station': station, 'iterations': 0,
+                'converged': True, 'mode': 'ox', 'warnings': warns
             }
+
+        # 'total' modu: katsayı tabanıyla uyuşmazlık uyarısı (F018).
+        warns.append(_w('warn.hybrid.flux_mode_double_count', 'warning'))
+        if station == 'exit':
+            # F058: çıkış istasyonu tek bir noktayı temsil eder, grain
+            # ortalamasını DEĞİL — kullanıcı hangi tanımı gördüğünü bilmeli.
+            warns.append(_w('warn.hybrid.fuel_flux_exit_station', 'info'))
 
         A_port = np.pi * (port_diameter / 2.0) ** 2
         mdot_ox = G_ox * A_port  # kg/s (sabit; G_ox tanımından)
@@ -108,13 +205,13 @@ class RegressionAnalyzer:
         converged = False
         it = 0
         for it in range(1, max_iter + 1):
-            # Bu istasyondaki yakıt üretimi -> yerel yakıt akısı.
-            # Port-çıkış yaklaşımı: tüm grain boyunca üretilen yakıt aynı
-            # kesitten geçer (G_fuel = mdot_f / A_port). Bu, port boyunca
-            # biriken akının ÜST sınırıdır -> en yüksek r_dot -> web tükenme
-            # süresinde KONSERVATİF (güvenli) taraf.
+            # Grain'in TOPLAM yakıt üretimi (fiziksel debi) ve bunun port
+            # çıkışındaki akı karşılığı.
             mdot_f = rho_f * np.pi * port_diameter * grain_length * r_dot
-            G_fuel = mdot_f / A_port
+            G_fuel_exit = mdot_f / A_port
+            # v2.6.2 FİZİK DENETİMİ (F058): tek istasyonlu modelde kullanılacak
+            # akı, seçilen istasyonun akısıdır. 'average' -> çıkışın yarısı.
+            G_fuel = station_factor * G_fuel_exit
             G_total = G_ox + G_fuel
             r_new = a * G_total ** n
             if abs(r_new - r_dot) <= tol * max(r_new, 1e-12):
@@ -124,12 +221,19 @@ class RegressionAnalyzer:
             r_dot = r_new
 
         mdot_f = rho_f * np.pi * port_diameter * grain_length * r_dot
-        G_fuel = mdot_f / A_port
+        G_fuel_exit = mdot_f / A_port
+        G_fuel = station_factor * G_fuel_exit
         G_total = G_ox + G_fuel
         if not converged:
             # OPUS DENETİM DÜZELTMESİ (minor): sessiz yakınsamama yasak.
             # n≥0.7 egzotik yakıt + aşırı yakıt-baskın geometri 50 iterasyonu
             # aşabilir; kullanıcı son iterat kullanıldığını bilmeli.
+            # v2.6.2: warnings.warn SUNUCU KONSOLUNA gidiyordu, kullanıcı hiç
+            # görmüyordu; artık dönen sözlükte de yapısal kayıt var.
+            warns.append(_w('warn.hybrid.regression_not_converged', 'warning',
+                            max_iter=max_iter, n=round(float(n), 3),
+                            fuel_flux_fraction=round(
+                                float(G_fuel / max(G_total, 1e-12)), 3)))
             import warnings
             warnings.warn(
                 f"Marxman G_total sabit-nokta iterasyonu {max_iter} adımda "
@@ -137,18 +241,21 @@ class RegressionAnalyzer:
                 f"{G_fuel/max(G_total,1e-12):.3f}); son iterat kullanılıyor.",
                 RuntimeWarning)
         return {
-            'r_dot': r_dot, 'G_ox': G_ox, 'G_fuel': G_fuel, 'G_total': G_total,
-            'mdot_f': mdot_f, 'flux_used': G_total, 'iterations': it,
-            'converged': converged, 'mode': 'total'
+            'r_dot': r_dot, 'G_ox': G_ox, 'G_fuel': G_fuel,
+            'G_fuel_exit': G_fuel_exit, 'G_total': G_total,
+            'mdot_f': mdot_f, 'flux_used': G_total,
+            'fuel_flux_station': station, 'iterations': it,
+            'converged': converged, 'mode': 'total', 'warnings': warns
         }
 
     def analyze_regression_vs_time(self, motor_data: Dict) -> Dict:
         """Zamana karşı regresyon hızı analizi.
 
-        flux_mode (motor_data anahtarı): 'total' (varsayılan, Marxman
-        G_total = G_ox + G_fuel) veya 'ox' (eski G_ox-only, geriye uyum).
-        'total' modu için yakıt yoğunluğu ve grain boyu gerekir (motor_data'dan
-        veya yakıt tablosundan).
+        flux_mode (motor_data anahtarı): 'ox' (VARSAYILAN — katsayı tabanıyla
+        tutarlı; bkz. modül docstring / bulgu F018) veya 'total' (Marxman
+        G_total = G_ox + G_fuel; çift sayım uyarısı üretir). 'total' modu için
+        yakıt yoğunluğu ve grain boyu gerekir (motor_data'dan veya yakıt
+        tablosundan).
         """
 
         # Motor parametrelerini al
@@ -165,7 +272,12 @@ class RegressionAnalyzer:
         grain_length = motor_data.get('grain_length')
         if not grain_length or grain_length <= 0:
             grain_length = motor_data.get('chamber_length', 0.3) * 0.8  # m
-        flux_mode = motor_data.get('flux_mode', 'total')  # 'total' (Marxman) | 'ox'
+        # v2.6.2 (F018): varsayılan 'ox' — tablo katsayıları G_ox tabanlıdır.
+        flux_mode = motor_data.get('flux_mode', 'ox')  # 'ox' | 'total' (Marxman)
+        # v2.6.2 (F058): 'total' modunda yakıt akısının hangi istasyonu temsil
+        # ettiği. Varsayılan boy-ortalaması; 'exit' eski davranıştır.
+        fuel_flux_station = motor_data.get('fuel_flux_station',
+                                           DEFAULT_FUEL_FLUX_STATION)
 
         # Yakıt özelliklerini al
         fuel_props = self.fuel_properties.get(fuel_type, self.fuel_properties['htpb'])
@@ -187,8 +299,9 @@ class RegressionAnalyzer:
         total_flux = []
 
         dt = burn_time / (time_steps - 1)
+        run_warnings = []
 
-        for t in time_array:
+        for i_step, t in enumerate(time_array):
             # Port alanı ve oksitleyici akış yoğunluğu
             port_area = np.pi * port_radius**2  # m²
             G_ox = mdot_ox / port_area  # kg/m²/s
@@ -197,9 +310,13 @@ class RegressionAnalyzer:
             reg = self.regression_rate(
                 a, n, G_ox,
                 rho_f=rho_f, port_diameter=2 * port_radius,
-                grain_length=grain_length, flux_mode=flux_mode
+                grain_length=grain_length, flux_mode=flux_mode,
+                fuel_flux_station=fuel_flux_station
             )
             r_dot = reg['r_dot']  # m/s
+            for w in reg.get('warnings', []):
+                if w not in run_warnings:
+                    run_warnings.append(w)
 
             # Sonuçları kaydet
             regression_rates.append(r_dot * 1000)  # mm/s'ye çevir
@@ -207,8 +324,15 @@ class RegressionAnalyzer:
             oxidizer_flux.append(G_ox)
             total_flux.append(reg['G_total'])
 
-            # Port yarıçapını güncelle
-            if t < burn_time - dt:
+            # Port yarıçapını güncelle.
+            # v2.6.2 FİZİK DENETİMİ (F158): eski koşul `t < burn_time - dt`
+            # kayan-nokta eşitliği yüzünden SON İKİ noktayı özdeş bırakıyordu
+            # (100 noktalı ızgarada 99 değil 98 güncelleme). İNDEKS TABANLI
+            # koşul ızgarayla birebir tutarlıdır. ÖLÇÜLDÜ (mdot_ox=0.7 kg/s,
+            # D_i=50 mm, t_b=10 s, HTPB): D_final 66.119 -> 66.239 mm; büyüme
+            # payında %0.74 eksik hesap ortadan kalktı (referans: 100 000
+            # adımlı integrasyon 66.239 mm).
+            if i_step < time_steps - 1:
                 port_radius += r_dot * dt
 
         return {
@@ -220,7 +344,11 @@ class RegressionAnalyzer:
             'fuel_type': fuel_type,
             'fuel_name': fuel_props['name'],
             'flux_mode': flux_mode,
-            'parameters': {'a': a, 'n': n}
+            'fuel_flux_station': fuel_flux_station,
+            'parameters': {'a': a, 'n': n},
+            # v2.6.2: uyarılar kullanıcıya ULAŞAN kanaldan da dönüyor
+            # (eskiden yalnız sunucu konsoluna gidiyordu).
+            'warnings': run_warnings,
         }
     
     def create_regression_plot(self, regression_data: Dict) -> str:
@@ -382,6 +510,16 @@ class RegressionAnalyzer:
             conditions['fuel_type'] = fuel_type
             conditions['regression_a'] = fuel_props['a']
             conditions['regression_n'] = fuel_props['n']
+            # v2.6.2 FİZİK DENETİMİ (F159): yoğunluk da yakıtla birlikte
+            # DEĞİŞTİRİLMELİ. Eskiden yalnız a/n güncelleniyor, rho_f ise
+            # base_conditions['fuel_density'] (ör. parafin 900 kg/m³) olarak
+            # kalıyordu; PMMA (1180) ve ABS (1050) eğrileri yanlış yoğunlukla
+            # çiziliyordu. Etki flux_mode='total' modunda görünür
+            # (G_fuel ∝ rho_f): parafin↔PMMA arası %31 yoğunluk hatası tipik
+            # G_fuel/G_total≈0.14 payında G_total'i ~%4.3, r_dot'u ~%2.4
+            # kaydırıyordu. 'ox' modunda etki sıfırdır ama tutarsızlık yine
+            # de kapatılır (mod değişince sessizce geri gelmesin).
+            conditions['fuel_density'] = fuel_props['density']
 
             # Regresyon analizi yap
             regression_data = self.analyze_regression_vs_time(conditions)

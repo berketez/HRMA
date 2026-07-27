@@ -9,6 +9,23 @@ flask-cors>=4.0.0
 numpy>=1.24.0,<2
 scipy>=1.11.0
 
+# Cantera — denge termokimyası. ZORUNLUDUR, opsiyonel değildir.
+#
+# v2.6.2'de tespit edildi: cantera bu dosyada YOKTU, dolayısıyla temiz bir
+# kurulumda import başarısız oluyor ve CombustionAnalyzer sessizce
+# `_fallback_equilibrium_composition`'a düşüyordu. O yedek, ürün bileşimini
+# İTİCİ ÇİFTİNDEN BAĞIMSIZ sabit bir sözlükten veriyor: LOX/HTPB gibi hiç azot
+# içermeyen bir çiftte bile ürünlerin %54'ü N2 sayılıyor ve ortalama molekül
+# ağırlığı her çiftte 29,6 g/mol'e çakılıyordu. Ölçülen c* hatası %4,4 ile
+# %13,4 arası — ve kullanıcıya hiçbir uyarı verilmiyordu.
+#
+# Yol kullanıcıya görünür: /calculate hibrit yanma analizi panelini bu
+# sınıftan besler (hrma/app.py:723).
+#
+# numpy uyumu: cantera 3.1.0 `numpy<3,>=1.12` deklare eder, yukarıdaki
+# numpy<2 pinimizle çakışmaz (build123d'nin aksine — o yüzden o opsiyonel).
+cantera>=3.0.0,<4
+
 # Visualization
 plotly>=5.18.0
 matplotlib>=3.7.0

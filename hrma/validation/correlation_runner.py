@@ -17,7 +17,22 @@ Akis:
    (tahmin - olcum) / olcum * 100 (bias gorunur kalsin).
 4. Toplulastirma (motor_type x buyukluk) hucresi basina: n, bias (ortalama
    isaretli hata %), RMS %, medyan APE %, MAPE %, min/maks (test_id ile).
-   Aykiri isaretleme: |hata - medyan| > 3*MAD -> ISARETLENIR, ATILMAZ
+   Ek durustluk alanlari (2026-07-27 fizik denetimi):
+   - n_campaigns (F006): kayitlar bagimsiz gozlem DEGILDIR — ayni kampanyanin
+     ardisik atislari sistematik (tesis/enjektor/olcum zinciri) hatayi
+     paylasir; hucre 'kayit / bagimsiz kampanya' ikilisini ve kampanya
+     duzeyinde ozet istatistigi (campaign_stats) tasir.
+   - n_in_sample / n_weak_evidence (F007): adaptorun 'IN-SAMPLE' ve 'ZAYIF
+     KANIT' bayraklari (quantity_flags) artik hucreye ve markdown ozetine
+     tasinir; fitin kendi verisine karsi olculen skorlar niteliksiz sayi
+     olarak yayilamaz.
+   - measurement_u_pct / median_measurement_u_pct (F008 eki): kayitlarin
+     bildirdigi olcum belirsizligi skora ve hucreye tasinir; coverage_k
+     biliniyorsa normalize hata E_n = error_pct/(k*u_pct) verilir, k
+     bilinmiyorsa verilmez (uydurulmaz; ISO/IEC Guide 98-3 / ASME V&V
+     20-2009 Bol. 2).
+   Aykiri isaretleme (F035): modifiye z-skoru
+   |0.6745*(hata - medyan)/MAD| > 3.5 -> ISARETLENIR, ATILMAZ
    (rapor hem 'tumu' hem 'aykirisiz' istatistigi verir). anomaly.flag=true
    kayitlar ana istatistige GIRMEZ, ayri listede raporlanir. Guven katmani:
    ana istatistik high+medium; low ayri hucre listesinde (Berke onayli K2).
@@ -46,7 +61,8 @@ from hrma.validation.experiment_db import load_records, records_for_statistics
 __all__ = [
     "RUNNER_VERSION",
     "MAIN_CONFIDENCE_LEVELS",
-    "OUTLIER_MAD_FACTOR",
+    "OUTLIER_MAD_SCALE",
+    "OUTLIER_MODIFIED_Z",
     "db_content_hash",
     "run_correlation",
     "deterministic_view",
@@ -56,7 +72,16 @@ __all__ = [
 RUNNER_VERSION = "1"
 # Ana istatistik katmani (Berke onayli K2): low ayri raporlanir.
 MAIN_CONFIDENCE_LEVELS = ("high", "medium")
-OUTLIER_MAD_FACTOR = 3.0
+# F035 (2026-07-27): eski esik |hata - medyan| > 3*ham MAD idi
+# (OUTLIER_MAD_FACTOR = 3.0, kaynaksiz). Ham MAD normal dagilimda sigma'nin
+# 0.6745 katidir (sigma ~ 1.4826*MAD; Rousseeuw & Croux, JASA 88(424), 1993),
+# yani 3*ham MAD yalnizca ~2.02 sigma'ya karsilik geliyordu ve temiz normal
+# veride n=27'de orneklerin ~%6.2'sini aykiri isaretliyordu (beklenen %0.27'nin
+# ~23 kati; katalog Monte Carlo olcumu). Yeni esik modifiye z-skorudur:
+# |0.6745*(hata - medyan)/MAD| > 3.5 (Iglewicz & Hoaglin, 'How to Detect and
+# Handle Outliers', ASQC Basic References in Quality Control Vol. 16, 1993).
+OUTLIER_MAD_SCALE = 0.6745
+OUTLIER_MODIFIED_Z = 3.5
 # Kayit basina sure uyari esigi (s). Kosucu tek is parcaciklidir; kosuyu
 # KESMEZ (yarim motor hesabi guvenle iptal edilemez), sonuca uyari yazar.
 PER_RECORD_TIME_WARN_S = 120.0
@@ -77,7 +102,49 @@ def db_content_hash(records: Iterable[Dict[str, Any]]) -> str:
 
 # --- Skorlama ----------------------------------------------------------------
 
-def _score_adapter_result(adapter_result: Dict[str, Any]) -> Dict[str, Any]:
+def _measurement_uncertainty_map(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Kayittaki ``measurement_uncertainty`` blogunu kanonik taban ada indirger.
+
+    F008 eki (2026-07-27, dogrulama denetimi): kosucu bu blogu HIC okumuyordu
+    — medAPE gibi sayilarin yaninda deneysel hata cubugu yoktu ve model
+    hatasi ile olcum sacilimi ayrismiyordu. Sema: SCHEMA.md
+    'measurement_uncertainty blogu' (value/type/coverage_k/source);
+    metrik ilkesi: ASME V&V 20-2009 Bol. 2 (karsilastirma hatasi E = S - D
+    ve u_val) ve ISO/IEC Guide 98-3 (GUM). coverage_k null olan kayitlarda k
+    bilinmedigi icin normalize hata HESAPLANMAZ (uydurma k yasak); yalniz
+    goreli belirsizlik raporlanir.
+
+    Returns:
+        {taban_ad: {'type', 'coverage_k', 'u_rel_pct', 'u_si'}} — 'relative'
+        tipte u_rel_pct dolu (yuzde); 'absolute' tipte u_si dolu (SI,
+        birim-ekli anahtar to_si ile cevrilir; cevrilemeyen None kalir).
+    """
+    block = record.get("measurement_uncertainty") or {}
+    out: Dict[str, Any] = {}
+    for key, spec in block.items():
+        if not isinstance(spec, dict) or spec.get("value") is None:
+            continue
+        base, _ = record_adapters.split_quantity_key(key)
+        base = record_adapters.BASE_ALIASES.get(base, base)
+        entry = {
+            "type": spec.get("type"),
+            "coverage_k": spec.get("coverage_k"),
+            "u_rel_pct": None,
+            "u_si": None,
+        }
+        if spec.get("type") == "relative":
+            entry["u_rel_pct"] = float(spec["value"]) * 100.0
+        elif spec.get("type") == "absolute":
+            # Birim carpani dogrusal oldugu icin belirsizlik ayni carpani alir.
+            _, si = record_adapters.to_si(key, spec["value"])
+            entry["u_si"] = si
+        out[base] = entry
+    return out
+
+
+def _score_adapter_result(adapter_result: Dict[str, Any],
+                          measurement_u: Optional[Dict[str, Any]] = None
+                          ) -> Dict[str, Any]:
     """Adaptor sonucundan buyukluk-basina skor sozlugu uretir.
 
     Her measured taban adi icin bir giris doner:
@@ -85,12 +152,17 @@ def _score_adapter_result(adapter_result: Dict[str, Any]) -> Dict[str, Any]:
               'skipped_derived' | 'no_prediction' | 'measured_zero' |
               'measured_null' | 'curve_skipped_v1' | 'unknown_unit'
     'scored' girislerde predicted/measured (SI) ve isaretli error_pct bulunur.
+    Kayit olcum belirsizligi bildiriyorsa (F008 eki) 'measurement_u_pct' ve
+    'coverage_k' eklenir; k biliniyorsa normalize hata E_n = error_pct /
+    (k * u_pct) da verilir (ASME V&V 20-2009: |E_n| <= 1 model-olcum uyumu).
     """
     scores: Dict[str, Any] = {}
     input_bases = set(adapter_result.get("input_bases", []))
     consumed = set(adapter_result.get("consumed_measured", []))
     derived = set(adapter_result.get("derived_bases", []))
     predictions = adapter_result.get("predictions", {})
+    # F007: adaptorun makine-okunur bagimlilik bayraklari skora tasinir.
+    quantity_flags = adapter_result.get("quantity_flags", {})
 
     for base, measured in adapter_result.get("measured_si", {}).items():
         if base in input_bases:
@@ -112,6 +184,21 @@ def _score_adapter_result(adapter_result: Dict[str, Any]) -> Dict[str, Any]:
                 "measured_si": float(measured),
                 "error_pct": float(error_pct),
             }
+            flags = sorted(quantity_flags.get(base, []))
+            if flags:
+                scores[base]["flags"] = flags
+            mu = (measurement_u or {}).get(base)
+            if mu is not None:
+                u_pct = mu["u_rel_pct"]
+                if u_pct is None and mu["u_si"] is not None:
+                    u_pct = abs(mu["u_si"]) / abs(float(measured)) * 100.0
+                if u_pct is not None:
+                    scores[base]["measurement_u_pct"] = float(u_pct)
+                    k = mu.get("coverage_k")
+                    scores[base]["coverage_k"] = k
+                    if isinstance(k, (int, float)) and k > 0 and u_pct > 0:
+                        scores[base]["normalized_error"] = float(
+                            error_pct / (k * u_pct))
     for base in adapter_result.get("measured_null", []):
         scores.setdefault(base, {"status": "measured_null"})
     for base in adapter_result.get("measured_curves", []):
@@ -123,13 +210,54 @@ def _score_adapter_result(adapter_result: Dict[str, Any]) -> Dict[str, Any]:
 
 # --- Hucre istatistigi -------------------------------------------------------
 
+def _campaign_key(record: Dict[str, Any]) -> str:
+    """Kaydin bagimsiz-kampanya anahtari (F006).
+
+    Ayni yayina/kampanyaya ait kayitlar ayni kaynak kunyesini (source.citation)
+    tasir; kunye yoksa kayit tek basina kampanya sayilir (test_id). Kampanya =
+    'sistematik hatayi paylasan olcum kumesi' yaklasimi: ASME V&V 20-2009
+    Bol. 3 (tekrarli olcumlerde sistematik vs rastgele bilesen ayrimi).
+    """
+    citation = (record.get("source") or {}).get("citation")
+    if citation and str(citation).strip():
+        return str(citation).strip()
+    return str(record.get("test_id") or "?")
+
+
 def _basic_stats(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     errors = [e["error_pct"] for e in entries]
     apes = [abs(e) for e in errors]
     mn = min(entries, key=lambda e: e["error_pct"])
     mx = max(entries, key=lambda e: e["error_pct"])
+    # F006: 'n' bagimsiz gozlem sayisi DEGILDIR — ayni kampanyanin atislari
+    # sistematik hatayi paylasir (pseudoreplication; Hurlbert, Ecological
+    # Monographs 54(2), 1984). Etkin serbestlik derecesi kampanya sayisina
+    # yakindir; ikisi de raporlanir. Olculen fark (tam DB): hybrid c_star/isp
+    # n=18 -> 1 kampanya, hybrid Pc/regresyon n=35 -> 2, solid burn_rate
+    # n=27 -> 2; yalniz sivi hucreleri gercekten bagimsizdir (14 ayri motor).
+    campaigns = {e.get("campaign") or e["test_id"] for e in entries}
+    # F008 eki: kayitlarin bildirdigi olcum belirsizligi hucre duzeyinde
+    # ozetlenir — medAPE'nin olcum gurultusunden ayrissip ayrismadigi ancak
+    # boyle okunabilir (or. hybrid c_star medAPE %2.3 vs u_olcum ~%0.8:
+    # model hatasi olcum sacilmasinin ~3 kati, ayrisabilir durumda).
+    u_vals = [e["measurement_u_pct"] for e in entries
+              if e.get("measurement_u_pct") is not None]
+    en_vals = [abs(e["normalized_error"]) for e in entries
+               if e.get("normalized_error") is not None]
     return {
         "n": len(errors),
+        "n_campaigns": len(campaigns),
+        # F007: bagimlilik bayragi tasiyan girislerin sayimi hucrede gorunur.
+        "n_in_sample": sum(1 for e in entries
+                           if "in_sample" in (e.get("flags") or ())),
+        "n_weak_evidence": sum(1 for e in entries
+                               if "weak_evidence" in (e.get("flags") or ())),
+        "n_with_measurement_u": len(u_vals),
+        "median_measurement_u_pct": (float(_stats.median(u_vals))
+                                     if u_vals else None),
+        # coverage_k bildirilmis kayit yoksa None — k uydurulmaz (GUM).
+        "median_abs_normalized_error": (float(_stats.median(en_vals))
+                                        if en_vals else None),
         "bias_pct": float(_stats.fmean(errors)),
         "rms_pct": float(math.sqrt(_stats.fmean(e * e for e in errors))),
         "median_ape_pct": float(_stats.median(apes)),
@@ -139,8 +267,45 @@ def _basic_stats(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _campaign_stats(entries: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Kampanya duzeyinde ozet (F006): kampanya-ici ortalama -> ustu istatistik.
+
+    Kumelenmis veride durust ozet, once kampanya icinde ortalama alip sonra
+    kampanyalar arasinda istatistik vermektir (Hurlbert 1984; ASME V&V
+    20-2009 Bol. 3). Tek kampanyali hucrede None doner — 'kampanyalar arasi
+    sacilim' diye bir sey yoktur ve uydurulmaz.
+    """
+    groups: Dict[str, List[float]] = {}
+    for e in entries:
+        groups.setdefault(e.get("campaign") or e["test_id"], []).append(
+            e["error_pct"])
+    if len(groups) < 2:
+        return None
+    means = sorted(float(_stats.fmean(v)) for v in groups.values())
+    return {
+        "n_campaigns": len(groups),
+        "bias_pct": float(_stats.fmean(means)),
+        "median_ape_pct": float(_stats.median(abs(m) for m in means)),
+        "note": ("Campaign-level view: per-campaign mean signed errors, "
+                 "then statistics across campaigns (clustered data)."),
+    }
+
+
 def _mad_outliers(entries: List[Dict[str, Any]]) -> List[str]:
-    """|hata - medyan| > 3*MAD olan test_id'ler (MAD=0 ise aykiri yok)."""
+    """Modifiye z-skoru |0.6745*(hata - medyan)/MAD| > 3.5 olan test_id'ler.
+
+    F035 (2026-07-27): eski esik 3*ham MAD yalnizca ~2.02 sigma idi
+    (gerekce OUTLIER_MAD_SCALE sabitinin yorumunda). OLCULEN etki (tam DB
+    kosusu, once -> sonra): hybrid c_star 1 -> 0, hybrid isp 2 -> 0,
+    liquid isp_vac 1 -> 0 (vulcain21 modifiye z ~2.9, esik altinda),
+    liquid thrust_vac 1 -> 1 (rd0120 gercekten uc), solid burn_rate
+    5 -> 3 (kndx-p05, knsb-p09/p10 kaldi). 'excl. outliers' satirindaki
+    yapay iyilesme azaldi ama tamamen kaybolmadi: solid RMS 'aykirisiz'
+    satiri %1.99 -> %0.71 yerine artik %1.99 -> %0.88. MAD=0 ise aykiri
+    yok. NOT: n >= 3 alt siniri mevcut test sozlesmesiyle korundu; n < 6'da
+    MAD kaba bir tahmindir ve isaret yalniz sunumsaldir (aykirilar hicbir
+    zaman atilmaz).
+    """
     if len(entries) < 3:
         return []
     errors = [e["error_pct"] for e in entries]
@@ -148,23 +313,34 @@ def _mad_outliers(entries: List[Dict[str, Any]]) -> List[str]:
     mad = _stats.median([abs(e - med) for e in errors])
     if mad <= 0:
         return []
-    return sorted(e["test_id"] for e in entries
-                  if abs(e["error_pct"] - med) > OUTLIER_MAD_FACTOR * mad)
+    return sorted(
+        e["test_id"] for e in entries
+        if abs(OUTLIER_MAD_SCALE * (e["error_pct"] - med) / mad)
+        > OUTLIER_MODIFIED_Z)
 
 
 def _cell(motor_type: str, quantity: str,
           entries: List[Dict[str, Any]], band: str) -> Dict[str, Any]:
     entries = sorted(entries, key=lambda e: e["test_id"])
+    out_entries = []
+    for e in entries:
+        item = {"test_id": e["test_id"], "error_pct": e["error_pct"],
+                "confidence": e["confidence"]}
+        if e.get("flags"):
+            item["flags"] = list(e["flags"])  # F007: giris duzeyinde gorunur
+        if e.get("measurement_u_pct") is not None:  # F008 eki
+            item["measurement_u_pct"] = e["measurement_u_pct"]
+        if e.get("normalized_error") is not None:
+            item["normalized_error"] = e["normalized_error"]
+        out_entries.append(item)
     cell = {
         "motor_type": motor_type,
         "quantity": quantity,
         "confidence_band": band,
         **_basic_stats(entries),
-        "entries": [
-            {"test_id": e["test_id"], "error_pct": e["error_pct"],
-             "confidence": e["confidence"]}
-            for e in entries
-        ],
+        # F006: kampanya duzeyinde ozet (tek kampanyada None — uydurulmaz)
+        "campaign_stats": _campaign_stats(entries),
+        "entries": out_entries,
     }
     outlier_ids = _mad_outliers(entries)
     cell["outlier_test_ids"] = outlier_ids
@@ -192,6 +368,14 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "test_id": rr["test_id"],
                 "error_pct": score["error_pct"],
                 "confidence": rr["confidence"],
+                # F006: kampanya anahtari hucre-ici gruplamada kullanilir
+                # (cikti entries listesine yazilmaz — kunye uzun).
+                "campaign": rr.get("campaign"),
+                # F007: adaptor bagimlilik bayraklari ('in_sample', ...)
+                "flags": score.get("flags", []),
+                # F008 eki: kayit belirsizlik bildiriyorsa hucreye tasinir.
+                "measurement_u_pct": score.get("measurement_u_pct"),
+                "normalized_error": score.get("normalized_error"),
             }
             key = (rr["motor_type"], quantity)
             if rr["anomaly"]:
@@ -276,6 +460,8 @@ def run_correlation(records: Optional[Iterable[Dict[str, Any]]] = None,
             "motor_type": rec.get("motor_type"),
             "record_type": rec.get("record_type", "static_fire"),
             "confidence": rec.get("source", {}).get("confidence"),
+            "campaign": _campaign_key(rec),  # F006
+            "quantity_flags": adapter_result.get("quantity_flags", {}),
             "anomaly": bool(rec.get("anomaly", {}).get("flag", False)),
             "anomaly_note": rec.get("anomaly", {}).get("note"),
             "status": status,
@@ -287,7 +473,9 @@ def run_correlation(records: Optional[Iterable[Dict[str, Any]]] = None,
             "adapter_notes": adapter_result.get("adapter_notes", []),
             "convergence": adapter_result.get("convergence"),
             "engine_warnings": engine_warnings,
-            "scores": (_score_adapter_result(adapter_result)
+            "scores": (_score_adapter_result(
+                adapter_result,
+                measurement_u=_measurement_uncertainty_map(rec))
                        if status == "ok" else {}),
             "elapsed_s": round(elapsed, 3),
         }
@@ -347,34 +535,52 @@ def _fmt_pct(value: float) -> str:
     return f"{value:+.1f}"
 
 
+def _dependence_label(stats: Dict[str, Any]) -> str:
+    """F007/F008 hucre bagimlilik/belirsizlik etiketi (markdown Dependence)."""
+    parts = []
+    if stats.get("n_in_sample"):
+        parts.append(f"{stats['n_in_sample']}/{stats['n']} in-sample")
+    if stats.get("n_weak_evidence"):
+        parts.append(f"{stats['n_weak_evidence']}/{stats['n']} weak-evidence")
+    if stats.get("median_measurement_u_pct") is not None:
+        parts.append(
+            f"u_meas~{stats['median_measurement_u_pct']:.2f}% "
+            f"(n={stats['n_with_measurement_u']})")
+    return "; ".join(parts) or "-"
+
+
 def _cell_rows(cells: List[Dict[str, Any]]) -> List[str]:
     rows = []
     for cell in cells:
         outliers = ", ".join(cell["outlier_test_ids"]) or "-"
         rows.append(
-            f"| {cell['motor_type']} | {cell['quantity']} | {cell['n']} "
+            f"| {cell['motor_type']} | {cell['quantity']} "
+            f"| {cell['n']} ({cell['n_campaigns']}) "
             f"| {_fmt_pct(cell['bias_pct'])} "
             f"| {cell['median_ape_pct']:.1f} "
             f"| {cell['rms_pct']:.1f} "
             f"| {_fmt_pct(cell['min']['error_pct'])} ({cell['min']['test_id']}) "
             f"| {_fmt_pct(cell['max']['error_pct'])} ({cell['max']['test_id']}) "
+            f"| {_dependence_label(cell)} "
             f"| {outliers} |")
         if cell["stats_excl_outliers"]:
             ex = cell["stats_excl_outliers"]
             rows.append(
                 f"| {cell['motor_type']} | {cell['quantity']} (excl. outliers) "
-                f"| {ex['n']} | {_fmt_pct(ex['bias_pct'])} "
+                f"| {ex['n']} ({ex['n_campaigns']}) "
+                f"| {_fmt_pct(ex['bias_pct'])} "
                 f"| {ex['median_ape_pct']:.1f} | {ex['rms_pct']:.1f} "
                 f"| {_fmt_pct(ex['min']['error_pct'])} ({ex['min']['test_id']}) "
                 f"| {_fmt_pct(ex['max']['error_pct'])} ({ex['max']['test_id']}) "
+                f"| {_dependence_label(ex)} "
                 f"| flagged, not dropped |")
     return rows
 
 
 _TABLE_HEADER = (
-    "| Motor | Quantity | N | Bias % | Median APE % | RMS % "
-    "| Min % (test) | Max % (test) | Outliers |\n"
-    "|---|---|---|---|---|---|---|---|---|")
+    "| Motor | Quantity | N (campaigns) | Bias % | Median APE % | RMS % "
+    "| Min % (test) | Max % (test) | Dependence | Outliers |\n"
+    "|---|---|---|---|---|---|---|---|---|---|")
 
 
 def to_markdown(result: Dict[str, Any]) -> str:
@@ -391,13 +597,39 @@ def to_markdown(result: Dict[str, Any]) -> str:
         + ", ".join(f"{k}={v}" for k, v in result["status_counts"].items()),
         "",
         "Signed error convention: (predicted - measured) / measured * 100. "
-        "Outliers (|error - median| > 3*MAD) are flagged, never dropped.",
+        "Outliers use the modified z-score |0.6745*(error - median)/MAD| > "
+        "3.5 (Iglewicz & Hoaglin, 1993); they are flagged, never dropped. "
+        "N is 'records (independent campaigns)': records from the same "
+        "campaign share systematic error, so the effective sample size is "
+        "closer to the campaign count than to N. Dependence column: "
+        "'in-sample' entries are scored against the fit's own source data "
+        "(implementation check, NOT independent prediction); 'weak-evidence' "
+        "entries are derived from a consumed measurement (consistency check); "
+        "'u_meas' is the median reported measurement uncertainty where "
+        "records declare one (no coverage factor k reported in the current "
+        "DB, so errors are not normalized by k*u).",
         "",
         "## Main statistics (confidence: high + medium)",
         "",
         _TABLE_HEADER,
     ]
-    lines += _cell_rows(result["statistics"]["cells"]) or ["| - | no scored quantities | | | | | | | |"]
+    lines += _cell_rows(result["statistics"]["cells"]) or ["| - | no scored quantities | | | | | | | | |"]
+
+    # F006: kampanya duzeyinde ozet (kumelenmis veride durust gorunum).
+    camp_cells = [c for c in result["statistics"]["cells"]
+                  if c.get("campaign_stats")]
+    if camp_cells:
+        lines += ["", "## Campaign-level statistics (clustered data)", "",
+                  "Per-campaign mean signed errors, then statistics across "
+                  "campaigns; single-campaign cells cannot appear here.", "",
+                  "| Motor | Quantity | Campaigns | Bias % | Median APE % |",
+                  "|---|---|---|---|---|"]
+        for cell in camp_cells:
+            cs = cell["campaign_stats"]
+            lines.append(
+                f"| {cell['motor_type']} | {cell['quantity']} "
+                f"| {cs['n_campaigns']} | {_fmt_pct(cs['bias_pct'])} "
+                f"| {cs['median_ape_pct']:.1f} |")
 
     low = result["statistics"]["low_confidence_cells"]
     if low:

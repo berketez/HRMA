@@ -163,6 +163,35 @@
         }
     }
 
+    // D-track uyarı kaydını okunur metne çevirir.
+    // Backend v2.6.2'den itibaren düz string yerine {code, params, severity}
+    // döndürüyor; eski düz string biçimi de desteklenir (geriye dönük uyum).
+    // Sözlük TF()'den geçmezse şablona "[object Object]" basılır — bu regresyon
+    // v2.6.2'de yaşandı, tests/test_warning_contract.py bekçilik ediyor.
+    // İÇ İÇE KAYITLAR: bazı uyarıların parametresi kendisi bir uyarı kaydı ya
+    // da kayıt LİSTESİDİR (ör. warn.solid.bates_envelope'un `options` alanı).
+    // I18N.tf sayı olmayan parametreyi String(v) ile bastığı için bunlar da
+    // "[object Object]" üretir; bu yüzden çeviri ÖZYİNELEMELİDİR.
+    function warnText(w, depth) {
+        depth = depth || 0;
+        if (w === null || w === undefined) return '';
+        if (typeof w === 'string') return w;
+        if (Array.isArray(w)) {
+            return w.map(function (x) { return warnText(x, depth + 1); })
+                    .filter(function (s) { return s; })
+                    .join(' · ');
+        }
+        if (typeof w !== 'object') return String(w);
+        if (!w.code) return JSON.stringify(w);  // beklenmeyen biçim: görünür kıl
+        if (depth > 4) return w.code;           // bozuk/döngüsel veri koruması
+        var p = {};
+        Object.keys(w.params || {}).forEach(function (k) {
+            var v = w.params[k];
+            p[k] = (v && typeof v === 'object') ? warnText(v, depth + 1) : v;
+        });
+        return TF(w.code, p, w.fallback || w.code);
+    }
+
     // Uyarı / öneri kutusu (injector_panel uyarı bloğu deseni)
     function listBlock(title, items, kind) {
         if (!items || !items.length) return '';
@@ -170,7 +199,7 @@
         return `<div style="border:1px solid ${c}; border-radius:8px;
             padding:10px 14px; margin:10px 0; color:${c};">
             <strong>${title}</strong><ul style="margin:6px 0 0 18px;">` +
-            items.map(w => `<li>${w}</li>`).join('') + '</ul></div>';
+            items.map(w => `<li>${warnText(w)}</li>`).join('') + '</ul></div>';
     }
 
     // ------------------------------------------------------------------
@@ -499,6 +528,7 @@
             kvTable: kvTable,
             sectionTitle: sectionTitle,
             listBlock: listBlock,
+            warnText: warnText,
             purgePlots: purgePlots,
             fmt: fmt,
             pick: pick,

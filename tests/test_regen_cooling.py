@@ -534,6 +534,55 @@ class TestCoolProp:
         assert abs(q_cp - q_tb) / q_tb < 0.10
 
 
+# ======================================================================
+# 11) Özellik tablosu geçerlilik zarfı (fizik denetimi F057)
+# ======================================================================
+class TestPropertyTableEnvelope:
+    """Tablo bandı dışına taşan istasyonlar bildirilmeli.
+
+    F057: ``_interp_table`` 'clamped' bayrağını üretiyor ama ``solve()``
+    onu HİÇ okumuyordu. RP-1 tablosu 500 K'de, su tablosu 400 K'de bitiyor;
+    band dışında özellikler en yakın uca DONUYOR. Ölçülen etki (su, 459 K /
+    80 bar, CoolProp referanslı): mu %48 yüksek, Pr 1.342 yerine 0.960,
+    h_c oranı 0.856 — yani soğutucu tarafı katsayısı %14 eksik. Bu testler
+    (a) band içinde yanlış alarm olmadığını, (b) band dışında uyarının ve
+    sayacın geldiğini kilitler.
+    """
+
+    def test_in_band_case_reports_no_clamp(self):
+        s = make_regen(coolant_props_source='table').solve()['summary']
+        assert s['property_table_clamped_stations'] == 0
+        assert not [w for w in s['warnings'] if 'PROPERTY RANGE' in w]
+
+    def test_out_of_band_rp1_warns(self):
+        r = RegenCooling(
+            chamber_pressure=70e5, chamber_temperature=3500.0, gamma=1.2,
+            molecular_weight=22.0, throat_diameter=0.06, expansion_ratio=20.0,
+            coolant='rp1', coolant_mdot=0.8, coolant_inlet_temp=300.0,
+            coolant_inlet_pressure=120e5, n_channels=80,
+            channel_width=1.5e-3, channel_height=3.0e-3,
+            wall_thickness=1.0e-3, wall_material='copper', n_stations=30)
+        s = r.solve()['summary']
+        # Bu devre soğutucuyu 500 K RP-1 tablo sınırının çok üstüne taşır.
+        assert s['coolant_exit_temp_K'] > 500.0
+        assert s['property_table_clamped_stations'] > 0
+        assert s['property_table_band_K'] == [290.0, 500.0]
+        hits = [w for w in s['warnings'] if 'PROPERTY RANGE' in w]
+        assert len(hits) == 1
+        # Uyarı hangi bandın aşıldığını ve kaç istasyonu etkilediğini söylemeli
+        assert '290-500 K' in hits[0]
+        assert 'FROZEN' in hits[0]
+
+    def test_interp_table_exposes_band(self):
+        p = rp1_properties(600.0)
+        assert p['clamped'] is True
+        assert p['table_t_min_K'] == 290.0
+        assert p['table_t_max_K'] == 500.0
+        # Klamp gerçekten donduruyor: 600 K ve 500 K aynı değerleri verir
+        assert p['density'] == pytest.approx(rp1_properties(500.0)['density'])
+        assert water_properties(350.0)['clamped'] is False
+
+
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-v']))

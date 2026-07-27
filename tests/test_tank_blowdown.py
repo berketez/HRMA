@@ -12,6 +12,7 @@ import pytest
 
 from hrma.analysis.tank_blowdown import (
     N2OSaturation, N2OTankBlowdown, COOLPROP_AVAILABLE,
+    N2O_T_TRIPLE, N2O_P_TRIPLE,
 )
 
 
@@ -105,6 +106,38 @@ class TestTankBlowdown:
         # Bağımsız kontrol: aynı (rho, u) çiftinden CoolProp'un T'si
         T_flash = PropsSI('T', 'D', rho, 'U', u, 'N2O')
         assert s['T'] == pytest.approx(T_flash, abs=1.0)
+
+    def test_vapor_tail_clamped_at_triple_point(self):
+        """F077: buhar kuyruğu üçlü noktanın ALTINA inemez.
+
+        Fizik denetimi (2026-07-25) öncesinde ``_vapor_step`` yalnız
+        ``ratio >= 1e-6`` tabanı kullanıyor, başka fiziksel sınır tanımıyordu.
+        ÖLÇÜLDÜ (düzeltmeden önce, bu depoda): 16.5 kg / 1.2 kg/s / 14 s ->
+        T_son = 166.0 K ve P_son = 3.01 bar; T_init = 253 K senaryosunda
+        T_min = 26.2 K ve P_min = 3.6e-4 bar; 2.0 kg / 1.0 kg/s / 5 s ->
+        T_son = 6.6 K. N₂O üçlü noktası 182.33 K / 87.84 kPa (NIST WebBook)
+        olduğundan bu değerler fiziksel olarak imkânsızdı ve P(t)/T(t)
+        eğrisi kullanıcıya çiziliyordu.
+        """
+        for m_ox, mdot, dur, T_init in [(16.5, 1.2, 14.0, 293.15),
+                                        (16.5, 1.2, 14.0, 253.0),
+                                        (2.0, 1.0, 5.0, 293.15)]:
+            tank = N2OTankBlowdown.from_oxidizer_mass(
+                oxidizer_mass=m_ox, initial_temperature=T_init)
+            hist = tank.simulate(mdot_out=mdot, duration=dur, dt=0.05)
+            assert hist['phase'] == 'vapor'
+            assert hist['temperature'].min() >= N2O_T_TRIPLE - 1e-9
+            assert hist['pressure'].min() >= N2O_P_TRIPLE - 1e-6
+            # Taban görüldüyse model zarfı dışına çıkıldığı BİLDİRİLMELİ.
+            assert hist['vapor_model_valid'] is False
+            assert any('triple point' in w for w in hist['warnings'])
+
+    def test_vapor_tail_valid_flag_true_before_floor(self):
+        """Taban görülmeden önce buhar modeli geçerli işaretlenir."""
+        tank = self._make_tank()
+        state = tank.step(mdot_out=1.2, dt=0.05)
+        assert state['vapor_model_valid'] is True
+        assert tank.warnings == []
 
     def test_fill_fraction_guard(self):
         with pytest.raises(ValueError):

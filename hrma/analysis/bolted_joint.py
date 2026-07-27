@@ -24,6 +24,12 @@ referanslıdır:
   Emniyetler    : proof SF n_p = S_p·A_t/F_b            (Eq. 8-28)
                   aşırı-yük faktörü n_L = (S_p·A_t − F_i)/(C·P)  (Eq. 8-29)
                   ayrılma faktörü n_0 = F_i/(P·(1−C))    (Eq. 8-30)
+                  YÖNETEN değerler ön-yük saçılımının UÇLARINDA hesaplanır
+                  (F031, 2026-07-25): akma/proof için F_i_max = 1.25·F_i,
+                  ayrılma için F_i_min = 0.75·F_i.
+                  → NASA-STD-5020A "Requirements for Threaded Fastening
+                    Systems in Spaceflight Hardware" Sec. 6.2;
+                    Shigley 10th ed. Sec. 8-8.
   Diş alanları  : ISO 898-1:2013 Table A.1 (= Shigley Table 8-1, kaba diş).
   Sınıf dayanımı: ISO 898-1:2013 Table 3 (8.8/10.9/12.9);
                   A2-70 → ISO 3506-1 (R_m ≥ 700, R_p0.2 ≥ 450 MPa).
@@ -285,17 +291,45 @@ class BoltedJointAnalyzer:
         F_bolt = F_i + C * P_bolt                      # Shigley Eq. 8-24
         F_member = F_i - (1.0 - C) * P_bolt            # Shigley Eq. 8-25
 
+        # --- FİZİK DENETİMİ F031 (2026-07-25): ÖN-YÜK SAÇILIMI ------------
+        # Tork kontrollü sıkmada gerçekleşen ön-yük ±%25 saçılır. Eski sürüm
+        # bu bandı torque() içinde RAPORLUYOR ama emniyet faktörlerine HİÇ
+        # uygulamıyordu; tüm SF'ler nominal F_i ile hesaplanıyordu.
+        # Standart uygulama (NASA-STD-5020A Sec. 6.2; Shigley 10th ed.
+        # Sec. 8-8):
+        #   - akma/proof kontrolü  MAKSİMUM ön-yükle (F_i_max = 1.25*F_i)
+        #   - ayrılma (separation) kontrolü MİNİMUM ön-yükle (F_i_min = 0.75*F_i)
+        # ÖLÇÜLDÜ (M10 8.8, l=30 mm, çelik üye, 8 cıvata, 60 bar x 160 mm):
+        #   nominal n_proof = 1.213 -> maks. ön-yükle 0.988 (cıvata proof
+        #   dayanımını AŞIYOR); nominal n_0 = 2.006 -> min. ön-yükle 1.505.
+        u = self.TORQUE_PRELOAD_UNCERTAINTY
+        F_i_max = (1.0 + u) * F_i
+        F_i_min = (1.0 - u) * F_i
+        F_bolt_max = F_i_max + C * P_bolt              # kritik: akma/proof
+        F_member_min = F_i_min - (1.0 - C) * P_bolt    # kritik: ayrılma
+
         sigma_bolt = F_bolt / A_t
         n_proof = S_p / sigma_bolt if sigma_bolt > 0 else float('inf')
+        sigma_bolt_max = F_bolt_max / A_t
+        n_proof_min = (S_p / sigma_bolt_max if sigma_bolt_max > 0
+                       else float('inf'))
         if C * P_bolt > 0:
             n_overload = (S_p * A_t - F_i) / (C * P_bolt)   # Eq. 8-29
+            # Aşırı-yük faktörü de maksimum ön-yükte en düşüktür; ön-yük
+            # zaten proof yükünü aşıyorsa faktör negatife düşer -> 0'da kırp.
+            n_overload_min = max((S_p * A_t - F_i_max) / (C * P_bolt), 0.0)
         else:
             n_overload = float('inf')
+            n_overload_min = float('inf') if S_p * A_t > F_i_max else 0.0
         if P_bolt * (1.0 - C) > 0:
             n_separation = F_i / (P_bolt * (1.0 - C))       # Eq. 8-30
+            n_separation_min = F_i_min / (P_bolt * (1.0 - C))
         else:
             n_separation = float('inf')
-        separated = bool(F_member <= 0.0)
+            n_separation_min = float('inf')
+        # Ayrılma kararı MİNİMUM ön-yükte verilir (konservatif; F031).
+        separated = bool(F_member_min <= 0.0)
+        separated_nominal = bool(F_member <= 0.0)
 
         warnings = list(st['notes'])
         if self.props['stainless'] and self.d_mm > 20.0:
@@ -303,18 +337,26 @@ class BoltedJointAnalyzer:
                 'A2-70 property class is commonly limited to <= M20 '
                 '(cold-worked austenitic, ISO 3506-1); verify supplier '
                 'certificate for larger sizes')
-        if separated or n_separation < 1.0:
+        if separated or n_separation_min < 1.0:
             warnings.append(
-                'JOINT SEPARATION: external load exceeds preload capacity — '
+                'JOINT SEPARATION: external load exceeds preload capacity at '
+                f'minimum preload ({(1.0 - u) * 100:.0f}% of nominal) — '
                 'increase bolt count/size or preload')
-        elif n_separation < 1.5:
+        elif n_separation_min < 1.5:
             warnings.append(
-                f'Separation factor {n_separation:.2f} < 1.5 — low margin '
+                f'Separation factor {n_separation_min:.2f} < 1.5 at minimum '
+                f'preload ({(1.0 - u) * 100:.0f}% of nominal) — low margin '
                 f'against joint opening')
-        if n_overload < 1.0:
+        if n_proof_min < 1.0:
             warnings.append(
-                'Bolt exceeds proof strength under external load — '
-                'increase bolt size/class')
+                f'Bolt stress exceeds proof strength at maximum preload '
+                f'({(1.0 + u) * 100:.0f}% of nominal, torque-control scatter, '
+                f'NASA-STD-5020A Sec. 6.2): proof SF = {n_proof_min:.3f} — '
+                'increase bolt size/class or use a preload-indicating method')
+        if n_overload_min < 1.0:
+            warnings.append(
+                'Bolt exceeds proof strength under external load at maximum '
+                'preload — increase bolt size/class')
 
         return {
             'bolt': {
@@ -331,6 +373,10 @@ class BoltedJointAnalyzer:
             'preload': {
                 'proof_load_N': pre['proof_load_N'],
                 'preload_N': F_i,
+                # F031: tork saçılımı bandı (SF'lerde fiilen kullanılan uçlar)
+                'preload_min_N': F_i_min,
+                'preload_max_N': F_i_max,
+                'preload_scatter_fraction': u,
                 'preload_fraction_of_proof': pre['preload_fraction'],
                 'basis': ('reusable connection, F_i = 0.75*F_p'
                           if self.reusable else
@@ -354,17 +400,36 @@ class BoltedJointAnalyzer:
                 'external_load_per_bolt_N': P_bolt,
                 'bolt_total_load_N': F_bolt,
                 'member_clamp_load_N': F_member,
+                # F031: saçılım uçlarındaki kritik yükler
+                'bolt_total_load_max_preload_N': F_bolt_max,
+                'member_clamp_load_min_preload_N': F_member_min,
             },
             'safety_factors': {
+                # Nominal ön-yükle (geriye dönük alanlar):
                 'proof_SF': n_proof,               # S_p*A_t / F_bolt (Eq. 8-28)
                 'overload_factor_nL': n_overload,  # Eq. 8-29
                 'separation_factor_n0': n_separation,  # Eq. 8-30
+                # YÖNETEN değerler (F031, NASA-STD-5020A Sec. 6.2):
+                # proof/akma -> maksimum ön-yük, ayrılma -> minimum ön-yük.
+                'proof_SF_min': n_proof_min,
+                'overload_factor_nL_min': n_overload_min,
+                'separation_factor_n0_min': n_separation_min,
+                'governing_basis': (
+                    'proof/yield evaluated at maximum preload '
+                    f'(+{u * 100:.0f}%), separation at minimum preload '
+                    f'(-{u * 100:.0f}%) per NASA-STD-5020A Sec. 6.2 / '
+                    'Shigley Sec. 8-8'),
             },
             'separation': {
+                # Karar minimum ön-yükte verilir (konservatif, F031).
                 'separated': separated,
+                'separated_nominal_preload': separated_nominal,
                 'separation_load_per_bolt_N': (
+                    F_i_min / (1.0 - C) if C < 1.0 else float('inf')),
+                'separation_load_per_bolt_nominal_N': (
                     F_i / (1.0 - C) if C < 1.0 else float('inf')),
-                'margin': n_separation,
+                'margin': n_separation_min,
+                'margin_nominal': n_separation,
             },
             'warnings': warnings,
             'assumptions': [
@@ -373,7 +438,9 @@ class BoltedJointAnalyzer:
                 'No gasket (metal-to-metal or o-ring face seal joint); '
                 'a soft gasket invalidates the Wileman member stiffness',
                 'Preload from torque control scatters about +/-25% '
-                '(Shigley Sec. 8-8)',
+                '(Shigley Sec. 8-8); proof/yield safety is evaluated at the '
+                'upper bound and separation at the lower bound '
+                '(NASA-STD-5020A Sec. 6.2)',
             ],
             'source': ('Shigley\'s Mechanical Engineering Design 10th ed. '
                        'Ch. 8; ISO 898-1:2013; ISO 3506-1; Wileman et al. '

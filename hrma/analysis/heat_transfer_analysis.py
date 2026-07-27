@@ -38,6 +38,18 @@ from hrma.data.materials_db import build_materials_view
 # Universal gas constant [J/(mol*K)] for frozen Cp / R_specific derivation.
 R_UNIVERSAL = 8314.462618  # J/(kmol*K) == J/(mol*K)*1000; here used with MW in g/mol
 
+
+def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
+    """Yapılandırılmış iki-dilli uyarı/öneri kaydı (D-track sözleşmesi).
+
+    Backend dilsiz kalır; frontend ``TF(code, params)`` ile metni kurar.
+    Şema: ``{code: 'warn.<subsystem>.<slug>', params: {...}, severity: ...}``.
+    f-string içine gömülü sayısal değerler artık ``params`` içinde döner;
+    i18n metni ``{yer_tutucu}`` ile aynı değeri gösterir.
+    Katalog: docs/v262_specs/D_codes_analysis.md.
+    """
+    return {'code': code, 'params': params, 'severity': severity}
+
 # ----------------------------------------------------------------------
 # Gaz radyasyonu (Leckner) sabitleri
 # ----------------------------------------------------------------------
@@ -82,8 +94,20 @@ _LECKNER_CO2 = (
 # sıcaklıkla düştüğünden T'yi 3000'de kelepçelemek emisiviteyi hafif
 # ABARTIR = muhafazakâr yön (tasarım-yükü felsefesi, codex teyitli).
 # Optik derinlik 1e-4..1e3 bar*cm bandında tutulur.
+#
+# GEÇERLİLİK BEYANI (v2.6.2, fizik denetimi F115): Leckner (1972) toplam
+# emisivite fitinin BİLDİRİLEN sıcaklık geçerlilik aralığı ~300-2500 K'dir
+# (Modest, Radiative Heat Transfer, Tablo 10.4 geçerlilik notu). Buradaki
+# 3000 K kelepçesi bilinçli bir EKSTRAPOLASYONdur: roket haznesi 3000-3600 K
+# çalıştığı için korelasyon zaten her çağrıda 2500 K zarfının dışındadır ve
+# kelepçe olmadan fit polinomu tanımsız bölgeye gider. Kelepçenin yönü
+# muhafazakârdır (eps_g bu bantta T ile düştüğünden 3400 K'lik gazı 3000 K'de
+# değerlendirmek eps'i hafif ABARTIR -> radyatif yük fazla, güvenli taraf).
+# Bu, q_rad'ın "±%25 mertebesinde belirsizlik taşıyan mühendislik tahmini"
+# olduğu anlamına gelir; kesin değer değildir.
 _LECKNER_T_MIN = 300.0    # K
-_LECKNER_T_MAX = 3000.0   # K
+_LECKNER_T_MAX = 3000.0   # K (mühendislik kelepçesi — literatür sınırı DEĞİL)
+_LECKNER_T_LITERATURE_MAX = 2500.0  # K (Leckner 1972 bildirilen fit üst sınırı)
 _LECKNER_PAL_MIN = 1e-4   # bar*cm
 _LECKNER_PAL_MAX = 1e3    # bar*cm
 
@@ -222,6 +246,11 @@ class HeatTransferAnalyzer:
         basınç düzeltmesi (eps/eps_0) aynı tablonun P_E / (p_a L)_m / A / B / c
         parametreleriyle hesaplanır. Korelasyon fit aralığı dışına taşma
         modül sabitlerindeki kelepçelerle önlenir.
+
+        GEÇERLİLİK (F115): Leckner'in bildirilen fit aralığı ~300-2500 K
+        (_LECKNER_T_LITERATURE_MAX). Roket haznesi sıcaklıkları bunun
+        üstündedir; _LECKNER_T_MAX = 3000 K bilinçli ve muhafazakâr yönde
+        bir ekstrapolasyon kelepçesidir (gerekçe modül sabitlerinde).
         """
         pal = p_partial_bar * path_length_cm  # bar*cm optik derinlik
         if pal < _LECKNER_PAL_MIN:
@@ -316,40 +345,79 @@ class HeatTransferAnalyzer:
         eps_w = self._species_emissivity('h2o', T_g, p_total_bar, p_w, L_cm)
         eps_c = self._species_emissivity('co2', T_g, p_total_bar, p_c, L_cm)
 
-        # Bant örtüşme düzeltmesi — yalnız iki tür de mevcutken ve toplam
-        # optik derinlik > 1 bar*cm iken anlamlı (log10 tabanı; altında
-        # negatif tabanın kesirli kuvveti tanımsız olur, örtüşme zaten ~0).
-        delta_eps = 0.0
-        pal_sum = (p_w + p_c) * L_cm
-        if eps_w > 0.0 and eps_c > 0.0 and pal_sum > 1.0:
-            zeta = p_w / (p_w + p_c)
-            delta_eps = (
-                zeta / (10.7 + 101.0 * zeta) - 0.0089 * zeta ** 10.4
-            ) * np.log10(pal_sum) ** 2.76
-            delta_eps = min(max(delta_eps, 0.0), eps_w + eps_c)
+        delta_eps = self._band_overlap_correction(p_w, p_c, L_cm, eps_w, eps_c)
 
         return float(min(max(eps_w + eps_c - delta_eps, 0.0), 0.995))
+
+    @staticmethod
+    def _band_overlap_correction(p_w: float, p_c: float, L_cm: float,
+                                 term_w: float, term_c: float) -> float:
+        """H2O/CO2 bant örtüşme düzeltmesi delta (Leckner; Modest Eq. 10.145).
+
+            zeta = p_w/(p_w+p_c)
+            delta = (zeta/(10.7+101*zeta) - 0.0089*zeta^10.4)
+                    * (log10((p_w+p_c)*L))^2.76
+
+        TEK KAYNAK (v2.6.2): aynı düzeltme hem emisivitede hem absorptivitede
+        kullanılır; daha önce absorptivite yolu _gas_emissivity'yi çağırdığı
+        için düzeltmeyi dolaylı alıyordu. Tür-bazlı absorptivite üsleri
+        (F111) ayrıştırılınca ortak yardımcıya çıkarıldı — parametre
+        tutarlılığı kuralı (aynı sayı iki yerde ayrı yazılmaz).
+
+        Yalnız iki tür de mevcutken ve toplam optik derinlik > 1 bar*cm iken
+        anlamlıdır (log10 tabanı; altında negatif tabanın kesirli kuvveti
+        tanımsız olur, örtüşme zaten ~0).
+        """
+        if term_w <= 0.0 or term_c <= 0.0:
+            return 0.0
+        pal_sum = (p_w + p_c) * L_cm
+        if pal_sum <= 1.0:
+            return 0.0
+        zeta = p_w / (p_w + p_c)
+        delta = (
+            zeta / (10.7 + 101.0 * zeta) - 0.0089 * zeta ** 10.4
+        ) * np.log10(pal_sum) ** 2.76
+        return float(min(max(delta, 0.0), term_w + term_c))
 
     def _gas_absorptivity(self, T_g: float, T_w: float, p_total_bar: float,
                           beam_length_m: float,
                           x_H2O: float = DEFAULT_X_H2O,
                           x_CO2: float = DEFAULT_X_CO2) -> float:
         """
-        Gazın duvar ışınımına karşı absorptivitesi — Leckner pratik kuralı
-        (Modest Eq. 10.146):
+        Gazın duvar ışınımına karşı absorptivitesi — Hottel/Leckner ölçekleme
+        kuralı (Modest, Radiative Heat Transfer, Eq. 10.146):
 
-            alpha_g(T_g -> T_w) = (T_g/T_w)^0.5 * eps_g(T_w, p*L*(T_w/T_g))
+            alpha_H2O = (T_g/T_w)^0.50 * eps_H2O(T_w, p_w*L*(T_w/T_g))
+            alpha_CO2 = (T_g/T_w)^0.65 * eps_CO2(T_w, p_c*L*(T_w/T_g))
+            alpha_g   = alpha_H2O + alpha_CO2 - delta(T_w)
 
-        Emisivite duvar sıcaklığında, optik derinlik T_w/T_g ile
+        DÜZELTME (v2.6.2, fizik denetimi F111): üs TÜRE GÖRE farklıdır —
+        H2O için 0.50, CO2 için 0.65. Eski kod karışımın TAMAMINA 0.50
+        uyguluyordu, yani CO2 payının absorptivitesi (T_g/T_w)^0.15 kadar
+        eksik hesaplanıyordu (T_g/T_w = 3500/800 için %24). Sayısal etkisi
+        küçüktür (alpha yalnız T_w^4 ile çarpılır; q_rad'da <%0.2), ama
+        korelasyonun kaynakla birebir olması için düzeltildi.
+
+        Emisiviteler duvar sıcaklığında, optik derinlik T_w/T_g ile
         ölçeklenmiş yol üzerinden değerlendirilir.
         """
         T_g_eff = max(T_g, 1.0)
         T_w_eff = max(T_w, _LECKNER_T_MIN)  # korelasyon alt sınırı
         scale = T_w_eff / T_g_eff
-        alpha = (T_g_eff / T_w_eff) ** 0.5 * self._gas_emissivity(
-            T_w_eff, p_total_bar, beam_length_m * scale, x_H2O, x_CO2
-        )
-        return float(min(max(alpha, 0.0), 0.995))
+        L_cm = max(beam_length_m, 0.0) * 100.0 * scale
+        p_w = max(x_H2O, 0.0) * p_total_bar
+        p_c = max(x_CO2, 0.0) * p_total_bar
+
+        ratio = T_g_eff / T_w_eff
+        alpha_w = ratio ** 0.50 * self._species_emissivity(
+            'h2o', T_w_eff, p_total_bar, p_w, L_cm)
+        alpha_c = ratio ** 0.65 * self._species_emissivity(
+            'co2', T_w_eff, p_total_bar, p_c, L_cm)
+
+        delta_alpha = self._band_overlap_correction(
+            p_w, p_c, L_cm, alpha_w, alpha_c)
+
+        return float(min(max(alpha_w + alpha_c - delta_alpha, 0.0), 0.995))
 
     def _gas_radiation_flux(self, T_g: float, T_w: float, p_total_bar: float,
                             beam_length_m: float,
@@ -606,6 +674,14 @@ class HeatTransferAnalyzer:
             wall_thickness, ambient_temp
         )
 
+        # F038: toplam ısı yükünü gerçek ıslak yüzey integraliyle değiştir
+        # (silindirik gövde + konverjan + boğaz + diverjan). Ayrıntılı
+        # gerekçe _apply_wetted_heat_load docstring'inde.
+        self._apply_wetted_heat_load(
+            gas_side_analysis, motor_data, material, wall_thickness,
+            ambient_temp, cooling_type
+        )
+
         # Wall temperature distribution (uses the energy-balance flux)
         wall_analysis = self._analyze_wall_temperature(
             gas_side_analysis['heat_flux'], wall_thickness, mat_props,
@@ -615,7 +691,8 @@ class HeatTransferAnalyzer:
 
         # Cooling requirements
         cooling_analysis = self._analyze_cooling_requirements(
-            gas_side_analysis['total_heat_rate'], burn_time, motor_data, cooling_type
+            gas_side_analysis['total_heat_rate'], burn_time, motor_data,
+            cooling_type, mat_props
         )
 
         # Safety analysis — thermal stress from the ACTUAL through-wall
@@ -794,8 +871,8 @@ class HeatTransferAnalyzer:
             ) ** (-gamma / (gamma - 1.0))
             beam_local = MEAN_BEAM_LENGTH_FACTOR * (2.0 * r_mm[i] / 1000.0)
 
-            def gas_side_flux(Tw):
-                q_conv = h_i * (Taw - Tw)
+            def gas_side_flux(Tw, h_local=None):
+                q_conv = (h_i if h_local is None else h_local) * (Taw - Tw)
                 q_rad = self._gas_radiation_flux(
                     T_stat, Tw, p_stat_bar, beam_local,
                     x_H2O=x_h2o_frac, x_CO2=x_co2_frac,
@@ -803,21 +880,40 @@ class HeatTransferAnalyzer:
                 )
                 return q_conv + max(q_rad, 0.0)
 
+            # Tasarım akısı: referans soğutulmuş cidarda dondurulmuş h_i ile
+            # (panelin ana güvenlik sayısı — davranışı korunur).
             q_flux[i] = gas_side_flux(Tw_ref)
 
             # Denge cidar sıcaklığı: q_in(Tw) = (Tw - T_amb)/R_out, bisection.
+            # DÜZELTME (v2.6.2, fizik denetimi F116): Bartz sigma düzeltmesi
+            # cidar sıcaklığına bağlıdır (Sutton & Biblarz Eq. 8-22), bu
+            # yüzden denge çözümünde h_g de İTERASYONA girmelidir. Eskiden
+            # h_g referans cidarda (Tw_ref) donduruluyordu; denge cidarı
+            # Tw_ref'ten soğuk çıktığında sigma oranı 1.16'ya kadar çıkıyor,
+            # yani h_g %16 EKSİK kullanılıyordu (T_wall_eq düşük tahmin =
+            # güvensiz yön). regen_cooling.py::_station_wall_balance zaten
+            # bu kuple çözümü yapıyor; iki modül artık aynı yöntemde.
+            def gas_side_flux_coupled(Tw):
+                h_local = self._bartz_coefficient(
+                    throat_d, chamber_pressure, c_star, gas,
+                    chamber_temperature, max(Tw, 1.0), rc_over_dt,
+                    area_ratio_local=1.0 / area_ratio[i],
+                    mach_local=M
+                )
+                return gas_side_flux(Tw, h_local)
+
             def q_out(Tw):
                 return (Tw - ambient_temp) / R_out
 
             lo, hi = ambient_temp, Taw
-            if (gas_side_flux(lo) - q_out(lo)) <= 0:
+            if (gas_side_flux_coupled(lo) - q_out(lo)) <= 0:
                 t_wall_eq[i] = ambient_temp
-            elif (gas_side_flux(hi) - q_out(hi)) >= 0:
+            elif (gas_side_flux_coupled(hi) - q_out(hi)) >= 0:
                 t_wall_eq[i] = hi
             else:
                 for _ in range(200):
                     mid = 0.5 * (lo + hi)
-                    if (gas_side_flux(mid) - q_out(mid)) > 0:
+                    if (gas_side_flux_coupled(mid) - q_out(mid)) > 0:
                         lo = mid
                     else:
                         hi = mid
@@ -956,6 +1052,7 @@ class HeatTransferAnalyzer:
         emissivity = mat_props.get('emissivity', 0.8)
         max_service = mat_props.get('max_service_temperature', 2000)
         allowable = mat_props.get('allowable_temperature', 1073)
+        melting_point = float(mat_props.get('melting_point', max_service))
 
         # Adiabatic wall (recovery) temperature at the throat (M=1).
         Taw = self._adiabatic_wall_temperature(temperature, gas, mach_local=1.0)
@@ -992,15 +1089,32 @@ class HeatTransferAnalyzer:
         def q_out(Tw):
             return (Tw - ambient_temp) / R_out
 
+        # DÜZELTME (v2.6.2, fizik denetimi F116): Bartz sigma düzeltmesi
+        # CİDAR SICAKLIĞINA bağlıdır (Sutton & Biblarz Eq. 8-22:
+        # sigma = 1/[(0.5*(Tw/Tc)*m2 + 0.5)^0.68 * m2^0.12]). Eskiden denge
+        # cidarı çözülürken h_g referans cidarda (Tw_ref) DONDURULMUŞTU;
+        # denge cidarı Tw_ref'ten soğuk çıktığında h_g %16'ya kadar EKSİK
+        # kullanılıyordu (güvensiz yön: T_wall_eq ve q düşük tahmin). Artık
+        # bisection'ın her adımında h_g o deneme cidar sıcaklığında yeniden
+        # hesaplanır — regen_cooling.py::_station_wall_balance ile aynı
+        # kuple çözüm mantığı (tek yöntem kuralı).
+        def gas_side_flux_coupled(Tw):
+            h_local = self._bartz_coefficient(
+                throat['throat_diameter'], pressure, throat['c_star'], gas,
+                temperature, max(Tw, 1.0), throat['rc_over_dt'],
+                area_ratio_local=1.0, mach_local=1.0
+            )
+            return gas_side_flux(Tw, h_local)
+
         lo, hi = ambient_temp, Taw
-        if (gas_side_flux(lo, h_gas) - q_out(lo)) <= 0:
+        if (gas_side_flux_coupled(lo) - q_out(lo)) <= 0:
             T_wall = ambient_temp
-        elif (gas_side_flux(hi, h_gas) - q_out(hi)) >= 0:
+        elif (gas_side_flux_coupled(hi) - q_out(hi)) >= 0:
             T_wall = hi
         else:
             for _ in range(200):
                 mid = 0.5 * (lo + hi)
-                if (gas_side_flux(mid, h_gas) - q_out(mid)) > 0:
+                if (gas_side_flux_coupled(mid) - q_out(mid)) > 0:
                     lo = mid
                 else:
                     hi = mid
@@ -1009,31 +1123,42 @@ class HeatTransferAnalyzer:
             T_wall = 0.5 * (lo + hi)
 
         # --- Physical clamp / warnings on equilibrium wall temperature ---
+        # DÜZELTME (v2.6.2, fizik denetimi F011): kritik yanma-delinme eşiği
+        # ERİME NOKTASININ ÜSTÜNDE olamaz. materials_db'de çelik ailesinde
+        # max_service_temperature (denge cidarı klamp üst sınırı) erime
+        # noktasının ÜSTÜNDEDİR (steel: 2000 K vs 1773 K; ss_304: 1723 vs
+        # 1673; ss_316: 1672 vs 1644). Bu yüzden 1773 K < T_wall < 2000 K
+        # penceresine düşen gerçek tasarımlarda ERİMİŞ cidar yalnız
+        # 'warning' seviyesinde raporlanıyordu — güvensiz yön. Kritik eşik
+        # artık min(max_service_temperature, melting_point) ile kurulur ve
+        # erime ayrı, daha sert bir kodla bildirilir.
+        critical_limit = min(float(max_service), melting_point)
         wall_unphysical = False
         mat_name = material_name(mat_props, self.materials)
-        if T_wall > max_service:
+        if T_wall > melting_point:
             wall_unphysical = True
-            warnings_list.append(
-                f"UNSAFE: equilibrium wall temperature {T_wall:.0f} K exceeds "
-                f"{mat_name} service limit {max_service:.0f} K with the specified "
-                f"cooling — burn-through likely. Required cooling load "
-                f"q={throat_heat_flux/1e6:.1f} MW/m^2 at the throat."
-            )
+            warnings_list.append(_mk_warning(
+                'warn.thermal.wall_exceeds_melting', 'critical',
+                T_wall=round(T_wall), material=mat_name,
+                melting=round(melting_point),
+                q_MW=round(throat_heat_flux / 1e6, 1)))
+        elif T_wall > critical_limit:
+            wall_unphysical = True
+            warnings_list.append(_mk_warning(
+                'warn.thermal.wall_exceeds_service', 'critical',
+                T_wall=round(T_wall), material=mat_name,
+                limit=round(critical_limit),
+                q_MW=round(throat_heat_flux / 1e6, 1)))
         elif T_wall > allowable:
-            warnings_list.append(
-                f"WARNING: equilibrium wall temperature {T_wall:.0f} K exceeds "
-                f"{mat_name} allowable {allowable:.0f} K — strength margin lost."
-            )
+            warnings_list.append(_mk_warning(
+                'warn.thermal.wall_exceeds_allowable', 'warning',
+                T_wall=round(T_wall), material=mat_name, allowable=round(allowable)))
         if T_wall > 3500:
-            warnings_list.append(
-                f"Wall temperature {T_wall:.0f} K is non-physical for any solid "
-                f"liner (>3500 K). Regenerative/film cooling or ablative liner required."
-            )
+            warnings_list.append(_mk_warning(
+                'warn.thermal.wall_nonphysical', 'critical', T_wall=round(T_wall)))
         if T_wall >= 0.95 * Taw:
-            warnings_list.append(
-                "Equilibrium wall temperature pinned near the adiabatic-wall "
-                "temperature: modelled cooling is grossly insufficient."
-            )
+            warnings_list.append(_mk_warning(
+                'warn.thermal.wall_pinned_adiabatic', 'critical'))
 
         # The 'heat_flux' key (consumed downstream) is the conservative design
         # load — NEVER the masked near-adiabatic value.
@@ -1053,12 +1178,19 @@ class HeatTransferAnalyzer:
         chamber_heat_flux = gas_side_flux(Tw_ref, h_chamber)  # W/m^2 (design load)
 
         # Total heat rate: chamber flux over barrel area + throat flux over throat.
+        # NOT (F038): bu ifade konverjan + diverjan nozul ıslak yüzeyini
+        # DIŞARIDA bırakır ve boğaz akısını A_t (KESİT alanı, ıslak alan
+        # değil) üzerine uygular. analyze_heat_transfer bu değeri
+        # _apply_wetted_heat_load ile kontur integraline yükseltir; burada
+        # yalnız kontur örneklenemezse kullanılacak yedek olarak kalır.
         total_heat_rate = chamber_heat_flux * surface_area + throat_heat_flux * throat_area  # W
 
         return {
             'heat_flux': heat_flux,                  # W/m^2 (conservative design load, throat)
             'total_heat_rate': total_heat_rate,      # W
             'surface_area': surface_area,            # m^2
+            'chamber_diameter': diameter,            # m (ıslak alan integrali için)
+            'chamber_length': length,                # m
             'throat_heat_flux': throat_heat_flux,    # W/m^2 (real Bartz, not chamber*1.5)
             'chamber_heat_flux': chamber_heat_flux,  # W/m^2 (real Bartz at A_t/A)
             'gas_temperature': temperature,          # K (stagnation/chamber)
@@ -1069,6 +1201,99 @@ class HeatTransferAnalyzer:
             'wall_temperature_unphysical': wall_unphysical,
             'warnings': warnings_list,
         }
+
+    def _apply_wetted_heat_load(self, gas_side: Dict, motor_data: Dict,
+                                material: str, wall_thickness: float,
+                                ambient_temp: float, cooling_type: str,
+                                n_stations: int = 41) -> Dict:
+        """Toplam ısı yükünü GERÇEK ıslak yüzey integraliyle değiştirir.
+
+        DÜZELTME (v2.6.2, fizik denetimi F038). Eski ifade
+
+            Q = q_hazne * (pi*D*L + pi*(D/2)^2) + q_bogaz * A_t
+
+        iki ayrı kusur taşıyordu:
+          (1) konverjan bölüm ve TÜM diverjan nozul ıslak yüzeyi hesaba
+              hiç girmiyordu;
+          (2) boğaz akısı A_t (boğaz KESİT alanı) üzerine uygulanıyordu —
+              A_t bir ıslak yüzey değildir, boğazın ıslak alanı kontur
+              üzerindeki 2*pi*r*ds şeridi kadardır.
+
+        Doğrusu, toplam ısı yükünün ıslak yüzey integrali olmasıdır
+        (Sutton & Biblarz 9th ed. Ch. 8):
+
+            Q = ∫ q(x) * 2*pi*r(x) * ds   +   q_hazne * A_silindirik
+
+        Kontur, 2D/3D/CAD ile AYNI tek geometri kaynağından örneklenir
+        (analyze_axial_profile -> sample_nozzle_inner_contour); kopya
+        geometri üretilmez. q(x) aynı Bartz + Leckner tasarım akısıdır.
+
+        Bu değer doğrudan soğutucu debisini ve ısı-yutucu kütlesini
+        boyutlandırdığı için eksik tahmin GÜVENSİZ yöndeydi.
+
+        Kontur örneklenemezse (geometri eksik / import hatası) eski yedek
+        değer korunur ve sonuçta ``wetted_integral_available=False`` ile
+        dürüstçe bildirilir.
+
+        Args:
+            gas_side: _analyze_gas_side_heat_transfer çıktısı (YERİNDE
+                güncellenir).
+            motor_data / material / wall_thickness / ambient_temp /
+            cooling_type: analyze_heat_transfer ile aynı girdiler.
+            n_stations: kontur integrali istasyon sayısı.
+
+        Returns:
+            Aynı ``gas_side`` sözlüğü (zincirleme kolaylığı için).
+        """
+        diameter = float(gas_side.get('chamber_diameter', 0.1))
+        length = float(gas_side.get('chamber_length', 0.5))
+        chamber_flux = float(gas_side.get('chamber_heat_flux', 0.0))
+
+        # Silindirik hazne gövdesi + enjektör yüzü (kontur bu bölümü
+        # içermez: sample_nozzle_inner_contour z=0'da hazne yarıçapından
+        # başlar ve konverjana girer).
+        barrel_area = np.pi * diameter * length
+        injector_area = np.pi * (diameter / 2.0) ** 2
+        q_barrel = chamber_flux * (barrel_area + injector_area)
+
+        gas_side['barrel_wetted_area'] = float(barrel_area + injector_area)
+        gas_side['barrel_heat_rate'] = float(q_barrel)
+
+        try:
+            profile = self.analyze_axial_profile(
+                motor_data, n_stations=n_stations, material=material,
+                wall_thickness=wall_thickness, ambient_temp=ambient_temp,
+                cooling_type=cooling_type
+            )
+            r_throat = 0.5 * float(profile['throat_diameter_m'])       # m
+            x = np.asarray(profile['x_mm'], dtype=float) / 1000.0      # m
+            r = r_throat * np.sqrt(np.asarray(profile['area_ratio'],
+                                              dtype=float))            # m
+            q = np.asarray(profile['q_MW'], dtype=float) * 1e6         # W/m^2
+            if x.size < 2:
+                raise ValueError("kontur en az 2 istasyon gerektirir")
+
+            # Yamuk kuralı: eğik (slant) uzunluk ds ve ortalama yarıçap.
+            ds = np.hypot(np.diff(x), np.diff(r))
+            r_mean = 0.5 * (r[1:] + r[:-1])
+            q_mean = 0.5 * (q[1:] + q[:-1])
+            dA = 2.0 * np.pi * r_mean * ds
+            nozzle_area = float(np.sum(dA))
+            q_nozzle = float(np.sum(q_mean * dA))
+
+            gas_side['nozzle_wetted_area'] = nozzle_area
+            gas_side['nozzle_heat_rate'] = q_nozzle
+            gas_side['surface_area'] = float(barrel_area + injector_area
+                                             + nozzle_area)
+            gas_side['total_heat_rate'] = float(q_barrel + q_nozzle)
+            gas_side['wetted_integral_available'] = True
+            gas_side['wetted_integral_stations'] = int(x.size)
+        except Exception as exc:  # geometri/kontur yoksa dürüst yedek
+            gas_side['wetted_integral_available'] = False
+            gas_side['wetted_integral_error'] = str(exc)
+            gas_side.setdefault('warnings', []).append(_mk_warning(
+                'warn.thermal.wetted_integral_unavailable', 'warning'))
+        return gas_side
 
     def _analyze_wall_temperature(self, heat_flux: float, thickness: float,
                                 mat_props: Dict, ambient_temp: float, h_coolant: float,
@@ -1132,12 +1357,10 @@ class HeatTransferAnalyzer:
         lower_bound = min(ambient_temp, T_inner)
         T_outer = min(max(T_outer, lower_bound), T_inner)
         if abs(T_outer - T_outer_raw) > 1e-6:
-            warnings_list.append(
-                f"Outer wall temperature {T_outer_raw:.0f} K was outside the "
-                f"physical range [{lower_bound:.0f} K, {T_inner:.0f} K] and was "
-                f"clamped to {T_outer:.0f} K — check wall thickness, "
-                f"conductivity and cooling inputs."
-            )
+            warnings_list.append(_mk_warning(
+                'warn.thermal.outer_wall_clamped', 'warning',
+                T_outer_raw=round(T_outer_raw), lower=round(lower_bound),
+                upper=round(T_inner), T_outer=round(T_outer)))
             delta_T_conduction = T_inner - T_outer
 
         T_average = (T_inner + T_outer) / 2.0
@@ -1167,29 +1390,82 @@ class HeatTransferAnalyzer:
             'warnings': warnings_list
         }
 
+    # Soğutucu tarafı tasarım sıcaklık farkları [K] — mühendislik kabulü,
+    # literatür formülü DEĞİL (dürüstlük notu: bunlar boyutlandırma
+    # kabulüdür; her biri A = Q/(h*dT) ifadesinde dT olarak kullanılır).
+    _COOLING_DESIGN_DELTA_T = {
+        'natural': 50.0,        # K (doğal taşınımda cidar-hava farkı)
+        'forced': 100.0,        # K (zorlanmış hava)
+        'regenerative': 100.0,  # K (cidar-soğutucu film farkı)
+    }
+    # Isı yutucu (heat-sink) tasarım sıcaklık artışı [K].
+    _HEAT_SINK_DELTA_T = 200.0
+
     def _analyze_cooling_requirements(self, heat_rate: float, burn_time: float,
-                                    motor_data: Dict, cooling_type: str) -> Dict:
-        """Analyze cooling requirements"""
+                                    motor_data: Dict, cooling_type: str,
+                                    mat_props: Optional[Dict] = None) -> Dict:
+        """Analyze cooling requirements.
+
+        DÜZELTME (v2.6.2, fizik denetimi F037) — iki ayrı kusur:
+
+        (1) YANLIŞ KATSAYI: rejeneratif dal gereken soğutma alanını
+            A = Q/(2000*100) ile hesaplıyordu. 2000 W/m^2/K değeri eski
+            sürümden kalmıştı; modülün MERKEZİ soğutucu-tarafı kaynağı
+            _coolant_side_coefficient rejeneratif için 20000 W/m^2/K
+            döndürür (Huzel & Huang Böl. 4: sıvı rejeneratif 1e4-5e4
+            W/m^2/K) ve kendi docstring'i 2000'in "bir mertebe düşük"
+            olduğunu zaten söylüyordu. Sonuç: kullanıcıya gösterilen
+            "gereken soğutma alanı" tam 10x FAZLA raporlanıyordu.
+            Artık üç dal da h'yi _coolant_side_coefficient'ten alır —
+            tek kaynak kuralı (natural 25 / forced 100 / regen 20000).
+
+        (2) MALZEMEDEN BAĞIMSIZ cp: ısı yutucu kütlesi
+            m = E/(460*200) ile, yani SEÇİLEN MALZEME ne olursa olsun
+            çelik cp=460 J/kg/K varsayımıyla hesaplanıyordu. Bakır (385)
+            ve alüminyum (896) için 2.3x'e varan hata. Artık cp seçilen
+            malzeme kaydından (materials_db 'specific_heat') okunur.
+
+        Args:
+            heat_rate: Toplam ısı yükü [W] (ıslak yüzey integrali, F038).
+            burn_time: Yanma süresi [s].
+            motor_data: Motor sözlüğü (coolant_side_coefficient geçilebilir).
+            cooling_type: 'natural' | 'forced' | 'regenerative'.
+            mat_props: Seçilen malzeme kaydı (specific_heat için). None ise
+                çelik varsayılanına düşülür ve bu çıktıda bildirilir.
+        """
 
         # Total heat energy
         total_heat_energy = heat_rate * burn_time  # J
 
-        # Cooling capacity requirements
+        # Cooling capacity requirements — h TEK merkezi kaynaktan.
+        h_cool = self._coolant_side_coefficient(motor_data, cooling_type)
+        delta_t = self._COOLING_DESIGN_DELTA_T.get(cooling_type)
+        if delta_t is None or h_cool <= 0.0:
+            required_surface_area = 0.0
+        else:
+            required_surface_area = heat_rate / (h_cool * delta_t)  # m^2
+
         if cooling_type == 'natural':
-            required_surface_area = heat_rate / (25.0 * 50)  # m² (natural convection)
             coolant_flow_rate = 0  # No active cooling
         elif cooling_type == 'forced':
-            required_surface_area = heat_rate / (100.0 * 100)  # m² (forced air)
-            coolant_flow_rate = heat_rate / (1000 * 20)  # kg/s (air flow)
+            coolant_flow_rate = heat_rate / (1000 * 20)  # kg/s (air, cp~1000, 20K)
         elif cooling_type == 'regenerative':
             coolant_flow_rate = heat_rate / (4180 * 50)  # kg/s (water, 50K rise)
-            required_surface_area = heat_rate / (2000.0 * 100)  # m²
         else:
-            required_surface_area = 0
             coolant_flow_rate = 0
 
-        # Heat sink analysis (for passive cooling)
-        heat_sink_mass = total_heat_energy / (460 * 200)  # kg (steel, 200K rise)
+        # Heat sink analysis (for passive cooling) — SEÇİLEN malzemenin cp'si.
+        cp_wall = 460.0  # J/kg/K (çelik yedeği; mat_props verilmezse)
+        cp_source = 'steel_default'
+        if mat_props:
+            try:
+                cp_candidate = float(mat_props.get('specific_heat', 0.0))
+                if cp_candidate > 0.0:
+                    cp_wall = cp_candidate
+                    cp_source = 'material_record'
+            except (TypeError, ValueError):
+                pass
+        heat_sink_mass = total_heat_energy / (cp_wall * self._HEAT_SINK_DELTA_T)
 
         return {
             'total_heat_energy': total_heat_energy / 1e6,  # MJ
@@ -1197,6 +1473,12 @@ class HeatTransferAnalyzer:
             'required_cooling_area': required_surface_area,  # m²
             'coolant_flow_rate': coolant_flow_rate,  # kg/s
             'heat_sink_mass': heat_sink_mass,  # kg
+            # Teşhis (additive): boyutlandırmada kullanılan kabuller açıkta.
+            'coolant_side_coefficient': h_cool,           # W/m^2/K
+            'design_delta_T_K': delta_t,                  # K (mühendislik kabulü)
+            'heat_sink_specific_heat_J_kgK': cp_wall,     # J/kg/K
+            'heat_sink_specific_heat_source': cp_source,
+            'heat_sink_delta_T_K': self._HEAT_SINK_DELTA_T,
             'cooling_efficiency': self._calculate_cooling_efficiency(cooling_type),
             'recommendations': self._get_cooling_recommendations(cooling_type, heat_rate)
         }
@@ -1261,11 +1543,21 @@ class HeatTransferAnalyzer:
 
         warnings_list = []
         if temp_safety_factor < 1.0:
-            warnings_list.append('Wall temperature exceeds allowable limit')
-        if melting_safety_factor < 2.0:
-            warnings_list.append('Wall temperature approaches melting point')
+            warnings_list.append(_mk_warning(
+                'warn.thermal.temp_exceeds_allowable', 'critical'))
+        # DÜZELTME (v2.6.2, fizik denetimi F011): cidar erime noktasının
+        # ÜSTÜNDEYKEN tek uyarı 'erimeye yaklaşıyor' (warning) idi. Erime
+        # aşıldığında metin de seviye de yanlıştı; artık ayrı kritik kod.
+        if melting_safety_factor < 1.0:
+            warnings_list.append(_mk_warning(
+                'warn.thermal.max_temp_exceeds_melting', 'critical',
+                T_max=round(max_temp), melting=round(melting_point)))
+        elif melting_safety_factor < 2.0:
+            warnings_list.append(_mk_warning(
+                'warn.thermal.approaches_melting', 'warning'))
         if stress_safety_factor < 2.0:
-            warnings_list.append('High thermal stress - consider thicker walls')
+            warnings_list.append(_mk_warning(
+                'warn.thermal.high_thermal_stress', 'warning'))
 
         return {
             'temperature_safety_factor': temp_safety_factor,
@@ -1334,14 +1626,19 @@ class HeatTransferAnalyzer:
         recommendations = []
 
         if heat_rate > 100000:  # > 100 kW
-            recommendations.append('High heat load - consider regenerative cooling')
-            recommendations.append('Use high thermal conductivity materials')
+            recommendations.append(_mk_warning(
+                'warn.thermal.high_heat_load_regen', 'warning'))
+            recommendations.append(_mk_warning(
+                'warn.thermal.high_conductivity_material', 'info'))
 
         if cooling_type == 'natural' and heat_rate > 10000:
-            recommendations.append('Natural cooling insufficient - use forced cooling')
+            recommendations.append(_mk_warning(
+                'warn.thermal.natural_insufficient', 'warning'))
 
-        recommendations.append('Consider heat sink or thermal mass for short burns')
-        recommendations.append('Monitor wall temperature during operation')
+        recommendations.append(_mk_warning(
+            'warn.thermal.heat_sink_short_burns', 'info'))
+        recommendations.append(_mk_warning(
+            'warn.thermal.monitor_wall_temp', 'info'))
 
         return recommendations
 
@@ -1350,15 +1647,21 @@ class HeatTransferAnalyzer:
         recommendations = []
 
         if temp_safety_factor < 1.5:
-            recommendations.append('Increase wall thickness')
-            recommendations.append('Improve cooling system')
-            recommendations.append('Use higher temperature material')
+            recommendations.append(_mk_warning(
+                'warn.thermal.increase_wall_thickness', 'warning'))
+            recommendations.append(_mk_warning(
+                'warn.thermal.improve_cooling', 'warning'))
+            recommendations.append(_mk_warning(
+                'warn.thermal.higher_temp_material', 'warning'))
 
         if thickness < 0.003:
-            recommendations.append('Minimum wall thickness should be 3mm')
+            recommendations.append(_mk_warning(
+                'warn.thermal.min_wall_thickness_3mm', 'info'))
 
-        recommendations.append('Consider thermal barrier coating')
-        recommendations.append('Implement temperature monitoring')
+        recommendations.append(_mk_warning(
+            'warn.thermal.thermal_barrier_coating', 'info'))
+        recommendations.append(_mk_warning(
+            'warn.thermal.implement_temp_monitoring', 'info'))
 
         return recommendations
 

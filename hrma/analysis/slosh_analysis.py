@@ -81,6 +81,26 @@ _MILES_DECAY = 4.60
 #: +/- factor applied to the Miles damping estimate to form the reported band.
 _MILES_BAND_FACTOR = 2.0
 
+# Wave-amplitude ratio eta/R used by the Miles correlation.
+#
+# v2.6.2 fix (fizik denetimi, bulgu F002 — KRİTİK):
+# the sqrt(eta/R) factor was missing entirely, which implicitly
+# assumed eta/R = 1 -- a free-surface wave amplitude equal to the full tank
+# radius.  That contradicts the module's own declared linear small-amplitude
+# theory and made the estimate strongly NON-CONSERVATIVE: a single ring baffle
+# reported 18.6% of critical damping, whereas measured single-baffle values are
+# typically 1-10%.  Because slosh stability margins shrink when damping is
+# overestimated, the error pushed designs in the unsafe direction, and the
+# module's declared +/-2x band did not cover it.
+#
+# The correlation scales as sqrt(eta/R), so the amplitude must be stated.  It is
+# now an explicit argument; the default below is a documented small-amplitude
+# design point, not a physical constant.  Callers doing real stability work
+# should pass their own design slosh amplitude.
+_MILES_DEFAULT_AMPLITUDE_RATIO = 0.05
+#: Envelope of the linear theory the correlation rests on (eta/R).
+_MILES_AMPLITUDE_MIN, _MILES_AMPLITUDE_MAX = 1e-3, 0.25
+
 
 class CylindricalTankSlosh:
     """Linear slosh model of an upright circular cylindrical propellant tank.
@@ -162,7 +182,8 @@ class CylindricalTankSlosh:
 
     # -- ring-baffle damping (Miles, Eq. 4) ---------------------------------
 
-    def baffle_damping(self, width_ratio, depth_ratio):
+    def baffle_damping(self, width_ratio, depth_ratio,
+                       amplitude_ratio=_MILES_DEFAULT_AMPLITUDE_RATIO):
         """Estimated damping ratio of a single flat ring baffle (Miles, Eq. 4).
 
         Parameters
@@ -172,40 +193,65 @@ class CylindricalTankSlosh:
         depth_ratio : float
             Baffle depth below the undisturbed free surface as a fraction of
             radius, d_s/R (>= 0).
+        amplitude_ratio : float, optional
+            Free-surface wave amplitude at the wall as a fraction of radius,
+            eta/R.  The Miles correlation scales as sqrt(eta/R), so damping is
+            **amplitude dependent** and this value must reflect the design
+            slosh amplitude.  The default is a documented small-amplitude
+            design point, not a physical constant.
 
         Returns
         -------
         dict with the nominal damping ratio, a low/high band (factor of two),
-        the blocked-area ratio, and an ``'approximate'`` confidence flag.
+        the blocked-area ratio, the amplitude assumed, and an ``'approximate'``
+        confidence flag.
         """
         w = float(width_ratio)
         d = float(depth_ratio)
+        eta = float(amplitude_ratio)
         if not (0.0 < w <= 1.0):
             raise ValueError("width_ratio must be in (0, 1]")
         if d < 0.0:
             raise ValueError("depth_ratio must be >= 0")
+        if eta <= 0.0:
+            raise ValueError("amplitude_ratio must be > 0")
         area_ratio = 1.0 - (1.0 - w) ** 2  # A_baffle / A_tank
-        gamma = _MILES_C * np.exp(-_MILES_DECAY * d) * area_ratio ** 1.5
-        return {
+        gamma = (_MILES_C * np.exp(-_MILES_DECAY * d)
+                 * area_ratio ** 1.5 * np.sqrt(eta))
+        out = {
             'damping_ratio': float(gamma),
             'damping_ratio_low': float(gamma / _MILES_BAND_FACTOR),
             'damping_ratio_high': float(gamma * _MILES_BAND_FACTOR),
             'blocked_area_ratio': float(area_ratio),
             'width_ratio': w,
             'depth_ratio': d,
+            'amplitude_ratio': eta,
             'confidence': 'approximate',
         }
+        if not (_MILES_AMPLITUDE_MIN <= eta <= _MILES_AMPLITUDE_MAX):
+            out['amplitude_out_of_envelope'] = True
+        return out
 
-    def recommend_baffle(self, target_damping=0.01, depth_ratio=0.05):
+    def recommend_baffle(self, target_damping=0.01, depth_ratio=0.05,
+                         amplitude_ratio=_MILES_DEFAULT_AMPLITUDE_RATIO):
         """Recommend a ring-baffle width to reach a target damping ratio.
 
         Inverts Eq. (4) for the blocked-area ratio, then the radial width.
         The default target (1% of critical) is a common slosh-stability goal
         (NASA SP-8009).  Result is ``'approximate'``.
+
+        ``amplitude_ratio`` (eta/R) must match the value used when evaluating
+        :meth:`baffle_damping`; the correlation scales as sqrt(eta/R), so an
+        inverted width is only meaningful at the amplitude it was solved for.
+        Omitting the amplitude term (the pre-v2.6.2 behaviour) made recommended
+        baffles roughly 2.8x too narrow at eta/R = 0.05.
         """
         target = float(target_damping)
         d = float(depth_ratio)
-        base = _MILES_C * np.exp(-_MILES_DECAY * d)
+        eta = float(amplitude_ratio)
+        if eta <= 0.0:
+            raise ValueError("amplitude_ratio must be > 0")
+        base = _MILES_C * np.exp(-_MILES_DECAY * d) * np.sqrt(eta)
         area_ratio = float(np.clip((target / base) ** (2.0 / 3.0), 0.0, 1.0))
         width_ratio = float(1.0 - np.sqrt(max(0.0, 1.0 - area_ratio)))
         achievable = area_ratio < 1.0
@@ -214,6 +260,7 @@ class CylindricalTankSlosh:
             'recommended_width_ratio': width_ratio,
             'recommended_width_m': width_ratio * self.radius,
             'depth_ratio': d,
+            'amplitude_ratio': eta,
             'blocked_area_ratio': area_ratio,
             'achievable_with_single_baffle': achievable,
             'note': (
@@ -285,7 +332,8 @@ class CylindricalTankSlosh:
 
     def analyze(self, control_frequencies=None, structural_frequencies=None,
                 coincidence_margin=0.20, baffle_width_ratio=None,
-                baffle_depth_ratio=0.10, sweep_heights=None):
+                baffle_depth_ratio=0.10, sweep_heights=None,
+                baffle_amplitude_ratio=_MILES_DEFAULT_AMPLITUDE_RATIO):
         """Full slosh assessment for the current geometry.
 
         Optional inputs
@@ -324,10 +372,16 @@ class CylindricalTankSlosh:
             warnings += self._coincidence(
                 f1, structural_frequencies, coincidence_margin, "structural")
 
+        # Genlik terimi ikisinde de AYNI olmali; yalnizca birine verilirse
+        # oneri ile degerlendirme birbirini tutmaz (bkz. test_slosh.py
+        # test_recommend_baffle_round_trips_at_any_amplitude).
         if baffle_width_ratio is not None:
-            baffle = self.baffle_damping(baffle_width_ratio, baffle_depth_ratio)
+            baffle = self.baffle_damping(baffle_width_ratio, baffle_depth_ratio,
+                                         amplitude_ratio=baffle_amplitude_ratio)
         else:
-            baffle = self.recommend_baffle(depth_ratio=baffle_depth_ratio)
+            baffle = self.recommend_baffle(
+                depth_ratio=baffle_depth_ratio,
+                amplitude_ratio=baffle_amplitude_ratio)
 
         result = {
             'radius': self.radius,

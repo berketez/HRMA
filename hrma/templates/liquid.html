@@ -2111,6 +2111,10 @@
                 }
                 
                 currentResults = results;
+                // A1 — uçuş köprüsü (bkz. app.js'teki eş çağrı).
+                if (window.FlightHandoff) {
+                    window.FlightHandoff.publish(results, { motor_type: 'liquid' });
+                }
                 displayResults(results);
                 // Analysis Dock önerilerini en güncel sonuçla tazele
                 // (kullanıcının elle değiştirdiği alanlar ezilmez)
@@ -4473,10 +4477,28 @@ Please provide:
                 return;
             }
 
+            // D-track (v2.6.2): uyarılar {code, params, severity} sözlüğü.
+            // Ham gömülürse "[object Object]" basılır. AnalysisDock'un
+            // özyinelemeli çeviricisi yüklüyse onu kullan (iç içe kayıtlar,
+            // ör. options listesi, orada da çözülür).
+            const warnToText = (w) => {
+                if (window.AnalysisDock && window.AnalysisDock.ui
+                    && window.AnalysisDock.ui.warnText) {
+                    return window.AnalysisDock.ui.warnText(w);
+                }
+                if (w === null || w === undefined) return '';
+                if (typeof w === 'string') return w;
+                if (w && w.code) {
+                    return (window.I18N && window.I18N.tf)
+                        ? window.I18N.tf(w.code, w.params || {}, w.fallback || w.code)
+                        : (w.fallback || w.code);
+                }
+                return (w && (w.message || w.text)) || String(w);
+            };
             const item = (label, text, cls) =>
                 `<div class="warning-item ${cls}">` +
                 `<span class="warning-tag">${label}</span>` +
-                `<span class="warning-text">${text}</span></div>`;
+                `<span class="warning-text">${warnToText(text)}</span></div>`;
 
             // Etiketler de sözlükten gelir: TR seçiliyken panelin tamamı Türkçe
             // olmalı (app.js displayWarnings ile aynı karşılıklar).
@@ -5318,6 +5340,9 @@ Please provide:
             });
         })();
     </script>
+    <!-- A1 uçuş köprüsü: hesap sonucunu tek Python normalize'ından
+         geçirip localStorage'a yazar; /launch-site oradan okur. -->
+    <script src="/static/js/flight_handoff.js"></script>
     <script src="/static/js/update_check.js"></script>
 </body>
 </html>

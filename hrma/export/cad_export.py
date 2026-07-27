@@ -11,6 +11,15 @@ import tempfile
 import zipfile
 from datetime import datetime
 
+
+def _hrma_version() -> str:
+    """Üretilen paketin hangi sürümden çıktığını kaydeder (izlenebilirlik)."""
+    try:
+        from hrma import __version__
+        return __version__
+    except Exception:
+        return 'unknown'
+
 try:
     import FreeCAD
     import Part
@@ -316,14 +325,22 @@ class TankCADGenerator:
         # üretilmiyordu; artık kuruluysa üretir, değilse notunu pakete yazar.
         try:
             from hrma.export.step_export import generate_tank_step
+            # BİRİM: tank_data['...']['dimensions'] MİLİMETRE taşır (sıvı motor
+            # `ox_tank_diameter * 1000` yazar) ve generate_tank_step de mm bekler.
+            # v2.6.2 öncesinde buradaki varsayılanlar METRE cinsindendi (0.3/0.8)
+            # ve step_export gelen değeri ayrıca 1000 ile çarpıyordu: gerçek veri
+            # geldiğinde 300 mm'lik tank 300 METRE olarak kuruluyor, OpenCascade
+            # o katıyı üretemeyip sessizce boş dosya döndürüyordu. Varsayılan yol
+            # doğru görünüyordu çünkü 0.3 m × 1000 = 300 mm idi — yani hata
+            # yalnızca veri VARKEN ortaya çıkıyordu.
             step_files = generate_tank_step({
                 'fuel_tank': {
-                    'diameter': tank_data['fuel_tank']['dimensions'].get('diameter', 0.3),
-                    'length': tank_data['fuel_tank']['dimensions'].get('length', 0.8),
+                    'diameter': tank_data['fuel_tank']['dimensions'].get('diameter', 300.0),
+                    'length': tank_data['fuel_tank']['dimensions'].get('length', 800.0),
                 },
                 'oxidizer_tank': {
-                    'diameter': tank_data['oxidizer_tank']['dimensions'].get('diameter', 0.3),
-                    'length': tank_data['oxidizer_tank']['dimensions'].get('length', 0.8),
+                    'diameter': tank_data['oxidizer_tank']['dimensions'].get('diameter', 300.0),
+                    'length': tank_data['oxidizer_tank']['dimensions'].get('length', 800.0),
                 },
             }, out_dir=output_dir)
             exported_files.extend(step_files.values())
@@ -473,47 +490,107 @@ class TankCADGenerator:
             json.dump(drawing_spec, f, indent=2)
     
     def _generate_manufacturing_specs(self, tank_data: Dict, output_dir: str):
-        """Generate manufacturing specifications"""
-        
+        """Jenerik imalat KONTROL LİSTESİ üretir — tasarımdan türetilmiş değil.
+
+        v2.6.2 dürüstlük düzeltmesi:
+        Bu dosya eskiden ``manufacturing_specifications.json`` adıyla ve
+        "imalat spesifikasyonu" havasıyla iniyordu. Oysa içindekilerin
+        ÇOĞU hesaptan gelmiyordu: bafl ve bağlantı elemanı malzemesi,
+        kaynak prosesi (AWS D17.1), ±0,1 mm işleme toleransı, yüzey
+        pürüzlülüğü, 1,5x basınç testi, helyum sızıntı eşiği ve montaj
+        sırası hepsi SABİT metinlerdi. Yalnız tank kabuğu malzemesi
+        gerçekten girdiden geliyordu.
+
+        Bu ayrımı kullanıcının görmesi imkânsızdı; dosya bir bütün olarak
+        "hesaplanmış" izlenimi veriyordu. Üstelik FreeCAD pratikte hiçbir
+        zaman kurulu olmadığı için tank CAD paketi HER ZAMAN bu yoldan
+        çıkıyor, yani şablon her kullanıcıya ulaşıyordu.
+
+        Artık her alan ``source`` etiketi taşır:
+          ``analysis``  — bu koşudan hesaplandı
+          ``template``  — jenerik örnek, tasarımınıza ait DEĞİL
+        ve dosya adı bunu yansıtır.
+        """
+        ox_struct = tank_data['oxidizer_tank']['structural']
+        fuel_struct = tank_data['fuel_tank']['structural']
+
+        def analysis(value, note=None):
+            d = {'value': value, 'source': 'analysis'}
+            if note:
+                d['note'] = note
+            return d
+
+        def template(value):
+            return {'value': value, 'source': 'template',
+                    'note': 'Generic example — NOT derived from your design.'}
+
         manufacturing_spec = {
+            'DISCLAIMER': (
+                'This file is a GENERIC CHECKLIST, not a manufacturing '
+                'specification. Only fields marked source="analysis" come from '
+                'your motor. Every field marked source="template" is a fixed '
+                'example: materials, weld process, tolerances, surface finish, '
+                'test pressures and the assembly sequence are NOT derived from '
+                'your design and must be set by a qualified engineer against '
+                'the applicable pressure-vessel code and your own requirements.'
+            ),
             'project_info': {
                 'title': 'Liquid Rocket Propellant Tanks',
                 'date': datetime.now().isoformat(),
                 'revision': 'A',
-                'units': 'mm'
+                'units': 'mm',
+                'hrma_version': _hrma_version(),
             },
             'materials': {
-                'oxidizer_tank': tank_data['oxidizer_tank']['structural']['material'],
-                'fuel_tank': tank_data['fuel_tank']['structural']['material'],
-                'baffles': 'Aluminum 6061-T6',
-                'fasteners': 'Stainless Steel 316'
+                # Tank kabuğu malzemesi GERÇEKTEN hesaptan gelir: dayanım ve
+                # yoğunluk aynı materials_db kaydından okunur ve cidar
+                # kalınlığı ondan boyutlandırılır.
+                'oxidizer_tank': analysis(
+                    ox_struct.get('material'),
+                    f"yield {ox_struct.get('yield_strength_mpa')} MPa, "
+                    f"density {ox_struct.get('density_kg_m3')} kg/m3"),
+                'fuel_tank': analysis(
+                    fuel_struct.get('material'),
+                    f"yield {fuel_struct.get('yield_strength_mpa')} MPa, "
+                    f"density {fuel_struct.get('density_kg_m3')} kg/m3"),
+                'baffles': template('Aluminum 6061-T6'),
+                'fasteners': template('Stainless Steel 316'),
             },
             'manufacturing_processes': {
-                'tank_shells': 'Spin forming or deep drawing',
-                'welding': 'TIG welding per AWS D17.1',
-                'machining': 'CNC machining ±0.1mm tolerance',
-                'surface_finish': 'Ra 3.2 μm internal, Ra 6.3 μm external'
+                'tank_shells': template('Spin forming or deep drawing'),
+                'welding': template('TIG welding per AWS D17.1'),
+                'machining': template('CNC machining +/-0.1 mm tolerance'),
+                'surface_finish': template(
+                    'Ra 3.2 um internal, Ra 6.3 um external'),
             },
             'quality_requirements': {
-                'pressure_test': '1.5x design pressure',
-                'leak_test': 'Helium leak test < 1e-6 std cm³/s',
-                'dimensional_inspection': '100% inspection of critical dimensions',
-                'material_certification': 'Mill test certificates required'
+                # Tasarım basıncı hesaptan gelir; test ÇARPANI ve sızıntı
+                # eşiği koda gömülü örneklerdir.
+                'design_pressure_bar': analysis(
+                    ox_struct.get('pressure_rating')),
+                'pressure_test': template('1.5x design pressure'),
+                'leak_test': template('Helium leak test < 1e-6 std cm3/s'),
+                'dimensional_inspection': template(
+                    '100% inspection of critical dimensions'),
+                'material_certification': template(
+                    'Mill test certificates required'),
             },
-            'assembly_sequence': [
+            'assembly_sequence': template([
                 '1. Machine tank shells',
                 '2. Fabricate internal structures',
                 '3. Weld baffles to tank walls',
                 '4. Install anti-vortex devices',
                 '5. Weld end caps',
                 '6. Pressure test individual tanks',
-                '7. Final assembly and leak test'
-            ]
+                '7. Final assembly and leak test',
+            ]),
         }
-        
-        spec_file = os.path.join(output_dir, 'manufacturing_specifications.json')
-        with open(spec_file, 'w') as f:
-            json.dump(manufacturing_spec, f, indent=2)
+
+        # Ad, içeriğin ne olduğunu söylüyor: şablon kontrol listesi.
+        spec_file = os.path.join(output_dir,
+                                 'manufacturing_checklist_TEMPLATE.json')
+        with open(spec_file, 'w', encoding='utf-8') as f:
+            json.dump(manufacturing_spec, f, indent=2, ensure_ascii=False)
     
     def _create_zip_package(self, temp_dir: str, files: List[str]) -> str:
         """Create ZIP package of all CAD files"""

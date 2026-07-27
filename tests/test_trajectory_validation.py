@@ -139,22 +139,52 @@ class TestEnergyConservation:
 # ---------------------------------------------------------------------------
 class TestWindCoupling:
 
-    def test_wind_produces_downrange_drift(self):
-        """Dikey fırlatma + rüzgar -> downrange sürüklenme (rüzgar denklemlerde)."""
+    def test_wind_produces_downwind_drift(self):
+        """Dikey fırlatma + rüzgâr -> RÜZGÂRALTI yönde sürüklenme.
+
+        KONVANSIYON (F082 düzeltmesi, v2.6.2): ``wind_direction`` rüzgârın
+        GELDİĞİ yöndür — meteorolojik standart ("kuzey rüzgârı" kuzeyden eser).
+        Dolayısıyla ``wind_direction=0`` +x'ten esen rüzgâr demektir ve araç
+        −x yönüne, yani rüzgâraltına sürüklenir. NEGATİF menzil DOĞRUDUR.
+
+        Bu test eskiden ``range10 > 100`` (pozitif) bekliyordu; o beklenti
+        rüzgârın ESTİĞİ yön konvansiyonuna dayanıyordu ve six_dof_trajectory
+        modülünün konvansiyonuyla ÇELİŞİYORDU (orada zaten
+        ``wind = −V·[cos, sin, 0]`` kullanılıyordu). İki modül artık aynı
+        konvansiyonu paylaşıyor — asıl düzeltilen tutarsızlık buydu.
+        """
         r0 = _run(launch_angle=90.0, wind_speed=0.0)
         r10 = _run(launch_angle=90.0, wind_speed=10.0, wind_direction=0.0)
         range0 = r0['performance']['trajectory_metrics']['range_distance']
         range10 = r10['performance']['trajectory_metrics']['range_distance']
-        assert abs(range0) < 1.0, "rüzgarsız dikey: menzil ~0"
-        assert range10 > 100.0, (
-            f"rüzgarlı dikey: belirgin downrange drift olmalı, bulunan={range10:.1f} m"
-        )
+        assert abs(range0) < 1.0, 'rüzgârsız dikey: menzil ~0'
+        assert abs(range10) > 100.0, (
+            f'rüzgârlı dikey: belirgin sürüklenme olmalı, bulunan={range10:.1f} m')
+        assert range10 < 0.0, (
+            f'wind_direction=0 (kuzeyden) -> araç −x yönüne sürüklenmeli, '
+            f'bulunan={range10:.1f} m (konvansiyon ters çevrilmiş olabilir)')
+
+    def test_wind_direction_180_reverses_drift(self):
+        """Ters yönden esen rüzgâr sürüklenmeyi ters çevirmeli.
+
+        İşaret konvansiyonunun gerçekten yöne bağlı olduğunu kilitler —
+        tek bir işareti sabitlemek yerine simetriyi sınar.
+        """
+        d0 = _run(launch_angle=90.0, wind_speed=10.0,
+                  wind_direction=0.0)['performance']['trajectory_metrics']['range_distance']
+        d180 = _run(launch_angle=90.0, wind_speed=10.0,
+                    wind_direction=180.0)['performance']['trajectory_metrics']['range_distance']
+        assert d0 * d180 < 0, f'yön 180° dönünce işaret değişmeli: {d0:.0f} / {d180:.0f}'
+        assert abs(abs(d0) - abs(d180)) < 0.05 * abs(d0), 'büyüklükler simetrik olmalı'
 
     def test_more_wind_more_drift(self):
-        """Daha fazla rüzgar -> daha fazla sürüklenme (monoton)."""
+        """Daha fazla rüzgâr -> daha fazla sürüklenme (büyüklükçe monoton)."""
         d10 = _run(launch_angle=90.0, wind_speed=10.0)['performance']['trajectory_metrics']['range_distance']
         d20 = _run(launch_angle=90.0, wind_speed=20.0)['performance']['trajectory_metrics']['range_distance']
-        assert d20 > d10 > 0.0, f"drift rüzgarla artmalı: 10m/s={d10:.0f}, 20m/s={d20:.0f}"
+        assert abs(d20) > abs(d10) > 0.0, (
+            f'sürüklenme rüzgârla artmalı: 10 m/s={d10:.0f}, 20 m/s={d20:.0f}')
+        # Aynı yönde olmalı (işaret tutarlılığı)
+        assert d10 * d20 > 0, 'iki rüzgâr hızı zıt yönlere sürüklüyor'
 
 
 # ---------------------------------------------------------------------------
