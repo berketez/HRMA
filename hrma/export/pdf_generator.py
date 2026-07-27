@@ -227,8 +227,11 @@ class PDFReportGenerator:
         story.extend(self._create_motor_configuration(motor_data))
         story.append(PageBreak())
         
-        # Analysis Results
-        story.extend(self._create_analysis_results(analysis_results))
+        # Analysis Results — motor_data da geçilir: yapısal bölümün "bu emniyet
+        # faktörü doğrulama mı, boyutlandırma hedefinin geri okunması mı"
+        # ayrımı yalnız ham structural_analysis kaydındaki design_mode /
+        # safety_factor_is_tautological alanlarından bilinir.
+        story.extend(self._create_analysis_results(analysis_results, motor_data))
         
         # Charts and Visualizations
         if charts:
@@ -432,10 +435,107 @@ class PDFReportGenerator:
         
         return story
 
-    def _create_analysis_results(self, analysis_results: Dict) -> List:
+    # İstasyon adı (safety_analysis['safety_factors'] anahtarı) -> ham
+    # structural_analysis alt bloğu. Burkulma (buckling_axial) bu haritada
+    # YOKTUR: burkulma emniyet faktörü bir hedefe boyutlandırılmaz, kabuk
+    # geometrisinden hesaplanır (NASA SP-8007), dolayısıyla tautolojik değildir.
+    _SF_STATION_SOURCES = {
+        'chamber_hoop': ('chamber_analysis', 'Chamber wall'),
+        'chamber_von_mises': ('chamber_analysis', 'Chamber wall'),
+        'nozzle': ('nozzle_analysis', 'Nozzle throat'),
+        'end_cap': ('end_cap_analysis', 'End cap / head'),
+    }
+
+    @classmethod
+    def _structural_design_basis(cls, structural_raw: Dict) -> Dict:
+        """Yapısal emniyet faktörlerinin tasarım tabanını çözer.
+
+        DÜRÜSTLÜK KAPISI (2026-07-27). StructuralAnalyzer iki modda çalışır
+        (bkz. structural_analysis.py F003/F004):
+
+          * ``size``   -> kalınlık, tasarım emniyet faktörü HEDEFİNE göre
+            boyutlandırılır. O istasyonun gerilmesi tanım gereği izin verilen
+            gerilmeye eşit çıkar, dolayısıyla SF = hedef SF (imalat payıyla
+            çarpılmış hâli). Analizör bunu ``safety_factor_is_tautological``
+            ile işaretler: rapor edilen sayı KULLANICININ GİRDİSİNİN geri
+            okunmasıdır, bağımsız bir doğrulama DEĞİLDİR.
+          * ``verify`` -> gerilme kullanıcının GERÇEK kalınlığından hesaplanır;
+            SF gerçek bir doğrulamadır.
+
+        Rapor katmanı bu iki durumu ayırmazsa, boyutlandırma modunda
+        ``minimum_safety_factor`` her motorda hedefin ta kendisi (tipik olarak
+        4.00) çıkar ve kullanıcı bunu "hesaplanmış emniyet payı" sanır — v2.5
+        öncesindeki sabit SF 4.0 kalıntısının aynısı, bu kez analizörden
+        geliyor gibi görünen hâli. Bu fonksiyon hangi istasyonun hedefe
+        boyutlandırıldığını, hangisinin doğrulandığını ve doğrulanmış
+        istasyonlar arasındaki gerçek minimumu döndürür.
+
+        Returns:
+            {'known': bool, 'sized': [istasyon adları], 'verified_min': float|None,
+             'target': float|None, 'allowance': float|None}
+        """
+        basis = {'known': False, 'sized': [], 'verified_min': None,
+                 'target': None, 'allowance': None}
+        if not isinstance(structural_raw, dict) or not structural_raw:
+            return basis
+
+        safety = structural_raw.get('safety_analysis') or {}
+        factors = safety.get('safety_factors') or {}
+        chamber = structural_raw.get('chamber_analysis') or {}
+
+        def _is_sized(block_name):
+            block = structural_raw.get(block_name) or {}
+            if 'safety_factor_is_tautological' in block:
+                return bool(block['safety_factor_is_tautological'])
+            if 'design_mode' in block:
+                return str(block['design_mode']) == 'size'
+            return None                      # bilinmiyor
+
+        known_any = False
+        sized_labels = []
+        verified = []
+        for station, value in factors.items():
+            source = cls._SF_STATION_SOURCES.get(station)
+            sized = _is_sized(source[0]) if source else False
+            if sized is None:
+                continue                     # mod bilinmiyor -> iddia etme
+            known_any = True
+            if sized:
+                if source[1] not in sized_labels:
+                    sized_labels.append(source[1])
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if number == number and number not in (float('inf'), float('-inf')):
+                verified.append(number)
+
+        if not known_any:
+            return basis
+
+        basis['known'] = True
+        basis['sized'] = sized_labels
+        basis['verified_min'] = min(verified) if verified else None
+        target = chamber.get('design_safety_factor_target')
+        if target is None:
+            target = (structural_raw.get('material_properties') or {}).get('safety_factor')
+        try:
+            basis['target'] = float(target) if target is not None else None
+        except (TypeError, ValueError):
+            basis['target'] = None
+        try:
+            allowance = chamber.get('manufacturing_allowance_factor')
+            basis['allowance'] = float(allowance) if allowance is not None else None
+        except (TypeError, ValueError):
+            basis['allowance'] = None
+        return basis
+
+    def _create_analysis_results(self, analysis_results: Dict,
+                                 motor_data: Optional[Dict] = None) -> List:
         """Create detailed analysis results section"""
         story = []
-        
+
         story.append(Paragraph("Analysis Results", self.styles['SectionHeader']))
         
         # Performance Analysis
@@ -519,9 +619,64 @@ class PDFReportGenerator:
                         [label, self._fmt(structural.get(key), pattern), unit]
                     )
 
+            # Ham analiz kaydı (boyutlandırma/doğrulama modunu yalnız o bilir).
+            # app.py'nin PDF besleyicisiyle aynı öncelik: motor sonucu, yoksa
+            # istekle gelen analiz bloğu.
+            structural_raw = ((motor_data or {}).get('structural_analysis')
+                              or analysis_results.get('structural_analysis')
+                              or {})
+            basis = self._structural_design_basis(structural_raw)
+
             _add_structural_row('Safety Factor (pressure only)', 'safety_factor_pressure')
             _add_structural_row('Safety Factor (pressure + thermal)', 'safety_factor_total')
-            _add_structural_row('Minimum Safety Factor (all modes)', 'min_safety_factor')
+
+            # MİNİMUM EMNİYET FAKTÖRÜ — üç ayrı durum, üç ayrı iddia:
+            #  (a) mod bilinmiyor (ham analiz yok) -> eski davranış, tüm
+            #      istasyonların minimumu olduğu gibi basılır;
+            #  (b) en az bir istasyon DOĞRULANMIŞ -> minimum yalnız o
+            #      istasyonlar üzerinden verilir (hedefe boyutlandırılmış
+            #      istasyonlar minimumu suni olarak hedefe kilitlemesin);
+            #  (c) her istasyon hedefe boyutlandırılmış -> ortada doğrulanmış
+            #      bir emniyet payı YOKTUR; sayı yerine tasarım HEDEFİ, girdi
+            #      olduğu açıkça yazılarak basılır.
+            design_note = None
+            if not basis['known']:
+                _add_structural_row('Minimum Safety Factor (all modes)',
+                                    'min_safety_factor')
+            elif basis['verified_min'] is not None:
+                structural_data.append([
+                    'Minimum Safety Factor (verified stations)',
+                    self._fmt(basis['verified_min'], '{:.2f}'), '-'])
+                if basis['sized']:
+                    design_note = (
+                        '<b>Design basis:</b> %s sized to the design safety '
+                        'factor target%s, so their safety factor is the design '
+                        'input read back and is EXCLUDED from the minimum above '
+                        '(structural_analysis: safety_factor_is_tautological = '
+                        'true). Supply the as-built thickness of those stations '
+                        'to obtain a verified value.'
+                        % (' and '.join(basis['sized']),
+                           '' if basis['target'] is None
+                           else ' (%s)' % self._fmt(basis['target'], '{:g}')))
+            else:
+                if basis['target'] is not None:
+                    structural_data.append([
+                        'Design Safety Factor Target (sizing mode)',
+                        self._fmt(basis['target'], '{:g}'), '-'])
+                allowance = ('' if basis['allowance'] is None else
+                             ' with a %s manufacturing allowance on the chamber '
+                             'wall' % self._fmt(basis['allowance'], '{:g}x'))
+                design_note = (
+                    '<b>Design basis: SIZING mode — no verified safety margin.</b> '
+                    'Wall, throat and head thicknesses were SIZED to the design '
+                    'safety factor target%s. Every station therefore returns that '
+                    'target back (structural_analysis: '
+                    'safety_factor_is_tautological = true), so no independent '
+                    'minimum safety factor is reported here; the factors above '
+                    'are design inputs read back, not verifications. Enter the '
+                    'as-built wall / throat / head thicknesses to obtain verified '
+                    'safety factors.' % allowance)
+
             _add_structural_row('Von Mises Stress', 'von_mises_stress_MPa', unit='MPa')
             _add_structural_row('Hoop Stress (total)', 'hoop_stress_MPa', unit='MPa')
             if structural.get('status'):
@@ -544,6 +699,10 @@ class PDFReportGenerator:
                      [colors.white, colors.lightgrey])
                 ]))
                 story.append(structural_table)
+
+            if design_note:
+                story.append(Spacer(1, 0.1 * inch))
+                story.append(Paragraph(design_note, self.styles['Normal']))
 
         return story
 

@@ -308,14 +308,26 @@ def _macos_app_identity(version):
         traceback.print_exc()  # kozmetik — pencere açılışını engelleme
     try:
         # About paneli ve Dock, paketsiz python sürecinde varsayılan (boş/
-        # Python) simgeye düşer; bundle'daki icon.icns'i elle veriyoruz.
+        # Python) simgeye düşer; bundle'daki simgeyi elle veriyoruz.
         # .app'te launcher Resources/app/ altında, ikon Resources/ kökünde.
+        #
+        # v2.6.25 — NEDEN icon.icns DEĞİL de icon_runtime.png:
+        # macOS 26 (Tahoe) bundle simgesine KENDİ yuvarlatılmış karo maskesini
+        # uygular. Bu yüzden ``icon.icns`` artık TAM TAŞMA (kare, tuvalin
+        # tamamı) üretiliyor — maskeyi sistem koyuyor (bkz. make_icons.py).
+        # Ama ``setApplicationIconImage_`` o maskeyi BYPASS eder, ham görüntüyü
+        # çizer; oraya tam taşma vermek Dock'ta keskin köşeli bir kare
+        # gösterirdi. Çalışma anı için önceden yuvarlatılmış varlığı veriyoruz.
         import AppKit
-        icon_path = os.path.abspath(os.path.join(APP_DIR, os.pardir, "icon.icns"))
-        if os.path.isfile(icon_path):
+        res_dir = os.path.abspath(os.path.join(APP_DIR, os.pardir))
+        for aday in ("icon_runtime.png", "icon.icns"):
+            icon_path = os.path.join(res_dir, aday)
+            if not os.path.isfile(icon_path):
+                continue
             img = AppKit.NSImage.alloc().initWithContentsOfFile_(icon_path)
             if img:
                 AppKit.NSApplication.sharedApplication().setApplicationIconImage_(img)
+                break
     except Exception:
         pass
 

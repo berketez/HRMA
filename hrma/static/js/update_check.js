@@ -25,6 +25,46 @@
     var SKIP_KEY = 'hrma_update_skip';
     var POLL_MS = 700;
 
+    // -----------------------------------------------------------------------
+    // Sürüm notlarının dili (v2.6.25 düzeltmesi)
+    //
+    // SORUN: Güncelleme penceresindeki notlar sunucudan GitHub sürüm
+    // GÖVDESİ olarak geliyor (update_checker.py -> release['body']). O gövde
+    // tek dilde yazıldığı için Türkçe arayüzde "Güncellemek ister misiniz?"
+    // sorusu Türkçe, hemen altındaki sürüm notu İngilizce çıkıyordu.
+    //
+    // ÇÖZÜM: Sürüm gövdesi artık iki dili de taşıyor ve bölümler makine
+    // tarafından okunabilir imlerle ayrılıyor:
+    //     <!--HRMA-LANG:en-->  ... İngilizce ...
+    //     <!--HRMA-LANG:tr-->  ... Türkçe ...
+    // Burada arayüz diline uyan bölüm ayıklanır.
+    //
+    // GERİYE UYUMLULUK: v2.6.2 ve öncesinin gövdelerinde bu im YOK. İm
+    // bulunmazsa metnin tamamı gösterilir — eski sürümlerin notları da
+    // görünmeye devam eder.
+    // -----------------------------------------------------------------------
+    var LANG_MARK = /<!--\s*HRMA-LANG:([a-z]{2})\s*-->/gi;
+
+    function pickLanguageSection(text) {
+        if (!text) return '';
+        var lang = (window.I18N && window.I18N.lang) ? window.I18N.lang : 'en';
+        var bolumler = {};
+        var son = null;
+        var sonSonu = 0;
+        var m;
+        LANG_MARK.lastIndex = 0;
+        while ((m = LANG_MARK.exec(text)) !== null) {
+            if (son !== null) bolumler[son] = text.slice(sonSonu, m.index);
+            son = m[1].toLowerCase();
+            sonSonu = m.index + m[0].length;
+        }
+        if (son === null) return text;          // im yok: eski sürüm gövdesi
+        bolumler[son] = text.slice(sonSonu);
+
+        var secilen = bolumler[lang] || bolumler.en || bolumler[Object.keys(bolumler)[0]];
+        return (secilen || '').trim();
+    }
+
     function el(tag, style, html) {
         var node = document.createElement(tag);
         if (style) node.style.cssText = style;
@@ -60,7 +100,8 @@
                'HRMA {latest} has been released (installed version: {current}). '
                + 'Would you like to update now?')));
 
-        if (info.notes) {
+        var notesText = pickLanguageSection(info.notes);
+        if (notesText) {
             var notes = el('div',
                 'max-height:120px;overflow-y:auto;font-size:12px;line-height:1.5;' +
                 'padding:10px 12px;margin-bottom:16px;white-space:pre-wrap;' +
@@ -68,7 +109,7 @@
                 'border:1px solid var(--hd-line, rgba(0,229,255,0.14));' +
                 'border-radius:var(--hd-radius-sm, 8px);' +
                 'color:var(--hd-ink-dim, #7d97a5);');
-            notes.textContent = info.notes;
+            notes.textContent = notesText;
             box.appendChild(notes);
         }
 

@@ -31,18 +31,36 @@ def _read(rel):
 # ===========================================================================
 
 class TestVersionHygiene:
-    def test_package_version_is_262(self):
-        import hrma
-        assert hrma.__version__ == '2.6.2'
+    def test_package_version_matches_changelog(self):
+        """Paket sürümü ile changelog'un en üst girdisi AYNI olmalı.
 
-    def test_changelog_has_262_in_both_languages(self):
+        v2.6.25 değişikliği: burada eskiden '2.6.2' sabiti vardı. Sabit sürüm
+        beklentisi her yayında elle güncellenmek zorunda kaldığı için gerçek
+        bir kapı değil, bakım yüküydü. Şimdi iki kaynağın tutarlılığı
+        sınanıyor — sürüm numarası ne olursa olsun kapı çalışır.
+        """
+        import hrma
         d = json.loads(_read('hrma/data/changelog.json'))
         top = d['versions'][0]
-        assert top['version'] == '2.6.2'
+        assert hrma.__version__ == top['version'], (
+            'hrma.__version__=%s ama changelog en üst girdi=%s'
+            % (hrma.__version__, top['version']))
+
+    def test_changelog_top_entry_is_bilingual_and_measured(self):
+        d = json.loads(_read('hrma/data/changelog.json'))
+        top = d['versions'][0]
         assert top.get('notes_en') and top.get('notes_tr')
         # Sürüm notu ölçülmüş sayı içermeli, pazarlama cümlesi değil
-        assert '15.9' in top['notes_en'], 'swirl bulgusu sayısıyla anlatılmamış'
-        assert '15,9' in top['notes_tr'] or '15.9' in top['notes_tr']
+        assert re.search(r'\d', top['notes_en']), 'sürüm notunda tek sayı yok'
+        assert re.search(r'\d', top['notes_tr'])
+
+    def test_262_entry_still_present_with_its_numbers(self):
+        """Geçmiş sürüm notları silinmemeli (changelog kümülatiftir)."""
+        d = json.loads(_read('hrma/data/changelog.json'))
+        girdi = {v['version']: v for v in d['versions']}.get('2.6.2')
+        assert girdi is not None, '2.6.2 girdisi changelog\'dan düşmüş'
+        assert '15.9' in girdi['notes_en'], 'swirl bulgusu sayısıyla anlatılmamış'
+        assert '15,9' in girdi['notes_tr'] or '15.9' in girdi['notes_tr']
 
 
 # ===========================================================================
@@ -291,3 +309,119 @@ class TestOutputHonesty:
                 bad.append(f'{sorted(names)} = {node.value.value} '
                            f'(satır {node.lineno})')
         assert not bad, f'satır içi malzeme sabiti kalmış: {bad}'
+
+
+# ===========================================================================
+# v2.6.25 — saha düzeltmesi kapıları
+# ===========================================================================
+
+class TestFieldFixV2625:
+    """v2.6.2'yi kullanılamaz yapan sınıftan hataları kilitler."""
+
+    def test_cors_filter_has_no_hardcoded_port_list(self):
+        """Süzgeç sabit port listesine geri dönmemeli.
+
+        v2.6.2'de ``_ALLOWED_HOSTS`` içinde '127.0.0.1:8080' gibi sabitler
+        vardı; başlatıcı 8081'e düşünce uygulama kendi API'sinden 403 aldı ve
+        hiçbir motor tipi hesap yapamadı. Kapı: kaynakta port taşıyan sabit
+        köken kalmasın.
+        """
+        src = _read('hrma/app.py')
+        assert '_ALLOWED_HOSTS' not in src, (
+            'sabit köken listesi geri gelmiş — port değişince uygulama '
+            'kendi kendini 403 ile reddeder')
+        assert re.search(r'def _is_loopback', src), (
+            'geri döngü denetimi yok; köken süzgeci porta bağımlı olmuş olabilir')
+
+    def test_launcher_and_runner_share_the_same_port_range(self):
+        """Port aralığı iki dosyada da AYNI olmalı (ayrışma bu hatayı doğurdu)."""
+        launcher = _read('packaging/launcher.py')
+        runner = _read('hrma/run.py')
+        assert 'range(8080, 8091)' in launcher, 'launcher port aralığı değişmiş'
+        assert 'range(8080, 8091)' in runner, (
+            'hrma/run.py başlatıcının port aralığını paylaşmıyor — '
+            '8080 meşgulken çöker')
+        assert 'port=8080' not in runner, 'run.py içinde sabit 8080 kalmış'
+
+    def test_release_notes_are_bilingual_with_markers(self):
+        """Güncelleme penceresi arayüz dilini izleyebilsin diye iki dilli im.
+
+        Notlar tek dilde yayımlanınca Türkçe arayüzde soru Türkçe, sürüm notu
+        İngilizce çıkıyordu (Berke'nin saha bildirimi, 2026-07-27).
+        """
+        import hrma
+        notlar = _read('packaging/release_notes_v%s.md' % hrma.__version__)
+        for dil in ('en', 'tr'):
+            assert '<!--HRMA-LANG:%s-->' % dil in notlar, (
+                '%s dil imi yok — güncelleme penceresi tek dil gösterir' % dil)
+        # İmlerin arası gerçekten o dilde olmalı (blokların karışmaması)
+        parcalar = re.split(r'<!--HRMA-LANG:(\w+)-->', notlar)
+        bolum = {parcalar[i]: parcalar[i + 1] for i in range(1, len(parcalar), 2)}
+        assert not re.search(r'[çğıİöşüÇĞÖŞÜ]', bolum['en']), (
+            'İngilizce bölümde Türkçe karakter var — bloklar karışmış')
+        assert re.search(r'[çğıİöşüÇĞÖŞÜ]', bolum['tr']), (
+            'Türkçe bölüm Türkçe karakter içermiyor — çeviri yapılmamış olabilir')
+
+    def test_update_modal_picks_language_section(self):
+        """İstemci tarafı imleri ayıklayan işlevi taşımalı."""
+        src = _read('hrma/static/js/update_check.js')
+        assert 'pickLanguageSection' in src, (
+            'güncelleme penceresi dil ayıklama işlevini kaybetmiş')
+        assert 'HRMA-LANG' in src, 'dil imi deseni yok'
+
+    def test_bundle_icon_is_full_bleed(self):
+        """macOS 26 (Tahoe) bundle simgesine kendi karo maskesini uygular.
+
+        Sanat eserinin kendi yuvarlatılmış karosunu çizmesi ve tuvali
+        doldurmaması "karo içinde karo" görüntüsü üretiyordu (uygulama
+        KAPALIYKEN). Kapı: bundle simgesi tam taşma kalsın.
+        """
+        from PIL import Image
+        png = ROOT / 'packaging' / 'icon_1024_fullbleed.png'
+        assert png.is_file(), (
+            'tam taşma simge kaynağı yok — packaging/make_icons.py çalıştırın')
+        im = Image.open(png).convert('RGBA')
+        kutu = im.split()[3].getbbox()
+        assert kutu == (0, 0, im.width, im.height), (
+            'bundle simgesi tuvali doldurmuyor (alfa kutusu %s); Tahoe bunu '
+            'kendi gri karosunun içine gömer' % (kutu,))
+
+    def test_release_gate_script_exists_and_is_wired(self):
+        """Yayın betiği kapıyı çağırmadan release oluşturmamalı."""
+        assert (ROOT / 'packaging' / 'release_gate.sh').is_file(), (
+            'yayın kapısı betiği yok')
+        publish = _read('packaging/publish_release.sh')
+        assert 'release_gate.sh' in publish, (
+            'publish_release.sh kapıyı çağırmıyor — v2.6.2 kırmızı CI ile '
+            'bu yüzden yayınlandı')
+        # Sıra denetimi YORUMLARI saymaz: betiğin baş açıklaması hem kapıdan
+        # hem 'gh release create'ten söz ediyor; ham metinde arama yapmak
+        # açıklamayı çalışan kod sanar (bu testin ilk hâli buna takıldı).
+        kod = '\n'.join(satir for satir in publish.split('\n')
+                        if not satir.lstrip().startswith('#'))
+        assert 'gh release create' in kod, 'yayın çağrısı bulunamadı'
+        assert kod.index('release_gate.sh') < kod.index('gh release create'), (
+            'kapı, release oluşturulduktan SONRA çalışıyor')
+
+    def test_no_icloud_conflict_copies_in_source(self):
+        """iCloud çakışma kopyaları kaynak ağacında kalmamalı.
+
+        Proje iCloud Masaüstü içinde durduğu için servis zaman zaman
+        "dosya 2.py" biçiminde çakışma kopyaları üretiyor. Bunlar git'te
+        izlenmez ama derleme betikleri dizinleri OLDUĞU GİBİ kopyaladığından
+        kurulum paketine girerler. 2026-07-27'de pakete iki bayat kopya
+        girmişti: 'combustion_analysis 2.py' (16 saat eski) ve
+        'nozzle_design 2.py' (15 gün eski, gerçek dosyanın yarısı boyutunda).
+
+        İçe aktarılamazlar (adlarında boşluk var), ama pakette bulunmaları
+        kafa karıştırır ve bir sonraki geliştiricinin yanlış dosyayı
+        düzenlemesine yol açar.
+        """
+        desen = re.compile(r' \d+\.(py|js|json|md|html|tex)$')
+        bulunan = []
+        for klasor in ('hrma', 'tests', 'docs'):
+            for yol in (ROOT / klasor).rglob('*'):
+                if yol.is_file() and desen.search(yol.name):
+                    bulunan.append(str(yol.relative_to(ROOT)))
+        assert not bulunan, (
+            'iCloud çakışma kopyaları kaynak ağacında: %s' % bulunan[:10])

@@ -31,8 +31,21 @@ BÖLÜM 2 — Goodman yorulma (structural_analysis._analyze_fatigue).
     σ_max = 500 MPa → σ_a = σ_m = 250:
        1/n = 250/230 + 250/730 = 1.42901 → n = 0.6998 (sonlu ömür)
        σ_ar = 250/(1−250/730) = 380.21 MPa
-       a = (0.9·730)²/230 = 1876.73 MPa, b = −log10(657/230)/3 = −0.151946
-       N = (380.21/1876.73)^(1/b) ≈ 3.67e4 çevrim (Shigley Eq. 6-14/6-15)
+
+  SONLU ÖMÜR ÇAPASI GÜNCELLENDİ (v2.6.2, fizik denetimi bulgusu F181):
+  Basquin çapası f (Shigley Fig. 6-18, 10^3 çevrimdeki dayanım kesri) daha
+  önce SABİT 0.9 alınıyordu; oysa f, S_ut ile düşer. v2.6.2 bunu
+  _shigley_fatigue_strength_fraction(S_u) ile eğriye bağladı. steel_4130
+  (S_u = 730 MPa) için el hesabı:
+       f = 0.82 + (730−689)/(1034−689)·(0.79−0.82) = 0.82 − 0.003565
+         = 0.81643            (Fig. 6-18 çapaları: 689 MPa→0.82, 1034→0.79)
+       f·S_u = 595.997 MPa
+       a = 595.997²/230 = 1544.40 MPa                     (Shigley Eq. 6-14)
+       b = −log10(595.997/230)/3 = −0.41352/3 = −0.137839 (Shigley Eq. 6-15)
+       N = (380.21/1544.40)^(1/b) = 0.246185^(−7.25485) = 2.608e4 çevrim
+  Eski f = 0.9 sabitiyle aynı hesap 3.66e4 veriyordu; aradaki 1.40 kat, f'in
+  üstel konumundan gelir (N ∝ (σ_ar/a)^(1/b)). Yeni değer KONSERVATİF yöndedir
+  (daha kısa ömür), eski test çapası bu yüzden güncellendi — eşik gevşetilmedi.
 """
 
 import numpy as np
@@ -40,7 +53,8 @@ import pytest
 
 from hrma.analysis.bolted_joint import (
     BoltedJointAnalyzer, analyze_bolted_joint, THREAD_STRESS_AREA_MM2)
-from hrma.analysis.structural_analysis import StructuralAnalyzer
+from hrma.analysis.structural_analysis import (
+    StructuralAnalyzer, _shigley_fatigue_strength_fraction)
 from hrma.data.materials_db import get_material
 
 
@@ -310,16 +324,30 @@ class TestGoodmanFatigue:
         assert res['estimated_life'] == 'Infinite'  # Goodman doğrusu altında
 
     def test_goodman_finite_life_hand_calc(self, analyzer, mat):
-        """σ_max = 500 MPa → n_f = 0.6998; Basquin N ≈ 3.67e4 çevrim.
+        """σ_max = 500 MPa → n_f = 0.6998; Basquin N ≈ 2.61e4 çevrim.
 
-        El hesabı: σ_ar = 250/(1−250/730) = 380.21 MPa;
-        a = (0.9·730)²/230 = 1876.73 MPa; b = −0.151946;
-        N = (380.21/1876.73)^(1/b) ≈ 36 700.
+        El hesabı (v2.6.2 F181 sonrası — f artık S_ut'ye bağlı):
+          σ_a = σ_m = 250 MPa; σ_ar = 250/(1−250/730) = 380.21 MPa
+          f   = 0.82 + (730−689)/(1034−689)·(0.79−0.82) = 0.81643
+                (Shigley Fig. 6-18 çapaları arasında doğrusal enterpolasyon)
+          a   = (0.81643·730)²/230 = 595.997²/230 = 1544.40 MPa   (Eq. 6-14)
+          b   = −log10(595.997/230)/3 = −0.137839                 (Eq. 6-15)
+          N   = (380.21/1544.40)^(1/b) = 0.246185^(−7.25485) = 26 080
+
+        ESKİ ÇAPA 3.67e4 İDİ: f SABİT 0.9 alındığında a = 1876.73 MPa,
+        b = −0.151946 ve N = 36 589 çıkıyordu. v2.6.2 f'i eğriye bağladı
+        (bulgu F181, konservatif yön: ömür 1.40 kat KISALDI); test çapası
+        koda değil EL HESABINA göre yenilendi, tolerans (rel=0.05)
+        DEĞİŞTİRİLMEDİ.
         """
         res = analyzer._analyze_fatigue(500.0, 10.0, mat)
         assert res['fatigue_safety_factor'] == pytest.approx(0.6998, rel=1e-3)
+        # Ömrü hangi çapanın sürüklediği tek bakışta görünsün: f eğrisi
+        # değişirse önce BU assert patlar, ömür assert'i değil.
+        assert _shigley_fatigue_strength_fraction(
+            mat['ultimate_strength']) == pytest.approx(0.81643, rel=1e-4)
         assert isinstance(res['estimated_life'], float)
-        assert res['estimated_life'] == pytest.approx(3.67e4, rel=0.05)
+        assert res['estimated_life'] == pytest.approx(2.608e4, rel=0.05)
         # 25 tasarım çevrimine karşı bol marj → sonlu ömür ama MARGINAL
         assert res['cycle_margin'] == pytest.approx(
             res['estimated_life'] / res['design_cycles'], rel=1e-9)

@@ -110,8 +110,39 @@ GRAIN_LENGTH_FIXED_POINT_TOL = 1e-8
 GRAIN_LENGTH_FIXED_POINT_MAX_ITER = 60
 
 
+#: Arayüzdeki "Include Cooling Channels" seçeneklerinin ısı transferi
+#: modelindeki soğutma tipine eşlemesi (v2.6.25).
+#:
+#: HeatTransferAnalyzer._coolant_side_coefficient üç sınıf tanır ve her birine
+#: bir soğutucu-tarafı film katsayısı verir: doğal taşınım 25, zorlanmış hava
+#: 100, sıvı rejeneratif 20 000 W/(m²·K) (Huzel & Huang Böl. 4). Arayüz ise
+#: kanal GEOMETRİSİ soruyor (radyal / sarmal). Her iki geometri de cidara
+#: sıvı soğutucu dolaştırır, yani ikisi de rejeneratif sınıfa girer;
+#: aralarındaki fark bu modelin çözünürlüğünün altındadır (kanal en-boy oranı,
+#: hız ve basınç düşüşü girdi olarak alınmıyor).
+#:
+#: Bu yüzden kanal seçildiğinde ayrıca warn.hybrid.cooling_channels_assumed
+#: uyarısı verilir: film katsayısı literatür aralığından ALINMIŞTIR, soğutucu
+#: debisi ve kaynama marjı DOĞRULANMAMIŞTIR.
+COOLING_CHANNEL_TO_TYPE = {
+    'none': 'natural',
+    'radial': 'regenerative',
+    'spiral': 'regenerative',
+    # Doğrudan ısı-transferi terimleri de kabul edilir (API çağrıları)
+    'natural': 'natural',
+    'forced': 'forced',
+    'regenerative': 'regenerative',
+}
+
+#: Cidar kalınlığı için kabul edilen aralık [m]. Arayüz mm gönderir; dönüşüm
+#: app.py'de yapılır. 0.5 mm altı imal edilemez, 100 mm üstü bu sınıf motorda
+#: girdi hatasıdır (birim karışıklığının işareti).
+WALL_THICKNESS_MIN_M = 0.0005
+WALL_THICKNESS_MAX_M = 0.100
+
+
 class HybridRocketEngine:
-    def __init__(self, thrust=None, burn_time=None, total_impulse=None, of_ratio=1.0, chamber_pressure=20.0, 
+    def __init__(self, thrust=None, burn_time=None, total_impulse=None, of_ratio=1.0, chamber_pressure=20.0,
                  atmospheric_pressure=1.0, chamber_temperature=None,
                  gamma=1.15, gas_constant=None, l_star=1.0,
                  expansion_ratio=0, nozzle_type='conical',
@@ -124,7 +155,9 @@ class HybridRocketEngine:
                  eta_c_star=None, precomputed_optimum_of=None,
                  injector_type='showerhead', initial_port_diameter=None,
                  tank_temperature=None, port_count=1,
-                 throat_erosion_rate=None):
+                 throat_erosion_rate=None,
+                 chamber_material='steel_4130', wall_thickness=0.005,
+                 cooling_type='natural'):
         
         # Tasarım uyarıları (v2.6.2): kullanıcıya ULAŞAN kanal. Liste her
         # şeyden ÖNCE kurulur; aksi hâlde erken üretilen uyarılar kaybolur
@@ -135,6 +168,14 @@ class HybridRocketEngine:
         self._defaults_used = []
         # Bir alt modül çöküp yedek (fallback) yola düşüldü mü?
         self._fallback_used = []
+
+        # --- Termal sınır koşulları (v2.6.25'te bağlandı) -------------------
+        # Bunlar önceden analyze_heat_transfer çağrısında sabit yazılıydı;
+        # kullanıcının seçtiği malzeme/kalınlık/soğutma termal modele hiç
+        # ulaşmıyordu. Ayrıntılı gerekçe o çağrının başındaki yorumda.
+        self.chamber_material = self._resolve_chamber_material(chamber_material)
+        self.wall_thickness = self._resolve_wall_thickness(wall_thickness)
+        self.cooling_type = self._resolve_cooling_type(cooling_type)
 
         # Handle thrust/burn_time vs total_impulse input
         if total_impulse is None:
@@ -412,6 +453,57 @@ class HybridRocketEngine:
         if self.R is None:
             self.R = props['gas_constant']
         
+    def _resolve_chamber_material(self, name):
+        """Malzeme adını doğrular; tanınmıyorsa 4130'a düşer ve UYARIR.
+
+        Sessiz yedeğe düşmek yasak: kullanıcı Inconel seçip çelik sonucu
+        görürse bunu fark etmesinin hiçbir yolu olmaz.
+        """
+        from hrma.data.materials_db import get_material
+        aday = str(name or '').strip() or 'steel_4130'
+        try:
+            get_material(aday)
+            return aday
+        except (KeyError, ValueError):
+            self.design_warnings.append(_w(
+                'warn.hybrid.chamber_material_unknown', 'warning',
+                requested=aday, used='steel_4130'))
+            return 'steel_4130'
+
+    def _resolve_wall_thickness(self, value):
+        """Cidar kalınlığını [m] doğrular; aralık dışıysa 5 mm'ye düşer."""
+        try:
+            t = float(value)
+        except (TypeError, ValueError):
+            t = 0.005
+        if not (WALL_THICKNESS_MIN_M <= t <= WALL_THICKNESS_MAX_M):
+            self.design_warnings.append(_w(
+                'warn.hybrid.wall_thickness_out_of_range', 'warning',
+                requested_mm=round(t * 1000.0, 3),
+                min_mm=WALL_THICKNESS_MIN_M * 1000.0,
+                max_mm=WALL_THICKNESS_MAX_M * 1000.0))
+            return 0.005
+        return t
+
+    def _resolve_cooling_type(self, value):
+        """Arayüzün kanal seçimini ısı transferi soğutma tipine çevirir.
+
+        Kanal seçildiğinde film katsayısının literatürden alındığını ve
+        soğutucu debisinin doğrulanmadığını AÇIKÇA bildirir.
+        """
+        ham = str(value or 'none').strip().lower()
+        tip = COOLING_CHANNEL_TO_TYPE.get(ham)
+        if tip is None:
+            self.design_warnings.append(_w(
+                'warn.hybrid.cooling_type_unknown', 'warning',
+                requested=ham, used='natural'))
+            return 'natural'
+        if tip == 'regenerative':
+            self.design_warnings.append(_w(
+                'warn.hybrid.cooling_channels_assumed', 'warning',
+                geometry=ham, h_coolant=20000))
+        return tip
+
     def calculate(self):
         # Calculate characteristic velocity
         self.C_star = self._calculate_c_star()
@@ -619,7 +711,26 @@ class HybridRocketEngine:
                 }, altitudes_thrust
             )
         
-        # Heat transfer analysis
+        # Isı transferi analizi
+        #
+        # v2.6.25 DÜZELTMESİ — ÜÇ KULLANICI GİRDİSİ BURAYA HİÇ ULAŞMIYORDU.
+        # Bu çağrıda malzeme 'steel_4130', cidar 5 mm ve soğutma 'natural'
+        # SABİT YAZILMIŞTI. Hibrit sayfasındaki "Chamber Material",
+        # "Wall Thickness" ve "Include Cooling Channels" seçicileri
+        # serileştirilip sunucuya gidiyor, ama termal model onları hiç
+        # görmüyordu: kullanıcı Inconel 718 + 8 mm cidar + radyal kanal seçse
+        # bile hesap 5 mm 4130 çelik ve soğutmasız yapılıyordu.
+        #
+        # Sonucu sessiz değildi, YANLIŞTI: soğutucu tarafı film katsayısı
+        # doğal taşınımda 25 W/m²K'dır, yani ısıyı dışarı atacak yol yok
+        # sayılır. Denge cidar sıcaklığı adyabatik alev sıcaklığına yapışıyor
+        # (warn.thermal.wall_pinned_adiabatic) ve GERÇEKÇİ HER TASARIM
+        # "cidar eriyor" kritiği veriyordu. Kullanıcı soğutma ekleyerek bunu
+        # düzeltmeye çalıştığında ekranda hiçbir şey değişmiyordu.
+        #
+        # Not: arayüzün 'steel_304' değeri materials_db'de yoktu (kayıt adı
+        # 'ss_304'); takma ad v2.6.25'te eklendi, aksi hâlde varsayılan
+        # malzeme seçimi burada çözülemezdi.
         heat_transfer_results = self.heat_transfer_analyzer.analyze_heat_transfer(
             {
                 'chamber_pressure': self.P_c,
@@ -629,9 +740,9 @@ class HybridRocketEngine:
                 'burn_time': self.t_b,
                 'mdot_total': self.mdot_total
             },
-            material='steel_4130',
-            wall_thickness=0.005,  # 5mm default
-            cooling_type='natural'
+            material=self.chamber_material,
+            wall_thickness=self.wall_thickness,
+            cooling_type=self.cooling_type
         )
         
         # Structural analysis — chamber_temperature GEÇİLMELİ; aksi halde

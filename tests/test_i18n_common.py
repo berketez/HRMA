@@ -155,6 +155,48 @@ def used_keys():
     # Güverte kategori sekmeleri dinamik kurulur ('dock.cat.' + cat)
     for cat in DOCK_CATEGORIES:
         found.setdefault('dock.cat.' + cat, set()).add('analysis_dock.js')
+    # Sunucudan gelen uyarı kodları (aşağıdaki açıklamaya bakın)
+    for key, kaynak in python_dispatched_keys().items():
+        found.setdefault(key, set()).update(kaynak)
+    return found
+
+
+#: Çeviri anahtarı biçimi: en az iki nokta-ayrık parça, harf/rakam/alt çizgi.
+PY_KEY_RE = re.compile(r"['\"]((?:warn|panel|common|risk|out)\.[\w.]+)['\"]")
+
+
+def python_dispatched_keys():
+    """Python motorlarının ürettiği, JS'in ÇALIŞMA ANINDA gönderdiği anahtarlar.
+
+    v2.6.25 — NEDEN BU FONKSİYON VAR:
+    ``test_every_dictionary_key_is_used`` 213 anahtarı "kullanılmıyor" diye
+    kırılıyordu. Ölçüldü: 213'ün **210'u Python kaynaklarında literal olarak
+    duruyor** ve gayet de kullanılıyor. Kopukluk şurada:
+
+        Python  hrma/engines/cycle_power_balance.py:1120
+                'warn.cycle.ffsc_shaft_balance_infeasible' kodunu üretir
+        JS      analysis_dock.js:192
+                TF(w.code, p, ...) — anahtar SUNUCUDAN gelir, kaynakta
+                literal olarak GEÇMEZ
+
+    Yani anahtar JS dosyalarında hiçbir zaman yazılı olmaz; statik tarama onu
+    yapısal olarak göremez. Testin eski hâli bu yüzden gerçek bir ölü-çeviri
+    denetimi değil, yanlış pozitif üretecidir — ve 210 canlı anahtarı silmeye
+    davet ediyordu.
+
+    Burada Python tarafı da taranır: motorların ürettiği kod literalleri
+    "kullanılıyor" sayılır. Ölü çeviri koruması korunur — ne JS'te ne
+    Python'da geçmeyen anahtar hâlâ yakalanır (o denetim gerçekten çalışıyor:
+    bu düzeltme sırasında 3 gerçek öksüz anahtar bulup sildik).
+    """
+    found = {}
+    for path in (REPO_ROOT / 'hrma').rglob('*.py'):
+        try:
+            src = path.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):       # pragma: no cover
+            continue
+        for match in PY_KEY_RE.finditer(src):
+            found.setdefault(match.group(1), set()).add(path.name)
     return found
 
 

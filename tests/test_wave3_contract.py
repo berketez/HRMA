@@ -300,15 +300,48 @@ class TestPressureVesselContract:
             3.5 * VESSEL_INPUT['meop_bar'], rel=1e-9)
 
     def test_auto_sized_wall_carries_meop(self, vessel_auto):
-        """Cidar verilmezse: kod minimumuna boyutlanır, MAWP >= MEOP."""
+        """Cidar verilmezse: kod minimumu + 1.2 kopma marjı, MAWP >= MEOP.
+
+        F021 (v2.6.2) sözleşmesi: otomatik boyutlandırma artık KABUL
+        KRİTERİYLE aynı fonksiyondan besleniyor, hedef açıkça
+        MARGINAL_BURST_MARGIN × gerekli kopma basıncıdır. Yani boyutlandırma
+        kod minimumuna DEĞİL, kendi kriterini geçen kalınlığa gider:
+
+            t_kod  = max(1.5·6·75/455.5, 2.0·6·75/724) = 1.481888 mm
+            t_marj : min(Faupel, ince cidar) = 1.2 · 120 bar = 144 bar kökü
+                   = 1.499077 mm   (bağımsız brentq ile doğrulandı)
+            t_used = max(t_kod, t_marj) = 1.499077 mm
+
+        2026-07-27: bu test eskiden t_used == t_kod eşitliğini arıyordu; o
+        eşitlik F021 ÖNCESİ davranışı (örtük hedef marj 1.000) kodluyordu ve
+        modülün kendi ürettiği cidarı kendi kriterinde MARGINAL bırakıyordu.
+        Eşitlik gevşetilmedi, YERİNE gerçek sözleşme sınanıyor: cidar kod
+        minimumundan ince olamaz ve marj tam olarak hedefe oturur.
+        """
+        from hrma.analysis.pressure_vessel import MARGINAL_BURST_MARGIN
         assert vessel_auto['auto_sized'] is True
         meop = vessel_auto['inputs']['meop_bar']
         assert vessel_auto['mawp_bar'] >= meop * (1.0 - 1e-9), (
             f"otomatik boyutlanan cidar MEOP taşımıyor: "
             f"MAWP={vessel_auto['mawp_bar']:.2f} < {meop}")
+        # Kod minimumundan ASLA ince olamaz:
+        assert (vessel_auto['wall_thickness_used_mm']
+                >= vessel_auto['required_thickness_mm'] * (1.0 - 1e-9)), (
+            f"otomatik cidar kod minimumunun altında: "
+            f"{vessel_auto['wall_thickness_used_mm']:.6f} < "
+            f"{vessel_auto['required_thickness_mm']:.6f} mm")
+        # ...ve boyutlandırma hedefi kabul kriterinin tam kendisidir:
+        assert vessel_auto['burst_margin'] == pytest.approx(
+            MARGINAL_BURST_MARGIN, rel=1e-6), (
+            f"otomatik boyutlandırma hedef marja oturmadı: "
+            f"{vessel_auto['burst_margin']:.6f} != {MARGINAL_BURST_MARGIN}")
+        # El hesabı kökü (brentq, bağımsız): 1.499077 mm
         assert vessel_auto['wall_thickness_used_mm'] == pytest.approx(
-            vessel_auto['required_thickness_mm'], rel=1e-9)
-        assert vessel_auto['status'] in ('PASS', 'MARGINAL', 'FAIL')
+            1.499077, rel=1e-5)
+        # Kendi ürettiği cidar kendi kriterini geçmeli (F021'in amacı):
+        assert vessel_auto['status'] == 'PASS', (
+            f"otomatik boyutlanan cidar kendi kriterinde kaldı: "
+            f"{vessel_auto['status']}")
 
     def test_missing_required_field_400(self, client):
         r = client.post('/api/pressure-vessel-analysis',

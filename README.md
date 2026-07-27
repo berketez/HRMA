@@ -27,8 +27,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.6.2.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.2-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-2.6.25.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.25-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -133,8 +133,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.6.2.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.2-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.2/HRMA-Setup-2.6.2-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.6.25.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.25-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -228,14 +228,29 @@ HRMA/
 
 ## Version
 
-**HRMA v2.6.2**
+**HRMA v2.6.25**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - A preliminary-design and educational rocket-propulsion analysis tool
   (not a flight-qualification tool — see the scope note above)
 - Last Updated: July 2026
 
-**v2.6.2 is an audit release.** Two independent reviews — an external source
+**v2.6.25 is a field fix.** v2.6.2 shipped with a red CI run and was unusable
+on a real machine: a fixed CORS origin list recognised only port 8080, while
+the desktop launcher scans 8080–8090 for a free port. Whenever anything else
+held 8080, the application's own page was rejected by its own API with
+`HTTP 403` and no engine type would calculate. No test caught it because the
+test sent the same hard-coded port the code expected — it confirmed the code's
+assumption instead of measuring it. The origin filter now requires a loopback
+origin on any port; a regression test walks every port the launcher can pick;
+and `packaging/release_gate.sh` refuses to publish unless the full suite is
+green, CI is green **for that commit**, and a live server on a **non-default
+port** completes a hybrid, solid and liquid calculation over HTTP. The same
+release also fixes the macOS dock icon on Tahoe, makes update notes follow the
+interface language, and adds Turkish and English text for 42 engine warnings
+that previously reached the user as raw codes.
+
+**v2.6.2 was the audit release.** Two independent reviews — an external source
 audit and a line-by-line physics audit of every equation in the code —
 produced over 300 findings. Rather than list features, here is what the audit
 found and what changed, because that is the more useful thing to know about a

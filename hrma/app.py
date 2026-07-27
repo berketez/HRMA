@@ -135,21 +135,58 @@ _SIXDOF_T_MAX_LIMIT_S = 3600.0
 # KENDİ kökeninden servis edilir, yani çapraz köken erişimine hiç ihtiyaç yok.
 # CORS tamamen kapatıldı ve ayrıca yabancı kökenli durum değiştiren istekler
 # aşağıdaki süzgeçle reddediliyor.
-_ALLOWED_HOSTS = frozenset({
-    '127.0.0.1:8080', 'localhost:8080',
-    '127.0.0.1:5000', 'localhost:5000',
-})
+#: Geri döngü (loopback) ana makine adları. Sayısal 127.0.0.0/8 adresleri
+#: ayrıca ``ipaddress`` ile sınanır, bu küme yalnız adla gelenler içindir.
+def _mm_to_m(value, default_m):
+    """Arayuzden gelen milimetre degerini metreye cevirir.
+
+    v2.6.25 — Birim sozlesmesi bu projede tekrar eden bir hata kaynagi oldu
+    (termal panel mm degerini metre alanina basiyordu: 100 mm -> 100 m; tank
+    STEP ihracati 1000 kati iki kez uyguluyordu). Donusum tek bir yerde
+    yapilir; okunamayan ya da <=0 girdi sessizce 0 olmaz, VARSAYILANA doner —
+    0 kalinlik termal modelde sonsuz iletkenlik demektir.
+    """
+    try:
+        mm = float(value)
+    except (TypeError, ValueError):
+        return default_m
+    if mm <= 0:
+        return default_m
+    return mm / 1000.0
 
 
-def _origin_host(value):
-    """'http://127.0.0.1:8080/x' -> '127.0.0.1:8080'; ayrıştırılamazsa None."""
+_LOOPBACK_HOSTNAMES = frozenset({'localhost', '::1'})
+
+
+def _host_and_port(value, is_url=False):
+    """('127.0.0.1', 8081) döndürür; ayrıştırılamazsa (None, None).
+
+    ``is_url=False`` iken ``Host`` başlığı biçimi ('127.0.0.1:8081') beklenir;
+    ``urlsplit`` bunu ancak '//' ön ekiyle netloc olarak ayrıştırır.
+    """
     if not value:
-        return None
+        return (None, None)
     try:
         from urllib.parse import urlsplit
-        return urlsplit(value).netloc or None
+        parts = urlsplit(value if is_url else '//' + value)
+        return (parts.hostname, parts.port)
     except (ValueError, TypeError):
-        return None
+        # Geçersiz port ('...:abc') .port erişiminde ValueError atar.
+        return (None, None)
+
+
+def _is_loopback(hostname):
+    """Ana makine adı bu bilgisayarın kendisini mi gösteriyor?"""
+    if not hostname:
+        return False
+    name = hostname.lower()
+    if name in _LOOPBACK_HOSTNAMES:
+        return True
+    try:
+        import ipaddress
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
 
 
 @app.before_request
@@ -160,15 +197,49 @@ def _reject_cross_origin():
     sayfa bunu değiştiremez; dolayısıyla bu denetim CSRF ve DNS-rebinding
     saldırılarını kapatır. ``Origin`` yoksa (curl, aynı köken GET, native
     webview) istek geçer — masaüstü kullanımını bozmamak için.
+
+    v2.6.25 DÜZELTMESİ — SAHA HATASI (uygulama hiç hesap yapmıyordu):
+    Burada eskiden sabit bir liste vardı: ``{127.0.0.1:8080, localhost:8080,
+    127.0.0.1:5000, localhost:5000}``. Oysa masaüstü başlatıcısı
+    (``packaging/launcher.py::_pick_port``) **8080-8090 arasında BOŞ port
+    arar**: 8080 meşgulse uygulama 8081'e düşer. O durumda arayüz
+    ``http://127.0.0.1:8081`` kökeninden servis edilir, tarayıcı her POST'a
+    ``Origin: http://127.0.0.1:8081`` ekler, liste bunu tanımaz ve
+    **uygulamanın kendi sayfası kendi API'sinden 403 alır**. Yani Hesapla
+    düğmesi hiçbir motor tipinde çalışmaz. Sabit liste ile dinamik port seçimi
+    iki ayrı dosyada durduğu, geliştirme makinesinde de 8080 hep boş olduğu
+    için bu yerelde hiç görünmedi.
+
+    Doğrusu portu sabitlemek değil, **kökenin geri döngü olmasını** şart
+    koşmak: uzaktaki bir sayfanın (evil.example) kökeni asla geri döngü
+    olamaz, DNS-rebinding denemesinde ise ``Host`` başlığı saldırganın alan
+    adını taşır ve aşağıdaki ilk kapıya takılır.
     """
     if request.method in ('GET', 'HEAD', 'OPTIONS'):
         return None
-    origin = _origin_host(request.headers.get('Origin'))
-    if origin is not None and origin not in _ALLOWED_HOSTS:
+
+    def _reject(reason):
         return jsonify({
             'status': 'error',
             'error': 'Cross-origin request rejected',
+            'reason': reason,
         }), 403
+
+    # 1) DNS-rebinding kapısı: sunucu yalnız 127.0.0.1'e bağlı olduğu için
+    #    meşru istekte Host mutlaka geri döngüdür. Saldırgan alan adını
+    #    127.0.0.1'e çözümlerse Host 'evil.example:8081' olarak gelir.
+    self_host, _self_port = _host_and_port(request.host)
+    if not _is_loopback(self_host):
+        return _reject('host_not_loopback')
+
+    # 2) Köken kapısı: başlık varsa geri döngü olmalı. Port karşılaştırılmaz —
+    #    uygulama 8080-8090 arasında herhangi bir porta düşebilir.
+    raw_origin = request.headers.get('Origin')
+    if raw_origin:
+        origin_host, _origin_port = _host_and_port(raw_origin, is_url=True)
+        if not _is_loopback(origin_host):
+            # 'null' kökeni de buraya düşer (sandbox iframe, file://).
+            return _reject('origin_not_loopback')
     return None
 
 # v2.5.5 modüler API'ler: dış format importu (.eng/.rse/.ork), STEP/CAD
@@ -560,6 +631,14 @@ def calculate():
             injector_type=data.get('injector_type', 'showerhead'),
             initial_port_diameter=data.get('initial_port_diameter') or None,
             initial_gox=data.get('mass_flux_chamber') or None,
+            # v2.6.25: termal sinir kosullari. Bu uc alan sayfada VARDI ve
+            # sunucuya GELIYORDU, ama motora hic gecirilmiyordu; hibrit isi
+            # transferi cagrisi malzeme/kalinlik/sogutmayi SABIT yaziyordu
+            # (gerekce: hybrid_rocket_engine.py analyze_heat_transfer yorumu).
+            # wall_thickness arayuzde mm, motorda m.
+            chamber_material=data.get('chamber_material') or 'steel_4130',
+            wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
+            cooling_type=data.get('cooling_channels') or 'none',
             tank_temperature=data.get('oxidizer_temp') or None,
             motor_name=data.get('motor_name', ''),
             motor_description=data.get('motor_description', '')
@@ -985,6 +1064,14 @@ def quick_geometry():
             injector_type=data.get('injector_type', 'showerhead'),
             initial_port_diameter=data.get('initial_port_diameter') or None,
             initial_gox=data.get('mass_flux_chamber') or None,
+            # v2.6.25: termal sinir kosullari. Bu uc alan sayfada VARDI ve
+            # sunucuya GELIYORDU, ama motora hic gecirilmiyordu; hibrit isi
+            # transferi cagrisi malzeme/kalinlik/sogutmayi SABIT yaziyordu
+            # (gerekce: hybrid_rocket_engine.py analyze_heat_transfer yorumu).
+            # wall_thickness arayuzde mm, motorda m.
+            chamber_material=data.get('chamber_material') or 'steel_4130',
+            wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
+            cooling_type=data.get('cooling_channels') or 'none',
             tank_temperature=data.get('oxidizer_temp') or None,
             motor_name=data.get('motor_name', ''),
             motor_description=data.get('motor_description', '')
@@ -1045,6 +1132,14 @@ def transient_analysis():
             injector_type=data.get('injector_type', 'showerhead'),
             initial_port_diameter=data.get('initial_port_diameter') or None,
             initial_gox=data.get('mass_flux_chamber') or None,
+            # v2.6.25: termal sinir kosullari. Bu uc alan sayfada VARDI ve
+            # sunucuya GELIYORDU, ama motora hic gecirilmiyordu; hibrit isi
+            # transferi cagrisi malzeme/kalinlik/sogutmayi SABIT yaziyordu
+            # (gerekce: hybrid_rocket_engine.py analyze_heat_transfer yorumu).
+            # wall_thickness arayuzde mm, motorda m.
+            chamber_material=data.get('chamber_material') or 'steel_4130',
+            wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
+            cooling_type=data.get('cooling_channels') or 'none',
             tank_temperature=data.get('tank_temperature') or data.get('oxidizer_temp') or None,
         )
         engine.calculate()

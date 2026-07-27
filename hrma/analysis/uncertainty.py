@@ -584,6 +584,37 @@ def _auto_output_keys(result):
     return keys
 
 
+def _consistency_note(distributions):
+    """Ortalama kaymasinin gercek bilesenlerini anlatan not (Ingilizce).
+
+    2026-07-27 duzeltmesi: not, kaymanin TEK sebebi olarak dogrusalsizligi
+    (Jensen bosluğu) gosteriyordu. Bu, F029'dan (nominal_override) sonra
+    YANLIS bir aciklamadir: nominali deterministik yola sabitlenen bir
+    parametrede (or. hibrit eta_c_star: nominal 1.0, dagilim ortalamasi 0.93)
+    kaymanin BASKIN terimi kasitli verim farkidir, dogrusalsizlik degildir.
+    Olculdu (hibrit fast, seed=42, N=200): isp kaymasi -%7.076; bunun
+    -%7.074'u eta sabitlemesi, yalniz -%0.002'si gercek Jensen bosluğu
+    (eta dagilimdan cikarilinca kalan kayma -%0.003). Sessiz yanlis aciklama
+    yerine iki bilesen de yaziliyor; sayisal sonuc DEGISMEZ.
+    """
+    note = ('MC mean differs from nominal due to input-output nonlinearity '
+            '(Jensen gap); the nominal deterministic value remains the '
+            'design point.')
+    pinned = [(name, inp) for name, inp in distributions.items()
+              if inp.nominal_override is not None and inp.nominal_value()]
+    if pinned:
+        detail = '; '.join(
+            f"{name}: nominal {inp.nominal_value():g} vs distribution mean "
+            f"{float(inp.mean):g} "
+            f"({(float(inp.mean) / inp.nominal_value() - 1.0) * 100.0:+.2f}%)"
+            for name, inp in pinned)
+        note += (' NOTE: the dominant term is usually NOT nonlinearity here — '
+                 'the nominal of the following parameter(s) is pinned to the '
+                 'deterministic path, so their distribution mean appears '
+                 f'directly in this shift: {detail}. See pinned_nominals.')
+    return note
+
+
 def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
                     output_keys=None, sampler='lhs', progress_callback=None):
     """MC/LHS belirsizlik analizi kosucusu (motor-tipi-bagimsiz).
@@ -759,10 +790,15 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
         'consistency': {
             'nominal_check': 'passed',
             'mean_shift_percent': mean_shift,
-            'note': (
-                'MC mean differs from nominal due to input-output '
-                'nonlinearity (Jensen gap); the nominal deterministic value '
-                'remains the design point.'),
+            'note': _consistency_note(distributions),
+            'pinned_nominals': {
+                name: {'nominal': inp.nominal_value(),
+                       'distribution_mean': float(inp.mean),
+                       'offset_percent': (float(inp.mean)
+                                          / inp.nominal_value() - 1.0) * 100.0}
+                for name, inp in distributions.items()
+                if inp.nominal_override is not None and inp.nominal_value()
+            },
         },
         'timing': {
             'wall_s': wall_s,

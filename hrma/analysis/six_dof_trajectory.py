@@ -800,7 +800,12 @@ class SixDOFTrajectory:
         F_i = np.array([0.0, 0.0, -m * g])
         F_i += self._thrust_at(t) * x_body_i
 
-        u_i = v - self.wind                      # hava-bağıl hız (atalet)
+        # Hava-bağıl hız (atalet). ``self._wind_i`` KULLANILIR, ``self.wind``
+        # DEĞİL: v entegrasyon çerçevesinde (E,N,U), ``self.wind`` ise dış
+        # sözleşme gereği (N,E,U) sırasındadır (bkz. __init__ F167 notu).
+        # İkisini karıştırmak rüzgârı NE köşegeni etrafında aynalar
+        # (azimut θ → 90°−θ): kuzey rüzgârı doğu rüzgârı gibi etki eder.
+        u_i = v - self._wind_i
         u_mag = np.linalg.norm(u_i)
         M_b = np.zeros(3)
         if u_mag > 0.5:
@@ -921,6 +926,7 @@ class SixDOFTrajectory:
             end_reason = 'tumble_detected'
 
         t = sol.t
+        # Entegrasyon çerçevesi (E,N,U) — tüm iç hesaplar bu sırada yapılır.
         r = sol.y[0:3]
         v = sol.y[3:6]
         q = sol.y[6:10]
@@ -934,7 +940,7 @@ class SixDOFTrajectory:
         for k in range(len(t)):
             qk = q[:, k] / np.linalg.norm(q[:, k])
             C = _quat_to_dcm(qk)
-            u_i = v[:, k] - self.wind
+            u_i = v[:, k] - self._wind_i     # ikisi de (E,N,U); bkz. _derivatives
             um = np.linalg.norm(u_i)
             _, a_snd = _atmosphere(max(alt[k], 0.0))
             mach_hist.append(um / a_snd)
@@ -962,12 +968,34 @@ class SixDOFTrajectory:
             burn_mask &= (t < t[i_apogee])
         max_alpha = float(alpha_arr[burn_mask].max()) if burn_mask.any() else 0.0
 
+        # --- ÇIKTI ÇERÇEVESİ: (E,N,U) → (N,E,U) ---------------------------
+        # Dış sözleşme (modül docstring'i, app.py 'north'/'east' eşlemesi,
+        # launch_site.enu_to_geodetic(n, e, u) çağrısı) satır 0 = KUZEY,
+        # satır 1 = DOĞU kabul eder. F167 çerçeveyi sağ-elli (E,N,U) yapmış
+        # ama bu geri dönüşümü YAZMAMIŞTI: 'position'/'velocity' satırları
+        # entegrasyon sırasında (doğu, kuzey, yukarı) olarak dışarı sızıyordu,
+        # yani kuzey ve doğu kanalları TAKAS olmuş durumdaydı. Ölçüldü
+        # (45°K dik atış, sürtünmesiz): Coriolis'in batı sapması −138.07 m
+        # 'north' kanalında raporlanıyordu; 'east' kanalında ise yalnız ikinci
+        # mertebe kuzey terimi (+0.40 m) görünüyordu. Rüzgâr girdisindeki
+        # ikizi (aşağıdaki _wind_i düzeltmesi) hatayı testlerde maskeliyordu:
+        # iki takas birbirini götürüyordu, ama Coriolis doğrudan entegrasyon
+        # çerçevesinde eklendiği için maskeleme orada çalışmıyordu.
+        _rows = list(_OUTPUT_ROW_ORDER)
+        r_out = r[_rows]
+        v_out = v[_rows]
+
         return {
             'time': t,
-            'position': r,                    # 3×N [m] (x=K, y=D, z=yukarı)
-            'velocity': v,
+            'position': r_out,                # 3×N [m] (x=K, y=D, z=yukarı)
+            'velocity': v_out,
+            # DİKKAT: 'quaternion' gövde→(E,N,U) (ENTEGRASYON çerçevesi), yani
+            # position/velocity'nin (N,E,U) satır sırasıyla AYNI tabanda
+            # değildir. Bilinçli: (N,E,U) sol-ellidir, sağ-elli tabandan ona
+            # geçiş bir dönme DEĞİL (determinant −1) ve quaternion'la
+            # temsil edilemez. Tüketen çağıran yok (yalnız norm testi).
             'quaternion': q,
-            'angular_velocity': w,
+            'angular_velocity': w,            # gövde ekseni (çerçeveden bağımsız)
             'altitude': alt,
             'speed': speed,
             'mach': np.array(mach_hist),
@@ -978,7 +1006,9 @@ class SixDOFTrajectory:
             'max_mach': float(np.max(mach_hist)),
             'max_alpha_deg': max_alpha,
             'end_reason': end_reason,
-            'lateral_drift_at_end': float(np.hypot(r[0, -1], r[1, -1])),
+            # Yatay sapmanın normu satır sırasından bağımsızdır (permütasyon
+            # ortonormal) ama tutarlılık için çıktı dizisinden okunur.
+            'lateral_drift_at_end': float(np.hypot(r_out[0, -1], r_out[1, -1])),
             'static_margin_full': float(sm_full),
             'static_margin_empty': float(sm_empty),
             'stable': bool(sm_full > 1.0 and sm_empty > 1.0 and

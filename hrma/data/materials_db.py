@@ -828,6 +828,12 @@ ALIASES: Dict[str, str] = {
     'titanium': 'titanium_6al4v',
     'stainless_304': 'ss_304',
     'stainless_316': 'ss_316',
+    # v2.6.25: arayüz (advanced.html / solid.html chamber_material seçicisi)
+    # bu adları gönderiyor. 'steel_304' hiçbir kayda çözülmüyordu; malzeme
+    # seçimi termal analize bağlandığında varsayılan seçim doğrudan
+    # KeyError verirdi.
+    'steel_304': 'ss_304',
+    'steel_316': 'ss_316',
     'cu_cr_zr': 'cucrzr',
     # v2.5.2 genişletme
     'al_6061': 'aluminum_6061',

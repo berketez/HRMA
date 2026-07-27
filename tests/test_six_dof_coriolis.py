@@ -117,14 +117,32 @@ def test_T4_coriolis_does_no_work(phi_deg):
 
 
 def test_T4b_coriolis_sign_vertical():
-    """Fonksiyon düzeyi işaret: dik tırmanış (v=+U) → ivme BATI (aE<0)."""
+    """Fonksiyon düzeyi işaret: dik tırmanış (v=+U) → ivme BATI (aE<0).
+
+    v2.6.25 DÜZELTMESİ — TESTİN İNDİSİ YANLIŞTI, KOD DOĞRUYDU.
+    Bu test Doğu bileşenini ``a[1]``'de arıyordu; bu, çerçeve (N,E,U)
+    sıralıyken doğruydu. v2.6.2'nin F167 refaktörü entegrasyon çerçevesini
+    baştan sağ-elli (E,N,U) yaptı, dolayısıyla Doğu artık ``a[0]``.
+    ``a[1]`` Kuzey bileşeni ve dik atışta ZATEN sıfırdır — test −0.0 okuyup
+    "Coriolis çalışmıyor" diye kırılıyordu.
+
+    El hesabı (φ=45°, v=(0,0,300) m/s, ENU):
+        Ω_enu = Ω·(0, cosφ, sinφ)
+        Ω × v = (Ω·cosφ·300 − Ω·sinφ·0,  −(0·300 − Ω·sinφ·0),  0·0 − Ω·cosφ·0)
+              = (300·Ω·cosφ, 0, 0)
+        a = −2·(Ω × v) = (−600·Ω·cosφ, 0, 0)
+    Yani Doğu bileşeni negatif (BATI), Kuzey ve Yukarı bileşenleri tam sıfır.
+    """
     phi = np.radians(45.0)
     a = _coriolis_acceleration(np.array([0.0, 0.0, 300.0]),
                                np.cos(phi), np.sin(phi))
-    assert a[1] < 0.0, f"Dik tırmanışta Coriolis batıya (aE<0) olmalı; aE={a[1]}"
+    assert a[0] < 0.0, f"Dik tırmanışta Coriolis batıya (aE<0) olmalı; aE={a[0]}"
     # Beklenen büyüklük −2Ω cosφ·vU
-    assert a[1] == pytest.approx(
+    assert a[0] == pytest.approx(
         -2.0 * OMEGA_EARTH * np.cos(phi) * 300.0, rel=1e-12)
+    # Dik atışta yatay-kuzey ve düşey bileşen tam sıfır (el hesabı yukarıda)
+    assert a[1] == pytest.approx(0.0, abs=1e-18)
+    assert a[2] == pytest.approx(0.0, abs=1e-18)
 
 
 # --------------------------------------------------------------------------

@@ -26,9 +26,20 @@ gereksinimlerini sağlıyor mu?"
       VARSAYILAN mod:
       * Proof basıncı  = 1.5 × MEOP  (akmaya karşı doğrulama)
       * Burst basıncı  = 2.0 × MEOP  (kopmaya karşı doğrulama)
-      * Gerekli kalınlık ince-cidar hoop'tan (σ = P·r_i/t, iç yarıçap —
-        konservatif; Shigley Ch. 3 ince cidar):
-            t_req = max(1.5·P·r/σ_y_der , 2.0·P·r/σ_u_der)
+      * Gerekli kalınlık ORTALAMA yarıçap membran hoop formundan
+        (σ = P·(r_i + t/2)/t; Shigley ince cidarlı basınçlı kap). F149,
+        v2.6.2: eskiden iç yarıçap (σ = P·r_i/t) kullanılıyordu ve
+        "konservatif" diye niteleniyordu — bu TERSTİR, iç yarıçap üç
+        seçeneğin en AZ konservatif olanıdır. Kapalı çözüm:
+            t_req = max( 1.5·P·r/(σ_y_der − 0.75·P) ,
+                         2.0·P·r/(σ_u_der − 1.00·P) )
+        Doğrulama (60 bar, r = 75 mm, 4130): tam Lamé kalın-cidar çözümü
+        σ_θ(a) = P(b²+a²)/(b²−a²) proof kriteri için t = 1.482031 mm ister;
+        ortalama yarıçap 1.481888 mm (−%0.010), iç yarıçap ise 1.467391 mm
+        (−%0.99) verir. İç yarıçapla boyutlanan cidarda gerçek çeper
+        gerilmesi proof basıncında 464.5 MPa'ya çıkar, yani σ_y = 460 MPa
+        AŞILIR. ASME UG-27'nin 0.6·P katsayısı aynı ailedendir (+%0.19,
+        Lamé'nin güvenli tarafında).
       * Başlık kalınlıkları UG-32 geometri formlarıyla, eşdeğer izin verilen
         gerilme S_eff = min(σ_y/1.5, σ_u/2.0) alınarak hesaplanır. S-080
         kapalı-form başlık denklemi vermez (emniyet faktörü standardıdır);

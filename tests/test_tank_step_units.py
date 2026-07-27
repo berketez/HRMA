@@ -23,7 +23,7 @@ import pytest
 step_export = pytest.importorskip('hrma.export.step_export')
 
 pytestmark = pytest.mark.skipif(
-    not getattr(step_export, '_HAS_B123D', True),
+    not getattr(step_export, 'BUILD123D_AVAILABLE', True),
     reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 

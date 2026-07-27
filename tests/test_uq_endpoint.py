@@ -157,13 +157,62 @@ class TestHybridFastContract:
         assert sens['isp'][0]['rho'] > 0.8
 
     def test_mean_shift_percent(self, hybrid_fast):
+        """Kayma = eta_c* sabitleme terimi + (çok küçük) Jensen artığı.
+
+        v2.6.2 fizik denetimi F029, eta_c_star'ın UQ NOMİNALİNİ 1.0'a
+        (deterministik /calculate yolunun teorik c*'ı) sabitledi; dağılımın
+        kendisi 0.93 ortalamada BIRAKILDI. Tasarım gereği MC ortalaması artık
+        nominalin ~%7 altındadır ve bu fark sessizce nominale gömülmek yerine
+        mean_shift_percent'te GÖRÜNÜR. Testin eski hali (|kayma| < %5) kaymanın
+        tek bileşeninin doğrusalsızlık olduğu döneme aitti; sözleşme aşağıda
+        gevşetilmedi, İKİ BİLEŞENE AYRIŞTIRILDI (artık için sınır %5 değil
+        0.5 PUAN — 10 kat DAHA SIKI).
+
+        El hesabı — eta ~ truncnorm(ortalama 0.93, sigma 0.03) [0.80, 1.00]:
+            a = (0.80−0.93)/0.03 = −4.3333,  b = (1.00−0.93)/0.03 = +2.3333
+            E[eta] = 0.93 + 0.03·(φ(a)−φ(b))/(Φ(b)−Φ(a))
+                   = 0.93 + 0.03·(0.0000294−0.026215)/0.990178 = 0.929207
+            beklenen kayma = (0.929207/1.0 − 1)·100 = −7.079 %
+        Isp ∝ c*_teslim = eta·c*_teorik olduğu için terim isp ve c_star'a
+        birebir geçer (Sutton & Biblarz 9. baskı Denk. 3-31).
+
+        ÖLÇÜLDÜ (seed=42, N=200): isp kayması −7.076465 %; LHS örnek
+        ortalaması E_örnek[eta] = 0.929258 → eta terimi −7.074246 %; artık
+        −0.0022 puan. Bağımsız teyit: eta_c_star dağılımdan ÇIKARILDIĞINDA
+        (distribution_overrides {'eta_c_star': None}) saf Jensen boşluğu
+        isp için −0.0031 %, c_star için −0.0004 %.
+        """
+        from scipy.stats import truncnorm
+
+        from hrma.analysis.uncertainty import DEFAULT_UQ_MODELS
+
         shift = hybrid_fast['mean_shift_percent']
         assert set(shift) == HYBRID_OUTPUT_KEYS
-        # Jensen farkı küçük olmalı; nominal ASLA değiştirilmez
-        assert abs(shift['isp']) < 5.0
+
+        eta = DEFAULT_UQ_MODELS['hybrid']['eta_c_star']
+        assert eta.nominal_override == 1.0  # F029 sabitlemesi yürürlükte
+        a = (eta.low - eta.mean) / eta.sigma
+        b = (eta.high - eta.mean) / eta.sigma
+        eta_mean = float(truncnorm.mean(a, b, loc=eta.mean, scale=eta.sigma))
+        expected = (eta_mean / eta.nominal_override - 1.0) * 100.0
+        assert expected == pytest.approx(-7.079, abs=0.005)  # el hesabı çapası
+
+        # c* ile doğrusal çıktılar sabitleme terimini TAŞIR; geriye kalan
+        # artık gerçek Jensen boşluğudur ve 0.5 puanın altında kalmalıdır.
+        for key in ('isp', 'c_star'):
+            assert shift[key] == pytest.approx(expected, abs=0.5), key
+        # eta'dan etkilenmeyen çıktıda kayma zaten saf Jensen boşluğudur.
+        assert abs(shift['regression_rate_avg']) < 5.0
+        # F girdi olduğundan itki/toplam impuls dağılmaz -> kayma tam sıfır.
+        assert shift['thrust'] == pytest.approx(0.0, abs=1e-9)
+        assert shift['total_impulse'] == pytest.approx(0.0, abs=1e-9)
+
+        # Nominal ASLA MC ortalamasıyla değiştirilmez: raporlanan kayma her
+        # blokta (mean, nominal) çiftinden birebir türetilebilmeli.
         for key, block in hybrid_fast['outputs'].items():
-            assert block['nominal'] == pytest.approx(
-                hybrid_fast['outputs'][key]['nominal'])
+            assert shift[key] == pytest.approx(
+                (block['mean'] - block['nominal']) / abs(block['nominal'])
+                * 100.0, rel=1e-9), key
 
 
 # ---------------------------------------------------------------------------

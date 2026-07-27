@@ -70,7 +70,9 @@ python3 -m pip install --target "$W/libs" --no-deps proxy_tools==0.1.0 \
 
 echo "[4/6] Uygulama kaynakları..."
 rsync -a --exclude='__pycache__' "$SRC/hrma" "$W/app/"
-rsync -a "$SRC/data" "$W/app/"
+# v2.6.25: experimental_data.db pakete GİRMEZ — gerekçe build_mac_app.sh'ta
+# (sentetik veri, emekli katman, 79 MB, hiçbir kod okumuyor).
+rsync -a --exclude='experimental_data.db' "$SRC/data" "$W/app/"
 cp "$B/launcher.py" "$W/app/launcher.py"
 
 echo "[5/6] Bytecode ön-derleme (ilk açılışı hızlandırır)..."

@@ -17,10 +17,13 @@
 """
 
 import os
+from pathlib import Path
 
 import pytest
 
 from hrma.app import app
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -118,3 +121,70 @@ class TestCorsIsNotWildcard:
         """Okuma istekleri Origin yüzünden bloklanmamalı (yalnız durum değiştirenler)."""
         r = client.get('/', headers={'Origin': 'https://evil.example'})
         assert r.status_code != 403
+
+
+class TestCorsWorksOnEveryLauncherPort:
+    """v2.6.25 SAHA HATASI REGRESYONU — uygulama hiç hesap yapmıyordu.
+
+    v2.6.2, CORS süzgecinde SABİT bir köken listesi kullanıyordu:
+    ``{127.0.0.1:8080, localhost:8080, 127.0.0.1:5000, localhost:5000}``.
+    Oysa masaüstü başlatıcısı (``packaging/launcher.py::_pick_port``)
+    **8080-8090 arasında boş port arar**: 8080 meşgulse uygulama 8081'e düşer.
+    O anda arayüz ``http://127.0.0.1:8081`` kökeninden servis edilir, tarayıcı
+    her POST'a ``Origin: http://127.0.0.1:8081`` ekler, sabit liste bunu
+    tanımaz ve uygulamanın KENDİ sayfası KENDİ API'sinden 403 alır. Sonuç:
+    Hesapla düğmesi hiçbir motor tipinde çalışmaz.
+
+    Bu hatayı hiçbir test yakalayamadı, çünkü testler kodun kör noktasını
+    paylaşıyordu: yukarıdaki ``test_same_origin_state_change_allowed`` sabit
+    8080 gönderiyor, o da sabit listeyle eşleşiyordu. Yani test, kodun kendi
+    varsayımını onaylıyordu — bağımsız bir ölçüm değildi.
+
+    Bu sınıf başlatıcının GERÇEK port aralığını süzgece karşı doğrular; iki
+    dosya birbirinden bağımsız değişirse kırılır.
+    """
+
+    #: launcher.py::_pick_port'un taradığı aralık — orayla AYNI kalmalı.
+    LAUNCHER_PORT_RANGE = range(8080, 8091)
+
+    def test_launcher_port_range_matches_launcher_source(self):
+        """Aralık hâlâ launcher.py'de yazdığı gibi mi? (iki dosya ayrışmasın)"""
+        kaynak = (ROOT / 'packaging' / 'launcher.py').read_text(encoding='utf-8')
+        assert 'range(8080, 8091)' in kaynak, (
+            'launcher.py port aralığı değişmiş — bu testteki '
+            'LAUNCHER_PORT_RANGE de güncellenmeli')
+
+    @pytest.mark.parametrize('port', list(LAUNCHER_PORT_RANGE))
+    def test_every_launcher_port_can_calculate(self, client, port):
+        """Başlatıcının seçebileceği HER portta durum değiştiren istek geçmeli."""
+        for ana_makine in ('127.0.0.1', 'localhost'):
+            r = client.post('/analyze_safety',
+                            json={'chamber_pressure': 20},
+                            headers={'Origin': f'http://{ana_makine}:{port}'})
+            assert r.status_code != 403, (
+                f'{ana_makine}:{port} kökeni 403 aldı — uygulama bu portta '
+                'hiçbir hesap yapamaz')
+
+    def test_ipv6_loopback_origin_allowed(self, client):
+        """IPv6 geri döngü de meşru bir yerel köken."""
+        r = client.post('/analyze_safety',
+                        json={'chamber_pressure': 20},
+                        headers={'Origin': 'http://[::1]:8081'})
+        assert r.status_code != 403
+
+    def test_remote_origin_still_rejected_on_any_port(self, client):
+        """Port serbestleşti diye uzak köken serbestleşmemeli."""
+        for kotu in ('http://evil.example:8081', 'https://evil.example',
+                     'http://192.168.1.50:8080', 'null'):
+            r = client.post('/analyze_safety',
+                            json={'chamber_pressure': 20},
+                            headers={'Origin': kotu})
+            assert r.status_code == 403, f'{kotu} kökeni geçti'
+
+    def test_dns_rebinding_still_rejected(self, client):
+        """Saldırgan alan adı 127.0.0.1'e çözümlenirse Host onu ele verir."""
+        r = client.post('/analyze_safety',
+                        json={'chamber_pressure': 20},
+                        headers={'Origin': 'http://evil.example:8081',
+                                 'Host': 'evil.example:8081'})
+        assert r.status_code == 403

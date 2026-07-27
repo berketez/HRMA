@@ -156,10 +156,24 @@ python3 -m pip install --target "$RES/libs" --no-deps --upgrade \
 echo "[4/7] Uygulama kaynakları..."
 mkdir -p "$RES/app"
 rsync -a --exclude='__pycache__' "$SRC/hrma" "$RES/app/"
-rsync -a "$SRC/data" "$RES/app/"
+# v2.6.25: experimental_data.db pakete GİRMEZ (79 MB).
+# İçeriği SENTETİKTİR: 11 uydurma kayıt (literatürden esinlenilmiş çalışma
+# noktaları + üretilmiş sinüzoid ve tohumlanmış gürültü) ve 12 096 satır
+# sahte zaman serisi. Katman v2.5.0'da (G1) emekliye ayrıldı; hiçbir kod
+# okumuyor (hrma/validation/experimental_validation.py bilerek boş bir mezar
+# taşı). Dosya gitignore'da olduğu için yalnız geliştirme makinesinde duruyor
+# ama rsync onu her kuruluma taşıyordu. Bir tablosunda 'facility' kolonu var:
+# kullanıcı açsa gerçek bir test tesisinden gelmiş sanır. Gerçek doğrulama
+# verisi hrma/data/validation_records/ altında, git'te izleniyor.
+rsync -a --exclude='experimental_data.db' "$SRC/data" "$RES/app/"
 cp "$B/launcher.py" "$RES/app/launcher.py"
 # v2.5.4 kök temizliği: icon.icns artık packaging/ altında
+# v2.6.25: iki ayrı simge varlığı — icon.icns TAM TAŞMA (Tahoe kendi karo
+# maskesini uygular), icon_runtime.png önceden yuvarlatılmış (launcher
+# setApplicationIconImage_ ile verir, o çağrı maskeyi bypass eder).
+# Üretimi: python3 packaging/make_icons.py
 cp "$B/icon.icns" "$RES/icon.icns"
+cp "$B/icon_runtime.png" "$RES/icon_runtime.png"
 
 echo "[5/7] Temizlik..."
 rm -rf "$RES/libs/bin" 2>/dev/null || true   # --target'ın script stub'ları gereksiz (kaleido hariç — kontrol edilecek)

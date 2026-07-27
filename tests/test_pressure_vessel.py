@@ -12,9 +12,15 @@ El hesabı referans vakası (tüm sayılar elle / bağımsız hesapla türetildi
     UG-32 tori  = 0.885·6·150/(208.571 − 0.1·6)  = 3.8299 mm
     UG-32 yarım = 6·75/(2·208.571 − 0.2·6)       = 1.0819 mm
 
-  AIAA S-080:
+  AIAA S-080 (F149, v2.6.2 — ORTALAMA yarıçap membran formu):
     proof = 90 bar, gerekli burst = 120 bar
-    t_req = max(1.5·6·75/460, 2.0·6·75/730) = max(1.4674, 1.2329) = 1.4674 mm
+    σ = P·(r + t/2)/t  ⇒  t = P·r/(σ − 0.5·P)
+    t_req = max(1.5·6·75/(460 − 0.75·6), 2.0·6·75/(730 − 1.0·6))
+          = max(675/455.5, 900/724) = max(1.481888, 1.243094) = 1.4819 mm
+    Referans (tam Lamé, σ_θ(a) = P(b²+a²)/(b²−a²)): proof 1.482031 mm,
+    burst 1.243179 mm → ortalama yarıçap formu %0.01 sapıyor. Eski iç
+    yarıçap formu (1.4674 mm) %0.99 İNCE kalıyordu: o cidarda proof
+    basıncında gerçek çeper gerilmesi 464.5 MPa > σ_y = 460 MPa (akma).
 
   Kopma (t = 5 mm):
     Faupel   = (2/√3)·460·(2 − 460/730)·ln(80/75) = 46.959 MPa = 469.59 bar
@@ -166,9 +172,26 @@ class TestAIAAS080:
             120.0, rel=1e-9)
 
     def test_required_thickness_hand_calc(self, aiaa):
-        # t = max(1.5·6·75/460, 2.0·6·75/730) = 1.4674 mm (proof-akma yönetir)
+        """El hesabı: ortalama yarıçap membran formu (F149, v2.6.2).
+
+        σ = P·(r + t/2)/t  ⇒  t = P·r/(σ − 0.5·P):
+            proof: 1.5·6·75/(460 − 0.75·6) = 675/455.5 = 1.481888 mm
+            burst: 2.0·6·75/(730 − 1.00·6) = 900/724   = 1.243094 mm
+            t_req = max(...) = 1.4819 mm (proof-akma yönetir)
+
+        Beklenen değer 2026-07-27'de 1.4674 → 1.4819 güncellendi. Eski değer
+        iç yarıçap formundan (t = P·r/σ) geliyordu; bağımsız kalın-cidar
+        çözümü onu ÇÜRÜTÜR: tam Lamé σ_θ(a) = P(b²+a²)/(b²−a²) ile proof
+        kriteri t = 1.482031 mm ister. Ortalama yarıçap %0.010 sapar,
+        iç yarıçap %0.99 İNCE kalır ve o cidarda proof basıncında gerçek
+        çeper gerilmesi 464.54 MPa olur — σ_y = 460 MPa aşılır, yani eski
+        beklenti akan bir cidarı 'gerekli kalınlık' sayıyordu.
+        """
         out = aiaa()
-        assert out['required_thickness_mm'] == pytest.approx(1.4674, rel=1e-3)
+        assert out['required_thickness_mm'] == pytest.approx(1.4819, rel=1e-3)
+        # Lamé referansına yakınlık (bu formun VARLIK sebebi) — %0.05 içinde:
+        assert out['required_thickness_mm'] == pytest.approx(1.482031,
+                                                             rel=5e-4)
 
     def test_mode_difference_asme_thicker_here(self, asme, aiaa):
         """Bu vakada ASME (3.5 marjlı S) S-080'den kalın cidar ister."""
@@ -240,10 +263,33 @@ class TestStatus:
             48.35, rel=2e-3)
 
     def test_marginal_band(self, aiaa):
-        """t = 1.47 mm → burst_margin ≈ 1.177 ∈ [1, 1.2) → MARGINAL."""
-        out = aiaa(wall_thickness_mm=1.47)
+        """t = 1.49 mm → burst_margin ≈ 1.193 ∈ [1, 1.2) → MARGINAL.
+
+        MARGINAL bandına düşmek için cidarın İKİ koşulu birden sağlaması
+        gerekir; bu vakada band elle şöyle türetilir:
+          alt sınır: kod minimumu t_req = 1.481888 mm (altında durum FAIL,
+              çünkü cidar S-080 proof/burst membran gereğini karşılamıyor)
+          üst sınır: marj = 1.2 veren kalınlık. min(Faupel, ince cidar) =
+              1.2·120 = 144 bar kökü → t* = 1.499077 mm (üstünde PASS).
+        Band = [1.481888, 1.499077) mm; seçilen t = 1.49 mm tam ortasında.
+
+        t = 1.49 mm'de el hesabı:
+          Faupel = (2/√3)·460·(2 − 460/730)·ln(76.49/75) = 14.3137 MPa
+          ince   = 2·730·1.49/(150 + 1.49)               = 14.3600 MPa
+          actual = min = 143.137 bar ;  marj = 143.137/120 = 1.19280
+
+        2026-07-27: eski değer t = 1.47 mm idi (marj 1.177, doğru) ama F149
+        kod minimumu 1.4674 → 1.481888 mm'ye çıkınca 1.47 mm kod
+        minimumunun ALTINA düştü; modül haklı olarak FAIL veriyordu
+        (kabul kriteri: t < t_req → FAIL, kopma marjı ne olursa olsun).
+        """
+        out = aiaa(wall_thickness_mm=1.49)
+        # Kod minimumunun üstünde (yoksa kalınlık kuralından FAIL gelirdi):
+        assert out['wall_thickness_used_mm'] >= out['required_thickness_mm']
         assert 1.0 <= out['burst_margin'] < MARGINAL_BURST_MARGIN
-        assert out['burst_margin'] == pytest.approx(1.177, rel=2e-3)
+        assert out['burst_margin'] == pytest.approx(1.1928, rel=2e-3)
+        assert out['actual_burst_pressure_bar'] == pytest.approx(143.137,
+                                                                 rel=2e-3)
         assert out['status'] == 'MARGINAL'
 
     def test_fail_above_max_service_temperature(self, aiaa):

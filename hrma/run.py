@@ -5,6 +5,7 @@ Cross-platform launcher script (Windows/Mac/Linux)
 """
 
 import os
+import socket
 import sys
 import platform
 import webbrowser
@@ -14,12 +15,41 @@ from threading import Timer
 # Betik hrma/ içinde yaşıyor: 'import hrma' için depo kökü sys.path'e eklenir
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def open_browser():
+#: Taranacak port aralığı — packaging/launcher.py::_pick_port ile AYNI olmalı.
+#: tests/test_local_api_security.py bu iki dosyanın ayrışmasını yakalar.
+PORT_RANGE = range(8080, 8091)
+
+
+def pick_port():
+    """Aralıktaki ilk boş portu döndürür.
+
+    v2.6.25 — NEDEN: burada eskiden üç ayrı yerde sabit 8080 vardı. 8080'i
+    başka bir uygulama tutuyorsa sunucu ``OSError: Address already in use``
+    ile çöküyordu; üstelik tarayıcı zamanlayıcısı çökmeden önce kurulduğu
+    için kullanıcının önüne 8080'deki YABANCI uygulama açılıyordu. Masaüstü
+    başlatıcısı (packaging/launcher.py) zaten boş port arıyordu; bu dosya
+    o davranıştan habersizdi — v2.6.2'yi kullanılamaz yapan CORS hatasıyla
+    birebir aynı kalıp: aynı bilgi iki dosyada, biri diğerini bilmiyor.
+    """
+    for port in PORT_RANGE:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(
+        "8080-8090 aralığında boş port yok. Bu portları tutan uygulamaları "
+        "kapatın ya da HRMA_PORT ile bir port belirtin.")
+
+
+def open_browser(port):
     """Open web browser after a delay"""
     time.sleep(1.5)
     try:
-        webbrowser.open('http://localhost:8080')
-    except:
+        webbrowser.open('http://127.0.0.1:%d' % port)
+    except Exception:
         pass  # Ignore browser opening errors
 
 def check_python_version():
@@ -42,28 +72,31 @@ def run_server():
     check_python_version()
     from hrma.app import app
 
+    forced = os.environ.get("HRMA_PORT")
+    port = int(forced) if forced else pick_port()
+
     print("=" * 60)
     print("  ROCKET MOTOR ANALYSIS WEB TOOL")
-    print("  http://localhost:8080")
+    print(f"  http://127.0.0.1:{port}")
     print("=" * 60)
     print()
     print(f"Platform: {platform.system()} {platform.release()}")
     print("Starting web server...")
     print("Press Ctrl+C to stop")
     print()
-    
+
     # Open browser automatically
-    Timer(1.0, open_browser).start()
-    
+    Timer(1.0, open_browser, args=(port,)).start()
+
     # Use appropriate server for platform
     if platform.system() == "Windows":
         try:
             from waitress import serve
             print("Using Waitress server (Windows optimized)")
-            serve(app, host='127.0.0.1', port=8080, threads=4)
+            serve(app, host='127.0.0.1', port=port, threads=4)
         except ImportError:
             print("Waitress not available, using Flask dev server")
-            app.run(host='127.0.0.1', port=8080, debug=False, threaded=True, use_reloader=False)
+            app.run(host='127.0.0.1', port=port, debug=False, threaded=True, use_reloader=False)
     else:
         # Unix-like systems (Mac/Linux)
         # debug=False ZORUNLU (2026-07-23 kararlılık/güvenlik denetimi):
@@ -76,10 +109,10 @@ def run_server():
             from gunicorn.app.wsgiapp import WSGIApplication
             print("Using Gunicorn server (Unix optimized)")
             # Note: Gunicorn setup would go here, but Flask dev server is simpler for this use case
-            app.run(host='127.0.0.1', port=8080, debug=False, threaded=True, use_reloader=False)
+            app.run(host='127.0.0.1', port=port, debug=False, threaded=True, use_reloader=False)
         except ImportError:
             print("Using Flask dev server")
-            app.run(host='127.0.0.1', port=8080, debug=False, threaded=True, use_reloader=False)
+            app.run(host='127.0.0.1', port=port, debug=False, threaded=True, use_reloader=False)
 
 if __name__ == '__main__':
     try:

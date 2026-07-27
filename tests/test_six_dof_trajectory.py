@@ -66,11 +66,27 @@ class TestQuaternion:
         assert np.allclose(x_body, [0, 0, 1], atol=1e-9)
 
     def test_elevation_80_azimuth_90(self):
+        """80° yükseliş, 90° azimut (doğuya) — (E,N,U) çerçevesinde.
+
+        v2.6.25 DÜZELTMESİ — TESTİN BİLEŞEN SIRASI YANLIŞTI, KOD DOĞRUYDU.
+        Beklenen vektör eskiden (N,E,U) sırasına göre yazılmıştı: doğu
+        bileşeni indis 1'de aranıyordu. v2.6.2'nin F167 refaktörü çerçeveyi
+        sağ-elli (E,N,U) yaptı ve ``_quat_from_elevation_azimuth`` bunu
+        docstring'inde açıkça ilan ediyor (doğu = cosθ·sin(az),
+        kuzey = cosθ·cos(az)).
+
+        El hesabı (yükseliş 80°, azimut 90°, azimut kuzeyden saat yönünde):
+            Doğu   = cos(80°)·sin(90°) = cos(80°)  = 0.173648
+            Kuzey  = cos(80°)·cos(90°) = 0
+            Yukarı = sin(80°)                      = 0.984808
+        Azimut 90° tanımı gereği tam doğu olduğundan kuzey bileşeni sıfırdır;
+        eski beklenti doğu değerini kuzey yuvasına koyuyordu.
+        """
         q = _quat_from_elevation_azimuth(80.0, 90.0)
         x_body = _quat_to_dcm(q)[:, 0]
-        expected = [np.cos(np.radians(80)) * 0.0,
-                    np.cos(np.radians(80)) * 1.0,
-                    np.sin(np.radians(80))]
+        expected = [np.cos(np.radians(80)) * 1.0,   # doğu
+                    np.cos(np.radians(80)) * 0.0,   # kuzey
+                    np.sin(np.radians(80))]         # yukarı
         assert np.allclose(x_body, expected, atol=1e-9)
 
 
