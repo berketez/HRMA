@@ -425,3 +425,37 @@ class TestFieldFixV2625:
                     bulunan.append(str(yol.relative_to(ROOT)))
         assert not bulunan, (
             'iCloud çakışma kopyaları kaynak ağacında: %s' % bulunan[:10])
+
+    def test_ci_check_cannot_be_skipped_in_gate(self):
+        """Kapıda CI kontrolü atlanabilir OLMAMALI.
+
+        v2.6.25 yayınında `HIZLI=1` hem yerel tam takımı hem CI kontrolünü
+        atlıyordu; ikisi aynı bayrağın altındaydı. Oysa maliyetleri taban
+        tabana zıt: tam takım yerelde 20-40 dakika, CI kontrolü tek bir API
+        çağrısı. Aynı bayrağa bağlamak, "hızlı geçeyim" diyen kişinin farkında
+        olmadan projenin EN GÜÇLÜ kanıtını (temiz makinede yeşil takım)
+        atlamasına yol açar — v2.6.2'yi yayınlayan hatanın ta kendisi.
+
+        O yayında CI elle teyit edildi; bir dahakine kimse teyit etmeyebilir.
+        """
+        src = _read('packaging/release_gate.sh')
+
+        def _kod(metin):
+            """Yorum satırlarını eler — açıklama metni kod sayılmamalı.
+
+            Bu adımın NEDEN atlanamaz olduğunu anlatan yorum doğal olarak
+            'HIZLI' kelimesini içerir; ham metinde arama yapmak o açıklamayı
+            çalışan kod sanar.
+            """
+            return '\n'.join(s for s in metin.split('\n')
+                             if not s.lstrip().startswith('#'))
+
+        ci_bolumu = _kod(src[src.index('3/5'):src.index('4/5')])
+        for bayrak in ('HIZLI', 'TAKIMI_ATLA', 'KAPIYI_ATLA'):
+            assert bayrak not in ci_bolumu, (
+                'CI kontrolü %s bayrağıyla atlanabilir hâle gelmiş — '
+                'bu adım koşulsuz çalışmalı' % bayrak)
+        # Yerel tam takım ise atlanabilir olmalı (CI zaten koşturuyor)
+        takim_bolumu = _kod(src[src.index('4/5'):src.index('5/5')])
+        assert 'TAKIMI_ATLA' in takim_bolumu, (
+            'yerel tam takımı atlama seçeneği kaybolmuş')

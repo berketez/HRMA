@@ -9,6 +9,24 @@ drawing / report exports.
 
 This manual describes HRMA **v2.6.25**.
 
+**New in v2.6.25.** Three changes affect what you see while using the tool.
+
+- **Hybrid cooling, chamber material and wall thickness now reach the thermal
+  model.** Until this release the hybrid heat-transfer calculation ran with a
+  fixed 4130 steel wall, 5 mm thick, uncooled — whatever you selected on the
+  page. Selecting Inconel 718 with an 8 mm wall and radial channels produced
+  identical numbers to leaving the defaults. All three inputs are now used.
+  When you select cooling channels a warning states that the coolant-side film
+  coefficient is taken from the regenerative range in the literature and that
+  coolant flow, channel velocity, pressure drop and boiling margin are not
+  verified here. That warning is a declared limit of the model, not an error.
+- **Engine warnings are shown as text in the interface language.** Forty-two
+  warning codes had no translation and reached the screen as raw identifiers
+  such as `warn.validation.isp_out_of_range`.
+- **The update window shows release notes in the interface language.** Notes
+  previously appeared in whichever single language the release was written in.
+
+
 > **Scope notice.** HRMA is a preliminary-design and educational tool built
 > on closed-form and 1D engineering correlations. It is not a
 > flight-qualification tool. See "Scope and Limitations" at the end of this

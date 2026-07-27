@@ -22,7 +22,9 @@
 #
 # Kullanım:
 #   bash packaging/release_gate.sh            # tam kapı (yayın öncesi)
-#   HIZLI=1 bash packaging/release_gate.sh    # CI + tam takım atlanır (geliştirme)
+#   TAKIMI_ATLA=1 bash packaging/release_gate.sh   # yalnız YEREL tam takım
+#                                                  # atlanır; CI kontrolü yine
+#                                                  # çalışır ve atlanamaz
 #
 # Çıkış kodu 0 ise yayın serbest. Aksi halde hangi kapının neden kapandığını
 # adıyla söyler.
@@ -95,9 +97,18 @@ fi
 # ---------------------------------------------------------------------------
 baslik "3/5  GitHub Actions (bu commit)"
 # ---------------------------------------------------------------------------
-if [ "${HIZLI:-0}" = "1" ]; then
-    atlandi "HIZLI=1 — CI kontrolü atlandı"
-elif ! command -v gh >/dev/null 2>&1; then
+# CI KONTROLÜ ATLANAMAZ (v2.6.25 yayınından çıkan ders).
+#
+# Bu adım eskiden HIZLI=1 ile atlanabiliyordu, tam takımla AYNI bayrağın
+# altındaydı. Oysa ikisi taban tabana zıt maliyette: tam takım yerelde 20-40
+# dakika sürer, CI kontrolü tek bir API çağrısıdır ve saniyeler alır.
+# Bunları aynı bayrağa bağlamak, "hızlı geçeyim" diyen kişinin farkında
+# olmadan projenin EN GÜÇLÜ kanıtını (temiz makinede yeşil takım) atlamasına
+# yol açıyor — yani v2.6.2'yi yayınlayan hatanın ta kendisine.
+#
+# 2.6.25 yayınında HIZLI=1 kullanıldı ve CI elle teyit edildi; bir dahakine
+# kimse teyit etmeyebilir. Artık atlanamaz.
+if ! command -v gh >/dev/null 2>&1; then
     basarisiz "gh CLI yok — CI durumu doğrulanamıyor"
 else
     SONUC="$(gh run list --commit "$YEREL" --limit 1 --json conclusion,status,url \
@@ -112,8 +123,12 @@ fi
 # ---------------------------------------------------------------------------
 baslik "4/5  Tam test takımı"
 # ---------------------------------------------------------------------------
-if [ "${HIZLI:-0}" = "1" ]; then
-    atlandi "HIZLI=1 — tam takım atlandı"
+# Yalnız BU adım atlanabilir: yerel tam takım, CI'ın temiz makinede koştuğu
+# takımın aynısıdır. 3/5 yeşilse buradaki koşu fazladan bir doğrulamadır.
+# TAKIMI_ATLA=1 tercih edilen ad; HIZLI=1 geriye uyumluluk için kabul edilir
+# ama ARTIK CI kontrolünü atlamaz.
+if [ "${TAKIMI_ATLA:-${HIZLI:-0}}" = "1" ]; then
+    atlandi "tam takım atlandı (CI yeşil olduğu için); atlamayı kapatmak: TAKIMI_ATLA=0"
 else
     echo "  (tam takım ~15 dk sürer; alt küme koşturmak bu kapıyı GEÇMİŞ SAYMAZ)"
     if "$PY" -m pytest -q --no-header -p no:cacheprovider > /tmp/hrma_gate_pytest.log 2>&1; then

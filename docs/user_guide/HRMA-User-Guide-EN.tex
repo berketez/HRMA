@@ -348,7 +348,18 @@ installs silently, and reopens automatically.
 
 \begin{notebox}
 \small\color{hrmadark}
-\textbf{Version 2.6.25 note.} On macOS the update install can take a few
+\textbf{New in version 2.6.25.} This release brings three visible
+changes. (1) The \emph{Cooling Channels} selection on the hybrid page now
+actually enters the calculation; in earlier versions the thermal analysis
+always ran uncooled regardless of what you picked. The warning shown when you
+select channels states that the coolant film coefficient is taken from
+literature and that coolant flow is not verified --- that is a deliberate
+limit, not a fault. Chamber material and wall thickness now change the thermal
+results as well. (2) Warnings produced by the engines now appear as readable
+text in the interface language; previously some of them reached you as raw
+codes. (3) The update window shows release notes in your interface language.
+
+\textbf{Update note.} On macOS the update install can take a few
 minutes, during which a notification is shown; do not open the app by hand
 until it finishes. If your network hits GitHub's request limit (possible on
 shared networks), the program now falls back to the ordinary release pages
