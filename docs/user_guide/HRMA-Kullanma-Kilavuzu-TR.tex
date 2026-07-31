@@ -76,7 +76,7 @@
 {\Huge\bfseries\color{hrmadark}Kullanma Kılavuzu}\\[10pt]
 {\large\color{hrmagray}Örnekli, adım adım anlatım}\\[3cm]
 
-{\large Sürüm 2.6.25 \quad|\quad Temmuz 2026}\\[6pt]
+{\large Sürüm 2.6.26 \quad|\quad Temmuz 2026}\\[6pt]
 {\small\color{hrmagray}Geliştiren: Berke Tezgöçen \quad•\quad Fikir \& Test: Ayberk Cem Aksoy}\\[1.5cm]
 
 \begin{notkutu}
@@ -132,11 +132,11 @@ uygulamadan alınmıştır.
 \subsection{Kurulum}
 
 \begin{itemize}[leftmargin=1.4em]
-  \item \textbf{Windows 10/11:} \texttt{HRMA-Setup-2.6.25.exe} dosyasını
+  \item \textbf{Windows 10/11:} \texttt{HRMA-Setup-2.6.26.exe} dosyasını
   indirin, çift tıklayın ve sihirbazı izleyin (İleri, İleri, Kur). Kurulum
   kullanıcı bazlıdır; yönetici hakkı gerekmez. Windows SmartScreen imzasız
   olduğu için uyarabilir: ``Ek bilgi'' $\rightarrow$ ``Yine de çalıştır''.
-  \item \textbf{macOS 11+ (Apple Silicon):} \texttt{HRMA-Setup-2.6.25-macOS.dmg}
+  \item \textbf{macOS 11+ (Apple Silicon):} \texttt{HRMA-Setup-2.6.26-macOS.dmg}
   dosyasını açın ve \texttt{HRMA} simgesini \texttt{Applications} klasörüne
   sürükleyin. İlk açılışta uygulamaya sağ tıklayıp ``Aç'' deyin (imzasız
   uygulamalar için Gatekeeper bunu bir kez ister).
@@ -209,10 +209,22 @@ Oda Basıncı & \texttt{20 bar} & Yanma odası basıncı \\
 Tank Basıncı & \texttt{50 bar} & Oda basıncını yeterince aşmalı \\
 Yakıt & \texttt{HTPB} & Regresyon katsayıları otomatik gelir \\
 Oksitleyici & \texttt{N\textsubscript{2}O (sıvı)} & Yoğunluk sıcaklıkla güncellenir \\
+Nozul Tipi & \texttt{Konik} & Konik / çan / parabolik \\
 Enjektör & \texttt{Showerhead} & Tip başına parametreler \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{Nozul tipi tek alandır.} Sürüm 2.6.26'ya kadar sayfada aynı kavramın
+\emph{iki} seçicisi vardı: Temel Parametreler'deki ``Nozul Tipi'' ve Tasarım
+Yapılandırması sekmesindeki ``Nozul Konturu''. İkincisi hiçbir hesaba bağlı
+değildi ve ikisi çeliştiğinde hangisinin geçerli olduğu belli olmuyordu.
+İkinci seçici kaldırıldı; parabolik seçeneği çözücüye bağlı olan tek alana
+taşındı. Artık aynı kontur hem hesapta hem CAD/teknik resim çıktılarında
+kullanılır.
+\end{notkutu}
 
 \gorsel{img/tr-01-form.png}{Girdi formu. ``Optimumu Bul'' düğmesi O/F oranını
 c* açısından en iyi değere tarar. Her alandaki ``?'' simgesi kısa bir
@@ -226,15 +238,96 @@ açıklama gösterir.}
 varsayılanları ezebilirsiniz.
 \end{notkutu}
 
-\subsection{2. Adım — Hesaplayın}
+\subsection{2. Adım — Tasarım Yapılandırması sekmesini doldurun}
+
+Formun üst kısmı motorun çalışma noktasını belirler; \textbf{Tasarım
+Yapılandırması} sekmesi ise motorun nelerden yapıldığını ve hangi marjla
+boyutlandırılacağını söyler. Bu sekmedeki alanların hepsi sürüm 2.6.26 ile
+birlikte gerçekten hesaba girer; daha önce bir kısmı ekranda duruyor ama
+hiçbir sonucu değiştirmiyordu.
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Yanma odası malzemesi, cidar kalınlığı, soğutma kanalları:}
+  Isı transferi modelini (cidar sıcaklıkları, ısı akısı) ve bu sürümden
+  itibaren yapısal modülü de besler; böylece termal ve yapısal sonuçlar
+  \emph{aynı} motoru anlatır. Soğutma kanalı seçtiğinizde çıkan uyarı,
+  soğutucu tarafı film katsayısının literatürdeki rejeneratif banttan
+  alındığını ve soğutucu debisinin, kanal hızının, basınç düşüşünün ve kaynama
+  marjının burada doğrulanmadığını söyler --- bu, modelin ilan edilmiş bir
+  sınırıdır, hata değildir.
+  \item \textbf{Emniyet Katsayısı:} Yapısal modülün hedeflediği tasarım
+  katsayısı. Gerçek cidar kalınlığınız da modüle geçtiği için modül
+  \emph{doğrulama} kipinde çalışır (bkz. aşağıdaki kutu).
+  \item \textbf{Kamara Boyu Ezmesi (mm):} L* ile türetilen yanma odası boyunu
+  ezer; boş bırakırsanız otomatik hesap geçerlidir. Verdiğiniz boy yakıt
+  grain'i ile ön yanma odasının toplamından kısaysa ezme \textbf{reddedilir} ve
+  uyarıda hem sizin değeriniz hem gereken en küçük değer yazılır. Sessizce
+  kırpılmaz; kırpılmış bir boy, sizin girdiğinizden başka bir motor demektir.
+  \item \textbf{Nozul Malzemesi} (grafit, tungsten, bakır): Boğaz termal
+  kontrolünü ve erozyon tahminini yönetir. Bartz tabanlı eksenel profil boğaz
+  istasyonunda bu malzemeyle çözülür ve denge cidar sıcaklığı malzemenin izin
+  verilen sıcaklığıyla karşılaştırılır; sınırın aşılması kritik uyarı üretir.
+  Erozyonda yayımlanmış katsayı bandı olan malzemeler (grafit; ayrıca modelin
+  desteklediği fakat listede yer almayan karbon-karbon) için gerileme hızı ve
+  yanma boyunca boğaz büyümesi hesaplanır. \textbf{Tungsten için yayımlanmış
+  bant yoktur; katsayı uydurulmaz, ``veri yok'' denir.} Bakır seçeneği arayüzde
+  ``rejeneratif soğutmalı'' diye etiketlidir ve o varsayımla çözülür.
+  Erozyon yalnızca raporlanır: kalıcı rejim performans çözümü boğazı rijit
+  kabul eder, erozyonla eşlenmiş itki/basınç geçmişi için geçici rejim
+  çözücüsünü kullanın.
+  \item \textbf{Enjektör Malzemesi} (AISI 316, Ti-6Al-4V, pirinç): Enjektör
+  plakasını boyutlandırır. Seçilen malzemenin akma dayanımı ve yoğunluğuyla
+  plaka eğilme gerilmesi, emniyet katsayısı, gereken kalınlık ve plaka kütlesi
+  raporlanır (kenarından tutturulmuş dairesel plaka: Roark's Formulas Tablo
+  11.2 durum 10b; delikli bölge için ASME BPVC PG-52 ligament verimi).
+  \item \textbf{Swirl enjektör alanları:} Enjektör tipi olarak \emph{swirl}
+  seçerseniz \textbf{Swirl Odası Çapı} ve \textbf{Teğetsel Giriş Açısı} artık
+  Giffen--Muraszew basınç-swirl çözümüne girer: oda çapı $K = A_p/(D_s\,d_o)$
+  bağıntısındaki $D_s$'tir, giriş açısı ise hedef sprey yarı açısı olarak
+  alınır ve ters çözücü $K$'yı ondan bularak çıkış orifisi ile yuvaları
+  boyutlandırır. Hedef açıya göre tasarım yapmak için yuva genişliği ile
+  yüksekliğini \emph{boş} bırakın; yuva geometrisini sabitlerseniz swirl
+  sayısı da sabitlenir ve hedef açı uygulanamaz --- program bunu sessizce
+  yutmak yerine söyler. Çözülebilir zarfın (yaklaşık $3{,}7^\circ$--$71{,}2^\circ$)
+  dışındaki açılar uyarıyla kırpılır; swirl odası çıkış orifisinin
+  1,25 katından darsa modelin geometri varsayımı bozulur ve bu da bildirilir.
+\end{itemize}
+
+\begin{notkutu}
+\small\color{hrmadark}
+\textbf{Emniyet katsayısı artık ölçülen bir sayı.} Sürüm 2.6.26'ya kadar
+yapısal modül \emph{boyutlandırma} kipinde çalışıyordu: cidarı kendisi seçiyor
+ve raporladığı katsayı tanım gereği ``hedef katsayı $\times$ imalat payı''
+oluyordu --- yani sizin girdiğiniz sayının size geri okunması. Artık gerçek
+cidar kalınlığınız da geçtiği için modül \emph{doğrulama} kipindedir ve
+raporlanan asgari emniyet katsayısı basınç, çap, malzeme ve kalınlıktan
+gerçekten hesaplanır. Bu yüzden aynı tasarımda eski sürümlerin gösterdiğinden
+farklı bir sayı görürsünüz; eskisi bir ölçüm değildi.
+\end{notkutu}
+
+\begin{uyarikutu}
+\small\color{hrmadark}
+\textbf{Varsayılan malzeme değişti sayılır.} Bu sekmedeki üç termal alan
+(malzeme, cidar kalınlığı, soğutma) sürüm 2.6.25'te sunucu tarafında okunur
+hâle gelmişti, ancak hibrit sayfasının formu bunları hiç göndermiyordu; yani
+kullanıcı açısından hiçbir şey değişmemişti. Artık gönderiliyorlar. Sonuç:
+listedeki ilk seçenek olan AISI 304 paslanmaz çelik, siz değiştirmedikçe
+hesabın \emph{gerçekten} kullandığı malzemedir; daha önce hesap sessizce 4130
+çeliğiyle yapılıyordu.
+\end{uyarikutu}
+
+\subsection{3. Adım — Hesaplayın}
 
 \textbf{Hesapla} düğmesine basın. Çözücü, formu \texttt{/calculate} ucuna
 gönderir ve birkaç saniye içinde sonuçları doldurur.
 
 \gorsel{img/tr-02-results.png}{Sonuç göstergeleri (Performans Özeti),
 Uyarılar paneli ve tasarım tabloları. Örneğimizde Özgül İtki 185.6~s,
-İtki 1000~N, Oda Basıncı 20~bar, Kütle Debisi 0.549~kg/s ve Yapısal
-Asgari Emniyet Katsayısı 2.89 çıktı.}
+İtki 1000~N, Oda Basıncı 20~bar ve Kütle Debisi 0.549~kg/s çıktı.
+Ekran görüntüsündeki yapısal emniyet katsayısı sürüm 2.6.25'te alınmıştır;
+2.6.26'da bu sayının nasıl hesaplandığı değişti (bir önceki bölümdeki
+``Emniyet katsayısı artık ölçülen bir sayı'' kutusu), dolayısıyla aynı
+tasarımda farklı bir değer görürsünüz.}
 
 \textbf{Sonuçları okurken:}
 
@@ -247,9 +340,20 @@ Asgari Emniyet Katsayısı 2.89 çıktı.}
   okuyun.} Örneğimizde üç uyarı var: c* normal aralığın hemen altında
   ($1325$ m/s), genişleme oranı düşük ($\varepsilon = 3.4$) ve ``flash
   boiling'' (ani kaynama) riski. Bunlar hata değil; tasarımın hangi
-  varsayımlarla sınırda olduğunu söyler.
+  varsayımlarla sınırda olduğunu söyler. Sürüm 2.6.26'dan itibaren hibrit
+  motorun \emph{kendi} tasarım uyarıları da bu panele düşer: tanınmayan bir
+  malzeme adı, aralık dışı bir cidar kalınlığı, reddedilen bir kamara boyu
+  ezmesi. Daha önce bu uyarılar toplanıyor ama ekrana hiç ulaşmıyordu; yani
+  sessiz geri düşmeler gerçekten sessiz kalıyordu.
   \item \textbf{Tasarım tabloları:} Tam geometri — lüle kontur ölçüleri ve
-  açıları, grain/port geometrisi, enjektör planı, cidar kalınlığı.
+  açıları, grain/port geometrisi, enjektör planı, cidar kalınlığı. Kamara boyu
+  tablosunda boyun L*'den mi yoksa sizin ezmenizden mi geldiği de yazar.
+  \item \textbf{Malzeme değerlendirmeleri:} Seçtiğiniz nozul malzemesi için
+  boğaz sıcaklık marjı ve erozyon tahmini; enjektör malzemesi için plaka
+  gerilmesi, emniyet katsayısı, gereken kalınlık ve kütle. Üretilemeyen bir
+  büyüklük varsa (literatürde katsayısı olmayan bir erozyon, çözücünün
+  boyutlandıramadığı bir enjektör devresi) sayı uydurulmaz; blok ``analiz
+  edilmedi'' der ve nedenini yazar.
 \end{itemize}
 
 \begin{uyarikutu}
@@ -260,7 +364,7 @@ Kırmızı/turuncu bir uyarı gördüğünüzde, o parametreyi el hesabıyla vey
 bağımsız bir kodla çapraz kontrol edin.
 \end{uyarikutu}
 
-\subsection{3. Adım — 3B modeli inceleyin}
+\subsection{4. Adım — 3B modeli inceleyin}
 
 Sonuçların altında, çözücünün ürettiği geometriden canlı kurulan bir 3B
 motor modeli bulunur. Kesit, ölçüler, patlatılmış görünüm, ısı haritası ve
@@ -279,16 +383,17 @@ hesaplar; 3B model ve kesit görünümü, tam bir yeniden hesaplama olmadan
 anında güncellenir.
 \end{notkutu}
 
-\subsection{4. Adım — Grafikler ve kesit}
+\subsection{5. Adım — Grafikler ve kesit}
 
 Performans grafikleri (itki eğrisi, basınç, regresyon hızı ve port büyümesi)
 uygulamanın koyu temasında ve tamamen çevrimdışı çizilir. Kesit görünümü,
 çözücünün kullandığı geometriden üretilen ölçekli bir mühendislik çizimidir.
 
-\gorsel{img/tr-02-results.png}{Örnekte regresyon hızı yanma boyunca
-azalırken (port genişledikçe kütle akısı düşer) port çapı büyür.}
+Örnek motorumuzda regresyon hızı yanma boyunca azalır (port genişledikçe
+oksitleyici kütle akısı düşer), buna karşılık port çapı büyür; grafiklerde
+görünen budur.
 
-\subsection{5. Adım — Dışa aktarın}
+\subsection{6. Adım — Dışa aktarın}
 
 Sonuç panelindeki dışa aktarma düğmeleriyle şunları üretebilirsiniz:
 teknik resim ve rapor PDF'leri, CAD dosyaları (STEP kesit eşleme dahil) ve
@@ -355,16 +460,30 @@ kurulumu indirir, kendini kapatır, sessizce kurar ve otomatik yeniden açılır
 
 \begin{notkutu}
 \small\color{hrmadark}
-\textbf{Sürüm 2.6.25 ile gelenler.} Bu sürüm üç görünür değişiklik
-getiriyor. (1) Hibrit sayfasındaki \emph{Soğutma Kanalları} seçimi artık
-gerçekten hesaba giriyor; önceki sürümlerde seçim yapılsa da termal analiz her
-zaman soğutmasız çalışıyordu. Kanal seçtiğinizde çıkan uyarı, soğutucu film
-katsayısının literatürden alındığını ve soğutucu debisinin doğrulanmadığını
-belirtir --- bu bilinçli bir sınırdır, hata değildir. Aynı şekilde yanma odası
-malzemesi ve cidar kalınlığı seçimleriniz de artık termal sonuçları
-değiştirir. (2) Motorların ürettiği uyarılar artık arayüz dilinde okunur
-metin olarak görünür; daha önce bir kısmı ham kod olarak düşüyordu.
-(3) Güncelleme penceresi sürüm notlarını arayüz dilinizde gösterir.
+\textbf{Sürüm 2.6.26 ile gelenler.} Bu sürüm yeni fizik getirmiyor; ekranda
+duran ama hiçbir yere ulaşmayan girdileri çözücüye bağlıyor, aynı kavramın
+ikinci kopyası olan iki alanı kaldırıyor ve iki hatayı düzeltiyor.
+
+(1) \textbf{Hibrit sayfasındaki sekiz girdi artık gerçekten hesaba giriyor:}
+Emniyet Katsayısı, Kamara Boyu Ezmesi, Nozul Malzemesi, Enjektör Malzemesi,
+Swirl Odası Çapı, Teğetsel Giriş Açısı, Yanma Tipi (sonlu alan seçeneği) ve
+Kontraksiyon Oranı. Ayrıntı için ``Tasarım Yapılandırması sekmesini
+doldurun'' bölümüne bakın.
+(2) \textbf{Raporlanan yapısal emniyet katsayısı artık hesaplanan bir
+sayıdır}, girdiğiniz değerin geri okunması değil; aynı tasarımda eski
+sürümlerden farklı bir sayı görürsünüz.
+(3) \textbf{İki alan kaldırıldı:} ``Nozul Konturu'' seçicisi (parabolik
+seçeneği çözücüye bağlı olan ``Nozul Tipi'' alanına taşındı) ve ``Enjeksiyon
+Hızı'' alanı (bağlı eşdeğeri showerhead panelindeki ``Hedef Hız''; eski alan
+üstelik her hesaptan sonra çözücünün kendi çıkış hızıyla eziliyordu).
+(4) \textbf{Enjektör artık delik planı uydurmuyor:} devre modeli seçtiğiniz
+tipi boyutlandıramadığında sonuç, 12 delikli showerhead sabitleriyle
+dolduruluyor ve sizin seçtiğiniz tiple etiketleniyordu. Artık plan
+üretilemiyorsa üretilmez ve nedeni ekranda yazar.
+(5) \textbf{Düzeltilen hata:} Çarpışmalı (impingement) enjektör seçilip
+çarpışma açısı boş bırakıldığında hesap çöküyordu.
+(6) \textbf{Motor tasarım uyarıları artık uyarılar paneline düşüyor;} daha
+önce toplanıp atılıyordu.
 
 \textbf{Sürüm notu.} macOS'ta güncelleme kurulumu birkaç dakika
 sürebilir ve bu sırada bir bildirim gösterilir; kurulum bitene kadar
@@ -376,7 +495,7 @@ düşerek güncellemeyi yine de bulur.
 \vspace{1cm}
 \begin{center}
 \color{hrmagray}\small
-HRMA v2.6.25 — Roket Motoru Analiz Paketi\\
+HRMA v2.6.26 — Roket Motoru Analiz Paketi\\
 \href{https://github.com/berketez/HRMA}{github.com/berketez/HRMA}
 \end{center}
 

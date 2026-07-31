@@ -15,7 +15,7 @@ VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/hrma/__init__.py")"
 [ -n "$VERSION" ] || { echo "HATA: sürüm okunamadı"; exit 1; }
 echo "Sürüm: $VERSION"
 
-echo "[1/7] İskelet..."
+echo "[1/8] İskelet..."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$RES"
 
@@ -51,8 +51,21 @@ fi
 cp "$B/hrma_stub" "$APP/Contents/MacOS/HRMA"
 chmod +x "$APP/Contents/MacOS/HRMA"
 
-cat > "$APP/Contents/MacOS/hrma_baslat.sh" <<'MAIN'
+# hrma_baslat.sh GERÇEKTE Resources/ altında yaşar; MacOS/ altında ona işaret
+# eden bir SYMLINK durur (aşağıda). Neden: codesign, Contents/MacOS içindeki
+# HER dosyayı "iç içe kod" sayar ve imzasız script bundle imzasını düşürür
+# ("code object is not signed at all — In subcomponent ... hrma_baslat.sh",
+# 2026-07-30'da gerçek pakette ölçüldü; +x biti kaldırmak da kurtarmıyor).
+# Resources'taki kopya CodeResources mührüne hash ile girer (kaybolabilecek
+# xattr imzası yok), symlink ise hedef dizgesi olarak mühürlenir. Stub script'i
+# /bin/bash ile symlink YOLU üzerinden çağırır; bu sayede SELF_DIR MacOS/ olur
+# ve APP_BUNDLE türetimi değişmez. Güncelleme yardımcısı ditto kullanır,
+# ditto symlink'i korur (hrma/utils/self_install.py).
+cat > "$RES/hrma_baslat.sh" <<'MAIN'
 #!/bin/bash
+# DİKKAT: Bu script her zaman Contents/MacOS/hrma_baslat.sh SYMLINK'i
+# üzerinden çağrılmalı (stub öyle çağırır). Doğrudan Resources yolundan
+# çağrılırsa SELF_DIR/APP_BUNDLE türetimi yanlış çıkar.
 set -u
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_BUNDLE="$(dirname "$(dirname "$SELF_DIR")")"
@@ -101,12 +114,15 @@ LOG="$LOGDIR/HRMA.log"
 export PYTHONUNBUFFERED=1
 exec "$PY" "$LAUNCH" >> "$LOG" 2>&1
 MAIN
-chmod +x "$APP/Contents/MacOS/hrma_baslat.sh"
+# 755: /bin/bash ile çağrıldığı için +x şart değil ama zararı da yok;
+# Resources'ta durduğu için codesign onu kod değil kaynak olarak mühürler.
+chmod 755 "$RES/hrma_baslat.sh"
+ln -s ../Resources/hrma_baslat.sh "$APP/Contents/MacOS/hrma_baslat.sh"
 
-echo "[2/7] Python runtime..."
+echo "[2/8] Python runtime..."
 tar -xzf "$B/runtime/pbs-mac.tar.gz" -C "$RES"   # 'python/' kökünü açar
 
-echo "[3/7] libs..."
+echo "[3/8] libs..."
 cp -R "$B/mac/libs" "$RES/libs"
 # rocketcea: PyPI'da mac wheel yok — çalışan anaconda ortamından kopyala (arm64, numpy 1.26.4 uyumlu)
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea "$RES/libs/"
@@ -153,7 +169,7 @@ python3 -m pip install --target "$RES/libs" --no-deps --upgrade \
 # rocketcea: sıvı motor gerçek çalışma noktası termokimyası
 [ -d "$RES/libs/rocketcea" ] || { echo "HATA: rocketcea eksik!"; exit 1; }
 
-echo "[4/7] Uygulama kaynakları..."
+echo "[4/8] Uygulama kaynakları..."
 mkdir -p "$RES/app"
 rsync -a --exclude='__pycache__' "$SRC/hrma" "$RES/app/"
 # v2.6.25: experimental_data.db pakete GİRMEZ (79 MB).
@@ -175,17 +191,64 @@ cp "$B/launcher.py" "$RES/app/launcher.py"
 cp "$B/icon.icns" "$RES/icon.icns"
 cp "$B/icon_runtime.png" "$RES/icon_runtime.png"
 
-echo "[5/7] Temizlik..."
+echo "[5/8] Temizlik..."
 rm -rf "$RES/libs/bin" 2>/dev/null || true   # --target'ın script stub'ları gereksiz (kaleido hariç — kontrol edilecek)
 
-echo "[6/7] Bytecode ön-derleme (ilk açılışı hızlandırır)..."
+echo "[6/8] Bytecode ön-derleme (ilk açılışı hızlandırır)..."
 # Paketin KENDİ python'u ile derle (magic number uyumu garanti).
 # __pycache__ silinmiyor — ilk açılışta pandas/scipy derleme bedeli kalkar.
 "$RES/python/bin/python3.12" -m compileall -q -j 0 "$RES/libs" "$RES/app" || true
 
-# Bundle seviyesinde ad-hoc imza (arm64 exec ile tutarlı mühür)
-codesign --force -s - "$APP" 2>/dev/null || true
+echo "[7/8] İmza öncesi temizlik + ad-hoc imza..."
+# ---------------------------------------------------------------------------
+# KÖK NEDEN (2026-07-28 otomatik güncelleme çökmesi):
+# Bu codesign çağrısı eskiden `2>/dev/null || true` ile bitiyordu, yani hata
+# YUTULUYORDU ve paket İMZASIZ çıkıyordu; 2.6.0/2.6.1/2.6.2 böyle yayınlandı.
+# macOS Tahoe sıkılaşınca lsd paketi launch-disabled kaydetti (-67062, "code
+# object is not signed at all"), `open` "executable is missing" dedi ve
+# güncelleme yardımcısı eski sürüme geri döndü (kanıt: ~/Documents/HRMA/
+# hrma_update_log.txt, 28 Tem 02:54).
+#
+# 2026-07-30 GERÇEK PAKET ölçümleriyle bulunan İKİ ayrı imza engeli:
+#   a) iCloud/Finder .app köküne com.apple.FinderInfo yazıyor ve SİLİNSE
+#      BİLE milisaniyeler içinde GERİ YAZIYOR (xattr -cr sonrası "temiz"
+#      doğrulandı, 30 ms sonra codesign yine "resource fork, Finder
+#      information, or similar detritus not allowed" verdi). Bu xattr
+#      mühre GİRMEZ; imzada --no-strict ile tolere edilir. --no-strict
+#      yalnız bu imza-öncesi detritus denetimini atlar, üretilen imza
+#      temiz ağaçtakiyle aynıdır.
+#   b) Contents/MacOS içindeki hrma_baslat.sh "iç içe kod" sayılıyordu ve
+#      imzasız script bundle imzasını düşürüyordu. Script artık Resources/
+#      altında (yukarıda, [1/8] bölümünde) ve MacOS/'ta symlink var.
+#
+# Artık: kirlilik temizlenir, imza atılır, doğrulanır; herhangi bir adım
+# başarısızsa derleme DURUR (set -e). Sessizce imzasız paket bir daha YOK.
+# ---------------------------------------------------------------------------
+# 1) Finder/iCloud kirliliği: .DS_Store + AppleDouble (._*) dosyaları.
+#    (mac/libs kaynağındaki .DS_Store'lar cp -R ile pakete taşınıyor;
+#    ayrıca kullanıcıya çöp göndermemek için de silinmeliler.)
+find "$APP" -name '.DS_Store' -delete
+find "$APP" -name '._*' -delete
+# 2) Genişletilmiş öznitelikler: elimizden gelen temizlik (best effort).
+#    com.apple.provenance silinemez, com.apple.FinderInfo iCloud tarafından
+#    anında geri yazılır — ikisi de mühre girmediği için imzayı BOZMAZ;
+#    bu adım yalnız ağacı olabildiğince sadeleştirir.
+xattr -cr "$APP" 2>/dev/null || true
+# 3) Bundle seviyesinde ad-hoc imza (arm64 exec ile tutarlı mühür).
+#    FAIL-CLOSED: stderr artık görünür ve başarısızlık derlemeyi durdurur.
+codesign --force --no-strict -s - "$APP"
+# 4) İmza doğrulaması. --strict BİLEREK YOK: sıkı doğrulama da aynı detritus
+#    denetimini yapıyor ve iCloud'un geri yazdığı FinderInfo yüzünden her
+#    zaman kırmızı kalıyor (2026-07-30 ölçümü). --deep doğrulama imzanın
+#    geçerliliğini ve kaynak mührünü tam kontrol eder — v2.6.25'i vuran
+#    "code object is not signed at all" hâlini fazlasıyla yakalar. Sıkı
+#    (--strict) doğrulama, xattr'sız kopya üzerinde yayın kapısında yapılır
+#    (packaging/release_gate.sh, kapı 6/6).
+#    Ad-hoc imzada spctl reddi NORMALDİR (Gatekeeper ad-hoc imzayı onaylı
+#    geliştirici saymaz); ölçüt codesign doğrulamasıdır.
+codesign --verify --deep "$APP"
+echo "İmza doğrulandı (ad-hoc)."
 
-echo "[7/7] Boyut:"
+echo "[8/8] Boyut:"
 du -sh "$APP"
 echo "TAMAM: $APP (v$VERSION)"

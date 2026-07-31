@@ -38,6 +38,48 @@ ASSETS_FRAGMENT = "https://github.com/%s/releases/expanded_assets/%%s" % GITHUB_
 # Yedek yoldan gelen indirme adresi yalnız bu önekle kabul edilir (URL enjeksiyonu)
 DOWNLOAD_PREFIX = "https://github.com/%s/releases/download/" % GITHUB_REPO
 
+# Sürüm notu gövdesi için üst sınır. DİL BÖLÜMÜ BAŞINA uygulanır, gövdenin
+# tamamına değil: v2.6.26'da gövde 16045 karakterdi ve `<!--HRMA-LANG:tr-->`
+# imi 8072. karakterde başlıyordu; tek parça [:4000] kırpması Türkçe bölümü
+# istemciye HİÇ ulaştırmıyordu, Türkçe arayüzde sürüm notu İngilizce çıkıyordu.
+NOTES_MAX_CHARS = 4000
+_LANG_MARK_RE = re.compile(r"<!--\s*HRMA-LANG:([a-z]{2})\s*-->", re.I)
+# Atom yedek yolunda GitHub HTML yorumlarını düşürür (2026-07-29'da canlı
+# akışta ölçüldü: im sayısı 0); orada bölümler sürüm başlıklarından ayrılır.
+_SECTION_HEAD_RE = re.compile(r"(?m)^(?=[ \t]*#{0,3}[ \t]*HRMA[ \t]+v?\d)")
+
+
+def split_notes_by_language(body):
+    """Sürüm notu gövdesini dil imlerinden bölüp {'en': ..., 'tr': ...} döndürür."""
+    if not body:
+        return {}
+    bolumler, son_kod, son_son = {}, None, 0
+    for m in _LANG_MARK_RE.finditer(body):
+        if son_kod is not None:
+            bolumler[son_kod] = body[son_son:m.start()].strip()
+        son_kod = m.group(1).lower()
+        son_son = m.end()
+    if son_kod is None:
+        return {}
+    bolumler[son_kod] = body[son_son:].strip()
+    return {k: v for k, v in bolumler.items() if v}
+
+
+def clip_notes(body, limit=NOTES_MAX_CHARS):
+    """Gövdeyi DİL BÖLÜMÜ BAŞINA kırpar; imleri koruyarak birleştirir."""
+    if not body:
+        return ""
+    bolumler = split_notes_by_language(body)
+    if bolumler:
+        return "\n\n".join(
+            "<!--HRMA-LANG:%s-->\n%s" % (kod, metin[:limit])
+            for kod, metin in bolumler.items()
+        )
+    parcalar = [x.strip() for x in _SECTION_HEAD_RE.split(body) if x.strip()]
+    if len(parcalar) >= 2:
+        return "\n\n".join(x[:limit] for x in parcalar)
+    return body[:limit]
+
 # API yanıtı bu süre boyunca önbellekte tutulur (aynı oturumda her sayfa
 # yenilemesinde GitHub'a gitmemek için; anonim limit 60 istek/saat).
 CACHE_TTL_S = 6 * 3600
@@ -179,7 +221,9 @@ def _fetch_notes_via_atom(tag, timeout_s=8):
             if entry_id.endswith("/" + tag) or href.endswith("/" + tag):
                 content = entry.findtext("a:content", "", ns) or ""
                 text = re.sub(r"<[^>]+>", "", content)  # kaba HTML temizliği
-                return re.sub(r"\n{3,}", "\n\n", text).strip()[:4000]
+                # Kırpma dil bölümü başına yapılır; Atom yolunda im yoktur,
+                # bölümler sürüm başlıklarından ayrılır.
+                return clip_notes(re.sub(r"\n{3,}", "\n\n", text).strip())
     except Exception:
         pass
     return ""
@@ -257,7 +301,13 @@ def check_for_update(force=False):
         result["latest"] = tag
         if is_newer(tag) and not release.get("draft") and not release.get("prerelease"):
             result["available"] = True
-            result["notes"] = (release.get("body") or "")[:4000]
+            govde = release.get("body") or ""
+            result["notes"] = clip_notes(govde)
+            # Dile AYRILMIŞ alanlar: istemcinin tercih ettiği yol
+            # (update_check.js -> notesForActiveLang). Bölme kırpmadan ÖNCE
+            # yapıldığı için uzun notlarda da doğru dil ulaşır.
+            for _kod, _metin in split_notes_by_language(govde).items():
+                result["notes_" + _kod] = _metin[:NOTES_MAX_CHARS]
             result["page_url"] = release.get("html_url") or RELEASES_PAGE
             result["asset"] = pick_asset(release.get("assets"))
             # Yedek yolda API notları gelmez; Atom akışından tamamla

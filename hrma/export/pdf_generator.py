@@ -75,10 +75,34 @@ CHART_UNAVAILABLE_NOTE = (
 # aşan bir hazne/lüle boyu roket motoru pratiğinde bulunmaz.
 LENGTH_UNIT_METRE_MAX = 5.0
 
-# Güvenlik puanı kabul eşiği (0-10 ölçeği) — tek tanım noktası.
-SAFETY_RATING_ACCEPTABLE = 7.0
 LENGTH_KEYS = ('chamber_diameter', 'chamber_length', 'throat_diameter',
                'exit_diameter', 'nozzle_length', 'grain_length')
+
+# --------------------------------------------------------------------------
+# Rapor bölümü -> gerçekten kullanılan yöntem/referans metni.
+# DENETİM DÜZELTMESİ (2026-07-28, PDF-NASA-4): eski kapak koşulsuz
+# 'Standards: NASA SP-125, NASA-STD-5012, NASA SP-8124' basıyor, yönetici
+# özeti ve teknik ek 'NASA-standard methodologies' iddia ediyordu — BOŞ
+# analysis_results ile bile. Hiçbir kod bu standartlara uygunluk kontrolü
+# yapmıyor. Artık yalnız raporda GERÇEKTEN bulunan bölümler için, o bölümü
+# üreten kod yolunun kullandığı yöntem adı basılır; standart uygunluk
+# iddiası basılmaz.
+# --------------------------------------------------------------------------
+SECTION_METHOD_REFERENCES = {
+    # analysis_results anahtarı -> (bölüm adı, yöntem/referans metni)
+    'performance': ('Performance',
+                    'isentropic nozzle flow relations with computed '
+                    'combustion properties'),
+    'thermal': ('Thermal',
+                'Bartz gas-side heat-transfer correlation '
+                '(hrma heat-transfer module)'),
+    'structural': ('Structural',
+                   'thin-wall pressure vessel stress relations '
+                   '(hoop / von Mises; hrma structural module)'),
+    'safety': ('Safety',
+               'hrma safety module (risk classes are model-internal, '
+               'not a certification)'),
+}
 
 
 def _is_dark(color) -> bool:
@@ -214,8 +238,10 @@ class PDFReportGenerator:
         
         story = []
         
-        # Title Page
-        story.extend(self._create_title_page(motor_data, report_type))
+        # Title Page — analysis_results da geçilir: 'References consulted'
+        # satırı yalnız gerçekten koşan bölümler için basılır (PDF-NASA-4).
+        story.extend(self._create_title_page(motor_data, report_type,
+                                             analysis_results))
         story.append(PageBreak())
         
         # Executive Summary
@@ -253,31 +279,56 @@ class PDFReportGenerator:
         buffer.seek(0)
         return buffer.getvalue()
 
-    def _create_title_page(self, motor_data: Dict, report_type: str) -> List:
+    @staticmethod
+    def _sections_present(analysis_results: Dict) -> List[str]:
+        """analysis_results içinde GERÇEKTEN dolu olan rapor bölümleri.
+
+        PDF-NASA-4: kapak/özet/ek metinleri sabit iddialar yerine bu listeden
+        kurulur — boş koşuda hiçbir metodoloji iddiası basılmaz.
+        """
+        present = []
+        for key in SECTION_METHOD_REFERENCES:
+            value = (analysis_results or {}).get(key)
+            if isinstance(value, dict) and value:
+                present.append(key)
+        return present
+
+    def _create_title_page(self, motor_data: Dict, report_type: str,
+                           analysis_results: Optional[Dict] = None) -> List:
         """Create title page"""
         story = []
-        
+
         # Main title
         motor_type = motor_data.get('motor_type', 'Unknown').title()
         title = f"{motor_type} Motor Analysis Report"
         story.append(Paragraph(title, self.styles['CustomTitle']))
         story.append(Spacer(1, 0.5*inch))
-        
+
         # Motor name/designation
         motor_name = motor_data.get('motor_name', 'Unnamed Motor')
-        story.append(Paragraph(f"Motor Designation: <b>{motor_name}</b>", 
+        story.append(Paragraph(f"Motor Designation: <b>{motor_name}</b>",
                              self.styles['Heading2']))
         story.append(Spacer(1, 0.3*inch))
-        
+
         # Report info table
         report_info = [
             ['Report Type:', report_type.title()],
             ['Generated:', datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
             ['Motor Type:', motor_type],
             ['Analysis Software:', f'UZAYTEK HRMA v{_hrma_version()}'],
-            ['Standards:', 'NASA SP-125, NASA-STD-5012, NASA SP-8124']
         ]
-        
+
+        # 'References consulted' — yalnız ilgili bölüm bu koşuda gerçekten
+        # varsa basılır (PDF-NASA-4; eski koşulsuz 'Standards: NASA ...'
+        # satırının dürüst karşılığı).
+        present = self._sections_present(analysis_results or {})
+        if present:
+            refs = '; '.join(SECTION_METHOD_REFERENCES[key][1]
+                             for key in present)
+            # Paragraph: uzun referans metni hücre içinde sarılabilsin
+            report_info.append(['References consulted:',
+                                Paragraph(refs, self.styles['Normal'])])
+
         table = Table(report_info, colWidths=[2*inch, 3*inch])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
@@ -320,8 +371,27 @@ class PDFReportGenerator:
         if total_impulse is None:
             total_impulse = thrust * burn_time
 
+        # Metodoloji cümlesi DİNAMİK kurulur (PDF-NASA-4): eski sabit
+        # 'NASA-standard methodologies ... thermal, structural, and
+        # performance evaluations' cümlesi, o koşuda hiç termal/yapısal
+        # analiz olmasa da basılıyordu. Artık yalnız gerçekten dolu
+        # bölümler sayılır; hiçbiri yoksa iddia edilmez.
+        present = self._sections_present(analysis_results)
+        if present:
+            section_names = ', '.join(
+                SECTION_METHOD_REFERENCES[key][0].lower() for key in present)
+            methodology_line = (
+                f"This run includes the following computed sections: "
+                f"{section_names}. The methods actually used are listed on "
+                f"the title page under 'References consulted'.")
+        else:
+            methodology_line = (
+                "No analysis sections were supplied with this report; only "
+                "the values shown above and the motor configuration are "
+                "included.")
+
         summary_text = f"""
-        This report presents a comprehensive analysis of the rocket motor performance
+        This report presents an analysis of the rocket motor performance
         and characteristics. Key performance metrics include:
 
         • Maximum Thrust: {self._fmt(thrust)} N
@@ -329,42 +399,48 @@ class PDFReportGenerator:
         • Burn Time: {self._fmt(burn_time)} s
         • Total Impulse: {self._fmt(total_impulse)} N⋅s
 
-        The analysis was conducted using NASA-standard methodologies and includes
-        thermal, structural, and performance evaluations.
+        {methodology_line}
         """
-        
+
         story.append(Paragraph(summary_text, self.styles['Normal']))
         story.append(Spacer(1, 0.3*inch))
-        
-        # Safety assessment — YALNIZ gerçek güvenlik analizi varsa puan basılır.
-        # Eski kod 'safety' anahtarı hiç yokken bile bölümü basıyor, 0.0/10 ve
-        # "REVIEW REQUIRED" yazıyordu; kullanıcı hiç çalıştırılmamış bir
-        # analizin motorunu sıfır puanladığını sanıyordu (2026-07-19 denetimi).
-        safety = analysis_results.get('safety') or {}
-        rating = safety.get('overall_rating')
-        try:
-            rating = float(rating)
-        except (TypeError, ValueError):
-            rating = None
-        if rating is None or rating != rating:
-            rating = None
 
-        if rating is None:
+        # Güvenlik özeti — YALNIZ gerçek güvenlik analizi varsa basılır.
+        # Eski kod 'safety' anahtarı hiç yokken bile bölümü basıyor, 0.0/10 ve
+        # "REVIEW REQUIRED" yazıyordu (2026-07-19 denetimi).
+        # DENETİM DÜZELTMESİ (2026-07-28, PDF-710-5): 0-10 'overall_rating'
+        # ölçeği ve 7/10 kabul eşiği KALDIRILDI — depoda bu alanı üreten
+        # hiçbir kod yoktu ve eşiğin dayanağı yoktu. Özet artık
+        # /analyze_safety'nin gerçek risk_assessment alanlarından
+        # (risk_level + acceptability) basılır.
+        safety = analysis_results.get('safety') or {}
+        risk = safety.get('risk_assessment') or {}
+        if not isinstance(risk, dict) or not risk:
+            # Frontend risk_assessment'ı doğrudan da gönderebilir
+            risk = safety if isinstance(safety, dict) else {}
+        risk_level = risk.get('risk_level')
+        acceptability = risk.get('acceptability')
+
+        if risk_level or acceptability:
+            lines = ['<b>Safety Assessment (model risk scale)</b><br/>']
+            if risk_level:
+                lines.append(f'Overall risk level: {risk_level}<br/>')
+            if acceptability:
+                lines.append('Model risk acceptability: '
+                             f"{str(acceptability).replace('_', ' ')}<br/>")
+            lines.append(
+                'These classes come from the HRMA safety module risk '
+                'assessment (worst hazard axis governs). They are '
+                'model-internal classifications, not a regulatory or '
+                'certification judgement.')
+            safety_text = ''.join(lines)
+        else:
             safety_text = (
                 '<b>Safety Assessment: NOT EVALUATED IN THIS RUN</b><br/>'
-                'No safety analysis result was supplied with this report, so no '
-                'safety rating is reported. Run the safety analysis to include '
-                'this section.'
+                'No safety analysis result was supplied with this report, so '
+                'no safety assessment is reported. Run the safety analysis '
+                'to include this section.'
             )
-        else:
-            safety_status = ("ACCEPTABLE" if rating > SAFETY_RATING_ACCEPTABLE
-                             else "REVIEW REQUIRED")
-            safety_text = f"""
-        <b>Safety Assessment: {safety_status}</b><br/>
-        Overall Safety Rating: {rating:.1f}/10
-        (acceptance threshold {SAFETY_RATING_ACCEPTABLE:.0f}/10)<br/>
-        Critical Issues: {len(safety.get('critical_issues', []))}
-        """
 
         story.append(Paragraph(safety_text, self.styles['Normal']))
 

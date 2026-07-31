@@ -245,36 +245,48 @@ class SafetyAnalyzer:
         yield_safety_factor = yield_strength / hoop_stress
         ultimate_safety_factor = ultimate_strength / hoop_stress
         
-        # Failure probability estimation (simplified)
+        # Nitel arıza olabilirlik sınıfı — SF eşiklerinden türeyen vekil.
+        # DENETİM DÜZELTMESİ (2026-07-28, SAFE-PROB-2): eski kod SF'den
+        # basamak fonksiyonuyla SAYISAL olasılık (0.1/0.01/0.001) üretip
+        # bunu sabit 0.3/0.5/0.2 paylarıyla arıza modlarına dağıtıyordu.
+        # Bu sayıların hiçbirinin kaynağı yoktu: yük/dayanım dağılımı, COV,
+        # Weibull, stress-strength girişimi — hiçbiri modellenmiyor.
+        # Deterministik bir SF'den kalibre edilmiş olasılığa geçilemez;
+        # sayı KALDIRILDI, yerine SF bandına bağlı nitel sınıf ve dayanak
+        # beyanı raporlanır.
         if yield_safety_factor < 2.0:
-            failure_probability = 0.1  # 10% chance
+            failure_likelihood_class = 'HIGH'
         elif yield_safety_factor < 4.0:
-            failure_probability = 0.01  # 1% chance
+            failure_likelihood_class = 'MEDIUM'
         else:
-            failure_probability = 0.001  # 0.1% chance
-        
-        # Failure modes analysis
+            failure_likelihood_class = 'LOW'
+        failure_likelihood = {
+            'likelihood_class': failure_likelihood_class,
+            'basis': ('deterministic safety-factor proxy - '
+                      'not a calibrated probability'),
+        }
+
+        # Olası arıza modları — jenerik basınçlı kap kontrol listesi.
+        # Mod başına sayısal olasılık bilinçli olarak YOKTUR (eski
+        # 0.3/0.5/0.2 payları uydurmaydı); şiddet sınıfı niteldir.
         failure_modes = [
             {
                 'mode': 'Catastrophic Rupture',
-                'probability': failure_probability * 0.3,
                 'consequences': 'Complete vessel destruction, debris field',
                 'severity': 'CRITICAL'
             },
             {
                 'mode': 'Crack Propagation',
-                'probability': failure_probability * 0.5,
                 'consequences': 'Gradual pressure loss, possible flame jet',
                 'severity': 'HIGH'
             },
             {
                 'mode': 'Seal Failure',
-                'probability': failure_probability * 0.2,
                 'consequences': 'Pressure loss, possible fire',
                 'severity': 'MEDIUM'
             }
         ]
-        
+
         return {
             'hoop_stress_mpa': hoop_stress / 1e6,
             'material': material_key,
@@ -283,8 +295,11 @@ class SafetyAnalyzer:
             'ultimate_strength_mpa': ultimate_strength / 1e6,
             'yield_safety_factor': yield_safety_factor,
             'ultimate_safety_factor': ultimate_safety_factor,
-            'failure_probability': failure_probability,
+            'failure_likelihood': failure_likelihood,
             'failure_modes': failure_modes,
+            'failure_modes_basis': ('generic pressure-vessel failure-mode '
+                                    'checklist - not motor-specific; no '
+                                    'per-mode probabilities are computed'),
             'structural_integrity': 'SAFE' if yield_safety_factor >= 4.0 else 'MARGINAL' if yield_safety_factor >= 2.0 else 'UNSAFE',
             'recommended_inspection_interval': self._calculate_inspection_interval(yield_safety_factor)
         }
@@ -624,7 +639,9 @@ class SafetyAnalyzer:
                 'toxic_components': [],
                 'exposure_limits': {},
                 'detection_required': False,
-                'ppe_requirements': []
+                'ppe_requirements': [],
+                'guidance_basis': self._toxic_guidance_basis(),
+                'disclaimer_code': 'warn.safety.guidance_not_authoritative',
             }
         
         # Calculate worst-case release scenario
@@ -648,7 +665,35 @@ class SafetyAnalyzer:
             'detection_requirements': detection_requirements,
             'ppe_requirements': ppe_requirements,
             'exposure_monitoring': self._determine_exposure_monitoring(toxic_components),
-            'emergency_treatment': self._determine_emergency_treatment(toxic_components)
+            'emergency_treatment': self._determine_emergency_treatment(toxic_components),
+            # SAFE-TEXT-3 (2026-07-28): PPE/tıbbi/mesafe metinleri genel
+            # emniyet pratiğinden derlenmiş kontrol listeleridir; belirli bir
+            # standart maddesine veya SDS'e bağlanmamıştır. Compliance
+            # rozetlerindeki NOT_EVALUATED + disclaimer_code deseninin
+            # danışma-metni karşılığı: içerik korunur, dayanağı beyan edilir.
+            'guidance_basis': self._toxic_guidance_basis(),
+            'disclaimer_code': 'warn.safety.guidance_not_authoritative',
+        }
+
+    @staticmethod
+    def _toxic_guidance_basis() -> Dict:
+        """Toksik tehlike danışma metinlerinin yapılandırılmış kaynak beyanı."""
+        return {
+            'release_scenarios': ('generic sqrt(mass) scaling with '
+                                  'tool-chosen coefficients - not an '
+                                  'ERG/dispersion-model result'),
+            'ppe_requirements': ('general hypergolic/toxic handling '
+                                 'practice - not tied to a specific '
+                                 'standard clause'),
+            'emergency_treatment': ('general first-aid checklist - NOT '
+                                    'medical advice; this software is not '
+                                    'a physician'),
+            'verification_required': ('confirm against the propellant SDS, '
+                                      'current DOT Emergency Response '
+                                      'Guidebook guidance and the '
+                                      'responsible occupational physician / '
+                                      'industrial-hygiene assessment '
+                                      'before use'),
         }
     
     def _analyze_fire_hazards(self, propellant_type: str, propellant_mass: float, motor_data: Dict) -> Dict:
@@ -967,7 +1012,18 @@ class SafetyAnalyzer:
                 'on_site_capabilities': 'Basic first aid, oxygen, decontamination',
                 'hospital_notification': 'Notify trauma center of potential casualties',
                 'antidotes_required': self._determine_required_antidotes(toxic_hazards),
-                'treatment_protocols': self._generate_treatment_protocols(toxic_hazards)
+                'treatment_protocols': self._generate_treatment_protocols(toxic_hazards),
+                # SAFE-TEXT-3 (2026-07-28): buradaki antidot/tedavi satırları
+                # (piridoksin protokolü, 24-48 saat gözlem, dekontaminasyon)
+                # genel acil-durum planlama kontrol listesidir; bu yazılım
+                # hekim değildir ve metinlerin tıbbi atfı yoktur. İçerik
+                # korunur, çerçevesi açıkça beyan edilir.
+                'basis': ('general emergency-planning checklist - NOT '
+                          'medical advice; every item must be confirmed '
+                          'against the propellant SDS and with the '
+                          'responsible occupational physician before it is '
+                          'relied upon'),
+                'disclaimer_code': 'warn.safety.medical_guidance_requires_physician',
             }
         }
     
@@ -984,25 +1040,20 @@ class SafetyAnalyzer:
         toxic_risk = self._score_toxic_risk(toxic_hazards)
         fire_risk = self._score_fire_risk(fire_hazards)
         
-        # Weighted overall risk
-        weights = {
-            'structural': 0.25,
-            'pressure': 0.20,
-            'thermal': 0.15,
-            'explosive': 0.20,
-            'toxic': 0.10,
-            'fire': 0.10
-        }
-        
-        overall_risk_score = (
-            structural_risk * weights['structural'] +
-            pressure_risk * weights['pressure'] +
-            thermal_risk * weights['thermal'] +
-            explosive_risk * weights['explosive'] +
-            toxic_risk * weights['toxic'] +
-            fire_risk * weights['fire']
+        # Genel risk = EN KÖTÜ EKSEN (max).
+        # DENETİM DÜZELTMESİ (2026-07-28, SAFE-PROB-2): eski kod kaynaksız
+        # 0.25/0.20/0.15/0.20/0.10/0.10 ağırlıklarıyla ortalama alıyordu.
+        # Ağırlıkların hiçbir atfı/kalibrasyonu yoktu ve ortalama, KRİTİK
+        # tek bir ekseni sulandırıyordu: yapısal risk 5.0 iken diğerleri
+        # düşükse genel skor ~2 çıkıp motor 'LOW/ACCEPTABLE' damgalanıyordu.
+        # Emniyet pratiğinde kabul edilebilirliği azaltılmamış EN KÖTÜ
+        # tehlike yönetir; max birleşimi uydurma sayı içermez ve mevcut
+        # sınıflandırma eşikleriyle (<=2 LOW ... >4 CRITICAL) uyumludur.
+        overall_risk_score = max(
+            structural_risk, pressure_risk, thermal_risk,
+            explosive_risk, toxic_risk, fire_risk
         )
-        
+
         # Risk level classification
         if overall_risk_score <= 2.0:
             risk_level = 'LOW'
@@ -1029,6 +1080,9 @@ class SafetyAnalyzer:
             'overall_risk_score': overall_risk_score,
             'risk_level': risk_level,
             'acceptability': acceptability,
+            'aggregation_basis': ('worst-axis (max of individual risk '
+                                  'scores) - uncalibrated weighted '
+                                  'averaging removed 2026-07-28'),
             'risk_matrix': self._generate_risk_matrix(),
             'mitigation_priority': self._determine_mitigation_priority(
                 structural_risk, pressure_risk, thermal_risk,
@@ -1308,6 +1362,15 @@ class SafetyAnalyzer:
             'hazard_distance_m': round(distance_m, 0),  # tüketici bu adı okuyor
             'facility_type': facility_type,
             'scenario': 'Worst-case full inventory release, neutral weather (F stability)',
+            # SAFE-TEXT-3 (2026-07-28): katsayıların ERG/NIOSH/SDS atfı YOK.
+            # Sayı korunur (planlama için tamamen silmek kullanıcıyı bilgisiz
+            # bırakır) ama dayanağı açıkça beyan edilir; doğrulama şartı
+            # disclaimer_code ile arayüze taşınır.
+            'source': ('generic sqrt(mass) scaling with tool-chosen '
+                       'per-component coefficients - not an ERG/dispersion-'
+                       'model result; verify against the propellant SDS and '
+                       'current DOT Emergency Response Guidebook guidance'),
+            'disclaimer_code': 'warn.safety.toxic_distance_basis_unverified',
         }
 
     def _determine_toxic_detection_requirements(self, toxic_components: List[str]) -> List[str]:
@@ -1403,6 +1466,13 @@ class SafetyAnalyzer:
             'public_distance_m': round(max(60.0, 60.0 * base), 0),
             # _generate_emergency_procedures bu anahtarı okuyor
             'radiant_heat_m': round(max(15.0, 20.0 * base), 0),
+            # SAFE-TEXT-3 (2026-07-28): 20*m^(1/3) katsayılarının NFPA/QD
+            # tablosu atfı yok. Sayılar korunur, dayanağı beyan edilir.
+            'source': ('generic cube-root mass scaling chosen for this '
+                       'tool - not taken from NFPA or quantity-distance '
+                       'tables; verify against the applicable range safety '
+                       'rules before use'),
+            'disclaimer_code': 'warn.safety.fire_distance_basis_unverified',
         }
 
     def _identify_ignition_sources_control(self) -> List[str]:

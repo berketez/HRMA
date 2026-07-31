@@ -26,43 +26,114 @@
     var POLL_MS = 700;
 
     // -----------------------------------------------------------------------
-    // Sürüm notlarının dili (v2.6.25 düzeltmesi)
+    // Sürüm notlarının dili (v2.6.25 düzeltmesi, 2026-07-29 genişletmesi)
     //
     // SORUN: Güncelleme penceresindeki notlar sunucudan GitHub sürüm
     // GÖVDESİ olarak geliyor (update_checker.py -> release['body']). O gövde
     // tek dilde yazıldığı için Türkçe arayüzde "Güncellemek ister misiniz?"
     // sorusu Türkçe, hemen altındaki sürüm notu İngilizce çıkıyordu.
     //
-    // ÇÖZÜM: Sürüm gövdesi artık iki dili de taşıyor ve bölümler makine
-    // tarafından okunabilir imlerle ayrılıyor:
-    //     <!--HRMA-LANG:en-->  ... İngilizce ...
-    //     <!--HRMA-LANG:tr-->  ... Türkçe ...
-    // Burada arayüz diline uyan bölüm ayıklanır.
+    // Not gövdesi üç biçimde gelebilir; üçü de burada çözülür:
     //
-    // GERİYE UYUMLULUK: v2.6.2 ve öncesinin gövdelerinde bu im YOK. İm
-    // bulunmazsa metnin tamamı gösterilir — eski sürümlerin notları da
-    // görünmeye devam eder.
+    //   1. Sunucu dile AYRILMIŞ alan gönderir (info.notes_tr / info.notes_en).
+    //      Tercih edilen yol: gövde sunucuda kırpılmadan önce bölündüğü için
+    //      uzun notlarda da doğru dil gelir.
+    //
+    //   2. Gövde <!--HRMA-LANG:xx--> imlerini taşır (GitHub API yolu; imler
+    //      packaging/release_notes_v*.md dosyasında durur ve publish_release.sh
+    //      onları zorunlu kılar). İmlerden bölünür.
+    //
+    //   3. İm yok ama gövde iki dilli. Bu, API kotası dolduğunda devreye giren
+    //      Atom yedek yolunda OLAĞAN durumdur: GitHub'ın ürettiği HTML,
+    //      yorum satırlarını içermez (2026-07-29'da canlı releases.atom
+    //      akışında ölçüldü — im sayısı 0), üstelik sunucudaki etiket
+    //      temizliği de aynı imleri silerdi. Bölümler o zaman kendi
+    //      "HRMA v<sürüm>" başlıklarından ayrılır ve hangi bölümün Türkçe
+    //      olduğu Türkçe'ye özgü harflerden anlaşılır (yayın kapısı,
+    //      İngilizce bölümde Türkçe harf bulunmamasını zorunlu kılar:
+    //      tests/test_v262_release_gate.py).
+    //
+    // Hiçbiri tutmazsa gövde olduğu gibi gösterilir — elde tek metin odur,
+    // gizlemek kullanıcıyı bilgisiz bırakır.
     // -----------------------------------------------------------------------
     var LANG_MARK = /<!--\s*HRMA-LANG:([a-z]{2})\s*-->/gi;
+    // İm silinmiş gövdede dil bölümlerinin sınırı: her bölüm kendi sürüm
+    // başlığıyla başlar ('# HRMA v2.6.25 — ...'; Atom yolunda '#' düşer).
+    var SECTION_HEAD = /^[ \t]*#{0,3}[ \t]*HRMA[ \t]+v?\d/i;
+    var TR_LETTERS = /[çğıİöşüÇĞÖŞÜ]/g;
 
-    function pickLanguageSection(text) {
-        if (!text) return '';
-        var lang = (window.I18N && window.I18N.lang) ? window.I18N.lang : 'en';
-        var bolumler = {};
+    function activeLang() {
+        return (window.I18N && window.I18N.lang) ? window.I18N.lang : 'en';
+    }
+
+    /* Tek tük Türkçe harf (özel ad, alıntı) bölümü Türkçe yapmaz; birkaç
+       satırlık gerçek Türkçe metinde bu harfler onlarca kez geçer. */
+    function looksTurkish(text) {
+        var hits = String(text || '').match(TR_LETTERS);
+        return !!hits && hits.length >= 3;
+    }
+
+    function sectionsByMarker(text) {
+        var bolumler = null;
         var son = null;
         var sonSonu = 0;
         var m;
         LANG_MARK.lastIndex = 0;
         while ((m = LANG_MARK.exec(text)) !== null) {
+            bolumler = bolumler || {};
             if (son !== null) bolumler[son] = text.slice(sonSonu, m.index);
             son = m[1].toLowerCase();
             sonSonu = m.index + m[0].length;
         }
-        if (son === null) return text;          // im yok: eski sürüm gövdesi
+        if (son === null) return null;
         bolumler[son] = text.slice(sonSonu);
+        return bolumler;
+    }
 
-        var secilen = bolumler[lang] || bolumler.en || bolumler[Object.keys(bolumler)[0]];
+    /* Yalnız GERÇEKTEN iki dilli gövdede bölme yapar: tek dilli bir not
+       (eski sürümler, elle yazılmış kısa notlar) olduğu gibi kalsın diye
+       iki dil de bulunamazsa null döner. */
+    function sectionsByHeading(text) {
+        var lines = String(text).split('\n');
+        var bloklar = [];
+        var cur = [];
+        for (var i = 0; i < lines.length; i++) {
+            if (SECTION_HEAD.test(lines[i]) && cur.length) {
+                bloklar.push(cur.join('\n'));
+                cur = [];
+            }
+            cur.push(lines[i]);
+        }
+        if (cur.length) bloklar.push(cur.join('\n'));
+        if (bloklar.length < 2) return null;
+
+        var bolumler = {};
+        for (var j = 0; j < bloklar.length; j++) {
+            var dil = looksTurkish(bloklar[j]) ? 'tr' : 'en';
+            bolumler[dil] = bolumler[dil]
+                ? bolumler[dil] + '\n' + bloklar[j] : bloklar[j];
+        }
+        return (bolumler.tr && bolumler.en) ? bolumler : null;
+    }
+
+    function pickLanguageSection(text) {
+        if (!text) return '';
+        var lang = activeLang();
+        var bolumler = sectionsByMarker(text) || sectionsByHeading(text);
+        if (!bolumler) return text;             // tek dilli gövde: aynen göster
+        var secilen = bolumler[lang] || bolumler.en
+            || bolumler[Object.keys(bolumler)[0]];
         return (secilen || '').trim();
+    }
+
+    /* Güncelleme yanıtından arayüz diline uyan not gövdesini seçer.
+       Sunucunun dile ayrılmış alanları varsa onlar kazanır: gövde orada
+       kırpılmadan önce bölünmüştür. */
+    function notesForActiveLang(info) {
+        if (!info) return '';
+        var ayrilmis = info['notes_' + activeLang()];
+        if (ayrilmis) return String(ayrilmis).trim();
+        return pickLanguageSection(info.notes);
     }
 
     function el(tag, style, html) {
@@ -100,7 +171,7 @@
                'HRMA {latest} has been released (installed version: {current}). '
                + 'Would you like to update now?')));
 
-        var notesText = pickLanguageSection(info.notes);
+        var notesText = notesForActiveLang(info);
         if (notesText) {
             var notes = el('div',
                 'max-height:120px;overflow-y:auto;font-size:12px;line-height:1.5;' +

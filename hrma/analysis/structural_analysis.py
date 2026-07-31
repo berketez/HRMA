@@ -419,15 +419,24 @@ class StructuralAnalyzer:
         }
     
     def analyze_structure(self, motor_data: Dict, material: str = 'steel_4130',
-                         design_pressure_factor: float = 1.5) -> Dict:
+                         design_pressure_factor: float = 1.5,
+                         design_safety_factor: Optional[float] = None,
+                         actual_wall_thickness: Optional[float] = None) -> Dict:
         """
         Complete structural analysis
-        
+
         Args:
             motor_data: Motor performance and geometry data
             material: Material type
             design_pressure_factor: Safety factor for design pressure
-            
+            design_safety_factor: Tasarım emniyet katsayısı hedefi (v2.6.26 —
+                arayüzün 'Safety Factor' alanı; _analyze_chamber_wall bunu
+                zaten destekliyordu ama buradan İLETİLMİYORDU, alan ölüydü).
+                None -> malzeme kaydındaki eski varsayılan.
+            actual_wall_thickness: Kullanıcının GERÇEK cidar kalınlığı [m].
+                Verilirse hazne cidarı DOĞRULAMA modunda değerlendirilir
+                (SF gerçek cidardan); None -> eski boyutlandırma modu.
+
         Returns:
             Structural analysis results
         """
@@ -470,7 +479,9 @@ class StructuralAnalyzer:
             der = self._derate_strength(mat_props, T_derate)
             ana = self._analyze_chamber_wall(
                 design_pressure, chamber_diameter, chamber_length, mat_props,
-                derating=der, wall_delta_T=dT
+                derating=der, wall_delta_T=dT,
+                actual_thickness=actual_wall_thickness,
+                design_safety_factor=design_safety_factor
             )
             scenarios[name] = {'analysis': ana, 'derating': der,
                                'derating_temp_K': T_derate, 'delta_T_K': dT}
@@ -505,7 +516,10 @@ class StructuralAnalyzer:
         # 27.74 MPa -> 18.49 MPa; basincli durum SF 181.09 -> 161.66.
         # Kaynak: NASA SP-8007 (1968) — basinc stabilizasyonu yalnizca fiilen
         # mevcut olan basinctan kredi alir.
-        chamber_t = chamber_analysis['recommended_thickness'] / 1000.0  # m
+        # v2.6.26: burkulma DEĞERLENDİRİLEN cidarla yapılır — doğrulama
+        # modunda kullanıcının gerçek cidarı, boyutlandırma modunda önerilen
+        # kalınlık (o modda iki değer zaten aynıdır).
+        chamber_t = chamber_analysis['wall_thickness_used_mm'] / 1000.0  # m
         axial_force = float(motor_data.get('thrust', 0.0) or 0.0)  # N
         buckling_analysis = self._check_buckling(
             chamber_pressure, chamber_diameter / 2.0, chamber_t,
@@ -1306,17 +1320,30 @@ class StructuralAnalyzer:
         """Calculate structural weight"""
         
         density = mat_props['density']
-        
-        # Chamber weight
-        chamber_thickness = chamber_analysis['recommended_thickness'] / 1000  # m
+
+        # v2.6.26 — KÜTLE DEĞERLENDİRİLEN CİDARDAN HESAPLANIR.
+        # Burada `recommended_thickness` kullanılıyordu: kullanıcı 5 mm cidar
+        # girse bile kütle, modülün ÖNERDİĞİ 15,9 mm'den hesaplanıyordu
+        # (ölçüldü: 230,7 kg yerine 67,9 kg olmalıydı). Doğrulama modunda
+        # kullanıcının tasarımı geçerlidir; boyutlandırma modunda iki değer
+        # zaten aynıdır. Aynı hata burkulma kontrolünde de vardı ve bu
+        # sürümde düzeltildi — kütle kalemi atlanmıştı.
+        chamber_thickness = (
+            chamber_analysis.get('wall_thickness_used_mm')
+            or chamber_analysis['recommended_thickness']) / 1000  # m
         chamber_diameter = chamber_analysis['diameter'] / 1000  # m
         chamber_length = chamber_analysis['length'] / 1000  # m
-        
+
         chamber_volume = np.pi * ((chamber_diameter/2 + chamber_thickness)**2 - (chamber_diameter/2)**2) * chamber_length
         chamber_weight = chamber_volume * density
-        
-        # Nozzle weight (simplified)
-        nozzle_weight = chamber_weight * 0.3  # Estimate as 30% of chamber weight
+
+        # Lüle kütlesi: kamara kütlesinin %30'u kabul edilir. Bu bir GEOMETRİ
+        # HESABI DEĞİL, mühendislik başparmak kuralıdır; lülenin kendi
+        # malzemesi (grafit 1800 vs çelik 7850 kg/m³) burada hiç görünmez.
+        # Çıktıda 'nozzle_weight_basis' ile AÇIKÇA beyan edilir ki kullanıcı
+        # bunu hesaplanmış bir sayı sanmasın. Gerçek lüle kütlesi
+        # nozzle_design modülünün geometri+malzeme çözümünden gelir.
+        nozzle_weight = chamber_weight * 0.3
         
         # End caps weight
         end_cap_thickness = min(end_cap_analysis['flat_head_thickness'], end_cap_analysis['dished_head_thickness']) / 1000
@@ -1331,6 +1358,14 @@ class StructuralAnalyzer:
             'nozzle_weight': nozzle_weight,    # kg
             'end_caps_weight': end_caps_weight,  # kg
             'total_weight': total_weight,      # kg
+            'wall_thickness_used_mm': chamber_thickness * 1000,
+            'chamber_weight_basis': (
+                'cylindrical shell volume x material density, using the '
+                'evaluated wall thickness'),
+            'nozzle_weight_basis': (
+                'ESTIMATE: 30% of chamber weight (engineering rule of thumb, '
+                'not a geometry calculation; the nozzle material is not '
+                'reflected here)'),
             'weight_breakdown': {
                 'chamber_percent': chamber_weight / total_weight * 100,
                 'nozzle_percent': nozzle_weight / total_weight * 100,

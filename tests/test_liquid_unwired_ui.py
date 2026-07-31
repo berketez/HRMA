@@ -57,10 +57,15 @@ CATEGORY_TEXT = {
 
 # Çözücü değeri gösterilen (karşılaştırma) alanlar — değerin yanıttaki yeri
 # alan başına farklı olduğu için şablonda bir konum çözümleyicisi vardır.
+# v2.6.26: motor 'turbine_inlet_pressure' alanını (öncelik genişleme
+# oranında; ima edilen giriş basıncı yalnız karşılaştırılır) ve oda çapı
+# öncelik aldığı koşularda 'contraction_ratio' alanını da bu kategoriyle
+# beyan etmeye başladı; ikisi de şablonda YALNIZ çözümleyici anahtarı olarak
+# geçer (test_comparison_ids_appear_only_as_resolver_keys bunu kilitler).
 COMPARISON_IDS = {
     'throat_diameter', 'fuel_injection_velocity', 'oxidizer_injection_velocity',
     'fuel_orifice_diameter', 'oxidizer_orifice_diameter',
-    'target_thrust_to_weight',
+    'target_thrust_to_weight', 'turbine_inlet_pressure', 'contraction_ratio',
 }
 
 

@@ -287,17 +287,39 @@
             ['burn_time', 'Burn Time (s)', 10, 0.5, 'common.f.burnTimeS'],
             ['chamber_temperature', 'Gas Temperature (K, 0 = skip thermal)', 0, 50,
              'common.f.gasTemperatureSkip'],
+            // İtki alanı yoktu, bu yüzden hesap ucuna hiç gitmiyordu ve
+            // eksenel burkulma DAİMA sıfır basma yüküyle koşuyordu
+            // (uygulanan gerilme 0,0 MPa, emniyet katsayısı boş "—").
+            // Varsayılan 0 = "eksenel yükü atla" (app.py:4398 `if
+            // data.get('thrust')`), yani eski davranış korunur; sonuç
+            // varsa fromResults gerçek itkiyi doldurur.
+            ['thrust', 'Thrust (N)', 0, 50, 'common.f.thrustN'],
             ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
         ],
         fromResults: function (r) {
-            const m = (r && r.motor) || r || {};
+            const m = U.motorDict(r);
+            // BİRİM (2026-07-30 ölçümü): bu üç uzunluk HAM okunuyordu ve
+            // alanlar METRE etiketli. Hibritte doğruydu, ama katı motorda
+            // chamber_diameter 75,0 (mm) ve sıvıda 120,0 (mm) geliyor —
+            // panel bunları 75 m ve 120 m sanıyordu. Merkezi çözümleyici
+            // motor tipine göre metreye getiriyor.
             return {
                 chamber_pressure: m.chamber_pressure,
-                chamber_diameter: m.chamber_diameter,
-                chamber_length: m.chamber_length,
-                throat_diameter: m.throat_diameter,
-                burn_time: m.burn_time,
+                chamber_diameter: U.readLengthM(r, 'chamber_diameter'),
+                chamber_length: U.readLengthM(r, 'chamber_length'),
+                throat_diameter: U.readLengthM(r, 'throat_diameter'),
+                burn_time: U.readBurnTime(r),
                 chamber_temperature: m.chamber_temperature,
+                // MALZEME hiç döndürülmüyordu: alan varsayılanı steel_4130,
+                // arayüz varsayılanı ise steel_304. Aynı oda için ölçüm:
+                // steel_4130 SF 4,512 / cidar 2,33 mm  <- panelin gösterdiği
+                // ss_304     SF 1,309 / cidar 7,46 mm  <- kullanıcının seçtiği
+                // Panel 3,4 kat iyimser emniyet katsayısı gösteriyordu.
+                material: U.readChamberMaterial(r),
+                // İTKİ: hesap ucu (app.py:4398) 'thrust' verilirse eksenel
+                // burkulmayı gerçek basma yüküyle hesaplıyor; verilmezse
+                // eksenel kuvvet 0 kalıyor ve burkulma kontrolü ölü kalıyordu.
+                thrust: U.readThrust(r),
             };
         },
         render: render,

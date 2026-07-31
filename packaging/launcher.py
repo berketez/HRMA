@@ -588,6 +588,13 @@ def main():
     port, already_running = _pick_port()
     url = "http://127.0.0.1:%d" % port
 
+    # Köken kapısına gerçekte bağlandığımız portu bildir (hrma/app.py bunu
+    # import anında app.config['HRMA_SELF_PORT'] içine alır). Bilinmezse kapı
+    # 127.0.0.1'in HERHANGİ bir portundan gelen isteği kabul etmek zorunda
+    # kalıyordu — yerel bir geliştirme sunucusu ya da kötü niyetli yerel
+    # uygulama bu boşluktan CSRF yapabiliyordu.
+    os.environ["HRMA_SELF_PORT"] = str(port)
+
     if already_running:
         print()
         print("  HRMA is already running, opening a window: %s" % url)

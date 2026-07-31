@@ -437,6 +437,12 @@ class TestFieldFixV2625:
         atlamasına yol açar — v2.6.2'yi yayınlayan hatanın ta kendisi.
 
         O yayında CI elle teyit edildi; bir dahakine kimse teyit etmeyebilir.
+
+        v2.6.26 güncellemesi: bölümler eskiden '3/5' gibi sabit sayaçlarla
+        aranıyordu; kapıya yeni bir bölüm eklenince (6/6 macOS imzası) sayaç
+        kaydı ve test kapının İÇERİĞİNE değil NUMARASINA kırılmış oldu.
+        Bölümler artık ``baslik "..."`` çağrılarının BAŞLIK METNİYLE bulunur;
+        kapı sayısı kaç olursa olsun denetim aynı kalır.
         """
         src = _read('packaging/release_gate.sh')
 
@@ -450,12 +456,29 @@ class TestFieldFixV2625:
             return '\n'.join(s for s in metin.split('\n')
                              if not s.lstrip().startswith('#'))
 
-        ci_bolumu = _kod(src[src.index('3/5'):src.index('4/5')])
+        def _bolum(baslik_parcasi):
+            """Başlığı verilen bölümün gövdesi (bir sonraki bölüme kadar)."""
+            parcalar = re.split(r'baslik\s+"([^"]*)"', src)
+            basliklar = parcalar[1::2]
+            eslesen = [i for i, b in enumerate(basliklar)
+                       if baslik_parcasi in b]
+            assert len(eslesen) == 1, (
+                "kapıda '%s' başlıklı TEK bölüm beklenirdi, bulunan: %s"
+                % (baslik_parcasi, [basliklar[i] for i in eslesen]))
+            return parcalar[2 + 2 * eslesen[0]]
+
+        ci_bolumu = _kod(_bolum('GitHub Actions'))
         for bayrak in ('HIZLI', 'TAKIMI_ATLA', 'KAPIYI_ATLA'):
             assert bayrak not in ci_bolumu, (
                 'CI kontrolü %s bayrağıyla atlanabilir hâle gelmiş — '
                 'bu adım koşulsuz çalışmalı' % bayrak)
+        # CI yeşil değilse kapı GERÇEKTEN kapanmalı: bölümde hem başarısızlık
+        # kaydı hem gerçek kontrol çağrısı (gh run list) bulunmalı.
+        assert 'basarisiz' in ci_bolumu, (
+            'CI bölümü başarısızlık kaydetmiyor — kapı kapanamaz')
+        assert 'gh run list' in ci_bolumu, (
+            'CI bölümü gerçek CI durumunu sorgulamıyor')
         # Yerel tam takım ise atlanabilir olmalı (CI zaten koşturuyor)
-        takim_bolumu = _kod(src[src.index('4/5'):src.index('5/5')])
+        takim_bolumu = _kod(_bolum('Tam test takımı'))
         assert 'TAKIMI_ATLA' in takim_bolumu, (
             'yerel tam takımı atlama seçeneği kaybolmuş')

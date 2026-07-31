@@ -56,7 +56,8 @@ you can ignore them entirely.
 - **Analysis Deck (13 panels)**: tabbed engineering-analysis deck that pre-fills from the current motor result: Structural Safety (Lamé/SP-8007/fatigue), Thermal Safety (Bartz + axial wall profile), Comprehensive Safety, Advanced Performance (3D surface, Mach contour), Pressure Vessel (MAWP/burst), Thermal Protection (ablative/heat-sink/radiation-cooled), Bolted Joint (Shigley), Nozzle Flow (quasi-1D), User Data Validation (static-fire CSV), Regenerative Cooling (liquid), Feed System (slosh/pressurant/water hammer), Injector Design, and Comparative Analysis
 - **Quasi-1D Nozzle Flow**: compressible quasi-1D solver with regime detection, P(x)/M(x) profiles and CF, replacing the former placeholder CFD panel
 - **Staged Combustion Kinetics**: three explicit fidelity levels (Fast Screening / Engineering / High-Fidelity finite-rate Cantera integration) with honest `fidelity_used` reporting and graceful fallback when Cantera is absent
-- **Materials Database**: 11 engineering materials (steels, aluminum, titanium, Inconel, coppers, graphite, ablative liner) with temperature-derated properties feeding the structural and thermal panels
+- **Materials Database**: 24 engineering materials (steels, aluminium alloys, titanium, Inconel, coppers, refractories, graphite, carbon-carbon, ablative liner) with temperature-derated properties feeding the structural and thermal panels
+- **Material Verdicts (v2.6.26)**: the selected nozzle material gets a throat thermal margin (Bartz axial profile at the throat station vs its allowable temperature) and, where a published coefficient band exists, an erosion recession rate and throat growth — tungsten has no published band and is reported as "no published data" rather than given an invented coefficient; the selected injector material sizes the injector plate (stress, safety factor, required thickness, mass) from an edge-fixed circular plate with an ASME ligament efficiency
 - **Injector Design Module**: seven element types with the Dyer NHNE two-phase model for self-pressurizing N₂O (not the optimistic single-phase orifice equation)
 - **Gas Radiation (Leckner)**: chamber radiation uses Leckner H₂O/CO₂ gas emissivity correlations instead of a black-body assumption
 - **Native Desktop App**: opens in its own window (macOS WKWebView / Windows WebView2, no Chrome required), splash screen appears in ~1 s while engines load in the background; closing the window closes the app
@@ -234,6 +235,68 @@ HRMA/
 - A preliminary-design and educational rocket-propulsion analysis tool
   (not a flight-qualification tool — see the scope note above)
 - Last Updated: July 2026
+
+**v2.6.26 is a wiring release.** It adds no physics. An empirical audit of the
+hybrid page measured, field by field, whether typing a value into an input
+changed any leaf of the output. Eight fields changed nothing at all, and the
+release connects them:
+
+- **`Safety Factor`** now sets the structural module's design target — and,
+  because the real wall thickness is passed with it, the module switches from
+  *sizing* to *verification*. That matters more than the field itself: in
+  sizing mode the reported factor is by construction `target × manufacturing
+  allowance`, i.e. your own input read back to you. It is now computed from
+  pressure, diameter, material and thickness, so it reports a different (and
+  measured) number than earlier releases did for the same design.
+- **`Chamber Length Override`** overrides the L\*-derived chamber length, and
+  is *rejected with a stated reason* when the grain plus pre-combustion
+  chamber would not fit — not silently trimmed to something you did not ask
+  for.
+- **`Nozzle Material`** drives a throat thermal margin (Bartz axial profile
+  solved at the throat with that material against its allowable temperature)
+  and an erosion estimate. Graphite and carbon-carbon have published
+  coefficient bands and get numbers; **tungsten does not, so no coefficient is
+  invented — the result says "no published data".** Copper is labelled
+  "regeneratively cooled" in the interface and is solved on that declared
+  assumption.
+- **`Injector Material`** sizes the injector plate: bending stress, safety
+  factor, required thickness and mass, from an edge-fixed circular plate
+  (Roark's Formulas Table 11.2, case 10b) with an ASME BPVC PG-52 ligament
+  efficiency for the drilled area.
+- **`Swirl Chamber Diameter`** and **`Tangential Entry Angle`** enter the
+  Giffen-Muraszew pressure-swirl solution (`K = A_p/(D_s·d_o)`, with the angle
+  as the target spray half-angle driving the inverse solver). The inverse
+  solver was already in the repository; the fields simply were not attached
+  to it.
+- **`Combustion Type` (finite area)** and **`Contraction Ratio`** now solve
+  the subsonic root of the isentropic area relation for the chamber Mach
+  number and report the injector-face over-pressure that follows.
+
+Two fields were **removed** because each was a second, unwired copy of a
+concept that already had a working field: `Nozzle Contour` (its parabolic
+option moved into `Nozzle Type`, which the solver reads) and `Injection
+Velocity` (wired equivalent: `Target Velocity` in the showerhead panel — and
+the old field was overwritten with the solver's own exit velocity after every
+run, so the input was replaced by the result).
+
+Two shipped bugs were fixed:
+
+- Selecting an impingement injector and leaving the impingement angle empty
+  crashed `/calculate` with `HTTP 500` (a constant was used but never
+  imported).
+- When the injector circuit model could not size the selected element type,
+  the result was filled with **12-hole showerhead constants and labelled with
+  the type the user had chosen** — a fabricated hole plan someone could take
+  to a machine shop. It now returns `status: not_analyzed` with the reason,
+  and the warning reaches the screen instead of the server log.
+
+Also in this release: the hybrid engine's design warnings now actually reach
+the warnings panel (they were collected and discarded, so silent material
+fallbacks stayed silent); archive entry names and spreadsheet cells are
+sanitised on export (ZIP-Slip and CSV/XLSX formula injection); the local API's
+Host gate applies to `GET`/`HEAD`/`OPTIONS` as well, closing a DNS-rebinding
+read path; and the chemical database no longer writes to disk at import time,
+so a read-only installation starts.
 
 **v2.6.25 is a field fix.** v2.6.2 shipped with a red CI run and was unusable
 on a real machine: a fixed CORS origin list recognised only port 8080, while

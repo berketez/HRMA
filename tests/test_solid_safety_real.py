@@ -261,8 +261,25 @@ class TestGrainStressIsRealElasticity:
         res = solid()['structural_analysis']['grain_structural']
         assert res['grain_property_source']
         assert 'case-bonded' in res['bonding_assumption']
-        assert set(SOLID_GRAIN_MECHANICS) <= {
-            'apcp', 'double_base', 'sugar', 'knsu', 'black_powder'}
+        # Yayımlanmış mekanik verisi olan TABAN kayıtlar:
+        TABAN = {'apcp', 'double_base', 'sugar', 'knsu', 'black_powder'}
+        # Bunların dışındaki her anahtar, mevcut bir kayda TAKMA AD olmak
+        # zorundadır — yani yeni bir modül/Poisson/uzama sayısı UYDURULMAMIŞ
+        # olmalı. (Eskiden bu satır düz bir beyaz listeydi; v2.6.26'da
+        # kndx/knsb/kner şeker ailesine takma ad olarak bağlanınca kırıldı.
+        # Öncesinde bu üçü sözlükte YOKTU ve motor sessizce HTPB kompozit
+        # kaydına düşüyordu: KNDX grainine 6 MPa modül / %35 uzama atanıyor,
+        # gerinim emniyeti 11.7 "Low" çıkıyordu; doğru şeker kaydıyla 0.91
+        # "High". Yani anahtarı eklemek düzeltmenin kendisiydi.)
+        taban_kimlikler = {id(SOLID_GRAIN_MECHANICS[k]) for k in TABAN
+                           if k in SOLID_GRAIN_MECHANICS}
+        for ad, kayit in SOLID_GRAIN_MECHANICS.items():
+            if ad in TABAN:
+                continue
+            assert id(kayit) in taban_kimlikler, (
+                f"'{ad}': taban kayitlarin hicbirine takma ad degil — bu "
+                f"formulasyona ozgu yayimlanmis veri yoksa sayi uydurulmus "
+                f"olabilir")
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +336,14 @@ class TestOverridesActuallyApply:
     def test_liner_overrides_change_mass_and_thermal(self):
         base = solid()['thermal_analysis']['heat_transfer']
         changed = solid({'liner_thickness': 8})['thermal_analysis']['heat_transfer']
-        assert changed['insulation_thickness_mm'] != base['insulation_thickness_mm']
+        # Liner ile yalıtım AYRI alanlardır ve motor bunları bilerek ayırır:
+        # yalıtım çap zincirine girer (kasa iç çapı, kütle), liner yalnız
+        # termal+kütle katmanıdır (bkz. solid_rocket_engine.py, "Liner (bond
+        # katmanı) çap zincirine BİLEREK eklenmedi"). Bu test eskiden liner'ı
+        # değiştirip YALITIM alanına bakıyordu; 0.0 != 0.0 ile düşüyordu.
+        # Doğru sözleşme: liner girdisi kendi alanına yansır ve ısıl dirence
+        # girer (_insulation_resistance = (t_yalitim + t_liner)/k).
+        assert changed['liner_thickness_mm'] != base['liner_thickness_mm']
         assert changed['insulation_effectiveness'] != base['insulation_effectiveness']
 
     def test_declared_overall_efficiency_is_reported_not_double_counted(self):

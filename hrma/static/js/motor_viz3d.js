@@ -38,8 +38,14 @@
 
     // Plume fiziği (görev 6): radyal saçılım referans çıkış yarım açısı ve
     // deniz seviyesinde ~ideal genişleme oranı (pe ≈ pa) yaklaşımı.
+    // Görsel normalizasyon çapası: 8 derece yarı açılı bir bell nozul
+    // sahnede "referans genişlikte" bir jet üretir. Bu bir FİZİK sabiti
+    // değil, saçılımı ekran ölçeğine oturtan bir katsayıdır — jetin
+    // gerçek açısı çözücünün nozul açısından ve pe/pa oranından gelir.
     var PLUME_REF_EXIT_ANGLE_DEG = 8;
-    var IDEAL_EXPANSION_EPS = 8;
+    // IDEAL_EXPANSION_EPS (=8) KALDIRILDI (v2.6.26): pe/pa oranını
+    // `(8/eps)^1.15` diye tahmin etmek için kullanılıyordu; hem 8 hem 1.15
+    // dayanaksızdı. Artık gerçek çıkış ve ortam basıncı okunuyor.
 
     // ------------------------------------------------------------------
     // Yardımcılar
@@ -230,10 +236,157 @@
         return INJECTOR_TYPE_ALIASES[String(raw).toLowerCase()] || 'showerhead';
     }
 
+    // ------------------------------------------------------------------
+    // Enjektör kaynağı — sunucudaki _injector_spec ile AYNI kural (v2.6.26)
+    // ------------------------------------------------------------------
+    //
+    // Hibrit /calculate İKİ bağımsız enjektör çözücüsü koşturur:
+    //   1) enjektör paneli  -> injector_results  (ekran tablosu + 2B şema)
+    //   2) motorun devre modeli -> injector_design (N2O'da doyma basıncı)
+    // Ölçüldü (K2 denetimi): aynı koşuda panel 125 delik x 0,957 mm derken bu
+    // modül injector_design'ı okuyup 11 delik x 2,457 mm çiziyordu — enjeksiyon
+    // alanı 1,9 kat farklı. Kullanıcı ekranda bir enjektör görüp 3B modelde
+    // BAŞKA bir enjektör görüyordu.
+    //
+    // Kural: bir kaynak seçilir ve BÜTÜN alanlar o kaynaktan okunur. Panelde
+    // olmayan alan diğer çözücüden ödünç ALINMAZ (melez spesifikasyon
+    // hiçbir çözücüde var olmayan bir parçadır).
+    function resolveInjectorSource(md) {
+        var panel = (md && md.injector_results) || null;
+        if (panel && Object.keys(panel).length) {
+            return {
+                data: panel,
+                nOrifices: num(panel.number_of_orifices,
+                    num(panel.n_holes, num(panel.n_elements, null))),
+                orificeMm: num(panel.orifice_diameter_mm,
+                    num(panel.hole_diameter, num(panel.orifice_diameter, null))),
+                source: 'injector_results'
+            };
+        }
+        var inj = (md && md.injector_design) || {};
+        return {
+            data: inj,
+            nOrifices: num(inj.number_of_orifices,
+                num(inj.n_holes, num(inj.n_elements, null))),
+            orificeMm: num(inj.orifice_diameter_mm,
+                num(inj.hole_diameter, null)),
+            source: 'injector_design'
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // Kamara cidarı — sunucudaki _chamber_wall_design ile AYNI kural
+    // ------------------------------------------------------------------
+    //
+    // v2.6.26 (Y5): burası her zaman yapısal analizin ÖNERDİĞİ kalınlığı
+    // çiziyordu. Ölçüldü: kullanıcı 3 / 5 / 10 / 20 mm girse de model 15,92 mm
+    // gösteriyordu; Alüminyum 6061'de 49,92 mm cidar çizerken yapısal panel
+    // kullanıcının 5 mm'si için "güvensiz" diyordu — yani ekrandaki emniyet
+    // katsayısı çizilen parçaya ait değildi.
+    //
+    // Kural: gerilmelerin hesaplandığı kalınlık çizilir. 'verify' modunda bu
+    // kullanıcının cidarıdır; 'size' modunda zaten önerilen kalınlığa eşittir.
+    function resolveCasingWall(md, Dch) {
+        var ca = ((md && md.structural_analysis) || {}).chamber_analysis || {};
+        var used = num(ca.wall_thickness_used_mm, null);
+        var recommended = num(ca.recommended_thickness, null);
+        if (ca.design_mode === 'verify' && used !== null && used > 0) return used;
+        if (recommended !== null && recommended > 0) return recommended;
+        if (used !== null && used > 0) return used;
+        // Yapısal sonuç yok: sunucu tarafındaki AYNI geometrik yedek kural
+        // (CHAMBER_WALL_FALLBACK_FRACTION = 0.045) — mesh ile çelişmesin.
+        return Math.max(4, 0.045 * Dch);
+    }
+
+    // ------------------------------------------------------------------
+    // Nozul çıkış durumu — SAHTE PLUME SÖKÜMÜ (v2.6.26)
+    // ------------------------------------------------------------------
+    //
+    // Egzoz gösterimi çözücünün gerçek çıkış büyüklüklerini KULLANMIYORDU.
+    // Uydurma olanlar ve gerçekleri:
+    //
+    //   parçacık hızı  = toplam_uzunluk x (2.2 + rastgele x 1.6)
+    //                    -> gerçeği: nozul çıkış hızı [m/s], çözücüde var
+    //   pe/pa          = (8 / eps)^1.15   (8 ve 1.15 havadan)
+    //                    -> gerçeği: çıkış basıncı / ortam basıncı, çözücüde var
+    //   şok aralığı    = de x (0.7 + 0.5 x sqrt(eps/8))
+    //                    -> gerçeği: Prandtl-Pack bağıntısı (aşağıda)
+    //
+    // Parçacığın çıkış kesitinde rastgele DAĞITILMASI sahtelik değildir:
+    // sürekli bir akışı ayrık noktalarla çizmenin doğru yoludur. Sahte olan,
+    // hesaplanabilir bir değerin yerine rastgele sayı koymaktı.
+    //
+    // Değerler yoksa null döner ve plume HİÇ çizilmez — uydurma alev yasak.
+    function readNozzleExit(md) {
+        md = md || {};
+        var nozzle = md.nozzle_design || {};
+        var perf = nozzle.performance || {};
+        var comb = md.combustion_analysis || {};
+        var comp = (comb.compositions && comb.compositions.chamber) || {};
+
+        var pe = num(perf.exit_pressure, NaN);          // bar
+        var pa = num(perf.ambient_pressure, NaN);       // bar
+        var me = num(perf.exit_mach, NaN);
+        var gamma = num(comp.gamma, num(md.gamma, NaN));
+        var tc = num(md.chamber_temperature, NaN);      // K
+
+        // Çıkış hızı: irtifa performansı dizisinin deniz seviyesi girdisi.
+        var ve = NaN;
+        var alt = md.altitude_performance && md.altitude_performance.altitude_performance;
+        if (Array.isArray(alt) && alt.length) ve = num(alt[0].exit_velocity, NaN);
+        if (!isFinite(ve)) ve = num(perf.exit_velocity, NaN);
+
+        if (!isFinite(pe) || !isFinite(pa) || !isFinite(me) || !isFinite(gamma)
+            || !isFinite(ve) || pe <= 0 || pa <= 0 || me <= 1 || ve <= 0) {
+            return null;
+        }
+
+        var pRatio = pe / pa;
+
+        // Çıkış statik sıcaklığı — izentropik: Te = Tc / (1 + (g-1)/2 * Me^2)
+        var te = isFinite(tc)
+            ? tc / (1 + 0.5 * (gamma - 1) * me * me)
+            : NaN;
+
+        // Tam genişlemiş eşdeğer jet Mach sayısı: akış pa basıncına kadar
+        // izentropik genişleseydi ulaşacağı Mach. Aşırı-genişlemiş jette
+        // (pe < pa) Mj < Me olur.
+        var mj = me;
+        var arg = 1 + (2 / (gamma - 1)) * (Math.pow(pRatio, (gamma - 1) / gamma)
+            * (1 + 0.5 * (gamma - 1) * me * me) - 1);
+        if (isFinite(arg) && arg > 1) mj = Math.sqrt(arg);
+
+        // Şok hücre aralığı — Prandtl-Pack bağıntısı:
+        //     L_s = 1.306 * D_j * sqrt(Mj^2 - 1)
+        // Kaynak: Prandtl (1904); Pack, Q. J. Mech. Appl. Math. 3 (1950).
+        // Jet aeroakustiğinde yaygın olarak doğrulanmıştır. Mj <= 1 ise
+        // hücre yapısı oluşmaz (tam genişlemiş/ses altı jet).
+        var cellSpacing = (mj > 1.02)
+            ? 1.306 * num(md.exit_diameter, 0) * 1000 * Math.sqrt(mj * mj - 1)
+            : 0;
+
+        return {
+            exitPressureBar: pe,
+            ambientPressureBar: pa,
+            pressureRatio: pRatio,
+            exitMach: me,
+            jetMach: mj,
+            exitVelocity: ve,          // m/s
+            exitTemperature: te,       // K (Tc yoksa NaN)
+            gamma: gamma,
+            cellSpacingMm: cellSpacing,
+            // pe > pa: az genişlemiş (jet çıkışta genişler, elmaslar belirgin)
+            // pe < pa: aşırı genişlemiş (jet büzülür, şok içeri girer)
+            expansionState: (pRatio > 1.05) ? 'under'
+                : (pRatio < 0.95) ? 'over' : 'ideal'
+        };
+    }
+
     function extractDims(md) {
         md = md || {};
         var gd = md.grain_design || {};
-        var inj = md.injector_design || {};
+        var injSrc = resolveInjectorSource(md);
+        var inj = injSrc.data;
         var contour = md.nozzle_contour || {};
         var conv = contour.convergent || {};
         var div = contour.divergent || {};
@@ -249,7 +402,9 @@
         var de = num(md.exit_diameter, 0.08) * 1000;
         var rt = dt / 2, re = de / 2, rc = Dch / 2;
 
-        var casingWall = clamp(num(struct.chamber_analysis && struct.chamber_analysis.recommended_thickness, 0.045 * Dch), 3, 0.12 * Dch);
+        // Kullanıcının tasarladığı cidar çizilir; 0.12·D üst kırpması
+        // kaldırıldı (kullanıcının kalınlığını sessizce değiştiriyordu).
+        var casingWall = Math.max(0.2, resolveCasingWall(md, Dch));
         var nozzleWall = clamp(num(md.nozzle_geometry && md.nozzle_geometry.wall_thickness, Math.max(3, 0.1 * dt)), 2.5, 0.25 * dt + 6);
         var liner = clamp(0.02 * Dch, 1.5, 5);
 
@@ -318,8 +473,14 @@
             capT: capT, flangeT: flangeT, flangeLip: flangeLip,
             inletR: clamp(0.22 * rc, 5, 22),
             inletL: clamp(1.6 * capT, 14, 60),
-            nOrifices: Math.max(4, Math.round(num(inj.number_of_orifices, 12))),
-            orificeR: clamp(num(inj.orifice_diameter_mm, 1.5) / 2, 0.8, 4),
+            // v2.6.26: UYDURMA DELİK DESENİ YASAK. Eski kod veri yokken
+            // 12 delik x 1,5 mm çiziyor, üstelik Math.max(4, ...) yüzünden
+            // çözücünün 3 deliğini 4 gösteriyordu. Sayı ya da çap yoksa
+            // nOrifices = 0 kalır ve enjektör yüzüne HİÇBİR delik çizilmez.
+            nOrifices: ((injSrc.nOrifices > 0 && injSrc.orificeMm > 0)
+                ? Math.round(injSrc.nOrifices) : 0),
+            orificeR: ((injSrc.orificeMm > 0) ? injSrc.orificeMm / 2 : 0),
+            injectorSource: injSrc.source,
             // Enjektör tipi 2D kesitle AYNI takma ad tablosundan çözülür
             injectorType: resolveInjectorType(inj),
             pintleR: clamp(num(inj.pintle_diameter_mm, num(inj.d_pintle_mm, 0.22 * Dch)) / 2,
@@ -332,6 +493,12 @@
             thrust: num(md.thrust, 1000),
             isp: num(md.isp, 200),
             pc: num(md.chamber_pressure, 20),
+            // v2.6.26 — SAHTE PLUME SÖKÜMÜ: egzoz gösterimi çözücünün gerçek
+            // nozul çıkış büyüklüklerini KULLANMIYORDU; parçacık hızı, pe/pa
+            // oranı ve şok elması aralığı uydurma sabitlerden geliyordu.
+            // Bu değerler çözücüde ZATEN hesaplanıyor; aşağıda okunuyorlar.
+            // Yoksa null kalır ve plume HİÇ çizilmez (uydurma alev yasak).
+            nozzleExit: readNozzleExit(md),
             of0: num(md.of_ratio_initial, num(md.of_ratio, 2)),
             portHist: md.port_history || null,
             ofShift: md.of_shift_performance || null,
@@ -1018,7 +1185,10 @@
             // Enjektör tipine göre yüz geometrisi (2D kesitle aynı tip)
             var injFace = injZ0 + injT;
             var seg = this._perfMode ? 8 : 12;
-            var oriR = Math.max(d.orificeR * 1.6, 1.2);
+            // Delik yarıçapı ÇÖZÜCÜDEN gelir; gelmiyorsa delik çizilmez
+            // (eski 1,2 mm tabanı hesaplanmış bir ölçü gibi görünüyordu).
+            var hasOrifices = (d.nOrifices > 0 && d.orificeR > 0);
+            var oriR = d.orificeR * 1.6;
             var rMaxO = d.rc - 6;
 
             if (d.injectorType === 'pintle') {
@@ -1031,20 +1201,23 @@
                 post.position.y = injFace + pLen / 2;
                 post.castShadow = true;
                 injector.add(post);
-                // Uçta radyal delik dizisi (yatık silindirler)
-                var nRad = Math.max(6, Math.min(d.nOrifices, 24));
-                var radGeo = new THREE.CylinderGeometry(oriR * 0.8, oriR * 0.8,
-                    pR * 0.9, this._perfMode ? 6 : 10);
-                for (var rk = 0; rk < nRad; rk++) {
-                    var rphi = (rk / nRad) * TAU;
-                    var rad = new THREE.Mesh(radGeo, mats.orifice);
-                    rad.rotation.z = Math.PI / 2;
-                    rad.rotation.y = -rphi;
-                    rad.position.set(pR * 0.75 * Math.sin(rphi),
-                        injFace + pLen * 0.82, pR * 0.75 * Math.cos(rphi));
-                    rad.userData.phi = rphi;
-                    rad.userData.hideInCut = true;
-                    injector.add(rad);
+                // Uçta radyal delik dizisi (yatık silindirler) — yalnız
+                // çözücü gerçek bir delik sayısı/çapı verdiyse
+                if (hasOrifices) {
+                    var nRad = Math.min(d.nOrifices, 24);
+                    var radGeo = new THREE.CylinderGeometry(oriR * 0.8, oriR * 0.8,
+                        pR * 0.9, this._perfMode ? 6 : 10);
+                    for (var rk = 0; rk < nRad; rk++) {
+                        var rphi = (rk / nRad) * TAU;
+                        var rad = new THREE.Mesh(radGeo, mats.orifice);
+                        rad.rotation.z = Math.PI / 2;
+                        rad.rotation.y = -rphi;
+                        rad.position.set(pR * 0.75 * Math.sin(rphi),
+                            injFace + pLen * 0.82, pR * 0.75 * Math.cos(rphi));
+                        rad.userData.phi = rphi;
+                        rad.userData.hideInCut = true;
+                        injector.add(rad);
+                    }
                 }
                 // Anülüs bileziği (pintle çevresindeki eksenel oks tabakası)
                 var annGap = clamp(d.annulusGap, 0.4, 6);
@@ -1059,33 +1232,37 @@
 
             } else if (d.injectorType === 'swirl') {
                 // Teğetsel kanal blokları: plaka yüzünde eğik kutular
-                var nSlot = Math.max(4, Math.min(d.nOrifices, 12));
-                var slotGeo = new THREE.BoxGeometry(Math.max(oriR * 1.4, 1.6),
-                    Math.max(injT * 0.5, 2), rMaxO * 0.45);
-                for (var sk = 0; sk < nSlot; sk++) {
-                    var sphi = (sk / nSlot) * TAU;
-                    var slot = new THREE.Mesh(slotGeo, mats.orifice);
-                    var sr = rMaxO * 0.62;
-                    slot.position.set(sr * Math.sin(sphi), injFace + 0.4,
-                        sr * Math.cos(sphi));
-                    // Teğetsel yönelim: radyal yönden 90 derece kaydırılmış
-                    slot.rotation.y = -sphi + Math.PI / 2;
-                    slot.userData.phi = sphi;
-                    slot.userData.hideInCut = true;
-                    injector.add(slot);
+                if (hasOrifices) {
+                    var nSlot = Math.min(d.nOrifices, 12);
+                    var slotGeo = new THREE.BoxGeometry(oriR * 1.4,
+                        Math.max(injT * 0.5, 2), rMaxO * 0.45);
+                    for (var sk = 0; sk < nSlot; sk++) {
+                        var sphi = (sk / nSlot) * TAU;
+                        var slot = new THREE.Mesh(slotGeo, mats.orifice);
+                        var sr = rMaxO * 0.62;
+                        slot.position.set(sr * Math.sin(sphi), injFace + 0.4,
+                            sr * Math.cos(sphi));
+                        // Teğetsel yönelim: radyal yönden 90 derece kaydırılmış
+                        slot.rotation.y = -sphi + Math.PI / 2;
+                        slot.userData.phi = sphi;
+                        slot.userData.hideInCut = true;
+                        injector.add(slot);
+                    }
+                    // Merkezi çıkış orifisi (içi boş koni sprey kaynağı)
+                    var exitR = oriR * 2.2;
+                    var exitO = new THREE.Mesh(
+                        new THREE.CylinderGeometry(exitR, exitR, 1.8,
+                            this._perfMode ? 12 : 24),
+                        mats.orifice);
+                    exitO.position.y = injFace + 0.6;
+                    exitO.userData.hideInCut = true;
+                    injector.add(exitO);
                 }
-                // Merkezi çıkış orifisi (içi boş koni sprey kaynağı)
-                var exitR = Math.max(oriR * 2.2, 0.12 * d.rc);
-                var exitO = new THREE.Mesh(
-                    new THREE.CylinderGeometry(exitR, exitR, 1.8, this._perfMode ? 12 : 24),
-                    mats.orifice);
-                exitO.position.y = injFace + 0.6;
-                exitO.userData.hideInCut = true;
-                injector.add(exitO);
 
             } else if (d.injectorType === 'impingement') {
                 // Açılı delik çiftleri: her çift eksene doğru eğik iki silindir
-                var nPair = Math.max(3, Math.min(Math.round(d.nOrifices / 2), 12));
+                var nPair = hasOrifices
+                    ? Math.max(1, Math.min(Math.round(d.nOrifices / 2), 12)) : 0;
                 var tilt = THREE.MathUtils.degToRad(clamp(d.impingeHalfDeg, 10, 60));
                 var impGeo = new THREE.CylinderGeometry(oriR, oriR, injT * 0.9,
                     this._perfMode ? 6 : 10);
@@ -1124,14 +1301,14 @@
                 outerRing.userData.hideInCut = true;
                 injector.add(outerRing);
 
-            } else {
+            } else if (hasOrifices) {
                 // Showerhead: eş merkezli 2-3 delik halkası (çevreyle orantılı dağıtım)
                 var oriGeo = new THREE.CylinderGeometry(oriR, oriR, 1.6, seg);
                 var ringFr = d.nOrifices >= 10 ? [0.35, 0.6, 0.85] : [0.4, 0.75];
                 var frSum = ringFr.reduce(function (a, b) { return a + b; }, 0);
                 ringFr.forEach(function (fr, ri) {
                     var rr = fr * rMaxO;
-                    var nRing = Math.max(3, Math.round(d.nOrifices * fr / frSum));
+                    var nRing = Math.max(1, Math.round(d.nOrifices * fr / frSum));
                     for (var k = 0; k < nRing; k++) {
                         var phi = ((k + ri * 0.5) / nRing) * TAU; // halkalar arası kaydırma
                         var ori = new THREE.Mesh(oriGeo, mats.orifice);
@@ -1464,22 +1641,40 @@
     // Egzoz plume: iki katmanlı partikül sistemi + şok elmasları
     // ------------------------------------------------------------------
 
-    // Plume fizik türetimleri (görev 6): radyal saçılım tan(θ_exit) ile,
-    // şok elması aralığı/şiddeti genişleme oranından. Ölçüler extractDims'te.
+    // Plume fiziği — v2.6.26'dan itibaren ÇÖZÜCÜNÜN GERÇEK DEĞERLERİYLE.
+    //
+    // Eskiden pe/pa oranı `(8/eps)^1.15` diye uyduruluyor, şok elması aralığı
+    // `de*(0.7+0.5*sqrt(eps/8))` gibi dayanaksız bir ifadeyle çiziliyordu.
+    // İkisi de artık nozul çözümünden gelir (bkz. readNozzleExit).
+    //
+    // Çözücü verisi yoksa null döner ve plume çizilmez — uydurma alev yasak.
     MotorScene.prototype._plumeAero = function () {
         var d = this.dims;
+        var ex = d.nozzleExit;
+        if (!ex) return null;
+
+        // Radyal saçılım: nozul çıkış yarı açısı akışın geometrik sapmasıdır.
+        // Az genişlemiş jette (pe > pa) akış çıkışta ayrıca Prandtl-Meyer
+        // genişlemesiyle DIŞA açılır; aşırı genişlemişte içeri büzülür.
         var thetaDeg = d.nozType === 'conical' ? d.halfAngle : d.thetaE;
-        var spread = Math.tan(THREE.MathUtils.degToRad(clamp(thetaDeg, 2, 35))) /
-            Math.tan(THREE.MathUtils.degToRad(PLUME_REF_EXIT_ANGLE_DEG));
-        var eps = Math.pow(d.re / Math.max(d.rt, 1e-3), 2);
-        // pe/pa yaklaşımı: eps ≈ IDEAL_EXPANSION_EPS deniz seviyesinde tam
-        // genişleme sayılır; sapma büyüdükçe elmaslar belirginleşir
-        var peOverPa = Math.pow(IDEAL_EXPANSION_EPS / Math.max(eps, 1.01), 1.15);
-        var mismatch = clamp(Math.abs(1 - peOverPa), 0, 1);
+        var geometric = Math.tan(THREE.MathUtils.degToRad(clamp(thetaDeg, 2, 35)));
+        var pressureTurn = clamp(Math.pow(ex.pressureRatio, 0.5), 0.6, 1.8);
+        var spread = geometric / Math.tan(
+            THREE.MathUtils.degToRad(PLUME_REF_EXIT_ANGLE_DEG)) * pressureTurn;
+
+        // Şok elmalarının ŞİDDETİ basınç uyumsuzluğuyla artar; tam genişlemiş
+        // jette (pe = pa) hücre yapısı kaybolur. Bu artık ölçülen bir sapma:
+        var mismatch = clamp(Math.abs(1 - ex.pressureRatio), 0, 1);
+
         return {
-            spread: clamp(spread, 0.5, 3),
-            diamondSpacing: d.de * (0.7 + 0.5 * Math.sqrt(eps / IDEAL_EXPANSION_EPS)),
-            diamondStrength: 0.25 + 0.75 * mismatch
+            spread: clamp(spread, 0.4, 3.5),
+            // Prandtl-Pack hücre aralığı (readNozzleExit'te hesaplandı).
+            // 0 ise hücre yapısı yok demektir; çizim onu atlar.
+            diamondSpacing: ex.cellSpacingMm,
+            diamondStrength: clamp(mismatch, 0, 1),
+            expansionState: ex.expansionState,
+            exitVelocity: ex.exitVelocity,
+            exitTemperature: ex.exitTemperature
         };
     };
 
@@ -1531,7 +1726,16 @@
     MotorScene.prototype._updateDiamondPositions = function () {
         var d = this.dims;
         var info = this._plumeInfo || (this._plumeInfo = this._plumeAero());
+        // Çözücü verisi yoksa ya da jet tam genişlemişse hücre yapısı YOKTUR;
+        // elmasları uydurma bir aralıkla dizmek yerine gizleriz.
+        if (!info || !(info.diamondSpacing > 0)) {
+            for (var j = 0; j < this._diamonds.length; j++) {
+                this._diamonds[j].visible = false;
+            }
+            return;
+        }
         for (var k = 0; k < this._diamonds.length; k++) {
+            this._diamonds[k].visible = true;
             this._diamonds[k].position.set(0,
                 this._nozzleInfo.zExit + d.de * 0.9 + k * info.diamondSpacing, 0);
             this._diamonds[k].scale.setScalar(d.re * (1.5 - k * 0.18));
@@ -1543,10 +1747,24 @@
         var st = this._pState;
         var pos = (this._plume && this._plume.geometry)
             ? this._plume.geometry.attributes.position.array : null;
-        var spread = this._plumeInfo ? this._plumeInfo.spread : 1;
+        var info = this._plumeInfo;
+        var spread = info ? info.spread : 1;
+        // Doğuş noktası: çıkış kesitinde eşdağılımlı. Buradaki rastgelelik
+        // SAHTELİK DEĞİLDİR — sürekli bir akışı ayrık parçacıklarla çizmenin
+        // doğru yoludur (sqrt, dairesel kesitte alanca eşdağılım verir).
         var rSpawn = d.re * 0.75 * Math.sqrt(Math.random());
         var phi = Math.random() * TAU;
-        var speed = this._totalLen * (2.2 + Math.random() * 1.6); // mm/s ölçekli
+        // v2.6.26: hız artık ÇÖZÜCÜNÜN nozul çıkış hızından ölçekleniyor.
+        // Eskiden `_totalLen * (2.2 + rastgele*1.6)` idi; modelin uzunluğuna
+        // bağlı, gerçek egzoz hızıyla hiç ilgisi olmayan bir sayıydı.
+        // Ölçek: 2500 m/s (tipik kimyasal roket egzozu) sahnede eski görsel
+        // hıza denk gelsin diye normalize edilir; hızlı motor GÖRÜNÜR biçimde
+        // hızlı akar. Parçacıklar arası %20'lik saçılım türbülanslı jetin
+        // hız dağılımını temsil eder (görsel; tek bir hız değeri düz bir
+        // duvar gibi görünürdü).
+        var vExit = (info && info.exitVelocity > 0) ? info.exitVelocity : 2500;
+        var speed = this._totalLen * 3.0 * (vExit / 2500)
+            * (0.9 + 0.2 * Math.random());
         st[i * 5 + 0] = speed;
         // Radyal saçılım çıkış yarım açısıyla ölçekli: bell (θe küçük) dar
         // ve toplu, koni (θ büyük) geniş bir jet üretir (görev 6)
@@ -1564,7 +1782,20 @@
 
     MotorScene.prototype._updatePlume = function (dt, intensity) {
         if (!this._plume) return;
+        // v2.6.26 — UYDURMA ALEV YASAĞI: çözücü nozul çıkış durumunu
+        // vermediyse (eski kayıt, eksik analiz, yakınsamayan çözüm) egzoz
+        // ÇİZİLMEZ. Eskiden bu durumda da uydurma sabitlerle akışkan bir
+        // alev gösteriliyordu ve kullanıcı hesabın çalıştığını sanıyordu.
         var geo = this._plume.geometry;
+        if (!this._plumeInfo) {
+            this._plume.visible = false;
+            if (geo && geo.setDrawRange) geo.setDrawRange(0, 0);
+            for (var h = 0; h < this._diamonds.length; h++) {
+                this._diamonds[h].visible = false;
+            }
+            return;
+        }
+        this._plume.visible = true;
         var pos = geo.attributes.position.array;
         var col = geo.attributes.color.array;
         var st = this._pState;
@@ -1660,7 +1891,12 @@
             g.add(sp);
         }
 
-        callout(d.Lch * 0.30, d.rcOut, 'ØC ' + d.Dch.toFixed(1) + ' mm');
+        // v2.6.26 (Y3): ölçü oku dış yüzeyden çıkıp İÇ çapı yazıyordu. Ölçü
+        // tablosunda aynı karışıklık atölyede 2 x cidar kadar (ölçülen koşuda
+        // 31,8 mm) yanlış boru seçtiriyordu. Artık ikisi de AÇIKÇA yazılır.
+        callout(d.Lch * 0.30, d.rcOut,
+            'ØC ic ' + d.Dch.toFixed(1) + ' / dis '
+            + (2 * d.rcOut).toFixed(1) + ' mm');
         callout(d.Lch + d.Lc, d.rt + 2, 'ØT ' + d.dt.toFixed(1) + ' mm', scaleBase * 1.5);
         callout(this._nozzleInfo.zExit - 2, this._nozzleInfo.rExit + d.nozzleWall, 'ØE ' + d.de.toFixed(1) + ' mm');
 

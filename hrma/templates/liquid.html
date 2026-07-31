@@ -619,7 +619,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.fuel_boiling_point_at_1_atm">Fuel boiling point at 1 atm. Critical for storage system design. RP-1: ~500K (room temp storable), LH2: 20.3K (cryogenic), Methane: 111.7K (moderate cryogenic), MMH: 360K, UDMH: 336K.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_boiling_point" value="500" step="1">
+                    <input type="number" id="fuel_boiling_point" value="500" step="1" min="20" max="900">
                 </div>
                 <div class="form-group">
                     <label>
@@ -629,7 +629,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.oxidizer_boiling_point_at_1_atm">Oxidizer boiling point at 1 atm. LOX: 90.2K (cryogenic, requires active cooling), N2O4: 294K (room temperature storable). Affects ground support equipment complexity.</span>
                         </div>
                     </label>
-                    <input type="number" id="oxidizer_boiling_point" value="90.2" step="0.1">
+                    <input type="number" id="oxidizer_boiling_point" value="90.2" step="0.1" min="60" max="500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -639,7 +639,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.fuel_freezing_point_important_for_minimum">Fuel freezing point. Important for minimum operating temperature. RP-1: ~200K, LH2: 14K, Methane: 90.7K, MMH: 220K, UDMH: 216K. Must stay above this temperature during all operations.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_freezing_point" value="200" step="1">
+                    <input type="number" id="fuel_freezing_point" value="200" step="1" min="10" max="400">
                 </div>
                 <div class="form-group">
                     <label>
@@ -649,7 +649,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.oxidizer_freezing_point_lox_54_4k">Oxidizer freezing point. LOX: 54.4K, N2O4: 262K. Critical for thermal management system design and minimum operating temperature limits.</span>
                         </div>
                     </label>
-                    <input type="number" id="oxidizer_freezing_point" value="54.4" step="0.1">
+                    <input type="number" id="oxidizer_freezing_point" value="54.4" step="0.1" min="40" max="350">
                 </div>
                 <div class="form-group">
                     <label>
@@ -659,7 +659,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.fuel_dynamic_viscosity_at_operating_temperature">Fuel dynamic viscosity at operating temperature. Affects injection pressure drop and atomization. RP-1: 0.0012, LH2: 0.000013, Methane: 0.00011, MMH: 0.00085. Lower viscosity improves injection.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_viscosity" value="0.0012" step="0.00001">
+                    <input type="number" id="fuel_viscosity" value="0.0012" step="0.00001" min="1e-06" max="0.1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -669,7 +669,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.oxidizer_dynamic_viscosity_at_operating_temperat">Oxidizer dynamic viscosity at operating temperature. LOX: 0.00019, N2O4: 0.00042. Higher viscosity increases injection pressure requirements and affects atomization quality.</span>
                         </div>
                     </label>
-                    <input type="number" id="oxidizer_viscosity" value="0.00019" step="0.00001">
+                    <input type="number" id="oxidizer_viscosity" value="0.00019" step="0.00001" min="1e-06" max="0.1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -679,7 +679,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.energy_released_per_unit_mass_of">Energy released per unit mass of fuel burned. RP-1: 43.1, LH2: 120.0, Methane: 50.0, MMH: 19.5, UDMH: 17.8. Higher values indicate more energetic fuel, contributing to specific impulse.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_heat_combustion" value="43.1" step="0.1">
+                    <input type="number" id="fuel_heat_combustion" value="43.1" step="0.1" min="1" max="150">
                 </div>
                 <div class="form-group">
                     <label>
@@ -689,7 +689,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.fuel_specific_heat_capacity_important_for">Fuel specific heat capacity. Important for regenerative cooling calculations. RP-1: 2090, LH2: 14300, Methane: 3480. Higher Cp provides better cooling capacity.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_heat_capacity" value="2090" step="10">
+                    <input type="number" id="fuel_heat_capacity" value="2090" step="10" min="500" max="20000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -699,7 +699,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.fuel_thermal_conductivity_for_heat_transfer">Fuel thermal conductivity for heat transfer analysis. RP-1: 0.145, LH2: 0.18, Methane: 0.19. Higher conductivity improves heat transfer in cooling circuits.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_thermal_conductivity" value="0.145" step="0.001">
+                    <input type="number" id="fuel_thermal_conductivity" value="0.145" step="0.001" min="0.01" max="5">
                 </div>
             </div>
             
@@ -802,7 +802,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.percentage_of_theoretical_combustion_achieved_ac">Percentage of theoretical combustion achieved. Accounts for incomplete mixing, finite reaction time, heat losses. Well-designed engines: 95-99%. Affects c* and Isp directly.</span>
                         </div>
                     </label>
-                    <input type="number" id="combustion_efficiency" value="97" step="0.1">
+                    <input type="number" id="combustion_efficiency" value="97" step="0.1" min="0.5" max="1">
                 </div>
             </div>
         </div>
@@ -945,7 +945,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.total_number_of_injection_element_pairs">Total number of injection element pairs. More elements provide better mixing and shorter chamber length but increase complexity. Typical: 50-500 for large engines, 5-50 for small engines.</span>
                         </div>
                     </label>
-                    <input type="number" id="injector_elements" value="100" step="1">
+                    <input type="number" id="injector_elements" value="100" step="1" min="1" max="20000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -955,7 +955,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.fuel_velocity_at_injection_higher_velocity">Fuel velocity at injection. Higher velocity improves atomization and mixing but increases pressure drop. Typical range: 15-50 m/s. Limited by cavitation and pressure drop considerations.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_injection_velocity" value="25" step="1">
+                    <input type="number" id="fuel_injection_velocity" value="25" step="1" min="1" max="150">
                 </div>
                 <div class="form-group">
                     <label>
@@ -965,7 +965,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.oxidizer_velocity_at_injection_typically_higher">Oxidizer velocity at injection. Typically higher than fuel velocity for good momentum mixing. Range: 20-80 m/s. Velocity ratio affects mixing quality and combustion stability.</span>
                         </div>
                     </label>
-                    <input type="number" id="oxidizer_injection_velocity" value="40" step="1">
+                    <input type="number" id="oxidizer_injection_velocity" value="40" step="1" min="1" max="150">
                 </div>
                 <div class="form-group">
                     <label>
@@ -975,7 +975,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.diameter_of_fuel_injection_orifices_smaller">Diameter of fuel injection orifices. Smaller orifices provide better atomization but are prone to clogging. Typical: 0.5-5mm. Manufacturing tolerances critical for performance uniformity.</span>
                         </div>
                     </label>
-                    <input type="number" id="fuel_orifice_diameter" value="2.0" step="0.1">
+                    <input type="number" id="fuel_orifice_diameter" value="2.0" step="0.1" min="0.1" max="25">
                 </div>
                 <div class="form-group">
                     <label>
@@ -985,7 +985,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.diameter_of_oxidizer_injection_orifices_sized">Diameter of oxidizer injection orifices. Sized to achieve desired mixture ratio with given pressure drops. Usually larger than fuel orifices due to higher flow rates.</span>
                         </div>
                     </label>
-                    <input type="number" id="oxidizer_orifice_diameter" value="2.5" step="0.1">
+                    <input type="number" id="oxidizer_orifice_diameter" value="2.5" step="0.1" min="0.1" max="25">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1022,7 +1022,18 @@
                             <span class="tooltip-text" data-i18n="liq.ui.internal_diameter_of_combustion_chamber_larger">Internal diameter of combustion chamber. Larger chambers provide more residence time but increase weight. Typically sized for L* requirements and structural constraints.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_diameter" value="200" step="1">
+                    <!-- Varsayılan BOŞ: hazne çapı ile daralma oranı aynı
+                         büyüklüğü belirler (d_c = d_t·√CR). Burada 200 mm
+                         sabit duruyordu ve çözücüde çap önceliği olduğu için
+                         kullanıcının daralma oranı HİÇ kazanamıyordu (ölçüm:
+                         alan yalnız kendi yankısı). Boş bırakılınca çap
+                         daralma oranından türetilir; kullanıcı bir değer
+                         girerse o kazanır ve çözücü
+                         warn.liquid.chamber_diameter_overrides_contraction
+                         uyarısını üretir. -->
+                    <input type="number" id="chamber_diameter" step="1"
+                           placeholder="blank = computed from contraction ratio"
+                           data-i18n-placeholder="liq.attr.blank_from_contraction">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1042,7 +1053,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.chamber_area_to_throat_area_ratio">Chamber area to throat area ratio (Ac/At). Higher ratios reduce chamber velocity and heat transfer but increase length. Typical range: 2-8. Higher for high chamber pressure engines.</span>
                         </div>
                     </label>
-                    <input type="number" id="contraction_ratio" value="4" step="0.1">
+                    <input type="number" id="contraction_ratio" value="4" step="0.1" min="1.5" max="60">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1052,7 +1063,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.structural_wall_thickness_for_pressure_loads">Structural wall thickness for pressure loads. Must handle chamber pressure with safety factor. Thicker walls increase thermal mass but provide strength. Typical: 2-10mm depending on size.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_wall_thickness" value="5" step="0.1">
+                    <input type="number" id="chamber_wall_thickness" value="5" step="0.1" min="0.2" max="150">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1078,7 +1089,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.internal_surface_roughness_affects_heat_transfer">Internal surface roughness affects heat transfer and flow. Smooth surfaces (Ra < 1.6) reduce heat transfer but improve flow. Rougher surfaces enhance cooling but increase losses.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_roughness" value="3.2" step="0.1">
+                    <input type="number" id="chamber_roughness" value="3.2" step="0.1" min="0.05" max="100">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1166,7 +1177,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.diameter_at_nozzle_throat_minimum_area">Diameter at nozzle throat (minimum area). Calculated from mass flow and c*. Critical dimension that determines engine performance. Must be precisely manufactured and maintained.</span>
                         </div>
                     </label>
-                    <input type="number" id="throat_diameter" value="50" step="0.1">
+                    <input type="number" id="throat_diameter" value="50" step="0.1" min="1" max="500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1176,7 +1187,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.number_of_regenerative_cooling_channels_around">Number of regenerative cooling channels around chamber circumference. More channels provide better heat transfer but increase manufacturing complexity. Typical: 50-200 for large engines.</span>
                         </div>
                     </label>
-                    <input type="number" id="cooling_channels" value="80" step="1">
+                    <input type="number" id="cooling_channels" value="80" step="1" min="4" max="2000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1186,7 +1197,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.percentage_of_total_fuel_flow_used">Percentage of total fuel flow used for regenerative cooling. 100% means all fuel passes through cooling channels. Lower percentages use bypass flow. Typical: 80-100% for efficiency.</span>
                         </div>
                     </label>
-                    <input type="number" id="coolant_flow_percent" value="100" step="1">
+                    <input type="number" id="coolant_flow_percent" value="100" step="1" min="5" max="100">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1196,7 +1207,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.temperature_of_coolant_entering_cooling_system">Temperature of coolant entering cooling system. Usually close to fuel storage temperature. Cryogenic fuels: near boiling point. Storable fuels: ambient temperature. Affects cooling capacity.</span>
                         </div>
                     </label>
-                    <input type="number" id="coolant_inlet_temp" value="300" step="1">
+                    <input type="number" id="coolant_inlet_temp" value="300" step="1" min="20" max="700">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1206,7 +1217,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.maximum_allowable_hot_side_wall_temperature">Maximum allowable hot-side wall temperature. Limited by material properties and coking (for hydrocarbon fuels). Steel: 800K, Inconel: 1200K, Copper: 700K. Critical for engine life.</span>
                         </div>
                     </label>
-                    <input type="number" id="max_wall_temp" value="800" step="10">
+                    <input type="number" id="max_wall_temp" value="800" step="10" min="300" max="3000">
                 </div>
             </div>
         </div>
@@ -1238,7 +1249,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.time_from_ignition_command_to_full">Time from ignition command to full thrust. Hypergolic: 0.1-0.5s, Gas generator: 1-3s, Staged combustion: 3-6s. Faster starts reduce gravity losses but increase stress.</span>
                         </div>
                     </label>
-                    <input type="number" id="engine_start_time" value="2.0" step="0.1">
+                    <input type="number" id="engine_start_time" value="2.0" step="0.1" min="0.01" max="30">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1248,7 +1259,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.time_from_shutdown_command_to_zero">Time from shutdown command to zero thrust. Controlled by valve closure rates and system inertia. Faster shutdown improves precision but may cause water hammer effects.</span>
                         </div>
                     </label>
-                    <input type="number" id="engine_shutdown_time" value="1.5" step="0.1">
+                    <input type="number" id="engine_shutdown_time" value="1.5" step="0.1" min="0.01" max="30">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1258,7 +1269,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.minimum_throttle_level_as_percentage_of">Minimum throttle level as percentage of maximum thrust. Deep throttling enables precision maneuvers and landing. Gas generators: 40-100%, Staged combustion: 20-100%. Limited by combustion stability.</span>
                         </div>
                     </label>
-                    <input type="number" id="min_throttle" value="40" step="1">
+                    <input type="number" id="min_throttle" value="40" step="1" min="5" max="100">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1268,7 +1279,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.time_constant_for_thrust_changes_during">Time constant for thrust changes during throttling. Faster response improves control authority but may cause instability. Limited by system dynamics and valve response.</span>
                         </div>
                     </label>
-                    <input type="number" id="throttle_response" value="0.5" step="0.1">
+                    <input type="number" id="throttle_response" value="0.5" step="0.1" min="0.01" max="10">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1293,7 +1304,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.time_required_to_cool_down_hot">Time required to cool down hot components before restart (cryogenic engines). Prevents propellant vaporization in lines. LOX/LH2: 10-60s, LOX/RP-1: 5-30s. Affects mission timeline.</span>
                         </div>
                     </label>
-                    <input type="number" id="chill_down_time" value="30" step="1">
+                    <input type="number" id="chill_down_time" value="30" step="1" min="0" max="3600">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1303,7 +1314,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.maximum_continuous_operation_time_limited_by">Maximum continuous operation time. Limited by cooling system capacity, ablative liner life, or propellant supply. Regeneratively cooled: 300-600s, Ablative: 30-300s, affects mission design.</span>
                         </div>
                     </label>
-                    <input type="number" id="max_burn_duration" value="400" step="10">
+                    <input type="number" id="max_burn_duration" value="400" step="10" min="0.1" max="100000">
                 </div>
             </div>
         </div>
@@ -1320,7 +1331,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.engine_thrust_divided_by_engine_mass">Engine thrust divided by engine mass. Higher T/W reduces vehicle structural mass. Gas generators: 40-80, Staged combustion: 60-120, Pressure-fed: 20-50. Critical for launch vehicle performance.</span>
                         </div>
                     </label>
-                    <input type="number" id="target_thrust_to_weight" value="60" step="1">
+                    <input type="number" id="target_thrust_to_weight" value="60" step="1" min="1" max="500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1330,7 +1341,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.design_margin_for_structural_loads_higher">Design margin for structural loads. Higher factors increase reliability but add mass. Human-rated: 4.0, Unmanned: 2.5-3.0, Expendable: 1.4-2.0. Covers pressure, thermal, and dynamic loads.</span>
                         </div>
                     </label>
-                    <input type="number" id="safety_factor" value="2.5" step="0.1">
+                    <input type="number" id="safety_factor" value="2.5" step="0.1" min="1.1" max="10">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1355,7 +1366,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.maximum_engine_deflection_angle_for_thrust">Maximum engine deflection angle for thrust vector control. Larger angles provide better control authority but increase complexity. Typical: ±5° to ±15°. Limited by plumbing flexibility.</span>
                         </div>
                     </label>
-                    <input type="number" id="gimbal_range" value="8" step="1">
+                    <input type="number" id="gimbal_range" value="8" step="1" min="0" max="45">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1365,7 +1376,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.time_for_gimbal_actuators_to_respond">Time for gimbal actuators to respond to control commands. Faster response improves vehicle stability and control precision. Hydraulic: 10-50ms, Electric: 50-200ms.</span>
                         </div>
                     </label>
-                    <input type="number" id="actuator_response" value="50" step="10">
+                    <input type="number" id="actuator_response" value="50" step="10" min="1" max="1000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1375,7 +1386,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.number_of_start_stop_cycles_before">Number of start/stop cycles before refurbishment. Reusable engines need higher life. Expendable: 1-2 cycles, Reusable booster: 10-100 cycles, Spacecraft: 50-1000 cycles.</span>
                         </div>
                     </label>
-                    <input type="number" id="engine_life_cycles" value="10" step="1">
+                    <input type="number" id="engine_life_cycles" value="10" step="1" min="1" max="100000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1400,7 +1411,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.sound_pressure_level_during_operation_high">Sound pressure level during operation. High levels stress components and affect nearby systems. Large boosters: 180+ dB, Medium engines: 150-180 dB, Small thrusters: 100-150 dB.</span>
                         </div>
                     </label>
-                    <input type="number" id="acoustic_level" value="165" step="1">
+                    <input type="number" id="acoustic_level" value="165" step="1" min="80" max="200">
                 </div>
             </div>
         </div>
@@ -1433,7 +1444,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.operating_temperature_range_earth_surface_200">Operating temperature range. Earth surface: 200-350K, Space: 4-400K (sun/shade). Affects propellant conditioning, seals, electronics. Wide ranges require thermal management.</span>
                         </div>
                     </label>
-                    <input type="number" id="temp_range_min" value="200" step="10" placeholder="Min (K)" data-i18n-placeholder="liq.attr.min_k">
+                    <input type="number" id="temp_range_min" value="200" step="10" placeholder="Min (K)" data-i18n-placeholder="liq.attr.min_k" min="3" max="500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1443,7 +1454,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.maximum_operating_temperature_limits_component_m">Maximum operating temperature. Limits component materials and affects cooling requirements. Desert launch: 320K, Spacecraft: 400K+ in sunlight.</span>
                         </div>
                     </label>
-                    <input type="number" id="temp_range_max" value="350" step="10">
+                    <input type="number" id="temp_range_max" value="350" step="10" min="3" max="500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1453,7 +1464,7 @@
                             <span class="tooltip-text" data-i18n="liq.ui.maximum_storage_time_before_use_affects">Maximum storage time before use. Affects seal materials, propellant stability, component degradation. Launch vehicles: 3-12 months, Spacecraft: 12-60 months on orbit.</span>
                         </div>
                     </label>
-                    <input type="number" id="storage_duration" value="12" step="1">
+                    <input type="number" id="storage_duration" value="12" step="1" min="0" max="240">
                 </div>
                 <div class="form-group">
                     <label>
@@ -2498,7 +2509,9 @@
             document.getElementById('discharge_coefficient').value = '0.7';
             
             // Chamber design
-            document.getElementById('chamber_diameter').value = '200';
+            // Çap BOŞ bırakılır: daralma oranı belirlesin (bkz. alanın
+            // yanındaki not). Sıfırlama da bu davranışa dönmeli.
+            document.getElementById('chamber_diameter').value = '';
             document.getElementById('characteristic_length').value = '1.2';
             document.getElementById('contraction_ratio').value = '4';
             document.getElementById('chamber_wall_thickness').value = '5';
@@ -2962,17 +2975,34 @@
             const container = document.getElementById('subsystemsGrid');
             if (!container) return;
             
+            // v2.6.26: burada 'Development Cost' ($2M-$5M), 'Production Unit'
+            // ($100k-$300k) ve 'Design Phase' (18 months) satırları vardı.
+            // Üçü de koddaki sabit dizelerdi: 10 N'lik bir iticide de 2 MN'lik
+            // bir ana motorda da aynı değerler görünüyordu. Motor tarafında
+            // kaldırıldılar; burada da gösterilmezler. Yerine, tedarikçi ve
+            // program verimiz olmadığı AÇIKÇA yazılır ve hesaptan türetilen
+            // gerçek imalat toleransları basılır.
+            const proc = mfgData.manufacturing_processes || {};
+            const tol = (mfgData.critical_tolerances || {}).features || {};
+            const tolRows = Object.keys(tol).map(function (key) {
+                const f = tol[key] || {};
+                const nominal = (typeof f.nominal_mm === 'number')
+                    ? f.nominal_mm.toFixed(2) : '—';
+                const band = (typeof f.tolerance_mm === 'number')
+                    ? ('±' + f.tolerance_mm.toFixed(3)) : '—';
+                return `<tr><td>${key}</td><td>${nominal} mm ${band} mm</td></tr>`;
+            }).join('');
+
             const mfgCard = document.createElement('div');
             mfgCard.className = 'subsystem-card';
             mfgCard.innerHTML = `
                 <h3>${T('liq.js.manufacturing_production', 'Manufacturing & Production')}</h3>
                 <table class="spec-table">
-                    <tr><td>${T('liq.js.chamber_process', 'Chamber Process:')}</td><td>${mfgData.manufacturing_processes.chamber}</td></tr>
-                    <tr><td>${T('liq.js.nozzle_process', 'Nozzle Process:')}</td><td>${mfgData.manufacturing_processes.nozzle}</td></tr>
-                    <tr><td>${T('liq.js.injector_process', 'Injector Process:')}</td><td>${mfgData.manufacturing_processes.injector}</td></tr>
-                    <tr><td>${T('liq.js.development_cost', 'Development Cost:')}</td><td>${mfgData.estimated_costs.development}</td></tr>
-                    <tr><td>${T('liq.js.production_unit', 'Production Unit:')}</td><td>${mfgData.estimated_costs.production_unit}</td></tr>
-                    <tr><td>${T('liq.js.design_phase', 'Design Phase:')}</td><td>${mfgData.production_timeline.design_phase}</td></tr>
+                    <tr><td>${T('liq.js.chamber_process', 'Chamber Process:')}</td><td>${proc.chamber || '—'}</td></tr>
+                    <tr><td>${T('liq.js.nozzle_process', 'Nozzle Process:')}</td><td>${proc.nozzle || '—'}</td></tr>
+                    <tr><td>${T('liq.js.injector_process', 'Injector Process:')}</td><td>${proc.injector || '—'}</td></tr>
+                    ${tolRows}
+                    <tr><td>${T('liq.js.cost_schedule', 'Cost &amp; schedule:')}</td><td>${mfgData.cost_and_schedule_status || '—'}</td></tr>
                 </table>
             `;
             container.appendChild(mfgCard);
@@ -3481,7 +3511,7 @@
         }
         
         function collectAllParameters() {
-            return {
+            const params = {
                 // Propellant data
                 fuel_type: document.getElementById('fuel_type').value,
                 oxidizer_type: document.getElementById('oxidizer_type').value,
@@ -3535,7 +3565,15 @@
                 discharge_coefficient: parseFloat(document.getElementById('discharge_coefficient').value) || 0.7,
                 
                 // Chamber design
-                chamber_diameter: parseFloat(document.getElementById('chamber_diameter').value) || 200,
+                // NOT: chamber_diameter burada YOK — aşağıda koşullu eklenir.
+                // Hazne çapı ile daralma oranı AYNI büyüklüğü belirler
+                // (d_c = d_t·sqrt(CR)). Çözücüde çap verilmişse o kazanır ve
+                // 'warn.liquid.chamber_diameter_overrides_contraction' uyarısı
+                // üretilir. Burada çap boş bırakılsa bile `|| 200` ile sabit
+                // gönderiliyordu, dolayısıyla kullanıcının daralma oranı HİÇ
+                // kazanamıyordu — ölçümde alan "yalnız kendi yankısı" olarak
+                // görünüyordu. Artık alan boşsa gönderilmez ve daralma oranı
+                // çapı belirler.
                 characteristic_length: parseFloat(document.getElementById('characteristic_length').value) || 1.2,
                 contraction_ratio: parseFloat(document.getElementById('contraction_ratio').value) || 4,
                 chamber_wall_thickness: parseFloat(document.getElementById('chamber_wall_thickness').value) || 5,
@@ -3584,6 +3622,19 @@
                 ground_support: document.getElementById('ground_support').value,
                 hazard_classification: document.getElementById('hazard_classification').value
             };
+
+            // Hazne çapı YALNIZ kullanıcı gerçekten bir değer bıraktıysa
+            // gönderilir. Boşsa gönderilmez ve çözücü hazne çapını daralma
+            // oranından türetir (d_c = d_t·sqrt(CR)). Eskiden burada
+            // `|| 200` vardı: alan silinse bile 200 mm gidiyordu, çap her
+            // zaman kazanıyordu ve contraction_ratio girdisi hiçbir sayıyı
+            // oynatamıyordu.
+            const _dcRaw = (document.getElementById('chamber_diameter')?.value ?? '').trim();
+            const _dc = parseFloat(_dcRaw);
+            if (_dcRaw !== '' && Number.isFinite(_dc) && _dc > 0) {
+                params.chamber_diameter = _dc;
+            }
+            return params;
         }
         
         // Ask AI Analysis
@@ -4777,7 +4828,12 @@ Please provide:
         function _liquidSheetsToCsvBlob(sheets) {
             const esc = function (v) {
                 const x = (v === null || v === undefined) ? '' : String(v);
-                return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x;
+                // Formul enjeksiyonu (CWE-1236): elektronik tablolar '=' '+' '-' '@'
+                // ve sekme/CR ile baslayan METNI formul/komut sayabilir. Sayi
+                // gorunen degerlere (-5000, +3.2e4) DOKUNULMAZ, yoksa veri bozulur.
+                var y = x;
+                if (/^[=+\-@\t\r]/.test(y) && !(y !== '' && isFinite(Number(y)))) { y = "'" + y; }
+                return /[",\n]/.test(y) ? '"' + y.replace(/"/g, '""') + '"' : y;
             };
             const lines = [];
             sheets.forEach(function (sheet, i) {
@@ -4916,6 +4972,23 @@ Please provide:
             target_thrust_to_weight: {
                 unit: '', digits: 1,
                 get: function (r) { return _uwNum(((r.design_summary || {}).masses || {}).thrust_to_weight); }
+            },
+            // Oda çapı da girildiğinde daralma oranı hesaba GİRMEZ; çözücünün
+            // oda çapından geri hesapladığı gerçek oran gösterilir. Motor bu
+            // alanı yalnız oda çapı öncelik aldığı koşularda beyan eder.
+            contraction_ratio: {
+                unit: '', digits: 2,
+                get: function (r) { return _uwNum((r.nozzle_angles || {}).contraction_ratio); }
+            },
+            // Türbin basınç oranında öncelik genişleme oranındadır; çözücünün
+            // ima ettiği giriş basıncı motorda hesaplanır (P_in = PR · P_atm),
+            // atmosfer basıncı burada TEKRARLANMAZ.
+            turbine_inlet_pressure: {
+                unit: 'bar', digits: 1,
+                get: function (r) {
+                    var tp = ((r.detailed_feed_system || {}).turbopump_analysis || {});
+                    return _uwNum((tp.turbine || {}).inlet_pressure_implied_bar);
+                }
             }
         };
 

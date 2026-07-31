@@ -53,15 +53,22 @@
                          source: T('panel.validation.srcTransient', 'transient analysis F(t)') };
             }
         } catch (e) { /* transient paneli yoksa sıradaki kaynak */ }
-        const m = window.currentResults && window.currentResults.motor;
+        // Eski kod yalnız `currentResults.motor` altına bakıyordu; katı ve
+        // sıvı yanıtları DÜZ olduğu için o iki motor tipinde tahmin kaynağı
+        // hiçbir zaman bulunamıyor, panel "kaynak yok" diyordu.
+        const results = window.currentResults;
+        const m = results ? U.motorDict(results) : null;
         if (m && m.transient && Array.isArray(m.transient.time)
             && m.transient.time.length > 3) {
             return { time: m.transient.time, thrust: m.transient.thrust,
                      source: T('panel.validation.srcStored', 'stored transient F(t)') };
         }
-        if (m && Number.isFinite(m.thrust) && Number.isFinite(m.burn_time)
-            && m.burn_time > 0) {
-            return { time: [0, m.burn_time], thrust: [m.thrust, m.thrust],
+        // Katı motor düz sözlükte 'thrust' üretmiyor (ortalama/tepe ayrı);
+        // merkezi okuyucu motor tipine göre doğru anahtarı seçer.
+        const thrust = results ? U.readThrust(results) : undefined;
+        const burnTime = results ? U.readBurnTime(results) : undefined;
+        if (Number.isFinite(thrust) && Number.isFinite(burnTime) && burnTime > 0) {
+            return { time: [0, burnTime], thrust: [thrust, thrust],
                      source: T('panel.validation.srcDesign', 'design point (constant thrust)') };
         }
         return null;

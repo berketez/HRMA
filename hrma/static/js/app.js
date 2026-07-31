@@ -98,83 +98,28 @@ function safeParseFloat(value, fallback = 0) {
     return isNaN(parsed) || !isFinite(parsed) ? fallback : parsed;
 }
 
-// Collect form data
-function getFormData() {
-    const data = {
-        // Basic parameters
-        motor_name: document.getElementById('motor_name') ? document.getElementById('motor_name').value || 'UZAYTEK-HRM-001' : 'UZAYTEK-HRM-001',
-        motor_description: document.getElementById('motor_description') ? document.getElementById('motor_description').value || '' : '',
-        thrust: safeParseFloat(document.getElementById('thrust').value),
-        burn_time: safeParseFloat(document.getElementById('burn_time').value),
-        total_impulse: document.getElementById('total_impulse') ? safeParseFloat(document.getElementById('total_impulse').value) : safeParseFloat(document.getElementById('thrust').value) * safeParseFloat(document.getElementById('burn_time').value),
-        of_ratio: safeParseFloat(document.getElementById('of_ratio').value),
-        chamber_pressure: safeParseFloat(document.getElementById('chamber_pressure').value),
-        tank_pressure: safeParseFloat(document.getElementById('tank_pressure').value),
-        
-        // Advanced parameters
-        atmospheric_pressure: safeParseFloat(document.getElementById('single_pressure')?.value, 1.01325),
-        chamber_temperature: document.getElementById('chamber_temperature') ? safeParseFloat(document.getElementById('chamber_temperature').value, 2800) : 2800,
-        gamma: document.getElementById('gamma') ? safeParseFloat(document.getElementById('gamma').value, 1.25) : 1.25,
-        gas_constant: document.getElementById('gas_constant') ? safeParseFloat(document.getElementById('gas_constant').value, 296) : 296,
-        l_star: safeParseFloat(document.getElementById('l_star')?.value, 1.0),
-        expansion_ratio: document.getElementById('expansion_ratio') ? safeParseFloat(document.getElementById('expansion_ratio').value, 16) : 16,
-        nozzle_type: document.getElementById('nozzle_type') ? document.getElementById('nozzle_type').value || 'conical' : 'conical',
-        combustion_type: document.getElementById('combustion_type') ? document.getElementById('combustion_type').value || 'infinite' : 'infinite',
-        chamber_diameter_input: document.getElementById('chamber_diameter_input') ? safeParseFloat(document.getElementById('chamber_diameter_input').value, 0) : 0,
-        contraction_ratio: document.getElementById('contraction_ratio') ? safeParseFloat(document.getElementById('contraction_ratio').value, 0) : 0,
-        mass_flux_chamber: document.getElementById('mass_flux_chamber') ? safeParseFloat(document.getElementById('mass_flux_chamber').value, 0) : 0,
-        fuel_type: document.getElementById('fuel_type') ? document.getElementById('fuel_type').value || 'htpb' : 'htpb',
-        fuel_density: document.getElementById('fuel_density') ? safeParseFloat(document.getElementById('fuel_density').value, 920) : 920,
-        regression_a: document.getElementById('regression_a') ? safeParseFloat(document.getElementById('regression_a').value, 0.0003) : 0.0003,
-        regression_n: document.getElementById('regression_n') ? safeParseFloat(document.getElementById('regression_n').value, 0.5) : 0.5,
-        oxidizer_type: document.getElementById('oxidizer_type') ? document.getElementById('oxidizer_type').value || 'n2o' : 'n2o',
-        oxidizer_phase: document.getElementById('oxidizer_phase') ? document.getElementById('oxidizer_phase').value || 'liquid' : 'liquid',
-        oxidizer_density: document.getElementById('oxidizer_density') ? safeParseFloat(document.getElementById('oxidizer_density').value, 1220) : 1220,
-        oxidizer_viscosity: document.getElementById('oxidizer_viscosity') ? safeParseFloat(document.getElementById('oxidizer_viscosity').value, 0.0002) : 0.0002,
-        oxidizer_temp: document.getElementById('oxidizer_temp') ? safeParseFloat(document.getElementById('oxidizer_temp').value, 293) : 293,
-        
-        // Injector parameters
-        injector_type: document.getElementById('injector_type') ? document.getElementById('injector_type').value || 'showerhead' : 'showerhead',
-        target_velocity: document.getElementById('target_velocity') ? safeParseFloat(document.getElementById('target_velocity').value, 30) : 30,
-        hole_diameter_min: document.getElementById('hole_diameter_min') ? safeParseFloat(document.getElementById('hole_diameter_min').value, 0.3) : 0.3,
-        hole_diameter_max: document.getElementById('hole_diameter_max') ? safeParseFloat(document.getElementById('hole_diameter_max').value, 2) : 2,
-        plate_thickness: document.getElementById('plate_thickness') ? safeParseFloat(document.getElementById('plate_thickness').value, 3) : 3,
-        
-        // Trajectory parameters
-        calculate_trajectory: document.getElementById('calculate_trajectory') ? document.getElementById('calculate_trajectory').checked : false,
-        vehicle_mass_dry: document.getElementById('vehicle_mass_dry') ? safeParseFloat(document.getElementById('vehicle_mass_dry').value, 50) : 50,
-        vehicle_diameter: document.getElementById('vehicle_diameter') ? safeParseFloat(document.getElementById('vehicle_diameter').value, 0.15) : 0.15,
-        drag_coefficient: document.getElementById('drag_coefficient') ? safeParseFloat(document.getElementById('drag_coefficient').value, 0.5) : 0.5,
-        vehicle_length: document.getElementById('vehicle_length') ? safeParseFloat(document.getElementById('vehicle_length').value, 2) : 2,
-        launch_angle: document.getElementById('launch_angle') ? safeParseFloat(document.getElementById('launch_angle').value, 85) : 85,
-        launch_altitude: document.getElementById('launch_altitude') ? safeParseFloat(document.getElementById('launch_altitude').value, 0) : 0,
-        wind_speed: document.getElementById('wind_speed') ? safeParseFloat(document.getElementById('wind_speed').value, 0) : 0,
-        wind_direction: document.getElementById('wind_direction') ? safeParseFloat(document.getElementById('wind_direction').value, 0) : 0
-    };
-    
-    // Add injector-specific parameters
-    const injectorType = document.getElementById('injector_type').value;
-    
-    if (injectorType === 'showerhead') {
-        data.target_velocity = document.getElementById('target_velocity') ? safeParseFloat(document.getElementById('target_velocity').value, 30) : 30;
-        data.n_holes = document.getElementById('n_holes') ? parseInt(document.getElementById('n_holes').value || 0) : 0;
-        data.hole_diameter_min = document.getElementById('hole_diameter_min') ? safeParseFloat(document.getElementById('hole_diameter_min').value, 0.3) : 0.3;
-        data.hole_diameter_max = document.getElementById('hole_diameter_max') ? safeParseFloat(document.getElementById('hole_diameter_max').value, 2.0) : 2.0;
-        data.plate_thickness = document.getElementById('plate_thickness') ? safeParseFloat(document.getElementById('plate_thickness').value, 3.0) : 3.0;
-    } else if (injectorType === 'pintle') {
-        // injectorType ZATEN string; eski kod injectorType.value okuyordu →
-        // undefined === 'pintle' hiç tutmuyor, pintle/swirl alanları hiç
-        // gönderilmiyordu. Alanlar sayfada yoksa mm cinsinden varsayılan.
-        data.outer_diameter = safeParseFloat(document.getElementById('outer_diameter')?.value, 50);
-        data.pintle_diameter = safeParseFloat(document.getElementById('pintle_diameter')?.value, 25);
-    } else if (injectorType === 'swirl') {
-        data.n_slots = parseInt(document.getElementById('n_slots')?.value || 6);
-        data.slot_width = safeParseFloat(document.getElementById('slot_width')?.value, 0);
-        data.slot_height = safeParseFloat(document.getElementById('slot_height')?.value, 0);
-    }
-    
-    return data;
-}
+// TOPLAYICI BURADA DEGIL — templates/advanced.html icindeki inline
+// getFormData'dadir.
+//
+// v2.6.26: burada 76 satirlik ikinci bir getFormData kopyasi duruyordu.
+// advanced.html app.js'i once yukleyip kendi inline surumunu SONRA
+// tanimladigi icin inline olan bu kopyayi gölgeliyordu; yani bu kod
+// hicbir zaman calismiyordu. Iki kopya farkli varsayilanlar tasiyordu
+// (burada regression_a=0.0003 / n=0.5, inline'da 3.68e-5 / 0.555) ve
+// hangisinin gecerli oldugu koddan anlasilmiyordu. Denetim sirasinda
+// envanter betigi yanlis kopyayi tarayip 33 alan bulmustu; gercek
+// toplayici 41 alan gonderiyor.
+//
+// Buradaki kopyanin okudugu gamma / gas_constant / chamber_temperature /
+// thrust_coefficient anahtarlarinin advanced.html'de KARSILIK GELEN
+// ALANI YOK (getElementById null donuyordu); app.py bu anahtarlari
+// okuyor ama arayuzden erisilemiyorlar. Silinmeleriyle bir sey kaybolmadi.
+//
+// Asagidaki calculate() / calculateParametric() / calculateTrajectory()
+// cagrilarindaki getFormData(), calisma aninda advanced.html'deki inline
+// surume cozulur. liquid.html ve solid.html app.js'i yukler ama kendi
+// calculateLiquid() / calculateSolid() akislarini kullanir; bu
+// fonksiyonlari cagirmazlar.
 
 // Main calculation function
 async function calculate() {
@@ -361,8 +306,17 @@ function displayCalculationResults(results) {
     // Display injector design table
     displayInjectorTable(results.injector);
     
-    // Display warnings (enjektör uyarıları + backend doğrulama özeti)
-    displayWarnings((results.injector && results.injector.warnings) || [], results.validation);
+    // Display warnings (motor tasarım uyarıları + enjektör + doğrulama özeti)
+    //
+    // v2.6.26: burada YALNIZ enjektör uyarıları gösteriliyordu. Hibrit motor
+    // kendi tasarım uyarılarını (bilinmeyen kamara malzemesi, aralık dışı
+    // cidar kalınlığı, ...) topluyor ama hiçbiri ekrana ulaşmıyordu.
+    // Ölçüldü: chamber_material='ZIRVAAA' gönderilen istek HTTP 200 dönüyor,
+    // sessizce steel_4130 kullanılıyor ve kullanıcı bunu asla göremiyordu.
+    const engineWarnings = (results.motor && (results.motor.warnings
+        || results.motor.design_warnings)) || [];
+    const injectorWarnings = (results.injector && results.injector.warnings) || [];
+    displayWarnings(engineWarnings.concat(injectorWarnings), results.validation);
     
     // Show export panel after successful calculation
     const exportPanel = document.getElementById('exportActionsPanel');
@@ -378,44 +332,61 @@ function displayCalculationResults(results) {
 }
 
 // Validate and fix injector diameter
+/* v2.6.26 — TARAYICI ARTIK ÇÖZÜCÜNÜN SONUCUNU DEĞİŞTİRMİYOR.
+ *
+ * Bu fonksiyon adı gibi davranıyordu: enjektör geometrisi kamaraya sığmıyorsa
+ * çözücünün ürettiği sayıları YENİDEN YAZIYORDU. İki ayrı zarar veriyordu:
+ *
+ *  1. Delik çapı yeniden yazılıyor ama `injection_area`, `exit_velocity` ve
+ *     `reynolds_number` güncellenmiyordu. Sonuç tablosu kendi içinde
+ *     tutarsız kalıyordu: n x pi/4 x d^2 artık raporlanan alanı vermiyordu.
+ *     Kullanıcı bu çapı delerse hedef debiyi tutturamaz.
+ *  2. `injector_diameter` alanı yoksa kamara çapının %80'i UYDURULUYORDU.
+ *     Hesaplanmamış bir ölçü, hesaplanmış gibi ekrana ve dışa aktarıma
+ *     giriyordu.
+ *
+ * Geometrik çelişki gerçek bir TASARIM sorunudur; görüntüleme katmanının
+ * sessizce "düzeltebileceği" bir şey değildir. Artık sayılar olduğu gibi
+ * korunur ve çelişki UYARI olarak bildirilir — kullanıcı neyin uymadığını
+ * görür, hangi sayının gerçek olduğunu bilir.
+ */
 function validateAndFixInjectorDiameter(results) {
-    const chamberDiameter = results.motor.chamber_diameter * 1000; // Convert to mm
-    
-    // Check injector outer diameter for different types
+    if (!results || !results.injector || !results.motor) return;
+    const chamberDiameter = results.motor.chamber_diameter * 1000; // mm
+    if (!isFinite(chamberDiameter) || chamberDiameter <= 0) return;
+
+    const warn = (msg) => {
+        if (!results.injector.warnings) results.injector.warnings = [];
+        results.injector.warnings.push(msg);
+    };
+
     if (results.injector.type === 'pintle' && results.injector.outer_diameter) {
         if (results.injector.outer_diameter > chamberDiameter * 0.9) {
-            // Injector should be max 90% of chamber diameter for clearance
-            results.injector.outer_diameter = chamberDiameter * 0.8;
-            
-            // Add warning
-            if (!results.injector.warnings) {
-                results.injector.warnings = [];
-            }
-            results.injector.warnings.push(`Injector diameter limited to ${results.injector.outer_diameter.toFixed(1)}mm (80% of chamber diameter)`);
+            warn(T('app.warn.injectorTooWide',
+                   'Injector outer diameter does not fit the chamber')
+                 + ` (${results.injector.outer_diameter.toFixed(1)} mm > 90% of `
+                 + `${chamberDiameter.toFixed(1)} mm). Increase the chamber `
+                 + `diameter or reduce the injector; the reported values are `
+                 + `the solver's and were not adjusted.`);
         }
     }
-    
+
     if (results.injector.type === 'showerhead') {
-        // Calculate effective injector plate diameter
-        const effectiveDiameter = Math.sqrt(results.injector.n_holes || 1) * (results.injector.hole_diameter || 1) * 3;
-        
+        // Kaba yerleşim kontrolü: kare dizilimde delik alanının kapladığı
+        // yaklaşık çap. Bu bir TAHMİN, çözüm değil; yalnız uyarı üretir.
+        const effectiveDiameter = Math.sqrt(results.injector.n_holes || 1)
+            * (results.injector.hole_diameter || 1) * 3;
         if (effectiveDiameter > chamberDiameter * 0.9) {
-            // Recalculate hole parameters
-            const maxDiameter = chamberDiameter * 0.8;
-            const holeCount = results.injector.n_holes || 20;
-            results.injector.hole_diameter = maxDiameter / (Math.sqrt(holeCount) * 3);
-            
-            if (!results.injector.warnings) {
-                results.injector.warnings = [];
-            }
-            results.injector.warnings.push(`Hole pattern adjusted to fit within chamber diameter (${chamberDiameter.toFixed(1)}mm)`);
+            warn(T('app.warn.holePatternTooWide',
+                   'Hole pattern does not fit the chamber face')
+                 + ` (~${effectiveDiameter.toFixed(1)} mm > 90% of `
+                 + `${chamberDiameter.toFixed(1)} mm). Reduce the hole count or `
+                 + `increase the chamber diameter; the reported hole geometry `
+                 + `is the solver's and was not adjusted.`);
         }
     }
-    
-    // Ensure injector diameter field exists for display
-    if (!results.injector.injector_diameter) {
-        results.injector.injector_diameter = chamberDiameter * 0.8;
-    }
+    // 'injector_diameter' UYDURULMAZ: çözücü vermiyorsa alan boş kalır ve
+    // gösterim katmanı "bildirilmedi" der.
 }
 
 // Display performance metrics
@@ -491,6 +462,96 @@ function displayPerformanceMetrics(motorData) {
 
 // Plotly grafiğini güvenle çizer (JSON parse + responsive layout ayarı).
 // displayPlots içinden ÇIKARILDI: opsiyonel panel yardımcısı da kullanıyor.
+/* v2.6.26 — İtki ve oda basıncı zaman eğrisi (hibrit).
+ *
+ * Katı motor sayfasında bu eğri vardı, hibritte YOKTU; oysa zaman-adımlı
+ * çözücü anlık yakıt debisini, c*'ı ve Isp'yi zaten hesaplıyordu ve
+ * yalnızca dışarı vermiyordu. Eğri artık çözücünün kendi durumundan gelir
+ * (motor.thrust_curve), burada BİÇİM VERİLMEZ.
+ *
+ * Veri yoksa panel gizlenir: boş bir grafik kabı, kullanıcıya "hesap
+ * yapıldı ama sonuç sıfır" izlenimi verir — oysa gerçek "bu koşuda eğri
+ * üretilmedi"dir (ör. eski kayıt yüklendiğinde).
+ */
+function renderHybridThrustCurve() {
+    const panel = document.getElementById('hybridThrustCurvePanel');
+    const host = document.getElementById('hybrid_thrust_plot');
+    if (!panel || !host) return;
+
+    const curve = (window.currentResults && currentResults.motor
+                   && currentResults.motor.thrust_curve) || null;
+    const hasData = !!(curve && Array.isArray(curve.time) && curve.time.length > 1
+                       && Array.isArray(curve.thrust) && curve.thrust.length > 1);
+    if (!hasData) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+
+    const traces = [{
+        x: curve.time,
+        y: curve.thrust,
+        type: 'scatter',
+        mode: 'lines',
+        name: T('app.chart.thrust', 'Thrust'),
+        line: { width: 3 }
+    }];
+    // Oda basıncı ikinci eksende; yalnız gerçekten hesaplandıysa çizilir
+    // (çözücü boğaz alanını bilemediğinde NaN bırakır — NaN çizmek yerine
+    // izi hiç eklemiyoruz).
+    const pressure = Array.isArray(curve.pressure) ? curve.pressure : [];
+    if (pressure.length === curve.time.length
+        && pressure.every(v => typeof v === 'number' && isFinite(v))) {
+        traces.push({
+            x: curve.time,
+            y: pressure,
+            type: 'scatter',
+            mode: 'lines',
+            name: T('app.chart.chamberPressure', 'Chamber Pressure'),
+            yaxis: 'y2',
+            line: { width: 2, dash: 'dot' }
+        });
+    }
+
+    const layout = {
+        title: T('app.chart.thrustVsTime', 'Thrust and Chamber Pressure vs Time'),
+        xaxis: { title: T('app.chart.timeS', 'Time (s)') },
+        yaxis: { title: T('app.chart.thrustN', 'Thrust (N)') },
+        yaxis2: {
+            title: T('app.chart.pressureBar', 'Chamber Pressure (bar)'),
+            overlaying: 'y',
+            side: 'right',
+            showgrid: false
+        },
+        showlegend: true,
+        margin: { t: 60, r: 70, b: 60, l: 70 }
+    };
+    Plotly.newPlot(host, traces, layout, {
+        responsive: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+        toImageButtonOptions: { format: 'png', filename: 'hybrid_thrust_curve', scale: 2 }
+    });
+}
+
+/* v2.6.26 — Tasarım raporundaki "Chamber Volume" satırı, hemen üstündeki
+ * L* satırıyla ÇELİŞİYORDU. Motor iki hacim döndürür:
+ *   chamber_volume        = L*_istenen x A_t  (kullanıcının HEDEFİ)
+ *   chamber_volume_actual = gerçek geometrinin sardığı serbest hacim
+ * Hibritte port hacmi tek başına büyük olduğu için gerçekleşen L* çoğu zaman
+ * istenenin çok üstünde kalır (ölçüldü: 1,00 m istendi, 7,49 m gerçekleşti) ve
+ * tablo 371,4 cm³ gösterirken motorun gerçek hacmi 2781,5 cm³'tü. Aynı tablonun
+ * bir üst satırı zaten "achieved 7,49 m" yazdığı için iki satır matematiksel
+ * olarak birbirini yalanlıyordu. Artık GERÇEK hacim gösterilir; hedef hacim
+ * l_star / l_star_achieved satırlarından zaten okunabiliyor.
+ */
+function chamberVolumeM3(motorData) {
+    if (!motorData) return 0;
+    const actual = motorData.chamber_volume_actual;
+    return (typeof actual === 'number' && isFinite(actual) && actual > 0)
+        ? actual : (motorData.chamber_volume || 0);
+}
+
 function safePlotCreate(elementId, plotData) {
     const element = document.getElementById(elementId);
     if (element && plotData) {
@@ -596,6 +657,10 @@ function displayPlots(plots) {
     
     // Performance plots
     safePlotCreate('performance_plots', plots.performance);
+
+    // v2.6.26: İtki-zaman eğrisi (hibrit). Veri yoksa panel GİZLENİR —
+    // boş bir grafik kabı "hesap yapılmadı"yı "sonuç sıfır" gibi gösterir.
+    renderHybridThrustCurve();
     
     // 3D Motor simülasyonu: önce Three.js dijital ikiz (MotorViz3D),
     // yüklenemezse backend'in Plotly 3D çıktısına düş
@@ -807,7 +872,7 @@ function displayDesignReport(motorData, injectorData) {
                     <tr><td>${T('app.rep.chamberDia', 'Chamber Diameter')}</td><td>${(motorData.chamber_diameter * 1000).toFixed(1)} mm</td></tr>
                     <tr><td>${T('app.rep.chamberLen', 'Chamber Length')}</td><td>${(motorData.chamber_length * 1000).toFixed(1)} mm</td></tr>
                     ${lStarRow(motorData)}
-                    <tr><td>${T('app.rep.chamberVolume', 'Chamber Volume')}</td><td>${(motorData.chamber_volume * 1e6).toFixed(1)} cm³</td></tr>
+                    <tr><td>${T('app.rep.chamberVolume', 'Chamber Volume')}</td><td>${(chamberVolumeM3(motorData) * 1e6).toFixed(1)} cm³</td></tr>
                     <tr><td>${T('app.rep.portInitial', 'Initial Port Diameter')}</td><td>${(motorData.port_diameter_initial * 1000).toFixed(1)} mm</td></tr>
                     <tr><td>${T('app.rep.portFinal', 'Final Port Diameter')}</td><td>${(motorData.port_diameter_final * 1000).toFixed(1)} mm</td></tr>
                     <tr><td>${T('app.rep.regressionRate', 'Regression Rate')}</td><td>${motorData.regression_rate ? (motorData.regression_rate * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
@@ -1717,11 +1782,12 @@ function autoFillDesignConfig() {
         chamberLength.placeholder = `Auto: ${(motor.chamber_length * 1000).toFixed(0)} mm`;
     }
     
-    // Auto-fill injector parameters
-    if (injector.exit_velocity) {
-        document.getElementById('injection_velocity').value = Math.round(injector.exit_velocity);
-    }
-    
+    // v2.6.26: burada 'injection_velocity' GİRDİ kutusuna çözücünün hesapladığı
+    // çıkış hızı YAZILIYORDU. Kullanıcının girdiği sayı sonuçla eziliyordu; bir
+    // sonraki koşuda o değer geri gönderilse "girdi sonuca uyuyor" görünürdü —
+    // kendini doğrulayan bir döngü. Alan kaldırıldı (bağlı eşdeğeri
+    // target_velocity) ve çıkış hızı zaten enjektör sonuç tablosunda gösteriliyor.
+
     if (injector.n_holes) {
         document.getElementById('n_holes_override').placeholder = `Auto: ${injector.n_holes} holes`;
     }
@@ -1766,11 +1832,19 @@ function applyDesignConfig() {
             safety_factor: parseFloat(document.getElementById('safety_factor').value),
             nozzle_material: document.getElementById('nozzle_material').value,
             chamber_length_override: parseFloat(document.getElementById('chamber_length_override').value) || null,
-            nozzle_contour: document.getElementById('nozzle_contour').value
+            // v2.6.26: ayrı 'nozzle_contour' seçicisi kaldırıldı (nozzle_type ile
+            // aynı kavramın ikinci, bağlanmamış kopyasıydı). CAD artık çözücüye
+            // bağlı olan tek alandan okur — böylece CAD ile hesap aynı konturu
+            // kullanır (katı motorda CAD'in analizden kopması v2.6.26'da
+            // düzeltilen bir hataydı; aynı hatayı burada tekrarlamıyoruz).
+            nozzle_contour: document.getElementById('nozzle_type')?.value || 'conical'
         },
         injector: {
             material: document.getElementById('injector_material').value,
-            injection_velocity: parseFloat(document.getElementById('injection_velocity').value),
+            // 'injection_velocity' alanı kaldırıldı; bağlı olan eşdeğeri
+            // showerhead panelindeki target_velocity. Yoksa (pintle/swirl/
+            // koaksiyel) hız bir çıktıdır, CAD'e girdi olarak verilmez.
+            injection_velocity: parseFloat(document.getElementById('target_velocity')?.value) || null,
             pressure_drop_percent: parseFloat(document.getElementById('pressure_drop_percent').value),
             n_holes_override: parseInt(document.getElementById('n_holes_override').value) || null,
             hole_pattern: document.getElementById('hole_pattern').value,
@@ -2322,7 +2396,7 @@ function displayMotorTable(motorData) {
         [T('common.f.expansionRatio', 'Expansion Ratio'), motorData.expansion_ratio.toFixed(1), '-'],
         [T('app.rep.chamberDia', 'Chamber Diameter'), (motorData.chamber_diameter * 1000).toFixed(1), 'mm'],
         [T('app.rep.chamberLen', 'Chamber Length'), (motorData.chamber_length * 1000).toFixed(1), 'mm'],
-        [T('app.rep.chamberVolume', 'Chamber Volume'), (motorData.chamber_volume * 1e6).toFixed(1), 'cm³'],
+        [T('app.rep.chamberVolume', 'Chamber Volume'), (chamberVolumeM3(motorData) * 1e6).toFixed(1), 'cm³'],
         [T('app.metric.pc', 'Chamber Pressure'), (motorData.chamber_pressure).toFixed(1), 'bar'],
         [T('app.metric.thrust', 'Thrust'), (motorData.thrust).toFixed(0), 'N'],
         [T('app.metric.isp', 'Specific Impulse'), motorData.isp.toFixed(1), 's'],

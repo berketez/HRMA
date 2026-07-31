@@ -1,0 +1,46 @@
+{
+ "format": "hrma-project",
+ "format_version": 1,
+ "name": "Example Liquid LOX-RP1 25kN",
+ "description": "Öğretici örnek: LOX/RP-1 sıvı motor, 25 kN itki, 70 bar oda basıncı, O/F 2.3, gaz jeneratörü çevrimi, rejeneratif soğutma. / Educational example: LOX/RP-1 liquid engine, 25 kN thrust, 70 bar chamber pressure, O/F 2.3, gas-generator cycle, regenerative cooling.",
+ "motor_type": "liquid",
+ "inputs": {
+  "fields": {
+   "fuel_type": "rp1",
+   "oxidizer_type": "lox",
+   "fuel_density": 810,
+   "oxidizer_density": 1141,
+   "mixture_ratio": 2.3,
+   "stoichiometric_of": 3.4,
+   "of_min": 2.0,
+   "of_max": 3.2,
+   "combustion_efficiency": 97,
+   "engine_cycle": "gas_generator",
+   "thrust": 25000,
+   "chamber_pressure": 70,
+   "feed_pressure": 105,
+   "turbine_expansion_ratio": 4,
+   "generator_gas_temp": 900,
+   "injector_type": "impinging",
+   "injector_pressure_drop": 20,
+   "discharge_coefficient": 0.7,
+   "contraction_ratio": 4,
+   "characteristic_length": 1.2,
+   "chamber_material": "inconel_718",
+   "cooling_type": "regenerative",
+   "nozzle_expansion_ratio": 12,
+   "nozzle_type": "bell_80",
+   "safety_factor": 2.5
+  }
+ },
+ "results_summary": {
+  "thrust_N": 25000.0,
+  "isp_s": 277.449,
+  "isp_vacuum_s": 309.182,
+  "chamber_pressure_bar": 70.0,
+  "computed_with_version": "2.6.26"
+ },
+ "app_version": "2.6.26",
+ "created_at": "2026-07-31T19:25:34",
+ "updated_at": "2026-08-01T00:04:01"
+}

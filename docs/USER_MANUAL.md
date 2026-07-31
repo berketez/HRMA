@@ -7,24 +7,48 @@ presents results in a dark-themed web interface with an interactive 3D
 digital twin, an Analysis Deck of engineering panels, and working CAD /
 drawing / report exports.
 
-This manual describes HRMA **v2.6.25**.
+This manual describes HRMA **v2.6.26**.
 
-**New in v2.6.25.** Three changes affect what you see while using the tool.
+**New in v2.6.26.** This release changes no physics; it connects inputs that
+were already on the screen but reached nothing, removes two fields that
+duplicated another one, and fixes two bugs. What you see while using the tool
+changes as follows.
 
-- **Hybrid cooling, chamber material and wall thickness now reach the thermal
-  model.** Until this release the hybrid heat-transfer calculation ran with a
-  fixed 4130 steel wall, 5 mm thick, uncooled — whatever you selected on the
-  page. Selecting Inconel 718 with an 8 mm wall and radial channels produced
-  identical numbers to leaving the defaults. All three inputs are now used.
-  When you select cooling channels a warning states that the coolant-side film
-  coefficient is taken from the regenerative range in the literature and that
-  coolant flow, channel velocity, pressure drop and boiling margin are not
-  verified here. That warning is a declared limit of the model, not an error.
-- **Engine warnings are shown as text in the interface language.** Forty-two
-  warning codes had no translation and reached the screen as raw identifiers
-  such as `warn.validation.isp_out_of_range`.
-- **The update window shows release notes in the interface language.** Notes
-  previously appeared in whichever single language the release was written in.
+- **Eight hybrid-page inputs now reach the solver.** Until this release you
+  could type a value into each of them and no output leaf changed. They are:
+  *Safety Factor*, *Chamber Length Override*, *Nozzle Material*, *Injector
+  Material*, *Swirl Chamber Diameter*, *Tangential Entry Angle*, *Combustion
+  Type* (the "finite area" choice) and *Contraction Ratio*. Section 4 describes
+  what each one now does.
+- **The reported chamber safety factor is now a computed number, not your own
+  input read back.** Your real wall thickness is passed to the structural
+  module, so it runs in verification mode: the factor comes out of pressure,
+  diameter, material and thickness. Previously the module sized a wall and
+  reported `target factor × manufacturing allowance`, which is your input
+  returned to you. Expect the number to differ from what earlier releases
+  showed for the same design — the earlier one was not a measurement.
+- **Correction to the v2.6.25 note.** That release said cooling, chamber
+  material and wall thickness now reach the thermal model. On the server side
+  they did; on the hybrid page the form never sent them, so for you nothing
+  changed. The form sends them from v2.6.26 on. Note that the material
+  selector's first entry (AISI 304) is now what the analysis actually uses
+  unless you change it — earlier the analysis silently used 4130 steel.
+- **Two duplicate fields were removed.** *Nozzle Contour* is gone; its
+  parabolic option moved into *Nozzle Type*, which the solver reads (so the
+  selector is now conical / bell / parabolic). *Injection Velocity* is gone;
+  its wired equivalent is *Target Velocity* in the showerhead panel. The old
+  field was also overwritten with the solver's own exit velocity after each
+  run, so your entry was replaced by the result.
+- **The injector no longer fabricates a hole plan.** When the injector circuit
+  model could not size the selected element type, the result was filled with
+  12-hole showerhead constants and labelled with the type you had chosen. Now
+  nothing is invented: if the orifice plan cannot be produced it is not
+  reported, and the reason appears on screen.
+- **Selecting an impingement injector with an empty impingement angle no
+  longer crashes the calculation** (it returned HTTP 500).
+- **Engine design warnings reach the warnings panel.** The hybrid engine
+  collected them but never put them in the response, so an unknown chamber
+  material, for example, silently fell back and you never learned about it.
 
 
 > **Scope notice.** HRMA is a preliminary-design and educational tool built
@@ -51,6 +75,7 @@ This manual describes HRMA **v2.6.25**.
 14. [Scope and Limitations](#14-scope-and-limitations)
 15. [Saving and Reusing Projects](#15-saving-and-reusing-projects)
 16. [Importing External Designs](#16-importing-external-designs)
+17. [Flying Your Motor (Launch Site)](#17-flying-your-motor-launch-site)
 
 ---
 
@@ -58,7 +83,7 @@ This manual describes HRMA **v2.6.25**.
 
 ### Option A: Windows installer (recommended on Windows)
 
-1. Download `HRMA-Setup-2.6.25.exe` from the
+1. Download `HRMA-Setup-2.6.26.exe` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest).
 2. Double-click and follow the wizard (Next, Next, Install). The installer
    is per-user: no administrator rights are required.
@@ -69,7 +94,7 @@ Python and all libraries are bundled; no separate installation is needed.
 
 ### Option B: macOS disk image (recommended on macOS)
 
-1. Download `HRMA-Setup-2.6.25-macOS.dmg` from the
+1. Download `HRMA-Setup-2.6.26-macOS.dmg` from the
    [latest release](https://github.com/berketez/HRMA/releases/latest)
    (Apple Silicon, macOS 11 or newer).
 2. Open the DMG and drag `HRMA` into `Applications`.
@@ -150,9 +175,21 @@ Fill the form top to bottom, then press **Calculate**. The main input groups:
 - **L\* [m]**: characteristic chamber length.
 - **Expansion ratio**: enter 0 for automatic (ambient-pressure adapted)
   calculation.
-- **Nozzle type**: conical or bell.
-- **Chamber diameter, contraction ratio, chamber mass flux**: enter 0 to
-  let the solver size them.
+- **Nozzle type**: conical, bell or parabolic. This single selector drives
+  both the nozzle-efficiency factor used by the solver and the contour used by
+  the CAD and drawing exports. (Until v2.6.26 a second selector called *Nozzle
+  Contour* offered the same three choices and was connected to nothing; it has
+  been removed.)
+- **Chamber diameter and chamber mass flux**: enter 0 to let the solver size
+  them.
+- **Combustion type and contraction ratio**: with *Infinite Area Combustion*
+  the chamber flow velocity is taken as zero, so injector-face pressure equals
+  nozzle stagnation pressure. Choosing *Finite Area Combustion* solves the
+  subsonic root of the isentropic area relation for the chamber Mach number and
+  reports the injector-face over-pressure that follows from it. The contraction
+  ratio you enter is used there; if you leave it at 0 the ratio is taken from
+  the computed chamber and throat geometry. A low ratio raises a warning
+  because the chamber approaches choking.
 
 ### Fuel
 
@@ -171,11 +208,82 @@ Fill the form top to bottom, then press **Calculate**. The main input groups:
 
 ### Injector
 
-- **Injector type**: showerhead, pintle, or swirl, with type-specific
-  parameters (target velocity, hole diameter limits, plate thickness).
+- **Injector type**: showerhead, impingement, pintle, swirl or coaxial. Each
+  choice replaces the parameter block under it:
+  - *Showerhead*: target velocity, hole-diameter limits, plate thickness.
+    **Target Velocity is the wired velocity input** (the separate *Injection
+    Velocity* field on the design-configuration tab was removed in v2.6.26;
+    it was a second, unconnected copy of the same quantity).
+  - *Swirl*: number of tangential slots, slot width and height, **swirl
+    chamber diameter** and **tangential entry angle**. The last two are used
+    from v2.6.26 on: the swirl chamber diameter is the `D_s` in the
+    Giffen-Muraszew atomiser constant `K = A_p / (D_s · d_o)`, and the entry
+    angle is treated as the target spray half-angle, from which the inverse
+    solver picks `K` and sizes the exit orifice and slots. Leave the slot
+    width and height empty to design for a target angle: if you fix the slot
+    geometry it fixes the swirl number as well, and the target angle can no
+    longer be honoured — the panel says so instead of ignoring it silently.
+    Angles outside the solvable envelope (about 3.7° to 71.2°) are clamped
+    with a warning, and a swirl chamber narrower than 1.25 × the exit orifice
+    breaks the geometric assumption of the model, which is also reported.
+  - *Impingement*: pattern, impingement angle, element pairs, orifice
+    diameter, impingement distance, momentum ratio. If the hole diameter your
+    pair count implies falls outside the manufacturing band, the pair count is
+    re-solved to preserve the target flow rate and both numbers (requested and
+    used) are reported.
+  - *Pintle* and *coaxial*: tip and annulus geometry.
+
   For detailed injector design use the dedicated Injector Design panel
   (Section 6), which implements the Dyer NHNE two-phase model for
   self-pressurizing N2O.
+
+### Design configuration (materials, margins, overrides)
+
+These fields live on the design-configuration tab. From v2.6.26 all of them
+reach the solver; before that release they were on screen but inert.
+
+- **Chamber material, wall thickness, cooling channels**: feed the heat
+  transfer model (wall temperatures, heat flux) and, since this release, the
+  structural module as well — so thermal and structural results now describe
+  the same motor. Selecting cooling channels raises a warning stating that the
+  coolant-side film coefficient is taken from the regenerative range in the
+  literature and that coolant flow, channel velocity, pressure drop and boiling
+  margin are not verified here. That is a declared limit of the model, not an
+  error.
+- **Safety Factor**: the design factor the structural module aims at. Because
+  your real wall thickness is passed alongside it, the module runs in
+  *verification* mode: the reported minimum safety factor is computed from
+  pressure, diameter, material and thickness, and it will not simply echo what
+  you typed. Values outside the accepted range are refused with a warning
+  rather than silently applied.
+- **Chamber Length Override [mm]**: overrides the chamber length derived from
+  L\*. Leave it empty for automatic. The override is refused — with a warning
+  that names the numbers — if it is shorter than the fuel grain plus the
+  pre-combustion chamber, because the grain has to fit inside the chamber.
+  A refused override is not quietly trimmed to fit; you keep the automatic
+  length and are told why.
+- **Nozzle Material** (graphite, tungsten, copper): drives a throat thermal
+  check and an erosion estimate. The axial Bartz profile is solved at the
+  throat station with this material, and the equilibrium wall temperature is
+  compared against the material's allowable temperature; exceeding it is a
+  critical warning. For erosion, materials with a published coefficient band
+  (graphite, and carbon-carbon, which the erosion model supports even though
+  the selector does not list it) get a recession rate and the throat growth
+  over the burn; **tungsten has no published band, so no coefficient is
+  invented and the result says "no published data"**.
+  The copper option is labelled "regeneratively cooled" in the interface, so
+  it is solved under that assumption; the empirical oxidation model is not
+  valid for an uncooled melting metal, and that is reported rather than
+  guessed around. The erosion estimate is reported only — the steady-state
+  performance solution still assumes a rigid throat. Use the transient solver
+  for erosion-coupled histories.
+- **Injector Material** (AISI 316, Ti-6Al-4V, brass): sizes the injector
+  plate. With the chosen material's yield strength and density, HRMA reports
+  the plate bending stress, safety factor, required thickness and mass, using
+  the edge-fixed circular-plate relation (Roark's Formulas, Table 11.2, case
+  10b) with an ASME BPVC PG-52 ligament efficiency for the drilled area. If a
+  needed quantity is missing, the block returns "not analyzed" with the reason
+  instead of a number.
 
 The solid and liquid pages follow the same pattern with type-specific
 inputs (grain geometry, segments, and propellant family on the solid page;
@@ -191,9 +299,21 @@ Pressing Calculate sends the form to `/calculate` (or `/calculate_solid`,
   fuel/oxidizer mass flow, and a SAFE / MARGINAL / UNSAFE state badge.
 - **Warnings panel**: design-criteria messages from the solver and the
   validation system (for example injector pressure-drop ratio, L/D limits,
-  regression-model applicability). Read these before trusting the numbers.
+  regression-model applicability). Since v2.6.26 the hybrid engine's own
+  design warnings appear here too — a material name it did not recognise, a
+  wall thickness outside the accepted range, a rejected chamber-length
+  override. Before that they were collected and thrown away, so a silent
+  fallback stayed silent. Read these before trusting the numbers.
 - **Motor design tables**: full geometry: nozzle contour dimensions and
-  angles, grain/port geometry, injector plan, wall thickness.
+  angles, grain/port geometry, injector plan, wall thickness. The chamber
+  length table also states whether the length came from L\* or from your
+  override.
+- **Material verdicts**: the throat thermal margin and erosion estimate for
+  the selected nozzle material, and the injector plate stress, safety factor,
+  required thickness and mass for the selected injector material. Where a
+  quantity cannot be produced — an erosion coefficient that does not exist in
+  the literature, an injector circuit the model cannot size — the block says
+  so and gives the reason instead of a number.
 - **Performance charts**: Plotly charts (thrust curve, pressure, altitude
   sweeps) in the same dark theme, fully offline.
 - **2D cross-section**: engineering cross-section drawing generated from
@@ -254,7 +374,7 @@ more) that appears after a successful calculation. Every panel:
 - renders tables, stat cards, and Plotly charts, with ok / warning / error
   badges.
 
-The 13 panels (introduced through v2.4.6, current in v2.6.25):
+The 13 panels (introduced through v2.4.6, current in v2.6.26):
 
 | Panel | Endpoint | Motor types | What it computes |
 |---|---|---|---|
@@ -274,6 +394,14 @@ The 13 panels (introduced through v2.4.6, current in v2.6.25):
 
 Panels marked "long" warn you that the analysis may take noticeably longer
 (for example the high-fidelity kinetic integration).
+
+The Comprehensive Safety panel states the basis of every distance it prints:
+fire standoff comes from generic cube-root scaling and is **not** an NFPA
+495/1123 siting calculation, and toxic standoff uses generic mass-scaled
+coefficients rather than DOT ERG protective action distances. Medical items
+are emergency-planning prompts, not medical advice. Treat all of them as a
+checklist to take to the authority having jurisdiction, not as a compliance
+result — the software does not evaluate regulatory compliance and says so.
 
 ### Uncertainty and Correlation (v2.5.0 Confidence Release)
 
@@ -481,6 +609,22 @@ choose Open (unsigned app, Gatekeeper requires one manual confirmation).
 
 **Windows SmartScreen blocks the installer.** Click "More info", then
 "Run anyway" (the installer is unsigned).
+
+**The injector result has no hole count or hole diameter.** The detailed
+injector circuit model could not size the element type you selected, and the
+warning panel names the reason. HRMA no longer fills the gap with generic
+showerhead numbers labelled as your chosen type, so there is nothing to read
+off: change the injector type or its parameters, or size that injector in the
+dedicated Injector Design panel.
+
+**The chamber length override did nothing.** It is refused when it is shorter
+than the fuel grain plus the pre-combustion chamber; the warning gives both
+your value and the minimum. Increase the override or shorten the grain.
+
+**The safety factor no longer matches what I typed.** That is the intended
+behaviour from v2.6.26: the field is the design *target*, and the reported
+factor is verified against your actual wall thickness. If they were always
+equal, the number would be measuring nothing.
 
 **Results look wrong.** Read the warnings panel first. Most "wrong"
 results are inputs outside the validity range of the underlying

@@ -510,7 +510,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.energy_released_per_unit_mass_during">Energy released per unit mass during combustion. Higher values indicate better energy content. APCP: 2000-3000 kJ/kg, KNSU: 3000-4000 kJ/kg.</span>
                         </div>
                     </label>
-                    <input type="number" id="heat_value" value="2500" step="0.1">
+                    <input type="number" id="heat_value" value="2500" step="0.1" min="500" max="10000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -561,7 +561,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.coefficient_for_burn_rate_enhancement_at">Coefficient for burn rate enhancement at high mass flux conditions. Accounts for increased burning rate due to convective heat transfer from hot gas flow.</span>
                         </div>
                     </label>
-                    <input type="number" id="erosive_k" value="0.0002" step="0.0001">
+                    <input type="number" id="erosive_k" value="0.0002" step="0.0001" min="0" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -571,7 +571,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.exponent_for_erosive_burning_law_typical">Exponent for erosive burning law. Typical values: 0.6-0.8. Higher values indicate stronger dependence on mass flux.</span>
                         </div>
                     </label>
-                    <input type="number" id="erosive_m" value="0.8" step="0.01">
+                    <input type="number" id="erosive_m" value="0.8" step="0.01" min="0.1" max="2">
                 </div>
                 <div class="form-group">
                     <label>
@@ -581,7 +581,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.temperature_sensitivity_coefficient_for_burn_rat">Temperature sensitivity coefficient for burn rate law: r = a·P^n·(1+σ·ΔT). Accounts for propellant temperature effects on burning rate.</span>
                         </div>
                     </label>
-                    <input type="number" id="temp_coeff" value="0.002" step="0.0001">
+                    <input type="number" id="temp_coeff" value="0.002" step="0.0001" min="0" max="0.02">
                 </div>
             </div>
         </div>
@@ -681,7 +681,7 @@
                                 <span class="tooltip-text" data-i18n="solid.ui.radius_of_star_points_from_center">Radius of star points from center. Determines burning surface area and progressive characteristics.</span>
                             </div>
                         </label>
-                        <input type="number" id="star_radius" value="15" step="0.1">
+                        <input type="number" id="star_radius" value="15" step="0.1" min="2" max="60">
                     </div>
                     <div class="form-group">
                         <label>
@@ -691,7 +691,7 @@
                                 <span class="tooltip-text" data-i18n="solid.ui.radius_of_fillets_at_star_valleys">Radius of fillets at star valleys to reduce stress concentration. Improves grain structural integrity.</span>
                             </div>
                         </label>
-                        <input type="number" id="star_fillet" value="2" step="0.1">
+                        <input type="number" id="star_fillet" value="2" step="0.1" min="0.1" max="30">
                     </div>
                 </div>
             </div>
@@ -728,7 +728,7 @@
                                 <span class="tooltip-text" data-i18n="solid.ui.radial_length_of_fin_slots_from">Radial length of fin slots from core to outer diameter. Determines progressive burning characteristics.</span>
                             </div>
                         </label>
-                        <input type="number" id="fin_length" value="20" step="0.1">
+                        <input type="number" id="fin_length" value="20" step="0.1" min="1" max="200">
                     </div>
                 </div>
             </div>
@@ -823,7 +823,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.thickness_of_thermal_insulation_layer_between">Thickness of thermal insulation layer between propellant and case. Protects case from high temperatures and provides thermal barrier.</span>
                         </div>
                     </label>
-                    <input type="number" id="insulation_thickness" value="3" step="0.1">
+                    <input type="number" id="insulation_thickness" value="3" step="0.1" min="0" max="100">
                 </div>
             </div>
             
@@ -885,7 +885,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.free_volume_inside_the_motor_case">Free volume inside the motor case excluding propellant volume. Affects chamber pressure buildup and combustion dynamics. Include volume of forward and aft chambers.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_volume" value="2.5" step="0.001">
+                    <input type="number" id="chamber_volume" value="2.5" step="0.001" min="0.01" max="16000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -912,7 +912,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.yield_strength_of_case_material_steel">Yield strength of case material. Steel: 200-400 MPa, Aluminum: 100-300 MPa, Composite: 300-800 MPa. Used for case stress analysis and wall thickness calculation.</span>
                         </div>
                     </label>
-                    <input type="number" id="yield_strength" value="250" step="0.1">
+                    <input type="number" id="yield_strength" value="250" step="0.1" min="10" max="3000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -922,7 +922,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.factor_of_safety_for_case_design">Factor of safety for case design. Typical values: 2-4. Higher values provide more safety margin but increase case weight. Required by safety codes for amateur rocketry.</span>
                         </div>
                     </label>
-                    <input type="number" id="safety_factor" value="2.5" step="0.1">
+                    <input type="number" id="safety_factor" value="2.5" step="0.1" min="1.1" max="10">
                 </div>
                 <div class="form-group">
                     <label>
@@ -932,7 +932,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.thickness_of_insulating_liner_layer_protects">Thickness of insulating liner layer. Protects case from hot combustion gases and provides thermal barrier. Typical materials: phenolic, EPDM rubber.</span>
                         </div>
                     </label>
-                    <input type="number" id="liner_thickness" value="2" step="0.1">
+                    <input type="number" id="liner_thickness" value="2" step="0.1" min="0.1" max="100">
                 </div>
                 <div class="form-group">
                     <label>
@@ -942,7 +942,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.density_of_liner_material_for_mass">Density of liner material for mass calculation. Phenolic: 1200-1400 kg/m³, EPDM: 1200-1300 kg/m³. Affects overall motor mass.</span>
                         </div>
                     </label>
-                    <input type="number" id="liner_density" value="1200" step="0.1">
+                    <input type="number" id="liner_density" value="1200" step="0.1" min="200" max="3000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -952,7 +952,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.initial_chamber_temperature_before_ignition_affe">Initial chamber temperature before ignition. Affects propellant burn rate and pressure buildup. Standard conditions: 298K (25°C). Cold weather reduces performance.</span>
                         </div>
                     </label>
-                    <input type="number" id="initial_temp" value="298" step="0.1">
+                    <input type="number" id="initial_temp" value="298" step="0.1" min="200" max="350">
                 </div>
                 <div class="form-group">
                     <label>
@@ -962,7 +962,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.wall_thickness_of_motor_case_must">Wall thickness of motor case. Must be sufficient to withstand internal pressure with adequate safety factor. Calculated from hoop stress formula or specified directly.</span>
                         </div>
                     </label>
-                    <input type="number" id="case_thickness" value="8" step="0.1">
+                    <input type="number" id="case_thickness" value="8" step="0.1" min="2" max="100">
                 </div>
             </div>
         </div>
@@ -979,7 +979,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.nozzle_throat_diameter_critical_parameter_that">Nozzle throat diameter - critical parameter that determines chamber pressure and mass flow rate. Smaller throat = higher pressure. Must be sized for desired pressure and thrust.</span>
                         </div>
                     </label>
-                    <input type="number" id="throat_diameter" value="15" step="0.1">
+                    <input type="number" id="throat_diameter" value="15" step="0.1" min="1" max="500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -989,7 +989,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.nozzle_exit_diameter_larger_exit_provides">Nozzle exit diameter. Larger exit provides better expansion and higher specific impulse at altitude but increases nozzle weight and length.</span>
                         </div>
                     </label>
-                    <input type="number" id="exit_diameter" value="35" step="0.1">
+                    <input type="number" id="exit_diameter" value="35" step="0.1" min="1.5" max="2500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -999,7 +999,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.ratio_of_exit_area_to_throat">Ratio of exit area to throat area (Ae/At). Automatically calculated from diameters. Higher ratios provide better performance at altitude but risk flow separation at sea level.</span>
                         </div>
                     </label>
-                    <input type="number" id="expansion_ratio" value="5.44" step="0.1" readonly>
+                    <input type="number" id="expansion_ratio" value="5.44" step="0.1" readonly min="1" max="25">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1009,7 +1009,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.half_angle_of_convergent_section_approaching">Half-angle of convergent section approaching the throat. Typical values: 20-45°. Affects flow uniformity and pressure losses in subsonic region.</span>
                         </div>
                     </label>
-                    <input type="number" id="convergent_angle" value="45" step="0.1">
+                    <input type="number" id="convergent_angle" value="45" step="0.1" min="10" max="80">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1019,7 +1019,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.half_angle_of_divergent_section_after">Half-angle of divergent section after the throat. Typical values: 12-18°. Larger angles cause flow separation, smaller angles increase nozzle length and weight.</span>
                         </div>
                     </label>
-                    <input type="number" id="divergent_angle" value="15" step="0.1">
+                    <input type="number" id="divergent_angle" value="15" step="0.1" min="5" max="45">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1029,7 +1029,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.overall_nozzle_efficiency_including_divergence_l">Overall nozzle efficiency including divergence losses, friction, and heat transfer. Typical values: 0.94-0.98. Accounts for real-world performance reduction from ideal conditions.</span>
                         </div>
                     </label>
-                    <input type="number" id="nozzle_efficiency" value="0.95" step="0.001">
+                    <input type="number" id="nozzle_efficiency" value="0.95" step="0.001" min="0.8" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1039,7 +1039,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.rate_of_throat_diameter_increase_due">Rate of throat diameter increase due to erosion during burn. Affects performance over burn time. Depends on propellant type and nozzle material. Graphite: ~0.001 mm/s.</span>
                         </div>
                     </label>
-                    <input type="number" id="erosion_factor" value="0.001" step="0.0001">
+                    <input type="number" id="erosion_factor" value="0.001" step="0.0001" min="0" max="5">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1105,7 +1105,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.pressure_sensitivity_exponent_in_burn_rate">Pressure sensitivity exponent in burn rate law r=a×P^n. Values 0.2-0.8 typical. Low n (0.2-0.4) gives stable combustion. High n (0.6+) can cause pressure instability. KN-sugar plateau/mesa regimes can have NEGATIVE n (burn rate drops with pressure) — this is physical, from published fits.</span>
                         </div>
                     </label>
-                    <input type="number" id="burn_rate_n" value="0.35" step="0.01">
+                    <input type="number" id="burn_rate_n" value="0.35" step="0.01" min="-0.5" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1115,7 +1115,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.c_efficiency_factor_accounts_for_incomplete">c* efficiency factor. Accounts for incomplete combustion and heat losses. Typical values: 0.92-0.98. Higher values indicate better propellant mixing and combustion completeness.</span>
                         </div>
                     </label>
-                    <input type="number" id="combustion_efficiency" value="0.95" step="0.001">
+                    <input type="number" id="combustion_efficiency" value="0.95" step="0.001" min="0.5" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1125,7 +1125,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.cf_efficiency_factor_accounting_for_nozzle">Cf efficiency factor accounting for nozzle losses including friction, heat transfer, and flow non-uniformities. Typical values: 0.96-0.99.</span>
                         </div>
                     </label>
-                    <input type="number" id="cf_efficiency" value="0.98" step="0.001">
+                    <input type="number" id="cf_efficiency" value="0.98" step="0.001" min="0.8" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1135,7 +1135,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.combined_efficiency_of_entire_propulsion_system">Combined efficiency of entire propulsion system including combustion, nozzle, and two-phase flow losses. Product of all individual efficiencies.</span>
                         </div>
                     </label>
-                    <input type="number" id="overall_efficiency" value="0.92" step="0.001">
+                    <input type="number" id="overall_efficiency" value="0.92" step="0.001" min="0.5" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1145,7 +1145,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.flow_discharge_coefficient_for_mass_flow">Flow discharge coefficient for mass flow through nozzle throat. Accounts for viscous effects and flow non-uniformities. Typical values: 0.97-0.99.</span>
                         </div>
                     </label>
-                    <input type="number" id="discharge_coeff" value="0.98" step="0.001">
+                    <input type="number" id="discharge_coeff" value="0.98" step="0.001" min="0.7" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1155,7 +1155,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.efficiency_of_converting_thermal_energy_to">Efficiency of converting thermal energy to kinetic energy in the nozzle. Accounts for incomplete expansion and non-ideal gas effects. Typical values: 0.95-0.98.</span>
                         </div>
                     </label>
-                    <input type="number" id="kinetic_efficiency" value="0.97" step="0.001">
+                    <input type="number" id="kinetic_efficiency" value="0.97" step="0.001" min="0.8" max="1">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1165,7 +1165,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.thrust_loss_due_to_non_axial">Thrust loss due to non-axial flow in divergent nozzle section. Depends on divergent half-angle. Typical values: 0.01-0.05 (1-5% loss).</span>
                         </div>
                     </label>
-                    <input type="number" id="divergence_loss" value="0.02" step="0.001">
+                    <input type="number" id="divergence_loss" value="0.02" step="0.001" min="0" max="0.2">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1175,7 +1175,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.performance_reduction_due_to_solid_particles">Performance reduction due to solid particles (alumina) in exhaust gas. Particles have lower expansion efficiency than gas. Typical values: 0.96-0.99.</span>
                         </div>
                     </label>
-                    <input type="number" id="two_phase_loss" value="0.98" step="0.001">
+                    <input type="number" id="two_phase_loss" value="0.98" step="0.001" min="0.8" max="1">
                 </div>
             </div>
             <p style="margin-top: 10px; color: #6c757d; font-size: 14px;">
@@ -1195,7 +1195,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.delay_time_from_ignition_signal_to">Delay time from ignition signal to significant pressure rise. Includes igniter response time and flame propagation. Typical values: 20-100 ms.</span>
                         </div>
                     </label>
-                    <input type="number" id="ignition_delay" value="50" step="0.1">
+                    <input type="number" id="ignition_delay" value="50" step="0.1" min="1" max="1000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1205,7 +1205,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.ambient_pressure_at_test_flight_conditions">Ambient pressure at test/flight conditions. Sea level: 101.325 kPa. Lower pressure at altitude increases nozzle performance but reduces air-breathing stage performance.</span>
                         </div>
                     </label>
-                    <input type="number" id="atm_pressure" value="101.325" step="0.1">
+                    <input type="number" id="atm_pressure" value="101.325" step="0.1" min="1" max="200">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1215,7 +1215,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.altitude_above_sea_level_for_test">Altitude above sea level for test or flight conditions. Affects atmospheric pressure and nozzle performance. 0 = sea level conditions.</span>
                         </div>
                     </label>
-                    <input type="number" id="test_altitude" value="0" step="1">
+                    <input type="number" id="test_altitude" value="0" step="1" min="0" max="30000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1225,7 +1225,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.environmental_temperature_affecting_propellant_b">Environmental temperature affecting propellant burn rate and motor performance. Standard conditions: 298K (25°C). Cold weather reduces performance.</span>
                         </div>
                     </label>
-                    <input type="number" id="ambient_temp" value="298" step="0.1">
+                    <input type="number" id="ambient_temp" value="298" step="0.1" min="200" max="350">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1235,7 +1235,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.relative_humidity_of_ambient_air_affects">Relative humidity of ambient air. Affects propellant performance and can cause moisture absorption during storage. High humidity may reduce performance.</span>
                         </div>
                     </label>
-                    <input type="number" id="humidity" value="60" step="0.1">
+                    <input type="number" id="humidity" value="60" step="0.1" min="0" max="100">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1245,7 +1245,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.environmental_wind_speed_for_flight_trajectory">Environmental wind speed for flight trajectory calculations. Affects rocket stability and trajectory but not motor performance. Used for launch safety analysis.</span>
                         </div>
                     </label>
-                    <input type="number" id="wind_speed" value="0" step="0.1">
+                    <input type="number" id="wind_speed" value="0" step="0.1" min="0" max="100">
                 </div>
             </div>
         </div>
@@ -1262,7 +1262,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.total_mass_of_solid_propellant_automatically">Total mass of solid propellant. Automatically calculated from grain geometry and propellant density. Critical for performance calculations and thrust-to-weight ratio.</span>
                         </div>
                     </label>
-                    <input type="number" id="propellant_mass" step="0.001" readonly>
+                    <input type="number" id="propellant_mass" step="0.001" readonly min="0" max="60000">
                     <button type="button" onclick="calculatePropellantMass()" style="margin-top: 5px; padding: 5px 10px; font-size: 12px;" data-i18n="solid.ui.calculate">Calculate</button>
                 </div>
                 <div class="form-group">
@@ -1273,7 +1273,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.mass_of_motor_casing_including_forward">Mass of motor casing including forward and aft closures. Depends on material, pressure rating, and safety factor. Major component of dry mass.</span>
                         </div>
                     </label>
-                    <input type="number" id="case_mass" value="2.5" step="0.001">
+                    <input type="number" id="case_mass" value="2.5" step="0.001" min="0.001" max="30000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1283,7 +1283,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.mass_of_nozzle_assembly_including_throat">Mass of nozzle assembly including throat insert, exit cone, and mounting hardware. Varies with nozzle material and size.</span>
                         </div>
                     </label>
-                    <input type="number" id="nozzle_mass" value="0.5" step="0.001">
+                    <input type="number" id="nozzle_mass" value="0.5" step="0.001" min="0.001" max="10000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1293,7 +1293,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.mass_of_thermal_insulation_materials_including">Mass of thermal insulation materials including liner, inhibitor coatings, and heat barriers. Protects case from high temperatures.</span>
                         </div>
                     </label>
-                    <input type="number" id="insulation_mass" value="0.3" step="0.001">
+                    <input type="number" id="insulation_mass" value="0.3" step="0.001" min="0" max="12000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1303,7 +1303,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.mass_of_electronic_systems_including_flight">Mass of electronic systems including flight computer, sensors, telemetry, and recovery systems. Not part of motor but affects overall vehicle performance.</span>
                         </div>
                     </label>
-                    <input type="number" id="avionics_mass" value="0.2" step="0.001">
+                    <input type="number" id="avionics_mass" value="0.2" step="0.001" min="0" max="500">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1313,7 +1313,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.combined_mass_of_forward_and_aft">Combined mass of forward and aft closures, bulkheads, and sealing components. Includes igniter and nozzle mounting provisions.</span>
                         </div>
                     </label>
-                    <input type="number" id="closure_mass" value="0.8" step="0.001">
+                    <input type="number" id="closure_mass" value="0.8" step="0.001" min="0.001" max="10000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1323,7 +1323,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.total_mass_excluding_propellant_case_nozzle">Total mass excluding propellant (case + nozzle + insulation + avionics + closures). Represents final vehicle mass after propellant burnout.</span>
                         </div>
                     </label>
-                    <input type="number" id="dry_mass" step="0.001" readonly>
+                    <input type="number" id="dry_mass" step="0.001" readonly min="0.1" max="65000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1333,7 +1333,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.total_loaded_mass_including_all_propellant">Total loaded mass including all propellant (dry mass + propellant mass). Initial vehicle mass at ignition. Used for thrust-to-weight calculations.</span>
                         </div>
                     </label>
-                    <input type="number" id="wet_mass" step="0.001" readonly>
+                    <input type="number" id="wet_mass" step="0.001" readonly min="0.1" max="130000">
                 </div>
             </div>
         </div>
@@ -1350,7 +1350,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.maximum_pressure_measurement_range_of_pressure">Maximum pressure measurement range of pressure transducer. Should be 1.5-2x expected maximum pressure for accuracy and safety. Typical range: 5-15 MPa for amateur motors.</span>
                         </div>
                     </label>
-                    <input type="number" id="pressure_sensor_range" value="10" step="0.1">
+                    <input type="number" id="pressure_sensor_range" value="10" step="0.1" min="0.1" max="100">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1360,7 +1360,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.data_acquisition_sampling_rate_higher_rates">Data acquisition sampling rate. Higher rates capture more detail but generate larger data files. 500-2000 Hz typical for motor testing. Must be >2x highest frequency of interest.</span>
                         </div>
                     </label>
-                    <input type="number" id="sampling_freq" value="1000" step="1">
+                    <input type="number" id="sampling_freq" value="1000" step="1" min="1" max="100000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1370,7 +1370,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.maximum_thrust_measurement_capacity_of_load">Maximum thrust measurement capacity of load cell. Should be 1.5-2x expected maximum thrust for accuracy. Includes safety margin for unexpected over-pressure events.</span>
                         </div>
                     </label>
-                    <input type="number" id="load_cell_capacity" value="5000" step="1">
+                    <input type="number" id="load_cell_capacity" value="5000" step="1" min="1" max="20000000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1380,7 +1380,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.sensor_calibration_coefficient_to_convert_raw">Sensor calibration coefficient to convert raw readings to engineering units. Determined through calibration with known weights/pressures. Should be verified before each test.</span>
                         </div>
                     </label>
-                    <input type="number" id="calibration_factor" value="1.0" step="0.0001">
+                    <input type="number" id="calibration_factor" value="1.0" step="0.0001" min="0.1" max="10">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1390,7 +1390,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.total_recording_duration_including_pre_ignition">Total recording duration including pre-ignition baseline and post-burnout data. Should be longer than expected burn time to capture complete motor operation.</span>
                         </div>
                     </label>
-                    <input type="number" id="data_collection_time" value="10" step="0.1">
+                    <input type="number" id="data_collection_time" value="10" step="0.1" min="0.1" max="3600">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1400,7 +1400,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.low_pass_filter_cutoff_frequency_for">Low-pass filter cutoff frequency for noise reduction. Should be high enough to preserve real data but low enough to remove noise. Typically 50-200 Hz for motor testing.</span>
                         </div>
                     </label>
-                    <input type="number" id="filter_cutoff" value="100" step="1">
+                    <input type="number" id="filter_cutoff" value="100" step="1" min="1" max="50000">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1410,7 +1410,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.overall_measurement_uncertainty_for_monte_carlo">Overall measurement uncertainty for Monte Carlo analysis. Includes sensor accuracy, calibration uncertainty, and environmental effects. Typical values: 1-5% for professional setups.</span>
                         </div>
                     </label>
-                    <input type="number" id="uncertainty_level" value="2" step="0.1">
+                    <input type="number" id="uncertainty_level" value="2" step="0.1" min="0" max="100">
                 </div>
             </div>
         </div>
@@ -2423,7 +2423,12 @@
         function _sheetsToCsvBlob(sheets) {
             const esc = function (v) {
                 const x = (v === null || v === undefined) ? '' : String(v);
-                return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x;
+                // Formul enjeksiyonu (CWE-1236): elektronik tablolar '=' '+' '-' '@'
+                // ve sekme/CR ile baslayan METNI formul/komut sayabilir. Sayi
+                // gorunen degerlere (-5000, +3.2e4) DOKUNULMAZ, yoksa veri bozulur.
+                var y = x;
+                if (/^[=+\-@\t\r]/.test(y) && !(y !== '' && isFinite(Number(y)))) { y = "'" + y; }
+                return /[",\n]/.test(y) ? '"' + y.replace(/"/g, '""') + '"' : y;
             };
             const lines = [];
             sheets.forEach(function (sheet, i) {
@@ -4263,6 +4268,10 @@ Please provide:
             if (Array.isArray(tc.time) && Array.isArray(tc.thrust)
                 && tc.time.length === tc.thrust.length && tc.time.length > 3) {
                 motorData.thrust_curve = { time: tc.time, thrust: tc.thrust };
+                // Çözücünün kendi temel beyanı .eng yorum satırına yazılır.
+                // Buraya konulmazsa dışa aktarıcı eğrinin hangi çözücüden
+                // geldiğini bilemez ve genel bir etikete düşer.
+                if (tc.basis) { motorData.thrust_curve.basis = tc.basis; }
             }
 
             showInfo(T('solid.msg.generating_openrocket_eng_file', 'Generating OpenRocket .eng file...'));

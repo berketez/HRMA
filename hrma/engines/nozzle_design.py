@@ -727,12 +727,23 @@ class NozzleDesigner:
         volume = np.pi * L_total * (rt**2 + rt * re + re**2) / 3
         
         # --- Cidar kalınlığı ve kütle (F049; gerekçe docstring'de) ---
+        # v2.6.26 (O3): çağıran malzeme vermediğinde SESSİZCE çeliğe düşülüyor,
+        # kütle de çelik yoğunluğuyla (7850 kg/m³) raporlanıyordu. Ölçüldü:
+        # kullanıcı grafit seçtiğinde motor sonucunda nozzle_material='graphite'
+        # yazıyor ama nozzle_design.geometry.wall_material='steel' kalıyor ve
+        # kütle 4,36 kat fazla çıkıyordu (tungstende 2,46 kat AZ). Bu kütle CAD
+        # kütle dökümüne doğrudan giriyor. Artık düşüş SESSİZ DEĞİL: hangi
+        # malzemenin istendiği ve neden kullanılamadığı çıktıda taşınır.
+        requested_material = wall_material or None
         mat_name = wall_material or self._DEFAULT_WALL_MATERIAL
         try:
             mat = get_material(mat_name)
+            material_source = ('caller' if requested_material
+                               else 'default_not_specified_by_caller')
         except KeyError:
             mat = get_material(self._DEFAULT_WALL_MATERIAL)
             mat_name = self._DEFAULT_WALL_MATERIAL
+            material_source = 'default_requested_material_not_in_materials_db'
         sigma_yield = float(mat['yield_strength'])          # Pa
         rho_wall = float(mat['density'])                    # kg/m³
         sf = (float(wall_safety_factor) if wall_safety_factor
@@ -764,6 +775,21 @@ class NozzleDesigner:
             'wall_yield_strength': sigma_yield,       # Pa
             'wall_safety_factor': sf,                 # [-]
             'wall_thickness_basis': thickness_basis,  # nereden geldiği
+            # --- v2.6.26 (O3) malzeme dürüstlüğü ---
+            # 'caller' dışındaki her değer, kütlenin KULLANICININ seçtiği lüle
+            # malzemesine ait OLMADIĞI anlamına gelir.
+            'wall_material_source': material_source,
+            'wall_material_requested': requested_material,
+            'wall_material_is_default': bool(material_source != 'caller'),
+            'wall_material_warning': (
+                None if material_source == 'caller' else
+                (f"nozzle wall mass computed with the default "
+                 f"'{self._DEFAULT_WALL_MATERIAL}' ({rho_wall:.0f} kg/m3); "
+                 f"the caller did not pass wall_material"
+                 if material_source == 'default_not_specified_by_caller' else
+                 f"requested wall material {requested_material!r} is not in "
+                 f"materials_db; mass computed with the default "
+                 f"'{self._DEFAULT_WALL_MATERIAL}' ({rho_wall:.0f} kg/m3)")),
         }
     
     def calculate_nozzle_flow_properties(self, nozzle_data: Dict, 

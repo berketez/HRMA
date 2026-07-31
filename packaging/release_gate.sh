@@ -45,7 +45,7 @@ baslik()   { printf "\n=== %s ===\n" "$1"; }
 PY="${PYTHON:-python3}"
 
 # ---------------------------------------------------------------------------
-baslik "1/5  Sürüm tutarlılığı"
+baslik "1/6  Sürüm tutarlılığı"
 # ---------------------------------------------------------------------------
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' hrma/__init__.py)"
 if [ -z "$VERSION" ]; then
@@ -75,7 +75,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "2/5  Git durumu"
+baslik "2/6  Git durumu"
 # ---------------------------------------------------------------------------
 if [ -n "$(git status --porcelain)" ]; then
     basarisiz "çalışma ağacı kirli — commit edilmemiş değişiklikle sürüm çıkmaz"
@@ -95,7 +95,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "3/5  GitHub Actions (bu commit)"
+baslik "3/6  GitHub Actions (bu commit)"
 # ---------------------------------------------------------------------------
 # CI KONTROLÜ ATLANAMAZ (v2.6.25 yayınından çıkan ders).
 #
@@ -121,10 +121,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "4/5  Tam test takımı"
+baslik "4/6  Tam test takımı"
 # ---------------------------------------------------------------------------
 # Yalnız BU adım atlanabilir: yerel tam takım, CI'ın temiz makinede koştuğu
-# takımın aynısıdır. 3/5 yeşilse buradaki koşu fazladan bir doğrulamadır.
+# takımın aynısıdır. 3/6 yeşilse buradaki koşu fazladan bir doğrulamadır.
 # TAKIMI_ATLA=1 tercih edilen ad; HIZLI=1 geriye uyumluluk için kabul edilir
 # ama ARTIK CI kontrolünü atlamaz.
 if [ "${TAKIMI_ATLA:-${HIZLI:-0}}" = "1" ]; then
@@ -140,7 +140,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "5/5  Canlı duman testi — VARSAYILAN OLMAYAN portta"
+baslik "5/6  Canlı duman testi — VARSAYILAN OLMAYAN portta"
 # ---------------------------------------------------------------------------
 # v2.6.2'yi kullanılamaz yapan hata tam buradaydı: uygulama 8080 dışında bir
 # porta düştüğünde kendi sayfası kendi API'sinden 403 alıyordu. Bu kapı gerçek
@@ -206,6 +206,76 @@ fi
 
 kill $SUNUCU_PID 2>/dev/null || true
 trap - EXIT
+
+# ---------------------------------------------------------------------------
+baslik "6/6  macOS paket imzası"
+# ---------------------------------------------------------------------------
+# v2.6.25 güncelleme çökmesi (2026-07-28): build_mac_app.sh içindeki codesign
+# hatayı `2>/dev/null || true` ile yutuyordu; paket İMZASIZ üretildi ve ÜÇ
+# SÜRÜM (2.6.0/2.6.1/2.6.2) böyle yayınlandı. macOS Tahoe sıkılaşınca lsd
+# paketi launch-disabled kaydetti (-67062, "code object is not signed at
+# all"), `open` "executable is missing" dedi, otomatik güncelleme eski sürüme
+# geri döndü. Bu kapı ÜRETİLEN artefaktları doğrular: imzasız .app ya da
+# imzasız DMG içeriği = KAPI KAPALI.
+#
+# İki bilinçli tasarım kararı (2026-07-30, gerçek paket üzerinde ölçüldü):
+#   1. Diskteki .app için --strict KULLANILMAZ: derleme ağacı iCloud
+#      senkronunda ve iCloud .app köküne com.apple.FinderInfo'yu silindikten
+#      milisaniyeler sonra geri yazıyor; sıkı doğrulamanın detritus denetimi
+#      buna takılıp HER ZAMAN kırmızı kalıyor. FinderInfo mühre girmez;
+#      `codesign --verify --deep` imzayı ve kaynak mührünü tam kontrol eder.
+#   2. DMG içeriği için ALTIN STANDART uygulanır: içindeki .app xattr'sız
+#      kopyalanır (ditto --noextattr) ve o kopyada TAM SIKI doğrulama
+#      (--deep --strict) çalışır. Ölçüm: kopya ~2 dk, doğrulama ~9 sn.
+#      Kullanıcıya giden şey diskteki .app değil DMG içeriğidir.
+#
+# Not: imza ad-hoc (`codesign -s -`). Gatekeeper (spctl) ad-hoc imzayı onaylı
+# geliştirici saymadığı için spctl burada ÇALIŞTIRILMAZ; ölçüt codesign
+# doğrulamasıdır — "code object is not signed at all" hâlini bu bile yakalar.
+if [ "$(uname)" != "Darwin" ]; then
+    atlandi "macOS değil — imza kontrolü yalnız macOS'ta anlamlı"
+else
+    APP_BUILD="packaging/mac/build.noindex/HRMA.app"
+    if [ ! -d "$APP_BUILD" ]; then
+        basarisiz "derlenmiş .app yok: $APP_BUILD — önce packaging/build_mac_app.sh"
+    elif codesign --verify --deep "$APP_BUILD" 2>/tmp/hrma_gate_codesign.log; then
+        basarili ".app imzası geçerli: $APP_BUILD"
+    else
+        basarisiz ".app İMZASIZ/BOZUK: $(head -1 /tmp/hrma_gate_codesign.log)"
+    fi
+
+    DMG_YOL="dist/HRMA-Setup-${VERSION}-macOS.dmg"
+    if [ ! -f "$DMG_YOL" ]; then
+        basarisiz "DMG yok: $DMG_YOL — önce packaging/build_dmg.sh"
+    else
+        DMG_MNT="$(mktemp -d /tmp/hrma_gate_dmg.XXXXXX)"
+        if hdiutil attach -readonly -nobrowse -noverify -mountpoint "$DMG_MNT" "$DMG_YOL" >/dev/null 2>&1; then
+            # Hızlı kontrol: mount edilmiş kopyada imza var ve mühür tutuyor mu?
+            if codesign --verify --deep "$DMG_MNT/HRMA.app" 2>/tmp/hrma_gate_codesign.log; then
+                basarili "DMG içindeki HRMA.app imzası geçerli: $DMG_YOL"
+
+                # Altın standart: xattr'sız kopyada TAM SIKI doğrulama.
+                # DMG, stage'den FinderInfo'yu miras alır; o mühürde olmadığı
+                # için önce soyulur, kalan HER ŞEY sıkı denetimden geçer.
+                echo "  (sıkı doğrulama: xattr'sız kopya çıkarılıyor, ~2 dk)"
+                SIKI_KOPYA="$(mktemp -d /tmp/hrma_gate_strict.XXXXXX)"
+                if ditto --noextattr --norsrc "$DMG_MNT/HRMA.app" "$SIKI_KOPYA/HRMA.app" 2>/tmp/hrma_gate_codesign.log \
+                   && codesign --verify --deep --strict "$SIKI_KOPYA/HRMA.app" 2>/tmp/hrma_gate_codesign.log; then
+                    basarili "DMG içeriği SIKI doğrulamadan geçti (--deep --strict)"
+                else
+                    basarisiz "DMG içeriği sıkı doğrulamada kaldı: $(head -1 /tmp/hrma_gate_codesign.log)"
+                fi
+                rm -rf "$SIKI_KOPYA"
+            else
+                basarisiz "DMG içindeki HRMA.app İMZASIZ/BOZUK: $(head -1 /tmp/hrma_gate_codesign.log)"
+            fi
+            hdiutil detach "$DMG_MNT" >/dev/null 2>&1 || hdiutil detach "$DMG_MNT" -force >/dev/null 2>&1 || true
+        else
+            basarisiz "DMG mount edilemedi: $DMG_YOL"
+        fi
+        rmdir "$DMG_MNT" 2>/dev/null || true
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 printf "\n============================================\n"

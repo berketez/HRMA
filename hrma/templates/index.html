@@ -87,26 +87,19 @@
         .hero-badge {
             display: inline-flex; align-items: center; gap: 9px;
             font-family: var(--hd-mono);
-            font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
-            color: #6fd3e6;
+            font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+            color: var(--hd-cyan-soft);
             border: 1px solid rgba(0, 229, 255, 0.3);
             background: rgba(3, 10, 18, 0.75);
             padding: 7px 18px; border-radius: 20px;
             margin-bottom: 28px;
             position: relative; z-index: 2;
         }
-        .hero-badge .dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: var(--hd-cyan);
-            box-shadow: 0 0 10px var(--hd-cyan), 0 0 22px rgba(0,229,255,0.6);
-            animation: pulse 2.2s ease-in-out infinite;
-        }
         .hero-badge .ver {
             padding-left: 14px; margin-left: 5px;
             border-left: 1px solid rgba(0, 229, 255, 0.3);
             color: var(--hd-cyan-soft);
         }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
         .hero h1 {
             position: relative; z-index: 2;
@@ -346,7 +339,15 @@
                 <option value="tr" data-i18n="lang.tr">Türkçe</option>
             </select>
         </div>
-        <div class="hero-badge"><span class="dot"></span><span data-i18n="hero.badge">SYSTEM ONLINE — SOLVER READY</span><span class="ver">v{{ app_version }}</span></div>
+        <!-- v2.6.26: burada "SYSTEM ONLINE - SOLVER READY" yazan, yanıp sönen
+             noktalı bir rozet vardı. İki sorunu vardı: (1) hiçbir şey
+             BİLDİRMİYORDU - sayfayı görüyorsanız sistem zaten çevrimiçidir,
+             yani telemetri taklidi yapan bir süstü; (2) yanıp sönen nokta +
+             harf aralıklı büyük harf + em-dash kalıbı, mühendislik
+             yazılımlarında değil yapay zekâ üretimi arayüzlerde görülen bir
+             imza hâline geldi. Yerine GERÇEK bilgi konuldu: sürüm ve derleme
+             kimliği. Mühendislik yazılımının açılışta gösterdiği şey budur. -->
+        <div class="hero-badge"><span data-i18n="hero.badge">VERSION</span><span class="ver">{{ app_version }}</span></div>
         <h1>HRM<span>A</span></h1>
         <div class="tagline" data-i18n="hero.tagline">High-Fidelity Rocket Motor Analysis &amp; Design Suite</div>
         <div class="sub" data-i18n="hero.sub">Parametric Solvers &middot; NASA CEA Validated &middot; Interactive 3D Model</div>

@@ -344,7 +344,12 @@
             console.warn('XLSX export unavailable, falling back to CSV:', e);
             const esc = function (v) {
                 const x = (v === null || v === undefined) ? '' : String(v);
-                return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x;
+                // Formul enjeksiyonu (CWE-1236): elektronik tablolar '=' '+' '-' '@'
+                // ve sekme/CR ile baslayan METNI formul/komut sayabilir. Sayi
+                // gorunen degerlere (-5000, +3.2e4) DOKUNULMAZ, yoksa veri bozulur.
+                var y = x;
+                if (/^[=+\-@\t\r]/.test(y) && !(y !== '' && isFinite(Number(y)))) { y = "'" + y; }
+                return /[",\n]/.test(y) ? '"' + y.replace(/"/g, '""') + '"' : y;
             };
             const lines = [headers.map(esc).join(',')];
             rows.forEach(function (r) { lines.push(r.map(esc).join(',')); });

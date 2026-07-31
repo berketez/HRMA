@@ -91,7 +91,7 @@
             'lang.tr': 'Türkçe',
 
             'page.title': 'HRMA — Rocket Motor Analysis Suite',
-            'hero.badge': 'SYSTEM ONLINE — SOLVER READY',
+            'hero.badge': 'VERSION',
             'hero.tagline': 'High-Fidelity Rocket Motor Analysis & Design Suite',
             'hero.sub': 'Parametric Solvers · NASA CEA Validated · Interactive 3D Model',
 
@@ -145,7 +145,7 @@
             'lang.tr': 'Türkçe',
 
             'page.title': 'HRMA — Roket Motoru Analiz Paketi',
-            'hero.badge': 'SİSTEM ÇEVRİMİÇİ — ÇÖZÜCÜ HAZIR',
+            'hero.badge': 'SÜRÜM',
             'hero.tagline': 'Yüksek Doğruluklu Roket Motoru Analiz ve Tasarım Paketi',
             'hero.sub': 'Parametrik Çözücüler · NASA CEA Doğrulamalı · Etkileşimli 3B Model',
 

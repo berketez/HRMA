@@ -68,7 +68,7 @@
 {\Huge\bfseries\color{hrmadark}User Guide}\\[10pt]
 {\large\color{hrmagray}A step-by-step worked example}\\[3cm]
 
-{\large Version 2.6.25 \quad|\quad July 2026}\\[6pt]
+{\large Version 2.6.26 \quad|\quad July 2026}\\[6pt]
 {\small\color{hrmagray}Developed by: Berke Tezgocen \quad•\quad Idea \& Testing: Ayberk Cem Aksoy}\\[1.5cm]
 
 \begin{notebox}
@@ -123,13 +123,13 @@ their sections. All screenshots are taken directly from the application.
 \subsection{Installation}
 
 \begin{itemize}[leftmargin=1.4em]
-  \item \textbf{Windows 10/11:} Download \texttt{HRMA-Setup-2.6.25.exe},
+  \item \textbf{Windows 10/11:} Download \texttt{HRMA-Setup-2.6.26.exe},
   double-click and follow the wizard (Next, Next, Install). The installer is
   per-user; no administrator rights are required. Windows SmartScreen may
   warn because the installer is unsigned: click ``More info'', then ``Run
   anyway''.
   \item \textbf{macOS 11+ (Apple Silicon):} Open
-  \texttt{HRMA-Setup-2.6.25-macOS.dmg} and drag \texttt{HRMA} into
+  \texttt{HRMA-Setup-2.6.26-macOS.dmg} and drag \texttt{HRMA} into
   \texttt{Applications}. On first launch, right-click the app and choose
   ``Open'' (Gatekeeper requires this once for unsigned apps).
 \end{itemize}
@@ -201,10 +201,22 @@ Chamber Pressure & \texttt{20 bar} & Combustion chamber pressure \\
 Tank Pressure & \texttt{50 bar} & Must exceed chamber pressure enough \\
 Fuel & \texttt{HTPB} & Regression coefficients auto-filled \\
 Oxidizer & \texttt{N\textsubscript{2}O (liquid)} & Density updates with temperature \\
+Nozzle Type & \texttt{Conical} & Conical / bell / parabolic \\
 Injector & \texttt{Showerhead} & Type-specific parameters \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{Nozzle type is one field.} Until v2.6.26 the page carried \emph{two}
+selectors for the same concept: ``Nozzle Type'' under Basic Parameters and
+``Nozzle Contour'' on the design-configuration tab. The second one was
+connected to nothing, and when the two disagreed there was no way to tell
+which applied. It has been removed and its parabolic option moved into the
+field the solver actually reads, so the same contour now drives both the
+calculation and the CAD/drawing exports.
+\end{notebox}
 
 \fig{img/en-01-form.png}{The input form. The ``Find Optimum'' button sweeps
 the O/F ratio for the c*-optimal value. The ``?'' next to each field shows a
@@ -218,15 +230,95 @@ Override the defaults with your own data (for example regression
 coefficients fitted from a static fire).
 \end{notebox}
 
-\subsection{Step 2 — Calculate}
+\subsection{Step 2 — Fill in the design-configuration tab}
+
+The top of the form sets the operating point; the \textbf{design
+configuration} tab says what the motor is made of and what margin it is sized
+to. Every field on that tab reaches the solver from v2.6.26 on --- before this
+release several of them sat on screen and changed nothing.
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Chamber material, wall thickness, cooling channels:} feed the
+  heat-transfer model (wall temperatures, heat flux) and, from this release,
+  the structural module as well, so the thermal and structural results now
+  describe the \emph{same} motor. Selecting cooling channels raises a warning
+  stating that the coolant-side film coefficient is taken from the
+  regenerative range in the literature and that coolant flow rate, channel
+  velocity, pressure drop and boiling margin are not verified here --- a
+  declared limit of the model, not a fault.
+  \item \textbf{Safety Factor:} the design factor the structural module aims
+  at. Because your real wall thickness is passed with it, the module runs in
+  \emph{verification} mode (see the box below).
+  \item \textbf{Chamber Length Override (mm):} overrides the chamber length
+  derived from L*; leave it empty for automatic. If the value is shorter than
+  the fuel grain plus the pre-combustion chamber the override is
+  \textbf{rejected}, and the warning quotes both your value and the minimum.
+  It is not quietly trimmed: a trimmed length would be a different motor from
+  the one you asked for.
+  \item \textbf{Nozzle Material} (graphite, tungsten, copper): drives the
+  throat thermal check and the erosion estimate. The Bartz axial profile is
+  solved at the throat station with this material and the equilibrium wall
+  temperature is compared with the material's allowable temperature; exceeding
+  it is a critical warning. Erosion is computed for materials with a published
+  coefficient band (graphite, and carbon-carbon, which the model supports even
+  though the selector does not list it). \textbf{Tungsten has no published
+  band, so no coefficient is invented --- the result says ``no published
+  data''.} The copper option is labelled ``regeneratively cooled'' in the
+  interface and is solved under that assumption. Erosion is reported only: the
+  steady-state performance solution assumes a rigid throat, so use the
+  transient solver for erosion-coupled thrust and pressure histories.
+  \item \textbf{Injector Material} (AISI 316, Ti-6Al-4V, brass): sizes the
+  injector plate. With the selected material's yield strength and density the
+  plate bending stress, safety factor, required thickness and mass are
+  reported (edge-fixed circular plate: Roark's Formulas Table 11.2 case 10b;
+  ASME BPVC PG-52 ligament efficiency for the drilled area).
+  \item \textbf{Swirl injector fields:} if you pick the \emph{swirl} injector,
+  \textbf{Swirl Chamber Diameter} and \textbf{Tangential Entry Angle} now
+  enter the Giffen--Muraszew pressure-swirl solution: the chamber diameter is
+  the $D_s$ in $K = A_p/(D_s\,d_o)$, and the entry angle is taken as the
+  target spray half-angle, from which the inverse solver picks $K$ and sizes
+  the exit orifice and the slots. Leave the slot width and height \emph{empty}
+  to design for a target angle; fixing the slot geometry fixes the swirl
+  number as well, so the target angle cannot be honoured --- and the program
+  says so instead of swallowing the input. Angles outside the solvable
+  envelope (about $3.7^\circ$--$71.2^\circ$) are clamped with a warning, and a
+  swirl chamber narrower than 1.25 times the exit orifice breaks the geometric
+  assumption of the model, which is also reported.
+\end{itemize}
+
+\begin{notebox}
+\small\color{hrmadark}
+\textbf{The safety factor is now a measured number.} Until v2.6.26 the
+structural module ran in \emph{sizing} mode: it chose a wall itself, so the
+factor it reported was by definition ``target factor $\times$ manufacturing
+allowance'' --- your own input read back to you. Your real wall thickness is
+now passed as well, the module runs in \emph{verification} mode, and the
+reported minimum safety factor genuinely follows from pressure, diameter,
+material and thickness. Expect a different number from earlier releases for
+the same design; the earlier one was not a measurement.
+\end{notebox}
+
+\begin{warnbox}
+\small\color{hrmadark}
+\textbf{The effective default material changed.} The three thermal fields on
+this tab (material, wall thickness, cooling) became readable on the server
+side in v2.6.25, but the hybrid page never sent them, so nothing changed for
+you. They are sent now. As a result the first entry in the list, AISI 304
+stainless steel, is what the analysis \emph{actually} uses unless you change
+it; previously the analysis silently used 4130 steel.
+\end{warnbox}
+
+\subsection{Step 3 — Calculate}
 
 Press \textbf{Calculate}. The solver sends the form to \texttt{/calculate}
 and populates the results within a few seconds.
 
 \fig{img/en-02-results.png}{The results HUD (Performance Summary), the
 Warnings panel, and the design tables. In our example the Specific Impulse
-is 185.6~s, thrust 1000~N, chamber pressure 20~bar, mass flow 0.549~kg/s,
-and the minimum structural safety factor 2.89.}
+is 185.6~s, thrust 1000~N, chamber pressure 20~bar and mass flow 0.549~kg/s.
+The structural safety factor in this screenshot was taken under v2.6.25; the
+way that number is computed changed in v2.6.26 (see the box in the previous
+section), so the same design now reports a different value.}
 
 \textbf{Reading the results:}
 
@@ -239,9 +331,21 @@ and the minimum structural safety factor 2.89.}
   numbers.} Our example raises three: c* just below its normal range
   ($1325$ m/s), a low expansion ratio ($\varepsilon = 3.4$), and a flash
   boiling risk. These are not errors; they tell you where the design sits at
-  a limit and under which assumptions.
+  a limit and under which assumptions. From v2.6.26 the hybrid engine's
+  \emph{own} design warnings appear here too: an unrecognised material name,
+  a wall thickness outside the accepted range, a rejected chamber-length
+  override. They used to be collected and never shown, so silent fallbacks
+  really did stay silent.
   \item \textbf{Design tables:} Full geometry — nozzle contour dimensions
-  and angles, grain/port geometry, injector plan, wall thickness.
+  and angles, grain/port geometry, injector plan, wall thickness. The chamber
+  length table also states whether the length came from L* or from your
+  override.
+  \item \textbf{Material verdicts:} throat temperature margin and erosion
+  estimate for the selected nozzle material; plate stress, safety factor,
+  required thickness and mass for the selected injector material. If a
+  quantity cannot be produced — an erosion coefficient that does not exist in
+  the literature, an injector circuit the model cannot size — nothing is
+  invented: the block reports ``not analyzed'' and the reason.
 \end{itemize}
 
 \begin{warnbox}
@@ -252,7 +356,7 @@ for something it cannot compute, HRMA warns explicitly or says
 quantity by hand or with an independent code.
 \end{warnbox}
 
-\subsection{Step 3 — Inspect the 3D model}
+\subsection{Step 4 — Inspect the 3D model}
 
 Below the results is a 3D motor model built live from the geometry the
 solver produced. Use the cutaway, dimensions, exploded, heat-map and burn
@@ -270,7 +374,7 @@ L* and expansion-ratio sliders recompute geometry in about a second; the 3D
 model and cross-section update live without a full recalculation.
 \end{notebox}
 
-\subsection{Step 4 — Charts and cross-section}
+\subsection{Step 5 — Charts and cross-section}
 
 Performance charts (thrust curve, pressure, regression rate and port growth)
 are drawn in the app's dark theme, fully offline. The cross-section is a
@@ -280,7 +384,7 @@ scaled engineering drawing generated from the same geometry the solver used.
 chamber wall, liner, fuel grain, injector plate, nozzle, and the final port
 diameter at burnout, all dimensioned in mm.}
 
-\subsection{Step 5 — Export}
+\subsection{Step 6 — Export}
 
 The export buttons in the results panel produce: drawing and report PDFs,
 CAD files (including STEP cross-section mapping) and CSV/Excel data tables.
@@ -348,16 +452,31 @@ installs silently, and reopens automatically.
 
 \begin{notebox}
 \small\color{hrmadark}
-\textbf{New in version 2.6.25.} This release brings three visible
-changes. (1) The \emph{Cooling Channels} selection on the hybrid page now
-actually enters the calculation; in earlier versions the thermal analysis
-always ran uncooled regardless of what you picked. The warning shown when you
-select channels states that the coolant film coefficient is taken from
-literature and that coolant flow is not verified --- that is a deliberate
-limit, not a fault. Chamber material and wall thickness now change the thermal
-results as well. (2) Warnings produced by the engines now appear as readable
-text in the interface language; previously some of them reached you as raw
-codes. (3) The update window shows release notes in your interface language.
+\textbf{New in version 2.6.26.} This release adds no physics. It connects
+inputs that were on screen but reached nothing, removes two fields that
+duplicated another one, and fixes two bugs.
+
+(1) \textbf{Eight inputs on the hybrid page now genuinely enter the
+calculation:} Safety Factor, Chamber Length Override, Nozzle Material,
+Injector Material, Swirl Chamber Diameter, Tangential Entry Angle, Combustion
+Type (the finite-area option) and Contraction Ratio. See ``Fill in the
+design-configuration tab''.
+(2) \textbf{The reported structural safety factor is now a computed number},
+not your own input read back; expect a different value from earlier releases
+for the same design.
+(3) \textbf{Two fields were removed:} the ``Nozzle Contour'' selector (its
+parabolic option moved into ``Nozzle Type'', which the solver reads) and the
+``Injection Velocity'' field (its wired equivalent is ``Target Velocity'' in
+the showerhead panel; the old field was also overwritten with the solver's own
+exit velocity after every run).
+(4) \textbf{The injector no longer fabricates a hole plan:} when the circuit
+model could not size the type you selected, the result was filled with 12-hole
+showerhead constants and labelled with your chosen type. Now, if the plan
+cannot be produced it is not produced, and the reason is shown.
+(5) \textbf{Fixed:} selecting an impingement injector and leaving the
+impingement angle empty crashed the calculation.
+(6) \textbf{Engine design warnings now reach the warnings panel;} previously
+they were collected and discarded.
 
 \textbf{Update note.} On macOS the update install can take a few
 minutes, during which a notification is shown; do not open the app by hand
@@ -369,7 +488,7 @@ and still finds the update.
 \vspace{1cm}
 \begin{center}
 \color{hrmagray}\small
-HRMA v2.6.25 — Rocket Motor Analysis Suite\\
+HRMA v2.6.26 — Rocket Motor Analysis Suite\\
 \href{https://github.com/berketez/HRMA}{github.com/berketez/HRMA}
 \end{center}
 

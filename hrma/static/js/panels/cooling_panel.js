@@ -301,14 +301,22 @@
             const sug = {};
             if (Number.isFinite(m.chamber_pressure)) sug.chamber_pressure = m.chamber_pressure;
             if (Number.isFinite(m.chamber_temperature)) sug.chamber_temperature = m.chamber_temperature;
-            if (Number.isFinite(m.throat_diameter)) sug.throat_diameter = m.throat_diameter;
+            // BİRİM: alan METRE etiketli; katı motorda throat_diameter
+            // 17,96 (mm) geliyordu ve panel 17,96 m boğaz çapıyla hesap
+            // yapıyordu. Merkezi çözümleyici metreye getiriyor.
+            const dtM = U.readLengthM(r, 'throat_diameter');
+            if (Number.isFinite(dtM)) sug.throat_diameter = dtM;
             if (Number.isFinite(m.expansion_ratio) && m.expansion_ratio > 1) {
                 sug.expansion_ratio = m.expansion_ratio;
             }
             if (Number.isFinite(m.gamma)) sug.gamma = m.gamma;
             if (Number.isFinite(m.molecular_weight)) sug.molecular_weight = m.molecular_weight;
-            // Rejeneratif soğutucu tipik olarak yakıttır → yakıt debisini öner
-            const mdotFuel = m.fuel_flow != null ? m.fuel_flow : m.mdot_fuel;
+            // Rejeneratif soğutucu tipik olarak yakıttır → yakıt debisini öner.
+            // Eski kod 'fuel_flow' (yalnız sıvıda var) ve 'mdot_fuel' (HİÇBİR
+            // çözücüde yok) anahtarlarını arıyordu; hibritin gerçek anahtarı
+            // 'mdot_f'. Hibritte alan 2,0 kg/s panel varsayılanında kalıyordu,
+            // gerçek yakıt debisi 0,158 kg/s — 12,6 kat fazla soğutucu.
+            const mdotFuel = U.readFuelFlow(r);
             if (Number.isFinite(mdotFuel) && mdotFuel > 0) sug.coolant_mdot = mdotFuel;
             return sug;
         },

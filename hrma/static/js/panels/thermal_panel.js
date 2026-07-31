@@ -23,12 +23,33 @@
     // FALLBACK listesi — /api/materials kataloğu yüklenemezse kullanılır
     // (anahtarlar heat_transfer_analysis.py self.materials içinde çözülür;
     // katalog gelirse 'liner'+'shell' etiketli tam liste bunun yerine geçer)
+    //
+    // v2.6.26: liste çözücülerin BİLDİRDİĞİ kanonik malzemeleri kapsamıyordu.
+    // Sıvı motor hazne malzemesini 'inconel_718' olarak raporluyor; bu anahtar
+    // listede olmadığı için katalog yüklenemediğinde öneri uygulanamıyordu
+    // (olmayan bir seçeneğe value atamak tarayıcıda seçimi düşürür). Aşağıdaki
+    // anahtarların hepsi /analyze_thermal_safety ucunda AYRI ısıl özelliklerle
+    // çözülüyor — ölçüldü: k 0,5-401 W/m·K, T_allow 450-3300 K.
     const MATERIALS = [
         ['steel', 'Steel (generic)', 'mat.steelGeneric'],
         ['steel_4130', 'Steel AISI 4130'],
+        ['steel_4340', 'Steel AISI 4340'],
+        ['ss_304', 'Stainless 304'],
+        ['ss_316', 'Stainless 316'],
+        ['ss_17_4ph', 'Stainless 17-4PH (H900)'],
         ['aluminum', 'Aluminum', 'mat.aluminum'],
+        ['aluminum_6061', 'Aluminum 6061-T6'],
+        ['al_7075_t6', 'Aluminum 7075-T6'],
+        ['al_2024_t3', 'Aluminum 2024-T3'],
         ['copper', 'Copper', 'mat.copper'],
+        ['cucrzr', 'CuCrZr (C18150)'],
+        ['beryllium_copper_c17200', 'Beryllium copper C17200'],
         ['inconel', 'Inconel'],
+        ['inconel_718', 'Inconel 718'],
+        ['inconel_625', 'Inconel 625'],
+        ['titanium_6al4v', 'Titanium Ti-6Al-4V'],
+        ['ti_grade2_cp', 'Titanium CP Grade 2'],
+        ['magnesium_az31b', 'Magnesium AZ31B'],
         ['graphite', 'Graphite', 'mat.graphite'],
         ['ablative', 'Ablative liner', 'mat.ablativeLiner'],
     ];
@@ -135,9 +156,17 @@
             });
         }
         try {
-            const m = (window.currentResults && window.currentResults.motor) || {};
-            if (payload.throat_diameter == null && Number.isFinite(m.throat_diameter)) {
-                payload.throat_diameter = m.throat_diameter;
+            const results = window.currentResults;
+            const m = U.motorDict(results);
+            // BİRİM: /api/analysis/wall-profile boğaz çapını METRE bekliyor
+            // (app.py). Burada değer HAM okunuyordu; katı motorda çözücü
+            // 17,96 (mm) döndürdüğü için eksenel profil 17,96 m boğazla
+            // çözülüyordu. Eski kod ayrıca yalnız `currentResults.motor`
+            // altına bakıyordu — katı ve sıvı yanıtları DÜZ olduğu için
+            // orada hiçbir zaman bir şey bulamıyordu.
+            const dtM = U.readLengthM(results, 'throat_diameter');
+            if (payload.throat_diameter == null && Number.isFinite(dtM)) {
+                payload.throat_diameter = dtM;
             }
             if (payload.expansion_ratio == null && Number.isFinite(m.expansion_ratio)) {
                 payload.expansion_ratio = m.expansion_ratio;
@@ -449,35 +478,34 @@
             ['cooling_type', 'Cooling Type', 'natural', COOLING, 'common.f.coolingType'],
         ],
         fromResults: function (r) {
-            const m = (r && r.motor) || r || {};
-            // BİRİM SÖZLEŞMESİ UYARISI (2026-07-23 saha denetimi):
-            // Çözücü sözlüğünde uzunluk birimleri TÜRDEŞ DEĞİL —
-            //   katı motor : chamber/core/exit/throat çapları ve grain boyu MİLİMETRE
-            //   sıvı motor : chamber_diameter ve chamber_length MİLİMETRE,
-            //                buna karşılık throat_diameter ve exit_diameter METRE
-            // Bu panelin alanları METRE etiketli. Önceden dönüştürme YAPILMIYOR,
-            // 100 mm'lik oda ekranda 100 m olarak beliriyordu. Aşağıdaki
-            // yardımcı, değeri fiziksel makullüğe göre değil KAYNAK ANAHTARIN
-            // bilinen birimine göre çevirir (tahmin yok).
-            const mmToM = (v) => (Number.isFinite(v) ? v / 1000 : undefined);
-            // Toplam kütle akışı: 'mdot_total' anahtarı hiçbir çözücüde
-            // ÜRETİLMİYOR (alan bu yüzden hep varsayılanda kalıyordu). Sıvı
-            // motorda karşılığı 'total_mass_flow'; katı motorda ortalama akış
-            // yakıt kütlesi / yanma süresinden türetilir (ortalama değerdir,
-            // anlık tepe akışı değil).
-            let mdot = Number.isFinite(m.total_mass_flow) ? m.total_mass_flow
-                : undefined;
-            if (mdot === undefined
-                && Number.isFinite(m.propellant_mass) && m.burn_time > 0) {
-                mdot = m.propellant_mass / m.burn_time;
-            }
+            const m = U.motorDict(r);
+            // BİRİM SÖZLEŞMESİ (2026-07-30 yeniden ölçüldü):
+            // Buradaki eski `mmToM` yardımcısı çözücüden gelen
+            // chamber_diameter / chamber_length değerlerini KOŞULSUZ 1000'e
+            // bölüyordu. Yorumu yalnız katı ve sıvı motoru sayıyordu, HİBRİT
+            // atlanmıştı — oysa panel motorTypes: ['hybrid','liquid','solid']
+            // ile hibritte de kayıtlı. Hibrit çözücü bu iki alanı ZATEN METRE
+            // döndürüyor (ölçüm: chamber_diameter 0,0798685 m -> panele
+            // 7,99e-05 m, yani 0,08 mm çaplı oda). Sonuç: q_chamber 8,4 kat
+            // yüksek, ısı kuyusu kütlesi 6,7 kat düşük çıkıyordu.
+            // Çevirme artık panelde değil, ölçülmüş birim tablosunu tutan
+            // merkezi AnalysisDock.ui.readLengthM içinde yapılıyor.
             return {
                 chamber_pressure: m.chamber_pressure,
                 chamber_temperature: m.chamber_temperature,
-                chamber_diameter: mmToM(m.chamber_diameter),
-                chamber_length: mmToM(m.chamber_length),
-                burn_time: m.burn_time,
-                mdot_total: mdot,
+                chamber_diameter: U.readLengthM(r, 'chamber_diameter'),
+                chamber_length: U.readLengthM(r, 'chamber_length'),
+                burn_time: U.readBurnTime(r),
+                // Eski kod 'total_mass_flow' (yalnız sıvıda var) ve
+                // 'propellant_mass' (yalnız katıda var) anahtarlarını
+                // arıyordu; hibritte ikisi de YOK, bu yüzden alan panel
+                // varsayılanı 1,0 kg/s'de kalıyordu (gerçek: 1,2643 kg/s).
+                mdot_total: U.readMassFlow(r),
+                // Aşağıdaki iki alan hiç bağlı DEĞİLDİ: kullanıcı sayfada
+                // AISI 304 / 8 mm seçmişken panel 'steel' ve 5 mm ile
+                // hesaplıyordu (hesap ucu varsayılanları).
+                material: U.readChamberMaterial(r),
+                wall_thickness: U.readWallThicknessM(r),
             };
         },
         render: render,

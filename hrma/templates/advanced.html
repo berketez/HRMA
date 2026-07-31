@@ -1032,9 +1032,18 @@
                             <span class="tooltip-text" data-i18n="adv.tip.nozzleType">Nozzle geometry type. Conical: simple to manufacture, 15° half-angle typical, 1-2% Isp penalty. Bell: optimized contour, maximum performance, more complex manufacturing. Bell nozzles provide higher efficiency.</span>
                         </div>
                     </label>
+                    <!-- v2.6.26: "Nozzle Contour" adlı İKİNCİ bir seçici daha
+                         vardı (conical / bell / parabolic) ve hiçbir hesaba
+                         bağlı değildi — yalnız CAD yapılandırmasına yazılıyordu.
+                         Aynı kavramın iki alanı olması kullanıcıyı yanıltıyordu
+                         (hangisi geçerli?). Üst küme olan üç seçenek buraya
+                         alındı, ikinci seçici kaldırıldı. Motor üç değeri de
+                         zaten destekliyor: lambda_eff = LAMBDA_CONICAL_15DEG /
+                         LAMBDA_BELL / LAMBDA_PARABOLIC. -->
                     <select id="nozzle_type">
                         <option value="conical" data-i18n="adv.opt.conicalNozzle">Conical Nozzle</option>
                         <option value="bell" data-i18n="adv.opt.bellNozzle">Bell Nozzle</option>
+                        <option value="parabolic" data-i18n="adv.opt.parabolicNozzle">Parabolic Nozzle</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -1670,6 +1679,25 @@
                     <div id="performance_plots" class="plot-container" style="min-height: 800px;"></div>
                 </div>
 
+                <!-- v2.6.26: İtki-zaman eğrisi. Katı motorda vardı, hibritte
+                     YOKTU; oysa zaman-adımlı çözücü anlık yakıt debisini,
+                     c*'ı ve Isp'yi zaten hesaplıyordu. Eğrinin her noktası o
+                     çözümden gelir (F = ṁ_toplam(t)·Isp(t)·g0), şekil
+                     verilmez. Hibritte oksitleyici debisi sabit, yakıt debisi
+                     port gerilemesiyle değişir — eğrinin biçimi bu fizikten
+                     çıkar. -->
+                <div class="panel" style="width: 100%;" id="hybridThrustCurvePanel">
+                    <h2 data-i18n="adv.sec.thrustCurve">Thrust and Chamber Pressure vs Time</h2>
+                    <div class="chart-explanation">
+                        <p><strong data-i18n="adv.txt.whatThisShows">What this shows:</strong>
+                        <span data-i18n="adv.txt.thrustCurveExplain">Instantaneous thrust and chamber
+                        pressure through the burn, taken from the time-marching solution. In a hybrid the
+                        oxidiser flow is constant while the fuel flow follows the regressing port, so the
+                        shape of this curve is the O/F shift made visible.</span></p>
+                    </div>
+                    <div id="hybrid_thrust_plot" class="plot-container" style="min-height: 420px;"></div>
+                </div>
+
                 <div class="panel" style="width: 100%;">
                     <h2 data-i18n="adv.sec.injectorDesignSchematic">Injector Design Schematic</h2>
                     <div class="chart-explanation">
@@ -1901,14 +1929,12 @@
                             <label data-i18n="adv.label.chamberLengthOverrideMm">Chamber Length Override (mm)</label>
                             <input type="number" id="chamber_length_override" class="form-control" placeholder="Auto-calculated" step="10" data-i18n-placeholder="adv.ph.autoCalculated2">
                         </div>
-                        <div class="form-group">
-                            <label data-i18n="adv.label.nozzleContour">Nozzle Contour</label>
-                            <select id="nozzle_contour" class="form-control">
-                                <option value="conical" data-i18n="adv.opt.15Conical">15° Conical</option>
-                                <option value="bell" data-i18n="adv.opt.80BellRao">80% Bell (Rao)</option>
-                                <option value="parabolic" data-i18n="adv.opt.parabolic">Parabolic</option>
-                            </select>
-                        </div>
+                        <!-- v2.6.26: "Nozzle Contour" seçicisi buradan KALDIRILDI.
+                             Temel Parametreler'deki "Nozzle Type" ile aynı kavramın
+                             ikinci alanıydı, hiçbir hesaba bağlı değildi (yalnız CAD
+                             yapılandırmasına yazılıyordu) ve iki alan çeliştiğinde
+                             hangisinin geçerli olduğu belirsizdi. Parabolik seçenek
+                             nozzle_type'a taşındı; orası çözücüye bağlıdır. -->
                     </div>
                 </div>
                 
@@ -1924,16 +1950,14 @@
                                 <option value="brass" data-i18n="adv.opt.brassLowPressure">Brass (Low Pressure)</option>
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label>
-                                <span data-i18n="adv.label.injectionVelocityMS">Injection Velocity (m/s)</span>
-                                <div class="tooltip">
-                                    <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.injectionVelocityMS">Target oxidizer velocity through injection holes. Higher velocities improve atomization and mixing but increase pressure drop. Optimal range: 20-50 m/s for good balance of performance and pressure loss.</span>
-                                </div>
-                            </label>
-                            <input type="number" id="injection_velocity" class="form-control" value="30" min="10" max="100" step="5">
-                        </div>
+                        <!-- v2.6.26: "Injection Velocity" alanı buradan KALDIRILDI.
+                             Showerhead panelindeki "Target Velocity" ile aynı
+                             büyüklüğün ikinci kopyasıydı ve hiçbir hesaba
+                             bağlı değildi. Ayrıca yalnız showerhead'de bir GİRDİ
+                             olarak anlamlıdır; pintle/swirl/koaksiyel tiplerinde
+                             enjeksiyon hızı geometriden TÜREYEN bir çıktıdır ve
+                             burada girdi gibi sunulması yanıltıcıydı. Bağlı olan
+                             alan (target_velocity) enjektör tipi panelinde. -->
                         <div class="form-group">
                             <label>
                                 <span data-i18n="adv.label.pressureDropOverride">Pressure Drop Override (%)</span>
@@ -3203,6 +3227,19 @@
             if (typeof window.I18N !== 'undefined' && I18N.applyTo) I18N.applyTo(paramsDiv);
         }
 
+        /* v2.6.26 — Motor adı yanıtta TEK bir yerde yok: hibritte
+         * design_summary.title, bazı yollarda düz 'motor_name'. Dışa
+         * aktarımlar ve dosya adları bunu tek yerden okur ki kullanıcının
+         * verdiği ad kaybolmasın. Ad yoksa UYDURULMAZ, boş döner ve çağıran
+         * kendi yedeğini kullanır. */
+        function motorNameOf(m) {
+            if (!m) return '';
+            if (m.motor_name) return m.motor_name;
+            const title = (m.design_summary && m.design_summary.title) || '';
+            // "<ad> - Optimal Design" kalıbından adı ayıkla
+            return title ? title.split(' - ')[0].trim() : '';
+        }
+
         function getFormData() {
             // Get environment data
             const isProfileMode = document.getElementById('profile_env').classList.contains('active');
@@ -3294,6 +3331,39 @@
             const portDiaMm = parseFloat(document.getElementById('initial_port_diameter')?.value || 0);
             if (portDiaMm > 0) data.initial_port_diameter = portDiaMm / 1000;
 
+            // v2.6.26 — v2.6.25'İN YARIM KALAN DÜZELTMESİ:
+            // 2.6.25'te backend'in bu üç anahtarı okuması sağlanmıştı
+            // (app.py: chamber_material / wall_thickness / cooling_channels)
+            // ama bu toplayıcıya EKLENMEDİĞİ için hiçbiri sunucuya
+            // gitmiyordu; kullanıcı açısından üç girdi hâlâ ölüydü.
+            // Ölçüldü: elle eklenince çıktı sırasıyla 224 / 100 / 269 yaprakta
+            // değişiyor (ör. heat_transfer_analysis.cooling_analysis).
+            const chamberMaterial = document.getElementById('chamber_material')?.value;
+            if (chamberMaterial) data.chamber_material = chamberMaterial;
+            const wallThicknessMm = parseFloat(document.getElementById('wall_thickness')?.value || 0);
+            if (wallThicknessMm > 0) data.wall_thickness = wallThicknessMm;
+            const coolingChannels = document.getElementById('cooling_channels')?.value;
+            if (coolingChannels) data.cooling_channels = coolingChannels;
+
+            // v2.6.26 — ÜÇ ÖLÜ ALAN DAHA BAĞLANDI. Üçü de sayfada vardı,
+            // kullanıcı değerini giriyordu ve hiçbir hesaba ulaşmıyordu
+            // (Katman A taraması: sıfır yaprak değişimi).
+            //   safety_factor           -> yapısal analizin tasarım SF hedefi
+            //   chamber_length_override -> L* ile türetilen kamara boyunu ezer
+            //   nozzle_material         -> boğaz termal + erozyon değerlendirmesi
+            // Ölçüldü (motor sonucu yaprak sayısı): 12 / 25 / 27.
+            const safetyFactor = parseFloat(document.getElementById('safety_factor')?.value || 0);
+            if (safetyFactor > 0) data.safety_factor = safetyFactor;
+            // Boş bırakmak "otomatik (L* ile türet)" demektir; 0/boş gönderilmez
+            // ki sunucu tarafı varsayılan enjekte etmesin.
+            const chamberLenMm = parseFloat(document.getElementById('chamber_length_override')?.value || 0);
+            if (chamberLenMm > 0) data.chamber_length_override = chamberLenMm;
+            const nozzleMaterial = document.getElementById('nozzle_material')?.value;
+            if (nozzleMaterial) data.nozzle_material = nozzleMaterial;
+
+            const injectorMaterial = document.getElementById('injector_material')?.value;
+            if (injectorMaterial) data.injector_material = injectorMaterial;
+
             // Injector override alanları — v2.5.1'e kadar ölü girdiydiler
             // (yalnız CAD config'e yazılıyordu, /calculate'e gitmiyordu):
             // pressure_drop backend'e BAR olarak Pc yüzdesinden gider,
@@ -3317,6 +3387,16 @@
                 data.n_slots = parseInt(document.getElementById('n_slots')?.value || 6);
                 data.slot_width = parseFloat(document.getElementById('slot_width')?.value || 0);
                 data.slot_height = parseFloat(document.getElementById('slot_height')?.value || 0);
+                // v2.6.26: bu iki alan Giffen-Muraszew çözümüne bağlandı.
+                // swirl_chamber_diameter -> K = A_p/(D_s·d_o) içindeki D_s
+                // swirl_angle            -> hedef sprey yarı açısı; ters çözücü
+                //                           (swirl_K_from_theta) K'yı ondan bulur
+                // Ters çözücü depoda ZATEN yazılıydı, alan ona bağlanmamıştı.
+                // Ölçüldü: 9 ve 35 yaprak değişiyor.
+                const swirlD = parseFloat(document.getElementById('swirl_chamber_diameter')?.value || 0);
+                if (swirlD > 0) data.swirl_chamber_diameter = swirlD;
+                const swirlTheta = parseFloat(document.getElementById('swirl_angle')?.value || 0);
+                if (swirlTheta > 0) data.swirl_angle = swirlTheta;
             } else if (injectorType === 'impingement') {
                 // 2026-07-22 denetim bulgusu: impingement ve coaxial tiplerinde
                 // form 6+4 alan üretiyordu ama HİÇBİRİ gönderilmiyordu — girdiler
@@ -4427,7 +4507,12 @@
         function downloadTableCsv(filename, headers, rows) {
             const esc = (v) => {
                 const s = (v === null || v === undefined) ? '' : String(v);
-                return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+                // Formul enjeksiyonu (CWE-1236): elektronik tablolar '=' '+' '-' '@'
+                // ve sekme/CR ile baslayan METNI formul/komut sayabilir. Sayi
+                // gorunen degerlere (-5000, +3.2e4) DOKUNULMAZ, yoksa veri bozulur.
+                let y = s;
+                if (/^[=+\-@\t\r]/.test(y) && !(y !== '' && isFinite(Number(y)))) { y = "'" + y; }
+                return /[",\n]/.test(y) ? '"' + y.replace(/"/g, '""') + '"' : y;
             };
             const lines = [headers.map(esc).join(',')];
             rows.forEach(r => lines.push(r.map(esc).join(',')));
@@ -4485,13 +4570,18 @@
 
             const num = (v, f) => (typeof v === 'number' && isFinite(v)) ? Number(v.toFixed(f === undefined ? 4 : f)) : '';
             const perf = [
-                ['Motor name', m.motor_name || 'HRMA Motor'],
+                // v2.6.26: 'm.motor_name' hibrit yanıtında YOK; ad
+                // design_summary.title içinde duruyor. Kullanıcı motoruna ad
+                // verse bile Excel'de "HRMA Motor" yazıyordu.
+                ['Motor name', motorNameOf(m)],
                 ['Thrust (N)', num(m.thrust, 1)],
                 ['Burn time (s)', num(m.burn_time, 2)],
                 ['Total impulse (N.s)', num(m.total_impulse, 1)],
                 ['Specific impulse (s)', num(m.isp, 2)],
                 ['c* (m/s)', num(m.c_star, 1)],
-                ['Thrust coefficient', num(m.thrust_coefficient, 4)],
+                // v2.6.26: yanıttaki alan adı 'cf'; 'thrust_coefficient'
+                // diye bir anahtar yok. Satır ekranda dolu, Excel'de boştu.
+                ['Thrust coefficient', num(m.cf ?? m.thrust_coefficient, 4)],
                 ['Chamber pressure (bar)', num(m.chamber_pressure, 2)],
                 ['O/F ratio', num(m.of_ratio, 3)],
                 ['Oxidizer flow (kg/s)', num(m.mdot_ox, 4)],
@@ -4543,7 +4633,7 @@
             }
 
             const stamp = new Date().toISOString().split('T')[0];
-            const fname = `${m.motor_name || 'HRMA_Motor'}_analysis_${stamp}.xlsx`;
+            const fname = `${(motorNameOf(m) || 'HRMA_Motor').replace(/[^\w.-]+/g, '_')}_analysis_${stamp}.xlsx`;
             try {
                 const response = await fetch('/api/export-xlsx', {
                     method: 'POST',

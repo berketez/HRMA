@@ -27,60 +27,24 @@ class ChemicalSpecies:
     source: str  # 'NASA_CEA', 'JANAF', 'Custom'
 
 class ChemicalDatabase:
-    """Comprehensive chemical species database"""
-    
+    """Comprehensive chemical species database
+
+    Tum tuketiciler (get_species, calculate_cp, ...) bellekteki species_data
+    sozlugunu kullanir. SQLite kaliciligi import yolundan bilerek cikarildi:
+    v2.6.26 oncesinde her import 38 baglanti acip 37 INSERT yapiyordu, paket
+    ici data/ dizinini her acilista yeniden yaziyordu (salt-okunur kurulumda
+    cokme, imzali .app bundle'inda muhur bozulmasi). Diske yazma artik yalniz
+    acikca cagrilan export_sqlite() ile olur.
+    """
+
     def __init__(self, db_path: str = None):
+        # db_path yalniz export_sqlite() icin varsayilan hedef; import sirasinda
+        # bu yola dokunulmaz (dizin olusturma dahil hicbir disk I/O yapilmaz).
         self.db_path = db_path or os.path.join(DATA_DIR, 'chemical_species.db')
         self.species_data = {}
-        self.initialize_database()
         self.load_nasa_cea_species()
         self.load_custom_propellant_species()
-    
-    def initialize_database(self):
-        """Initialize SQLite database for chemical species"""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS chemical_species (
-                id INTEGER PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL,
-                formula TEXT NOT NULL,
-                molecular_weight REAL NOT NULL,
-                enthalpy_formation REAL NOT NULL,
-                entropy_standard REAL NOT NULL,
-                cp_coeff_1 REAL, cp_coeff_2 REAL, cp_coeff_3 REAL,
-                cp_coeff_4 REAL, cp_coeff_5 REAL, cp_coeff_6 REAL, cp_coeff_7 REAL,
-                temp_range_low REAL, temp_range_high REAL,
-                temp_range_mid REAL,
-                phase TEXT NOT NULL,
-                cas_number TEXT,
-                source TEXT,
-                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS reaction_data (
-                id INTEGER PRIMARY KEY,
-                reactants TEXT NOT NULL,
-                products TEXT NOT NULL,
-                reaction_type TEXT NOT NULL,
-                heat_of_reaction REAL,
-                activation_energy REAL,
-                frequency_factor REAL,
-                temperature_range_min REAL,
-                temperature_range_max REAL,
-                source TEXT
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-    
+
     def load_nasa_cea_species(self):
         """Load NASA CEA standard species database"""
         
@@ -214,11 +178,10 @@ class ChemicalDatabase:
         
         # Add more species from literature and NASA CEA database
         self._add_extended_species(cea_species)
-        
-        # Store in memory and database
+
+        # Yalniz bellekte tut — disk kaliciligi istenirse export_sqlite() cagrilir
         for species_name, species in cea_species.items():
             self.species_data[species_name] = species
-            self._store_species_in_db(species)
     
     def _add_extended_species(self, species_dict: Dict[str, ChemicalSpecies]):
         """Add extended species list from NASA CEA database"""
@@ -353,43 +316,88 @@ class ChemicalDatabase:
             )
         }
         
+        # Yalniz bellekte tut — disk kaliciligi istenirse export_sqlite() cagrilir
         for species_name, species in custom_species.items():
             self.species_data[species_name] = species
-            self._store_species_in_db(species)
-    
-    def _store_species_in_db(self, species: ChemicalSpecies):
-        """Store chemical species in SQLite database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
+
+    def export_sqlite(self, path: str = None) -> str:
+        """Bellekteki tur verisini SQLite dosyasina acikca disa aktar.
+
+        Import yolunda CAGRILMAZ. Sema, eski import-yolu semasiyla ayni
+        tutuldu ki daha once uretilmis chemical_species.db dosyalarini okuyan
+        harici bir arac varsa format degismesin. Tek baglanti kullanilir.
+
+        Returns:
+            Yazilan dosyanin tam yolu.
+        """
+        target = path or self.db_path
+        target_dir = os.path.dirname(target)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+
+        conn = sqlite3.connect(target)
         try:
+            cursor = conn.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO chemical_species 
-                (name, formula, molecular_weight, enthalpy_formation, entropy_standard,
-                 cp_coeff_1, cp_coeff_2, cp_coeff_3, cp_coeff_4, cp_coeff_5, cp_coeff_6, cp_coeff_7,
-                 temp_range_low, temp_range_high, temp_range_mid, phase, cas_number, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                species.name, species.formula, species.molecular_weight,
-                species.enthalpy_formation, species.entropy_standard,
-                species.cp_coefficients[0] if len(species.cp_coefficients) > 0 else 0,
-                species.cp_coefficients[1] if len(species.cp_coefficients) > 1 else 0,
-                species.cp_coefficients[2] if len(species.cp_coefficients) > 2 else 0,
-                species.cp_coefficients[3] if len(species.cp_coefficients) > 3 else 0,
-                species.cp_coefficients[4] if len(species.cp_coefficients) > 4 else 0,
-                species.cp_coefficients[5] if len(species.cp_coefficients) > 5 else 0,
-                species.cp_coefficients[6] if len(species.cp_coefficients) > 6 else 0,
-                species.temperature_ranges[0][0] if species.temperature_ranges else 298,
-                species.temperature_ranges[0][1] if species.temperature_ranges else 3000,
-                1000,  # Mid temperature
-                species.phase, species.cas_number, species.source
-            ))
+                CREATE TABLE IF NOT EXISTS chemical_species (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    formula TEXT NOT NULL,
+                    molecular_weight REAL NOT NULL,
+                    enthalpy_formation REAL NOT NULL,
+                    entropy_standard REAL NOT NULL,
+                    cp_coeff_1 REAL, cp_coeff_2 REAL, cp_coeff_3 REAL,
+                    cp_coeff_4 REAL, cp_coeff_5 REAL, cp_coeff_6 REAL, cp_coeff_7 REAL,
+                    temp_range_low REAL, temp_range_high REAL,
+                    temp_range_mid REAL,
+                    phase TEXT NOT NULL,
+                    cas_number TEXT,
+                    source TEXT,
+                    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS reaction_data (
+                    id INTEGER PRIMARY KEY,
+                    reactants TEXT NOT NULL,
+                    products TEXT NOT NULL,
+                    reaction_type TEXT NOT NULL,
+                    heat_of_reaction REAL,
+                    activation_energy REAL,
+                    frequency_factor REAL,
+                    temperature_range_min REAL,
+                    temperature_range_max REAL,
+                    source TEXT
+                )
+            ''')
+            for species in self.species_data.values():
+                cursor.execute('''
+                    INSERT OR REPLACE INTO chemical_species
+                    (name, formula, molecular_weight, enthalpy_formation, entropy_standard,
+                     cp_coeff_1, cp_coeff_2, cp_coeff_3, cp_coeff_4, cp_coeff_5, cp_coeff_6, cp_coeff_7,
+                     temp_range_low, temp_range_high, temp_range_mid, phase, cas_number, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    species.name, species.formula, species.molecular_weight,
+                    species.enthalpy_formation, species.entropy_standard,
+                    species.cp_coefficients[0] if len(species.cp_coefficients) > 0 else 0,
+                    species.cp_coefficients[1] if len(species.cp_coefficients) > 1 else 0,
+                    species.cp_coefficients[2] if len(species.cp_coefficients) > 2 else 0,
+                    species.cp_coefficients[3] if len(species.cp_coefficients) > 3 else 0,
+                    species.cp_coefficients[4] if len(species.cp_coefficients) > 4 else 0,
+                    species.cp_coefficients[5] if len(species.cp_coefficients) > 5 else 0,
+                    species.cp_coefficients[6] if len(species.cp_coefficients) > 6 else 0,
+                    species.temperature_ranges[0][0] if species.temperature_ranges else 298,
+                    species.temperature_ranges[0][1] if species.temperature_ranges else 3000,
+                    1000,  # Mid temperature
+                    species.phase, species.cas_number, species.source
+                ))
             conn.commit()
-        except sqlite3.Error as e:
-            print(f"Database error storing {species.name}: {e}")
         finally:
             conn.close()
-    
+        return target
+
+
     def get_species(self, name: str) -> Optional[ChemicalSpecies]:
         """Get chemical species by name"""
         return self.species_data.get(name)

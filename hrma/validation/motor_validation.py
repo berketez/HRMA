@@ -3,8 +3,34 @@ Motor Data Validation and Error Handling Module
 Professional validation for safety-critical rocket motor parameters
 """
 
+import math
+
 import numpy as np
 from typing import Dict, Tuple, Optional, List
+
+
+def _num(value):
+    """Sayisal girdiyi float'a zorlar; sayiya cevrilemiyorsa None doner.
+
+    v2.6.26 — DOGRULAYICI STRING GIRDIDE COKUYORDU. Bu modul degerleri
+    ``motor_data.get(...)`` ile ham okuyup dogrudan carpiyordu; kayitli bir
+    proje ya da API cagrisi sayiyi metin olarak tasidiginda (ornegin
+    ``{"chamber_pressure": "20"}``) ``chamber_p * safety_factor`` satiri
+    ``TypeError: can't multiply sequence by non-int`` veriyordu. Kullanici,
+    girdisinin neresinin yanlis oldugunu soyleyen bir mesaj yerine ic Python
+    hatasi goruyordu — oysa dogrulayicinin isi tam olarak bunu onlemek.
+
+    None donmesi "bu alan sayisal degil" demektir; cagiran taraf o kontrolu
+    ATLAR, sessizce 0 varsaymaz.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return num if math.isfinite(num) else None
+
 
 class MotorDataValidator:
     """Comprehensive motor data validation for all motor types"""
@@ -180,7 +206,7 @@ class MotorDataValidator:
         
         # Throat must be smaller than chamber
         throat_d = motor_data.get('throat_diameter')
-        chamber_d = motor_data.get('chamber_diameter')
+        chamber_d = _num(motor_data.get('chamber_diameter'))
         if throat_d and chamber_d and throat_d >= chamber_d:
             errors.append(f"Throat diameter ({throat_d}m) must be smaller than "
                         f"chamber diameter ({chamber_d}m)")
@@ -193,23 +219,23 @@ class MotorDataValidator:
         
         # Chamber pressure vs tank pressure (for liquid)
         if motor_type == 'liquid':
-            chamber_p = motor_data.get('chamber_pressure')
-            tank_p = motor_data.get('tank_pressure')
+            chamber_p = _num(motor_data.get('chamber_pressure'))
+            tank_p = _num(motor_data.get('tank_pressure'))
             if chamber_p and tank_p and tank_p <= chamber_p:
                 errors.append(f"Tank pressure ({tank_p} bar) must be higher than "
                             f"chamber pressure ({chamber_p} bar)")
         
         # Port diameter checks for hybrid
         if motor_type == 'hybrid':
-            port_d = motor_data.get('port_diameter')
+            port_d = _num(motor_data.get('port_diameter'))
             if port_d and chamber_d and port_d >= chamber_d * 0.8:
                 warnings.append(f"Port diameter ({port_d}m) is very large relative to "
                               f"chamber ({chamber_d}m). Check structural integrity.")
         
         # Total impulse vs thrust and burn time
-        thrust = motor_data.get('thrust')
-        burn_time = motor_data.get('burn_time')
-        total_impulse = motor_data.get('total_impulse')
+        thrust = _num(motor_data.get('thrust'))
+        burn_time = _num(motor_data.get('burn_time'))
+        total_impulse = _num(motor_data.get('total_impulse'))
         
         if thrust and burn_time and total_impulse:
             calculated_impulse = thrust * burn_time
@@ -222,7 +248,7 @@ class MotorDataValidator:
         """Perform safety-critical checks"""
         
         # Chamber pressure safety factor
-        chamber_p = motor_data.get('chamber_pressure')
+        chamber_p = _num(motor_data.get('chamber_pressure'))
         if chamber_p:
             burst_p = chamber_p * self.safety_factors['pressure_vessel']
             if burst_p > 2000:  # Extreme pressure warning
@@ -252,29 +278,51 @@ class MotorDataValidator:
                           "management and structural analysis")
     
     def sanitize_export_data(self, data: Dict) -> Dict:
-        """Sanitize data for safe export"""
-        """Remove or fix invalid values for export"""
-        sanitized = {}
-        
-        for key, value in data.items():
-            if value is None:
-                sanitized[key] = 0
-            elif isinstance(value, (int, float)):
-                if np.isnan(value) or np.isinf(value):
-                    sanitized[key] = 0
-                else:
-                    sanitized[key] = float(value)
-            elif isinstance(value, str):
-                sanitized[key] = value.replace('\x00', '').strip()
-            elif isinstance(value, dict):
-                sanitized[key] = self.sanitize_export_data(value)
-            elif isinstance(value, list):
-                sanitized[key] = [self.sanitize_export_data(item) if isinstance(item, dict) 
-                                else item for item in value]
-            else:
-                sanitized[key] = str(value)
-        
-        return sanitized
+        """Dışa aktarım verisini güvenli hale getirir.
+
+        v2.6.26 düzeltmesi (SAN-ZERO-6) — SESSİZ VERİ BOZULMASI:
+        Bu fonksiyon eskiden None/NaN/Inf değerleri 0'a çeviriyordu. Çıktısı
+        /api/export-stl üzerinden İMALATA gidebilecek STL dosyasına aktığı
+        için, çözücünün hesaplayamadığı bir boğaz çapı sessizce 0 olup
+        geometriyi değiştiriyordu (ölçüm: aynı istek NaN ile ve gerçek
+        değerle FARKLI STL üretti, hiçbir uyarı dönmedi).
+
+        Yeni sözleşme app.py::sanitize_json_values (v2.6.2) ile AYNIDIR:
+        sonlu olmayan sayı ``None`` döner. 0 gerçek bir ölçümdür ve aynen
+        korunur; "hesaplanamadı" ile "sıfır" bir daha karışmaz. Çağıran taraf
+        None'ı eksik/hesaplanamamış saymakla yükümlüdür. Ortak yardımcıya
+        taşınamadı: app.py bu modülü import ettiği için (app.py:46) tersi
+        döngüsel import olurdu; semantik burada yerel olarak eşitlendi.
+
+        Listelerdeki ve dizilerdeki çıplak sayılar da taranır (eski kod
+        listelerde yalnız dict elemanlarını geziyordu, listedeki NaN
+        hayatta kalıyordu).
+        """
+        return {key: self._sanitize_value(value) for key, value in data.items()}
+
+    def _sanitize_value(self, value):
+        """Tek bir değeri dışa aktarım sözleşmesine göre temizler."""
+        if value is None:
+            return None
+        # bool, int'in alt sınıfıdır; sayı yoluna girerse bayraklar 1.0/0.0
+        # olur (app.py sözleşmesi bool'u korur).
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, np.integer)):
+            return int(value)
+        if isinstance(value, (float, np.floating)):
+            f = float(value)
+            return f if math.isfinite(f) else None
+        if isinstance(value, str):
+            return value.replace('\x00', '').strip()
+        if isinstance(value, dict):
+            return {key: self._sanitize_value(item)
+                    for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._sanitize_value(item) for item in value]
+        if isinstance(value, np.ndarray):
+            return [self._sanitize_value(item) for item in value.tolist()]
+        return str(value)
     
     def validate_export_request(self, export_data: Dict, export_type: str) -> Tuple[bool, str]:
         """Validate export request data"""

@@ -263,7 +263,22 @@ class WindowsCompatibility:
             
             # Import numpy after setting environment variables
             import numpy as np
-            np.seterr(all='ignore')  # Suppress warnings that can cause issues
+            # v2.6.26 — SUREC GENELINDE `np.seterr(all='ignore')` KALDIRILDI.
+            #
+            # Burada numpy'nin TUM kayan nokta hata durumlari (sifira bolme,
+            # tasma, gecersiz islem) surec genelinde susturuluyordu. Bu, yalniz
+            # bir gurultu ayari degil: v2.6.2'de motor modullerinden
+            # `warnings.filterwarnings('ignore')` cagrilari BILEREK kaldirilmisti
+            # (bkz. liquid_rocket_engine.py, cfd_analysis.py, kinetic_analysis.py
+            # basindaki notlar) cunku catch-all susturma gercek sayisal hatalari
+            # gizliyordu. Windows yolu ayni susturmayi daha guclu bicimde geri
+            # getiriyordu ve yayinlanan EXE bu yoldan geciyor: macOS'ta gorunen
+            # bir sifira bolme uyarisi Windows'ta hic gorunmuyordu. Ayni kod
+            # iki platformda farkli tani veriyorsa hata avi guvenilmez olur.
+            #
+            # Belirli bir hesabin bilerek susturulmasi gerekiyorsa bunun yeri
+            # o hesabin cevresindeki dar bir `with np.errstate(...)` blogudur.
+            _ = np
             
         except Exception as e:
             warnings.warn(f"Could not configure numpy threading: {e}")

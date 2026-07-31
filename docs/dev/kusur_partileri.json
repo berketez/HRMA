@@ -1,0 +1,2015 @@
+{
+  "kaynak": "/Users/apple/HRMA-kurtarma/takim-raporlari/sabit-bulgular.json",
+  "toplam_kusur": 138,
+  "parti_sayisi": 6,
+  "partiler": [
+    {
+      "ad": "P1",
+      "sahip": "ajan",
+      "dosyalar": [
+        "hrma/engines/cycle_power_balance.py",
+        "hrma/engines/liquid_rocket_engine.py",
+        "hrma/templates/liquid.html"
+      ],
+      "kalem_sayisi": 47,
+      "kalemler": [
+        {
+          "yol": ".combustion_analysis.combustion_analysis.combustion_efficiency",
+          "sinif": "KUSUR",
+          "deger": "90.0 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5396-5397",
+          "gerekce": "Olctum: 25 kN ve 250 kN'de tam 90.0; Damkohler 0.805 -> 1-exp(-0.0805)=0.077, sonuc max(0.90,...) kelepceleriyle her motorda TABANA oturuyor, yani raporlanan sayi modelin degil kelepcenin ciktisi.",
+          "onerilen_baglama": "Ya kelepce kaldirilip verim gercekten damlacik buharlasma sinirindan hesaplanmali (Priem & Heidmann, NASA TR R-67: buharlasma sinirli yanma; d^2 yasasi ile t_buh = d_SMD^2/lambda, mevcut hesaplanan droplet_diameter/SMD girdi olarak var), ya da bu alan tamamen kaldirilip tek yanma verimi kaynagi olarak eta_c_star kullanilmali. Su hali ucuncu, celisen bir 'yanma verimi' uretiyor.",
+          "mevcut_fonksiyon": "detail['atomization'] SMD'si (injector_design.smd_elkotb / smd_impinging) ve calculate_injector_design()->droplet_diameter zaten hesaplaniyor",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".combustion_analysis.combustion_analysis.mixing_time",
+          "sinif": "KUSUR",
+          "deger": "2.0 ms",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5383",
+          "gerekce": "'0.002 s typical for impinging injectors' diye sabit yazilmis; enjektor tipi, damlacik boyutu, enjeksiyon hizi ve oda basincindan bagimsiz. Damkohler sayisinin paydasi bu oldugu icin yanma verimini ve kararlilik tepki suresini tek basina belirliyor.",
+          "onerilen_baglama": "Karakteristik zaman damlacik buharlasmasindan gelmeli: t = rho_l*d_SMD^2/(K_buh) (d^2 yasasi; Priem & Heidmann NASA TR R-67, Sutton & Biblarz 9. bs. Bol. 9). d_SMD ayni yanitta zaten hesaplaniyor (injector_design atomization blogu). Alternatif olarak modulun kendi 'mixing_residence_time' degeri kullanilabilir.",
+          "mevcut_fonksiyon": "hrma/engines/injector_design.py::smd_elkotb / smd_impinging / smd_lefebvre_swirl",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".combustion_analysis.combustion_analysis.optimal_momentum_ratio",
+          "sinif": "KUSUR",
+          "deger": "2.0",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5389",
+          "gerekce": "AYNI yanitta enjektor modulu ayni impinging doublet icin momentum hedefini 1.0 veriyor (injector_design_detail.momentum.target = 1.0, Rupe olcutu / MR_BAND=(0.7,1.3)); iki modul tek motor icin iki farkli 'optimum' rapor ediyor. Ustelik bu deger mixing_efficiency'yi dogrudan belirliyor.",
+          "onerilen_baglama": "Tek kaynak: injector_design.MR_BAND ve momentum.target (Rupe, JPL 20-195, 1953) kullanilmali; combustion_analysis kendi hedefini tanimlamamali.",
+          "mevcut_fonksiyon": "hrma/engines/injector_design.py::design_injector -> momentum['target'] (satir 1363-1366)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".combustion_analysis.stability_analysis.combustion_response_time",
+          "sinif": "KUSUR",
+          "deger": "2.0 ms",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5478",
+          "gerekce": "mixing_time*1000 olarak dogrudan yukaridaki 2 ms sabitini tasiyor; yanma tepki suresi kararlilik hukmunun (chug/akustik baglasim) girdisi oldugu icin sabit kalmasi guvenlik acisindan anlamli bir yaniltmadir.",
+          "onerilen_baglama": "mixing_time duzeltilince kendiliginden duzelir; yanma tepki suresi ayrica basinc duyarliligi n ve zaman gecikmesi tau ile (Crocco-Cheng n-tau modeli, NASA SP-194) raporlanmali ya da 'modellenmiyor' denmeli.",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".component_sizing.component_masses.controls_avionics",
+          "sinif": "KUSUR",
+          "deger": "15.0 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:6334 (sabit tanimi :485 CONTROLS_MASS_BASE_KG)",
+          "gerekce": "Olctum: 25 kN ve 250 kN'de birebir 15.0 kg. Ustelik ayni sozlukteki 'mass_method.feed_and_controls' etiketi 'empirical scaling with mass flow - estimate' DIYOR ama kontrol kutlesi debiyle hic olceklenmiyor; besleme hatti (FEED_LINE_MASS_PER_KG_S*mdot) ve turbopompa (TURBOPUMP_MASS_BASE+PER_KW*P) olcekleniyor, yalniz bu kalem sabit. Yani beyan ile kod celisiyor.",
+          "onerilen_baglama": "En az besleme hatti kalemiyle ayni desende olceklenmeli: m_kontrol = a + b*mdot_total (ya da vana sayisi x vana kutlesi). Etiket sabit birakilacaksa 'fixed allowance' olarak duzeltilmeli, 'scaling with mass flow' yazip sabit dondurmek beyan curumesidir.",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cooling_system.film_cooling.film_cooling_percent",
+          "sinif": "KUSUR",
+          "deger": "0.0 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:845-848, 2846",
+          "gerekce": "Varsayilan 0.0 ve arayuzde bu alani ayarlayacak hicbir girdi yok; film sogutma secilse dahi 0 kaliyor. Beyan (unwired_inputs) da bu bosluktan soz etmiyor.",
+          "onerilen_baglama": "Forma alan eklenmeli; en azindan cooling_type='film_cooling' icin literaturde yaygin %3-10 bandindan etiketli bir varsayilan atanmali (Huzel & Huang Bol. 4; Sutton & Biblarz 9. bs. Bol. 8).",
+          "mevcut_fonksiyon": "LiquidRocketEngine._film_cooling_analysis",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cooling_system.film_cooling.film_cooling_flow_kg_s",
+          "sinif": "KUSUR",
+          "deger": "0.0 kg/s",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:2850",
+          "gerekce": "pct=0 oldugu icin erken donusteki sifir; kok neden film_cooling_percent girdisinin arayuzde bulunmamasi (yukaridaki kalemle ayni).",
+          "onerilen_baglama": "Girdi baglaninca kendiliginden hesaplanir: mdot_film = pct/100 * mdot_fuel.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._film_cooling_analysis",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cooling_system.film_cooling.film_heat_absorbed_w",
+          "sinif": "KUSUR",
+          "deger": "0.0 W",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:2851",
+          "gerekce": "Ayni kok neden; olctum, girdi elle verildiginde 279 kW sogurma hesaplanabiliyor - yani hesap var, tetiklenmiyor.",
+          "onerilen_baglama": "film_cooling_percent arayuze baglaninca enerji dengesi zaten cozuluyor.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._film_cooling_analysis",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cooling_system.film_cooling.film_covered_length_mm",
+          "sinif": "KUSUR",
+          "deger": "0.0 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:2852",
+          "gerekce": "Ayni kok neden (pct=0 -> erken donus).",
+          "onerilen_baglama": "Girdi baglandiginda l_film hesaplaniyor (satir 2907).",
+          "mevcut_fonksiyon": "LiquidRocketEngine._film_cooling_analysis",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cooling_system.film_cooling.film_coverage_fraction_of_chamber",
+          "sinif": "KUSUR",
+          "deger": "0.0",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:2853",
+          "gerekce": "Ayni kok neden (pct=0 -> erken donus).",
+          "onerilen_baglama": "Girdi baglandiginda coverage hesaplaniyor (satir 2910).",
+          "mevcut_fonksiyon": "LiquidRocketEngine._film_cooling_analysis",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".detailed_feed_system.performance_margins.flow_margin",
+          "sinif": "KUSUR",
+          "deger": "50.0 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5345 (PUMP_CURVE_FLOW_MAX :400)",
+          "gerekce": "PUMP_CURVE_FLOW_MAX kodda 'Q/Q_bep TARAMA BANDI' olarak tanimli, yani pompa egrisi cizdirilirken kullanilan grafik ust siniri; bu sayiyi 'debi marji' diye raporlamak tarama parametresini performans hukmune cevirmektir. Her motorda 50.0 cikiyor (olctum). Ayrica ayni sozlukteki yorum 'Marjlar hesaplanan buyukluklerden gelir (sabit degil)' diyor - iki kalemde bu dogru degil.",
+          "onerilen_baglama": "Gercek debi marji = (Q_pompa_max - Q_gerekli)/Q_gerekli, pompanin _design_pump ile kurulan H-Q egrisinden ve cevrimin gercek debisinden (_cycle_pump_duty) alinmali.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._design_pump (satir 5016) gercek H-Q egrisi ve calisma noktasi uretiyor; _cycle_pump_duty gercek debiyi veriyor",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".detailed_feed_system.performance_margins.power_margin",
+          "sinif": "KUSUR",
+          "deger": "53.846 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5349",
+          "gerekce": "(1/TURBINE_EFFICIENCY_DEFAULT - 1)*100 = (1/0.65-1)*100; bu bir MARJ degil, turbin veriminin kayip payidir - motor buyuklugu, cevrim tipi, turbin basinc orani ne olursa olsun 53.846 cikiyor (olctum).",
+          "onerilen_baglama": "Guc marji = (turbin_uretilen_guc - pompa_gerekli_guc)/pompa_gerekli_guc olmali; her iki buyukluk de _solve_cycle_balance() mil bazinda kapatildigi icin ZATEN hesaplaniyor (turbine_power_required, total_pump_power satir 5259-5261).",
+          "mevcut_fonksiyon": "LiquidRocketEngine._solve_cycle_balance / _cycle_pump_duty (mil basina guc kapanisi)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".efficiency_breakdown.efficiency_breakdown.kinetic_loss",
+          "sinif": "KUSUR",
+          "deger": "0.99 (donmus akista 0.96)",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5892",
+          "gerekce": "Depoda GERCEK kinetik verim hesabi VAR ve baska bir yerde cagriliyor: _kinetic_efficiency(isp_shifting, isp_frozen, throat_diameter) (satir 1910, hrma/analysis/kinetic_efficiency.KineticEfficiency, JANNAF tarzi harman) teslim verim zincirinde satir 2023'te kullaniliyor. Verim dokumu ise ayni motorda bunu yok sayip iki degerli bir bayrak sabitine (0.96/0.99) dusuyor - kinetik kayip bogaz capina ve oda basincina guclu bagimlidir, sabit olamaz.",
+          "onerilen_baglama": "efficiency_breakdown kalemi _kinetic_efficiency() sonucundan (eta_kinetic / kinetic_loss_pct) okunmali; boylece ayni yanitta iki farkli kinetik verim kalmaz.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._kinetic_efficiency (satir 1910) ve hrma/analysis/kinetic_efficiency.py::KineticEfficiency",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".efficiency_breakdown.loss_breakdown.kinetic_loss",
+          "sinif": "KUSUR",
+          "deger": "1.0 % (1-0.99)",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5922",
+          "gerekce": "Yukaridaki sabitin tumleyeni; ayni kok neden.",
+          "onerilen_baglama": "_kinetic_efficiency()'in kinetic_loss_pct alani dogrudan kullanilmali.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._kinetic_efficiency -> res['kinetic_loss_pct'] (satir 1958)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".injector_design.spray_angle_deg",
+          "sinif": "KUSUR",
+          "deger": "30.0 deg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4058",
+          "gerekce": "'tipik impinging jet angle' diye sabit yazilmis; enjektor TIPI canli bir form alani oldugu halde showerhead (pratikte ~0 deg eksenel), swirl (60-120 deg koni) ve pintle (TMR'ye bagli) icin de 30 deg raporlaniyor. Enjektor modulu bu aciyi tip tip GERCEKTEN hesapliyor ama panel onu kullanmiyor.",
+          "onerilen_baglama": "Deger injector_design_detail'den okunmali: pintle icin pintle_spray_angle(tmr) = arccos(1/(1+TMR)) (Cheng 2017), swirl icin swirl_K_from_theta / 'spray_cone_half_angle_deg', impinging icin pattern.impingement.half_angle_deg ve iki jetin momentum dengesinden bilesik aci (Sutton & Biblarz 9. bs. Bol. 8).",
+          "mevcut_fonksiyon": "hrma/engines/injector_design.py::pintle_spray_angle (satir 519), swirl_K_from_theta (satir 466), detail['pattern']['impingement']['half_angle_deg']",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".mixture_ratio_efficiency",
+          "sinif": "KUSUR",
+          "deger": "100.0 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:2110 (canli CEA yolunda mr_efficiency = 1.0), cikti :3962",
+          "gerekce": "Canli CEA yolunda ozdes olarak 1.0 atanmis; O/F ne olursa olsun kullaniciya 'karisim orani verimi %100' gosteriliyor. Gerekce yorumda dogru (CEA referansi zaten o MR'da cozuluyor, ikinci ceza uydurma olurdu) ama SONUC yanlis: hicbir motorun MR verimi %100 degildir, sadece bu metrik artik olculmuyor. AYNI yanitta gercek veri var: performance_maps.mixture_ratio_optimization icinde isp_vs_mr taramasi ve optimal_mr HESAPLANIYOR.",
+          "onerilen_baglama": "eta_MR = Isp(MR_kullanici) / max(isp_vs_mr) olarak ayni taramadan hesaplanmali (her ikisi de o blokta mevcut), ya da alan tamamen kaldirilmali. Sabit %100 gostermek en kotu secenek.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._generate_performance_maps -> mixture_ratio_optimization.isp_vs_mr + optimal_mr (satir 5771-5781)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".performance_maps.mixture_ratio_optimization.mr_efficiency",
+          "sinif": "KUSUR",
+          "deger": "100.0 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5779-5781",
+          "gerekce": "Yukaridaki degerin harita panelindeki ikizi; getattr(self,'mr_efficiency',...) canli CEA yolunda hep 1.0 dondugu icin taramanin hemen yanibasinda duran gercek Isp(MR) egrisi kullanilmadan %100 yaziliyor.",
+          "onerilen_baglama": "Ayni sozlukteki isp_vs_mr ve current_isp_vac'tan: eta_MR = current_isp_vac / max(isp_vs_mr).",
+          "mevcut_fonksiyon": "ayni blokta hesaplanan isp_vs_mr / optimal_mr",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".performance_maps.altitude_performance.optimal_altitude",
+          "sinif": "KUSUR",
+          "deger": "100000.0 m",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5796-5798",
+          "gerekce": "argmax(isp_vs_alt) aliniyor ama sabit lulede Isp irtifayla MONOTON artar (ortam basinci dustukce CF buyur), dolayisiyla argmax HER ZAMAN taramanin son noktasidir. Olctum: 25 kN ve 250 kN'de, epsilon 12 ve 40'ta, hepsinde 100000.0 - yani raporlanan 'optimum irtifa' fiziksel bir optimum degil, tarama tavaninin ta kendisi.",
+          "onerilen_baglama": "Bir lulenin tasarim (optimum) irtifasi P_cikis = P_ortam kosulundan cozulur: motorun kendi exit_pressure_bar degerini ISA basinc profilinde ters cevirerek h* bulunmali (ISA_LAYERS + barometrik formul zaten satir 3676-3684'te var). Boyle bir h* yoksa (vakum optimize lule) durustce 'vacuum-optimised, no finite optimum' denmeli.",
+          "mevcut_fonksiyon": "calculate_altitude_performance icindeki ISA cozumu ve exit_pressure_bar hesabi (satir 3676-3684, 3793-3794)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.structural.safety_factor",
+          "sinif": "KUSUR",
+          "deger": "2.5",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4764 getattr(self,'tank_safety_factor', 2.5)",
+          "gerekce": "Okunan oznitelik 'tank_safety_factor' depoda HICBIR YERDE atanmiyor (tam repo taramasi: yalnizca bu satirda geciyor), yani varsayilan 2.5 her zaman kazaniyor. Oysa formda 'safety_factor' alani VAR; sarsim olcumu o alanin yalnizca 2 yaprak oynattigini gosteriyor (structural_analysis.chamber_structure.allowable_stress ve stress_margin) - kullanicinin emniyet katsayisi hazneye gidiyor, tanka gitmiyor. Tank cidar kalinligi ve kutlesi dogrudan bu katsayidan turedigi icin kullanici SF=1.5 girse bile tank 2.5 ile boyutlaniyor.",
+          "onerilen_baglama": "Kurucuda self.tank_safety_factor = self._override_val('safety_factor', ...) ile forma baglanmali (ya da ayri bir tank_safety_factor alani acilmali). Su hali sessiz bir beyan bosluqu: cikti SF=2.5 diyor, kullanici baska bir sey girmis.",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.structural.safety_factor",
+          "sinif": "KUSUR",
+          "deger": "2.5",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4764 (ayni degisken)",
+          "gerekce": "Oksitleyici tankiyla ayni kok neden: form alani 'safety_factor' tank zincirine hic ulasmiyor.",
+          "onerilen_baglama": "Ayni: tank_safety_factor form 'safety_factor' alanina baglanmali.",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.inlet_configuration.diameter",
+          "sinif": "KUSUR",
+          "deger": "100 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4940",
+          "gerekce": "Olctum: 25 kN ve 250 kN motorda birebir 100 mm. Bu bir AKIS GECIDIDIR, tam oksitleyici debisini gecirmek zorundadir; 10 kat debi farkinda ayni cap fiziksel olarak imkansizdir. Ayni fonksiyonun icinde anti-vortex capi D*0.3 ile olcekleniyor, giris capi mutlak mm - fonksiyon kendi icinde tutarsiz.",
+          "onerilen_baglama": "D = sqrt(4*mdot_ox/(pi*rho_ox*v)) ile, sivi besleme hatti hedef hizindan (v ~ 3-8 m/s; Huzel & Huang Bol. 7, NASA SP-125). Depoda bu tam olarak _calculate_line_diameter(mdot, tip) fonksiyonudur ve besleme hattinda ZATEN cagriliyor - tank agizlarinda cagrilmiyor.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._calculate_line_diameter (satir 4168)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.outlet_configuration.diameter",
+          "sinif": "KUSUR",
+          "deger": "150 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4949",
+          "gerekce": "Olctum: 25 kN'de de 250 kN'de de 150 mm. Ayrica bagli oldugu besleme hattinin capiyla CELISIYOR: ayni kosuda oxidizer_main.diameter 50 mm (25 kN) ve 100 mm (250 kN) hesaplaniyor - tank cikisi hicbir durumda hatla eslesmiyor.",
+          "onerilen_baglama": "_calculate_line_diameter(self.mdot_ox, 'oxidizer') ile hesaplanmali; sump/anti-vortex icin cikis capinin uzeri (tipik 1.2-1.5 kat) alinip NPSH kaybi buna gore raporlanmali.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._calculate_line_diameter (satir 4168)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.inlet_configuration.diameter",
+          "sinif": "KUSUR",
+          "deger": "80 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4959",
+          "gerekce": "Yakit tanki girisi de mutlak mm; debiden, yogunluktan, tank capindan bagimsiz. Ayni fonksiyon icindeki anti-vortex olculeri capla olcekleniyor.",
+          "onerilen_baglama": "_calculate_line_diameter(self.mdot_fuel, 'fuel').",
+          "mevcut_fonksiyon": "LiquidRocketEngine._calculate_line_diameter (satir 4168)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.outlet_configuration.diameter",
+          "sinif": "KUSUR",
+          "deger": "120 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4967",
+          "gerekce": "Yakit cikis capi sabit; ayni kosuda hesaplanan fuel_main.diameter 25 mm (25 kN) ve 100 mm (250 kN) - tank cikisi hatla eslesmiyor, basinc dusumu zinciri kopuk.",
+          "onerilen_baglama": "_calculate_line_diameter(self.mdot_fuel, 'fuel') ile ve besleme hatti capiyla tutarli.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._calculate_line_diameter (satir 4168)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.inlet_configuration.diffuser_length",
+          "sinif": "KUSUR",
+          "deger": "200 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4942",
+          "gerekce": "Difüzör boyu, giris capi ve yari aciyla GEOMETRIK olarak bagli bir buyukluktur; hem giris capi (100 mm) hem aci (15 deg) ayni sozlukte duruyor ama boy onlardan turetilmemis, ayri bir sabit. Uc sayidan ikisi verildiginde ucuncusu serbest olamaz.",
+          "onerilen_baglama": "L = (D_cikis - D_giris)/(2*tan(theta)); D_giris hat capindan, D_cikis difuzor cikis capindan gelir. Aci ve capi zaten hesaplandiginda boy artik bir secim degil bir sonuctur.",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.outlet_configuration.sump_depth",
+          "sinif": "KUSUR",
+          "deger": "50 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4950",
+          "gerekce": "Sump derinligi kullanilamayan (residual) itergac hacmini ve gaz yutma sinirini belirler; tank capiyla olceklenmesi gerekirken mutlak mm. Ayni sozlukte anti-vortex yuksekligi D*0.1 ile olcekleniyor - ic tutarsizlik.",
+          "onerilen_baglama": "Sump/anti-vortex yuksekligi cikis capinin katiyla olceklenmeli (kritik girdap yuksekligi h/D_cikis olcutu; NASA SP-8031 Slosh Suppression ve SP-8004 girdap/gaz yutma kriterleri).",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.outlet_configuration.standpipe_height",
+          "sinif": "KUSUR",
+          "deger": "100 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4968",
+          "gerekce": "Ayni sozlukte 'anti_vortex_height' D*0.1 ile HESAPLANIYOR, standpipe yuksekligi ise mutlak 100 mm - iki komsu alan farkli mantikla uretilmis.",
+          "onerilen_baglama": "Cikis capi ve kritik girdap yuksekligi olcutunden (NASA SP-8004 / SP-8031); en azindan anti_vortex_height ile ayni olcekleme kuralina baglanmali.",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.instrumentation.relief_valve.diameter",
+          "sinif": "KUSUR",
+          "deger": "25 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4983",
+          "gerekce": "Emniyet valfi capi bir AKIS ALANIDIR: bosaltilmasi gereken debiyle (basinclandirici debisi / kriyojenik kaynama) olcekleir. Ayni sozlukteki 'set_pressure' Pc'den HESAPLANIYOR ama cap sabit - tek bir bilesenin bir alani hesaplanip digeri sabit birakilmis. 25 kN ile 250 kN motorda ayni valf cikiyor (olctum).",
+          "onerilen_baglama": "Gerekli bosaltma alani A = W/(C*K*P*...) bagintisiyla (API RP 520 gaz bosaltma) ya da en azindan tank hacmi/basinclandirici debisiyle olceklenmeli.",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.instrumentation.relief_valve.diameter",
+          "sinif": "KUSUR",
+          "deger": "25 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4983",
+          "gerekce": "Ayni kok neden; ustelik LH2 tankinda kaynama debisi cok farklidir, yine 25 mm cikiyor.",
+          "onerilen_baglama": "API RP 520 bosaltma alani ya da tank hacmi/kaynama debisi olceklemesi.",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.anti_vortex_device.vane_thickness",
+          "sinif": "KUSUR",
+          "deger": "3 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4905",
+          "gerekce": "Ayni sozlukte kanat capi (D*0.3) ve yuksekligi (D*0.1) tank capiyla olceklenirken kalinlik mutlak mm: 1 m capli tankta 0.3 m'lik kanat 3 mm, 2.2 m capli tankta 0.65 m'lik kanat yine 3 mm. Ayni yapinin bir boyutu olceklenip digeri sabit birakilmis.",
+          "onerilen_baglama": "Kanat plaka kalinligi ya asgari imalat gauge kurali olarak ACIKCA etiketlenmeli (o zaman mesru olur) ya da akis/carpma yukune gore burkulma kontroluyle boyutlanmali (levha burkulmasi; Roark, Tablo 15).",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.anti_vortex_device.vane_thickness",
+          "sinif": "KUSUR",
+          "deger": "3 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4905",
+          "gerekce": "Ayni kok neden: capi olceklenen bir yapinin kalinligi olceklenmiyor ve etiketlenmemis.",
+          "onerilen_baglama": "Asgari gauge olarak etiketle ya da burkulma/akis yukunden boyutlandir.",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.slosh_baffles[*].thickness",
+          "sinif": "KUSUR",
+          "deger": "2 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4926",
+          "gerekce": "Ayni sozlukte halka dis capi (D*0.95) ve ic capi (D*0.2) tank capiyla olcekleniyor, kalinlik mutlak 2 mm; 2.2 m capli bir tankta 2 mm'lik konsol halka calkantı yukunu tasiyamaz.",
+          "onerilen_baglama": "Halka bafl kalinligi calkanti basinc yukunden konsol halka egilmesiyle boyutlanmali (NASA SP-8031, Propellant Slosh Loads; halka bafl yuku ve moment bagintilari) - tank capi, doluluk ve eksenel ivme girdi.",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.slosh_baffles[*].thickness",
+          "sinif": "KUSUR",
+          "deger": "2 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4926",
+          "gerekce": "Ayni kok neden.",
+          "onerilen_baglama": "NASA SP-8031 calkanti yukune gore halka kalinligi.",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.slosh_baffles[*].hole_diameter",
+          "sinif": "KUSUR",
+          "deger": "50.0 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4918",
+          "gerekce": "'50mm holes' diye mutlak sabit; kucuk bir tankta halka radyal genisligi delik capina yaklasir. Ustelik delik SAYISI formulu boyutsal olarak hatali: holes_per_baffle = (pi*D*oran)/(pi*(d/2)^2) - pay uzunluk, payda alan, sonuc 1/m birimli. Olculen sonuc: 952/200 mm halkada 240 adet 50 mm delik = acik alan orani ~%69, oysa ayni sozluk %15 raporluyor.",
+          "onerilen_baglama": "Delik capi tank capiyla olceklenmeli ve delik SAYISI hedef acik alan oranindan boyutsal olarak dogru turetilmeli: n = oran * A_halka / (pi*d^2/4), A_halka = pi/4*(D_dis^2 - D_ic^2).",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.slosh_baffles[*].hole_diameter",
+          "sinif": "KUSUR",
+          "deger": "50.0 mm",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4918",
+          "gerekce": "Ayni kok neden ve ayni boyutsal hata.",
+          "onerilen_baglama": "Cap tank capiyla olceklensin; delik sayisi n = oran*A_halka/(pi*d^2/4) ile.",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.slosh_baffles[*].open_area_ratio",
+          "sinif": "KUSUR",
+          "deger": "15.0 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4917, 4929",
+          "gerekce": "Raporlanan %15 ile ayni fonksiyonun urettigi delik deseninin gercek acik alan orani UYUSMUYOR: olculen halka (D_dis 952.2 mm, D_ic 200.5 mm, 240 delik x 50 mm) icin gercek oran ~%69. Yani bu alan bir olcum degil, hesabin geri kalanini yalanlayan bir etiket. (Halka 240 adet 50 mm deligi geometrik olarak zaten alamaz.)",
+          "onerilen_baglama": "Acik alan orani bir TASARIM HEDEFI olarak kalabilir (calkanti sonumlemede %10-30 tipiktir, NASA SP-8031) ama delik sayisi ondan boyutsal olarak dogru turetilmeli ve gerceklenen oran ayrica raporlanmali.",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.slosh_baffles[*].open_area_ratio",
+          "sinif": "KUSUR",
+          "deger": "15.0 %",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4917, 4929",
+          "gerekce": "Ayni celiski: etiketlenen oran ile emit edilen delik deseni tutarsiz.",
+          "onerilen_baglama": "Delik sayisini hedef orandan dogru turet, gerceklenen orani raporla.",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.anti_vortex",
+          "sinif": "KUSUR",
+          "deger": "2.5 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4990",
+          "gerekce": "'kg (typical)' diye sabit; oysa ayni fonksiyon kanat capini (D*0.3), yuksekligini (D*0.1), sayisini (8) ve kalinligini (3 mm) ZATEN uretiyor - kutle bu dort sayidan dogrudan hesaplanabilir. Olctum: 25 kN ve 250 kN'de birebir 2.5 kg.",
+          "onerilen_baglama": "m = n_kanat * (yukseklik x yaricap x kalinlik) x rho_malzeme; malzeme zaten 'Aluminum 6061-T6' olarak ayni sozlukte yaziyor, yogunlugu materials_db'de mevcut.",
+          "mevcut_fonksiyon": "hrma/data/materials_db.get_material_safe (tank malzemeleri icin ayni dosyada zaten kullaniliyor, satir 4750)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.anti_vortex",
+          "sinif": "KUSUR",
+          "deger": "2.5 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4990",
+          "gerekce": "Ayni kok neden; hesaplanmis geometri var, kutle sabit.",
+          "onerilen_baglama": "Kanat geometrisi x malzeme yogunlugu.",
+          "mevcut_fonksiyon": "hrma/data/materials_db.get_material_safe",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.baffles",
+          "sinif": "KUSUR",
+          "deger": "6.0 kg (2 bafl x 3.0)",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4991",
+          "gerekce": "Bafl BASINA 3.0 kg sabiti; oysa her baflin dis capi, ic capi, kalinligi ve acik alan orani ayni fonksiyonda uretiliyor - kutle bunlarin dogrudan sonucudur. Sayi 1 m capli bir tanka gore ayarlanmis: o tank icin geometriden 3.12 kg cikiyor ama 2.18 m capli tankta ~16 kg olmasi gerekirken yine 3.0 kg raporlaniyor (bafl sayisi degisiyor, kutle/bafl degismiyor).",
+          "onerilen_baglama": "m_bafl = pi/4*(D_dis^2 - D_ic^2) * (1 - acik_alan_orani) * kalinlik * rho; uc buyuklugun ucu de ayni sozlukte hazir.",
+          "mevcut_fonksiyon": "hrma/data/materials_db.get_material_safe (Aluminum 6061-T6 yogunlugu)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.baffles",
+          "sinif": "KUSUR",
+          "deger": "6.0 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4991",
+          "gerekce": "Ayni kok neden; bafl sayisi L/D'den hesaplaniyor ama bafl kutlesi geometriden degil sabitten geliyor.",
+          "onerilen_baglama": "m_bafl = pi/4*(D_dis^2-D_ic^2)*(1-acik_oran)*t*rho.",
+          "mevcut_fonksiyon": "hrma/data/materials_db.get_material_safe",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.plumbing",
+          "sinif": "KUSUR",
+          "deger": "15.0 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4992",
+          "gerekce": "'kg (inlet, outlet, instrumentation)' diye tek sabit; giris/cikis capi, sump, difuzor ve enstrumantasyon sayilari ayni sozlukte duruyor. Olctum: 25 kN ve 250 kN'de birebir 15.0 kg. Ayni dosyada besleme hatti kutlesi FEED_LINE_MASS_PER_KG_S*mdot ile OLCEKLENIYOR - desen mevcut, burada uygulanmamis.",
+          "onerilen_baglama": "En az debiyle olceklenmeli (motorun kendi FEED_LINE_MASS_PER_KG_S deseni) ya da agiz capi x et kalinligi x uzunluk x rho ile geometrik hesaplanmali.",
+          "mevcut_fonksiyon": "FEED_LINE_MASS_PER_KG_S olcekleme deseni (liquid_rocket_engine.py:6332)",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.plumbing",
+          "sinif": "KUSUR",
+          "deger": "15.0 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4992",
+          "gerekce": "Ayni kok neden.",
+          "onerilen_baglama": "Debiyle olcekleme ya da geometrik boru kutlesi.",
+          "mevcut_fonksiyon": "FEED_LINE_MASS_PER_KG_S deseni",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.total_mass",
+          "sinif": "KUSUR",
+          "deger": "23.5 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4994, tank kutlesine eklenme :4808",
+          "gerekce": "Uc sabitin toplami. AGIRLIGI: 25 kN motorun oksitleyici tank kutlesi 102.5 kg olctum, bunun 23.5 kg'i (yaklasik %23) bu sabit blok. Dogrudan structural.tank_mass, mass_fraction ve system_summary.overall_mass_fraction'a giriyor - yani kullaniciya gosterilen tank kutle orani sabit bir sayiyla kirletiliyor.",
+          "onerilen_baglama": "Uc kalem de geometriden hesaplandiginda toplam kendiliginden canlilanir.",
+          "mevcut_fonksiyon": "materials_db + mevcut bafl/kanat geometrisi",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.total_mass",
+          "sinif": "KUSUR",
+          "deger": "23.5 kg",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:4994, :4809",
+          "gerekce": "Ayni kok neden; yakit tanki kutlesine ve kutle orani metriklerine ayni sabit blok ekleniyor. Kucuk motorlarda oransal etki daha da buyuk.",
+          "onerilen_baglama": "Alt kalemler geometriden hesaplansin.",
+          "mevcut_fonksiyon": "materials_db + mevcut bafl/kanat geometrisi",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cooling_system.film_cooling_flow",
+          "sinif": "KUSUR",
+          "deger": "0.0 kg/s",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:2556-2558, girdi okumasi :845-848",
+          "gerekce": "Olctum: cooling_type='film_cooling' SECILSE BILE film debisi 0.0 kaliyor ve isi yukunun tamami rejeneratife gidiyor; yani 'film sogutmali' motor filmsiz modelleniyor. Mekanizma calisiyor (film_cooling_percent=8 elle verildiginde 0.2227 kg/s ve 279 kW sogurma cikiyor) fakat hrma/templates/liquid.html icinde film_cooling_percent alani HIC YOK (grep: 0 eslesme), oysa ayni formda cooling_type secenegi olarak 'Film Cooling' sunuluyor (liquid.html:1140).",
+          "onerilen_baglama": "liquid.html'e film_cooling_percent girdisi eklenmeli (motor overrides uzerinden zaten okuyor, aralik 0-FILM_COOLING_PCT_MAX=30) ve cooling_type='film_cooling' secildiginde sifirdan farkli bir varsayilan atanmali; aksi halde secim hicbir sey degistirmiyor.",
+          "mevcut_fonksiyon": "LiquidRocketEngine._film_cooling_analysis (satir 2824) - calisiyor, yalniz tetikleyici girdi arayuzde yok",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py",
+            "hrma/templates/liquid.html"
+          ]
+        },
+        {
+          "yol": "turbine_inlet_pressure (liquid)",
+          "sinif": "KUSUR",
+          "gerekce": "Beyan ('reported_for_comparison: çözücü kendi değerini hesaplar') LAFZEN doğru ama KARŞILAŞTIRMA TABANI yanlış: çözücü türbin giriş basıncını gerçekten hesaplıyor (ölçüldü: detailed_feed_system.engine_cycle_solution.shafts[0].turbine.inlet_pressure_bar = 78,78 bar, çıkış 19,70 bar), oysa kullanıcının değeri pr_from_inlet = P_in/P_atm ile kıyaslanıyor ve aynı yanıta ikinci bir 'ima edilen giriş basıncı' 4,053 bar (= PR x P_atm) yazılıyor — tek yanıtta 19,4 kat çelişen iki değer; arayüz varsayılanlarında (150 bar, PR=4) sapma 36 kat olduğu için uyarı HER koşuda tetikleniyor.",
+          "guven": "yuksek",
+          "deger": "aynı koşuda 78,78 bar (çözücü) vs 4,053 bar (ima edilen); kullanıcı varsayılanı 150 bar",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:5224-5230 (pr_from_inlet = p_in/self.P_a), 5305-5311 (inlet_pressure_implied_bar = PR x P_a), 4560-4562 (turbine_pr yalnız 'turbine_expansion_ratio' overrides'ta ise geçiliyor)",
+          "mevcut_fonksiyon": "hrma/engines/cycle_power_balance.py:476 _turbine_dict — 'inlet_pressure_bar' ve 'exit_pressure_bar' alanlarını ZATEN üretiyor ve yanıta giriyor; liquid_rocket_engine.py bu düğümü karşılaştırmada hiç okumuyor",
+          "onerilen_baglama": "İki adım: (a) Karşılaştırma tabanı ambient yerine çözücünün kendi türbin çıkış basıncı olsun — pr_from_inlet = p_in / turbine['exit_pressure_bar'] (kapalı çevrimde türbin ana odaya boşalır, açık çevrimde kendi egzoz lülesine; P_atm hiçbirinde doğru referans değil; Sutton & Biblarz 9. baskı Böl. 10, Huzel & Huang Böl. 6). inlet_pressure_implied_bar da PR x P_a yerine shafts[*].turbine.inlet_pressure_bar'dan yayımlansın. (b) Kullanıcı türbin genişleme oranını BOŞ bırakıp giriş basıncı verdiyse alan ölü kalmasın: turbine_pr = p_in / p_exhaust hesaplanıp solve_cycle(turbine_pr=...) ile geçilsin — solve_cycle bu parametreyi zaten kabul ediyor (cycle_power_balance.py:514).",
+          "_grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+          "_dosyalar": [
+            "hrma/engines/cycle_power_balance.py",
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        }
+      ]
+    },
+    {
+      "ad": "P2",
+      "sahip": "ajan",
+      "dosyalar": [
+        "hrma/analysis/heat_transfer_analysis.py",
+        "hrma/analysis/structural_analysis.py",
+        "hrma/engines/combustion_analysis.py",
+        "hrma/engines/hybrid_rocket_engine.py",
+        "hrma/engines/injector_design.py",
+        "hrma/engines/nozzle_design.py"
+      ],
+      "kalem_sayisi": 43,
+      "kalemler": [
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_thickness",
+          "sinif": "KUSUR",
+          "deger": "1.0 mm",
+          "nerede": "hrma/engines/nozzle_design.py:759 wall_thickness = max(_MIN_WALL_THICKNESS_M, t_pressure); _MIN_WALL_THICKNESS_M = 0.001 (satir 47). .motor.* yankisi.",
+          "gerekce": "Deger duz sabit DEGIL - t_pressure = sf*p_design*rt/sigma_yield olarak basinctan hesaplaniyor (satir 754); ancak bu motor sinifinda t_pressure 1 mm'nin altinda kaldigi icin imalat tabani her koste kazaniyor ve cikti sarsimlarda sabit gorunuyor. Ikinci sorun: lule cidari cember gerilmesiyle degil ISIL yukle boyutlanir; ayni yanitta Bartz tabanli heat_transfer_analysis mevcutken cidar kalinligina hic girmiyor. Hafifletici: modul kaynagi beyan ediyor (wall_thickness_basis='manufacturing_minimum').",
+          "onerilen_baglama": "Imalat tabani (_MIN_WALL_THICKNESS_M) sabit degil kullanici/malzeme girdisi olsun ve isil boyutlandirma heat_transfer_analysis sonucundan (cidar sicakligi / isi akisi) turetilen bir minimumla birlikte max() alinsin. Onarim lule grubuna aittir - bu yol yalnizca yankidir.",
+          "guven": "orta",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_yield_strength",
+          "sinif": "KUSUR",
+          "deger": "celik akma dayanimi (varsayilan malzeme)",
+          "nerede": "hrma/engines/nozzle_design.py:775 (sigma_yield = mat['yield_strength'], satir 747). .motor.* yankisi.",
+          "gerekce": "wall_material_density ile ayni kok neden: hibrit design_nozzle'a wall_material gecmiyor, 'steel' varsayilani sabit akma dayanimi uretiyor. Bu deger dogrudan cidar kalinligi hesabina (t_pressure) giriyor, yani kopukluk sadece raporu degil boyutlandirmayi da etkiliyor.",
+          "mevcut_fonksiyon": "nozzle_design.design_nozzle(..., wall_material=...)",
+          "onerilen_baglama": "wall_material_density ile ayni tek onarim.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_safety_factor",
+          "sinif": "KUSUR",
+          "deger": "malzeme kaydinin varsayilan emniyet katsayisi",
+          "nerede": "hrma/engines/nozzle_design.py:749-750 sf = wall_safety_factor or mat.get('safety_factor', 4.0); satir 776. .motor.* yankisi.",
+          "gerekce": "design_nozzle imzasinda wall_safety_factor parametresi VAR (satir 166) ama hibrit cagri (hybrid_rocket_engine.py:1029) gecmiyor; kullanicinin emniyet katsayisi secimi lule cidarina hic ulasmiyor ve deger malzeme kaydinin varsayilaninda cakili kaliyor.",
+          "mevcut_fonksiyon": "nozzle_design.design_nozzle(..., wall_safety_factor=...)",
+          "onerilen_baglama": "Kullanicinin/yapisal analizin emniyet katsayisi hibrit cagrisinda wall_safety_factor= olarak gecirilsin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_yield_strength",
+          "sinif": "KUSUR",
+          "deger": "celik akma dayanimi",
+          "nerede": "Ayni uretici (nozzle_design.py:775); nozzle_geometry = nozzle_design.geometry.",
+          "gerekce": "Ikinci sergileme; kok neden ayni (hibrit design_nozzle'a wall_material gecmiyor).",
+          "onerilen_baglama": "Tek onarim iki yapragi kapatir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_safety_factor",
+          "sinif": "KUSUR",
+          "deger": "malzeme varsayilan emniyet katsayisi",
+          "nerede": "Ayni uretici (nozzle_design.py:776); nozzle_geometry = nozzle_design.geometry.",
+          "gerekce": "Ikinci sergileme; kok neden ayni (wall_safety_factor gecirilmiyor).",
+          "onerilen_baglama": "Tek onarim iki yapragi kapatir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_design.geometry.wall_thickness",
+          "sinif": "KUSUR",
+          "deger": "1.0 mm (taban); OLCULDU: Pc=80 bar -> 1,44 mm, itki=100 kN -> 3,45 mm",
+          "nerede": "hrma/engines/nozzle_design.py:752-761 (t = SF*p*r/sigma; taban _MIN_WALL_THICKNESS_M=0.001 satir 47)",
+          "gerekce": "DIKKAT, 'her zaman 1,0 mm' tespiti sarsim araligi yanilsamasidir: ince cidar hoop formulu CANLI ve itki/basincla gercekten degisiyor (100 kN'da 3,45 mm olculdu). Gercek kusur baska: kalinlik daima CELIK ozellikleriyle hesaplaniyor (bkz. wall_yield_strength/wall_safety_factor) ve kucuk-orta motorlarda 1 mm imalat tabani bagliyor -- kullanicinin sectigi grafit lule icin 1 mm et fiziksel olarak anlamsizdir (grafit bogaz insertleri tipik 10-20 mm).",
+          "mevcut_fonksiyon": "Formul zaten mevcut ve kaynakli (Huzel & Huang NASA SP-125 Bol. 4, ince cidar hoop)",
+          "onerilen_baglama": "Formul degismemeli; yalnizca dogru malzeme beslenmeli (wall_material=self.nozzle_material, wall_safety_factor=self.design_safety_factor). Ayrica _MIN_WALL_THICKNESS_M imalat tabaninin bagladigi durumlarda cikti zaten wall_thickness_basis='manufacturing_minimum' diyor -- bu bayrak arayuzde gosterilmeli ki kullanici sayinin basinctan degil imalat tabanindan geldigini gorsun.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.injector_design_detail.ox_circuit.cd",
+          "sinif": "KUSUR",
+          "nerede": "hrma/engines/injector_design.py (devre cozucusu, cd/cd_basis alanlari satir 881 ve 1014 civari). .motor.* yankisi - onarim enjektor grubunda.",
+          "gerekce": "Depoda bu buyuklugu HESAPLAYAN fonksiyon var - injector_design.py:332 discharge_coefficient(inlet, l_over_d) - ama cd sabit kaldigina gore devre yolunda cagrilmiyor; oysa Cd delik giris geometrisi ve L/D'ye bagimlidir (keskin kenarli ~0.6-0.65, yuvarlatilmis/kisa boru ~0.8+), tek bir sayi tum tasarimlar icin gecerli olamaz.",
+          "mevcut_fonksiyon": "hrma/engines/injector_design.py:332 discharge_coefficient(inlet, l_over_d)",
+          "onerilen_baglama": "ox_circuit cd'si discharge_coefficient(giris_tipi, delik_L/D) cagrisindan gelsin ve modulun zaten tasidigi cd_basis alaniyla kaynagi beyan edilsin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/injector_design.py"
+          ]
+        },
+        {
+          "yol": ".injection_system.injector_design_detail.assumptions[*].params.p_v_bar",
+          "sinif": "KUSUR",
+          "deger": "0.05 bar",
+          "nerede": "hrma/engines/injector_design.py:860-866",
+          "gerekce": "Akiskandan BAGIMSIZ tek sabit; oysa ayni modul sigma ve mu icin bu akiskan-bagimsizlik hatasini v2.6.2'de acikca duzeltmis (satir 87-99 yorumu). LOX doyma noktasinda depolanir, buhar basinci ~1 bar mertebesindedir; 0.05 bar kullanmak Nurick kavitasyon sayisini K_c=(P1-Pv)/(P1-P2) yukari cekip HIDROLIK FLIP/kavitasyon riskini oldugundan dusuk gosterir - guvenlik yonunde yanlis taraf.",
+          "onerilen_baglama": "Akiskana gore buhar basinci tablosu eklenmeli (LOX ~1.0 bar @ NBP, RP-1 ~0.002 bar @ 293 K; NIST WebBook), sigma/mu icin yapilan duzeltmenin aynisi: p_v = vapor_pressure(fluid, T) ve tablo yoksa VARSAYIM olarak bildir.",
+          "mevcut_fonksiyon": "Desen mevcut: liquid_surface_tension() / liquid_viscosity() akiskan tabanli cozumu; N2O icin _SAT.p_sat zaten var",
+          "guven": "orta",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/injector_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.buckling_analysis.applied_axial_stress_MPa",
+          "sinif": "KUSUR",
+          "deger": "0.0",
+          "nerede": "hrma/analysis/structural_analysis.py:335-340, 389",
+          "gerekce": "sigma_compression = axial_compression_force/(2*pi*r*t) ifadesinde pay sifir oldugu icin uygulanan gerilme de sifir cikiyor; kok neden axial_compression_force_N kaleminde.",
+          "onerilen_baglama": "Kok neden duzeltilince (struct_input'a thrust eklenince) bu yaprak kendiliginden canlanir; ayri mudahale gerekmez.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.buckling_analysis.applied_axial_stress_unpressurized_MPa",
+          "sinif": "KUSUR",
+          "deger": "0.0",
+          "nerede": "hrma/analysis/structural_analysis.py:340",
+          "gerekce": "max(sigma_compression, 0.0) ifadesi itki gelmedigi icin daima 0; oysa bu, nakliye/montaj/atesleme oncesi yoneten yuk durumu olarak tasarlanmis (F075 yorumu satir 333).",
+          "onerilen_baglama": "Kok neden: struct_input'a thrust eklenmesi.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.buckling_analysis.applied_axial_stress_pressurized_MPa",
+          "sinif": "KUSUR",
+          "deger": "0.0",
+          "nerede": "hrma/analysis/structural_analysis.py:338-339",
+          "gerekce": "max(sigma_compression - sigma_pressure_tension, 0.0); basma terimi sifir, basinc cekme kredisi pozitif oldugu icin sonuc sifira kirpiliyor. Basinc kredisi hesaplaniyor ama karsisinda yuk olmadigindan hicbir bilgi tasimiyor.",
+          "onerilen_baglama": "Kok neden: struct_input'a thrust eklenmesi.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.fastener_analysis.bolt_allowable_stress_MPa",
+          "sinif": "KUSUR",
+          "deger": "400.0 MPa",
+          "nerede": "hrma/analysis/structural_analysis.py:1132 (bolt_allowable_stress = 400e6)",
+          "gerekce": "Kodun kendi yorumu (satir 1114-1117) itiraf ediyor: 'LITERATUR KAYNAGI YOKTUR -- beyan edilen tasarim kabulu'. Ayni yorum cozumu de gosteriyor: 'sinif-bazli S_p icin bolted_joint.py tablosu kullanilabilir, imza korundugu icin burada sabit tutuldu'. Civata izin verilen cekme gerilmesi sinifa gore 3 kattan fazla degisir (ISO 898-1: 8.8 -> S_p=580 MPa, 12.9 -> S_p=970 MPa); sabit 400 MPa gerekli civata capini yanlis boyutlandirir.",
+          "mevcut_fonksiyon": "hrma/analysis/bolted_joint.py -> _bolt_class_props(property_class, d_mm) (satir 76, ISO 898-1:2013 Table 3: 8.8 / 10.9 / 12.9 / A2-70) ve analyze_bolted_joint(...) (satir 451). Bu modul depoda CALISIYOR ama yalnizca ayri bir uc noktadan (app.py:1802) cagriliyor -- motor sonucundaki civata blogu ondan habersiz.",
+          "onerilen_baglama": "_analyze_fasteners, civata sinifini (varsayilan '8.8') parametre alip _bolt_class_props'tan S_p okumali ve izin verilen gerilmeyi oradan turetmeli; boylece motor sonucundaki civata analizi ile /api/bolted-joint panelinin sonuclari ayni kaynaktan gelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.fastener_analysis.bolt_safety_factor",
+          "sinif": "KUSUR",
+          "deger": "4.0",
+          "nerede": "hrma/analysis/structural_analysis.py:1118 (bolt_safety_factor = 4.0)",
+          "gerekce": "Ayni yorum blogunda kaynaksiz oldugu beyan edilmis. Daha onemlisi kullanicinin 'Safety Factor' girdisi (self.design_safety_factor) kamara cidarina uygulaniyor ama civataya uygulanmiyor -- OLCULDU: safety_factor=2.0 ile bu yaprak 4.0 kaldi. Ayni motorda iki farkli tasarim emniyet katsayisi kullaniliyor.",
+          "mevcut_fonksiyon": "hybrid_rocket_engine._resolve_safety_factor (satir 583); analyze_structure zaten design_safety_factor argumanini tasiyor (satir 423)",
+          "onerilen_baglama": "_analyze_fasteners'a design_safety_factor gecirilip civata tasarim yuku onunla carpilmali; ayrica on-yuklemeli baglanti icin bolted_joint.BoltedJointAnalyzer.analyze() (Shigley Eq. 8-24...8-30) kullanilirsa ayirma ve cekme marjlari birlikte cikar.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.nozzle_analysis.safety_factor",
+          "sinif": "KUSUR",
+          "deger": "4.0 (malzemeyle 3.0-4.0 arasinda degisiyor, kullanicinin SF girdisiyle DEGISMIYOR)",
+          "nerede": "hrma/analysis/structural_analysis.py:531-533 (cagri) ve _analyze_nozzle_structure imzasi (design_safety_factor: Optional[float] = None)",
+          "gerekce": "Fonksiyon design_safety_factor parametresini KABUL EDIYOR ama cagri satiri onu gecmiyor; sonucta lule daima malzeme tablosundaki katsayiyla boyutlandiriliyor. Fonksiyonun kendi docstring'i durumu 'safety_factor = yield/allowable = SF_mal her zaman' diye yaziyor, yani sayi bagimsiz bir kontrol degil malzeme sabitinin geri okunmasi. OLCULDU: safety_factor=2.0 girildiginde deger 4.0 kaldi.",
+          "mevcut_fonksiyon": "structural_analysis._analyze_nozzle_structure zaten design_safety_factor parametresini destekliyor",
+          "onerilen_baglama": "Cagriya design_safety_factor=design_safety_factor eklenmeli (satir 531-533); kamara cidarinda ayni parametre satir 484'te zaten geciriliyor, yani desen dosyanin kendi icinde mevcut.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.end_cap_analysis.head_safety_factor",
+          "sinif": "KUSUR",
+          "deger": "4.0 (malzemeyle 3.0-4.0, kullanici SF girdisiyle degismiyor)",
+          "nerede": "hrma/analysis/structural_analysis.py:536-538 (cagri) ve _analyze_end_caps imzasi (design_safety_factor: Optional[float] = None)",
+          "gerekce": "Lule ile ayni desen: fonksiyon design_safety_factor'u kabul ediyor, cagri gecmiyor. Kullanicinin emniyet katsayisi ucbir bilesenden yalnizca kamara cidarina uygulaniyor; kapak ve lule malzeme tablosunun katsayisinda kaliyor. Ondalik imza (4.000000000000001) degerin hedefe boyutlandirilip geri okundugunu, yani bagimsiz bir dogrulama olmadigini gosteriyor.",
+          "mevcut_fonksiyon": "structural_analysis._analyze_end_caps zaten design_safety_factor parametresini destekliyor",
+          "onerilen_baglama": "Cagriya design_safety_factor=design_safety_factor eklenmeli (satir 536-538).",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.safety_analysis.safety_factors.nozzle",
+          "sinif": "KUSUR",
+          "deger": "4.0",
+          "nerede": "hrma/analysis/structural_analysis.py, safety_analysis toplama blogu",
+          "gerekce": "nozzle_analysis.safety_factor yaprağinin ozet tablosundaki kopyasi; ayni kok neden (design_safety_factor cagriya gecirilmiyor).",
+          "onerilen_baglama": "Kok neden duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.safety_analysis.safety_factors.end_cap",
+          "sinif": "KUSUR",
+          "deger": "4.0",
+          "nerede": "hrma/analysis/structural_analysis.py, safety_analysis toplama blogu",
+          "gerekce": "end_cap_analysis.head_safety_factor yaprağinin kopyasi; ayni kok neden.",
+          "onerilen_baglama": "Kok neden duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.fatigue_analysis.estimated_cycles",
+          "sinif": "KUSUR",
+          "deger": "25 (design_cycles ile birebir ayni)",
+          "nerede": "hrma/analysis/structural_analysis.py:1291 ('estimated_cycles': design_cycles)",
+          "gerekce": "'Tahmini cevrim' adini tasiyan alan, tahmin degil TASARIM GIRDISININ kendisini donduruyor -- ayni sozlukte satir 1301 zaten 'design_cycles': design_cycles yaziyor, yani alan bilgi tasimiyor. Gercek hesaplanan omur ayni fonksiyonda mevcut: satir 1262'de Basquin bagintisiyla N cozuluyor ve satir 1292'de 'estimated_life' olarak donduruluyor.",
+          "mevcut_fonksiyon": "Ayni fonksiyon icinde estimated_life / N (Shigley 10. baski Eq. 6-14/6-15, Basquin) zaten hesaplaniyor",
+          "onerilen_baglama": "estimated_cycles ya estimated_life ile ayni degere baglanmali ya da yanlis anlasilmayi onlemek icin kaldirilip yerine design_cycles kullanilmali. Kod yorumu alanin 'sozlesme testleri' icin korundugunu soyluyor; bu durumda arayuzde gosterilmemeli, cunku kullanici bunu bir omur tahmini saniyor.",
+          "guven": "orta",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.structural_analysis.buckling_analysis.axial_compression_force_N",
+          "sinif": "KUSUR",
+          "deger": "0.0 (18/18 kosuda)",
+          "nerede": "hrma/analysis/structural_analysis.py:523 (axial_force = motor_data.get('thrust', 0.0)); besleyen sozluk hrma/engines/hybrid_rocket_engine.py:1141-1149",
+          "gerekce": "struct_input sozlugunde 'thrust' anahtari yok, bu yuzden eksenel basma yuku her motorda 0 N okunuyor ve NASA SP-8007 burkulma kontrolu fiilen devre disi kaliyor (SF=sonsuz, durum daima SAFE); motorun kendi self.F itki degeri (hybrid:265) ayni fonksiyonda hazir duruyor.",
+          "mevcut_fonksiyon": "structural_analysis._check_buckling zaten axial_compression_force parametresini destekliyor (satir 270)",
+          "onerilen_baglama": "struct_input'a 'thrust': self.F (N) eklenmeli; modul bunu satir 523'te okuyup sigma_basma = F/(2*pi*r*t) ile NASA SP-8007 knockdown'lu kritik gerilmeye oranlar. Kod yorumu (satir 507-510) bu sozlesmeyi zaten tarif ediyor.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/structural_analysis.py",
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_contour.convergent.contraction_ratio",
+          "sinif": "KUSUR",
+          "deger": "2.25",
+          "nerede": "hrma/engines/hybrid_rocket_engine.py:2258 (basic_results['nozzle_contour'] = nozzle_results['contour'])",
+          "gerekce": "nozzle_design.contour.convergent.contraction_ratio yaprağinin birebir kopyasidir; ayni kok nedenden sabit kaliyor.",
+          "onerilen_baglama": "Kok neden duzeltilince kendiliginden duzelir; ayri mudahale gerekmez.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_geometry.wall_material_density",
+          "sinif": "KUSUR",
+          "deger": "7850.0",
+          "nerede": "hrma/engines/hybrid_rocket_engine.py:2257 (basic_results['nozzle_geometry'] = nozzle_results['geometry'])",
+          "gerekce": "nozzle_design.geometry.wall_material_density yaprağinin birebir kopyasi; ayni kok neden.",
+          "onerilen_baglama": "Kok neden (wall_material gecirilmesi) duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_geometry.wall_yield_strength",
+          "sinif": "KUSUR",
+          "deger": "250000000.0",
+          "nerede": "hrma/engines/hybrid_rocket_engine.py:2257",
+          "gerekce": "nozzle_design.geometry.wall_yield_strength kopyasi; ayni kok neden.",
+          "onerilen_baglama": "Kok neden duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_geometry.wall_safety_factor",
+          "sinif": "KUSUR",
+          "deger": "4.0",
+          "nerede": "hrma/engines/hybrid_rocket_engine.py:2257",
+          "gerekce": "nozzle_design.geometry.wall_safety_factor kopyasi; ayni kok neden.",
+          "onerilen_baglama": "Kok neden duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_geometry.wall_thickness",
+          "sinif": "KUSUR",
+          "deger": "1.0 mm (taban), itki/basincla degisiyor",
+          "nerede": "hrma/engines/hybrid_rocket_engine.py:2257",
+          "gerekce": "nozzle_design.geometry.wall_thickness kopyasi; ayni kok neden (yanlis malzeme).",
+          "onerilen_baglama": "Kok neden duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.injector_design.discharge_coefficient",
+          "sinif": "KUSUR",
+          "deger": "0.78",
+          "nerede": "hrma/engines/hybrid_rocket_engine.py:2140 ('discharge_coefficient': oxc['cd'])",
+          "gerekce": "ox_circuit.cd yaprağinin ozet blogundaki kopyasidir; ayni kok neden (inlet/L-D sabit varsayilanlari).",
+          "mevcut_fonksiyon": "injector_design.discharge_coefficient (satir 332)",
+          "onerilen_baglama": "Kok neden (inj_spec'e inlet_ox + l_over_d eklenmesi) duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_design.performance.kinetic_efficiency",
+          "sinif": "KUSUR",
+          "deger": "0.995",
+          "nerede": "hrma/engines/nozzle_design.py:162 (varsayilan parametre); hibrit cagri hrma/engines/hybrid_rocket_engine.py:1029 bu argumani GECMIYOR. Bu yol .motor.* yankisidir, onarim kaynak modulde.",
+          "gerekce": "CAPRAZ-MOTOR TUTARSIZLIGI: ayni buyukluk sivi motorda gercek modelle hesaplaniyor (liquid_rocket_engine.py:2023 _kinetic_efficiency(isp_vac_ref, isp_vac_frozen_ref, d_t) -> hrma/analysis/kinetic_efficiency.py KineticEfficiency.evaluate, Damkohler harmanli JANNAF tarzi) ve kaynagi beyan ediliyor; hibritte fonksiyon hic cagrilmadigi icin imza varsayilani 0.995 sabit kaliyor.",
+          "mevcut_fonksiyon": "hrma.analysis.kinetic_efficiency.KineticEfficiency.evaluate (liquid_rocket_engine.py:1910 _kinetic_efficiency sarmalayicisi uzerinden)",
+          "onerilen_baglama": "hybrid_rocket_engine.py:1029'daki design_nozzle cagrisina kinetic_efficiency=<KineticEfficiency ile hesaplanan> gecirilsin; sivi motordaki gibi eta_kinetic ve kaynak alani birlikte raporlansin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_design.performance.friction_efficiency",
+          "sinif": "KUSUR",
+          "deger": "0.99",
+          "nerede": "hrma/engines/nozzle_design.py:161 (varsayilan parametre); hibrit cagri hybrid_rocket_engine.py:1029 gecmiyor. .motor.* yankisi.",
+          "gerekce": "MERKEZI SABIT ATLANMIS: ayni fiziksel buyukluk icin depoda tek tanim noktasi var - hrma/constants.py:166 NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT = 0.015, yani eta_friction = 0.985 (Sutton & Biblarz 9. baski Bol. 3.5 kaynakli, sivi motorda beyanla kullaniliyor: liquid_rocket_engine.py:2017-2022). nozzle_design.py bu sabiti import etmeyip 0.99 yaziyor; ayni nicelik icin iki farkli deger (CLAUDE.md kural 11 ihlali).",
+          "mevcut_fonksiyon": "hrma/constants.py NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT (liquid_rocket_engine.py:2017'de kullaniliyor)",
+          "onerilen_baglama": "nozzle_design.py varsayilani friction_efficiency = 1.0 - NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT olarak merkezi sabitten turetsin; sivi motordaki eta_friction_source metni gibi kaynak beyani eklensin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_thickness",
+          "sinif": "KUSUR",
+          "deger": "1.0 mm",
+          "nerede": "Ayni uretici: nozzle_design.py:759. hybrid_rocket_engine.py:2257 basic_results['nozzle_geometry'] = nozzle_results['geometry'] - bu, nozzle_design.geometry ile AYNI sozluk, iki farkli anahtar altinda.",
+          "gerekce": "nozzle_design.geometry.wall_thickness ile bire bir ayni deger ve ayni kusur; yanit sozlugunde iki kez sergileniyor. Tek onarim iki yapragi birden kapatir - ayrica ayni sozlugun iki anahtarla sunulmasinin gerekli olup olmadigi gozden gecirilmeli.",
+          "onerilen_baglama": "nozzle_design.geometry.wall_thickness ile ayni; ek yama gerekmez.",
+          "guven": "orta",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_material_density",
+          "sinif": "KUSUR",
+          "deger": "celik yogunlugu (varsayilan malzeme)",
+          "nerede": "hrma/engines/nozzle_design.py:774; malzeme secimi satir 738-745, _DEFAULT_WALL_MATERIAL = 'steel' (satir 42). Hibrit cagri hybrid_rocket_engine.py:1029 wall_material GECMIYOR. .motor.* yankisi.",
+          "gerekce": "CAGRILAN AMA BESLENMEYEN PARAMETRE: design_nozzle imzasinda wall_material parametresi VAR (nozzle_design.py:165) ama hibrit motor bunu gecmiyor, bu yuzden her koste 'steel' varsayilanina dusuyor ve yogunluk sabit kaliyor. Modulun kendisi bu durumu material_source='default_not_specified_by_caller' diye isaretliyor - yani kod kopuklugu kendi kendine beyan ediyor.",
+          "mevcut_fonksiyon": "nozzle_design.design_nozzle(..., wall_material=...) parametresi ve get_material() malzeme veritabani",
+          "onerilen_baglama": "hybrid_rocket_engine.py:1029 cagrisina kullanicinin lule malzemesi secimi wall_material= olarak gecirilsin; malzeme yogunlugu/akma dayanimi o kayittan gelsin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_material_density",
+          "sinif": "KUSUR",
+          "deger": "celik yogunlugu",
+          "nerede": "Ayni uretici (nozzle_design.py:774); nozzle_geometry, nozzle_design.geometry ile ayni sozluk (hybrid_rocket_engine.py:2257).",
+          "gerekce": "nozzle_design.geometry.wall_material_density'nin ikinci sergilenisi; ayri bir kusur degil, ayni kusurun ikinci yapragi.",
+          "onerilen_baglama": "Tek onarim (wall_material gecirme) her iki yapragi kapatir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".trajectory.motor_data.nozzle_design.performance.kinetic_efficiency (ikiz: .motor.nozzle_design.performance.kinetic_efficiency)",
+          "sinif": "KUSUR",
+          "deger": "0.995",
+          "nerede": "hrma/engines/nozzle_design.py:162 ve :491 (imza varsayilani) — hibrit motor design_nozzle'i cagirirken bu argumani HIC gecmiyor: hrma/engines/hybrid_rocket_engine.py:1029-1032 yalnizca gamma, R_specific, T_chamber geciriyor",
+          "gerekce": "Depoda 35 KB'lik hrma/analysis/kinetic_efficiency.py (KineticEfficiency sinifi) duruyor ve SIVI motor bunu gercekten cagiriyor (liquid_rocket_engine.py:1910 _kinetic_efficiency -> :1930 `from hrma.analysis.kinetic_efficiency import KineticEfficiency` -> :1944 evaluate(..., throat_diameter=...)), sonucu 'model': 'kinetic_efficiency (engineering, JANNAF-style blend)' diye beyan ediyor. Hibritte ayni buyukluk imza varsayilani olan sabit 0,995 ile geciyor. Ayni urunde ayni fiziksel kaybin bir motor tipinde hesaplanip digerinde sabit kalmasi tek basina kusur kanitidir (gorevin 3. maddesi).",
+          "onerilen_baglama": "hybrid_rocket_engine.py:1029'daki design_nozzle cagrisina kinetic_efficiency=eta gecirilmeli; eta, liquid_rocket_engine._kinetic_efficiency(isp_shifting, isp_frozen, throat_diameter) kalibiyla KineticEfficiency().evaluate(..., fidelity='engineering', chamber_pressure=self.P_c, characteristic_length=self.L_star, throat_diameter=self.Dt) cagrisindan alinmali. Onkosul: hibrit yanma cozumunun frozen ve shifting Isp'yi birlikte uretmesi (sivida oldugu gibi); uretemiyorsa sivi yolun yaptigi gibi 1.0 + 'not_modelled' beyani dondurulmeli, sessiz 0,995 birakilmamali.",
+          "mevcut_fonksiyon": "hrma/analysis/kinetic_efficiency.py -> KineticEfficiency.evaluate() (yazilmis, hibritte cagrilmiyor); calisan ornek kullanim: hrma/engines/liquid_rocket_engine.py:1910-1960 _kinetic_efficiency()",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_design.contour.convergent.contraction_ratio",
+          "sinif": "KUSUR",
+          "deger": "2.25 (18/18 kosuda; contraction_ratio=4.0 ve 8.0 girildiginde bile)",
+          "nerede": "hrma/engines/nozzle_design.py:183-184 ve 268 (contraction_area_ratio=None -> A_c/A_t=2.25 eski varsayimi); cagri hrma/engines/hybrid_rocket_engine.py:1029-1032",
+          "gerekce": "Kullanicinin kontraksiyon orani girdisi design_nozzle'a hic gecirilmiyor. OLCULDU: combustion_type='finite' + contraction_ratio=4.0 ile ayni yanitta finite_area_combustor.contraction_ratio=4.0 ('user input') yazarken bu yaprak 2.25 kaliyor ve yakinsak koni boyu 28,954 mm ile degismiyor -- tek bir sonucta iki celiskili kontraksiyon orani.",
+          "mevcut_fonksiyon": "nozzle_design.design_nozzle contraction_area_ratio parametresini zaten destekliyor; hybrid_rocket_engine._finite_area_combustor (satir 1846-1853) kullanicinin degerini cr olarak zaten cozuyor",
+          "onerilen_baglama": "design_nozzle cagrisina contraction_area_ratio=<cozulmus cr> gecilmeli. cr onceligi mevcut kodun kendi kuralidir: kullanici girdisi varsa o, yoksa geometriden (D_ch/d_t)^2 (hybrid:1849). Boylece yakinsak kontur, koni boyu ve islak alan gercek oda kesitiyle tutarli olur (Sutton & Biblarz 9. baski Bol. 3; Huzel & Huang NASA SP-125 Bol. 4).",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_design.geometry.wall_material_density",
+          "sinif": "KUSUR",
+          "deger": "7850.0 kg/m3 (nozzle_material=tungsten/copper secildiginde dahi)",
+          "nerede": "hrma/engines/nozzle_design.py:738 (mat_name = wall_material or 'steel'), 748; cagri hybrid_rocket_engine.py:1029-1032",
+          "gerekce": "Hibrit cagrisi wall_material argumanini hic gecmiyor, bu yuzden material_source daima 'default_not_specified_by_caller' ve yogunluk celigin. OLCULDU: nozzle_material='tungsten' verildiginde motor sonucunda nozzle_material alani 'tungsten' yazarken bu yaprak 7850 kaliyor; lule kutlesi bu yogunluktan cikip CAD kutle dokumune giriyor.",
+          "mevcut_fonksiyon": "hybrid_rocket_engine._resolve_nozzle_material (satir 636) kullanicinin secimini zaten dogruluyor ve self.nozzle_material'a yaziyor (varsayilan 'graphite')",
+          "onerilen_baglama": "design_nozzle cagrisina wall_material=self.nozzle_material gecilmeli; get_material(mat_name)['density'] merkezi materials_db kaydindan gelir. nozzle_design.py:730-736 bu hatayi ve olculen kutle sapmasini (grafitte 4,36 kat) zaten belgelemis, yalniz cagiran duzeltilmemis.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_design.geometry.wall_yield_strength",
+          "sinif": "KUSUR",
+          "deger": "250000000.0 Pa (ASTM A36 celik)",
+          "nerede": "hrma/engines/nozzle_design.py:747; cagri hybrid_rocket_engine.py:1029-1032",
+          "gerekce": "Ayni kok neden: wall_material gecirilmedigi icin akma dayanimi daima celigin. Bu deger dogrudan cidar kalinligi formulunun paydasinda (t = SF*p*r/sigma_akma), yani yanlis malzeme yanlis kalinlik uretiyor.",
+          "mevcut_fonksiyon": "hrma/data/materials_db.get_material (satir 913) her malzemenin yield_strength kaydini tasiyor",
+          "onerilen_baglama": "design_nozzle'a wall_material=self.nozzle_material gecilmeli. Not: grafit gevrek bir malzemedir, akma yerine izin verilen basma/egilme dayanimi kullanilmasi gerekir; malzeme sinifina gore dayanim secimi ayrica degerlendirilmeli.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_design.geometry.wall_safety_factor",
+          "sinif": "KUSUR",
+          "deger": "4.0",
+          "nerede": "hrma/engines/nozzle_design.py:749-750 (wall_safety_factor or mat.get('safety_factor', 4.0)); cagri hybrid_rocket_engine.py:1029-1032",
+          "gerekce": "Hibrit ne wall_safety_factor'u ne de malzemeyi geciyor; katsayi celigin tablo degerinde kilitli. Kullanicinin 'Safety Factor' girdisi motorda self.design_safety_factor olarak cozulup yapisal module gecirildigi halde (hybrid:1186) lule cidarina hic ulasmiyor -- OLCULDU: safety_factor=2.0 ile bu yaprak 4.0 kaldi.",
+          "mevcut_fonksiyon": "hybrid_rocket_engine._resolve_safety_factor (satir 583) kullanicinin degerini zaten dogrulayip self.design_safety_factor'a yaziyor",
+          "onerilen_baglama": "design_nozzle'a wall_safety_factor=self.design_safety_factor ve wall_material=self.nozzle_material gecilmeli; boylece lule ile kamara ayni tasarim emniyet katsayisini kullanir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.injector_design_detail.ox_circuit.cd",
+          "sinif": "KUSUR",
+          "deger": "0.78 (17/17 basarili kosuda; 18. kosuda enjektor blogu uretilmedi)",
+          "nerede": "hrma/engines/injector_design.py:1199-1201 (inlet_ox = spec.get('inlet_ox','sharp'), l_over_d = spec.get('l_over_d', 4.0)) ve satir 832; cagri hybrid_rocket_engine.py:2093-2111",
+          "gerekce": "Gorev tarifindeki 'fonksiyon var ama cagrilmiyor' hipotezini DUZELTIYORUM: discharge_coefficient() gercekten cagriliyor (satir 832). Kusur daha ince -- fonksiyonun iki argumani da sabit varsayilan. Hibritin inj_spec sozlugu ne 'inlet_ox' ne 'l_over_d' anahtarini iceriyor, bu yuzden daima inlet='sharp', L/D=4.0 ve CD_TABLE'in ('sharp',1.0,5.0) satiri -> 0,78 seciliyor. Tablo 0,63-0,92 bandini kapsiyor; Cd dogrudan delik alanina giriyor (A = mdot/(Cd*sqrt(2*rho*dP))), yani bant ucundan uca toplam enjeksiyon alani yaklasik %46 degisir.",
+          "mevcut_fonksiyon": "injector_design.discharge_coefficient(inlet, l_over_d) (satir 332, SP-8089 / Lefebvre & McDonell Bol. 5 tablosu) -- yazilmis, cagrilmis, ama sabit argumanlarla besleniyor",
+          "onerilen_baglama": "Arayuze orifis giris tipi (sharp/radiused) ve orifis L/D (ya da enjektor plaka kalinligi) girdileri eklenip inj_spec'e 'inlet_ox' ve 'l_over_d' olarak gecirilmeli; modul bu iki anahtari zaten okuyor, kod degisikligi cagri tarafinda. L/D dogrudan girdi istenmiyorsa plaka kalinligi t ve cozulen orifis capi d'den L/D = t/d olarak turetilebilir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/injector_design.py"
+          ]
+        },
+        {
+          "yol": ".motor.heat_transfer_analysis.cooling_analysis.heat_sink_delta_T_K",
+          "sinif": "KUSUR",
+          "deger": "200.0 K",
+          "nerede": "hrma/analysis/heat_transfer_analysis.py:1402 (_HEAT_SINK_DELTA_T = 200.0), kullanim satir 1468",
+          "gerekce": "heat_sink_mass = Q_toplam/(cp*deltaT) ifadesinde deltaT paydada; yani isi yutucu kutlesi bu sabitle ters orantili. Ayni satirdaki cp ZATEN malzeme kaydindan aliniyor (cp_source='material_record', satir 1455-1461) -- yani fonksiyon malzemeye duyarli hale getirilmis, sadece izin verilen sicaklik artisi disarida kalmis. Celik (max_service_temp 811 K) ile Inconel arasinda izin verilen artis birkac kat farklidir.",
+          "mevcut_fonksiyon": "hrma/data/materials_db her kayitta 'max_service_temp' ve 'allowable_temperature' tasiyor; mat_props zaten bu fonksiyona geciriliyor",
+          "onerilen_baglama": "deltaT = (mat_props['max_service_temp'] veya 'allowable_temperature') - baslangic sicakligi olarak hesaplanmali; boylece isi yutucu kutlesi kullanicinin sectigi kamara malzemesinin gercek sicaklik kapasitesinden cikar. Emniyet payi istenirse aciklikca beyan edilen bir kesir uygulanabilir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/heat_transfer_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.heat_transfer_analysis.design_parameters.ambient_temperature",
+          "sinif": "KUSUR",
+          "deger": "293.15 K",
+          "nerede": "hrma/analysis/heat_transfer_analysis.py:619 (ambient_temp: float = 293.15 varsayilani); cagri hybrid_rocket_engine.py:1128-1133 bu argumani gecmiyor",
+          "gerekce": "Uc olculebilir gerekce: (1) AYNI kosuda yapisal module ortam sicakligi 300.0 K olarak sabit yaziliyor (hybrid:1144) -- tek motor sonucunda iki farkli ortam sicakligi; (2) ayni analiz fonksiyonu baska bir uc noktadan istekten okunarak besleniyor (app.py:4479, ambient_temp=float(data.get('ambient_temp', 293.15))); (3) KATI motor sayfasinda bu girdi arayuzde mevcut (templates/solid.html:1228, id=ambient_temp) ve gonderiliyor (satir 2751), hibrit sayfasinda yok. Ortam sicakligi disa tasinim ve denge cidar sicakligi cozumune giriyor.",
+          "mevcut_fonksiyon": "hrma/analysis/launch_site.py -> resolve_launch_site(...) yuzey 'temperature_k' degerini ISA + istege bagli olculen hava durumundan zaten uretiyor (satir 596)",
+          "onerilen_baglama": "Asgari duzeltme: hibrit sayfasina katidakiyle ayni ortam sicakligi girdisi eklenip analyze_heat_transfer'a ambient_temp olarak, yapisal module de ayni deger 'ambient_temperature' olarak gecilmeli (iki modul ayni sayiyi gormeli). Daha iyisi: firlatma sahasi secildiyse launch_site surface temperature_k degeri kullanilmali.",
+          "guven": "orta",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/heat_transfer_analysis.py",
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.optimum_analysis.analysis.performance.thermodynamic_properties.stations.exit.pressure",
+          "sinif": "KUSUR",
+          "deger": "1.01325 bar",
+          "nerede": "hrma/engines/combustion_analysis.py, istasyon tablosu; kok neden find_optimum_of_ratio imzasinda expansion_ratio olmamasi",
+          "gerekce": "conditions.exit.P ile ayni deniz seviyesi capasinin istasyon tablosundaki yansimasi; bagimsiz bir kusur degil, ayni kok nedenin ikinci gorunumu.",
+          "onerilen_baglama": "Kok neden (find_optimum_of_ratio'ya expansion_ratio eklenmesi) duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/combustion_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.optimum_analysis.analysis.compositions.exit.pressure",
+          "sinif": "KUSUR",
+          "deger": "1.01325 bar (olculen sapma yalnizca 1e-13 mertebesinde sayisal gurultu)",
+          "nerede": "hrma/engines/combustion_analysis.py, cikis bilesim cozumu; kok neden find_optimum_of_ratio",
+          "gerekce": "Sarsimda 4 farkli deger gorunuyor ama hepsi 1,0132499999999796 ile 1,0132500000000062 arasinda, yani fiilen sabit; denge cozucusunun yakinsama gurultusu. Ayni deniz seviyesi capasi.",
+          "onerilen_baglama": "Kok neden duzeltilince kendiliginden duzelir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/combustion_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.optimum_analysis.analysis.performance.thermodynamic_properties.isentropic_efficiency",
+          "sinif": "KUSUR",
+          "deger": "1.0 (17/18 kosu); yalnizca Pc=80 bar kosusunda 0.9954",
+          "nerede": "hrma/engines/combustion_analysis.py:1584 _calculate_isentropic_efficiency; kok neden find_optimum_of_ratio'nun deniz seviyesi capasi",
+          "gerekce": "Fonksiyon v2.6.2'de duzeltilmis ve docstring'i gercek genisleme oranlarinda 0,93 / 0,89 / 0,87 (eps=4/10/25) degerleri urettigini olcumle belgeliyor. Optimum arama yolunda 1,0 cikmasinin sebebi fonksiyonun kendisi degil, cikis basincinin deniz seviyesine capalanmasi nedeniyle fiili genislemenin yok denecek kadar az olmasi. Yani bu yaprak bagimsiz bir uydurma degil, exit.P kusurunun turevidir.",
+          "onerilen_baglama": "Kok neden (find_optimum_of_ratio'ya expansion_ratio eklenmesi) duzeltilince deger anlamli sekilde 1'in altina iner ve bilgi tasimaya baslar.",
+          "guven": "orta",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/combustion_analysis.py"
+          ]
+        },
+        {
+          "yol": ".motor.optimum_analysis.analysis.conditions.exit.P",
+          "sinif": "KUSUR",
+          "deger": "1.01325 bar (deniz seviyesi capa)",
+          "nerede": "hrma/engines/combustion_analysis.py:1264 find_optimum_of_ratio(fuel_composition, oxidizer_type, chamber_pressure, of_range) -- imzada genisleme orani parametresi YOK; cagri hybrid_rocket_engine.py:1061-1063",
+          "gerekce": "Optimum O/F aramasi, kullanicinin genisleme oranindan bagimsiz olarak cikis basincini deniz seviyesine capaliyor. Bu, ekibin ANA yolda zaten kapattigi hatanin ayni sinifta kalan ikizi: hybrid:997-1006 yorumu, analyze_combustion'a expansion_ratio gecirilmedigi icin irtifa panelinin epsilon degisimine sagir kaldigini ve duzeltildigini anlatiyor; find_optimum_of_ratio ayni duzeltmeyi almamis. Sonuc: epsilon=16 secen kullanicinin optimum O/F tablosu hala epsilon=1 kosullarinda hesaplaniyor.",
+          "mevcut_fonksiyon": "combustion_analysis.analyze_combustion expansion_ratio argumanini ZATEN destekliyor (hibritin ana cagrisinda hybrid:1010'da kullaniliyor)",
+          "onerilen_baglama": "find_optimum_of_ratio'ya expansion_ratio parametresi eklenip ic analyze_combustion cagrilarina iletilmeli; hibrit tarafinda expansion_ratio=self.epsilon gecilmeli. Onbellek anahtarina da (satir 1281-1288) eklenmeli, aksi halde farkli epsilon'lar ayni onbellek girdisini paylasir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/combustion_analysis.py",
+            "hrma/engines/hybrid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_design.performance.kinetic_efficiency",
+          "sinif": "KUSUR",
+          "deger": "0.995 (18/18 kosuda)",
+          "nerede": "hrma/engines/nozzle_design.py:162 ve 491 (kinetic_efficiency: float = 0.995 varsayilani); cagri hybrid_rocket_engine.py:1029-1032 bu argumani hic gecmiyor",
+          "gerekce": "Ayni fiziksel buyukluk SIVI motorda gercekten hesaplaniyor: liquid_rocket_engine._kinetic_efficiency (satir 1910-1962) Damkohler parametresi, oda kalis suresi ve uc-cisimli rekombinasyon zamaniyla eta_kin uretiyor. Hibritte duz 0,995 sabit. Gorev tarifindeki tutarsizlik kanitinin birebir ornegi.",
+          "mevcut_fonksiyon": "hrma/analysis/kinetic_efficiency.py -> KineticEfficiency().evaluate(...) ('engineering' seviyesi); sivi motor bunu liquid_rocket_engine.py:2023'te cagiriyor",
+          "onerilen_baglama": "Hibrit combustion analizi gerekli iki girdiyi ZATEN uretiyor: combustion_analysis.py:337-343 isp_frozen ve isp_shifting'i hesaplayip performance sozlugune yaziyor. Bunlar ve bogaz capi (self.d_t) ile KineticEfficiency().evaluate cagirilip donen eta design_nozzle'a kinetic_efficiency=<eta> olarak gecilmeli; sivi motordaki cagri sablonu (liquid:2023-2025) aynen uygulanabilir. CEA donmus degeri yoksa modul zaten eta=1.0 ve 'not_modelled' tanisi donduruyor, yani uydurma uretmiyor.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/combustion_analysis.py",
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        }
+      ]
+    },
+    {
+      "ad": "P3",
+      "sahip": "ajan",
+      "dosyalar": [
+        "hrma/engines/solid_rocket_engine.py",
+        "hrma/templates/solid.html"
+      ],
+      "kalem_sayisi": 29,
+      "kalemler": [
+        {
+          "yol": ".motor_geometry.structural_analysis.grain_structural.strain_capability_percent",
+          "sinif": "KUSUR",
+          "deger": "35.0",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4866 (ayni sozlugun ikinci yayini)",
+          "gerekce": "Ustteki kalemin aynisi (motor_geometry alti ayni grain_structural sozlugunu tekrar yayinliyor); tek kok neden, tek duzeltme iki yapragi birden kapatir.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder (bkz. ust kalem).",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".structural_analysis.grain_structural.grain_elastic_modulus_mpa",
+          "sinif": "KUSUR",
+          "deger": "6.0 MPa (HTPB elastomer)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4876",
+          "gerekce": "Ayni kok neden: propellant_type hic ulasmadigi icin her yakit HTPB kaydini aliyor. Olctum: propellant_type='kndx' ile 6.0 -> 1000.0 MPa. Dokme seker gevrek katidir, HTPB elastomerdir; 167 kat modul farki dogrudan gerilme cozumune girer.",
+          "mevcut_fonksiyon": "_grain_mechanics() -> _SUGAR_GRAIN_MECHANICS (satir 283)",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor_geometry.structural_analysis.grain_structural.grain_elastic_modulus_mpa",
+          "sinif": "KUSUR",
+          "deger": "6.0",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4876",
+          "gerekce": "Ustteki kalemin ikinci yayini; ayni kok neden.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".structural_analysis.grain_structural.grain_poisson_ratio",
+          "sinif": "KUSUR",
+          "deger": "0.4995 (HTPB, neredeyse sikistirilamaz)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4877",
+          "gerekce": "Ayni kok neden. Olctum: 'kndx' ile 0.4995 -> 0.35. Poisson orani duzlem-sekil-degistirme cozumunde K = E/((1+nu)(1-2nu)) paydasinda; 0.4995 ile 0.35 arasindaki fark K'yi ~330 kat degistirir, yani en duyarli parametredir.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor_geometry.structural_analysis.grain_structural.grain_poisson_ratio",
+          "sinif": "KUSUR",
+          "deger": "0.4995",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4877",
+          "gerekce": "Ustteki kalemin ikinci yayini; ayni kok neden.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".structural_analysis.grain_structural.grain_thermal_expansion_1k",
+          "sinif": "KUSUR",
+          "deger": "1.0e-4 1/K (HTPB)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4878",
+          "gerekce": "Ayni kok neden. Olctum: 'kndx' ile 1.0e-4 -> 8.0e-5. Kurleme sogumasi gerinimi alpha*dT ile dogrudan orantili.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor_geometry.structural_analysis.grain_structural.grain_thermal_expansion_1k",
+          "sinif": "KUSUR",
+          "deger": "1.0e-4",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4878",
+          "gerekce": "Ustteki kalemin ikinci yayini; ayni kok neden.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".structural_analysis.grain_structural.cure_temperature_k",
+          "sinif": "KUSUR",
+          "deger": "333.0 K (60 C, HTPB kurleme)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4874",
+          "gerekce": "Ayni kok neden. Olctum: 'kndx' ile 333.0 -> 398.0 K. dT = T_depolama - T_kurleme oldugu icin 65 K'lik fark kurleme sogumasi geriniminin tamamini degistirir; seker yakit ~125 C eriyik dokumden soguyor.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor_geometry.structural_analysis.grain_structural.cure_temperature_k",
+          "sinif": "KUSUR",
+          "deger": "333.0",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4874",
+          "gerekce": "Ustteki kalemin ikinci yayini; ayni kok neden.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".thermal_analysis.thermal_management.material_temperature_limits.grain_max_temp_k",
+          "sinif": "KUSUR",
+          "deger": "333.0 K",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3159 (grain_limit) ve 3210 (yayin)",
+          "gerekce": "grain_limit = _grain_mechanics()['cure_temperature_k'], yani ayni kok nedene bagli. Olctum: 'kndx' ile 333.0 -> 398.0 K. Ayrica bu alanin 'kurleme sicakligi = azami grain sicakligi' varsayimi ciktida hicbir yerde beyan edilmiyor; kullanici bunu yayimlanmis bir servis limiti saniyor.",
+          "mevcut_fonksiyon": "_grain_mechanics()",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder; ayrica 'basis' alanina 'limit = kurleme sicakligi (yumusama vekili), olculmus servis limiti degildir' yazilmali.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".detailed_analysis.performance_metrics.theoretical_vs_actual_isp.two_phase_losses",
+          "sinif": "KUSUR",
+          "deger": "4.081 % (APCP X_p=0.340 uzerinden)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3003 (hesap), 341-370 (SOLID_CONDENSED_MASS_FRACTION)",
+          "gerekce": "Hesap dogru (eta = 1 - 0.12*X_p, Sutton & Biblarz sec. 3.5) ama X_p yakit kimliginden geliyor ve kimlik ulasmiyor. Olctum: KNDX ornegi icin 4.081 -> 5.28 (%29 goreli fark). SOLID_CONDENSED_MASS_FRACTION['kndx']=0.44 kaydi zaten yazilmis, sadece secilmiyor.",
+          "mevcut_fonksiyon": "_isp_loss_breakdown() + _family_lookup(self.propellant_type, SOLID_CONDENSED_MASS_FRACTION)",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".manufacturing_analysis.propellant_manufacturing.mixing_requirements.oxidizer_percent",
+          "sinif": "KUSUR",
+          "deger": "68 (is_apcp dali)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3237",
+          "gerekce": "Deger 'is_apcp = self.propellant_type == \"apcp\"' dalindan geliyor ve kimlik ulasmadigi icin dal HER ZAMAN APCP. Olctum: 'kndx' ile 68 -> 75. Dahasi iki dal da jenerik: katalog kaydi KNDX icin gercek bilesimi metin olarak zaten tutuyor ('Potassium nitrate (KNO3), 65%'), yani ekranda yakit adi '65/35' derken tarif '68/18/12' diyor.",
+          "mevcut_fonksiyon": "hrma/data/propellants_db.py PROPELLANTS[key]['oxidizer'] / ['fuel'] (satir 275-300) - gercek bilesim orada",
+          "onerilen_baglama": "propellant_type'i UI'dan gonder ve yuzdeleri iki dalli sabit yerine PROPELLANTS[key]['oxidizer'/'fuel'] kaydindan al; kayit yoksa sayi uretme, 'not tabulated' de.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".manufacturing_analysis.propellant_manufacturing.mixing_requirements.fuel_percent",
+          "sinif": "KUSUR",
+          "deger": "18",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3238",
+          "gerekce": "Ustteki kalemle ayni: is_apcp dali kimlik ulasmadigi icin donmus. Olctum: 'kndx' ile 18 -> 15; gercek KNDX yakit orani %35.",
+          "mevcut_fonksiyon": "PROPELLANTS[key]['fuel']",
+          "onerilen_baglama": "propellant_type'i gonder + bilesimi katalogdan oku.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".manufacturing_analysis.propellant_manufacturing.mixing_requirements.binder_percent",
+          "sinif": "KUSUR",
+          "deger": "12",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3239",
+          "gerekce": "Ustteki iki kalemle ayni. Olctum: 'kndx' ile 12 -> 8. KN-seker yakitinda ayri bir baglayici FAZI yoktur (dekstrozun kendisi yakit+baglayici), yani her iki dal da bu yakit ailesi icin yanlis.",
+          "mevcut_fonksiyon": "PROPELLANTS[key] bilesim alanlari",
+          "onerilen_baglama": "propellant_type'i gonder; seker ailesinde baglayici kalemi hic yayinlanmamali (kayit yoksa sayi uretme kurali).",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.nozzle_design.convergent_angle",
+          "sinif": "KUSUR",
+          "deger": "30.0 derece",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3801 (yerel sabit) ve 3842 (yayin)",
+          "gerekce": "_design_nozzle_geometry icinde 'conv_half_angle = 30.0' SABIT yaziliyken depoda TEK KAYNAK olarak yazilmis _nozzle_half_angles() var ve _calculate_nozzle_length onu kullaniyor. Olctum: convergent_angle=45 gonderdigimde AYNI yanitta .nozzle_angles.convergent_half_angle_deg 30 -> 45 oluyor, .cad_design.nozzle_design.convergent_angle 30'da KALIYOR. Yani tek yanit iki farkli lule tarif ediyor; imalata giden CAD, analizin lulesi degil - v2.6.26'daki 'CAD 8 mm derken analiz 2.4-12 mm' bulgusunun aynisi.",
+          "mevcut_fonksiyon": "_nozzle_half_angles() (satir 4199) - yazilmis, docstring'i 'TEK kaynak' diyor, bu cagri noktasinda cagrilmamis",
+          "onerilen_baglama": "3801-3802 satirlarindaki yerel sabitler silinip 'conv_half_angle, div_half_angle = self._nozzle_half_angles()' cagrisiyla degistirilmeli; boylece hem yayinlanan aci hem ayni fonksiyonda hesaplanan convergent_length tek kaynaktan gelir.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.nozzle_design.divergent_angle",
+          "sinif": "KUSUR",
+          "deger": "15.0 derece",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3802 ve 3843",
+          "gerekce": "Ustteki kalemin ikizi. Olctum: divergent_angle=12 gonderdigimde .nozzle_angles.divergent_half_angle_deg 15 -> 12, CAD paneli 15'te kaldi. Ayrica _isp_loss_breakdown diverjans kaybini lambda=(1+cos a)/2 ile KULLANICININ acisindan hesapliyor - yani ayni yanitta uc yerde iki farkli aci dolasiyor.",
+          "mevcut_fonksiyon": "_nozzle_half_angles()",
+          "onerilen_baglama": "3802'deki sabit yerine _nozzle_half_angles() cagrisi.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.nozzle_design.performance.thrust_coefficient",
+          "sinif": "KUSUR",
+          "deger": "1.65",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3856",
+          "gerekce": "Duz sabit. Ayni motorun kendi CF'ini depo zaten hesapliyor: _thrust_coefficient(P_c) sevkiyattaki KNDX ornegi icin 1.530, ayni yanittaki .detailed_analysis.performance_metrics.average_thrust_coefficient 1.537, .altitude_performance[0].thrust_coefficient 1.530. CAD paneli 1.65 diyerek motorun kendi degerini %7.8 yukari yaziyor; CF gamma, epsilon ve Pa/Pc'ye bagli oldugu icin sabit olmasi hicbir motorda dogru degil.",
+          "mevcut_fonksiyon": "_thrust_coefficient(P_c_bar) (satir 1625) - 'TEK tanim noktasi' diye yazilmis, bu panelde cagrilmamis",
+          "onerilen_baglama": "'thrust_coefficient': self._thrust_coefficient(self.P_c) yapilmali (satir 1741 ve 1809'daki cagrilarin aynisi).",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.insulation_system.aft_insulation.thickness",
+          "sinif": "KUSUR",
+          "deger": "4.0 mm",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3915",
+          "gerekce": "Duz sabit: 40 bar'da 1 saniye yanan 75 mm'lik motorla 100 bar'da 60 saniye yanan motorun bogaz arkasi yalitimi ayni cikiyor; basinctan, yanma suresinden, isi akisindan bagimsiz. Metodun docstring'i 'ablasyon cozumu yok' diyor ama depoda ablasyon cozumu VAR ve calisiyor. Bu motorun boguz isi akisi zaten hesaplaniyor: _calculate_heat_flux() ornek motor icin 23929 kW/m2 donduruyor.",
+          "mevcut_fonksiyon": "hrma.analysis.thermal_protection.ThermalProtectionAnalyzer.ablative_thickness(q_net_W_m2, burn_time_s, material='carbon_phenolic') (satir 163) - yazilmis, /api/thermal-protection uc noktasindan cagriliyor, kati motordan HIC cagrilmiyor",
+          "onerilen_baglama": "t = ThermalProtectionAnalyzer().ablative_thickness(q_net_W_m2=self._calculate_heat_flux()*1e3, burn_time_s=<curve toplam sure>, material='carbon_phenolic')['required_thickness_mm'] (Seviye-1 Q* modeli, NASA SP-8091 sinifi; kaynak fonksiyonun kendi 'source' alaninda). Model sinirlamasi zaten 'model_note' ile beraber donuyor, ciktiya oldugu gibi tasinabilir.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.insulation_system.forward_insulation.thickness",
+          "sinif": "KUSUR",
+          "deger": "5.0 mm",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3909",
+          "gerekce": "Ustteki kalemin ikizi (on kapak yalitimi). Sabit; docstring 'basis alaninda beyan edilir' diyor ama forward_insulation blogunda 'basis' anahtari YOK - vaat edilen beyan yazilmamis (thermal_barrier blogunda var, bunda yok). On kapak akisi bogaz akisindan dusuktur, o yuzden bogaz akisini dogrudan kullanmak konservatiftir ve bu acikca yazilabilir.",
+          "mevcut_fonksiyon": "ThermalProtectionAnalyzer.ablative_thickness()",
+          "onerilen_baglama": "Ayni cagri, malzeme 'carbon_phenolic', akı olarak bogaz akisinin kullanildigi 'basis' alaninda beyan edilerek (konservatif ust sinir). Beyan edilmeden sayi uretilecekse en azindan blogun icine 'basis: HRMA bu kalinligi boyutlandirmiyor' yazilmali.",
+          "guven": "orta",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.insulation_system.thermal_barrier.density",
+          "sinif": "KUSUR",
+          "deger": "1200.0 kg/m3 (SOLID_INSULATION tablo degeri)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3890 (yayin), 1158-1161 (self.liner_density), 5066 (kullanim)",
+          "gerekce": "Panel tablo sabitini basiyor, oysa motorun isil kapasite zincirinde KULLANDIGI yogunluk kullanicinin girdigi self.liner_density (kabul araligi 200-3000 kg/m3). Olctum: liner_density=2400 gonderdigimde panel yine 1200 gosterdi. Ayni panelin kalinlik alanlari v2.6.26'da tam bu nedenle duzeltilmisti (Y2); yogunluk atlanmis. Kalinlik kullanicinin, yogunluk tablonun olmasi ayni blokta celiskidir.",
+          "mevcut_fonksiyon": "self.liner_density (_apply_overrides, satir 1158-1161)",
+          "onerilen_baglama": "'density': float(getattr(self,'liner_density', SOLID_INSULATION['density_kg_m3'])) - kutle ve isil kapasite zinciriyle ayni kaynak.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.igniter_system.igniter_grain.mass",
+          "sinif": "KUSUR",
+          "deger": "2.0 gram",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3927",
+          "gerekce": "Duz sabit: 0.5 kg itergacli amator motorla 10 tonluk katagi ayni 2 gram siyah barutla atesleniyor. Atesleyici sarji serbest hacmi atesleme basincina cikaracak gaz kutlesine gore boyutlandirilir; serbest hacim bu motorda ZATEN hesaplanabiliyor (kasa ic hacmi - _propellant_volume()). Blokta 'basis' beyani da yok, yani kullanici bunu hesaplanmis saniyor.",
+          "onerilen_baglama": "NASA SP-8051 'Solid Rocket Motor Igniters' serbest-hacim basinclandirma olcutu: m_ign = P_ign*V_serbest/(R_ign*T_ign) * pay; V_serbest = kasa ic hacmi - _propellant_volume(), P_ign tasarim secimi olarak (or. 0.1-0.2*Pc) ACIKCA beyan edilir. Yayimlanmis bir R_ign/T_ign kaydi yoksa sayi uretilmez, 'not sized' yazilir.",
+          "guven": "orta",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.igniter_system.igniter_grain.burn_time",
+          "sinif": "KUSUR",
+          "deger": "0.2 s",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3928",
+          "gerekce": "Duz sabit; motorun buyuklugunden, serbest hacminden ve hedef atesleme yukselme suresinden bagimsiz. Depoda bu hesabi yapan fonksiyon YOK (transient_ballistics atesleme gecici rejimini modellemiyor), o yuzden onerim mevcut koda degil yayimlanmis olcute dayaniyor.",
+          "onerilen_baglama": "NASA SP-8051: atesleyici yanma suresi, motorun hedef basinc-yukselme suresiyle (tipik olarak yuzde 90 Pc'ye ulasma suresi) eslesmeli. Bu sure modellenmiyorsa sayi UYDURULMAMALI: alan 'not sized by HRMA' + gerekce ile yayinlanmali.",
+          "guven": "orta",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.igniter_system.igniter_case.diameter",
+          "sinif": "KUSUR",
+          "deger": "10.0 mm",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3933",
+          "gerekce": "Duz sabit; sarj kutlesi sabit oldugu icin (ust kaleme bkz.) kap olculeri de sabit kaliyor. Kap capi sarj kutlesi/paketleme yogunlugundan cikar, bagimsiz bir tasarim sayisi degildir. 'basis' beyani yok.",
+          "onerilen_baglama": "V_sarj = m_ign/rho_sarj; kap ic hacmi V_sarj/dolum_orani; secilen L/D oraniyla cap ve boy cozulur. m_ign bagli degilse bu alan da sayi uretmemeli.",
+          "guven": "dusuk",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.igniter_system.igniter_case.length",
+          "sinif": "KUSUR",
+          "deger": "50.0 mm",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3934",
+          "gerekce": "Ust kalemle ayni: sarj hacminin sonucu olmasi gereken bir olcu sabit yazilmis. Ayrica 50 mm'lik atesleyici, 75 mm capli ornek motorun on kapak portuna gore olculmemis; hicbir geometrik kontrol yok.",
+          "onerilen_baglama": "Kap hacminden ve secilen L/D'den turetilmeli; ayrica grain ic port capina (D_core) gore gecebilirlik kontrolu yapilmali.",
+          "guven": "dusuk",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".cad_design.igniter_system.igniter_case.wall_thickness",
+          "sinif": "KUSUR",
+          "deger": "1.0 mm",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3935",
+          "gerekce": "Duz sabit. Atesleyici kabi da bir basincli kaptir; cidari ic basinc, cap ve malzeme akma dayanimindan cikar. Depoda bu hesabi yapan kod var (_case_design ve hrma/analysis/pressure_vessel.py Barlow/ince cidar zinciri), atesleyici icin cagrilmiyor.",
+          "mevcut_fonksiyon": "_case_design() / hrma.analysis.pressure_vessel (ince cidarli kap: t = P*r/(sigma_y/SF))",
+          "onerilen_baglama": "t = P_ign*r_ign/(sigma_y_alu/SF). P_ign bagli degilse bu alan da sayi uretmemeli.",
+          "guven": "dusuk",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".detailed_analysis.grain_regression_analysis.erosive_burning_effects.port_diameter_factor_final",
+          "sinif": "KUSUR",
+          "deger": "1.0 (her motorda)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4692-4694 (port_ratio_end) ve 4706 (yayin)",
+          "gerekce": "Hesaplanmis gorunuyor ama cebirsel olarak OZDES 1.0: port_ratio_end = min(1, (D_core + 2*max((D_chamber-D_core)/2,0))/D_chamber) ifadesinde pay her zaman D_chamber'a esitleniyor, dolayisiyla oran 1, us alinca yine 1. Yani ifade hicbir girdiye duyarli degil; kardesi port_diameter_factor_initial ise gercekten geometriden geliyor (canli). Ayrica end-burner ve sliver birakan kesitlerde son port capi kasa capina esit degildir, yani sonuc kavramsal olarak da yanlis.",
+          "mevcut_fonksiyon": "calculate_thrust_curve zaten 'port_area' serisini uretiyor (satir 5397) - gercek son port capi orada",
+          "onerilen_baglama": "port_ratio_end = sqrt(4*port_area[-1]/pi)/D_chamber (cozucunun kendi gerileme serisinden), sonra ayni (D_port/D_chamber)^-0.2 vekili uygulanir - boylece ifade cozumun sonucuna baglanir.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".structural_analysis.assembly_integrity.joint_reliability",
+          "sinif": "KUSUR",
+          "deger": "98.2 (%)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3110",
+          "gerekce": "Kaynaksiz bir GUVENILIRLIK yuzdesi: hicbir sey imal edilmemisken, civata sayisi/boyu/on yuku/sizdirmazlik capi bilinmezken bir baglantiya %98.2 guvenilirlik atamak, v2.6.0'da sokulen 'gorev basari olasiligi 0.92' ile tam olarak ayni siniftir. Guvenilirlik verisi olmadan uretilemez.",
+          "mevcut_fonksiyon": "hrma/analysis/bolted_joint.py analyze_bolted_joint(pressure_bar, seal_diameter_mm, bolt_count, ...) (satir 451) - yazilmis, /api/bolted-joint uc noktasindan cagriliyor, kati motordan HIC cagrilmiyor",
+          "onerilen_baglama": "Guvenilirlik yuzdesi tamamen kaldirilip yerine analyze_bolted_joint(pressure_bar=self.P_c, seal_diameter_mm=self._case_inner_diameter()*1000, bolt_count=<kullanici girdisi>) ciktisindaki ayrilma/civata emniyet katsayilari verilmeli (VDI 2230 sinifi). Civata sayisi girdisi yoksa alan 'not sized' olmali - sayi uydurulmamali.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".motor_geometry.structural_analysis.assembly_integrity.joint_reliability",
+          "sinif": "KUSUR",
+          "deger": "98.2",
+          "nerede": "hrma/engines/solid_rocket_engine.py:3110",
+          "gerekce": "Ustteki kalemin ikinci yayini (motor_geometry ayni sozlugu tekrar yayinliyor); tek duzeltme ikisini birden kapatir.",
+          "mevcut_fonksiyon": "analyze_bolted_joint()",
+          "onerilen_baglama": "Bkz. ust kalem.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": "outer_diameter (solid)",
+          "sinif": "KUSUR",
+          "gerekce": "Alan beyan edilmiş ama BEYAN GEREKÇESİ YANLIŞ: unwired_inputs yorumu 'kasa dış çapı iç çap + 2 x cidar kalınlığından' diyor (bu case_outer_diameter'dır, solid_rocket_engine.py:3513), oysa formdaki alan grain DIŞ ÇAPIDIR (solid.html:632-638 etiketi ve ipucu metni açıkça öyle diyor) ve çalışma anındaki uyarı da doğrusunu söylüyor: 'the grain OD is taken as the chamber diameter'; yani çözücü grain dış çapı olarak chamber_diameter alanını okuyor (_case_inner_diameter = D_chamber + 2 x yalıtım, satır 1305-1314), böylece aynı fiziksel büyüklük için formda iki alan var ve yanlış etiketli olan okunuyor.",
+          "guven": "yuksek",
+          "deger": "girilen 100 mm yok sayılıyor; grain OD olarak chamber_diameter kullanılıyor",
+          "nerede": "hrma/engines/solid_rocket_engine.py:723-728 (beyan metni), 5648-5661 (warn.solid.outer_diameter_ignored), 1305-1314 (_case_inner_diameter = grain OD + 2 x yalıtım), 2592-2594 ve 3640 (yanma alanı ve grain hacmi D_chamber ile) ; hrma/templates/solid.html:632-638 (grain OD etiketi), 875-879 (chamber_diameter 'kasa iç çapı' etiketi)",
+          "mevcut_fonksiyon": "hrma/engines/solid_rocket_engine.py:1305 _case_inner_diameter() — grain OD'den kasa iç çapını zaten türetiyor; eksik olan ters yön, yani grain OD'nin outer_diameter alanından okunması",
+          "onerilen_baglama": "Doğruluk kaynağı outer_diameter olsun: self.D_chamber (fiilen grain OD) _override_val('outer_diameter', ...) ile beslensin, chamber_diameter ise kasa iç çapı olarak yorumlanıp D_kasa_ic >= D_grain + 2 x insulation_thickness_m tutarlılık denetimine dönüşsün (ilişki zaten _case_inner_diameter'da yazılı; Sutton & Biblarz 9. baskı Böl. 12, hacimsel doluluk ve yalıtım payı). Bu yapılamıyorsa asgari düzeltme: unwired_inputs yorumundaki 'kasa dış çapı' ifadesi düzeltilsin — beyan şu an başka bir büyüklüğü anlatarak alanı haksız yere meşrulaştırıyor.",
+          "_grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+          "_dosyalar": [
+            "hrma/engines/solid_rocket_engine.py",
+            "hrma/templates/solid.html"
+          ]
+        }
+      ]
+    },
+    {
+      "ad": "P4",
+      "sahip": "ajan",
+      "dosyalar": [
+        "hrma/export/openrocket_integration.py"
+      ],
+      "kalem_sayisi": 1,
+      "kalemler": [
+        {
+          "yol": ".openrocket.flight_profile.simulation_settings.wind_speed",
+          "sinif": "KUSUR",
+          "deger": "0 m/s",
+          "nerede": "hrma/export/openrocket_integration.py:247",
+          "gerekce": "OLU GIRDI: wind_speed form alani var (advanced.html:1563), payload'da gonderiliyor (advanced.html:3297), app.py:1114'te launch_params'a giriyor; OpenRocket dali kullanicinin ruzgar degerini yok sayip 0 yaziyor. Varsayilan degerin de 0 olmasi kusuru gizliyor - kullanici 10 m/s girse bile disa aktarim 0 diyor.",
+          "onerilen_baglama": "simulation_settings['wind_speed'] = data['wind_speed']; create_ork_project_template'teki windaverage 0.0 (satir 793) ayni kaynaktan beslensin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/export/openrocket_integration.py"
+          ]
+        }
+      ]
+    },
+    {
+      "ad": "P5",
+      "sahip": "ajan",
+      "dosyalar": [
+        "hrma/analysis/trajectory_analysis.py"
+      ],
+      "kalem_sayisi": 1,
+      "kalemler": [
+        {
+          "yol": ".trajectory.vehicle_parameters.cross_sectional_area",
+          "sinif": "KUSUR",
+          "deger": "0.017671458676442587 (m2)",
+          "nerede": "hrma/analysis/trajectory_analysis.py:382 `cross_sectional_area = np.pi * (self.vehicle_diameter / 2) ** 2`",
+          "gerekce": "Bagintinin kendisi dogru (A = pi*d^2/4) ama girdisi olan vehicle_diameter sabit 0,15 m oldugu icin cikti da sabit kaliyor. Bu bagimsiz bir kusur degil, yukaridaki cap kusurunun semptomu; surukleme kuvvetinin tamamini bu alan olcekledigi icin apojeyi dogrudan tasiyor.",
+          "onerilen_baglama": "vehicle_diameter kablolamasi duzeltilince kendiliginden cozulur; ayri bir mudahale gerekmez.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/trajectory_analysis.py"
+          ]
+        }
+      ]
+    },
+    {
+      "ad": "P6",
+      "sahip": "ana model",
+      "dosyalar": [
+        "hrma/analysis/launch_site.py",
+        "hrma/analysis/trajectory_analysis.py",
+        "hrma/app.py",
+        "hrma/data/propellants_db.py",
+        "hrma/engines/hybrid_rocket_engine.py",
+        "hrma/engines/injector_design.py",
+        "hrma/engines/liquid_rocket_engine.py",
+        "hrma/engines/nozzle_design.py",
+        "hrma/engines/solid_rocket_engine.py",
+        "hrma/export/openrocket_integration.py",
+        "hrma/templates/advanced.html",
+        "hrma/templates/liquid.html",
+        "hrma/templates/solid.html",
+        "hrma/utils/injector_design.py"
+      ],
+      "kalem_sayisi": 17,
+      "kalemler": [
+        {
+          "yol": ".openrocket.flight_profile.rocket_parameters.dry_mass",
+          "sinif": "KUSUR",
+          "deger": "5.0 kg",
+          "nerede": "hrma/export/openrocket_integration.py:227-234 (create_flight_simulation_data varsayilan sozlugu); cagri hrma/app.py:1058",
+          "gerekce": "Ayni /calculate istegindeki data zaten vehicle_mass_dry tasiyor ve app.py:1107 yorunge dalinda 50 kg olarak kullaniliyor; OpenRocket dali 5 kg sabitini kullandigi icin tek yanitta 10 kat farkli iki arac var, ustelik flight_performance.estimated_apogee/delta_v/mass_ratio bu 5 kg'dan turetiliyor (mass_ratio=(5+m_p)/5).",
+          "mevcut_fonksiyon": "OpenRocketExporter.resolve_inert_mass (openrocket_integration.py:407) - structural_analysis.weight_analysis.total_weight'ten motorun kuru kutlesini cozuyor ve .eng loaded mass icin cagriliyor, arac dry_mass icin cagrilmiyor",
+          "onerilen_baglama": "app.py:1058'de rocket_params data'dan kurulup gecirilsin (metod app.py:3436'da zaten rocket_params ile cagriliyor): dry_mass = data['vehicle_mass_dry'] (ya da form'daki final_mass). Kullanici vermediyse alt sinir olarak resolve_inert_mass(motor_results) kullanilip kaynak etiketi (MASS_SOURCE_LABELS deseni) ciktiya yazilsin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/export/openrocket_integration.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.rocket_parameters.diameter",
+          "sinif": "KUSUR",
+          "deger": "0.1 m",
+          "nerede": "hrma/export/openrocket_integration.py:230; cagri hrma/app.py:1058",
+          "gerekce": "Govde capi motor kasa capindan kucuk olamaz; kasa capi ayni sinifta resolve_geometry(motor_data)['case_diameter'] ile SI olarak zaten cozuluyor (satir 470-548) ama arac capina baglanmiyor. Yorunge dali ayni istekte 0.15 m kullaniyor (app.py:1108) - celiski. Cap ayrica generate_flight_profile'da ref_area uzerinden surukleme kuvvetine giriyor (satir 913).",
+          "mevcut_fonksiyon": "OpenRocketExporter.resolve_geometry (openrocket_integration.py:470) -> 'case_diameter' + 'case_diameter_source'",
+          "onerilen_baglama": "rocket_params['diameter'] = data['vehicle_diameter']; kullanici vermediyse max(kullanici_capi, resolve_geometry(...)['case_diameter']) alinip kaynak beyan edilsin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/export/openrocket_integration.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.rocket_parameters.drag_coefficient",
+          "sinif": "KUSUR",
+          "deger": "0.5",
+          "nerede": "hrma/export/openrocket_integration.py:232; cagri hrma/app.py:1058",
+          "gerekce": "OLU GIRDI: hibrit sayfasinda gercek bir form alani var (hrma/templates/advanced.html:1528, id=drag_coefficient), payload'da gonderiliyor (advanced.html:3293) ve ayni endpoint'in yorunge dalinda kullaniliyor (app.py:1109); OpenRocket dali kullanicinin degerini yok sayip kendi 0.5'ini yaziyor.",
+          "onerilen_baglama": "rocket_params['drag_coefficient'] = data['drag_coefficient'] (app.py:1058). Tek satirlik baglama; deger zaten istekte.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/export/openrocket_integration.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.rocket_parameters.length",
+          "sinif": "KUSUR",
+          "deger": "1.5 m",
+          "nerede": "hrma/export/openrocket_integration.py:231; cagri hrma/app.py:1058",
+          "gerekce": "Arac boyu motor kamara boyundan kisa olamaz; chamber_length resolve_geometry ile SI olarak mevcut. Yorunge dali ayni istekte 2.0 m kullaniyor (app.py:1110) - ayni yanitta celisen iki arac boyu. Bu dalda sayisal bir sonuca girmedigi icin (flight_performance length okumaz) siddeti orta.",
+          "mevcut_fonksiyon": "OpenRocketExporter.resolve_geometry (openrocket_integration.py:470) -> 'chamber_length'",
+          "onerilen_baglama": "rocket_params['length'] = data['vehicle_length']; alt sinir olarak resolve_geometry(...)['chamber_length'] ile tutarlilik denetimi.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/export/openrocket_integration.py"
+          ]
+        },
+        {
+          "yol": ".openrocket.flight_profile.simulation_settings.launch_angle",
+          "sinif": "KUSUR",
+          "deger": "85 derece",
+          "nerede": "hrma/export/openrocket_integration.py:248",
+          "gerekce": "OLU GIRDI ve CELISKI: hibrit sayfasinda launch_angle form alani var (advanced.html:1553, varsayilan 90), payload'da gonderiliyor (advanced.html:3295), app.py:1113'te launch_params icinde yorunge cozucusune veriliyor; OpenRocket dali bunu okumadigi gibi yazdigi 85 degeri form varsayilani 90 ile de uyusmuyor. Ayni sabit create_ork_project_template'te de gomulu (satir 792, launchrodangle 85.0).",
+          "onerilen_baglama": "simulation_settings['launch_angle'] = data['launch_angle'] (app.py:1058'de gecirilecek launch/rocket parametreleri icine alinsin); create_ork_project_template ayni degerden beslensin.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/export/openrocket_integration.py"
+          ]
+        },
+        {
+          "yol": "$.trajectory (dalin TAMAMI - tarayicida hic uretilmiyor)",
+          "sinif": "KUSUR",
+          "deger": "null (gercek tarayicida)",
+          "nerede": "hrma/templates/advanced.html:3290 (toplayici) + hrma/app.py:1104",
+          "gerekce": "Sablonda id=\"calculate_trajectory\" elemani YOK (grep ile dogrulandi: yalnizca 3290 ve 3542 satirlarindaki JS referanslari var, hicbir <input> yok); toplayici `document.getElementById('calculate_trajectory') ? ....checked : false` yazdigi icin tarayici her /calculate cagrisinda calculate_trajectory:false gonderiyor, app.py:1104 `if data.get('calculate_trajectory', True)` dali atliyor ve results.trajectory None doner — olculdu: flag=False -> trajectory=NoneType, flag yok -> trajectory=dict.",
+          "onerilen_baglama": "Ya trajectory_params panelinin basina gercek bir onay kutusu (id=calculate_trajectory) eklenmeli, ya da toplayicidaki `: false` varsayilani `: true` yapilmali. Not: bu dal zaten hicbir sablon tarafindan okunmuyor (advanced.html'de results.trajectory tuketimi yok), o yuzden alternatif olarak dalin /calculate yanitindan tamamen kaldirilmasi da tutarli bir karardir — su anki durum 27.676 yapragin buyuk kismini bosa uretiyor.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/templates/advanced.html"
+          ]
+        },
+        {
+          "yol": ".trajectory.vehicle_parameters.mass_dry",
+          "sinif": "KUSUR",
+          "deger": "50 (kg)",
+          "nerede": "hrma/app.py:1107 `mass_dry=data.get('vehicle_mass_dry', 50)` <- advanced.html:3291 `parseFloat(document.getElementById('vehicle_mass_dry')?.value || 50)`",
+          "gerekce": "Sablonda id=\"vehicle_mass_dry\" elemani yok (dogrulandi: template=False, collected=True), bu yuzden `?.value ||` her zaman 50'ye dusuyor; oysa AYNI sayfanin trajectory panelinde kullanicinin girdigi final_mass (kuru kutle, varsayilan 25 kg) ve initial_mass (50 kg) alanlari var (advanced.html:1508,1518). Olculdu: mass_dry 50 -> 25 kg apoje 10.575,7 m -> 13.472,0 m (+%27,4), max hiz 584,9 -> 843,3 m/s (+%44,2). Yani kullanicinin ekranda gordugu kuru kutle ile yorungenin kullandigi kutle 2 kat farkli.",
+          "onerilen_baglama": "advanced.html:3291'de `document.getElementById('final_mass')?.value` okunmali (bu alan zaten kuru kutle olarak tanimli: 'Vehicle mass after propellant consumption (dry mass + payload)'). Kardes ucnokta bunu ZATEN dogru yapiyor: app.py:4129 `mass_dry=final_mass`. Alternatif: sayfaya gercek bir vehicle_mass_dry input'u eklenmeli.",
+          "mevcut_fonksiyon": "app.py:4128-4132 trajectory_analysis() — final_mass'i mass_dry olarak, reference_area'yi capa cevirerek set_vehicle_parameters'a veren dogru kablolama zaten yazilmis, /calculate yolu onu kullanmiyor",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/templates/advanced.html"
+          ]
+        },
+        {
+          "yol": ".trajectory.vehicle_parameters.diameter",
+          "sinif": "KUSUR",
+          "deger": "0.15 (m)",
+          "nerede": "hrma/app.py:1108 `diameter=data.get('vehicle_diameter', 0.15)` <- advanced.html:3292 `getElementById('vehicle_diameter')?.value || 0.15`",
+          "gerekce": "Sablonda id=\"vehicle_diameter\" elemani yok, deger daima 0,15 m. Sayfanin kendi reference_area alani (advanced.html:1542, varsayilan 100000 mm2 = 0,1 m2) 0,357 m capa karsilik gelir — yani ekrandaki alan ile yorungenin kullandigi alan 5,7 kat farkli. Olculdu: cap 0,15 -> 0,357 m apoje 10.575,7 m -> 3.940,2 m (2,7 kat). Ayrica bu kosuda motorun kendi hazne capi 0,1525 m cikiyor; govde capinin hazne capindan kucuk olamayacagi gozetilmiyor.",
+          "onerilen_baglama": "reference_area alanindan cap turetilmeli: d = sqrt(4*A_ref/pi). Bu tam olarak app.py:4130'da yazili bagintidir (`np.sqrt(4 * reference_area / np.pi)`), /calculate yolu cagirmiyor.",
+          "mevcut_fonksiyon": "app.py:4130 (ayni bagintinin calisan hali) ve TrajectoryAnalyzer.set_vehicle_parameters (trajectory_analysis.py:167)",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/templates/advanced.html"
+          ]
+        },
+        {
+          "yol": "/api/trajectory-analysis -> launch_params.launch_angle / wind_speed / wind_direction / launch_altitude (79'un DISINDA, ayni dalin kardes ucnoktasi)",
+          "sinif": "KUSUR",
+          "deger": "85.0 derece / 0.0 m/s / 0.0 derece / 0.0 m",
+          "nerede": "hrma/app.py:4159-4168",
+          "gerekce": "Trajectory sekmesinin 'Calculate Trajectory Performance' butonu bu ucnoktayi cagiriyor (advanced.html:1567 -> static/js/app.js:2255 calculateTrajectory). JS formdaki launch_angle ve wind_speed'i OKUYUP requestData icinde GONDERIYOR (app.js:2311-2312), fakat ucnokta gelen degerleri hic okumadan launch_params sozlugunu sabitlerle kuruyor. Kullanici 45 derece firlatma acisi ya da 20 m/s ruzgar girse de hesap 85 derece ve ruzgarsiz kosuluyor; sayfadaki alanin bir etkisi yok.",
+          "onerilen_baglama": "launch_params sozlugu istekten okunmali: 'launch_angle': float(data.get('launch_angle', 85.0)), 'wind_speed': float(data.get('wind_speed', 0.0)), 'wind_direction': float(data.get('wind_direction', 0.0)), 'launch_altitude': float(data.get('trajectory_start_altitude', 0.0)). /calculate yolu bunu ZATEN dogru yapiyor (app.py:1114-1119), yani ayni uygulamada dogru kalip mevcut.",
+          "mevcut_fonksiyon": "hrma/app.py:1114-1119 (ayni sozlugun istekten okunan calisan hali)",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py"
+          ]
+        },
+        {
+          "yol": "/api/trajectory-analysis -> launch_params.launch_latitude (79'un DISINDA)",
+          "sinif": "KUSUR",
+          "deger": "40.0 (derece)",
+          "nerede": "hrma/app.py:4164",
+          "gerekce": "Sabit 40 derece enlem, calculate_trajectory:329-336 uzerinden local_gravity(enlem, rakim) cagrisini tetikliyor ve yerel yercekimini belirliyor; g_surface agirlik terimine ve T/W oranina giriyor (trajectory_analysis.py:787). Kullanicinin baska bir yerde sectigi firlatma sahasi ne olursa olsun bu ucnokta 40. paralelin g'siyle hesap yapar. Kod tarafi hazir: set_launch_site() ve resolve_launch_site() cikti sozlesmesini destekliyor.",
+          "onerilen_baglama": "launch_params'a 'launch_site' anahtari, uygulamanin launch_site cozumleyicisinden (hrma/analysis/launch_site.py resolve_launch_site) gecirilmeli; site yoksa anahtar HIC eklenmemeli (trajectory_analysis.py:196-201 zaten site=None'da eski davranisa donuyor), sahte bir 40 derece yerine.",
+          "mevcut_fonksiyon": "TrajectoryAnalyzer.set_launch_site (trajectory_analysis.py:182) ve hrma/analysis/launch_site.local_gravity / resolve_launch_site",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/analysis/launch_site.py",
+            "hrma/analysis/trajectory_analysis.py",
+            "hrma/app.py"
+          ]
+        },
+        {
+          "yol": "/api/trajectory-analysis -> motor_data.thrust ve motor_data.burn_time (79'un DISINDA)",
+          "sinif": "KUSUR",
+          "deger": "1000 N ve 10 s",
+          "nerede": "hrma/app.py:4113-4119 ve :4136-4143",
+          "gerekce": "Istekte dogrudan thrust+burn_time yoksa HybridRocketEngine sabit thrust=1000 N, burn_time=10 s ile kuruluyor ve motor_data'ya burn_time 10,0 / total_impulse = F*10,0 yaziliyor — kod icindeki '# Default thrust for trajectory analysis' yorumu bunu kabul ediyor. Kullanici sayfada 5000 N / 20 s bir motor tasarlamis olsa bile bu yol calisirsa yorunge 1 kN'luk baska bir motorun profilini cizer. Bu bir birim etiketi ya da fiziksel sabit degil, tasarim buyuklugunun yerine konmus bir doldurma degerdir.",
+          "onerilen_baglama": "Ucnokta thrust/burn_time gelmediginde varsayilan motor uydurmak yerine HTTP 400 ile 'once motoru hesaplayin' demeli, ya da istekteki tam motor girdi kumesiyle (of_ratio, chamber_pressure, thrust, burn_time) motoru kurmali — /calculate yolunun yaptigi gibi (app.py:1123 motor_results dogrudan cozulmus motordan gelir).",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py"
+          ]
+        },
+        {
+          "yol": "oxidizer_phase (hybrid)",
+          "sinif": "KUSUR",
+          "gerekce": "Beyan EDİLMEMİŞ (ne DECLARED_UNUSED_IN_APP'te ne de hibrit motorda bir unwired_inputs mekanizması var) ve ölçümde liquid -> gas geçişi yalnız 4 yaprak değiştiriyor, dördü de uyarı metni (Nurick kavitasyon + flaş kaynama uyarılarının düşmesi); delik sayısı, orifis çapı, enjeksiyon hızı, yoğunluk dahil tek bir fiziksel sayı oynamıyor — oysa gaz fazında besleme yoğunluğu ve orifis akış rejimi tamamen değişir.",
+          "guven": "yuksek",
+          "deger": "liquid -> gas: 4 yaprak (hepsi uyarı), 0 fiziksel yaprak; rho_ox her iki fazda da sıvı değeri (1220 kg/m3)",
+          "nerede": "hrma/app.py:815 (yalnız InjectorDesign'a geçiyor) ; hrma/utils/injector_design.py:78, 887, 899 (ox_phase yalnız iki uyarıyı kapılıyor) ; hrma/engines/hybrid_rocket_engine.py:1390 _get_oxidizer_density (koşulsuz sıvı yoğunluğu), 2116 (fluid_ox yalnız oxidizer_type'tan)",
+          "mevcut_fonksiyon": "hrma/engines/injector_design.py:543 compressible_orifice_flow (izentropik, boğulmalı/boğulmasız orifis) ve :649 _plan_gas_elements, :630 _require_gas_stream — üçü de YAZILI ama yalnız :898 _design_gas_gas_coaxial içinden çağrılıyor, o dal da design_injector'da (:1168) motor_type != 'liquid' ise ValueError atıyor, yani hibrit yolundan ASLA çağrılmıyor. Ayrıca hrma/utils/injector_design.py:88 data_fetcher.fetch_nist_oxidizer_properties(tip, T, P) faz-doğru yoğunluk verebilecek durumda.",
+          "onerilen_baglama": "(1) oxidizer_phase HybridRocketEngine kurucusuna geçirilip _get_oxidizer_density'ye taşınsın; doyma noktasındaki akışkanda faz belirsiz olduğu için yoğunluk CoolProp doymuş dal seçimiyle alınsın (sıvı Q=0, gaz Q=1) — N2O 293 K'de sıvı ~745 kg/m3'e karşı buhar ~195 kg/m3, yani orifis alanı sqrt oranıyla ~1,95 kat sapıyor. (2) inj_spec'e faz bilgisi eklenip gaz fazında SPI/NHNE yerine compressible_orifice_flow zinciri koşsun (P_c/P_tank kritik oranın altındaysa boğulmalı akış; Sutton & Biblarz 9. baskı Böl. 8). (3) Faz gerçekten bağlanamıyorsa alan sessiz kalmasın: hibrit için de bir unwired_inputs beyanı açılıp gerekçesiyle bildirilsin.",
+          "_grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/engines/hybrid_rocket_engine.py",
+            "hrma/utils/injector_design.py"
+          ]
+        },
+        {
+          "yol": ".structural_analysis.grain_structural.strain_capability_percent",
+          "sinif": "KUSUR",
+          "deger": "35.0 (HTPB kopma uzamasi %35)",
+          "nerede": "hrma/engines/solid_rocket_engine.py:4866 (deger), hrma/app.py:2189 (kok neden), hrma/templates/solid.html:2662 collectAllParameters (kok neden)",
+          "gerekce": "KOK NEDEN - yakit kimligi arayuzden HIC gonderilmiyor: collectAllParameters yalniz 'propellant_name' gonderir, app.py ise data.get('propellant_type','apcp') okur, yani HER kati motor APCP/HTPB sayilir. Olctum: sevkiyattaki KNDX ornegine propellant_type='kndx' eklendiginde 35.0 -> 2.0 oluyor, gerinim emniyet katsayisi 11.678 -> 0.906, catlak riski 'Low' -> 'High'. Kodun kendi K4 yorumu (satir 296-320) tam bu senaryoyu 'ateslenecek bir grain hakkinda verilebilecek en tehlikeli yanlis karar' diye tarif ediyor ve duzeltmeyi yazmis ama girdi ulasmadigi icin kayit hic secilmiyor.",
+          "mevcut_fonksiyon": "_grain_mechanics() (satir 4717) + SOLID_GRAIN_MECHANICS['kndx'/'knsb'/'sugar'] (satir 296-330) - kayitlar VAR, secici girdi yok",
+          "onerilen_baglama": "solid.html collectAllParameters icine propellant_type: (secili katalog kaydinin 'key' alani, or. 'kndx') eklenmeli; katalog secimi zaten PROPELLANTS anahtarini biliyor (hrma/data/propellants_db.py:275). Alternatif: app.py'de propellant_name -> propellants_db anahtar cozumlemesi (ALIASES) yapilmali.",
+          "guven": "yuksek",
+          "_grup": "kati sayfasi (58 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/app.py",
+            "hrma/data/propellants_db.py",
+            "hrma/engines/solid_rocket_engine.py",
+            "hrma/templates/solid.html"
+          ]
+        },
+        {
+          "yol": ".motor.nozzle_design.performance.friction_efficiency",
+          "sinif": "KUSUR",
+          "deger": "0.99",
+          "nerede": "hrma/engines/nozzle_design.py:161 ve 489 (friction_efficiency: float = 0.99)",
+          "gerekce": "Ayni fiziksel kayip icin depoda MERKEZI bir sabit var: hrma/constants.py:166 NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT = 0.015, yani eta = 0,985. Sivi motor bu merkezi sabiti import edip kullaniyor (liquid_rocket_engine.py:2017), lule modulu ise 0,99'u kendi icinde sabit yazmis. Ayni programda ayni kayip icin iki farkli sayi (0,985 ve 0,99) dolasiyor; bu, projenin kendi parametre tutarliligi kuralinin ihlalidir.",
+          "mevcut_fonksiyon": "hrma/constants.py:166 NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT (sivi motorda import edilerek kullaniliyor)",
+          "onerilen_baglama": "nozzle_design.py merkezi sabiti import edip varsayilani friction_efficiency = 1.0 - NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT yapmali. Girdi-bagimli hale getirmek istenirse liquid_rocket_engine.py:3736'daki Reynolds tabanli baginti (eta_bl = 1 - 0.002*(1e6/Re_bogaz)^0.2) hibrite de uygulanabilir; ancak asgari duzeltme tek kaynaga baglamaktir.",
+          "guven": "yuksek",
+          "_grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py",
+            "hrma/engines/nozzle_design.py"
+          ]
+        },
+        {
+          "yol": ".injection_system.injector_design_detail.assumptions[*].params.sigma_n_m",
+          "sinif": "KUSUR",
+          "deger": "0.02 N/m (fluid='generic')",
+          "nerede": "hrma/engines/injector_design.py:1198 (fluid_ox varsayilani 'generic'), :1276-1280; cagiran spec: liquid_rocket_engine.py:3363-3377",
+          "gerekce": "Modulde LOX yuzey gerilimi TABLOSU VAR (SIGMA_LIQUID_REF['lox'] = 0.013 N/m @ 90 K, satir 99) ama sivi motor design_injector cagrisinda 'fluid_ox' anahtarini HIC gondermiyor, bu yuzden fluid_ox='generic' olup jenerik 0.02 N/m kullaniliyor - LOX icin %54 yuksek. Yaprak sabit cikmasinin nedeni tam olarak budur: oksitleyici tipi canli bir alan oldugu halde sigma degismiyor. Elkotb SMD ~ sigma^0.737 oldugundan damlacik capi ~%38 sisiyor.",
+          "onerilen_baglama": "inj_spec'e 'fluid_ox': self.oxidizer_type (ve varsa 'T_ox_K') eklenmeli; modul zaten dogru tabloyu secip 'sigma_basis':'table' etiketiyle raporluyor. Yakit icin de spec'te 'fluid_fuel' alani yok (modul bunu satir 1297 yorumunda kendisi soyluyor) - eklenmeli.",
+          "mevcut_fonksiyon": "hrma/engines/injector_design.py::liquid_surface_tension (satir 479) + SIGMA_LIQUID_REF tablosu",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/injector_design.py",
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": ".injection_system.injector_design_detail.assumptions[*].params.mu_pa_s",
+          "sinif": "KUSUR",
+          "deger": "0.001 Pa.s",
+          "nerede": "hrma/engines/liquid_rocket_engine.py:3124 (fuel_props.get('viscosity', 0.001)) -> :3376; tuketim injector_design.py:1291-1300",
+          "gerekce": "Kullanicinin 'fuel_viscosity' girdisi motorda OKUNUYOR ve dogrulaniyor (self.mu_fuel, satir 673-674) ve besleme hatti basinc dusumunde kullaniliyor; ama calculate_injector_design onu YOK SAYIP web tablosunun 0.001 varsayilanini enjektor moduline gonderiyor. Olctum: fuel_viscosity=0.0012 verdigimde raporlanan mu_pa_s yine 0.001. Ayrica oksitleyici tarafinda modulun kendi MU_LIQUID_REF['lox']=1.9e-4 tablosu var ama mu_ox spec'ten (0.0005 varsayilan) geldigi icin ona da ulasilmiyor - LOX icin ~2.6 kat yuksek. SMD ~ nu^0.385 oldugundan atomizasyon dogrudan etkileniyor.",
+          "onerilen_baglama": "fuel_viscosity = self.mu_fuel if self.mu_fuel else fuel_props.get('viscosity', ...) ve ox_viscosity = self.mu_ox if self.mu_ox else None (None gonderilirse modul kendi akiskan tablosunu kullanir).",
+          "mevcut_fonksiyon": "hrma/engines/injector_design.py::liquid_viscosity (satir 502) + MU_LIQUID_REF; ayrica motorda dogrulanmis self.mu_fuel / self.mu_ox",
+          "guven": "yuksek",
+          "_grup": "sıvı sayfası (105 sabit yaprak)",
+          "_dosyalar": [
+            "hrma/engines/injector_design.py",
+            "hrma/engines/liquid_rocket_engine.py"
+          ]
+        },
+        {
+          "yol": "turbopump_efficiency (liquid)",
+          "sinif": "KUSUR",
+          "gerekce": "Alan aslında TAM BAĞLI: 75 -> 40 sarsımında 193 fiziksel yaprak değişiyor (pompa gücü 110,2 kW -> 208,1 kW, kuru kütle 71,3 kg -> 90,8 kg, çevrim Isp 274,0 s -> 271,0 s); 'yankı' sonucu ölçüm yapayıdır, çünkü liquid.html:885 satırındaki input min/max taşımıyor ve sarsım 75 x 1,5 = 112,5 üretip motorun [20,95] bandında reddedilmiş, geriye yalnız warn.liquid.input_out_of_range yankısı kalmıştır.",
+          "guven": "yuksek",
+          "deger": "ölçüm sarsımı 75 -> 112,5 (reddedildi); geçerli sarsım 75 -> 40 = 193 fiziksel yaprak",
+          "nerede": "hrma/templates/liquid.html:885 (min/max yok) ; hrma/engines/liquid_rocket_engine.py:812-815 (okuma), 4538-4541 (eta_pump_ox/eta_pump_fuel), 5076 (eta_bep)",
+          "mevcut_fonksiyon": "hrma/engines/cycle_power_balance.py:solve_cycle(eta_pump_ox=..., eta_pump_fuel=...) — zaten çağrılıyor, sorun kodda değil şablonda",
+          "onerilen_baglama": "MOTOR KODUNA DOKUNMA. liquid.html:885'e motorun kendi bandı yazılsın: min=\"20\" max=\"95\" (kaynak: _override_val('turbopump_efficiency', 20.0, 95.0), liquid_rocket_engine.py:812). Böylece hem tarayıcı doğrulaması motorun bandıyla eşleşir hem tests/support/inventory.field_specs_for banttan doğru sarsım üretir ve alan haritada CANLI görünür. Aynı kontrol turbine_inlet_pressure (liquid.html:905) ve generator_gas_temp (895), turbine_expansion_ratio (915), web_thickness (solid.html:611), outer_diameter (solid.html:638) için de yapılmalı — hepsi min/max'sız.",
+          "_grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+          "_dosyalar": [
+            "hrma/engines/liquid_rocket_engine.py",
+            "hrma/templates/liquid.html",
+            "hrma/templates/solid.html"
+          ]
+        }
+      ],
+      "seri": true,
+      "not": "13 hub (app.py) + 4 köprü + 0 yeri belirsiz — ajanlardan SONRA, tek elden"
+    }
+  ]
+}

@@ -137,8 +137,61 @@ COOLING_CHANNEL_TO_TYPE = {
 #: Cidar kalınlığı için kabul edilen aralık [m]. Arayüz mm gönderir; dönüşüm
 #: app.py'de yapılır. 0.5 mm altı imal edilemez, 100 mm üstü bu sınıf motorda
 #: girdi hatasıdır (birim karışıklığının işareti).
-WALL_THICKNESS_MIN_M = 0.0005
+# Kullanıcının GİRDİĞİ cidar kalınlığı için kabul alt sınırı [m].
+# Sıvı motordaki WALL_THICKNESS_MANUFACTURING_MIN_M ile KARIŞTIRILMAMALI:
+# o, hesaplanan kalınlığın altına inemeyeceği İMALAT tabanıdır (2 mm);
+# bu ise kullanıcının elle girebileceği en ince değerdir (0.5 mm).
+# İkisi farklı kavram olduğu için ayrı adlandırıldı (aynı ad iki
+# dosyada iki farklı anlamda kullanılıyordu).
+WALL_THICKNESS_INPUT_MIN_M = 0.0005
 WALL_THICKNESS_MAX_M = 0.100
+
+#: Tasarım emniyet katsayısı için kabul edilen aralık. Arayüz 2-6 sunar;
+#: API daha geniş kabul eder ama 1.05 altı (fiilen emniyet payı yok) ve
+#: 10 üstü (kütle cezası anlamsız) girdi hatasıdır.
+SAFETY_FACTOR_MIN = 1.05
+SAFETY_FACTOR_MAX = 10.0
+
+#: Lüle (boğaz) malzemesinin soğutma varsayımı. Arayüzün KENDİ etiketi
+#: "Copper (Regeneratively Cooled)" olduğu için bakır rejeneratif soğutmalı
+#: kabul edilir; grafit/tungsten/C-C soğutmasız (ısı emici + ışıma) çalışır.
+#: Bu bir modelleme kararı değil, arayüzün beyanının okunmasıdır.
+NOZZLE_MATERIAL_COOLING = {
+    'graphite': 'natural',
+    'tungsten': 'natural',
+    'carbon_carbon': 'natural',
+    'molybdenum_tzm': 'natural',
+    'niobium_c103': 'natural',
+    'copper': 'regenerative',
+    'cucrzr': 'regenerative',
+}
+#: Arayüz enjektör tipi -> ``engines/injector_design.py`` sözcüğü.
+#: İki modül aynı kavram için farklı ad kullanıyor; eşleme olmadan devre
+#: modeli ValueError atıyor ve motor uydurma yedeğe düşüyordu.
+#:  - 'impingement': arayüz tek akışkanlı (yalnız oksitleyici) çarpışmalı
+#:    enjektör sunar; modülün karşılığı 'like_impinging' (benzer-akışkan
+#:    doublet). 'impinging_doublet' FARKLI-akışkan çarpışmasıdır ve hibritte
+#:    yakıt sıvı olmadığı için uygulanamaz.
+#:
+#: 'coaxial' BİLEREK eşlenmemiştir: devre modeli hibritte koaksiyel
+#: desteklemiyor ("'coax_swirl' hibritte desteklenmez (tek akışkan)";
+#: 'gas_gas_coaxial' yalnız sıvı kademeli yanma motorları için). Zorlama bir
+#: eşleme kullanıcıya "gas_gas_coaxial yalnız sıvı motor içindir" gibi
+#: sormadığı bir tipe dair hata gösterirdi. Bu tipte devre ayrıntısı
+#: üretilmez ve nedeni söylenir; enjektörün kendisi ``utils/injector_design``
+#: içindeki tek akışkanlı koaksiyel modelle (iç jet + dış anülüs) yine
+#: boyutlandırılır, yani kullanıcı sonuçsuz kalmaz.
+INJECTOR_TYPE_TO_MODULE = {
+    'impingement': 'like_impinging',
+}
+
+#: Lüle termal profilinde kullanılan istasyon sayısı. Boğaz istasyonunun
+#: çözünürlüğü için 20 yeterli (ölçüldü: 12 ve 20 istasyonda boğaz denge
+#: cidar sıcaklığı aynı, 2971 K).
+NOZZLE_THERMAL_STATIONS = 20
+#: Lüle cidar kalınlığı verilmediğinde kullanılan pay: boğaz insertinde
+#: et kalınlığı kamara cidarıyla aynı mertebededir; ayrı bir girdi
+#: olmadığı için kamara cidarı kullanılır ve rapor bunu AÇIKÇA yazar.
 
 
 class HybridRocketEngine:
@@ -149,6 +202,7 @@ class HybridRocketEngine:
                  thrust_coefficient=0, regression_a=None,
                  regression_n=None, fuel_density=None, 
                  combustion_type='infinite', chamber_diameter_input=0,
+                 contraction_ratio=0,
                  fuel_type='htpb', motor_name='', motor_description='',
                  initial_gox=None, flux_mode='ox', track_performance=True,
                  oxidizer_type='n2o', uq_mode=False, combustion_analyzer=None,
@@ -156,8 +210,10 @@ class HybridRocketEngine:
                  injector_type='showerhead', initial_port_diameter=None,
                  tank_temperature=None, port_count=1,
                  throat_erosion_rate=None,
-                 chamber_material='steel_4130', wall_thickness=0.005,
-                 cooling_type='natural'):
+                 chamber_material='steel_4130', wall_thickness=None,
+                 cooling_type='natural',
+                 safety_factor=None, chamber_length_override=None,
+                 nozzle_material=None):
         
         # Tasarım uyarıları (v2.6.2): kullanıcıya ULAŞAN kanal. Liste her
         # şeyden ÖNCE kurulur; aksi hâlde erken üretilen uyarılar kaybolur
@@ -174,8 +230,30 @@ class HybridRocketEngine:
         # kullanıcının seçtiği malzeme/kalınlık/soğutma termal modele hiç
         # ulaşmıyordu. Ayrıntılı gerekçe o çağrının başındaki yorumda.
         self.chamber_material = self._resolve_chamber_material(chamber_material)
+        # v2.6.26 — KURUCU VARSAYILANI "KULLANICI GİRDİSİ" SAYILMAZ.
+        # İmzada `wall_thickness=0.005` yazıyordu ve bu değer yapısal modüle
+        # `actual_wall_thickness` olarak gidiyordu; modül de DOĞRULAMA moduna
+        # geçip "verified against user-supplied wall thickness" diye
+        # raporluyordu. Oysa kimse bir kalınlık vermemişti — 5 mm kurucunun
+        # kendi varsayımıydı. Kullanıcının tasarımı ile motorun varsayımı
+        # arasındaki fark, bu sürümde kapattığımız hata sınıfının ta kendisi.
+        # Artık: değer verilmediyse termal model yine 5 mm ile çalışır (bir
+        # kalınlık olmadan ısı iletimi çözülemez) ama yapısal modüle None
+        # geçilir ve modül BOYUTLANDIRMA modunda kalır.
+        self.wall_thickness_user_supplied = wall_thickness is not None
         self.wall_thickness = self._resolve_wall_thickness(wall_thickness)
         self.cooling_type = self._resolve_cooling_type(cooling_type)
+
+        # --- v2.6.26'da bağlanan üç ölü girdi ---------------------------------
+        # Üçü de arayüzde VARDI, kullanıcı değerini giriyordu ve hiçbiri
+        # hiçbir hesaba ulaşmıyordu (Katman A taraması: 0 yaprak değişimi).
+        #   safety_factor          -> yapısal analizin tasarım SF hedefi
+        #   chamber_length_override-> L* ile türetilen kamara boyunu ezer
+        #   nozzle_material        -> boğaz termal + erozyon değerlendirmesi
+        self.design_safety_factor = self._resolve_safety_factor(safety_factor)
+        self.chamber_length_override = self._resolve_chamber_length_override(
+            chamber_length_override)
+        self.nozzle_material = self._resolve_nozzle_material(nozzle_material)
 
         # Handle thrust/burn_time vs total_impulse input
         if total_impulse is None:
@@ -232,6 +310,10 @@ class HybridRocketEngine:
         self.n = regression_n
         self.rho_f = fuel_density  # kg/m³
         self.combustion_type = combustion_type
+        # v2.6.26: kullanıcının kontraksiyon oranı girdisi. Eskiden motora
+        # HİÇ geçirilmiyordu (app.py /calculate bu anahtarı okumuyordu bile),
+        # dolayısıyla arayüzdeki alan tamamen ölüydü.
+        self.contraction_ratio_input = contraction_ratio
         self.chamber_diameter_input = chamber_diameter_input / 1000 if chamber_diameter_input > 0 else 0  # Convert mm to m
         self.motor_name = motor_name
         self.motor_description = motor_description
@@ -476,11 +558,11 @@ class HybridRocketEngine:
             t = float(value)
         except (TypeError, ValueError):
             t = 0.005
-        if not (WALL_THICKNESS_MIN_M <= t <= WALL_THICKNESS_MAX_M):
+        if not (WALL_THICKNESS_INPUT_MIN_M <= t <= WALL_THICKNESS_MAX_M):
             self.design_warnings.append(_w(
                 'warn.hybrid.wall_thickness_out_of_range', 'warning',
                 requested_mm=round(t * 1000.0, 3),
-                min_mm=WALL_THICKNESS_MIN_M * 1000.0,
+                min_mm=WALL_THICKNESS_INPUT_MIN_M * 1000.0,
                 max_mm=WALL_THICKNESS_MAX_M * 1000.0))
             return 0.005
         return t
@@ -503,6 +585,259 @@ class HybridRocketEngine:
                 'warn.hybrid.cooling_channels_assumed', 'warning',
                 geometry=ham, h_coolant=20000))
         return tip
+
+    def _resolve_safety_factor(self, value):
+        """Tasarım emniyet katsayısını doğrular; aralık dışıysa UYARIR.
+
+        None döndürmek 'kullanıcı vermedi' demektir; o durumda yapısal modül
+        eski davranışını (malzeme kaydındaki değer) sürdürür. Bilinçli bir
+        varsayılan enjekte edilmez ki kullanıcının girdiği ile motorun
+        varsaydığı ayrılabilsin.
+        """
+        if value is None or value == '':
+            return None
+        try:
+            sf = float(value)
+        except (TypeError, ValueError):
+            self.design_warnings.append(_w(
+                'warn.hybrid.safety_factor_invalid', 'warning',
+                requested=str(value)))
+            return None
+        if not (SAFETY_FACTOR_MIN <= sf <= SAFETY_FACTOR_MAX):
+            self.design_warnings.append(_w(
+                'warn.hybrid.safety_factor_out_of_range', 'warning',
+                requested=round(sf, 3),
+                min_value=SAFETY_FACTOR_MIN, max_value=SAFETY_FACTOR_MAX))
+            return None
+        return sf
+
+    def _resolve_chamber_length_override(self, value):
+        """Kullanıcının kamara boyu ezmesini [m] doğrular.
+
+        Geometrik tutarlılık (override >= L_grain + L_pre) burada
+        BİLİNEMEZ — grain daha hesaplanmamıştır. Bu yüzden burada yalnız
+        işaret/birim kontrolü yapılır; geometrik kapı geometri kurulduktan
+        sonra _apply_chamber_length_override'da uygulanır.
+        """
+        if value is None or value == '':
+            return None
+        try:
+            L = float(value)
+        except (TypeError, ValueError):
+            self.design_warnings.append(_w(
+                'warn.hybrid.chamber_length_override_invalid', 'warning',
+                requested=str(value)))
+            return None
+        if L <= 0:
+            return None  # 0/boş = otomatik (L* ile türet) — uyarı gerekmez
+        if L > 20.0:
+            # 20 m üstü bu sınıf motorda birim karışıklığının işareti
+            # (kullanıcı mm yerine m girmiş olabilir).
+            self.design_warnings.append(_w(
+                'warn.hybrid.chamber_length_override_out_of_range', 'warning',
+                requested_m=round(L, 3), max_m=20.0))
+            return None
+        return L
+
+    def _resolve_nozzle_material(self, name):
+        """Lüle/boğaz malzemesini doğrular; tanınmıyorsa grafite düşer + UYARIR.
+
+        None döndürmez: lüle termal değerlendirmesi her koşuda yapılır.
+        Grafit varsayılanı seçilirken bunun bir VARSAYIM olduğu
+        _defaults_used ile işaretlenir.
+        """
+        from hrma.data.materials_db import get_material
+        if name is None or str(name).strip() == '':
+            self._defaults_used.append('nozzle_material')
+            return 'graphite'
+        aday = str(name).strip().lower().replace(' ', '_')
+        try:
+            get_material(aday)
+            return aday
+        except (KeyError, ValueError):
+            self.design_warnings.append(_w(
+                'warn.hybrid.nozzle_material_unknown', 'warning',
+                requested=aday, used='graphite'))
+            return 'graphite'
+
+    def _analyze_nozzle_material(self, heat_transfer_results=None):
+        """Seçilen lüle/boğaz malzemesinin termal ve erozyon değerlendirmesi.
+
+        v2.6.26 — arayüzdeki 'Nozzle Material' seçicisi bu sürüme kadar
+        hiçbir hesaba girmiyordu (grafit / tungsten / bakır seçmek hiçbir
+        çıktıyı değiştirmiyordu). Bu fonksiyon o alanı iki gerçek çıktıya
+        bağlar:
+
+        1) **Boğaz cidar sıcaklığı ve malzeme sınırı.** Bartz tabanlı eksenel
+           profil BOĞAZ istasyonunda çözülür; profil LÜLE malzemesiyle
+           koşulur (kamara malzemesiyle değil — ikisi farklı parçadır).
+           Soğutma varsayımı arayüzün kendi beyanından gelir
+           (NOZZLE_MATERIAL_COOLING; "Copper (Regeneratively Cooled)").
+           Denge cidar sıcaklığı malzemenin izin verilen sıcaklığıyla
+           karşılaştırılır.
+
+        2) **Erozyon.** Yayımlanmış katsayı bandı OLAN malzemeler için
+           (grafit, C-C) ThroatErosionModel ile gerileme hızı ve yanma
+           süresince toplam boğaz büyümesi hesaplanır. Bandı olmayan
+           malzemede (tungsten) katsayı UYDURULMAZ; 'no published data'
+           denir. Soğutmasız metal boğaz için modelin geçerli olmadığı
+           açıkça bildirilir.
+
+        Ölçüm gerekçesi: aynı motorda grafit 2971 K denge sıcaklığında
+        3300 K sınırının altında kalırken tungsten (2473 K) ve soğutmasız
+        bakır (1000 K) sınırı aşar — yani seçim sonucu gerçekten değiştirir.
+        """
+        from hrma.data.materials_db import get_material
+
+        material = self.nozzle_material
+        cooling = NOZZLE_MATERIAL_COOLING.get(material)
+        if cooling is None:
+            # Tabloda yoksa soğutmasız kabul edilir (konservatif) ve bu
+            # varsayım raporda görünür.
+            cooling = 'natural'
+        try:
+            mat = get_material(material)
+        except (KeyError, ValueError):
+            return {'status': 'not_analyzed',
+                    'reason': f"material '{material}' not in materials_db"}
+
+        result = {
+            'status': 'analyzed',
+            'material': material,
+            'material_name': mat.get('name', material),
+            'cooling_assumption': cooling,
+            'cooling_assumption_basis': (
+                'regeneratively cooled (declared by the material selection)'
+                if cooling == 'regenerative'
+                else 'uncooled heat-sink / radiation-cooled throat'),
+            'wall_thickness_mm': self.wall_thickness * 1000.0,
+            'wall_thickness_basis': (
+                'chamber wall thickness input (no separate nozzle wall '
+                'thickness field exists)'),
+            'warnings': [],
+        }
+
+        # --- 1. Boğaz termal durumu -----------------------------------------
+        try:
+            profile = self.heat_transfer_analyzer.analyze_axial_profile(
+                {
+                    'chamber_pressure': self.P_c,
+                    'chamber_temperature': self.T_c,
+                    'chamber_diameter': self.D_ch,
+                    'chamber_length': self.L,
+                    'burn_time': self.t_b,
+                    'mdot_total': self.mdot_total,
+                    'throat_diameter': self.d_t,
+                    'nozzle_type': self.nozzle_type,
+                },
+                n_stations=NOZZLE_THERMAL_STATIONS,
+                material=material,
+                wall_thickness=self.wall_thickness,
+                cooling_type=cooling,
+            )
+            i = int(profile['throat_index'])
+            t_wall = float(profile['T_wall_eq'][i])
+            q_throat = float(profile['q_MW'][i])
+            t_recovery = float(profile['T_recovery'][i])
+        except Exception as exc:  # profil çözülemezse sessiz kalınmaz
+            self._fallback_used.append('nozzle_thermal_profile')
+            result['throat_thermal'] = {
+                'status': 'not_analyzed',
+                'reason': f'axial thermal profile failed: {exc}'}
+        else:
+            allowable = mat.get('allowable_temperature')
+            if allowable is None:
+                allowable = mat.get('max_service_temp')
+            thermal = {
+                'status': 'analyzed',
+                'throat_wall_temperature_K': t_wall,
+                'gas_recovery_temperature_K': t_recovery,
+                'throat_heat_flux_MW_m2': q_throat,
+                'allowable_temperature_K': (float(allowable)
+                                            if allowable else None),
+            }
+            if allowable:
+                allowable = float(allowable)
+                thermal['temperature_margin_K'] = allowable - t_wall
+                thermal['utilization'] = (t_wall / allowable
+                                         if allowable > 0 else None)
+                thermal['verdict'] = ('SAFE' if t_wall <= allowable
+                                      else 'EXCEEDS_ALLOWABLE')
+                if t_wall > allowable:
+                    result['warnings'].append(_w(
+                        'warn.hybrid.nozzle_material_over_temp', 'critical',
+                        material=result['material_name'],
+                        wall_K=round(t_wall),
+                        allowable_K=round(allowable),
+                        cooling=cooling))
+            else:
+                thermal['verdict'] = 'NOT_EVALUATED'
+                thermal['reason'] = (
+                    'no allowable temperature in the material record')
+            result['throat_thermal'] = thermal
+
+        # --- 2. Erozyon ------------------------------------------------------
+        from hrma.analysis.transient_ballistics import ThroatErosionModel
+        try:
+            model = ThroatErosionModel.for_material(material)
+        except ValueError as exc:
+            # Yayımlanmış bant yok (tungsten) veya soğutmasız metal için
+            # model geçersiz (çelik/bakır). Katsayı UYDURULMAZ.
+            result['erosion'] = {
+                'status': 'no_published_data',
+                'reason': str(exc),
+                'assumption': 'rigid throat (no erosion applied)',
+            }
+        else:
+            rate_mm_s = model.rate_mm_s(self.P_c)
+            recession_mm = rate_mm_s * self.t_b
+            r0 = self.d_t / 2.0
+            r1 = r0 + recession_mm / 1000.0
+            area_growth = (r1 / r0) ** 2 - 1.0 if r0 > 0 else 0.0
+            result['erosion'] = {
+                'status': 'analyzed',
+                'radial_recession_rate_mm_s': rate_mm_s,
+                'total_radial_recession_mm': recession_mm,
+                'throat_diameter_initial_mm': self.d_t * 1000.0,
+                'throat_diameter_final_mm': 2.0 * r1 * 1000.0,
+                'throat_area_growth_fraction': area_growth,
+                'coupled_to_performance': False,
+                'coupling_note': (
+                    'Reported only; the steady-state performance solution '
+                    'assumes a rigid throat. Use the transient solver for '
+                    'erosion-coupled thrust and pressure histories.'),
+                'model': model.describe(),
+            }
+            if model.warnings:
+                result['erosion']['material_warnings'] = list(model.warnings)
+        return result
+
+    def _apply_chamber_length_override(self, L_auto, L_grain, L_pre):
+        """Kamara boyu ezmesini geometrik kapıdan geçirerek uygular.
+
+        Döndürür: (L_kullanılan, L_post_kullanılan). Ezme yoksa otomatik
+        değerler aynen döner.
+
+        Fiziksel alt sınır L_grain + L_pre'dir: yakıt grain'i ve ön-yanma
+        odası kamaranın İÇİNDE olmak zorundadır. Altında bir değer verilirse
+        sessizce kırpmak yerine ezme REDDEDİLİR ve neden söylenir — çünkü
+        kırpılmış bir değer kullanıcının girdiğinden farklı bir motor demektir
+        ve kullanıcı bunu ekranda göremez.
+        """
+        if self.chamber_length_override is None:
+            return L_auto, L_auto - L_grain - L_pre
+        L_user = self.chamber_length_override
+        L_min = L_grain + L_pre
+        if L_user < L_min:
+            self.design_warnings.append(_w(
+                'warn.hybrid.chamber_length_override_too_short', 'warning',
+                requested_mm=round(L_user * 1000.0, 1),
+                min_mm=round(L_min * 1000.0, 1),
+                grain_mm=round(L_grain * 1000.0, 1),
+                pre_mm=round(L_pre * 1000.0, 1)))
+            return L_auto, L_auto - L_grain - L_pre
+        # Ezme kabul edildi: art-yanma odası kalan boydan gelir.
+        return L_user, L_user - L_grain - L_pre
 
     def calculate(self):
         # Calculate characteristic velocity
@@ -592,9 +927,33 @@ class HybridRocketEngine:
         L_post = float(np.clip(L_post_raw,
                                POST_CHAMBER_D_FACTOR_MIN * self.D_ch,
                                POST_CHAMBER_D_FACTOR_MAX * self.D_ch))
+        L_auto = self.L_grain + L_pre + L_post
+        # v2.6.26: "Chamber Length Override (mm)" alanı bu sürüme kadar
+        # tamamen ölüydü (arayüzde vardı, hiçbir yere gitmiyordu). Artık
+        # L* ile türetilen boyu ezer; geometrik alt sınır kapısı
+        # _apply_chamber_length_override içinde.
+        self.L, L_post = self._apply_chamber_length_override(
+            L_auto, self.L_grain, L_pre)
         self.L_pre_chamber = L_pre
         self.L_post_chamber = L_post
-        self.L = self.L_grain + L_pre + L_post
+        self.chamber_length_auto = L_auto
+        # v2.6.26 — ETİKET ÜÇÜNCÜ DURUMU DA SÖYLÜYOR.
+        # Eskiden yalnız iki değer vardı ve ezme yoksa her koşuda
+        # 'l_star_derived' yazıyordu. Oysa hibritte port hacmi çoğu zaman
+        # istenen L*'ın gerektirdiği hacmi TEK BAŞINA aşar; o durumda art-yanma
+        # odası geometrik alt sınıra kelepçelenir ve kamara boyu fiilen
+        # GRAIN UZUNLUĞUNDAN gelir, L*'tan değil. Ölçüldü: varsayılan koşuda
+        # L_post/D_ch tam 0,3000 (alt sınırın kendisi) çıkarken etiket hâlâ
+        # "L* ile türetildi" diyordu. l_star_note bu durumu zaten dürüstçe
+        # anlatıyordu ama makinece okunan alan yanlış cevap veriyordu.
+        if abs(self.L - L_auto) > 1e-9:
+            self.chamber_length_source = 'user_override'
+        elif abs(L_post - POST_CHAMBER_D_FACTOR_MIN * self.D_ch) < 1e-9:
+            self.chamber_length_source = 'grain_limited'
+        elif abs(L_post - POST_CHAMBER_D_FACTOR_MAX * self.D_ch) < 1e-9:
+            self.chamber_length_source = 'post_chamber_clamped_high'
+        else:
+            self.chamber_length_source = 'l_star_derived'
 
         # GERÇEKLEŞEN L*: hibritte port hacmi tek başına büyük olduğundan
         # istenen L* çoğu zaman geometrik alt sınırın ALTINDA kalır; bu
@@ -641,9 +1000,20 @@ class HybridRocketEngine:
         # Advanced combustion analysis with Cantera (kendi yanma çözücümüz)
         fuel_composition = {self.fuel_type: 100.0}  # Simplified for now
         ox = getattr(self, 'oxidizer_type', None) or 'N2O'
+        # v2.6.26 — GENİŞLEME ORANI ARTIK GEÇİRİLİYOR.
+        # `analyze_combustion` bu argümanı ZATEN destekliyordu; verilmediğinde
+        # çıkış basıncını ISA deniz seviyesine (1,01325 bar) çapalıyor ve bunu
+        # `exit_pressure_basis: 'sea_level_default'` ile dürüstçe bildiriyor.
+        # Ama hibrit çağrısı hiç göndermediği için "İrtifa Performansı" paneli
+        # her zaman "deniz seviyesinde tam genişlemiş nozul" varsayıyordu:
+        # ölçüldü, ε 2/4/8/16 süpürüldüğünde sea_level_isp ve vacuum_isp 15
+        # hane boyunca SABİT kaldı (191,976 / 211,809 s) ve ε=16'da motor
+        # paneli Isp 125,8 s derken irtifa paneli 192,0 s gösteriyordu (%53).
+        # Kullanıcı nozul genişlemesini büyütüp irtifa kazancını göremiyordu.
         combustion_results = self.combustion_analyzer.analyze_combustion(
             fuel_composition, ox, self.OF, self.P_c, None,
-            eta_c_star=self.eta_c_star
+            eta_c_star=self.eta_c_star,
+            expansion_ratio=self.epsilon
         )
 
         # Gerçek termodinamik değerler CombustionAnalyzer denge çözümünden alınır.
@@ -662,9 +1032,23 @@ class HybridRocketEngine:
         # Advanced nozzle design — gerçek yanma değerlerini (gamma, R, T_c)
         # geçir; aksi halde design_nozzle eski hardcoded 1.25/300/3000'e düşer
         # ve CF/Isp motorun geri kalanıyla tutarsız olur (entegrasyon gap fix).
+        # v2.6.26 — İKİ ÖLÇÜLMÜŞ KOPUKLUK burada kapatıldı:
+        #
+        # 1) contraction_area_ratio geçirilmiyordu: lüle tasarımcısı kendi
+        #    varsayılanına (A_c/A_t = 2.25) düşüyor, kullanıcının daralma
+        #    oranı yakınsak kontura hiç ulaşmıyordu. Aynı yanıtta iki farklı
+        #    daralma oranı görünüyordu.
+        # 2) wall_material geçirilmiyordu: cidar kalınlığı/kütlesi ne seçilirse
+        #    seçilsin ÇELİKTEN (7850 kg/m³, 250 MPa) hesaplanıyordu. Kullanıcı
+        #    tungsten seçtiğinde sonuçta 'nozzle_material: tungsten' yazarken
+        #    lüle kütlesi çelik yoğunluğundan çıkıyordu. nozzle_design.py:730
+        #    bu hatayı kendi yorumunda tarif etmiş ama çağıran düzeltilmemişti.
+        _cr, _ = self._resolve_contraction_ratio()
         nozzle_results = self.nozzle_designer.design_nozzle(
             self.At, self.epsilon, self.P_c, self.P_a, self.nozzle_type,
-            gamma=self.gamma, R_specific=self.R, T_chamber=self.T_c
+            gamma=self.gamma, R_specific=self.R, T_chamber=self.T_c,
+            contraction_area_ratio=_cr,
+            wall_material=getattr(self, 'nozzle_material', None),
         )
         
         # Altitude performance — uq_mode'da atlanır (danışma tablosu; ana
@@ -731,15 +1115,38 @@ class HybridRocketEngine:
         # Not: arayüzün 'steel_304' değeri materials_db'de yoktu (kayıt adı
         # 'ss_304'); takma ad v2.6.25'te eklendi, aksi hâlde varsayılan
         # malzeme seçimi burada çözülemezdi.
+        # v2.6.26 — SÖZLEŞME BOŞLUĞU KAPATILDI. Bu çağrı yalnız altı anahtar
+        # gönderiyordu; ısı modülü bulamadığı büyüklükleri KENDİ genel
+        # varsayılanlarından türetiyordu ve motorun gerçek çözümüyle
+        # çelişiyordu (ölçüldü, aynı koşu):
+        #     c*     motor 1325,00 m/s  <-> ısı modülü 1251,38 m/s  (-%5,6)
+        #     boğaz  motor   48,69 mm   <-> ısı modülü   46,85 mm   (-%3,8)
+        #     gamma  motor    1,2378    <-> ısı modülü    1,20      (varsayılan)
+        #     MW     motor   20,94 g/mol<-> ısı modülü   24,0       (varsayılan)
+        # Bileşik Bartz etkisi ~%20 h_g sapması; ayrıca termal panelin
+        # gösterdiği boğaz çapı nozul panelininkiyle çelişiyordu.
+        # Aynı dosyadaki _analyze_nozzle_material çağrısı boğaz çapını ZATEN
+        # doğru geçiriyordu — yani sözleşme bir çağrıda kurulu, diğerinde
+        # atlanmıştı.
+        ht_input = {
+            'chamber_pressure': self.P_c,
+            'chamber_temperature': self.T_c,
+            'chamber_diameter': self.D_ch,
+            'chamber_length': self.L,
+            'burn_time': self.t_b,
+            'mdot_total': self.mdot_total,
+            'throat_diameter': self.d_t,
+            'throat_area': self.At,
+            'c_star': self.C_star,
+            'gamma': self.gamma,
+        }
+        # Molekül ağırlığı: R spesifikten türetilir (M = R_evrensel/R).
+        # Yoksa GÖNDERİLMEZ — ısı modülü kendi Bartz tahminine düşer ve bunu
+        # kendi içinde beyan eder; buradan uydurma bir sayı geçirmek yasak.
+        if getattr(self, 'R', None):
+            ht_input['molecular_weight'] = 8314.462618 / self.R
         heat_transfer_results = self.heat_transfer_analyzer.analyze_heat_transfer(
-            {
-                'chamber_pressure': self.P_c,
-                'chamber_temperature': self.T_c,
-                'chamber_diameter': self.D_ch,
-                'chamber_length': self.L,
-                'burn_time': self.t_b,
-                'mdot_total': self.mdot_total
-            },
+            ht_input,
             material=self.chamber_material,
             wall_thickness=self.wall_thickness,
             cooling_type=self.cooling_type
@@ -759,7 +1166,15 @@ class HybridRocketEngine:
             'chamber_length': self.L,
             'throat_diameter': self.d_t,
             'nozzle_type': self.nozzle_type,
-            'burn_time': self.t_b
+            'burn_time': self.t_b,
+            # v2.6.26: EKSENEL İTKİ YÜKÜ. structural_analysis.py:523 burkulma
+            # kontrolü için bunu `motor_data['thrust']` diye okuyor; anahtar
+            # burada olmadığı için her motorda 0 N geliyordu. Sonuç: uygulanan
+            # eksenel gerilme 0, burkulma emniyet katsayısı SONSUZ ve durum
+            # DAİMA "SAFE" — yani NASA SP-8007 burkulma kontrolü fiilen
+            # kapalıydı. İnce cidarlı uzun bir kamarada burkulma yöneten yük
+            # olabilir; sessizce "güvenli" demek en tehlikeli yanlıştır.
+            'thrust': self.F,
         }
         # ISI -> YAPISAL ZİNCİR (Dalga 0, 2026-07-14): Isı analizinin
         # hesapladığı GERÇEK iç/dış cidar sıcaklıkları yapısal modüle
@@ -776,15 +1191,42 @@ class HybridRocketEngine:
                 struct_input['wall_temperature_cold'] = max(t_cold, 0.0)
         except (KeyError, TypeError, ValueError):
             pass  # ısı sonucu yoksa eski konservatif T_c tahmini devrede kalır
+        # v2.6.26 — İKİ KOPUKLUK BURADA KAPANDI:
+        #
+        # 1) material='steel_4130' SABİT yazılıydı. Kullanıcının seçtiği kamara
+        #    malzemesi (v2.6.25'te termal modele bağlanmıştı) yapısal modüle
+        #    hâlâ ULAŞMIYORDU: Inconel 718 seçen kullanıcının emniyet katsayısı
+        #    4130 çeliğinden hesaplanıyordu. Termal ve yapısal modüller aynı
+        #    motor için FARKLI malzeme varsayıyordu.
+        #
+        # 2) 'Safety Factor' ve gerçek cidar kalınlığı geçilmiyordu. Yapısal
+        #    modül bu ikisini zaten destekliyor (design_safety_factor,
+        #    actual_wall_thickness) ama çağrı onları vermediği için modül
+        #    BOYUTLANDIRMA modunda kalıyordu; o modda raporlanan SF tanım
+        #    gereği "hedef SF x imalat payı"dır, yani kullanıcının kendi
+        #    girdisinin geri okunmasıdır (bkz. _analyze_chamber_wall F003
+        #    yorumu). Gerçek cidar geçilince modül DOĞRULAMA moduna geçer ve
+        #    SF gerçekten basınç, çap, malzeme ve kalınlıktan çıkar.
         structural_results = self.structural_analyzer.analyze_structure(
             struct_input,
-            material='steel_4130',
-            design_pressure_factor=1.5
+            material=self.chamber_material,
+            design_pressure_factor=1.5,
+            design_safety_factor=self.design_safety_factor,
+            # Yalnız kullanıcı GERÇEKTEN bir kalınlık verdiyse doğrulama modu.
+            actual_wall_thickness=(self.wall_thickness
+                                   if self.wall_thickness_user_supplied
+                                   else None)
         )
-        
-        return self._compile_results(combustion_results, nozzle_results, 
+
+        # Lüle/boğaz malzemesinin termal + erozyon değerlendirmesi (v2.6.26'da
+        # bağlanan üçüncü ölü girdi).
+        nozzle_material_results = self._analyze_nozzle_material(
+            heat_transfer_results)
+
+        return self._compile_results(combustion_results, nozzle_results,
                                    altitude_performance, optimum_of, thrust_altitude_analysis,
-                                   heat_transfer_results, structural_results)
+                                   heat_transfer_results, structural_results,
+                                   nozzle_material_results)
     
     def _calculate_c_star(self):
         """Karakteristik hızı (c*) KENDİ yanma çözücümüzle hesaplar.
@@ -1244,6 +1686,19 @@ class HybridRocketEngine:
         # (track_performance'dan bağımsız tutulur — geometri her zaman lazım)
         self._port_time_history = []
         self._port_diameter_history = []
+        # v2.6.26 — İTKİ-ZAMAN EĞRİSİ. Katı motorda bu eğri vardı, hibritte
+        # YOKTU; oysa zaman-adımlı çözücü gereken her şeyi zaten hesaplıyordu
+        # (anlık yakıt debisi, anlık c*, anlık Isp) ve yalnızca dışarı
+        # vermiyordu. Eğri UYDURULMAZ: her nokta bu döngünün kendi
+        # durumundan gelir.
+        #     ṁ_toplam(t) = ṁ_ox + ṁ_yakıt(t)          (süreklilik)
+        #     F(t)        = ṁ_toplam(t)·Isp(t)·g0       (itki tanımı)
+        #     Pc(t)       = ṁ_toplam(t)·c*(t)/At        (c* tanımı)
+        # Hibritte ṁ_ox sabit, ṁ_yakıt port çapıyla değişir; eğrinin
+        # regresif/progresif biçimi bu fizikten çıkar, elle çizilmez.
+        self._mdot_total_history = []
+        self._thrust_history = []
+        self._pc_history = []
 
         for i in range(num_steps):
             t_now = i * dt
@@ -1273,6 +1728,23 @@ class HybridRocketEngine:
                 self._cstar_history.append(cstar_inst)
                 self._isp_history.append(isp_inst)
                 self._time_history.append(t_now)
+
+                # İtki ve oda basıncı, bu adımın KENDİ durumundan türer.
+                # At bu noktada hesaplanmıştır (calculate() sırası:
+                # At -> _design_fuel_grain); yine de savunmacı davranılır,
+                # çünkü At yoksa Pc uydurulamaz — o nokta atlanır.
+                mdot_total_inst = self.mdot_ox + mdot_f_inst
+                self._mdot_total_history.append(mdot_total_inst)
+                self._thrust_history.append(
+                    mdot_total_inst * isp_inst * self.g0)
+                # Pc BAR cinsinden saklanır: katı motorun thrust_curve
+                # sözleşmesi bar kullanıyor (ölçüldü) ve tek bir çizim kodu
+                # üç sayfayı da beslediği için birimler AYNI olmak zorunda.
+                # c* tanımı Pa verir; 1e5'e bölünür.
+                at = getattr(self, 'At', None)
+                self._pc_history.append(
+                    mdot_total_inst * cstar_inst / at / 1e5
+                    if at and at > 0 else float('nan'))
 
             # Port yarıçapını artır (çap artışı = 2 · yarıçap artışı)
             D_port += 2 * r_dot * dt
@@ -1361,9 +1833,119 @@ class HybridRocketEngine:
         # Store for results
         self.G_ox_initial = G_ox_initial
     
-    def _compile_results(self, combustion_results=None, nozzle_results=None, 
+    def _resolve_contraction_ratio(self):
+        """(A_c/A_t, kaynak) — daralma oranının TEK tanım noktası.
+
+        Kullanıcı bir değer verdiyse o geçerlidir; vermediyse oda kesiti grain
+        dış zarfından bilindiği için geometriden türetilir.
+
+        v2.6.26: bu çözüm yalnız `_finite_area_combustor` içinde duruyordu ve
+        lüle tasarımcısına HİÇ geçirilmiyordu. Ölçüldü: kullanıcı 4.0
+        girdiğinde yanıtın bir yerinde `finite_area_combustor.contraction_ratio
+        = 4.0 (user input)` yazarken lüle konturunda
+        `convergent.contraction_ratio = 2.25` kalıyor ve yakınsak koni boyu hiç
+        değişmiyordu — tek sonuçta iki çelişkili daralma oranı. Tek kaynağa
+        indirildi.
+        """
+        cr_user = getattr(self, 'contraction_ratio_input', None)
+        cr_geom = None
+        if getattr(self, 'D_ch', 0) and getattr(self, 'd_t', 0):
+            cr_geom = (self.D_ch / self.d_t) ** 2
+        kullanici_verdi = bool(cr_user and float(cr_user) > 1.0)
+        cr = float(cr_user) if kullanici_verdi else cr_geom
+        if not cr or cr <= 1.0:
+            return None, None
+        return cr, ('user input' if kullanici_verdi else 'chamber geometry')
+
+    def _finite_area_combustor(self):
+        """Sonlu alanlı yanma odası: kontraksiyon oranından basınç kaybı.
+
+        v2.6.26 — ÖLÜ ALAN DÜZELTMESİ. Arayüzdeki ``combustion_type``
+        seçicisi ve ``contraction_ratio`` alanı ölçümde çıktının HİÇBİR
+        yaprağını değiştirmiyordu: ``self.combustion_type`` sınıfta yalnız
+        bir kez ATANIYOR, hiç okunmuyordu; ``contraction_ratio`` ise motora
+        hiç geçirilmiyordu. Kullanıcı bir yanma modeli seçtiğini sanıyordu.
+
+        Fizik (Sutton & Biblarz, Roket Tahrik Elemanları, Böl. 3; Huzel &
+        Huang, NASA SP-125, Böl. 4): sonsuz alanlı oda varsayımında odadaki
+        akış hızı sıfır kabul edilir ve enjektör yüzü basıncı ile nozul
+        durgunluk basıncı eşittir. Gerçek odada kesit sonludur; akış boğaza
+        doğru hızlanır, odada sonlu bir Mach sayısı oluşur ve enjektör
+        yüzündeki basınç nozul girişindekinden YÜKSEKTİR. Oda Mach sayısı,
+        izentropik alan bağıntısının ses altı kökünden gelir:
+
+            A_c/A_t = (1/M)·[ (2/(g+1))·(1 + (g-1)/2·M²) ]^((g+1)/(2(g-1)))
+
+        Enjektör yüzü / nozul durgunluk basıncı oranı ise sıkıştırılabilir
+        akışın durgunluk bağıntısıdır:
+
+            p_inj/p_c = (1 + (g-1)/2·M_c²)^(g/(g-1))
+
+        CR büyüdükçe M_c -> 0 ve oran -> 1; yani sonsuz alan çözümü bu
+        modelin limit hâlidir. Bu, bir uydurma düzeltme katsayısı DEĞİL,
+        aynı denklemin sonlu kesit için çözülmüş hâlidir.
+
+        Döndürür: ``None`` (model uygulanmadı) veya sonuç sözlüğü.
+        """
+        if str(getattr(self, 'combustion_type', 'infinite')).lower() != 'finite':
+            return None
+        gamma = float(getattr(self, 'gamma', 1.2) or 1.2)
+        if not (1.0 < gamma < 2.0):
+            return None
+
+        # Kontraksiyon oranı TEK KAYNAKTAN (_resolve_contraction_ratio):
+        # eskiden bu blok yalnız buradaydı ve lüle konturu aynı sayıyı
+        # görmüyordu — aynı yanıtta iki farklı daralma oranı çıkıyordu.
+        cr, source = self._resolve_contraction_ratio()
+        if not cr:
+            return None
+
+        # İzentropik alan bağıntısının SES ALTI kökü (ikiye bölme; A/A* alan
+        # oranı M<1 bölgesinde M ile monoton azalır, kök tektir).
+        exponent = (gamma + 1.0) / (2.0 * (gamma - 1.0))
+
+        def area_ratio(mach):
+            return (1.0 / mach) * ((2.0 / (gamma + 1.0))
+                                   * (1.0 + 0.5 * (gamma - 1.0) * mach ** 2)) ** exponent
+
+        lo, hi = 1e-6, 1.0
+        for _ in range(200):
+            mid = 0.5 * (lo + hi)
+            if area_ratio(mid) > cr:
+                lo = mid
+            else:
+                hi = mid
+        mach_c = 0.5 * (lo + hi)
+
+        stagnation_ratio = (1.0 + 0.5 * (gamma - 1.0) * mach_c ** 2) ** (
+            gamma / (gamma - 1.0))
+        injector_face_bar = self.P_c * stagnation_ratio
+
+        # Çok küçük kontraksiyonda oda tıkanmaya yaklaşır — uyar, kırpma.
+        if cr < 2.0:
+            self.design_warnings.append(_w(
+                'warn.hybrid.contraction_ratio_low', 'warning',
+                contraction_ratio=round(cr, 2),
+                chamber_mach=round(mach_c, 3)))
+
+        return {
+            'model': 'finite-area combustor',
+            'contraction_ratio': round(cr, 3),
+            'contraction_ratio_source': source,
+            'chamber_mach': round(mach_c, 4),
+            'injector_face_pressure_bar': round(injector_face_bar, 3),
+            'stagnation_pressure_ratio': round(stagnation_ratio, 5),
+            'pressure_loss_percent': round((stagnation_ratio - 1.0) * 100.0, 3),
+            'basis': ('Isentropic area-Mach relation (subsonic root) plus the '
+                      'compressible stagnation relation; Sutton & Biblarz Ch.3, '
+                      'Huzel & Huang NASA SP-125 Ch.4. The infinite-area '
+                      'assumption is the CR -> infinity limit of this model.'),
+        }
+
+    def _compile_results(self, combustion_results=None, nozzle_results=None,
                         altitude_performance=None, optimum_of=None, thrust_altitude_analysis=None,
-                        heat_transfer_results=None, structural_results=None):
+                        heat_transfer_results=None, structural_results=None,
+                        nozzle_material_results=None):
         """Compile all results into a comprehensive dictionary"""
         
         # Basic performance and geometry
@@ -1393,6 +1975,15 @@ class HybridRocketEngine:
             'l_star': self.L_star,
             'l_star_achieved': getattr(self, 'L_star_achieved', self.L_star),
             'l_star_note': getattr(self, 'l_star_note', ''),
+            # v2.6.26: kamara boyunun kullanıcı ezmesinden mi L*'dan mı
+            # geldiği görünür olmalı (ezme kabul edilmediyse kullanıcı bunu
+            # uyarıdan ve bu alandan anlar).
+            'chamber_length_source': getattr(self, 'chamber_length_source',
+                                             'l_star_derived'),
+            'chamber_length_auto': getattr(self, 'chamber_length_auto',
+                                           self.L),
+            'design_safety_factor_input': self.design_safety_factor,
+            'nozzle_material': self.nozzle_material,
             'chamber_volume_actual': getattr(self, 'V_c_actual', self.V_c),
             
             # Fuel grain
@@ -1483,6 +2074,21 @@ class HybridRocketEngine:
                 'isp_design_of': self.Isp,
             }
 
+        # İtki-zaman eğrisi (v2.6.26). Katı motorla AYNI sözleşme
+        # ({time, thrust, pressure, mass_flow}) kullanılır ki üç sayfa aynı
+        # çizim kodunu paylaşabilsin. Değerlerin tamamı zaman-adımlı
+        # çözücünün kendi durumundan gelir; şekil verilmez.
+        if getattr(self, '_thrust_history', None):
+            basic_results['thrust_curve'] = {
+                'time': [float(x) for x in self._time_history],
+                'thrust': [float(x) for x in self._thrust_history],
+                'pressure': [float(x) for x in self._pc_history],
+                'mass_flow': [float(x) for x in self._mdot_total_history],
+                'basis': ('time-marching solution: F = mdot_total(t)*Isp(t)*g0, '
+                          'Pc = mdot_total(t)*c_star(t)/At; oxidiser flow is '
+                          'constant, fuel flow follows the regressing port'),
+            }
+
         # Port çapı zaman serisi (3D yanma animasyonu için, metre + saniye).
         # Yanıt boyutunu sınırlamak için ~200 noktaya seyreltilir.
         if getattr(self, '_port_diameter_history', None):
@@ -1536,7 +2142,16 @@ class HybridRocketEngine:
                 'motor_type': 'hybrid',
                 # v2.5.2: kullanıcının seçtiği enjektör tipi (eskiden sabit
                 # 'showerhead' idi, seçim sonucu hiç etkilemiyordu)
-                'injector_type': self.injector_type,
+                # v2.6.26: ARAYÜZ SÖZCÜĞÜ İLE MODÜL SÖZCÜĞÜ AYRIYDI. Arayüz
+                # 'impingement' / 'coaxial' gönderiyor, bu modül
+                # 'like_impinging' / 'gas_gas_coaxial' bekliyor. Eşleme
+                # olmadığı için beş enjektör tipinin İKİSİNDE çağrı
+                # ValueError atıyor ve aşağıdaki yedek yola düşülüyordu —
+                # yedek yol da 12 delikli showerhead SABİTİ üretiyordu.
+                # Yani pintle-dışı iki tipte kullanıcı, seçtiği tipin
+                # etiketini taşıyan uydurma bir showerhead sonucu görüyordu.
+                'injector_type': INJECTOR_TYPE_TO_MODULE.get(
+                    self.injector_type, self.injector_type),
                 'mdot_ox': self.mdot_ox,
                 'rho_ox': rho_ox,
                 'Pc_bar': self.P_c,
@@ -1559,7 +2174,11 @@ class HybridRocketEngine:
                 raise ValueError(detail.get('error', 'enjektör tasarım hatası'))
             oxc = detail['ox_circuit']
             basic_results['injector_design'] = {
-                'injector_type': detail['injector_type'],
+                # Kullanıcının SEÇTİĞİ ad birincil; modülün iç sözcüğü ayrı
+                # alanda verilir (eşleme yapıldığında kullanıcı 'impingement'
+                # seçip sonuçta 'like_impinging' görmemeli).
+                'injector_type': self.injector_type,
+                'model_injector_type': detail['injector_type'],
                 'oxidizer_flow_rate_kg_s': self.mdot_ox,
                 'injection_velocity_m_s': oxc['velocity_m_s'],
                 'number_of_orifices': oxc['n_orifices'],
@@ -1571,26 +2190,36 @@ class HybridRocketEngine:
             }
             basic_results['injector_design_detail'] = detail
         except Exception as _inj_err:
-            warnings.warn(f'injector_design modülü kullanılamadı, basit '
-                          f'hesaba düşüldü: {_inj_err}')
-            # Eski basit boyutlandırma (geriye uyum):
-            Cd_inj = 0.65  # Typical sharp-edge orifice discharge coefficient
-            A_inj_total = self.mdot_ox / (
-                Cd_inj * np.sqrt(2 * rho_ox * delta_P_inj * 1e5))
-            n_orifices = 12  # Typical showerhead pattern
-            A_single = A_inj_total / n_orifices
-            d_orifice = np.sqrt(4 * A_single / np.pi)  # m
-            manifold_d = self.D_port_initial * 2.0
+            # v2.6.26 — UYDURMA YEDEK KALDIRILDI.
+            #
+            # Eski yedek yol, devre modeli hata verdiğinde şu SABİTLERİ
+            # üretiyordu: n_orifices = 12 ("typical showerhead pattern"),
+            # Cd = 0.65 ve manifold çapı = 2 x başlangıç port çapı. Bu
+            # sayıların hiçbiri kullanıcının seçtiği enjektör tipinden
+            # gelmiyordu; yine de sonuç ``injector_type`` alanında
+            # kullanıcının seçimiyle ETİKETLENİYORDU. Yani pintle/swirl
+            # dışındaki iki tipte kullanıcı, "coaxial" yazan bir 12 delikli
+            # showerhead görüyordu. Uyarı yalnız ``warnings.warn`` ile
+            # sunucu günlüğüne gidiyordu; ekranda hiçbir iz yoktu.
+            #
+            # Yeni sözleşme: delik planı üretilemiyorsa ÜRETİLMEZ. Blok
+            # 'status: not_analyzed' ile ve nedeniyle döner, uyarı
+            # kullanıcıya ULAŞIR. Geometri uydurmak, geometri vermemekten
+            # daha kötüdür — kullanıcı bu sayıları imalata götürüyor.
+            self._fallback_used.append('injector_design_detail')
+            self.design_warnings.append(_w(
+                'warn.hybrid.injector_detail_unavailable', 'warning',
+                injector_type=self.injector_type,
+                reason=str(_inj_err)[:200]))
             basic_results['injector_design'] = {
+                'status': 'not_analyzed',
                 'injector_type': self.injector_type,
+                'reason': (f'the detailed injector circuit model could not '
+                           f'size this injector: {_inj_err}'),
+                # Cozucunun GERCEKTEN hesapladiklari korunur; uydurulan
+                # (delik sayisi, delik capi, manifold capi, Cd) verilmez.
                 'oxidizer_flow_rate_kg_s': self.mdot_ox,
-                'injection_velocity_m_s': self._inj_velocity,
-                'number_of_orifices': n_orifices,
-                'orifice_diameter_mm': d_orifice * 1000,
                 'injection_pressure_drop_bar': delta_P_inj,
-                'manifold_diameter_mm': manifold_d * 1000,
-                'discharge_coefficient': Cd_inj,
-                'total_injector_area_mm2': A_inj_total * 1e6,
             }
 
         # --- 4. Design Summary ---
@@ -1601,8 +2230,37 @@ class HybridRocketEngine:
         L_div = (self.d_e / 2 - self.d_t / 2) / np.tan(np.radians(div_half_angle))
         total_motor_length = self.L + L_conv + L_div
         # Total mass estimate: propellant + dry mass (~25% of propellant for small motors)
-        dry_mass_est = 0.25 * self.m_total
-        total_mass = self.m_total + dry_mass_est
+        # v2.6.26 — KURU KÜTLE ARTIK GEOMETRİDEN HESAPLANIYOR.
+        #
+        # Burada `dry_mass_est = 0.25 * m_total` yazıyordu: itergaç kütlesinin
+        # dörtte biri alınan bir başparmak kuralı. Kullanıcının cidar
+        # kalınlığından, malzemesinden ve motorun kendi geometrisinden
+        # TAMAMEN kopuktu — ölçüldü: cidar 3 mm'den 20 mm'ye çıkarıldığında
+        # bu sayı 1,366 kg'da SABİT kaldı, malzeme değişimi de etkilemedi.
+        # Aynı koşuda CAD kütle dökümü gerçek geometri × yoğunlukla
+        # 32,02 kg veriyordu; iki sayı 23 KAT farklıydı ve ikisi de "kuru
+        # kütle" adıyla kullanıcıya gösteriliyordu. İtki/ağırlık oranı bu
+        # sayıdan çıktığı için uçuş bütçesi de yanlış oluyordu.
+        #
+        # Yeni davranış: yapısal analizin hesapladığı GERÇEK kamara kütlesi
+        # kullanılır. Yapısal sonuç yoksa sayı UYDURULMAZ — None döner ve
+        # nedeni beyan edilir (0 yazmak "kütlesiz motor" demek olurdu).
+        dry_mass_est = None
+        dry_mass_basis = 'structural analysis not available'
+        try:
+            weight = (structural_results or {}).get('weight_analysis') or {}
+            for key in ('total_mass', 'total_weight', 'total_structural_mass'):
+                candidate = weight.get(key)
+                if candidate is not None and np.isfinite(float(candidate)):
+                    dry_mass_est = float(candidate)
+                    dry_mass_basis = (
+                        'structural analysis: chamber + nozzle + closures '
+                        'from real geometry and material density')
+                    break
+        except (TypeError, ValueError, AttributeError):
+            dry_mass_est = None
+        total_mass = (self.m_total + dry_mass_est
+                      if dry_mass_est is not None else None)
 
         basic_results['design_summary'] = {
             'title': f'{self.motor_name or "Hybrid Motor"} - Optimal Design',
@@ -1615,6 +2273,9 @@ class HybridRocketEngine:
                 'total_motor_length_mm': total_motor_length * 1000,
                 'total_mass_kg': total_mass,
                 'dry_mass_estimate_kg': dry_mass_est,
+                # Kütlenin nereden geldiği görünür olmalı: eskiden bu alan
+                # bir başparmak kuralıydı ve kullanıcı bunu bilmiyordu.
+                'dry_mass_basis': dry_mass_basis,
             },
             'performance': {
                 'thrust_N': self.F,
@@ -1662,5 +2323,24 @@ class HybridRocketEngine:
         
         if structural_results:
             basic_results['structural_analysis'] = structural_results
-        
+
+        if nozzle_material_results:
+            basic_results['nozzle_material_analysis'] = nozzle_material_results
+
+        # v2.6.26: hibrit motor uyarıları TOPLUYOR ama sonuç sözlüğüne HİÇ
+        # koymuyordu; ``self.design_warnings`` listesi nesneyle birlikte
+        # ölüyordu. Ölçüldü: chamber_material='ZIRVAAA' gönderilen bir istek
+        # HTTP 200 dönüyor, sessizce steel_4130 kullanılıyor ve kullanıcıya
+        # HİÇBİR uyarı ulaşmıyordu — yani "sessiz yedeğe düşme yasak" diyen
+        # _resolve_chamber_material'ın uyarısı fiilen yok hükmündeydi.
+        # Katı motorda olduğu gibi iki adla birden verilir: arayüz panelleri
+        # 'warnings', dış tüketiciler 'design_warnings' okuyor.
+        finite_area = self._finite_area_combustor()
+        if finite_area:
+            basic_results['finite_area_combustor'] = finite_area
+
+        warnings_list = list(getattr(self, 'design_warnings', []) or [])
+        basic_results['design_warnings'] = warnings_list
+        basic_results['warnings'] = warnings_list
+
         return basic_results

@@ -20,7 +20,8 @@ import os
 import re
 from typing import Any, Dict, Iterable, Optional
 
-__all__ = ['InputError', 'num', 'integer', 'choice', 'safe_name', 'text']
+__all__ = ['InputError', 'num', 'integer', 'choice', 'safe_name',
+           'safe_arcname', 'is_safe_arcname', 'text']
 
 
 class InputError(ValueError):
@@ -43,6 +44,36 @@ def safe_name(value: Any, default: str = 'HRMA_MOTOR',
     base = os.path.basename(raw)
     cleaned = _SAFE_NAME.sub('_', base).strip('._')
     return (cleaned or default)[:maxlen]
+
+
+#: Arşiv girdi adı için beyaz liste: '/' ile ayrılmış, her bileşeni
+#: ``safe_name`` alfabesinde olan yol. Kara liste ('..' ara) KULLANILMAZ —
+#: v2.6.26 ölçümünde ters bölü ve 'C:' sürücü ön eki kara listeden kaçmıştı
+#: (POSIX'te ``os.path.normpath`` ters bölüyü yol ayracı saymıyor).
+_SAFE_ARCNAME = re.compile(r'[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\Z')
+
+
+def is_safe_arcname(value: Any) -> bool:
+    """Bu dize ZIP arşivine girdi adı olarak yazılabilir mi?
+
+    Yalnız beyaz listeye uyan, ``..`` bileşeni içermeyen göreli yollar geçer.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    if not _SAFE_ARCNAME.match(value):
+        return False
+    return '..' not in value.split('/')
+
+
+def safe_arcname(*parts: Any) -> str:
+    """Arşiv girdi adını güvenli bileşenlerden kurar: ``safe_arcname('step', ad)``.
+
+    Her bileşen :func:`safe_name`'den geçer, sonra '/' ile birleştirilir. Böylece
+    kullanıcı adındaki ``../``, ``..\\``, ``C:\\`` ve NUL baytı bileşenin İÇİNDE
+    kalamaz; dizin yapısını yalnız çağıran kod belirler.
+    """
+    cleaned = [safe_name(p) for p in parts if str(p or '').strip() != '']
+    return '/'.join(cleaned) or 'HRMA_MOTOR'
 
 
 def _missing(value: Any) -> bool:

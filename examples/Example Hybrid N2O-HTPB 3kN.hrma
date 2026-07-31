@@ -1,0 +1,54 @@
+{
+ "format": "hrma-project",
+ "format_version": 1,
+ "name": "Example Hybrid N2O-HTPB 3kN",
+ "description": "Öğretici örnek: N2O/HTPB hibrit motor, 3 kN itki, 10 s yanma, 30 bar oda basıncı. Regresyon katsayıları uygulamanın HTPB/N2O varsayılanıdır (Doran et al., AIAA 2007-5352). / Educational example: N2O/HTPB hybrid motor, 3 kN thrust, 10 s burn, 30 bar chamber pressure. Regression coefficients are the application defaults for HTPB/N2O (Doran et al., AIAA 2007-5352).",
+ "motor_type": "hybrid",
+ "inputs": {
+  "fields": {
+   "motor_name": "Example Hybrid N2O-HTPB 3kN",
+   "motor_description": "Öğretici örnek: N2O/HTPB hibrit motor, 3 kN itki, 10 s yanma, 30 bar oda basıncı. Regresyon katsayıları uygulamanın HTPB/N2O varsayılanıdır (Doran et al., AIAA 2007-5352). / Educational example: N2O/HTPB hybrid motor, 3 kN thrust, 10 s burn, 30 bar chamber pressure. Regression coefficients are the application defaults for HTPB/N2O (Doran et al., AIAA 2007-5352).",
+   "single_pressure": 1.013,
+   "thrust": 3000.0,
+   "burn_time": 10.0,
+   "of_ratio": 7.0,
+   "chamber_pressure": 30.0,
+   "tank_pressure": 55.0,
+   "l_star": 1.0,
+   "expansion_ratio": 0,
+   "nozzle_type": "conical",
+   "combustion_type": "infinite",
+   "chamber_diameter_input": 0,
+   "fuel_type": "htpb",
+   "fuel_density": 920,
+   "regression_a": 3.68e-05,
+   "regression_n": 0.555,
+   "oxidizer_type": "n2o",
+   "oxidizer_phase": "liquid",
+   "oxidizer_temp": 293,
+   "oxidizer_density": 949.2,
+   "oxidizer_viscosity": 0.00028,
+   "injector_type": "showerhead",
+   "target_velocity": 30,
+   "hole_diameter_min": 0.3,
+   "hole_diameter_max": 2.0,
+   "plate_thickness": 3.0
+  },
+  "ui_state": {
+   "environment_tab": "single",
+   "design_tab": "thrust_time",
+   "analysis_tab": "single"
+  }
+ },
+ "results_summary": {
+  "thrust_N": 3000.0,
+  "isp_s": 241.961,
+  "burn_time_s": 10.0,
+  "chamber_pressure_bar": 30.0,
+  "total_impulse_Ns": 30000.0,
+  "computed_with_version": "2.6.26"
+ },
+ "app_version": "2.6.26",
+ "created_at": "2026-07-30T17:01:45",
+ "updated_at": "2026-08-01T00:03:56"
+}

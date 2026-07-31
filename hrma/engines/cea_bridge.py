@@ -123,10 +123,23 @@ def is_rocketcea_available() -> bool:
 
 
 @functools.lru_cache(maxsize=32)
-def _cea_obj(ox_card: str, fuel_card: str):
-    """CEA_Obj örneğini (ox, fuel) başına önbellekle (kurulum maliyetli)."""
+def _cea_obj(ox_card: str, fuel_card: str, fac_cr: Optional[float] = None):
+    """CEA_Obj örneğini (ox, fuel, kontraksiyon) başına önbellekle.
+
+    ``fac_cr`` verilirse CEA SONLU ALANLI YANMA ODASI (finite-area combustor)
+    modunda çözer: yanma odası kesiti sonsuz kabul edilmez, akış odada
+    hızlanırken Rayleigh hattı boyunca basınç ve sıcaklık düşer. Sonuç c*
+    sonsuz-alan çözümünden bir miktar DÜŞÜKTÜR ve gerçeğe daha yakındır.
+    Küçük kontraksiyon oranlarında (kısa/geniş portlu hibritlerde) fark
+    ölçülebilir düzeye çıkar.
+
+    ``None`` ise klasik sonsuz-alan (infinite-area) çözümü kullanılır —
+    eski davranış, geriye uyumlu.
+    """
     from rocketcea.cea_obj import CEA_Obj
-    return CEA_Obj(oxName=ox_card, fuelName=fuel_card)
+    if fac_cr is None:
+        return CEA_Obj(oxName=ox_card, fuelName=fuel_card)
+    return CEA_Obj(oxName=ox_card, fuelName=fuel_card, fac_CR=float(fac_cr))
 
 
 # --------------------------------------------------------------------------
@@ -140,6 +153,7 @@ def _compute_rocketcea(
     mr: float,
     eps: Optional[float],
     ambient_bar: Optional[float],
+    fac_cr: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Tek bir (kart, Pc, MR, eps, ortam) noktasında CEA ideal sonucu.
 
@@ -147,7 +161,7 @@ def _compute_rocketcea(
     lru_cache ile sarılıdır; dönen sözlük DEĞİŞTİRİLMEMELİDİR (public sarmalayıcı
     kopya üretir).
     """
-    c = _cea_obj(ox_card, fuel_card)
+    c = _cea_obj(ox_card, fuel_card, fac_cr)
     pc_psia = pc_bar * BAR_TO_PSIA
 
     # c* ve Tc — oda büyüklükleri, nozul eps'inden bağımsız
@@ -324,6 +338,7 @@ def get_combustion_properties(
     expansion_ratio: Optional[float] = None,
     ambient_bar: Optional[float] = None,
     fallback: Optional[Dict[str, Any]] = None,
+    contraction_ratio: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Basınca bağlı yanma özelliklerini (IDEAL CEA) döndür.
 
@@ -371,7 +386,15 @@ def get_combustion_properties(
             amb_key = (round(float(ambient_bar), _AMB_ROUND)
                        if ambient_bar is not None else None)
 
-            core = _compute_rocketcea(fuel_card, ox_card, pc_key, mr_key, eps_key, amb_key)
+            # Sonlu alanlı yanma odası: kontraksiyon oranı verildiyse CEA
+            # Rayleigh kaybını da hesaba katar (bkz. _cea_obj). Yalnız
+            # fiziksel olarak anlamlı aralıkta kullanılır; CEA çok küçük
+            # kontraksiyonda yakınsamayabilir.
+            cr_key = (round(float(contraction_ratio), 3)
+                      if contraction_ratio and float(contraction_ratio) > 1.0
+                      else None)
+            core = _compute_rocketcea(fuel_card, ox_card, pc_key, mr_key,
+                                      eps_key, amb_key, cr_key)
 
             # cache-güvenli kopya + kaynak/validity ekle
             result = dict(core)
@@ -389,6 +412,8 @@ def get_combustion_properties(
                     'fugacity / real-gas corrections; treat c*/Tc/Isp as an '
                     'upper-bound estimate.'
                 ) if real_gas else 'RocketCEA (NASA CEA) ideal-equilibrium solution.',
+                'combustor_model': ('finite-area (CR=%.2f)' % cr_key
+                                    if cr_key else 'infinite-area'),
             }
             return result
         except Exception as exc:  # RocketCEA çağrı hatası -> fallback

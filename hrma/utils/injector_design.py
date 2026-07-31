@@ -5,7 +5,8 @@ from hrma.analysis.tank_blowdown import N2OSaturation
 # Giffen–Muraszew basınç-swirl çözücüsü — kardeş (authoritative) modülden
 # alınır ki iki modül AYNI katsayı ve aynı zarfı kullansın (F017/F043).
 from hrma.engines.injector_design import (
-    swirl_solve, swirl_K_from_theta, _SWIRL_K_MIN, _SWIRL_K_MAX)
+    swirl_solve, swirl_K_from_theta, _SWIRL_K_MIN, _SWIRL_K_MAX,
+    _SWIRL_THETA_MIN_DEG, _SWIRL_THETA_MAX_DEG)
 import warnings
 
 # ---------------------------------------------------------------------------
@@ -223,11 +224,22 @@ class InjectorDesign:
             'D_pintle': pintle_diameter / 1000
         }
 
-    def set_swirl_params(self, n_slots=6, slot_width=0, slot_height=0):
+    def set_swirl_params(self, n_slots=6, slot_width=0, slot_height=0,
+                         chamber_diameter=0, target_half_angle=0):
+        """Swirl parametreleri. chamber_diameter [mm] verilirse D_s olarak
+        K = A_p/(D_s·d_o) bağıntısında kullanılır (verilmezse eski
+        D_s = 2.5·d_o oranı). target_half_angle [derece] verilirse sentez
+        yolunda hedef sprey yarı açısı olur (verilmezse 45°). İkisi de
+        v2.6.26'ya kadar arayüzde olup HİÇBİR yere bağlı olmayan ölü
+        alanlardı."""
         self.swirl_params = {
             'n_slots': n_slots,
             'w': slot_width / 1000 if slot_width > 0 else None,
-            'h': slot_height / 1000 if slot_height > 0 else None
+            'h': slot_height / 1000 if slot_height > 0 else None,
+            'D_s': chamber_diameter / 1000 if chamber_diameter > 0 else None,
+            'theta_target': (float(target_half_angle)
+                             if target_half_angle and target_half_angle > 0
+                             else None)
         }
 
     def set_impingement_params(self, n_pairs=0, impingement_angle=2 * IMPINGEMENT_HALF_ANGLE_DEG,
@@ -506,31 +518,64 @@ class InjectorDesign:
         sqrt_term = np.sqrt(2 * self.rho_ox * delta_P_Pa)
         extra_warnings = []
 
+        # v2.6.26 — iki eski ölü girdi bağlandı:
+        # D_s_user: swirl (spin) odası çapı. Verilirse K = A_p/(D_s·d_o)
+        #   bağıntısında D_s = 2.5·d_o varsayılan oranının yerini alır.
+        # theta_target: hedef sprey YARI açısı. Sentez yolunda
+        #   swirl_K_from_theta ile K'yı belirler. Çözücü zarfı
+        #   θ ∈ [3.7°, 71.2°] (K ∈ [0.02, 20]); dışı kırpılır ve UYARILIR.
+        D_s_user = params.get('D_s')
+        theta_target = params.get('theta_target')
+        if theta_target is not None and not (
+                _SWIRL_THETA_MIN_DEG <= theta_target <= _SWIRL_THETA_MAX_DEG):
+            clamped_theta = float(np.clip(
+                theta_target, _SWIRL_THETA_MIN_DEG, _SWIRL_THETA_MAX_DEG))
+            extra_warnings.append(
+                f"Target spray half-angle {theta_target:.1f} deg is outside "
+                f"the Giffen-Muraszew solvable envelope "
+                f"[{_SWIRL_THETA_MIN_DEG:.1f}, {_SWIRL_THETA_MAX_DEG:.1f}] "
+                f"deg; using {clamped_theta:.1f} deg.")
+            theta_target = clamped_theta
+
         if params['h'] is None or params['w'] is None:
             # Tasarım sentezi: hedef yarı açı → K → (X, Cd_sw, θ) → orifis ve
             # yuvalar. (Yalnız biri verilirse de sentez yolu kullanılır —
             # tek boyutla K kapalı sistemi kurulamaz.)
-            # yuvalar. Varsayılan hedef 45° (tipik simplex bandının ortası).
-            K = swirl_K_from_theta(SWIRL_DEFAULT_HALF_ANGLE_DEG)
+            # Hedef verilmezse 45° (tipik simplex bandının ortası).
+            theta_used = (theta_target if theta_target is not None
+                          else SWIRL_DEFAULT_HALF_ANGLE_DEG)
+            K = swirl_K_from_theta(theta_used)
             sw = swirl_solve(K)
             A_o = self.mdot_ox / (sw['cd'] * sqrt_term)
             d_o = 2.0 * np.sqrt(A_o / np.pi)
-            # K = A_p/(D_s·d_o), D_s = 2.5·d_o → toplam teğet giriş alanı
-            A_p = K * (SWIRL_CHAMBER_D_RATIO * d_o) * d_o
+            # K = A_p/(D_s·d_o); D_s kullanıcıdan gelir, yoksa 2.5·d_o
+            D_s = D_s_user if D_s_user is not None else SWIRL_CHAMBER_D_RATIO * d_o
+            A_p = K * D_s * d_o
             A_slot = A_p / n_slots
             h = np.sqrt(A_slot / 2.0)
             w = 2.0 * h
         else:
             # Kullanıcı yuva geometrisi verdi: K kapalı sistemden çözülür.
-            # A_p_model(K) = K·D_s·d_o = K·2.5·(4/π)·A_o(K), A_o(K) =
-            # ṁ/(Cd(K)·√(2ρΔP)). A_p_model K'da monoton artar (K/Cd(K)
+            # A_p_model(K) = K·D_s·d_o; D_s kullanıcıdan gelirse sabit bir
+            # uzunluktur, gelmezse 2.5·d_o(K) oranı kullanılır (o durumda
+            # D_s·d_o = 2.5·(4/π)·A_o). A_p_model K'da monoton artar (K/Cd(K)
             # K→0'da sabite, K→∞'da K'ya gider) → bisection yeterli.
             h = params['h']
             w = params['w']
             A_p = n_slots * w * h
+            if theta_target is not None:
+                # Yuva geometrisi K'yı (dolayısıyla sprey açısını) kendisi
+                # belirler; hedef açı bu durumda UYGULANAMAZ. Sessiz yutma
+                # yasak — açıkça bildirilir.
+                extra_warnings.append(
+                    "Slot geometry (width/height) fixes the swirl number, so "
+                    "the target spray half-angle input is ignored; clear the "
+                    "slot dimensions to design for a target angle.")
 
             def a_p_model(K_try):
                 a_o = self.mdot_ox / (swirl_solve(K_try)['cd'] * sqrt_term)
+                if D_s_user is not None:
+                    return K_try * D_s_user * 2.0 * np.sqrt(a_o / np.pi)
                 return K_try * SWIRL_CHAMBER_D_RATIO * (4.0 * a_o / np.pi)
 
             if A_p <= a_p_model(_SWIRL_K_MIN):
@@ -562,6 +607,18 @@ class InjectorDesign:
         X = sw['X']
         theta_half = sw['theta_deg']
 
+        # Kullanılan swirl odası çapı ve GM geçerlilik kontrolü: model spin
+        # odasının çıkış orifisini sardığını varsayar (D_s > d_o; pratikte
+        # D_s/d_o >= ~1.25, Lefebvre & McDonell Böl. 6 simplex geometrisi).
+        D_s_used = D_s_user if D_s_user is not None else SWIRL_CHAMBER_D_RATIO * d_o
+        if D_s_user is not None and D_s_user < 1.25 * d_o:
+            extra_warnings.append(
+                f"Swirl chamber diameter {D_s_user * 1000:.1f} mm is below "
+                f"1.25x the exit orifice diameter ({d_o * 1000:.2f} mm); the "
+                f"Giffen-Muraszew geometry assumption breaks down. Increase "
+                f"the swirl chamber diameter to at least "
+                f"{1.25 * d_o * 1000:.1f} mm.")
+
         # Actual slot area (toplam teğet giriş alanı)
         A_slots = n_slots * w * h
         # Sıvı halka (hava çekirdeği düşülmüş) çıkış alanı ve film kalınlığı
@@ -586,6 +643,14 @@ class InjectorDesign:
             'exit_orifice_diameter': d_o * 1000,  # mm
             'atomizer_constant_K': float(K),
             'air_core_ratio_X': float(X),
+            # v2.6.26: kullanılan spin odası çapı ve kaynağı raporlanır —
+            # kullanıcı girdisinin sonuca girdiği görünür olmalı.
+            'swirl_chamber_diameter': float(D_s_used * 1000),  # mm
+            'swirl_chamber_d_source': ('user' if D_s_user is not None
+                                       else 'default_ratio'),
+            'spray_half_angle_target_deg': (float(theta_target)
+                                            if theta_target is not None
+                                            else None),
             'film_thickness_mm': film_t * 1000,
             'spray_angle': float(2.0 * theta_half),  # TAM koni açısı [derece]
             'spray_half_angle_deg': float(theta_half),
@@ -622,15 +687,32 @@ class InjectorDesign:
                 if d_try <= params['d_max']:
                     break
                 n_pairs += 1
+        n_pairs_requested = n_pairs
         n_holes = 2 * n_pairs
         d_h = 2 * np.sqrt(A_required / (n_holes * np.pi))
         d_h_clamped = max(params['d_min'], min(d_h, params['d_max']))
+        extra_warnings = []
         if not np.isclose(d_h_clamped, d_h, rtol=1e-9):
             # Çap imalat bandına kırpıldı → hedef debiyi korumak için çift
             # sayısı yeniden çözülür (showerhead ile aynı ilke)
             area_per_hole = np.pi * (d_h_clamped / 2) ** 2
             n_pairs = max(2, int(np.ceil(A_required / (2 * area_per_hole))))
             n_holes = 2 * n_pairs
+            # v2.6.26: bu yeniden çözüm SESSİZDİ. Kullanıcının girdiği çift
+            # sayısı, çap banda sığmadığında hiçbir iz bırakmadan atılıyordu;
+            # ölçüldü: element_pairs 8 ve 12 aynı sonucu veriyor (ikisi de
+            # 15'e yeniden çözülüyor), yani kullanıcı alanı değiştirip
+            # hiçbir şeyin kımıldamadığını görüyordu. Kardeş dal
+            # (_calculate_showerhead) aynı durumda ZATEN uyarıyordu; bu dal
+            # o uyarıyı taşımıyordu.
+            if params['n_pairs'] > 0 and n_pairs != n_pairs_requested:
+                extra_warnings.append(
+                    f"Requested {n_pairs_requested} doublet pairs would need "
+                    f"{d_h * 1000:.2f} mm holes, outside the manufacturing "
+                    f"band ({params['d_min'] * 1000:.2f}-"
+                    f"{params['d_max'] * 1000:.2f} mm); the pair count was "
+                    f"re-solved to {n_pairs} to preserve the target flow "
+                    f"rate.")
         d_h = d_h_clamped
         A_inj = n_holes * np.pi * (d_h / 2) ** 2
         # Süreklilikten hız (F042 — önceki dalga yalnız showerhead'i düzeltip
@@ -645,7 +727,7 @@ class InjectorDesign:
         Re = self.rho_ox * v_exit * d_h / self.mu_ox
         L_D = params['t_plate'] / d_h
 
-        warn_list = self._check_warnings(v_exit, Re, L_D)
+        warn_list = self._check_warnings(v_exit, Re, L_D) + extra_warnings
         if params['full_angle_deg'] < 40 or params['full_angle_deg'] > 90:
             warn_list.append(
                 f"Impingement angle ({params['full_angle_deg']:.0f} deg) outside "
@@ -654,6 +736,11 @@ class InjectorDesign:
         result = {
             'type': 'impingement',
             'n_pairs': int(n_pairs),
+            # v2.6.26: kullanicinin istedigi cift sayisi ile cozumun kullandigi
+            # ayri raporlanir; yeniden cozuldugunde bu iki alan ayrisir ve
+            # kullanici hangi degerin gecerli oldugunu gorur.
+            'n_pairs_requested': (int(n_pairs_requested)
+                                  if params['n_pairs'] > 0 else None),
             'n_holes': int(n_holes),
             'hole_diameter': d_h * 1000,  # mm
             'plate_thickness': params['t_plate'] * 1000,  # mm
@@ -814,3 +901,158 @@ class InjectorDesign:
                 warn_list.append("Flash boiling risk detected")
 
         return warn_list
+
+
+# ---------------------------------------------------------------------------
+# Enjektör plakası yapısal değerlendirmesi (v2.6.26)
+# ---------------------------------------------------------------------------
+# Kullanıcının seçtiği enjektör plakası malzemesi (injector_material) bu
+# fonksiyona bağlanır; eskiden alan arayüzde vardı ama hiçbir hesaba
+# ulaşmıyordu.
+#
+#   Eğilme  : Roark's Formulas for Stress and Strain, Tablo 11.2, durum 10b —
+#             dairesel plaka, düzgün yayılı yük, kenar ANKASTRE. Kenardaki
+#             radyal gerilme yönetir:
+#                 sigma_max = 0.75 * q * a^2 / t^2
+#             (a = plaka yarıçapı [m], t = kalınlık [m], q = basınç farkı [Pa])
+#             Ankastre kabulü enjektör plakasında doğru taraftadır: plaka
+#             cıvatalı flanşla sıkıştırılır, serbest mesnetli değildir.
+#
+#   Delikler: ASME BPVC Bölüm I, PG-52 — ligament verimi. Delikli plakada
+#             taşıyan kesit zayıflar, gerilme ligament verimine BÖLÜNÜR:
+#                 eta = (p - d) / p
+#             Delik düzeni girdi olarak gelmediğinden p, plakaya eşit dağılmış
+#             kare düzen kabulüyle p = sqrt(A_plaka / n) alınır. Bu bir
+#             KABULDÜR ve raporda 'ligament_basis' ile açıkça beyan edilir.
+#
+# Eğilme gerilmesi malzemeden BAĞIMSIZDIR (yalnız geometri ve yüke bağlıdır);
+# malzemeye bağlı olan emniyet katsayısı ve gereken kalınlıktır. İkisini
+# karıştırmak bu modelde kolay bir hata olurdu.
+#
+# Eksik/geçersiz girdide sayı UYDURULMAZ: rapor 'not_analyzed' döner ve
+# nedenini yazar.
+
+# Kullanıcı hedef emniyet katsayısı vermediğinde kullanılan değer. Basınçlı
+# kap kabuğu değil, cıvatalı bir kapak plakası olduğu için 2.0 alınır;
+# kullanıcı safety_factor girdiğinde onun değeri geçerlidir.
+INJECTOR_PLATE_DEFAULT_SF = 2.0
+# Ligament verimi bunun altına inerse eğilme modeli fiziksel anlamını yitirir
+# (plaka fiilen bir elek hâline gelir).
+INJECTOR_PLATE_MIN_LIGAMENT = 0.15
+
+
+def _plate_num(value):
+    """Sayıya zorlar; çevrilemezse None döner (string girdide çökme yasağı)."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v in (float('inf'), float('-inf')):
+        return None
+    return v
+
+
+def injector_plate_structural(delta_P_bar, plate_diameter_m, material_props,
+                              material_name=None, plate_thickness_m=None,
+                              n_holes=0, hole_diameter_m=0.0,
+                              required_sf=None):
+    """Enjektör plakasının eğilme gerilmesi, emniyet katsayısı ve kütlesi.
+
+    Dönen sözlük ya {'status': 'not_analyzed', 'reason': ...} biçimindedir ya
+    da eğilme sonuçlarını taşır. 'not_analyzed' durumunda 'safety_factor'
+    anahtarı BULUNMAZ — okuyan taraf eksikliği sıfır sanmasın diye.
+    """
+    q_bar = _plate_num(delta_P_bar)
+    d_plate = _plate_num(plate_diameter_m)
+    t_plate = _plate_num(plate_thickness_m)
+    n = int(_plate_num(n_holes) or 0)
+    d_hole = _plate_num(hole_diameter_m) or 0.0
+
+    ad = material_name or (material_props or {}).get('name') or 'unknown'
+
+    if not q_bar or q_bar <= 0:
+        return {'status': 'not_analyzed',
+                'reason': 'injector pressure drop is not available',
+                'material': ad}
+    if not d_plate or d_plate <= 0:
+        return {'status': 'not_analyzed',
+                'reason': 'plate diameter (chamber diameter) is not available',
+                'material': ad}
+
+    sigma_y = _plate_num((material_props or {}).get('yield_strength'))
+    if not sigma_y or sigma_y <= 0:
+        return {'status': 'not_analyzed',
+                'reason': f"material '{ad}' has no yield strength record",
+                'material': ad}
+
+    a = d_plate / 2.0                      # plaka yarıçapı [m]
+    q = q_bar * 1e5                        # [bar] -> [Pa]
+    area_plate = np.pi * a ** 2            # [m^2]
+
+    # --- ASME PG-52 ligament verimi ---------------------------------------
+    eta = 1.0
+    ligament_basis = 'solid plate (no hole data)'
+    if n > 0 and d_hole > 0:
+        pitch = float(np.sqrt(area_plate / n))     # kare düzen kabulü
+        eta = (pitch - d_hole) / pitch if pitch > 0 else -1.0
+        ligament_basis = ('ASME PG-52, equivalent square pitch '
+                          f'p = sqrt(A/n) = {pitch * 1000:.2f} mm')
+        if eta <= INJECTOR_PLATE_MIN_LIGAMENT:
+            return {
+                'status': 'not_analyzed',
+                'reason': (f'ligament efficiency {eta:.2f} is below the '
+                           f'{INJECTOR_PLATE_MIN_LIGAMENT:.2f} limit: '
+                           f'{n} holes of {d_hole * 1000:.2f} mm consume the '
+                           f'plate, the bending model no longer applies'),
+                'material': ad,
+                'ligament_efficiency': round(eta, 4),
+                'ligament_basis': ligament_basis,
+            }
+
+    hedef_sf = _plate_num(required_sf) or INJECTOR_PLATE_DEFAULT_SF
+
+    # --- Roark 11.2 / 10b --------------------------------------------------
+    # SF hedefini tutan kalınlık: sigma_y/SF = 0.75*q*a^2/(t^2*eta)
+    t_required = float(np.sqrt(0.75 * q * a ** 2 * hedef_sf / (sigma_y * eta)))
+
+    rapor = {
+        'status': 'analyzed',
+        'material': ad,
+        'model': 'Roark Table 11.2 case 10b (clamped circular plate)',
+        'delta_P_bar': round(q_bar, 4),
+        'plate_diameter_mm': round(d_plate * 1000, 3),
+        'yield_strength_MPa': round(sigma_y / 1e6, 1),
+        'ligament_efficiency': round(eta, 4),
+        'ligament_basis': ligament_basis,
+        'required_safety_factor': round(hedef_sf, 3),
+        'required_thickness_mm': round(t_required * 1000, 3),
+        'warnings': [],
+    }
+
+    if t_plate and t_plate > 0:
+        sigma = 0.75 * q * a ** 2 / (t_plate ** 2 * eta)
+        sf = sigma_y / sigma
+        rapor['plate_thickness_mm'] = round(t_plate * 1000, 3)
+        rapor['bending_stress_MPa'] = round(sigma / 1e6, 3)
+        rapor['safety_factor'] = round(sf, 3)
+        yogunluk = _plate_num((material_props or {}).get('density'))
+        if yogunluk:
+            delik_alani = n * np.pi * (d_hole / 2.0) ** 2 if (n and d_hole) else 0.0
+            hacim = max(area_plate - delik_alani, 0.0) * t_plate
+            rapor['plate_mass_kg'] = round(yogunluk * hacim, 4)
+        if sf < hedef_sf:
+            rapor['warnings'].append(
+                f'Injector plate safety factor {sf:.2f} is below the target '
+                f'{hedef_sf:.2f}: {t_required * 1000:.2f} mm required, '
+                f'{t_plate * 1000:.2f} mm given ({ad}).')
+    else:
+        # Kalınlık verilmemiş: boyutlandırma modu. Emniyet katsayısı
+        # RAPORLANMAZ — hangi kalınlığa ait olduğu belirsiz olurdu.
+        rapor['status'] = 'sized'
+        rapor['warnings'].append(
+            'Plate thickness was not supplied; the reported thickness is the '
+            'minimum that meets the target safety factor.')
+
+    return rapor

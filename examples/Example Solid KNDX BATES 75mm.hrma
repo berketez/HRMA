@@ -1,0 +1,43 @@
+{
+ "format": "hrma-project",
+ "format_version": 1,
+ "name": "Example Solid KNDX BATES 75mm",
+ "description": "Öğretici örnek: KNDX (KNO3/dekstroz 65/35) katı motor, 75 mm gövde, 3 BATES segmenti, 40 bar tasarım basıncı, L sınıfı. Termokimya ve yanma hızı uygulamanın merkezi kataloglarından (propellants_db + Nakka 1999 rejim fitleri). / Educational example: KNDX (KNO3/dextrose 65/35) solid motor, 75 mm case, 3 BATES segments, 40 bar design pressure, L class. Thermochemistry and burn rate come from the application catalogues (propellants_db + Nakka 1999 regime fits).",
+ "motor_type": "solid",
+ "inputs": {
+  "fields": {
+   "propellant_name": "KNDX - Potassium Nitrate/Dextrose 65/35",
+   "density": 1850.0,
+   "flame_temp": 1710.0,
+   "molecular_weight": 42.39,
+   "gamma": 1.1308,
+   "char_velocity": 912.4,
+   "burn_rate_a": 0.0007876,
+   "burn_rate_n": 0.688,
+   "burn_rate_preset": "kndx",
+   "grain_type": "bates",
+   "grain_count": 3,
+   "outer_diameter": 75.0,
+   "core_diameter": 32.0,
+   "grain_length": 360.0,
+   "web_thickness": 21.5,
+   "grain_gap": 2.0,
+   "inhibit_front": false,
+   "inhibit_rear": false,
+   "inhibit_outer": true,
+   "chamber_diameter": 75.0,
+   "chamber_pressure": 40.0
+  }
+ },
+ "results_summary": {
+  "total_impulse_Ns": 3381.804,
+  "burn_time_s": 2.024,
+  "chamber_pressure_bar": 40.0,
+  "isp_s": 143.289,
+  "peak_thrust_N": 1926.775,
+  "computed_with_version": "2.6.26"
+ },
+ "app_version": "2.6.26",
+ "created_at": "2026-07-30T17:01:45",
+ "updated_at": "2026-08-01T00:03:56"
+}

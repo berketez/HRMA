@@ -195,8 +195,15 @@
             if (Number.isFinite(m.chamber_pressure)) {
                 out.meop_bar = m.chamber_pressure;
             }
-            if (Number.isFinite(m.chamber_diameter)) {
-                out.inner_diameter_mm = m.chamber_diameter * 1000.0;
+            // BİRİM (2026-07-30 ölçümü): buradaki koşulsuz `* 1000` YALNIZ
+            // hibritte doğruydu. Katı motorda chamber_diameter 75,0 ve sıvıda
+            // 120,0 zaten MİLİMETRE geliyor — panel 75 000 mm (75 m) ve
+            // 120 000 mm (120 m) iç çaplı bir basınçlı kap boyutlandırıyordu.
+            // Çevirme merkezi tabloya taşındı (termal panel aynı alanı ters
+            // yönde, 1000'e BÖLEREK bozuyordu; tek kaynak ikisini de düzeltir).
+            var idMm = U.readLengthMM(r, 'chamber_diameter');
+            if (Number.isFinite(idMm)) {
+                out.inner_diameter_mm = idMm;
             }
             return out;
         },

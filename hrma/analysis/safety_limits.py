@@ -34,11 +34,16 @@ class SafetyLimits:
         
         self.throat_dia_min = throat_diameter_min
         self.throat_dia_max = throat_diameter_max
-        
+
         self.violations = []  # Track all violations
-        
+        # Fail-open koruması (2026-07-28): koşan kontrol sayısı izlenir.
+        # Eskiden hiç kontrol koşmamışken de "ALL CHECKS PASSED" dönüyordu —
+        # "hiç değerlendirilmedi" ile "tümü geçti" ayırt edilemiyordu.
+        self.checks_run = 0
+
     def check_chamber_pressure(self, pc: float, motor_name: str = "Motor") -> bool:
         """Check chamber pressure against limits"""
+        self.checks_run += 1
         if pc > self.pc_limit:
             violation = {
                 'parameter': 'Chamber Pressure',
@@ -55,6 +60,7 @@ class SafetyLimits:
     
     def check_wall_temperature(self, temp: float, motor_name: str = "Motor") -> bool:
         """Check wall temperature against limits"""
+        self.checks_run += 1
         if temp > self.temp_limit:
             violation = {
                 'parameter': 'Wall Temperature',
@@ -71,6 +77,7 @@ class SafetyLimits:
     
     def check_thrust(self, thrust: float, motor_name: str = "Motor") -> bool:
         """Check thrust against limits"""
+        self.checks_run += 1
         if thrust > self.thrust_limit:
             violation = {
                 'parameter': 'Thrust',
@@ -87,6 +94,7 @@ class SafetyLimits:
     
     def check_throat_diameter(self, throat_dia: float, motor_name: str = "Motor") -> bool:
         """Check throat diameter for sanity bounds"""
+        self.checks_run += 1
         throat_mm = throat_dia * 1000  # Convert to mm
         
         if throat_dia < self.throat_dia_min:
@@ -121,6 +129,7 @@ class SafetyLimits:
                            expected_isp: float = 300, tolerance: float = 0.3,
                            motor_name: str = "Motor") -> bool:
         """Check mass flow rate against expected value"""
+        self.checks_run += 1
         g0 = 9.80665
         expected_mdot = thrust / (expected_isp * g0)
         error = abs(mdot - expected_mdot) / expected_mdot
@@ -141,20 +150,31 @@ class SafetyLimits:
         return True
     
     def comprehensive_check(self, motor_params: Dict, motor_name: str = "Motor") -> Dict:
-        """Run all safety checks on motor parameters"""
+        """Run all safety checks on motor parameters.
+
+        Fail-open koruması (2026-07-28): hiçbir parametre eşleşmezse hiçbir
+        kontrol koşmaz; bu durumda 'safe': True demek "hiç bakılmadı"nın
+        "tümü geçti" gibi raporlanması olurdu. Koşan kontrol sayısı
+        ``checks_run`` alanında döner; sıfırsa ``safe`` None olur ve
+        ``status`` bunu açıkça söyler.
+        """
         results = {
             'safe': True,
             'violations': [],
+            'checks_run': 0,
+            'status': 'EVALUATED',
             'summary': {
                 'critical': 0,
-                'high': 0, 
+                'high': 0,
                 'medium': 0
             }
         }
-        
+
         # Clear previous violations for this motor
         self.violations = [v for v in self.violations if v['motor'] != motor_name]
-        
+
+        checks_before = self.checks_run
+
         # Run checks
         checks = [
             ('chamber_pressure', self.check_chamber_pressure),
@@ -162,41 +182,59 @@ class SafetyLimits:
             ('thrust', self.check_thrust),
             ('throat_diameter', self.check_throat_diameter)
         ]
-        
+
         for param_name, check_func in checks:
             if param_name in motor_params:
                 safe = check_func(motor_params[param_name], motor_name)
                 if not safe:
                     results['safe'] = False
-        
+
         # Mass flow rate check (needs multiple parameters)
         if all(p in motor_params for p in ['mass_flow_rate', 'thrust']):
             safe = self.check_mass_flow_rate(
                 motor_params['mass_flow_rate'],
-                motor_params['thrust'], 
+                motor_params['thrust'],
                 motor_params.get('expected_isp', 300),
                 motor_name=motor_name
             )
             if not safe:
                 results['safe'] = False
-        
+
         # Get violations for this motor
         motor_violations = [v for v in self.violations if v['motor'] == motor_name]
         results['violations'] = motor_violations
-        
+
         # Count by severity
         for violation in motor_violations:
             severity = violation['severity'].lower()
             if severity in results['summary']:
                 results['summary'][severity] += 1
-        
+
+        results['checks_run'] = self.checks_run - checks_before
+        if results['checks_run'] == 0:
+            # Hiç kontrol koşmadı: geçti/kaldı hükmü YOK.
+            results['safe'] = None
+            results['status'] = 'NOT_EVALUATED - no applicable checks ran'
+
         return results
     
     def generate_safety_report(self) -> str:
-        """Generate human-readable safety report"""
+        """Generate human-readable safety report.
+
+        Fail-open düzeltmesi (2026-07-28): eski sürüm ihlal listesi boşsa
+        "ALL CHECKS PASSED - MOTOR SAFE FOR OPERATION" dönüyordu — hiç
+        kontrol koşulmamışken bile. "Hiç değerlendirilmedi" artık ayrı
+        raporlanır ve sertifikasyon iması taşıyan "MOTOR SAFE FOR
+        OPERATION" ifadesi kaldırıldı: bu sınıf yalnız model limitlerini
+        kontrol eder, işletme emniyeti hükmü veremez.
+        """
+        if self.checks_run == 0:
+            return "SAFETY STATUS: NOT EVALUATED - no applicable checks ran"
         if not self.violations:
-            return "SAFETY STATUS: ALL CHECKS PASSED - MOTOR SAFE FOR OPERATION"
-        
+            return (f"SAFETY STATUS: NO LIMIT VIOLATIONS DETECTED "
+                    f"({self.checks_run} checks run; model limit checks "
+                    f"only - not a safety certification)")
+
         report = ["SAFETY VIOLATION REPORT", "=" * 50]
         
         critical_violations = [v for v in self.violations if v['severity'] == 'CRITICAL']
@@ -240,8 +278,13 @@ class SafetyLimits:
         return "\n".join(report)
     
     def clear_violations(self):
-        """Clear all recorded violations"""
+        """Clear all recorded violations (tam sıfırlama).
+
+        checks_run da sıfırlanır: temizlenmiş bir nesneden rapor istenirse
+        "değerlendirilmedi" denmelidir, "N kontrol geçti" değil.
+        """
         self.violations = []
+        self.checks_run = 0
 
 
 class MotorValidator:

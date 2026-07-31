@@ -78,12 +78,23 @@ class TestEngThrustCurve:
             'thrust': [1000.0, 1800.0, 1600.0, 900.0, 0.0],
         }
         eng = OpenRocketExporter().export_motor_file(data)
-        assert 'solid grain burn-back solver' in eng
+        # Etiketten "solid" kelimesi v2.6.26'da çıkarıldı: `thrust_curve` artık
+        # hibritte de üretiliyor, motor tipi eğrinin kendisinden bilinemez.
+        # Eğri `basis` beyanı taşıyorsa o eklenir (burada taşımıyor).
+        assert 'grain burn-back solver' in eng
         assert ' 1800.0' in eng
 
     def test_no_fabricated_ramp_without_real_curve(self, motor):
-        """Gerçek eğri yoksa: SABİT itki + açık not; uydurma şekil YOK."""
-        eng = OpenRocketExporter().export_motor_file(dict(motor))
+        """Gerçek eğri YOKSA: SABİT itki + açık not; uydurma şekil YOK.
+
+        v2.6.26'da hibrit motor da zaman-adımlı itki eğrisi üretmeye başladı
+        (eskiden yalnız katıda vardı), yani fixture artık GERÇEK eğri taşıyor.
+        Bu testin konusu eğrisiz sonuç olduğu için eğri bilerek çıkarılır;
+        aksi hâlde test kendi konusunu ölçmez olurdu.
+        """
+        data = {k: v for k, v in motor.items()
+                if k not in ('thrust_curve', 'transient')}
+        eng = OpenRocketExporter().export_motor_file(data)
         assert 'constant-thrust approximation' in eng
         samples = [tuple(float(x) for x in line.split())
                    for line in eng.splitlines()
@@ -94,6 +105,27 @@ class TestEngThrustCurve:
         # %15 düşüş + rampa vardı; bu test onu yakalar.
         assert max(burning) == pytest.approx(min(burning), rel=1e-9)
         assert max(burning) == pytest.approx(motor['thrust'], rel=1e-9)
+
+    def test_hybrid_curve_is_not_labelled_as_solid(self, motor):
+        """Hibrit eğri KATI çözücüsü diye etiketlenmemeli (v2.6.26 bekçisi).
+
+        `thrust_curve` eskiden yalnız katı motorda vardı ve .eng etiketi
+        "solid grain burn-back solver" diye SABİTTİ. Aynı sürümde hibrit de
+        eğri üretmeye başlayınca hibrit dosyalar katı çözücüsüyle üretilmiş
+        gibi etiketlendi. Etiket artık eğrinin kendi `basis` beyanını taşır.
+        """
+        assert motor.get('thrust_curve'), 'fixture gerçek eğri taşımalı'
+        eng = OpenRocketExporter().export_motor_file(dict(motor))
+        etiket = [l for l in eng.splitlines() if l.startswith('; thrust curve:')]
+        assert etiket, '.eng itki eğrisi kaynağını beyan etmeli'
+        satir = etiket[0]
+        assert 'solid' not in satir.lower(), (
+            'hibrit motorun eğrisi KATI çözücüsü diye etiketlenmiş: %s' % satir)
+        # Motorun kendi beyanı taşınmalı (uydurma etiket değil).
+        basis = motor['thrust_curve'].get('basis')
+        if basis:
+            assert basis.split(':')[0].strip()[:20] in satir, satir
+
 
     def test_loaded_mass_uses_structural_inert_mass(self, motor):
         """Yüklü kütle sabit +0.5 kg değil, yapısal analizin kütlesi olmalı."""
@@ -232,11 +264,19 @@ class TestPdfSafetySection:
         assert '0.0/10' not in text
         assert 'REVIEW REQUIRED' not in text
 
-    def test_real_safety_rating_is_reported(self, motor):
+    def test_real_risk_classes_are_reported(self, motor):
+        """Gerçek risk sınıfları raporlanır; dayanaksız 0-10 ölçeği değil.
+
+        v2.6.26 (PDF-710-5): bu test eskiden ``overall_rating: 8.4``
+        gönderip PDF'te '8.4/10 ACCEPTABLE' arıyordu. Ölçeği üreten kod
+        depoda yoktu; eşik dayanaksızdı. Bkz. tests/test_pdf_analysis.py.
+        """
         text = TestPdfDimensions._pdf_text(
-            motor, {'safety': {'overall_rating': 8.4, 'critical_issues': []}})
-        assert '8.4/10' in text
+            motor, {'safety': {'risk_assessment': {
+                'risk_level': 'LOW', 'acceptability': 'ACCEPTABLE'}}})
+        assert 'LOW' in text
         assert 'ACCEPTABLE' in text
+        assert '/10' not in text
 
 
 # ---------------------------------------------------------------------------

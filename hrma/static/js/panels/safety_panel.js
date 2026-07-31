@@ -37,6 +37,30 @@
         ['liquid', 'Liquid', 'motor.liquid'],
         ['solid', 'Solid', 'motor.solid'],
     ];
+    // Hazne/gövde malzemesi — hesap ucu (app.py:4348) bu değeri okuyup
+    // basınçlı kap emniyetini merkezi materials_db dayanımlarıyla
+    // hesaplıyor. Panelde alan YOKTU: kullanıcı Inconel 718 seçmiş olsa
+    // bile güvenlik hükmü daima steel_4130 ile üretiliyordu (uç bunu
+    // `defaults_applied` içinde bildiriyor, panel ise okumuyordu).
+    // Liste structural_panel.js ile birebir; katalog gelirse yerine geçer.
+    const MATERIALS = [
+        ['steel_4130', 'Steel AISI 4130'],
+        ['steel_4340', 'Steel AISI 4340'],
+        ['steel', 'Carbon steel (A36-class)'],
+        ['ss_304', 'Stainless 304'],
+        ['ss_316', 'Stainless 316'],
+        ['ss_17_4ph', 'Stainless 17-4PH (H900)'],
+        ['aluminum_6061', 'Aluminum 6061-T6'],
+        ['al_7075_t6', 'Aluminum 7075-T6'],
+        ['al_2024_t3', 'Aluminum 2024-T3'],
+        ['titanium_6al4v', 'Titanium Ti-6Al-4V'],
+        ['ti_grade2_cp', 'Titanium CP Grade 2'],
+        ['inconel_718', 'Inconel 718'],
+        ['inconel_625', 'Inconel 625'],
+        ['cucrzr', 'CuCrZr (C18150)'],
+        ['beryllium_copper_c17200', 'Beryllium copper C17200'],
+        ['magnesium_az31b', 'Magnesium AZ31B'],
+    ];
 
     // Dil değişiminde tazelenmesi için render sırasında kurulur
     function areaLabels() {
@@ -325,28 +349,51 @@
             ['facility_type', 'Facility Type', 'test_stand', FACILITIES, 'common.f.facilityType'],
             ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
             ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
+            ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
         ],
         fromResults: function (r) {
-            const m = (r && r.motor) || r || {};
+            const m = U.motorDict(r);
             const motorType = window.AnalysisDock.getMotorType();
             const sug = {
                 motor_type: motorType,
                 chamber_pressure: m.chamber_pressure,
                 chamber_temperature: m.chamber_temperature,
-                thrust: m.thrust,
-                burn_time: m.burn_time,
-                chamber_diameter: m.chamber_diameter,
+                // İTKİ: katı motor düz sözlükte 'thrust' ÜRETMİYOR (ortalama
+                // ve tepe itkiyi ayrı raporluyor) — alan 1000 N varsayılanında
+                // kalıyordu, gerçek ortalama 1670,6 N.
+                thrust: U.readThrust(r),
+                burn_time: U.readBurnTime(r),
+                // BİRİM: ham okunuyordu ve alan METRE etiketli; katı motorda
+                // 75,0 (mm) ve sıvıda 120,0 (mm) geliyor -> panel 75 m / 120 m
+                // çaplı bir kap için güvenlik hükmü üretiyordu.
+                chamber_diameter: U.readLengthM(r, 'chamber_diameter'),
                 // Sıvı motorda çift itergaç, katı/hibritte kompozit varsayılanı
                 propellant_type: motorType === 'liquid' ? 'liquid_biprop' : 'composite',
+                // İTERGAÇ KÜTLESİ: eskiden yalnız 'mdot_total' x burn_time ile
+                // türetiliyordu; o anahtar SADECE hibritte var, katı ve sıvıda
+                // alan 5 kg varsayılanında kalıyordu (gerçek: katı 2,41 kg,
+                // sıvı 2756,5 kg). Artık her motor tipinin kendi kütle anahtarı
+                // okunuyor; TNT eşdeğeri ve tahliye mesafeleri buna bağlı.
+                propellant_mass: U.readPropellantMass(r),
+                // CİDAR ve MALZEME hiç bağlı değildi: uç bunlar için
+                // varsayılana düşüyor ve bunu `defaults_applied` ile
+                // bildiriyordu (panel o alanı da okumuyor).
+                wall_thickness: U.readWallThicknessM(r),
+                material: U.readChamberMaterial(r),
             };
-            // Toplam itergaç kütlesi = kütle debisi × yanma süresi
-            if (Number.isFinite(m.mdot_total) && Number.isFinite(m.burn_time)) {
-                sug.propellant_mass = m.mdot_total * m.burn_time;
-            }
             return sug;
         },
         render: render,
     });
+
+    // Merkezi katalog yüklüyse malzeme select'ini 'structural' etiketli tam
+    // listeyle doldur; değilse yukarıdaki fallback aynen kalır.
+    if (typeof window.HRMAMaterials !== 'undefined' && window.HRMAMaterials) {
+        window.HRMAMaterials.populateSelect({
+            panelId: 'safety', fieldId: 'material',
+            tags: ['structural'], fallback: MATERIALS,
+        });
+    }
 
     // Test / hata ayıklama: saf render (dry-run)
     window.SafetyPanel = { _render: render };

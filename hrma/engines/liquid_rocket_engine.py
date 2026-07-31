@@ -110,6 +110,125 @@ VACUUM_REFERENCE_EPS = 200.0
 OF_OPTIMUM_SCAN_BAND = (0.8, 8.0)
 OF_OPTIMUM_SCAN_POINTS = 25
 
+# ---------------------------------------------------------------------------
+# İMALAT BİLGİSİ (2026-07-28 dürüstlük denetimi, LIQ-MFG-4)
+# HRMA'da tedarikçi fiyatı, işçilik ücreti ve program takvimi verisi YOKTUR.
+# Bu yüzden maliyet/termin ÜRETİLMEZ. Üretilen tek sayısal imalat bilgisi
+# tolerans; o da motorun GERÇEK nominal ölçüsünden standart tablosuyla
+# aranır ve tasarım toleransı olmadığı açıkça etiketlenir.
+# ---------------------------------------------------------------------------
+
+# ISO 2768-1 "Genel toleranslar — lineer ölçüler" izin verilen sapmalar [mm].
+# Her satır: (nominal ölçü aralığının ÜST sınırı, {sınıf: ± sapma}).
+# f = hassas (fine), m = orta (medium). Standardın kapsamı 0.5-4000 mm'dir;
+# dışında kalan ölçüde genel tolerans verilmez, ölçü tek tek belirtilir.
+ISO2768_LINEAR_TOLERANCE_MM = (
+    (3.0, {'f': 0.05, 'm': 0.1}),
+    (6.0, {'f': 0.05, 'm': 0.1}),
+    (30.0, {'f': 0.1, 'm': 0.2}),
+    (120.0, {'f': 0.15, 'm': 0.3}),
+    (400.0, {'f': 0.2, 'm': 0.5}),
+    (1000.0, {'f': 0.3, 'm': 0.8}),
+    (2000.0, {'f': 0.5, 'm': 1.2}),
+    (4000.0, {'f': None, 'm': 2.0}),
+)
+ISO2768_MIN_NOMINAL_MM = 0.5
+
+# Akışa hassas işlenmiş yüzeyler hassas sınıfta, gövde/montaj ölçüleri orta
+# sınıfta aranır (atölye pratiği).
+ISO2768_GRADE_PRECISION = 'f'
+ISO2768_GRADE_GENERAL = 'm'
+
+ISO2768_TOLERANCE_BASIS = (
+    'ISO 2768-1 general tolerance looked up for the computed nominal size; '
+    'workshop standard, NOT a performance-driven tolerance allocation')
+
+# Nitel üretim rotası: motorun soğutma/enjektör/besleme seçimine göre TİPİK
+# yöntem. Sayı değildir, ölçüt değildir; çıktıda kaynağıyla etiketlenir.
+MANUFACTURING_ROUTE_BASIS = (
+    'typical production route for the selected configuration; qualitative, '
+    'not a manufacturing plan and not computed from the analysis')
+
+CHAMBER_PROCESS_BY_COOLING = {
+    'regenerative': 'Machined liner, milled coolant channels, brazed closeout',
+    'dump_cooling': 'Machined liner, milled coolant channels, brazed closeout',
+    'film_cooling': 'Forged and machined shell with film-coolant ring',
+    'ablative': 'Structural case with ablative liner layup',
+    'radiative': 'Formed refractory-alloy shell, welded',
+}
+CHAMBER_PROCESS_DEFAULT = 'Forged and machined'
+
+NOZZLE_PROCESS_BY_COOLING = {
+    'regenerative': 'Brazed cooling channels',
+    'dump_cooling': 'Brazed cooling channels',
+    'film_cooling': 'Machined contour with film-coolant slots',
+    'ablative': 'Ablative liner in a composite overwrap',
+    'radiative': 'Formed refractory-alloy contour, welded',
+}
+NOZZLE_PROCESS_DEFAULT = 'Machined contour'
+
+INJECTOR_PROCESS_BY_TYPE = {
+    'impinging': 'CNC drilled impinging orifices',
+    'coaxial': 'CNC machined coaxial elements',
+    'showerhead': 'CNC drilled showerhead orifices',
+    'pintle': 'CNC machined pintle assembly',
+}
+INJECTOR_PROCESS_DEFAULT = 'CNC machined orifices'
+
+FEED_PROCESS_BY_TYPE = {
+    'turbopump': 'Investment cast impellers, machined and welded volutes',
+    'pressure_fed': 'Pressurant tank, regulator and valve assembly '
+                    '(no turbomachinery)',
+}
+FEED_PROCESS_DEFAULT = 'Feed system hardware not identified'
+
+# Maliyet ve termin alanları v2.6.26'da KALDIRILDI. Arayüz boş hücre yerine
+# bu açıklamayı basabilsin diye alanın yokluğu açıkça raporlanır.
+MANUFACTURING_COST_STATUS = (
+    'not calculated: HRMA has no supplier pricing, labour-rate or programme '
+    'schedule data. Development/unit cost and phase durations were removed '
+    'because the previous values were fixed literals, identical for a 10 N '
+    'thruster and a 2 MN booster engine')
+
+
+def _iso2768_linear_tolerance_mm(nominal_mm, grade=ISO2768_GRADE_PRECISION):
+    """Nominal ölçü için ISO 2768-1 genel tolerans sapması [mm].
+
+    Standardın kapsamı dışındaki ölçüde ya da geçersiz girdide None döner:
+    uydurma tolerans üretilmez, çağıran alanı açıkça etiketler.
+    """
+    try:
+        nominal = float(nominal_mm)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(nominal) or nominal < ISO2768_MIN_NOMINAL_MM:
+        return None
+    for upper, grades in ISO2768_LINEAR_TOLERANCE_MM:
+        if nominal <= upper:
+            return grades.get(grade)
+    return None
+
+
+def _iso2768_feature(nominal_mm, grade=ISO2768_GRADE_PRECISION):
+    """Tek bir kritik ölçünün tolerans kaydı: nominal + sapma + sınıf.
+
+    Ölçü yoksa/geçersizse None döner (çağıran alanı hiç yazmaz); ölçü var ama
+    standardın kapsamı dışındaysa sapma None kalır ve durumu yazılır.
+    """
+    try:
+        nominal = float(nominal_mm)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(nominal) or nominal <= 0:
+        return None
+    entry = {'nominal_mm': round(nominal, 3), 'iso_grade': grade,
+             'tolerance_mm': _iso2768_linear_tolerance_mm(nominal, grade)}
+    if entry['tolerance_mm'] is None:
+        entry['status'] = ('nominal size outside the ISO 2768-1 range '
+                           '(0.5-4000 mm); tolerance must be specified '
+                           'individually on the drawing')
+    return entry
+
 
 @lru_cache(maxsize=256)
 def _optimal_mr_scan_cached(fuel, oxidizer, pc_bar, eps, n_points):
@@ -296,7 +415,10 @@ GAS_GENERATOR_PRESSURE_RATIO = 1.3   # GG oda basıncı / ana oda basıncı
 SAFETY_FACTOR_DEFAULT = 2.5          # form varsayılanı ile aynı
 SAFETY_FACTOR_MIN, SAFETY_FACTOR_MAX = 1.1, 10.0
 CHAMBER_MATERIAL_DEFAULT = 'inconel_718'
-WALL_THICKNESS_MIN_M = 0.002         # imalat alt sınırı (2 mm)
+# Hesaplanan cidar kalınlığının altına inemeyeceği İMALAT tabanı [m].
+# Hibritteki WALL_THICKNESS_INPUT_MIN_M ile karıştırılmamalı: o,
+# kullanıcının elle girebileceği en ince değerdir (0.5 mm).
+WALL_THICKNESS_MANUFACTURING_MIN_M = 0.002
 PROOF_PRESSURE_FACTOR = 1.5          # kanıt basıncı / işletme basıncı
 BURST_PRESSURE_FACTOR = 2.5          # patlama basıncı / işletme basıncı
 THERMAL_CYCLES_DEFAULT = 500
@@ -737,10 +859,11 @@ class LiquidRocketEngine:
             'min_throttle', 5.0, 100.0, 'Minimum throttle', ' %')
 
         # --- girdi tutarlılık denetimleri -----------------------------------
-        if (self.chamber_diameter_input_m is not None
-                and self.contraction_ratio_input is not None):
-            self._warn('warn.liquid.chamber_diameter_overrides_contraction',
-                       'info')
+        # Oda çapı / daralma oranı çakışması BURADA duyurulmaz: bu noktada d_t
+        # henüz çözülmediğinden hangisinin öncelik alacağı bilinemez (aralık
+        # dışı bir oda çapı reddedilip sıra daralma oranına geçebilir). Uyarı,
+        # kararın gerçekten verildiği _chamber_diameter() içinde üretilir —
+        # aksi hâlde kullanıcıya gerçekleşmeyen bir öncelik bildiriliyordu.
         if self.throat_diameter_input_m is not None:
             self._warn('warn.liquid.throat_diameter_is_output', 'info')
 
@@ -755,7 +878,35 @@ class LiquidRocketEngine:
 
         UI bu listeyi 'not used in solver' etiketi için okur. Liste kod
         gerçeğidir: buradaki bir alan bağlanınca listeden çıkarılmalıdır.
+
+        Ölçüt (2026-07-29 beyan denetimi): beyan edilen bir alan hiçbir
+        FİZİKSEL büyüklüğü oynatmamalıdır. Alanın kendisi hakkında rapor
+        üreten düğümler (input_warnings, girilen değerin yankısı, girilen
+        değere ilişkin bir yargı) beyanı bozmaz — bunlar zaten 'değeriniz
+        kullanılmadı' demenin biçimleridir. tests/test_liquid_input_wiring.py
+        bu kuralı iki yönlü ölçer.
+
+        NOT (self=None ile çağrılabilir): tests/test_liquid_unwired_ui.py
+        listeyi motor kurmadan ``unwired_inputs(None)`` ile okur. Bu yüzden
+        koşullu dallar yalnız ``getattr`` ile durum sorgular, metot çağırmaz.
         """
+        # Daralma oranı KOŞULLU beyan edilir. Motor onu gerçekten kullanır —
+        # ama yalnız oda çapı verilmediğinde. liquid.html her koşuda oda çapı
+        # gönderdiğinden arayüzdeki alan pratikte ölüdür; koşulu bilmeden
+        # 'ölü' demek de yanlış olurdu (API/proje yüklemesinde canlı).
+        # Kaynak kararını _chamber_diameter() yazar, biz yalnız okuruz.
+        comparison = [
+            'throat_diameter', 'fuel_injection_velocity',
+            'oxidizer_injection_velocity', 'fuel_orifice_diameter',
+            'oxidizer_orifice_diameter', 'target_thrust_to_weight',
+            # Türbin basınç oranında öncelik doğrudan girilen genişleme
+            # oranındadır; giriş basıncı yalnız onunla KARŞILAŞTIRILIR
+            # (bkz. _design_feed_system, 'warn.liquid.turbine_pr_inconsistent').
+            'turbine_inlet_pressure',
+        ]
+        if (getattr(self, '_chamber_diameter_source', None) == 'chamber_diameter'
+                and getattr(self, 'contraction_ratio_input', None) is not None):
+            comparison.append('contraction_ratio')
         return {
             # kayıt/etiket alanları (fiziksel çözücü girdisi değil)
             'informational': [
@@ -765,6 +916,13 @@ class LiquidRocketEngine:
                 # kendi özellik tablosuyla) kullanılır; Bartz zincirinde girdi
                 # değildir, bu yüzden burada bildirilir.
                 'fuel_thermal_conductivity',
+                # Yakıt kaynama noktası hiçbir şeyi BOYUTLANDIRMAZ: çözücü
+                # soğutucu çıkış sıcaklığını kendi hesaplar, kaynama noktası
+                # yalnız 'warn.liquid.coolant_exit_above_boiling' sınır
+                # denetiminde okunur. Kanal sayısı/debi ona göre iterasyona
+                # sokulmadığı için burada bildirilir (2026-07-29 ölçümü:
+                # 500 K -> 800 K değişimi hiçbir sayıyı oynatmıyor).
+                'fuel_boiling_point',
                 'stoichiometric_of', 'throttling_of_strategy',
                 'stability_margin', 'ignition_system', 'engine_mount',
                 'vibration_environment', 'acoustic_level', 'gimbal_range',
@@ -780,11 +938,7 @@ class LiquidRocketEngine:
                 'restart_capability', 'chill_down_time',
             ],
             # karşılaştırma amaçlı: çözücü kendi değerini hesaplar
-            'reported_for_comparison': [
-                'throat_diameter', 'fuel_injection_velocity',
-                'oxidizer_injection_velocity', 'fuel_orifice_diameter',
-                'oxidizer_orifice_diameter', 'target_thrust_to_weight',
-            ],
+            'reported_for_comparison': comparison,
         }
 
     # ------------------------------------------------------------------
@@ -795,9 +949,17 @@ class LiquidRocketEngine:
         return getattr(self, 'L_star', L_STAR_DEFAULT_M)
 
     def _chamber_diameter(self):
-        """Yanma odası iç çapı [m] — kullanıcı girdisi > daralma oranı > taban."""
+        """Yanma odası iç çapı [m] — kullanıcı girdisi > daralma oranı > taban.
+
+        Önceliği kim kazandıysa ``_chamber_diameter_source`` alanına yazılır.
+        unwired_inputs() beyanı ORADAN üretir: karar bir yerde verilip beyan
+        başka bir yerde tahmin edilirse rozet yalan söyler (2026-07-29
+        denetimi: form her koşuda oda çapını da gönderdiğinden daralma oranı
+        fiilen ölüydü, ama hiçbir yerde bildirilmiyordu).
+        """
         d_t = getattr(self, 'd_t', None)
-        if d_t is None or not np.isfinite(d_t) or d_t <= 0:
+        d_t_solved = d_t is not None and np.isfinite(d_t) and d_t > 0
+        if not d_t_solved:
             d_t = 0.03
         if getattr(self, 'chamber_diameter_input_m', None) is not None:
             d_c = self.chamber_diameter_input_m
@@ -811,10 +973,24 @@ class LiquidRocketEngine:
                            cr_min=float(CONTRACTION_RATIO_MIN),
                            cr_max=float(CONTRACTION_RATIO_MAX))
             else:
+                # Oda çapı öncelik aldı: kullanıcı ayrıca daralma oranı
+                # girdiyse o değer hesaba GİRMİYOR, sessiz kalınmaz.
+                if getattr(self, 'contraction_ratio_input', None) is not None:
+                    self._warn(
+                        'warn.liquid.chamber_diameter_overrides_contraction',
+                        'info')
+                # Kaynak yalnız d_t GERÇEKTEN çözülmüşken kaydedilir; erken
+                # (0.03 m varsayılanlı) çağrılar beyanı kirletmemeli.
+                if d_t_solved:
+                    self._chamber_diameter_source = 'chamber_diameter'
                 return max(d_c, CHAMBER_DIAMETER_MIN_M)
         if getattr(self, 'contraction_ratio_input', None) is not None:
+            if d_t_solved:
+                self._chamber_diameter_source = 'contraction_ratio'
             return max(d_t * np.sqrt(self.contraction_ratio_input),
                        CHAMBER_DIAMETER_MIN_M)
+        if d_t_solved:
+            self._chamber_diameter_source = 'default'
         return max(d_t * CHAMBER_THROAT_DIAMETER_RATIO_DEFAULT,
                    CHAMBER_DIAMETER_MIN_M)
 
@@ -1793,12 +1969,22 @@ class LiquidRocketEngine:
 
         Kinetik korelasyonun boyut faktörü için gerekir (büyük lüle daha
         yavaş genişler, akış dengeye daha yakın kalır). d_t = 2·sqrt(A_t/π),
-        A_t = ṁ·c*/(P_c·C_D), ṁ = F/(Isp_sl·g0). Kullanıcı boğaz çapı
-        girdiyse doğrudan o kullanılır.
+        A_t = ṁ·c*/(P_c·C_D), ṁ = F/(Isp_sl·g0).
+
+        2026-07-29 beyan denetimi: burada eskiden kullanıcının girdiği boğaz
+        çapı varsa DOĞRUDAN o kullanılıyordu. Boğaz alanı serbest değişken
+        değildir — verilen itki ve oda basıncında A_t kütle dengesinden çıkar
+        (motor bunu zaten 'warn.liquid.throat_diameter_is_output' ile söylüyor
+        ve geometriyi kendi d_t'siyle kuruyor). Kullanıcının değeri yalnız bu
+        korelasyona sızdığında kinetik kayıp, RAPORLANANDAN BAŞKA bir motorun
+        boğazıyla hesaplanıyordu (ölçüm: 95 mm girdi -> 30.7 mm geometri, 781
+        çıktı yaprağı kayıyordu) ve alan 'karşılaştırma amaçlı' diye beyan
+        edildiği hâlde çözümü sürüklüyordu. Kestirim artık her koşulda
+        motorun kendi kütle dengesinden gelir.
         """
-        d_user = getattr(self, 'throat_diameter_input_m', None)
-        if d_user:
-            return float(d_user)
+        # (Buradaki 'GECICI GERI ALMA' notlu erken donus 31 Tem 2026'da
+        # kaldirildi: yukaridaki gerekce uygulanmis gorunuyordu ama kullanicinin
+        # degeri hala dogrudan donuyordu, yani beyan ile davranis celisiyordu.)
         try:
             if not isp_sl_ideal or isp_sl_ideal <= 0:
                 return None
@@ -3109,32 +3295,15 @@ class LiquidRocketEngine:
             d_fuel_orifice = 2 * np.sqrt(A_fuel / np.pi)
             d_ox_orifice = 2 * np.sqrt(A_ox / np.pi)
 
-        # Girdi-çıktı tutarlılık uyarıları: hız ve orifis çapı ÇIKTIDIR
-        # (ΔP + Cd + debi zincirinden gelir). Kullanıcının girdiği değerle
-        # ciddi fark varsa sessiz kalınmaz.
-        for label, entered, computed, unit in (
-                ('Fuel injection velocity',
-                 getattr(self, 'fuel_velocity_input', None), v_fuel_base, ' m/s'),
-                ('Oxidizer injection velocity',
-                 getattr(self, 'ox_velocity_input', None), v_ox_base, ' m/s'),
-                ('Fuel orifice diameter',
-                 getattr(self, 'fuel_orifice_input_mm', None),
-                 d_fuel_orifice * 1000.0, ' mm'),
-                ('Oxidizer orifice diameter',
-                 getattr(self, 'ox_orifice_input_mm', None),
-                 d_ox_orifice * 1000.0, ' mm')):
-            if entered is None or computed <= 0:
-                continue
-            if abs(entered - computed) / computed > INPUT_CONSISTENCY_TOLERANCE:
-                self._warn('warn.liquid.entered_value_is_comparison_only', 'info',
-                           label=label, computed=round(float(computed), 2),
-                           entered=float(entered), unit=unit)
-        
         # Mixing efficiency calculation
         mixing_length = 0.05  # 50mm typical mixing length
         residence_time = mixing_length / np.sqrt(v_fuel_base * v_ox_base)
         
-        # Combustion efficiency (mixing dependent)
+        # Yanma verimi: kullanıcı 'combustion_efficiency' girdiyse TEK KAYNAK
+        # ODUR (2026-07-30 / O6: enjektör paneli kullanıcının %97'sini yok
+        # sayıp enjektör tipine bağlı 0.98 sabitini gösteriyordu; kullanıcı
+        # %80 girse bile panel 0.98'de kalıyordu). Girdi yoksa enjektör
+        # tipinden gelen karışım kalitesi tahmini kullanılır ve etiketlenir.
         if self.injector_type == 'impinging':
             combustion_efficiency = 0.98  # Excellent mixing
         elif self.injector_type == 'coaxial':
@@ -3143,7 +3312,12 @@ class LiquidRocketEngine:
             combustion_efficiency = 0.99  # Uniform distribution
         else:
             combustion_efficiency = 0.95  # Conservative estimate
-        
+        combustion_efficiency_source = (
+            f"estimated from the injector type ({self.injector_type})")
+        if 'combustion_efficiency' in self.overrides:
+            combustion_efficiency = float(getattr(self, 'eta_c_star', 1.0))
+            combustion_efficiency_source = 'user input (combustion efficiency)'
+
         result = {
             'injector_type': self.injector_type,
             'fuel_injection_area': A_fuel * 1e6,  # mm²
@@ -3155,11 +3329,16 @@ class LiquidRocketEngine:
             'required_fuel_tank_pressure': P_tank_fuel,  # bar
             'required_ox_tank_pressure': P_tank_ox,  # bar
             'number_of_elements': n_elements,
+            # Devre başına DELİK sayısı: n·π/4·d² = A özdeşliğinin kullandığı
+            # sayı budur (eleman sayısı tipe göre farklı olabilir, ör. pintle).
+            'fuel_orifice_count': n_elements,
+            'ox_orifice_count': n_elements,
             'fuel_orifice_diameter': d_fuel_orifice * 1000,  # mm
             'ox_orifice_diameter': d_ox_orifice * 1000,  # mm
             'discharge_coefficient_fuel': Cd_fuel,
             'discharge_coefficient_ox': Cd_ox,
             'combustion_efficiency': combustion_efficiency,
+            'combustion_efficiency_source': combustion_efficiency_source,
             'droplet_diameter': droplet_diameter * 1e6,  # microns
             'weber_number': target_weber,
             'mixing_residence_time': residence_time * 1000  # ms
@@ -3169,6 +3348,13 @@ class LiquidRocketEngine:
         # Geriye uyum: mevcut alan adları korunur, eşleşen alanlar modül
         # çıktısıyla doldurulur; tam çıktı 'injector_design_detail'. Modül
         # hata verirse yukarıdaki eski hesap olduğu gibi döner.
+        #
+        # K3 DÜZELTMESİ (2026-07-30): panel eskiden İKİ hesabın karışımıydı —
+        # toplam alan/hız modülden, delik çapı eski hesaptan geliyordu; aynı
+        # delik için 3.9 kat fark ve panelin kendi içinde
+        # n·π/4·d² ≠ A çelişkisi (%11.4) vardı. Artık eleman sayısı modüle
+        # GİRDİ olarak verilir (n_orifices_*), çap modülün KENDİ alanından
+        # bölünür ve tek sayı kümesi kalır.
         try:
             from hrma.engines.injector_design import design_injector
             type_map = {'impinging': 'impinging_doublet',
@@ -3198,25 +3384,57 @@ class LiquidRocketEngine:
             # (main_chamber.inlet_streams iki gaz akışı) enjektör gaz-gaz
             # shear-coax modeliyle çözülür; akım koşulları (T0, P0, gamma,
             # MW) ÇEVRİM ÇÖZÜMÜNDEN gelir, varsayılan sabit yoktur.
+            # Kullanıcının eleman sayısı modüle GİRDİ olarak verilir: bir
+            # eleman = devre başına bir delik (unlike doublet, koaksiyel,
+            # showerhead). Modül çapı kendi toplam alanından bu sayıya böler,
+            # sonra alanı n·π/4·d² ile geri kurar → aritmetik TAM tutar.
+            if n_user is not None:
+                inj_spec['n_orifices_ox'] = n_elements
+                inj_spec['n_orifices_fuel'] = n_elements
             gas_spec = self._gas_gas_injector_spec()
             if gas_spec is not None:
                 inj_spec = gas_spec
             detail = design_injector(inj_spec)
             if detail.get('status') == 'success':
+                cd_applied = self._apply_user_discharge_coefficient(
+                    detail, cd_user)
                 oxc, fc = detail['ox_circuit'], detail.get('fuel_circuit')
                 result['injector_design_detail'] = detail
                 result['number_of_elements'] = detail['pattern']['n_elements']
+                result['ox_orifice_count'] = oxc['n_orifices']
                 result['ox_orifice_diameter'] = oxc['orifice_d_mm']
                 result['ox_injection_velocity'] = oxc['velocity_m_s']
                 result['ox_pressure_drop'] = oxc['delta_p_bar']
                 result['ox_injection_area'] = oxc['total_area_mm2']
                 result['discharge_coefficient_ox'] = oxc['cd']
                 if fc:
+                    result['fuel_orifice_count'] = fc['n_orifices']
                     result['fuel_orifice_diameter'] = fc['orifice_d_mm']
                     result['fuel_injection_velocity'] = fc['velocity_m_s']
                     result['fuel_pressure_drop'] = fc['delta_p_bar']
                     result['fuel_injection_area'] = fc['total_area_mm2']
                     result['discharge_coefficient_fuel'] = fc['cd']
+                result['orifice_geometry_source'] = (
+                    'injector design model (single source: element count, '
+                    'orifice diameter, area, velocity and Cd)')
+                result['discharge_coefficient_source'] = (
+                    'user input (discharge coefficient)' if
+                    (cd_user is not None and cd_applied) else
+                    oxc.get('cd_basis', 'injector design model'))
+                # Kullanıcı Cd'si bu yolda uygulanamadıysa SESSİZ KALINMAZ.
+                if cd_user is not None and not cd_applied:
+                    self._warn('warn.liquid.entered_value_is_comparison_only',
+                               'info', label='Injector discharge coefficient',
+                               computed=round(float(oxc['cd']), 3),
+                               entered=float(cd_user), unit='')
+                # Eleman sayısını modül tipe göre kendi kurduysa (ör. pintle
+                # tek elemandır) kullanıcıya bildirilir.
+                if (n_user is not None
+                        and int(result['number_of_elements']) != int(n_elements)):
+                    self._warn('warn.liquid.entered_value_is_comparison_only',
+                               'info', label='Injector element count',
+                               computed=int(result['number_of_elements']),
+                               entered=int(n_user), unit='')
                 smd = detail['atomization'].get('smd_ox_um')
                 if smd:
                     result['droplet_diameter'] = smd  # microns (modül SMD'si)
@@ -3242,71 +3460,179 @@ class LiquidRocketEngine:
             result['main_injection_phase'] = 'gas-liquid'
             result['gas_liquid_element_model'] = 'not_modelled'
 
-        # Kullanıcı eleman sayısı verdiyse SON SÖZ ONUNDUR: detay modülü kendi
-        # desen sayısını yazmış olabilir, orifis çapları toplam alandan
-        # kullanıcının sayısına göre yeniden bölünür.
-        if n_user is not None:
-            result['number_of_elements'] = n_elements
-            result['fuel_orifice_diameter'] = d_fuel_orifice * 1000.0
-            result['ox_orifice_diameter'] = d_ox_orifice * 1000.0
-            result['element_count_source'] = 'user input'
-        else:
-            result['element_count_source'] = 'sized by the injector model'
+        # K3: eleman sayısı ARTIK modüle girdi olarak veriliyor (yukarıda);
+        # burada çapı eski hesaba geri çeviren blok KALDIRILDI — panelin
+        # alanı modülden, çapı eski hesaptan gelince n·π/4·d² = A tutmuyordu.
+        result['element_count_source'] = (
+            'user input' if n_user is not None
+            else 'sized by the injector model')
         result['pressure_drop_source'] = (
             'user input (injector pressure drop)'
             if getattr(self, 'injector_dp_input_bar', None) is not None
             else 'NASA SP-8089 dP/Pc ratio for the element type')
 
+        # Girdi-çıktı tutarlılık uyarıları: hız ve orifis çapı ÇIKTIDIR
+        # (ΔP + Cd + debi zincirinden gelir). Kullanıcının girdiği değerle
+        # ciddi fark varsa sessiz kalınmaz.
+        # K3: kıyaslama artık PANELDE GÖSTERİLEN nihai değerlerle yapılıyor;
+        # eskiden modül öncesi eski hesapla kıyaslanıyor ve uyarı panelden
+        # farklı bir üçüncü sayı ("hesaplanan 49.19 m/s" vs panel 54.81 m/s)
+        # bildiriyordu.
+        for label, entered, computed, unit in (
+                ('Fuel injection velocity',
+                 getattr(self, 'fuel_velocity_input', None),
+                 result['fuel_injection_velocity'], ' m/s'),
+                ('Oxidizer injection velocity',
+                 getattr(self, 'ox_velocity_input', None),
+                 result['ox_injection_velocity'], ' m/s'),
+                ('Fuel orifice diameter',
+                 getattr(self, 'fuel_orifice_input_mm', None),
+                 result['fuel_orifice_diameter'], ' mm'),
+                ('Oxidizer orifice diameter',
+                 getattr(self, 'ox_orifice_input_mm', None),
+                 result['ox_orifice_diameter'], ' mm')):
+            if entered is None or computed is None or computed <= 0:
+                continue
+            if abs(entered - computed) / computed > INPUT_CONSISTENCY_TOLERANCE:
+                self._warn('warn.liquid.entered_value_is_comparison_only',
+                           'info', label=label,
+                           computed=round(float(computed), 2),
+                           entered=float(entered), unit=unit)
+
         return result
-    
+
+    # Cd'si tablo yerine swirl geometrisinden (Giffen-Muraszew) gelen tipler:
+    # bunlarda düz orifis Cd'si fiziksel olarak YANLIŞ sınıftır, kullanıcı
+    # değeri uygulanmaz (uygulanmadığı açıkça bildirilir).
+    _SWIRL_CD_INJECTOR_TYPES = ('swirl', 'coax_swirl')
+
+    def _apply_user_discharge_coefficient(self, detail, cd_user):
+        """Modül enjektör çözümünü kullanıcının Cd'sine TAM cebirle taşır.
+
+        injector_design.design_injector sözleşmesinde SIVI devreleri için Cd
+        giriş alanı yoktur (yalnız gaz-gaz dalı spec['cd'] okur); Cd, orifis
+        giriş geometrisi + L/D tablosundan gelir. Kullanıcının ölçtüğü Cd'yi
+        AYRI bir hesapla uygulamak K3 çelişkisini doğuruyordu. Burada modülün
+        KENDİ SPI cebriyle tam ölçekleme yapılır ve sonuç modül çıktısına
+        GERİ YAZILIR; böylece geriye tek sayı kümesi kalır:
+
+            ṁ = Cd·A·√(2ρΔP),  v = Cd·√(2ΔP/ρ),  d = √(4A/(π·n))
+            r = Cd_model / Cd_user  ⇒  A ∝ r,  d ∝ √r,  v ∝ 1/r
+
+        ΔP, ρ, ṁ, ΔP/Pc, kavitasyon sayısı, chug ve hidrolik flip kalemleri
+        Cd'den bağımsızdır; dokunulmaz.
+
+        Dönüş: uygulandı mı (bool). False dönerse çağıran taraf kullanıcıya
+        'bu yolda kullanılmıyor' bildirimini yapar.
+        """
+        if cd_user is None:
+            return True   # kullanıcı Cd vermedi: modül Cd'si zaten tek kaynak
+        inj_type = detail.get('injector_type')
+        if inj_type == 'gas_gas_coaxial':
+            return True   # gaz-gaz dalı spec['cd'] ile Cd'yi zaten aldı
+        if inj_type in self._SWIRL_CD_INJECTOR_TYPES:
+            return False  # swirl Cd'si geometriden gelir, düz orifis Cd'si değil
+        circuits = {k: detail.get(k) for k in ('ox_circuit', 'fuel_circuit')}
+        live = [c for c in circuits.values() if c]
+        if not live:
+            return False
+        # Ölçekleme yalnız tek fazlı orifis (SPI) çözümünde tam geçerlidir;
+        # NHNE (flaşlayan N₂O) devresinde Cd doğrusal ölçeklenmez.
+        if any(c.get('flow_model') != 'SPI' for c in live):
+            return False
+
+        cd_user = float(cd_user)
+        ratios = {}
+        for key, c in circuits.items():
+            if not c:
+                continue
+            r = float(c['cd']) / cd_user
+            ratios[key] = r
+            root = float(np.sqrt(r))
+            c['total_area_mm2'] = float(c['total_area_mm2']) * r
+            c['orifice_d_mm'] = float(c['orifice_d_mm']) * root
+            c['velocity_m_s'] = float(c['velocity_m_s']) / r
+            c['cd'] = cd_user
+            c['cd_basis'] = (
+                'user input (discharge coefficient); the model value '
+                f"({float(r) * cd_user:.3f}) was replaced through the same "
+                'SPI orifice equation')
+            man = c.get('manifold')
+            if man:
+                man['d_mm'] = float(man['d_mm']) * root
+                man['velocity_m_s'] = float(man['velocity_m_s']) / r
+
+        r_ox = ratios.get('ox_circuit', 1.0)
+        r_fuel = ratios.get('fuel_circuit', r_ox)
+        # Çarpışma geometrisi doğrudan d_ox ile ölçekli (3·d ve 6·d kuralları)
+        imp = (detail.get('pattern') or {}).get('impingement')
+        if imp:
+            root_ox = float(np.sqrt(r_ox))
+            for key in ('free_jet_length_mm', 'element_spacing_mm'):
+                if imp.get(key):
+                    imp[key] = float(imp[key]) * root_ox
+        # SMD: impinging korelasyonu D32 = C·d·We^(-1/3) ⇒ d^(2/3)·v^(-2/3) ∝ r.
+        # Elkotb ve Lefebvre-swirl korelasyonları yalnız ΔP / eleman başına
+        # debi / akışkan özelliklerine bağlıdır — Cd'den etkilenmez.
+        atom = detail.get('atomization') or {}
+        if atom.get('correlation') == 'impinging-We13':
+            if atom.get('smd_ox_um'):
+                atom['smd_ox_um'] = float(atom['smd_ox_um']) * r_ox
+            if atom.get('smd_fuel_um'):
+                atom['smd_fuel_um'] = float(atom['smd_fuel_um']) * r_fuel
+        # Pintle geometrisinin tüm uzunlukları √alan ile ölçekli; BF, delik
+        # sayısı ve L_s/D_p oranları boyutsuzdur ve değişmez.
+        pin = detail.get('pintle_geometry')
+        if pin:
+            root_ox = float(np.sqrt(r_ox))
+            for key in ('d_pintle_mm', 'skip_distance_mm', 'annulus_gap_mm',
+                        'radial_hole_d_mm'):
+                if pin.get(key):
+                    pin[key] = float(pin[key]) * root_ox
+        return True
+
     def calculate_turbopump_requirements(self):
-        """Calculate turbopump specifications (if required)"""
-        # Check if turbopumps are needed (high pressure engines)
-        if self.P_c > 50:  # bar
-            # DENETIM DUZELTMESI (Bulgu 8): pompa head'i Pc'den bagimsiz sabit
-            # 200/300 m idi (Pc=100 bar icin gereken ~1300+ m; guc ~6.5x dusuk
-            # raporlaniyordu). Head artik gercek basinc yukselmesinden:
-            # H = (Pc + dP_enjektor + dP_hat/marj) / (rho * g)
-            # (_design_turbopump_system ile ayni yaklasim; Huzel & Huang Ch. 6)
-            injector = self.calculate_injector_design()
-            delta_P_inj_fuel = injector['fuel_pressure_drop'] * PA_PER_BAR  # Pa
-            delta_P_inj_ox = injector['ox_pressure_drop'] * PA_PER_BAR     # Pa
-            delta_P_lines = 5e5  # Pa, besleme hatti kayiplari + marj (5 bar tipik)
+        """Turbopompa özeti — çevrimden ve TEK pompa zincirinden.
 
-            P_c_pa = self.P_c * PA_PER_BAR
-            fuel_head = (P_c_pa + delta_P_inj_fuel + delta_P_lines) / (self.rho_fuel * self.g0)  # m
-            ox_head = (P_c_pa + delta_P_inj_ox + delta_P_lines) / (self.rho_ox * self.g0)        # m
-
-            # Pump efficiencies
-            eta_fuel_pump = 0.75
-            eta_ox_pump = 0.80
-            
-            # Power requirements
-            P_fuel_pump = (self.mdot_fuel * fuel_head * self.g0) / eta_fuel_pump
-            P_ox_pump = (self.mdot_ox * ox_head * self.g0) / eta_ox_pump
-            
-            total_power = P_fuel_pump + P_ox_pump
-            
-            # Turbine requirements (assuming gas generator cycle)
-            turbine_efficiency = 0.65
-            gas_generator_flow = total_power / (turbine_efficiency * 500000)  # Simplified
-            
-            return {
-                'turbopumps_required': True,
-                'fuel_pump_power': P_fuel_pump / 1000,  # kW
-                'ox_pump_power': P_ox_pump / 1000,  # kW
-                'total_pump_power': total_power / 1000,  # kW
-                'gas_generator_flow': gas_generator_flow,  # kg/s
-                'fuel_pump_head': fuel_head,  # m
-                'ox_pump_head': ox_head  # m
-            }
-        else:
-            injector = self.calculate_injector_design()
+        Y4 DÜZELTMESİ (2026-07-30): karar ölçütü 'Pc > 50 bar' idi, bu yüzden
+        BASINÇ BESLEMELİ çevrimde bile turbopompa raporlanıyordu
+        (turbopumps_required=True iken detailed_feed_system.turbopump_required
+        =False). Ayrıca güç burada kendi head/verim sabitleriyle yeniden
+        hesaplanıyor ve _design_turbopump_system / çevrim çözümüyle üç farklı
+        değer veriyordu (65.217 kW / 0.543 kW / 0.0 W). Artık:
+          - turbopompa gerekliliği ÇEVRİMDEN gelir (pressure_fed -> yok),
+          - güç TEK kaynaktan (_design_turbopump_system -> _design_pump).
+        """
+        injector = self.calculate_injector_design()
+        if getattr(self, 'feed_system_type', 'turbopump') != 'turbopump':
             return {
                 'turbopumps_required': False,
                 'tank_fed_system': True,
-                'max_tank_pressure': max(injector['required_fuel_tank_pressure'], injector['required_ox_tank_pressure'])
+                'engine_cycle': getattr(self, 'engine_cycle', 'pressure_fed'),
+                'not_applicable_reason': (
+                    'pressure-fed cycle: the propellants are pushed by tank '
+                    'pressure, there is no turbopump'),
+                'max_tank_pressure': max(
+                    injector['required_fuel_tank_pressure'],
+                    injector['required_ox_tank_pressure']),
             }
+
+        # Turbopompalı çevrim: sayılar ayrıntılı pompa tasarımından gelir.
+        tp = self._design_turbopump_system(self.mdot_ox, self.mdot_fuel)
+        fuel_power_kw = float(tp['fuel_pump']['power'])
+        ox_power_kw = float(tp['oxidizer_pump']['power'])
+        return {
+            'turbopumps_required': True,
+            'engine_cycle': getattr(self, 'engine_cycle', 'gas_generator'),
+            'fuel_pump_power': fuel_power_kw,   # kW
+            'ox_pump_power': ox_power_kw,       # kW
+            'total_pump_power': fuel_power_kw + ox_power_kw,  # kW
+            'turbine_power': float(tp['turbine']['power']),   # kW
+            'fuel_pump_head': float(tp['fuel_pump']['head']),  # m
+            'ox_pump_head': float(tp['oxidizer_pump']['head']),  # m
+            'power_source': ('_design_turbopump_system (single pump-design '
+                             'chain shared with detailed_feed_system)'),
+        }
     
     def calculate_altitude_performance(self, altitudes):
         """High-precision altitude performance with detailed nozzle optimization
@@ -3609,7 +3935,10 @@ class LiquidRocketEngine:
         autogenous = self._autogenous_pressurization_summary()
 
         # Manufacturing and cost analysis
-        manufacturing_analysis = self._analyze_manufacturing_requirements()
+        # Soğutma ve enjektör sonuçları yukarıda zaten hesaplandı; tolerans
+        # tablosu bunların GERÇEK ölçülerini kullanır (tekrar hesap yok).
+        manufacturing_analysis = self._analyze_manufacturing_requirements(
+            cooling=cooling, injector=injector)
         
         return {
             # Input parameters
@@ -3855,6 +4184,46 @@ class LiquidRocketEngine:
         standard_sizes = [0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3]  # m
         return min(standard_sizes, key=lambda x: abs(x - diameter))
     
+    def _cycle_pump_flows(self):
+        """Çevrim çözümünün pompa başına GERÇEK debisi -> (ṁ_ox, ṁ_yakıt).
+
+        Turbopompalı çevrimde pompalar ana oda debisini DEĞİL, gaz
+        jeneratörü / ön yakıcı payını da içeren toplam debiyi basar; O/F
+        bölüşümü de ana odanınkinden farklıdır. Çevrim kapanmadıysa None.
+        """
+        flows = self._cycle_pump_duty()
+        if flows is None:
+            return None
+        return flows[0], flows[1]
+
+    def _cycle_pump_duty(self):
+        """(ṁ_ox, ṁ_yakıt, P_ox_kW, P_yakıt_kW) — çevrim çözümünden.
+
+        Güç değerleri çevrim güç dengesinin mil başına kapanışıdır; çok
+        kademeli (ana + boost) mimariyi de içerdiği için tek kademe
+        varsayımıyla hesaplanan değerden farklı olabilir. Çevrim kapanmadıysa
+        None döner ve pompa kendi tek kademeli zinciriyle boyutlandırılır.
+        """
+        if getattr(self, 'feed_system_type', 'turbopump') != 'turbopump':
+            return None
+        cyc = self._solve_cycle_balance()
+        if not cyc or cyc.get('status') != 'converged':
+            return None
+        mdot = {'oxidizer': 0.0, 'fuel': 0.0}
+        power = {'oxidizer': 0.0, 'fuel': 0.0}
+        found = False
+        for shaft in (cyc.get('shafts') or []):
+            for pump in (shaft.get('pumps') or []):
+                key = str(pump.get('propellant', '')).lower()
+                if key in mdot and pump.get('mdot_kg_s'):
+                    mdot[key] += float(pump['mdot_kg_s'])
+                    power[key] += float(pump.get('power_W') or 0.0) / 1000.0
+                    found = True
+        if not found or mdot['oxidizer'] <= 0 or mdot['fuel'] <= 0:
+            return None
+        return (mdot['oxidizer'], mdot['fuel'],
+                power['oxidizer'] or None, power['fuel'] or None)
+
     def _design_turbopump_system(self, mdot_ox: float, mdot_fuel: float) -> Dict:
         """Turbopompa alt sistemi — ayrıntılı analizle TEK kaynak.
 
@@ -3868,6 +4237,14 @@ class LiquidRocketEngine:
         tank_bar = ((getattr(self, 'feed_pressure_input_bar', None)
                      or PUMP_TANK_PRESSURE_DEFAULT_BAR) if pressure_fed
                     else PUMP_TANK_PRESSURE_DEFAULT_BAR)
+        # Y4: pompaların GERÇEKTEN bastığı debi ve mil gücü çevrim
+        # çözümünden gelir (gaz jeneratörü / ön yakıcı payı dahil). Ana oda
+        # debisiyle boyutlandırmak çevrim güç dengesinden farklı bir pompa
+        # gücü üretiyordu (64.5 kW vs 64.96 kW).
+        duty = self._cycle_pump_duty()
+        p_ox_kw = p_fuel_kw = None
+        if duty is not None:
+            mdot_ox, mdot_fuel, p_ox_kw, p_fuel_kw = duty
         # Pompa basma basıncı: çevrim çözümü varsa ONDAN (ön yakıcı merdiveni
         # + rejeneratif ΔP dahil — _analyze_detailed_feed_system ile TEK
         # kaynak), yoksa Pc + hat/enjektör zinciri.
@@ -3878,9 +4255,10 @@ class LiquidRocketEngine:
                 and cyc.get('pump_discharge_ox_bar')):
             disch_ox = float(cyc['pump_discharge_ox_bar'])
             disch_fuel = float(cyc['pump_discharge_fuel_bar'])
-        ox = self._design_pump(mdot_ox, self.rho_ox, disch_ox, tank_bar)
+        ox = self._design_pump(mdot_ox, self.rho_ox, disch_ox, tank_bar,
+                               shaft_power_kw=p_ox_kw)
         fuel = self._design_pump(mdot_fuel, self.rho_fuel, disch_fuel,
-                                 tank_bar)
+                                 tank_bar, shaft_power_kw=p_fuel_kw)
         total_pump_power = (ox['design_power'] + fuel['design_power']) * 1000.0
         eta_turbine = TURBINE_EFFICIENCY_DEFAULT
         turbine_power_required = total_pump_power / eta_turbine  # W
@@ -4638,7 +5016,8 @@ class LiquidRocketEngine:
             }
         }
     
-    def _design_pump(self, mdot, density, discharge_pressure_bar, tank_pressure_bar):
+    def _design_pump(self, mdot, density, discharge_pressure_bar,
+                     tank_pressure_bar, shaft_power_kw=None):
         """Tek pompanın benzerlik tabanlı tasarımı (sabit eğri YOK).
 
         2026-07-19 denetimi: H-Q ve verim eğrileri uydurma parabollerden
@@ -4721,6 +5100,20 @@ class LiquidRocketEngine:
             npsh_curve.append(float(npsh_i))
 
         power_design = density * g0 * head * q / (eta_bep * 1000.0)  # kW
+        power_source = ('rho*g*H*Q/eta at the design point '
+                        '(single-stage head rise)')
+        # Y4 (2026-07-30): çok kademeli mimaride (staged combustion'da RS-25
+        # tipi ana+boost oksitleyici pompası) TOPLAM debi bildirilen en yüksek
+        # basma basıncını GÖRMEZ; yalnız küçük ön yakıcı payı boost kademesine
+        # girer. Tek kademe varsayımıyla hesaplanan güç bu durumda çevrim güç
+        # dengesinden %12.8 sapıyordu. Çevrim mil gücü verildiyse TEK KAYNAK
+        # odur; eğri şekli korunarak aynı oranla ölçeklenir.
+        if shaft_power_kw is not None and power_design > 1e-9:
+            scale = float(shaft_power_kw) / power_design
+            power_design = float(shaft_power_kw)
+            power_curve = [p * scale for p in power_curve]
+            power_source = ('cycle power balance shaft power (multi-stage '
+                            'architecture accounted for)')
         npsh_req = ((omega * np.sqrt(max(q, 1e-12))
                      / PUMP_SUCTION_SPECIFIC_SPEED) ** (4.0 / 3.0)) / g0
         if npsh_req > npsh_avail:
@@ -4736,6 +5129,7 @@ class LiquidRocketEngine:
                                   if 'turbopump_efficiency' in self.overrides
                                   else 'default best-efficiency-point value'),
             'design_power': power_design,                 # kW
+            'design_power_source': power_source,
             'rotational_speed': rpm,                      # rpm
             'speed_source': speed_source,
             'impeller_tip_speed': u2,                     # m/s
@@ -4808,12 +5202,16 @@ class LiquidRocketEngine:
                            feed_bar=float(feed_input),
                            required_bar=round(float(
                                drops['pump_discharge_pressure_ox']), 1))
+        duty = self._cycle_pump_duty()
+        p_ox_kw = p_fuel_kw = None
+        if duty is not None:
+            mdot_ox, mdot_fuel, p_ox_kw, p_fuel_kw = duty
         ox_pump = self._design_pump(mdot_ox, self.rho_ox,
                                     drops['pump_discharge_pressure_ox'],
-                                    tank_bar)
+                                    tank_bar, shaft_power_kw=p_ox_kw)
         fuel_pump = self._design_pump(mdot_fuel, self.rho_fuel,
                                       drops['pump_discharge_pressure_fuel'],
-                                      tank_bar)
+                                      tank_bar, shaft_power_kw=p_fuel_kw)
 
         # Türbin: gerekli güç pompalardan; uç hızı gerçek özgül işten.
         eta_turbine = TURBINE_EFFICIENCY_DEFAULT
@@ -4907,6 +5305,14 @@ class LiquidRocketEngine:
                     'source': 'cycle power balance solution',
                 }
 
+        # Türbin giriş basıncı 'reported_for_comparison' beyanıyla bildirilen
+        # bir alandır; kullanıcının karşılaştırabilmesi için çözücünün KENDİ
+        # ima ettiği giriş basıncı da yayımlanır (P_in = PR · P_atmosfer,
+        # tutarlılık denetiminin ters çevrilmiş hâli). Arayüz bu düğümü okur;
+        # sabit atmosfer basıncı JS'e kopyalanmaz.
+        turbine_card['inlet_pressure_implied_bar'] = float(
+            turbine_card['pressure_ratio']) * float(self.P_a)
+
         return {
             'feed_system_type': self.feed_system_type,
             'engine_cycle': getattr(self, 'engine_cycle', 'gas_generator'),
@@ -4915,10 +5321,20 @@ class LiquidRocketEngine:
             'engine_cycle_solution': cycle_solution,
             'pump_discharge_source': drops.get('discharge_pressure_source'),
             'turbopump_analysis': {
-                'oxidizer_pump': ox_pump,
-                'fuel_pump': fuel_pump,
-                'turbine': turbine_card,
-                'gas_generator': gg_card,
+                # Y4 (2026-07-30): basınç beslemeli çevrimde turbopompa
+                # YOKTUR; pompa/türbin/gaz jeneratörü kartları burada sahte
+                # sayı olur (0.543 kW'lık iki pompa, 130 bar gaz jeneratörü,
+                # PR=4 türbin raporlanıyordu). Kartlar bilinçli olarak boş
+                # bırakılır ve gerekçesi çıktıda yazar.
+                'applicable': not pressure_fed,
+                'not_applicable_reason': (
+                    None if not pressure_fed else
+                    'pressure-fed cycle: no pumps, no turbine, no gas '
+                    'generator in this engine'),
+                'oxidizer_pump': None if pressure_fed else ox_pump,
+                'fuel_pump': None if pressure_fed else fuel_pump,
+                'turbine': None if pressure_fed else turbine_card,
+                'gas_generator': None if pressure_fed else gg_card,
             },
             'turbopump_required': not pressure_fed,
             'tank_pressure_bar': tank_bar,
@@ -5592,7 +6008,7 @@ class LiquidRocketEngine:
 
         d_c = self._chamber_diameter()
         p_int = self.P_c * PA_PER_BAR  # Pa
-        t_required = max((p_int * d_c / 2.0) / allowable, WALL_THICKNESS_MIN_M)
+        t_required = max((p_int * d_c / 2.0) / allowable, WALL_THICKNESS_MANUFACTURING_MIN_M)
 
         thickness_source = 'next standard plate thickness above the requirement'
         t_used = None
@@ -5783,34 +6199,83 @@ class LiquidRocketEngine:
                 'integration.')
         return result
     
-    def _analyze_manufacturing_requirements(self):
-        """Manufacturing and production analysis"""
-        
+    def _analyze_manufacturing_requirements(self, cooling=None, injector=None):
+        """İmalat gereksinimleri — yalnız türetilmiş ya da etiketli bilgi.
+
+        2026-07-28 dürüstlük denetimi (LIQ-MFG-4): bu fonksiyon dört sözlüğün
+        tamamını literal döndürüyordu ve sonuç arayüzde (liquid.html imalat
+        kartı) kullanıcıya gösteriliyordu — 10 N'lik itici de 2 MN'lik motor
+        da aynı '$2M - $5M' geliştirme maliyetini ve aynı '18 months' tasarım
+        süresini görüyordu. Maliyet ve termin için elimizde tedarikçi fiyatı,
+        işçilik ücreti ya da program verisi YOK; ölçeklenen bir korelasyon
+        uydurmak yerine alanlar KALDIRILDI (yokluğu MANUFACTURING_COST_STATUS
+        ile açıkça raporlanır).
+
+        Kalan iki alan gerçeğe bağlandı: üretim rotası motorun soğutma /
+        enjektör / besleme seçimine göre seçilir (nitel, etiketli), toleranslar
+        ise motorun HESAPLANMIŞ nominal ölçüsünden ISO 2768-1 tablosuyla
+        aranır. Tolerans bir tasarım dağıtımı değildir, öyle etiketlenir.
+
+        cooling/injector: çağıran zaten hesapladıysa geçirir (tekrar hesap
+        yok); geçirmezse burada üretilir.
+        """
+        if cooling is None:
+            try:
+                cooling = self.calculate_cooling_requirements()
+            except Exception:
+                cooling = {}
+        if injector is None:
+            try:
+                injector = self.calculate_injector_design()
+            except Exception:
+                injector = {}
+        cooling = cooling or {}
+        injector = injector or {}
+
+        processes = {
+            'chamber': CHAMBER_PROCESS_BY_COOLING.get(
+                self.cooling_type, CHAMBER_PROCESS_DEFAULT),
+            'nozzle': NOZZLE_PROCESS_BY_COOLING.get(
+                self.cooling_type, NOZZLE_PROCESS_DEFAULT),
+            'injector': INJECTOR_PROCESS_BY_TYPE.get(
+                self.injector_type, INJECTOR_PROCESS_DEFAULT),
+            'feed_system': FEED_PROCESS_BY_TYPE.get(
+                self.feed_system_type, FEED_PROCESS_DEFAULT),
+        }
+
+        d_t = getattr(self, 'd_t', None)
+        features = {
+            'throat_diameter': _iso2768_feature(
+                d_t * 1000.0 if d_t else None, ISO2768_GRADE_PRECISION),
+            'fuel_injector_orifice': _iso2768_feature(
+                injector.get('fuel_orifice_diameter'),
+                ISO2768_GRADE_PRECISION),
+            'oxidizer_injector_orifice': _iso2768_feature(
+                injector.get('ox_orifice_diameter'), ISO2768_GRADE_PRECISION),
+            'chamber_diameter': _iso2768_feature(
+                cooling.get('chamber_diameter'), ISO2768_GRADE_GENERAL),
+        }
+        if cooling.get('cooling_channels'):
+            features['cooling_channel_width'] = _iso2768_feature(
+                cooling.get('channel_width_mm'), ISO2768_GRADE_PRECISION)
+        features = {k: v for k, v in features.items() if v is not None}
+
+        # Boğaz toleransının performans karşılığı: A_t ~ D^2 olduğundan
+        # dA/A = 2·dD/D. Boğaz alanı sabit mdot'ta doğrudan Pc'yi, sabit Pc'de
+        # doğrudan itkiyi ölçekler; tolerans bandı bu yüzden anlamlı.
+        throat = features.get('throat_diameter')
+        if throat and throat.get('tolerance_mm'):
+            throat['throat_area_variation_percent'] = round(
+                200.0 * throat['tolerance_mm'] / throat['nominal_mm'], 2)
+
         return {
-            'manufacturing_processes': {
-                'chamber': 'Forged and machined',
-                'nozzle': 'Brazed cooling channels',
-                'injector': 'CNC machined orifices',
-                'turbopump': 'Investment cast impellers'
-            },
+            'manufacturing_processes': processes,
+            'manufacturing_processes_basis': MANUFACTURING_ROUTE_BASIS,
             'critical_tolerances': {
-                'throat_diameter': '±0.1mm',
-                'injector_orifices': '±0.05mm',
-                'cooling_channels': '±0.2mm',
-                'chamber_alignment': '±0.5mm'
+                'basis': ISO2768_TOLERANCE_BASIS,
+                'features': features,
             },
-            'estimated_costs': {
-                'development': '$2M - $5M',
-                'first_unit': '$500k - $1M',
-                'production_unit': '$100k - $300k',
-                'annual_production': '50 - 200 units'
-            },
-            'production_timeline': {
-                'design_phase': '18 months',
-                'prototype_build': '12 months',
-                'qualification_testing': '6 months',
-                'production_ramp': '6 months'
-            }
+            'cost_and_schedule_status': MANUFACTURING_COST_STATUS,
         }
     
     def _detailed_component_sizing(self):

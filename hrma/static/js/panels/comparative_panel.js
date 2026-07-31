@@ -48,13 +48,16 @@
     function currentMetrics() {
         const r = window.currentResults;
         if (!r) return null;
-        const m = (r && r.motor) || r || {};
+        const m = U.motorDict(r);
         const out = {};
-        const thrust = num(m.thrust);
+        // Katı motor düz sözlükte 'thrust' ÜRETMİYOR (ortalama ve tepe itki
+        // ayrı anahtarlarda); eskiden karşılaştırmaya itki ve toplam impuls
+        // hiç girmiyordu. Merkezi okuyucu motor tipine göre çözer.
+        const thrust = num(U.readThrust(r));
         const isp = num(m.isp);
         let totalImpulse = num(m.total_impulse);
         if (totalImpulse == null && thrust != null) {
-            const burnTime = num(m.burn_time);
+            const burnTime = num(U.readBurnTime(r));
             if (burnTime != null) totalImpulse = thrust * burnTime;
         }
         const totalMass = (num(m.total_mass) != null)

@@ -392,14 +392,48 @@ def test_swirl_cikis_orifisi_gercek_alandan_gelir():
 
 
 def test_swirl_bildirilmeyen_olculer_not_reported_der():
-    from hrma.utils.injector_design import InjectorDesign
+    """v2.6.26 guncellemesi: swirl oda capi ARTIK GERCEKTEN hesaplaniyor.
+
+    Eski surumde cozucu D_chamber uretmiyordu ve figur durustce
+    'not reported' diyordu; bu test o davranisi kilitliyordu. v2.6.26'da
+    swirl_chamber_diameter kullanici girdisinden ya da varsayilan
+    SWIRL_CHAMBER_D_RATIO·d_o oranindan hesaplanip kaynagiyla birlikte
+    (swirl_chamber_d_source: user/default_ratio) raporlaniyor — yani
+    'not reported' demek artik YANLIS olurdu. Test yeni gercege gore
+    guncellendi; hala bildirilmeyen D_outer icin eski kontrol KORUNDU.
+    """
+    from hrma.utils.injector_design import (InjectorDesign,
+                                            SWIRL_CHAMBER_D_RATIO)
     inj = InjectorDesign(mdot_ox=1.0, chamber_pressure=20.0,
                          injector_type='swirl')
     inj.set_swirl_params()
-    fig = _fig(create_swirl_injector(inj.calculate()))
+    res = inj.calculate()
+    fig = _fig(create_swirl_injector(res))
     texts = ' '.join(a.get('text', '') for a in fig['layout']['annotations'])
+    # Govde disi capi hala modellenmiyor: durust kalmali
     assert 'D_outer: not reported' in texts
-    assert 'D_chamber: not reported' in texts
+
+    # Oda capi: kullanici girmedi -> varsayilan oran, kaynagi soyleniyor
+    assert res['swirl_chamber_d_source'] == 'default_ratio'
+    d_ch = res['swirl_chamber_diameter']
+    assert d_ch == pytest.approx(
+        SWIRL_CHAMBER_D_RATIO * res['exit_orifice_diameter']), (
+        'varsayilan oda capi SWIRL_CHAMBER_D_RATIO·d_o olmali')
+    assert 'D_chamber: not reported' not in texts, (
+        'oda capi hesaplanirken figur hala "not reported" diyor')
+    assert f'D_chamber = {d_ch:.1f} mm' in texts, (
+        'figur cozucunun gercek oda capini gostermiyor: %s' % texts[:200])
+
+    # Kullanici cap girerse kaynak 'user' olur ve figur O degeri basar
+    inj2 = InjectorDesign(mdot_ox=1.0, chamber_pressure=20.0,
+                          injector_type='swirl')
+    inj2.set_swirl_params(chamber_diameter=40.0)
+    res2 = inj2.calculate()
+    assert res2['swirl_chamber_d_source'] == 'user'
+    assert res2['swirl_chamber_diameter'] == pytest.approx(40.0)
+    fig2 = _fig(create_swirl_injector(res2))
+    texts2 = ' '.join(a.get('text', '') for a in fig2['layout']['annotations'])
+    assert 'D_chamber = 40.0 mm' in texts2
 
 
 def test_pintle_kesiti_cozucu_geometrisini_okur():

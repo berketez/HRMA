@@ -35,6 +35,54 @@ never need Python or an internet connection. Both are produced on a single
 macOS machine; no Windows build machine is required (the exe is
 cross-assembled with NSIS via `brew install makensis`).
 
+## Code Signing (macOS) — mandatory, fail-closed
+
+`build_mac_app.sh` ad-hoc signs the bundle (`codesign --force --no-strict
+-s -`) and then verifies it (`codesign --verify --deep`) as its final step.
+**If either step fails, the build stops.** Release gate 6/6 re-verifies the
+built `.app` (`--deep`) and the app *inside* the DMG, the latter twice: a
+fast `--deep` check on the mounted volume plus the gold standard — an
+xattr-stripped copy (`ditto --noextattr`) that must pass the full
+`codesign --verify --deep --strict`. An unsigned artifact closes the gate.
+
+Why this is non-negotiable: versions 2.6.0-2.6.2 shipped **unsigned**
+because the old codesign line ended in `2>/dev/null || true` and swallowed
+its own failure. Pre-Tahoe macOS tolerated the unsigned app; macOS Tahoe's
+`lsd` records it as launch-disabled (error -67062, "code object is not
+signed at all"), `open` reports "executable is missing", and the auto-update
+helper rolls the user back to the previous version (field incident,
+2026-07-28, `~/Documents/HRMA/hrma_update_log.txt`).
+
+Two empirically measured constraints shape the current design (2026-07-30,
+reproduced on the real 1.4 GB bundle):
+
+1. **The build tree lives under iCloud sync.** Finder/fileproviderd rewrites
+   `com.apple.FinderInfo` onto the `.app` root within milliseconds of
+   removal, so a clean-then-sign sequence loses the race and codesign fails
+   with "resource fork, Finder information, or similar detritus not
+   allowed". Signing therefore uses `--no-strict`, which skips only that
+   detritus pre-check; the xattr is not part of the seal, so the produced
+   signature is identical to one made on a clean tree. Strict
+   *verification* rejects the same detritus, which is why in-place
+   verification uses `--deep` without `--strict`; the strict check runs in
+   the release gate on an xattr-stripped copy of the DMG payload (measured:
+   it passes). Long term, moving the build tree out of iCloud
+   (`packaging/mac/build.noindex` -> a non-synced location) would remove
+   this constraint entirely; that requires touching `build_dmg.sh` and is
+   left as a recommendation.
+2. **Everything in `Contents/MacOS` must itself be signed code.** The
+   launcher script `hrma_baslat.sh` used to live there and broke the bundle
+   signature ("code object is not signed at all — In subcomponent"). The
+   script now lives in `Contents/Resources/` (hash-sealed like any resource)
+   with a symlink at `Contents/MacOS/hrma_baslat.sh`; the arm64 stub invokes
+   it through `/bin/bash`, so no executable bit or nested signature is
+   needed. The update helper copies with `ditto`, which preserves symlinks.
+
+The signature is **ad-hoc** (`-s -`): Gatekeeper's `spctl --assess` rejects
+ad-hoc apps by design, so the acceptance criterion is `codesign --verify
+--deep --strict`, which is exactly the check that catches the "not signed at
+all" failure mode. Guard tests: `tests/test_packaging_signature.py`.
+
 ## Release Steps
 
 ```bash

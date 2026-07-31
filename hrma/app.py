@@ -34,7 +34,17 @@ from hrma.engines.solid_rocket_engine import SolidRocketEngine
 from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
 
 # Utils
-from hrma.utils.injector_design import InjectorDesign
+from hrma.utils.injector_design import (
+    InjectorDesign,
+    # v2.6.26: bu sabit app.py'de KULLANILIYOR ama import EDILMIYORDU.
+    # Sonuc: impingement enjektorunde 'impingement_angle' bos/0 geldiginde
+    # /calculate NameError ile HTTP 500 veriyordu (yayinlanmis surumde de
+    # vardi). Arayuz alani doldurdugu icin gozden kacmisti; alani temizleyen
+    # kullanici ya da API cagrisi cokertiyordu. Katman B sarsim bekcisi
+    # bagimsiz olarak bu yolu deneyince yakalandi.
+    IMPINGEMENT_HALF_ANGLE_DEG,
+)
+from hrma.utils.input_guard import safe_name, safe_arcname, is_safe_arcname
 from hrma.utils.common_fixes import validation, calculations, graph_fixes, fuel_mixer, export_fixes
 from hrma.utils.optimum_of_ratio import of_optimizer
 
@@ -155,7 +165,108 @@ def _mm_to_m(value, default_m):
     return mm / 1000.0
 
 
+def _mm_to_m_optional(value):
+    """Opsiyonel milimetre girdisini metreye cevirir; yoksa None dondurur.
+
+    _mm_to_m'den farki: VARSAYILAN YOKTUR. 'Bos birak = otomatik' anlamina
+    gelen alanlar (or. kamara boyu ezmesi) icin dogru sozlesme budur —
+    varsayilan enjekte etmek kullanicinin bos biraktigi alani bir TASARIM
+    kararina cevirir. Okunamayan girdi de None doner; motor tarafi bunu
+    kendi araligina gore uyararak reddeder.
+    """
+    if value is None or value == '':
+        return None
+    try:
+        mm = float(value)
+    except (TypeError, ValueError):
+        return None
+    if mm <= 0:
+        return None
+    return mm / 1000.0
+
+
+#: Arayuzun enjektor malzemesi secenekleri -> materials_db kayit anahtarlari.
+#: Arayuz "AISI 316 Stainless Steel" / "Titanium Grade 5" / "Brass (Low
+#: Pressure)" yaziyor; materials_db kayitlari ss_316 / titanium_6al4v /
+#: brass_c360. Esleme olmadan secim cozulemez (v2.6.25'te 'steel_304' ->
+#: 'ss_304' esleme eksikligi ayni sinifta bir hataydi).
+INJECTOR_MATERIAL_ALIASES = {
+    'stainless_steel': 'ss_316',
+    'stainless': 'ss_316',
+    'titanium': 'titanium_6al4v',
+    'brass': 'brass_c360',
+}
+
+
+def _injector_plate_report(material_name, data, motor_results,
+                           injector_results):
+    """Enjektor plakasinin secilen malzemeyle yapisal raporu.
+
+    Girdiler cozucunun KENDI ciktilarindan alinir (plaka capi = yanma odasi
+    capi, delik sayisi/capi enjektor cozumunden, basinc farki enjektor
+    basinc dususunden). Eksik olan bir sey varsa uydurulmaz; rapor
+    'not_analyzed' doner ve nedeni yazar.
+    """
+    from hrma.data.materials_db import get_material
+    from hrma.utils.injector_design import injector_plate_structural
+
+    raw = str(material_name or '').strip().lower().replace(' ', '_')
+    key = INJECTOR_MATERIAL_ALIASES.get(raw, raw)
+    try:
+        props = get_material(key)
+    except (KeyError, ValueError):
+        return {'status': 'not_analyzed',
+                'reason': (f"injector material '{material_name}' does not "
+                           f"resolve to a materials_db record"),
+                'requested': material_name}
+
+    # Plaka capi = yanma odasi capi [m]; cozucunun kendi geometrisi.
+    d_ch = motor_results.get('chamber_diameter') if isinstance(
+        motor_results, dict) else None
+    # Basinc farki: enjektor cozumunun kullandigi deger [bar].
+    dp = injector_results.get('pressure_drop') if isinstance(
+        injector_results, dict) else None
+    if not dp:
+        dp = data.get('pressure_drop')
+    # Delik alani bilgisi yalniz delikli tiplerde vardir.
+    n_holes = injector_results.get('n_holes') or 0
+    d_hole_mm = (injector_results.get('hole_diameter')
+                 or injector_results.get('orifice_diameter') or 0)
+    # Plaka kalinligi: kullanicinin verdigi deger (showerhead/impingement).
+    t_plate_mm = injector_results.get('plate_thickness')
+
+    report = injector_plate_structural(
+        delta_P_bar=dp,
+        plate_diameter_m=d_ch,
+        material_props=props,
+        material_name=props.get('name', key),
+        plate_thickness_m=(t_plate_mm / 1000.0) if t_plate_mm else None,
+        n_holes=int(n_holes or 0),
+        hole_diameter_m=(float(d_hole_mm) / 1000.0) if d_hole_mm else 0.0,
+        required_sf=data.get('safety_factor'),
+    )
+    report['material_key'] = key
+    report['material_requested'] = material_name
+    return report
+
+
+#: Parametrik taramada izin verilen en fazla adim. Her adim TAM bir motor
+#: cozumudur (Cantera dengesi dahil); 50 adim saniyeler, 1000 adim dakikalar
+#: surer. Sinir keyfi degil: arayuzun kendi max="50" beyaninin iki kati,
+#: yani elle girilen makul bir tarama reddedilmez ama surec donmaz.
+PARAMETRIC_MAX_STEPS = 100
+
 _LOOPBACK_HOSTNAMES = frozenset({'localhost', '::1'})
+
+#: Sunucunun GERÇEKTEN bağlandığı port. Başlatıcı ``_pick_port()`` sonucunu
+#: ``HRMA_SELF_PORT`` ortam değişkenine yazar (8080-8090 arasında değişebilir).
+#: Köken kapısı bunu bildiğinde 'geri döngü olsun yeter' yerine 'benim portum
+#: olsun' diyebilir. Ayarlı değilse (doğrudan ``python -m hrma.app``) kapı
+#: gevşek davranır — geliştirme akışı bozulmasın.
+try:
+    app.config['HRMA_SELF_PORT'] = int(os.environ['HRMA_SELF_PORT'])
+except (KeyError, ValueError, TypeError):
+    app.config['HRMA_SELF_PORT'] = None
 
 
 def _host_and_port(value, is_url=False):
@@ -214,10 +325,19 @@ def _reject_cross_origin():
     koşmak: uzaktaki bir sayfanın (evil.example) kökeni asla geri döngü
     olamaz, DNS-rebinding denemesinde ise ``Host`` başlığı saldırganın alan
     adını taşır ve aşağıdaki ilk kapıya takılır.
-    """
-    if request.method in ('GET', 'HEAD', 'OPTIONS'):
-        return None
 
+    v2.6.26 DÜZELTMESİ — OKUMA İSTEKLERİ KAPININ DIŞINDAYDI:
+    Burada eskiden ``if request.method in ('GET','HEAD','OPTIONS'): return None``
+    satırı vardı ve **Host kapısından önce** geldiği için okuma isteklerinde
+    hiçbir denetim çalışmıyordu. Ölçüldü: ``Host: evil.example:PORT`` başlıklı
+    düz bir GET ile ``/api/projects`` proje listesini, ``/api/projects/load/<ad>``
+    ise tam tasarım belgesini (yanma basıncı, alev sıcaklığı, kasa malzemesi,
+    burn-rate katsayıları) döndürüyordu. DNS-rebinding tam olarak bu şekilde
+    çalışır ve Host kapısı zaten bunun için yazılmıştı. Artık:
+      * Host kapısı HER metodda çalışır (rebinding'e karşı tek savunma),
+      * Origin kapısı yalnız durum değiştiren metodlarda (çapraz köken GET
+        zaten CORS başlığı olmadığı için tarayıcıda okunamıyor).
+    """
     def _reject(reason):
         return jsonify({
             'status': 'error',
@@ -228,19 +348,49 @@ def _reject_cross_origin():
     # 1) DNS-rebinding kapısı: sunucu yalnız 127.0.0.1'e bağlı olduğu için
     #    meşru istekte Host mutlaka geri döngüdür. Saldırgan alan adını
     #    127.0.0.1'e çözümlerse Host 'evil.example:8081' olarak gelir.
+    #    HER metodda çalışır: okuma uçları da tasarım verisi döndürüyor.
     self_host, _self_port = _host_and_port(request.host)
     if not _is_loopback(self_host):
         return _reject('host_not_loopback')
 
-    # 2) Köken kapısı: başlık varsa geri döngü olmalı. Port karşılaştırılmaz —
-    #    uygulama 8080-8090 arasında herhangi bir porta düşebilir.
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+
+    # 2) Köken kapısı (yalnız durum değiştiren metodlar): başlık varsa geri
+    #    döngü olmalı. Port da bilindiği takdirde karşılaştırılır — aksi hâlde
+    #    127.0.0.1'in BAŞKA bir portundaki sayfa (yerel geliştirme sunucusu,
+    #    Jupyter, kötü niyetli yerel uygulama) bize CSRF yapabiliyordu.
+    #    HRMA_SELF_PORT'u başlatıcı doldurur; doldurulmamışsa (doğrudan
+    #    ``python -m hrma.app`` ile geliştirme) eski geri-döngü davranışına
+    #    düşülür ki v2.6.25'teki "kendi sayfası 403 alıyor" hatası tekrarlanmasın.
     raw_origin = request.headers.get('Origin')
     if raw_origin:
-        origin_host, _origin_port = _host_and_port(raw_origin, is_url=True)
+        origin_host, origin_port = _host_and_port(raw_origin, is_url=True)
         if not _is_loopback(origin_host):
             # 'null' kökeni de buraya düşer (sandbox iframe, file://).
             return _reject('origin_not_loopback')
+        self_port = app.config.get('HRMA_SELF_PORT')
+        if self_port and origin_port and int(origin_port) != int(self_port):
+            return _reject('origin_port_mismatch')
     return None
+
+
+@app.after_request
+def _add_security_headers(response):
+    """Yerel arayüze uygulanabilir asgari güvenlik başlıkları.
+
+    Abartılmadı: bu uygulama yalnız 127.0.0.1'e bağlı bir masaüstü penceresi
+    olduğu için HSTS, COEP/COOP gibi başlıklar tören olurdu. Gerçekten iş
+    gören iki tanesi burada:
+      * ``X-Frame-Options`` / ``frame-ancestors``: uygulamanın sayfası başka
+        bir sayfanın iframe'ine gömülüp tıklama-hırsızlığına alet edilmesin.
+      * ``X-Content-Type-Options``: tarayıcı içerik tipini tahmin etmesin.
+    """
+    response.headers.setdefault('X-Frame-Options', 'DENY')
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('Referrer-Policy', 'no-referrer')
+    response.headers.setdefault('Content-Security-Policy', "frame-ancestors 'none'")
+    return response
 
 # v2.5.5 modüler API'ler: dış format importu (.eng/.rse/.ork), STEP/CAD
 # geometri analizi ve proje kaydet/yükle deposu Blueprint olarak yaşar
@@ -626,6 +776,10 @@ def calculate():
             fuel_density=data.get('fuel_density'),  # None if not provided
             combustion_type=data.get('combustion_type', 'infinite'),
             chamber_diameter_input=data.get('chamber_diameter_input', 0),
+            # v2.6.26: contraction_ratio arayuzden GONDERILIYOR ama buraya
+            # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
+            # degisimiydi, yani alan tamamen oluydu.
+            contraction_ratio=data.get('contraction_ratio', 0),
             fuel_type=data.get('fuel_type', 'htpb'),
             oxidizer_type=data.get('oxidizer_type', 'n2o'),
             injector_type=data.get('injector_type', 'showerhead'),
@@ -639,6 +793,13 @@ def calculate():
             chamber_material=data.get('chamber_material') or 'steel_4130',
             wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
             cooling_type=data.get('cooling_channels') or 'none',
+            # v2.6.26: Katman A ile bulunan üç ölü girdi. Motorun
+            # gövdesi ve çözücüleri 30 Temmuz'da yazılmıştı; imza ve
+            # buradaki geçirme yarım kalmıştı (oturum çöktü).
+            # chamber_length_override arayüzde MİLİMETRE, motorda METRE.
+            safety_factor=data.get('safety_factor'),
+            chamber_length_override=_mm_to_m_optional(data.get('chamber_length_override')),
+            nozzle_material=data.get('nozzle_material'),
             tank_temperature=data.get('oxidizer_temp') or None,
             motor_name=data.get('motor_name', ''),
             motor_description=data.get('motor_description', '')
@@ -677,10 +838,20 @@ def calculate():
                 pintle_diameter=data.get('pintle_diameter', 25)
             )
         elif data.get('injector_type', 'showerhead') == 'swirl':
+            # v2.6.26: 'swirl_chamber_diameter' ve 'swirl_angle' arayuzde
+            # VARDI ama depoda hicbir yerde okunmuyordu (Katman A: sifir
+            # yaprak). Ikisi de Giffen-Muraszew cozumune baglandi:
+            #   swirl_chamber_diameter -> K = A_p/(D_s*d_o) icindeki D_s
+            #   swirl_angle            -> hedef sprey yari acisi; ters cozucu
+            #                             (swirl_K_from_theta) K'yi ondan bulur
+            # Ters cozucu bu depoda ZATEN yaziliydi ve arayuzdeki alan ona
+            # baglanmamisti.
             injector.set_swirl_params(
                 n_slots=data.get('n_slots', 6),
                 slot_width=data.get('slot_width', 0),
-                slot_height=data.get('slot_height', 0)
+                slot_height=data.get('slot_height', 0),
+                chamber_diameter=data.get('swirl_chamber_diameter', 0) or 0,
+                target_half_angle=data.get('swirl_angle', 0) or 0
             )
         elif data.get('injector_type', 'showerhead') == 'impingement':
             # 2026-07-22 denetim bulgusu: form 6 alan gönderiyordu, çözücüye
@@ -749,6 +920,23 @@ def calculate():
             injector_results.setdefault('warnings', []).extend(
                 f"Input '{f}' was not consumed: {r}" for f, r in _unused)
 
+        # --- Enjektor plakasi yapisal kontrolu (v2.6.26) --------------------
+        # 'injector_material' arayuzde bu surume kadar hicbir hesaba
+        # ulasmiyordu (yalniz CAD malzeme listesine yaziliyordu). Artik secilen
+        # malzemenin akma dayanimi ve yogunlugu plaka egilme gerilmesi,
+        # emniyet katsayisi, gereken kalinlik ve plaka kutlesini uretir.
+        # Model: kenarindan tutturulmus dairesel plaka (Roark Tablo 11.2 durum
+        # 10b) + ASME PG-52 ligament verimi. Ayrinti: injector_design.py
+        # icindeki injector_plate_structural docstring'i.
+        if isinstance(injector_results, dict):
+            _inj_mat_name = data.get('injector_material')
+            if _inj_mat_name:
+                _plate = _injector_plate_report(
+                    _inj_mat_name, data, motor_results, injector_results)
+                injector_results['plate_structural'] = _plate
+                for _pw in (_plate.get('warnings') or []):
+                    injector_results.setdefault('warnings', []).append(_pw)
+
         # Fizik limiti doğrulaması (ValidationSystem, Sutton & Biblarz +
         # NASA SP-8089 aralıkları): rapor üretilemezse /calculate ASLA
         # kırılmaz — hata loglanır, 'validation' anahtarı yanıttan atlanır.
@@ -802,8 +990,19 @@ def calculate():
                 from hrma.engines.combustion_analysis import CombustionAnalyzer
                 combustion_analyzer = CombustionAnalyzer()
                 fuel_composition = {data.get('fuel_type', 'htpb'): 100.0}
+                # v2.6.26: OKSITLEYICI SABIT 'N2O' YAZILIYDI. Kullanicinin
+                # sectigi oksitleyici sayisal panellere gidiyordu ama
+                # "Combustion Analysis" grafigine GITMIYORDU: LOX secili bir
+                # motorda grafik N2O alev sicakligini, N2O tur dagilimini
+                # (LOX/HTPB'de kimyasal olarak imkansiz olan %31 N2 dahil) ve
+                # N2O Isp egrisini ciziyordu. Uc oksitleyicinin grafik JSON'u
+                # bayt-ayni cikiyordu (olculdu). Motorun kendi cozucusu bu
+                # hatayi 2026-07 denetiminde duzeltmisti; app.py'deki iki
+                # cagri duzeltmenin disinda kalmis.
                 combustion_data = combustion_analyzer.analyze_combustion(
-                    fuel_composition, 'N2O', data.get('of_ratio', 1.0),
+                    fuel_composition,
+                    data.get('oxidizer_type', 'n2o'),
+                    data.get('of_ratio', 1.0),
                     data.get('chamber_pressure', 20.0)
                 )
                 combustion_analysis_plot = create_combustion_analysis_plots(combustion_data)
@@ -863,7 +1062,33 @@ def calculate():
         cad_data = None
         if data.get('generate_cad', True):
             try:
-                cad_data = cad_designer.generate_3d_motor_assembly(motor_results)
+                # v2.6.26 — EKRAN ILE CAD FARKLI ENJEKTOR GOSTERIYORDU.
+                # Hibritte iki bagimsiz enjektor cozucusu kosuyor:
+                #   1) InjectorDesign (utils) -> yanittaki 'injector' blogu.
+                #      Kullanicinin ENJEKTOR PANELI girdileri (hedef hiz, delik
+                #      sayisi ezmesi, basinc dususu ezmesi, Cd) buraya gider.
+                #      Tablo ve 2B sema bunu gosterir.
+                #   2) design_injector (engines) -> motor icindeki
+                #      'injector_design'. Devre modeli; N2O'da tank basincini
+                #      degil doyma basincini kullanir.
+                # CAD/cizim/STEP/DXF ve 3B model (2)'yi okuyordu. Olculdu:
+                # ayni kosuda tablo 32 delik x 0,887 mm (dP 4,00 bar) derken
+                # teknik cizim 3 delik x 2,10 mm (dP 30,37 bar) diyordu;
+                # enjeksiyon alani 1,9 kat, hiz 3,5 kat farkliydi. Kullanici
+                # hangisini delerse delsin diger tum analizler yanlis
+                # enjektore aitti.
+                #
+                # _injector_spec zaten 'injector_results' anahtarini ONCELIKLI
+                # okuyacak sekilde yazilmis, ama /calculate o anahtari HIC
+                # doldurmuyordu; kopukluk tam oradaydi. Panel sonucu artik
+                # CAD'e de veriliyor, boylece ekran ile cizim ayni enjektoru
+                # anlatir. Panel sonucu yoksa eski davranis (motorun kendi
+                # cozumu) surer.
+                cad_input = motor_results
+                if isinstance(injector_results, dict) and injector_results:
+                    cad_input = dict(motor_results)
+                    cad_input['injector_results'] = injector_results
+                cad_data = cad_designer.generate_3d_motor_assembly(cad_input)
                 
                 # Export STL files if requested
                 if data.get('export_stl', False):
@@ -968,10 +1193,13 @@ def calculate():
         error_traceback = traceback.format_exc()
         print(f"Error in calculate: {str(e)}")
         print(f"Traceback: {error_traceback}")
+        # v2.6.26 — TRACEBACK VE ISTEK GOVDESI ARTIK YANITTA DEGIL.
+        # Yanit tam Python traceback'ini (gelistirinin mutlak dosya yollari,
+        # ic modul yapisi, satir numaralari) ve istegin TAMAMINI geri
+        # veriyordu. Tanilama degeri sunucu gunlugunde korunur; istemciye
+        # yalnizca hatanin kendisi gider.
         return jsonify({
             'error': str(e),
-            'traceback': error_traceback,
-            'received_data': data,
             'error_type': type(e).__name__
         }), 400
 
@@ -1059,6 +1287,10 @@ def quick_geometry():
             fuel_density=data.get('fuel_density'),
             combustion_type=data.get('combustion_type', 'infinite'),
             chamber_diameter_input=data.get('chamber_diameter_input', 0),
+            # v2.6.26: contraction_ratio arayuzden GONDERILIYOR ama buraya
+            # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
+            # degisimiydi, yani alan tamamen oluydu.
+            contraction_ratio=data.get('contraction_ratio', 0),
             fuel_type=data.get('fuel_type', 'htpb'),
             oxidizer_type=data.get('oxidizer_type', 'n2o'),
             injector_type=data.get('injector_type', 'showerhead'),
@@ -1072,6 +1304,17 @@ def quick_geometry():
             chamber_material=data.get('chamber_material') or 'steel_4130',
             wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
             cooling_type=data.get('cooling_channels') or 'none',
+            # v2.6.26: uc olu girdi daha baglandi. Ucu de sayfada VARDI ve
+            # (chamber_length_override haric) sunucuya bile geliyordu, ama
+            # motora hic gecirilmiyordu: Katman A taramasinda sifir yaprak
+            # degisimi olcusmustu. safety_factor -> yapisal analizin tasarim
+            # SF hedefi; chamber_length_override -> L* ile turetilen kamara
+            # boyunu ezer (arayuz mm, motor m); nozzle_material -> bogaz
+            # termal + erozyon degerlendirmesi.
+            safety_factor=data.get('safety_factor'),
+            chamber_length_override=_mm_to_m_optional(
+                data.get('chamber_length_override')),
+            nozzle_material=data.get('nozzle_material'),
             tank_temperature=data.get('oxidizer_temp') or None,
             motor_name=data.get('motor_name', ''),
             motor_description=data.get('motor_description', '')
@@ -1127,6 +1370,10 @@ def transient_analysis():
             fuel_density=data.get('fuel_density'),
             combustion_type=data.get('combustion_type', 'infinite'),
             chamber_diameter_input=data.get('chamber_diameter_input', 0),
+            # v2.6.26: contraction_ratio arayuzden GONDERILIYOR ama buraya
+            # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
+            # degisimiydi, yani alan tamamen oluydu.
+            contraction_ratio=data.get('contraction_ratio', 0),
             fuel_type=data.get('fuel_type', 'htpb'),
             oxidizer_type=data.get('oxidizer_type', 'n2o'),
             injector_type=data.get('injector_type', 'showerhead'),
@@ -1140,6 +1387,11 @@ def transient_analysis():
             chamber_material=data.get('chamber_material') or 'steel_4130',
             wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
             cooling_type=data.get('cooling_channels') or 'none',
+            # v2.6.26: bkz. /calculate icindeki ayni ucluye dair yorum.
+            safety_factor=data.get('safety_factor'),
+            chamber_length_override=_mm_to_m_optional(
+                data.get('chamber_length_override')),
+            nozzle_material=data.get('nozzle_material'),
             tank_temperature=data.get('tank_temperature') or data.get('oxidizer_temp') or None,
         )
         engine.calculate()
@@ -1974,9 +2226,9 @@ def calculate_solid():
         error_traceback = traceback.format_exc()
         print(f"Solid motor calculation error: {str(e)}")
         print(f"Traceback: {error_traceback}")
+        # v2.6.26: traceback yanittan cikarildi (bkz. /calculate notu).
         return jsonify({
             'error': str(e),
-            'traceback': error_traceback,
             'error_type': type(e).__name__
         }), 400
 
@@ -2052,9 +2304,9 @@ def calculate_liquid():
         error_traceback = traceback.format_exc()
         print(f"Liquid motor calculation error: {str(e)}")
         print(f"Traceback: {error_traceback}")
+        # v2.6.26: traceback yanittan cikarildi (bkz. /calculate notu).
         return jsonify({
             'error': str(e),
-            'traceback': error_traceback,
             'error_type': type(e).__name__
         }), 400
 
@@ -2126,7 +2378,7 @@ def _motor_cad_zip_response(geo, motor_type, default_name):
     STEP build123d yoksa paket STL-only iner; MANIFEST durumu açıkça yazar
     (sessiz eksilme yasak). Enjektör katısı katıda, grain katısı sıvıda üretilmez.
     """
-    name = geo.get('motor_name') or default_name
+    name = safe_name(geo.get('motor_name'), default=default_name)
     arc = {}
     manifest = [f'HRMA CAD paketi — {name} ({motor_type})', '']
 
@@ -2148,7 +2400,7 @@ def _motor_cad_zip_response(geo, motor_type, default_name):
         meshes = [(n, m) for n, m in meshes if n not in skip]
         stl_files = cad_designer.export_stl_files(meshes) if meshes else []
         for p in stl_files:
-            arc[f'stl/{os.path.basename(p)}'] = p
+            arc[safe_arcname('stl', os.path.basename(p))] = p
         manifest.append(f'STL: {len(stl_files)} dosya (mm, 3D baskı/CAM)')
     except Exception as e:
         manifest.append(f'STL: FAILED ({e})')
@@ -2207,7 +2459,25 @@ def parametric_analysis():
         sweep_param = data.get('param_type', 'of_ratio')
         param_start = data.get('param_start', 0.5)
         param_end = data.get('param_end', 3.0)
-        sweep_points = data.get('param_steps', 20)
+        # v2.6.26 — IS BUTCESI. Bu deger dogrudan np.linspace'e gidiyordu;
+        # tip denetimi ve ust sinir yoktu. OLCULDU: param_steps=1e9 ile
+        # istek iki dakikadan uzun surdu ve DONMEDI (8 GB linspace).
+        # Arayuzde max="50" yaziyor ama HTML max'i zorlamaz ve kayitli
+        # proje / API cagrisi onu tamamen atlar. Sunucu tarafinda sinir
+        # koymak tek gercek koruma.
+        try:
+            sweep_points = int(data.get('param_steps', 20))
+        except (TypeError, ValueError):
+            return jsonify({
+                'error': "'param_steps' must be a whole number",
+                'status': 'invalid_input'}), 422
+        if not (2 <= sweep_points <= PARAMETRIC_MAX_STEPS):
+            return jsonify({
+                'error': (f"'param_steps' must be between 2 and "
+                          f"{PARAMETRIC_MAX_STEPS}; each step runs a full "
+                          f"motor solution."),
+                'requested': sweep_points,
+                'status': 'invalid_input'}), 422
         
         sweep_range = [param_start, param_end]
         
@@ -2562,8 +2832,11 @@ def advanced_analysis():
             from hrma.engines.combustion_analysis import CombustionAnalyzer
             combustion_analyzer = CombustionAnalyzer()
             fuel_composition = {data.get('fuel_type', 'htpb'): 100.0}
+            # v2.6.26: bkz. /calculate icindeki ayni sabit-oksitleyici notu.
             combustion_data = combustion_analyzer.analyze_combustion(
-                fuel_composition, 'N2O', data.get('of_ratio', 1.0),
+                fuel_composition,
+                data.get('oxidizer_type', 'n2o'),
+                data.get('of_ratio', 1.0),
                 data.get('chamber_pressure', 20.0)
             )
             results['combustion_plot'] = create_combustion_analysis_plots(combustion_data)
@@ -2908,14 +3181,36 @@ def export_eng_file():
 # + ezdxf + reportlab) ve hrma/export/step_export.py (build123d/OCC).
 # ---------------------------------------------------------------------------
 
-def _zip_files(file_map, readme_text=None):
-    """{arşiv_adı: dosya_yolu} sözlüğünü bellekte ZIP'ler; BytesIO döner."""
+def _zip_files(file_map, readme_text=None, text_map=None):
+    """{arşiv_adı: dosya_yolu} sözlüğünü bellekte ZIP'ler; BytesIO döner.
+
+    ``text_map`` ({arşiv_adı: metin}) doğrudan içerik yazmak içindir; aynı
+    kapıdan geçer.
+
+    v2.6.26 BEKÇİSİ — ZIP SLIP: Girdi adları ``is_safe_arcname`` beyaz
+    listesinden geçmezse istisna atılır. Eskiden kullanıcının ``motor_name``
+    değeri buraya ham geliyordu ve ``motor_name='../../EVIL'`` ile arşivde
+    ``../EVIL_chamber.step`` gibi girdiler üretilebiliyordu (ölçüldü).
+    Çağıranlar adı zaten ``safe_name``'den geçiriyor; bu bekçi ileride
+    eklenecek yeni bir çağıranın aynı hataya düşmesini MEKANİK olarak
+    engeller — dikkat değil, kod garanti eder.
+    """
     import zipfile
+    from hrma.utils.input_guard import is_safe_arcname
+
+    def _check(arcname):
+        if not is_safe_arcname(arcname):
+            raise ValueError(f'unsafe archive entry name: {arcname!r}')
+        return arcname
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for arcname, path in file_map.items():
             if path and os.path.exists(path):
-                zf.write(path, arcname)
+                zf.write(path, _check(arcname))
+        for arcname, content in (text_map or {}).items():
+            if content:
+                zf.writestr(_check(arcname), content)
         if readme_text:
             zf.writestr('README.txt', readme_text)
     buf.seek(0)
@@ -2929,7 +3224,7 @@ def export_dxf():
         from hrma.export.drawing_generator import generate_dxf
         motor_data = (request.json or {}).get('motor_data', {})
         path = generate_dxf(motor_data)
-        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        name = safe_name(motor_data.get('motor_name'))
         return send_file(path, as_attachment=True,
                          download_name=f'{name}_profile.dxf',
                          mimetype='application/dxf')
@@ -2945,7 +3240,7 @@ def export_drawings_pdf():
         from hrma.export.drawing_generator import generate_drawing_pdf
         motor_data = (request.json or {}).get('motor_data', {})
         path = generate_drawing_pdf(motor_data)
-        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        name = safe_name(motor_data.get('motor_name'))
         return send_file(path, as_attachment=True,
                          download_name=f'{name}_technical_drawings.pdf',
                          mimetype='application/pdf')
@@ -2961,7 +3256,7 @@ def export_step_files():
         from hrma.export.step_export import generate_step_assembly
         motor_data = (request.json or {}).get('motor_data', {})
         files = generate_step_assembly(motor_data)
-        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        name = safe_name(motor_data.get('motor_name'))
         arc = {f'{name}_{k}.step': p for k, p in files.items()}
         buf = _zip_files(arc, readme_text=(
             'HRMA STEP export (AP214)\n'
@@ -2992,7 +3287,7 @@ def export_stl_zip():
         if not stl_files:
             return jsonify({'status': 'error',
                             'error': 'STL üretilemedi'}), 500
-        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        name = safe_name(motor_data.get('motor_name'))
         arc = {os.path.basename(p): p for p in stl_files}
         buf = _zip_files(arc, readme_text=(
             'HRMA STL export\n'
@@ -3016,7 +3311,7 @@ def export_complete_zip():
     """
     try:
         motor_data = (request.json or {}).get('motor_data', {})
-        name = motor_data.get('motor_name', 'HRMA_MOTOR')
+        name = safe_name(motor_data.get('motor_name'))
         arc = {}
         manifest = []
 
@@ -3030,7 +3325,7 @@ def export_complete_zip():
         def add_stl():
             cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
             for p in cad_designer.export_stl_files(cad_data['assembly_meshes']):
-                arc[f'stl/{os.path.basename(p)}'] = p
+                arc[safe_arcname('stl', os.path.basename(p))] = p
 
         def add_dxf():
             from hrma.export.drawing_generator import generate_dxf
@@ -3057,21 +3352,23 @@ def export_complete_zip():
         attempt('STEP solids (build123d)', add_step)
         attempt('OpenRocket .eng (real thrust curve if transient present)', add_eng)
 
-        import zipfile
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for arcname, path in arc.items():
-                if path and os.path.exists(path):
-                    zf.write(path, arcname)
-            if eng_holder.get('content'):
-                zf.writestr(f'openrocket/{name}.eng', eng_holder['content'])
-            zf.writestr('geometry/motor_geometry.json',
-                        json.dumps(sanitize_json_values(motor_data), indent=2))
-            zf.writestr('MANIFEST.txt',
-                        'HRMA COMPLETE DESIGN PACKAGE\n'
-                        + datetime.now().strftime('%Y-%m-%d %H:%M') + '\n\n'
-                        + '\n'.join(manifest) + '\n')
-        buf.seek(0)
+        # v2.6.26: burası eskiden kendi zipfile.ZipFile'ını açıyordu ve
+        # _zip_files bekçisinin DIŞINDA kalıyordu. Üstelik zipfile.writestr,
+        # zf.write'ın uyguladığı normpath temizliğini de yapmadığı için
+        # 'openrocket/{name}.eng' girdisi traversal dizesini bir kademe DAHA
+        # derin taşıyordu (ölçüldü). Artık tek kapı: _zip_files.
+        text_map = {
+            'geometry/motor_geometry.json':
+                json.dumps(sanitize_json_values(motor_data), indent=2),
+            'MANIFEST.txt':
+                'HRMA COMPLETE DESIGN PACKAGE\n'
+                + datetime.now().strftime('%Y-%m-%d %H:%M') + '\n\n'
+                + '\n'.join(manifest) + '\n',
+        }
+        if eng_holder.get('content'):
+            text_map[safe_arcname('openrocket', f'{name}.eng')] = \
+                eng_holder['content']
+        buf = _zip_files(arc, text_map=text_map)
         return send_file(buf, as_attachment=True,
                          download_name=f'{name}_complete_package.zip',
                          mimetype='application/zip')
@@ -3178,7 +3475,12 @@ def generate_complete_design_package():
         })
         
         complete_package = {}
-        
+        # Alt bölümler isteğe bağlı üretiliyor; özet ve imalat blokları bu iki
+        # sözlüğü okuduğu için burada tanımlanırlar. Üretilmemiş bölüm boş
+        # kalır ve özet "analiz yok" hükmüne düşer.
+        structural_pkg = {}
+        safety_section = {}
+
         # CAD files and drawings
         if package_options.get('include_cad', True):
             cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
@@ -3211,9 +3513,9 @@ def generate_complete_design_package():
             # 'NOT ANALYZED' olarak işaretlenir — değer UYDURULMAZ.
             structural_pkg = motor_data.get('structural_analysis') or {}
             safety_sub_pkg = structural_pkg.get('safety_analysis') or {}
-            safety_section = {
+            safety_section.update({
                 'chamber_pressure': motor_data.get('chamber_pressure', 0),
-            }
+            })
             if structural_pkg.get('safety_factor') is not None:
                 safety_section.update({
                     'safety_factor': structural_pkg.get('safety_factor'),
@@ -3239,46 +3541,123 @@ def generate_complete_design_package():
             }
         
         # Manufacturing package
+        #
+        # v2.6.26 DÜRÜSTLÜK DÜZELTMESİ: burada eskiden hesapla hiç ilgisi olmayan
+        # sabit bir malzeme listesi vardı (AISI 304 kamara, ATJ lüle, AISI 316
+        # enjektör, 3 Viton O-ring, 8 adet M8x30 cıvata) ve yanında ±0.1 mm,
+        # Ra 3.2, 1.5x basınç testi gibi tolerans hükümleri. Ölçüldü: 500 N'lik
+        # motor da 50 kN'lik motor da AYNI listeyi alıyordu. Bağlayıcı sayı
+        # (cıvata sayısı, sızdırmazlık eleman adedi, tolerans) HRMA tarafından
+        # hesaplanmıyor; imalatçıya verilen bir pakette bunları sanki
+        # hesaplanmış gibi göstermek bu projedeki en ağır hata sınıfıdır.
+        # Artık: analizden gelen malzeme kullanılır, gelmiyorsa NOT_DEFINED
+        # yazılır; boyutlandırılmayan bağlantı elemanları listeye HİÇ girmez.
         if package_options.get('include_manufacturing', True):
+            structural_params = structural_pkg.get('design_parameters') or {}
+
+            def _material_of(*keys):
+                for key in keys:
+                    value = motor_data.get(key) or structural_params.get(key)
+                    if value:
+                        return {'material': str(value), 'source': 'analysis input'}
+                return {'material': 'NOT_DEFINED',
+                        'source': 'not specified in the analysis'}
+
+            bom = [
+                dict({'part': 'Combustion Chamber', 'quantity': 1},
+                     **_material_of('chamber_material', 'material', 'case_material')),
+                dict({'part': 'Nozzle', 'quantity': 1},
+                     **_material_of('nozzle_material')),
+            ]
+            if motor_data.get('injector_type') or motor_data.get('injector'):
+                bom.append(dict({'part': 'Injector', 'quantity': 1},
+                                **_material_of('injector_material')))
+
+            design_pressure_bar = structural_params.get('design_pressure')
+            chamber_pressure_bar = motor_data.get('chamber_pressure')
+            if design_pressure_bar:
+                proof_note = (f"Proof test to the structural design pressure "
+                              f"({float(design_pressure_bar):.1f} bar)")
+            elif chamber_pressure_bar:
+                proof_note = (f"Proof test pressure is NOT_DEFINED; operating "
+                              f"pressure is {float(chamber_pressure_bar):.1f} bar "
+                              f"(run the structural analysis for a design pressure)")
+            else:
+                proof_note = 'Proof test pressure is NOT_DEFINED'
+
             complete_package['manufacturing'] = {
-                'bill_of_materials': [
-                    {'part': 'Combustion Chamber', 'material': 'AISI 304 SS', 'quantity': 1},
-                    {'part': 'Nozzle', 'material': 'Graphite ATJ', 'quantity': 1},
-                    {'part': 'Injector Head', 'material': 'AISI 316 SS', 'quantity': 1},
-                    {'part': 'O-rings', 'material': 'Viton', 'quantity': 3},
-                    {'part': 'Bolts M8x30', 'material': 'Steel', 'quantity': 8}
-                ],
+                'basis': ('Generic workshop template. HRMA does not size fasteners, '
+                          'seals, tolerances or surface finishes; those must come '
+                          'from your own detail design and applicable standards.'),
+                'bill_of_materials': bom,
+                'bill_of_materials_note': (
+                    'Fasteners, seals and gaskets are not sized by HRMA and are '
+                    'deliberately omitted from this list.'),
                 'manufacturing_notes': cad_data['manufacturing_notes'] if 'cad_data' in locals() else [],
                 'assembly_instructions': [
-                    "1. Machine all components per technical drawings",
-                    "2. Pressure test chamber to 1.5x operating pressure",
-                    "3. Install fuel grain with proper centering",
-                    "4. Mount nozzle with high-temp sealant",
-                    "5. Attach injector with O-ring seals",
-                    "6. Perform final leak test before use"
+                    "1. Machine all components per the technical drawings",
+                    f"2. {proof_note}",
+                    "3. Install the fuel grain with proper centering",
+                    "4. Mount the nozzle with a high-temperature sealant",
+                    "5. Attach the injector with its seals",
+                    "6. Perform a final leak test before use",
                 ],
                 'quality_control': [
                     "Visual inspection of all welds",
-                    "Dimensional verification ±0.1mm",
-                    "Surface finish Ra 3.2 μm max",
-                    "Pressure test certification"
-                ]
+                    "Dimensional verification against the technical drawings "
+                    "(tolerances are NOT_DEFINED by HRMA)",
+                    "Surface finish per your detail design (NOT_DEFINED by HRMA)",
+                    "Proof test certification",
+                ],
             }
-        
+
         # Generate summary report
-        motor_name = motor_data.get('motor_name', 'UZAYTEK-HRM-001')
+        motor_name = safe_name(motor_data.get('motor_name'))
+
+        # v2.6.26: 'Ready for manufacturing' KOŞULSUZ basılıyordu. Ölçüldü:
+        # paketin KENDİ güvenlik bölümü UNSAFE (SF=1.28) derken de, boş {}
+        # gönderildiğinde de, thrust=-5000 gibi saçma girdide de aynı ifade
+        # çıkıyordu. Artık durum güvenlik bölümünden türetilir ve hiçbir
+        # koşulda sertifikasyon iması taşımaz — bağımsız inceleme yerine
+        # geçecek bir damga üretmiyoruz.
+        # include_analysis kapalıysa safety_section hiç kurulmamış olur; o
+        # durumda da "hazır" demeyiz — analiz yoksa hüküm de yoktur.
+        safety_status = str(safety_section.get('status', 'NOT ANALYZED')).upper()
+        safety_factor = safety_section.get('safety_factor')
+        if safety_status in ('NOT ANALYZED', 'UNKNOWN'):
+            design_status = ('NOT ANALYZED - run the structural analysis before '
+                             'manufacturing')
+        elif safety_status == 'UNSAFE' or str(
+                safety_section.get('risk_level', '')).upper() == 'HIGH':
+            detail = (f" (SF={float(safety_factor):.2f})"
+                      if isinstance(safety_factor, (int, float)) else '')
+            design_status = f'NOT READY - structural safety inadequate{detail}'
+        else:
+            design_status = ('Design outputs complete - independent review '
+                             'required before manufacturing')
+
+        def _fmt(key, spec, unit):
+            value = motor_data.get(key)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                return 'NOT_DEFINED'
+            if not math.isfinite(value):
+                return 'NOT_COMPUTABLE'
+            return f"{value:{spec}} {unit}"
+
         complete_package['summary'] = {
             'motor_designation': motor_name,
-            'total_impulse': f"{motor_data.get('total_impulse', 0):.0f} N⋅s",
-            'thrust': f"{motor_data.get('thrust', 0):.0f} N",
-            'burn_time': f"{motor_data.get('burn_time', 0):.1f} s",
-            'isp': f"{motor_data.get('isp', 0):.1f} s",
-            'chamber_pressure': f"{motor_data.get('chamber_pressure', 0):.1f} bar",
-            'design_status': 'Ready for manufacturing',
-            'estimated_cost': '$500-800 USD',
-            'development_time': '2-4 weeks'
+            'total_impulse': _fmt('total_impulse', '.0f', 'N.s'),
+            'thrust': _fmt('thrust', '.0f', 'N'),
+            'burn_time': _fmt('burn_time', '.1f', 's'),
+            'isp': _fmt('isp', '.1f', 's'),
+            'chamber_pressure': _fmt('chamber_pressure', '.1f', 'bar'),
+            'design_status': design_status,
+            'safety_factor': safety_factor,
         }
-        
+        # 'estimated_cost' ve 'development_time' KALDIRILDI: '$500-800 USD' ve
+        # '2-4 weeks' koddaki iki literal satırdı, hiçbir tedarikçi verisine
+        # veya hesaba dayanmıyordu ve motor 500 N de olsa 50 kN de olsa aynıydı.
+
         return jsonify({
             'status': 'success',
             'complete_package': complete_package,
@@ -3506,6 +3885,25 @@ def export_stl():
 
         with open(main_stl_path, 'rb') as f:
             stl_content = f.read()
+        # v2.6.26: export artik istek basina gecici dizine yaziyor
+        # (cad_visualization.export_stl_files). Icerik okundugu an dizin
+        # silinir; birikmesini beklemek disk sizintisi olurdu.
+        try:
+            import shutil, tempfile
+            # GUVENLIK KAPISI (31 Tem 2026): burada korumasiz bir
+            # `rmtree(os.path.dirname(main_stl_path))` vardi. main_stl_path
+            # goreli bir yol oldugunda dirname "." doner ve rmtree CALISMA
+            # DIZININI siler — depo kokunun tamami. Uc kez yasandi (test
+            # kosarken agac ucdu). Artik yalniz bu modulun kendi urettigi
+            # gecici dizin silinir: hem tempdir altinda olmali hem de
+            # mkdtemp onekini tasimali.
+            _stl_dir = os.path.dirname(os.path.abspath(main_stl_path))
+            _tmp_kok = os.path.realpath(tempfile.gettempdir())
+            if (os.path.realpath(_stl_dir).startswith(_tmp_kok)
+                    and os.path.basename(_stl_dir).startswith('hrma_stl_')):
+                shutil.rmtree(_stl_dir, ignore_errors=True)
+        except Exception:
+            pass
         if not stl_content.strip():
             return jsonify({
                 'status': 'stl_empty',
@@ -3533,122 +3931,18 @@ def export_stl():
             'error': f'STL export failed: {e}',
         }), 500
 
-def generate_basic_stl_content(motor_data, motor_type):
-    """Generate basic STL content for motor geometry"""
-    try:
-        # Get motor dimensions
-        chamber_length = motor_data.get('chamber_length', 0.5) * 1000  # Convert to mm
-        chamber_diameter = motor_data.get('chamber_diameter', 0.1) * 1000  # Convert to mm
-        throat_diameter = motor_data.get('throat_diameter', 0.03) * 1000  # Convert to mm
-        exit_diameter = motor_data.get('exit_diameter', throat_diameter * 2)  # Convert to mm
-        
-        # Generate a basic cylindrical chamber with nozzle representation
-        stl_content = f"""solid {motor_type}_motor
-facet normal 0 0 -1
-  outer loop
-    vertex 0 0 0
-    vertex {chamber_diameter/2} 0 0
-    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} 0
-  endloop
-endfacet
-facet normal 0 0 -1
-  outer loop
-    vertex 0 0 0
-    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} 0
-    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} 0
-  endloop
-endfacet
-facet normal 0 0 -1
-  outer loop
-    vertex 0 0 0
-    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} 0
-    vertex 0 {chamber_diameter/2} 0
-  endloop
-endfacet
-facet normal 0 0 1
-  outer loop
-    vertex 0 0 {chamber_length}
-    vertex {chamber_diameter/2} 0 {chamber_length}
-    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} {chamber_length}
-  endloop
-endfacet
-facet normal 0 0 1
-  outer loop
-    vertex 0 0 {chamber_length}
-    vertex {chamber_diameter/2 * 0.866} {chamber_diameter/4} {chamber_length}
-    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} {chamber_length}
-  endloop
-endfacet
-facet normal 0 0 1
-  outer loop
-    vertex 0 0 {chamber_length}
-    vertex {chamber_diameter/2 * 0.5} {chamber_diameter/2 * 0.866} {chamber_length}
-    vertex 0 {chamber_diameter/2} {chamber_length}
-  endloop
-endfacet
-endsolid {motor_type}_motor"""
-        
-        return stl_content
-    except Exception as e:
-        print(f"Error generating basic STL: {e}")
-        # Return absolute minimum STL
-        return """solid motor
-facet normal 0 0 1
-  outer loop
-    vertex 0 0 0
-    vertex 10 0 0
-    vertex 5 10 0
-  endloop
-endfacet
-endsolid motor"""
+# v2.6.26 - OLU YEDEK GEOMETRI URETICILERI KALDIRILDI.
+#
+# generate_basic_stl_content ve generate_fallback_cad_geometry: CAD
+# uretimi basarisiz oldugunda basitlestirilmis bir govde (silindir +
+# koni) uretip gecerli export gibi donduren yedek yollardi. v2.6.2'de
+# fail-closed davranisa gecildiginde CAGRILARI kaldirilmisti ama
+# fonksiyonlar dosyada kaldi. Cagrilmayan kod tehlikelidir: iyi
+# niyetli bir refaktor onu diriltir ve uydurma geometri sessizce
+# imalata gider. Bekciler: test_stl_export_fail_closed.py,
+# test_v262_release_gate.py.
 
-def generate_fallback_cad_geometry(motor_data, motor_type):
-    """Generate fallback CAD geometry when main CAD generation fails"""
-    import trimesh
-    
-    try:
-        # Get motor dimensions with defaults
-        chamber_length = motor_data.get('chamber_length', 0.5)
-        chamber_diameter = motor_data.get('chamber_diameter', 0.1)
-        throat_diameter = motor_data.get('throat_diameter', 0.03)
-        
-        # Create basic cylinder for chamber
-        chamber_mesh = trimesh.creation.cylinder(
-            radius=chamber_diameter/2,
-            height=chamber_length,
-            sections=16
-        )
-        
-        # Create basic cone for nozzle
-        nozzle_mesh = trimesh.creation.cone(
-            radius=throat_diameter/2,
-            height=chamber_length * 0.3,
-            sections=16
-        )
-        
-        # Position nozzle at end of chamber
-        nozzle_mesh.apply_translation([0, 0, -chamber_length/2 - chamber_length*0.15])
-        
-        # Combine meshes
-        assembly = trimesh.util.concatenate([chamber_mesh, nozzle_mesh])
-        
-        return {
-            'assembly_meshes': [('Motor Assembly', assembly)],
-            'technical_drawings': {},
-            'material_specifications': {},
-            'plotly_visualization': {},
-            'performance_summary': {
-                'mass_breakdown': {
-                    'chamber_mass': chamber_length * chamber_diameter * 2.7,  # Rough estimate
-                    'nozzle_mass': throat_diameter * 0.5,
-                    'total_dry_mass': chamber_length * chamber_diameter * 3.0
-                }
-            },
-            'manufacturing_notes': ['Fallback geometry - simplified representation']
-        }
-    except Exception as e:
-        print(f"Error generating fallback CAD: {e}")
-        return None
+
 
 @app.route('/api/get-propellant-properties', methods=['POST'])
 def get_propellant_properties():
@@ -3934,28 +4228,58 @@ def trajectory_analysis():
 def analyze_safety():
     """Comprehensive safety analysis endpoint"""
     try:
-        data = request.json
-        
+        data = request.json or {}
+
+        # v2.6.26 FAIL-CLOSED: bu uç eskiden BOŞ istekten ({}) varsayılan bir
+        # motor kurup TAM güvenlik hükmü üretiyordu — tahliye mesafeleri,
+        # muayene aralığı, 'ACCEPTABLE' kabul kararı, hatta tıbbi müdahale
+        # bölümü. Ölçüldü: `POST /analyze_safety -d '{}'` -> HTTP 200 ve
+        # 11100 baytlık analiz, hepsi kullanıcının hiç vermediği
+        # varsayılanlardan. Güvenlik hükmü, verisi olmayan bir motor için
+        # üretilemez; eksik girdide 422 döner.
+        REQUIRED_SAFETY_FIELDS = (
+            'chamber_pressure', 'propellant_mass', 'chamber_diameter',
+            'wall_thickness',
+        )
+        missing = [key for key in REQUIRED_SAFETY_FIELDS
+                   if data.get(key) in (None, '')]
+        if missing:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_safety_input',
+                'message': ('A safety assessment cannot be produced from '
+                            'defaults. Provide the missing values.'),
+                'missing_fields': missing,
+            }), 422
+
         # Extract motor parameters
         motor_type = data.get('motor_type', 'hybrid')
-        chamber_pressure = float(data.get('chamber_pressure', 20))  # bar
+        chamber_pressure = float(data.get('chamber_pressure'))  # bar
         chamber_temperature = float(data.get('chamber_temperature', 3000))  # K
         thrust = float(data.get('thrust', 1000))  # N
         burn_time = float(data.get('burn_time', 10))  # s
-        propellant_mass = float(data.get('propellant_mass', 5))  # kg
+        propellant_mass = float(data.get('propellant_mass'))  # kg
         propellant_type = data.get('propellant_type', 'composite')
         facility_type = data.get('facility_type', 'test_stand')
-        
+
+        # Zorunlu olmayan alanlarda varsayılan kullanıldıysa bunu SAKLAMA:
+        # kullanıcı hangi sayının kendi verisi olmadığını görmeli.
+        defaults_applied = [key for key, default in (
+            ('chamber_temperature', 3000), ('thrust', 1000),
+            ('burn_time', 10), ('propellant_type', 'composite'),
+            ('facility_type', 'test_stand'), ('material', 'steel_4130'),
+        ) if data.get(key) in (None, '')]
+
         # Prepare motor data dictionary
         motor_data = {
             'chamber_pressure': chamber_pressure,
             'chamber_temperature': chamber_temperature,
             'thrust': thrust,
             'burn_time': burn_time,
-            'chamber_diameter': float(data.get('chamber_diameter', 0.1)),
-            'wall_thickness': float(data.get('wall_thickness', 0.005))
+            'chamber_diameter': float(data.get('chamber_diameter')),
+            'wall_thickness': float(data.get('wall_thickness')),
         }
-        
+
         # Initialize safety analyzer
         safety_analyzer = SafetyAnalyzer()
         
@@ -3963,16 +4287,26 @@ def analyze_safety():
         # Dalga 0 (2026-07-14): malzeme artık istekten geçer — yapısal
         # emniyet merkezi materials_db dayanımlarıyla hesaplanır (eski
         # sabit 250/400 MPa jenerik çelik kalktı).
-        safety_results = safety_analyzer.analyze_comprehensive_safety(
+        # v2.6.26: motor_type OKUNUYOR ama analize HİÇ geçirilmiyordu — yanıtta
+        # daima 'not supplied' görünüyordu ve MOTOR_TYPE_TO_EXPLOSIVE_CLASS
+        # eşlemesi bu uçtan asla tetiklenemiyordu (patlayıcı sınıfı yalnız
+        # propellant_type'tan çözülüyordu).
+        safety_kwargs = dict(
             motor_data=motor_data,
             propellant_mass=propellant_mass,
             propellant_type=propellant_type,
             facility_type=facility_type,
-            material=data.get('material', 'steel_4130')
+            material=data.get('material', 'steel_4130'),
         )
-        
+        import inspect
+        if 'motor_type' in inspect.signature(
+                safety_analyzer.analyze_comprehensive_safety).parameters:
+            safety_kwargs['motor_type'] = motor_type
+        safety_results = safety_analyzer.analyze_comprehensive_safety(**safety_kwargs)
+
         return jsonify({
             'status': 'success',
+            'defaults_applied': defaults_applied,
             'safety_analysis': sanitize_json_values(safety_results)
         })
         
@@ -4901,6 +5235,47 @@ def get_propellants_catalog():
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
+#: Elektronik tabloların formül başlangıcı saydığı karakterler. Excel ve
+#: LibreOffice '=' dışındakileri de bağlama göre formül/komut olarak
+#: yorumlayabildiği için dördü birden kaçırılır (CWE-1236).
+_FORMULA_LEAD = ('=', '+', '-', '@', '\t', '\r', '\n')
+
+
+def _looks_numeric(text_value):
+    """'-5000' / '+3.2e4' gibi sayı görünen metin mi?
+
+    Formül kaçışının bunlara DOKUNMAMASI gerekir: negatif sayılar '-' ile
+    başlar ve körü körüne apostrof eklemek veriyi bozardı.
+    """
+    try:
+        parsed = float(text_value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(parsed)
+
+
+def _spreadsheet_safe(value):
+    """Kullanıcı metnini hücreye yazmadan önce formüle dönüşmekten korur.
+
+    v2.6.26 ÖLÇÜMÜ: '=1+1' ile başlayan bir motor adı XLSX'e yazıldığında
+    openpyxl hücreyi ``data_type='f'`` (formül) olarak saklıyordu; dosya
+    yeniden açıldığında formül olarak görünüyordu. Başa apostrof koymak
+    elektronik tabloların standart 'bu metindir' işaretidir ve hücre metni
+    olarak görüntülenirken apostrof gösterilmez.
+    """
+    text_value = str(value)
+    if text_value.startswith(_FORMULA_LEAD) and not _looks_numeric(text_value):
+        return "'" + text_value
+    return text_value
+
+
+def _safe_sheet_title(title, idx):
+    """Excel'in yasakladığı karakterleri temizler (eskiden HTTP 500 oluyordu)."""
+    import re
+    cleaned = re.sub(r'[\\/*?:\[\]]', '_', title).strip() or f'Sheet{idx + 1}'
+    return cleaned[:31]
+
+
 @app.route('/api/export-xlsx', methods=['POST'])
 def export_xlsx():
     """Genel amaçlı Excel (xlsx) dışa aktarma.
@@ -4925,18 +5300,19 @@ def export_xlsx():
         wb.remove(wb.active)
         header_font = Font(bold=True)
         for idx, sheet in enumerate(sheets[:20]):
-            title = str(sheet.get('name') or f'Sheet{idx + 1}')[:31]
+            raw_title = str(sheet.get('name') or f'Sheet{idx + 1}')[:31]
+            title = _safe_sheet_title(raw_title, idx)
             ws = wb.create_sheet(title=title)
             headers = sheet.get('headers') or []
             rows = sheet.get('rows') or []
             if headers:
-                ws.append([str(h) for h in headers])
+                ws.append([_spreadsheet_safe(h) for h in headers])
                 for cell in ws[1]:
                     cell.font = header_font
             for row in rows[:100000]:
                 ws.append([
                     (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool)
-                     else ('' if v is None else str(v)))
+                     else ('' if v is None else _spreadsheet_safe(v)))
                     for v in (row if isinstance(row, (list, tuple)) else [row])
                 ])
             # Kolon genişliklerini başlığa göre kabaca ayarla

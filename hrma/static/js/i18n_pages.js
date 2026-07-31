@@ -27,6 +27,7 @@
 
     var DICT = {
         en: {
+            'liq.attr.blank_from_contraction': 'blank = computed from contraction ratio',
             'liq.attr.min_k': 'Min (K)',
             'liq.js.3d_engine_visualization': '3D Engine Visualization',
             'liq.js.altitude_performance_analysis': 'Altitude Performance Analysis',
@@ -54,10 +55,9 @@
             'liq.js.cycle': 'Cycle:',
             'liq.js.data_sources': 'Data Sources:',
             'liq.js.density_label': 'Density:',
-            'liq.js.design_phase': 'Design Phase:',
+            'liq.js.cost_schedule': 'Cost & schedule:',
             'liq.js.design_summary': 'Design Summary',
             'liq.js.detailed_engineering_visualization_with_cross_se': 'Detailed engineering visualization with cross-section',
-            'liq.js.development_cost': 'Development Cost:',
             'liq.js.diameter': 'Diameter:',
             'liq.js.dimethylhydrazine': 'Dimethylhydrazine',
             'liq.js.engine_specifications': 'Engine Specifications:',
@@ -109,7 +109,6 @@
             'liq.js.ox_vel': 'Ox Vel:',
             'liq.js.plotly_library_required_for_detailed_cad': 'Plotly library required for detailed CAD visualization',
             'liq.js.pressure_rating': 'Pressure Rating:',
-            'liq.js.production_unit': 'Production Unit:',
             'liq.js.propellant_label': 'Propellant:',
             'liq.js.propellant_mass': 'Propellant Mass:',
             'liq.js.propellants': 'Propellants:',
@@ -1368,6 +1367,7 @@
             'solid.ui.yield_strength_y': 'Yield Strength σy'
         },
         tr: {
+            'liq.attr.blank_from_contraction': 'boş = daralma oranından hesaplanır',
             'liq.attr.min_k': 'En az (K)',
             'liq.js.3d_engine_visualization': '3B Motor Görselleştirmesi',
             'liq.js.altitude_performance_analysis': 'İrtifa Performansı Analizi',
@@ -1395,10 +1395,9 @@
             'liq.js.cycle': 'Çevrim:',
             'liq.js.data_sources': 'Veri Kaynakları:',
             'liq.js.density_label': 'Yoğunluk:',
-            'liq.js.design_phase': 'Tasarım Aşaması:',
+            'liq.js.cost_schedule': 'Maliyet ve termin:',
             'liq.js.design_summary': 'Tasarım Özeti',
             'liq.js.detailed_engineering_visualization_with_cross_se': 'Kesit görünümlü ayrıntılı mühendislik görselleştirmesi',
-            'liq.js.development_cost': 'Geliştirme Maliyeti:',
             'liq.js.diameter': 'Çap:',
             'liq.js.dimethylhydrazine': 'Dimetilhidrazin',
             'liq.js.engine_specifications': 'Motor Özellikleri:',
@@ -1450,7 +1449,6 @@
             'liq.js.ox_vel': 'Oksitleyici Hızı:',
             'liq.js.plotly_library_required_for_detailed_cad': 'Ayrıntılı CAD görselleştirmesi için Plotly kitaplığı gerekir',
             'liq.js.pressure_rating': 'Basınç Sınıfı:',
-            'liq.js.production_unit': 'Seri Üretim Birimi:',
             'liq.js.propellant_label': 'Yakıt:',
             'liq.js.propellant_mass': 'Yakıt Kütlesi:',
             'liq.js.propellants': 'İticiler:',

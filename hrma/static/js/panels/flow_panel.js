@@ -313,15 +313,24 @@
             if (Number.isFinite(m.chamber_temperature)) sug.chamber_temperature = m.chamber_temperature;
             if (Number.isFinite(m.gamma)) sug.gamma = m.gamma;
             if (Number.isFinite(m.molecular_weight)) sug.molecular_weight = m.molecular_weight;
-            if (Number.isFinite(m.throat_diameter)) sug.throat_diameter = m.throat_diameter;
-            if (Number.isFinite(m.exit_diameter)) {
-                sug.exit_diameter = m.exit_diameter;
+            // BİRİM: iki alan da METRE etiketli. Katı motorda çözücü bunları
+            // MİLİMETRE döndürüyor (boğaz 17,96 / çıkış 46,47) — panel 17,96 m
+            // ve 46,47 m ile quasi-1D akış çözüyordu. Merkezi çözümleyici
+            // motor tipine göre metreye getiriyor.
+            const dtM = U.readLengthM(r, 'throat_diameter');
+            const deM = U.readLengthM(r, 'exit_diameter');
+            if (Number.isFinite(dtM)) sug.throat_diameter = dtM;
+            if (Number.isFinite(deM)) {
+                sug.exit_diameter = deM;
             } else if (Number.isFinite(m.expansion_ratio) && m.expansion_ratio > 1
-                       && Number.isFinite(m.throat_diameter)) {
+                       && Number.isFinite(dtM)) {
                 sug.exit_diameter = Number(
-                    (m.throat_diameter * Math.sqrt(m.expansion_ratio)).toPrecision(5));
+                    (dtM * Math.sqrt(m.expansion_ratio)).toPrecision(5));
             }
-            if (Number.isFinite(m.of_ratio)) sug.of_ratio = m.of_ratio;
+            // O/F: sıvı çözücü bu anahtarı 'mixture_ratio' adıyla döndürüyor,
+            // 'of_ratio' YOK — alan panel varsayılanında kalıyordu.
+            const of = U.readOfRatio(r);
+            if (Number.isFinite(of)) sug.of_ratio = of;
             return sug;
         },
         render: render,

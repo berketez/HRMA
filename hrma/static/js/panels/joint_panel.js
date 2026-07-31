@@ -187,8 +187,13 @@
                 out.pressure_bar = m.chamber_pressure;
             }
             // Sızdırmazlık çapı önerisi: hazne iç çapı (O-ring yüz contası)
-            if (Number.isFinite(m.chamber_diameter)) {
-                out.seal_diameter_mm = m.chamber_diameter * 1000.0;
+            // BİRİM (2026-07-30 ölçümü): koşulsuz `* 1000` yalnız hibritte
+            // doğruydu; katı (75,0) ve sıvı (120,0) motorlarda değer zaten
+            // MİLİMETRE geliyor ve panel 75 m / 120 m'lik conta çapıyla
+            // cıvata hesabı yapıyordu.
+            var sealMm = U.readLengthMM(r, 'chamber_diameter');
+            if (Number.isFinite(sealMm)) {
+                out.seal_diameter_mm = sealMm;
             }
             return out;
         },

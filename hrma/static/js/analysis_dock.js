@@ -202,6 +202,210 @@
             items.map(w => `<li>${warnText(w)}</li>`).join('') + '</ul></div>';
     }
 
+    // ==================================================================
+    // ÇÖZÜCÜ SONUCU OKUMA — merkezi birim çözümlemesi (v2.6.26)
+    // ------------------------------------------------------------------
+    // Neden burada: hesap uçlarının sözlüğünde uzunluk birimleri TÜRDEŞ
+    // DEĞİL ve tutarsızlık motor tipine göre değişiyor. Her panel kendi
+    // başına tahmin ettiği sürece aynı hata yeniden üretiliyor: termal
+    // panel 1000'e BÖLÜYOR, vessel/joint panelleri 1000 ile ÇARPIYOR ve
+    // ikisi de yalnız TEK bir motor tipinde doğru çıkıyordu.
+    //
+    // Aşağıdaki tablo 2026-07-30'da ÖLÇÜLDÜ (examples/ altındaki üç gerçek
+    // örnek proje ilgili hesap ucundan geçirilip yanıt okundu; tahmin yok):
+    //
+    //   anahtar             hibrit      katı           sıvı
+    //   chamber_diameter    0.1200 m    75.0 mm        120.0 mm
+    //   chamber_length      1.0032 m    (anahtar yok)  249.52 mm
+    //   throat_diameter     0.0297 m    17.96 mm       0.0547 m
+    //   exit_diameter       0.0677 m    46.47 mm       0.1896 m
+    //
+    // Katı ve sıvı yanıtlarında ayrıca TAMAMEN SI birimli bir
+    // `motor_geometry` bloğu var (katı: chamber_length 0.46 m — üstteki
+    // düz sözlükte bu anahtar hiç yok). Bu blok varsa ÖNCE o okunur;
+    // yoksa yukarıdaki ölçülmüş birim tablosuna düşülür. Anahtar hiçbir
+    // yerde yoksa `undefined` döner — panel varsayılanı UYDURULMAZ.
+    // ==================================================================
+
+    // Çözücü yanıtının motor sözlüğü: hibrit yanıtı `.motor` altında
+    // iç içedir, katı ve sıvı yanıtları düzdür.
+    function motorDict(r) {
+        return (r && r.motor) || r || {};
+    }
+
+    // 'a.b.c' yolunu güvenli okur; ara düğüm yoksa undefined.
+    function deepGet(obj, path) {
+        var cur = obj;
+        var parts = String(path).split('.');
+        for (var i = 0; i < parts.length; i++) {
+            if (cur == null || typeof cur !== 'object') return undefined;
+            cur = cur[parts[i]];
+        }
+        return cur;
+    }
+
+    // İlk sonlu sayıyı veren yolu döndürür (yol listesi sırayla denenir).
+    function firstNumber(obj, paths) {
+        for (var i = 0; i < paths.length; i++) {
+            var v = deepGet(obj, paths[i]);
+            if (typeof v === 'number' && Number.isFinite(v)) return v;
+        }
+        return undefined;
+    }
+
+    // İlk boş olmayan string'i veren yolu döndürür.
+    function firstString(obj, paths) {
+        for (var i = 0; i < paths.length; i++) {
+            var v = deepGet(obj, paths[i]);
+            if (typeof v === 'string' && v !== '') return v;
+        }
+        return undefined;
+    }
+
+    // Düz sözlükteki uzunluk anahtarlarının ÖLÇÜLMÜŞ birimi (yukarıdaki
+    // tablo). Burada olmayan anahtar için tahmin yürütülmez.
+    const LENGTH_UNITS = {
+        hybrid: {
+            chamber_diameter: 'm', chamber_length: 'm',
+            throat_diameter: 'm', exit_diameter: 'm', grain_length: 'm',
+            port_diameter_initial: 'm', port_diameter_final: 'm',
+        },
+        solid: {
+            chamber_diameter: 'mm', throat_diameter: 'mm',
+            exit_diameter: 'mm', grain_length: 'mm',
+            core_diameter: 'mm',
+        },
+        liquid: {
+            chamber_diameter: 'mm', chamber_length: 'mm',
+            throat_diameter: 'm', exit_diameter: 'm',
+        },
+    };
+
+    // Uzunluk okuma — METRE döner. Bilinmeyen anahtar/motor -> undefined.
+    function readLengthM(r, key) {
+        const m = motorDict(r);
+        const g = m.motor_geometry;
+        if (g && typeof g === 'object'
+                && typeof g[key] === 'number' && Number.isFinite(g[key])) {
+            return g[key];              // motor_geometry bloğu SI (ölçüldü)
+        }
+        const unit = (LENGTH_UNITS[getMotorType()] || {})[key];
+        const v = m[key];
+        if (!unit || typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+        return unit === 'mm' ? v / 1000 : v;
+    }
+
+    // Uzunluk okuma — MİLİMETRE döner (mm etiketli alanlar için).
+    function readLengthMM(r, key) {
+        const v = readLengthM(r, key);
+        return (typeof v === 'number' && Number.isFinite(v)) ? v * 1000 : undefined;
+    }
+
+    // --- Motor tipine göre ÖLÇÜLMÜŞ anahtar yolları -------------------
+    // (2026-07-30, examples/ üç örnek projesinin gerçek yanıtından)
+
+    const THRUST_PATHS = {
+        // Katı motorda düz sözlükte 'thrust' YOK; çözücü ortalama ve tepe
+        // itkiyi ayrı raporluyor. motor_geometry.thrust ortalamaya eşit.
+        hybrid: ['thrust'],
+        solid: ['motor_geometry.thrust', 'average_thrust'],
+        liquid: ['thrust'],
+    };
+
+    const MASS_FLOW_PATHS = {
+        hybrid: ['mdot_total'],
+        solid: [],                        // aşağıda ortalamadan türetilir
+        liquid: ['total_mass_flow'],
+    };
+
+    const PROPELLANT_MASS_PATHS = {
+        hybrid: ['propellant_mass_total'],
+        solid: ['propellant_mass', 'motor_geometry.propellant_mass_total'],
+        liquid: ['design_summary.masses.propellant_mass_kg'],
+    };
+
+    const FUEL_FLOW_PATHS = {
+        hybrid: ['mdot_f'],               // 'mdot_fuel' DEĞİL (ölçüldü)
+        solid: [],                        // katı motorda ayrı yakıt akışı yok
+        liquid: ['fuel_flow'],
+    };
+
+    const OF_RATIO_PATHS = {
+        hybrid: ['of_ratio'],
+        solid: [],                        // tek bileşenli itergaç: O/F yok
+        liquid: ['mixture_ratio'],        // 'of_ratio' DEĞİL (ölçüldü)
+    };
+
+    // Kanonik hazne/gövde malzemesi anahtarı (materials_db adı).
+    const CHAMBER_MATERIAL_PATHS = {
+        hybrid: ['structural_analysis.design_parameters.material',
+                 'heat_transfer_analysis.design_parameters.material'],
+        solid: ['structural_analysis.case_analysis.case_material',
+                'design_summary.case_design.material'],
+        liquid: ['structural_analysis.chamber_structure.material_key'],
+    };
+
+    // Cidar kalınlığı — kaynakların HEPSİ MİLİMETRE (ölçüldü; hibritte
+    // heat_transfer_analysis.py:722 `wall_thickness * 1000  # mm`).
+    const WALL_THICKNESS_MM_PATHS = {
+        hybrid: ['heat_transfer_analysis.design_parameters.wall_thickness'],
+        solid: ['structural_analysis.case_analysis.wall_thickness_mm',
+                'design_summary.key_dimensions.wall_thickness_mm'],
+        liquid: ['structural_analysis.chamber_structure.wall_thickness'],
+    };
+
+    function readThrust(r) {
+        return firstNumber(motorDict(r), THRUST_PATHS[getMotorType()] || []);
+    }
+
+    function readBurnTime(r) {
+        return firstNumber(motorDict(r), ['burn_time', 'motor_geometry.burn_time']);
+    }
+
+    // Toplam kütle debisi (kg/s). Katı motorda çözücü anlık debi
+    // ÜRETMİYOR; itergaç kütlesi / yanma süresi ORTALAMASI döner
+    // (uydurma değil, çözücünün kendi iki çıktısından türetilmiş
+    // ortalama — anlık tepe debisi değildir).
+    function readMassFlow(r) {
+        const m = motorDict(r);
+        const direct = firstNumber(m, MASS_FLOW_PATHS[getMotorType()] || []);
+        if (direct !== undefined) return direct;
+        const mass = readPropellantMass(r);
+        const t = readBurnTime(r);
+        if (typeof mass === 'number' && typeof t === 'number' && t > 0) {
+            return mass / t;
+        }
+        return undefined;
+    }
+
+    function readPropellantMass(r) {
+        return firstNumber(motorDict(r), PROPELLANT_MASS_PATHS[getMotorType()] || []);
+    }
+
+    function readFuelFlow(r) {
+        return firstNumber(motorDict(r), FUEL_FLOW_PATHS[getMotorType()] || []);
+    }
+
+    function readOfRatio(r) {
+        return firstNumber(motorDict(r), OF_RATIO_PATHS[getMotorType()] || []);
+    }
+
+    function readChamberMaterial(r) {
+        return firstString(motorDict(r), CHAMBER_MATERIAL_PATHS[getMotorType()] || []);
+    }
+
+    // Cidar kalınlığı — METRE döner (m etiketli alanlar için).
+    function readWallThicknessM(r) {
+        const mm = firstNumber(motorDict(r),
+                               WALL_THICKNESS_MM_PATHS[getMotorType()] || []);
+        return mm === undefined ? undefined : mm / 1000;
+    }
+
+    // Cidar kalınlığı — MİLİMETRE döner.
+    function readWallThicknessMM(r) {
+        return firstNumber(motorDict(r), WALL_THICKNESS_MM_PATHS[getMotorType()] || []);
+    }
+
     // ------------------------------------------------------------------
     // DOM yardımcıları
     // ------------------------------------------------------------------
@@ -349,7 +553,27 @@
             if (!el || el.dataset.dirty === '1') return;
             const v = sug[k];
             if (el.tagName === 'SELECT') {
-                if (v != null) el.value = String(v);
+                if (v == null) return;
+                // SESSİZ GERİ DÜŞME KAPISI (v2.6.26): olmayan bir seçeneğe
+                // value atamak tarayıcıda seçimi DÜŞÜRÜR (value '' olur) ve
+                // POST gövdesine boş dize gider; hesap ucu da kendi
+                // varsayılanına düşer. Kullanıcı ekranda bir malzeme görüp
+                // başka malzemeyle hesaplanmış sonuç okurdu. Seçenek yoksa
+                // alan DEĞİŞTİRİLMEZ: ekranda görünen değer = gönderilen
+                // değer sözleşmesi korunur.
+                const want = String(v);
+                const opts = el.options || [];
+                let found = false;
+                for (let i = 0; i < opts.length; i++) {
+                    if (opts[i].value === want) { found = true; break; }
+                }
+                if (found) {
+                    el.value = want;
+                } else if (window.console && console.warn) {
+                    console.warn('[AnalysisDock] ' + spec.id + '.' + k
+                        + ': çözücünün verdiği "' + want + '" seçeneği listede yok;'
+                        + ' alan değiştirilmedi (görünen değer gönderilir).');
+                }
                 return;
             }
             if (typeof v === 'number' && Number.isFinite(v)) el.value = v;
@@ -535,8 +759,26 @@
             kindColor: kindColor,
             TBL: TBL,
             TD: TD,
+            // --- Çözücü sonucu okuma (merkezi birim çözümlemesi) ---
+            // Paneller uzunlukları KENDİ BAŞINA çevirmez; bu yardımcılar
+            // motor tipine göre ölçülmüş birim sözleşmesini uygular.
+            motorDict: motorDict,
+            readLengthM: readLengthM,
+            readLengthMM: readLengthMM,
+            readThrust: readThrust,
+            readBurnTime: readBurnTime,
+            readMassFlow: readMassFlow,
+            readPropellantMass: readPropellantMass,
+            readFuelFlow: readFuelFlow,
+            readOfRatio: readOfRatio,
+            readChamberMaterial: readChamberMaterial,
+            readWallThicknessM: readWallThicknessM,
+            readWallThicknessMM: readWallThicknessMM,
         },
         // Test / hata ayıklama için salt-okunur kayıt listesi
         _registry: registry,
+        // Test / hata ayıklama: init() tam bir DOM kurmadan motor tipini
+        // ayarlamak için (bekçi testi üç motor tipini de aynı süreçte ölçer).
+        _setMotorType: function (t) { cfg.motorType = t; },
     };
 })();

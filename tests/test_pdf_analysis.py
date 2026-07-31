@@ -166,18 +166,48 @@ class TestRealValuesInPdf:
         assert '33600.0' in text    # gerçek toplam impuls
 
     def test_request_safety_summary_preserved(self, client, motor_with_analyses):
-        # İstekle gelen güvenlik özeti yönetici özetine girer
+        """İstekle gelen GERÇEK risk sınıfları yönetici özetine girer.
+
+        v2.6.26 (PDF-710-5): bu test eskiden ``{'overall_rating': 8.2}``
+        gönderip PDF'te '8.2' ve 'ACCEPTABLE' arıyordu. O 0-10 ölçeğini
+        depoda üreten HİÇBİR kod yoktu ve '>7/10 kabul edilebilir' eşiğinin
+        hiçbir dayanağı yoktu — yani test, yalnız elle kurulmuş bir istekle
+        ulaşılan uydurma bir damgayı sabitliyordu. Artık özet
+        /analyze_safety'nin gerçek risk_assessment alanlarından basılır.
+        """
         r = client.post('/api/export-pdf/complete', json={
             'motor_data': motor_with_analyses,
             'analysis_results': {
-                'safety': {'overall_rating': 8.2, 'critical_issues': []},
+                'safety': {
+                    'risk_assessment': {
+                        'risk_level': 'MEDIUM',
+                        'acceptability': 'ACCEPTABLE_WITH_CONTROLS',
+                    },
+                },
             },
             'charts': [],
         })
         assert r.status_code == 200
         _, text = _pdf_text(r.data)
-        assert '8.2' in text
-        assert 'ACCEPTABLE' in text
+        assert 'MEDIUM' in text
+        assert 'ACCEPTABLE WITH CONTROLS' in text
+        # Dayanaksız sayısal ölçek geri gelmemeli
+        assert '/10' not in text
+
+    def test_arbitrary_rating_no_longer_stamps_a_verdict(self, client,
+                                                         motor_with_analyses):
+        """Uydurma 'overall_rating' artık hüküm ürettiremez (regresyon bekçisi)."""
+        r = client.post('/api/export-pdf/complete', json={
+            'motor_data': motor_with_analyses,
+            'analysis_results': {
+                'safety': {'overall_rating': 9.9, 'critical_issues': []},
+            },
+            'charts': [],
+        })
+        assert r.status_code == 200
+        _, text = _pdf_text(r.data)
+        assert '9.9/10' not in text
+        assert 'acceptance threshold' not in text.lower()
 
 
 class TestNoFabricationWithoutData:

@@ -62,6 +62,22 @@ MESH_MAX_INJECTOR_ORIFICES = 16
 MANUFACTURING_EFFORT_BASIS = ('typical machine-shop experience for this size '
                               'class; not computed from the analysis')
 
+# İmalat notlarında SAYILAR çözücüden gelir; adımların kendisi (tornalama,
+# delme, çapak alma, sızdırmazlık) genel atölye pratiğidir ve bu motorun
+# analizinden türetilmez. MANUFACTURING_EFFORT_BASIS ile aynı desen.
+MANUFACTURING_NOTE_BASIS = ('numeric values in the steps above come from this '
+                            'analysis run (source named inline); the process '
+                            'steps themselves are general machine-shop practice '
+                            'and are not computed for this motor')
+
+# ANSI B1.1 / AWS D1.1 gerçek standartlardır, ancak "bu tasarıma uygulanır"
+# iddiası bu yazılım tarafından DOĞRULANMAZ; referans olarak listelenir.
+MANUFACTURING_STANDARD_BASIS = ('the standards cited (ANSI B1.1 threads, '
+                                'AWS D1.1 welding) are real published standards '
+                                'listed for reference only; this analysis does '
+                                'not verify that they are the applicable '
+                                'standards for this design')
+
 # Tolerans ve yüzey pürüzlülüğü bu yazılımın tasarım çıktısı DEĞİLDİR; standart
 # atölye değerleridir ve çizim sözlüğünde kaynağıyla birlikte verilir.
 DRAWING_TOLERANCE_BASIS = ('ISO 2768-m general tolerances (workshop standard, '
@@ -125,8 +141,19 @@ def _nozzle_length_m(motor_data):
         return None
 
 
+def _first_real(mapping, *keys):
+    """Verilen anahtarlardan İLK sonlu-pozitif değeri döndürür (yoksa None)."""
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        value = _real_scalar(mapping.get(key))
+        if value is not None:
+            return value
+    return None
+
+
 def _injector_spec(motor_data):
-    """Enjektör için TEK doğruluk kaynağı: motor sonucundaki injector_design.
+    """Enjektör için TEK doğruluk kaynağı.
 
     Döner: {'n_orifices', 'orifice_diameter_mm', 'plate_diameter_mm',
             'type', 'pressure_drop_bar', 'source'}
@@ -134,26 +161,50 @@ def _injector_spec(motor_data):
     farklı delik sayıları gösteriyordu (2026-07-19 denetimi, kritik bulgu);
     bütün CAD/çizim katmanı artık bu tek fonksiyondan okur. Değer yoksa
     None bırakılır — sabit sayı uydurulmaz.
+
+    KAYNAK KARIŞTIRMA YASAĞI (v2.6.26, K2 denetimi). Hibrit ``/calculate``
+    İKİ bağımsız enjektör çözücüsü koşturur:
+      1. Enjektör paneli (``injector_results``) — ekran tablosu ve 2B şema,
+      2. Motorun kendi devre modeli (``injector_design`` /
+         ``injector_design_detail``) — N2O'da doyma basıncını kullanır.
+    Eski kod delik sayısını (1)'den, basınç düşümünü (2)'den okuyabiliyordu.
+    Ölçüldü: panel 125 delik x 0,957 mm / ΔP 4,00 bar derken çizim sözlüğü
+    aynı satırda ΔP 30,37 bar yazıyordu — 7,6 kat. Böyle bir enjektör HİÇBİR
+    çözücüde yoktur; melez spesifikasyon uydurmadır. Artık bir kaynak seçilir
+    ve BÜTÜN alanlar o kaynaktan okunur; kaynakta olmayan alan None kalır.
     """
     md = motor_data or {}
+    detail = md.get('injector_design_detail') or {}
+    if not isinstance(detail, dict):
+        detail = {}
+    ox = detail.get('ox_circuit') or {}
+
     # Öncelik: kullanıcının enjektör panelinden gelen sonuç (ΔP/hız hedefleri
     # oradan giriliyor) motor sonucuna eklenmişse o kazanır; yoksa motorun
-    # kendi injector_design'ı.
+    # kendi devre modeli.
     panel = md.get('injector_results') or {}
-    inj = panel or md.get('injector_design') or md.get('injector') or {}
-    source_name = ('injector panel (injector_results)' if panel
-                   else 'motor result injector_design')
-    detail = md.get('injector_design_detail') or {}
-    ox = (detail.get('ox_circuit') or {}) if isinstance(detail, dict) else {}
+    if panel:
+        n = _first_real(panel, 'number_of_orifices', 'n_holes', 'n_elements')
+        d_mm = _first_real(panel, 'orifice_diameter_mm', 'hole_diameter',
+                           'orifice_diameter')
+        dp = _first_real(panel, 'injection_pressure_drop_bar',
+                         'pressure_drop_bar', 'pressure_drop')
+        # Enjektör TİPİ iki çözücüde de aynı kullanıcı seçimidir (boyutlandırma
+        # değil, kimlik alanıdır); panelde adı 'type' ile de gelebilir.
+        inj_type = panel.get('injector_type') or panel.get('type')
+        source_name = 'injector panel (injector_results)'
+    else:
+        inj = md.get('injector_design') or md.get('injector') or {}
+        n = (_first_real(inj, 'number_of_orifices', 'n_holes', 'n_elements')
+             or _first_real(ox, 'n_orifices'))
+        d_mm = (_first_real(inj, 'orifice_diameter_mm', 'hole_diameter')
+                or _first_real(ox, 'orifice_d_mm'))
+        dp = (_first_real(inj, 'injection_pressure_drop_bar')
+              or _first_real(ox, 'delta_p_bar'))
+        inj_type = (inj.get('injector_type') or inj.get('type')
+                    or detail.get('injector_type'))
+        source_name = 'motor result injector_design'
 
-    n = (inj.get('number_of_orifices') or inj.get('n_holes')
-         or inj.get('n_elements') or ox.get('n_orifices'))
-    n = _real_scalar(n)
-    d_mm = _real_scalar(inj.get('orifice_diameter_mm')
-                        or inj.get('hole_diameter')
-                        or ox.get('orifice_d_mm'))
-    dp = _real_scalar(inj.get('injection_pressure_drop_bar')
-                      or ox.get('delta_p_bar'))
     plate_mm = _real_scalar(md.get('chamber_diameter'))
     plate_mm = plate_mm * 1000.0 if plate_mm is not None else None
 
@@ -161,22 +212,117 @@ def _injector_spec(motor_data):
         'n_orifices': int(round(n)) if n else None,
         'orifice_diameter_mm': d_mm,
         'plate_diameter_mm': plate_mm,
-        'type': inj.get('injector_type') or detail.get('injector_type'),
+        'type': inj_type,
         'pressure_drop_bar': dp,
         'source': source_name if n else 'not available',
     }
 
 
-def _chamber_wall_thickness_m(motor_data):
-    """Kamara cidar kalınlığı [m] — yapısal analizin GERÇEK önerisi.
+def _chamber_wall_design(motor_data):
+    """Kamara cidarı: ÇİZİLECEK kalınlık + yapısal öneri + hangi SF'nin geçerli olduğu.
 
-    Döner: (kalınlık_m|None, kaynak_etiketi)
+    v2.6.26 denetimi (Y5): CAD çizimi ve 3B katı, kullanıcının girdiği cidar
+    kalınlığını YOK SAYIP her zaman yapısal analizin ÖNERDİĞİ kalınlığı
+    çiziyordu. Ölçüldü: kullanıcı 3 / 5 / 10 / 20 mm girse de çizim 15,92 mm
+    ve kamara kütlesi 232,04 kg SABİT kalıyordu. Malzeme değişiminde sapma
+    daha büyüktü: Alüminyum 6061'de çizim 49,92 mm cidar gösterirken yapısal
+    panel kullanıcının 5 mm'si için SF 0,466 ("güvensiz") diyordu — yani
+    ekrandaki emniyet katsayısı ÇİZİLEN parçaya ait değildi.
+
+    Çözüm tek kurala indirgenir: **gerilmelerin hesaplandığı kalınlık çizilir.**
+    ``structural_analysis.chamber_analysis`` bunu zaten ayırıyor:
+      * ``design_mode == 'verify'`` -> kullanıcı bir cidar girdi; gerilmeler ve
+        emniyet katsayıları O kalınlığa aittir -> ``wall_thickness_used_mm``.
+      * ``design_mode == 'size'``   -> kullanıcı girmedi; yazılım boyutlandırdı
+        ve ``wall_thickness_used_mm == recommended_thickness``.
+    Böylece çizilen geometri ile ekrandaki emniyet katsayısı AYNI parçayı
+    anlatır. Öneri ayrıca ``recommended_mm`` alanında taşınır ve ikisi
+    farklıysa ``note`` alanı bunu AÇIKÇA söyler (imalatçı hangi kalınlığın
+    hangi SF'ye ait olduğunu görmeden torna tezgâhına gitmemeli).
+
+    Döner sözlük:
+        thickness_m     -> çizilecek/kütlelenecek kalınlık [m] (None olabilir)
+        source          -> insan okur kaynak etiketi
+        as_designed_mm  -> gerilmelerin ait olduğu kalınlık [mm] (None olabilir)
+        recommended_mm  -> yapısal analizin önerdiği kalınlık [mm] (None olabilir)
+        design_mode     -> 'verify' | 'size' | None
+        safety_factor   -> as_designed kalınlığa ait toplam emniyet katsayısı
+        note            -> çizilen ile önerilen farklıysa uyarı metni, yoksa None
     """
     struct = (motor_data or {}).get('structural_analysis') or {}
-    t_mm = _real_nested(struct, ('chamber_analysis', 'recommended_thickness'))
-    if t_mm is not None:
-        return t_mm / 1000.0, 'structural analysis (recommended thickness)'
-    return None, 'not available'
+    chamber = struct.get('chamber_analysis') or {}
+
+    recommended_mm = _real_nested(struct, ('chamber_analysis', 'recommended_thickness'))
+    used_mm = _real_nested(struct, ('chamber_analysis', 'wall_thickness_used_mm'))
+    design_mode = chamber.get('design_mode')
+    safety_factor = (_real_scalar(chamber.get('safety_factor_total'))
+                     or _real_scalar(chamber.get('hoop_safety_factor')))
+
+    # Kullanıcının cidarı YALNIZ 'verify' modunda açıkça bildirilmiştir.
+    # Mod bilinmiyorsa (eski sözlükler) eski davranış korunur: öneri çizilir.
+    if design_mode == 'verify' and used_mm is not None:
+        thickness_mm = used_mm
+        # Sayı yine yapısal analizin çıktı alanından (wall_thickness_used_mm)
+        # gelir; 'verify' modunda bu, çağıranın bildirdiği as-designed cidardır.
+        source = ('structural analysis (as-designed wall thickness, '
+                  'verified against the pressure load)')
+    elif recommended_mm is not None:
+        thickness_mm = recommended_mm
+        source = 'structural analysis (recommended thickness)'
+    elif used_mm is not None:
+        thickness_mm = used_mm
+        source = 'structural analysis (thickness used in the stress check)'
+    else:
+        thickness_mm = None
+        source = 'not available'
+
+    note = None
+    if (thickness_mm is not None and recommended_mm is not None
+            and abs(thickness_mm - recommended_mm) > 1e-6):
+        note = (f'drawn wall is the as-designed {thickness_mm:.2f} mm; the '
+                f'structural sizing recommends {recommended_mm:.2f} mm. '
+                f'Safety factors reported for this motor belong to the '
+                f'as-designed {thickness_mm:.2f} mm wall, NOT to the '
+                f'recommended one.')
+
+    return {
+        'thickness_m': (thickness_mm / 1000.0) if thickness_mm is not None else None,
+        'source': source,
+        'as_designed_mm': used_mm,
+        'recommended_mm': recommended_mm,
+        'design_mode': design_mode,
+        'safety_factor': safety_factor,
+        'note': note,
+    }
+
+
+def _chamber_wall_thickness_m(motor_data):
+    """Kamara cidar kalınlığı [m] — çizilen/kütlelenen kalınlık.
+
+    Döner: (kalınlık_m|None, kaynak_etiketi). Ayrıntı için
+    :func:`_chamber_wall_design`.
+    """
+    design = _chamber_wall_design(motor_data)
+    return design['thickness_m'], design['source']
+
+
+def _chamber_wall_effective_m(motor_data, chamber_diameter_m):
+    """3B katının ve kütle dökümünün GERÇEKTEN kullandığı cidar [m].
+
+    Yapısal sonuç yoksa CAD katmanı geometrik yedek kurala düşer; mesh, kütle
+    ve zarf çapı bu TEK fonksiyondan okur ki üçü çelişmesin. Yedek kural
+    kullanıldığında çizim sözlüğü yine de sayı yazmaz (bkz.
+    ``_generate_technical_drawings``) — imalata giden ölçü uydurulmaz.
+    """
+    design = _chamber_wall_design(motor_data)
+    wall_m = design['thickness_m']
+    if wall_m is not None:
+        return wall_m, design['source']
+    d = _real_scalar(chamber_diameter_m)
+    if d is None:
+        return None, design['source']
+    return (max(0.004, CHAMBER_WALL_FALLBACK_FRACTION * d),
+            'geometric fallback (no structural result in this run)')
 
 
 def _chamber_material(motor_data):
@@ -301,11 +447,12 @@ class MotorCADDesigner:
             nozzle_length = noz_meta['z_exit'] / 1000.0
 
             # Duvar kalınlıkları
-            struct = motor_data.get('structural_analysis') or {}
-            wall_case = _real_nested(struct, ('chamber_analysis', 'recommended_thickness'))
-            wall_case = ((wall_case / 1000.0) if wall_case else
-                         max(0.004, CHAMBER_WALL_FALLBACK_FRACTION * chamber_diameter))
-            wall_case = min(wall_case, 0.12 * chamber_diameter)
+            # v2.6.26 (Y5): kullanıcının cidarı ÇİZİLİR. Eski kod hem öneriye
+            # sabitliydi hem de 0.12·D üst sınırıyla kırpıyordu; kırpma
+            # kullanıcının tasarımını sessizce değiştirdiği için kaldırıldı
+            # (çizim sözlüğü, kütle dökümü ve STL artık AYNI kalınlığı taşır).
+            wall_case, _wall_src = _chamber_wall_effective_m(motor_data,
+                                                             chamber_diameter)
             noz_geo = motor_data.get('nozzle_geometry') or {}
             wall_noz = noz_geo.get('wall_thickness')
             wall_noz = (wall_noz / 1000.0) if wall_noz else max(0.003, 0.1 * throat_diameter)
@@ -316,30 +463,35 @@ class MotorCADDesigner:
             grain_length = min(grain_length, 0.98 * chamber_length)
             liner = min(max(0.02 * chamber_diameter, 0.0015), 0.005)
 
-            # Enjektör: gerçek orifis sayısı/çapı
-            inj = motor_data.get('injector_design') or {}
-            injector_orifices = inj.get('number_of_orifices')
-            if injector_orifices:
-                injector_orifices = int(round(injector_orifices))
-            elif injector_config.get('n_holes_override'):
-                injector_orifices = injector_config['n_holes_override']
-            else:
-                injector_orifices = 8
+            # Enjektör: TEK doğruluk kaynağı (_injector_spec) — teknik çizim,
+            # PDF, STEP/DXF ve bu mesh AYNI enjektörü anlatmalı.
+            # v2.6.26 (K2): burası `injector_design`'ı DOĞRUDAN okuyordu;
+            # çizim sözlüğü ise panel sonucunu kullanıyordu. Ölçüldü: aynı
+            # koşuda mesh 11 delik x 2,457 mm delerken çizim 125 delik x
+            # 0,957 mm yazıyordu. STL'i açan kişi çizimdeki parçayı GÖRMÜYORDU.
+            inj_spec = _injector_spec(motor_data)
+            injector_orifices_real = inj_spec['n_orifices']
+            if not injector_orifices_real and injector_config.get('n_holes_override'):
+                injector_orifices_real = int(injector_config['n_holes_override'])
             # Gerçek (kırpılmamış) sayı korunur: MESH kararlılığı için delik
             # sayısı sınırlanır ama teknik çizim/spesifikasyon çıktısı gerçek
             # sayıyı yazmalıdır (2026-07-19 denetimi: çözücü 41 orifis derken
             # çizimde 16 görünüyordu).
-            injector_orifices_real = injector_orifices
-            injector_orifices = max(1, min(injector_orifices,
-                                           MESH_MAX_INJECTOR_ORIFICES))
-            ori_mm = inj.get('orifice_diameter_mm')
-            if ori_mm:
-                orifice_diameter = max(0.0005, min(0.01, ori_mm / 1000.0))
+            if injector_orifices_real:
+                injector_orifices = max(1, min(int(injector_orifices_real),
+                                               MESH_MAX_INJECTOR_ORIFICES))
             else:
-                mdot_ox = motor_data.get('mdot_ox', 1.0)
-                inj_v = injector_config.get('injection_velocity', 30)
-                a_tot = mdot_ox / (motor_data.get('oxidizer_density', 1200) * inj_v)
-                orifice_diameter = max(0.001, min(0.01, 2 * (a_tot / injector_orifices / np.pi) ** 0.5))
+                # Hiçbir çözücü delik üretmedi -> DELİK AÇILMAZ. Eski kod 8
+                # delik uydurup çapını akıştan türetiyordu; kullanıcı bunun
+                # hesaplanmış bir desen olduğunu sanıyordu (v2.6.26 denetimi).
+                injector_orifices = 0
+            ori_mm = inj_spec['orifice_diameter_mm']
+            # Çap yalnız delik sayısıyla BİRLİKTE anlamlıdır; biri yoksa
+            # diğeri de çizilmez.
+            orifice_diameter = (max(0.0005, min(0.01, ori_mm / 1000.0))
+                                if (ori_mm and injector_orifices) else 0.0)
+            if not orifice_diameter:
+                injector_orifices = 0
 
             # Türetilen boyutları KOPYAYA yaz (çağıranın dict'i korunur)
             motor_data.update({
@@ -556,8 +708,13 @@ class MotorCADDesigner:
             injector_plate = trimesh.creation.cylinder(radius=radius, height=thickness)
 
             # Create injection orifices
-            orifice_count = motor_data.get('injector_orifices', 8)
-            orifice_diameter = motor_data.get('orifice_diameter', 0.003)  # 3mm
+            # v2.6.26: sayı/çap ÇÖZÜCÜDEN gelir. Gelmiyorsa DELİK AÇILMAZ —
+            # eski 8 delik x 3 mm varsayılanı çizilmiş bir tasarım gibi
+            # görünüyordu ama hiçbir hesaptan çıkmıyordu (uydurma geometri).
+            orifice_count = int(motor_data.get('injector_orifices') or 0)
+            orifice_diameter = _real_scalar(motor_data.get('orifice_diameter')) or 0.0
+            if orifice_count <= 0 or orifice_diameter <= 0:
+                return injector_plate
 
             # Arrange orifices in circle
             orifice_radius = radius * 0.7
@@ -1062,7 +1219,9 @@ class MotorCADDesigner:
 
         drawings = {}
 
-        wall_m, wall_source = _chamber_wall_thickness_m(motor_data)
+        wall_design = _chamber_wall_design(motor_data)
+        wall_m = wall_design['thickness_m']
+        wall_source = wall_design['source']
         _mat_key, mat_name, _rho = _chamber_material(motor_data)
         conv_deg, div_deg, noz_type = _nozzle_half_angles(motor_data)
         inj = _injector_spec(motor_data)
@@ -1071,11 +1230,41 @@ class MotorCADDesigner:
         plate_mm = _real_nested(struct, ('end_cap_analysis', 'flat_head_thickness'))
 
         # Chamber drawing
+        # v2.6.26 (Y3): 'outer_diameter' aslında İÇ (kamara) çapını yazıyordu,
+        # hemen yanında ayrı bir 'wall_thickness' alanı varken. Ölçüldü: katı
+        # modelin mesh köşelerinden okunan gerçek dış çap 184,37 mm iken ölçü
+        # tablosu 152,53 mm diyordu (152,53 + 2 x 15,92 = 184,37). Atölye
+        # Ø152 mm boru alıp 15,92 mm cidar bırakacak şekilde tornalasa kalan
+        # delik 120,7 mm olurdu; grain'in dış çapı 146,4 mm — parça takılmaz.
+        # Artık iç ve dış çap AYRI ve ikisi de katı modelin gerçeğiyle tutar.
+        bore_mm = _real_scalar(motor_data.get('chamber_diameter'))
+        bore_mm = bore_mm * 1000.0 if bore_mm is not None else None
+        outer_mm = ((bore_mm + 2.0 * wall_m * 1000.0)
+                    if (bore_mm is not None and wall_m) else None)
+        length_m = _real_scalar(motor_data.get('chamber_length'))
         drawings['chamber'] = {
-            'outer_diameter': motor_data.get('chamber_diameter', 0.1) * 1000,  # mm
+            # Kamara İÇ çapı (yanma hacmi / grain dış çapı bu ölçüye oturur)
+            'inner_diameter': bore_mm if bore_mm is not None else NOT_AVAILABLE_SPEC,
+            # Boru dış çapı = iç çap + 2 x cidar (katı modelle birebir aynı)
+            'outer_diameter': outer_mm if outer_mm is not None else NOT_AVAILABLE_SPEC,
+            'diameter_convention': ('inner_diameter is the chamber bore; '
+                                    'outer_diameter = inner_diameter + 2 x '
+                                    'wall_thickness and matches the CAD solid'),
             'wall_thickness': (wall_m * 1000.0) if wall_m else NOT_AVAILABLE_SPEC,
             'wall_thickness_source': wall_source,
-            'length': motor_data.get('chamber_length', 0.5) * 1000,  # mm
+            # Hangi kalınlık çizildi, yapısal analiz ne öneriyor, ekrandaki
+            # emniyet katsayısı hangisine ait — üçü de aynı satırda.
+            'wall_thickness_as_designed': (wall_design['as_designed_mm']
+                                           if wall_design['as_designed_mm'] is not None
+                                           else NOT_AVAILABLE_SPEC),
+            'wall_thickness_recommended': (wall_design['recommended_mm']
+                                           if wall_design['recommended_mm'] is not None
+                                           else NOT_AVAILABLE_SPEC),
+            'wall_thickness_note': wall_design['note'],
+            'safety_factor_at_drawn_wall': (wall_design['safety_factor']
+                                            if wall_design['safety_factor'] is not None
+                                            else NOT_AVAILABLE_SPEC),
+            'length': (length_m * 1000.0) if length_m is not None else NOT_AVAILABLE_SPEC,
             'material': mat_name or NOT_AVAILABLE_SPEC,
             'surface_finish': DRAWING_SURFACE_FINISH_CHAMBER,
             'finish_basis': DRAWING_SURFACE_FINISH_BASIS,
@@ -1087,11 +1276,14 @@ class MotorCADDesigner:
         }
 
         # Nozzle drawing
+        # Boy: `or 0.0` zinciri yerine açık koşul — geçersiz boy 0 mm olarak
+        # yazılmaz (aynı hata geometri özetinde gerçekten 0 mm üretiyordu).
+        nozzle_len_m = _nozzle_length_m(motor_data)
         drawings['nozzle'] = {
             'throat_diameter': motor_data.get('throat_diameter', 0.02) * 1000,  # mm
             'exit_diameter': motor_data.get('exit_diameter', 0.04) * 1000,  # mm
-            'length': ((_nozzle_length_m(motor_data) or 0.0) * 1000
-                       or NOT_AVAILABLE_SPEC),  # mm
+            'length': ((nozzle_len_m * 1000.0) if nozzle_len_m is not None
+                       else NOT_AVAILABLE_SPEC),  # mm
             'nozzle_type': noz_type,
             'convergence_angle': conv_deg if conv_deg is not None else NOT_AVAILABLE_SPEC,
             'divergence_angle': div_deg if div_deg is not None else NOT_AVAILABLE_SPEC,
@@ -1201,15 +1393,109 @@ class MotorCADDesigner:
         }
 
     def _generate_manufacturing_notes(self, motor_data: Dict) -> List[str]:
-        """Generate manufacturing and assembly notes"""
+        """İmalat notları — ölçülü adımlar ÇÖZÜCÜNÜN kendi sonuçlarından.
+
+        Eski sürüm motor_data'yı hiç okumuyordu: 500 N'lik motorla 50 kN'lik
+        motorun notları birebir aynı çıkıyordu ("bore to final ID",
+        "graphite blank", "1.5x operating pressure"). Komşu fonksiyonlar
+        (_generate_technical_drawings, _generate_material_specifications)
+        2026-07-19 denetiminde çözücüye bağlanmıştı, bu fonksiyon atlanmıştı.
+
+        Artık gerçek sayı taşıyan adımlar:
+          - kamara: gerçek iç çap + yapısal analizin cidar kalınlığı/malzemesi
+          - lüle: gerçek boğaz çapı, seçilmişse gerçek lüle malzemesi
+          - enjektör: _injector_spec'in delik sayısı/çapı (tek doğruluk kaynağı)
+          - basınç testi: gerçek kamara basıncı + yapısal tasarım basıncı
+        Değer yoksa sabit sayı yazılmaz, alan NOT_AVAILABLE_SPEC olur. Sayı
+        üretilemeyen adımlar bu motora özel hesaplanmaz; sondaki BASIS bloğu
+        bunu açıkça söyler (manufacturing_complexity ile aynı desen).
+        """
+
+        md = motor_data or {}
+        struct = md.get('structural_analysis') or {}
+
+        def _mm(value):
+            metres = _real_scalar(value)
+            return metres * 1000.0 if metres is not None else None
+
+        chamber_id_mm = _mm(md.get('chamber_diameter'))
+        wall_design = _chamber_wall_design(md)
+        wall_m = wall_design['thickness_m']
+        wall_source = wall_design['source']
+        wall_mm = wall_m * 1000.0 if wall_m is not None else None
+        _mat_key, chamber_mat, _rho = _chamber_material(md)
+        throat_mm = _mm(md.get('throat_diameter'))
+        nozzle_mat = md.get('nozzle_material') or md.get('throat_material')
+        inj = _injector_spec(md)
+        pc_bar = _real_scalar(md.get('chamber_pressure'))
+        design_p_bar = _real_nested(struct, ('design_parameters', 'design_pressure'))
+        design_factor = _real_nested(struct,
+                                     ('design_parameters', 'design_pressure_factor'))
+
+        # 1 - kamara: iç çap ve cidar yapısal analizden gelir
+        if chamber_id_mm is not None:
+            chamber_note = (
+                f"1. Chamber: machine from "
+                f"{chamber_mat or 'the chamber material selected in this run'} "
+                f"stock; bore to {chamber_id_mm:.1f} mm ID")
+            chamber_note += (f", leave {wall_mm:.1f} mm wall ({wall_source})"
+                             if wall_mm is not None
+                             else f"; wall thickness {NOT_AVAILABLE_SPEC}")
+            # v2.6.26 (Y5): tezgâha giden not, çizilen cidar ile yapısal
+            # önerinin AYNI OLMADIĞINI söylemeden geçemez. Torna başındaki
+            # kişi hangi kalınlığın hangi emniyet katsayısına ait olduğunu
+            # görmeden talaş kaldırmamalı.
+            if wall_design['note']:
+                chamber_note += f". NOTE: {wall_design['note']}"
+        else:
+            chamber_note = f"1. Chamber: bore diameter {NOT_AVAILABLE_SPEC}"
+
+        # 2 - lüle: boğaz çapı çözücüden; malzeme yalnız SEÇİLDİYSE yazılır
+        nozzle_note = (
+            f"2. Nozzle: CNC machine from "
+            f"{nozzle_mat or 'the nozzle blank material (not selected in this run)'}")
+        nozzle_note += (f"; finish throat to {throat_mm:.2f} mm diameter"
+                        if throat_mm is not None
+                        else f"; throat diameter {NOT_AVAILABLE_SPEC}")
+        nozzle_note += f"; throat finish target {DRAWING_SURFACE_FINISH_NOZZLE}"
+
+        # 3 - enjektör: çizim/CAD ile AYNI kaynaktan (bkz. _injector_spec)
+        if inj['n_orifices'] and inj['orifice_diameter_mm']:
+            injector_note = (
+                f"3. Injector: drill {inj['n_orifices']} orifices at "
+                f"{inj['orifice_diameter_mm']:.2f} mm diameter and deburr each one; "
+                f"face finish target {DRAWING_SURFACE_FINISH_INJECTOR} "
+                f"(source: {inj['source']})")
+        else:
+            injector_note = (f"3. Injector: orifice count and diameter "
+                             f"{NOT_AVAILABLE_SPEC} (source: {inj['source']})")
+
+        # 5 - basınç testi: "1.5x" UYDURMA DEĞİL, yapısal analizin kendi
+        # tasarım basıncı yazılır. Test seviyesini seçmek bu yazılımın işi
+        # değildir; yalnız hesaplanan basınçlar bildirilir.
+        if pc_bar is not None and design_p_bar is not None:
+            factor_txt = (f", factor {design_factor:.2f}"
+                          if design_factor is not None else "")
+            pressure_note = (
+                f"5. Pressure test: operating pressure {pc_bar:.1f} bar; the wall "
+                f"was sized to {design_p_bar:.1f} bar design pressure{factor_txt} "
+                f"by the structural analysis. The proof/burst test level is set by "
+                f"the applicable code, not by this analysis.")
+        elif pc_bar is not None:
+            pressure_note = (
+                f"5. Pressure test: operating pressure {pc_bar:.1f} bar; no "
+                f"structural design pressure in this run and no proof factor is "
+                f"computed here.")
+        else:
+            pressure_note = f"5. Pressure test level: {NOT_AVAILABLE_SPEC}"
 
         notes = [
             "MANUFACTURING INSTRUCTIONS:",
-            "1. Chamber: Turn from solid bar stock, bore to final ID",
-            "2. Nozzle: CNC machine from graphite blank, diamond polish throat",
-            "3. Injector: Drill orifices with carbide bits, deburr carefully",
-            "4. All threads per ANSI B1.1, Class 2A/2B fit",
-            "5. Pressure test assembly to 1.5x operating pressure",
+            chamber_note,
+            nozzle_note,
+            injector_note,
+            "4. Threads: ANSI B1.1 Class 2A/2B fit",
+            pressure_note,
             "",
             "ASSEMBLY SEQUENCE:",
             "1. Install fuel grain in chamber",
@@ -1219,10 +1505,15 @@ class MotorCADDesigner:
             "5. Perform leak test with nitrogen",
             "",
             "SAFETY REQUIREMENTS:",
-            "- All welding per AWS D1.1",
+            "- Welding per AWS D1.1",
             "- NDT inspection of pressure boundaries",
             "- Hydrostatic test before first firing",
-            "- Maintain detailed test records"
+            "- Maintain detailed test records",
+            "",
+            "BASIS:",
+            f"- {MANUFACTURING_NOTE_BASIS}",
+            f"- {MANUFACTURING_STANDARD_BASIS}",
+            f"- surface finish targets: {DRAWING_SURFACE_FINISH_BASIS}",
         ]
 
         return notes
@@ -1230,23 +1521,94 @@ class MotorCADDesigner:
     def _generate_cad_performance_summary(self, motor_data: Dict) -> Dict:
         """CAD kütle/geometri özeti — kütleler GERÇEK kalınlık ve malzemeden."""
 
-        chamber_volume = np.pi * (motor_data.get('chamber_diameter', 0.1)/2)**2 * motor_data.get('chamber_length', 0.5)
         nozzle_mass = self._estimate_component_mass('nozzle', motor_data)
         chamber_mass = self._estimate_component_mass('chamber', motor_data)
         injector_mass = self._estimate_component_mass('injector', motor_data)
         dry_mass = chamber_mass + nozzle_mass + injector_mass
 
-        wall_m, wall_source = _chamber_wall_thickness_m(motor_data)
+        wall_design = _chamber_wall_design(motor_data)
+        wall_m = wall_design['thickness_m']
+        wall_source = wall_design['source']
         _key, mat_name, _rho = _chamber_material(motor_data)
+
+        # Bileşenlerden biri geçersizse (eksik/NaN) toplam uzunluk 0 mm DEĞİL
+        # None'dır. Eski `or 0.0` yedeği _real_scalar'ın None'ını yutuyor,
+        # geçersiz kamara boyu geometri özetinde sessizce 0 mm katkı yapıyordu:
+        # kullanıcı 56 mm'lik "toplam boy" görüp bunun hesaplandığını sanıyordu.
+        # 'sıfır' ile 'hesaplanamadı' bu projede aynı şey değildir.
+        chamber_len_m = _real_scalar(motor_data.get('chamber_length'))
+        chamber_d_m = _real_scalar(motor_data.get('chamber_diameter'))
+        thrust_n = _real_scalar(motor_data.get('thrust'))
+        nozzle_len_m = _nozzle_length_m(motor_data)
+        total_length_mm = ((chamber_len_m + nozzle_len_m) * 1000.0
+                           if (chamber_len_m is not None and nozzle_len_m is not None)
+                           else None)
+
+        # Aynı kural geometri özetinin BÜTÜN alanları için geçerlidir. Eski
+        # `motor_data.get('chamber_diameter', 0.1)` kalıbı iki ayrı yoldan
+        # yanlış sonuç veriyordu: anahtar hiç yoksa 100 mm çaplı / 500 mm boylu
+        # UYDURMA bir motorun hacmini hesaplanmış gibi basıyor, anahtar varken
+        # değeri None ise (girdi doğrulamada elenen alanlar) çarpma TypeError
+        # ile patlıyordu. Artık geçersiz girdide alan None kalır.
+        chamber_volume_cm3 = (
+            np.pi * (chamber_d_m / 2.0) ** 2 * chamber_len_m * 1e6
+            if (chamber_d_m is not None and chamber_len_m is not None)
+            else None)
+
+        # v2.6.26 (Y3): 'max_diameter' kamaranın İÇ çapını yazıyordu. Bu alan
+        # gövde tüpü / yük hattı seçimine giren ZARF çapıdır; iç çap yazmak
+        # aracı cidar kalınlığının iki katı kadar küçük gösteriyordu (ölçülen
+        # koşuda 152,53 mm yerine gerçek 184,37 mm). Zarf, 3B katının
+        # KULLANDIĞI cidarla hesaplanır ki mesh ile çelişmesin; lüle çıkışı
+        # kamaradan genişse (yüksek genişleme oranı) o kazanır.
+        # Zarf KAMARADAN başlar: kamara çapı geçersizse zarf hesaplanamaz ve
+        # alan None kalır. (Yalnız lüle çıkışına bakıp sayı üretmek, geçersiz
+        # girdide "hesaplanmış" görünen bir çap basmak olurdu.)
+        env_wall_m, env_wall_src = _chamber_wall_effective_m(motor_data, chamber_d_m)
+        if chamber_d_m is None or env_wall_m is None:
+            max_diameter_mm = None
+        else:
+            chamber_outer_mm = (chamber_d_m + 2.0 * env_wall_m) * 1000.0
+            exit_d_m = _real_scalar(motor_data.get('exit_diameter'))
+            noz_wall_m = _real_scalar((motor_data.get('nozzle_geometry') or {})
+                                      .get('wall_thickness'))
+            noz_wall_m = (noz_wall_m / 1000.0) if noz_wall_m is not None else None
+            # Lülenin en geniş yeri ÇIKIŞ değil, çoğu tasarımda KONVERJAN
+            # GİRİŞİdir (kamara çapında başlar). Yalnız çıkışa bakan eski
+            # hesap, düşük genişleme oranlı motorlarda zarfı olduğundan küçük
+            # gösteriyordu: ölçülen koşuda 162,53 mm yazıyordu, katının gerçek
+            # zarfı 168,11 mm idi (lüle mesh'i kamaradan genişti). Kontur
+            # örneklenebiliyorsa zarf ONDAN okunur — böylece sayı, çizilen
+            # katıyla tanım gereği aynı olur.
+            noz_max_r_m = None
+            try:
+                _pts_mm, _meta = sample_nozzle_inner_contour(motor_data)
+                if _pts_mm:
+                    noz_max_r_m = max(r for _z, r in _pts_mm) / 1000.0
+            except Exception:
+                noz_max_r_m = None
+            if noz_max_r_m is None:
+                _cands = [d for d in (exit_d_m, chamber_d_m) if d is not None]
+                noz_max_r_m = (max(_cands) / 2.0) if _cands else None
+            nozzle_outer_mm = ((noz_max_r_m + noz_wall_m) * 2.0 * 1000.0
+                               if (noz_max_r_m is not None and noz_wall_m is not None)
+                               else None)
+            max_diameter_mm = max(v for v in (chamber_outer_mm, nozzle_outer_mm)
+                                  if v is not None)
 
         return {
             'geometry_summary': {
-                'total_length': ((_real_scalar(motor_data.get('chamber_length')) or 0.0)
-                                 + (_nozzle_length_m(motor_data) or 0.0)) * 1000,  # mm
-                'max_diameter': motor_data.get('chamber_diameter', 0.1) * 1000,  # mm
-                'chamber_volume': chamber_volume * 1e6,  # cm3
-                'thrust_to_weight': (motor_data.get('thrust', 1000) / (dry_mass * G_0)
-                                     if dry_mass > 0 else None)
+                'total_length': total_length_mm,  # mm (None = hesaplanamadı)
+                'max_diameter': max_diameter_mm,  # mm — ZARF (dış) çapı
+                'max_diameter_basis': ('outer envelope: max(chamber bore + 2 x '
+                                       'wall, nozzle exit + 2 x nozzle wall); '
+                                       f'chamber wall from {env_wall_src}'),
+                'chamber_bore_diameter': ((chamber_d_m * 1000.0)
+                                          if chamber_d_m is not None else None),  # mm
+                'chamber_volume': chamber_volume_cm3,  # cm3
+                'thrust_to_weight': (thrust_n / (dry_mass * G_0)
+                                     if (thrust_n is not None and dry_mass > 0)
+                                     else None)
             },
             'mass_breakdown': {
                 'chamber_mass': chamber_mass,  # kg
@@ -1256,7 +1618,14 @@ class MotorCADDesigner:
                 # Kütlelerin neye dayandığı kullanıcıya açıkça söylenir.
                 'wall_thickness_mm': (wall_m * 1000.0) if wall_m else None,
                 'wall_thickness_source': wall_source,
+                'wall_thickness_recommended_mm': wall_design['recommended_mm'],
+                'wall_thickness_note': wall_design['note'],
                 'chamber_material': mat_name or NOT_AVAILABLE_SPEC,
+                # Kütleler GERÇEK geometri x yoğunluk ile hesaplanır; kaba
+                # oranlarla (ör. itergaç kütlesinin %25'i) DEĞİL.
+                'mass_basis': ('solid geometry x material density from '
+                               'materials_db (chamber: pi x L x (r_out^2 - '
+                               'r_in^2); injector: plate disc minus orifices)'),
             },
             'manufacturing_complexity': {
                 'machining_time': '24-48 hours',
@@ -1280,14 +1649,10 @@ class MotorCADDesigner:
         yedek kural uygulanır (0.045·D_ch) — böylece görsel ile kütle çelişmez.
         """
 
-        wall_m, _src = _chamber_wall_thickness_m(motor_data)
-        _key, _name, density = _chamber_material(motor_data)
         chamber_d = _real_scalar(motor_data.get('chamber_diameter')) or 0.1
-        if wall_m is None:
-            # 3B mesh ile aynı yedek kural (bkz. generate_3d_motor_assembly)
-            wall_m = max(0.004, CHAMBER_WALL_FALLBACK_FRACTION * chamber_d)
-        # DİKKAT: mesh tarafındaki 0.12·D üst sınırı burada UYGULANMAZ; o sınır
-        # görsel içindir. Kütle, yapısal analizin gerçek kalınlığını yansıtmalı.
+        # 3B mesh, zarf çapı ve kütle TEK fonksiyondan okur (yedek kural dahil)
+        wall_m, _src = _chamber_wall_effective_m(motor_data, chamber_d)
+        _key, _name, density = _chamber_material(motor_data)
         if density is None:
             density = get_material('steel_4130')['density']
 
@@ -1301,24 +1666,72 @@ class MotorCADDesigner:
             return volume * density
 
         elif component == 'nozzle':
-            # Öncelik: çözücünün kendi lüle kütlesi (gerçek kontur + cidar)
+            # v2.6.26: kütle ÇİZİLEN katıdan gelir — aynı iç kontur, aynı
+            # cidar, aynı malzeme (bkz. _nozzle_solid). İki ayrı kusur vardı:
+            #
+            # (O3) Çözücü, lüle cidar malzemesi verilmediğinde sessizce ÇELİĞE
+            #      düşüyor ve kütleyi 7850 kg/m³ ile hesaplıyordu. Kullanıcı
+            #      grafit seçtiğinde motor sonucunda nozzle_material='graphite'
+            #      yazıyor ama kütle çelikten geliyordu (4,36 kat fazla;
+            #      tungstende 2,46 kat az).
+            # (kapsam) Çözücünün estimated_mass'i YALNIZ diverjan koninin
+            #      yüzeyini sayar; CAD katısı konverjanı da içerir. Ölçüldü:
+            #      çözücü 0,03885 kg derken katının gerçek kabuğu 0,08948 kg
+            #      (2,30 kat) — yani "kütle dökümü" çizilen parçaya ait değildi.
+            #
+            # Kontur bu koşuda örneklenemezse (eksik geometri) çözücünün değeri
+            # yoğunluk düzeltmesiyle kullanılır; o da yoksa yapısal tahmin.
             noz_geo = motor_data.get('nozzle_geometry') or {}
+            selected_key = (motor_data.get('nozzle_material')
+                            or motor_data.get('throat_material'))
+            density_noz = None
+            if selected_key:
+                try:
+                    density_noz = _real_scalar(
+                        get_material(str(selected_key))['density'])
+                except Exception:
+                    density_noz = None
+            if density_noz is None:
+                density_noz = get_material('graphite')['density']
+
+            wall_noz = _real_scalar(noz_geo.get('wall_thickness'))
+            wall_noz = ((wall_noz / 1000.0) if wall_noz is not None else
+                        max(0.003, 0.1 * (_real_scalar(
+                            motor_data.get('throat_diameter')) or 0.02)))
+            try:
+                pts_mm, _meta = sample_nozzle_inner_contour(motor_data)
+                # Cidar iç kontura DIŞARI eklenir (_nozzle_solid:613 —
+                # `outer = [(r + wall, z) ...]`), yani halka hacmi
+                # pi*((r+t)^2 - r^2)*dz = pi*(2*r*t + t^2)*dz.
+                # Eski hesap kabuğu konturun ORTASINA koyup yalnız 2*pi*r*t*dz
+                # sayıyordu; pi*t^2*dz terimi düşüyordu. İnce cidarda fark
+                # ihmal edilebilir ama cidar kalınlaşınca büyür (oran
+                # 1 + t/(2r)): ölçülen koşuda t=7,79 mm ile kütle 0,694 kg
+                # çıkıyordu, çizilen katı 0,751 kg idi (%7,7 eksik).
+                volume = 0.0
+                for (z0, r0), (z1, r1) in zip(pts_mm[:-1], pts_mm[1:]):
+                    dz = (z1 - z0) / 1000.0
+                    r_mid = (r0 + r1) / 2000.0
+                    volume += np.pi * ((r_mid + wall_noz) ** 2 - r_mid ** 2) * abs(dz)
+                if volume > 0:
+                    return volume * density_noz
+            except Exception:
+                pass
+
             mass = _real_scalar(noz_geo.get('estimated_mass'))
             if mass is not None:
+                # Geometri (yüzey x kalınlık) doğru olduğundan yoğunluk
+                # oranıyla ÖLÇEKLEMEK tam düzeltmedir — yeni bir sayı
+                # uydurulmaz, yanlış yoğunluk düzeltilir.
+                used_rho = _real_scalar(noz_geo.get('wall_material_density'))
+                if used_rho is not None and abs(density_noz - used_rho) > 1.0:
+                    return mass * (density_noz / used_rho)
                 return mass
             struct_noz = _real_nested(motor_data.get('structural_analysis') or {},
                                       ('weight_analysis', 'nozzle_weight'))
             if struct_noz is not None:
                 return struct_noz
-            # Yedek: gerçek kontur yüzeyinden kabuk hacmi (grafit yoğunluğu)
-            pts_mm, meta = sample_nozzle_inner_contour(motor_data)
-            wall_noz = max(0.003, 0.1 * (_real_scalar(motor_data.get('throat_diameter')) or 0.02))
-            volume = 0.0
-            for (z0, r0), (z1, r1) in zip(pts_mm[:-1], pts_mm[1:]):
-                dz = (z1 - z0) / 1000.0
-                r_mid = (r0 + r1) / 2000.0
-                volume += 2 * np.pi * r_mid * wall_noz * abs(dz)
-            return volume * get_material('graphite')['density']
+            return 0.0
 
         elif component == 'injector':
             # Plaka kalınlığı: yapısal analizin düz kapak kalınlığı
@@ -1337,11 +1750,34 @@ class MotorCADDesigner:
 
         return 0.0
 
-    def export_stl_files(self, assembly_meshes: List, output_dir: str = "./cad_exports/"):
-        """Export STL files for 3D printing/machining"""
+    def export_stl_files(self, assembly_meshes: List, output_dir: str = None):
+        """Export STL files for 3D printing/machining.
+
+        v2.6.26 — İSTEKLER ARASI KİRLENME KAPATILDI.
+
+        Varsayılan çıktı dizini ``./cad_exports/`` idi ve dosya adları
+        sabitti (``motor_assembly.stl``, ``chamber.stl`` ...). Uç nokta
+        dosyayı diskten GERİ OKUDUĞU için iki eşzamanlı istek aynı yola
+        yazıyor ve biri diğerinin geometrisini indiriyordu. ÖLÇÜLDÜ: iki
+        farklı motorla (Ø120/L1000 ve Ø300/L2000) altı eşzamanlı denemenin
+        ikisinde A isteği HTTP 200 ile B'nin STL'ini aldı. Üretimde sunucu
+        8 iş parçacığıyla çalışıyor (``packaging/launcher.py``), yani bu
+        teorik bir yarış değil.
+
+        Artık her çağrı kendi geçici dizinine yazar. Çağıran dosyayı
+        okuduktan sonra dizini silmelidir (``shutil.rmtree``); silmezse
+        işletim sistemi geçici dizin temizliğinde alır.
+
+        ``output_dir`` açıkça verilirse (ör. kullanıcının seçtiği bir klasöre
+        toplu dışa aktarım) o kullanılır — davranış değişmez.
+        """
 
         import os
-        os.makedirs(output_dir, exist_ok=True)
+        if output_dir is None:
+            import tempfile
+            output_dir = tempfile.mkdtemp(prefix='hrma_stl_')
+        else:
+            os.makedirs(output_dir, exist_ok=True)
 
         exported_files = []
         valid_meshes = []
@@ -1447,7 +1883,11 @@ class MotorCADDesigner:
         for category, data in perf.items():
             report.append(f"\n{category.replace('_', ' ').upper()}:")
             for key, value in data.items():
-                if isinstance(value, float):
+                # None = hesaplanamadı; metin raporda "None" yerine açık etiket
+                # basılır (total_length ve thrust_to_weight None olabilir).
+                if value is None:
+                    report.append(f"  {key}: {NOT_AVAILABLE_SPEC}")
+                elif isinstance(value, float):
                     report.append(f"  {key}: {value:.3f}")
                 else:
                     report.append(f"  {key}: {value}")
