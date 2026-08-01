@@ -1427,8 +1427,18 @@ function prepareAIData(results) {
             total_impulse_Ns: results.motor.total_impulse,
             of_ratio_dimensionless: results.motor.of_ratio,
             chamber_pressure_bar: results.motor.chamber_pressure, // CRITICAL: Unit assumed as bar
-            fuel_type: getFuelTypeDisplayName(results.motor.fuel_type),
-            oxidizer: 'N2O',
+            // v2.6.26 — yakit ve oksitleyici FORMDAN okunur.
+            // `results.motor.fuel_type` yanitta HIC YOK (olculdu) -> yapay
+            // zekaya `undefined` gidiyordu; oksitleyici ise 'N2O' diye SABIT
+            // yaziliydi, yani kullanici baska bir oksitleyici secse bile
+            // yapay zeka N2O uzerinden akil yurutuyordu. Ikisi de sayfanin
+            // kendi alanindan (id=fuel_type / id=oxidizer_type) alinir;
+            // alan yoksa deger uydurulmaz, null gider.
+            fuel_type: (document.getElementById('fuel_type')?.value
+                        ? getFuelTypeDisplayName(
+                            document.getElementById('fuel_type').value)
+                        : null),
+            oxidizer: document.getElementById('oxidizer_type')?.value || null,
             reference_conditions: {
                 ambient_pressure_Pa: 101325,
                 ambient_temperature_K: 293.15,
@@ -1507,11 +1517,30 @@ function prepareAIData(results) {
         
         warnings: structurizeWarnings(results.injector.warnings || []),
         
-        efficiency_metrics: {
-            combustion_efficiency_estimate: 0.95,
-            nozzle_efficiency_estimate: 0.98,
-            overall_efficiency_estimate: 0.93
-        },
+        // v2.6.26 — UYDURMA VERIM UCLUSU KALDIRILDI.
+        // 0,95 / 0,98 / 0,93 hicbir hesaptan gelmiyordu ve lule verimi
+        // cozucunun KENDI degeriyle CELISIYORDU (olculdu: 0,9541). Yapay
+        // zekaya iki farkli lule verimi gitmis oluyordu. Artik cozucunun
+        // ayrik kayip modeli oldugu gibi aktarilir; uretilmeyen alan
+        // uydurulmaz.
+        efficiency_metrics: (function () {
+            const perf = results.motor?.nozzle_design?.performance;
+            if (!perf) {
+                return {
+                    status: 'NOT_REPORTED',
+                    basis: 'solver did not return nozzle_design.performance'
+                };
+            }
+            return {
+                nozzle_efficiency: perf.nozzle_efficiency ?? null,
+                divergence_efficiency: perf.divergence_efficiency ?? null,
+                friction_efficiency: perf.friction_efficiency ?? null,
+                kinetic_efficiency: perf.kinetic_efficiency ?? null,
+                two_phase_efficiency: perf.two_phase_efficiency ?? null,
+                basis: 'discrete loss model reported by the solver '
+                     + '(lambda x friction x two-phase x kinetic)'
+            };
+        })(),
         
         thermal_analysis: {
             chamber_temperature_K: results.motor.chamber_temperature || 3000,
@@ -1532,8 +1561,14 @@ function prepareAIData(results) {
         
         safety_considerations: {
             critical_parameters: {
-                chamber_pressure_limit_bar: 50,
-                of_ratio_range: [2.0, 8.0],
+                // v2.6.26 — bu iki "kritik parametre" hicbir malzeme veya
+                // emniyet hesabindan gelmiyordu; 50 bar siniri ve 2-8
+                // O/F araligi her motor icin ayniydi. Kaldirildi: uydurma
+                // bir emniyet siniri, hic sinir vermemekten kotudur.
+                limits_status: 'NOT_MODELLED',
+                limits_basis: 'chamber pressure and O/F limits are not '
+                            + 'derived here; see the structural and safety '
+                            + 'analysis blocks for the computed margins',
                 thrust_to_weight_ratio: results.motor.thrust / (results.motor.propellant_mass_total * 9.81)
             },
             risk_factors: identifyRiskFactors(results),
@@ -1545,47 +1580,28 @@ function prepareAIData(results) {
             ]
         },
         
+        // v2.6.26 — UYDURMA İMALAT ŞARTNAMESİ KALDIRILDI.
+        // Burada yapay zekâya giden yüke sabit toleranslar (IT7 ±0,1 mm,
+        // IT6 ±0,05 mm), sabit yüzey pürüzlülüğü (Ra 3,2 μm) ve sabit
+        // işleme yöntemleri basılıyordu. Hiçbiri motorun ölçüsünden,
+        // malzemesinden veya basıncından gelmiyordu: 40 mm'lik bir motorla
+        // 500 mm'lik bir motor aynı toleransı alıyordu. Yapay zekâ bu yükü
+        // ÖLÇÜLMÜŞ VERİ sanıp üstüne akıl yürütüyordu — uydurmanın en
+        // sinsi biçimi, çünkü çıktısı ikinci bir metne yayılıyor.
+        //
+        // Çözücü artık ölçüye bağlı ISO 2768 toleransı üretiyor
+        // (hrma/engines/solid_rocket_engine.py, _iso2768_feature üstünden;
+        // Ø75 -> ±0,15 mm, Ø500 -> ±0,30 mm). Bu blok, o gerçek değerler
+        // yapay zekâ yüküne bağlanana kadar durumunu açıkça bildirir.
         manufacturing_data: {
-            tolerances: {
-                chamber_diameter_mm: {
-                    type: "bilateral",
-                    plus: 0.1,
-                    minus: 0.1,
-                    unit: "mm",
-                    grade: "IT7"
-                },
-                throat_diameter_mm: {
-                    type: "bilateral", 
-                    plus: 0.05,
-                    minus: 0.05,
-                    unit: "mm",
-                    grade: "IT6",
-                    critical: true
-                },
-                surface_finish: {
-                    parameter: "Ra",
-                    value: 3.2,
-                    unit: "μm",
-                    measurement_standard: "ISO4287"
-                }
-            },
-            machining_requirements: {
-                chamber: {
-                    method: "CNC turning",
-                    material_removal_rate: "conservative",
-                    heat_treatment: "stress_relief_required"
-                },
-                nozzle: {
-                    method: "CNC machining + EDM finish",
-                    throat_fabrication: "wire_EDM_preferred",
-                    convergent_divergent_matching: "±0.02mm"
-                },
-                injector: {
-                    method: "precision_drilling + EDM",
-                    hole_pattern_tolerance: "±0.02mm",
-                    flow_testing_required: true
-                }
-            }
+            status: "NOT_MODELLED",
+            basis: "Manufacturing tolerances, surface finish and machining "
+                 + "methods are not produced by this payload. Earlier versions "
+                 + "sent fixed values (IT7/IT6, Ra 3.2 um) that did not depend "
+                 + "on the motor at all; they were removed rather than kept as "
+                 + "plausible-looking placeholders. The solver's own "
+                 + "size-dependent ISO 2768 tolerances are reported in the "
+                 + "solid motor results."
         }
     };
 }

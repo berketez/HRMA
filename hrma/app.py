@@ -1170,6 +1170,17 @@ def calculate():
             'launch_altitude': data.get('launch_altitude'),
             'wind_speed': data.get('wind_speed'),
             'wind_direction': data.get('wind_direction'),
+            # v2.6.26 — kurtarma parametreleri bu sozluge HIC konmuyordu.
+            # calculate_trajectory ucunu de kabul ediyor (trajectory_analysis
+            # .py:365-378) ve set_recovery_parameters acik bir API (:137), ama
+            # /calculate yolu onlari hic tasimadigi icin inis hizi ARACTAN
+            # BAGIMSIZ sabit 2,0 m^2 / Cd 1,4'ten turuyordu. Olculdu:
+            # parachute_area=9.0 gonderildiginde yanittaki 152 yapragin 0'i
+            # degisiyordu. landing_velocity bir GUVENLIK metrigi olarak
+            # okunuyor; kullanicinin onu duzeltememesi kabul edilemez.
+            'parachute_area': data.get('parachute_area'),
+            'parachute_cd': data.get('parachute_cd'),
+            'parachute_deploy_delay': data.get('parachute_deploy_delay'),
         }
         # Verilmeyen anahtar SOZLUKTEN CIKAR: disa aktarici "istekten geldi"
         # ile "verilmedi" ayrimini bu sayede yapip beyan edebiliyor.

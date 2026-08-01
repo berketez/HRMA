@@ -104,7 +104,8 @@ def _cached_slot_quads(r_port, n_slots, width, depth):
     return tuple(quads)
 
 from hrma.constants import (G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR,
-                            R_STAR_ICAO, R_UNIVERSAL)
+                            R_STAR_ICAO, R_UNIVERSAL,
+                            ISA_TABLE_TOP_M, isa_temperature, isa_pressure)
 
 # Parametrik maliyet modeli birim fiyatları (2026 tahmini, USD) — TEK tanım
 # noktası. _calculate_cost_analysis bunlardan ölçekler; kesin fiyat değildir.
@@ -172,6 +173,31 @@ SOLID_CASE_DESIGN = {
     # Emniyet valfi ayarı: tasarım basıncının bu oranı (API 520 sınıfı
     # pratik). Hesaplanmış bir kap basıncı değil, ÖNERİdir.
     'relief_fraction_of_design': 0.85,
+}
+
+# ---------------------------------------------------------------------------
+# Monte Carlo üretim saçılımı ve başarı ölçütü — TEK tanım noktası.
+# v2.6.26 (P4): bu sayılar İKİ yerde ayrı ayrı yazılıydı — bir kez örneklemeyi
+# yapan kodda (0.03 / 0.005 / 0.01 / 0.01) ve bir kez kullanıcıya gösterilen
+# 'criteria' METİN SABİTİNDE ('İtki ±%10, Isp ±%5, ... a ±%3 ...'). İkisi
+# birbirinden habersiz olduğu için kod değişse metin eski değerleri
+# göstermeye devam ederdi: kullanıcı koşulmayan bir analizin açıklamasını
+# okurdu. Artık hem örnekleme hem açıklama BU tablodan üretilir.
+# Bantlar katı yakıt üretimi için literatür-tipik 1σ değerleridir (ölçülmüş
+# parti verisi DEĞİL) ve çıktıda 'basis' ile beyan edilir.
+# ---------------------------------------------------------------------------
+SOLID_MC_TOLERANCE_MODEL = {
+    # 1σ üretim saçılımları
+    'burn_rate_a_rel_sigma': 0.03,      # yanma hızı katsayısı a: ±%3 (bağıl)
+    'burn_rate_n_abs_sigma': 0.005,     # üs n: ±0.005 (MUTLAK)
+    'density_rel_sigma': 0.01,          # yakıt yoğunluğu: ±%1 (bağıl)
+    'c_star_rel_sigma': 0.01,           # karakteristik hız: ±%1 (bağıl)
+    # Başarı (kabul) ölçütü — nominale göre
+    'thrust_band_rel': 0.10,            # ortalama itki nominalin ±%10'u
+    'isp_band_rel': 0.05,               # Isp nominalin ±%5'i
+    'max_pressure_factor': 1.2,         # tepe basıncı ≤ nominal tepe × 1.2
+    'basis': ('literature-typical manufacturing scatter for solid propellant '
+              'production; not measured batch data for your propellant'),
 }
 
 # ---------------------------------------------------------------------------
@@ -3016,9 +3042,24 @@ class SolidRocketEngine:
             pressure_atm = pressure_atm / 100000
             
             # Space vacuum conditions
-            if alt >= 100000:
-                pressure_atm = 1e-6  # Near vacuum
-                T = 1000  # Thermospheric temperature
+            # v2.6.26 — 100 km satiri ELLE YAZILMIS sayilarla doluyordu:
+            #   pressure_atm = 1e-6 ; T = 1000
+            # Oysa fonksiyonun kendi belgesi ICAO/ISO 2533 dogrulugu iddia
+            # ediyor ve tablonun diger 7 satiri gercek ISA'dan geliyor.
+            # Olculdu: 100 km'de deponun KENDI isa_temperature'i 186,95 K,
+            # isa_pressure'i 2,344e-07 bar. Yani sicaklik 5,3 kat, basinc
+            # 4,3 kat yanlisti ve tek yanitta ayni buyuklugun iki farkli
+            # kaynagi vardi. Ayni yardimcilar hrma/analysis/launch_site.py
+            # tarafindan zaten kullaniliyor — tek kaynaga baglaniyor.
+            # ISA tablosu 84,852 km'de biter; ustunde izotermal uzanti
+            # uygulanir ve bu durum cikti satirinda beyan edilir.
+            if alt > ISA_TABLE_TOP_M:
+                T = isa_temperature(alt)
+                pressure_atm = isa_pressure(alt) / 1e5   # Pa -> bar
+                atmosphere_basis = ('ISA isothermal extension above '
+                                    '84.852 km (US Std Atm 1976 table top)')
+            else:
+                atmosphere_basis = 'ISA / US Std Atm 1976'
             
             # Optimal nozzle design for this altitude:
             # Tam izentropik Mach-alan bağıntısı (Sutton & Biblarz 9. baskı,
@@ -3027,7 +3068,18 @@ class SolidRocketEngine:
             gamma = self.gamma
             Pe_Pc_opt = max(pressure_atm, 1e-6) / self.P_c
             epsilon_opt = self._expansion_ratio_from_pressure_ratio(Pe_Pc_opt)
+            # v2.6.26 — KIRPMA BEYAN EDİLİYOR.
+            # Bu kelepçe 80 ve 100 km satırlarında kabul edilebilir girdi
+            # uzayının TAMAMINDA doymuş durumda: gamma=1,5 / Pc=5 bar
+            # köşesinde ham değerler 1754 ve 8394 çıkıyor, yani o iki satır
+            # hiçbir girdiyle 500'den ayrılamıyor. Kullanıcı "bu irtifadaki
+            # optimum genişleme oranı" diye okuyor; gördüğü optimum değil
+            # TAVAN. Sayı uydurma değil (model çıktısının kırpılmışı) ama
+            # etiketi yanıltıyordu. 50 km satırında aynı kelepçe doymuyor
+            # (ölçüldü: 100 - 456 arası), orası zaten canlı.
+            epsilon_uncapped = float(epsilon_opt)
             epsilon_opt = max(2.5, min(epsilon_opt, 500))  # Physical limits
+            epsilon_clamped = abs(epsilon_opt - epsilon_uncapped) > 1e-9
             
             # High-precision thrust coefficient with nozzle efficiency
             Pe_Pc = pressure_atm / self.P_c
@@ -3061,6 +3113,16 @@ class SolidRocketEngine:
                 'temperature': T,
                 'pressure': pressure_atm,
                 'expansion_ratio': epsilon_opt,
+                # Kırpma olduysa AÇIKÇA söylenir; ham değer de taşınır ki
+                # kullanıcı "optimum" ile "tavan" arasındaki farkı görsün.
+                'expansion_ratio_clamped': bool(epsilon_clamped),
+                'expansion_ratio_uncapped': (float(epsilon_uncapped)
+                                             if epsilon_clamped else None),
+                'expansion_ratio_basis': (
+                    'clamped to the 2.5-500 model range; the uncapped optimum '
+                    'for this altitude is reported separately'
+                    if epsilon_clamped else
+                    'optimum expansion for ambient pressure at this altitude'),
                 'thrust_coefficient': CF_actual,
                 'nozzle_efficiency': eta_nozzle,
                 'specific_impulse': isp_altitude,
@@ -3361,11 +3423,25 @@ class SolidRocketEngine:
             }
         sf = res.get('safety_factors', {})
         sep = res.get('separation', {})
+        tq = res.get('torque', {})
         return {
             'status': 'sized',
             'bolt_count': int(count),
             'bolt_size': size,
             'property_class': prop_class,
+            # v2.6.26 (P4): montaj sırası "Torque to 150 Nm" diye SABİT bir
+            # sayı basıyordu. Sıkma torku ön yükten ve cıvata çapından çıkar
+            # (T = K·F_i·d, Shigley Denk. 8-27; K nut factor 0.20 yağsız /
+            # 0.15 yağlı). Değer analizörün kendi torque() çıktısıdır.
+            'tightening_torque_nm': tq.get('recommended_torque_Nm'),
+            'nut_factor_K': tq.get('K_nut_factor'),
+            'thread_condition': tq.get('condition'),
+            'preload_scatter_percent': tq.get('preload_uncertainty_pct'),
+            'tightening_torque_basis': (
+                'T = K x F_i x d (Shigley 10th ed. Eq. 8-27) with '
+                'F_i = 0.75 x proof load (reusable joint) from ISO 898-1 '
+                'proof strength; torque control scatters the achieved preload '
+                'by the percentage above'),
             'seal_diameter_mm': float(seal_diameter_mm),
             'pressure_bar': float(self.P_c),
             'proof_safety_factor': sf.get('proof_SF_min'),
@@ -3688,13 +3764,12 @@ class SolidRocketEngine:
     def run_monte_carlo(self, n_samples=300, seed=42):
         """Üretim toleransı belirsizlikleriyle Monte Carlo performans analizi.
 
-        1σ belirsizlikler (katı yakıt üretimi için literatür-tipik):
-          yanma hızı katsayısı a: ±%3, üssü n: ±0.005 (mutlak),
-          yakıt yoğunluğu: ±%1, C*: ±%1.
-        Başarı ölçütü: ortalama itki nominalin ±%10'u, Isp ±%5'i içinde ve
-        tepe basıncı ≤ nominal tepe × 1.2 (MEOP marjı).
+        1σ belirsizlikler ve başarı ölçütü SOLID_MC_TOLERANCE_MODEL'den gelir
+        (TEK tanım noktası): örnekleme de, kullanıcıya gösterilen 'criteria'
+        açıklaması da aynı tablodan üretilir; ikisi ayrışamaz.
         Sabit tohum → tekrarlanabilir sonuç (aynı girdi aynı çıktıyı verir).
         """
+        mc = SOLID_MC_TOLERANCE_MODEL
         n_samples = int(max(20, min(n_samples, 2000)))
         rng = np.random.default_rng(int(seed))
 
@@ -3724,20 +3799,23 @@ class SolidRocketEngine:
 
         for _ in range(n_samples):
             ov = dict(base_ov)
-            ov['density'] = self.rho_p * (1.0 + rng.normal(0.0, 0.01))
+            ov['density'] = self.rho_p * (
+                1.0 + rng.normal(0.0, mc['density_rel_sigma']))
             # TEORİK c* örneklenir: base_ov 'combustion_efficiency' anahtarını
             # taşıdığından alt motor verimi bir kez daha uygular. Teslim
             # edilen c* verilseydi eta İKİ KEZ çarpılırdı (eta=0.8'de MC
             # ortalaması nominalin %20 altına düşüyordu — 2026-07-19 ölçümü).
             ov['char_velocity'] = self._c_star_theoretical() * (
-                1.0 + rng.normal(0.0, 0.01))
+                1.0 + rng.normal(0.0, mc['c_star_rel_sigma']))
             args = dict(self._ctor_args)
-            args['burn_rate_a'] = self.a * (1.0 + rng.normal(0.0, 0.03))
+            args['burn_rate_a'] = self.a * (
+                1.0 + rng.normal(0.0, mc['burn_rate_a_rel_sigma']))
             # Alt sınır -0.5: KN-şeker plateau/mesa rejimlerinde n negatif
             # (burn_rate_db preset'leri); eski 0.1 tabanı fiziği sessizce
             # değiştiriyordu (app.py doğrulama aralığıyla tutarlı).
             args['burn_rate_n'] = float(np.clip(
-                self.n + rng.normal(0.0, 0.005), -0.5, 0.99))
+                self.n + rng.normal(0.0, mc['burn_rate_n_abs_sigma']),
+                -0.5, 0.99))
             try:
                 r = SolidRocketEngine(overrides=ov, **args).calculate_performance()
                 if isinstance(r, dict) and r.get('error'):
@@ -3753,9 +3831,9 @@ class SolidRocketEngine:
             samples['isp'].append(s_isp)
             samples['burn_time'].append(s_burn)
             samples['max_pressure'].append(s_pmax)
-            if (abs(s_thrust - nom_thrust) <= 0.10 * nom_thrust
-                    and abs(s_isp - nom_isp) <= 0.05 * nom_isp
-                    and s_pmax <= 1.2 * nom_pmax):
+            if (abs(s_thrust - nom_thrust) <= mc['thrust_band_rel'] * nom_thrust
+                    and abs(s_isp - nom_isp) <= mc['isp_band_rel'] * nom_isp
+                    and s_pmax <= mc['max_pressure_factor'] * nom_pmax):
                 n_success += 1
 
         def _stats(vals, nom):
@@ -3776,8 +3854,19 @@ class SolidRocketEngine:
             'n_samples': n_samples,
             'n_failed_runs': n_failed_runs,
             'success_rate_percent': round(100.0 * n_success / n_samples, 1),
-            'criteria': ('İtki ±%10, Isp ±%5, tepe basıncı ≤ nominal×1.2; '
-                         '1σ: a ±%3, n ±0.005, yoğunluk ±%1, C* ±%1'),
+            # Açıklama metni ÖLÇÜTÜN KENDİSİNDEN üretilir (sabit metin değil):
+            # yukarıdaki kabul testi ile bu satır aynı sayıları kullanır.
+            'criteria': (
+                f"İtki ±%{mc['thrust_band_rel'] * 100:g}, "
+                f"Isp ±%{mc['isp_band_rel'] * 100:g}, "
+                f"tepe basıncı ≤ nominal×{mc['max_pressure_factor']:g}; "
+                f"1σ: a ±%{mc['burn_rate_a_rel_sigma'] * 100:g}, "
+                f"n ±{mc['burn_rate_n_abs_sigma']:g}, "
+                f"yoğunluk ±%{mc['density_rel_sigma'] * 100:g}, "
+                f"C* ±%{mc['c_star_rel_sigma'] * 100:g}"),
+            # Makine tarafı: arayüz/dışa aktarım metni ayrıştırmak zorunda
+            # kalmasın diye ölçütün sayıları da verilir.
+            'criteria_detail': dict(mc),
             'thrust': _stats(samples['thrust'], nom_thrust),
             'isp': _stats(samples['isp'], nom_isp),
             'burn_time': _stats(samples['burn_time'], nom_burn),
@@ -4100,39 +4189,132 @@ class SolidRocketEngine:
             'tooling_requirements': 'Custom mandrel with star profile',
             'structural_considerations': {
                 'stress_concentration': 'Star valleys require fillet radii',
-                'minimum_web_thickness': '15mm at star valleys',
-                'manufacturing_tolerance': '±0.05mm on star geometry'
+                # v2.6.26 (P4) UYDURMA SÖKÜMÜ: burada sabit
+                # 'minimum_web_thickness': '15mm at star valleys' yazıyordu.
+                # En ince kesit BU SÖZLÜKTE ZATEN HESAPLANIYORDU
+                # (web_thickness) — kullanıcı iki farklı sayı görüyordu.
+                # Ölçüldü: 75 mm gövde / 25 mm çekirdek / 15 mm uç derinliği
+                # motorda gerçek web 10,0 mm iken metin 15 mm diyordu (%50
+                # iyimser); 500 mm'lik motorda da yine 15 mm diyordu.
+                'minimum_web_thickness_mm': web_thickness * 1000,
+                'minimum_web_thickness_basis': (
+                    'thinnest section = (D_case - D_core)/2 - star point '
+                    'depth, i.e. the web under the star points; identical to '
+                    "this block's web_thickness (same geometry, one source)"),
+                # Grain toleransı HRMA tarafından BOYUTLANDIRILMAZ; BATES
+                # bloğuyla aynı beyan (manufacturing_tolerances).
+                'manufacturing_tolerance': None,
+                'manufacturing_tolerance_status': 'NOT_MODELLED',
+                'manufacturing_tolerance_basis': (
+                    'Star profile tolerances are not sized by HRMA. The '
+                    'previous fixed +/-0.05 mm applied to every motor and was '
+                    'not derived from anything; set it on your detail '
+                    'drawings.'),
             }
         }
-    
+
     def _analyze_wagon_wheel_grain(self):
-        """Wagon wheel grain analysis"""
-        # Multiple cores configuration
-        center_core_diameter = self.D_core
+        """Wagon-wheel grain raporu — geometri ÇÖZÜCÜNÜN PORTUNDAN.
+
+        v2.6.26 (P4). Bu blok, itki eğrisinin kullandığı porttan BAŞKA bir
+        yerleşim anlatıyordu:
+
+            rapor  : d_uydu = 0.6*D_core, R = (D_kasa - d_uydu)/4
+            çözücü : 7 EŞİT delik, r = D_core/4, R = D_kasa/4
+                     (_wagon_port_polygon / _cached_wagon_polygon)
+
+        75 mm gövde + 25 mm çekirdekte rapor 15 mm'lik uyduları 15 mm
+        yarıçapa koyuyordu — merkez delikle 5,0 mm ÜST ÜSTE binen, hiçbir
+        yerde yanmayan bir kesit. Çözücünün gerçek portunda ise 12,5 mm'lik
+        yedi delik 18,75 mm yarıçapta ve en ince web 6,25 mm. Yani ekrandaki
+        ölçüler imal edilse motor hesaplanandan başka bir motor olurdu.
+        Artık TEK kaynak: çözücünün port kesiti.
+        """
+        # _wagon_port_polygon ile AYNI parametreler (tek tanım noktası).
+        hole_radius = self.D_core / 4.0
+        pitch_radius = self.D_chamber / 4.0
         satellite_cores = 6
-        satellite_diameter = center_core_diameter * 0.6
-        satellite_radius = (self.D_chamber - satellite_diameter) / 4
-        
-        total_core_area = (np.pi * (center_core_diameter/2)**2 + 
-                          satellite_cores * np.pi * (satellite_diameter/2)**2)
-        
+        center_core_diameter = 2.0 * hole_radius
+        satellite_diameter = 2.0 * hole_radius   # yedi delik eşittir
+
+        # Port alanı: delikler çakışabildiği için ANALİTİK TOPLAM değil,
+        # çözücünün birleştirdiği kesitin gerçek alanı okunur.
+        if SHAPELY_AVAILABLE:
+            total_core_area = float(self._wagon_port_polygon().area)
+            core_area_source = 'union of the solver port cross-section (shapely)'
+        else:
+            total_core_area = (1 + satellite_cores) * np.pi * hole_radius ** 2
+            core_area_source = ('analytic sum of 7 circles (shapely missing, so '
+                                'overlap between holes is not subtracted)')
+
+        # En ince kesit — üç aday, en küçüğü belirleyici (hepsi mm):
+        #   merkez-uydu : R - r_merkez - r_uydu
+        #   uydu-uydu   : 2*R*sin(pi/N) - d_uydu   (komşu merkez açıklığı)
+        #   uydu-kasa   : R_kasa - (R + r_uydu)
+        web_center_sat_mm = float((pitch_radius - 2.0 * hole_radius) * 1000)
+        web_sat_sat_mm = float(
+            (2 * pitch_radius * np.sin(np.pi / satellite_cores)
+             - 2.0 * hole_radius) * 1000)
+        web_sat_case_mm = float((self.D_chamber / 2
+                                 - (pitch_radius + hole_radius)) * 1000)
+        # Beraberlikte ilk aday kazanır (N = 6'da merkez-uydu ile uydu-uydu
+        # analitik olarak EŞİTTİR: 2R·sin(30°) = R); etiket kayan nokta
+        # gürültüsüne göre değil, sabit sıraya göre seçilir.
+        min_web_location, min_web_mm = min(
+            (('center-to-satellite', web_center_sat_mm),
+             ('satellite-to-satellite', web_sat_sat_mm),
+             ('satellite-to-case', web_sat_case_mm)),
+            key=lambda item: item[1])
+
         return {
             'type': 'Wagon Wheel (7 cores)',
             'outer_diameter': self.D_chamber * 1000,
             'center_core_diameter': center_core_diameter * 1000,
             'satellite_cores': satellite_cores,
             'satellite_diameter': satellite_diameter * 1000,
-            'satellite_positions': satellite_radius * 1000,
+            'satellite_positions': pitch_radius * 1000,
             'length': self.L_grain * 1000,
             'total_core_area': total_core_area,
+            'total_core_area_source': core_area_source,
+            'geometry_source': (
+                'the same port cross-section the burn-area model uses '
+                '(_wagon_port_polygon: 7 equal holes of radius D_core/4, six '
+                'of them on a circle of radius D_case/4)'),
             'burning_characteristics': 'Regressive',
             'thrust_profile': 'High initial thrust, decreasing',
             'manufacturing_complexity': 'Very High',
             'tooling_requirements': 'Multi-core mandrel system',
             'structural_challenges': {
                 'web_thickness_variation': 'Complex stress distribution',
-                'minimum_web': '10mm between cores',
-                'manufacturing_precision': '±0.02mm core positioning'
+                # v2.6.26 (P4) UYDURMA SÖKÜMÜ: burada sabit
+                # 'minimum_web': '10mm between cores' yazıyordu; motorun
+                # boyutundan da, çekirdek yerleşiminden de bağımsızdı.
+                # ÖLÇÜM: çözücünün gerçek portunda en ince web 75 mm gövdede
+                # 6,25 mm, 500 mm gövdede 50,0 mm — sabit metin ikisine de
+                # 10 mm diyordu (küçük motorda %60 iyimser, büyük motorda
+                # beşte bir).
+                'minimum_web_mm': min_web_mm,
+                'minimum_web_location': min_web_location,
+                'web_center_to_satellite_mm': float(web_center_sat_mm),
+                'web_satellite_to_satellite_mm': float(web_sat_sat_mm),
+                'web_satellite_to_case_mm': float(web_sat_case_mm),
+                'minimum_web_status': ('cores_overlap' if min_web_mm <= 0
+                                       else 'positive'),
+                'minimum_web_basis': (
+                    'computed from the solver port layout (7 holes of radius '
+                    'D_core/4, six on a circle of radius D_case/4): the '
+                    'smallest of center-to-satellite, satellite-to-satellite '
+                    'and satellite-to-case spacing. A non-positive value means '
+                    'the holes overlap for this diameter pair - change the '
+                    'core or case diameter.'),
+                # Yerleşim toleransı boyutlandırılmaz (BATES/star ile aynı).
+                'manufacturing_precision': None,
+                'manufacturing_precision_status': 'NOT_MODELLED',
+                'manufacturing_precision_basis': (
+                    'Core positioning tolerance is not sized by HRMA. The '
+                    'previous fixed +/-0.02 mm applied to every motor and was '
+                    'not derived from anything; set it on your detail '
+                    'drawings.'),
             }
         }
     
@@ -4158,6 +4340,38 @@ class SolidRocketEngine:
             'disadvantages': ['Low thrust-to-weight', 'Large motor size', 'Slow acceleration']
         }
     
+    def _throat_gas_temperatures(self):
+        """Boğazdaki GAZ sıcaklıkları [K] — statik ve kurtarma (recovery).
+
+        v2.6.26 (P4). Lüle raporunda sabit '2800°C' yazıyordu; bu sayı ne
+        yakıttan ne basınçtan etkileniyordu. Ölçüldü: KNSU motorunda gerçek
+        boğaz statik sıcaklığı 1345,9 °C, APCP motorunda 3015,1 °C — sabit
+        metin ikisine de 2800 °C diyordu, yani şeker yakıtında gerçeğin
+        1454 °C üstünde. Bu sayı doğrudan boğaz malzemesi seçimine (grafit /
+        fenolik / refrakter) girdiği için tehlikeli bir uydurmaydı.
+
+        Statik sıcaklık (Sutton & Biblarz 9. baskı Denk. 3-12, M = 1):
+            T_t = T_c · 2/(γ+1)
+        Cidarın gördüğü sürücü sıcaklık ise KURTARMA sıcaklığıdır
+        (T_aw = T_c·(1+r·m)/(1+m), r = Pr^{1/3}); onu bu sınıfın ısı akısı
+        hesabıyla AYNI uygulama üretir (heat_transfer_analysis), yeni fizik
+        yazılmaz. Modül bulunamazsa sayı UYDURULMAZ, None döner.
+        """
+        t_static = float(self.T_c) * 2.0 / (float(self.gamma) + 1.0)
+        t_recovery = None
+        try:
+            from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
+            analyzer = HeatTransferAnalyzer()
+            gas = analyzer._get_gas_properties(
+                {'gamma': self.gamma,
+                 'molecular_weight': getattr(self, 'mw_exhaust', 26.0)},
+                self.T_c)
+            t_recovery = float(analyzer._adiabatic_wall_temperature(
+                self.T_c, gas, mach_local=1.0))
+        except Exception:
+            t_recovery = None
+        return {'static_k': t_static, 'recovery_k': t_recovery}
+
     def _design_nozzle_geometry(self):
         """Detailed nozzle design derived from motor parameters.
 
@@ -4189,6 +4403,7 @@ class SolidRocketEngine:
         # Tembel import: engines → analysis modül-seviyesi bağımlılığı ve
         # olası döngüsel importu önler.
         from hrma.analysis.transient_ballistics import ThroatErosionModel
+        _t_gas = self._throat_gas_temperatures()
         _ero = ThroatErosionModel.for_material('graphite')  # nozul malzemesi
         _pc_bar = float(self.P_c)
         _ero_rate = _ero.rate_mm_s(_pc_bar)                 # mm/s @ tasarım Pc
@@ -4222,11 +4437,25 @@ class SolidRocketEngine:
             'total_length': (convergent_length + divergent_length) * 1000,  # mm
             'throat_radius': throat_curvature * 1000,  # mm (throat curvature)
             'material': 'Graphite',
+            # v2.6.26 (P4) UYDURMA SÖKÜMÜ: burada 'Ra 0.8 μm', '±0.01mm' ve
+            # '±0.5°' sabitleri vardı. Bunlar imalat ŞARTNAMESİdir, çözücünün
+            # çıktısı değildir ve motorun boyutundan bağımsız yazılıyordu —
+            # üstelik AYNI KOŞUDA 'manufacturing_drawings.critical_dimensions'
+            # bloğu bu tür toleransları zaten NOT_MODELLED ilan ediyor
+            # (oradaki gerekçe: "±0.01 mm boğaz ... her motora uygulanıyordu
+            # ve hiçbir şeyden türetilmiyordu"). Aynı yanıtta iki farklı
+            # beyan kalamaz; bu blok da beyana çevrildi.
             'manufacturing': {
                 'machining_method': 'CNC turning',
-                'surface_finish': 'Ra 0.8 μm',
-                'throat_tolerance': '±0.01mm',
-                'angle_tolerance': '±0.5°'
+                'status': 'NOT_MODELLED',
+                'surface_finish': None,
+                'throat_tolerance': None,
+                'angle_tolerance': None,
+                'basis': ('Surface finish and dimensional tolerances are not '
+                          'sized by HRMA (no manufacturing-process model). '
+                          'Specify them on your detail drawings; the machining '
+                          'method above is general workshop practice for a '
+                          'turned nozzle, not a computed result.'),
             },
             'performance': {
                 # Kalem 17 (P3): sabit 1.65 yerine motorun KENDİ CF tanımı
@@ -4244,7 +4473,27 @@ class SolidRocketEngine:
                 # Gerçek ampirik modelden (eskiden sabit '0.001 mm/s' idi)
                 'erosion_rate': f"{_ero_rate:.3f} mm/s",
                 'erosion_estimate': erosion_estimate,
-                'operating_temperature': '2800°C'
+                # v2.6.26 (P4): sabit '2800°C' yerine bu motorun GAZ
+                # sıcaklıkları (bkz. _throat_gas_temperatures). Kurtarma
+                # sıcaklığı cidarın gördüğü sürücü sıcaklıktır; ikisi de GAZ
+                # sıcaklığıdır, malzeme/cidar sıcaklığı DEĞİLDİR.
+                'chamber_flame_temperature_k': float(self.T_c),
+                'throat_gas_static_temperature_k': _t_gas['static_k'],
+                'throat_gas_static_temperature_c': _t_gas['static_k'] - 273.15,
+                'throat_recovery_temperature_k': _t_gas['recovery_k'],
+                'throat_recovery_temperature_c': (
+                    _t_gas['recovery_k'] - 273.15
+                    if _t_gas['recovery_k'] is not None else None),
+                'operating_temperature_basis': (
+                    'gas temperatures for this propellant and pressure: '
+                    'static T_t = T_c*2/(gamma+1) (Sutton & Biblarz Eq. 3-12 '
+                    'at M = 1); recovery T_aw = T_c*(1+r*m)/(1+m), '
+                    'r = Pr^(1/3), from the same heat-transfer module the '
+                    'throat heat flux uses. Flame temperature comes from the '
+                    'propellant record, not from a CEA solve of your exact '
+                    'formulation. These are gas temperatures - the nozzle '
+                    'material temperature needs a thermal/ablation solution '
+                    'HRMA does not run.'),
             }
         }
     
@@ -4595,9 +4844,60 @@ class SolidRocketEngine:
             }
         }
     
+    #: Kürleme çizelgesi (süre + sıcaklık) HRMA'nın MODELLEDİĞİ bir şey
+    #: değildir: yalıtım/yapıştırıcı/inhibitör reçinesinin kür kinetiği
+    #: üreticinin teknik veri sayfasından (TDS) gelir. Yakıt kaydındaki
+    #: 'cure_temperature_k' GRAIN'in kürleme sıcaklığıdır ve grain termal
+    #: gerinim hesabında kullanılır — yalıtım ya da inhibitör kaplamasının
+    #: kürlemesi DEĞİLDİR, o yüzden buraya taşınamaz.
+    CURE_SCHEDULE_BASIS = (
+        'NOT_MODELLED: HRMA has no cure-kinetics model. Use the cure schedule '
+        'on the technical data sheet of the insulation/adhesive/inhibitor '
+        'resin you actually buy; the previous fixed "24 h at 60 C" / "8 h at '
+        'room temperature" values were the same for every motor and every '
+        'material.')
+
     def _generate_assembly_sequence(self):
-        """Generate assembly sequence"""
+        """Montaj sırası — SAYILAR ya hesaptan gelir ya hiç yazılmaz.
+
+        v2.6.26 (P4). Bu liste üç uydurma sayı taşıyordu:
+        'cure_time: 24 hours at 60°C', 'cure_time: 8 hours at room
+        temperature' ve 'requirement: Torque to 150 Nm'. Üçü de motorun
+        boyutundan, malzemesinden ve basıncından bağımsızdı.
+
+        * Sıkma torku artık HESAPLANIR: kapak cıvata birleşimi zaten
+          ``_closure_joint_analysis`` ile çözülüyor (Shigley Böl. 8 /
+          ISO 898-1); tork T = K·F_i·d oradan okunur. Kullanıcı cıvata
+          sayısını girmediyse birleşim boyutlandırılmaz ve tork alanı sayı
+          yerine gerekçe taşır.
+        * Kürleme çizelgesi MODELLENMİYOR olarak beyan edilir
+          (CURE_SCHEDULE_BASIS).
+
+        Adımların kendisi (sırayla ne yapılacağı) genel montaj pratiğidir;
+        bu da 'basis' alanında söylenir.
+        """
+        joint = self._closure_joint_analysis()
+        torque_nm = joint.get('tightening_torque_nm')
+        if torque_nm is not None:
+            closure_requirement = (
+                f"Torque {joint['bolt_count']} x {joint['bolt_size']} "
+                f"{joint['property_class']} closure bolts to "
+                f"{torque_nm:.1f} Nm")
+            closure_basis = joint.get('tightening_torque_basis')
+        else:
+            closure_requirement = None
+            closure_basis = (
+                'NOT_SIZED: no closure bolt count was supplied, so the '
+                'tightening torque cannot be computed (it follows from bolt '
+                'preload and diameter). Enter the closure bolt count, size '
+                'and property class. The previous fixed "150 Nm" was '
+                'independent of bolt size, class and chamber pressure.')
         return {
+            'basis': ('The order of operations is general solid-motor '
+                      'assembly practice, not a result computed for this '
+                      'motor. Numeric requirements below are either computed '
+                      '(named in their own basis field) or declared as '
+                      'not modelled.'),
             'sequence': [
                 {
                     'step': 1,
@@ -4609,7 +4909,8 @@ class SolidRocketEngine:
                     'step': 2,
                     'operation': 'Apply thermal barrier',
                     'requirement': 'Even coating thickness',
-                    'cure_time': '24 hours at 60°C'
+                    'cure_time': None,
+                    'cure_time_basis': self.CURE_SCHEDULE_BASIS,
                 },
                 {
                     'step': 3,
@@ -4621,12 +4922,15 @@ class SolidRocketEngine:
                     'step': 4,
                     'operation': 'Apply inhibitor coating',
                     'requirement': 'Complete coverage of designated areas',
-                    'cure_time': '8 hours at room temperature'
+                    'cure_time': None,
+                    'cure_time_basis': self.CURE_SCHEDULE_BASIS,
                 },
                 {
                     'step': 5,
                     'operation': 'Install forward closure',
-                    'requirement': 'Torque to 150 Nm',
+                    'requirement': closure_requirement,
+                    'tightening_torque_nm': torque_nm,
+                    'tightening_torque_basis': closure_basis,
                     'sealant': 'High-temperature thread sealant'
                 },
                 {
@@ -4643,10 +4947,30 @@ class SolidRocketEngine:
                 }
             ]
         }
-    
+
+
     def _generate_quality_requirements(self):
-        """Generate quality control requirements"""
+        """Kalite kontrol listesi — NE YAPILACAĞI, kabul SAYISI değil.
+
+        v2.6.26 (P4). Bu blok dört uydurma kabul ölçütü taşıyordu:
+        '1.5x design pressure for 30 seconds', 'Helium leak test <1e-6 std
+        cm³/s', 'Total mass within ±2%' ve 'Continuity within 2.0±0.2 Ohms'.
+        Hiçbiri hesaplanmıyordu; hepsi her motorda aynıydı. Sızdırmazlık
+        eşiği kullanılan conta/ölçüm yöntemine, kütle bandı üretim sürecine,
+        ateşleyici direnci köprü teli tipine bağlıdır — HRMA bunların
+        hiçbirini modellemiyor. Basınç testi seviyesi ise bir PROGRAM
+        kararıdır; HRMA'nın hesapladığı tasarım ve kopma basınçları
+        safety_analysis bloğundadır, kullanıcı oraya yönlendirilir.
+
+        Kalan liste bir DENETİM PLANIdır (hangi ölçüm yapılmalı), bir kabul
+        şartnamesi değildir ve öyle beyan edilir.
+        """
         return {
+            'basis': ('Inspection plan: which checks to perform. HRMA does '
+                      'not set acceptance limits - leak rates, mass bands, '
+                      'igniter resistance and proof-test levels come from '
+                      'your process, hardware and test authority, none of '
+                      'which are modelled here.'),
             'incoming_inspection': {
                 'propellant_grain': ['Dimensional check', 'Density test', 'Visual inspection'],
                 'case_material': ['Material certification', 'Hardness test', 'Surface finish'],
@@ -4658,15 +4982,34 @@ class SolidRocketEngine:
                 'electrical_continuity': ['Resistance measurement', 'Insulation test']
             },
             'final_inspection': {
-                'pressure_test': '1.5x design pressure for 30 seconds',
-                'leak_test': 'Helium leak test <1e-6 std cm³/s',
-                'weight_check': 'Total mass within ±2%',
+                'status': 'NOT_MODELLED',
+                'pressure_test': None,
+                'pressure_test_basis': (
+                    'Proof-test level and hold time are a programme decision. '
+                    'The pressures HRMA actually computes for this motor '
+                    '(design, burst, yield, relief) are in '
+                    'safety_analysis.pressure_safety.'),
+                'leak_test': None,
+                'leak_test_basis': (
+                    'Allowable leak rate depends on the seal, the test method '
+                    'and the mission; HRMA has no seal or leakage model.'),
+                'weight_check': None,
+                'weight_check_basis': (
+                    'Mass tolerance is a production-process band, not a '
+                    'solver output. The predicted masses are in the mass '
+                    'breakdown; compare measured hardware against those.'),
                 'documentation': 'Complete test records and certificates'
             },
             'acceptance_criteria': {
+                'status': 'NOT_MODELLED',
                 'dimensional_tolerance': 'All dimensions within drawing limits',
                 'surface_finish': 'All surfaces meet Ra requirements',
-                'electrical_test': 'Continuity within 2.0±0.2 Ohms',
+                'electrical_test': None,
+                'electrical_test_basis': (
+                    'Igniter bridgewire resistance follows from the igniter '
+                    'you use (bridgewire material, length, diameter); HRMA '
+                    'does not model the igniter circuit. The previous fixed '
+                    '"2.0 +/- 0.2 Ohms" was printed for every motor.'),
                 'pressure_test': 'No leakage or deformation'
             }
         }
@@ -5099,7 +5442,27 @@ class SolidRocketEngine:
             },
             'handling_safety': {
                 'electrostatic_precautions': 'Grounding required',
-                'temperature_limits': '0-40°C storage',
+                # v2.6.26 (P4) UYDURMA SÖKÜMÜ: burada sabit '0-40°C storage'
+                # yazıyordu. Depolama bandı yakıta bağlıdır (HTPB elastomer
+                # ile dökme şeker aynı sınırı taşımaz) ve HRMA'nın bir
+                # depolama modeli YOKTUR. Kasıtlı olarak BURAYA SAYI
+                # KOYMUYORUZ: yakıt kaydındaki kürleme sıcaklığı termal
+                # blokta 'yumuşama vekili' etiketiyle zaten yayımlanıyor;
+                # aynı sayıyı bir de 'depolama sınırı' adıyla emniyet
+                # bloğuna kopyalamak onu ölçülmüş bir servis limitine
+                # dönüştürürdü (şeker yakıtında 125 °C çıkar — depolama
+                # tavsiyesi olarak tehlikeli olurdu).
+                'temperature_limits': None,
+                'temperature_limits_status': 'NOT_MODELLED',
+                'temperature_limits_basis': (
+                    'HRMA has no propellant storage/ageing model. The grain '
+                    'strain margin IS computed at the storage temperature you '
+                    'enter (structural_analysis.grain_structural: '
+                    'storage_temperature_k, strain_safety_factor) and a '
+                    'softening proxy is reported in '
+                    'thermal_analysis.thermal_management.'
+                    'material_temperature_limits.grain_max_temp_k. Take the '
+                    'actual storage limits from the propellant SDS.'),
                 'transportation_class': 'UN 1.3C',
                 'hazard_classification': 'Explosive',
                 'basis': ('Generic handling practice for composite solid '

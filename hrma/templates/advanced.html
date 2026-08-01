@@ -1562,8 +1562,36 @@
                         </label>
                         <input type="number" id="wind_speed" value="0" min="0" max="50" step="0.1">
                     </div>
+                    <!-- v2.6.26 — bu iki alan YOKTU. Toplayıcı
+                         `numById('launch_altitude')` / `numById('wind_direction')`
+                         çağırıyor, eleman bulunmayınca null gidiyor ve çözücü
+                         değeri hiç görmüyordu. Sunucu tarafı tamamen bağlıydı:
+                         ölçüldü, launch_altitude=2000 m ile uçuş süresi
+                         224,1 -> 299,6 s ve yörünge başlangıç irtifası 2000 m
+                         oluyor. Yani kullanıcı rampanın rakımını ve rüzgâr
+                         yönünü hiçbir şekilde giremiyordu. -->
+                    <div class="form-group">
+                        <label>
+                            <span data-i18n="adv.label.launchAltitudeM">Launch Altitude (m)</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="adv.tip.launchAltitudeM">Elevation of the launch site above sea level. Sets the starting altitude and the ambient conditions the trajectory begins from.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="launch_altitude" value="0" min="0" max="6000" step="10">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <span data-i18n="adv.label.windDirectionDeg">Wind Direction (degrees)</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="adv.tip.windDirectionDeg">Compass direction the wind blows towards, measured clockwise from the launch azimuth. 0° = tailwind along the launch heading.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="wind_direction" value="0" min="0" max="360" step="1">
+                    </div>
                 </div>
-                
+
                 <button type="button" class="btn" onclick="calculateTrajectory()" data-i18n="adv.btn.calculateTrajectoryPerformance">Calculate Trajectory Performance</button>
                 <div class="chart-explanation">
                     <p><strong data-i18n="adv.txt.whatThisShows">What this shows:</strong> <span data-i18n="adv.txt.motorPerformanceDuringAtmosphericFlight">Motor performance during atmospheric flight trajectory</span></p>
@@ -3340,7 +3368,15 @@
                 // Oxidizer
                 oxidizer_type: document.getElementById('oxidizer_type').value || 'n2o',
                 oxidizer_phase: document.getElementById('oxidizer_phase').value || 'liquid',
-                oxidizer_density: parseFloat(document.getElementById('oxidizer_density').value || 1220),
+                // v2.6.26 — EKRANDAKİ DEĞER ile GÖNDERİLEN yedek FARKLIYDI.
+                // Alanın kendi varsayılanı 1004 kg/m³ (satır 1286), toplayıcı
+                // yedeği ise 1220 idi. Kullanıcı alanı boşaltınca gördüğünden
+                // başka bir yoğunluk gidiyordu. Yedek kaldırıldı: alan boşsa
+                // null gider ve çözücü kendi kaynaklı değerini kaynağıyla
+                // birlikte kullanır (LOCAL_DENSITY_FALLBACK, utils/
+                // injector_design.py:42) — iki farklı sayı arasında sessizce
+                // seçim yapılmaz.
+                oxidizer_density: numById('oxidizer_density'),
                 oxidizer_viscosity: parseFloat(document.getElementById('oxidizer_viscosity').value || 0.0002),
                 oxidizer_temp: parseFloat(document.getElementById('oxidizer_temp').value || 293),
                 
@@ -4171,10 +4207,25 @@
         }
 
         function vizDesignInit() {
-            const m = currentResults.motor;
-            const dchMm = (m.chamber_diameter || 0.1) * 1000;
+            const m = (currentResults && currentResults.motor) || {};
+            // v2.6.26 (Faz 2): burada `m.chamber_diameter || 0.1` ve
+            // `m.expansion_ratio || 8` vardı. Çözücü bu iki alanı vermezse
+            // kaydırıcılar 100 mm kamara / eps=8'lik UYDURMA bir motoru
+            // kullanıcının tasarımı diye gösteriyor, sonraki önizleme
+            // isteklerini de o sayılarla yolluyordu. Ölçü yoksa panel
+            // kurulmaz (vizDesignReadouts/Apply zaten null'da erken döner).
+            const dchM = m.chamber_diameter;
+            const eps = m.expansion_ratio;
+            const usable = [dchM, eps].every(
+                v => typeof v === 'number' && isFinite(v) && v > 0);
+            if (!usable) {
+                vizDesignBase = null;
+                return;
+            }
+            const dchMm = dchM * 1000;
+            // l_star KULLANICI GİRDİSİ: boş bırakılırsa varsayılan gitmesi
+            // meşru (gösterim değil, tasarım parametresi).
             const lstar = parseFloat(document.getElementById('l_star')?.value) || 1.0;
-            const eps = m.expansion_ratio || 8;
             vizDesignBase = {
                 dch: [dchMm * 0.6, dchMm * 1.4, dchMm],
                 lstar: [0.4, 3.0, Math.min(Math.max(lstar, 0.4), 3.0)],
@@ -4256,8 +4307,14 @@
                             }
                         } catch (e) { console.warn('design mode 2D update:', e); }
                     }
+                    // v2.6.26 (Faz 2): `(r.motor.thrust || 0).toFixed(0)`
+                    // çözücü itkiyi vermediğinde "thrust 0 N" yazıyordu —
+                    // sıfır itki uydurmaktır. Sayı yoksa mevcut 'unknown'
+                    // metni yazılır (yeni sözlük anahtarı gerekmiyor).
+                    const previewNum = (v, d) => (typeof v === 'number' && isFinite(v))
+                        ? v.toFixed(d) : i18nText('adv.js.unknown', 'unknown');
                     if (status) status.textContent = i18nFmt('adv.js.vizPreviewUpdated',
-                        { thrust: (r.motor.thrust || 0).toFixed(0), isp: (r.motor.isp || 0).toFixed(1) },
+                        { thrust: previewNum(r.motor.thrust, 0), isp: previewNum(r.motor.isp, 1) },
                         'PREVIEW UPDATED — thrust {thrust} N, Isp {isp} s. Run CALCULATE for the full analysis.');
                 } else {
                     if (status) status.textContent = i18nText('adv.js.vizSolverError', 'SOLVER ERROR: ')
@@ -4611,15 +4668,15 @@
                 ['Total flow (kg/s)', num(m.mdot_total, 4)]
             ];
             const geom = [
-                ['Throat diameter (mm)', num((m.throat_diameter || 0) * 1000, 2)],
-                ['Exit diameter (mm)', num((m.exit_diameter || 0) * 1000, 2)],
+                ['Throat diameter (mm)', num(m.throat_diameter * 1000, 2)],
+                ['Exit diameter (mm)', num(m.exit_diameter * 1000, 2)],
                 ['Expansion ratio', num(m.expansion_ratio, 3)],
-                ['Chamber diameter (mm)', num((m.chamber_diameter || 0) * 1000, 2)],
-                ['Chamber length (mm)', num((m.chamber_length || 0) * 1000, 2)],
+                ['Chamber diameter (mm)', num(m.chamber_diameter * 1000, 2)],
+                ['Chamber length (mm)', num(m.chamber_length * 1000, 2)],
                 ['L* (m)', num(m.l_star || m.L_star, 3)],
-                ['Initial port diameter (mm)', num((m.port_diameter_initial || 0) * 1000, 2)],
-                ['Final port diameter (mm)', num((m.port_diameter_final || 0) * 1000, 2)],
-                ['Grain length (mm)', num((m.grain_length || m.L_grain || 0) * 1000, 2)],
+                ['Initial port diameter (mm)', num(m.port_diameter_initial * 1000, 2)],
+                ['Final port diameter (mm)', num(m.port_diameter_final * 1000, 2)],
+                ['Grain length (mm)', num((m.grain_length || m.L_grain) * 1000, 2)],
                 ['Fuel mass (kg)', num(m.fuel_mass, 3)],
                 ['Oxidizer mass (kg)', num(m.oxidizer_mass, 3)],
                 ['Propellant mass (kg)', num(m.propellant_mass_total, 3)]
@@ -4643,7 +4700,7 @@
             if (ph && ph.time && ph.time.length) {
                 const phRows = ph.time.map((tv, i) => [
                     num(tv, 3),
-                    num(((ph.port_diameter && ph.port_diameter[i]) || 0) * 1000, 3),
+                    num((ph.port_diameter && ph.port_diameter[i]) * 1000, 3),
                     num(ph.chamber_pressure && ph.chamber_pressure[i], 3),
                     num(ph.of_ratio && ph.of_ratio[i], 3)
                 ]);

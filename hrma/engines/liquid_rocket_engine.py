@@ -11,7 +11,8 @@ from typing import Dict, List, Optional, Tuple
 
 from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, LAMBDA_BELL,
                             NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT,
-                            lambda_conical)
+                            lambda_conical,
+                            ISA_TABLE_TOP_M, isa_temperature, isa_pressure)
 # v2.6.2: buradaki ``warnings.filterwarnings('ignore')`` KALDIRILDI.
 # Argümansız çağrı SÜREÇ GENELİNDE catch-all filtre kurar — kapsam bu modül
 # değil, tüm Python süreci. Yani sıvı motor modülünü içe aktarmak (app.py her
@@ -1320,6 +1321,31 @@ class LiquidRocketEngine:
             ox_props = web_data['oxidizer_properties'] 
             combustion_data = web_data['combustion_data']
             
+            # v2.6.26 — AYRISTIRILAMAYAN YANIT "CANLI" SAYILMAZ.
+            # fetch_nist_data ayristirma basarisiz oldugunda
+            # {'error': ..., 'status': 'parse_failed'} donuyor (eskiden
+            # 'success' damgaliydi). O durumda asagidaki .get(anahtar,
+            # SABIT) zinciri devreye giriyor ve satir ici sabitler (0,001 /
+            # 0,0005 / 800 ...) "NIST (Live)" etiketiyle sunuluyordu.
+            # Artik depoda ZATEN var olan kaynakli tablo kullaniliyor
+            # (web_propellant_api._get_fallback_data: LOX mu=1,94e-4,
+            # RP-1 1,64e-3, LH2 1,34e-5, metan 1,17e-4) ve kaynak durumu
+            # durustce tasiniyor.
+            def _usable(props, compound):
+                if isinstance(props, dict) and props.get('status') == 'success' \
+                        and props.get('density') is not None:
+                    return props
+                try:
+                    yedek = dict(web_api._get_fallback_data(compound, 'parse_failed'))
+                except Exception:
+                    return props if isinstance(props, dict) else {}
+                yedek.setdefault('status', 'fallback_table')
+                yedek.setdefault('source', 'HRMA sourced property table')
+                return yedek
+
+            fuel_props = _usable(fuel_props, self.fuel_type)
+            ox_props = _usable(ox_props, self.oxidizer_type)
+
             # Update propellant data with live values
             self.web_propellant_data = {
                 self.fuel_type: {
@@ -3468,9 +3494,43 @@ class LiquidRocketEngine:
                 'dp_ratio_fuel': pressure_drop_factor,
                 'T_c_K': self.T_c,
                 'mw_gas': self.mw,
-                'mu_ox': ox_viscosity,
-                'mu_fuel': fuel_viscosity,
             }
+
+            # --- v2.6.26: AKIŞKAN KİMLİĞİ enjektöre TESLİM EDİLİR ------------
+            # Bu iki anahtar hiç konmuyordu; enjektör modülü 'generic' dalına
+            # düşüyor ve buhar basıncını 0,05 bar varsayıyordu. Ölçüldü:
+            # LOX'un gerçek doyma basıncı 1,01325 bar (NBP 90,19 K) — yani
+            # 20 kat hata, ve hata GÜVENLİK YÖNÜNDE YANLIŞ TARAFTA:
+            # K_c = (P1 − P_v)/(P1 − P2) yukarı çıkıyor, kavitasyon riski
+            # olduğundan DÜŞÜK görünüyor. RP-1'de ters yönde 25 kat
+            # (gerçek 0,002 bar). Modülün kendi docstring'i (injector_design
+            # .py:544) tam bu vakayı uyarı olarak yazıyor; hibrit motor bunu
+            # zaten yapıyordu (hybrid_rocket_engine.py:2346), sıvı yolu
+            # bağlanmamıştı.
+            #
+            # N₂O istisnası: modül 'n2o' oksitleyicide NHNE dalına girer ve
+            # T_ox_K'yı ZORUNLU ister (injector_design.py:850). Sıvı motorda
+            # oksitleyici deposu sıcaklığı modellenmiyor, bu yüzden kimlik
+            # yalnız sıcaklık gerektirmeyen akışkanlar için geçirilir;
+            # aksi hâlde modül kendi 'generic' beyanını üretir.
+            _fluid_ox = str(self.oxidizer_type or '').lower()
+            if _fluid_ox and _fluid_ox != 'n2o':
+                inj_spec['fluid_ox'] = _fluid_ox
+            if self.fuel_type:
+                inj_spec['fluid_fuel'] = str(self.fuel_type).lower()
+
+            # --- v2.6.26: viskozite yalnız KULLANICI verdiyse geçirilir -----
+            # Eskiden `fuel_props.get('viscosity', 0.001)` geçiliyordu.
+            # fuel_props, web_propellant_api'nin HATA sözlüğü olabiliyor
+            # ({'error': ..., 'status': 'success'}), o zaman değer sessizce
+            # 0,001'e düşüyordu — LH2'de gerçek 1,34e-5, yani 77 kat. Ayrıca
+            # bu sabit, modülün kendi kaynaklı MU_LIQUID_REF tablosunu
+            # bastırıyordu. Artık: kullanıcı girdisi varsa o, yoksa anahtar
+            # HİÇ konmaz ve modül kendi tablosunu kaynağıyla birlikte kullanır.
+            if self.mu_ox is not None:
+                inj_spec['mu_ox'] = self.mu_ox
+            if self.mu_fuel is not None:
+                inj_spec['mu_fuel'] = self.mu_fuel
             # --- GAZ-GAZ ana oda enjeksiyonu (2026-07-22, denetim madde 5) --
             # FFSC'de ana odaya İKİ ÖN YAKICI EGZOZU (gaz) girer; sıvı SPI
             # modeli fiziksel olarak yanlış sınıftır. Çevrim çözümü mevcutsa
@@ -3782,9 +3842,24 @@ class LiquidRocketEngine:
             pressure_atm = P / 100000  # Convert Pa to bar
 
             # Space vacuum conditions
-            if alt >= 100000:
-                pressure_atm = 1e-6
-                T = 1000  # Thermospheric temperature
+            # v2.6.26 — 100 km satiri ELLE YAZILMIS sayilarla doluyordu:
+            #   pressure_atm = 1e-6 ; T = 1000
+            # Oysa fonksiyonun kendi belgesi ICAO/ISO 2533 dogrulugu iddia
+            # ediyor ve tablonun diger 7 satiri gercek ISA'dan geliyor.
+            # Olculdu: 100 km'de deponun KENDI isa_temperature'i 186,95 K,
+            # isa_pressure'i 2,344e-07 bar. Yani sicaklik 5,3 kat, basinc
+            # 4,3 kat yanlisti ve tek yanitta ayni buyuklugun iki farkli
+            # kaynagi vardi. Ayni yardimcilar hrma/analysis/launch_site.py
+            # tarafindan zaten kullaniliyor — tek kaynaga baglaniyor.
+            # ISA tablosu 84,852 km'de biter; ustunde izotermal uzanti
+            # uygulanir ve bu durum cikti satirinda beyan edilir.
+            if alt > ISA_TABLE_TOP_M:
+                T = isa_temperature(alt)
+                pressure_atm = isa_pressure(alt) / 1e5   # Pa -> bar
+                atmosphere_basis = ('ISA isothermal extension above '
+                                    '84.852 km (US Std Atm 1976 table top)')
+            else:
+                atmosphere_basis = 'ISA / US Std Atm 1976'
 
             # Calculate optimal nozzle for this altitude
             nozzle_geom = self.calculate_nozzle_geometry(altitude=alt)

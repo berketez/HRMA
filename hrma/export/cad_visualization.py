@@ -57,10 +57,19 @@ CHAMBER_WALL_FALLBACK_FRACTION = 0.045  # cidar / kamara çapı
 # yazar (bkz. _injector_spec).
 MESH_MAX_INJECTOR_ORIFICES = 16
 
-# İmalat süresi/beceri tahminleri atölye deneyimi kaynaklıdır; motorun
-# hesabından türetilmez ve çıktıda böyle etiketlenir.
+# Nitel imalat zorluğu (beceri seviyesi, özel takım) atölye deneyimi
+# kaynaklıdır; motorun hesabından türetilmez ve çıktıda böyle etiketlenir.
 MANUFACTURING_EFFORT_BASIS = ('typical machine-shop experience for this size '
                               'class; not computed from the analysis')
+
+# Termin (işleme/montaj süresi) alanları v2.6.26'da KALDIRILDI — V2.6.26
+# planı §2.2. Arayüz boş hücre yerine bu açıklamayı basabilsin diye alanın
+# yokluğu açıkça raporlanır (sıvı motordaki MANUFACTURING_COST_STATUS deseni).
+MANUFACTURING_EFFORT_STATUS = (
+    'not calculated: HRMA has no machine-shop routing, labour-rate or '
+    'programme schedule data. Machining and assembly durations were removed '
+    'because the previous values ("24-48 hours", "4-6 hours") were fixed '
+    'literals, identical for a 500 N amateur motor and a 50 kN motor')
 
 # İmalat notlarında SAYILAR çözücüden gelir; adımların kendisi (tornalama,
 # delme, çapak alma, sızdırmazlık) genel atölye pratiğidir ve bu motorun
@@ -78,10 +87,11 @@ MANUFACTURING_STANDARD_BASIS = ('the standards cited (ANSI B1.1 threads, '
                                 'not verify that they are the applicable '
                                 'standards for this design')
 
-# Tolerans ve yüzey pürüzlülüğü bu yazılımın tasarım çıktısı DEĞİLDİR; standart
-# atölye değerleridir ve çizim sözlüğünde kaynağıyla birlikte verilir.
-DRAWING_TOLERANCE_BASIS = ('ISO 2768-m general tolerances (workshop standard, '
-                           'not computed by this analysis)')
+# Yüzey pürüzlülüğü bu yazılımın tasarım çıktısı DEĞİLDİR; standart atölye
+# değeridir ve çizim sözlüğünde kaynağıyla (finish_basis) birlikte verilir.
+# v2.6.26 (P4): DRAWING_TOLERANCE_BASIS kaldırıldı — künyesi ("ISO 2768-m")
+# ile yanında yazılan sabit sayılar ('+-0.1 mm' / '+-0.5 mm') birbirini
+# tutmuyordu. Tolerans artık ölçüden aranır: bkz. _iso2768_tolerance_block.
 DRAWING_SURFACE_FINISH_BASIS = ('ISO 1302 typical machined finish (workshop '
                                 'standard, not computed by this analysis)')
 DRAWING_SURFACE_FINISH_CHAMBER = 'Ra 3.2 um'
@@ -96,6 +106,45 @@ def _real_scalar(value):
     except (TypeError, ValueError):
         return None
     return v if (np.isfinite(v) and v > 0) else None
+
+
+def _iso2768_tolerance_block(bore_mm, outer_mm, length_mm):
+    """Kamara çizimi için ISO 2768-1 genel tolerans bloğu.
+
+    v2.6.26 (P4). Öncesi: sabit '+-0.1 mm' çap / '+-0.5 mm' boy. Bu iki sayı
+    75 mm'lik amatör motorla 500 mm'lik motora aynıydı VE yanlarındaki künye
+    "ISO 2768-m" diyordu — oysa o standardın tablosu ölçüye göre değişir.
+    Yani sayılar gösterilen kaynağa uymuyordu.
+
+    Tablo BU DOSYADA TEKRAR TANIMLANMAZ: proje içinde tek tanım noktası
+    ``hrma.engines.liquid_rocket_engine`` içindedir (sıvı motorun kritik
+    tolerans bloğu onu kullanır). Modül okunamazsa sayı UYDURULMAZ; blok
+    'NOT_AVAILABLE' durumu döner.
+
+    İşlenmiş yatak yüzeyleri hassas (f), gövde/montaj ölçüleri orta (m)
+    sınıfta aranır — sıvı motordaki aynı gerekçe.
+    """
+    try:
+        from hrma.engines.liquid_rocket_engine import (
+            ISO2768_GRADE_GENERAL, ISO2768_GRADE_PRECISION,
+            ISO2768_TOLERANCE_BASIS, _iso2768_feature)
+    except Exception as exc:                       # pragma: no cover
+        return {'status': 'NOT_AVAILABLE',
+                'basis': f'ISO 2768-1 tolerance table unavailable: {exc}'}
+
+    def _feature(nominal, grade):
+        # Ölçü yoksa tolerans da yoktur; komşu alanlarla aynı etiket kullanılır.
+        return _iso2768_feature(nominal, grade) or NOT_AVAILABLE_SPEC
+
+    return {
+        # Grain/kapak bu deliğe oturur: işlenmiş yatak -> hassas sınıf
+        'diameter': _feature(bore_mm, ISO2768_GRADE_PRECISION),
+        'outer_diameter': _feature(outer_mm, ISO2768_GRADE_GENERAL),
+        'length': _feature(length_mm, ISO2768_GRADE_GENERAL),
+        'basis': ISO2768_TOLERANCE_BASIS,
+        'source': ('ISO 2768-1 Table 1 (permissible deviations for linear '
+                   'dimensions), classes f and m'),
+    }
 
 
 def _nozzle_half_angles(motor_data):
@@ -1242,6 +1291,7 @@ class MotorCADDesigner:
         outer_mm = ((bore_mm + 2.0 * wall_m * 1000.0)
                     if (bore_mm is not None and wall_m) else None)
         length_m = _real_scalar(motor_data.get('chamber_length'))
+        length_mm = length_m * 1000.0 if length_m is not None else None
         drawings['chamber'] = {
             # Kamara İÇ çapı (yanma hacmi / grain dış çapı bu ölçüye oturur)
             'inner_diameter': bore_mm if bore_mm is not None else NOT_AVAILABLE_SPEC,
@@ -1268,11 +1318,14 @@ class MotorCADDesigner:
             'material': mat_name or NOT_AVAILABLE_SPEC,
             'surface_finish': DRAWING_SURFACE_FINISH_CHAMBER,
             'finish_basis': DRAWING_SURFACE_FINISH_BASIS,
-            'tolerances': {
-                'diameter': '+-0.1 mm',
-                'length': '+-0.5 mm',
-                'basis': DRAWING_TOLERANCE_BASIS
-            }
+            # v2.6.26 (P4): tolerans artık ÖLÇÜNÜN KENDİSİNDEN aranır.
+            # Öncesi: sabit '+-0.1 mm' çap ve '+-0.5 mm' boy — hem motorun
+            # boyutundan bağımsızdı, hem de hemen yanındaki 'basis' alanı
+            # "ISO 2768-m" diyordu ama o standardın tablosu ölçüyle DEĞİŞİR
+            # (Ø100 mm için m sınıfı ±0.3 mm, f sınıfı ±0.15 mm). Yani
+            # sayılar kaynağa uymuyordu: yanlış künye.
+            'tolerances': _iso2768_tolerance_block(bore_mm, outer_mm,
+                                                   length_mm),
         }
 
         # Nozzle drawing
@@ -1628,8 +1681,14 @@ class MotorCADDesigner:
                                'r_in^2); injector: plate disc minus orifices)'),
             },
             'manufacturing_complexity': {
-                'machining_time': '24-48 hours',
-                'assembly_time': '4-6 hours',
+                # v2.6.26 (P4) KALDIRILDI: 'machining_time': '24-48 hours' ve
+                # 'assembly_time': '4-6 hours'. Bunlar TERMİNDİR ve V2.6.26
+                # planı §2.2 gereği kapsam dışıdır: HRMA'nın ne tezgâh saati
+                # verisi ne iş gücü modeli var; iki sayı da 500 N'lik motorla
+                # 50 kN'lik motorda aynıydı. Sıvı motor tarafında aynı karar
+                # MANUFACTURING_COST_STATUS ile uygulanmıştı; arayüz boş hücre
+                # yerine bu durumu basabilsin diye alanın yokluğu bildirilir.
+                'effort_status': MANUFACTURING_EFFORT_STATUS,
                 'skill_level': 'Advanced machinist required',
                 'special_tooling': 'Diamond boring bar for nozzle',
                 'basis': MANUFACTURING_EFFORT_BASIS

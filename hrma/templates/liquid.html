@@ -3892,12 +3892,36 @@ Please provide:
             // Engine dimensions from results
             // DİKKAT: /calculate_liquid KARIŞIK birim döner — chamber mm,
             // throat/exit/nozzle_length METRE (bkz. buildLiquidVizData notu).
-            const chamberDiameter = results.chamber_diameter || 200; // mm
-            const chamberLength = results.chamber_length || 300; // mm
-            const throatDiameter = (typeof results.throat_diameter === 'number' && isFinite(results.throat_diameter)) ? results.throat_diameter * 1000 : 50; // m → mm
-            const exitDiameter = (typeof results.exit_diameter === 'number' && isFinite(results.exit_diameter)) ? results.exit_diameter * 1000 : 150; // m → mm
-            const nozzleLength = (typeof results.nozzle_length === 'number' && isFinite(results.nozzle_length)) ? results.nozzle_length * 1000 : 200; // m → mm
-            
+            // v2.6.26 (Faz 2): beş ölçünün her biri için sabit yedek vardı
+            // (200/300 mm kamara, 50/150/200 mm boğaz/çıkış/nozul). Çözücü
+            // ölçüyü vermezse ekran gerçek görünen ama HİÇBİR hesaptan
+            // gelmeyen bir motor çiziyordu — kullanıcı kendi tasarımına
+            // baktığını sanıyordu. Artık ölçü eksikse çizim yapılmaz.
+            const cadDims = [
+                ['chamber_diameter', results.chamber_diameter],
+                ['chamber_length', results.chamber_length],
+                ['throat_diameter', results.throat_diameter],
+                ['exit_diameter', results.exit_diameter],
+                ['nozzle_length', results.nozzle_length]
+            ];
+            const missingDims = cadDims
+                .filter(d => !(typeof d[1] === 'number' && isFinite(d[1])))
+                .map(d => d[0]);
+            if (missingDims.length) {
+                cadContainer.innerHTML =
+                    '<p style="text-align:center; color:#7d97a5; padding:40px;">'
+                    + T('liq.js.cad_geometry_missing',
+                        'CAD geometry not returned by the solver - nothing drawn')
+                    + ' (' + missingDims.join(', ') + ')</p>';
+                return;
+            }
+
+            const chamberDiameter = results.chamber_diameter; // mm
+            const chamberLength = results.chamber_length; // mm
+            const throatDiameter = results.throat_diameter * 1000; // m → mm
+            const exitDiameter = results.exit_diameter * 1000; // m → mm
+            const nozzleLength = results.nozzle_length * 1000; // m → mm
+
             console.log(T('liq.msg.cad_visualization_dimensions', 'CAD Visualization - Dimensions:'), {
                 chamberDiameter, chamberLength, throatDiameter, exitDiameter, nozzleLength
             });
@@ -3967,7 +3991,8 @@ Please provide:
             const layout = {
                 title: {
                     text: TF('liq.msg.engine_3d_cad_title',
-                             { propellant: results.propellant_name || 'LOX/RP-1' },
+                             { propellant: results.propellant_name
+                                             || T('liq.js.not_specified', 'not specified') },
                              'LIQUID ENGINE 3D CAD - {propellant}'),
                     font: { size: 16 }
                 },
@@ -3993,7 +4018,7 @@ Please provide:
                         <h3 style="color: #1e3c72; margin-bottom: 10px;">${T('liq.js.3d_engine_visualization', '3D Engine Visualization')}</h3>
                         <p style="color: #6c757d; text-align: center;">${T('liq.js.chamber_label', 'Chamber:')} ${chamberDiameter}mm × ${chamberLength}mm<br>
                         ${T('liq.js.throat_label', 'Throat:')} ${throatDiameter}mm | ${T('liq.js.exit_label', 'Exit:')} ${exitDiameter}mm<br>
-                        ${T('liq.js.propellant_label', 'Propellant:')} ${results.propellant_name || 'LOX/RP-1'}</p>
+                        ${T('liq.js.propellant_label', 'Propellant:')} ${results.propellant_name || T('liq.js.not_specified', 'not specified')}</p>
                         <div style="margin-top: 20px; padding: 15px; background: var(--hd-panel-solid, #0a1524); border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                             <strong>${T('liq.js.engine_specifications', 'Engine Specifications:')}</strong><br>
                             • ${T('liq.js.thrust_label', 'Thrust:')} ${(results.thrust/1000).toFixed(1)} kN<br>
@@ -4221,14 +4246,30 @@ Please provide:
                 const v = el ? parseFloat(el.value) : NaN;
                 return (isFinite(v)) ? v : d;
             };
+            // v2.6.26 — MOTOR VERİSİ UYDURULMAZ (bkz. solid.html aynı yer).
+            // Hesap yokken `thrust: 50000` / `isp: 300` uydurulup sunucuya
+            // gönderiliyor, dönen grafik kullanıcının motoruymuş gibi
+            // çiziliyordu. Bu gösterim yedeği değil, çözücü girdisi.
+            const trThrust = (typeof cr.thrust === 'number' && cr.thrust > 0)
+                ? cr.thrust : null;
+            const trIsp = [cr.isp_vacuum, cr.isp_sea_level]
+                .find(v => typeof v === 'number' && v > 0) ?? null;
+            if (trThrust === null || trIsp === null) {
+                div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">'
+                    + T('liq.js.trajectory_needs_results',
+                        'Run an engine calculation first - the trajectory needs the '
+                        + 'computed thrust and specific impulse.')
+                    + '</p>';
+                return;
+            }
             const body = {
                 initial_mass: getv('traj_initial_mass', 5000),
                 final_mass: getv('traj_final_mass', 2000),
                 drag_coefficient: getv('traj_drag_coeff', 0.5),
                 reference_area: getv('traj_ref_area', 0.05),
                 burn_time: getv('traj_burn_time', 30),
-                thrust: (typeof cr.thrust === 'number' && cr.thrust > 0) ? cr.thrust : 50000,
-                isp: cr.isp_vacuum || cr.isp_sea_level || 300
+                thrust: trThrust,
+                isp: trIsp
             };
             div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">' + T('liq.js.computing_trajectory', 'Computing trajectory…') + '</p>';
             try {
@@ -4774,8 +4815,8 @@ Please provide:
             const geom = [
                 [T('liq.msg.chamber_diameter_mm', 'Chamber diameter (mm)'), num(cr.chamber_diameter, 2)],
                 [T('liq.msg.chamber_length_mm', 'Chamber length (mm)'), num(cr.chamber_length, 2)],
-                [T('liq.msg.throat_diameter_mm', 'Throat diameter (mm)'), num((cr.throat_diameter || 0) * 1000, 2)],
-                [T('liq.msg.exit_diameter_mm', 'Exit diameter (mm)'), num((cr.exit_diameter || 0) * 1000, 2)],
+                [T('liq.msg.throat_diameter_mm', 'Throat diameter (mm)'), num(cr.throat_diameter * 1000, 2)],
+                [T('liq.msg.exit_diameter_mm', 'Exit diameter (mm)'), num(cr.exit_diameter * 1000, 2)],
                 [T('liq.msg.expansion_ratio', 'Expansion ratio'), num(cr.expansion_ratio, 3)],
                 [T('liq.msg.vacuum_expansion_ratio_2', 'Vacuum expansion ratio'), num(cr.expansion_ratio_vacuum, 3)],
                 [T('liq.ui.cooling_type', 'Cooling type'), cr.cooling_type || ''],

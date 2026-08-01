@@ -31,6 +31,8 @@
     var DICT = {
         en: {
             /* Sayfa başlığı */
+            'adv.label.launchAltitudeM': 'Launch Altitude (m)',
+            'adv.label.windDirectionDeg': 'Wind Direction (degrees)',
             'adv.page.title': 'Hybrid Motor Analysis - Motor Analysis Tool',
 
             /* Navigasyon */
@@ -55,6 +57,8 @@
             'adv.sec.injectorConfiguration': 'Injector Configuration',
             'adv.sec.injectorDesign': 'Injector Design',
                         'adv.sec.thrustCurve': 'Thrust and Chamber Pressure vs Time',
+            'adv.tip.launchAltitudeM': 'Elevation of the launch site above sea level. Sets the starting altitude and the ambient conditions the trajectory begins from.',
+            'adv.tip.windDirectionDeg': 'Compass direction the wind blows towards, measured clockwise from the launch azimuth. 0° = tailwind along the launch heading.',
             'adv.txt.thrustCurveExplain': 'Instantaneous thrust and chamber pressure through the burn, taken from the time-marching solution. In a hybrid the oxidiser flow is constant while the fuel flow follows the regressing port, so the shape of this curve is the O/F shift made visible.',
 'adv.sec.injectorDesignSchematic': 'Injector Design Schematic',
             'adv.sec.motorCrossSection': 'Motor Cross-Section',
@@ -691,6 +695,8 @@
         },
         tr: {
             /* Sayfa başlığı */
+            'adv.label.launchAltitudeM': 'Fırlatma Rakımı (m)',
+            'adv.label.windDirectionDeg': 'Rüzgâr Yönü (derece)',
             'adv.page.title': 'Hibrit Motor Analizi - Motor Analiz Aracı',
 
             /* Navigasyon */
@@ -715,6 +721,8 @@
             'adv.sec.injectorConfiguration': 'Enjektör Ayarları',
             'adv.sec.injectorDesign': 'Enjektör Tasarımı',
                         'adv.sec.thrustCurve': 'Zamana Göre İtki ve Yanma Odası Basıncı',
+            'adv.tip.launchAltitudeM': 'Fırlatma sahasının deniz seviyesinden yüksekliği. Yörüngenin başlangıç irtifasını ve başladığı ortam koşullarını belirler.',
+            'adv.tip.windDirectionDeg': 'Rüzgârın estiği yön; fırlatma azimutundan saat yönünde ölçülür. 0 derece = fırlatma yönünde arkadan rüzgâr.',
             'adv.txt.thrustCurveExplain': 'Yanma boyunca anlık itki ve yanma odası basıncı; değerler zaman-adımlı çözümden gelir. Hibritte oksitleyici debisi sabittir, yakıt debisi gerileyen portu izler; bu yüzden eğrinin biçimi O/F kaymasının görünür hâlidir.',
 'adv.sec.injectorDesignSchematic': 'Enjektör Tasarım Şeması',
             'adv.sec.motorCrossSection': 'Motor Kesiti',

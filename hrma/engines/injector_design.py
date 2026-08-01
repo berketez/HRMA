@@ -828,7 +828,8 @@ def _manifold(mdot, rho, v_orifice):
 def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
                    T_K, inlet, l_over_d, constraints, warnings,
                    assumptions, cd_override=None, cd_basis_override=None,
-                   n_fixed=None, orifice_length_m=None):
+                   n_fixed=None, orifice_length_m=None,
+                   l_over_d_supplied=False):
     """Tek devre (ox/fuel) akış + delik planı + manifold + flip çözümü.
 
     ``circuit`` ∈ {'ox', 'fuel'} — dil-nötr devre kimliği. Uyarı kodu bundan
@@ -913,7 +914,16 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
     # ve ulaşılan L/D çıktıda beyan edilir.
     # Kaynak: NASA SP-8089 / Lefebvre & McDonell, "Atomization and Sprays"
     # Böl. 5 (düz orifis Cd — giriş geometrisi ve L/D bağımlılığı).
-    l_over_d_basis = 'caller-supplied L/D (declared assumption)'
+    # v2.6.26 — BEYAN GERCEGE BAGLI.
+    # Bu metin kosulsuz 'caller-supplied' diyordu; oysa cagiran cogu
+    # zaman L/D vermiyor ve deger modul varsayilani 4,0 oluyordu.
+    # Kullanici 'bu tasarim icin 4 secildi' diye okuyor, kimse
+    # secmemis. Yanlis beyan, beyansizliktan kotudur: ortada bir insan
+    # karari varmis izlenimi verir.
+    l_over_d_basis = ('caller-supplied L/D (declared assumption)'
+                      if l_over_d_supplied else
+                      'module default L/D (no orifice length or L/D '
+                      'supplied by the caller)')
     if cd_override is not None:
         cd, cd_basis = cd_override, (cd_basis_override or 'tip özel Cd')
         n, d, flow_model = _size(cd)
@@ -1358,7 +1368,8 @@ def design_injector(spec):
             inlet_ox, l_over_d, constraints, warnings, assumptions,
             cd_override=cd_override, cd_basis_override=cd_basis_override,
             n_fixed=spec.get('n_orifices_ox'),
-            orifice_length_m=orifice_length)
+            orifice_length_m=orifice_length,
+            l_over_d_supplied=('l_over_d' in spec))
         fuel = None
         if mdot_fuel:
             fuel = _solve_circuit(
@@ -1366,7 +1377,8 @@ def design_injector(spec):
                 spec.get('p_feed_bar_fuel'), fluid_f, None,
                 inlet_f, l_over_d, constraints, warnings, assumptions,
                 n_fixed=spec.get('n_orifices_fuel'),
-                orifice_length_m=orifice_length)
+                orifice_length_m=orifice_length,
+            l_over_d_supplied=('l_over_d' in spec))
     except ValueError:
         raise
     except Exception as exc:  # fiziksel imkânsızlık / sayısal çöküş

@@ -123,6 +123,28 @@ class WebPropellantAPI:
         except Exception as e:
             print(f"Cache write error: {e}")
     
+    @staticmethod
+    def _dogru_durum(data: Dict) -> Dict:
+        """'success' damgasini GERCEGE gore duzeltir.
+
+        v2.6.26 — ayristirma basarisiz oldugunda sozluk
+        {'error': ..., 'source': 'NIST API (Live)', 'status': 'success'}
+        seklinde donuyordu ve cagiran onu canli veri sayiyordu. Damga her
+        donus yolunda (canli fetch, pickle cache, kalici depo) ayni kurala
+        tabi olmali; yoksa eski onbellek kayitlari yalani tasimaya devam
+        eder.
+        """
+        if not isinstance(data, dict):
+            return data
+        if data.get('error') or data.get('density') is None:
+            if data.get('status') == 'success':
+                data = dict(data)
+                data['status'] = 'parse_failed'
+                kaynak = str(data.get('source') or '')
+                if 'not parsable' not in kaynak:
+                    data['source'] = (kaynak + ' - response not parsable').strip(' -')
+        return data
+
     def fetch_nist_data(self, compound: str) -> Dict:
         """Fetch real-time data from NIST sources"""
         print(f"Fetching NIST data for {compound}...")
@@ -130,7 +152,7 @@ class WebPropellantAPI:
         cache_key = self._get_cache_key('nist', compound)
         cached = self._load_cache(cache_key)
         if cached:
-            return cached
+            return self._dogru_durum(cached)
 
         offline_key = offline_store.make_key('webapi', 'nist', compound)
 
@@ -161,6 +183,18 @@ class WebPropellantAPI:
                 'cas_number': cas_number,
                 'status': 'success'
             })
+            # v2.6.26 — "success" DAMGASI KOSULLU.
+            # Ayristirma basarisiz oldugunda bu sozluk
+            #   {'error': "argument of type 'NoneType' is not iterable",
+            #    'source': 'NIST API (Live)', 'status': 'success'}
+            # seklinde donuyordu. Cagiran onu CANLI veri sayip her alani
+            # .get(anahtar, varsayilan) ile okuyordu; sonucta sayfada
+            # "NIST (Live)" rozetiyle gosterilen her ozellik aslinda bir
+            # varsayilandi (olculdu: LH2 viskozitesi 0,001 gosteriliyordu,
+            # gercegi 1,34e-5 — 77 kat). Asagidaki kosul, bir satir altta
+            # zaten var olan 'density is None' kontrolunun donen sozluge de
+            # uygulanmis halidir; o kontrol yalniz kalici depoyu koruyordu.
+            data = self._dogru_durum(data)
             
             # Cache the result (pickle + persistent offline store)
             self._save_cache(cache_key, data)
@@ -177,13 +211,13 @@ class WebPropellantAPI:
             # stale-if-error: bayat pickle cache yas siniri olmadan kullanilir
             stale = self._load_cache(cache_key, allow_stale=True)
             if stale is not None:
-                return stale
+                return self._dogru_durum(stale)
             # Persistent offline store (user cache -> bundled snapshot)
             stored = self._load_offline_store(offline_key)
             if stored is not None:
-                return stored
+                return self._dogru_durum(stored)
             # Try direct NIST webbook as fallback
-            return self._try_direct_nist(compound)
+            return self._dogru_durum(self._try_direct_nist(compound))
     
     def fetch_nasa_cea_data(self, fuel: str, oxidizer: str, chamber_pressure: float = 100, mixture_ratio: float = 2.5) -> Dict:
         """Fetch real-time NASA CEA combustion data"""

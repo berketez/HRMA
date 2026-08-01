@@ -623,7 +623,17 @@ class StructuralAnalyzer:
                     'uses the section-average temperature'),
             },
             'buckling_analysis': buckling_analysis,
-            'material_properties': mat_props,
+            # v2.6.26 — AD CAKISMASI BEYAN EDILIYOR.
+            # mat_props['safety_factor'] materials_db'nin bu malzeme icin
+            # ONERDIGI tasarim katsayisidir (celik 4,0; inconel 3,0).
+            # Kullanicinin girdigi tasarim emniyet katsayisi DEGILDIR ama
+            # ayni adi tasiyor: kullanici SF=6 girip bu alanda 4,0 gorunce
+            # 'girdim yutuldu' diye okuyor. Deger dogru, sunum yaniltici.
+            'material_properties': dict(
+                mat_props,
+                safety_factor_basis=(
+                    'materials_db recommended design factor for this material - NOT the design safety factor entered by the user'),
+            ) if isinstance(mat_props, dict) else mat_props,
             'design_parameters': {
                 'material': material,
                 'design_pressure': design_pressure / 1e5,  # bar

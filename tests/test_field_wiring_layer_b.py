@@ -61,6 +61,12 @@ HYBRID_BASE = {
 # Bazı alanlar yalnız kendi dalında canlıdır; o dal kurulmadan ölçülürse
 # YALANCI ÖLÜ görünürler. Refakat alanları burada bildirilir.
 HYBRID_CONTEXTS = {
+    # v2.6.26 — rüzgâr YÖNÜ yalnız rüzgâr HIZI sıfırdan büyükken anlamlıdır:
+    # vx_wind = -wind_speed * cos(yön) (trajectory_analysis.py:300). Taban
+    # yükte wind_speed=0 olduğu için yönü tek başına sarsmak hiçbir şeyi
+    # oynatmaz ve alan YALANCI "yalnız-yankı" görünür. Dal kurulmadan ölçülen
+    # alan yanlış hüküm verir — star_points / slot_width ile aynı sınıf.
+    'wind_direction': {'wind_speed': 15.0, 'wind_direction': 90.0},
     'outer_diameter': {'injector_type': 'pintle', 'pintle_diameter': 25,
                        'outer_diameter': 50},
     'pintle_diameter': {'injector_type': 'pintle', 'pintle_diameter': 25,

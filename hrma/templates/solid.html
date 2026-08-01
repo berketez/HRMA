@@ -380,6 +380,15 @@
             justify-content: center;
             background: var(--hd-inset, #0a1524);
         }
+
+        /* Çözücünün üretmediği alan. Sayı yerine gerekçe gösterilir;
+           title niteliğinde çözücünün <alan>_basis/_source/_status metni
+           durur, o yüzden imleç yardım işaretine döner. */
+        .hrma-na {
+            color: #7d97a5;
+            font-style: italic;
+            cursor: help;
+        }
     </style>
     <script src="/static/vendor/plotly-1.58.5.min.js"></script>
     <script src="/static/js/plotly_dark.js"></script>
@@ -2544,15 +2553,31 @@
                 const v = el ? parseFloat(el.value) : NaN;
                 return isFinite(v) ? v : d;
             };
+            // v2.6.26 — MOTOR VERİSİ UYDURULMAZ.
+            // Burada hesap sonucu yokken `thrust: 5000` ve `isp: 200`
+            // uydurulup sunucuya gönderiliyordu; dönen yörünge grafiği
+            // kullanıcının motoruymuş gibi çiziliyordu. Bu bir gösterim
+            // yedeği değil, ÇÖZÜCÜ GİRDİSİ — sahte giriş, sahte sonuç.
+            const trThrust = (typeof cr.average_thrust === 'number'
+                              && cr.average_thrust > 0) ? cr.average_thrust : null;
+            const trIsp = [cr.isp_vacuum, cr.isp_sea_level]
+                .find(v => typeof v === 'number' && v > 0) ?? null;
+            if (trThrust === null || trIsp === null) {
+                div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">'
+                    + T('solid.js.trajectory_needs_results',
+                        'Run a motor calculation first - the trajectory needs the '
+                        + 'computed thrust and specific impulse.')
+                    + '</p>';
+                return;
+            }
             const body = {
                 initial_mass: getv('traj_initial_mass', 12),
                 final_mass: getv('traj_final_mass', 5),
                 drag_coefficient: getv('traj_drag_coeff', 0.5),
                 reference_area: getv('traj_ref_area', 0.008),
                 burn_time: getv('traj_burn_time', 2),
-                thrust: (typeof cr.average_thrust === 'number' && cr.average_thrust > 0)
-                    ? cr.average_thrust : 5000,
-                isp: cr.isp_vacuum || cr.isp_sea_level || 200
+                thrust: trThrust,
+                isp: trIsp
             };
             div.innerHTML = '<p style="text-align:center; color:#7d97a5; padding:40px;">' + T('solid.js.computing_trajectory', 'Computing trajectory...') + '</p>';
             try {
@@ -2915,6 +2940,11 @@
             }
         }
         
+        // >>> HRMA-HONEST-FORMATTERS-BEGIN <<<
+        // Bu blok tests/test_ui_no_fabricated_numbers.py tarafından SÖKÜLÜP
+        // node içinde ÇALIŞTIRILIYOR. İşaretleri kaldırmayın; blok yalnız
+        // T() ve standart JS'e bağımlı kalmalı (DOM erişimi yok).
+
         // Hibrit sayfası paritesi: sayısal değeri güvenli biçimlendirir.
         // Sonlu sayı değilse '—' döner (eksik alanlarda tablo kırılmaz).
         function fmtNum(v, digits) {
@@ -2930,6 +2960,69 @@
                 ? v.toFixed(0) + '%'
                 : T('solid.js.not_tabulated', 'not tabulated');
         }
+
+        // ---- v2.6.26 (Faz 2) — GÖSTERİM tarafında yedek sayı yasağı --------
+        // Ayrıntılı analiz sekmeleri `${(x.y || 96).toFixed(1)}` kalıbıyla
+        // yazılmıştı: çözücü alanı üretmezse arayüz KENDİ uydurduğu sayıyı
+        // basıyor, kullanıcı bunu hesaplanmış sanıyordu. Bugün alanların çoğu
+        // yanıtta var (yedek tetiklenmiyor), ama tek bir kod yolu alanı
+        // atladığında sessizce sahte sayı görünürdü. Aşağıdaki iki yardımcı o
+        // kalıbın yerini alır; fmtNum/fmtPercentOrNA'nın işini TEKRARLAMAZ,
+        // onların üstüne "nesne + anahtar" erişimi ve gerekçe koyar.
+
+        // Değer yoksa ÇÖZÜCÜNÜN gerekçesini bulur. Motor tarafı çoğu alan için
+        // kardeş anahtar üretiyor (solid_rocket_engine.py):
+        //   <alan>_basis / <alan>_source / <alan>_status / <alan>_definition
+        // Yoksa nesnenin kendi 'basis' / 'status' alanına düşer. Hiçbiri yoksa
+        // boş döner — o zaman yalnız "hesaplanmadı" yazılır.
+        function missingReason(obj, key) {
+            const src = obj || {};
+            const candidates = [key + '_basis', key + '_source', key + '_status',
+                                key + '_definition', 'basis', 'status'];
+            for (let i = 0; i < candidates.length; i++) {
+                const v = src[candidates[i]];
+                if (typeof v === 'string' && v.trim()) return v.trim();
+            }
+            return '';
+        }
+
+        // Tek hücrelik dürüst gösterim. Sayı varsa biçimlendirir (birim
+        // eklenir); YOKSA sayı uydurmaz: "not computed" yazar ve varsa
+        // gerekçeyi title niteliğine koyar. `transform` sayı üstünde birim
+        // dönüşümü içindir (m -> mm, K -> °C); yalnız gerçek sayıya uygulanır.
+        function fmtField(obj, key, digits, unit, transform) {
+            const src = obj || {};
+            let v = src[key];
+            if (typeof v === 'number' && isFinite(v) && typeof transform === 'function') {
+                v = transform(v);
+            }
+            if (typeof v === 'number' && isFinite(v)) {
+                // Harfle başlayan birim boşlukla ('12.0 mm'), simge birim
+                // bitişik yazılır ('96.0%', '60°C', '25:1').
+                const sep = (unit && /^[A-Za-z]/.test(unit)) ? ' ' : '';
+                return v.toFixed(digits) + (unit ? sep + unit : '');
+            }
+            const label = T('solid.js.not_computed', 'not computed');
+            const why = missingReason(src, key);
+            return why
+                ? `<span class="hrma-na" title="${why.replace(/"/g, '&quot;')}">${label}</span>`
+                : `<span class="hrma-na">${label}</span>`;
+        }
+
+        // Metin alanı için aynı kural: çözücü sınıflandırmadıysa arayüz
+        // 'Excellent' / 'Low' / 'Neutral' gibi bir NİTELEME uyduramaz.
+        function fmtTextField(obj, key) {
+            const src = obj || {};
+            const v = src[key];
+            if (typeof v === 'string' && v.trim()) return v.trim();
+            if (typeof v === 'number' && isFinite(v)) return String(v);
+            const label = T('solid.js.not_classified', 'not classified');
+            const why = missingReason(src, key);
+            return why
+                ? `<span class="hrma-na" title="${why.replace(/"/g, '&quot;')}">${label}</span>`
+                : `<span class="hrma-na">${label}</span>`;
+        }
+        // >>> HRMA-HONEST-FORMATTERS-END <<<
 
         // "Motor Tasarımı" (Motor Design) tablosunu currentResults'tan doldurur.
         // Kaynaklar: üst düzey (mm) + grain_design + nozzle_angles + design_summary.
@@ -3175,8 +3268,8 @@
                 { label: T('solid.msg.average_thrust', 'Average Thrust'), value: results.average_thrust, decimals: 0, unit: 'N' },
                 { label: T('solid.msg.burn_time', 'Burn Time'), value: results.burn_time, decimals: 2, unit: 's' },
                 { label: T('solid.msg.total_impulse', 'Total Impulse'), value: results.total_impulse / 1000, decimals: 1, unit: 'kN·s' },
-                { label: T('solid.msg.c_efficiency', 'C* Efficiency'), value: (results.detailed_analysis?.performance_metrics?.c_star_efficiency_percent || 96), decimals: 1, unit: '%' },
-                { label: T('solid.msg.thrust_coefficient', 'Thrust Coefficient'), value: (results.detailed_analysis?.performance_metrics?.average_thrust_coefficient || 1.65), decimals: 2, unit: '' },
+                { label: T('solid.msg.c_efficiency', 'C* Efficiency'), value: results.detailed_analysis?.performance_metrics?.c_star_efficiency_percent, decimals: 1, unit: '%' },
+                { label: T('solid.msg.thrust_coefficient', 'Thrust Coefficient'), value: results.detailed_analysis?.performance_metrics?.average_thrust_coefficient, decimals: 2, unit: '' },
                 { label: T('solid.ui.propellant_mass', 'Propellant Mass'), value: results.propellant_mass, decimals: 2, unit: 'kg' }
             ];
 
@@ -3609,25 +3702,26 @@ Please provide:
             const analysis = results.detailed_analysis || {};
             const thrustProfile = analysis.thrust_profile_analysis || {};
             const performance = analysis.performance_metrics || {};
+            const ispSplit = performance.theoretical_vs_actual_isp || {};
             
             return `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.thrust_profile_analysis', 'Thrust Profile Analysis')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thrust_profile_type', 'Thrust Profile Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${thrustProfile.thrust_curve_type || 'Neutral'}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thrust_stability', 'Thrust Stability:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(thrustProfile.thrust_stability || 95).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.pressure_oscillations', 'Pressure Oscillations:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(thrustProfile.pressure_oscillations_percent || 2.5).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.combustion_smoothness', 'Combustion Smoothness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(thrustProfile.combustion_smoothness || 97.5).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thrust_profile_type', 'Thrust Profile Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(thrustProfile, 'thrust_curve_type')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thrust_stability', 'Thrust Stability:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(thrustProfile, 'thrust_stability', 1, '%')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.pressure_oscillations', 'Pressure Oscillations:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(thrustProfile, 'pressure_oscillations_percent', 1, '%')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.combustion_smoothness', 'Combustion Smoothness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(thrustProfile, 'combustion_smoothness', 1, '%')}</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.performance_metrics', 'Performance Metrics')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.average_thrust_coefficient', 'Average Thrust Coefficient:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.average_thrust_coefficient || 1.65).toFixed(2)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.c_efficiency', 'C* Efficiency:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.c_star_efficiency_percent || 96).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.combustion_losses', 'Combustion Losses:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.theoretical_vs_actual_isp?.combustion_losses || 3.2).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.nozzle_losses', 'Nozzle Losses:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(performance.theoretical_vs_actual_isp?.nozzle_losses || 2.1).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.average_thrust_coefficient', 'Average Thrust Coefficient:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(performance, 'average_thrust_coefficient', 2)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.c_efficiency', 'C* Efficiency:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(performance, 'c_star_efficiency_percent', 1, '%')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.combustion_losses', 'Combustion Losses:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(ispSplit, 'combustion_losses', 1, '%')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.nozzle_losses', 'Nozzle Losses:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(ispSplit, 'nozzle_losses', 1, '%')}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -3653,20 +3747,20 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.case_analysis', 'Case Analysis')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.hoop_stress', 'Hoop Stress:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.hoop_stress_mpa || 120).toFixed(1)} MPa</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.longitudinal_stress', 'Longitudinal Stress:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.longitudinal_stress_mpa || 60).toFixed(1)} MPa</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.safety_factor', 'Safety Factor:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.safety_factor || 2.1).toFixed(1)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.material_utilization', 'Material Utilization:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.material_utilization_percent || 65).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.recommended_wall_thickness', 'Recommended Wall Thickness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseAnalysis.recommended_wall_thickness_mm || 8.5).toFixed(1)} mm</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.hoop_stress', 'Hoop Stress:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseAnalysis, 'hoop_stress_mpa', 1, 'MPa')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.longitudinal_stress', 'Longitudinal Stress:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseAnalysis, 'longitudinal_stress_mpa', 1, 'MPa')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.safety_factor', 'Safety Factor:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseAnalysis, 'safety_factor', 1)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.material_utilization', 'Material Utilization:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseAnalysis, 'material_utilization_percent', 1, '%')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.recommended_wall_thickness', 'Recommended Wall Thickness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseAnalysis, 'recommended_wall_thickness_mm', 1, 'mm')}</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.grain_structural_analysis', 'Grain Structural Analysis')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.maximum_grain_stress', 'Maximum Grain Stress:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainStructural.max_grain_stress_mpa || 3.2).toFixed(1)} MPa</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.structural_efficiency', 'Structural Efficiency:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainStructural.structural_efficiency || 92).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.crack_propagation_risk', 'Crack Propagation Risk:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${grainStructural.crack_propagation_risk || 'Low'}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thermal_expansion_compatibility', 'Thermal Expansion Compatibility:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${grainStructural.thermal_expansion_compatibility || 'Good'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.maximum_grain_stress', 'Maximum Grain Stress:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(grainStructural, 'max_grain_stress_mpa', 1, 'MPa')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.structural_efficiency', 'Structural Efficiency:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(grainStructural, 'structural_efficiency', 1, '%')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.crack_propagation_risk', 'Crack Propagation Risk:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(grainStructural, 'crack_propagation_risk')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thermal_expansion_compatibility', 'Thermal Expansion Compatibility:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(grainStructural, 'thermal_expansion_compatibility')}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -3688,18 +3782,18 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.combustion_thermal_analysis', 'Combustion Thermal Analysis')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.flame_temperature', 'Flame Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(combustionThermal.flame_temperature_k || 3200).toFixed(0)} K</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.heat_release_rate', 'Heat Release Rate:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(combustionThermal.heat_release_rate_mw || 15.2).toFixed(1)} MW</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thermal_efficiency', 'Thermal Efficiency:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(combustionThermal.thermal_efficiency_percent || 85.2).toFixed(1)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.flame_temperature', 'Flame Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(combustionThermal, 'flame_temperature_k', 0, 'K')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.heat_release_rate', 'Heat Release Rate:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(combustionThermal, 'heat_release_rate_mw', 1, 'MW')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thermal_efficiency', 'Thermal Efficiency:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(combustionThermal, 'thermal_efficiency_percent', 1, '%')}</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.heat_transfer_analysis', 'Heat Transfer Analysis')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.convective_heat_flux', 'Convective Heat Flux:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(heatTransfer.convective_heat_flux_kw_m2 || 6.4).toFixed(1)} kW/m²</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.case_temperature', 'Case Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(heatTransfer.case_temperature_k || 425).toFixed(0)} K</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.insulation_effectiveness', 'Insulation Effectiveness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(heatTransfer.insulation_effectiveness || 94.8).toFixed(1)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thermal_protection_rating', 'Thermal Protection Rating:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${heatTransfer.thermal_protection_rating || 'Excellent'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.convective_heat_flux', 'Convective Heat Flux:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(heatTransfer, 'convective_heat_flux_kw_m2', 1, 'kW/m²')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.case_temperature', 'Case Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(heatTransfer, 'case_temperature_k', 0, 'K')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.insulation_effectiveness', 'Insulation Effectiveness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(heatTransfer, 'insulation_effectiveness', 1, '%')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thermal_protection_rating', 'Thermal Protection Rating:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(heatTransfer, 'thermal_protection_rating')}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -3710,6 +3804,7 @@ Please provide:
             const manufacturing = results.manufacturing_analysis || {};
             const propellantManuf = manufacturing.propellant_manufacturing || {};
             const mixingReqs = propellantManuf.mixing_requirements || {};
+            const curing = propellantManuf.curing_process || {};
             
             return `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -3725,8 +3820,8 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.curing_process', 'Curing Process')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.temperature', 'Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${((propellantManuf.curing_process?.temperature_k || 333) - 273).toFixed(0)}°C</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.duration', 'Duration:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(propellantManuf.curing_process?.time_hours || 24).toFixed(0)} hours</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.temperature', 'Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(curing, 'temperature_k', 0, '\u00B0C', v => v - 273)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.duration', 'Duration:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(curing, 'time_hours', 0, T('solid.js.hours', 'hours'))}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.pressure', 'Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${T('solid.js.atmospheric', 'Atmospheric')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.humidity_control', 'Humidity Control:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${T('solid.js.required', 'Required')}</td></tr>
                         </table>
@@ -3745,17 +3840,17 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.pressure_safety', 'Pressure Safety')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.maximum_operating_pressure', 'Maximum Operating Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.max_operating_pressure_bar || 40).toFixed(1)} bar</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.design_pressure', 'Design Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.design_pressure_bar || 100).toFixed(0)} bar</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.burst_pressure', 'Burst Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.burst_pressure_bar || 150).toFixed(0)} bar</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.safety_factor', 'Safety Factor:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.safety_factor || 2.5).toFixed(1)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.maximum_operating_pressure', 'Maximum Operating Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(pressureSafety, 'max_operating_pressure_bar', 1, 'bar')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.design_pressure', 'Design Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(pressureSafety, 'design_pressure_bar', 0, 'bar')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.burst_pressure', 'Burst Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(pressureSafety, 'burst_pressure_bar', 0, 'bar')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.safety_factor', 'Safety Factor:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(pressureSafety, 'safety_factor', 1)}</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.ignition_safety', 'Ignition Safety')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.ignition_system', 'Ignition System:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${ignitionSafety.ignition_system || T('solid.msg.electric_match', 'Electric match')}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.safe_distance', 'Safe Distance:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(ignitionSafety.minimum_safe_distance_m || 30).toFixed(0)} m</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.ignition_system', 'Ignition System:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(ignitionSafety, 'ignition_system')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.safe_distance', 'Safe Distance:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));" title="${(ignitionSafety.minimum_safe_distance_basis || '').replace(/"/g, '&quot;')}">${(typeof ignitionSafety.minimum_safe_distance_m === 'number' && isFinite(ignitionSafety.minimum_safe_distance_m)) ? ignitionSafety.minimum_safe_distance_m.toFixed(0) + ' m' : T('solid.js.standoff_not_computed', 'not computed - standoff scales with propellant mass; see the safety analysis')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.personal_protective_equipment', 'Personal Protective Equipment:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${T('solid.js.required', 'Required')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.fire_suppression', 'Fire Suppression:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${T('solid.js.co2_system_recommended', 'CO₂ system recommended')}</td></tr>
                         </table>
@@ -3779,24 +3874,24 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.material_costs_usd', 'Material Costs (USD)')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant', 'Propellant:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.propellant || 45).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.case_materials', 'Case Materials:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.case_materials || 120).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.nozzle', 'Nozzle:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.nozzle || 35).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.insulation', 'Insulation:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.insulation || 15).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.hardware', 'Hardware:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(materialCosts.hardware || 25).toFixed(0)}</td></tr>
-                            <tr style="background: var(--hd-inset, #0a1524);"><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.total_materials', 'Total Materials:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>$${(materialCosts.total_materials || 240).toFixed(0)}</strong></td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant', 'Propellant:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(materialCosts, 'propellant', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.case_materials', 'Case Materials:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(materialCosts, 'case_materials', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.nozzle', 'Nozzle:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(materialCosts, 'nozzle', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.insulation', 'Insulation:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(materialCosts, 'insulation', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.hardware', 'Hardware:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(materialCosts, 'hardware', 0, 'USD')}</td></tr>
+                            <tr style="background: var(--hd-inset, #0a1524);"><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.total_materials', 'Total Materials:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${fmtField(materialCosts, 'total_materials', 0, 'USD')}</strong></td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.manufacturing_costs_usd', 'Manufacturing Costs (USD)')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant_mixing', 'Propellant Mixing:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.propellant_mixing || 20).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.casting', 'Casting:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.casting || 15).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.curing', 'Curing:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.curing || 10).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.machining', 'Machining:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.machining || 45).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.assembly', 'Assembly:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.assembly || 25).toFixed(0)}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.test', 'Test:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">$${(manufacturingCosts.testing || 35).toFixed(0)}</td></tr>
-                            <tr style="background: var(--hd-inset, #0a1524);"><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.total_manufacturing', 'Total Manufacturing:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>$${(manufacturingCosts.total_manufacturing || 150).toFixed(0)}</strong></td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant_mixing', 'Propellant Mixing:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(manufacturingCosts, 'propellant_mixing', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.casting', 'Casting:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(manufacturingCosts, 'casting', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.curing', 'Curing:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(manufacturingCosts, 'curing', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.machining', 'Machining:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(manufacturingCosts, 'machining', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.assembly', 'Assembly:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(manufacturingCosts, 'assembly', 0, 'USD')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.test', 'Test:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(manufacturingCosts, 'testing', 0, 'USD')}</td></tr>
+                            <tr style="background: var(--hd-inset, #0a1524);"><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.total_manufacturing', 'Total Manufacturing:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${fmtField(manufacturingCosts, 'total_manufacturing', 0, 'USD')}</strong></td></tr>
                         </table>
                     </div>
                 </div>
@@ -3828,19 +3923,19 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.motor_assembly_properties', 'Motor Assembly Properties')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.total_length', 'Total Length:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.overall_length * 1000 || 650).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.maximum_diameter', 'Maximum Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.maximum_diameter * 1000 || 116).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.dry_mass', 'Dry Mass:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.dry_mass_kg || 4.2).toFixed(1)} kg</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.wet_mass', 'Wet Mass:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(motorAssembly.wet_mass_kg || 8.5).toFixed(1)} kg</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.total_length', 'Total Length:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(motorAssembly, 'overall_length', 0, 'mm', v => v * 1000)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.maximum_diameter', 'Maximum Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(motorAssembly, 'maximum_diameter', 0, 'mm', v => v * 1000)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.dry_mass', 'Dry Mass:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(motorAssembly, 'dry_mass_kg', 1, 'kg')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.wet_mass', 'Wet Mass:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(motorAssembly, 'wet_mass_kg', 1, 'kg')}</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.case_design', 'Case Design')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.outer_diameter', 'Outer Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseDesign.outer_diameter || 116).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.inner_diameter', 'Inner Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseDesign.inner_diameter || 100).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.wall_thickness', 'Wall Thickness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(caseDesign.wall_thickness || 8).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.material', 'Material:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${caseDesign.material || T('solid.msg.aisi_4130_steel', 'AISI 4130 Steel')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.outer_diameter', 'Outer Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseDesign, 'outer_diameter', 0, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.inner_diameter', 'Inner Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseDesign, 'inner_diameter', 0, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.wall_thickness', 'Wall Thickness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(caseDesign, 'wall_thickness', 0, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.material', 'Material:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(caseDesign, 'material')}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -3849,21 +3944,21 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.grain_geometry', 'Grain Geometry')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.type', 'Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${grainGeometry.type || T('solid.ui.bates_cylindrical', 'BATES (Cylindrical)')}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.outer_diameter', 'Outer Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.outer_diameter || 100).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.core_diameter', 'Core Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.core_diameter || 30).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.web_thickness', 'Web Thickness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.web_thickness || 35).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant_mass', 'Propellant Mass:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(grainGeometry.propellant_mass || 4.3).toFixed(2)} kg</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.type', 'Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(grainGeometry, 'type')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.outer_diameter', 'Outer Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(grainGeometry, 'outer_diameter', 0, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.core_diameter', 'Core Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(grainGeometry, 'core_diameter', 0, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.web_thickness', 'Web Thickness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(grainGeometry, 'web_thickness', 0, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant_mass', 'Propellant Mass:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(grainGeometry, 'propellant_mass', 2, 'kg')}</td></tr>
                         </table>
                     </div>
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.nozzle_design', 'Nozzle Design')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.type', 'Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${nozzleDesign.type || T('solid.msg.de_laval_nozzle', 'De Laval Nozzle')}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.throat_diameter', 'Throat Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(nozzleDesign.throat_diameter || 15).toFixed(1)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.exit_diameter', 'Exit Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(nozzleDesign.exit_diameter || 75).toFixed(0)} mm</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.expansion_ratio', 'Expansion Ratio:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(nozzleDesign.expansion_ratio || 25).toFixed(0)}:1</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.material', 'Material:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${nozzleDesign.material || 'Graphite'}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.type', 'Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(nozzleDesign, 'type')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.throat_diameter', 'Throat Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(nozzleDesign, 'throat_diameter', 1, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.exit_diameter', 'Exit Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(nozzleDesign, 'exit_diameter', 0, 'mm')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.expansion_ratio', 'Expansion Ratio:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(nozzleDesign, 'expansion_ratio', 0, ':1')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.material', 'Material:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(nozzleDesign, 'material')}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -4102,22 +4197,61 @@ Please provide:
             const caseDesign = cad.case_design || {};
             const grainGeometry = cad.grain_geometry || {};
             const nozzleDesign = cad.nozzle_design || {};
-            
-            // Case dimensions (convert to mm)
-            const caseOD = (caseDesign.outer_diameter || 116) / 2;  // radius
-            const caseID = (caseDesign.inner_diameter || 100) / 2;   // radius
-            const caseLength = caseDesign.length || 600;
-            
+
+            // v2.6.26 (Faz 2): burada dokuz ölçünün her biri için sabit yedek
+            // vardı (116/100/600, 100/30/500, 15/75/130 mm). Çözücü CAD
+            // geometrisini üretmediğinde ekran gerçek bir motor çiziyor, ama
+            // çizdiği motor HİÇBİR hesaptan gelmiyordu — kullanıcı kendi
+            // tasarımına baktığını sanıyordu. Artık ölçü eksikse çizim
+            // YAPILMAZ; hangi alanların eksik olduğu yazılır.
+            const required = [
+                ['case_design.outer_diameter', caseDesign.outer_diameter],
+                ['case_design.inner_diameter', caseDesign.inner_diameter],
+                ['case_design.length', caseDesign.length],
+                ['grain_geometry.outer_diameter', grainGeometry.outer_diameter],
+                ['grain_geometry.core_diameter', grainGeometry.core_diameter],
+                ['grain_geometry.length', grainGeometry.length],
+                ['nozzle_design.throat_diameter', nozzleDesign.throat_diameter],
+                ['nozzle_design.exit_diameter', nozzleDesign.exit_diameter],
+                ['nozzle_design.total_length', nozzleDesign.total_length]
+            ];
+            // Yalnız "sayı mı" sorulur: uç yakıcı grainin çekirdek çapı
+            // meşru biçimde 0'dır, onu eksik saymak yeni bir yalan olurdu.
+            const missing = required
+                .filter(p => !(typeof p[1] === 'number' && isFinite(p[1])))
+                .map(p => p[0]);
+            if (missing.length) {
+                return {
+                    data: [],
+                    layout: {
+                        annotations: [{
+                            text: T('solid.js.cad_geometry_missing',
+                                    'CAD geometry not returned by the solver - nothing drawn')
+                                  + '<br>' + missing.join(', '),
+                            showarrow: false, x: 0.5, y: 0.5,
+                            xref: 'paper', yref: 'paper', align: 'center'
+                        }],
+                        xaxis: { visible: false },
+                        yaxis: { visible: false }
+                    }
+                };
+            }
+
+            // Case dimensions (mm)
+            const caseOD = caseDesign.outer_diameter / 2;  // radius
+            const caseID = caseDesign.inner_diameter / 2;  // radius
+            const caseLength = caseDesign.length;
+
             // Grain dimensions
-            const grainOD = (grainGeometry.outer_diameter || 100) / 2;
-            const grainCore = (grainGeometry.core_diameter || 30) / 2;
-            const grainLength = grainGeometry.length || 500;
-            
+            const grainOD = grainGeometry.outer_diameter / 2;
+            const grainCore = grainGeometry.core_diameter / 2;
+            const grainLength = grainGeometry.length;
+
             // Nozzle dimensions
-            const throatD = (nozzleDesign.throat_diameter || 15) / 2;
-            const exitD = (nozzleDesign.exit_diameter || 75) / 2;
-            const nozzleLength = nozzleDesign.total_length || 130;
-            
+            const throatD = nozzleDesign.throat_diameter / 2;
+            const exitD = nozzleDesign.exit_diameter / 2;
+            const nozzleLength = nozzleDesign.total_length;
+
             const traces = [];
             
             // Motor case (outer cylinder)
