@@ -145,6 +145,17 @@ def perturb(spec: FieldSpec, current: Any) -> Optional[Any]:
         if spec.hi is not None and candidate > spec.hi:
             continue
         return candidate
+
+    # v2.6.26 — DAR BANT KURTARMASI.
+    # Çarpımsal adayların ikisi de banda sığmayabilir: sıvı motorun
+    # combustion_efficiency alanı 97, bandı [50, 100] — 1.5x=145.5 taşıyor,
+    # 0.5x=48.5 altına düşüyor. Eski kod None döndürüp alanı "ölçülemedi"
+    # sayıyordu; oysa alan pekâlâ sarsılabilir. Bant içinde, değerden EN UZAK
+    # uca gidilir: bu, alanın kendi beyan ettiği sınırdır, uydurma değildir.
+    if spec.lo is not None and spec.hi is not None and spec.hi > spec.lo:
+        hedef = spec.lo if (value - spec.lo) >= (spec.hi - value) else spec.hi
+        if abs(hedef - value) > 1e-9 * max(1.0, abs(value)):
+            return hedef
     return None
 
 
@@ -162,6 +173,13 @@ class ShakeReport:
     unmeasurable: Dict[str, str] = field(default_factory=dict)
     constant_outputs: List[str] = field(default_factory=list)
     declared_but_live: List[str] = field(default_factory=list)
+    #: Taban koşunun DÜZ yaprak sözlüğü (yol -> değer).
+    #: v2.6.26 — sabit çıktı yapraklarının SINIFLANDIRILMASI için gerekli:
+    #: bir yaprağın "ızgara mı, standart mı, beyanlı mı" olduğuna karar vermek
+    #: değerine ve kardeş alanlarına (``*_basis`` / ``*_source`` / ``*_status``)
+    #: bakmayı gerektiriyor. Bekçi testleri bu alanı kullanmaz; ölçüm aracı
+    #: kullanır.
+    baseline_leaves: Dict[str, Any] = field(default_factory=dict)
     #: alan -> o alanı sarsınca değişen çıktı yaprakları (yankılar hariç).
     #: Bekçi testleri yalnız sayıya bakar; bu alan geliştirici bağlama
     #: haritası (tools/wiring_map.py) içindir — "bu sayı nereden geliyor"
@@ -207,7 +225,8 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
     if baseline is None:
         raise AssertionError(f'{endpoint} taban cagrisi HTTP {status}')
 
-    report = ShakeReport(endpoint=endpoint, baseline_leaf_count=len(baseline))
+    report = ShakeReport(endpoint=endpoint, baseline_leaf_count=len(baseline),
+                         baseline_leaves=dict(baseline))
     declared = set(declared_unwired)
     ignore = tuple(ignore_output_prefixes)
     ever_changed: set = set()

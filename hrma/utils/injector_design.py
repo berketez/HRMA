@@ -884,6 +884,23 @@ class InjectorDesign:
         # K_c < ~1.5 ise kavitasyon/hidrolik flip riski. Kardeş modül
         # (engines/injector_design.py) aynı kriteri uygular.
         # Kaynak: Nurick, ASME J. Fluids Eng. 98 (1976).
+        # v2.6.26 — GAZ FAZI MODELLENMİYOR VE BU SESSİZ KALAMAZ.
+        # `oxidizer_phase` alanı yalnız aşağıdaki iki uyarıyı kapılıyordu;
+        # 'gas' seçildiğinde delik boyutlandırması yine SIKIŞTIRILAMAZ (SPI)
+        # modelle ve SIVI yoğunluğuyla yapılıyordu. Yani kullanıcı fazı
+        # değiştiriyor, çıktıda tek bir fiziksel yaprak oynamıyor ve
+        # aldığı sonuç sıvı enjeksiyona ait oluyordu — sessiz yanlış cevap.
+        # Sıkıştırılabilir orifis çözümü depoda VAR
+        # (engines/injector_design.py::compressible_orifice_flow, izentropik,
+        # boğulma ayrımlı) ama bu yola bağlı değil. Bağlanana kadar durum
+        # açıkça bildirilir.
+        if self.ox_phase != 'liquid':
+            warn_list.append(
+                f"Oxidiser phase '{self.ox_phase}' is NOT modelled here: the "
+                "orifice sizing below uses the incompressible (SPI) model with "
+                "the liquid density, which is not valid for gas injection. "
+                "Treat these hole sizes as liquid-phase values.")
+
         if self.ox_phase == 'liquid':
             k_c = (self.P_tank - self.p_vapor_bar) / \
                 max(self.P_tank - self.P_c, 1e-9)

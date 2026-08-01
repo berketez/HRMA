@@ -2368,6 +2368,14 @@ class HybridRocketEngine:
                 'injection_pressure_drop_bar': oxc['delta_p_bar'],
                 'manifold_diameter_mm': oxc['manifold']['d_mm'],
                 'discharge_coefficient': oxc['cd'],
+                # v2.6.26 — ÖZET BLOK SAYIYI GEREKÇESİZ KOPYALIYORDU.
+                # Aynı yanıtta injector_design_detail.ox_circuit.cd_basis
+                # Cd'nin nereden geldiğini (giriş geometrisi + L/D tablosu)
+                # zaten yazıyor; özet blok yalnız sayıyı taşıyordu ve orada
+                # 0,78 gerekçesiz bir sabit gibi duruyordu. Metin YENİDEN
+                # YAZILMAZ, TEK kaynaktan (devre çözücüsü) okunur — iki yerde
+                # iki farklı gerekçe olamaz.
+                'discharge_coefficient_basis': oxc.get('cd_basis'),
                 'total_injector_area_mm2': oxc['total_area_mm2'],
             }
             basic_results['injector_design_detail'] = detail

@@ -549,7 +549,14 @@
                             <span class="tooltip-text" data-i18n="solid.ui.ratio_of_specific_heats_cp_cv">Ratio of specific heats (Cp/Cv) for combustion products. Typical values: 1.2-1.3. Higher values provide better nozzle expansion efficiency.</span>
                         </div>
                     </label>
-                    <input type="number" id="gamma" value="1.25" step="0.001">
+                    <!-- v2.6.26 — bant EKLENDİ. Alan min/max taşımıyordu;
+                         ölçüm aracı bandı bilmeyince motorun REDDETTİĞİ bir
+                         değere (1,875) sarsıp yalnız yankı görüyordu ve alan
+                         "yalnız-yankı" damgası alıyordu — oysa gamma 303
+                         fiziksel yaprağı oynatıyor. Bant motorun kendi kabul
+                         aralığı: solid_rocket_engine.py:1077
+                         `_override_val('gamma', 1.05, 1.5)`. -->
+                    <input type="number" id="gamma" value="1.25" step="0.001" min="1.05" max="1.5">
                 </div>
                 <div class="form-group">
                     <label>

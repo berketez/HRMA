@@ -811,14 +811,73 @@ def _plan_orifices(total_area_m2, constraints, warnings, n_fixed=None):
     return int(n), float(d)
 
 
-def _manifold(mdot, rho, v_orifice):
-    """Manifold boyutlandırma: hız oranı hedefi 0.1 → çap ve oranlar."""
-    v_man = MANIFOLD_V_RATIO_TARGET * v_orifice
-    a_man = mdot / max(rho * v_man, 1e-12)
+def _manifold(mdot, rho, v_orifice, a_orifice_m2):
+    """Manifold boyutlandırma: hedef hız oranından çap, sonra GERÇEKLENEN oran.
+
+    v2.6.26 KUSUR DÜZELTMESİ — TOTOLOJİ. Eski sürüm hızı
+    ``v_man = 0.1 * v_orifice`` ile KENDİSİ belirleyip hemen ardından
+    ``v_ratio = v_man / v_orifice`` yayımlıyordu: sonuç cebirsel olarak
+    DAİMA 0,1 idi. ``area_ratio`` ise hiç hesaplanmıyordu bile, doğrudan
+    ``1 / 0.1 = 10`` yazılıyordu. İkisi de kullanıcıya "gerçeklenen oran"
+    diye sunuluyor ama hiçbir şey ölçmüyordu. Üstelik ``MANIFOLD_V_RATIO_MAX``
+    ve ``MANIFOLD_AREA_RATIO_MIN`` bekçi sabitleri depo genelinde YALNIZ
+    tanımlandıkları satırda geçiyordu — hiçbir karşılaştırmaya girmeyen ölü
+    sabitlerdi.
+
+    Şimdi oranlar devrenin GERÇEKLENEN orifis akış alanına (``a_orifice_m2``
+    = n · π/4 · d², delik planı çözüldükten sonraki alan) göre hesaplanır:
+
+    * SPI devresinde A_orifis ≡ ṁ/(ρ·v_orifis) özdeşliği geçerlidir, dolayısıyla
+      oran hedefe BİREBİR eşit çıkar. Bu bir ölçüm değil bir özdeşliktir ve
+      ``v_ratio_is_tautological`` bayrağıyla açıkça öyle bildirilir
+      (``structural_analysis.safety_factor_is_tautological`` deseni).
+    * NHNE (N₂O) devresinde alan iki fazlı kütle akısından çözülür; orifisteki
+      GERÇEK sıvı hızı ``v_orifice`` değildir, bu yüzden oran hedeften ayrılır
+      (ölçüldü: a_man/a_orifis ≈ 7,2-7,6, hedef 10).
+
+    Her iki oran bekçi sınırlarıyla artık gerçekten KARŞILAŞTIRILIR ve sonuç
+    ``*_within_limit`` bayraklarıyla yayımlanır.
+    """
+    v_man_target = MANIFOLD_V_RATIO_TARGET * v_orifice
+    a_man = mdot / max(rho * v_man_target, 1e-12)
     d_man = np.sqrt(4.0 * a_man / np.pi)
-    return {'d_mm': float(d_man * 1e3), 'velocity_m_s': float(v_man),
-            'v_ratio': float(v_man / max(v_orifice, 1e-9)),
-            'area_ratio': float(1.0 / MANIFOLD_V_RATIO_TARGET)}
+    # Gerçeklenen kesitler: çap bir standart boru ölçüsüne yuvarlanırsa
+    # (bugün yuvarlanmıyor) buradan geri hesap hedeften ayrılır.
+    a_man_real = np.pi * d_man ** 2 / 4.0
+    v_man_real = mdot / max(rho * a_man_real, 1e-12)
+    a_orifice = max(float(a_orifice_m2), 1e-12)
+    v_orifice_real = mdot / max(rho * a_orifice, 1e-12)
+    v_ratio = float(v_man_real / max(v_orifice_real, 1e-9))
+    area_ratio = float(a_man_real / a_orifice)
+    tautological = bool(abs(v_ratio - MANIFOLD_V_RATIO_TARGET) < 1e-9)
+    return {
+        'd_mm': float(d_man * 1e3),
+        'velocity_m_s': float(v_man_real),
+        # GERÇEKLENEN oran: manifold kesitinden ve delik planının gerçek
+        # alanından geri hesap.
+        'v_ratio': v_ratio,
+        'v_ratio_basis': (
+            'achieved manifold/orifice velocity ratio, computed back from the '
+            'sized manifold area and the realised orifice flow area '
+            '(n*pi/4*d^2). In an SPI circuit A_orifice = mdot/(rho*v_orifice) '
+            'is an identity, so the achieved ratio reproduces the target '
+            f'{MANIFOLD_V_RATIO_TARGET:g} exactly; the NHNE (N2O) circuit '
+            'solves the area from the two-phase mass flux and does separate. '
+            f'Acceptance limit {MANIFOLD_V_RATIO_MAX:g} '
+            '(Huzel & Huang Ch. 4 manifold practice)'),
+        'v_ratio_is_tautological': tautological,
+        'v_ratio_within_limit': bool(v_ratio <= MANIFOLD_V_RATIO_MAX),
+        'v_ratio_target': float(MANIFOLD_V_RATIO_TARGET),
+        'v_ratio_target_is_target': True,
+        'area_ratio': area_ratio,
+        'area_ratio_basis': (
+            'achieved manifold cross-section area divided by the realised '
+            'orifice flow area; the reciprocal of the velocity ratio by '
+            f'continuity, so the design target is 1/{MANIFOLD_V_RATIO_TARGET:g}'
+            f' and the acceptance floor is {MANIFOLD_AREA_RATIO_MIN:g} '
+            '(Huzel & Huang Ch. 4)'),
+        'area_ratio_within_limit': bool(area_ratio >= MANIFOLD_AREA_RATIO_MIN),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1002,7 +1061,9 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
         'nhne': nhne_block,
         'cavitation_number': float(k_c),
         'hydraulic_flip_risk': flip,
-        'manifold': _manifold(mdot, rho, v_inj),
+        # Manifold oranları GERÇEKLENEN orifis alanına göre çözülür (a_total),
+        # yoksa oran kendi hedefinden geri hesaplanmış olur (bkz. _manifold).
+        'manifold': _manifold(mdot, rho, v_inj, a_total),
         '_rho': float(rho),  # iç kullanım (tip geometrisi); çıktıda kalır, zararsız
     }
 
@@ -1463,6 +1524,12 @@ def design_injector(spec):
         half = IMPINGE_HALF_ANGLE_DEG
         impingement = {
             'half_angle_deg': half,
+            # v2.6.26 beyan: açı bir TASARIM SEÇİMİdir, akıştan çözülmez.
+            'half_angle_deg_basis': (
+                f'2*theta = {2 * IMPINGE_HALF_ANGLE_DEG:.0f} deg impinging '
+                'doublet design choice; the half angle is a fixed element '
+                'geometry choice (NASA SP-8089), NOT solved from the jet '
+                'momentum or the spray field'),
             'free_jet_length_mm': float(FREE_JET_LD * d_ox_m * 1e3),
             'element_spacing_mm': float(ELEMENT_SPACING_D
                                         * max(d_ox_m, 1e-9) * 1e3),
@@ -1493,7 +1560,16 @@ def design_injector(spec):
             target = spec.get('target_velocity_ratio', 1.0)
             ok = MR_BAND[0] <= mr <= MR_BAND[1]
             momentum = {'momentum_ratio': float(mr), 'rupe_factor': float(rupe),
-                        'tmr': None, 'target': float(target), 'ok': bool(ok)}
+                        'tmr': None, 'target': float(target), 'ok': bool(ok),
+                        # v2.6.26 beyan: hedef bir TASARIM SEÇİMİdir; ölçülen
+                        # değer 'momentum_ratio' alanında ayrıca yayımlanır.
+                        'target_basis': (
+                            'balanced-doublet design target (momentum ratio '
+                            '= 1) unless the caller supplies '
+                            'target_velocity_ratio; the achieved value is '
+                            'reported separately as momentum_ratio, and the '
+                            f'acceptance band is {MR_BAND[0]:g}-{MR_BAND[1]:g}'
+                            ' (Rupe, JPL PR 20-195)')}
             if not ok:
                 warnings.append(_w(
                     'warn.injector.doublet_momentum_out_of_band', 'warning',
@@ -1517,7 +1593,11 @@ def design_injector(spec):
                 / max(mdot_fuel * v_f, 1e-12)
             ok = MR_BAND[0] <= tmr <= 2.0  # triplet doğal olarak O/F ile büyür
             momentum = {'momentum_ratio': None, 'rupe_factor': None,
-                        'tmr': float(tmr), 'target': 1.0, 'ok': bool(ok)}
+                        'tmr': float(tmr), 'target': 1.0, 'ok': bool(ok),
+                        'target_basis': (
+                            'balanced O-F-O triplet design target (total '
+                            'momentum ratio = 1); the achieved value is '
+                            'reported separately as tmr')}
             n_elements = max(1, min(ox['n_orifices'] // 2, fuel['n_orifices']))
             desc = (f"{n_elements} adet O-F-O triplet (dış 2×oks., orta yakıt), "
                     f"2θ={2*half:.0f}°")
@@ -1569,7 +1649,12 @@ def design_injector(spec):
         theta = pintle_spray_angle(tmr)
         momentum = {'momentum_ratio': None, 'rupe_factor': None,
                     'tmr': float(tmr), 'target': pin.get('tmr_target', 1.0),
-                    'ok': bool(0.5 <= tmr <= 2.0)}
+                    'ok': bool(0.5 <= tmr <= 2.0),
+                    'target_basis': (
+                        'pintle total-momentum-ratio design target (TMR = 1 '
+                        'unless the caller supplies tmr_target); the achieved '
+                        'value is reported separately as tmr and it sets the '
+                        'spray cone angle')}
         pintle_geometry = {
             'd_pintle_mm': float(d_p_m * 1e3),
             'skip_distance_mm': float(PINTLE_SKIP_LS_DP * d_p_m * 1e3),
@@ -1627,7 +1712,12 @@ def design_injector(spec):
         theta = pintle_spray_angle(tmr)
         momentum = {'momentum_ratio': None, 'rupe_factor': None,
                     'tmr': float(tmr), 'target': pin.get('tmr_target', 1.0),
-                    'ok': bool(0.5 <= tmr <= 2.0)}
+                    'ok': bool(0.5 <= tmr <= 2.0),
+                    'target_basis': (
+                        'pintle total-momentum-ratio design target (TMR = 1 '
+                        'unless the caller supplies tmr_target); the achieved '
+                        'value is reported separately as tmr and it sets the '
+                        'spray cone angle')}
         pintle_geometry = {
             'd_pintle_mm': float(d_p_m * 1e3),
             'skip_distance_mm': float(PINTLE_SKIP_LS_DP * d_p_m * 1e3),

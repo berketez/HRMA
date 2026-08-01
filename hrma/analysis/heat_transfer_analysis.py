@@ -34,6 +34,9 @@ from typing import Dict, List, Tuple, Optional
 from scipy.optimize import brentq
 
 from hrma.data.materials_db import build_materials_view
+# Malzeme kaydının YANITA konan biçimi (beyanlarıyla) — yapısal modülle TEK
+# ortak kaynak. İki modül aynı kaydı yayımladığı için metin tek yerde durur.
+from hrma.analysis.structural_analysis import published_material_record
 
 # Universal gas constant [J/(mol*K)] for frozen Cp / R_specific derivation.
 R_UNIVERSAL = 8314.462618  # J/(kmol*K) == J/(mol*K)*1000; here used with MW in g/mol
@@ -722,16 +725,25 @@ class HeatTransferAnalyzer:
             # Kullanicinin girdigi tasarim emniyet katsayisi DEGILDIR ama
             # ayni adi tasiyor: kullanici SF=6 girip bu alanda 4,0 gorunce
             # 'girdim yutuldu' diye okuyor. Deger dogru, sunum yaniltici.
-            'material_properties': dict(
-                mat_props,
-                safety_factor_basis=(
-                    'materials_db recommended design factor for this material - NOT the design safety factor entered by the user'),
-            ) if isinstance(mat_props, dict) else mat_props,
+            'material_properties': published_material_record(mat_props),
             'design_parameters': {
                 'material': material,
                 'wall_thickness': wall_thickness * 1000,  # mm
                 'cooling_type': cooling_type,
-                'ambient_temperature': ambient_temp
+                'ambient_temperature': ambient_temp,
+                # v2.6.26 — SABİT ÇIKTI BEYANI: bu bir GİRDİ YANKISIDIR,
+                # hesaplanmış bir sıcaklık değildir. Hibrit formunda karşılık
+                # gelen alan (ambient_temp) bulunmadığı için her koşuda
+                # modülün varsayılanında kalır ve sabit görünür.
+                'ambient_temperature_basis': (
+                    'ambient temperature INPUT echoed back in kelvin, not a '
+                    'computed result: it is the ambient_temp argument of the '
+                    'heat transfer analysis (request field "ambient_temp"). '
+                    'When the caller supplies nothing this module keeps its '
+                    'own default of 293.15 K, which is why the value can be '
+                    'the same in every run. The same number is read back by '
+                    'the structural chain so the two modules cannot assume '
+                    'different ambient conditions.'),
             }
         }
 
@@ -1543,6 +1555,15 @@ class HeatTransferAnalyzer:
             'heat_sink_delta_T_basis': heat_sink_basis,
             'heat_sink_temperature_limit_K': heat_sink_limit,
             'heat_sink_initial_temperature_K': float(ambient_temp),
+            # v2.6.26 — SABİT ÇIKTI BEYANI: ısı kuyusu ΔT'sinin ALT ucu, yani
+            # girdinin kendisi. Hesap değil, yankı.
+            'heat_sink_initial_temperature_basis': (
+                'starting (soak) temperature of the heat-sink mass: the '
+                'ambient_temp INPUT of this analysis, echoed back, not a '
+                'computed temperature. It is the lower end of '
+                'heat_sink_delta_T_K (limit minus initial); the module '
+                'default 293.15 K applies when the caller supplies no '
+                'ambient temperature.'),
             'cooling_efficiency': self._calculate_cooling_efficiency(cooling_type),
             'recommendations': self._get_cooling_recommendations(cooling_type, heat_rate)
         }

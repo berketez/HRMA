@@ -67,6 +67,24 @@ COOLING_CHANNEL_HEIGHT_DEFAULT_M = 2.0e-3
 COOLANT_CHANNEL_TARGET_VELOCITY_MS = 40.0
 # Frezeli kanal pratik derinlik üst sınırı (Huzel & Huang Ch. 4).
 COOLING_CHANNEL_HEIGHT_MAX_M = 10.0e-3
+# v2.6.26 BEYAN ÇÜRÜMESİ DÜZELTMESİ: eskiden tek bir
+# ``channel_section_source: 'design default (not auto-sized)'`` metni HEM
+# genişliği HEM derinliği anlatıyordu ve derinlik için YALAN söylüyordu —
+# derinlik hız hedefine göre otomatik boyutlanıyor (ölçüldü: 2 MN itkide
+# 6,70 mm). Üstelik beyan ``_calculate_thermal_protection_system`` bloğunda,
+# sayı ise ``cooling_system`` bloğundaydı: sayı bir yerde, gerekçesi başka
+# yerde. Artık iki AYRI metin var ve ikisi de kendi sayısının yanında duruyor.
+COOLING_CHANNEL_WIDTH_BASIS = (
+    'fixed design default channel width (Huzel & Huang Ch. 4, typical 1-3 mm '
+    'milled channel); NOT auto-sized and not a user input. The same width '
+    'also sets the geometric channel count through the throat circumference')
+COOLING_CHANNEL_HEIGHT_BASIS = (
+    'default channel height (depth), which IS auto-sized: when the resulting '
+    f'coolant velocity exceeds the {COOLANT_CHANNEL_TARGET_VELOCITY_MS:.0f} '
+    'm/s design target the depth is increased to meet it, up to the '
+    f'{COOLING_CHANNEL_HEIGHT_MAX_M * 1e3:.0f} mm milled-channel ceiling. It '
+    'stays at the default only while the velocity target is already met; the '
+    'channel_count_source field records when the auto-sizing actually fired')
 COOLING_CHANNEL_LAND_DEFAULT_M = 1.5e-3      # kanallar arası kaburga kalınlığı
 COOLING_CHANNEL_COUNT_MIN, COOLING_CHANNEL_COUNT_MAX = 4, 2000
 # İşlenmiş kanal yüzeyi mutlak pürüzlülüğü [m] (Ra 3.2 um, form varsayılanı).
@@ -110,6 +128,25 @@ VACUUM_REFERENCE_EPS = 200.0
 # adımının altına indirilir.
 OF_OPTIMUM_SCAN_BAND = (0.8, 8.0)
 OF_OPTIMUM_SCAN_POINTS = 25
+
+# KRİTİK Weber sayısı — damlacık aerodinamik parçalanma EŞİĞİ. Hesaplanan bir
+# Weber sayısı DEĞİLDİR; damlacık çapı bu eşikten geri çözülür:
+#     D = We_krit * sigma / (rho_gaz * v_bagil^2)
+# (Lefebvre & McDonell, "Atomization and Sprays" 2. baskı, Böl. 2). v2.6.26'ya
+# kadar çıktıya 'weber_number' adıyla basılıyordu ve AYNI yanıtta
+# injector_design_detail.*.weber_number GERÇEKTEN hesaplanan Weber sayısını
+# taşıyordu — aynı ad, iki anlam.
+CRITICAL_WEBER_NUMBER = 12
+CRITICAL_WEBER_NUMBER_BASIS = (
+    'critical Weber number, i.e. the droplet aerodynamic breakup threshold '
+    '(We_crit ~ 12 for low-viscosity liquids; Lefebvre & McDonell '
+    '"Atomization and Sprays" 2nd ed. Ch. 2). It is a breakup CRITERION, NOT '
+    'a computed Weber number - the field was called weber_number until '
+    'v2.6.26, which collided with the genuinely computed Weber number of the '
+    'injector module. It only drives the legacy fallback droplet estimate: '
+    'whenever injector_design solves, the reported droplet_diameter is that '
+    'module\'s SMD correlation (injector_design_detail.atomization) and this '
+    'threshold is a comparison value only')
 
 # ---------------------------------------------------------------------------
 # İMALAT BİLGİSİ (2026-07-28 dürüstlük denetimi, LIQ-MFG-4)
@@ -223,7 +260,18 @@ def _iso2768_feature(nominal_mm, grade=ISO2768_GRADE_PRECISION):
     if not np.isfinite(nominal) or nominal <= 0:
         return None
     entry = {'nominal_mm': round(nominal, 3), 'iso_grade': grade,
-             'tolerance_mm': _iso2768_linear_tolerance_mm(nominal, grade)}
+             'tolerance_mm': _iso2768_linear_tolerance_mm(nominal, grade),
+             # v2.6.26: sapma HESAPLANAN nominal ölçüden aranır ama standardın
+             # tablosu BASAMAKLIDIR — nominal aynı ölçü bandında kaldığı sürece
+             # sapma kıpırdamaz. Bu bir uydurma sabit değil, bir arama
+             # sonucudur; ayrımı okuyucu göremeyeceği için yazılı beyan edilir.
+             'tolerance_basis': (
+                 f'ISO 2768-1 general linear tolerance, grade {grade}, looked '
+                 'up for the computed nominal size. The standard is banded, '
+                 'so the tolerance is a step function of the nominal and stays '
+                 'constant while the nominal stays inside one size band. It is '
+                 'a workshop standard, NOT a performance-driven tolerance '
+                 'allocation')}
     if entry['tolerance_mm'] is None:
         entry['status'] = ('nominal size outside the ISO 2768-1 range '
                            '(0.5-4000 mm); tolerance must be specified '
@@ -388,7 +436,19 @@ BURN_TIME_MIN_S, BURN_TIME_MAX_S = 0.1, 100000.0
 
 # Besleme hattı: Darcy-Weisbach + yerel kayıp katsayıları.
 # K değerleri: Crane TP-410 / White "Fluid Mechanics" 7th ed. Table 6.5.
-FEED_LINE_LENGTH_DEFAULT_M = 2.5     # hat uzunluğu (feed_system ile aynı değer)
+#
+# v2.6.26 KUSUR (ÇİFT TANIM, kapatıldı): bu sabit basınç düşümüne giriyordu
+# (``_feed_line_pressure_drops``), ama ``_initialize_feed_system`` ekrana
+# çıkan hat boyunu AYRI bir ``2.5`` literaliyle yazıyordu. İkisi bugün aynı
+# sayıydı; biri değişse gösterilen boru boyu ile basınç düşümünün varsaydığı
+# boy SESSİZCE ayrışırdı. Artık tek tanım yeri burasıdır.
+FEED_LINE_LENGTH_DEFAULT_M = 2.5     # hat uzunluğu (TEK tanım yeri)
+FEED_LINE_LENGTH_BASIS = (
+    'assumed engine-to-tank run length; a layout assumption, NOT solved from '
+    'a vehicle geometry (HRMA has no stage layout model). Single definition '
+    'point FEED_LINE_LENGTH_DEFAULT_M - the same length also drives the '
+    'Darcy-Weisbach line pressure drop, so the displayed length and the '
+    'pressure drop cannot disagree')
 FEED_LINE_ROUGHNESS_M = 4.5e-5       # ticari çelik boru (White Table 6.1)
 FEED_K_TANK_OUTLET = 0.50            # keskin kenarlı tank çıkışı
 FEED_K_MAIN_VALVE = 0.15             # tam açık küresel/kelebek ana vana
@@ -400,6 +460,50 @@ FEED_LINE_TARGET_VELOCITY_MS = 5.0   # hat çapı boyutlandırma hedefi (3-8 m/s
 # NASA SP-125). Hat çapı standart boru ölçüsüne yuvarlandığı için gerçek hız
 # hedeften sapar; besleme sistemi debi marjı bu tavana göre raporlanır.
 FEED_LINE_MAX_VELOCITY_MS = 8.0
+
+# ---------------------------------------------------------------------------
+# Besleme sistemi TOPOLOJİSİ (v2.6.26)
+#
+# Aşağıdaki bileşen sayıları eskiden gövde içinde satır içi literaldi ve
+# "tasarım sonucu" gibi sunuluyordu. İkiye ayrıldılar:
+#
+#   1. TOPOLOJİK olanlar — iki itici devresi, iki gimbal ekseni ve ikili
+#      yedeklilik seçiminden ARİTMETİK OLARAK çıkarlar. Bunlar burada
+#      adlandırılmış mimari sabitlerden hesaplanır ve beyanla yayımlanır.
+#   2. HİÇBİR mimariden türemeyenler (basınç/sıcaklık/debi sensörü sayısı,
+#      çek vana sayısı, basınçlandırıcı şişe sayısı) — HRMA'da P&ID, ölçüm
+#      doğruluğu gereksinimi veya güvenilirlik hedefi MODELİ YOKTUR. Bunlara
+#      "mimari varsayımı" demek, ortada olmayan bir mimariyi beyan etmek
+#      olurdu; yanlış beyan beyansızlıktan kötüdür. Onlar None + NOT_MODELLED
+#      olarak yayımlanır (katı motorda kurulan desen).
+PROPELLANT_CIRCUIT_COUNT = 2         # oksitleyici + yakıt devresi
+GIMBAL_AXIS_COUNT = 2                # yunuslama + sapma
+CONTROL_REDUNDANCY = 2               # ikili yedekli (aktif + yedek)
+
+
+def _feed_topology_basis(alan_adi, tureme):
+    """Topolojik bileşen sayısı için beyan metni.
+
+    Metin, alanın ADINDAKİ sözcükleri geçirmek ZORUNDADIR: sınıflandırıcı
+    (``tools/sabit_siniflandirma.py::_kardes_beyan_var``) blok beyanlarını
+    jeton eşleşmesiyle kabul ediyor ve "havada" duran genel bir cümle bir
+    yaprağı aklamamalı. Bu yüzden tek bir ortak metin yerine alan başına
+    metin üretilir.
+    """
+    return (f'{alan_adi.replace("_", " ")}: {tureme} - a topological '
+            'consequence of the declared architecture, NOT a sized quantity: '
+            'no valve flow coefficient, actuator torque or reliability '
+            'allocation is solved anywhere in HRMA')
+
+
+FEED_INSTRUMENTATION_STATUS = 'NOT_MODELLED'
+FEED_INSTRUMENTATION_BASIS = (
+    'not calculated: HRMA has no P&ID, no measurement-accuracy requirement '
+    'and no reliability allocation, so a sensor count cannot be derived. The '
+    'previous values (8 pressure, 6 temperature, 4 flow sensors, 6 check '
+    'valves, 2 pressurant bottles) were fixed literals - identical for a '
+    '10 N thruster and a 2 MN booster - and are removed rather than '
+    'relabelled as an assumption')
 
 # Turbopompa benzerlik modeli (Huzel & Huang, "Modern Engineering for Design
 # of Liquid-Propellant Rocket Engines", Ch. 6; Stepanoff, "Centrifugal and
@@ -481,6 +585,12 @@ NOZZLE_TYPE_DEFAULT = 'bell_80'
 # daralma açısıdır (Huzel & Huang, "Modern Engineering for Design of
 # Liquid-Propellant Rocket Engines", Böl. 4; Sutton & Biblarz 9th ed. Böl. 3).
 CONVERGENT_HALF_ANGLE_DEG = 30.0
+CONVERGENT_HALF_ANGLE_BASIS = (
+    '30 deg standard convergent half angle (Huzel & Huang Ch. 4; Sutton & '
+    'Biblarz 9th ed. Ch. 3); a fixed design choice from the single definition '
+    'point CONVERGENT_HALF_ANGLE_DEG, NOT solved from the contraction contour '
+    '- the same angle also sets the convergent cone length used by the '
+    'cooling integration, so the two cannot disagree')
 # Tank boyutlandırma — TEK model (bkz. _size_tank). Besleme sistemi kartı ve
 # ayrıntılı tank tasarımı aynı iki sabiti kullanır; ayrı ayrı gömülüyken
 # (1.20 çarpanı vs 1.15 rezerv + %5 ullage) aynı koşuda iki farklı tank
@@ -488,6 +598,23 @@ CONVERGENT_HALF_ANGLE_DEG = 30.0
 # ullage: tankın sıvı DOLMAYAN hacim kesri (Huzel & Huang, Böl. 8).
 TANK_PROPELLANT_RESERVE_FACTOR = 1.15
 TANK_ULLAGE_FRACTION = 0.05
+TANK_RESERVE_BASIS = (
+    'TANK_PROPELLANT_RESERVE_FACTOR = 1.15 loaded/consumed propellant reserve '
+    '(Huzel & Huang Ch. 8); a sizing assumption for the safety margin, NOT a '
+    'mission-derived residual - HRMA has no mixture-ratio-shift, trapped-'
+    'propellant or flight-performance-reserve budget')
+TANK_ULLAGE_BASIS = (
+    'TANK_ULLAGE_FRACTION = 0.05 non-liquid ullage volume fraction of the '
+    'tank (Huzel & Huang Ch. 8); fixed, NOT solved from thermal expansion or '
+    'pressurant demand')
+# Silindirik tank boy/çap oranı. TEK tanım yeri (eskiden gövde içinde satır
+# içi 2.5 idi ve iki tank sözlüğüne ayrı ayrı yazılıyordu).
+TANK_LD_RATIO = 2.5
+TANK_LD_RATIO_BASIS = (
+    'length/diameter ratio L/D = 2.5, a structural-efficiency design choice '
+    'for a cylindrical tank; NOT optimised against buckling or vehicle '
+    'packaging - neither is modelled here. The tank diameter and length '
+    'follow from this ratio and the required volume')
 # --- Tank iç yapıları (bkz. _design_tank_internals) ------------------------
 # Bu blok GEOMETRİK ORANLAMA kurallarıdır, fiziksel yasa değildir; her biri
 # çıktıda kendi 'basis' etiketiyle bildirilir. Değerler eskiden fonksiyonun
@@ -528,6 +655,13 @@ TANK_DIFFUSER_AREA_RATIO = 2.0
 TANK_OUTLET_TO_LINE_D_RATIO = 1.30
 # Bir tank ağzı için borulama uzunluğu / ağız çapı (stub + flanş payı).
 TANK_PORT_STUB_LD = 3.0
+# --- Tank enstrümantasyonu (v2.6.26) ---------------------------------------
+# Bu iki kalem MİMARİ VARSAYIMIDIR; ölçüm doğruluğu, ullage çözünürlüğü ya da
+# güvenilirlik hedefi HRMA'da modellenmez. Seviye probu SAYISI ayrıca
+# yazılmaz: yerleşim listesinin uzunluğudur (tek tanım yeri), yoksa iki sayı
+# birbirinden habersiz kayabilir.
+TANK_PRESSURE_TRANSDUCER_COUNT = 2
+TANK_LEVEL_PROBE_POSITIONS = (0.25, 0.5, 0.75, 0.95)   # doluluk kesri
 # API RP 520 Part I sertifikalı emniyet vanası boşaltma katsayısı.
 RELIEF_VALVE_DISCHARGE_COEFF = 0.975
 # Emniyet vanası ayar basıncı / tank işletme basıncı (ASME VIII Div.1 UG-134:
@@ -1024,9 +1158,22 @@ class LiquidRocketEngine:
                 'temp_range_min', 'temp_range_max',
             ],
             # geçici rejim: bu sürümün tasarım-noktası çözücüsünde modellenmez
+            #
+            # v2.6.26 — 'min_throttle' BU LİSTEDEN ÇIKARILDI: beyan çürümüştü.
+            # Alan gerçekten kullanılıyor — kısma haritasında
+            # `min_throttle_pct` ve `min_throttle_chug_risk` üretiyor
+            # (ölçüldü: 20 girilince ikisi de değişiyor). Bekçi bunu
+            # "beyanlı ama canlı" diye yakaladı. Yanlış beyan, beyansızlıktan
+            # kötüdür: kullanıcıya "bu alan kullanılmıyor" diyorduk, oysa
+            # onun girdisiyle bir risk hükmü veriliyordu.
+            #
+            # KALAN EKSİK (ayrı iş): kısma tarama ızgarası
+            # THROTTLE_SCAN_FRACTIONS (0,40-1,00) kullanıcının min_throttle
+            # değerine UZANMIYOR. Yani "en derin kısmada chug riski" hükmü
+            # %40'ta değerlendirilmiş oluyor; kullanıcı %20 girse bile.
             'transient_not_modelled': [
                 'startup_sequence', 'engine_start_time',
-                'engine_shutdown_time', 'min_throttle', 'throttle_response',
+                'engine_shutdown_time', 'throttle_response',
                 'restart_capability', 'chill_down_time',
             ],
             # karşılaştırma amaçlı: çözücü kendi değerini hesaplar
@@ -1126,9 +1273,13 @@ class LiquidRocketEngine:
         """Kanal sayısı ve kesiti.
 
         Kanal sayısı: kullanıcı girdisi varsa o; yoksa GEOMETRİDEN
-        n = floor(pi·D_hazne / (w + land)) (sabit 80/180 değil). Kanal
-        genişliği/yüksekliği bu sürümde tasarım varsayılanıdır ve çıktıda
-        'channel_section_source' ile etiketlenir.
+        n = floor(pi·D_hazne / (w + land)) (sabit 80/180 değil).
+
+        Kesit: burada dönen değerler BAŞLANGIÇ değerleridir. Genişlik gerçekten
+        sabittir (``COOLING_CHANNEL_WIDTH_BASIS``); DERİNLİK ise çağıran
+        tarafında hız hedefine göre büyütülebilir
+        (``COOLING_CHANNEL_HEIGHT_BASIS`` + ``channel_height_auto_sized``).
+        İkisi tek bir beyanla anlatılamaz, bu yüzden iki ayrı metin taşınır.
         """
         width = COOLING_CHANNEL_WIDTH_DEFAULT_M
         height = COOLING_CHANNEL_HEIGHT_DEFAULT_M
@@ -1484,10 +1635,42 @@ class LiquidRocketEngine:
             # Pressurization system
             'pressurization': {
                 'type': 'gaseous_nitrogen' if self.feed_system_type == 'pressure_fed' else 'autogenous',
-                'pressurant_tanks': 2,  # number of pressurant bottles
-                'pressure_regulators': 4,  # ox_main, ox_backup, fuel_main, fuel_backup
-                'relief_valves': 4,  # safety pressure relief
-                'check_valves': 6   # prevent backflow
+                # Türemeyen sayılar KALDIRILDI (bkz. FEED_INSTRUMENTATION_BASIS).
+                'pressurant_tanks': None,
+                'pressurant_tanks_status': FEED_INSTRUMENTATION_STATUS,
+                'pressurant_tanks_basis': (
+                    'not calculated: the number of pressurant tanks needs a '
+                    'bottle volume and storage pressure choice, neither of '
+                    'which HRMA solves; the field was also meaningless for '
+                    'the autogenous configuration, which has no pressurant '
+                    'bottle at all'),
+                # Devre başına ana + yedek regülatör: ox_main, ox_backup,
+                # fuel_main, fuel_backup (kodun kendi eski yorumu buydu).
+                'pressure_regulators': (PROPELLANT_CIRCUIT_COUNT
+                                        * CONTROL_REDUNDANCY),
+                'pressure_regulators_basis': _feed_topology_basis(
+                    'pressure_regulators',
+                    f'a main and a backup regulator on each of the '
+                    f'{PROPELLANT_CIRCUIT_COUNT} propellant circuits '
+                    f'({PROPELLANT_CIRCUIT_COUNT} x {CONTROL_REDUNDANCY})'),
+                # Emniyet vanası sayısı artık ÇÖZÜCÜNÜN KENDİ modelinden:
+                # her itici tankı için _size_tank_relief_valve bir vana
+                # boyutlandırıyor. Eski literal 4 idi ve tank kartlarındaki
+                # 2 vanayla çelişiyordu.
+                'relief_valves': PROPELLANT_CIRCUIT_COUNT,
+                'relief_valves_basis': (
+                    'relief valves: one per propellant tank, matching the '
+                    'valve actually sized by _size_tank_relief_valve (API RP '
+                    '520 Part I critical gas flow) and reported under '
+                    'propellant_tanks.*.internal_structures.instrumentation.'
+                    'relief_valve. The previous literal 4 contradicted the '
+                    'tank cards, which carry exactly 2 sized valves'),
+                'check_valves': None,
+                'check_valves_status': FEED_INSTRUMENTATION_STATUS,
+                'check_valves_basis': (
+                    'not calculated: HRMA solves a single-branch line, not a '
+                    'flow network, so the number of check valves needed to '
+                    'prevent backflow cannot be derived'),
             },
             
             # Turbopump system (if applicable)
@@ -1497,7 +1680,10 @@ class LiquidRocketEngine:
             'feed_lines': {
                 'oxidizer_main': {
                     'diameter': self._calculate_line_diameter(mdot_ox, 'oxidizer'),  # m
-                    'length': 2.5,  # m (typical)
+                    # ÇİFT TANIM kapatıldı: boy artık basınç düşümünün
+                    # kullandığı sabitin ta kendisi.
+                    'length': FEED_LINE_LENGTH_DEFAULT_M,  # m
+                    'length_basis': FEED_LINE_LENGTH_BASIS,
                     'material': 'Stainless Steel 316L',
                     'insulation': True if self.oxidizer_type in ['lox', 'lh2'] else False,
                     'valves': ['isolation_valve', 'throttle_valve', 'shutoff_valve'],
@@ -1505,8 +1691,9 @@ class LiquidRocketEngine:
                 },
                 'fuel_main': {
                     'diameter': self._calculate_line_diameter(mdot_fuel, 'fuel'),  # m
-                    'length': 2.5,  # m
-                    'material': 'Stainless Steel 316L', 
+                    'length': FEED_LINE_LENGTH_DEFAULT_M,  # m
+                    'length_basis': FEED_LINE_LENGTH_BASIS,
+                    'material': 'Stainless Steel 316L',
                     'insulation': True if self.fuel_type in ['lh2', 'methane'] else False,
                     'valves': ['isolation_valve', 'throttle_valve', 'shutoff_valve'],
                     'filters': ['main_filter', 'fine_filter']
@@ -1515,15 +1702,46 @@ class LiquidRocketEngine:
             },
             
             # Control system
+            #
+            # v2.6.26: sayılar iki sınıfa ayrıldı. Devre/eksen/yedeklilik
+            # sayısından ARİTMETİK olarak çıkanlar hesaplanıp topoloji
+            # beyanıyla yayımlanır; hiçbir mimariden türemeyen sensör
+            # sayıları None + NOT_MODELLED olur.
             'control_system': {
-                'main_valves': 2,  # ox + fuel
-                'backup_valves': 2,
-                'throttle_valves': 2,
-                'gimbal_actuators': 2,  # pitch + yaw
-                'pressure_sensors': 8,
-                'temperature_sensors': 6,
-                'flow_sensors': 4,
-                'control_computers': 2,  # redundant
+                'main_valves': PROPELLANT_CIRCUIT_COUNT,      # ox + yakıt
+                'main_valves_basis': _feed_topology_basis(
+                    'main_valves',
+                    f'one shutoff valve per propellant circuit '
+                    f'({PROPELLANT_CIRCUIT_COUNT} circuits: oxidizer, fuel)'),
+                'backup_valves': PROPELLANT_CIRCUIT_COUNT,
+                'backup_valves_basis': _feed_topology_basis(
+                    'backup_valves',
+                    f'one backup valve per propellant circuit '
+                    f'({PROPELLANT_CIRCUIT_COUNT} circuits)'),
+                'throttle_valves': PROPELLANT_CIRCUIT_COUNT,
+                'throttle_valves_basis': _feed_topology_basis(
+                    'throttle_valves',
+                    f'one throttling valve per propellant circuit '
+                    f'({PROPELLANT_CIRCUIT_COUNT} circuits)'),
+                'gimbal_actuators': GIMBAL_AXIS_COUNT,        # yunuslama + sapma
+                'gimbal_actuators_basis': _feed_topology_basis(
+                    'gimbal_actuators',
+                    f'one actuator per gimbal axis ({GIMBAL_AXIS_COUNT} axes: '
+                    'pitch, yaw)'),
+                'control_computers': CONTROL_REDUNDANCY,      # yedekli
+                'control_computers_basis': _feed_topology_basis(
+                    'control_computers',
+                    f'{CONTROL_REDUNDANCY}x redundancy on the control '
+                    'computer (active plus standby)'),
+                'pressure_sensors': None,
+                'pressure_sensors_status': FEED_INSTRUMENTATION_STATUS,
+                'pressure_sensors_basis': FEED_INSTRUMENTATION_BASIS,
+                'temperature_sensors': None,
+                'temperature_sensors_status': FEED_INSTRUMENTATION_STATUS,
+                'temperature_sensors_basis': FEED_INSTRUMENTATION_BASIS,
+                'flow_sensors': None,
+                'flow_sensors_status': FEED_INSTRUMENTATION_STATUS,
+                'flow_sensors_basis': FEED_INSTRUMENTATION_BASIS,
                 'ignition_system': 'torch_igniter' if (self.fuel_type, self.oxidizer_type) in [('rp1', 'lox'), ('methane', 'lox')] else 'hypergolic'
             },
             
@@ -2891,12 +3109,17 @@ class LiquidRocketEngine:
             'convergent_length': L_conv * 1000,  # mm (boğaz öncesi koni)
             'divergent_length': L_div * 1000,  # mm (boğaz→çıkış)
             'convergent_half_angle_deg': CONVERGENT_HALF_ANGLE_DEG,
+            'convergent_half_angle_basis': CONVERGENT_HALF_ANGLE_BASIS,
             'cooled_channel_length': (chamber_length + nozzle_axial_length) * 1000,  # mm
             'chamber_surface_area': A_chamber,  # m² (hazne silindiri)
             'nozzle_surface_area': A_nozzle_total,  # m² (koni yanal, eğik uzunlukla)
             'cooling_channels': n_channels if coolant_flow > 0 else 0,
             'channel_width_mm': channel_width * 1000,
+            'channel_width_basis': COOLING_CHANNEL_WIDTH_BASIS,
             'channel_height_mm': channel_height * 1000,
+            'channel_height_basis': COOLING_CHANNEL_HEIGHT_BASIS,
+            'channel_height_auto_sized': bool(
+                channel_height > COOLING_CHANNEL_HEIGHT_DEFAULT_M + 1e-12),
             'channel_count_source': channel_source,
             'coolant_velocity': v_coolant,  # m/s (kanal içi, hesaplanmış)
             'coolant_reynolds': reynolds,
@@ -3366,9 +3589,19 @@ class LiquidRocketEngine:
         # gazi) yogunlugu ile tanimlanir; sivi yogunlugu kullanmak capi
         # ~140x kucultuyordu ve deger her kosulda 10 um tabanina yapisiyordu
         # (Lefebvre & McDonell 2nd ed., Bolum 2).
-        target_weber = 12
+        # v2.6.26 AD DÜZELTMESİ: bu sayı bir Weber SAYISI değil, KRİTİK Weber
+        # sayısıdır (damlacık parçalanma EŞİĞİ). Eskiden çıktıya
+        # 'weber_number' adıyla basılıyordu; aynı ad
+        # hrma/utils/injector_design.py'de GERÇEKTEN hesaplanan Weber sayısını
+        # taşıyor (app.js:2473 onu 'Weber Number' diye basıyor) — aynı ad, iki
+        # anlam. Ad artık ayrık: 'critical_weber_number'.
+        #
+        # Aşağıdaki damlacık çapı YEDEK tahmindir: injector_design modülü
+        # çözerse result['droplet_diameter'] modülün SMD korelasyonuyla
+        # EZİLİR. Beyan metni (CRITICAL_WEBER_NUMBER_BASIS) bunu söyler.
+        critical_weber = CRITICAL_WEBER_NUMBER
         rho_gas = (self.P_c * PA_PER_BAR) / ((R_UNIVERSAL / self.mw) * self.T_c)
-        droplet_diameter = target_weber * surface_tension / (rho_gas * (v_relative**2))
+        droplet_diameter = critical_weber * surface_tension / (rho_gas * (v_relative**2))
         # Makul fiziksel sinirlar: 10-500 mikron (tipik enjektor sprey araligi)
         droplet_diameter = min(max(droplet_diameter, 10e-6), 500e-6)
 
@@ -3459,7 +3692,8 @@ class LiquidRocketEngine:
             'combustion_efficiency': combustion_efficiency,
             'combustion_efficiency_source': combustion_efficiency_source,
             'droplet_diameter': droplet_diameter * 1e6,  # microns
-            'weber_number': target_weber,
+            'critical_weber_number': critical_weber,
+            'critical_weber_number_basis': CRITICAL_WEBER_NUMBER_BASIS,
             'mixing_residence_time': residence_time * 1000  # ms
         }
 
@@ -4203,6 +4437,7 @@ class LiquidRocketEngine:
             # (NOZZLE_TYPE_GEOMETRY; Sutton & Biblarz 9th ed., Fig. 3-14).
             'nozzle_angles': {
                 'convergent_half_angle_deg': CONVERGENT_HALF_ANGLE_DEG,
+                'convergent_half_angle_basis': CONVERGENT_HALF_ANGLE_BASIS,
                 'divergent_half_angle_deg': nozzle_geometry_table['half_angle'],
                 'exit_angle_deg': nozzle_geometry_table['exit_angle'],
                 'nozzle_type': getattr(self, 'nozzle_type', NOZZLE_TYPE_DEFAULT),
@@ -4246,7 +4481,9 @@ class LiquidRocketEngine:
                 'discharge_coefficient_fuel': injector['discharge_coefficient_fuel'],
                 'discharge_coefficient_ox': injector['discharge_coefficient_ox'],
                 'droplet_diameter_micron': injector['droplet_diameter'],
-                'weber_number': injector['weber_number'],
+                'critical_weber_number': injector['critical_weber_number'],
+                'critical_weber_number_basis':
+                    injector['critical_weber_number_basis'],
             },
 
             # --- Optimal Design Summary ---
@@ -4909,8 +5146,9 @@ class LiquidRocketEngine:
             self._size_tank(fuel_mass_nominal, 'fuel')
 
         # Tank dimensions (optimized for minimum surface area = sphere, but use cylinder for practicality)
-        # Length/Diameter ratio = 2.5 for good structural efficiency
-        ld_ratio = 2.5
+        # v2.6.26: satır içi 2.5 literali yerine TEK tanım yeri olan modül
+        # sabiti; oran çıktıda kendi gerekçesiyle yayımlanır.
+        ld_ratio = TANK_LD_RATIO
 
         # Oxidizer tank (larger, typically)
         ox_tank_diameter = (4 * ox_tank_volume / (np.pi * ld_ratio))**(1/3)
@@ -5033,7 +5271,8 @@ class LiquidRocketEngine:
                     'length': ox_tank_length * 1000,  # mm
                     'volume': ox_tank_volume * 1000,  # liters
                     'wall_thickness': ox_wall_thickness * 1000,  # mm
-                    'ld_ratio': ld_ratio
+                    'ld_ratio': ld_ratio,
+                    'ld_ratio_basis': TANK_LD_RATIO_BASIS
                 },
                 'propellant_data': {
                     'mass': ox_mass,  # kg
@@ -5066,7 +5305,8 @@ class LiquidRocketEngine:
                     'length': fuel_tank_length * 1000,  # mm
                     'volume': fuel_tank_volume * 1000,  # liters
                     'wall_thickness': fuel_wall_thickness * 1000,  # mm
-                    'ld_ratio': ld_ratio
+                    'ld_ratio': ld_ratio,
+                    'ld_ratio_basis': TANK_LD_RATIO_BASIS
                 },
                 'propellant_data': {
                     'mass': fuel_mass,  # kg
@@ -5098,7 +5338,9 @@ class LiquidRocketEngine:
                 'burn_time': burn_time,  # seconds
                 'burn_time_source': burn_time_source,
                 'safety_margin': (safety_margin - 1) * 100,  # %
+                'safety_margin_basis': TANK_RESERVE_BASIS,
                 'ullage_fraction': ullage_fraction * 100,  # %
+                'ullage_fraction_basis': TANK_ULLAGE_BASIS,
                 # Besleme sistemi kartı da bu modeli kullanır (_size_tank);
                 # iki kart artık aynı hacmi gösterir.
                 'sizing_model': ('single tank-sizing model: '
@@ -5173,6 +5415,12 @@ class LiquidRocketEngine:
             'diameter': av_diameter,                          # m
             'height': av_height,                              # m
             'vane_count': TANK_ANTIVORTEX_VANE_COUNT,
+            'vane_count_basis': (
+                'geometric proportioning choice: the vane count is a fixed '
+                'radial layout number, NOT sized against a swirl or drain '
+                'load. NASA SP-8004 vane sizing needs the outflow vortex '
+                'model, which is not solved here'),
+            'vane_count_load_sized': False,
             'vane_radial_length_mm': vane_radial_len * 1000.0,
             'vane_thickness': TANK_VANE_GAUGE_MM,             # mm
             'vane_thickness_basis': (
@@ -5243,6 +5491,17 @@ class LiquidRocketEngine:
                 'open_area_ratio': TANK_BAFFLE_OPEN_AREA_TARGET * 100.0,  # %
                 'open_area_ratio_is_target': True,
                 'open_area_ratio_achieved': open_area_achieved * 100.0,   # %
+                # ÖLÇÜLDÜ (v2.6.26): tank çapı 295 -> 3702 mm (12,5 kat)
+                # aralığında hole_count 50'de, gerçeklenen oran %14,9818'de
+                # sabit kalıyor. Bu bir uydurma sayı DEĞİL, ölçek
+                # değişmezliğinin sonucudur ve öyle beyan edilir.
+                'open_area_ratio_achieved_basis': (
+                    'scale-invariant by construction: the hole area and the '
+                    'ring annulus area both scale as D^2, so the achieved '
+                    'open area ratio does not change with tank size. Only the '
+                    'hole-row count and the target ratio move it; the residual '
+                    'gap to the target is the integer rounding of the hole '
+                    'count'),
                 'open_area_target_basis': (
                     'design target; NASA SP-8031 gives 10-30% open area for '
                     'perforated ring slosh baffles'),
@@ -5279,6 +5538,12 @@ class LiquidRocketEngine:
                 'type': 'Diffuser',
                 'diameter': d_inlet * 1000.0,                  # mm
                 'diffuser_angle': TANK_DIFFUSER_HALF_ANGLE_DEG,
+                # Gerekçe kaynak kodda vardı ama çıktıya hiç taşınmıyordu.
+                'diffuser_angle_basis': (
+                    f'{TANK_DIFFUSER_HALF_ANGLE_DEG:g} deg diffuser half '
+                    'angle for non-separating diffusion (Huzel & Huang Ch. 7; '
+                    'ESDU 73024 conical diffuser separation limit) - a design '
+                    'choice, NOT solved from the local flow'),
                 'diffuser_exit_diameter_mm': d_diffuser_exit * 1000.0,
                 'diffuser_length': diffuser_length * 1000.0,   # mm
                 'diffuser_length_basis': (
@@ -5322,13 +5587,31 @@ class LiquidRocketEngine:
         relief = self._size_tank_relief_valve(tank_pressure_pa, mdot,
                                               propellant_type)
 
+        # --- Enstrümantasyon -------------------------------------------------
+        # v2.6.26 beyanı: bu sayıların hiçbiri bir ölçüm gereksiniminden
+        # ÇÖZÜLMEZ. Prob YERLEŞİMİ tek tanım yeridir ve sayı ondan türer;
+        # ikisi ayrı yazılırsa biri değişince öteki sessizce yalan söyler.
+        level_probe_positions = TANK_LEVEL_PROBE_POSITIONS
         instrumentation = {
-            'pressure_transducers': 2,
+            'pressure_transducers': TANK_PRESSURE_TRANSDUCER_COUNT,
+            'pressure_transducers_basis': (
+                'redundancy architecture assumption (dual pressure '
+                'transducers per tank); NOT derived from a reliability target '
+                'or a measurement-accuracy requirement - HRMA models neither'),
             'temperature_sensors': 3 if self.fuel_type == 'lh2' else 1,
             'level_sensors': {
                 'type': 'Capacitive probes',
-                'count': 4,
-                'positions': [0.25, 0.5, 0.75, 0.95],
+                'count': len(level_probe_positions),
+                'count_basis': (
+                    'instrumentation architecture assumption: the count is '
+                    'the length of the declared probe position list '
+                    'TANK_LEVEL_PROBE_POSITIONS, NOT derived from a '
+                    'measurement-accuracy or ullage-resolution requirement'),
+                'positions': list(level_probe_positions),
+                'positions_basis': (
+                    'evenly spaced fill-fraction stations plus a near-full '
+                    'probe; a layout choice, not solved from a draining or '
+                    'sloshing model'),
             },
             'relief_valve': relief,
         }
@@ -6381,6 +6664,23 @@ class LiquidRocketEngine:
 
         Dönen sözlük 'throttle_map' anahtarıyla sonuca girer.
         """
+        # v2.6.26 — TARAMA KULLANICININ ALT SINIRINA UZANIR.
+        # Sabit ızgara %40'ta başlıyordu; kullanıcı min_throttle=%20 girse
+        # bile "en derin kısmada chug riski" hükmü %40'ta değerlendirilmiş
+        # oluyordu — yani kullanıcının sorduğu noktada hiç bakılmıyordu.
+        # Kullanıcı alt sınırı ızgaranın altındaysa o nokta taramaya EKLENİR
+        # (ızgaranın kendisi değişmez; yalnız bir nokta eklenir ki hüküm
+        # gerçekten sorulan yerde verilsin).
+        try:
+            _min_pct = self._override_val('min_throttle', 5.0, 100.0,
+                                          'Minimum throttle', ' %')
+        except Exception:
+            _min_pct = None
+        if _min_pct:
+            _min_frac = float(_min_pct) / 100.0
+            if _min_frac < min(fractions) - 1e-9:
+                fractions = tuple(sorted(set(fractions) | {_min_frac}))
+
         base_pc = float(self.P_c)
         dp_frac_design = float(self._injector_dp_fraction())
         eps = float(getattr(self, 'design_reference_expansion_ratio', 0)
@@ -7028,7 +7328,14 @@ class LiquidRocketEngine:
                 f"{cooling.get('channel_height_mm', 0):.1f} mm",
             'channel_count_source': cooling.get('channel_count_source',
                                                 'computed'),
-            'channel_section_source': 'design default (not auto-sized)',
+            # v2.6.26: tek metin iki farklı şeyi anlatamaz. Eski
+            # 'channel_section_source' genişlik ve derinliği birlikte "design
+            # default (not auto-sized)" ilan ediyordu; derinlik için bu YALANDI.
+            # Beyanlar ayrıldı ve sayının yanına taşındı (cooling_system).
+            'channel_width_basis': COOLING_CHANNEL_WIDTH_BASIS,
+            'channel_height_basis': COOLING_CHANNEL_HEIGHT_BASIS,
+            'channel_height_auto_sized': cooling.get(
+                'channel_height_auto_sized'),
             'coolant_velocity': cooling.get('coolant_velocity', 0.0),  # m/s
             'coolant_reynolds': cooling.get('coolant_reynolds', 0.0),
             'wall_temperature': t_hot,  # K (sıcak cidar tasarım hedefi)

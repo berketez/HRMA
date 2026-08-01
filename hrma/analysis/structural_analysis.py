@@ -43,6 +43,63 @@ ASME_SM_YIELD_DIVISOR = 1.5
 ASME_SHAKEDOWN_MULTIPLIER = 3.0
 
 
+def published_material_record(mat_props):
+    """materials_db kaydının YANITA konan biçimi — beyanlarıyla birlikte.
+
+    İki modül (yapısal analiz + ısı transferi) AYNI kaydı yayımlıyor. Metin
+    iki yerde yazılırsa biri güncellenip diğeri eskiyor; tek kaynak burasıdır.
+
+    Yayımlanan iki beyan:
+
+    ``safety_factor_basis``
+        Ad çakışması: ``safety_factor`` materials_db'nin bu malzeme için
+        ÖNERDİĞİ tasarım katsayısıdır (çelik 4,0; inconel 3,0), kullanıcının
+        girdiği tasarım emniyet katsayısı DEĞİLDİR. Değer doğru, sunum
+        yanıltıcıydı: kullanıcı SF=6 girip burada 4,0 görünce "girdim yutuldu"
+        diye okuyordu.
+
+    ``derating_curve``
+        v2.6.26 SABİT ÇIKTI DÜZELTMESİ. Eğri ham sözlük olarak
+        (``{20: 1.00, 200: 0.92, ...}``) yayımlanıyordu; JSON'da anahtar
+        metne dönüşünce yaprağın ADI sayının kendisi oluyordu
+        (``derating_curve.20``). 20 °C noktası HER malzemede tam 1.0
+        olduğundan bu yaprak her koşuda sabit çıkıyor, adı da hiçbir şey
+        anlatmadığı için neden sabit olduğu okunamıyordu. Artık adlandırılmış
+        iki dizi + gerekçe olarak yayımlanır. Hesap zinciri bu biçimi DEĞİL,
+        materials_db kaydının kendisini okur (``_derate_strength``,
+        ``pressure_vessel``); burada yalnız SUNUM değişir.
+    """
+    if not isinstance(mat_props, dict):
+        return mat_props
+    published = dict(
+        mat_props,
+        safety_factor_basis=(
+            'materials_db recommended design factor for this material - NOT '
+            'the design safety factor entered by the user'),
+    )
+    curve = mat_props.get('derating_curve')
+    if isinstance(curve, dict) and curve:
+        try:
+            points = sorted((float(t), float(r)) for t, r in curve.items())
+        except (TypeError, ValueError):
+            return published
+        published['derating_curve'] = {
+            'temperatures_c': [p[0] for p in points],
+            'yield_retention': [p[1] for p in points],
+            'basis': (
+                'tabulated yield-strength retention of this material versus '
+                'metal temperature, read from the materials_db record '
+                '(MMPDS / MIL-HDBK-5 derating pattern). temperatures_c and '
+                'yield_retention are DATABASE values, not computed from this '
+                'design; the first point is the room-temperature reference '
+                'where the retention is 1.0 by definition, because the curve '
+                'is normalised to the room-temperature yield strength. '
+                'Intermediate temperatures are linearly interpolated and the '
+                'ends are clamped.'),
+        }
+    return published
+
+
 def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
     """Yapılandırılmış iki-dilli uyarı/öneri kaydı (D-track sözleşmesi).
 
@@ -413,6 +470,20 @@ class StructuralAnalyzer:
             'applied_axial_stress_pressurized_MPa': (
                 applied_pressurized / 1e6
                 if np.isfinite(applied_pressurized) else float('inf')),
+            # v2.6.26 — SABİT ÇIKTI BEYANI. Bu alan sık sık TAM 0.0 çıkar ve
+            # okuyucu "hesaplanmadı" sanır; oysa hesaplanır ve TABANA KENETLİ
+            # (max(...,0)) çıkar: ic-basinc boylamsal cekmesi eksenel basmayi
+            # asinca net basma sifirdir.
+            'applied_axial_stress_pressurized_basis': (
+                'net axial compression in the pressurised load case: '
+                'max(thrust compression F/(2*pi*r*t) - internal pressure '
+                'longitudinal tension p*r/(2t), 0). A value of exactly zero '
+                'is the clamp, not a missing model: the pressure tension '
+                'exceeds the axial compression, so this load case cannot '
+                'buckle the shell and the unpressurised case governs. Both '
+                'contributors are published next to this field '
+                '(axial_compression_force_N, '
+                'pressure_stabilizing_stress_MPa).'),
             'applied_axial_stress_unpressurized_MPa': (
                 applied_unpressurized / 1e6
                 if np.isfinite(applied_unpressurized) else float('inf')),
@@ -629,15 +700,22 @@ class StructuralAnalyzer:
             # Kullanicinin girdigi tasarim emniyet katsayisi DEGILDIR ama
             # ayni adi tasiyor: kullanici SF=6 girip bu alanda 4,0 gorunce
             # 'girdim yutuldu' diye okuyor. Deger dogru, sunum yaniltici.
-            'material_properties': dict(
-                mat_props,
-                safety_factor_basis=(
-                    'materials_db recommended design factor for this material - NOT the design safety factor entered by the user'),
-            ) if isinstance(mat_props, dict) else mat_props,
+            'material_properties': published_material_record(mat_props),
             'design_parameters': {
                 'material': material,
                 'design_pressure': design_pressure / 1e5,  # bar
                 'design_pressure_factor': design_pressure_factor,
+                # v2.6.26 — SABİT ÇIKTI BEYANI. Bu çarpan çağıran motorun
+                # geçtiği bir SABİTTİR (hibritte hybrid_rocket_engine.py
+                # analyze_structure çağrısında design_pressure_factor=1.5) ve
+                # kullanıcının emniyet katsayısı DEĞİLDİR: ikisi çarpışır.
+                'design_pressure_factor_basis': (
+                    'design pressure = chamber pressure x this design '
+                    'pressure factor. The factor is passed in as a constant '
+                    'by the calling engine, it is NOT computed here and it is '
+                    'NOT the safety_factor entered by the user - it is a '
+                    'separate multiplier that compounds with it (proof/burst '
+                    'pressure margin over MEOP).'),
                 'wall_temperature_K': wall_temp_structural
             }
         }
@@ -841,6 +919,16 @@ class StructuralAnalyzer:
             'wall_thickness_used_mm': evaluated_thickness * 1000,
             'design_safety_factor_target': safety_factor,
             'manufacturing_allowance_factor': MANUFACTURING_ALLOWANCE_FACTOR,
+            # v2.6.26 — SABİT ÇIKTI BEYANI: bu çarpan bu tasarımdan
+            # hesaplanmaz, modül sabitidir (structural_analysis.py:35).
+            'manufacturing_allowance_factor_basis': (
+                'manufacturing allowance constant (structural_analysis.py '
+                'MANUFACTURING_ALLOWANCE_FACTOR): recommended thickness = '
+                'minimum thickness x this factor. It is NOT computed from '
+                'this design and it is NOT a safety factor - it is stock '
+                'tolerance, machining and corrosion allowance taken from '
+                'general tube/plate manufacturing practice (ASME BPVC VIII-1 '
+                'UG-25 corrosion-allowance pattern).'),
             'safety_factor_is_tautological': bool(design_mode == 'size'),
             'safety_factor_basis': (
                 'sized to allowable: SF = target_SF x manufacturing allowance '
@@ -1402,6 +1490,15 @@ class StructuralAnalyzer:
             'max_stress': sigma_max_pa / 1e6,    # MPa (σ_max)
             'mean_stress': sigma_m / 1e6,        # MPa (σ_m = σ_max/2)
             'stress_ratio_R': 0.0,               # basınç çevrimi 0→P→0
+            # v2.6.26 — SABİT ÇIKTI BEYANI: R tanım gereği sabittir, çünkü
+            # çevrim modeli 0→P→0 seçilmiştir (aşağıdaki 'assumptions').
+            'stress_ratio_R_basis': (
+                'stress ratio R = sigma_min/sigma_max is fixed at zero BY '
+                'THE CYCLE MODEL, not computed: every firing is treated as '
+                'one full 0 -> P -> 0 pressure cycle, so the minimum stress '
+                'is zero. If your duty cycle keeps the chamber pressurised '
+                'between firings (or preloads it), R is not zero and this '
+                'Goodman evaluation does not apply.'),
             'ultimate_strength': S_u / 1e6,      # MPa
             'goodman_utilization': goodman_utilization,  # σa/Se + σm/Su
             'cycle_margin': cycle_margin,        # tahmini ömür / tasarım çevrimi

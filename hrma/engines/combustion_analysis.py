@@ -361,6 +361,14 @@ class CombustionAnalyzer:
             'stoichiometric_of': of_stoich,
             'equivalence_ratio': of_stoich / of_ratio,
             'elemental_composition': elements,
+            # v2.6.26 — sifir degerler GERCEK hesap sonucudur, eksik
+            # veri degil: katalogdaki hibrit yakitlarin hicbiri metal
+            # icermedigi icin AL kesri 0 cikar. Metalize bir yakit
+            # secilirse (fuel_type='aluminum') 0'dan farkli olur.
+            'elemental_composition_basis': (
+                'computed mass fractions of the elemental composition; '
+                'a zero AL fraction is a real result - no catalogued '
+                'hybrid fuel contains aluminium'),
             'compositions': {
                 'chamber': chamber_composition,
                 'throat': throat_composition,
@@ -1748,5 +1756,13 @@ class CombustionAnalyzer:
             'base_thrust_sea_level': base_thrust,
             'max_thrust': max([p['thrust'] for p in thrust_data]),
             'max_thrust_altitude': thrust_data[np.argmax([p['thrust'] for p in thrust_data])]['altitude'],
+            # v2.6.26 — bu bir SONUÇ gibi duruyor ama tarama
+            # ızgarasının ucudur: sabit geometrili lülede itki irtifayla
+            # monoton arttığı için argmax daima son noktaya düşer.
+            # Kardeş 'max_thrust' gerçekten canlıdır.
+            'max_thrust_altitude_basis': (
+                'top of the altitude sweep grid, not an optimum: thrust '
+                'increases monotonically with altitude for a fixed-geometry '
+                'nozzle, so the argmax always lands on the last grid point'),
             'vacuum_thrust': thrust_data[-1]['thrust'] if thrust_data else 0
         }

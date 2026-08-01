@@ -242,6 +242,19 @@ GRAIN_STRESS_CONCENTRATION = {
 }
 
 # ---------------------------------------------------------------------------
+# Erozif yanma eşiği ve referans akısı — indirgenmiş Lenoir-Robillard
+# vekilinin TEK tanım noktası (bkz. _erosive_factor):
+#     G <= G_esik            -> r/r0 = 1 (erozif yanma yok)
+#     G >  G_esik            -> r/r0 = 1 + k * ((G-G_esik)/G_ref)^m * (D/Dc)^-0.2
+# Eşik davranışı Summerfield tipidir; sayı bir MODEL SABİTİDİR, motordan
+# hesaplanmaz. Kaynak: Sutton & Biblarz 9. baskı Böl. 12 (erozif yanma).
+# v2.6.26: aynı 100.0 hem çözücüde hem rapor bloğunda AYRI AYRI yazılıydı.
+# Biri değiştirilse rapor sessizce çözücüden başka bir eşik gösterirdi.
+# ---------------------------------------------------------------------------
+EROSIVE_THRESHOLD_KG_M2S = 100.0
+EROSIVE_REFERENCE_FLUX_KG_M2S = 400.0
+
+# ---------------------------------------------------------------------------
 # Desteklenen grain tipleri — TEK tanım noktası.
 # 2026-07-19 denetim bulgusu: calculate_burn_area yalnız bates/star/wagon_wheel
 # dallarını tanıyordu, GERİ KALAN HER tip (arayüzdeki 'finocyl' ve 'slotted'
@@ -2894,10 +2907,13 @@ class SolidRocketEngine:
             G = float(mass_flux)
         except (TypeError, ValueError):
             return 1.0
-        if not np.isfinite(G) or G <= 100.0:  # kg/m²s, Summerfield tipi eşik
+        # Eşik ve referans akı modül sabitidir (EROSIVE_THRESHOLD_KG_M2S /
+        # EROSIVE_REFERENCE_FLUX_KG_M2S); rapor bloğu AYNI sabiti yayımlar.
+        if not np.isfinite(G) or G <= EROSIVE_THRESHOLD_KG_M2S:
             return 1.0
         m_ero = getattr(self, 'erosive_exponent', 0.8)
-        reynolds_factor = ((G - 100.0) / 400.0) ** m_ero
+        reynolds_factor = ((G - EROSIVE_THRESHOLD_KG_M2S)
+                           / EROSIVE_REFERENCE_FLUX_KG_M2S) ** m_ero
         geom_factor = max(port_diameter_ratio, 0.05) ** -0.2
         return 1.0 + self.erosive_burning_coeff * reynolds_factor * geom_factor
 
@@ -3700,7 +3716,18 @@ class SolidRocketEngine:
                 'quality_requirements': {
                     'density_tolerance_percent': 2.0,
                     'void_content_max_percent': 0.5,
-                    'burn_rate_tolerance_percent': 5.0
+                    'burn_rate_tolerance_percent': 5.0,
+                    # v2.6.26 — BEYAN BLOĞUN KENDİSİNE KONDU. Üst blokta
+                    # (manufacturing_analysis.basis) benzer bir cümle vardı
+                    # ama üç seviye yukarıdaydı; bu üç sayıyı okuyan
+                    # kullanıcı onu görmüyordu.
+                    'basis': (
+                        'density tolerance, void content max and burn rate '
+                        'tolerance are a published general manufacturing '
+                        'acceptance band for composite solid propellant; NOT '
+                        'computed from this design and NOT a measured quality '
+                        'value of your batch. Agree the real limits with your '
+                        'test authority.'),
                 }
             },
             'case_manufacturing': {
@@ -4735,9 +4762,13 @@ class SolidRocketEngine:
                     'm_charge = P_ign*V_free/(R*T) / (1 - X_condensed). '
                     'P_ign is a DESIGN CHOICE ('
                     f'{fraction:.0%} of the chamber pressure, '
-                    f'{fraction_source}), not a computed quantity. Charge '
-                    f'gas properties from catalogue record "{charge_key}" '
-                    f'({rec.get("source", "propellants_db")}); condensed '
+                    f'{fraction_source}), not a computed quantity. The charge '
+                    'gas properties reported here - flame temperature and '
+                    'gas molecular weight in g/mol - are CATALOGUE VALUES of '
+                    f'the igniter charge record "{charge_key}" '
+                    f'({rec.get("source", "propellants_db")}); the charge is '
+                    'a fixed choice of this solver, so those two properties '
+                    'do not change with your motor design. Condensed '
                     f'mass fraction {float(x_condensed):.2f} from '
                     'SOLID_CONDENSED_MASS_FRACTION.'),
                 'model_limitation': (
@@ -5328,7 +5359,17 @@ class SolidRocketEngine:
                     f'T_ref={t_ref:.2f} K, n={n_exp:.3f}. Burn rate follows '
                     'r = r_ref*exp(sigma_p*dT); chamber pressure follows '
                     'Pc ~ r^(1/(1-n)). Isp shift is NOT computed (needs a CEA '
-                    'run at the shifted condition).'
+                    'run at the shifted condition). '
+                    # v2.6.26: docstring "aralık çıktıda AÇIKÇA yazılır"
+                    # diyordu ama yayımlanan metinde bandın ADI geçmiyordu;
+                    # okuyucu iki ham sayı görüp nereden geldiklerini
+                    # bilmiyordu. Söz artık tutuluyor.
+                    'The two ambient points are the qualification band '
+                    f'-20 C / +50 C ({t_cold:.2f} K / {t_hot:.2f} K), the '
+                    'common solid motor qualification range; it is a '
+                    'REPORTING CHOICE of this solver, not a limit computed '
+                    'from your design or taken from your own qualification '
+                    'plan.'
                     + ('' if sigma_p else
                        ' WARNING: the temperature coefficient is zero, so no '
                        'temperature sensitivity can be reported.')),
@@ -5701,7 +5742,17 @@ class SolidRocketEngine:
                 (np.nanmax(factors) - 1.0) * 100.0),
             'erosive_enhancement_mean_percent': float(
                 (np.nanmean(factors) - 1.0) * 100.0),
-            'erosive_threshold_kg_m2s': 100.0,
+            'erosive_threshold_kg_m2s': EROSIVE_THRESHOLD_KG_M2S,
+            # v2.6.26 — SABİT ÇIKTI BEYANI. Eşik motordan hesaplanmaz; ayrıca
+            # artık çözücüyle TEK sabiti paylaşır (eskiden iki ayrı 100.0).
+            'erosive_threshold_kg_m2s_basis': (
+                'model constant, not computed from this design: the port '
+                'mass flux below which no erosive burning is applied '
+                '(Summerfield-type threshold, Sutton & Biblarz 9th ed. '
+                'Ch.12). This is the SAME constant the burn-rate solver '
+                'uses, so the reported threshold cannot drift away from the '
+                'one that actually shaped the burn. Compare it with '
+                'mass_flux_max_kg_m2s to see whether your motor reaches it.'),
             'erosive_coefficient_k': float(self.erosive_burning_coeff),
             'erosive_exponent': float(getattr(self, 'erosive_exponent', 0.8)),
             # 'Moderate' sabit metni yerine hesaplanmış geometrik çarpan
@@ -5887,6 +5938,22 @@ class SolidRocketEngine:
             'grain_poisson_ratio': nu,
             'grain_thermal_expansion_1k': alpha,
             'grain_property_source': mech['source'],
+            # v2.6.26 — SABİT ÇIKTI BEYANI. Aşağıdaki dört alan (kürleme
+            # sıcaklığı, modül, Poisson oranı, termal genleşme) bu modelin
+            # GİRDİSİDİR, sonucu değildir: SOLID_GRAIN_MECHANICS kaydından
+            # gelirler ve motor girdileri değişince değişmezler. Kaydın
+            # künyesi 'grain_property_source' alanındadır.
+            'grain_property_basis': (
+                'the grain mechanical properties used by this model - cure '
+                'temperature, grain elastic modulus, grain poisson ratio and '
+                'grain thermal expansion - are read from the propellant '
+                'record in SOLID_GRAIN_MECHANICS (see grain_property_source '
+                'for the citation of that record). They are literature-band '
+                'INPUTS to the plane-strain solution, NOT computed from your '
+                'design and NOT measured on your batch, so they stay the same '
+                'when you change geometry or pressure. Measure your own '
+                'propellant before using the strain margin as an acceptance '
+                'criterion.'),
             # Kayıt bu yakıta AİT değilse hangi yakıttan devralındığı
             # burada açıkça yazar (sessiz devralma yasak).
             'grain_property_inherited_from': mech.get('inherited_from'),

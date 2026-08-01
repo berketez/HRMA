@@ -257,6 +257,10 @@ class NozzleDesigner:
             friction_efficiency=friction_efficiency,
             two_phase_efficiency=two_phase_efficiency,
             kinetic_efficiency=kinetic_efficiency,
+            # Kayıp modelinin GİRDİLERİ de aşağı geçer: iki-fazlı verimin
+            # gerekçesi yanıtta kesirle birlikte yayımlanabilsin.
+            particle_mass_fraction=particle_mass_fraction,
+            two_phase_loss_coeff=two_phase_loss_coeff,
         )
         
         # Geometric parameters — cidar kalınlığı basınç ve malzemeden gelir
@@ -505,7 +509,9 @@ class NozzleDesigner:
                                     divergence_efficiency: float = 1.0,
                                     friction_efficiency: float = 0.99,
                                     two_phase_efficiency: float = 1.0,
-                                    kinetic_efficiency: float = 0.995) -> Dict:
+                                    kinetic_efficiency: float = 0.995,
+                                    particle_mass_fraction: float = 0.0,
+                                    two_phase_loss_coeff: float = 0.12) -> Dict:
         """Calculate nozzle performance parameters
 
         gamma / R_specific / T_chamber: None → eski hardcoded varsayılanlar
@@ -657,7 +663,45 @@ class NozzleDesigner:
             # --- Ayrık kayıp bileşenleri (Sutton & Biblarz 9th ed. Ch.3) ---
             'divergence_efficiency': divergence_efficiency,    # lambda (geometrik)
             'friction_efficiency': friction_efficiency,        # sınır tabaka/sürtünme
+            # v2.6.26 — SABİT ÇIKTI BEYANI. Bu üç alan bu tasarımdan
+            # HESAPLANMAZ; ikisi model sabiti, biri girdi yankısıdır. Gerekçe
+            # design_nozzle() docstring'inde yazılıydı ama YANITA çıkmıyordu:
+            # kullanıcı 0.99'u hesaplanmış bir verim sanabiliyordu.
+            'friction_efficiency_basis': (
+                'model constant, not computed from this design. Sutton & '
+                'Biblarz 9th ed. Ch.3: 0.5-1.5% boundary-layer loss in a well '
+                'designed nozzle. The default friction_efficiency is '
+                'CALIBRATED so that the discrete loss model (lambda * '
+                'eta_friction * eta_2phase * eta_kinetic) reproduces the '
+                'validated legacy single-factor 0.98 at eps=100; it must NOT '
+                'be unified with '
+                'hrma.constants.NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT, which '
+                'belongs to a different loss split.'),
             'two_phase_efficiency': two_phase_efficiency,      # partikül (1.0 = gaz-faz)
+            'two_phase_efficiency_basis': (
+                'eta_2phase = 1 - k * particle_mass_fraction, where '
+                'particle_mass_fraction is the condensed-phase (particle) '
+                'mass fraction reported next to this field and k is the '
+                'first-order two-phase loss coefficient (Sutton & Biblarz '
+                '9th ed. sec. 3.5). A gas-phase hybrid or liquid engine '
+                'carries no metal, so the fraction is zero and the two phase '
+                'efficiency is exactly 1 BY DEFINITION - no loss is modelled. '
+                'It drops below 1 only for metallised solid propellant.'),
+            # Beyanın okunabilir olması için kesrin KENDİSİ de yayımlanır:
+            # 1.0'ın nereden geldiği aksi hâlde yanıtta görünmüyordu.
+            'particle_mass_fraction': float(particle_mass_fraction),
+            'particle_mass_fraction_basis': (
+                'condensed-phase (particle, e.g. Al2O3) mass fraction passed '
+                'in by the calling engine; zero means no metal loading is '
+                'modelled. This is an INPUT to the two-phase loss model, not '
+                'a combustion result of this design.'),
+            'two_phase_loss_coeff': float(two_phase_loss_coeff),
+            'two_phase_loss_coeff_basis': (
+                'first-order two-phase loss coefficient k in eta = 1 - k*phi; '
+                'model constant from the Sutton & Biblarz particle-flow band '
+                '(Al2O3 around 30% mass fraction gives a 2-4% Isp loss), not '
+                'computed here. Use a CEA two-phase solution for a metallised '
+                'propellant.'),
             'kinetic_efficiency': kinetic_efficiency,          # kimyasal kinetik
             'pressure_ratio': pressure_ratio,
             'expansion_ratio': expansion_ratio,

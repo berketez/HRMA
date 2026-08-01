@@ -802,7 +802,14 @@
                             <span class="tooltip-text" data-i18n="liq.ui.percentage_of_theoretical_combustion_achieved_ac">Percentage of theoretical combustion achieved. Accounts for incomplete mixing, finite reaction time, heat losses. Well-designed engines: 95-99%. Affects c* and Isp directly.</span>
                         </div>
                     </label>
-                    <input type="number" id="combustion_efficiency" value="97" step="0.1" min="0.5" max="1">
+                    <!-- v2.6.26 — SINIRLAR KENDİ VARSAYILANIYLA ÇELİŞİYORDU:
+                         value="97" (yüzde) ama min="0.5" max="1" (kesir).
+                         Tarayıcı bu yüzden alanı hiç sarsamıyordu
+                         ("ölçülemedi") ve tarayıcıda 97 yazan bir alan HTML
+                         doğrulamasına göre geçersizdi. Bant motorun kendi
+                         kabul aralığına hizalandı: liquid_rocket_engine.py:790
+                         `_override_val('combustion_efficiency', 50.0, 100.0)`. -->
+                    <input type="number" id="combustion_efficiency" value="97" step="0.1" min="50" max="100">
                 </div>
             </div>
         </div>
@@ -882,7 +889,13 @@
                             <span class="tooltip-text" data-i18n="liq.ui.combined_efficiency_of_turbine_and_pump">Combined efficiency of turbine and pump. Modern turbopumps: 65-85%. Higher efficiency reduces power requirements and improves overall engine performance.</span>
                         </div>
                     </label>
-                    <input type="number" id="turbopump_efficiency" value="75" step="1">
+                    <!-- v2.6.26 — bant EKLENDİ (bkz. solid.html gamma alanı,
+                         aynı sınıf). Bant yokken sarsım 112,5'e gidiyordu;
+                         motor onu reddedip 75'te kalıyor ve alan "yalnız-yankı"
+                         görünüyordu. Oysa 40 veya 85 verildiğinde 195 fiziksel
+                         yaprak oynuyor. Bant: liquid_rocket_engine.py:884
+                         `_override_val('turbopump_efficiency', 20.0, 95.0)`. -->
+                    <input type="number" id="turbopump_efficiency" value="75" step="1" min="20" max="95">
                 </div>
                 <div class="form-group">
                     <label>

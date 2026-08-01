@@ -63,49 +63,59 @@ p.note{color:var(--dim);font-size:13px;line-height:1.7}
 </style></head><body>
 <div class="wrap">
   <h1 style="font-size:20px">HRMA bağlama haritası</h1>
-  <p class="meta">ölçüm: 2026-08-01 00:42</p>
+  <p class="meta">ölçüm: 2026-08-02 02:10</p>
   <div class="cards">
-        <a class="card warn" href="wiring_map_hybrid.html">
+        <a class="card ok" href="wiring_map_hybrid.html">
           <h2>hybrid</h2>
-          <div class="big">50</div>
+          <div class="big">52</div>
           <div class="lbl">alan ölçüldü</div>
           <div class="tags">
-            <span>49 bağlı</span>
+            <span>51 bağlı</span>
             <span class="bad">0 ölü</span>
-            <span class="amb">1 yankı</span>
-            <span class="amb">290 sabit çıktı</span>
+            <span class="amb">1 yankı (beyanlı)</span>
           </div>
-          <div class="badge">1 sorunlu alan</div>
+          <div class="tags">
+            <span>216 sabit açıklandı</span>
+            <span class="ok">0 sınıflandırılmamış</span>
+          </div>
+          <div class="badge">temiz</div>
         </a>
-        <a class="card warn" href="wiring_map_liquid.html">
+        <a class="card ok" href="wiring_map_liquid.html">
           <h2>liquid</h2>
-          <div class="big">46</div>
+          <div class="big">48</div>
           <div class="lbl">alan ölçüldü</div>
           <div class="tags">
-            <span>38 bağlı</span>
+            <span>41 bağlı</span>
             <span class="bad">0 ölü</span>
-            <span class="amb">8 yankı</span>
-            <span class="amb">156 sabit çıktı</span>
+            <span class="amb">7 yankı (beyanlı)</span>
           </div>
-          <div class="badge">8 sorunlu alan</div>
+          <div class="tags">
+            <span>117 sabit açıklandı</span>
+            <span class="ok">0 sınıflandırılmamış</span>
+          </div>
+          <div class="badge">temiz</div>
         </a>
-        <a class="card warn" href="wiring_map_solid.html">
+        <a class="card ok" href="wiring_map_solid.html">
           <h2>solid</h2>
-          <div class="big">53</div>
+          <div class="big">57</div>
           <div class="lbl">alan ölçüldü</div>
           <div class="tags">
-            <span>49 bağlı</span>
+            <span>54 bağlı</span>
             <span class="bad">0 ölü</span>
-            <span class="amb">4 yankı</span>
-            <span class="amb">220 sabit çıktı</span>
+            <span class="amb">3 yankı (beyanlı)</span>
           </div>
-          <div class="badge">4 sorunlu alan</div>
+          <div class="tags">
+            <span>210 sabit açıklandı</span>
+            <span class="ok">0 sınıflandırılmamış</span>
+          </div>
+          <div class="badge">temiz</div>
         </a></div>
   <p class="note">Bu harita ÖLÇÜMDEN üretilir, elle düzenlenmez. Her alan
   gerçek bir hesap koşularak sarsılır ve yanıtın hangi dallarının değiştiği
   kaydedilir. Kod değişince <code>python3 tools/wiring_map.py</code> ile
   yeniden üretilir.<br><br>
-  Sabit çıktı sayısı bir BULGU değil, BAKILACAK YER'dir: yalnız ölçülen
-  alanlar için anlamlıdır, sarsılmayan bir girdinin etkilediği çıktı da
-  orada sabit görünür.</p>
+  Sabitler sınıflandırılır (ızgara / standart / tanım / beyanlı / kopya);
+  izlenen tek sayı <b>sınıflandırılmamış</b>, hedefi sıfırdır.
+  Sınıfların tanımı: <code>tools/sabit_siniflandirma.py</code>.<br>
+  Toplam sınıflandırılmamış: <b>0</b></p>
 </div></body></html>

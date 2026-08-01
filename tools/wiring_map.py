@@ -135,6 +135,14 @@ CONTEXTS = {
                         'star_fillet': 3},
         'fin_length': {'grain_type': 'finocyl', 'fin_count': 6,
                        'fin_length': 25},
+        # v2.6.26 — kapak cıvatası ÖLÇÜSÜ ve SINIFI yalnız cıvata SAYISI
+        # verildiğinde anlamlıdır: sayı boşsa çözücü bağlantıyı bilinçli
+        # olarak 'not_sized' bırakır ve hiçbir yaprak oynamaz. Dal
+        # kurulmadan ölçülünce ikisi de YALANCI ÖLÜ görünüyordu.
+        'closure_bolt_size': {'closure_bolt_count': 6,
+                              'closure_bolt_size': 'M10'},
+        'closure_bolt_class': {'closure_bolt_count': 6,
+                               'closure_bolt_class': '12.9'},
     },
     'liquid': {
         # Çevrime özgü alanlar kendi çevrimiyle ölçülür: basınç beslemeli
@@ -550,6 +558,28 @@ def build_html(page: str, report, inv, template_of_payload, generated_at: str) -
     for c in constants:
         pid(c)
 
+    # v2.6.26 — SABİT YAPRAKLAR SINIFLANDIRILIR.
+    # "207 sabit çıktı" tek başına hüküm taşımıyordu; bir kısmı tarama
+    # ızgarası, bir kısmı ISA atmosferi, bir kısmı beyanlı. Sınıflandırınca
+    # geriye tek anlamlı rakam kalıyor: kaç yaprağın NEDEN sabit olduğunu
+    # bilmiyoruz. Kapı ona bağlanabilir.
+    from sabit_siniflandirma import siniflandir_hepsi
+    _sinif = siniflandir_hepsi(report.constant_outputs, report.baseline_leaves)
+    _sinif_of: Dict[int, str] = {}
+    _gerekce_of: Dict[int, str] = {}
+    for _yol, _s, _g in _sinif['kalemler']:
+        _cid = path_id.get(collapse(_yol))
+        if _cid is None:
+            continue
+        # Çökertilmiş yol birden çok yaprağı temsil edebilir; en KÖTÜ sınıf
+        # kazanır ki iyi kardeşler belirsiz olanı gizlemesin.
+        if _sinif_of.get(_cid) != 'SINIFLANDIRILMAMIS':
+            _sinif_of[_cid] = _s
+            _gerekce_of[_cid] = _g
+    _sinif_sayim: Dict[str, int] = {}
+    for _s in _sinif_of.values():
+        _sinif_sayim[_s] = _sinif_sayim.get(_s, 0) + 1
+
     fields = [{'payload': payload, 'template': template}
               for payload, template in sorted(template_of_payload.items())]
 
@@ -563,13 +593,19 @@ def build_html(page: str, report, inv, template_of_payload, generated_at: str) -
         'unmeasurable': report.unmeasurable,
         'constants': [path_id[c] for c in constants],
         'byField': by_field,
+        'constClass': _sinif_of,
+        'constWhy': _gerekce_of,
+        'constCounts': _sinif_sayim,
     }
     payload_json = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
 
     measured = (len(report.live_inputs) + len(report.dead_inputs)
                 + len(report.echo_only_inputs))
+    _belirsiz = _sinif_sayim.get('SINIFLANDIRILMAMIS', 0)
     meta = (f'{page} &middot; {measured} alan ölçüldü &middot; '
-            f'{report.baseline_leaf_count} çıktı yaprağı &middot; {generated_at}')
+            f'{report.baseline_leaf_count} çıktı yaprağı &middot; '
+            f'{len(constants)} sabit '
+            f'({_belirsiz} sınıflandırılmamış) &middot; {generated_at}')
 
     return f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8">
@@ -603,14 +639,25 @@ def build_html(page: str, report, inv, template_of_payload, generated_at: str) -
 
 def build_index(written, generated_at: str) -> str:
     """Üç sayfanın giriş sayfası."""
+    from sabit_siniflandirma import siniflandir_hepsi
     cards = []
+    toplam_belirsiz = 0
     for page, out, rep in written:
         measured = (len(rep.live_inputs) + len(rep.dead_inputs)
                     + len(rep.echo_only_inputs))
-        problems = len(rep.dead_inputs) + len(rep.echo_only_inputs)
-        badge = ('temiz' if problems == 0
-                 else f'{problems} sorunlu alan')
+        # v2.6.26 — "sorunlu alan" sayısına YANKI dahil edilmiyor artık.
+        # Beyanı olan yankı bir sorun değil; beyanı OLMAYAN yankı zaten
+        # ölçümde `declared_but_live` ya da beyan listesinin dışında görünür.
+        # Kartın kırmızı/sarı olması ölü alan ve beyan çürümesine bakar.
+        problems = len(rep.dead_inputs) + len(rep.unmeasurable) \
+            + len(rep.declared_but_live)
+        _s = siniflandir_hepsi(rep.constant_outputs, rep.baseline_leaves)
+        belirsiz = _s['sayim'].get('SINIFLANDIRILMAMIS', 0)
+        toplam_belirsiz += belirsiz
+        aciklanan = len(rep.constant_outputs) - belirsiz
+        badge = ('temiz' if problems == 0 else f'{problems} sorunlu alan')
         cls = 'ok' if problems == 0 else 'warn'
+        belirsiz_cls = 'ok' if belirsiz == 0 else 'bad'
         cards.append(f"""
         <a class="card {cls}" href="{html.escape(out.name)}">
           <h2>{html.escape(page)}</h2>
@@ -619,8 +666,11 @@ def build_index(written, generated_at: str) -> str:
           <div class="tags">
             <span>{len(rep.live_inputs)} bağlı</span>
             <span class="bad">{len(rep.dead_inputs)} ölü</span>
-            <span class="amb">{len(rep.echo_only_inputs)} yankı</span>
-            <span class="amb">{len(rep.constant_outputs)} sabit çıktı</span>
+            <span class="amb">{len(rep.echo_only_inputs)} yankı (beyanlı)</span>
+          </div>
+          <div class="tags">
+            <span>{aciklanan} sabit açıklandı</span>
+            <span class="{belirsiz_cls}">{belirsiz} sınıflandırılmamış</span>
           </div>
           <div class="badge">{badge}</div>
         </a>""")
@@ -651,9 +701,10 @@ p.note{{color:var(--dim);font-size:13px;line-height:1.7}}
   gerçek bir hesap koşularak sarsılır ve yanıtın hangi dallarının değiştiği
   kaydedilir. Kod değişince <code>python3 tools/wiring_map.py</code> ile
   yeniden üretilir.<br><br>
-  Sabit çıktı sayısı bir BULGU değil, BAKILACAK YER'dir: yalnız ölçülen
-  alanlar için anlamlıdır, sarsılmayan bir girdinin etkilediği çıktı da
-  orada sabit görünür.</p>
+  Sabitler sınıflandırılır (ızgara / standart / tanım / beyanlı / kopya);
+  izlenen tek sayı <b>sınıflandırılmamış</b>, hedefi sıfırdır.
+  Sınıfların tanımı: <code>tools/sabit_siniflandirma.py</code>.<br>
+  Toplam sınıflandırılmamış: <b>{toplam_belirsiz}</b></p>
 </div></body></html>"""
 
 

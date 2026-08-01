@@ -130,6 +130,12 @@ class TrajectoryAnalyzer:
         self.parachute_area = None          # m² (izdüşüm alanı)
         self.parachute_cd = DEFAULT_PARACHUTE_CD
         self.parachute_deploy_delay = DEFAULT_PARACHUTE_DEPLOY_DELAY_S
+        # v2.6.26 — Cd ve gecikme için de "kullanıcı verdi mi" bayrağı.
+        # Alan için `parachute_area is None` bu bilgiyi taşıyordu; Cd ve
+        # gecikmenin varsayılanı sayısal olduğu için ayırt edilemiyordu ve
+        # varsayım SESSİZ kalıyordu.
+        self._parachute_cd_supplied = False
+        self._parachute_delay_supplied = False
 
         # Bu koşuda üretilen uyarılar ({code, params, severity})
         self.warnings = []
@@ -156,6 +162,7 @@ class TrajectoryAnalyzer:
                 c = float('nan')
             if np.isfinite(c) and c > 0.0:
                 self.parachute_cd = c
+                self._parachute_cd_supplied = True
         if deploy_delay is not None:
             try:
                 t = float(deploy_delay)
@@ -163,6 +170,7 @@ class TrajectoryAnalyzer:
                 t = float('nan')
             if np.isfinite(t) and t >= 0.0:
                 self.parachute_deploy_delay = t
+                self._parachute_delay_supplied = True
 
     def set_vehicle_parameters(self, mass_dry: float, diameter: float,
                                drag_coefficient: float = 0.5, length: float = 2.0):
@@ -368,10 +376,43 @@ class TrajectoryAnalyzer:
             ('parachute_deploy_delay', 'parachute_deploy_delay',
              DEFAULT_PARACHUTE_DEPLOY_DELAY_S),
         )
+        # v2.6.26 — SIFIRLAMA KOŞULSUZ.
+        #
+        # Ölçülmüş hata: bu blok eskiden yalnız launch_params'ta paraşüt
+        # anahtarı VARSA çalışıyordu, üstelik yalnız VERİLEN anahtarları
+        # sıfırlıyordu. TrajectoryAnalyzer app.py:667'de modül düzeyinde TEKİL
+        # nesne olduğu için, bir istekte verilen paraşüt bir SONRAKİ isteğe
+        # sızıyordu. Ölçüm (aynı süreçte ardışık istekler):
+        #     1. taban                  -> iniş 22,62 m/s, assumed=True
+        #     2. parachute_area=9.0     -> iniş 10,65 m/s, assumed=False
+        #     3. taban (1'in AYNISI)    -> iniş 10,65 m/s, assumed=False
+        # Yani birebir aynı istek %53 farklı sonuç veriyor ve `_assumed`
+        # bayrağı uydurulmuş değeri "kullanıcı verdi" diye işaretliyor —
+        # yanlış sayıdan da kötüsü, DÜRÜSTLÜK BAYRAĞININ kendisi bozuluyor.
+        # Masaüstü paketinde süreç ömrü boyunca sürer; sunucuda kullanıcılar
+        # arasında sızar.
+        #
+        # Muhafız çağıranın davranışına bağlı kalmamalı: her koşuda önce
+        # varsayılana dönülür, sonra istekte NE VARSA o uygulanır.
+        # (set_recovery_parameters None'ı zaten doğru işliyor: :146-165.)
+        # KOŞULLU sıfırlama — programatik sözleşme korunur.
+        #
+        # `set_recovery_parameters` bir API'dir: kullanıcı onu çağırıp değer
+        # bıraktıysa, sonraki `calculate_trajectory` o değeri KORUMALIDIR
+        # (test_trajectory_physics_v262::test_setter_value_survives_when_key_absent
+        # bunu sözleşme olarak kilitliyor). Bu yüzden burada koşulsuz
+        # sıfırlamak yanlış: paylaşılan nesnedeki sızıntı bu metodun değil,
+        # NESNENİN PAYLAŞILMASININ sorunuydu ve orada çözüldü — app.py artık
+        # her istekte taze analizör kuruyor.
+        #
+        # Kalan iş: launch_params kurtarma anahtarı taşıyorsa ÜÇÜNÜ BİRDEN
+        # sıfırla. Eski kod yalnız VERİLEN anahtarı sıfırlıyordu; bir istekte
+        # alan, sonrakinde Cd verilince alan hâlâ eskisinden kalıyordu.
         if any(k in launch_params for k, _a, _d in _recovery_defaults):
-            for key, attr, default in _recovery_defaults:
-                if key in launch_params:
-                    setattr(self, attr, default)
+            for _key, attr, default in _recovery_defaults:
+                setattr(self, attr, default)
+            self._parachute_cd_supplied = False
+            self._parachute_delay_supplied = False
             self.set_recovery_parameters(
                 parachute_area=launch_params.get('parachute_area'),
                 parachute_cd=launch_params.get('parachute_cd'),
@@ -646,9 +687,18 @@ class TrajectoryAnalyzer:
         mass = apogee_state[4]  # constant during descent
 
         # Kurtarma parametrelerinin çözümü
+        #
+        # v2.6.26 — VARSAYIM BAYRAĞI ÜÇÜ İÇİN DE. Eskiden yalnız ALAN için
+        # `_assumed` bayrağı ve uyarı üretiliyordu; Cd ve açılma gecikmesi
+        # sessizce varsayılana düşüyordu. Ölçüldü: aynı paraşüt alanında
+        # Cd beyan edilmediği için %37 fark oluşuyor (Cd 1,4 -> 0,75 ile
+        # iniş hızı 10,65 -> 14,56 m/s). İniş hızı bir GÜVENLİK metriği
+        # olarak okunuyor; hangi bileşeninin varsayım olduğu gizlenemez.
         area_assumed = self.parachute_area is None
         chute_area = (DEFAULT_PARACHUTE_AREA_M2 if area_assumed
                       else float(self.parachute_area))
+        cd_assumed = self._parachute_cd_supplied is not True
+        delay_assumed = self._parachute_delay_supplied is not True
         chute_cd = float(self.parachute_cd)
         deploy_delay = float(self.parachute_deploy_delay)
         if area_assumed:
@@ -719,6 +769,21 @@ class TrajectoryAnalyzer:
             'parachute_cd': chute_cd,
             'parachute_deploy_delay_s': deploy_delay,
             'parachute_area_assumed': bool(area_assumed),
+            'parachute_cd_assumed': bool(cd_assumed),
+            'parachute_deploy_delay_assumed': bool(delay_assumed),
+            'parachute_area_basis': (
+                'projected-area recovery assumption; NOT sized against a '
+                'landing-velocity requirement'
+                if area_assumed else 'parachute area supplied by the caller'),
+            'parachute_cd_basis': (
+                'parachute drag coefficient Cd = 1.4 on PROJECTED area '
+                '(Hoerner 1965, hollow hemisphere); a model default, not a '
+                'measured canopy value'
+                if cd_assumed else 'parachute cd supplied by the caller'),
+            'parachute_deploy_delay_basis': (
+                'parachute deploy delay after apogee is a model assumption; '
+                'not derived from a recovery-system timeline'
+                if delay_assumed else 'deploy delay supplied by the caller'),
         }
 
     def _combine_flight_phases(self, powered: Dict, coasting: Dict, descent: Dict) -> Dict:
@@ -821,6 +886,16 @@ class TrajectoryAnalyzer:
                 'parachute_cd': descent.get('parachute_cd'),
                 'landing_velocity_assumed': bool(
                     descent.get('parachute_area_assumed', False)),
+                # v2.6.26 — VARSAYIM BAYRAKLARI BU BLOKTA DA.
+                # Beyan yalnız `phases.descent` altında duruyordu; bu metrik
+                # bloğunu TEK BAŞINA okuyan bir tüketici (PDF, dışa aktarım,
+                # panel) iniş hızının varsayımdan geldiğini göremiyordu.
+                'parachute_area_assumed': bool(
+                    descent.get('parachute_area_assumed', False)),
+                'parachute_cd_assumed': bool(
+                    descent.get('parachute_cd_assumed', False)),
+                'parachute_area_basis': descent.get('parachute_area_basis'),
+                'parachute_cd_basis': descent.get('parachute_cd_basis'),
             },
             'motor_performance': {
                 'thrust_to_weight_ratio': thrust_to_weight,

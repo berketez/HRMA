@@ -128,6 +128,14 @@ DECLARED_UNUSED_IN_APP = {
     'impingement_pattern': 'yalnız like_on_like/doublet modelleniyor',
     'recess_length': 'model girintiyi iç jet çapından hesaplar',
     'n_elements': 'bu yol tek koaksiyel eleman boyutlandırır',
+    # v2.6.26 — gaz fazı enjeksiyonu MODELLENMİYOR. Alan yalnız uyarı
+    # üretiyor (fiziksel yaprak oynatmıyor) ve bu artık kullanıcıya açıkça
+    # söyleniyor: 'gas' seçilirse delik boyutlandırması sıvı SPI modeliyle
+    # yapılmış demektir. Sıkıştırılabilir çözüm depoda var
+    # (engines/injector_design.py::compressible_orifice_flow), bağlanması
+    # ayrı bir iş olarak kayıtlı.
+    'oxidizer_phase': 'gaz fazı enjeksiyonu modellenmiyor; alan yalnız uyarı '
+                      'üretir ve durumu açıkça bildirir',
 }
 
 # Şablon alan adı ile payload anahtarı AYRI olan alanlar. Toplayıcı bu

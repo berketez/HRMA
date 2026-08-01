@@ -170,7 +170,9 @@ SHAKES = {
     'startup_sequence': ('simultaneous', {}),
     'engine_start_time': (6.0, {}),
     'engine_shutdown_time': (5.0, {}),
-    'min_throttle': (80.0, {}),
+    # Izgara alt sınırının (%40) ALTINA sarsılır ki gerçek yol
+    # sınansın: alt sınır taramaya yeni bir nokta ekliyor mu?
+    'min_throttle': (20.0, {}),
     'throttle_response': (3.0, {}),
     'restart_capability': ('single', {}),
     'chill_down_time': (120.0, {}),
@@ -205,13 +207,19 @@ ECHO_PREFIXES = ('$.input_warnings', '$.unwired_inputs', '$.warnings')
 # Alana özel izinler. Blanket kural DEĞİL: her satır adıyla ve gerekçesiyle
 # yazılır ki bir gün gerçek bir sızıntı buraya sessizce eklenmesin.
 FIELD_ECHO_ALLOWANCES = {
-    # min_throttle hiçbir fiziksel büyüklüğü oynatmaz: kısma haritasının
-    # noktaları ve chug dereceleri SABİT bir kısma ızgarasında, bu girdiden
-    # bağımsız hesaplanır. Alt sınır yalnız hazır noktaları SÜZER ("sizin
-    # verdiğiniz tabanda chug riski var mı?") ve girilen değeri geri yansıtır.
-    # Bu yüzden 'transient_not_modelled' beyanı doğrudur.
-    'min_throttle': ('$.throttle_map.min_throttle_pct',
-                     '$.throttle_map.min_throttle_chug_risk'),
+    # v2.6.26 — min_throttle ARTIK FİZİĞE BAĞLI, bu izin KALDIRILDI.
+    #
+    # Eski gerekçe şuydu: "kısma haritasının noktaları SABİT bir ızgarada
+    # hesaplanır, alt sınır yalnız hazır noktaları süzer". Ölçüm bunun bir
+    # KUSUR olduğunu gösterdi: kullanıcı min_throttle=%20 girdiğinde
+    # "en derin kısmada chug riski" hükmü hâlâ %40'ta veriliyordu — yani
+    # kullanıcının sorduğu noktada hiç bakılmıyordu.
+    #
+    # Artık kullanıcının alt sınırı ızgaranın altındaysa taramaya EKLENİYOR
+    # (liquid_rocket_engine.py::solve_throttle_map). Ölçüldü:
+    #   min_throttle=20 -> noktalar [0.20, 0.40, 0.55, 0.70, 0.85, 1.00]
+    #   min_throttle=10 -> noktalar [0.10, 0.40, ...]
+    # Bu yüzden alan `unwired_inputs()` beyanından da çıkarıldı.
 }
 
 

@@ -664,7 +664,16 @@ def build_time_history(motor_results):
 
 # Initialize database manager and trajectory analyzer
 db_manager = DatabaseManager()
-trajectory_analyzer = TrajectoryAnalyzer() 
+# v2.6.26 — BU TEKIL NESNE ARTIK ISTEK YOLUNDA KULLANILMIYOR.
+# TrajectoryAnalyzer DURUM TASIR (arac ve kurtarma parametreleri).
+# Modul duzeyinde paylasilinca bir istekte verilen paraşut bir sonraki
+# istege siziyordu: birebir ayni istek %53 farkli inis hizi donduruyor
+# ve `_assumed` bayragi uydurulmus degeri 'kullanici verdi' diye
+# isaretliyordu (olculdu). Cozum semptomu yamamak degil: her istek
+# kendi nesnesini kurar. Kurucu yalniz skaler atama yapar, maliyeti yok.
+# Boylece `set_recovery_parameters` programatik sozlesmesi de bozulmaz
+# (deger cagrilar arasi korunur — tek nesne icinde).
+trajectory_analyzer = TrajectoryAnalyzer()  # yalniz geriye uyumluluk
 openrocket_exporter = OpenRocketExporter()
 cad_designer = MotorCADDesigner()
 
@@ -1246,6 +1255,9 @@ def calculate():
         
         # Calculate trajectory if requested
         trajectory_data = None
+        # Istek basina TAZE analizor (bkz. modul duzeyindeki not): durum
+        # tasiyan bir nesneyi istekler arasinda paylasmak sizinti demektir.
+        trajectory_analyzer = TrajectoryAnalyzer()
         if data.get('calculate_trajectory', True):
             # Arac parametreleri: OpenRocket dalinin kullandigi AYNI sozluk.
             # set_vehicle_parameters None kabul etmiyor (cross_sectional_area
