@@ -191,6 +191,23 @@ class NozzleDesigner:
             friction_efficiency: Sürtünme/sınır tabaka verimi (eta_friction).
                 Sutton & Biblarz 9th ed. Ch.3: iyi tasarlanmış nozzle'da %0.5-1.5
                 kayıp → 0.985-0.995. Varsayılan 0.99 (tipik %1 kayıp).
+
+                DİKKAT (v2.6.26): buradaki 0.99 ile
+                hrma.constants.NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT (0.015,
+                yani 0.985) AYNI SAYI OLMAK ZORUNDA DEĞİLDİR ve
+                birleştirilmemelidir. İkisi FARKLI kayıp ayrıştırmalarına
+                aittir:
+                  - Bu modül ayrık modeli kullanır:
+                    eta = lambda · eta_friction · eta_2phase · eta_kinetic
+                    ve 0.99, toplamın eps=100'de doğrulanmış eski tek-faktör
+                    0.98 değerini vermesi için KALİBRELİDİR
+                    (bkz. tests/test_nozzle_validation.py::
+                     TestDiscreteLossModel::
+                     test_default_matches_legacy_098_at_high_expansion;
+                     eps=10 → 0.9704, eps=100 → 0.98).
+                  - Sıvı motor kendi zincirinde merkezi sabiti kullanır.
+                Bunları eşitlemek kalibrasyonu bozar; 2026-08-01'de denendi,
+                dört doğrulama testi kırmızıya döndü ve geri alındı.
             kinetic_efficiency: Kimyasal kinetik (sonlu-hız rekombinasyon) verimi
                 (eta_kinetic). Sutton Ch.5: frozen-equilibrium farkı tipik
                 %0.1-1. Varsayılan 0.995 (%0.5 kayıp; konservatif orta değer).
@@ -759,13 +776,46 @@ class NozzleDesigner:
         wall_thickness = max(self._MIN_WALL_THICKNESS_M, t_pressure)
         if thickness_basis == 'thin_wall_hoop' and wall_thickness > t_pressure:
             thickness_basis = 'manufacturing_minimum'
-        nozzle_mass = surface_area * wall_thickness * rho_wall
+
+        # v2.6.26 — kütle ÇİZİLEN katıyla aynı tanımdan gelir.
+        #
+        # Eski hesap iki yerden birden eksikti: (1) yalnız DİVERJAN koninin
+        # yüzeyini sayıyordu, konverjan bölüm hiç girmiyordu; (2) ince kabuk
+        # (A·t·ρ) kullanıyordu, oysa cidar iç kontura DIŞARI ekleniyor
+        # (cad_visualization._nozzle_solid) ve halka hacminin π·t² terimi
+        # kalın cidarda büyüyor. Ölçüldü: aynı koşuda bu modül 0,303 kg,
+        # CAD katısı 0,756 kg diyordu — tek yanıtta aynı parçaya 2,5 kat
+        # farklı iki kütle.
+        #
+        # Her iki bölüm için kesik koni halkası:
+        #   V = π·(2·t·r_ort + t²)·L
+        t_w = wall_thickness
+        conv_geo = contour.get('convergent') or {}
+        r_chamber_m = float(conv_geo.get('chamber_radius', 0.0)) / 1000.0
+        L_conv_m = float(conv_geo.get('length', 0.0)) / 1000.0
+        vol_conv = (np.pi * (2.0 * t_w * (r_chamber_m + rt) / 2.0 + t_w ** 2)
+                    * L_conv_m) if L_conv_m > 0 else 0.0
+        vol_div = np.pi * (2.0 * t_w * (rt + re) / 2.0 + t_w ** 2) * L_div
+        nozzle_mass = (vol_conv + vol_div) * rho_wall
 
         return {
             'surface_area': surface_area * 1e6,  # mm²
             'volume': volume * 1e9,  # mm³
             'wall_thickness': wall_thickness * 1000,  # mm
             'estimated_mass': nozzle_mass,  # kg
+            # Kütlenin hangi geometriden çıktığı AÇIKÇA yazılır. Bu değer
+            # konverjan + diverjan bölümlerin kesik koni halkası
+            # yaklaşımıdır; boğaz eğrilik yarıçapları ve bell konturunun
+            # gerçek eğrisi düzleştirilmiştir. Çizilen katının kütlesi
+            # (cad_design.performance_summary.mass_breakdown.nozzle_mass)
+            # gerçek konturu örnekler ve bu koşulda ~%20 daha büyüktür.
+            # İki sayı da aynı cidar ve aynı malzemeden gelir; fark yalnız
+            # geometri örneklemesindendir. Tek fonksiyona indirilmesi
+            # bekleyen iş olarak kayıtlıdır.
+            'estimated_mass_basis': ('conical frustum annulus over convergent '
+                                     'and divergent sections; the drawn CAD '
+                                     'solid samples the true contour and is '
+                                     'the authoritative mass'),
             'throat_radius': rt * 1000,  # mm
             'exit_radius': re * 1000,    # mm
             'length_to_diameter_ratio': (contour['total_length'] / 1000) / dt,

@@ -3264,7 +3264,23 @@
 
             // Check which design mode is active
             const thrustTimeActive = document.getElementById('thrust_time_design').classList.contains('active');
-            
+
+            // v2.6.26 — "alan yoksa uydurma sayi gonderme".
+            // Yorunge blogu var OLMAYAN id'lerden okuyordu (vehicle_mass_dry,
+            // vehicle_diameter, vehicle_length) ve `|| 50`, `|| 0.15`, `|| 2.0`
+            // fallback'lerine dusuyordu; yani kullanici ne girerse girsin
+            // arac her zaman ayni sabitti. Artik alan yoksa null gider ve
+            // sunucu "verilmedi" diye beyan eder.
+            const numById = function (id) {
+                const el = document.getElementById(id);
+                if (!el || el.value === '' || el.value === null) { return null; }
+                const v = parseFloat(el.value);
+                return Number.isFinite(v) ? v : null;
+            };
+            // Referans alan sayfada mm^2 girilir; cap donusumu SUNUCUDA tek
+            // noktada yapilir, formul istemciye kopyalanmaz.
+            const refAreaMm2 = numById('reference_area');
+
             const data = {
                 // Motor info
                 motor_name: document.getElementById('motor_name').value || 'UZAYTEK-HRM-001',
@@ -3288,14 +3304,20 @@
                 
                 // Trajectory analysis
                 calculate_trajectory: document.getElementById('calculate_trajectory') ? document.getElementById('calculate_trajectory').checked : false,
-                vehicle_mass_dry: parseFloat(document.getElementById('vehicle_mass_dry')?.value || 50),
-                vehicle_diameter: parseFloat(document.getElementById('vehicle_diameter')?.value || 0.15),
-                drag_coefficient: parseFloat(document.getElementById('drag_coefficient')?.value || 0.5),
-                vehicle_length: parseFloat(document.getElementById('vehicle_length')?.value || 2.0),
-                launch_angle: parseFloat(document.getElementById('launch_angle')?.value || 85),
-                launch_altitude: parseFloat(document.getElementById('launch_altitude')?.value || 0),
-                wind_speed: parseFloat(document.getElementById('wind_speed')?.value || 0),
-                wind_direction: parseFloat(document.getElementById('wind_direction')?.value || 0),
+                // 'final_mass' alani "yakit tukendikten sonraki kutle
+                // (kuru kutle + faydali yuk)" diye tanimli — yorungenin
+                // kuru kutlesi tam olarak budur.
+                vehicle_mass_dry: numById('final_mass'),
+                vehicle_reference_area_m2: (refAreaMm2 === null
+                                            ? null : refAreaMm2 / 1e6),
+                drag_coefficient: numById('drag_coefficient'),
+                // Govde boyu icin sayfada alan YOK; uydurma boy gondermek
+                // yerine bos birakiliyor.
+                vehicle_length: null,
+                launch_angle: numById('launch_angle'),
+                launch_altitude: numById('launch_altitude'),
+                wind_speed: numById('wind_speed'),
+                wind_direction: numById('wind_direction'),
                 
                 // Advanced parameters
                 l_star: parseFloat(document.getElementById('l_star').value || 1.0),

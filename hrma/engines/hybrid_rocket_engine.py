@@ -213,7 +213,8 @@ class HybridRocketEngine:
                  chamber_material='steel_4130', wall_thickness=None,
                  cooling_type='natural',
                  safety_factor=None, chamber_length_override=None,
-                 nozzle_material=None):
+                 nozzle_material=None, ambient_temperature=None,
+                 plate_thickness=None, orifice_inlet=None):
         
         # Tasarım uyarıları (v2.6.2): kullanıcıya ULAŞAN kanal. Liste her
         # şeyden ÖNCE kurulur; aksi hâlde erken üretilen uyarılar kaybolur
@@ -254,6 +255,20 @@ class HybridRocketEngine:
         self.chamber_length_override = self._resolve_chamber_length_override(
             chamber_length_override)
         self.nozzle_material = self._resolve_nozzle_material(nozzle_material)
+
+        # --- v2.6.26 ikinci tur: iki sözleşme girdisi -----------------------
+        # ambient_temperature [K]: ısı ve yapısal modüller AYNI ortam
+        #   sıcaklığını görmelidir. Verilmezse None kalır ve ısı modülünün
+        #   kendi varsayılanı tek kaynak olur (buradan sayı uydurulmaz).
+        # plate_thickness [m]: enjektör plaka kalınlığı. Orifis L/D = t/d
+        #   oranı deşarj katsayısını (Cd) belirler; verilmezse devre çözücüsü
+        #   kendi beyan edilen L/D varsayımında kalır.
+        self.ambient_temperature = self._resolve_ambient_temperature(
+            ambient_temperature)
+        self.injector_plate_thickness = self._resolve_plate_thickness(
+            plate_thickness)
+        self.injector_orifice_inlet = self._resolve_orifice_inlet(
+            orifice_inlet)
 
         # Handle thrust/burn_time vs total_impulse input
         if total_impulse is None:
@@ -611,6 +626,55 @@ class HybridRocketEngine:
             return None
         return sf
 
+    def _resolve_ambient_temperature(self, value):
+        """Ortam sıcaklığını [K] doğrular; geçersizse None döner.
+
+        None = 'kullanıcı vermedi'. O durumda ısı transferi modülünün kendi
+        varsayılanı kullanılır ve AYNI değer yapısal modüle geri okunur —
+        iki modülün farklı ortam sıcaklığı varsayması bu sürümde kapatılan
+        kusur sınıfıdır (ölçüldü: ısı 293,15 K, yapısal 300,0 K).
+        """
+        if value is None or value == '':
+            return None
+        try:
+            T = float(value)
+        except (TypeError, ValueError):
+            self._defaults_used.append(f'ambient_temperature(invalid:{value!r})')
+            return None
+        # Fiziksel zarf: Dünya yüzeyi çalışma bandının cömert bir üst kümesi
+        # (Vostok -89 °C ... Ölüm Vadisi +57 °C). Dışı birim karışıklığının
+        # işaretidir (kullanıcı °C girmiş olabilir).
+        if not (180.0 <= T <= 340.0):
+            self._defaults_used.append(
+                f'ambient_temperature(out_of_range:{T:.2f}K)')
+            return None
+        return T
+
+    def _resolve_plate_thickness(self, value):
+        """Enjektör plaka kalınlığını [m] doğrular; geçersizse None döner."""
+        if value is None or value == '':
+            return None
+        try:
+            t = float(value)
+        except (TypeError, ValueError):
+            self._defaults_used.append(f'plate_thickness(invalid:{value!r})')
+            return None
+        if not (0.0002 <= t <= 0.1):   # 0,2 mm - 100 mm
+            self._defaults_used.append(
+                f'plate_thickness(out_of_range:{t * 1000.0:.3f}mm)')
+            return None
+        return t
+
+    def _resolve_orifice_inlet(self, value):
+        """Orifis giriş tipini ('sharp'/'radiused') doğrular; yoksa None."""
+        if value is None or value == '':
+            return None
+        aday = str(value).strip().lower()
+        if aday in ('sharp', 'radiused'):
+            return aday
+        self._defaults_used.append(f'orifice_inlet(unknown:{aday})')
+        return None
+
     def _resolve_chamber_length_override(self, value):
         """Kullanıcının kamara boyu ezmesini [m] doğrular.
 
@@ -659,6 +723,61 @@ class HybridRocketEngine:
                 'warn.hybrid.nozzle_material_unknown', 'warning',
                 requested=aday, used='graphite'))
             return 'graphite'
+
+    def _kinetic_efficiency(self, combustion_results):
+        """(η_kinetik, teşhis) — sonlu-hız kimyası (rekombinasyon) kaybı.
+
+        v2.6.26 — ÇAPRAZ-MOTOR TUTARSIZLIĞI KAPATILDI. Aynı fiziksel kayıp
+        SIVI motorda gerçekten hesaplanıyordu
+        (``liquid_rocket_engine._kinetic_efficiency`` ->
+        ``hrma.analysis.kinetic_efficiency.KineticEfficiency``), hibritte ise
+        ``design_nozzle`` imza varsayılanı olan SABİT 0,995 geçiyordu — 18/18
+        koşuda hiç değişmedi. Oysa modelin iki girdisi (donmuş ve kayan denge
+        Isp'si) hibritin kendi yanma çözümünde ZATEN üretiliyor
+        (``combustion_analysis`` performance.isp_frozen / isp_shifting).
+
+        Gerçek lüle akışı donmuş (ODF) ile kayan denge (ODE) arasındadır;
+        harman kesri Damköhler benzeri bir parametreden gelir (oda kalış
+        süresi t_res = L*·ρ_c·c*/P_c, Sutton & Biblarz 9. baskı Eş. 8-9;
+        üç-cisimli rekombinasyon zamanı ∝ P^-2, Bray 1959). Buradaki hiçbir
+        katsayı bu görevde ayarlanmadı — modül bu görevden ÖNCE yazılmış ve
+        kaynaklandırılmıştır.
+
+        Donmuş/kayan çift çözülemezse η = 1,0 ve 'not_modelled' döner:
+        uydurma bir kayıp uygulanmaz (sıvı yolun sözleşmesiyle aynı).
+        """
+        perf = (combustion_results or {}).get('performance') or {}
+        isp_frozen = perf.get('isp_frozen')
+        isp_shifting = perf.get('isp_shifting')
+        if (not isp_frozen or not isp_shifting
+                or isp_frozen >= isp_shifting):
+            return 1.0, {
+                'model': 'not_modelled',
+                'note': ('frozen/shifting expansion pair unavailable; the '
+                         'finite-rate (kinetic) loss is not resolved and no '
+                         'loss is applied.')}
+        try:
+            from hrma.analysis.kinetic_efficiency import KineticEfficiency
+            res = KineticEfficiency().evaluate(
+                combustion_results=combustion_results,
+                fidelity='engineering',
+                chamber_pressure=float(self.P_c),
+                characteristic_length=float(self.L_star),
+                throat_diameter=float(getattr(self, 'd_t', 0.0)) or None)
+            eta = float(res['isp_predicted']) / float(isp_shifting)
+        except Exception as exc:  # korelasyon kurulamadı -> kayıp uygulanmaz
+            return 1.0, {'model': 'not_modelled',
+                         'note': f'kinetic correlation unavailable ({exc})'}
+        return eta, {
+            'model': 'kinetic_efficiency (engineering, JANNAF-style blend)',
+            'isp_shifting_s': float(isp_shifting),
+            'isp_frozen_s': float(isp_frozen),
+            'isp_predicted_s': float(res['isp_predicted']),
+            'kinetic_loss_pct': float(res['kinetic_loss_pct']),
+            'loss_band_pct': list(res['loss_band_pct']),
+            'damkohler': res['diagnostics'].get('damkohler'),
+            'note': res['model_note'],
+        }
 
     def _analyze_nozzle_material(self, heat_transfer_results=None):
         """Seçilen lüle/boğaz malzemesinin termal ve erozyon değerlendirmesi.
@@ -1043,13 +1162,33 @@ class HybridRocketEngine:
         #    tungsten seçtiğinde sonuçta 'nozzle_material: tungsten' yazarken
         #    lüle kütlesi çelik yoğunluğundan çıkıyordu. nozzle_design.py:730
         #    bu hatayı kendi yorumunda tarif etmiş ama çağıran düzeltilmemişti.
+        #
+        # 3) (v2.6.26, ikinci tur) wall_safety_factor ve kinetic_efficiency
+        #    geçirilmiyordu:
+        #    - Lüle cidarı DAİMA malzeme kaydının kendi emniyet katsayısıyla
+        #      (çelikte 4,0) boyutlanıyordu; kullanıcının 'Safety Factor'
+        #      girdisi hazne cidarına uygulanırken lüleye hiç ulaşmıyordu.
+        #      ÖLÇÜLDÜ: safety_factor=2,0 ile wall_safety_factor 4,0 kaldı.
+        #    - Kinetik (sonlu-hız kimyası) verimi imza varsayılanı 0,995'te
+        #      sabitti; oysa AYNI büyüklük sıvı motorda gerçekten hesaplanıyor
+        #      (liquid_rocket_engine._kinetic_efficiency -> KineticEfficiency).
         _cr, _ = self._resolve_contraction_ratio()
+        eta_kin, kin_diag = self._kinetic_efficiency(combustion_results)
         nozzle_results = self.nozzle_designer.design_nozzle(
             self.At, self.epsilon, self.P_c, self.P_a, self.nozzle_type,
             gamma=self.gamma, R_specific=self.R, T_chamber=self.T_c,
             contraction_area_ratio=_cr,
             wall_material=getattr(self, 'nozzle_material', None),
+            wall_safety_factor=self.design_safety_factor,
+            kinetic_efficiency=eta_kin,
         )
+        # Kinetik verimin NEREDEN geldiği çıktıda taşınır (sıvı motordaki
+        # 'kinetic' teşhis bloğuyla aynı sözleşme). Çözülemediğinde eta=1,0
+        # ve 'not_modelled' denir — sessizce 0,995 uydurulmaz.
+        try:
+            nozzle_results['performance']['kinetic'] = kin_diag
+        except (KeyError, TypeError):
+            pass
         
         # Altitude performance — uq_mode'da atlanır (danışma tablosu; ana
         # çıktıları beslemez, MC örneğinde gereksiz maliyet — ARGE spec 6.2)
@@ -1078,8 +1217,18 @@ class HybridRocketEngine:
         if self.uq_mode:
             optimum_of = self._precomputed_optimum_of
         else:
+            # v2.6.26 — GENİŞLEME ORANI OPTİMUM O/F ARAMASINA DA GEÇİYOR.
+            # Ana çağrı (yukarıda) ε'yi alıyordu ama bu arama almıyordu:
+            # her O/F noktası çıkış istasyonunu ISA deniz seviyesine
+            # çapalıyor, dolayısıyla ε=16 seçen kullanıcının optimum O/F
+            # tablosu hâlâ ε≈1 koşullarında hesaplanıyordu. ÖLÇÜLDÜ
+            # (HTPB/N2O, Pc=20 bar): ε yokken O/F* = 6,845 ve çıkış basıncı
+            # 1,01325 bar SABİT; ε=4 -> O/F* = 6,661 / 0,9567 bar;
+            # ε=16 -> O/F* = 7,841 / 0,1613 bar. Aynı yanıtta iki çelişkili
+            # genişleme varsayımı vardı.
             optimum_of = self.combustion_analyzer.find_optimum_of_ratio(
-                fuel_composition, ox, self.P_c
+                fuel_composition, ox, self.P_c,
+                expansion_ratio=self.epsilon
             )
 
         # Total impulse to thrust at altitudes — uq_mode'da atlanır (danışma)
@@ -1145,11 +1294,22 @@ class HybridRocketEngine:
         # kendi içinde beyan eder; buradan uydurma bir sayı geçirmek yasak.
         if getattr(self, 'R', None):
             ht_input['molecular_weight'] = 8314.462618 / self.R
+        # v2.6.26 — ORTAM SICAKLIĞI TEK KAYNAK. Kullanıcı bir değer verdiyse
+        # o geçirilir; vermediyse ısı modülünün KENDİ varsayılanı kullanılır
+        # (buradan ikinci bir sayı uydurulmaz). Aşağıda yapısal modüle
+        # geçirilen değer, ısı modülünün fiilen kullandığı sayıdan geri
+        # okunur — eskiden burada 300,0 K SABİT yazılıydı ve tek motor
+        # sonucunda iki farklı ortam sıcaklığı (293,15 K ısı / 300 K yapısal)
+        # dolaşıyordu.
+        ht_kwargs = {}
+        if self.ambient_temperature is not None:
+            ht_kwargs['ambient_temp'] = float(self.ambient_temperature)
         heat_transfer_results = self.heat_transfer_analyzer.analyze_heat_transfer(
             ht_input,
             material=self.chamber_material,
             wall_thickness=self.wall_thickness,
-            cooling_type=self.cooling_type
+            cooling_type=self.cooling_type,
+            **ht_kwargs
         )
         
         # Structural analysis — chamber_temperature GEÇİLMELİ; aksi halde
@@ -1158,10 +1318,18 @@ class HybridRocketEngine:
         # şekilde yüksek gösterir (entegrasyon gap fix). Mümkünse ısı transferi
         # modülünün hesapladığı gerçek cidar sıcaklıklarını geçir; yoksa T_c'den
         # konservatif tahmin yapılır.
+        # Ortam sıcaklığı ısı modülünün FİİLEN kullandığı değerden okunur
+        # (tek kaynak; bkz. yukarıdaki not). Isı sonucu yoksa anahtar hiç
+        # gönderilmez ve yapısal modül kendi varsayılanını beyan eder.
+        ambient_used = None
+        try:
+            ambient_used = float(
+                heat_transfer_results['design_parameters']['ambient_temperature'])
+        except (KeyError, TypeError, ValueError):
+            ambient_used = self.ambient_temperature
         struct_input = {
             'chamber_pressure': self.P_c,
             'chamber_temperature': self.T_c,
-            'ambient_temperature': 300.0,
             'chamber_diameter': self.D_ch,
             'chamber_length': self.L,
             'throat_diameter': self.d_t,
@@ -1176,6 +1344,8 @@ class HybridRocketEngine:
             # olabilir; sessizce "güvenli" demek en tehlikeli yanlıştır.
             'thrust': self.F,
         }
+        if ambient_used is not None:
+            struct_input['ambient_temperature'] = float(ambient_used)
         # ISI -> YAPISAL ZİNCİR (Dalga 0, 2026-07-14): Isı analizinin
         # hesapladığı GERÇEK iç/dış cidar sıcaklıkları yapısal modüle
         # aktarılır. structural_analysis._estimate_wall_delta_T bu
@@ -2157,6 +2327,18 @@ class HybridRocketEngine:
                 'Pc_bar': self.P_c,
                 'dp_ratio_ox': delta_P_inj / self.P_c if self.P_c > 0 else 0.20,
             }
+            # v2.6.26 — DEŞARJ KATSAYISI ARTIK GEOMETRİDEN GELİYOR.
+            # Devre çözücüsü Cd'yi discharge_coefficient(giriş, L/D) ile
+            # ZATEN seçiyordu, ama hibrit sözlüğü ne 'inlet_ox' ne
+            # 'orifice_length_m' anahtarını taşıdığı için her koşuda
+            # giriş='sharp', L/D=4,0 varsayımına düşülüyor ve Cd 0,78'de
+            # SABİT kalıyordu (17/17 koşu). Cd doğrudan delik alanına girer
+            # (A = ṁ/(Cd·√(2ρΔP))): tablonun 0,63-0,92 bandı uçtan uca
+            # ~%46 alan farkı demektir. Plaka kalınlığı arayüzde ZATEN var.
+            if self.injector_plate_thickness:
+                inj_spec['orifice_length_m'] = self.injector_plate_thickness
+            if self.injector_orifice_inlet:
+                inj_spec['inlet_ox'] = self.injector_orifice_inlet
             ox_name = (getattr(self, 'oxidizer_type', None) or 'n2o').lower()
             if ox_name == 'n2o':
                 # Tank sıcaklığı v2.5.2'de motor girdisi; verilmezse doymuş

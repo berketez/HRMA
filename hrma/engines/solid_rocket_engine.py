@@ -5,6 +5,7 @@ from scipy.optimize import fsolve, newton
 from scipy.interpolate import interp1d
 from typing import Dict
 import json
+import re
 import warnings
 
 # Star grain gerçek yanma-yüzeyi modeli için (poligon ofseti, Huygens ilkesi).
@@ -102,7 +103,8 @@ def _cached_slot_quads(r_port, n_slots, width, depth):
         ]))
     return tuple(quads)
 
-from hrma.constants import G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR, R_STAR_ICAO
+from hrma.constants import (G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR,
+                            R_STAR_ICAO, R_UNIVERSAL)
 
 # Parametrik maliyet modeli birim fiyatları (2026 tahmini, USD) — TEK tanım
 # noktası. _calculate_cost_analysis bunlardan ölçekler; kesin fiyat değildir.
@@ -362,6 +364,27 @@ SOLID_CONDENSED_MASS_FRACTION = {
 TWO_PHASE_LOSS_COEFF = 0.12
 
 # ---------------------------------------------------------------------------
+# Ateşleyici boyutlandırması — TEK tanım noktası (bkz. _design_igniter_system).
+#
+# Şarj kütlesi serbest hacim basınçlandırma ölçütünden gelir (NASA SP-8051,
+# "Solid Rocket Motor Igniters"): ateşleyici, kamaranın SERBEST hacmini hedef
+# ateşleme basıncına çıkaracak GAZI üretmelidir. Şarjın gaz özellikleri
+# (molekül ağırlığı, alev sıcaklığı, yoğunluk) merkezi katalogtan, yoğuşmuş
+# faz kesri SOLID_CONDENSED_MASS_FRACTION'dan okunur — burada YENİ bir sayı
+# tanımlanmaz.
+#
+# 'pressure_fraction' bir FİZİK SABİTİ DEĞİL, tasarım seçimidir: ateşleyicinin
+# kamarayı çıkardığı basıncın çalışma basıncına oranı. Formdan verilebilir
+# (igniter_pressure_fraction); verilmezse buradaki varsayılan kullanılır ve
+# çıktıda "design choice" olarak açıkça beyan edilir.
+# ---------------------------------------------------------------------------
+SOLID_IGNITER = {
+    'charge_record': 'black_powder',      # merkezi katalog kaydı (şarj)
+    'pressure_fraction_default': 0.15,    # P_ateş / P_c — tasarım seçimi
+    'pressure_fraction_range': (0.02, 0.50),
+}
+
+# ---------------------------------------------------------------------------
 # Tasarım noktası boyutlandırma sınırları — TEK tanım noktası.
 # Çağıran hedef ortalama itki (N) ve/veya yanma süresi (s) verdiğinde grain
 # geometrisi bu sınırlar altında çözülür; boyutlandırma, uygunluk kontrolü ve
@@ -544,6 +567,38 @@ def _family_lookup(propellant_type, table):
     return None, None
 
 
+def _catalog_key_from_text(text):
+    """Serbest metinden merkezi katalog anahtarı çıkarır (yoksa None).
+
+    Arayüz yakıtı ÜÇ ayrı alanla anlatıyor: katalog satırı (anahtar),
+    yanma-hızı ön ayarı ('kndx') ve serbest metin ad alanı ('KNDX -
+    Potassium Nitrate/Dextrose 65/35'). Motor yalnız ilkini tanıyordu ve
+    o alan hiç gönderilmiyordu; bu yüzden KNDX seçen kullanıcının motoru
+    içeride APCP olarak çözülüyordu. Burada üç yazımın da aynı anahtara
+    inmesi sağlanır — yeni bir eşleme tablosu UYDURULMAZ, yalnız merkezi
+    kataloğun kendi anahtarları/adları/takma adları denenir.
+    """
+    raw = str(text or '').strip().lower()
+    if not raw or raw in ('custom', 'none', 'other'):
+        return None
+    # 1) Doğrudan anahtar / motor anahtarı / takma ad
+    key = _catalog_key_for(raw.replace(' ', '_').replace('-', '_'))
+    if key:
+        return key
+    # 2) 'KNDX - Potassium Nitrate/Dextrose 65/35' gibi katalog adı: ayraçtan
+    #    önceki ilk sözcük öbeği katalog anahtarının kendisidir.
+    head = re.split(r'[-–—/(,:]', raw, maxsplit=1)[0].strip()
+    if head and head != raw:
+        key = _catalog_key_for(head.replace(' ', '_'))
+        if key:
+            return key
+    # 3) Kaydın tam adı (kullanıcı katalog adını olduğu gibi bırakmışsa)
+    for cat_key, rec in _PROPELLANT_CATALOG.items():
+        if str(rec.get('name', '')).strip().lower() == raw:
+            return cat_key
+    return None
+
+
 def _catalog_burn_rate(propellant_type):
     """Yakıtın merkezi katalogdaki (a, n) çifti — yoksa (None, None)."""
     key = _catalog_key_for(propellant_type)
@@ -613,6 +668,13 @@ class SolidRocketEngine:
         # _override_val itki eğrisi döngüsünde aynı anahtarla yüzlerce kez
         # çağrılabildiği için uyarı anahtar başına BİR kez üretilir.
         self._range_rejected_keys = set()
+
+        # Yakıt kimliği: arayüz onu üç ayrı alanla anlatıyor (katalog anahtarı,
+        # yanma-hızı ön ayarı, serbest metin ad) ve eskiden hiçbiri motora
+        # ULAŞMIYORDU — bkz. _resolve_propellant_type. Termokimya, grain
+        # mekaniği ve iki-fazlı kayıp bu anahtardan seçildiği için çözüm
+        # _set_propellant_properties'ten ÖNCE yapılmak zorunda.
+        self._resolve_propellant_type()
 
         # Set propellant properties
         self._set_propellant_properties()
@@ -719,12 +781,18 @@ class SolidRocketEngine:
             'computed_by_solver': [
                 'throat_diameter', 'exit_diameter', 'expansion_ratio',
                 'propellant_mass', 'dry_mass', 'wet_mass',
-                # Aşağıdaki üçü geometriden TÜREtİLİR: kamara hacmi grain
-                # yığınından, kasa dış çapı iç çap + 2·cidar kalınlığından,
-                # web kalınlığı grain iç/dış çapından. Kullanıcının girdiği
-                # değer okunur ama türetilen değeri ezmez; ölçümde "yalnız
-                # kendi yankısı" olarak görünüyorlardı.
-                'chamber_volume', 'outer_diameter', 'web_thickness',
+                # Kamara hacmi grain yığınından, web kalınlığı grain iç/dış
+                # çapından TÜREtİLİR. Kullanıcının girdiği değer okunur ama
+                # türetilen değeri ezmez; ölçümde "yalnız kendi yankısı"
+                # olarak görünüyorlardı.
+                #
+                # v2.6.26 (kalem 29): 'outer_diameter' bu listeden ÇIKARILDI.
+                # Beyanı zaten yanlıştı — metin "kasa dış çapı iç çap +
+                # 2·cidar kalınlığından türetilir" diyerek BAŞKA bir
+                # büyüklüğü anlatıyor, oysa alan grain dış çapıdır. Alan
+                # artık grain dış çapının doğruluk kaynağıdır
+                # (_apply_overrides 7c), yani bağlıdır.
+                'chamber_volume', 'web_thickness',
             ],
             # Kullanıcının BEYAN ettiği toplam verim: rapora yazılır ama itki
             # zincirine ikinci kez çarpılmaz. Çift sayım olurdu — bileşen
@@ -1210,6 +1278,34 @@ class SolidRocketEngine:
             self.insulation_thickness_m = m / 1000.0
 
         # ------------------------------------------------------------------
+        # 7c) GRAIN DIŞ ÇAPI ile KASA İÇ ÇAPI ayrımı (v2.6.26, kalem 29)
+        #
+        # Formda iki ayrı alan var ve ikisinin de etiketi doğruyken davranış
+        # ikisini de yalanlıyordu:
+        #   * 'outer_diameter'   — "grain dış çapı" diye etiketli, motora HİÇ
+        #                          girmiyordu (girilen 100 mm yok sayılıyor,
+        #                          bir uyarıyla "kullanılmıyor" deniyordu),
+        #   * 'chamber_diameter' — "kasa iç çapı" diye etiketli, ama fiilen
+        #                          GRAIN dış çapı olarak kullanılıyordu
+        #                          (yanma alanı, grain hacmi, web hep bundan).
+        # Yani kullanıcı grain'i büyütmek için etiketi "kasa" olan alanı
+        # değiştirmek zorundaydı ve yalıtım payını hesaba katamıyordu.
+        #
+        # Artık grain dış çapının doğruluk kaynağı 'outer_diameter'dır;
+        # 'chamber_diameter' kasa iç çapı olarak yorumlanır. İlişki zaten
+        # _case_inner_diameter'da yazılıydı: D_kasa_iç >= D_grain + 2·yalıtım
+        # (Sutton & Biblarz 9. baskı Böl. 12: hacimsel doluluk ve yalıtım
+        # payı). Alan verilmediğinde eski davranış BİT-AYNI kalır.
+        # ------------------------------------------------------------------
+        self.case_bore_input_m = None
+        m = self._override_val('outer_diameter', 1.0, 5000.0)       # mm
+        if m is not None and abs(m / 1000.0 - self.D_chamber) > 1e-9:
+            # chamber_diameter kullanıcının kasa iç çapı beyanıdır; grain dış
+            # çapı ayrı bir alandan gelir.
+            self.case_bore_input_m = self.D_chamber
+            self.D_chamber = m / 1000.0
+
+        # ------------------------------------------------------------------
         # 8) PARÇALI yanma hızı yasası (F025, 2026-07-25)
         #
         # KN-şeker yakıtların (KNDX/KNSB) yayımlanmış davranışı PARÇALIDIR:
@@ -1303,15 +1399,27 @@ class SolidRocketEngine:
                      * getattr(self, 'two_phase_efficiency', 1.0))
 
     def _case_inner_diameter(self):
-        """Kasa iç çapı [m] = grain dış çapı + 2 x yalıtım kalınlığı.
+        """Kasa iç çapı [m] — kullanıcının beyanı ya da grain + 2 x yalıtım.
 
         v2.6.26 (D1-KATI-OLU-1): yalıtım eskiden hiçbir geometriye girmiyordu;
         kasa grain'e sıfır boşlukla yapışık varsayılıyordu. Yalıtım radyal
         yer kapladığı için hoop boyutlandırması, kasa kütlesi ve motor dış
         çapı bu çaptan türer. Yalıtım verilmezse (0) davranış eskisiyle aynı.
+
+        v2.6.26 (kalem 29): kullanıcı grain dış çapını ('outer_diameter') ve
+        kasa iç çapını ('chamber_diameter') AYRI verdiyse beyan edilen kasa
+        çapı kullanılır — ama asla grain + 2·yalıtımın altına düşemez, çünkü
+        grain fiziksel olarak kasaya sığmak zorundadır. Sığmıyorsa geometrik
+        alt sınır uygulanır ve tutarsızlık koşu uyarısıyla bildirilir
+        (bkz. calculate_performance, warn.solid.case_bore_too_small).
         """
-        return self.D_chamber + 2.0 * getattr(self, 'insulation_thickness_m',
-                                              0.0)
+        geometric_minimum = (self.D_chamber
+                             + 2.0 * getattr(self, 'insulation_thickness_m',
+                                             0.0))
+        declared = getattr(self, 'case_bore_input_m', None)
+        if declared is not None:
+            return max(float(declared), geometric_minimum)
+        return geometric_minimum
 
     def _case_inner_length(self):
         """Kasa iç boyu [m] = grain yığını + BATES segment araları + kapaklar.
@@ -1362,6 +1470,81 @@ class SolidRocketEngine:
             return float(SOLID_CASE_DESIGN['case_density_kg_m3'])
         return float(self._case_material_properties(material)['density'])
 
+    #: /calculate_solid uç noktasının kurucu varsayılanı. İstemci
+    #: 'propellant_type' göndermediğinde uç nokta bu değeri koyduğu için
+    #: "kullanıcı gerçekten APCP seçti" ile "alan hiç gelmedi" ayrımı yalnız
+    #: overrides sözlüğüne bakarak yapılabilir.
+    _DEFAULT_PROPELLANT_TYPE = 'apcp'
+
+    def _resolve_propellant_type(self):
+        """Yakıt kimliğini formun GERÇEKTEN gönderdiği alanlardan çözer.
+
+        v2.6.26 (P3): katı sayfasında ``#propellant_type`` diye bir alan
+        YOKTU; form yakıtı ``propellant_name`` (serbest metin) ve
+        ``burn_rate_preset`` (katalog anahtarı) ile gönderiyordu.
+        /calculate_solid ise ``data.get('propellant_type', 'apcp')`` ile
+        okuduğu için HER koşu APCP oluyordu. Sonuç: KNDX seçen kullanıcıya
+        HTPB elastomerin grain mekaniği (E = 6 MPa, kopma uzaması %35,
+        kürleme 333 K) ve APCP'nin iki-fazlı kaybı (%4.08) raporlanıyordu —
+        ateşlenecek bir grain hakkında verilebilecek en tehlikeli yanlış
+        karar (bkz. _grain_mechanics docstring'i).
+
+        Öncelik: açık ``propellant_type`` girdisi > kurucuya verilen
+        (varsayılan olmayan) argüman > yanma-hızı ön ayarı > yakıt adı.
+        Ad/ön ayar üzerinden çözüldüyse bu SESSİZ DEĞİLDİR: bilgi düzeyinde
+        bir tasarım notu üretilir, çünkü kullanıcının seçtiği yakıt ile
+        motorun çözdüğü yakıt arasındaki bağ türetilmiştir.
+        """
+        explicit = self.overrides.get('propellant_type')
+        explicit = explicit.strip().lower() if isinstance(explicit, str) else ''
+        if explicit:
+            self.propellant_type = explicit
+            self.propellant_type_source = 'propellant_type input'
+            return
+        # DİKKAT: alan BOŞ STRING olarak da gelebilir (kullanıcı katalog
+        # satırı seçmediyse arayüz '' gönderir). Boş değer "seçim yapıldı"
+        # sayılmaz; aksi hâlde ad/ön ayar üzerinden türetme yolu kapanır ve
+        # motor yine sessizce APCP çözerdi.
+        given = str(self.propellant_type or '').strip().lower()
+        # Uç noktanın koyduğu varsayılanı "kullanıcı seçimi" saymayız.
+        if given and given != self._DEFAULT_PROPELLANT_TYPE:
+            self.propellant_type = given
+            self.propellant_type_source = 'constructor argument'
+            return
+        for field, label in (('burn_rate_preset', 'burn-rate preset'),
+                             ('propellant_name', 'propellant name')):
+            candidate = _catalog_key_from_text(self.overrides.get(field))
+            if not candidate:
+                continue
+            self.propellant_type = candidate
+            self.propellant_type_source = f'{label} ({field})'
+            self.design_warnings.append(dict(_w(
+                'warn.solid.propellant_type_derived', 'info',
+                propellant=candidate, field=field,
+                value=str(self.overrides.get(field))),
+                fallback=("The solid motor page has no explicit propellant "
+                          "selector, so the propellant identity was derived "
+                          "from '{field}' = '{value}' and resolved to "
+                          "'{propellant}'. Grain mechanics, two-phase loss "
+                          "and the published mixture come from that record.")))
+            return
+        self.propellant_type = given or self._DEFAULT_PROPELLANT_TYPE
+        self.propellant_type_source = 'endpoint default'
+        # Kullanıcı bir yakıt ADI yazdı ama hiçbir katalog kaydına
+        # oturmadı: motor varsayılan kompozit kaydını çözer ve bu SESSİZ
+        # KALAMAZ. _grain_mechanics burada uyarmaz, çünkü 'apcp' kaydı
+        # vardır — kullanıcı kendi karışımı için HTPB sayılarını görür.
+        typed_name = str(self.overrides.get('propellant_name') or '').strip()
+        if typed_name and not _catalog_key_from_text(typed_name):
+            self.design_warnings.append(dict(_w(
+                'warn.solid.propellant_type_unresolved', 'warning',
+                name=typed_name, used=self.propellant_type),
+                fallback=("Propellant '{name}' does not match any catalogue "
+                          "record, so the solver fell back to '{used}'. Grain "
+                          "mechanics, two-phase loss and the published "
+                          "mixture describe '{used}', NOT your formulation - "
+                          "pick a catalogue row or enter the properties "
+                          "explicitly.")))
 
     def _set_propellant_properties(self):
         """CEA-tutarlı yakıt referans setleri (sentetik referans, deneysel veri değil)"""
@@ -3107,8 +3290,96 @@ class SolidRocketEngine:
             'assembly_integrity': {
                 'grain_case_bonding': 'Inhibited surfaces',
                 'thermal_barrier_effectiveness': self._insulation_effectiveness_percent(),
-                'joint_reliability': 98.2
+                # Kalem 27-28 (P3): eskiden burada SABİT '98.2' (%) vardı.
+                # HRMA'da bir güvenilirlik (olasılık) modeli YOKTUR: ne
+                # cıvata dayanım dağılımı ne yük dağılımı tanımlı. Sayı
+                # kaldırıldı; yerine cıvatalı kapak birleşiminin GERÇEK
+                # emniyet katsayıları (VDI 2230 / Shigley Böl. 8 sınıfı)
+                # verilir. Kullanıcı cıvata sayısını girmediyse alan
+                # 'not_sized' döner — sayı uydurulmaz.
+                'joint_reliability': None,
+                'joint_reliability_status': 'NOT_MODELLED',
+                'joint_reliability_basis': (
+                    'HRMA has no probabilistic joint model (no strength or '
+                    'load distributions); a reliability percentage cannot be '
+                    'computed. The deterministic bolted-joint safety factors '
+                    'are given in closure_joint instead.'),
+                'closure_joint': self._closure_joint_analysis(),
             }
+        }
+
+    #: Kapak cıvata birleşiminin varsayılan kabulleri — TEK tanım noktası.
+    #: Bunlar HESAP DEĞİL, kullanıcı girdisi verilmediğinde kullanılan
+    #: sözleşme değerleridir ve çıktıda adıyla beyan edilirler.
+    SOLID_CLOSURE_JOINT_DEFAULTS = {
+        'size': 'M8',
+        'property_class': '8.8',
+        'member_material': 'aluminum_6061',
+        'bolt_count_range': (1, 200),
+    }
+
+    def _closure_joint_analysis(self):
+        """Kapak cıvata birleşimi — hrma.analysis.bolted_joint ile.
+
+        Kalem 27-28 (P3). Çözüm projede ZATEN VARDI
+        (``analyze_bolted_joint``: Shigley Böl. 8 / ISO 898-1 / NASA-STD-5020A
+        ön-yük saçılımı) ve /api/bolted-joint ucundan çağrılıyordu; katı
+        motor onu HİÇ çağırmıyor, yerine sabit '%98.2 güvenilirlik' basıyordu.
+
+        Sızdırmazlık çapı kasa İÇ çapıdır (basıncın kapağa ittiği alan);
+        basınç tasarım oda basıncıdır. Cıvata sayısı formdan gelir; yoksa
+        birleşim boyutlandırılmaz.
+        """
+        cfg = self.SOLID_CLOSURE_JOINT_DEFAULTS
+        lo, hi = cfg['bolt_count_range']
+        count = self._override_val('closure_bolt_count', lo, hi)
+        if count is None or int(count) < 1:
+            return {
+                'status': 'not_sized',
+                'basis': ('No closure bolt count was supplied, so the joint '
+                          'is not sized. Enter the number of closure bolts '
+                          'to get separation and proof safety factors.'),
+            }
+        size = str(self.overrides.get('closure_bolt_size')
+                   or cfg['size']).strip().upper()
+        prop_class = str(self.overrides.get('closure_bolt_class')
+                         or cfg['property_class']).strip()
+        seal_diameter_mm = self._case_inner_diameter() * 1000.0
+        try:
+            from hrma.analysis.bolted_joint import analyze_bolted_joint
+            res = analyze_bolted_joint(
+                pressure_bar=float(self.P_c),
+                seal_diameter_mm=float(seal_diameter_mm),
+                bolt_count=int(count),
+                size=size,
+                property_class=prop_class,
+                member_material=cfg['member_material'])
+        except Exception as exc:
+            return {
+                'status': 'not_sized',
+                'basis': f'Bolted-joint analysis rejected the inputs: {exc}',
+            }
+        sf = res.get('safety_factors', {})
+        sep = res.get('separation', {})
+        return {
+            'status': 'sized',
+            'bolt_count': int(count),
+            'bolt_size': size,
+            'property_class': prop_class,
+            'seal_diameter_mm': float(seal_diameter_mm),
+            'pressure_bar': float(self.P_c),
+            'proof_safety_factor': sf.get('proof_SF_min'),
+            'separation_factor': sf.get('separation_factor_n0_min'),
+            'overload_factor': sf.get('overload_factor_nL_min'),
+            'separated': sep.get('separated'),
+            'governing_basis': sf.get('governing_basis'),
+            'member_material': cfg['member_material'],
+            'assumptions': res.get('assumptions'),
+            'warnings': res.get('warnings'),
+            'source': res.get('source'),
+            'basis': ('Separating load = chamber pressure x sealed area '
+                      '(case inner diameter); safety factors from the '
+                      'bolted-joint analyser used by /api/bolted-joint.'),
         }
     
     def _calculate_thermal_analysis(self):
@@ -3209,10 +3480,114 @@ class SolidRocketEngine:
                     'case_max_temp_k': case_limit,
                     'grain_max_temp_k': grain_limit,
                     'safety_margin_k': float(margin),
+                    # Kalem 10 (P3): bu sayı ÖLÇÜLMÜŞ bir servis limiti
+                    # değildir; seçili yakıtın kürleme sıcaklığıdır ve
+                    # yumuşama/depolama üst sınırı için vekil olarak
+                    # kullanılır. Etiketsiz bırakıldığında kullanıcı bunu
+                    # yakıtın tutuşma/bozunma sıcaklığı sanıyordu.
+                    'grain_max_temp_basis': (
+                        'limit = propellant cure temperature (softening '
+                        'proxy) from the grain mechanical record, not a '
+                        'measured service limit'),
+                    'grain_property_source': self._grain_mechanics()['source'],
                 }
             }
         }
     
+    @staticmethod
+    def _split_composition(text):
+        """'Aluminum ~16% + PBAN binder ~14%' -> [('aluminum', 16.0), ...].
+
+        Merkezi katalog bileşimi YAYIMLANMIŞ METİN olarak tutar; burada yalnız
+        o metindeki yüzdeler okunur. Yüzde yazmayan kayıttan sayı ÜRETİLMEZ
+        (boş liste döner) — kalem 12-14'ün kuralı budur.
+        """
+        parts = []
+        for chunk in re.split(r'\s*\+\s*', str(text or '')):
+            match = re.search(r'(\d+(?:\.\d+)?)\s*%', chunk)
+            if not match:
+                continue
+            label = re.sub(r'[~]?\d+(?:\.\d+)?\s*%', '', chunk)
+            label = re.sub(r'\s{2,}', ' ', label).strip(' ,;')
+            parts.append((label, float(match.group(1))))
+        return parts
+
+    def _published_mixture(self):
+        """Seçili yakıtın YAYIMLANMIŞ karışım oranları (katalogtan).
+
+        Kalem 12-14 (P3). Eski kod iki dallı bir sabitti::
+
+            is_apcp = self.propellant_type == 'apcp'
+            'oxidizer_percent': 68 if is_apcp else 75
+
+        Yani KNDX, KNSU, çift bazlı ve siyah barut AYNI üç sayıyı alıyordu
+        (75/15/8) — oysa KN-şeker karışımı yayımlanmış olarak %65/%35'tir ve
+        BAĞLAYICI İÇERMEZ. APCP dalındaki 12'lik bağlayıcı da kayda
+        dayanmıyordu: merkezi katalogdaki 'htpb_ap_al' kaydının kendi
+        bileşimi %68 AP + %18 Al + %14 HTPB olarak zaten yazılıydı. Artık
+        oranlar o kaydın 'oxidizer'/'fuel' alanlarından okunur; kayıtta
+        yüzde yoksa (ör. homojen çift bazlı) sayı UYDURULMAZ, alan boş
+        bırakılır ve 'status' bunu söyler.
+
+        Bağlayıcı ayrımı kaydın kendi sözcüğünden gelir ('... binder ...') —
+        şeker yakıtlarında bağlayıcı kalemi yoktur ve bu yüzden yayınlanmaz.
+        """
+        key = _catalog_key_for(self.propellant_type)
+        rec = _get_propellant_safe(key) if key else None
+        if not rec:
+            return {
+                'status': 'not_tabulated',
+                'oxidizer_percent': None,
+                'fuel_percent': None,
+                'binder_percent': None,
+                'additives_percent': None,
+                'basis': (f"No formulation record exists for "
+                          f"'{self.propellant_type}' in the central propellant "
+                          f"catalogue; mixture percentages are left empty "
+                          f"rather than guessed."),
+            }
+
+        oxidizer_parts = self._split_composition(rec.get('oxidizer'))
+        fuel_parts = self._split_composition(rec.get('fuel'))
+        components = ([{'role': 'oxidizer', 'label': label, 'percent': pct}
+                       for label, pct in oxidizer_parts]
+                      + [{'role': ('binder' if 'binder' in label.lower()
+                                   else 'fuel'),
+                          'label': label, 'percent': pct}
+                         for label, pct in fuel_parts])
+
+        def _total(role):
+            vals = [c['percent'] for c in components if c['role'] == role]
+            return float(sum(vals)) if vals else None
+
+        oxidizer_percent = _total('oxidizer')
+        fuel_percent = _total('fuel')
+        binder_percent = _total('binder')
+        tabulated = any(v is not None for v in
+                        (oxidizer_percent, fuel_percent, binder_percent))
+        return {
+            'status': 'tabulated' if tabulated else 'not_tabulated',
+            'oxidizer_percent': oxidizer_percent,
+            'fuel_percent': fuel_percent,
+            'binder_percent': binder_percent,
+            # Katkı maddesi oranı hiçbir katalog kaydında tablolanmıyor:
+            # eski sabit %2 kaldırıldı, yerine sayı KONULMADI.
+            'additives_percent': None,
+            'components': components,
+            'oxidizer_description': rec.get('oxidizer'),
+            'fuel_description': rec.get('fuel'),
+            'propellant_record': key,
+            'basis': (
+                f"Published formulation of catalogue record '{key}' "
+                f"({rec.get('name', key)}); percentages are read from that "
+                f"record, not computed from this design. "
+                f"Source: {rec.get('source', 'see propellants_db')}"
+                if tabulated else
+                f"Catalogue record '{key}' states the composition without "
+                f"percentages (e.g. homogeneous double-base); no numbers are "
+                f"reported rather than guessed."),
+        }
+
     def _calculate_manufacturing_analysis(self):
         """İmalat REÇETESİ - bu tasarımdan hesaplanmış değerler değil.
 
@@ -3225,30 +3600,26 @@ class SolidRocketEngine:
         hesaplanmıyor ama hesaplanmış gibi duruyordu.
         """
         case_material = getattr(self, 'case_material', None) or 'NOT_DEFINED'
-        # Karışım oranları itergaç ailesine göre genel yayınlanmış aralıklardır;
-        # kullanıcının kendi karışımı değildir.
-        is_apcp = self.propellant_type == 'apcp'
         return {
             'basis': ('Generic production recipe for this propellant family and '
                       'case material. Percentages, cure schedule and tolerances '
                       'are published practice, not computed from this design.'),
             'propellant_manufacturing': {
-                'mixing_requirements': {
-                    'oxidizer_percent': 68 if is_apcp else 75,
-                    'fuel_percent': 18 if is_apcp else 15,
-                    'binder_percent': 12 if is_apcp else 8,
-                    'additives_percent': 2,
-                    'basis': ('Typical published formulation band for '
-                              f'{self.propellant_type}; confirm against your '
-                              'own mix design.'),
-                },
+                'mixing_requirements': self._published_mixture(),
                 'curing_process': {
-                    'temperature_k': 333,
+                    # Kürleme sıcaklığı, yapısal zincirin kullandığı kürleme
+                    # sıcaklığının TA KENDİSİdir (aynı kavram iki yerde iki
+                    # farklı sayı olamaz): _grain_mechanics kaydı.
+                    'temperature_k': float(
+                        self._grain_mechanics()['cure_temperature_k']),
                     'time_hours': 24,
                     'pressure_kpa': 101.325,
                     'humidity_control': 'Required',
-                    'basis': ('Typical HTPB-class cure schedule; follow your '
-                              'binder supplier data sheet.'),
+                    'basis': ('Cure temperature is the value used by the grain '
+                              'structural chain (propellant mechanical '
+                              'record); dwell time and humidity are typical '
+                              'practice - follow your binder supplier data '
+                              'sheet.'),
                 },
                 'quality_requirements': {
                     'density_tolerance_percent': 2.0,
@@ -3798,8 +4169,13 @@ class SolidRocketEngine:
         d_exit = d_throat * np.sqrt(epsilon)
 
         # Nozzle contour lengths (conical nozzle)
-        conv_half_angle = 30.0  # degrees
-        div_half_angle = 15.0   # degrees
+        # Kalem 15-16 (P3): burada 30/15 derece YEREL SABİT olarak duruyordu.
+        # Yarı açıların TEK kaynağı _nozzle_half_angles(): kullanıcının
+        # convergent_angle / divergent_angle girdisi zaten oraya işleniyor ve
+        # nozul boyu (_calculate_nozzle_length) onu kullanıyordu. Bu panel
+        # ise girdiden bağımsız 30/15 yayımlıyordu — aynı motorun nozul açısı
+        # iki yerde iki farklı sayıydı.
+        conv_half_angle, div_half_angle = self._nozzle_half_angles()
         convergent_length = (self.D_chamber - d_throat) / (2 * np.tan(np.radians(conv_half_angle)))
         divergent_length = (d_exit - d_throat) / (2 * np.tan(np.radians(div_half_angle)))
 
@@ -3853,7 +4229,17 @@ class SolidRocketEngine:
                 'angle_tolerance': '±0.5°'
             },
             'performance': {
-                'thrust_coefficient': 1.65,
+                # Kalem 17 (P3): sabit 1.65 yerine motorun KENDİ CF tanımı
+                # (_thrust_coefficient — Sutton & Biblarz Denk. 3-30/3-31,
+                # sabit geometri + gerçek ortam basıncı). İtki eğrisi bu
+                # fonksiyonu zaten kullanıyordu; CAD paneli kullanmıyordu ve
+                # her motorda aynı 1.65'i basıyordu.
+                'thrust_coefficient': float(self._thrust_coefficient(self.P_c)),
+                'thrust_coefficient_basis': (
+                    'CF(Pc) at the design chamber pressure from the same '
+                    'definition the thrust curve uses (Sutton & Biblarz '
+                    'Eq. 3-30/3-31, fixed-geometry nozzle, nozzle efficiency '
+                    'applied)'),
                 'nozzle_efficiency': self.nozzle_efficiency,
                 # Gerçek ampirik modelden (eskiden sabit '0.001 mm/s' idi)
                 'erosion_rate': f"{_ero_rate:.3f} mm/s",
@@ -3886,7 +4272,12 @@ class SolidRocketEngine:
                 'thickness': t_ins_mm,  # mm — kullanıcının girdisi
                 'liner_thickness': t_liner_mm,  # mm — grain bağ katmanı
                 'total_thermal_thickness': t_ins_mm + t_liner_mm,  # mm
-                'density': SOLID_INSULATION['density_kg_m3'],   # kg/m³
+                # Kalem 20 (P3): tablo değeri SABİT basılıyordu; oysa formun
+                # 'liner_density' alanı motora ulaşıyor ve ısıl kapasite
+                # zinciri (_calculate_case_temperature) onu kullanıyor.
+                # Aynı katmanın yoğunluğu iki panelde iki farklı sayı olamaz.
+                'density': float(getattr(self, 'liner_density',
+                                         SOLID_INSULATION['density_kg_m3'])),
                 'thermal_conductivity':
                     SOLID_INSULATION['thermal_conductivity_w_mk'],  # W/mK
                 'application_method': 'NOT_DEFINED',
@@ -3898,58 +4289,280 @@ class SolidRocketEngine:
             },
             'inhibitor_coating': {
                 'material': 'Silicone rubber',
-                'thickness': 1.0,  # mm
+                # İnhibitör kaplama kalınlığı HRMA tarafından
+                # BOYUTLANDIRILMIYOR (yanma yüzeyi maskeleme modeli var,
+                # kaplama ablasyon modeli yok). Sabit 1.0 mm kaldırıldı.
+                'thickness': None,
+                'thickness_status': 'NOT_MODELLED',
                 'coverage': ['Outer grain surface', 'End faces'],
-                'adhesion_strength': '2.5 MPa',
-                'flexibility': 'High temperature flexible',
-                'application': 'Brush or spray application'
+                'application': 'Brush or spray application',
+                'basis': ('HRMA does not size the inhibitor coating: the '
+                          'burn-area model treats inhibited faces as fully '
+                          'masked and has no coating recession model.'),
             },
-            'forward_insulation': {
-                'material': 'Carbon phenolic',
-                'thickness': 5.0,  # mm
-                'function': 'Protect forward closure',
-                'erosion_resistance': 'Excellent'
-            },
-            'aft_insulation': {
-                'material': 'Graphite cloth phenolic',
-                'thickness': 4.0,  # mm
-                'function': 'Nozzle throat protection',
-                'operating_temperature': '3000°C'
+            'forward_insulation': self._ablative_liner_sizing(
+                'forward closure',
+                'Protect forward closure',
+                # Ön kapak akısı boğaz akısından KÜÇÜKTÜR (durgun bölge,
+                # düşük hız); boğaz akısıyla boyutlandırmak konservatif ÜST
+                # sınırdır ve 'basis' alanında böyle beyan edilir.
+                conservative=True),
+            'aft_insulation': self._ablative_liner_sizing(
+                'aft closure / nozzle entry',
+                'Nozzle throat protection',
+                conservative=False),
+        }
+
+    def _ablative_liner_sizing(self, station, function, conservative):
+        """Ablatif kapak yalıtımı kalınlığı — Seviye-1 Q* modeliyle.
+
+        Kalem 18-19 (P3). Eskiden ön kapak 5.0 mm, arka kapak 4.0 mm SABİT
+        yazılıydı: 75 mm'lik bir amatör motorla 500 mm'lik bir motora aynı
+        kalınlık veriliyordu ve sayının hiçbir ısı yüküyle ilgisi yoktu.
+
+        Projede boyutlandırmayı yapan çözüm ZATEN VAR ama katı motordan hiç
+        çağrılmıyordu: ``hrma.analysis.thermal_protection.
+        ThermalProtectionAnalyzer.ablative_thickness`` (Seviye-1 Q* /
+        ablasyon ısısı modeli, NASA SP-8091 sınıfı; /api/thermal-protection
+        uç noktası onu kullanıyor). Girdiler motorun kendi zincirinden
+        gelir: Bartz boğaz ısı akısı (_calculate_heat_flux) ve çözülen
+        yanma süresi.
+
+        Yanma süresi bilinmiyorsa (itki eğrisi henüz koşmadıysa) sayı
+        ÜRETİLMEZ: alan NOT_MODELLED döner.
+        """
+        burn_time = getattr(self, '_last_burn_time', None)
+        material = 'carbon_phenolic'
+        if not burn_time or burn_time <= 0:
+            return {
+                'material': material,
+                'thickness': None,
+                'thickness_status': 'NOT_MODELLED',
+                'function': function,
+                'basis': ('Ablative thickness needs the solved burn time; '
+                          'no thrust curve has been computed for this '
+                          'motor instance.'),
             }
+        q_throat_kw_m2 = float(self._calculate_heat_flux())
+        try:
+            from hrma.analysis.thermal_protection import ThermalProtectionAnalyzer
+            sizing = ThermalProtectionAnalyzer().ablative_thickness(
+                q_net_W_m2=q_throat_kw_m2 * 1e3,
+                burn_time_s=float(burn_time),
+                material=material)
+        except Exception as exc:                       # pragma: no cover
+            return {
+                'material': material,
+                'thickness': None,
+                'thickness_status': 'NOT_MODELLED',
+                'function': function,
+                'basis': f'Ablative sizing failed: {exc}',
+            }
+        basis = (
+            f"Level-1 Q* ablation sizing at the {station}: required "
+            f"thickness = total recession x design margin "
+            f"{sizing['design_margin']:g}. Heat flux is the Bartz THROAT "
+            f"flux ({q_throat_kw_m2:.0f} kW/m2) and the burn time is the "
+            f"solved value ({float(burn_time):.2f} s).")
+        if conservative:
+            basis += (' The forward closure sits in a low-velocity stagnant '
+                      'region and sees a LOWER flux than the throat, so this '
+                      'thickness is a conservative upper bound, not a '
+                      'station-resolved value.')
+        return {
+            'material': sizing['material_name'],
+            'thickness': float(sizing['required_thickness_mm']),  # mm
+            'thickness_status': 'sized',
+            'function': function,
+            'total_recession_mm': float(sizing['total_recession_mm']),
+            'recession_rate_mm_s': float(sizing['recession_rate_mm_s']),
+            'design_margin': float(sizing['design_margin']),
+            'q_star_mj_kg': float(sizing['q_star_MJ_kg']),
+            'heat_flux_kw_m2': q_throat_kw_m2,
+            'burn_time_s': float(burn_time),
+            'basis': basis,
+            'model_note': sizing['model_note'],
+            'source': sizing['source'],
         }
     
+    def _case_free_volume(self):
+        """Kasa serbest (boş) hacmi [m³] = kasa iç hacmi − yakıt hacmi.
+
+        TEK tanım noktası: hem calculate_performance'ın raporladığı
+        'case_free_volume_l' hem ateşleyici boyutlandırması buradan okur
+        (aynı kavram iki yerde iki farklı sayı olamaz).
+        """
+        interior = (np.pi * (self.D_chamber / 2.0) ** 2
+                    * self._case_inner_length())
+        return float(max(interior - self._propellant_volume(), 0.0))
+
     def _design_igniter_system(self):
-        """Igniter system design"""
+        """Ateşleyici — serbest hacim basınçlandırma ölçütüyle boyutlandırılır.
+
+        EK BULGU (P3, v2.6.26). Bu blok BAŞTAN SONA elle yazılmış bir
+        sözlüktü: 2.0 g kara barut, 0.2 s yanma, 2200 °C alev, 10 mm çaplı
+        50 mm boyunda 1 mm cidarlı kap, 'Nichrome 32 AWG / 2.0 Ohms /
+        3A for 1 second'. 75 mm'lik bir amatör motorla 200 mm'lik bir motor
+        AYNI ateşleyiciyi alıyordu; hiçbir sayı motorun serbest hacmine,
+        basıncına ya da yakıtına bağlı değildi.
+
+        Boyutlandırılan tek büyüklük ŞARJ KÜTLESİdir ve klasik serbest hacim
+        basınçlandırma ölçütünden gelir (NASA SP-8051, "Solid Rocket Motor
+        Igniters"; Sutton & Biblarz 9. baskı Böl. 12 ateşleme bölümü):
+
+            m_gaz  = P_ateş · V_serbest / (R_gaz · T_gaz)
+            m_şarj = m_gaz / (1 − X_yoğuşmuş)
+
+        Burada
+          * V_serbest : kasa iç hacmi − yakıt hacmi (_case_free_volume),
+          * P_ateş    : hedef ateşleme basıncı; TASARIM SEÇİMİdir, hesap
+            değildir — kullanıcı girdisiyle (igniter_pressure_fraction)
+            verilir ve çıktıda adıyla beyan edilir,
+          * R_gaz,T_gaz: şarjın merkezi katalog kaydından (molekül ağırlığı
+            ve alev sıcaklığı),
+          * X_yoğuşmuş: şarjın yoğuşmuş faz kütle kesri — kara barut
+            kütlesinin yarıdan fazlası katı kalıntıdır ve bu kesir projede
+            ZATEN tablolu (SOLID_CONDENSED_MASS_FRACTION); yalnız gaz fazı
+            kamarayı basınçlandırır.
+
+        BOYUTLANDIRILMAYANLAR (sayı üretilmez, NOT_MODELLED etiketlenir):
+          * yanma süresi — motorun basınç yükselme süresine (tipik olarak
+            %90 Pc'ye ulaşma) eşlenmesi gerekir; HRMA'da ateşleme geçici
+            rejim modeli yoktur,
+          * kap çapı/boyu — dolum oranı ve L/D seçimine bağlıdır, ikisi de
+            yayımlanmış bir kayda dayanmaz,
+          * cidar kalınlığı — kap yarıçapı boyutlandırılmadığı için
+            t = P·r/(σ_y/SF) değerlendirilemez,
+          * köprü teli / direnç / akım — elektriksel ateşleme modeli yok.
+        """
+        cfg = SOLID_IGNITER
+        lo, hi = cfg['pressure_fraction_range']
+        fraction = self._override_val('igniter_pressure_fraction', lo, hi)
+        fraction_source = 'igniter_pressure_fraction input'
+        if fraction is None:
+            fraction = cfg['pressure_fraction_default']
+            fraction_source = ('default design choice (no '
+                               'igniter_pressure_fraction supplied)')
+
+        charge_key = cfg['charge_record']
+        rec = _get_propellant_safe(charge_key)
+        x_condensed = SOLID_CONDENSED_MASS_FRACTION.get(charge_key)
+        v_free = self._case_free_volume()
+        p_ign_bar = float(self.P_c) * float(fraction)
+
+        grain = {
+            'material': (rec or {}).get('name', charge_key),
+            'charge_record': charge_key,
+        }
+        if not rec or x_condensed is None or v_free <= 0 or p_ign_bar <= 0:
+            grain.update({
+                'mass': None,
+                'mass_status': 'NOT_MODELLED',
+                'basis': ('The igniter charge cannot be sized: the free '
+                          'volume, the ignition pressure or the charge gas '
+                          'record is missing. No number is reported.'),
+            })
+        else:
+            gas_fraction = max(1.0 - float(x_condensed), 1e-6)
+            r_gas = R_UNIVERSAL / float(rec['molecular_weight'])  # J/(kg*K)
+            t_gas = float(rec['flame_temperature'])               # K
+            m_gas = p_ign_bar * 1e5 * v_free / (r_gas * t_gas)    # kg
+            m_charge = m_gas / gas_fraction                       # kg
+            grain.update({
+                'mass': float(m_charge * 1000.0),                 # gram
+                'mass_status': 'sized',
+                'gas_mass_g': float(m_gas * 1000.0),
+                'flame_temperature_k': t_gas,
+                'gas_molecular_weight_g_mol': float(rec['molecular_weight']),
+                'gas_mass_fraction': float(gas_fraction),
+                'ignition_pressure_bar': p_ign_bar,
+                'ignition_pressure_fraction_of_pc': float(fraction),
+                'ignition_pressure_source': fraction_source,
+                'free_volume_l': float(v_free * 1000.0),
+                'charge_volume_cm3': float(m_charge / float(rec['density'])
+                                           * 1e6),
+                'basis': (
+                    'Free-volume pressurisation criterion (NASA SP-8051): '
+                    'm_charge = P_ign*V_free/(R*T) / (1 - X_condensed). '
+                    'P_ign is a DESIGN CHOICE ('
+                    f'{fraction:.0%} of the chamber pressure, '
+                    f'{fraction_source}), not a computed quantity. Charge '
+                    f'gas properties from catalogue record "{charge_key}" '
+                    f'({rec.get("source", "propellants_db")}); condensed '
+                    f'mass fraction {float(x_condensed):.2f} from '
+                    'SOLID_CONDENSED_MASS_FRACTION.'),
+                'model_limitation': (
+                    'Quasi-static ideal-gas criterion: it sizes the charge '
+                    'that fills the free volume to P_ign, it does NOT model '
+                    'the ignition transient, flame spreading or heat loss '
+                    'to the grain surface. Static-fire confirmation is '
+                    'required.'),
+            })
+        # Yanma süresi: ateşleme geçici rejimi modellenmiyor (bkz. docstring).
+        grain.update({
+            'burn_time': None,
+            'burn_time_status': 'NOT_MODELLED',
+            'burn_time_basis': (
+                'The igniter burn time must match the motor pressure-rise '
+                'time (typically time to 90% of Pc). HRMA has no ignition '
+                'transient model, so no number is reported.'),
+        })
         return {
             'igniter_type': 'Pyrotechnic',
-            'igniter_grain': {
-                'material': 'Black powder',
-                'mass': 2.0,  # grams
-                'burn_time': 0.2,  # seconds
-                'flame_temperature': 2200  # °C
-            },
+            'igniter_grain': grain,
             'igniter_case': {
-                'material': 'Aluminum',
-                'diameter': 10.0,  # mm
-                'length': 50.0,   # mm
-                'wall_thickness': 1.0  # mm
+                'material': 'NOT_DEFINED',
+                'diameter': None,
+                'length': None,
+                'wall_thickness': None,
+                'status': 'NOT_MODELLED',
+                'basis': ('The igniter case envelope depends on the charge '
+                          'bulk fill fraction and a chosen length/diameter '
+                          'ratio; neither has a published record in HRMA, so '
+                          'no dimensions are reported. The required charge '
+                          'volume is given in igniter_grain.'),
             },
             'electrical_system': {
-                'bridge_wire': 'Nichrome 32 AWG',
-                'resistance': '2.0 Ohms',
-                'current_requirement': '3A for 1 second',
-                'safety_features': ['Continuity test', 'Arming switch', 'Safety key']
+                'bridge_wire': 'NOT_DEFINED',
+                'resistance': None,
+                'current_requirement': None,
+                'status': 'NOT_MODELLED',
+                'basis': ('HRMA has no electrical initiation model (bridge '
+                          'wire energy balance, no-fire/all-fire current); '
+                          'the previous fixed "Nichrome 32 AWG / 2.0 Ohms / '
+                          '3 A" text was not derived from anything.'),
+                'safety_features': ['Continuity test', 'Arming switch',
+                                    'Safety key'],
             },
             'installation': {
                 'mounting': 'Forward closure threaded port',
                 'alignment': 'Aimed at grain core center',
-                'wire_routing': 'Sealed electrical feedthrough'
+                'wire_routing': 'Sealed electrical feedthrough',
+                'basis': ('Installation practice, not a computed result.'),
             }
         }
     
     def _generate_manufacturing_drawings(self):
-        """Generate manufacturing drawing specifications"""
+        """İmalat resmi paketinin İÇERİK LİSTESİ — ölçü/tolerans üretmez.
+
+        EK BULGU (P3, v2.6.26). Bu blok tolerans ve geçme sınıfı BEYAN
+        ediyordu: '±0.01mm boğaz', '±0.05mm kasa deliği', 'H7/f6 geçme',
+        '2A/2B diş sınıfı'. Hiçbiri hesaplanmıyordu ve motorun boyutundan,
+        malzemesinden, basıncından bağımsızdı — kullanıcı bunları HRMA'nın
+        kendi tasarımı için verdiği imalat gereksinimi sanabilirdi.
+        Aynı sınıftaki 'surface_finish' / 'threads' alanları kasa bloğunda
+        zaten NOT_DEFINED'a çevrilmişti (v2.6.26); bu blok da aynı kurala
+        getirildi: sayı üretilmez, ne yapılması gerektiği söylenir.
+
+        Geriye kalan liste bir DOKÜMAN listesidir (hangi resimler çizilmeli),
+        hesap sonucu değildir ve öyle beyan edilir.
+        """
         return {
+            'basis': ('Document checklist for a manufacturing drawing '
+                      'package. HRMA does not produce dimensional tolerances, '
+                      'fits or thread classes: those follow from the '
+                      'manufacturing process, the material and the assembly '
+                      'stack-up, none of which are modelled here.'),
             'drawing_set': {
                 'assembly_drawing': 'Overall motor assembly with BOM',
                 'case_drawing': 'Machined case with all dimensions',
@@ -3962,14 +4575,23 @@ class SolidRocketEngine:
                 'tolerance_standard': 'ISO 2768-1',
                 'surface_symbols': 'ISO 1302',
                 'material_callouts': 'ASTM standards',
-                'revision_control': 'Controlled document system'
+                'revision_control': 'Controlled document system',
+                'basis': ('A conventional standard set for this drawing '
+                          'package; it is a template choice, not a result '
+                          'derived from this motor.'),
             },
             'critical_dimensions': {
-                'throat_diameter': '±0.01mm',
-                'case_bore': '±0.05mm',
-                'grain_fit': 'H7/f6 fit',
-                'thread_class': '2A/2B',
-                'surface_finish': 'Ra values specified'
+                'status': 'NOT_MODELLED',
+                'throat_diameter': None,
+                'case_bore': None,
+                'grain_fit': None,
+                'thread_class': None,
+                'surface_finish': None,
+                'basis': ('Tolerances, fits and thread classes are not sized '
+                          'by HRMA. The previous fixed values (+/-0.01 mm '
+                          'throat, +/-0.05 mm bore, H7/f6, 2A/2B) applied to '
+                          'every motor regardless of size and were not '
+                          'derived from anything.'),
             }
         }
     
@@ -4681,9 +5303,28 @@ class SolidRocketEngine:
                 'model_applied': False,
             }
 
+        # Kalem 26 (P3): port_ratio_end eskiden
+        #   (D_core + 2*(D_chamber - D_core)/2) / D_chamber
+        # idi — bu ifade cebirsel olarak HER motorda tam 1.0'dır, yani
+        # 'port_diameter_factor_final' bir hesap değil sabitti. Gerçek son
+        # port çapı çözücünün kendi gerileme serisinde duruyor: A_port(t).
+        # Eşdeğer çap D = sqrt(4A/pi) ile ifade çözümün sonucuna bağlanır
+        # (yıldız/finocyl gibi dairesel olmayan portlarda da tanımlıdır).
         port_ratio_0 = self.D_core / self.D_chamber
-        port_ratio_end = min(1.0, (self.D_core + 2.0 * max(
-            (self.D_chamber - self.D_core) / 2.0, 0.0)) / self.D_chamber)
+        port_areas = np.asarray(curve.get('port_area', []), dtype=float)
+        port_areas = port_areas[np.isfinite(port_areas) & (port_areas > 0)]
+        if port_areas.size:
+            d_port_end = float(np.sqrt(4.0 * port_areas[-1] / np.pi))
+            port_ratio_end = min(1.0, d_port_end / self.D_chamber)
+            port_ratio_end_basis = (
+                'equivalent final port diameter sqrt(4*A_port/pi) from the '
+                'solver regression series')
+        else:
+            # Seri yoksa sayı UYDURULMAZ: başlangıç oranına düşmek yerine
+            # alan boş bırakılır (aşağıda None olarak yayımlanır).
+            port_ratio_end = None
+            port_ratio_end_basis = (
+                'NOT_MODELLED: the solver produced no port-area series')
         return {
             # Akı, çözücünün kullandığı GERÇEK port akış kesitinden gelir
             # (eski kod end-burner'da bile π(D_core/2)² kullanıyordu).
@@ -4703,8 +5344,13 @@ class SolidRocketEngine:
             # 'Moderate' sabit metni yerine hesaplanmış geometrik çarpan
             'port_diameter_factor_initial': float(
                 max(port_ratio_0, 0.05) ** -0.2),
-            'port_diameter_factor_final': float(
-                max(port_ratio_end, 0.05) ** -0.2),
+            'port_diameter_factor_final': (
+                float(max(port_ratio_end, 0.05) ** -0.2)
+                if port_ratio_end is not None else None),
+            'port_diameter_ratio_final': (float(port_ratio_end)
+                                          if port_ratio_end is not None
+                                          else None),
+            'port_diameter_ratio_final_basis': port_ratio_end_basis,
             'port_diameter_basis': '(D_port/D_chamber)^-0.2 (reduced L-R proxy)',
             'model_applied': True,
             'model_limitation': (
@@ -5612,9 +6258,8 @@ class SolidRocketEngine:
         # 'chamber_volume' (Case Internal Volume, L) alanı bu büyüklüğün
         # kullanıcı beyanıdır; çözücü girdisi değildir, tutarlılık için
         # hesaplananla karşılaştırılır (aşağıda) ve raporlanır.
-        case_free_volume = max(
-            np.pi * (self.D_chamber / 2)**2 * self._case_inner_length()
-            - grain_volume, 0.0)  # m^3
+        # TEK tanım noktası: ateşleyici boyutlandırması aynı hacmi okur.
+        case_free_volume = self._case_free_volume()  # m^3
 
         # Initial and final burn areas for Kn calculation
         A_burn_initial = self.calculate_burn_area(0.0)  # web=0 -> initial
@@ -5645,18 +6290,27 @@ class SolidRocketEngine:
                           '({derived_mm} mm = (outer - core)/2). The solver '
                           'uses the geometric value.')))
 
-        od_user_mm = self._override_val('outer_diameter', 1.0, 5000.0)
-        d_grain_mm = self.D_chamber * 1000.0
-        if (od_user_mm is not None and d_grain_mm > 0
-                and abs(od_user_mm - d_grain_mm) / d_grain_mm > 0.01):
-            run_warnings.append(dict(_w(
-                'warn.solid.outer_diameter_ignored', 'warning',
-                entered_mm=round(od_user_mm, 1),
-                used_mm=round(d_grain_mm, 1)),
-                fallback=('Grain outer diameter field ({entered_mm} mm) is '
-                          'not used by the ballistic model: the grain OD is '
-                          'taken as the chamber diameter ({used_mm} mm). '
-                          'Adjust Chamber Diameter to change the grain.')))
+        # Kalem 29: 'outer_diameter' artık grain dış çapının doğruluk
+        # kaynağıdır (bkz. _apply_overrides 7c), bu yüzden eski
+        # "alan kullanılmıyor" uyarısı KALKTI. Yerine gerçek geometri
+        # denetimi geldi: kullanıcının beyan ettiği kasa iç çapı grain'i
+        # yalıtımıyla birlikte içine alabiliyor mu?
+        bore_user_m = getattr(self, 'case_bore_input_m', None)
+        if bore_user_m is not None:
+            required_m = (self.D_chamber
+                          + 2.0 * getattr(self, 'insulation_thickness_m', 0.0))
+            if bore_user_m < required_m - 1e-9:
+                run_warnings.append(dict(_w(
+                    'warn.solid.case_bore_too_small', 'warning',
+                    entered_mm=round(bore_user_m * 1000.0, 1),
+                    required_mm=round(required_m * 1000.0, 1),
+                    grain_mm=round(self.D_chamber * 1000.0, 1)),
+                    fallback=('Declared case bore {entered_mm} mm cannot '
+                              'contain a {grain_mm} mm grain plus its '
+                              'insulation: at least {required_mm} mm is '
+                              'needed. The solver used the geometric '
+                              'minimum for the case, the grain outer '
+                              'diameter is unchanged.')))
 
         cv_user_l = self._override_val('chamber_volume', 1e-3, 1e5)  # L
         cv_calc_l = case_free_volume * 1000.0

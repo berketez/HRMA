@@ -964,6 +964,59 @@
                     </label>
                     <input type="number" id="case_thickness" value="8" step="0.1" min="2" max="100">
                 </div>
+                <!-- Kapak cıvata birleşimi (v2.6.26, P3): yapısal panel eskiden
+                     sabit "%98.2 birleşim güvenilirliği" basıyordu. Güvenilirlik
+                     için olasılık modeli yok; onun yerine cıvatalı birleşimin
+                     GERÇEK emniyet katsayıları hesaplanır (Shigley Böl. 8 /
+                     ISO 898-1 / NASA-STD-5020A ön-yük saçılımı). Cıvata sayısı
+                     boş bırakılırsa birleşim boyutlandırılmaz — sayı
+                     uydurulmaz. -->
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="solid.ui.closure_bolt_count">Closure Bolt Count</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="solid.ui.number_of_bolts_holding_each_closure">Number of bolts holding each closure against chamber pressure. Leave empty if unknown - the joint is then reported as "not sized" instead of guessed. Drives the separation and proof safety factors of the closure joint.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="closure_bolt_count" value="" step="1" min="1" max="200" placeholder="—">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="solid.ui.closure_bolt_size">Closure Bolt Size</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="solid.ui.metric_coarse_thread_size_of_the">Metric coarse thread size of the closure bolts (ISO 898-1 stress areas). Only used when a bolt count is given.</span>
+                        </div>
+                    </label>
+                    <select id="closure_bolt_size">
+                        <option value="M4">M4</option>
+                        <option value="M5">M5</option>
+                        <option value="M6">M6</option>
+                        <option value="M8" selected>M8</option>
+                        <option value="M10">M10</option>
+                        <option value="M12">M12</option>
+                        <option value="M14">M14</option>
+                        <option value="M16">M16</option>
+                        <option value="M20">M20</option>
+                        <option value="M24">M24</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="solid.ui.closure_bolt_class">Closure Bolt Class</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="solid.ui.bolt_property_class_iso_898_1">Bolt property class: 8.8 / 10.9 / 12.9 (ISO 898-1) or A2-70 stainless (ISO 3506-1). Sets proof strength and therefore the preload.</span>
+                        </div>
+                    </label>
+                    <select id="closure_bolt_class">
+                        <option value="8.8" selected>8.8</option>
+                        <option value="10.9">10.9</option>
+                        <option value="12.9">12.9</option>
+                        <option value="A2-70">A2-70</option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -1196,6 +1249,21 @@
                         </div>
                     </label>
                     <input type="number" id="ignition_delay" value="50" step="0.1" min="1" max="1000">
+                </div>
+                <!-- Ateşleyici hedef basıncı (v2.6.26, P3): ateşleyici şarjı
+                     serbest hacim basınçlandırma ölçütüyle boyutlandırılır
+                     (NASA SP-8051). Hedef basınç bir TASARIM SEÇİMİdir, hesap
+                     değildir; bu yüzden kullanıcıya açık bir alan olarak
+                     verilir ve çıktıda "design choice" diye beyan edilir. -->
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="solid.ui.igniter_pressure_fraction">Igniter Target Pressure</span> <span class="unit">(P/Pc)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="solid.ui.fraction_of_chamber_pressure_the_igniter">Fraction of chamber pressure the igniter must reach in the free volume before the grain takes over (NASA SP-8051 free-volume criterion). This is a design choice, not a computed value; it sets the igniter charge mass.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="igniter_pressure_fraction" value="0.15" step="0.01" min="0.02" max="0.5">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1833,6 +1901,21 @@
         var _materialRows = [];
         var _catalogValues = {};       // son uygulanan katalog değerleri (geri alma)
         var _catalogFromApi = false;
+        // Kullanıcının katalog tablosundan SEÇTİĞİ yakıtın anahtarı.
+        // v2.6.26 (P3): sayfada yakıt kimliğini taşıyan bir alan yoktu —
+        // yalnız serbest metin ad ve yanma-hızı ön ayarı gidiyordu. Motor
+        // bu yüzden her koşuda APCP çözüyordu (grain mekaniği HTPB, iki-fazlı
+        // kayıp %4.08). Anahtar artık 'propellant_type' olarak gönderilir.
+        var _selectedPropellantKey = '';
+
+        // Çözücüye gidecek yakıt kimliği: önce açık katalog seçimi, yoksa
+        // yanma-hızı ön ayarı (o da bir katalog anahtarıdır). İkisi de yoksa
+        // boş gider ve motor serbest metin ad alanından türetmeyi dener.
+        function currentPropellantKey() {
+            if (_selectedPropellantKey) return _selectedPropellantKey;
+            var preset = (document.getElementById('burn_rate_preset') || {}).value;
+            return (preset && preset !== 'custom') ? preset : '';
+        }
 
         // Katalogtan yönetilen TÜM alanların id listesi (override izlemesi için).
         function catalogManagedIds() {
@@ -1952,6 +2035,8 @@
                 tr.classList.toggle('catalog-row-active',
                     tr.getAttribute('data-propellant-key') === key);
             });
+            // Seçim, çözücüye gidecek yakıt KİMLİĞİdir (bkz. currentPropellantKey).
+            _selectedPropellantKey = key;
             applyPropellantRecord(rec);
         }
 
@@ -2094,7 +2179,13 @@
                 var el = document.getElementById(id);
                 if (!el) return;
                 var evt = (el.tagName === 'SELECT') ? 'change' : 'input';
-                el.addEventListener(evt, function () { markFieldOverridden(el); });
+                el.addEventListener(evt, function () {
+                    markFieldOverridden(el);
+                    // Kullanıcı yakıt adını ELLE değiştirdiyse katalog satırı
+                    // artık onun seçimini temsil etmez: kimlik yeniden serbest
+                    // metinden (veya ön ayardan) türetilsin.
+                    if (id === 'propellant_name') _selectedPropellantKey = '';
+                });
             });
 
             var pStatus = document.getElementById('propellantCatalogStatus');
@@ -2663,6 +2754,9 @@
             return {
                 // Propellant properties
                 propellant_name: document.getElementById('propellant_name').value,
+                // Yakıt KİMLİĞİ (katalog anahtarı): grain mekaniği, iki-fazlı
+                // kayıp ve yayımlanmış karışım oranı bu anahtardan seçilir.
+                propellant_type: currentPropellantKey(),
                 density: parseFloat(document.getElementById('density').value) || 1850,
                 heat_value: parseFloat(document.getElementById('heat_value').value) || 2500,
                 flame_temp: parseFloat(document.getElementById('flame_temp').value) || 3200,
@@ -2713,6 +2807,15 @@
                 liner_density: parseFloat(document.getElementById('liner_density').value) || 1200,
                 initial_temp: parseFloat(document.getElementById('initial_temp').value) || 298,
                 case_thickness: parseFloat(document.getElementById('case_thickness').value) || 8,
+                // Kapak cıvata birleşimi: sayı BOŞ bırakılabilir. `|| n`
+                // kalıbı bilerek kullanılmadı — boş alan varsayılan bir
+                // cıvata sayısı UYDURMAMALI, birleşim 'not sized' kalmalı.
+                closure_bolt_count: (function () {
+                    const v = parseInt(document.getElementById('closure_bolt_count').value, 10);
+                    return (isNaN(v) || v < 1) ? null : v;
+                })(),
+                closure_bolt_size: document.getElementById('closure_bolt_size').value,
+                closure_bolt_class: document.getElementById('closure_bolt_class').value,
                 
                 // Nozzle properties
                 throat_diameter: parseFloat(document.getElementById('throat_diameter').value) || 15,
@@ -2746,6 +2849,8 @@
                 
                 // Environmental conditions
                 ignition_delay: parseFloat(document.getElementById('ignition_delay').value) || 50,
+                // Ateşleyici hedef basıncı (P_ateş / Pc) — tasarım seçimi.
+                igniter_pressure_fraction: parseFloat(document.getElementById('igniter_pressure_fraction').value) || 0.15,
                 atm_pressure: parseFloat(document.getElementById('atm_pressure').value) || 101.325,
                 test_altitude: parseFloat(document.getElementById('test_altitude').value) || 0,
                 ambient_temp: parseFloat(document.getElementById('ambient_temp').value) || 298,
@@ -2814,6 +2919,16 @@
         // Sonlu sayı değilse '—' döner (eksik alanlarda tablo kırılmaz).
         function fmtNum(v, digits) {
             return (typeof v === 'number' && isFinite(v)) ? v.toFixed(digits) : '—';
+        }
+
+        // Yüzde alanı: kayıtta yoksa SAYI UYDURULMAZ, "tablolanmamış" yazar.
+        // v2.6.26 (P3): karışım satırları `(v || 68).toFixed(0)` kalıbıyla
+        // yazılıyordu — çözücü alanı boş bıraksa bile arayüz APCP'nin
+        // 68/18/12'sini basıyordu, yani sahte sayı ARAYÜZDE üretiliyordu.
+        function fmtPercentOrNA(v) {
+            return (typeof v === 'number' && isFinite(v))
+                ? v.toFixed(0) + '%'
+                : T('solid.js.not_tabulated', 'not tabulated');
         }
 
         // "Motor Tasarımı" (Motor Design) tablosunu currentResults'tan doldurur.
@@ -3319,6 +3434,7 @@
                 clearFieldOverride(document.getElementById(id));
             });
             _catalogValues = {};
+            _selectedPropellantKey = '';
             updateOverrideBanner();
             document.querySelectorAll('.catalog-row-active').forEach(function (tr) {
                 tr.classList.remove('catalog-row-active');
@@ -3522,7 +3638,16 @@ Please provide:
             const structural = results.structural_analysis || {};
             const caseAnalysis = structural.case_analysis || {};
             const grainStructural = structural.grain_structural || {};
-            
+            // Kapak cıvata birleşimi (v2.6.26, P3). Sabit "%98.2 güvenilirlik"
+            // kaldırıldı; boyutlandırılmamış birleşim SAYI YERİNE gerekçe
+            // gösterir.
+            const joint = (structural.assembly_integrity || {}).closure_joint || {};
+            const jointRows = (joint.status === 'sized')
+                ? `<tr><td style="padding: 6px;"><strong>${T('solid.js.closure_bolts', 'Closure bolts:')}</strong></td><td style="padding: 6px;">${joint.bolt_count} x ${joint.bolt_size} ${joint.property_class}</td></tr>
+                   <tr><td style="padding: 6px;"><strong>${T('solid.js.separation_factor', 'Separation factor:')}</strong></td><td style="padding: 6px;">${fmtNum(joint.separation_factor, 2)}</td></tr>
+                   <tr><td style="padding: 6px;"><strong>${T('solid.js.proof_safety_factor', 'Proof safety factor:')}</strong></td><td style="padding: 6px;">${fmtNum(joint.proof_safety_factor, 2)}</td></tr>`
+                : `<tr><td colspan="2" style="padding: 6px;">${T('solid.js.joint_not_sized', 'Not sized - enter the closure bolt count in the case panel.')}</td></tr>`;
+
             return `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                     <div>
@@ -3544,6 +3669,11 @@ Please provide:
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thermal_expansion_compatibility', 'Thermal Expansion Compatibility:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${grainStructural.thermal_expansion_compatibility || 'Good'}</td></tr>
                         </table>
                     </div>
+                </div>
+                <div style="margin-top: 16px;">
+                    <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.closure_joint', 'Closure Bolted Joint')}</h4>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">${jointRows}</table>
+                    <div style="font-size: 12px; opacity: 0.8; margin-top: 6px;">${joint.basis || ''}</div>
                 </div>
             `;
         }
@@ -3586,10 +3716,10 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.propellant_mixture_requirements', 'Propellant Mixture Requirements')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.oxidizer', 'Oxidizer:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.oxidizer_percent || 68).toFixed(0)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.fuel', 'Fuel:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.fuel_percent || 18).toFixed(0)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.binder', 'Binder:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.binder_percent || 12).toFixed(0)}%</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.additives', 'Additives:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(mixingReqs.additives_percent || 2).toFixed(0)}%</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.oxidizer', 'Oxidizer:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtPercentOrNA(mixingReqs.oxidizer_percent)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.fuel', 'Fuel:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtPercentOrNA(mixingReqs.fuel_percent)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.binder', 'Binder:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtPercentOrNA(mixingReqs.binder_percent)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.additives', 'Additives:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtPercentOrNA(mixingReqs.additives_percent)}</td></tr>
                         </table>
                     </div>
                     <div>
@@ -3680,7 +3810,19 @@ Please provide:
             const caseDesign = cad.case_design || {};
             const grainGeometry = cad.grain_geometry || {};
             const nozzleDesign = cad.nozzle_design || {};
-            
+            // v2.6.26 (P3): yalıtım kalınlıkları ve ateşleyici şarjı artık
+            // hesaplanıyor (ablasyon Q* modeli + serbest hacim ölçütü).
+            // Hesaplanmayan alan SAYI YERİNE gerekçesini gösterir.
+            const insul = cad.insulation_system || {};
+            const fwdIns = insul.forward_insulation || {};
+            const aftIns = insul.aft_insulation || {};
+            const ignGrain = (cad.igniter_system || {}).igniter_grain || {};
+            const notSized = T('solid.js.not_sized', 'not sized by HRMA');
+            const mmOrNA = function (v) {
+                return (typeof v === 'number' && isFinite(v))
+                    ? v.toFixed(2) + ' mm' : notSized;
+            };
+
             return `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                     <div>
@@ -3725,7 +3867,29 @@ Please provide:
                         </table>
                     </div>
                 </div>
-                
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                    <div>
+                        <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.ablative_insulation', 'Ablative Closure Insulation')}</h4>
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.forward_insulation', 'Forward closure:')}</strong></td><td style="padding: 6px;">${mmOrNA(fwdIns.thickness)}</td></tr>
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.aft_insulation', 'Aft closure / nozzle entry:')}</strong></td><td style="padding: 6px;">${mmOrNA(aftIns.thickness)}</td></tr>
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.material', 'Material:')}</strong></td><td style="padding: 6px;">${aftIns.material || '—'}</td></tr>
+                        </table>
+                        <div style="font-size: 12px; opacity: 0.8; margin-top: 6px;">${aftIns.basis || ''}</div>
+                    </div>
+                    <div>
+                        <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.igniter_charge', 'Igniter Charge')}</h4>
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.charge_mass', 'Charge mass:')}</strong></td><td style="padding: 6px;">${(typeof ignGrain.mass === 'number' && isFinite(ignGrain.mass)) ? ignGrain.mass.toFixed(2) + ' g' : notSized}</td></tr>
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.ignition_pressure', 'Target ignition pressure:')}</strong></td><td style="padding: 6px;">${fmtNum(ignGrain.ignition_pressure_bar, 1)} bar</td></tr>
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.free_volume', 'Free volume:')}</strong></td><td style="padding: 6px;">${fmtNum(ignGrain.free_volume_l, 3)} L</td></tr>
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.igniter_burn_time', 'Burn time:')}</strong></td><td style="padding: 6px;">${notSized}</td></tr>
+                        </table>
+                        <div style="font-size: 12px; opacity: 0.8; margin-top: 6px;">${ignGrain.basis || ''}</div>
+                    </div>
+                </div>
+
                 <div style="text-align: center; margin: 20px 0;">
                     <button class="btn" onclick="exportMotorCAD()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin: 5px; padding: 12px 24px;">${T('solid.js.download_step_stl_files', 'Download STEP/STL Files')}</button>
                     <button class="btn" onclick="show3DVisualization()" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; margin: 5px; padding: 12px 24px;">${T('solid.js.3d_motor_visualization', '3D Motor Visualization')}</button>

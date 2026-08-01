@@ -80,6 +80,54 @@ GEOMETRY_SOURCE_LABELS = {
     'missing': 'geometry not supplied; exporter placeholders used',
 }
 
+# ---------------------------------------------------------------------------
+# FIRLATMA KOŞULLARI (simulation_settings) — v2.6.26, ölü girdi denetimi P4.
+# ---------------------------------------------------------------------------
+# `wind_speed` bu blokta 0 m/s olarak SABİT yazılıyordu. Oysa hibrit sayfasında
+# gerçek bir rüzgâr alanı var (advanced.html:1563), istekle gönderiliyor ve
+# AYNI isteğin yörünge dalında kullanılıyor (app.py:1117). Kullanıcı 12 m/s
+# girse bile dışa aktarım "rüzgârsız" diyordu; varsayılanın da 0 olması kusuru
+# gizliyordu (girdiyi oynatınca yaprak kıpırdamadığı fark edilmiyordu).
+#
+# Kural: fırlatma koşulu ÇAĞIRANDAN gelir. Gelmediyse sayı UYDURULMAZ — alan
+# None kalır ve nedeni `simulation_settings_source` içinde yazılı olur; dosyayı
+# okuyan kişi hangi sayının kendi girdisi, hangisinin eksik olduğunu görür.
+LAUNCH_SETTING_SOURCE_LABELS = {
+    'request': 'from the calculation request (user input)',
+    'not_supplied': ('NOT supplied by the caller - no value assumed; '
+                     'set it in OpenRocket before simulating'),
+    'invalid_input': ('supplied value rejected (non-finite or outside its '
+                      'physical range) - no value assumed'),
+    'exporter_default': ('exporter default; no input field feeds this setting '
+                         '- check it in OpenRocket'),
+}
+
+# İstekten okunan fırlatma koşulları. Anahtar adları app.py'nin yörünge dalında
+# kurduğu `launch_params` sözlüğüyle BİREBİR aynıdır (app.py:1114-1119) ki aynı
+# sözlük iki dala birden verilebilsin; tek yanıtta iki farklı fırlatma koşulu
+# dolaşmasın.
+#
+# Kabul bantları: değer bandın dışındaysa YAZILMAZ (uydurma yerine boşluk).
+# Açı bandı hibrit sayfasındaki alanın kendi bandıdır (advanced.html:1553,
+# min=0 max=90) ve yükseliş açısı tanımıyla uyumludur — trajectory_analysis.py
+# başlığı: 90° = dikey yukarı, ufuktan ölçülür.
+LAUNCH_SETTING_BOUNDS = {
+    'launch_angle': (0.0, 90.0),      # derece, ufuktan (yükseliş açısı)
+    'launch_altitude': (0.0, None),   # m
+    'wind_speed': (0.0, None),        # m/s (yön işareti wind_direction'da)
+    'wind_direction': (None, None),   # derece, rüzgârın GELDİĞİ yön (WMO)
+    'launch_rod_length': (0.0, None),  # m
+}
+
+# Çağıranın veremeyeceği (arayüzde karşılığı olmayan) ayarların dışa aktarıcı
+# varsayılanları — TEK tanım noktası (CLAUDE.md kural 11). XML şablonu da bu
+# sözlükten beslenir, sayı iki yerde tekrarlanmaz.
+EXPORTER_DEFAULT_SETTINGS = {
+    'time_step': 0.01,        # s  — OpenRocket entegrasyon adımı önerisi
+    'max_altitude': 50000,    # m  — simülasyon tavanı önerisi
+    'launch_rod_length': 3,   # m  — rampa boyu; sayfada karşılığı olan alan yok
+}
+
 # Çıkarım eşikleri. Bu sınıftaki (amatör/üniversite) motorlarda bir çap metre
 # cinsinden 1 m'yi, bir boy 5 m'yi geçmez; geçiyorsa değer milimetredir.
 # Belirsiz bant (ör. 1.0) çap için mm kabul edilir: 1 m boğaz bu yazılımın
@@ -134,6 +182,21 @@ def _finite_positive(value) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return f if (np.isfinite(f) and f > 0.0) else None
+
+
+def _finite_number(value) -> Optional[float]:
+    """Sonlu float döndürür — 0 ve negatif DAHİL; aksi halde None.
+
+    Fırlatma koşulları için gerekli: kullanıcının yazdığı 0 m/s rüzgâr geçerli
+    bir girdidir ("sakin hava") ve `_finite_positive` onu eleyip "veri yok"
+    ile karıştırırdı. İkisi ayrı şeydir: veri yok -> None, kullanıcı 0 yazdı
+    -> 0.0.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if np.isfinite(f) else None
 
 
 def _air_density(altitude_m: float) -> float:
@@ -212,18 +275,71 @@ class OpenRocketExporter:
         
         return eng_content
     
-    def create_flight_simulation_data(self, motor_data: Dict, rocket_params: Dict = None) -> Dict:
+    @staticmethod
+    def resolve_launch_settings(launch_params: Dict = None) -> Tuple[Dict, Dict]:
+        """Fırlatma koşullarını ÇAĞIRANIN sözlüğünden çözer (v2.6.26, P4).
+
+        `launch_params` anahtarları app.py'nin yörünge dalında kurduğu sözlükle
+        birebir aynıdır: ``launch_angle``, ``launch_altitude``, ``wind_speed``,
+        ``wind_direction`` (+ isteğe bağlı ``launch_rod_length``). Aynı sözlük
+        iki dala birden verilebilsin diye ad birliği kasıtlıdır.
+
+        Değer yoksa ya da bandın dışındaysa sayı UYDURULMAZ: alan None kalır,
+        nedeni kaynak sözlüğüne yazılır. Kullanıcının yazdığı 0 ile "veri yok"
+        birbirinden ayrılır (bkz. _finite_number).
+
+        Döner: (ayarlar, kaynaklar). Kaynaklar LAUNCH_SETTING_SOURCE_LABELS
+        anahtarlarıdır.
+        """
+        params = launch_params if isinstance(launch_params, dict) else {}
+        settings: Dict = {}
+        sources: Dict[str, str] = {}
+
+        for key, (low, high) in LAUNCH_SETTING_BOUNDS.items():
+            default = EXPORTER_DEFAULT_SETTINGS.get(key)
+            raw = params.get(key)
+            if raw is None:
+                # Çağıran vermedi. Arayüzde karşılığı olmayan ayarlar (rampa
+                # boyu) dışa aktarıcı varsayılanına düşer ve bunu BEYAN eder;
+                # kullanıcının gerçekten girebildiği alanlar boş kalır.
+                settings[key] = default
+                sources[key] = ('exporter_default' if default is not None
+                                else 'not_supplied')
+                continue
+            value = _finite_number(raw)
+            if value is None or (low is not None and value < low) or \
+                    (high is not None and value > high):
+                settings[key] = None
+                sources[key] = 'invalid_input'
+                continue
+            settings[key] = value
+            sources[key] = 'request'
+
+        # Sayısal simülasyon ayarları: fiziksel bir iddia değil, OpenRocket'a
+        # önerilen çözücü ayarlarıdır; kaynakları böyle etiketlenir.
+        for key in ('time_step', 'max_altitude'):
+            settings[key] = EXPORTER_DEFAULT_SETTINGS[key]
+            sources[key] = 'exporter_default'
+
+        return settings, sources
+
+    def create_flight_simulation_data(self, motor_data: Dict, rocket_params: Dict = None,
+                                      launch_params: Dict = None) -> Dict:
         """
         Create flight simulation parameters for OpenRocket integration
-        
+
         Args:
             motor_data: Motor analysis results
             rocket_params: Rocket parameters (mass, drag, etc.)
-            
+            launch_params: Fırlatma koşulları (launch_angle, wind_speed,
+                wind_direction, launch_altitude). Verilmezse ilgili ayarlar
+                None kalır ve kaynağı "not_supplied" olarak beyan edilir —
+                sıfır rüzgâr / 85° gibi sayılar UYDURULMAZ (v2.6.26, P4).
+
         Returns:
             Flight simulation data
         """
-        
+
         if rocket_params is None:
             rocket_params = {
                 'dry_mass': 5.0,  # kg
@@ -232,24 +348,26 @@ class OpenRocketExporter:
                 'drag_coefficient': 0.5,
                 'fin_count': 4
             }
-        
+
         # Calculate flight performance
         flight_data = self._calculate_flight_performance(motor_data, rocket_params)
-        
+
+        settings, sources = self.resolve_launch_settings(launch_params)
+
         # Generate OpenRocket simulation parameters
         simulation_params = {
             'motor_data': motor_data,
             'rocket_parameters': rocket_params,
             'flight_performance': flight_data,
-            'simulation_settings': {
-                'time_step': 0.01,  # s
-                'max_altitude': 50000,  # m
-                'wind_speed': 0,  # m/s
-                'launch_angle': 85,  # degrees
-                'launch_rod_length': 3  # m
-            }
+            'simulation_settings': settings,
+            # Hangi ayar kimden geldi: istekten mi, dışa aktarıcı
+            # varsayılanından mı, yoksa hiç verilmedi mi.
+            'simulation_settings_source': sources,
+            'simulation_settings_source_labels': {
+                k: LAUNCH_SETTING_SOURCE_LABELS[v] for k, v in sources.items()
+            },
         }
-        
+
         return simulation_params
     
     def generate_technical_report(self, motor_data: Dict) -> str:
@@ -696,9 +814,18 @@ class OpenRocketExporter:
             'altitude_at_burnout': altitude_at_burnout  # m
         }
     
-    def create_ork_project_template(self, motor_data: Dict, rocket_params: Dict = None) -> str:
-        """Create OpenRocket project template XML"""
-        
+    def create_ork_project_template(self, motor_data: Dict, rocket_params: Dict = None,
+                                    launch_params: Dict = None) -> str:
+        """Create OpenRocket project template XML.
+
+        Fırlatma koşulları (rüzgâr, rampa açısı/boyu) artık `launch_params`
+        ile aynı çözücüden beslenir (v2.6.26, P4): JSON'daki
+        `simulation_settings` ile XML'deki `<conditions>` bloğu tek kaynaktan
+        gelir, iki yerde iki farklı rüzgâr dolaşmaz. XML bir SAYI yazmak
+        zorunda olduğu için veri yoksa eski varsayılan yazılır — ama bunun bir
+        varsayım olduğu yorum satırında beyan edilir.
+        """
+
         if rocket_params is None:
             rocket_params = {
                 'name': 'UZAYTEK Test Rocket',
@@ -715,6 +842,36 @@ class OpenRocketExporter:
         motor_designation = self._designation(motor_data, geometry)
         mount_length_m = geometry.get('chamber_length') or 0.5
         mount_radius_m = (geometry.get('case_diameter') or 0.1) / 2.0
+
+        # --- Fırlatma koşulları: JSON ile AYNI çözücüden (P4) --------------
+        settings, sources = self.resolve_launch_settings(launch_params)
+        wind_xml = settings.get('wind_speed')
+        angle_xml = settings.get('launch_angle')
+        rod_xml = settings.get('launch_rod_length')
+        cond_notes = []
+        if wind_xml is None:
+            wind_xml = 0.0
+            cond_notes.append(
+                'windaverage: NO wind data supplied - 0 m/s written as a '
+                'placeholder, NOT a value chosen by the user; set it in '
+                'OpenRocket')
+        else:
+            cond_notes.append(f'windaverage: {LAUNCH_SETTING_SOURCE_LABELS[sources["wind_speed"]]}')
+        if angle_xml is None:
+            angle_xml = 85.0
+            cond_notes.append(
+                'launchrodangle: NO launch angle supplied - 85 deg written as '
+                'a placeholder; check it in OpenRocket')
+        else:
+            cond_notes.append(
+                'launchrodangle: written as the HRMA launch angle, which is '
+                'the ELEVATION angle measured from the horizon (90 deg = '
+                'straight up); verify the sign convention in OpenRocket '
+                'before running the simulation')
+        if rod_xml is None:
+            rod_xml = EXPORTER_DEFAULT_SETTINGS['launch_rod_length']
+        conditions_notes_xml = '\n        '.join(
+            f'<!-- {note} -->' for note in cond_notes)
 
         # Simplified OpenRocket XML template
         xml_template = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -788,9 +945,10 @@ class OpenRocketExporter:
         <flightconfiguration>default</flightconfiguration>
         <conditions>
             <configid>default</configid>
-            <launchrodlength>3.0</launchrodlength>
-            <launchrodangle>85.0</launchrodangle>
-            <windaverage>0.0</windaverage>
+        {conditions_notes_xml}
+            <launchrodlength>{float(rod_xml)}</launchrodlength>
+            <launchrodangle>{float(angle_xml)}</launchrodangle>
+            <windaverage>{float(wind_xml)}</windaverage>
             <atmosphere model="isa"/>
         </conditions>
     </simulation>
@@ -972,9 +1130,10 @@ class OpenRocketExporter:
             'burnout_time': burn_time
         }
     
-    def create_simulation_file(self, motor_data: Dict, rocket_data: Dict = None) -> str:
+    def create_simulation_file(self, motor_data: Dict, rocket_data: Dict = None,
+                               launch_params: Dict = None) -> str:
         """Create OpenRocket simulation file content"""
-        
+
         if rocket_data is None:
             rocket_data = {
                 'name': 'UZAYTEK Test Rocket',
@@ -982,9 +1141,11 @@ class OpenRocketExporter:
                 'diameter': 0.1,
                 'length': 1.5
             }
-        
+
         # Generate XML content for simulation
-        simulation_data = self.create_flight_simulation_data(motor_data, rocket_data)
-        ork_template = self.create_ork_project_template(motor_data, rocket_data)
-        
+        simulation_data = self.create_flight_simulation_data(
+            motor_data, rocket_data, launch_params)
+        ork_template = self.create_ork_project_template(
+            motor_data, rocket_data, launch_params)
+
         return ork_template

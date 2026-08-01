@@ -1,0 +1,1252 @@
+{
+  "sayim": {
+    "KAPALI": 86,
+    "YAPRAK_YOK": 27,
+    "HALA_SABIT": 17,
+    "ELLE": 8
+  },
+  "satirlar": [
+    {
+      "yol": ".openrocket.flight_profile.rocket_parameters.dry_mass",
+      "eski_deger": "5.0 kg",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.rocket_parameters.diameter",
+      "eski_deger": "0.1 m",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.rocket_parameters.drag_coefficient",
+      "eski_deger": "0.5",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".openrocket.flight_profile.rocket_parameters.length",
+      "eski_deger": "1.5 m",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".openrocket.flight_profile.simulation_settings.launch_angle",
+      "eski_deger": "85 derece",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".openrocket.flight_profile.simulation_settings.wind_speed",
+      "eski_deger": "0 m/s",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_design.performance.kinetic_efficiency",
+      "eski_deger": "0.995",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_design.performance.friction_efficiency",
+      "eski_deger": "0.99",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_thickness",
+      "eski_deger": "1.0 mm",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_thickness",
+      "eski_deger": "1.0 mm",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_material_density",
+      "eski_deger": "celik yogunlugu (varsayilan malzeme)",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_yield_strength",
+      "eski_deger": "celik akma dayanimi (varsayilan malzeme)",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_design.geometry.wall_safety_factor",
+      "eski_deger": "malzeme kaydinin varsayilan emniyet katsayisi",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_material_density",
+      "eski_deger": "celik yogunlugu",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_yield_strength",
+      "eski_deger": "celik akma dayanimi",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.nozzle_geometry.wall_safety_factor",
+      "eski_deger": "malzeme varsayilan emniyet katsayisi",
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".openrocket.flight_profile.motor_data.injector_design_detail.ox_circuit.cd",
+      "eski_deger": null,
+      "grup": "hibrit sayfasi, $.openrocket dali (65 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": "$.trajectory (dalin TAMAMI - tarayicida hic uretilmiyor)",
+      "eski_deger": "null (gercek tarayicida)",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": ".trajectory.vehicle_parameters.mass_dry",
+      "eski_deger": "50 (kg)",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".trajectory.vehicle_parameters.diameter",
+      "eski_deger": "0.15 (m)",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".trajectory.vehicle_parameters.cross_sectional_area",
+      "eski_deger": "0.017671458676442587 (m2)",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".trajectory.motor_data.nozzle_design.performance.kinetic_efficiency (ikiz: .motor.nozzle_design.performance.kinetic_efficiency)",
+      "eski_deger": "0.995",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": "/api/trajectory-analysis -> launch_params.launch_angle / wind_speed / wind_direction / launch_altitude (79'un DISINDA, ayni dalin kardes ucnoktasi)",
+      "eski_deger": "85.0 derece / 0.0 m/s / 0.0 derece / 0.0 m",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": "/api/trajectory-analysis -> launch_params.launch_latitude (79'un DISINDA)",
+      "eski_deger": "40.0 (derece)",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": "/api/trajectory-analysis -> motor_data.thrust ve motor_data.burn_time (79'un DISINDA)",
+      "eski_deger": "1000 N ve 10 s",
+      "grup": "hibrit sayfasi / $.trajectory dali (79 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": "turbopump_efficiency (liquid)",
+      "eski_deger": "ölçüm sarsımı 75 -> 112,5 (reddedildi); geçerli sarsım 75 -> 40 = 193 fiziksel yaprak",
+      "grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+      "sayfa": null,
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": "turbine_inlet_pressure (liquid)",
+      "eski_deger": "aynı koşuda 78,78 bar (çözücü) vs 4,053 bar (ima edilen); kullanıcı varsayılanı 150 bar",
+      "grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+      "sayfa": null,
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": "oxidizer_phase (hybrid)",
+      "eski_deger": "liquid -> gas: 4 yaprak (hepsi uyarı), 0 fiziksel yaprak; rho_ox her iki fazda da sıvı değeri (1220 kg/m3)",
+      "grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+      "sayfa": null,
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": "outer_diameter (solid)",
+      "eski_deger": "girilen 100 mm yok sayılıyor; grain OD olarak chamber_diameter kullanılıyor",
+      "grup": "YANKI alanları (13 adet, üç sayfa) — hybrid/liquid/solid",
+      "sayfa": null,
+      "guven": "yuksek",
+      "sonuc": "ELLE",
+      "neden": "yol bir JSON yaprağı değil"
+    },
+    {
+      "yol": ".motor.structural_analysis.buckling_analysis.axial_compression_force_N",
+      "eski_deger": "0.0 (18/18 kosuda)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.structural_analysis.buckling_analysis.applied_axial_stress_MPa",
+      "eski_deger": "0.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.structural_analysis.buckling_analysis.applied_axial_stress_unpressurized_MPa",
+      "eski_deger": "0.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.structural_analysis.buckling_analysis.applied_axial_stress_pressurized_MPa",
+      "eski_deger": "0.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": ".motor.nozzle_design.contour.convergent.contraction_ratio",
+      "eski_deger": "2.25 (18/18 kosuda; contraction_ratio=4.0 ve 8.0 girildiginde bile)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_contour.convergent.contraction_ratio",
+      "eski_deger": "2.25",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_design.geometry.wall_material_density",
+      "eski_deger": "7850.0 kg/m3 (nozzle_material=tungsten/copper secildiginde dahi)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_design.geometry.wall_yield_strength",
+      "eski_deger": "250000000.0 Pa (ASTM A36 celik)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_design.geometry.wall_safety_factor",
+      "eski_deger": "4.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_design.geometry.wall_thickness",
+      "eski_deger": "1.0 mm (taban); OLCULDU: Pc=80 bar -> 1,44 mm, itki=100 kN -> 3,45 mm",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_geometry.wall_material_density",
+      "eski_deger": "7850.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_geometry.wall_yield_strength",
+      "eski_deger": "250000000.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_geometry.wall_safety_factor",
+      "eski_deger": "4.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_geometry.wall_thickness",
+      "eski_deger": "1.0 mm (taban), itki/basincla degisiyor",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_design.performance.kinetic_efficiency",
+      "eski_deger": "0.995 (18/18 kosuda)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.nozzle_design.performance.friction_efficiency",
+      "eski_deger": "0.99",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": ".motor.injector_design_detail.ox_circuit.cd",
+      "eski_deger": "0.78 (17/17 basarili kosuda; 18. kosuda enjektor blogu uretilmedi)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": ".motor.injector_design.discharge_coefficient",
+      "eski_deger": "0.78",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": ".motor.structural_analysis.fastener_analysis.bolt_allowable_stress_MPa",
+      "eski_deger": "400.0 MPa",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": ".motor.structural_analysis.fastener_analysis.bolt_safety_factor",
+      "eski_deger": "4.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.structural_analysis.nozzle_analysis.safety_factor",
+      "eski_deger": "4.0 (malzemeyle 3.0-4.0 arasinda degisiyor, kullanicinin SF girdisiyle DEGISMIYOR)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".motor.structural_analysis.end_cap_analysis.head_safety_factor",
+      "eski_deger": "4.0 (malzemeyle 3.0-4.0, kullanici SF girdisiyle degismiyor)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.structural_analysis.safety_analysis.safety_factors.nozzle",
+      "eski_deger": "4.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.structural_analysis.safety_analysis.safety_factors.end_cap",
+      "eski_deger": "4.0",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.structural_analysis.fatigue_analysis.estimated_cycles",
+      "eski_deger": "25 (design_cycles ile birebir ayni)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.heat_transfer_analysis.cooling_analysis.heat_sink_delta_T_K",
+      "eski_deger": "200.0 K",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.heat_transfer_analysis.design_parameters.ambient_temperature",
+      "eski_deger": "293.15 K",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "orta",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): hybrid"
+    },
+    {
+      "yol": ".motor.optimum_analysis.analysis.conditions.exit.P",
+      "eski_deger": "1.01325 bar (deniz seviyesi capa)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.optimum_analysis.analysis.performance.thermodynamic_properties.stations.exit.pressure",
+      "eski_deger": "1.01325 bar",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.optimum_analysis.analysis.compositions.exit.pressure",
+      "eski_deger": "1.01325 bar (olculen sapma yalnizca 1e-13 mertebesinde sayisal gurultu)",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor.optimum_analysis.analysis.performance.thermodynamic_properties.isentropic_efficiency",
+      "eski_deger": "1.0 (17/18 kosu); yalnizca Pc=80 bar kosusunda 0.9954",
+      "grup": "hibrit sayfasi, $.motor dali (55 sabit yaprak)",
+      "sayfa": "hybrid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".structural_analysis.grain_structural.strain_capability_percent",
+      "eski_deger": "35.0 (HTPB kopma uzamasi %35)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor_geometry.structural_analysis.grain_structural.strain_capability_percent",
+      "eski_deger": "35.0",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".structural_analysis.grain_structural.grain_elastic_modulus_mpa",
+      "eski_deger": "6.0 MPa (HTPB elastomer)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor_geometry.structural_analysis.grain_structural.grain_elastic_modulus_mpa",
+      "eski_deger": "6.0",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".structural_analysis.grain_structural.grain_poisson_ratio",
+      "eski_deger": "0.4995 (HTPB, neredeyse sikistirilamaz)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor_geometry.structural_analysis.grain_structural.grain_poisson_ratio",
+      "eski_deger": "0.4995",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".structural_analysis.grain_structural.grain_thermal_expansion_1k",
+      "eski_deger": "1.0e-4 1/K (HTPB)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor_geometry.structural_analysis.grain_structural.grain_thermal_expansion_1k",
+      "eski_deger": "1.0e-4",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".structural_analysis.grain_structural.cure_temperature_k",
+      "eski_deger": "333.0 K (60 C, HTPB kurleme)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".motor_geometry.structural_analysis.grain_structural.cure_temperature_k",
+      "eski_deger": "333.0",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".thermal_analysis.thermal_management.material_temperature_limits.grain_max_temp_k",
+      "eski_deger": "333.0 K",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".detailed_analysis.performance_metrics.theoretical_vs_actual_isp.two_phase_losses",
+      "eski_deger": "4.081 % (APCP X_p=0.340 uzerinden)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".manufacturing_analysis.propellant_manufacturing.mixing_requirements.oxidizer_percent",
+      "eski_deger": "68 (is_apcp dali)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".manufacturing_analysis.propellant_manufacturing.mixing_requirements.fuel_percent",
+      "eski_deger": "18",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".manufacturing_analysis.propellant_manufacturing.mixing_requirements.binder_percent",
+      "eski_deger": "12",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cad_design.nozzle_design.convergent_angle",
+      "eski_deger": "30.0 derece",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".cad_design.nozzle_design.divergent_angle",
+      "eski_deger": "15.0 derece",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".cad_design.nozzle_design.performance.thrust_coefficient",
+      "eski_deger": "1.65",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cad_design.insulation_system.aft_insulation.thickness",
+      "eski_deger": "4.0 mm",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cad_design.insulation_system.forward_insulation.thickness",
+      "eski_deger": "5.0 mm",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cad_design.insulation_system.thermal_barrier.density",
+      "eski_deger": "1200.0 kg/m3 (SOLID_INSULATION tablo degeri)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cad_design.igniter_system.igniter_grain.mass",
+      "eski_deger": "2.0 gram",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cad_design.igniter_system.igniter_grain.burn_time",
+      "eski_deger": "0.2 s",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "orta",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".cad_design.igniter_system.igniter_case.diameter",
+      "eski_deger": "10.0 mm",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "dusuk",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".cad_design.igniter_system.igniter_case.length",
+      "eski_deger": "50.0 mm",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "dusuk",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".cad_design.igniter_system.igniter_case.wall_thickness",
+      "eski_deger": "1.0 mm",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "dusuk",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".detailed_analysis.grain_regression_analysis.erosive_burning_effects.port_diameter_factor_final",
+      "eski_deger": "1.0 (her motorda)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".structural_analysis.assembly_integrity.joint_reliability",
+      "eski_deger": "98.2 (%)",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".motor_geometry.structural_analysis.assembly_integrity.joint_reliability",
+      "eski_deger": "98.2",
+      "grup": "kati sayfasi (58 sabit yaprak)",
+      "sayfa": "solid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".combustion_analysis.combustion_analysis.combustion_efficiency",
+      "eski_deger": "90.0 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".combustion_analysis.combustion_analysis.mixing_time",
+      "eski_deger": "2.0 ms",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".combustion_analysis.combustion_analysis.optimal_momentum_ratio",
+      "eski_deger": "2.0",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".combustion_analysis.stability_analysis.combustion_response_time",
+      "eski_deger": "2.0 ms",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".component_sizing.component_masses.controls_avionics",
+      "eski_deger": "15.0 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".cooling_system.film_cooling_flow",
+      "eski_deger": "0.0 kg/s",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cooling_system.film_cooling.film_cooling_percent",
+      "eski_deger": "0.0 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".cooling_system.film_cooling.film_cooling_flow_kg_s",
+      "eski_deger": "0.0 kg/s",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cooling_system.film_cooling.film_heat_absorbed_w",
+      "eski_deger": "0.0 W",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cooling_system.film_cooling.film_covered_length_mm",
+      "eski_deger": "0.0 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".cooling_system.film_cooling.film_coverage_fraction_of_chamber",
+      "eski_deger": "0.0",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".detailed_feed_system.performance_margins.flow_margin",
+      "eski_deger": "50.0 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".detailed_feed_system.performance_margins.power_margin",
+      "eski_deger": "53.846 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".efficiency_breakdown.efficiency_breakdown.kinetic_loss",
+      "eski_deger": "0.99 (donmus akista 0.96)",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".efficiency_breakdown.loss_breakdown.kinetic_loss",
+      "eski_deger": "1.0 % (1-0.99)",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".injector_design.spray_angle_deg",
+      "eski_deger": "30.0 deg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".injection_system.injector_design_detail.assumptions[*].params.sigma_n_m",
+      "eski_deger": "0.02 N/m (fluid='generic')",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".injection_system.injector_design_detail.assumptions[*].params.mu_pa_s",
+      "eski_deger": "0.001 Pa.s",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".injection_system.injector_design_detail.assumptions[*].params.p_v_bar",
+      "eski_deger": "0.05 bar",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".mixture_ratio_efficiency",
+      "eski_deger": "100.0 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".performance_maps.mixture_ratio_optimization.mr_efficiency",
+      "eski_deger": "100.0 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".performance_maps.altitude_performance.optimal_altitude",
+      "eski_deger": "100000.0 m",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.structural.safety_factor",
+      "eski_deger": "2.5",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.structural.safety_factor",
+      "eski_deger": "2.5",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.inlet_configuration.diameter",
+      "eski_deger": "100 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.outlet_configuration.diameter",
+      "eski_deger": "150 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.inlet_configuration.diameter",
+      "eski_deger": "80 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.outlet_configuration.diameter",
+      "eski_deger": "120 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.inlet_configuration.diffuser_length",
+      "eski_deger": "200 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.outlet_configuration.sump_depth",
+      "eski_deger": "50 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.outlet_configuration.standpipe_height",
+      "eski_deger": "100 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.instrumentation.relief_valve.diameter",
+      "eski_deger": "25 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.instrumentation.relief_valve.diameter",
+      "eski_deger": "25 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.anti_vortex_device.vane_thickness",
+      "eski_deger": "3 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.anti_vortex_device.vane_thickness",
+      "eski_deger": "3 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.slosh_baffles[*].thickness",
+      "eski_deger": "2 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.slosh_baffles[*].thickness",
+      "eski_deger": "2 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "orta",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.slosh_baffles[*].hole_diameter",
+      "eski_deger": "50.0 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.slosh_baffles[*].hole_diameter",
+      "eski_deger": "50.0 mm",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.slosh_baffles[*].open_area_ratio",
+      "eski_deger": "15.0 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.slosh_baffles[*].open_area_ratio",
+      "eski_deger": "15.0 %",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "YAPRAK_YOK",
+      "neden": "yol yanıtta yok — kaldırılmış olabilir, göze bakar"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.anti_vortex",
+      "eski_deger": "2.5 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.anti_vortex",
+      "eski_deger": "2.5 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.baffles",
+      "eski_deger": "6.0 kg (2 bafl x 3.0)",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.baffles",
+      "eski_deger": "6.0 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.plumbing",
+      "eski_deger": "15.0 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.plumbing",
+      "eski_deger": "15.0 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "HALA_SABIT",
+      "neden": "sayfa(lar): liquid"
+    },
+    {
+      "yol": ".propellant_tanks.oxidizer_tank.internal_structures.mass_breakdown.total_mass",
+      "eski_deger": "23.5 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    },
+    {
+      "yol": ".propellant_tanks.fuel_tank.internal_structures.mass_breakdown.total_mass",
+      "eski_deger": "23.5 kg",
+      "grup": "sıvı sayfası (105 sabit yaprak)",
+      "sayfa": "liquid",
+      "guven": "yuksek",
+      "sonuc": "KAPALI",
+      "neden": "yaprak üretiliyor ve girdiyle oynuyor"
+    }
+  ]
+}

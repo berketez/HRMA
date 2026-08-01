@@ -1261,8 +1261,10 @@ class CombustionAnalyzer:
             'thermodynamic_properties': thermo_props
         }
     
-    def find_optimum_of_ratio(self, fuel_composition: Dict, oxidizer_type: str, 
-                             chamber_pressure: float, of_range: Tuple[float, float] = (1.0, 10.0)) -> Dict:
+    def find_optimum_of_ratio(self, fuel_composition: Dict, oxidizer_type: str,
+                             chamber_pressure: float,
+                             of_range: Tuple[float, float] = (1.0, 10.0),
+                             expansion_ratio: Optional[float] = None) -> Dict:
         """Find O/F ratio for maximum specific impulse.
 
         Desteklenmeyen yakit/oksitleyici anahtarinda _calculate_elemental_
@@ -1270,6 +1272,16 @@ class CombustionAnalyzer:
         optimum noktadaki tam analiz ayni hatayi yeniden firlatir, yani
         cagirana Ingilizce ve aciklayici bir hata ulasir (sessiz varsayilan
         uretilmez).
+
+        expansion_ratio: lüle alan oranı ε = Ae/At. v2.6.26'ya kadar bu arama
+            ε'yi HİÇ görmüyordu: her O/F noktası ``analyze_combustion``a
+            ε'sız gidiyor, çıkış istasyonu ISA deniz seviyesine (1,01325 bar)
+            ÇAPALANIYORDU. Sonuç: ε=16 seçen kullanıcının "optimum O/F"
+            tablosu hâlâ ε≈1 koşullarında hesaplanıyor, çıkış basıncı ve
+            izentropik verim yaprakları 18 koşuda tek değerde kalıyordu.
+            Aynı düzeltme ANA yolda (hybrid_rocket_engine calculate) v2.6.26
+            başında yapılmıştı; bu arama aynı düzeltmeyi almamıştı.
+            None -> eski davranış (deniz seviyesi çapası) korunur.
         """
 
         # --- Önbellek (v2.5.5): anahtar TAM girdilerle kurulur (yuvarlama
@@ -1285,15 +1297,26 @@ class CombustionAnalyzer:
                 float(chamber_pressure),
                 (float(of_range[0]), float(of_range[1])),
                 self._mechanism_id,
+                # ε çıkış istasyonunu (p_e, T_e, isp, cf) ve dolayısıyla
+                # optimum O/F'yi değiştirir; anahtara GİRMELİDİR, aksi hâlde
+                # farklı ε'lar aynı önbellek girdisini paylaşır.
+                None if expansion_ratio is None
+                else round(float(expansion_ratio), 4),
             )
         except (TypeError, ValueError, AttributeError, IndexError):
             cache_key = None
         if cache_key is not None and cache_key in _OPTIMUM_OF_CACHE:
             return copy.deepcopy(_OPTIMUM_OF_CACHE[cache_key])
 
+        eps = (None if expansion_ratio is None
+               else (float(expansion_ratio) if float(expansion_ratio) > 1.0
+                     else None))
+
         def negative_isp(of_ratio):
             try:
-                results = self.analyze_combustion(fuel_composition, oxidizer_type, of_ratio, chamber_pressure)
+                results = self.analyze_combustion(
+                    fuel_composition, oxidizer_type, of_ratio, chamber_pressure,
+                    expansion_ratio=eps)
                 return -results['performance']['isp']  # Negative because we minimize
             except Exception:
                 return 1000  # Large penalty for failed calculations
@@ -1305,7 +1328,9 @@ class CombustionAnalyzer:
         max_isp = -result.fun
 
         # Get full analysis at optimum
-        optimum_analysis = self.analyze_combustion(fuel_composition, oxidizer_type, optimum_of, chamber_pressure)
+        optimum_analysis = self.analyze_combustion(
+            fuel_composition, oxidizer_type, optimum_of, chamber_pressure,
+            expansion_ratio=eps)
 
         out = {
             'optimum_of_ratio': optimum_of,

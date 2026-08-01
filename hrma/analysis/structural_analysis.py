@@ -8,6 +8,15 @@ import json
 from typing import Dict, List, Tuple, Optional
 
 from hrma.data.materials_db import build_materials_view
+# Cıvata mukavemet sınıfı tablosu (ISO 898-1:2013 Table 3) — depodaki TEK
+# kaynak. Aynı tablo /api/bolted-joint ucunu da besler; motor sonucundaki
+# cıvata bloğu artık ondan habersiz değil (v2.6.26).
+from hrma.analysis.bolted_joint import _bolt_class_props
+
+# Kullanıcı tasarım emniyet katsayısı vermediğinde cıvata boyutlandırmasında
+# kullanılan BEYAN EDİLEN varsayılan (literatür kaynağı yoktur; eski
+# sürümdeki 4.0 davranışı korunur ki girdisiz koşularda sonuç değişmesin).
+_BOLT_SAFETY_FACTOR_DEFAULT = 4.0
 
 # Cidar sicakligi bilinmedigi durumda kullanilan radyasyon-denge tahmini:
 # sogutmasiz gaz-tarafi cidar, malzemenin kisa-sureli servis sinirinin bu
@@ -528,18 +537,31 @@ class StructuralAnalyzer:
         )
         
         # Nozzle analysis
+        # v2.6.26 — TASARIM EMNİYET KATSAYISI ARTIK BURAYA DA GEÇİYOR.
+        # Üç fonksiyon (lüle, kapak, cıvata) kullanıcının SF girdisini
+        # destekliyordu ama çağrı satırları onu geçmiyordu; sonuçta
+        # kullanıcının 'Safety Factor' alanı YALNIZ hazne cidarına
+        # uygulanıyor, lüle ve kapak malzeme kaydının kendi katsayısında
+        # (çelikte 4.0) kilitli kalıyordu. ÖLÇÜLDÜ: safety_factor=2.0
+        # girildiğinde nozzle_analysis.safety_factor ve
+        # end_cap_analysis.head_safety_factor 4.0'da SABİT kaldı — tek
+        # motorda iki farklı tasarım emniyet katsayısı kullanılıyordu.
         nozzle_analysis = self._analyze_nozzle_structure(
-            design_pressure, throat_diameter, chamber_diameter, mat_props, nozzle_type
+            design_pressure, throat_diameter, chamber_diameter, mat_props,
+            nozzle_type, design_safety_factor=design_safety_factor
         )
-        
+
         # End cap analysis
         end_cap_analysis = self._analyze_end_caps(
-            design_pressure, chamber_diameter, mat_props
+            design_pressure, chamber_diameter, mat_props,
+            design_safety_factor=design_safety_factor
         )
-        
+
         # Bolt/fastener analysis
         fastener_analysis = self._analyze_fasteners(
-            design_pressure, chamber_diameter, mat_props
+            design_pressure, chamber_diameter, mat_props,
+            design_safety_factor=design_safety_factor,
+            bolt_property_class=motor_data.get('bolt_property_class')
         )
         
         # Fatigue analysis
@@ -1091,9 +1113,48 @@ class StructuralAnalyzer:
             'safety_factor_is_tautological': bool(design_mode == 'size'),
         }
     
-    def _analyze_fasteners(self, pressure: float, diameter: float, mat_props: Dict) -> Dict:
-        """Analyze bolt and fastener requirements"""
-        
+    #: Kapak cıvatalarının varsayılan mukavemet sınıfı. ISO 898-1:2013
+    #: sınıflarından 8.8 en yaygın makine cıvatasıdır; kullanıcı/çağıran
+    #: sınıfı geçerse o kullanılır. Bu bir kalibrasyon sabiti DEĞİL, beyan
+    #: edilen varsayılan malzeme seçimidir ve çıktıda adıyla raporlanır.
+    _DEFAULT_BOLT_PROPERTY_CLASS = '8.8'
+
+    def _analyze_fasteners(self, pressure: float, diameter: float,
+                           mat_props: Dict,
+                           design_safety_factor: Optional[float] = None,
+                           bolt_property_class: Optional[str] = None) -> Dict:
+        """Kapak cıvatalarının statik çekme boyutlandırması.
+
+        v2.6.26 — İKİ KAYNAKSIZ SABİT KALDIRILDI:
+
+        (1) ``bolt_allowable_stress = 400 MPa``. Kodun kendi yorumu bu değerin
+            "LİTERATÜR KAYNAĞI YOKTUR" diye beyan ediyordu ve aynı yorum
+            çözümü de gösteriyordu: sınıf bazlı proof gerilmesi ``S_p``
+            depoda ZATEN var (``hrma/analysis/bolted_joint._bolt_class_props``,
+            ISO 898-1:2013 Table 3). Cıvata izin verilen çekme gerilmesi
+            sınıfa göre 400 MPa ile 970 MPa arasında değişir; tek sabit
+            kullanmak gerekli cıvata çapını yanlış boyutlandırıyordu.
+            Artık izin verilen gerilme = S_p (proof stress) ve hangi sınıftan
+            geldiği çıktıda kaynağıyla yazılır.
+
+        (2) ``bolt_safety_factor = 4.0``. Kullanıcının 'Safety Factor' girdisi
+            hazne cidarına uygulanırken cıvataya HİÇ ulaşmıyordu — ÖLÇÜLDÜ:
+            safety_factor=2.0 ile bu alan 4.0 kaldı. Artık tasarım yükü
+            kullanıcının katsayısıyla çarpılır; katsayı verilmezse beyan
+            edilen 4.0 varsayılanı korunur.
+
+        SINIR (beyan): burada YALNIZ statik çekme boyutlandırması yapılır.
+        Ön-yüklü bağlantıda cıvata yükü F_i + C·P'dir ve asıl kriter
+        AYRILMA'dır; o model aynı depoda ``bolted_joint.py``dedir (Shigley
+        Eq. 8-24...8-30) ve sıkma boyu bu fonksiyonun girdisi olmadığı için
+        buradan çağrılamaz. Uyarı çıktıda korunur.
+
+        Args:
+            design_safety_factor: tasarım emniyet katsayısı (None -> 4.0).
+            bolt_property_class: '8.8' | '10.9' | '12.9' | 'A2-70'
+                (None -> _DEFAULT_BOLT_PROPERTY_CLASS).
+        """
+
         # Total force on end cap
         total_force = pressure * np.pi * (diameter/2)**2  # N
         
@@ -1111,11 +1172,14 @@ class StructuralAnalyzer:
         # ÖLÇÜLDÜ (P_design=90 bar, D=150 mm): total=159.0 kN, raporlanan
         # force_per_bolt=79.52 kN, GERÇEK cıvata başına dış yük 19.88 kN
         # (4.00x şişirilmiş etiket). Artık ikisi ayrı alan.
-        # bolt_safety_factor=4.0 ve bolt_allowable_stress=400 MPa için
-        # LİTERATÜR KAYNAĞI YOKTUR — beyan edilen (konservatif) tasarım
-        # kabulüdür: 400 MPa, ISO 898-1 sınıf 8.8'in S_p=580 MPa'sının
-        # %69'udur, 4.0 ile birlikte S_p'ye göre etkin ~5.8 kat marj yığar.
-        bolt_safety_factor = 4.0
+        # v2.6.26: emniyet katsayısı kullanıcının tasarım katsayısıdır;
+        # verilmezse eski beyan edilen 4.0 varsayılanı korunur (bkz. docstring).
+        bolt_safety_factor = (float(design_safety_factor)
+                              if design_safety_factor is not None
+                              else _BOLT_SAFETY_FACTOR_DEFAULT)
+        bolt_safety_factor_source = ('design input (safety factor)'
+                                     if design_safety_factor is not None
+                                     else 'declared default (no user value)')
         force_per_bolt = total_force / num_bolts              # GERÇEK dış yük
         design_force_per_bolt = force_per_bolt * bolt_safety_factor
 
@@ -1126,15 +1190,32 @@ class StructuralAnalyzer:
         # pi/4*10^2=78.5, oran ~0.74). Eski kod gerekli alani dogrudan tam-dolu
         # daireye (pi/4*d^2) ceviriyordu -> civatayi sqrt(0.75)~0.87 kat KUCUK
         # seciyordu (non-konservatif). Dogrusu: gerekli A_t'yi guvenli nominal
-        # capa cevir -> A_nom = A_t / 0.75. (400 MPa ~ 8.8 sinifi yaklasik izin
-        # verilen cekme; sinif-bazli S_p icin bolted_joint.py tablosu kullanilabilir,
-        # imza korundugu icin burada sabit tutuldu.)
-        bolt_allowable_stress = 400e6  # Pa
+        # capa cevir -> A_nom = A_t / 0.75.
+        #
+        # v2.6.26: izin verilen gerilme artık ISO 898-1:2013 Table 3 PROOF
+        # gerilmesidir (bolted_joint._bolt_class_props — depodaki tek cıvata
+        # mukavemet kaynağı). 8.8 sınıfında S_p, d <= 16 mm için 580 MPa,
+        # d > 16 mm için 600 MPa'dır; çap çözümün kendi sonucu olduğu için
+        # küçük sabit-nokta yinelemesiyle kapatılır.
         THREAD_STRESS_AREA_RATIO = 0.75  # A_t / (pi/4*d_nom^2), ISO 898-1 yaklasik
-        required_stress_area = design_force_per_bolt / bolt_allowable_stress  # m^2 (gerekli A_t)
-        required_nominal_area = required_stress_area / THREAD_STRESS_AREA_RATIO  # m^2
-        required_bolt_diameter = 2 * np.sqrt(required_nominal_area / np.pi)  # m (nominal)
-        
+        bolt_class = str(bolt_property_class
+                         or self._DEFAULT_BOLT_PROPERTY_CLASS)
+        try:
+            bolt_props = _bolt_class_props(bolt_class, 16.0)
+        except ValueError:
+            bolt_class = self._DEFAULT_BOLT_PROPERTY_CLASS
+            bolt_props = _bolt_class_props(bolt_class, 16.0)
+        for _ in range(3):
+            bolt_allowable_stress = float(bolt_props['S_p'])  # Pa (proof)
+            required_stress_area = design_force_per_bolt / bolt_allowable_stress
+            required_nominal_area = required_stress_area / THREAD_STRESS_AREA_RATIO
+            required_bolt_diameter = 2 * np.sqrt(required_nominal_area / np.pi)
+            next_props = _bolt_class_props(bolt_class,
+                                           required_bolt_diameter * 1000.0)
+            if next_props['S_p'] == bolt_props['S_p']:
+                break
+            bolt_props = next_props
+
         # Standard bolt sizes (in meters)
         standard_sizes = [0.006, 0.008, 0.010, 0.012, 0.016, 0.020, 0.024, 0.030, 0.036, 0.042]  # M6 to M42
         suitable_sizes = [size for size in standard_sizes if size >= required_bolt_diameter]
@@ -1166,10 +1247,16 @@ class StructuralAnalyzer:
             'bolt_circle_radius': bolt_circle_radius * 1000,  # mm
             'bolt_spacing': 2 * np.pi * bolt_circle_radius / num_bolts * 1000,  # mm
             'bolt_safety_factor': bolt_safety_factor,
+            'bolt_safety_factor_source': bolt_safety_factor_source,
             'bolt_allowable_stress_MPa': bolt_allowable_stress / 1e6,
+            # v2.6.26 dürüstlük alanları: izin verilen gerilmenin hangi cıvata
+            # sınıfından ve hangi standarttan geldiği çıktıda taşınır.
+            'bolt_property_class': bolt_class,
+            'bolt_allowable_stress_basis': bolt_props['source'],
             'sizing_basis': ('static tensile sizing only: F_design = SF * P/n '
-                             'over thread stress area; preload and separation '
-                             'are NOT modelled here'),
+                             'over thread stress area, allowable = ISO 898-1 '
+                             'proof stress S_p; preload and separation are '
+                             'NOT modelled here'),
             'warning': bolt_warning,
             # ÖN-YÜK FİZİĞİ YOK: ön-yüklü bağlantıda cıvata yükü F_i + C*P'dir,
             # SF*P/n değil; asıl kritik kriter AYRILMA (F_i/(P(1-C))) burada
@@ -1288,7 +1375,17 @@ class StructuralAnalyzer:
             'stress_amplitude': sigma_a / 1e6,   # MPa (σ_a = σ_max/2, R=0)
             'fatigue_limit': S_e / 1e6,          # MPa
             'fatigue_safety_factor': fatigue_safety_factor,  # Goodman n_f
-            'estimated_cycles': design_cycles,   # tasarım çevrim sayısı
+            # v2.6.26 — 'estimated_cycles' ARTIK TAHMİNDİR.
+            # Bu alan tasarım GİRDİSİNİ (design_cycles) geri döndürüyordu:
+            # 'tahmini çevrim' adını taşıyan bir alan hiçbir bilgi taşımıyor,
+            # kullanıcı ise bunu bir ömür tahmini sanıyordu (aynı sözlükte
+            # 'design_cycles' zaten aynı sayıyı veriyor). Artık hesaplanan
+            # ömürle (Basquin/Goodman çözümü) aynı değeri taşır; tasarım
+            # hedefi 'design_cycles' alanında durur.
+            'estimated_cycles': estimated_life,  # çevrim | 'Infinite' (hesap)
+            'estimated_cycles_basis': (
+                'predicted life for the computed stress state '
+                '(Goodman + Basquin); the design target is design_cycles'),
             'estimated_life': estimated_life,    # çevrim sayısı | 'Infinite'
             'fatigue_status': fatigue_status,
             # Yeni alanlar (Dalga 3)

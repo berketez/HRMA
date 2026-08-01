@@ -185,6 +185,106 @@ def _mm_to_m_optional(value):
     return mm / 1000.0
 
 
+def _positive_float(value):
+    """Sonlu ve pozitif sayiya cevirir; olmuyorsa None."""
+    if value is None or value == '':
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(out) or out <= 0:
+        return None
+    return out
+
+
+def _resolve_vehicle_spec(data, motor_results):
+    """Aracin TEK tanimi — yorunge ve OpenRocket dallari ayni araci gorsun.
+
+    v2.6.26 olcumu: tek /calculate yanitinda UC farkli arac vardi. OpenRocket
+    dali kendi sabit sozlugune dusuyordu (5 kg / 0,10 m / 1,5 m), yorunge dali
+    var olmayan form alanlarindan okudugu icin kendi varsayilanlarina
+    dusuyordu (50 kg / 0,15 m), motorun kendi yapisal kutlesi ise 89,3 kg idi.
+    Govde capi motor kasasindan (0,184 m) ince, kuru kutle motorun kendi
+    yapisindan 18 kat kucuktu; apoje 570.915 m'ye karsi 10.576 m cikiyordu ve
+    mass_ratio/delta_v yanlis olanindan turuyordu.
+
+    Sozlesme: sayi UYDURULMAZ. Kullanici vermediyse alan None kalir ve
+    kaynagi 'not_supplied' diye beyan edilir; cagiran taraf ne yapacagina
+    ona bakarak karar verir.
+    """
+    spec = {}
+    sources = {}
+
+    # Kuru kutle: sayfadaki 'final_mass' alani "yakit tukendikten sonraki
+    # kutle (kuru kutle + faydali yuk)" diye tanimli — yorungenin kuru
+    # kutlesi tam olarak budur.
+    dry = _positive_float(data.get('vehicle_mass_dry'))
+    if dry is not None:
+        sources['dry_mass'] = 'request'
+    else:
+        # Alt sinir: motorun kendi atil kutlesi. Bu ARACIN kuru kutlesi
+        # DEGILDIR (govde, kanat, faydali yuk haric), bu yuzden yalnizca
+        # alt sinir olarak ve kaynagi yazilarak kullanilir.
+        try:
+            from hrma.export.openrocket_integration import OpenRocketExporter
+            inert, inert_src = OpenRocketExporter.resolve_inert_mass(
+                motor_results or {})
+        except Exception:
+            inert, inert_src = None, 'none'
+        if inert is not None:
+            dry = inert
+            sources['dry_mass'] = f'motor_inert_lower_bound:{inert_src}'
+        else:
+            sources['dry_mass'] = 'not_supplied'
+    spec['dry_mass'] = dry
+
+    # Cap: sayfa referans ALANI (mm^2) soruyor, cap sormuyor. Donusum TEK
+    # noktada, sunucuda yapilir; istemciye formul kopyalanmaz.
+    area_m2 = _positive_float(data.get('vehicle_reference_area_m2'))
+    diameter = _positive_float(data.get('vehicle_diameter'))
+    if diameter is not None:
+        sources['diameter'] = 'request'
+    elif area_m2 is not None:
+        diameter = math.sqrt(4.0 * area_m2 / math.pi)
+        sources['diameter'] = 'reference_area'
+    else:
+        # Alt sinir: govde en azindan motor kasasini icermek zorunda. Bu da
+        # olculmus bir sayidir (kasa ic capi + 2 x cidar), uydurma degil.
+        # Alternatif — her dalin kendi varsayilanina dusmesi — tam olarak
+        # duzeltmeye calistigimiz hataydi: openrocket 0,10 m, yorunge 0,15 m.
+        try:
+            from hrma.export.openrocket_integration import OpenRocketExporter
+            # resolve_geometry ORNEK metodu (resolve_inert_mass ise statik);
+            # statik cagrilirsa TypeError verip sessizce yedege duser.
+            geo = OpenRocketExporter().resolve_geometry(motor_results or {})
+            case_d = _positive_float((geo or {}).get('case_diameter'))
+            case_src = (geo or {}).get('case_diameter_source') or 'unknown'
+        except Exception:
+            case_d, case_src = None, 'unknown'
+        if case_d is not None:
+            diameter = case_d
+            sources['diameter'] = f'motor_case_lower_bound:{case_src}'
+        else:
+            sources['diameter'] = 'not_supplied'
+    spec['diameter'] = diameter
+    spec['reference_area_m2'] = area_m2
+
+    cd = _positive_float(data.get('drag_coefficient'))
+    sources['drag_coefficient'] = 'request' if cd is not None else 'not_supplied'
+    spec['drag_coefficient'] = cd
+
+    # Govde boyu icin sayfada alan YOK; uydurma bir boy uretmek yerine bos
+    # birakilir (surukleme modeli boyu kullanmiyor, OpenRocket XML'i ise
+    # kullaniciya birakilir).
+    length = _positive_float(data.get('vehicle_length'))
+    sources['length'] = 'request' if length is not None else 'not_modelled'
+    spec['length'] = length
+
+    spec['sources'] = sources
+    return spec
+
+
 #: Arayuzun enjektor malzemesi secenekleri -> materials_db kayit anahtarlari.
 #: Arayuz "AISI 316 Stainless Steel" / "Titanium Grade 5" / "Brass (Low
 #: Pressure)" yaziyor; materials_db kayitlari ss_316 / titanium_6al4v /
@@ -780,6 +880,15 @@ def calculate():
             # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
             # degisimiydi, yani alan tamamen oluydu.
             contraction_ratio=data.get('contraction_ratio', 0),
+            # v2.6.26 (P2 devri): enjektor plaka kalinligi ve ortam sicakligi
+            # formda VARDI ama motora hic gecmiyordu.
+            #   - plate_thickness: orifis L/D'sini, dolayisiyla Cd'yi belirler
+            #     (olculdu: 1 mm -> Cd 0,630 ; 20 mm -> 0,840 ; enjeksiyon
+            #     alani %43 bant). Gecmedigi icin Cd sabit 0,78 kaliyordu.
+            #   - ambient_temperature: isi ve yapisal moduller ayni kosuda
+            #     iki farkli ortam sicakligi kullaniyordu (293,15 K / 300 K).
+            plate_thickness=_mm_to_m_optional(data.get('plate_thickness')),
+            ambient_temperature=data.get('ambient_temp'),
             fuel_type=data.get('fuel_type', 'htpb'),
             oxidizer_type=data.get('oxidizer_type', 'n2o'),
             injector_type=data.get('injector_type', 'showerhead'),
@@ -1051,11 +1160,36 @@ def calculate():
                 motor_results['thrust_altitude_analysis']['thrust_altitude_data']
             )
         
+        # Arac ve firlatma kosulu TEK yerde cozulur; yorunge dali da
+        # OpenRocket dali da AYNI sozlugu kullanir. Oncesinde her dal kendi
+        # varsayilanina dusuyordu ve tek yanitta uc farkli arac cikiyordu
+        # (bkz. _resolve_vehicle_spec aciklamasi).
+        vehicle_spec = _resolve_vehicle_spec(data, motor_results)
+        launch_params = {
+            'launch_angle': data.get('launch_angle'),
+            'launch_altitude': data.get('launch_altitude'),
+            'wind_speed': data.get('wind_speed'),
+            'wind_direction': data.get('wind_direction'),
+        }
+        # Verilmeyen anahtar SOZLUKTEN CIKAR: disa aktarici "istekten geldi"
+        # ile "verilmedi" ayrimini bu sayede yapip beyan edebiliyor.
+        launch_params = {k: v for k, v in launch_params.items()
+                         if v is not None and v != ''}
+
+        rocket_params = {
+            'dry_mass': vehicle_spec['dry_mass'],
+            'diameter': vehicle_spec['diameter'],
+            'length': vehicle_spec['length'],
+            'drag_coefficient': vehicle_spec['drag_coefficient'],
+            'sources': vehicle_spec['sources'],
+        }
+
         # Generate OpenRocket export data
         openrocket_data = {
             'eng_file': openrocket_exporter.export_motor_file(motor_results),
             'motor_summary': openrocket_exporter.export_motor_summary(motor_results) if hasattr(openrocket_exporter, 'export_motor_summary') else {},
-            'flight_profile': openrocket_exporter.create_flight_simulation_data(motor_results)
+            'flight_profile': openrocket_exporter.create_flight_simulation_data(
+                motor_results, rocket_params, launch_params)
         }
         
         # Generate 3D CAD design
@@ -1102,22 +1236,23 @@ def calculate():
         # Calculate trajectory if requested
         trajectory_data = None
         if data.get('calculate_trajectory', True):
-            # Set vehicle parameters
-            trajectory_analyzer.set_vehicle_parameters(
-                mass_dry=data.get('vehicle_mass_dry', 50),
-                diameter=data.get('vehicle_diameter', 0.15),
-                drag_coefficient=data.get('drag_coefficient', 0.5),
-                length=data.get('vehicle_length', 2.0)
-            )
-            
-            # Launch parameters
-            launch_params = {
-                'launch_angle': data.get('launch_angle', 85),
-                'launch_altitude': data.get('launch_altitude', 0),
-                'wind_speed': data.get('wind_speed', 0),
-                'wind_direction': data.get('wind_direction', 0)
-            }
-            
+            # Arac parametreleri: OpenRocket dalinin kullandigi AYNI sozluk.
+            # set_vehicle_parameters None kabul etmiyor (cross_sectional_area
+            # hesabi TypeError verir), bu yuzden cozulemeyen alanda metot HIC
+            # cagrilmaz ve cozucunun kendi belgelenmis varsayilanlari gecerli
+            # kalir — uydurma bir sayi enjekte edilmez.
+            if (vehicle_spec['dry_mass'] is not None
+                    and vehicle_spec['diameter'] is not None):
+                kwargs = {
+                    'mass_dry': vehicle_spec['dry_mass'],
+                    'diameter': vehicle_spec['diameter'],
+                }
+                if vehicle_spec['drag_coefficient'] is not None:
+                    kwargs['drag_coefficient'] = vehicle_spec['drag_coefficient']
+                if vehicle_spec['length'] is not None:
+                    kwargs['length'] = vehicle_spec['length']
+                trajectory_analyzer.set_vehicle_parameters(**kwargs)
+
             # Calculate trajectory
             try:
                 trajectory_data = trajectory_analyzer.calculate_trajectory(motor_results, launch_params)
@@ -1291,6 +1426,15 @@ def quick_geometry():
             # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
             # degisimiydi, yani alan tamamen oluydu.
             contraction_ratio=data.get('contraction_ratio', 0),
+            # v2.6.26 (P2 devri): enjektor plaka kalinligi ve ortam sicakligi
+            # formda VARDI ama motora hic gecmiyordu.
+            #   - plate_thickness: orifis L/D'sini, dolayisiyla Cd'yi belirler
+            #     (olculdu: 1 mm -> Cd 0,630 ; 20 mm -> 0,840 ; enjeksiyon
+            #     alani %43 bant). Gecmedigi icin Cd sabit 0,78 kaliyordu.
+            #   - ambient_temperature: isi ve yapisal moduller ayni kosuda
+            #     iki farkli ortam sicakligi kullaniyordu (293,15 K / 300 K).
+            plate_thickness=_mm_to_m_optional(data.get('plate_thickness')),
+            ambient_temperature=data.get('ambient_temp'),
             fuel_type=data.get('fuel_type', 'htpb'),
             oxidizer_type=data.get('oxidizer_type', 'n2o'),
             injector_type=data.get('injector_type', 'showerhead'),
@@ -1374,6 +1518,15 @@ def transient_analysis():
             # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
             # degisimiydi, yani alan tamamen oluydu.
             contraction_ratio=data.get('contraction_ratio', 0),
+            # v2.6.26 (P2 devri): enjektor plaka kalinligi ve ortam sicakligi
+            # formda VARDI ama motora hic gecmiyordu.
+            #   - plate_thickness: orifis L/D'sini, dolayisiyla Cd'yi belirler
+            #     (olculdu: 1 mm -> Cd 0,630 ; 20 mm -> 0,840 ; enjeksiyon
+            #     alani %43 bant). Gecmedigi icin Cd sabit 0,78 kaliyordu.
+            #   - ambient_temperature: isi ve yapisal moduller ayni kosuda
+            #     iki farkli ortam sicakligi kullaniyordu (293,15 K / 300 K).
+            plate_thickness=_mm_to_m_optional(data.get('plate_thickness')),
+            ambient_temperature=data.get('ambient_temp'),
             fuel_type=data.get('fuel_type', 'htpb'),
             oxidizer_type=data.get('oxidizer_type', 'n2o'),
             injector_type=data.get('injector_type', 'showerhead'),
@@ -4101,25 +4254,22 @@ def trajectory_analysis():
         # hesap sonuçları kullanılır. Verilmemişse eski hibrit yolu çalışır.
         direct_thrust = data.get('thrust')
         direct_burn_time = data.get('burn_time')
-        engine = None
         if not (direct_thrust and direct_burn_time):
-            # Extract base motor data
-            fuel_type = data.get('fuel_type', 'paraffin')
-            oxidizer_type = data.get('oxidizer_type', 'n2o')
-            of_ratio = float(data.get('of_ratio', 2.5))
-            chamber_pressure = float(data.get('chamber_pressure', 20))  # bar
-
-            # Create hybrid rocket engine for trajectory analysis
-            engine = HybridRocketEngine(
-                fuel_type=fuel_type,
-                chamber_pressure=chamber_pressure,
-                of_ratio=of_ratio,
-                thrust=1000,  # Default thrust for trajectory analysis
-                burn_time=10  # Default burn time
-            )
-
-            # Calculate engine performance
-            engine.calculate()
+            # v2.6.26 — burada eskiden thrust=1000 N / burn_time=10 s ile
+            # UYDURMA bir hibrit motor kuruluyordu ve yorunge o hayali
+            # motordan cikiyordu. Kullanicinin gordugu apoje, delta-v ve
+            # ucus suresi kendi motoruna ait degildi. Motor verisi yoksa
+            # yorunge hesaplanamaz; sessizce sayi uretmek yerine acikca
+            # eksik alan bildirilir.
+            return jsonify({
+                'status': 'error',
+                'error': 'missing_fields',
+                'missing_fields': [f for f in ('thrust', 'burn_time')
+                                   if not data.get(f)],
+                'detail': ('Trajectory analysis needs the motor thrust and '
+                           'burn time. Run a motor calculation first, or '
+                           'send thrust and burn_time explicitly.'),
+            }), 422
 
         # Create trajectory analyzer
         trajectory_analyzer = TrajectoryAnalyzer()
@@ -4132,40 +4282,52 @@ def trajectory_analysis():
         )
         
         # Prepare motor data for trajectory analysis
-        if engine is not None:
-            motor_data = {
-                'thrust': engine.F,
-                'burn_time': 10.0,
-                'total_impulse': engine.F * 10.0,
-                'isp': engine.Isp,
-                'mass_flow_rate': engine.mdot_total,
-                'propellant_mass_total': initial_mass - final_mass
-            }
-        else:
-            thrust = float(direct_thrust)
-            burn_time = float(direct_burn_time)
-            isp = float(data.get('isp', 200.0))
-            motor_data = {
-                'thrust': thrust,
-                'burn_time': burn_time,
-                'total_impulse': float(data.get('total_impulse',
-                                                thrust * burn_time)),
-                'isp': isp,
-                'mass_flow_rate': thrust / (isp * G_0) if isp > 0 else 0.0,
-                'propellant_mass_total': initial_mass - final_mass
-            }
-        
-        # Prepare launch parameters
+        thrust = float(direct_thrust)
+        burn_time = float(direct_burn_time)
+        isp = float(data.get('isp', 200.0))
+        motor_data = {
+            'thrust': thrust,
+            'burn_time': burn_time,
+            'total_impulse': float(data.get('total_impulse',
+                                            thrust * burn_time)),
+            'isp': isp,
+            'mass_flow_rate': thrust / (isp * G_0) if isp > 0 else 0.0,
+            'propellant_mass_total': initial_mass - final_mass
+        }
+
+        # Firlatma kosulu ISTEKTEN gelir.
+        #
+        # v2.6.26 — bu sozluk tamamen sabitti: 85 derece, 0 m rakim, 40 derece
+        # enlem, 0 m/s ruzgar. Oysa istek launch_angle ve wind_speed'i ZATEN
+        # tasiyordu (app.js) ve rakim icin trajectory_start_altitude geliyordu
+        # ama okunmuyordu. Ayrica sabit 40 derece enlem, kullanicinin hic
+        # vermedigi bir sahaya gore yerel yercekimi uyguluyordu; ayni motorun
+        # /calculate yolunda ise saha yok ve g0 kullaniliyordu — tek uygulamada
+        # iki farkli yercekimi.
+        #
+        # Verilmeyen anahtar SOZLUGE KONMAZ: cozucunun kendi belgelenmis
+        # varsayilani gecerli kalir, uydurma bir saha enjekte edilmez.
         launch_params = {
             'initial_mass': initial_mass,
             'final_mass': final_mass,
-            'launch_angle': 85.0,  # Near-vertical launch (85 degrees)
-            'launch_altitude': 0.0,
-            'launch_latitude': 40.0,  # Default latitude
-            'launch_longitude': 0.0,  # Default longitude
-            'wind_speed': 0.0,  # No wind
-            'wind_direction': 0.0  # Wind direction in degrees
         }
+        for anahtar, kaynak in (
+            ('launch_angle', 'launch_angle'),
+            ('launch_altitude', 'trajectory_start_altitude'),
+            ('wind_speed', 'wind_speed'),
+            ('wind_direction', 'wind_direction'),
+            ('launch_latitude', 'launch_latitude'),
+            ('launch_longitude', 'launch_longitude'),
+        ):
+            deger = _positive_float(data.get(kaynak))
+            if deger is None:
+                # 0 gecerli bir deger (rakim, ruzgar, boylam); _positive_float
+                # onu elediginden sifiri ayrica kabul et.
+                ham = data.get(kaynak)
+                if ham not in (None, '') and float(ham) == 0.0:
+                    deger = 0.0
+            if deger is not None:
+                launch_params[anahtar] = deger
         
         # Calculate trajectory with error tracking
         try:

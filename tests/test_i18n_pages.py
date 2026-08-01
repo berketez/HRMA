@@ -51,6 +51,18 @@ TURKISH_CHARS = re.compile(r'[çğıİöşüÇĞÖŞÜ]')
 UNIT_WORDS = {'mm', 'cm', 'm', 'kg', 'k', 'l', 'n', 's', 'g', 'bar', 'pa', 'na'}
 ENTITIES = {'&times;', '&nbsp;', '&amp;', 'n/a', 'N/A'}
 
+#: Standart gösterimler — birim/simge kategorisinin devamı, çeviri nesnesi
+#: DEĞİL. "M8" ya da "A2-70" her dilde aynı yazılır; bunlara sözlük anahtarı
+#: açmak, EN ve TR değeri sonsuza dek özdeş kalacak 14 kayıt üretir ve
+#: sözlüğün "bu metin çevrilebilir" iddiasını yalanlar.
+#: Desen bilerek DAR: 'M' + yalnız rakam (isteğe bağlı diş adımı) ve ISO
+#: 3506-1 paslanmaz sınıfı. "Motor", "Malzeme" gibi gerçek metin geçemez.
+STANDARD_DESIGNATION = re.compile(
+    r'^(?:'
+    r'M\d{1,3}(?:[x×]\d+(?:[.,]\d+)?)?'   # ISO 68-1 metrik diş: M8, M12x1.75
+    r'|A[24]-\d{2}'                        # ISO 3506-1 paslanmaz: A2-70, A4-80
+    r')$')
+
 
 # ---------------------------------------------------------------------------
 # Yardımcılar
@@ -88,6 +100,8 @@ def is_skippable(raw):
         return True          # "(mm)", "(kg/m³)", "(m/s/bar^n)" gibi birimler
     if re.match(r'^[A-Za-z]{1,3}$', text) and text.lower() in UNIT_WORDS:
         return True
+    if STANDARD_DESIGNATION.match(text):
+        return True          # "M8", "M12x1.75", "A2-70" gibi ISO gösterimleri
     return False
 
 

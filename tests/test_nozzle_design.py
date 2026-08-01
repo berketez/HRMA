@@ -25,6 +25,8 @@ için doğru Rao açısı θe ≈ 14°, dolayısıyla λ = 0.9851 ve η = 0.9704
 Aşağıdaki testler yeni (doğru) değerleri sabitler.
 """
 
+import math
+
 import numpy as np
 import pytest
 
@@ -32,7 +34,7 @@ from hrma.engines.nozzle_design import NozzleDesigner
 
 
 PC = 40.0          # bar
-GAMMA = 1.20
+GAMMA = 1.2
 AT = 0.001         # m²
 
 
@@ -61,7 +63,7 @@ class TestExitPressureFromGeometry:
     def test_isp_no_longer_constant_across_expansion_ratio(self, designer):
         """F050'nin ana belirtisi: ε değişirken Isp SABİT kalıyordu (252.53 s).
 
-        Katalogda ölçülen doğru değerler (γ=1.20, R=350, Tc=3400 K, Pc=40 bar,
+        Katalogda ölçülen doğru değerler (γ=1.2, R=350, Tc=3400 K, Pc=40 bar,
         konik, deniz seviyesi): ε=8 -> 250.9 s, ε=16 -> 231.2 s. ε=16 zaten
         ayrılma bandındadır (bkz. TestFlowSeparation); bu yüzden burada
         ayrılma modeli devre dışı bırakılmadan tam-akan CF üzerinden
@@ -285,12 +287,40 @@ class TestWallThicknessAndMass:
         assert g['wall_thickness'] == pytest.approx(1.0, rel=1e-9)  # 1 mm
         assert g['wall_thickness_basis'] == 'manufacturing_minimum'
 
-    def test_mass_is_surface_times_thickness_times_density(self, designer):
-        g = designer.design_nozzle(0.01, 25.0, PC, 1.01325, 'bell',
-                                   gamma=GAMMA)['geometry']
-        expected = (g['surface_area'] / 1e6) * (g['wall_thickness'] / 1000.0) \
-            * g['wall_material_density']
+    def test_mass_covers_both_sections_as_a_full_annulus(self, designer):
+        """Kütle, KONVERJAN + DİVERJAN bölümlerin halka hacminden gelmeli.
+
+        v2.6.26 — bu test eskiden `surface_area · t · rho` bekliyordu ve iki
+        kusuru birden sözleşmeye çeviriyordu:
+          1. `surface_area` YALNIZ diverjan koniyi kapsıyor; konverjan bölüm
+             hiç sayılmıyordu.
+          2. İnce kabuk yaklaşımı, cidarın iç kontura DIŞARI eklenmesinden
+             gelen pi·t^2 terimini atlıyordu (cidar kalınlaştıkça büyür).
+        Sonuç: aynı yanıtta bu modül 0,303 kg, çizilen CAD katısı 0,756 kg
+        diyordu — tek parçaya 2,5 kat farklı iki kütle.
+        """
+        res = designer.design_nozzle(0.01, 25.0, PC, 1.01325, 'bell',
+                                     gamma=GAMMA)
+        g, contour = res['geometry'], res['contour']
+        t = g['wall_thickness'] / 1000.0
+        rho = g['wall_material_density']
+        # Yarıçaplar geometri bloğundan okunur (mm -> m)
+        r_throat = g['throat_radius'] / 1000.0
+        r_exit = g['exit_radius'] / 1000.0
+        conv = contour.get('convergent') or {}
+        r_chamber = float(conv.get('chamber_radius', 0.0)) / 1000.0
+        L_conv = float(conv.get('length', 0.0)) / 1000.0
+        L_div = contour['divergent']['length'] / 1000.0
+
+        def annulus(r0, r1, L):
+            r_mid = (r0 + r1) / 2.0
+            return math.pi * (2.0 * t * r_mid + t * t) * L
+
+        expected = (annulus(r_chamber, r_throat, L_conv)
+                    + annulus(r_throat, r_exit, L_div)) * rho
         assert g['estimated_mass'] == pytest.approx(expected, rel=1e-9)
+        # Dayanak çıktıda beyan edilmeli (hangi geometriden geldiği yazılı)
+        assert 'estimated_mass_basis' in g
 
     def test_unknown_material_falls_back_to_default(self, designer):
         g = designer.design_nozzle(0.01, 25.0, PC, 1.01325, 'bell', gamma=GAMMA,

@@ -692,7 +692,7 @@ class HeatTransferAnalyzer:
         # Cooling requirements
         cooling_analysis = self._analyze_cooling_requirements(
             gas_side_analysis['total_heat_rate'], burn_time, motor_data,
-            cooling_type, mat_props
+            cooling_type, mat_props, ambient_temp=ambient_temp
         )
 
         # Safety analysis — thermal stress from the ACTUAL through-wall
@@ -1398,12 +1398,59 @@ class HeatTransferAnalyzer:
         'forced': 100.0,        # K (zorlanmış hava)
         'regenerative': 100.0,  # K (cidar-soğutucu film farkı)
     }
-    # Isı yutucu (heat-sink) tasarım sıcaklık artışı [K].
+    # Isı yutucu (heat-sink) tasarım sıcaklık artışı [K] — YALNIZ malzeme
+    # kaydında sıcaklık sınırı bulunamazsa kullanılan yedek. v2.6.26'ya kadar
+    # bu değer her malzeme ve her ortam sıcaklığı için SABİTTİ; oysa
+    # m = Q/(cp·ΔT) ifadesinde ΔT paydadadır, yani ısı yutucu kütlesi bu
+    # sayıyla ters orantılıdır. Aynı satırdaki cp çoktan malzeme kaydından
+    # okunuyordu (cp_source='material_record') — fonksiyon malzemeye duyarlı
+    # hâle getirilmiş, yalnız izin verilen sıcaklık artışı dışarıda kalmıştı.
     _HEAT_SINK_DELTA_T = 200.0
+
+    def _heat_sink_delta_T(self, mat_props: Optional[Dict],
+                           ambient_temp: float) -> Tuple[float, float, str]:
+        """İzin verilen ısı yutucu sıcaklık artışı ΔT [K] + sınır + gerekçe.
+
+        Isı yutucu (heat-sink) hazne, yanma boyunca soğurduğu ısıyla ısınır;
+        boyutlandırma ölçütü cidarın malzemenin izin verilen sıcaklığını
+        aşmamasıdır (Huzel & Huang, NASA SP-125, Böl. 4 — ısı yutucu hazne
+        boyutlandırması). Dolayısıyla izin verilen artış
+            ΔT = T_sınır − T_başlangıç
+        olup, T_sınır merkezi malzeme kaydından gelir. İki aday alan vardır
+        (materials_db): ``max_service_temp`` (kısa süreli YAPISAL servis
+        sınırı) ve ``allowable_temperature`` (termal emniyet sınırı). Daha
+        KONSERVATİF (küçük) olan seçilir; ikisi de yoksa beyan edilen 200 K
+        yedeği kullanılır ve bu durum çıktıda bildirilir.
+        """
+        limits = []
+        if mat_props:
+            for key in ('max_service_temp', 'allowable_temperature'):
+                try:
+                    value = float(mat_props.get(key) or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if value > 0.0:
+                    limits.append((value, key))
+        t_start = float(ambient_temp) if ambient_temp else 293.15
+        if not limits:
+            return (self._HEAT_SINK_DELTA_T, float('nan'),
+                    'declared default (no temperature limit in material record)')
+        limit, key = min(limits)
+        delta_t = limit - t_start
+        if delta_t <= 0.0:
+            # Ortam sıcaklığı malzeme sınırının üstünde: ısı yutucu tasarımı
+            # anlamsızdır. Sayı uydurmak yerine yedek beyan edilir.
+            return (self._HEAT_SINK_DELTA_T, limit,
+                    f'declared default ({key} = {limit:.0f} K is at or below '
+                    f'the initial temperature {t_start:.1f} K)')
+        return (float(delta_t), limit,
+                f'material record {key} ({limit:.0f} K) minus initial '
+                f'temperature ({t_start:.1f} K)')
 
     def _analyze_cooling_requirements(self, heat_rate: float, burn_time: float,
                                     motor_data: Dict, cooling_type: str,
-                                    mat_props: Optional[Dict] = None) -> Dict:
+                                    mat_props: Optional[Dict] = None,
+                                    ambient_temp: float = 293.15) -> Dict:
         """Analyze cooling requirements.
 
         DÜZELTME (v2.6.2, fizik denetimi F037) — iki ayrı kusur:
@@ -1465,7 +1512,11 @@ class HeatTransferAnalyzer:
                     cp_source = 'material_record'
             except (TypeError, ValueError):
                 pass
-        heat_sink_mass = total_heat_energy / (cp_wall * self._HEAT_SINK_DELTA_T)
+        # ΔT artık seçilen malzemenin sıcaklık sınırından ve gerçek başlangıç
+        # (ortam) sıcaklığından gelir — bkz. _heat_sink_delta_T.
+        heat_sink_delta_t, heat_sink_limit, heat_sink_basis = \
+            self._heat_sink_delta_T(mat_props, ambient_temp)
+        heat_sink_mass = total_heat_energy / (cp_wall * heat_sink_delta_t)
 
         return {
             'total_heat_energy': total_heat_energy / 1e6,  # MJ
@@ -1478,7 +1529,10 @@ class HeatTransferAnalyzer:
             'design_delta_T_K': delta_t,                  # K (mühendislik kabulü)
             'heat_sink_specific_heat_J_kgK': cp_wall,     # J/kg/K
             'heat_sink_specific_heat_source': cp_source,
-            'heat_sink_delta_T_K': self._HEAT_SINK_DELTA_T,
+            'heat_sink_delta_T_K': heat_sink_delta_t,
+            'heat_sink_delta_T_basis': heat_sink_basis,
+            'heat_sink_temperature_limit_K': heat_sink_limit,
+            'heat_sink_initial_temperature_K': float(ambient_temp),
             'cooling_efficiency': self._calculate_cooling_efficiency(cooling_type),
             'recommendations': self._get_cooling_recommendations(cooling_type, heat_rate)
         }

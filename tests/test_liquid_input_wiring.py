@@ -63,6 +63,9 @@ BASE_PAYLOAD = {
     'mixture_ratio': 2.5, 'stoichiometric_of': 3.4,
     'of_min': 2.0, 'of_max': 3.2,
     'throttling_of_strategy': 'constant', 'combustion_efficiency': 97,
+    # v2.6.26 — film soğutma girdisi eklendi (analiz zaten vardı, onu
+    # tetikleyecek alan yoktu; 6 çıktı yaprağı her motorda 0,0 kalıyordu).
+    'film_cooling_percent': 0,
     'engine_cycle': 'gas_generator',
     'thrust': 10000, 'chamber_pressure': 100, 'feed_pressure': 130,
     'turbopump_efficiency': 75, 'generator_gas_temp': 1000,
@@ -124,6 +127,8 @@ SHAKES = {
     'of_max': (4.4, {}),
     'throttling_of_strategy': ('variable', {}),
     'combustion_efficiency': (88.0, {}),
+    # Kabul aralığı 0-30 (yakıt debisinin yüzdesi); %6 tipik bir film payı.
+    'film_cooling_percent': (6.0, {}),
     'engine_cycle': ('staged_combustion', {}),
     # Ön yakıcı tipi YALNIZ staged combustion'da gönderilir ve yalnız orada
     # anlamlıdır; kendi bağlamı dışında ölçülürse yalancı ölü çıkar.
@@ -456,17 +461,31 @@ def test_chamber_diameter_out_of_band_does_not_claim_false_precedence(client):
 def test_turbine_inlet_pressure_reports_a_comparable_solver_value(client):
     """Beyan edilen türbin giriş basıncının karşılaştırma değeri yayımlanmalı.
 
-    Öncelik doğrudan girilen genişleme oranındadır; kullanıcı kendi değerini
-    çözücününkiyle kıyaslayabilsin diye motor ima ettiği giriş basıncını da
-    (P_in = PR · P_atmosfer) çıktıya koyar. Arayüz o düğümü okuduğundan sabit
-    atmosfer basıncı JS'e kopyalanmaz.
+    Kullanıcı kendi girdisini çözücününkiyle kıyaslayabilsin diye motor, ima
+    ettiği giriş basıncını çıktıya koyar. O değer ÇEVRİM GÜÇ DENGESİNİN basınç
+    merdiveninden gelir.
+
+    v2.6.26 — bu test eskiden ``implied == PR · P_atmosfer`` diyordu ve
+    kusurun kendisini sözleşmeye çeviriyordu: aynı koşuda çevrim çözücüsü
+    105,04 bar üretirken yaprak 4,05 bar diyor, arayüz de kullanıcının 150
+    bar'lık girdisini o 4 bar ile kıyaslıyordu. Bir gaz jeneratörü türbini,
+    100 bar'a basan pompaları 4 bar'lık gazla süremez. Ölçüt artık çözücünün
+    kendi değeri.
     """
     result = _calculate(client, copy.deepcopy(BASE_PAYLOAD))
     assert 'turbine_inlet_pressure' in result['unwired_inputs'][
         'reported_for_comparison']
     turbine = result['detailed_feed_system']['turbopump_analysis']['turbine']
     implied = turbine['inlet_pressure_implied_bar']
-    assert implied == pytest.approx(turbine['pressure_ratio'] * 1.01325)
+
+    solved = (result['detailed_feed_system']['engine_cycle_solution']
+              ['shafts'][0]['turbine']['inlet_pressure_bar'])
+    assert implied == pytest.approx(solved), (
+        'yayımlanan giriş basıncı çevrim çözümüyle aynı olmalı: '
+        f'{implied} != {solved}')
+    # Açık çevrimde türbin, odaya basan pompaları sürer; girişi oda
+    # basıncının altına düşerse güç dengesi fiziksel değildir.
+    assert implied > result['chamber_pressure']
 
 
 def test_ui_can_show_a_solver_value_for_every_comparison_field(client):

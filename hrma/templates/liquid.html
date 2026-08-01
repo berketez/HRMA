@@ -1200,6 +1200,22 @@
                     <input type="number" id="coolant_flow_percent" value="100" step="1" min="5" max="100">
                 </div>
                 <div class="form-group">
+                    <!-- v2.6.26: film soğutma debisi girdisi. Çözücü bu alanı
+                         ZATEN okuyordu (LiquidRocketEngine film_cooling_percent
+                         -> _film_cooling_analysis) ama sayfa hiç göndermiyordu;
+                         bu yüzden cooling_system.film_cooling bloğunun beş
+                         yaprağı da (debi, yutulan ısı, kaplanan boy, kaplama
+                         oranı, yüzde) her motorda 0.0'da donuyordu ve
+                         "Film Cooling" seçmek hiçbir sayıyı değiştirmiyordu.
+                         Boş/0 bırakılırsa film yoktur; soğutma tipi film
+                         seçiliyken boş bırakılırsa çözücü etiketli literatür
+                         varsayılanını uygular ve kaynağını çıktıda söyler. -->
+                    <label>
+                        <span data-i18n="liq.ui.film_cooling">Film Cooling</span> <span class="unit" data-i18n="liq.ui.unit_pct_of_fuel_flow">(% of fuel flow)</span>
+                    </label>
+                    <input type="number" id="film_cooling_percent" value="0" step="0.5" min="0" max="30">
+                </div>
+                <div class="form-group">
                     <label>
                         <span data-i18n="liq.ui.coolant_inlet_temperature">Coolant Inlet Temperature</span> <span class="unit">(K)</span>
                         <div class="tooltip">
@@ -2527,6 +2543,7 @@
             document.getElementById('throat_diameter').value = '50';
             document.getElementById('cooling_channels').value = '80';
             document.getElementById('coolant_flow_percent').value = '100';
+            document.getElementById('film_cooling_percent').value = '0';
             document.getElementById('coolant_inlet_temp').value = '300';
             document.getElementById('max_wall_temp').value = '800';
             
@@ -3589,6 +3606,10 @@
                 throat_diameter: parseFloat(document.getElementById('throat_diameter').value) || 50,
                 cooling_channels: parseFloat(document.getElementById('cooling_channels').value) || 80,
                 coolant_flow_percent: parseFloat(document.getElementById('coolant_flow_percent').value) || 100,
+                // Film soğutma debisi: 0 MEŞRU bir değerdir (film yok), bu
+                // yüzden `|| 0` yerine NaN denetimi yapılır — `|| ` kalıbı
+                // 0'ı da yedek değere düşürürdü.
+                film_cooling_percent: isFinite(parseFloat(document.getElementById('film_cooling_percent').value)) ? parseFloat(document.getElementById('film_cooling_percent').value) : 0,
                 coolant_inlet_temp: parseFloat(document.getElementById('coolant_inlet_temp').value) || 300,
                 max_wall_temp: parseFloat(document.getElementById('max_wall_temp').value) || 800,
                 
@@ -4981,8 +5002,13 @@ Please provide:
                 get: function (r) { return _uwNum((r.nozzle_angles || {}).contraction_ratio); }
             },
             // Türbin basınç oranında öncelik genişleme oranındadır; çözücünün
-            // ima ettiği giriş basıncı motorda hesaplanır (P_in = PR · P_atm),
-            // atmosfer basıncı burada TEKRARLANMAZ.
+            // ima ettiği giriş basıncı motorda hesaplanır. v2.6.26: motor o
+            // değeri artık ÇEVRİM GÜÇ DENGESİNİN kendi basınç merdiveninden
+            // yayımlıyor (eskiden PR × P_atmosfer idi ve aynı koşuda çözücü
+            // 78.8 bar derken bu düğüm 4.05 bar diyordu — kullanıcının 150
+            // bar'lık girdisi 19 kat yanlış bir sayıyla kıyaslanıyordu).
+            // Düğüm adı değişmedi; sayfa yine tek düğüm okur, hiçbir basınç
+            // JS'e kopyalanmaz.
             turbine_inlet_pressure: {
                 unit: 'bar', digits: 1,
                 get: function (r) {

@@ -104,6 +104,28 @@ MU_LIQUID_REF = {'n2o': (6.3e-5, 293.15), 'lox': (1.9e-4, 90.0)}
 # raporlanır — akışkan bilinmediği için tablo değeri uydurulmaz.
 SIGMA_GENERIC = 0.02
 MU_GENERIC = 2e-4
+# Buhar basıncı P_v [bar] referans noktaları (akışkan -> (P_v, T_ref)).
+# Kaynak: NIST Chemistry WebBook doyma verileri.
+#   LOX  : NBP 90,19 K'de 1 atm = 1,01325 bar (doymuş depolama)
+#   RP-1 : ~0,002 bar @ 293 K (kerosen kesiti, düşük uçuculuk)
+#   etanol: 0,059 bar @ 293 K;  IPA: 0,044 bar @ 293 K
+#   su    : 0,0234 bar @ 293 K (soğutucu/hidrotest devreleri)
+# N₂O bu tabloda YOKTUR: onun için modülün kendi doyma tablosu (_SAT.psat)
+# sıcaklıkla çözülür, sabit değere düşülmez.
+PV_LIQUID_REF = {
+    'lox': (1.01325, 90.19),
+    'lo2': (1.01325, 90.19),
+    'rp1': (0.002, 293.15),
+    'rp-1': (0.002, 293.15),
+    'kerosene': (0.002, 293.15),
+    'ethanol': (0.059, 293.15),
+    'ipa': (0.044, 293.15),
+    'isopropanol': (0.044, 293.15),
+    'water': (0.0234, 293.15),
+}
+# Akışkan tanımlanmamışsa (çağıran ad göndermedi) korunan eski varsayım.
+# Depolanabilir hidrokarbonlar için makul mertebe; VARSAYIM olarak bildirilir.
+PV_GENERIC = 0.05
 # Guggenheim (1945) karşılık-gelen-haller bağıntısı: σ ∝ (1−T/Tc)^(11/9).
 # Poling, Prausnitz & O'Connell, "The Properties of Gases and Liquids"
 # 5. baskı Böl. 12'de aynı üs kullanılır. N₂O 280-305 K arasında σ 3 KAT
@@ -516,6 +538,43 @@ def liquid_viscosity(fluid, T_K=None):
     return float(mu_ref), float(t_ref), 'table'
 
 
+def liquid_vapor_pressure(fluid, T_K=None):
+    """Sıvı buhar basıncı P_v [bar] — akışkan tablosundan.
+
+    v2.6.26 (kusur: p_v_bar akışkandan BAĞIMSIZ 0,05 bar sabitiydi). Bu değer
+    Nurick kavitasyon sayısına doğrudan girer:
+        K_c = (P₁ − P_v)/(P₁ − P₂)
+    P_v'yi olduğundan küçük almak K_c'yi YUKARI çeker, yani kavitasyon /
+    hidrolik flip riskini OLDUĞUNDAN DÜŞÜK gösterir — güvenlik yönünde
+    yanlış taraf. LOX kendi doyma noktasında depolanır (NBP 90,19 K'de
+    P_v = 1,01325 bar); 0,05 bar kullanmak 20 kat hatadır.
+
+    Aynı modül σ ve μ için bu akışkan-bağımsızlık hatasını v2.6.2'de
+    kapatmıştı (bkz. SIGMA_LIQUID_REF / MU_LIQUID_REF); bu, o düzeltmenin
+    üçüncü büyüklüğüdür.
+
+    Sıcaklık bağımlılığı MODELLENMEZ: bu modülde N₂O dışında güvenilir
+    doyma eğrisi yoktur. Referans nokta ve sınır çıktıda beyan edilir —
+    uydurma korelasyon yazmak yerine sınır açıkça bildirilir.
+
+    Döner: (p_v [bar], basis)
+    Kaynak: NIST Chemistry WebBook doyma verileri — O₂ NBP 90,19 K
+    (1 atm); RP-1/kerosen ~0,002 bar ve etanol 0,059 bar @ 293 K
+    (Antoine, NIST); IPA 0,044 bar @ 293 K.
+    """
+    key = str(fluid or '').lower()
+    ref = PV_LIQUID_REF.get(key)
+    if ref is None:
+        return PV_GENERIC, ('generic assumption (fluid not identified by the '
+                            'caller; no vapour-pressure table applied)')
+    p_v, t_ref = ref
+    if T_K is None or abs(float(T_K) - t_ref) < 0.5:
+        return float(p_v), f'table value at {t_ref:.2f} K ({key})'
+    return float(p_v), (f'table value at {t_ref:.2f} K ({key}); the '
+                        f'temperature dependence is NOT modelled, requested '
+                        f'{float(T_K):.2f} K')
+
+
 def pintle_spray_angle(tmr):
     """Pintle sprey yarı açısı [deg]: θ = arccos(1/(1+TMR)) (Cheng 2017)."""
     if tmr < 0:
@@ -769,11 +828,15 @@ def _manifold(mdot, rho, v_orifice):
 def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
                    T_K, inlet, l_over_d, constraints, warnings,
                    assumptions, cd_override=None, cd_basis_override=None,
-                   n_fixed=None):
+                   n_fixed=None, orifice_length_m=None):
     """Tek devre (ox/fuel) akış + delik planı + manifold + flip çözümü.
 
     ``circuit`` ∈ {'ox', 'fuel'} — dil-nötr devre kimliği. Uyarı kodu bundan
     seçilir; ValueError metinleri ``_CIRCUIT_LABEL_TR`` etiketini kullanır.
+
+    ``orifice_length_m``: orifis uzunluğu = enjektör plakası kalınlığı [m].
+    Verilirse L/D geometriden çözülür (bkz. gövdedeki sabit-nokta notu);
+    verilmezse ``l_over_d`` argümanı beyan edilen varsayım olarak kullanılır.
     """
     name = _CIRCUIT_LABEL_TR[circuit]
     spec_p_feed_given = p_feed_bar is not None
@@ -826,22 +889,54 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
             "bar): besleme basıncı oda basıncını aşmalı")
     dp_pa = dp_bar * PA_PER_BAR
 
+    def _size(cd_value):
+        """Verilen Cd ile toplam alan + delik planı (n, d) döndürür."""
+        if is_n2o:
+            probe = nhne_mass_flow(cd_value, 1.0, p1_bar, pc_bar, p_sat_bar,
+                                   T_K, rho)
+            g_unit = probe['mdot_kg_s']   # kg/s, birim alan başına (Cd dahil)
+            model = 'NHNE'
+        else:
+            g_unit = spi_mass_flow(cd_value, 1.0, rho, dp_pa)
+            model = 'SPI'
+        area = mdot / max(g_unit, 1e-12)
+        n_local, d_local = _plan_orifices(area, constraints, warnings,
+                                          n_fixed=n_fixed)
+        return n_local, d_local, model
+
+    # --- Deşarj katsayısı --------------------------------------------------
+    # v2.6.26: orifis uzunluğu (enjektör plakası kalınlığı) verilirse L/D
+    # ARTIK GEOMETRİDEN çözülür. L/D = t_plaka / d_orifis olduğundan Cd ile
+    # delik çapı birbirine bağlıdır: sabit-nokta yinelemesiyle kapatılır
+    # (Cd -> alan -> delik planı -> L/D -> Cd). Tablonun kendisi bantlı
+    # olduğu için iki-üç adımda kilitlenir; kilitlenmezse son adım kullanılır
+    # ve ulaşılan L/D çıktıda beyan edilir.
+    # Kaynak: NASA SP-8089 / Lefebvre & McDonell, "Atomization and Sprays"
+    # Böl. 5 (düz orifis Cd — giriş geometrisi ve L/D bağımlılığı).
+    l_over_d_basis = 'caller-supplied L/D (declared assumption)'
     if cd_override is not None:
         cd, cd_basis = cd_override, (cd_basis_override or 'tip özel Cd')
+        n, d, flow_model = _size(cd)
+    elif orifice_length_m and float(orifice_length_m) > 0.0:
+        t_orifice = float(orifice_length_m)
+        cd, cd_basis = discharge_coefficient(inlet, l_over_d)
+        for _ in range(6):
+            n, d, flow_model = _size(cd)
+            ld_new = t_orifice / max(d, 1e-9)
+            cd_new, basis_new = discharge_coefficient(inlet, ld_new)
+            l_over_d = float(ld_new)
+            if cd_new == cd:
+                cd_basis = basis_new
+                break
+            cd, cd_basis = cd_new, basis_new
+        n, d, flow_model = _size(cd)
+        l_over_d = t_orifice / max(d, 1e-9)
+        l_over_d_basis = (f'L/D = orifice length {t_orifice * 1e3:.2f} mm / '
+                          f'solved orifice diameter {d * 1e3:.3f} mm')
     else:
         cd, cd_basis = discharge_coefficient(inlet, l_over_d)
+        n, d, flow_model = _size(cd)
 
-    # Birim alan debisi → toplam alan
-    if is_n2o:
-        probe = nhne_mass_flow(cd, 1.0, p1_bar, pc_bar, p_sat_bar, T_K, rho)
-        g_eff = probe['mdot_kg_s']  # kg/s başına m² (Cd dahil)
-        flow_model = 'NHNE'
-    else:
-        g_eff = spi_mass_flow(cd, 1.0, rho, dp_pa)
-        flow_model = 'SPI'
-    total_area = mdot / max(g_eff, 1e-12)
-
-    n, d = _plan_orifices(total_area, constraints, warnings, n_fixed=n_fixed)
     a_total = n * np.pi * d ** 2 / 4.0
     # Efektif enjeksiyon hızı (SPI özdeşliğinden; NHNE'de sıvı giriş hızı)
     v_inj = float(cd * np.sqrt(2.0 * dp_pa / rho))
@@ -858,8 +953,13 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
     # Nurick kavitasyon sayısı: K_c = (P₁ − P_v)/(P₁ − P₂)
     if is_n2o:
         p_v_bar = p_sat_bar
+        p_v_basis = 'n2o saturation table'
     else:
-        p_v_bar = 0.05  # depolanabilir sıvılar için ~hava basıncı altı varsayım
+        p_v_bar, p_v_basis = liquid_vapor_pressure(fluid, T_K)
+        # NOT: uyarı metninin parametre kümesi DEĞİŞTİRİLMEDİ (i18n sözlüğü
+        # bu partinin dosyası değil). Buhar basıncının hangi akışkandan ve
+        # hangi referans noktadan geldiği devre sözlüğündeki
+        # 'vapor_pressure_basis' alanında taşınır.
         assumptions.append(_w(
             'warn.injector.vapor_pressure_assumed_ox' if circuit == 'ox' else
             'warn.injector.vapor_pressure_assumed_fuel', 'info',
@@ -879,6 +979,12 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
         'dp_pc_ratio': float(dp_bar / pc_bar),
         'velocity_m_s': v_inj,
         'cd': float(cd), 'cd_basis': cd_basis,
+        # v2.6.26: Cd'nin geometrik dayanağı çıktıda taşınır.
+        'l_over_d': float(l_over_d),
+        'l_over_d_basis': l_over_d_basis,
+        'orifice_inlet': str(inlet),
+        'vapor_pressure_bar': float(p_v_bar),
+        'vapor_pressure_basis': p_v_basis,
         'n_orifices': int(n),
         'orifice_d_mm': float(d * 1e3),
         'total_area_mm2': float(a_total * 1e6),
@@ -1199,6 +1305,16 @@ def design_injector(spec):
     inlet_ox = spec.get('inlet_ox', 'sharp')
     inlet_f = spec.get('inlet_fuel', 'sharp')
     l_over_d = spec.get('l_over_d', 4.0)
+    # Orifis uzunluğu = enjektör plakası kalınlığı [m]. Verilirse L/D
+    # geometriden çözülür ve 'l_over_d' yalnız yineleme başlangıcı olur
+    # (v2.6.26; ayrıntı _solve_circuit içindeki notta).
+    orifice_length = spec.get('orifice_length_m') or spec.get('plate_thickness_m')
+    # Yakıt devresi akışkan adı YALNIZ buhar basıncı tablosu için kullanılır;
+    # 'n2o' burada anlamsızdır (hibritte yakıt katı, sıvıda oksitleyici) ve
+    # NHNE dalını T_ox_K olmadan tetiklerdi — bilerek dışarıda bırakılır.
+    fluid_f = str(spec.get('fluid_fuel') or 'generic').lower()
+    if fluid_f == 'n2o':
+        fluid_f = 'generic'
 
     # Swirl tiplerinde efektif Cd Giffen–Muraszew'den gelir (orifis Cd yerine)
     swirl_geom = None
@@ -1241,14 +1357,16 @@ def design_injector(spec):
             spec.get('p_feed_bar'), fluid_ox, spec.get('T_ox_K'),
             inlet_ox, l_over_d, constraints, warnings, assumptions,
             cd_override=cd_override, cd_basis_override=cd_basis_override,
-            n_fixed=spec.get('n_orifices_ox'))
+            n_fixed=spec.get('n_orifices_ox'),
+            orifice_length_m=orifice_length)
         fuel = None
         if mdot_fuel:
             fuel = _solve_circuit(
                 'fuel', mdot_fuel, spec.get('rho_fuel'), pc_bar, dp_f,
-                spec.get('p_feed_bar_fuel'), 'generic', None,
+                spec.get('p_feed_bar_fuel'), fluid_f, None,
                 inlet_f, l_over_d, constraints, warnings, assumptions,
-                n_fixed=spec.get('n_orifices_fuel'))
+                n_fixed=spec.get('n_orifices_fuel'),
+                orifice_length_m=orifice_length)
     except ValueError:
         raise
     except Exception as exc:  # fiziksel imkânsızlık / sayısal çöküş
