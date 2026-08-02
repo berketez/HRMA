@@ -60,6 +60,9 @@ ISA_LAYERS = [
 # uzantı kullanılır (T tablo tepesindeki değerde sabitlenir; basınç üstel
 # sönümle devam eder — sayısal kararlılık, negatif T/P engellenir).
 ISA_TABLE_TOP_M = 84852.0  # m
+# Altı katman sınırının tamamının sürekli olduğu ve tepe sıcaklığının
+# 186,946 K olduğu Lean ile ispatlandı: HRMA.isaLayers_all_continuous,
+# HRMA.isaTopTemperature (bkz. docs/BICIMSEL_ISPATLAR.md).
 
 
 def _isa_layer(altitude_m: float):

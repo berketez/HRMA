@@ -316,6 +316,13 @@ class TransientBallistics:
                                 * (1.0 + (gamma - 1.0) / 2.0 * M * M)) \
                    ** ((gamma + 1.0) / (2.0 * (gamma - 1.0))) - eps
 
+        # Alt sınır 1 DEĞİL 1.0001: alan oranı M=1'de dönüm yapar ve tipik
+        # ε > 1 için denklemin İKİ kökü vardır (biri subsonik, biri
+        # süpersonik). 1'in kesin üstünde başlayan aralık subsonik dalı
+        # dışarıda bırakır; kalan aralıkta fonksiyon kesin monoton artan
+        # olduğu için kök tektir. İkisi de Lean ile ispatlandı:
+        # HRMA.areaRatio_strictMonoOn, HRMA.bracket_excludes_subsonic
+        # (bkz. docs/BICIMSEL_ISPATLAR.md).
         Me = brentq(area_ratio, 1.0001, 50.0)
         return (1.0 + (gamma - 1.0) / 2.0 * Me * Me) ** (-gamma / (gamma - 1.0))
 

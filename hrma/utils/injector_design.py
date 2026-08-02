@@ -884,6 +884,10 @@ class InjectorDesign:
         # K_c < ~1.5 ise kavitasyon/hidrolik flip riski. Kardeş modül
         # (engines/injector_design.py) aynı kriteri uygular.
         # Kaynak: Nurick, ASME J. Fluids Eng. 98 (1976).
+        # P_v BELİRSİZKEN HATA GÜVENSİZ TARAFA DÜŞER: K_c, P_v'nin kesin
+        # azalan fonksiyonudur; P_v küçük tahmin edilirse K_c büyür ve uyarı
+        # basılmaz. Lean ispatı: HRMA.underestimate_can_miss_warning
+        # (bkz. docs/BICIMSEL_ISPATLAR.md).
         # v2.6.26 — GAZ FAZI MODELLENMİYOR VE BU SESSİZ KALAMAZ.
         # `oxidizer_phase` alanı yalnız aşağıdaki iki uyarıyı kapılıyordu;
         # 'gas' seçildiğinde delik boyutlandırması yine SIKIŞTIRILAMAZ (SPI)

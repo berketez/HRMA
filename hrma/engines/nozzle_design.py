@@ -833,6 +833,10 @@ class NozzleDesigner:
         #
         # Her iki bölüm için kesik koni halkası:
         #   V = π·(2·t·r_ort + t²)·L
+        # Bu kapalı biçimin disk integraliyle BİREBİR aynı olduğu (yaklaşım
+        # değil, kesin) ve ince kabuğun hatasının tam olarak π·t²·L olduğu
+        # Lean ile ispatlandı: HRMA.frustumAnnulusVolume_eq_integral,
+        # HRMA.frustum_minus_thinShell (bkz. docs/BICIMSEL_ISPATLAR.md).
         t_w = wall_thickness
         conv_geo = contour.get('convergent') or {}
         r_chamber_m = float(conv_geo.get('chamber_radius', 0.0)) / 1000.0
