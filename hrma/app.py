@@ -17,6 +17,8 @@ import io
 import math
 import contextlib
 import platform
+import collections
+import uuid
 
 # Apply Windows fixes before importing other modules
 if platform.system() == 'Windows':
@@ -355,6 +357,66 @@ def _injector_plate_report(material_name, data, motor_results,
 #: surer. Sinir keyfi degil: arayuzun kendi max="50" beyaninin iki kati,
 #: yani elle girilen makul bir tarama reddedilmez ama surec donmaz.
 PARAMETRIC_MAX_STEPS = 100
+
+#: Parametrik taramada KESİNLİKLE pozitif olması gereken süpürme
+#: parametreleri. ÖLÇÜM (Faz 4, A9): ``param_type='of_ratio'`` ile
+#: ``param_start=-2.0`` gönderildiğinde uç HTTP 200 ve Isp 204.77 s
+#: döndürüyordu — negatif karışım oranı fiziksel olarak yok, ama çözücü
+#: sayı üretiyor ve hiçbir katman itiraz etmiyordu. Kütle debisi, yoğunluk,
+#: süre, basınç ve sıcaklık aynı sınıfta.
+PARAMETRIC_POSITIVE_PARAMS = frozenset({
+    'of_ratio', 'chamber_pressure', 'chamber_temperature', 'thrust',
+    'burn_time', 'total_impulse', 'l_star', 'fuel_density', 'gas_constant',
+    'throat_diameter', 'chamber_diameter_input', 'regression_a',
+})
+
+#: Sıfır "otomatik/serbest" anlamına geldiği için sıfıra izin verilir, ama
+#: negatif değer geometrik olarak tanımsızdır.
+PARAMETRIC_NON_NEGATIVE_PARAMS = frozenset({
+    'expansion_ratio', 'thrust_coefficient', 'atmospheric_pressure',
+})
+
+
+def _parametric_point_rejection(sweep_param, value):
+    """Bu süpürme noktası fiziksel olarak geçerli mi?
+
+    Geçerliyse ``None``, değilse makine-okur ret nedeni döner. Geçersiz nokta
+    HESAPLANMAZ: sayı üretip "başarılı" demek, kullanıcıya var olmayan bir
+    motorun performansını vermektir.
+    """
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 'not_a_number'
+    if not math.isfinite(numeric):
+        return 'not_finite'
+    if sweep_param in PARAMETRIC_POSITIVE_PARAMS and numeric <= 0:
+        return 'must_be_positive'
+    if sweep_param in PARAMETRIC_NON_NEGATIVE_PARAMS and numeric < 0:
+        return 'must_be_non_negative'
+    if sweep_param == 'gamma' and numeric <= 1.0:
+        return 'gamma_must_exceed_one'
+    return None
+
+
+def _request_trace_id():
+    """Bu istek için kısa korelasyon kimliği — loga GÖVDE yerine bu gider.
+
+    D7 (2026-08-02): ``/calculate_solid`` ve ``/calculate_liquid``
+    ``print("... motor data received:", data)`` ile TAM istek gövdesini
+    stdout'a basıyordu. Başlatıcı stdout'u ``Documents/HRMA/hrma_log.txt``
+    dosyasına yönlendiriyor (``packaging/launcher.py:79``) ve destek paketi
+    o dosyayı içine koyup kullanıcıya "bunu bize gönderin" diyor (:651).
+    Yani kullanıcının motor tasarımının tamamı — itki, karışım oranı,
+    geometri, malzeme, yakıt seçimi — bir destek dosyasıyla dışarı
+    çıkabiliyordu. Gizli tasarım verisi hata ayıklama için gerekli değildir;
+    gerekli olan, kullanıcının bildirdiği olayı log satırıyla
+    EŞLEŞTİREBİLMEKTİR. Bu yüzden loga yalnız kararlı bir olay adı ve bu
+    tahmin edilemez kimlik yazılır; aynı kimlik hata yanıtında da döner ki
+    kullanıcı destek talebinde onu verebilsin.
+    """
+    return uuid.uuid4().hex[:12]
+
 
 _LOOPBACK_HOSTNAMES = frozenset({'localhost', '::1'})
 
@@ -2330,10 +2392,87 @@ def water_hammer_api():
 
 @app.route('/calculate_solid', methods=['POST'])
 def calculate_solid():
+    trace_id = _request_trace_id()
     try:
-        data = request.json
-        print("Solid motor data received:", data)
-        
+        data = request.json or {}
+        # D7: istek GÖVDESİ loglanmaz (gerekçe: _request_trace_id docstring'i).
+        # Loga yalnız kararlı olay adı + korelasyon kimliği + alan SAYISI
+        # gider; hiçbir alan adı ve hiçbir değer yazılmaz.
+        print(f"[{trace_id}] calculate_solid.request_accepted "
+              f"fields={len(data)}")
+
+        # --- Faz 4B, bulgu 57.3 (katı eşleniği): eksik kritik girdi
+        # sessizce dolmaz. ÖLÇÜM (2 Ağustos 2026): `POST /calculate_solid
+        # -d '{}'` HTTP 200 ve `status: CALCULATED` ile eksiksiz bir
+        # Ø100 / 500 mm / APCP / 40 bar tasarımı döndürüyordu. Sıvı ucuyla
+        # AYNI sözleşme uygulanır; iki uç arasında farklı davranmak
+        # kullanıcının hangisine güveneceğini bilememesi demektir.
+        # burn_rate_a/n zorunlu DEĞİL: verilmezse yakıt veritabanından
+        # türetilir, yani kaynağı bellidir.
+        #
+        # YAKIT KİMLİĞİ TEK BİR ANAHTARDA DEĞİL. İlk denemede kritik alan
+        # listesine `propellant_type` konmuştu ve 45 test kırıldı: gerçek
+        # kayıtlı projeler (examples/*.hrma) yakıtı `propellant_name` +
+        # `burn_rate_preset` ile taşıyor, `propellant_type` hiç yok. Kapı,
+        # veri modelinin kendisine uydurulur — tersi değil. Kimlik şu
+        # yollardan HERHANGİ biriyle karşılanır; hiçbiri yoksa reddedilir.
+        # UCUN İKİ GEÇERLİ GİRDİ KİPİ VAR ve kapı ikisini de tanımak
+        # zorundadır:
+        #   (1) Geometri kipi  — çap/boy/çekirdek verilir, performans çıkar.
+        #   (2) Tasarım noktası kipi — itki + yanma süresi verilir, geometri
+        #       BOYUTLANDIRILIR (bkz. tests/test_solid_design_point.py).
+        # İlk denemede yalnız (1) zorunlu tutulmuştu; (2) kipini kullanan
+        # meşru istekler 422 alıyordu. Ortak zorunluluk: oda basıncı + yakıt
+        # kimliği; buna ek olarak iki kipten EN AZ BİRİ eksiksiz olmalı.
+        GEOMETRI_ALANLARI = ('chamber_diameter', 'grain_length', 'core_diameter')
+        TASARIM_NOKTASI_ALANLARI = ('thrust', 'burn_time')
+        YAKIT_KIMLIK_ANAHTARLARI = ('propellant_type', 'propellant_name',
+                                    'burn_rate_preset')
+        OGRETICI_VARSAYILAN = {'chamber_diameter': 100, 'grain_length': 500,
+                               'core_diameter': 30, 'chamber_pressure': 40,
+                               'propellant_type': 'apcp'}
+
+        def _dolu(ad):
+            return data.get(ad) not in (None, '')
+
+        ogretici_mod = bool(data.get('use_tutorial_defaults'))
+        eksik_girdiler = []
+        if not _dolu('chamber_pressure'):
+            eksik_girdiler.append('chamber_pressure')
+        if not (any(_dolu(ad) for ad in YAKIT_KIMLIK_ANAHTARLARI)
+                or (_dolu('burn_rate_a') and _dolu('burn_rate_n'))):
+            eksik_girdiler.append('propellant_type')
+        geometri_tam = all(_dolu(ad) for ad in GEOMETRI_ALANLARI)
+        tasarim_noktasi_tam = all(_dolu(ad) for ad in TASARIM_NOKTASI_ALANLARI)
+        if not (geometri_tam or tasarim_noktasi_tam):
+            eksik_girdiler.extend(
+                ad for ad in GEOMETRI_ALANLARI if not _dolu(ad))
+        if eksik_girdiler and not ogretici_mod:
+            print(f"[{trace_id}] calculate_solid.incomplete_input "
+                  f"missing={len(eksik_girdiler)}")
+            return jsonify({
+                'status': 'incomplete_input',
+                'error': ('Katı motor hesabı için zorunlu girdiler eksik; '
+                          'varsayılanla doldurulup tasarım üretilmedi.'),
+                'missing_fields': eksik_girdiler,
+                'required_fields': {
+                    'always': ['chamber_pressure', 'propellant_type'],
+                    'either_geometry': list(GEOMETRI_ALANLARI),
+                    'or_design_point': list(TASARIM_NOKTASI_ALANLARI),
+                },
+                'hint': ('Geometri kipinde çap/boy/çekirdek, tasarım noktası '
+                         'kipinde itki + yanma süresi verilir. Öğretici '
+                         'senaryo için "use_tutorial_defaults": true '
+                         'gönderin; sonuç "defaults_applied" alanıyla hangi '
+                         'girdilerin varsayılandan geldiğini beyan eder.'),
+            }), 422
+        uygulanan_varsayilanlar = []
+        if ogretici_mod and eksik_girdiler:
+            for ad in eksik_girdiler:
+                if ad in OGRETICI_VARSAYILAN:
+                    data[ad] = OGRETICI_VARSAYILAN[ad]
+                    uygulanan_varsayilanlar.append(ad)
+
         # Solid motor input validation
         chamber_diameter = data.get('chamber_diameter', 100)
         validate_input_range(chamber_diameter, 10, 2000, "Chamber diameter (mm)")
@@ -2395,25 +2534,80 @@ def calculate_solid():
         except Exception:
             traceback.print_exc()  # pano hesabı düşürmesin
 
-        print("Solid motor calculation successful!")
+        # Öğretici modda sonuç, girdisinin nereden geldiğini TAŞIR
+        # (Faz 4B, bulgu 57.3 — sıvı ucuyla aynı sözleşme).
+        if uygulanan_varsayilanlar:
+            sanitized_results['defaults_applied'] = uygulanan_varsayilanlar
+            sanitized_results['input_source'] = 'tutorial_defaults'
+
+        print(f"[{trace_id}] calculate_solid.success")
         return jsonify(sanitized_results)
-        
+
     except Exception as e:
+        # D7: hata dalında da gövde yazılmaz. Yığın izi değişken DEĞERLERİ
+        # taşımaz (yalnız dosya/satır/kaynak metni), bu yüzden kalabilir.
         error_traceback = traceback.format_exc()
-        print(f"Solid motor calculation error: {str(e)}")
-        print(f"Traceback: {error_traceback}")
+        print(f"[{trace_id}] calculate_solid.error "
+              f"type={type(e).__name__}")
+        print(f"[{trace_id}] Traceback: {error_traceback}")
         # v2.6.26: traceback yanittan cikarildi (bkz. /calculate notu).
         return jsonify({
             'error': str(e),
-            'error_type': type(e).__name__
+            'error_type': type(e).__name__,
+            # Kullanıcı destek talebinde bu kimliği verir; log satırı
+            # gövdeyi saklamadan olayla eşleşir.
+            'trace_id': trace_id
         }), 400
 
 @app.route('/calculate_liquid', methods=['POST'])
 def calculate_liquid():
+    trace_id = _request_trace_id()
     try:
-        data = request.json
-        print("Liquid motor data received:", data)
-        
+        data = request.json or {}
+        # D7: istek GÖVDESİ loglanmaz (gerekçe: _request_trace_id docstring'i).
+        print(f"[{trace_id}] calculate_liquid.request_accepted "
+              f"fields={len(data)}")
+
+        # --- Faz 4B, bulgu 57.3: eksik kritik girdi sessizce dolmaz ---
+        # ÖLÇÜM (2 Ağustos 2026): `POST /calculate_liquid -d '{}'` HTTP 200 ve
+        # eksiksiz bir 10 kN / RP1-LOX / 100 bar tasarımı döndürüyordu. Çağıran,
+        # bu sayıların KENDİ girdisinden mi yoksa gövdedeki `data.get(..., X)`
+        # varsayılanlarından mı geldiğini yanıta bakarak ayırt edemiyordu.
+        # Beş kritik alan artık zorunlu; hiçbiri için sessiz varsayılan yok.
+        # Öğretici/tanıtım senaryosu kaybolmasın diye AÇIK bir katılım anahtarı
+        # bırakıldı (`use_tutorial_defaults`); o yolda sonuç, hangi alanların
+        # varsayılandan geldiğini `defaults_applied` ile beyan eder.
+        # Arayüz kırılmaz: liquid.html `collectAllParameters()` beş alanın
+        # hepsini gönderiyor (thrust, chamber_pressure, mixture_ratio,
+        # fuel_type, oxidizer_type).
+        KRITIK_GIRDILER = ('thrust', 'chamber_pressure', 'mixture_ratio',
+                           'fuel_type', 'oxidizer_type')
+        OGRETICI_VARSAYILAN = {'thrust': 10000, 'chamber_pressure': 100,
+                               'mixture_ratio': 2.5, 'fuel_type': 'rp1',
+                               'oxidizer_type': 'lox'}
+        ogretici_mod = bool(data.get('use_tutorial_defaults'))
+        eksik_girdiler = [ad for ad in KRITIK_GIRDILER
+                          if data.get(ad) in (None, '')]
+        if eksik_girdiler and not ogretici_mod:
+            print(f"[{trace_id}] calculate_liquid.incomplete_input "
+                  f"missing={len(eksik_girdiler)}")
+            return jsonify({
+                'status': 'incomplete_input',
+                'error': ('Sıvı motor hesabı için zorunlu girdiler eksik; '
+                          'varsayılanla doldurulup tasarım üretilmedi.'),
+                'missing_fields': eksik_girdiler,
+                'required_fields': list(KRITIK_GIRDILER),
+                'hint': ('Öğretici/tanıtım senaryosu için '
+                         '"use_tutorial_defaults": true gönderin; sonuç '
+                         '"defaults_applied" alanıyla hangi girdilerin '
+                         'varsayılandan geldiğini beyan eder.'),
+            }), 422
+        uygulanan_varsayilanlar = []
+        if ogretici_mod and eksik_girdiler:
+            for ad in eksik_girdiler:
+                data[ad] = OGRETICI_VARSAYILAN[ad]
+                uygulanan_varsayilanlar.append(ad)
+
         # Liquid motor input validation
         thrust = data.get('thrust', 10000)
         validate_positive(thrust, "Thrust")
@@ -2473,17 +2667,27 @@ def calculate_liquid():
         except Exception:
             traceback.print_exc()  # pano hesabı düşürmesin
 
-        print("Liquid motor calculation successful!")
+        # Öğretici modda üretilen sonuç, kendi girdisinin nereden geldiğini
+        # TAŞIR: sayıya bakan biri bunun kullanıcı tasarımı değil tanıtım
+        # senaryosu olduğunu yanıttan görebilmeli (Faz 4B, bulgu 57.3).
+        if uygulanan_varsayilanlar:
+            sanitized_results['defaults_applied'] = uygulanan_varsayilanlar
+            sanitized_results['input_source'] = 'tutorial_defaults'
+
+        print(f"[{trace_id}] calculate_liquid.success")
         return jsonify(sanitized_results)
-        
+
     except Exception as e:
+        # D7: hata dalında da gövde yazılmaz (bkz. /calculate_solid notu).
         error_traceback = traceback.format_exc()
-        print(f"Liquid motor calculation error: {str(e)}")
-        print(f"Traceback: {error_traceback}")
+        print(f"[{trace_id}] calculate_liquid.error "
+              f"type={type(e).__name__}")
+        print(f"[{trace_id}] Traceback: {error_traceback}")
         # v2.6.26: traceback yanittan cikarildi (bkz. /calculate notu).
         return jsonify({
             'error': str(e),
-            'error_type': type(e).__name__
+            'error_type': type(e).__name__,
+            'trace_id': trace_id
         }), 400
 
 @app.route('/api/solid-monte-carlo', methods=['POST'])
@@ -2659,10 +2863,25 @@ def parametric_analysis():
         
         # Generate sweep values
         sweep_values = np.linspace(sweep_range[0], sweep_range[1], sweep_points)
-        
+
         results = []
-        
+        # A9 (2026-08-02): başarısız noktalar artık SESSİZCE ATLANMIYOR.
+        # ÖLÇÜLDÜ: 5 nokta istendiğinde 4 dönüyor, yanıt yine
+        # 'status':'success' ve hiçbir başarısızlık alanı yok — kullanıcı
+        # eğrinin bir parçasının hiç hesaplanmadığını göremiyordu.
+        failed_points = []
+
         for value in sweep_values:
+            rejection = _parametric_point_rejection(sweep_param, value)
+            if rejection is not None:
+                failed_points.append({
+                    'sweep_value': float(value)
+                    if math.isfinite(float(value)) else None,
+                    'sweep_parameter': sweep_param,
+                    'reason': rejection,
+                    'stage': 'input_validation',
+                })
+                continue
             try:
                 # Update sweep parameter
                 current_params = base_params.copy()
@@ -2728,22 +2947,49 @@ def parametric_analysis():
                 results.append(point_result)
                 
             except Exception as e:
-                # Skip failed points
+                # Nokta çözülemedi: girdisi ve nedeni yanıta girer.
                 print(f"Failed calculation for {sweep_param}={value}: {str(e)}")
+                failed_points.append({
+                    'sweep_value': float(value),
+                    'sweep_parameter': sweep_param,
+                    'reason': f'{type(e).__name__}: {e}'[:200],
+                    'stage': 'solver',
+                })
                 continue
-        
+
         # Create parametric analysis plot
         parametric_plot = create_parametric_plot(results, sweep_param)
-        
-        return jsonify({
+
+        response = {
             'sweep_parameter': sweep_param,
             'sweep_range': sweep_range,
             'results': results,
             'plot': parametric_plot,
             'plot_data': parametric_plot,  # Add plot_data field for compatibility
-            'status': 'success'
-        })
-        
+            'points_requested': int(sweep_points),
+            'points_succeeded': len(results),
+            'points_failed': len(failed_points),
+            'failed_points': failed_points,
+        }
+        if results:
+            # Kısmi tarama hâlâ çizilebilir bir eğridir, bu yüzden
+            # 'success' sözleşmesi korunur (advanced.html:3571 yalnız
+            # status==='success' dalında grafik çiziyor). Eksiklik gizlenmez:
+            # points_failed / failed_points / warning alanları yanıtta.
+            response['status'] = 'success'
+            if failed_points:
+                response['warning'] = (
+                    f'{len(failed_points)} of {sweep_points} sweep points '
+                    f'could not be computed; see failed_points.')
+        else:
+            # Hiçbir nokta hesaplanamadı — bu bir başarı değildir.
+            response['status'] = 'error'
+            response['error'] = (
+                f'No sweep point could be computed for {sweep_param}; '
+                f'see failed_points for the reason of each.')
+            return jsonify(response), 422
+        return jsonify(response)
+
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -3357,6 +3603,228 @@ def export_eng_file():
 # + ezdxf + reportlab) ve hrma/export/step_export.py (build123d/OCC).
 # ---------------------------------------------------------------------------
 
+#: "Bu anahtar sözlükte hiç yok" ile "var ama None" ayrımı için nöbetçi.
+_ABSENT = object()
+
+#: Export üreticilerinin (``step_export.py``, ``drawing_generator.py``,
+#: ``cad_visualization.py``) doğrudan okuduğu geometri alanları. Bir alan
+#: istekte VARSA ama sonlu bir sayıya çözülmüyorsa katı cisim üretilmez.
+_EXPORT_GEOMETRY_FIELDS = (
+    'chamber_diameter', 'chamber_length', 'throat_diameter', 'exit_diameter',
+    'grain_length', 'port_diameter_initial', 'nozzle_length',
+    'expansion_ratio', 'wall_thickness',
+)
+
+#: Bunlardan EN AZ BİRİ sonlu ve pozitif olmalı. Hiçbiri yoksa ortada
+#: kullanıcı geometrisi yoktur ve üretici baştan sona kendi varsayılanlarını
+#: kullanır. ÖLÇÜM (Faz 4, A4): tüm geometri alanları NaN olan bir istek
+#: /api/export-step, -dxf, -drawings-pdf ve -complete-zip uçlarından HTTP 200
+#: aldı; üretilen STEP OCC ile geri okununca 308 x 109 mm, 5.179e5 mm3 katı
+#: cisim çıktı. Yani kullanıcı hiç vermediği bir motorun imalat dosyasını
+#: indiriyordu. ``step_export._num`` sonlu olmayan değeri sessizce kendi
+#: yedeğine çeviriyor (step_export.py:38-43) — bu yüzden kapı ROTA
+#: katmanında olmak zorunda.
+_EXPORT_GEOMETRY_PRIMARY = ('chamber_diameter', 'chamber_length',
+                            'throat_diameter')
+
+
+def _geometry_field_value(motor_data, key):
+    """Alanı üst düzeyde, yoksa ``motor_geometry`` alt sözlüğünde arar."""
+    if key in motor_data:
+        return motor_data[key]
+    geo = motor_data.get('motor_geometry')
+    if isinstance(geo, dict) and key in geo:
+        return geo[key]
+    return _ABSENT
+
+
+def _export_geometry_problem(motor_data):
+    """Geometri export'a uygun mu? Uygunsa ``None``, değilse yanıt gövdesi.
+
+    İki ret nedeni var ve ikisi de FAIL-CLOSED:
+
+    * ``invalid_export_geometry`` — alan verilmiş ama sonlu sayı değil
+      (NaN / Inf / sayıya çevrilemeyen metin). Sessizce varsayılana düşmek
+      kullanıcının vermediği bir motoru imalata göndermek demektir.
+    * ``missing_export_geometry`` — birincil alanların hiçbiri sonlu ve
+      pozitif değil. Bu durumda üretilecek katı cisim tamamen üreticinin
+      kendi yedek sayılarından oluşur; "hesaplanmadı" beyanı yerine sahte
+      bir çizim vermek yasak.
+
+    Biçim ``/analyze_safety``'nin 422 kapısıyla aynı (app.py:4426 civarı):
+    ``status`` + makine-okur ``error`` kodu + insan-okur ``message`` + hangi
+    alanın sorunlu olduğunu söyleyen liste.
+
+    Açıkça ``None``/boş dize gelen alan "verilmedi" sayılır (``input_guard``
+    modülünün belgelenmiş ilkesi): tek başına ret nedeni değildir, ama
+    birincil alanların hepsi böyleyse ikinci kapıya takılır.
+    """
+    if not isinstance(motor_data, dict):
+        return {
+            'status': 'error',
+            'error': 'invalid_export_geometry',
+            'message': "'motor_data' must be an object with geometry fields.",
+            'invalid_fields': [],
+        }
+
+    invalid = []
+    finite_primary = []
+    for key in _EXPORT_GEOMETRY_FIELDS:
+        raw = _geometry_field_value(motor_data, key)
+        if raw is _ABSENT or raw is None:
+            continue
+        if isinstance(raw, str) and raw.strip() == '':
+            continue
+        if isinstance(raw, bool):
+            invalid.append({'field': key, 'reason': 'not_a_number',
+                            'value': repr(raw)})
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            invalid.append({'field': key, 'reason': 'not_a_number',
+                            'value': str(raw)[:64]})
+            continue
+        if not math.isfinite(value):
+            invalid.append({'field': key, 'reason': 'not_finite',
+                            'value': str(raw)[:64]})
+            continue
+        if key in _EXPORT_GEOMETRY_PRIMARY and value > 0:
+            finite_primary.append(key)
+
+    if invalid:
+        return {
+            'status': 'error',
+            'error': 'invalid_export_geometry',
+            'message': ('Manufacturing files cannot be generated from '
+                        'non-finite geometry. Fix the listed fields and '
+                        'run the analysis again.'),
+            'invalid_fields': invalid,
+        }
+    if not finite_primary:
+        return {
+            'status': 'error',
+            'error': 'missing_export_geometry',
+            'message': ('No usable motor geometry was supplied; the export '
+                        'would consist entirely of generator defaults. '
+                        'Run an analysis first.'),
+            'required_any_of': list(_EXPORT_GEOMETRY_PRIMARY),
+        }
+    return None
+
+
+def _reject_unexportable_geometry(motor_data):
+    """Rota kapısı: sorun varsa ``(yanıt, 422)``, yoksa ``None``."""
+    problem = _export_geometry_problem(motor_data)
+    if problem is None:
+        return None
+    return jsonify(problem), 422
+
+
+def _step_length_units(paths):
+    """Üretilen STEP dosyalarının başlığındaki uzunluk birimini OKUR.
+
+    A1 düzeltmesi: README'ye sabit 'Units: millimetres.' yazılıyordu. Birim
+    iddiası, üretilen dosyadan okunmadıkça iddia edilmez. AP214 başlığında
+    birim ``SI_UNIT(.MILLI.,.METRE.)`` biçiminde geçer; inç kullanan
+    dosyalarda ``CONVERSION_BASED_UNIT('INCH', ...)`` görünür.
+
+    Dönüş: okunabilen birim adları kümesi. Boş küme = okunamadı → çağıran
+    metinde birim İDDİA ETMEZ.
+    """
+    units = set()
+    for path in paths:
+        try:
+            with open(path, 'r', encoding='utf-8', errors='ignore') as handle:
+                head = handle.read(400_000)
+        except OSError:
+            continue
+        # Boşluk/satır sonu STEP'te anlamsızdır; kalıp eşleşmesi için silinir.
+        compact = ''.join(head.upper().split())
+        if 'SI_UNIT(.MILLI.,.METRE.)' in compact:
+            units.add('millimetres')
+        elif 'SI_UNIT($,.METRE.)' in compact:
+            units.add('metres')
+        elif "CONVERSION_BASED_UNIT('INCH'" in compact:
+            units.add('inches')
+    return units
+
+
+def _step_readme_text(paths):
+    """STEP paketinin README'si — birim satırı ölçülen değerden gelir."""
+    lines = [
+        'HRMA STEP export (AP214)',
+        'Solver-generated parametric solids: chamber, nozzle (true contour),',
+        'fuel grain, injector plate (drilled orifices) + assembly.',
+    ]
+    units = _step_length_units(paths)
+    if len(units) == 1:
+        lines.append('Length unit read from the STEP header of the files in '
+                     'this archive: ' + units.pop() + '.')
+    elif units:
+        lines.append('WARNING: the files in this archive do not share one '
+                     'length unit; headers report: '
+                     + ', '.join(sorted(units)) + '.')
+    else:
+        lines.append('Length unit could not be read from the generated '
+                     'files; check the UNIT block in the STEP header before '
+                     'importing.')
+    return '\n'.join(lines) + '\n'
+
+
+def _stl_readme_text(paths):
+    """STL paketinin README'si — birim İDDİA ETMEZ, ölçülen değeri yazar.
+
+    A1 ölçümü: metin 'Units: millimetres.' ve 'Watertight closed-profile
+    revolve solids' diyordu; aynı ZIP'te STEP sınırlayıcı kutusu
+    [1069.62 163.50 163.50] mm iken STL kutusu [0.1635 0.1635 1.0696]
+    çıkıyordu (yani metre, 1000x hata) ve ``motor_assembly.stl``
+    ``is_watertight=False`` idi.
+
+    STL biçiminde birim beyanı YOKTUR — dosyadan okunamaz, dolayısıyla
+    iddia da edilemez. Bunun yerine ölçülen sınırlayıcı kutu ve gerçek
+    su-sızdırmazlık durumu yazılır; kullanıcı büyüklüğe bakıp hangi birimde
+    olduğunu görebilir. Metreden mm'ye çevirmek üretici tarafın
+    (``hrma/export/cad_visualization.py``) işidir; orası mm'ye geçtiğinde bu
+    metin kendiliğinden doğru sayıyı gösterir, burada değişiklik gerekmez.
+    """
+    lines = [
+        'HRMA STL export',
+        'Revolve solids generated from solver geometry.',
+        'motor_assembly.stl = combined single-file model.',
+        'The STL format carries no unit declaration, so none is claimed '
+        'here.',
+        'Measured properties of the files in this archive:',
+    ]
+    measured = False
+    try:
+        import trimesh
+    except Exception:
+        trimesh = None
+    if trimesh is not None:
+        for path in paths:
+            try:
+                mesh = trimesh.load_mesh(path)
+                extents = getattr(mesh, 'extents', None)
+                watertight = bool(getattr(mesh, 'is_watertight', False))
+            except Exception:
+                continue
+            if extents is None:
+                continue
+            measured = True
+            lines.append(
+                '  {name}: bounding box {x:.4g} x {y:.4g} x {z:.4g} '
+                '(file units), watertight={wt}'.format(
+                    name=os.path.basename(path),
+                    x=float(extents[0]), y=float(extents[1]),
+                    z=float(extents[2]),
+                    wt='yes' if watertight else 'no'))
+    if not measured:
+        lines.append('  not measured (mesh library unavailable on this '
+                     'machine); no geometric claim is made.')
+    return '\n'.join(lines) + '\n'
+
+
 def _zip_files(file_map, readme_text=None, text_map=None):
     """{arşiv_adı: dosya_yolu} sözlüğünü bellekte ZIP'ler; BytesIO döner.
 
@@ -3399,6 +3867,10 @@ def export_dxf():
     try:
         from hrma.export.drawing_generator import generate_dxf
         motor_data = (request.json or {}).get('motor_data', {})
+        # A4 kapısı: sonlu olmayan geometriden imalat çizimi üretilmez.
+        rejected = _reject_unexportable_geometry(motor_data)
+        if rejected:
+            return rejected
         path = generate_dxf(motor_data)
         name = safe_name(motor_data.get('motor_name'))
         return send_file(path, as_attachment=True,
@@ -3415,6 +3887,10 @@ def export_drawings_pdf():
     try:
         from hrma.export.drawing_generator import generate_drawing_pdf
         motor_data = (request.json or {}).get('motor_data', {})
+        # A4 kapısı: sonlu olmayan geometriden çizim paketi üretilmez.
+        rejected = _reject_unexportable_geometry(motor_data)
+        if rejected:
+            return rejected
         path = generate_drawing_pdf(motor_data)
         name = safe_name(motor_data.get('motor_name'))
         return send_file(path, as_attachment=True,
@@ -3431,14 +3907,15 @@ def export_step_files():
     try:
         from hrma.export.step_export import generate_step_assembly
         motor_data = (request.json or {}).get('motor_data', {})
+        # A4 kapısı: sonlu olmayan geometriden katı cisim üretilmez.
+        rejected = _reject_unexportable_geometry(motor_data)
+        if rejected:
+            return rejected
         files = generate_step_assembly(motor_data)
         name = safe_name(motor_data.get('motor_name'))
         arc = {f'{name}_{k}.step': p for k, p in files.items()}
-        buf = _zip_files(arc, readme_text=(
-            'HRMA STEP export (AP214)\n'
-            'Solver-generated parametric solids: chamber, nozzle (true contour),\n'
-            'fuel grain, injector plate (drilled orifices) + assembly.\n'
-            'Units: millimetres.\n'))
+        # A1: birim satırı artık üretilen dosyanın başlığından OKUNUYOR.
+        buf = _zip_files(arc, readme_text=_step_readme_text(files.values()))
         return send_file(buf, as_attachment=True,
                          download_name=f'{name}_STEP_package.zip',
                          mimetype='application/zip')
@@ -3465,11 +3942,10 @@ def export_stl_zip():
                             'error': 'STL üretilemedi'}), 500
         name = safe_name(motor_data.get('motor_name'))
         arc = {os.path.basename(p): p for p in stl_files}
-        buf = _zip_files(arc, readme_text=(
-            'HRMA STL export\n'
-            'Watertight closed-profile revolve solids from solver geometry.\n'
-            'motor_assembly.stl = combined single-file model.\n'
-            'Units: millimetres. Suitable for 3D printing / CAM import.\n'))
+        # A1: birim ve su-sızdırmazlık iddiası kaldırıldı; metin artık
+        # üretilen mesh'in ÖLÇÜLEN sınırlayıcı kutusunu ve gerçek
+        # ``is_watertight`` değerini yazıyor.
+        buf = _zip_files(arc, readme_text=_stl_readme_text(stl_files))
         return send_file(buf, as_attachment=True,
                          download_name=f'{name}_STL_package.zip',
                          mimetype='application/zip')
@@ -3487,6 +3963,11 @@ def export_complete_zip():
     """
     try:
         motor_data = (request.json or {}).get('motor_data', {})
+        # A4 kapısı: paketin İÇİNDEKİ her üretici aynı geometriyi okuyor;
+        # kapı en dışta bir kez kurulur.
+        rejected = _reject_unexportable_geometry(motor_data)
+        if rejected:
+            return rejected
         name = safe_name(motor_data.get('motor_name'))
         arc = {}
         manifest = []
@@ -3570,7 +4051,17 @@ def export_cad_files():
         if 'stl' in export_formats:
             stl_files = cad_designer.export_stl_files(cad_data['assembly_meshes'])
             results['stl_files'] = stl_files
-            results['stl_download_links'] = [f"/download/stl/{file.split('/')[-1]}" for file in stl_files]
+            # A10 (2026-08-02): indirme bağlantısı artık ÜRETİCİNİN DÖNDÜRDÜĞÜ
+            # yola bağlanıyor. Eskiden link yalnız dosya adını taşıyordu ve
+            # /download/stl ucu adı ``cwd/cad_exports`` altında arıyordu;
+            # ``export_stl_files`` ise v2.6.26'dan beri her çağrıda kendi
+            # ``mkdtemp`` dizinine yazıyor. ÖLÇÜLDÜ: sunulan dosyanın sha256'sı
+            # o istekte üretilenden farklıydı, mtime 31 Temmuz — kullanıcı iki
+            # gün önceki başka bir motorun katısını indiriyordu.
+            results['stl_download_links'] = [
+                '/download/stl/' + _register_stl_download(path)
+                for path in stl_files
+            ]
         
         # Technical drawings
         if 'technical_drawings' in export_formats:
@@ -3848,9 +4339,42 @@ def generate_complete_design_package():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+#: A10 — üretilen STL dosyalarının jeton -> GERÇEK YOL kaydı.
+#:
+#: ``export_stl_files`` her çağrıda ``tempfile.mkdtemp`` ile kendi dizinine
+#: yazar (v2.6.26 eşzamanlılık düzeltmesi). ``/download/stl`` ucu ise sabit
+#: bir dizini (``cwd/cad_exports``) tarıyordu; ikisi buluşmuyordu ve uç, adı
+#: tutan ESKİ bir dosyayı sunuyordu. Kayıt defteri bu varsayımı kaldırır:
+#: bağlantı, o istekte üretilen dosyanın kendisini gösterir.
+#:
+#: Sınırlı boyutta (LRU): eski girdiler düşer, dosyalar silinmez (geçici
+#: dizin temizliği işletim sisteminde kalır).
+_STL_DOWNLOAD_REGISTRY = collections.OrderedDict()
+_STL_REGISTRY_LOCK = threading.Lock()
+_STL_REGISTRY_MAX = 256
+
+
+def _register_stl_download(path):
+    """Üretilen bir STL yolunu kaydeder, indirme jetonunu döndürür.
+
+    Jeton ``<16 hex>_<güvenli taban ad>`` biçimindedir; ``/download/stl``
+    ucunun beyaz listesine (``[A-Za-z0-9._-]{1,128}\\.stl``) uyar. Jeton
+    tahmin edilemez olduğu için başka bir sekmenin dosyasına rastlanmaz.
+    """
+    token = uuid.uuid4().hex[:16] + '_' + safe_name(os.path.basename(path),
+                                                    default='motor.stl')
+    if not token.lower().endswith('.stl'):
+        token += '.stl'
+    with _STL_REGISTRY_LOCK:
+        _STL_DOWNLOAD_REGISTRY[token] = os.path.abspath(path)
+        while len(_STL_DOWNLOAD_REGISTRY) > _STL_REGISTRY_MAX:
+            _STL_DOWNLOAD_REGISTRY.popitem(last=False)
+    return token
+
+
 @app.route('/download/stl/<filename>')
 def download_stl_file(filename):
-    """cad_exports/ içindeki bir STL dosyasını indirir.
+    """Üretilen bir STL dosyasını indirir (kayıt defteri, yoksa cad_exports/).
 
     GÜVENLİK — v2.6.2 düzeltmesi (rastgele dosya okuma):
     Burası eskiden ``send_file(f"./cad_exports/{filename}")`` yapıyordu; adı
@@ -3866,6 +4390,12 @@ def download_stl_file(filename):
     ``.stl`` ile bitmeli, (2) ``basename`` ile her türlü dizin bileşeni atılır,
     (3) çözümlenmiş mutlak yolun gerçekten export dizini altında kaldığı
     ``os.path.commonpath`` ile doğrulanır (sembolik bağlantı dahil).
+
+    A10 (2026-08-02): ad önce KAYIT DEFTERİNDE aranır. ``/api/export-cad``
+    ürettiği her dosyayı oradaki gerçek yoluyla kaydeder, yani bağlantı sabit
+    bir dizin tahminine değil üreticinin döndürdüğü yola bağlıdır. Defterde
+    olmayan adlar için eski ``cad_exports/`` davranışı korunur (kullanıcı
+    ``output_dir`` vererek oraya toplu dışa aktarım yapabiliyor).
     """
     import os
     import re
@@ -3877,6 +4407,17 @@ def download_stl_file(filename):
     # ".." bileşeni beyaz listeden geçebilir (nokta izinli) — açıkça reddet.
     if '..' in filename:
         return jsonify({'error': 'Invalid filename'}), 400
+
+    # (0) Bu istekte üretilmiş bir dosya mı? Yol defterden gelir, kullanıcı
+    # girdisinden birleştirilmez — dolayısıyla yol kaçışı imkânsızdır.
+    with _STL_REGISTRY_LOCK:
+        registered = _STL_DOWNLOAD_REGISTRY.get(filename)
+    if registered:
+        if os.path.isfile(registered):
+            return send_file(registered, as_attachment=True)
+        # Geçici dizin temizlenmiş: ESKİ bir dosyayı ikame etmek yerine
+        # açıkça "yok" denir (yanlış katıyı sunmak bu bulgunun kendisiydi).
+        return jsonify({'error': 'File no longer available'}), 404
 
     export_dir = os.path.realpath(os.path.join(os.getcwd(), 'cad_exports'))
     # (2) Kalan her dizin bileşenini at.
@@ -4498,19 +5039,218 @@ def analyze_safety():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+#: Yapısal hükmün ASGARİ girdisi. Hiçbirinin varsayılanı yoktur: bunlar
+#: olmadan ortada değerlendirilecek bir basınçlı kap yoktur.
+REQUIRED_STRUCTURAL_FIELDS = (
+    'chamber_pressure', 'chamber_diameter', 'chamber_length',
+    'throat_diameter',
+)
+
+#: Kazanılmamış hükmün yerine yazılan değer. 'SAFE'/'ACCEPTABLE' gibi bir
+#: sıraya girmez; ``structural_panel.js::statusKind`` bilinmeyen değeri
+#: nötr 'info' rozetiyle çizer, yani ekranda yeşil onay görünmez.
+STRUCTURAL_VERDICT_NOT_EVALUATED = 'NOT_EVALUATED'
+
+
+def _withhold_unearned_structural_verdict(structural_results,
+                                          thermal_input_supplied):
+    """Kazanılmamış yapısal hükmü yanıttan çeker, yerine gerekçe koyar.
+
+    B3 ÖLÇÜMÜ (HEAD ``a7ff1e7``, 2026-08-02):
+    ``POST /analyze_structural_safety -d '{}'`` AYNI yanıtta hem
+    ``safety_factor_is_tautological: true`` hem ``status: 'ACCEPTABLE'``,
+    ``risk_level: 'LOW'`` ve ``peak_wall_temperature_K: 300.0``
+    döndürüyordu. Bayrak yazılıyor, kimse okumuyordu. İki ayrı kazanılmamış
+    çıktı var:
+
+    * **Hüküm.** Boyutlandırma (``design_mode == 'size'``) modunda emniyet
+      katsayısı bağımsız bir doğrulama değil, hedefin geri okunmasıdır:
+      cidar zaten ``SF_hedef`` sağlayacak şekilde hesaplanır, sonra
+      imalat payıyla çarpılır — çelikte 4.0 x 1.2 = 4.8. Bu sayıdan
+      "ACCEPTABLE / LOW risk" çıkarmak, kendi cevabını kendine sormaktır.
+      Modül bunu ``safety_factor_is_tautological`` ile zaten söylüyordu.
+    * **Sıcaklık.** Gaz sıcaklığı ve cidar sıcaklıkları verilmediğinde
+      ``structural_analysis._estimate_wall_delta_T`` termal etkiyi KAPATIR
+      ve iç/dış cidarı ortam sıcaklığına eşitler (o dosyada:
+      ``T_chamber is None -> return T_ambient, T_ambient``). Yanıttaki
+      300.0 K bu yüzden "hesaplanmış tepe cidar sıcaklığı" değil, "termal
+      analiz koşmadı" demektir. Sahte gösterge yasağı gereği hesaplanmayan
+      değer yayımlanmaz.
+
+    Anahtarlar SİLİNMEZ — panel ve sözleşme testleri onları okuyor
+    (``tests/test_analysis_dock_contract.py::test_safety_analysis_keys``);
+    hüküm alanları ``NOT_EVALUATED``'e, hesaplanmamış sıcaklıklar
+    ``None``'a çekilir ve nedeni makine-okur kodla yazılır.
+
+    Döner: yanıtın üst seviyesine konacak beyan sözlüğü.
+    """
+    chamber = structural_results.get('chamber_analysis') or {}
+    safety = structural_results.get('safety_analysis')
+    design_mode = chamber.get('design_mode')
+    tautological = bool(chamber.get('safety_factor_is_tautological'))
+
+    declaration = {
+        'design_mode': design_mode,
+        'is_verification': bool(design_mode == 'verify'),
+        'thermal_input': ('user_supplied' if thermal_input_supplied
+                          else 'not_supplied'),
+        'verdict': 'issued',
+        # Hükmün NEDEN verilmediği (yalnız verdict == 'withheld' iken dolu).
+        'verdict_withheld_reasons': [],
+        # Hüküm verilmiş olsa bile KOŞMAYAN değerlendirmeler.
+        'not_evaluated': [],
+    }
+
+    if not isinstance(safety, dict):
+        return declaration
+
+    if tautological:
+        declaration['verdict'] = 'withheld'
+        declaration['verdict_withheld_reasons'].append(
+            'safety_factor_is_tautological')
+        # ONAY geri çekilir, UYARI geri çekilmez. B3'ün ifadesi "status EN
+        # FAZLA NOT_EVALUATED olsun": NOT_EVALUATED bir TAVANDIR. 'SAFE' ve
+        # 'ACCEPTABLE' kazanılmamış onaylardır, tavana çekilir. 'MARGINAL' /
+        # 'UNSAFE' ise tehlike bildirimidir — bunu "değerlendirilmedi"ye
+        # çevirmek, kazanılmamış bir onaydan daha kötüdür: gerçek bir uyarıyı
+        # susturur. (Bu uçta uyarı iki yerden gelebilir: kullanıcının kendi
+        # düşük SF hedefinin geri okunması ve termal marj — ikincisi cidar
+        # kalınlığından bağımsızdır, yani totolojik değildir.)
+        if str(safety.get('status', '')).upper() in ('SAFE', 'ACCEPTABLE'):
+            safety['status'] = STRUCTURAL_VERDICT_NOT_EVALUATED
+            safety['risk_level'] = STRUCTURAL_VERDICT_NOT_EVALUATED
+        safety['verdict_basis'] = (
+            'No acceptance is issued: the wall was sized by HRMA to meet the '
+            'target safety factor, so the reported safety factor is that '
+            'target read back (target x manufacturing allowance), not an '
+            'independent verification. Supply the real wall_thickness (m) '
+            'to obtain a verification. A remaining MARGINAL/UNSAFE status is '
+            'a warning and is never suppressed.')
+        # Sayılar KALIR (gerçekten hesaplandılar) ama ne oldukları yazılır.
+        safety['minimum_safety_factor_is_tautological'] = True
+    else:
+        safety['verdict_basis'] = (
+            'Verified against the user-supplied wall thickness.')
+        safety['minimum_safety_factor_is_tautological'] = False
+
+    if not thermal_input_supplied:
+        declaration['not_evaluated'].append('wall_temperature')
+        # Hesaplanmamış sıcaklık YAYIMLANMAZ (300.0 K = ortam varsayılanı).
+        for key in ('peak_wall_temperature_K', 'derating_wall_temperature_K',
+                    'thermal_margin_ratio'):
+            if key in safety:
+                safety[key] = None
+        safety['thermal_assessment'] = 'not_evaluated'
+        safety['thermal_assessment_basis'] = (
+            'No gas temperature (chamber_temperature) and no wall '
+            'temperatures were supplied, so the thermal path did not run. '
+            'The values previously reported here were the ambient default '
+            'that marks the thermal model as OFF, not computed wall '
+            'temperatures. Safety factors above are pressure-only.')
+        thermal = structural_results.get('thermal_analysis')
+        if isinstance(thermal, dict):
+            for key in ('wall_temperature_inner_K', 'wall_temperature_outer_K',
+                        'wall_delta_T_K'):
+                if key in thermal:
+                    thermal[key] = None
+            thermal['status'] = 'NOT_MODELLED'
+            thermal['basis'] = (
+                'Thermal path not run: no gas or wall temperature supplied.')
+    else:
+        safety['thermal_assessment'] = 'evaluated'
+
+    return declaration
+
+
 @app.route('/analyze_structural_safety', methods=['POST'])
 def analyze_structural_safety():
-    """Detailed structural safety analysis endpoint"""
+    """Detailed structural safety analysis endpoint.
+
+    v2.6.26 (Faz 4B) — ÜÇ KAPI EKLENDİ:
+
+    **1. Fail-closed girdi kapısı (B3).** Bu uç eskiden BOŞ istekten
+    (``{}``) tam bir yapısal hüküm üretiyordu: 20 bar / 100 mm / 500 mm /
+    20 mm varsayılanlarıyla kurulmuş, kullanıcının hiç vermediği bir
+    motorun gerilmeleri, emniyet katsayıları ve "ACCEPTABLE" kararı.
+    Aynı depodaki ``/analyze_safety`` kapısı (bu dosyada, biraz yukarıda)
+    buraya uyarlandı: eksik girdide 422 + ``missing_fields``.
+
+    **2. Doğrulama modu bağlandı (B4).** ``StructuralAnalyzer.
+    analyze_structure`` iki argüman kabul ediyor — ``actual_wall_thickness``
+    ve ``design_safety_factor`` — ama bu uç İKİSİNİ DE geçirmiyordu.
+    ÖLÇÜLDÜ: ``wall_thickness=0.001`` (1 mm) ve ``safety_factor=2.0``
+    gönderildiğinde modül kendi boyutlandırdığı 5.887 mm'yi kullanıp
+    SF 4.8 (= 4.0 hedef x 1.2 imalat payı) ile 'SAFE' diyordu; kullanıcının
+    1 mm'lik cidarı hiç sınanmadı. Doğru desen aynı depoda vardı:
+    ``hrma/engines/hybrid_rocket_engine.py:1380-1386`` ikisini de geçiriyor.
+
+    **3. Kazanılmamış hüküm geri çekildi (B3).** Bkz.
+    ``_withhold_unearned_structural_verdict``.
+    """
     try:
-        data = request.json
-        
+        data = request.json or {}
+
+        # --- KAPI 1: eksik girdide hüküm üretilmez -----------------------
+        missing = [key for key in REQUIRED_STRUCTURAL_FIELDS
+                   if data.get(key) in (None, '')]
+        if missing:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_structural_input',
+                'message': ('A structural assessment cannot be produced from '
+                            'defaults. Provide the missing values.'),
+                'missing_fields': missing,
+            }), 422
+
         # Extract parameters
-        chamber_pressure = float(data.get('chamber_pressure', 20))  # bar
-        chamber_diameter = float(data.get('chamber_diameter', 0.1))  # m
-        chamber_length = float(data.get('chamber_length', 0.5))  # m
-        throat_diameter = float(data.get('throat_diameter', 0.02))  # m
+        chamber_pressure = float(data.get('chamber_pressure'))  # bar
+        chamber_diameter = float(data.get('chamber_diameter'))  # m
+        chamber_length = float(data.get('chamber_length'))  # m
+        throat_diameter = float(data.get('throat_diameter'))  # m
         burn_time = float(data.get('burn_time', 10))  # s
         material = data.get('material', 'steel_4130')
+
+        # Zorunlu olmayan alanlarda varsayılan kullanıldıysa SAKLANMAZ —
+        # kullanıcı hangi sayının kendi verisi olmadığını görmeli
+        # (``/analyze_safety`` ile aynı desen).
+        defaults_applied = [key for key in ('burn_time', 'material')
+                            if data.get(key) in (None, '')]
+
+        # --- KAPI 2: doğrulama modu girdileri ----------------------------
+        # ``wall_thickness`` METRE (bu uçtaki bütün uzunluklar gibi;
+        # ``/analyze_thermal_safety`` de aynı birimi kullanıyor).
+        actual_wall_thickness = _json_float(data, 'wall_thickness')
+        design_safety_factor = _json_float(data, 'safety_factor')
+
+        if actual_wall_thickness is not None and actual_wall_thickness <= 0:
+            # 0 / negatif = "cidarı sen boyutlandır" (thrust alanındaki
+            # 0 = "atla" sözleşmesiyle aynı); doğrulama modu açılmaz.
+            actual_wall_thickness = None
+        if actual_wall_thickness is not None:
+            radius = chamber_diameter / 2.0
+            if not math.isfinite(actual_wall_thickness):
+                return jsonify({
+                    'status': 'error', 'error': 'invalid_wall_thickness',
+                    'message': "'wall_thickness' must be a finite number (m).",
+                }), 422
+            if actual_wall_thickness >= radius:
+                # Neredeyse her zaman birim hatasıdır (mm yerine m). Sessizce
+                # kabul edip dolu silindir gibi hesaplamak yerine söylenir.
+                return jsonify({
+                    'status': 'error', 'error': 'invalid_wall_thickness',
+                    'message': ("'wall_thickness' is given in METRES and must "
+                                "be smaller than the chamber radius "
+                                f"({radius} m); received "
+                                f"{actual_wall_thickness}."),
+                }), 422
+        if design_safety_factor is not None and (
+                not math.isfinite(design_safety_factor)
+                or design_safety_factor <= 0):
+            return jsonify({
+                'status': 'error', 'error': 'invalid_safety_factor',
+                'message': ("'safety_factor' must be a finite number greater "
+                            "than zero."),
+            }), 422
 
         motor_data = {
             'chamber_pressure': chamber_pressure,
@@ -4541,21 +5281,59 @@ def analyze_structural_safety():
             if data.get(wall_key):
                 motor_data[wall_key] = float(data[wall_key])
 
+        # Termal yol GERÇEKTEN koştu mu? (Bu üç anahtardan biri yoksa
+        # structural_analysis._estimate_wall_delta_T iç/dış cidarı ortam
+        # sıcaklığına eşitler, yani termal model KAPALIDIR.)
+        thermal_input_supplied = any(
+            key in motor_data for key in
+            ('chamber_temperature', 'wall_temperature_hot',
+             'wall_temperature_cold'))
+
         # Initialize structural analyzer
         structural_analyzer = StructuralAnalyzer()
-        
+
         # Perform structural analysis
+        # B4: kullanıcının GERÇEK cidarı ve tasarım emniyet katsayısı artık
+        # geçiyor. Verilmezse ikisi de None kalır ve modül eski boyutlandırma
+        # davranışını sürdürür — ama sonuç 'verify' sayılmaz (aşağıdaki kapı).
         structural_results = structural_analyzer.analyze_structure(
             motor_data=motor_data,
             material=material,
-            design_pressure_factor=1.5
+            design_pressure_factor=1.5,
+            design_safety_factor=design_safety_factor,
+            actual_wall_thickness=actual_wall_thickness,
         )
-        
+
+        # --- KAPI 3: kazanılmamış hüküm yayımlanmaz ----------------------
+        design_basis = _withhold_unearned_structural_verdict(
+            structural_results, thermal_input_supplied)
+        design_basis['wall_thickness_source'] = (
+            'user_supplied' if actual_wall_thickness is not None
+            else 'sized_by_hrma')
+        design_basis['design_safety_factor_source'] = (
+            'user_supplied' if design_safety_factor is not None
+            else 'materials_database_default')
+        if actual_wall_thickness is None:
+            design_basis['message'] = (
+                'No wall thickness was supplied, so HRMA sized the wall '
+                'itself. This result is a DESIGN PROPOSAL, not a '
+                'verification of a wall you built.')
+        else:
+            design_basis['message'] = (
+                'The supplied wall thickness was evaluated against the '
+                'design pressure; this result is a verification.')
+
         return jsonify({
             'status': 'success',
+            'defaults_applied': defaults_applied,
+            'design_basis': design_basis,
             'structural_analysis': sanitize_json_values(structural_results)
         })
-        
+
+    except ValueError as e:
+        # _json_float / float() sayıya çeviremedi — bu istemci hatasıdır.
+        return jsonify({'status': 'error', 'error': 'invalid_input',
+                        'message': str(e)}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
@@ -4848,7 +5626,7 @@ def perform_kinetic_analysis():
 
 @app.route('/api/professional-analysis', methods=['POST'])
 def perform_complete_professional_analysis():
-    """Perform complete professional-grade analysis using all modules"""
+    """Perform complete analysis using all modules"""
     # Dalga 0 bekçisi (2026-07-14): bu uç CFD + kinetik çözücüleri birlikte
     # çağırıyor — ikisi de yukarıdaki nedenlerle emekliye ayrıldı (kilitleme
     # + ıraksama riski). v2.4.6: halefler yayında — 501 yanıtı yönlendirme
@@ -5182,13 +5960,35 @@ def advanced_performance_analysis():
                 'plot_data': plot_json,
                 'analysis_info': {
                     'title': '3D Performance Surface Analysis',
-                    'reference': 'NASA SP-125 Liquid-Propellant Rocket Engine Performance',
+                    # C2: künye "Liquid-Propellant Rocket Engine Performance"
+                    # diyordu; SP-125'in gerçek adı bu değil. Doğrulanmış ad
+                    # docs/STANDART_ATIFLARI.md'de (NTRS/ADS 1971NASSP.125.....H).
+                    'reference': ('NASA SP-125 — Huzel & Huang, Design of '
+                                  'Liquid Propellant Rocket Engines (2. baskı, 1971)'),
                     'description': 'Shows optimum O/F ratio and chamber pressure regions with combustion instability bands'
                 }
             })
 
         elif analysis_type == 'nozzle_mach':
-            # Nozzle Mach-Area Ratio Contour (NASA-STD-5012)
+            # Nozzle Mach-Area Ratio Contour
+            # (NACA Report 1135, "Equations, Tables, and Charts for
+            #  Compressible Flow", Ames Research Staff, 1953; Anderson,
+            #  "Modern Compressible Flow", 3. baskı — bkz.
+            #  hrma/analysis/nozzle_flow_1d.py:12-26 kaynak listesi)
+            #
+            # DENETİM DÜZELTMESİ (2026-08-02, C2): bu satır ve aşağıdaki
+            # 'reference' alanı konturun kaynağı olarak NASA-STD-5012
+            # gösteriyordu. İki ayrı hata vardı: (1) BAŞLIK yanlıştı —
+            # belgeye "Pressure Vessels & Pressurized Systems" deniyordu,
+            # gerçek adı "Strength and Life Assessment Requirements for
+            # Liquid-Fueled Space Propulsion System Engines" (Rev. B, 2016);
+            # (2) KONU yanlıştı — o belge motor mukavemeti ve ömür
+            # değerlendirmesi hakkındadır, içinde izantropik alan-Mach
+            # bağıntısı yoktur, dolayısıyla bu figürün kaynağı olamaz.
+            # Doğrulanmış başlıklar: docs/STANDART_ATIFLARI.md; aynı
+            # düzeltme formulas.html §14.2, i18n_formulas.js (EN+TR) ve
+            # performance_panel.js:7'de yapıldı — kaynak adı üç yerde
+            # birebir aynıdır.
             # v2.5.2 (Codex bulgusu): yalnız throat_area / nozzle_length /
             # expansion_ratio aktarılıyordu; gaz hâli (gamma, MW, Tc), oda
             # basıncı, hazne çapı ve ortam basıncı DÜŞÜYORDU. Çözücü kendi
@@ -5226,7 +6026,10 @@ def advanced_performance_analysis():
                 'plot_data': plot_json,
                 'analysis_info': {
                     'title': 'Nozzle Mach Distribution Analysis',
-                    'reference': 'NASA-STD-5012 Pressure Vessels & Pressurized Systems',
+                    'reference': ('NACA Report 1135, "Equations, Tables, and '
+                                  'Charts for Compressible Flow" (Ames '
+                                  'Research Staff, 1953); Anderson, "Modern '
+                                  'Compressible Flow", 3rd ed.'),
                     'description': 'Visualizes Mach distribution and shock/threshold regions for over/under-expansion detection'
                 }
             })
@@ -5265,7 +6068,11 @@ def advanced_performance_analysis():
                 'plot_data': plot_json,
                 'analysis_info': {
                     'title': 'Wall Heat Flux Waterfall Analysis',
-                    'reference': 'NASA SP-8124 Thermal Design Criteria',
+                    # C2: künye "Thermal Design Criteria" diyordu; SP-8124'ün
+                    # gerçek adı bu değil (NTRS 78N21211). Doğrulanmış ad
+                    # docs/STANDART_ATIFLARI.md'de.
+                    'reference': ('NASA SP-8124 — Liquid Rocket Engine '
+                                  'Self-Cooled Combustion Chambers (1977)'),
                     'description': 'Gradient colored waterfall showing local heat flux along cooling channels with thermal runaway detection'
                 }
             })
@@ -5461,6 +6268,111 @@ def _safe_sheet_title(title, idx):
     return cleaned[:31]
 
 
+# ---------------------------------------------------------------------------
+# D8 — XLSX İŞ BÜTÇESİ (2026-08-02)
+#
+# ÖLÇÜLDÜ: tek bir 23.3 MiB istek 26.3 saniye sürdü ve süreç 2.4 GB RSS'e
+# çıktı. 60 000 sütunluk sayfa hiçbir yerde yakalanmıyordu, 200 000
+# karakterlik hücreyi openpyxl SESSİZCE 32 767'ye kırpıyordu (bu makinede
+# doğrulandı: 200000 karakter yazıldı, geri okunan uzunluk 32767).
+#
+# Eski kodda iki SESSİZ kırpma daha vardı: ``sheets[:20]`` ve
+# ``rows[:100000]``. Kullanıcı eksik bir çalışma kitabı indiriyor ve bunu
+# hiçbir yerden öğrenemiyordu. Artık her sınır AÇIK hata döndürür.
+#
+# Sınırların dayanağı — bu makinede openpyxl ile ölçüldü:
+#   500 000 sayısal hücre (250 sütun x 2000 satır) -> 1.2 s, 229 MB tepe RSS
+#   500 000 sayısal hücre (10 sütun x 50 000 satır) -> 1.4 s, 263 MB tepe RSS
+#   8 000 000 karakter metin                        -> 0.13 s, 59 MB
+# Gerçek HRMA çıktılarının en genişi 10 sütun (transient paneli ve katı
+# motor itki eğrisi sayfası), en uzunu birkaç bin satır — yani meşru
+# kullanım bu tavanların çok altında.
+# ---------------------------------------------------------------------------
+XLSX_MAX_SHEETS = 20
+XLSX_MAX_COLUMNS = 256
+XLSX_MAX_ROWS_PER_SHEET = 100_000
+XLSX_MAX_TOTAL_CELLS = 500_000
+#: Excel'in kendi hücre sınırı. Aşan değeri KIRPMAK yerine reddediyoruz.
+XLSX_MAX_CELL_CHARS = 32_767
+
+
+def _xlsx_budget_error(sheets):
+    """İş bütçesi aşıldı mı? Aşıldıysa ``(gövde, http_kodu)`` döner.
+
+    Sessiz kırpma yasak: her ret, hangi sayfanın hangi sınırı hangi değerle
+    aştığını söyler. 413 "istek fazla büyük", 422 "istek biçimi geçersiz".
+    """
+    if len(sheets) > XLSX_MAX_SHEETS:
+        return ({'status': 'error', 'error': 'xlsx_budget_exceeded',
+                 'limit': 'sheets', 'maximum': XLSX_MAX_SHEETS,
+                 'requested': len(sheets),
+                 'message': (f'At most {XLSX_MAX_SHEETS} sheets per workbook; '
+                             f'{len(sheets)} were supplied.')}, 413)
+
+    total_cells = 0
+    for idx, sheet in enumerate(sheets):
+        if not isinstance(sheet, dict):
+            return ({'status': 'error', 'error': 'invalid_sheet',
+                     'sheet_index': idx,
+                     'message': 'Each sheet must be an object with '
+                                '{name, headers, rows}.'}, 422)
+        headers = sheet.get('headers') or []
+        rows = sheet.get('rows') or []
+        if len(rows) > XLSX_MAX_ROWS_PER_SHEET:
+            return ({'status': 'error', 'error': 'xlsx_budget_exceeded',
+                     'limit': 'rows_per_sheet', 'sheet_index': idx,
+                     'maximum': XLSX_MAX_ROWS_PER_SHEET,
+                     'requested': len(rows),
+                     'message': (f'Sheet {idx} has {len(rows)} rows; the '
+                                 f'limit is {XLSX_MAX_ROWS_PER_SHEET}.')}, 413)
+
+        widest = len(headers)
+        for row in rows:
+            width = len(row) if isinstance(row, (list, tuple)) else 1
+            if width > widest:
+                widest = width
+        if widest > XLSX_MAX_COLUMNS:
+            return ({'status': 'error', 'error': 'xlsx_budget_exceeded',
+                     'limit': 'columns', 'sheet_index': idx,
+                     'maximum': XLSX_MAX_COLUMNS, 'requested': widest,
+                     'message': (f'Sheet {idx} is {widest} columns wide; the '
+                                 f'limit is {XLSX_MAX_COLUMNS}.')}, 413)
+
+        total_cells += widest * (len(rows) + (1 if headers else 0))
+        if total_cells > XLSX_MAX_TOTAL_CELLS:
+            return ({'status': 'error', 'error': 'xlsx_budget_exceeded',
+                     'limit': 'total_cells',
+                     'maximum': XLSX_MAX_TOTAL_CELLS,
+                     'requested': total_cells,
+                     'message': (f'The workbook would contain at least '
+                                 f'{total_cells} cells; the limit is '
+                                 f'{XLSX_MAX_TOTAL_CELLS}.')}, 413)
+
+        def _too_long(values, kind):
+            for value in values:
+                if isinstance(value, str) and len(value) > XLSX_MAX_CELL_CHARS:
+                    return ({'status': 'error', 'error': 'xlsx_cell_too_long',
+                             'sheet_index': idx, 'cell_kind': kind,
+                             'maximum': XLSX_MAX_CELL_CHARS,
+                             'requested': len(value),
+                             'message': (f'A {kind} cell holds {len(value)} '
+                                         f'characters; Excel stores at most '
+                                         f'{XLSX_MAX_CELL_CHARS} and the '
+                                         f'value would be truncated without '
+                                         f'notice.')}, 422)
+            return None
+
+        problem = _too_long(headers, 'header')
+        if problem:
+            return problem
+        for row in rows:
+            problem = _too_long(
+                row if isinstance(row, (list, tuple)) else [row], 'data')
+            if problem:
+                return problem
+    return None
+
+
 @app.route('/api/export-xlsx', methods=['POST'])
 def export_xlsx():
     """Genel amaçlı Excel (xlsx) dışa aktarma.
@@ -5480,11 +6392,20 @@ def export_xlsx():
         sheets = data.get('sheets') or []
         if not sheets:
             return jsonify({'status': 'error', 'error': 'No sheets provided'}), 400
+        if not isinstance(sheets, list):
+            return jsonify({'status': 'error', 'error': 'invalid_sheets',
+                            'message': "'sheets' must be a list."}), 422
+
+        # D8: iş bütçesi. Tek satırlık kırpma yerine açık ret.
+        budget = _xlsx_budget_error(sheets)
+        if budget:
+            body, code = budget
+            return jsonify(body), code
 
         wb = Workbook()
         wb.remove(wb.active)
         header_font = Font(bold=True)
-        for idx, sheet in enumerate(sheets[:20]):
+        for idx, sheet in enumerate(sheets):
             raw_title = str(sheet.get('name') or f'Sheet{idx + 1}')[:31]
             title = _safe_sheet_title(raw_title, idx)
             ws = wb.create_sheet(title=title)
@@ -5494,7 +6415,7 @@ def export_xlsx():
                 ws.append([_spreadsheet_safe(h) for h in headers])
                 for cell in ws[1]:
                     cell.font = header_font
-            for row in rows[:100000]:
+            for row in rows:
                 ws.append([
                     (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool)
                      else ('' if v is None else _spreadsheet_safe(v)))
@@ -5507,8 +6428,14 @@ def export_xlsx():
         buf = BytesIO()
         wb.save(buf)
         buf.seek(0)
-        filename = str(data.get('filename') or 'hrma_export.xlsx')
-        if not filename.endswith('.xlsx'):
+        # D9 (2026-08-02): dosya adı ``safe_name``'den GEÇMİYORDU.
+        # ÖLÇÜLDÜ: filename='../../../../etc/passwd.xlsx' isteği HTTP 200
+        # döndü ve ad Content-Disposition başlığına aynen girdi. Diğer
+        # export uçları (STEP/DXF/ZIP) zaten safe_name kullanıyordu; bu uç
+        # atlanmıştı.
+        filename = safe_name(data.get('filename') or 'hrma_export.xlsx',
+                             default='hrma_export.xlsx')
+        if not filename.lower().endswith('.xlsx'):
             filename += '.xlsx'
         return send_file(
             buf,
@@ -5542,20 +6469,26 @@ def export_pdf_report(report_type):
         analysis_results = _build_pdf_analysis_sections(motor_data, analysis_results)
 
         pdf_generator = PDFReportGenerator()
-        
+
+        # D5 (2026-08-02): indirme adı ``safe_name``'den GEÇMİYORDU — motor
+        # adı ham olarak Content-Disposition'a giriyordu. Depodaki doğru
+        # desen aynı dosyada zaten var (app.py:3403 vd., STEP/DXF/ZIP uçları).
+        safe_motor_name = safe_name(motor_data.get('motor_name'),
+                                    default='unnamed')
+
         # Generate different types of reports
         if report_type == 'summary':
             pdf_bytes = pdf_generator.generate_quick_summary_report(motor_data, analysis_results)
-            filename = f"motor_summary_{motor_data.get('motor_name', 'unnamed')}.pdf"
+            filename = f"motor_summary_{safe_motor_name}.pdf"
         elif report_type == 'technical':
             pdf_bytes = pdf_generator.generate_technical_report(motor_data, analysis_results, charts)
-            filename = f"motor_technical_{motor_data.get('motor_name', 'unnamed')}.pdf"
+            filename = f"motor_technical_{safe_motor_name}.pdf"
         else:
             pdf_bytes = pdf_generator.generate_motor_analysis_report(
                 motor_data, analysis_results, charts, 'complete'
             )
-            filename = f"motor_complete_{motor_data.get('motor_name', 'unnamed')}.pdf"
-        
+            filename = f"motor_complete_{safe_motor_name}.pdf"
+
         # Return PDF file
         pdf_buffer = io.BytesIO(pdf_bytes)
         pdf_buffer.seek(0)
@@ -5606,8 +6539,13 @@ def export_chart_as_pdf():
         pdf_buffer = io.BytesIO(pdf_bytes)
         pdf_buffer.seek(0)
         
-        filename = f"chart_{chart_title.lower().replace(' ', '_')}_{motor_name}.pdf"
-        
+        # D5: iki bileşen de ``safe_name``'den geçer — grafik başlığı ve motor
+        # adı kullanıcı girdisidir ve doğrudan Content-Disposition'a giriyordu.
+        filename = 'chart_{}_{}.pdf'.format(
+            safe_name(str(chart_title).lower().replace(' ', '_'),
+                      default='chart'),
+            safe_name(motor_name, default='unnamed'))
+
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',

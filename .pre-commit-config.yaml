@@ -1,0 +1,86 @@
+# HRMA pre-commit hooks — the FAST checks only.
+#
+# Deliberate scope: everything here must finish in seconds on the staged files.
+# The real evidence is the test suite (~15-20 min, see CONTRIBUTING.md §2) and
+# the release gate (packaging/release_gate.sh). A pre-commit hook that takes
+# minutes gets disabled by the first person in a hurry, and a disabled gate is
+# worse than no gate because it still looks like protection.
+#
+# Install:
+#   python3 -m pip install pre-commit
+#   pre-commit install
+#   pre-commit run --all-files      # first pass over the existing tree
+
+repos:
+  # ---------------------------------------------------------------------
+  # File hygiene. These catch the mistakes that are invisible in a diff.
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+
+      # changelog.json and the experiment database are read by code and by the
+      # release gate; a broken one fails at runtime, not at commit time.
+      - id: check-json
+
+      # A malformed workflow file silently stops running: GitHub shows no run
+      # at all, and "no CI run for this commit" is exactly the state the
+      # release gate refuses to publish from.
+      - id: check-yaml
+
+      - id: check-toml
+
+      # Build outputs are measured in gigabytes and are gitignored; this is the
+      # backstop for `git add -f`. Ceiling is above the largest tracked file
+      # (hrma/data/dem/etopo2022_5min_int16.bin.gz, 8.2 MB).
+      - id: check-added-large-files
+        args: [--maxkb=10240]
+
+      # Detects an accidentally committed private key.
+      - id: detect-private-key
+
+      - id: check-ast          # the file at least parses as Python
+
+  # ---------------------------------------------------------------------
+  # flake8, restricted to the errors that are always real defects.
+  #
+  # The style rules (E501 line length, F401 unused import, ...) are NOT
+  # enabled: the tree has 283 long lines and 241 unused-import/variable hits,
+  # so turning them on would mean either a giant unrelated reformat commit or
+  # a hook everyone learns to skip. What is enabled is the set that means the
+  # code is broken:
+  #   E9   syntax errors / IndentationError
+  #   F63  comparison and membership-test bugs (e.g. `is` on a literal)
+  #   F7   syntax-adjacent statement errors (break outside loop, ...)
+  #   F82  undefined name  <-- a guaranteed NameError at runtime
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        # Tırnak ZORUNLU: YAML akış dizisi virgülden bölüyor, tırnaksız
+        # yazıldığında --select=E9 / F63 / F7 / F82 beş ayrı argüman oluyor.
+        args: ["--select=E9,F63,F7,F82", "--show-source"]
+
+  # ---------------------------------------------------------------------
+  # Project-specific: the claim/standard-citation lint.
+  #
+  # Faz 4 audit measured it: of the three standard titles checked by hand, all
+  # three were wrong, and the PDF/UI printed verdicts ("NASA-grade accurate")
+  # that no code path earns. tools/iddia_lint.py scans hrma/ against the
+  # registry in docs/STANDART_ATIFLARI.md and exits 1 on an unregistered hit.
+  #
+  # It always scans the whole hrma/ tree (pass_filenames: false) because the
+  # registry is global; it is fast because it is a line scan.
+  # ---------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: iddia-lint
+        name: iddia dili ve standart atifi denetimi
+        entry: python3 tools/iddia_lint.py
+        language: system
+        pass_filenames: false
+        files: ^(hrma/|tools/iddia_lint|docs/STANDART_ATIFLARI\.md)

@@ -320,8 +320,17 @@ class TestMassProperties:
         m = 10.0
         r = aero.d / 2.0
         assert legacy._inertia(m) == explicit._inertia(m)
+        # A6 (v2.6.26): bu bekçi PARALEL EKSEN TERİMİ OLMAYAN formülü
+        # rel=1e-12 ile kilitliyordu, yani docstring'in (F162) vaat ettiği
+        # doğru formülü yazan kişi testi kırmak zorunda kalıyordu. Terim
+        # eklendi: varsayılan x_cg = 0.55·L, kayma d = x_cg − L/2 = 0.05·L.
+        # ÖLÇÜM (m=25, r=0.05, L=2): eski 8.348958, yeni 8.598958 kg·m² —
+        # eski değer %2.91 EKSİKTİ. Aynı sınıftaki bileşen testi (:300)
+        # zaten doğru sözleşmeyi (x_cg etrafında atalet) kullanıyordu.
+        d_cg = legacy.x_cg_full - 0.5 * aero.L
         assert legacy._inertia(m)[1] == pytest.approx(
-            m * (3.0 * r * r + aero.L ** 2) / 12.0, rel=1e-12)
+            m * (3.0 * r * r + aero.L ** 2) / 12.0 + m * d_cg ** 2,
+            rel=1e-12)
 
         a = legacy.solve(t_max=200.0)
         b = explicit.solve(t_max=200.0)
@@ -340,8 +349,11 @@ class TestMassProperties:
                         {'mass': -2.0, 'x': 0.5}])
         assert solver.components is None
         m, r = 10.0, aero.d / 2.0
+        # A6: tekdüze dal artık Huygens-Steiner terimini içerir (bkz. yukarı).
+        d_cg = solver.x_cg_full - 0.5 * aero.L
         assert solver._inertia(m)[1] == pytest.approx(
-            m * (3.0 * r * r + aero.L ** 2) / 12.0, rel=1e-12)
+            m * (3.0 * r * r + aero.L ** 2) / 12.0 + m * d_cg ** 2,
+            rel=1e-12)
 
 
 # ---------------------------------------------------------------------------

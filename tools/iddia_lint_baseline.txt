@@ -1,0 +1,81 @@
+# tools/iddia_lint.py kayıt defteri (baseline)
+#
+# Biçim:  <depo-göreli yol> | <kural> | <satır metninin karması> | <gerekçe>
+#
+# Anahtar satır NUMARASI değil satır METNİNİN karmasıdır: dosyanın başına
+# satır eklenince kayıt bayatlamaz, ama metin değişirse isabet yeniden
+# görünür ve testi kırar.
+#
+# Bu dosya susturma listesi DEĞİL, envanterdir. İki tür kayıt var:
+#   * gerekçesi olan meşru kullanım (çözüm kademesinin adı, olumsuzlanmış
+#     ifade, kaldırılan kusuru anlatan yorum),
+#   * "AÇIK BORÇ" etiketli gerçek ihlal — bu satırların sahibi başka bir
+#     dosyadır ve Faz 4B'de o dosyanın sahibi tarafından kapatılacaktır.
+# Açık borçları listelemek için: python3 tools/iddia_lint.py --debt
+#
+# Oluşturma: 2 Ağustos 2026, HEAD a7ff1e7 üzerinde ölçüldü (42 isabet).
+
+# ---------------------------------------------------------------------------
+# AÇIK BORÇ — kazanılmamış iddia, sahibi dosyada düzeltilmeli
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# AÇIK BORÇ — yanlış standart başlığı (doğrusu docs/STANDART_ATIFLARI.md'de)
+# app.py bu turda başka bir ajanın sorumluluğundaydı; C2/C3 düzeltmesinin
+# arayüze giden kolu buradan besleniyor (performance_panel.js:114 bu metni
+# olduğu gibi kullanıcıya basıyor).
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# MEŞRU — kaldırılan kusuru birebir anlatan yorum satırları
+# (satır içi IDDIA-LINT-MUAF işareti eklemek yerine burada kayda geçti;
+#  bu dosyalar bu turda başka ajanlara aitti, dokunulmadı)
+# ---------------------------------------------------------------------------
+hrma/app.py | manufacturing_ready | 95ca3301f829 | MEŞRU: kaldırılan "Ready for manufacturing" kusurunu anlatan düzeltme yorumu.
+hrma/analysis/safety_limits.py | safe_for_operation | dd6d66257a0b | MEŞRU: kaldırılan fail-open "MOTOR SAFE FOR OPERATION" metnini anlatan yorum.
+
+# ---------------------------------------------------------------------------
+# MEŞRU — "guarantee" matematiksel/olumsuz anlamda
+# ---------------------------------------------------------------------------
+hrma/analysis/heat_transfer_analysis.py | guaranteed | 37a77871fe51 | MEŞRU: kodun sağladığı alt sınırı anlatıyor (sıfır olmayan muhafazakâr ısıl yük), kullanıcıya verilen garanti değil.
+hrma/analysis/regen_cooling.py | guaranteed | 3b5fa0dd4c5c | MEŞRU: ızgara özelliği — boğaz istasyonunun M=1'e tam oturduğu sayısal güvence.
+hrma/analysis/uncertainty.py | guaranteed | 655bb838d32f | MEŞRU: Latin Hypercube'ün ispatlı özelliği; cümle zaten "but not zero ..." ile sınırını söylüyor.
+hrma/validation/experiment_db.py | guaranteed | b9d2ec4c76c7 | MEŞRU: veri şemasının sağladığı alan güvenceleri (SCHEMA.md), sonuç doğruluğu iddiası değil.
+
+# ---------------------------------------------------------------------------
+# MEŞRU — "High-Fidelity" tanımlı çözüm kademesinin ADI
+# Kademe merdiveni: Fast Screening / Engineering / High-Fidelity
+# (docs/ANALIZ_PLATFORM_PLANI.md). Kademe, Cantera sonlu-hızlı kinetiği ve
+# Monte-Carlo belirsizlik koşusunu adlandırır; ürün sıfatı değildir.
+# ---------------------------------------------------------------------------
+hrma/app.py | high_fidelity | 344a0ba6817b | MEŞRU: kademe merdiveninin adları sayılıyor.
+hrma/app.py | high_fidelity | 544db1b24191 | MEŞRU: /api/flow-analysis'in kabul ettiği kademe adı.
+hrma/app.py | high_fidelity | 9cf03cbce7e4 | MEŞRU: hata mesajında kademe adı (finite-rate kinetics).
+hrma/app.py | high_fidelity | 89b94c674fec | MEŞRU: kademe yolunun mevcut olup olmadığını anlatan docstring.
+hrma/app.py | high_fidelity | 84cf76d445ba | MEŞRU: panelin fidelity_used alanından kademeyi tespit ettiğini anlatan yorum.
+hrma/app.py | high_fidelity | cf003692dbd5 | MEŞRU: kademe kimliği ('high_fidelity') ile karşılaştırma.
+hrma/analysis/kinetic_efficiency.py | high_fidelity | 5a15b861d655 | MEŞRU: kademeye ait kayıp bandının tanımı.
+hrma/analysis/kinetic_efficiency.py | high_fidelity | f45191013b5c | MEŞRU: kademenin girdi şeması docstring'i.
+hrma/analysis/kinetic_efficiency.py | high_fidelity | aa9bcf64c6bd | MEŞRU: kademe kullanılamadığında basılan durum mesajı.
+hrma/analysis/kinetic_efficiency.py | high_fidelity | 568c15b8c4c6 | MEŞRU: kademe kullanılamadığında basılan durum mesajı.
+hrma/analysis/kinetic_efficiency.py | high_fidelity | 77a91ae03822 | MEŞRU: "Level 3" kademesinin adı (Cantera sonlu-hızlı).
+hrma/analysis/uncertainty.py | high_fidelity | d8e39a1a995a | MEŞRU: kademenin ölçülmüş koşu süresi notu.
+hrma/static/js/i18n_common.js | high_fidelity | 45f8245d717c | MEŞRU: kademe seçeneğinin arayüz etiketi.
+hrma/static/js/i18n_common.js | high_fidelity | d39010d0b475 | MEŞRU: kademe koşusunun kuyruğa alındığını anlatan panel metni.
+hrma/static/js/i18n_common.js | high_fidelity | 734229b8214e | MEŞRU: kademe işinin ilerleme etiketi.
+hrma/static/js/i18n_common.js | high_fidelity | 0634201a7e20 | MEŞRU: kademe işinin zaman aşımı mesajı.
+hrma/static/js/i18n_common.js | high_fidelity | 223a6b8e6aeb | MEŞRU: kademe işi gönderilirken basılan durum.
+hrma/static/js/i18n_common.js | high_fidelity | 930a0297d018 | MEŞRU: kademe seçeneğinin süre etiketi.
+hrma/static/js/panels/flow_panel.js | high_fidelity | 8e974e3f006f | MEŞRU: kademenin yalnız Cantera varsa listelendiğini anlatan yorum.
+hrma/static/js/panels/flow_panel.js | high_fidelity | 4feef3820c3e | MEŞRU: kademe yetenek sondası yorumu.
+hrma/static/js/panels/flow_panel.js | high_fidelity | 5fb5a21df907 | MEŞRU: kademe seçeneğinin İngilizce yedek etiketi.
+hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 8d92f0f58c55 | MEŞRU: kademe kimliği + etiket çifti.
+hrma/static/js/panels/uncertainty_panel.js | high_fidelity | f4b0e3924392 | MEŞRU: kademe koşusunun kuyruğa alındığını anlatan yedek metin.
+hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 7016c69864ba | MEŞRU: kademe işi gönderilirken basılan yedek durum.
+hrma/static/js/panels/uncertainty_panel.js | high_fidelity | d9270e6a30ac | MEŞRU: kademe işinin zaman aşımı yedek mesajı.
+hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 2ebe10e67790 | MEŞRU: kademe işinin ilerleme yedek etiketi.
+
+# --- 2 Ağustos 2026, Faz 4B kapanışı ---
+# 10 kayıt AYIKLANDI: karşılık geldikleri satır ağaçta artık yok
+# (düzeltildi ya da yeniden yazıldı). Kayıtlar burada tutulmaz, çünkü
+# defter YAŞAYAN isabetlerin envanteridir; tarihsel iz git geçmişindedir.

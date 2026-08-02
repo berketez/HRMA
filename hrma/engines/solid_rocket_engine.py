@@ -131,6 +131,34 @@ SOLID_COST_PARAMS = {
 SEA_LEVEL_PRESSURE_BAR = 1.01325
 
 # ---------------------------------------------------------------------------
+# TASARIM ÖZETİ DURUM SÖZLÜĞÜ (Faz 4B, bulgu B1/B2/A3)
+#
+# Aynı sözlük üç motor dosyasında da BİREBİR tanımlıdır (hybrid / liquid /
+# solid); tam gerekçe ve etiket anlamları
+# hrma/engines/hybrid_rocket_engine.py içindeki aynı blokta yazılıdır. Çapraz
+# import bilinçli olarak yapılmaz; değerlerin aynı kaldığı makinece denetlenir:
+#   tests/test_faz4_motor_kapilari.py::test_durum_sozlugu_uc_motorda_ayni
+#
+# Katı motorun kendi durumu zaten 'CALCULATED' idi (eniyileme yok, girdiden
+# deterministik çözüm) — sözlüğün geri kalanı bu davranışla uyumlu tanımlandı.
+# ---------------------------------------------------------------------------
+DESIGN_STATUS_OPTIMIZED = 'OPTIMIZED'
+DESIGN_STATUS_CALCULATED = 'CALCULATED'
+DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS = 'ESTIMATED_WITH_DEFAULTS'
+DESIGN_STATUS_TARGET_NOT_MET = 'TARGET_NOT_MET'
+DESIGN_STATUS_UNVALIDATED_ESTIMATE = 'UNVALIDATED_ESTIMATE'
+DESIGN_STATUS_NOT_CONVERGED = 'NOT_CONVERGED'
+
+DESIGN_STATUS_SEVERITY = {
+    DESIGN_STATUS_OPTIMIZED: 0,
+    DESIGN_STATUS_CALCULATED: 1,
+    DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS: 2,
+    DESIGN_STATUS_TARGET_NOT_MET: 3,
+    DESIGN_STATUS_UNVALIDATED_ESTIMATE: 4,
+    DESIGN_STATUS_NOT_CONVERGED: 5,
+}
+
+# ---------------------------------------------------------------------------
 # Kasa (basınçlı kap) tasarım varsayılanları — TEK tanım noktası.
 # _calculate_dry_mass, _calculate_structural_analysis ve
 # _calculate_safety_analysis AYNI değerleri buradan okur; kullanıcı formdan
@@ -6490,11 +6518,125 @@ class SolidRocketEngine:
         """Calculate overall motor performance with comprehensive analysis"""
         # Get thrust curve
         curve = self.calculate_thrust_curve()
-        
+
         if len(curve['time']) == 0:
             return {'error': 'Invalid grain geometry',
                     'error_i18n': _w('warn.solid.invalid_grain_geometry',
                                      'critical')}
+
+        # --- YAKINSAMA KAPISI (Faz 4B, bulgu B2) ---------------------------
+        # Basınç sabit-nokta çözücüsü v2.6.25'ten beri gerçek durumunu
+        # raporluyor (convergence_achieved, başarısız adım sayısı, en büyük
+        # artık, tolerans, termination_reason) — ama KİMSE OKUMUYORDU:
+        # design_summary.status koşulsuz 'CALCULATED' yazıyor, performans ve
+        # imalata giden cad_design tam olarak üretiliyordu.
+        #
+        # ÖLÇÜM (2 Ağustos 2026, HEAD a7ff1e7; APCP, D_kamara=100 mm, L=500 mm,
+        # D_çekirdek=30 mm, Pc=40 bar, a=0.005):
+        #   n=0.35 -> yakınsadı, 0/219 adım
+        #   n=0.90 -> 122/204 adım başarısız, artık 1.03e-3, term=web_exhausted
+        #   n=0.95 ->  96/129 adım başarısız, artık 1.21e-2,
+        #              term=pressure_collapse
+        #   n=1.00 ->   1/35  adım başarısız,               term=burn_rate_zero
+        # Üçünde de status='CALCULATED', Isp dolu, cad_design 9 anahtar doluydu.
+        #
+        # KAPI NEDEN İKİ KADEMELİ: ilk denemede "bir adım bile başarısızsa sonuç
+        # yok" kuralı yazıldı ve deponun KENDİ kataloğundaki KNDX'i (n=0.688)
+        # meşru bir çalışma noktasında kesti. Ölçüldü (KNDX, Pc=90 bar):
+        # 7/164 adım başarısız, artık %1.19, term=web_exhausted — ama tolerans
+        # 1e-6'dan 1e-2'ye gevşetildiğinde toplam impuls yalnız %0.067
+        # değişiyor. Yani orada çözüm pratikte oturmuş, tepe basıncı
+        # civarındaki birkaç adım 100 iterasyon tavanına takılmış. Bunu
+        # "sonuç yok" saymak yanlış olurdu.
+        #
+        # Ayrım SAYISAL EŞİKLE değil FİZİKLE yapılır:
+        #   1. KADEME (sonuç üretilmez): yakınsama yok VE yanma anormal bitmiş
+        #      (safety_limit / throat_eroded_out / not_started), YA DA
+        #      yakınsama yok VE n >= 1. Birincisinde yanma süresi, toplam
+        #      impuls ve tüm CAD ölçüleri var olmayan bir motoru tarif eder;
+        #      ikincisinde sabit-nokta daralma savı tümden geçersiz olduğu için
+        #      hiçbir adımın basıncına güvenilemez.
+        #      (Hangi sonun "anormal" sayıldığı aşağıda gerekçesiyle yazılı —
+        #      ilk denemede pressure_collapse anormal sanılmış ve deponun kendi
+        #      yıldız grainli KNDX örneği kesilmişti.)
+        #   2. KADEME (sonuç üretilir ama etiketi düşürülür): yanma normal
+        #      bitmiş, n < 1, yalnız bazı adımlar tavana takılmış. Burada
+        #      zaten bir kullanıcı uyarısı ateşleniyordu; YALAN SÖYLEYEN tek
+        #      alan status idi. Artık status uyarıyla aynı şeyi söyler
+        #      (aşağıdaki design_summary bloğu).
+        #
+        # Kapı, depoda ZATEN var olan hata sözleşmesini kullanır (yukarıdaki
+        # 'Invalid grain geometry' dalıyla aynı biçim). Bu sözleşmeyi çağıranlar
+        # hâlihazırda tanıyor: run_monte_carlo (:3803, :3847), uq_adapters
+        # (:351) ve solid.html (:2929) `error` anahtarını kontrol ediyor.
+        yakinsadi = bool(curve.get('convergence_achieved', True))
+        # Yanmanın NORMAL bittiği sonlar. 'pressure_collapse' ve
+        # 'burn_rate_zero' buraya DAHİLDİR: çözücünün kendi tükeniş kapanışı
+        # (:6472-6474) tam olarak bu iki sonu burnout sayıp eğriye sıfır itkili
+        # son noktayı ekliyor. Yıldız/finocyl grainde yanan alan tükenişte
+        # sonlu bir değerden sıfıra düştüğü için basıncın çökmesi yanmanın
+        # DOĞAL sonudur, bir sapma değil — ölçüldü: katalog KNDX'i yıldız
+        # grainle Pc=40 bar'da term='pressure_collapse' ile bitiyor ve sonuç
+        # sağlıklı. Gerçekten anormal olan sonlar aşağıdakilerdir: motor
+        # emniyet sınırına dayandı, boğaz tamamen aşındı ya da hiç başlamadı.
+        normal_bitti = curve.get('termination_reason') not in (
+            'safety_limit', 'throat_eroded_out', 'not_started')
+        self._solver_converged = yakinsadi
+        if not yakinsadi and (not normal_bitti or float(self.n) >= 1.0):
+            basarisiz = int(curve.get('pressure_solver_failed_steps', 0) or 0)
+            toplam = int(curve.get('pressure_solver_steps', 0) or 0)
+            artik = float(curve.get('pressure_solver_max_residual', 0.0) or 0.0)
+            tol = float(curve.get('pressure_solver_tolerance', 0.0) or 0.0)
+            uyari = _w('warn.solid.pressure_solver_not_converged', 'critical',
+                       failed_steps=basarisiz, total_steps=toplam,
+                       max_residual=artik, tolerance=tol)
+            # Sağlık uyarılarının TAMAMI ulaşmalı (n >= 1 uyarısı, erozyon,
+            # port/boğaz oranı ...): kapı, kullanıcının teşhis bilgisini
+            # kısmamalı — asıl şimdi lazım.
+            tum_uyarilar = (list(self.design_warnings) + [uyari]
+                            + self._design_health_warnings(curve))
+            gerekce = ('the burn did not run to completion '
+                       f"(termination: {curve.get('termination_reason')})"
+                       if not normal_bitti else
+                       f'the burn-rate exponent n = {float(self.n):.3f} is not '
+                       f'below 1, so the damped fixed-point iteration is not a '
+                       f'contraction and its iterates cannot be trusted')
+            return {
+                'error': (
+                    f'Chamber pressure solver did not converge and {gerekce}. '
+                    f'{basarisiz} of {toplam} time steps exceeded the '
+                    f'tolerance (largest relative residual {artik:.3g} versus '
+                    f'tolerance {tol:.1e}). No performance, CAD or '
+                    f'acceptability result is produced from this solution.'),
+                'error_i18n': uyari,
+                'status': DESIGN_STATUS_NOT_CONVERGED,
+                'solver_diagnostics': {
+                    'convergence_achieved': False,
+                    'pressure_solver_steps': toplam,
+                    'pressure_solver_failed_steps': basarisiz,
+                    'pressure_solver_max_residual': artik,
+                    'pressure_solver_tolerance': tol,
+                    'termination_reason': curve.get('termination_reason'),
+                    'burn_rate_exponent': float(self.n),
+                    'time_step_s': curve.get('time_step_s'),
+                },
+                # Son (KABUL EDİLMEYEN) iterat yalnız teşhis içindir: adı
+                # performans alanlarıyla karışmayacak biçimde seçilmiştir ve
+                # hiçbir tüketici bunu sonuç sayamaz.
+                'non_converged_last_iterate_diagnostic_only': {
+                    'note': ('Values from the final, rejected iterate of a '
+                             'solve that did not converge. They are NOT a '
+                             'motor result and must not be reported as '
+                             'performance.'),
+                    'sample_count': int(len(curve['time'])),
+                    'last_sample_time_s': float(curve['time'][-1]),
+                    'max_chamber_pressure_bar': (
+                        float(np.max(curve['pressure']))
+                        if len(curve['pressure']) else None),
+                },
+                'design_warnings': tum_uyarilar,
+                'warnings': tum_uyarilar,
+            }
 
         # Calculate performance metrics
         burn_time = curve['time'][-1]
@@ -6891,9 +7033,30 @@ class SolidRocketEngine:
 
         motor_total_length = self.L_grain + 0.1 + nozzle_total_length  # grain + closures + nozzle
 
+        # 2. KADEME (Faz 4B, bulgu B2): yanma normal bitti ve n < 1, ama bazı
+        # adımlar 100 iterasyon tavanına takıldı. Bu koşu için ZATEN kritik bir
+        # kullanıcı uyarısı ateşleniyor (warn.solid.pressure_solver_not_converged);
+        # yalan söyleyen tek alan status'tü — koşulsuz 'CALCULATED' yazıyordu.
+        # Artık status uyarıyla AYNI şeyi söyler ve performans/CAD bloklarının
+        # hangi basınç geçmişinden geldiği açıkça beyan edilir.
+        cozucu_yakinsadi = bool(getattr(self, '_solver_converged', True))
         design_summary = {
             'title': f'Solid Motor - {self.grain_type.upper()} / {self.propellant_name}',
-            'status': 'CALCULATED',
+            'status': (DESIGN_STATUS_CALCULATED if cozucu_yakinsadi
+                       else DESIGN_STATUS_NOT_CONVERGED),
+            'numerical_validity': {
+                'convergence_achieved': cozucu_yakinsadi,
+                'note': (
+                    'Every time step met the pressure solver tolerance.'
+                    if cozucu_yakinsadi else
+                    'Some time steps reached the 100-iteration cap without '
+                    'meeting the pressure solver tolerance. The burn still ran '
+                    'to completion with a burn-rate exponent below 1, so the '
+                    'result is published, but every performance and CAD number '
+                    'below is derived from that pressure history and must be '
+                    'treated as unconverged. See solver_diagnostics for the '
+                    'failed step count and the largest residual.'),
+            },
             'key_dimensions': {
                 'motor_outer_diameter_mm': motor_od * 1000,
                 # Kasa boyu TEK kaynaktan (_case_inner_length): grain yığını +

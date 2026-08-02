@@ -197,8 +197,36 @@ class TestPdfMakesNoUnearnedClaims:
             return handle.read()
 
     def test_unconditional_nasa_claim_removed(self):
-        assert ('conducted using NASA-standard methodologies'
-                not in self._source())
+        """C1b: dize değil DESEN aranır.
+
+        Ölçüm (2026-08-02): bu test yalnız 'conducted using NASA-standard
+        methodologies' dizesini arıyordu. ``pdf_generator.py:992`` teknik
+        ekte 'This analysis **employs** NASA-standard methodologies ...'
+        yazıyordu; fiil farklı olduğu için yakalanmadı ve test kusur
+        ayaktayken YEŞİL kaldı. Artık fiilden bağımsız bütün varyantlar
+        (NASA-standard / NASA standard / NASA standards methodology|
+        methodologies) yakalanır. Kaldırılan kusuru birebir alıntılayan
+        düzeltme yorumları muaf tutulur (tools/iddia_lint.py ile aynı
+        işaretler) — yoksa bu docstring'in kendisi testi kırardı.
+        """
+        import re
+
+        pattern = re.compile(r'NASA[-\s]standards?\s+methodolog\w*',
+                             re.IGNORECASE)
+        hits = []
+        exempt_block = False
+        for index, line in enumerate(self._source().splitlines(), 1):
+            if 'IDDIA-LINT-MUAF-BASLANGIC' in line:
+                exempt_block = True
+                continue
+            if 'IDDIA-LINT-MUAF-BITIS' in line:
+                exempt_block = False
+                continue
+            if exempt_block or 'IDDIA-LINT-MUAF' in line:
+                continue
+            if pattern.search(line):
+                hits.append((index, line.strip()))
+        assert not hits, hits
 
     def test_arbitrary_acceptance_threshold_removed(self):
         source = self._source()

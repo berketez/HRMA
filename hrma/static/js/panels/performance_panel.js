@@ -3,9 +3,17 @@
    --------------------------------------------------------------------
    POST /api/advanced-performance-analysis sonuçlarını çizer.
    Endpoint çağrı başına TEK figür üretir (analysis_type seçicili):
-   - 3d_surface  : Pc – O/F – Isp yüzeyi (NASA SP-125)
-   - nozzle_mach : Mach–alan oranı konturu (NASA-STD-5012)
-   - heat_flux   : cidar ısı akısı şelalesi (NASA SP-8124)
+   - 3d_surface  : Pc – O/F – Isp yüzeyi (kimyasal denge çözücüsü)
+   - nozzle_mach : Mach–alan oranı konturu (NACA Rapor 1135 / Anderson,
+                   "Modern Compressible Flow" — nozzle_flow_1d.py:12-26)
+   - heat_flux   : cidar ısı akısı şelalesi (Bartz 1957; NASA SP-8124
+                   "Liquid Rocket Engine Self-Cooled Combustion Chambers")
+   DENETİM DÜZELTMESİ (2026-08-02, C2/C3): bu blok Mach–alan konturunun
+   kaynağı olarak NASA-STD-5012 yazıyordu. O belgenin gerçek adı "Strength
+   and Life Assessment Requirements for Liquid-Fueled Space Propulsion
+   System Engines" (Rev. B, 2016) — bir mukavemet/ömür standardı; içinde
+   gaz dinamiği bağıntısı yok. SP-8124 de "Thermal Design Criteria" değil.
+   Doğrulanmış başlıklar: docs/STANDART_ATIFLARI.md.
    Dock'un kendi POST'u analysis_type göndermez → backend varsayılanı
    3d_surface döner; kalan iki figür render içinde ayrıca çekilir.
    Yanıt şeması (test_client ile doğrulandı, 2026-07-14):

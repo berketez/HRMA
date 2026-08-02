@@ -14,6 +14,23 @@ EXE="$SRC/dist/HRMA-Setup-${VERSION}.exe"
 [ -f "$DMG" ] || { echo "HATA: $DMG yok — önce build_mac_app.sh + build_dmg.sh"; exit 1; }
 [ -f "$EXE" ] || { echo "HATA: $EXE yok — önce build_win_payload.sh + makensis"; exit 1; }
 
+# ---------------------------------------------------------------------------
+# YAYIN TÜRÜ — taslak mı, herkese açık mı?
+#
+# Ayrım v2.6.26'da eklendi çünkü aşağıdaki kapı atlaması ARTIK YALNIZ TASLAK
+# sürümlerde geçerli. Taslak GitHub'da yayımlanmaz, güncelleme kontrolü
+# (hrma/utils/update_checker.py) taslakları görmez; dolayısıyla eksik
+# doğrulamayla üretilmiş bir taslak hiçbir kullanıcının makinesine inmez.
+# ---------------------------------------------------------------------------
+TASLAK="${TASLAK:-0}"
+if [ "$TASLAK" = "1" ]; then
+    GH_TASLAK=(--draft)
+    echo "Yayın türü: TASLAK (--draft) — kullanıcılara dağıtılmaz"
+else
+    GH_TASLAK=()
+    echo "Yayın türü: HERKESE AÇIK — kurulu uygulamalar bu sürümü indirir"
+fi
+
 # Sürüm notu kaynağı (öncelik sırasıyla):
 #   1. packaging/release_notes_v<sürüm>.md   — tercih edilen
 #   2. komut satırı argümanı
@@ -51,11 +68,70 @@ fi
 # Kapı artık burada ve atlanması BİLİNÇLİ bir eylem gerektirir:
 #   KAPIYI_ATLA=1 bash packaging/publish_release.sh "..."
 # Bunu yazan kişi neyi atladığını bilerek yazar.
+#
+# v2.6.26 SIKILAŞTIRMASI — "bilinçli eylem" yetmiyormuş (Faz 4 denetimi E1/E2)
 # ---------------------------------------------------------------------------
+# v2.6.25 ölçülen zaman çizelgesi (GitHub API, UTC):
+#   22:46:25  DMG + EXE üretildi
+#   23:23:16  commit d908ae7 (ikilinin temsil ettiği kaynak) — ikiliden 37 dk SONRA
+#   23:23:50  CI başladı
+#   23:30:44  SÜRÜM YAYINLANDI      <-- CI hâlâ koşuyordu
+#   23:38:09  CI yeşil bitti        <-- yayından 7 dk 25 sn SONRA
+#
+# Yani kullanıcıya giden ikili, temsil ettiği kaynaktan önce üretilmişti ve
+# yayın anında hiçbir yeşil kanıt yoktu. Mekanizma tam olarak buydu:
+# KAPIYI_ATLA=1 288 satırlık kapının TAMAMINI atlıyordu — taslak kısıtı yok,
+# gerekçe yok, hiçbir yerde kaydı yok. Üç eksik de kapatıldı:
+#
+#   1. Atlama YALNIZ taslak (TASLAK=1) sürümlerde geçerli. Herkese açık
+#      sürüm kapı atlanarak ÜRETİLEMEZ — betik burada durur.
+#   2. Gerekçe ZORUNLU (KAPIYI_ATLA_GEREKCE, en az 20 karakter). "1" yazıp
+#      geçilemez; ne atlandığı yazıyla beyan edilir.
+#   3. Gerekçe İKİ yere kalıcı olarak yazılır: yerel atlama defteri
+#      (packaging/release_gate_bypass.log) ve TASLAĞIN KENDİ GÖVDESİ.
+#      İkincisi önemli: taslağı sonradan GitHub arayüzünden yayınlayan kişi
+#      bu betiği hiç çalıştırmaz; uyarıyı sürüm notunun başında görmezse
+#      atlamanın olduğunu bilemez.
+# ---------------------------------------------------------------------------
+KAPI_ATLAMA_UYARISI=""
 if [ "${KAPIYI_ATLA:-0}" = "1" ]; then
-    echo "UYARI: yayın kapısı KAPIYI_ATLA=1 ile atlandı. Sorumluluk sende."
+    if [ "$TASLAK" != "1" ]; then
+        echo
+        echo "HATA: KAPIYI_ATLA yalnız TASLAK sürümlerde kullanılabilir."
+        echo "      Herkese açık sürüm yayın kapısı atlanarak çıkarılamaz"
+        echo "      (v2.6.25 böyle çıktı: ikili commit'ten 37 dk önce üretilmişti)."
+        echo
+        echo "      Taslak istiyorsan:  TASLAK=1 KAPIYI_ATLA=1 \\"
+        echo "                          KAPIYI_ATLA_GEREKCE=\"...\" bash $0"
+        echo "      Herkese açık sürüm istiyorsan kapıyı GEÇİR, atlama."
+        exit 1
+    fi
+
+    GEREKCE="${KAPIYI_ATLA_GEREKCE:-}"
+    if [ "${#GEREKCE}" -lt 20 ]; then
+        echo
+        echo "HATA: KAPIYI_ATLA_GEREKCE zorunlu ve en az 20 karakter olmalı."
+        echo "      Şu an: '${GEREKCE}' (${#GEREKCE} karakter)."
+        echo "      Neyin neden atlandığını yaz — bu metin taslağın gövdesine girer."
+        exit 1
+    fi
+
+    ATLAMA_KAYDI="$SRC/packaging/release_gate_bypass.log"
+    {
+        printf '%s | v%s | HEAD %s | %s | %s\n' \
+            "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            "$VERSION" \
+            "$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo 'git-yok')" \
+            "$(whoami)@$(hostname -s 2>/dev/null || echo '?')" \
+            "$GEREKCE"
+    } >> "$ATLAMA_KAYDI"
+
+    KAPI_ATLAMA_UYARISI="var"
+
+    echo "UYARI: yayın kapısı atlandı (TASLAK). Gerekçe deftere yazıldı:"
+    echo "       $ATLAMA_KAYDI"
 else
-    echo "Yayın kapısı çalışıyor (atlamak için KAPIYI_ATLA=1)..."
+    echo "Yayın kapısı çalışıyor..."
     if ! bash "$SRC/packaging/release_gate.sh"; then
         echo
         echo "HATA: yayın kapısı kapalı — sürüm YAYINLANMADI."
@@ -64,12 +140,38 @@ else
     fi
 fi
 
+# Atlama olduysa uyarı, sürüm notunun EN BAŞINA girer (kaynak dosya
+# değiştirilmez; geçici bir kopya üretilir).
+if [ -n "$KAPI_ATLAMA_UYARISI" ]; then
+    GECICI_NOT="$(mktemp -t hrma_release_notes)"
+    cat > "$GECICI_NOT" <<UYARI
+> **UYARI — YAYIN KAPISI ATLANDI (TASLAK).**
+> Bu taslak, packaging/release_gate.sh doğrulamaları KOŞTURULMADAN üretildi:
+> tam test takımı, bu commit'in CI durumu, canlı duman testi, paket imzası ve
+> yapı-commit zaman sırası **doğrulanmamıştır**.
+> Beyan edilen gerekçe: ${GEREKCE}
+> Atlayan: $(whoami) · $(date -u '+%Y-%m-%d %H:%M UTC')
+>
+> **Bu taslağı yayına çevirmeden önce kapıyı koşturun.**
+
+UYARI
+    if [ -f "$NOT_DOSYASI" ]; then
+        cat "$NOT_DOSYASI" >> "$GECICI_NOT"
+    else
+        printf '%s\n' "${1:-HRMA v${VERSION}}" >> "$GECICI_NOT"
+    fi
+    NOT_ARGS=(--notes-file "$GECICI_NOT")
+fi
+
 echo "Yayınlanacak: v${VERSION}"
 ls -lh "$DMG" "$EXE"
 
+# NOT: ${dizi[@]+"${dizi[@]}"} biçimi macOS'un bash 3.2'si için zorunlu —
+# orada `set -u` altında BOŞ bir dizinin "${dizi[@]}" açılımı hata verir.
 gh release create "v${VERSION}" "$DMG" "$EXE" \
     --repo berketez/HRMA \
     --title "HRMA v${VERSION}" \
+    ${GH_TASLAK[@]+"${GH_TASLAK[@]}"} \
     "${NOT_ARGS[@]}"
 
 # README'deki doğrudan indirme linklerini yeni sürüme çevir (her yayında güncel kalsın)
@@ -88,4 +190,9 @@ print('README indirme linkleri v' + v + ' oldu — commit etmeyi unutma')
 PY
 
 echo "TAMAM: https://github.com/berketez/HRMA/releases/tag/v${VERSION}"
-echo "Kurulu uygulamalar bir sonraki açılışta bu sürümü önerecek."
+if [ "$TASLAK" = "1" ]; then
+    echo "TASLAK yayınlandı — kullanıcılara GÖRÜNMEZ, güncelleme kontrolü bunu okumaz."
+    echo "Yayına çevirmeden önce: bash packaging/release_gate.sh"
+else
+    echo "Kurulu uygulamalar bir sonraki açılışta bu sürümü önerecek."
+fi

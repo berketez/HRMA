@@ -161,8 +161,33 @@ class TestEngThrustCurve:
         # itki olmalı. Eski kodda 200 adımın yalnız 13'ünde (%6.5) itki vardı.
         assert burning.mean() > 0.25
         assert profile['max_altitude'] > 0
-        assert 'method' in profile['max_altitude_method'].lower() or True
-        assert profile['performance_summary']['estimated_apogee_method']
+
+        # Faz 4 denetimi (F): buradaki iki assertion BOŞTU — biri `or True`
+        # ile her hâlde geçiyordu, öteki yalnız dizenin boş olmadığına
+        # bakıyordu. Oysa asıl korunması gereken sözleşme şu: aynı yanıtta İKİ
+        # AYRI apoje sayısı dönüyor ve hangisinin hangi modelden geldiği
+        # okunabilmeli.
+        #
+        # Ölçüm (2000 N / 10 s / O_F 6,0 hibrit): sürüklemeli 1-DOF entegrasyon
+        # 13 800 m, sürüklemesiz kapalı form 257 977 m — 18,7 kat fark. Etiket
+        # okunmazsa aynı yanıttaki iki sayı aynı şeyin iki ölçümü sanılır.
+        zaman_cozumlu = profile['max_altitude_method']
+        kapali_form = profile['performance_summary']['estimated_apogee_method']
+        assert 'integration' in zaman_cozumlu.lower(), zaman_cozumlu
+        assert 'drag' in zaman_cozumlu.lower(), zaman_cozumlu
+        # Kapalı form sürüklemeyi HİÇ modellemediğini beyan etmeli, yoksa
+        # okuyucu iki sayıyı aynı şeyin iki ölçümü sanar.
+        assert 'no drag' in kapali_form.lower(), kapali_form
+        assert 'upper bound' in kapali_form.lower(), kapali_form
+        assert zaman_cozumlu != kapali_form
+
+        # Fizik: sürüklemesiz kapalı form, sürüklemeli entegrasyonun ÜST
+        # SINIRIDIR. Ters dönerse ya etiketler karışmıştır ya da sürükleme
+        # terimi işaret hatasıyla itki gibi davranıyordur.
+        ust_sinir = profile['performance_summary']['estimated_apogee']
+        assert profile['max_altitude'] < ust_sinir, (
+            f"sürüklemeli apoje {profile['max_altitude']:.0f} m, sürüklemesiz "
+            f"üst sınır {ust_sinir:.0f} m — üst sınır aşıldı")
 
 
 # ---------------------------------------------------------------------------

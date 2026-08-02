@@ -82,26 +82,72 @@ LENGTH_KEYS = ('chamber_diameter', 'chamber_length', 'throat_diameter',
 # Rapor bölümü -> gerçekten kullanılan yöntem/referans metni.
 # DENETİM DÜZELTMESİ (2026-07-28, PDF-NASA-4): eski kapak koşulsuz
 # 'Standards: NASA SP-125, NASA-STD-5012, NASA SP-8124' basıyor, yönetici
-# özeti ve teknik ek 'NASA-standard methodologies' iddia ediyordu — BOŞ
+# özeti ve teknik ek 'NASA-standard methodologies' iddia ediyordu — BOŞ  IDDIA-LINT-MUAF
 # analysis_results ile bile. Hiçbir kod bu standartlara uygunluk kontrolü
 # yapmıyor. Artık yalnız raporda GERÇEKTEN bulunan bölümler için, o bölümü
 # üreten kod yolunun kullandığı yöntem adı basılır; standart uygunluk
 # iddiası basılmaz.
 # --------------------------------------------------------------------------
 SECTION_METHOD_REFERENCES = {
-    # analysis_results anahtarı -> (bölüm adı, yöntem/referans metni)
+    # analysis_results anahtarı -> (bölüm adı, yöntem metni, literatür atfı)
+    # Üçüncü alan teknik ekte basılır ve YALNIZ o bölümü gerçekten üreten kod
+    # yolunun kullandığı kaynağı gösterir. Başlıklar docs/STANDART_ATIFLARI.md
+    # kayıt defterinde doğrulanmıştır; tools/iddia_lint.py yanlış başlıkları
+    # yakalar.
     'performance': ('Performance',
                     'isentropic nozzle flow relations with computed '
-                    'combustion properties'),
+                    'combustion properties',
+                    'Sutton & Biblarz, "Rocket Propulsion Elements", 9th ed., '
+                    'Ch. 3; NACA Report 1135 (Ames Research Staff, 1953), '
+                    'isentropic and normal-shock relations'),
     'thermal': ('Thermal',
                 'Bartz gas-side heat-transfer correlation '
-                '(hrma heat-transfer module)'),
+                '(hrma heat-transfer module)',
+                'Bartz, D. R., "A Simple Equation for Rapid Estimation of '
+                'Rocket Nozzle Convective Heat Transfer Coefficients", Jet '
+                'Propulsion 27 (1957); NASA SP-8124, "Liquid Rocket Engine '
+                'Self-Cooled Combustion Chambers" (1977)'),
     'structural': ('Structural',
                    'thin-wall pressure vessel stress relations '
-                   '(hoop / von Mises; hrma structural module)'),
+                   '(hoop / von Mises; hrma structural module)',
+                   'ASME BPVC Section VIII, Division 1, "Rules for '
+                   'Construction of Pressure Vessels", UG-27; NASA SP-8007, '
+                   '"Buckling of Thin-Walled Circular Cylinders" (1968)'),
     'safety': ('Safety',
                'hrma safety module (risk classes are model-internal, '
-               'not a certification)'),
+               'not a certification)',
+               'Kingery-Bulmash and Kinney-Graham blast scaling; UFC '
+               '3-340-02 (2008) standoff practice'),
+}
+
+# Bölüm -> o bölümü üreten kod yolunun GERÇEK modelleme varsayımları.
+# DENETİM DÜZELTMESİ (2026-08-02, C1): teknik ek eskiden bu listeyi
+# koşulsuz basıyordu; hiç performans/termal bölümü olmayan bir raporda bile
+# "Isentropic expansion through nozzle" yazıyor, yapılmamış bir analizin
+# varsayımlarını beyan ediyordu. Artık yalnız gerçekten dolu bölümlerin
+# varsayımları basılır.
+SECTION_ASSUMPTIONS = {
+    'performance': (
+        'Steady-state combustion at the reported chamber conditions',
+        'Inviscid, adiabatic (isentropic) expansion through the nozzle',
+        'Quasi-one-dimensional flow: properties uniform over each '
+        'cross-section',
+        'Thermally and calorically perfect combustion gas',
+    ),
+    'thermal': (
+        'Convective gas-side flux from the Bartz correlation; no '
+        'boundary-layer solution is performed',
+        'Gas properties evaluated at the film temperature',
+    ),
+    'structural': (
+        'Thin-wall assumption (wall thickness small against diameter)',
+        'Static internal pressure loading; dynamic and thermal-transient '
+        'loads are not included unless a separate section reports them',
+    ),
+    'safety': (
+        'Risk classes are model-internal labels, not a certification and '
+        'not a facility-specific hazard analysis',
+    ),
 }
 
 
@@ -372,7 +418,7 @@ class PDFReportGenerator:
             total_impulse = thrust * burn_time
 
         # Metodoloji cümlesi DİNAMİK kurulur (PDF-NASA-4): eski sabit
-        # 'NASA-standard methodologies ... thermal, structural, and
+        # 'NASA-standard methodologies ... thermal, structural, and  IDDIA-LINT-MUAF
         # performance evaluations' cümlesi, o koşuda hiç termal/yapısal
         # analiz olmasa da basılıyordu. Artık yalnız gerçekten dolu
         # bölümler sayılır; hiçbiri yoksa iddia edilmez.
@@ -981,39 +1027,77 @@ class PDFReportGenerator:
         return story
 
     def _create_technical_appendix(self, motor_data: Dict, analysis_results: Dict) -> List:
-        """Create technical appendix with formulas and references"""
+        """Teknik ek: YALNIZ bu koşuda gerçekten üretilen bölümlerin yöntemi.
+
+        DENETİM DÜZELTMESİ (2026-08-02, C1 — PDF-NASA-4'ün hayatta kalan kolu).
+        Ölçüm: 2026-07-28'de yönetici özeti ve kapak dinamik yola bağlandı
+        (``_sections_present`` + ``SECTION_METHOD_REFERENCES``), ama teknik ek
+        atlandı ve şu üç satırı KOŞULSUZ basmaya devam etti:
+
+        IDDIA-LINT-MUAF-BASLANGIC (kaldırılan kusurun birebir alıntısı)
+            "This analysis employs NASA-standard methodologies ..."
+            "NASA-STD-5012: Pressure Vessels & Pressurized Systems"
+            "NASA SP-8124: Thermal Design Criteria"
+        IDDIA-LINT-MUAF-BITIS
+
+        Üç kusur birden vardı:
+          1. Depoda hiçbir kod bu standartlara uygunluk denetimi yapmıyor —
+             "NASA-standard methodologies" kazanılmamış bir iddiaydı ve boş  IDDIA-LINT-MUAF
+             ``analysis_results`` ile bile basılıyordu.
+          2. NASA-STD-5012'nin gerçek adı "Strength and Life Assessment
+             Requirements for Liquid-Fueled Space Propulsion System Engines"
+             (Rev. B, 16 Haziran 2016) — bir mukavemet/ömür standardı; kodun
+             yazdığı "Pressure Vessels & Pressurized Systems" başlığı YANLIŞ.
+          3. NASA SP-8124'ün gerçek adı "Liquid Rocket Engine Self-Cooled
+             Combustion Chambers" (1977, NTRS 78N21211); "Thermal Design
+             Criteria" YANLIŞ. NASA SP-125 ise "Design of Liquid Propellant
+             Rocket Engines" (Huzel & Huang, 2. baskı 1971).
+        Doğrulanmış başlıklar docs/STANDART_ATIFLARI.md kayıt defterindedir.
+
+        Bu ek artık kapak ve yönetici özetiyle AYNI kaynaktan beslenir:
+        bölüm gerçekten doluysa o bölümü üreten kod yolunun yöntemi ve
+        literatür atfı basılır; hiçbir bölüm yoksa hiçbir yöntem iddia
+        edilmez. Standart UYGUNLUĞU hiçbir koşulda iddia edilmez.
+        """
         story = []
-        
+
         story.append(Paragraph("Technical Appendix", self.styles['SectionHeader']))
-        
+
+        present = self._sections_present(analysis_results or {})
+
         # Analysis methodology
         story.append(Paragraph("Analysis Methodology", self.styles['Heading3']))
-        methodology_text = """
-        This analysis employs NASA-standard methodologies for rocket motor performance 
-        evaluation:
-        
-        • NASA SP-125: Liquid-Propellant Rocket Engine Performance
-        • NASA-STD-5012: Pressure Vessels & Pressurized Systems
-        • NASA SP-8124: Thermal Design Criteria
-        
-        Key equations used in the analysis include isentropic flow relations, 
-        combustion thermodynamics, and heat transfer correlations.
-        """
-        story.append(Paragraph(methodology_text, self.styles['Normal']))
-        
-        # Assumptions
-        story.append(Paragraph("Analysis Assumptions", self.styles['Heading3']))
-        assumptions = [
-            "• Steady-state combustion conditions",
-            "• Isentropic expansion through nozzle",
-            "• Uniform propellant properties",
-            "• Perfect gas behavior for combustion products",
-            "• Adiabatic combustion chamber walls (where applicable)"
-        ]
-        
-        for assumption in assumptions:
-            story.append(Paragraph(assumption, self.styles['Normal']))
-        
+        if present:
+            story.append(Paragraph(
+                'The entries below describe the method actually used by the '
+                'code path that produced each section of this report, with '
+                'the literature the implementation follows. This is a record '
+                'of what was computed; it is not a statement of compliance '
+                'with, or qualification against, any standard.',
+                self.styles['Normal']))
+            for key in present:
+                name, method, reference = SECTION_METHOD_REFERENCES[key]
+                story.append(Paragraph(
+                    f'<b>{name}</b> — {method}.<br/>Reference: {reference}',
+                    self.styles['Normal']))
+                story.append(Spacer(1, 0.08 * inch))
+        else:
+            story.append(Paragraph(
+                'No analysis sections were supplied with this report, so no '
+                'analysis method is described here. Only the motor '
+                'configuration on the preceding pages was reported.',
+                self.styles['Normal']))
+
+        # Assumptions — yalnız gerçekten koşan bölümler için
+        if present:
+            story.append(Paragraph("Analysis Assumptions",
+                                   self.styles['Heading3']))
+            for key in present:
+                name = SECTION_METHOD_REFERENCES[key][0]
+                for assumption in SECTION_ASSUMPTIONS.get(key, ()):
+                    story.append(Paragraph(f'• {name}: {assumption}',
+                                           self.styles['Normal']))
+
         return story
 
     def export_plotly_chart_to_image(self, plotly_json, format: str = 'png',

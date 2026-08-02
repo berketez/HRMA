@@ -295,14 +295,28 @@ class TestLiquidEngineSpecOffline:
         monkeypatch.setattr(lre.LiquidRocketEngine,
                             "_fetch_web_propellant_data", _no_network)
 
-        run = cr.run_correlation(records=[_load_by_id(RS25_ID)])
+        kayit = _load_by_id(RS25_ID)
+        run = cr.run_correlation(records=[kayit])
         rr = run["records"][0]
         assert rr["status"] == "ok", rr["reason"]
         # thrust_sl motor girdisi olarak tüketildi -> skor dışı
         assert "thrust_sl" in rr["consumed_measured"]
         assert rr["scores"]["thrust_sl"]["status"] == "skipped_consumed"
-        # Pc ve O/F kayıt inputs'unda: dongusellik bekcisi devrede olmali
-        assert "chamber_pressure" in rr["scores"] or True  # Pc measured degil
+
+        # Faz 4 denetimi (F): buradaki assertion BOŞTU (`... or True`), yani
+        # hiçbir şey doğrulamıyordu. Korunması gereken sözleşme döngüsellik
+        # yasağı: Pc ve O/F bu kaydın INPUTS'unda duruyor (ölçüm: inputs =
+        # ['chamber_pressure_psia', 'of_ratio'], measured = ['isp_vac_s',
+        # 'thrust_sl_lbf', 'thrust_vac_lbf']). Çözücüye GİRDİ olarak verilen
+        # bir büyüklük, aynı koşuda "tahmin" diye skorlanamaz — skorlanırsa
+        # model kendi girdisini doğrulamış olur.
+        for taban in ("chamber_pressure_psia", "of_ratio"):
+            assert taban in kayit["inputs"], taban
+        assert "chamber_pressure" not in kayit.get("measured", {})
+        for taban in ("chamber_pressure", "of_ratio"):
+            skor = rr["scores"].get(taban)
+            assert skor is None or skor["status"] != "scored", (
+                f"{taban} kaydın girdisi olduğu hâlde skorlandı: {skor}")
         # isp_vac ve thrust_vac gerçek skorlar
         isp = rr["scores"]["isp_vac"]
         assert isp["status"] == "scored"

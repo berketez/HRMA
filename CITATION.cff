@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+message: "If you use HRMA in academic or published work, please cite it as below."
+title: "HRMA: High-Fidelity Rocket Motor Analysis"
+abstract: >-
+  HRMA is a preliminary-design and educational tool for hybrid, solid and
+  liquid rocket motors. It couples equilibrium thermochemistry (Cantera and
+  NASA CEA via RocketCEA) to nozzle, internal-ballistics, heat-transfer,
+  structural and trajectory models, and exports the resulting geometry to
+  STEP, DXF, STL, engineering drawings and OpenRocket motor files. Predictions
+  are scored against a git-tracked database of published static-fire and
+  flight data by an automated correlation runner. HRMA is not a
+  flight-qualification tool; see docs/VALIDATION_STATUS.md for the verified
+  envelope, the uncertainty bands and the known limitations before citing any
+  number produced by it.
+type: software
+authors:
+  - family-names: "Tezgöçen"
+    given-names: "Berke"
+    email: "btezgocen97@gmail.com"
+repository-code: "https://github.com/berketez/HRMA"
+url: "https://github.com/berketez/HRMA"
+license: MIT
+keywords:
+  - rocket propulsion
+  - hybrid rocket motor
+  - solid rocket motor
+  - liquid rocket engine
+  - internal ballistics
+  - nozzle design
+  - combustion thermochemistry
+  - preliminary design
+# Version and date of the most recent PUBLISHED release. Bump both at release
+# time, together with hrma/__init__.py, hrma/data/changelog.json and the
+# packaging/release_notes_v*.md file (see CONTRIBUTING.md §5). Do not put an
+# unreleased version here: a citation must point at something a reader can
+# actually download.
+version: 2.6.25
+date-released: "2026-07-27"

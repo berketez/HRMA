@@ -17,6 +17,41 @@ def _num(v, fb):
         return fb
 
 
+def _real_mm(*values):
+    """Verilen adaylardan ilk sonlu-pozitif MİLİMETRE değerini döndürür.
+
+    Hiçbiri geçerli değilse None döner — uydurma varsayılan ÜRETİLMEZ.
+    """
+    for v in values:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(f) and f > 0:
+            return f
+    return None
+
+
+def _put_nozzle_lengths(out, conv_mm, div_mm):
+    """Çözücünün lüle uzunluklarını METRE olarak ortak sözlüğe yazar.
+
+    Faz 4B / A5: bu sözlük lüle uzunluğunu HİÇ taşımıyordu; tüketici
+    (``nozzle_design.sample_nozzle_inner_contour``) ıraksak boyu yeniden
+    türetmek zorunda kalıyor ve bell lülede ``divergent_half_angle_deg``
+    alanını (bell'de bu BOĞAZ açısıdır: bell_80 -> 30°, bell_60 -> 34°) konik
+    yarı açı sanıyordu. Ölçüldü (HEAD a7ff1e7, 10 kN sıvı motor):
+    bell_80 çözücü 107.69 mm / export 62.48 mm (-41.99%),
+    bell_60 çözücü 80.77 mm / export 53.48 mm (-33.79%), konik +0.78%.
+
+    Değer yoksa ANAHTAR HİÇ YAZILMAZ — 'hesaplanmadı' hâli, sıfır ya da
+    uydurma bir sayı değil, anahtarın yokluğuyla bildirilir.
+    """
+    if conv_mm is not None:
+        out['nozzle_convergent_length'] = conv_mm / 1000.0
+    if div_mm is not None:
+        out['nozzle_divergent_length'] = div_mm / 1000.0
+
+
 def solid_results_to_motor_geometry(results):
     """/calculate_solid sonucundan hibrit-şekilli geometri (m) üretir.
 
@@ -37,7 +72,11 @@ def solid_results_to_motor_geometry(results):
     core_d_mm = _num(gd.get('inner_diameter_mm'), _num(r.get('core_diameter'), 30.0))
     grain_od_mm = _num(gd.get('outer_diameter_mm'), chamber_d_mm - 4.0)
 
-    return {
+    ang = r.get('nozzle_angles') or {}
+    ds_noz = ((r.get('design_summary') or {}).get('nozzle')) or {}
+    noz_geo = (r.get('nozzle_design') or {}).get('geometry') or {}
+
+    out = {
         'motor_name': r.get('motor_name') or 'UZAYTEK_SOLID',
         'chamber_diameter': chamber_d_mm / 1000.0,
         'chamber_length': chamber_l_mm / 1000.0,
@@ -54,9 +93,19 @@ def solid_results_to_motor_geometry(results):
         'port_diameter_initial': core_d_mm / 1000.0,
         'port_diameter_final': grain_od_mm / 1000.0,
         'grain_design': gd,
-        'nozzle_angles': r.get('nozzle_angles') or {},
+        'nozzle_angles': ang,
         'structural_analysis': r.get('structural_analysis') or {},
     }
+    # Katıda üç kaynak da aynı çözümden gelir; ilk gerçek değer kullanılır.
+    _put_nozzle_lengths(
+        out,
+        _real_mm(ang.get('convergent_length_mm'),
+                 ds_noz.get('convergent_length_mm'),
+                 noz_geo.get('convergent_length')),
+        _real_mm(ang.get('divergent_length_mm'),
+                 ds_noz.get('divergent_length_mm'),
+                 noz_geo.get('divergent_length')))
+    return out
 
 
 def liquid_results_to_motor_geometry(results):
@@ -68,8 +117,9 @@ def liquid_results_to_motor_geometry(results):
     r = results or {}
     inj = r.get('injector_design') or {}
     ang = r.get('nozzle_angles') or {}
+    cooling = r.get('cooling_system') or {}
 
-    return {
+    out = {
         'motor_name': r.get('motor_name') or 'UZAYTEK_LIQUID',
         'chamber_diameter': _num(r.get('chamber_diameter'), 150.0) / 1000.0,
         'chamber_length': _num(r.get('chamber_length'), 300.0) / 1000.0,
@@ -89,4 +139,19 @@ def liquid_results_to_motor_geometry(results):
             'injection_pressure_drop_bar':
                 _num(inj.get('injection_pressure_drop_fuel_bar'), 0.0),
         },
+        # A8: imalata giden STEP cidar kalınlığını buradan okur. Bu anahtar
+        # eskiden hiç taşınmıyordu; STEP 'chamber_analysis' arayıp bulamayınca
+        # 0.045·D geometrik yedeğine düşüyordu. Sıvı motor cidarı
+        # 'chamber_structure' bloğunda yayımlanır.
+        'structural_analysis': r.get('structural_analysis') or {},
     }
+    # Sıvıda nozzle_angles['nozzle_length_mm'] IRAKSAK boyudur (boğaz→çıkış,
+    # calculate_nozzle_geometry içinde L_nozzle); yakınsak koni soğutma
+    # bloğunda ayrı raporlanır. Ölçüldü: ikisi cooling_system'deki
+    # convergent_length / divergent_length ile bit-aynı.
+    _put_nozzle_lengths(
+        out,
+        _real_mm(cooling.get('convergent_length')),
+        _real_mm(cooling.get('divergent_length'),
+                 ang.get('nozzle_length_mm')))
+    return out

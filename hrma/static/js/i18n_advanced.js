@@ -280,7 +280,7 @@
             'adv.tip.finalAltitudeM2': 'Maximum altitude for trajectory analysis. Should represent apogee or desired analysis ceiling.',
             'adv.tip.finalMassKg': 'Vehicle mass after propellant consumption (dry mass + payload).',
             'adv.tip.fuelDensityKgM': 'Mass density of solid fuel. Affects regression rate and motor mass. HTPB: ~920 kg/m³, PMMA: ~1180 kg/m³, Paraffin: ~900 kg/m³. Higher density usually means more total impulse per unit volume.',
-            'adv.tip.fuelType': 'Solid fuel material for hybrid rocket. HTPB: professional grade, excellent performance. Paraffin: high regression rate, good for small motors. PMMA/Plastics: readily available, moderate performance. Aluminum: metal additive for increased thrust.',
+            'adv.tip.fuelType': 'Solid fuel material for hybrid rocket. HTPB: industry-standard binder with well-characterised regression data. Paraffin: high regression rate, good for small motors. PMMA/Plastics: readily available, moderate performance. Aluminum: metal additive for increased thrust.',
             'adv.tip.initialAltitudeM': 'Starting altitude for trajectory analysis. Usually ground level (0m) for vertical launches or current altitude for air-launched systems. Analysis will calculate performance changes during ascent.',
             'adv.tip.initialAltitudeM2': 'Starting altitude for trajectory analysis. Usually ground level (0m) for vertical launches or current altitude for air-launched systems.',
             'adv.tip.initialMassKg': 'Total vehicle mass at ignition including propellant, structure, and payload.',

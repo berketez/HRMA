@@ -17,8 +17,14 @@
 # Ayrıca sürümü kullanılamaz yapan 403 hatasını HİÇBİR test yakalayamazdı:
 # test, kodun kör noktasını paylaşıyordu (ikisi de portun 8080 olduğunu
 # varsayıyordu) ve uygulama hiçbir zaman 8080 dışında bir portta çalıştırılıp
-# denenmemişti. Bu yüzden aşağıdaki 5. kapı CANLI sunucuyu VARSAYILAN OLMAYAN
-# bir portta ayağa kaldırıp gerçekten hesap yaptırır.
+# denenmemişti. Bu yüzden aşağıdaki 6/7 kapısı CANLI sunucuyu VARSAYILAN
+# OLMAYAN bir portta ayağa kaldırıp gerçekten hesap yaptırır.
+#
+# v2.6.26 EKLERİ (Faz 4 denetimi E1/E2)
+# --------------------------------------
+# 3/7  Yapı ↔ commit zaman sırası: artefakt commit'ten ÖNCE üretilmişse KALDI.
+# 4/7  CI kontrolü artık bu SHA'nın BÜTÜN koşularını sayar (tek koşu değil) ve
+#      tamamlanmamış koşu varsa KALDI der — "CI'ı beklemeden yayınlama" hatası.
 #
 # Kullanım:
 #   bash packaging/release_gate.sh            # tam kapı (yayın öncesi)
@@ -45,7 +51,7 @@ baslik()   { printf "\n=== %s ===\n" "$1"; }
 PY="${PYTHON:-python3}"
 
 # ---------------------------------------------------------------------------
-baslik "1/6  Sürüm tutarlılığı"
+baslik "1/7  Sürüm tutarlılığı"
 # ---------------------------------------------------------------------------
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' hrma/__init__.py)"
 if [ -z "$VERSION" ]; then
@@ -75,7 +81,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "2/6  Git durumu"
+baslik "2/7  Git durumu"
 # ---------------------------------------------------------------------------
 if [ -n "$(git status --porcelain)" ]; then
     basarisiz "çalışma ağacı kirli — commit edilmemiş değişiklikle sürüm çıkmaz"
@@ -95,7 +101,46 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "3/6  GitHub Actions (bu commit)"
+baslik "3/7  Yapı ↔ commit zaman sırası"
+# ---------------------------------------------------------------------------
+# v2.6.25'te yayınlanan ikili, temsil ettiği kaynaktan ÖNCE üretilmişti.
+# Ölçülen zaman damgaları (GitHub API, UTC):
+#
+#   22:46:25  DMG + EXE üretildi
+#   23:23:16  commit d908ae7  <-- ikiliden 36 dk 51 sn SONRA
+#
+# Yani indirilen kurulum paketi, sürüm notunun anlattığı düzeltmelerin
+# HİÇBİRİNİ içermiyordu; kaynak ile ikili arasındaki bağ koptu ve bunu
+# hiçbir kontrol yakalamadı. Bu kapı o bağı ölçer: artefakt dosyasının
+# değiştirilme zamanı, yayınlanacak commit'in zamanından ESKİ OLAMAZ.
+#
+# Karşılaştırma commit'in COMMITTER tarihine göre yapılır (%ct): rebase /
+# amend sonrası author tarihi eski kalabilir, ikilinin temsil ettiği ağacı
+# belirleyen şey committer tarihidir.
+DMG_YOL="dist/HRMA-Setup-${VERSION}-macOS.dmg"
+EXE_YOL="dist/HRMA-Setup-${VERSION}.exe"
+COMMIT_EPOCH="$(git show -s --format=%ct HEAD 2>/dev/null || echo '')"
+if [ -z "$COMMIT_EPOCH" ]; then
+    basarisiz "HEAD commit zamanı okunamadı — yapı/commit sırası doğrulanamıyor"
+else
+    for ARTEFAKT in "$DMG_YOL" "$EXE_YOL"; do
+        if [ ! -f "$ARTEFAKT" ]; then
+            basarisiz "artefakt yok: $ARTEFAKT — bu commit'ten sonra üretilmeli"
+            continue
+        fi
+        ARTEFAKT_EPOCH="$("$PY" -c "import os,sys;print(int(os.path.getmtime(sys.argv[1])))" "$ARTEFAKT" 2>/dev/null || echo '')"
+        if [ -z "$ARTEFAKT_EPOCH" ]; then
+            basarisiz "$ARTEFAKT değiştirilme zamanı okunamadı"
+        elif [ "$ARTEFAKT_EPOCH" -ge "$COMMIT_EPOCH" ]; then
+            basarili "$(basename "$ARTEFAKT") commit'ten $(( (ARTEFAKT_EPOCH - COMMIT_EPOCH) / 60 )) dk SONRA üretilmiş"
+        else
+            basarisiz "$(basename "$ARTEFAKT") commit'ten $(( (COMMIT_EPOCH - ARTEFAKT_EPOCH) / 60 )) dk ÖNCE üretilmiş — v2.6.25 hatası (ikili kaynağı temsil etmiyor). YENİDEN DERLE."
+        fi
+    done
+fi
+
+# ---------------------------------------------------------------------------
+baslik "4/7  GitHub Actions (bu commit)"
 # ---------------------------------------------------------------------------
 # CI KONTROLÜ ATLANAMAZ (v2.6.25 yayınından çıkan ders).
 #
@@ -108,20 +153,59 @@ baslik "3/6  GitHub Actions (bu commit)"
 #
 # 2.6.25 yayınında HIZLI=1 kullanıldı ve CI elle teyit edildi; bir dahakine
 # kimse teyit etmeyebilir. Artık atlanamaz.
+#
+# v2.6.26 EKİ — tek koşuya bakmak yetmiyor (Faz 4 denetimi E1/E2c).
+# Eski hâli `--limit 1` ile YALNIZ EN SON koşuya bakıyordu. Depoda artık iki
+# iş akışı var (tests.yml + release.yml); iki koşudan biri bitmiş biri hâlâ
+# koşuyorken en son bitene bakmak "yeşil" der. v2.6.25 tam olarak böyle
+# yayınlandı: sürüm 23:30:44'te çıktı, CI 23:38:09'da bitti — yayın anında
+# koşu DEVAM EDİYORDU. Kapı artık bu SHA'nın BÜTÜN koşularını sayar:
+#   - hiç koşu yoksa            -> KALDI (CI henüz başlamamış)
+#   - biri bile tamamlanmamışsa -> KALDI (yayın CI'ı beklemez hatası)
+#   - biri bile başarısızsa     -> KALDI
+#   - 'tests' iş akışı yoksa    -> KALDI (asıl kanıt koşmamış)
 if ! command -v gh >/dev/null 2>&1; then
     basarisiz "gh CLI yok — CI durumu doğrulanamıyor"
 else
-    SONUC="$(gh run list --commit "$YEREL" --limit 1 --json conclusion,status,url \
-             --jq '.[0] | (.conclusion // .status) + " " + .url' 2>/dev/null || echo '')"
-    case "$SONUC" in
-        success*) basarili "CI yeşil — $SONUC" ;;
-        "")       basarisiz "bu commit için CI koşusu bulunamadı (henüz başlamadı mı?)" ;;
-        *)        basarisiz "CI YEŞİL DEĞİL — $SONUC" ;;
-    esac
+    KOSULAR="$(gh run list --commit "$YEREL" --limit 50 \
+               --json conclusion,status,workflowName,headSha \
+               --jq '.[] | [.workflowName, .status, (.conclusion // "-"), .headSha] | @tsv' \
+               2>/dev/null || echo '')"
+    if [ -z "$KOSULAR" ]; then
+        basarisiz "bu commit (${YEREL:0:8}) için CI koşusu yok — push edilip başlaması beklenmeli"
+    else
+        BEKLEYEN=0; DUSEN=0; TESTS_YESIL=0; TOPLAM=0
+        while IFS=$'\t' read -r AKIS DURUM SONUC SHA; do
+            [ -n "$AKIS" ] || continue
+            TOPLAM=$((TOPLAM + 1))
+            # Savunma: gh commit'e göre süzse de SHA'yı burada da doğruluyoruz;
+            # yayınlanacak ikili TAM OLARAK bu ağacı temsil etmeli.
+            if [ -n "$SHA" ] && [ "$SHA" != "$YEREL" ]; then
+                basarisiz "CI koşusu farklı SHA'ya ait: $AKIS (${SHA:0:8} != ${YEREL:0:8})"
+                continue
+            fi
+            if [ "$DURUM" != "completed" ]; then
+                basarisiz "CI hâlâ koşuyor: $AKIS ($DURUM) — yayın CI'ı BEKLER"
+                BEKLEYEN=$((BEKLEYEN + 1))
+                continue
+            fi
+            case "$SONUC" in
+                success) [ "$AKIS" = "tests" ] && TESTS_YESIL=1 ;;
+                skipped) ;;  # koşulu sağlanmadığı için atlanan iş akışı hata değil
+                *) basarisiz "CI koşusu başarısız: $AKIS ($SONUC)"; DUSEN=$((DUSEN + 1)) ;;
+            esac
+        done <<< "$KOSULAR"
+
+        if [ "$TESTS_YESIL" -eq 1 ]; then
+            basarili "CI 'tests' iş akışı bu SHA'da yeşil (${YEREL:0:8}, $TOPLAM koşu incelendi)"
+        elif [ "$BEKLEYEN" -eq 0 ] && [ "$DUSEN" -eq 0 ]; then
+            basarisiz "'tests' iş akışının bu SHA'da yeşil koşusu YOK — asıl kanıt eksik"
+        fi
+    fi
 fi
 
 # ---------------------------------------------------------------------------
-baslik "4/6  Tam test takımı"
+baslik "5/7  Tam test takımı"
 # ---------------------------------------------------------------------------
 # Yalnız BU adım atlanabilir: yerel tam takım, CI'ın temiz makinede koştuğu
 # takımın aynısıdır. 3/6 yeşilse buradaki koşu fazladan bir doğrulamadır.
@@ -140,7 +224,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "5/6  Canlı duman testi — VARSAYILAN OLMAYAN portta"
+baslik "6/7  Canlı duman testi — VARSAYILAN OLMAYAN portta"
 # ---------------------------------------------------------------------------
 # v2.6.2'yi kullanılamaz yapan hata tam buradaydı: uygulama 8080 dışında bir
 # porta düştüğünde kendi sayfası kendi API'sinden 403 alıyordu. Bu kapı gerçek
@@ -208,7 +292,7 @@ kill $SUNUCU_PID 2>/dev/null || true
 trap - EXIT
 
 # ---------------------------------------------------------------------------
-baslik "6/6  macOS paket imzası"
+baslik "7/7  macOS paket imzası"
 # ---------------------------------------------------------------------------
 # v2.6.25 güncelleme çökmesi (2026-07-28): build_mac_app.sh içindeki codesign
 # hatayı `2>/dev/null || true` ile yutuyordu; paket İMZASIZ üretildi ve ÜÇ
@@ -244,7 +328,7 @@ else
         basarisiz ".app İMZASIZ/BOZUK: $(head -1 /tmp/hrma_gate_codesign.log)"
     fi
 
-    DMG_YOL="dist/HRMA-Setup-${VERSION}-macOS.dmg"
+    # DMG_YOL 3/7 adımında tanımlandı (yapı ↔ commit zaman sırası).
     if [ ! -f "$DMG_YOL" ]; then
         basarisiz "DMG yok: $DMG_YOL — önce packaging/build_dmg.sh"
     else

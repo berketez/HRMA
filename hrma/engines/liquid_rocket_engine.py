@@ -38,6 +38,83 @@ from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, LAMBDA_BELL,
 _WEB_DATA_MEMO = {}
 _WEB_DATA_MEMO_MAX = 8
 
+
+# ---------------------------------------------------------------------------
+# TASARIM ÖZETİ DURUM SÖZLÜĞÜ (Faz 4B, bulgu B1/B2/A3)
+#
+# Aynı sözlük üç motor dosyasında da BİREBİR tanımlıdır (hybrid / liquid /
+# solid); tam gerekçe ve etiket anlamları
+# hrma/engines/hybrid_rocket_engine.py içindeki aynı blokta yazılıdır. Çapraz
+# import bilinçli olarak yapılmaz; değerlerin aynı kaldığı makinece denetlenir:
+#   tests/test_faz4_motor_kapilari.py::test_durum_sozlugu_uc_motorda_ayni
+#
+# ÖLÇÜM (2 Ağustos 2026, HEAD a7ff1e7): burada :4492'de koşulsuz 'OPTIMIZED'
+# yazıyordu — hiçbir eniyileme çalışmamış olsa da, hatta itici çifti için
+# yanma modeli hiç yokken bile.
+# ---------------------------------------------------------------------------
+DESIGN_STATUS_OPTIMIZED = 'OPTIMIZED'
+DESIGN_STATUS_CALCULATED = 'CALCULATED'
+DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS = 'ESTIMATED_WITH_DEFAULTS'
+DESIGN_STATUS_TARGET_NOT_MET = 'TARGET_NOT_MET'
+DESIGN_STATUS_UNVALIDATED_ESTIMATE = 'UNVALIDATED_ESTIMATE'
+DESIGN_STATUS_NOT_CONVERGED = 'NOT_CONVERGED'
+
+DESIGN_STATUS_SEVERITY = {
+    DESIGN_STATUS_OPTIMIZED: 0,
+    DESIGN_STATUS_CALCULATED: 1,
+    DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS: 2,
+    DESIGN_STATUS_TARGET_NOT_MET: 3,
+    DESIGN_STATUS_UNVALIDATED_ESTIMATE: 4,
+    DESIGN_STATUS_NOT_CONVERGED: 5,
+}
+
+
+class UnsupportedPropellantPairError(ValueError):
+    """Tabloda da CEA kartında da olmayan itici çifti (bulgu A3).
+
+    Böyle bir çift için yayımlanabilir bir yanma çözümü YOKTUR. Eskiden bu
+    durumda düz yazılmış yer tutucular (Isp_sl = 285 s, Isp_vac = 320 s,
+    c* = 1650 m/s) gerçek performansmış gibi döndürülüyordu. Artık hesap
+    burada durur; çağıran (app.py /calculate_liquid) bunu HTTP 400 + gerekçe
+    olarak kullanıcıya iletir.
+
+    ``ValueError`` türetilmiştir ki mevcut ``except Exception``/``ValueError``
+    yakalayan yollar (Monte Carlo, UQ fabrikaları) davranışlarını değiştirmeden
+    çalışmayı sürdürsün.
+    """
+
+    def __init__(self, message, fuel=None, oxidizer=None, validity=None):
+        super().__init__(message)
+        self.reason_code = 'propellant_pair_not_modelled'
+        self.fuel = fuel
+        self.oxidizer = oxidizer
+        self.validity = dict(validity or {})
+
+
+# Tablo dışı ama CEA ile ÇÖZÜLEBİLEN çiftlerde (ör. rp1/n2o4, lh2/n2o4) itici
+# YOĞUNLUKLARI için beyan edilmiş yedek değerler [kg/m3]. Bunlar kimyadan
+# TÜREMEZ, tipik bir hidrokarbon yakıt / depolanabilir oksitleyici mertebesidir
+# ve yalnız çağıran hiçbir yoğunluk vermediğinde kullanılır: arayüzün
+# ``fuel_density`` / ``oxidizer_density`` alanları _apply_overrides içinde
+# (kurucu sırası: _set_propellant_properties -> _apply_overrides) bu değerleri
+# EZER. Yanma performansı için yer tutucu üretmek yasaktır (bkz.
+# UnsupportedPropellantPairError); yoğunluk bir yanma çözümü değil, ezilebilir
+# bir madde özelliğidir ve bu ayrım bilinçlidir.
+LIQUID_UNKNOWN_PAIR_FUEL_DENSITY = 800.0
+LIQUID_UNKNOWN_PAIR_OX_DENSITY = 1200.0
+
+# Aynı çiftler için yanma GAZI taşıma özellikleri. Bunlar da performans değil:
+# Bartz ısı-taşınım korelasyonu bir viskozite ve Prandtl sayısı ister, CEA
+# köprüsü bunları döndürmez. Değerler yerleşik tablodaki altı çiftin ölçülen
+# bandının ortasındadır (mu_chamber 5.78e-5 ... 6.89e-5 Pa.s, pr_chamber
+# 0.712 ... 0.751, cp_chamber 2156 ... 2287 J/kg.K) ve bu bant zaten dardır.
+# cp_chamber, CEA çözümü bir değer döndürürse _resolve_combustion_reference
+# içinde EZİLİR; kalanlar yedek olarak durur.
+LIQUID_UNKNOWN_PAIR_GAS_VISCOSITY = 6e-5      # Pa.s
+LIQUID_UNKNOWN_PAIR_GAS_PRANDTL = 0.73        # -
+LIQUID_UNKNOWN_PAIR_GAS_CP = 2000.0           # J/kg.K
+LIQUID_UNKNOWN_PAIR_DISSOCIATION_TEMP = 3000  # K
+
 # ---------------------------------------------------------------------------
 # TASARIM SABİTLERİ (2026-07-19 uydurma denetimi)
 # Kural: bir sayı birden fazla yerde kullanılıyorsa BURADA bir kez tanımlanır
@@ -1931,44 +2008,74 @@ class LiquidRocketEngine:
             self._calculate_mixture_ratio_effects()
 
         else:
-            # Fallback for unknown combinations with conservative estimates
+            # ----------------------------------------------------------------
+            # TABLODA OLMAYAN İTİCİ ÇİFTİ (Faz 4B, bulgu A3)
+            #
+            # ÖLÇÜM (2 Ağustos 2026, HEAD a7ff1e7): fuel='zirvaaa',
+            # oxidizer='gizemli' gönderilen istek HTTP 200 dönüyor,
+            # design_summary.status 'OPTIMIZED' yazıyor ve kullanıcıya
+            # Isp_sl = 285 s / Isp_vac = 320 s / c* = 1650 m/s gösteriliyordu.
+            # Bu sayılar HİÇBİR kimyadan gelmiyor: aşağıdaki blokta düz
+            # yazılmış yer tutuculardı ve "muhafazakâr kestirim" adıyla
+            # sunuluyordu. Beyan kanalı doğru kuruluydu
+            # (combustion_data_source), ama kimse okumuyordu; ayrıca ölçüldü:
+            # kaynak 'not_modelled'a düştüğü için aşağıdaki uyarı bile HİÇ
+            # ateşlenmiyordu (design_warnings == []).
+            #
+            # KARAR: KAPALI DEVRE (fail-closed). Modellenmeyen bir çift için
+            # temsili performans ÜRETİLMEZ. Depodaki yerleşik standart budur
+            # (cea_bridge._not_modelled + tests/test_cea_bridge.py
+            # ::test_unmapped_pair_no_fallback_not_modelled: "sahte sayı YOK").
+            #
+            # Bu kapı MEŞRU seçimleri kapatmaz — ölçüldü: liquid.html'in
+            # sunduğu 5 yakıt x 2 oksitleyici = 10 çiftin 10'u da RocketCEA
+            # ile çözülüyor (rp1/n2o4, lh2/n2o4, methane/n2o4, mmh/lox,
+            # udmh/lox dahil; hiçbiri tabloda değil). Kapıya yalnız ne tabloda
+            # ne CEA kartında olan girdiler takılır.
+            #
+            # PERFORMANS DIŞI özellikler önden atanır: istisna kurulmadan ÖNCE
+            # _resolve_combustion_reference çağrılır ve o yol BAŞARILI olduğunda
+            # (tablo dışı ama CEA ile çözülen çiftler) motorun geri kalanı bu
+            # değerlere ihtiyaç duyar. Ayrımı net tutmak şart: Isp / c* / T_c /
+            # gamma / mw PERFORMANSTIR ve yer tutucusu YASAKTIR — CEA çözerse
+            # CEA'dan gelir, çözemezse motor kurulmaz. Aşağıdakiler ise taşıma
+            # ve yoğunluk özellikleridir, beyan edilmiş yedeklerdir ve
+            # kullanıcı overrides ile ezebilir (bkz. sabitlerin tanımı).
+            # ----------------------------------------------------------------
             self.propellant_name = f"{self.fuel_type.upper()}/{self.oxidizer_type.upper()}"
-            self.isp_vac = 320  # Conservative estimate
-            self.isp_sl = 285
-            self.c_star = 1650
-            self.T_c = 3200
-            self.gamma = 1.22
-            self.mw = 25.0
-            self.rho_fuel = 800
-            self.rho_ox = 1200
-            self.optimal_mr = 2.5
-            self.optimal_mr_thrust = 2.2
-
-            # Default advanced properties
-            self.cp_chamber = 2000
-            self.mu_chamber = 6e-5
-            self.pr_chamber = 0.73
+            self.rho_fuel = LIQUID_UNKNOWN_PAIR_FUEL_DENSITY
+            self.rho_ox = LIQUID_UNKNOWN_PAIR_OX_DENSITY
+            self.mu_chamber = LIQUID_UNKNOWN_PAIR_GAS_VISCOSITY
+            self.pr_chamber = LIQUID_UNKNOWN_PAIR_GAS_PRANDTL
+            self.cp_chamber = LIQUID_UNKNOWN_PAIR_GAS_CP
+            self.dissociation_temp = LIQUID_UNKNOWN_PAIR_DISSOCIATION_TEMP
             self.frozen_performance = False
-            self.dissociation_temp = 3000
-
-            # Tabloda olmayan çift: kaynak etiketi DÜRÜSTÇE 'conservative
-            # estimate'. (cea_bridge bu çifti eşleyebiliyorsa canlı CEA yine
-            # denenir — örn. hydrazine/h2o2 gibi tablo dışı ama kartı olan
-            # çiftler.)
-            self.combustion_data_source = 'conservative_estimate'
+            self.combustion_data_source = 'not_modelled'
             self.combustion_validity = {
                 'pc_range_ok': False, 'real_gas_warning': False,
                 'extrapolated': True,
-                'note': ('Propellant pair not in the built-in table; '
-                         'conservative placeholder values.')}
+                'note': ('Propellant pair not in the built-in table; awaiting '
+                         'a CEA solution.')}
             try:
                 self._resolve_combustion_reference(None)
             except Exception:
                 pass
-            if self.combustion_data_source == 'conservative_estimate':
+            if self.combustion_data_source != 'rocketcea':
+                # Ne tablo ne CEA: bu çift için yayımlanabilir bir yanma çözümü
+                # YOK. Uydurma sayı döndürmek yerine açık gerekçeyle dur.
                 self._warn('warn.liquid.propellant_pair_not_in_database',
-                           'warning', fuel=str(self.fuel_type),
+                           'critical', fuel=str(self.fuel_type),
                            oxidizer=str(self.oxidizer_type))
+                raise UnsupportedPropellantPairError(
+                    f"Propellant pair '{self.fuel_type}'/'{self.oxidizer_type}' "
+                    f"is not in the built-in combustion table and could not be "
+                    f"solved with CEA, so no combustion solution exists for it. "
+                    f"HRMA does not publish placeholder performance for an "
+                    f"unmodelled pair. Choose a supported pair "
+                    f"({', '.join(sorted({f'{f}/{o}' for f, o in combinations}))}) "
+                    f"or one that maps to a CEA propellant card.",
+                    fuel=self.fuel_type, oxidizer=self.oxidizer_type,
+                    validity=dict(self.combustion_validity or {}))
 
     # ------------------------------------------------------------------
     # CANLI CEA köprüsü (2026-07-22 Raptor entegrasyonu, denetim madde 1)
@@ -2665,11 +2772,16 @@ class LiquidRocketEngine:
                 (2.0 / (g + 1.0)) * (1.0 + (g - 1.0) / 2.0 * M_e ** 2)
             ) ** ((g + 1.0) / (2.0 * (g - 1.0)))
             epsilon_optimal = max(2.5, min(epsilon_optimal, 1000))
+            self._expansion_optimum_fallback = False
         except Exception:
             # Son çare: kaba yaklaşım (eski fallback korunuyor)
             pressure_ratio = self.P_c / max(self.P_e, 1e-9)
             epsilon_optimal = pressure_ratio ** (1/g) * ((g+1)/2) ** ((g+1)/(2*(g-1)))
             epsilon_optimal = max(4, min(epsilon_optimal, 300))
+            # Faz 4B (bulgu B1): bu dala düşüldüğünde ortam-eşlenik optimum
+            # ÇÖZÜLEMEMİŞTİR; kaba bir yaklaşım kullanılır. design_summary
+            # bunu okur ve o koşuyu 'OPTIMIZED' saymaz.
+            self._expansion_optimum_fallback = True
 
         # Kullanıcı genişleme oranı verdiyse lüle SABİTTİR: her irtifada aynı
         # ε kullanılır ve çıkış basıncı ε'dan izentropik olarak çözülür
@@ -3470,7 +3582,10 @@ class LiquidRocketEngine:
         ox_viscosity = ox_props.get('viscosity', 0.0005)  # Pa·s
         
         if self.injector_type == 'impinging':
-            # NASA-validated impinging jet design
+            # Çarpışmalı (impinging) jet düzeni. NOT: burada "NASA
+            # doğrulamalı" deniyordu — depoda böyle bir doğrulama kaydı
+            # yok. Açı ve hız değerleri aşağıda kaynaklarıyla birlikte
+            # veriliyor; iddia değil, girdi kabulü.
             injection_angle = 60  # degrees between jets
             
             # Realistic injection velocities from flight data
@@ -4344,7 +4459,40 @@ class LiquidRocketEngine:
         # tablosu bunların GERÇEK ölçülerini kullanır (tekrar hesap yok).
         manufacturing_analysis = self._analyze_manufacturing_requirements(
             cooling=cooling, injector=injector)
-        
+
+        # --- Tasarım durumu: 'OPTIMIZED' artık bir KOŞUL (Faz 4B, bulgu B1) ---
+        # Burada koşulsuz 'OPTIMIZED' yazıyordu (:4492). Sıvı motorda tasarıma
+        # FİİLEN uygulanan tek eniyileme, genişleme oranının ortam-eşlenik
+        # optimumda seçilmesidir (pe = pa; Sutton & Biblarz 9. baskı Böl. 3 —
+        # verilen irtifada itkiyi maksimize eden ε). Kullanıcı ε'yu kendisi
+        # verdiyse bu eniyileme ÇALIŞMAZ, lüle sabittir; kapalı-form çözüm
+        # başarısız olup kaba yaklaşıma düşüldüyse de eniyileme BAŞARILI
+        # dönmemiştir. Karışım oranı optimumu (_solve_optimal_mixture_ratio)
+        # yalnız DANIŞMA amaçlıdır — tasarım MR'ını değiştirmez — bu yüzden
+        # durumu yükseltmez, sadece 'optimizations_applied' listesinde adı
+        # geçmez.
+        eps_kullanici = getattr(self, 'expansion_ratio_input', None)
+        eps_yedege_dustu = bool(getattr(self, '_expansion_optimum_fallback',
+                                        False))
+        eniyilemeler = []
+        if eps_kullanici is None and not eps_yedege_dustu:
+            eniyilemeler.append(
+                'expansion ratio chosen at the ambient-matched optimum '
+                '(pe = pa) for the design altitude')
+        if eniyilemeler:
+            design_status = DESIGN_STATUS_OPTIMIZED
+            design_status_basis = eniyilemeler
+        else:
+            design_status = DESIGN_STATUS_CALCULATED
+            if eps_kullanici is not None:
+                gerekce = ('the expansion ratio was supplied by the user, so '
+                           'no expansion optimisation was performed')
+            else:
+                gerekce = ('the ambient-matched expansion optimum could not be '
+                           'solved in closed form; a coarse approximation was '
+                           'used instead')
+            design_status_basis = [gerekce]
+
         return {
             # Input parameters
             'thrust': self.F,
@@ -4486,10 +4634,15 @@ class LiquidRocketEngine:
                     injector['critical_weber_number_basis'],
             },
 
-            # --- Optimal Design Summary ---
+            # --- Design Summary ---
             'design_summary': {
-                'title': f'Liquid Motor ({self.fuel_type}/{self.oxidizer_type}) - Optimal Design',
-                'status': 'OPTIMIZED',
+                'title': f'Liquid Motor ({self.fuel_type}/{self.oxidizer_type}) - Design Summary',
+                'status': design_status,
+                # Etiketin NEDEN o olduğu ve hangi eniyilemenin FİİLEN
+                # uygulandığı okunabilir olmalı: etiketin tek başına gezmesi
+                # bu bulgunun ta kendisiydi.
+                'status_basis': design_status_basis,
+                'optimizations_applied': eniyilemeler,
                 'key_dimensions': {
                     'chamber_diameter_mm': cooling['chamber_diameter'],  # already in mm
                     'chamber_length_mm': cooling['chamber_length'],  # already in mm
@@ -4517,8 +4670,13 @@ class LiquidRocketEngine:
                     'mixture_ratio': self.MR,
                     'total_mass_flow_kg_s': self.mdot_total,
                 },
+                # v2.6.26 (bulgu B1): metin koşulsuz "design optimised" diyordu.
+                # Hiçbir eniyileme çalışmadığında bu iddia yanlıştı; fiil artık
+                # duruma göre seçilir.
                 'recommendation': (
-                    f'Liquid engine design optimised for the given parameters. '
+                    f'Liquid engine design '
+                    f'{"optimised" if eniyilemeler else "sized"} for the given '
+                    f'parameters. '
                     f'T/W={thrust_to_weight:.1f}, Isp(vac)={actual_isp_vac:.0f} s, '
                     f'c*={self.c_star:.0f} m/s. '
                     f'{self.cooling_type.capitalize()} cooling, {self.injector_type} injector.'

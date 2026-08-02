@@ -63,12 +63,36 @@ def _post(path, payload=None):
 
 @pytest.fixture(scope='module')
 def solid_results():
-    return _post('/calculate_solid')
+    return _post('/calculate_solid', SOLID_FIXTURE_GIRDI)
+
+
+# Bu beş değer, `/calculate_liquid` ucunun ESKİDEN gövdede eksik alanlar için
+# sessizce uyguladığı varsayılanların birebir aynısıdır. Faz 4B'de (bulgu 57.3)
+# uç, eksik kritik girdide 422 dönmeye başladı: boş gövde HTTP 200 ile eksiksiz
+# bir tasarım döndürüyor ve çağıran bu sayıların kendi girdisinden mi
+# varsayılandan mı geldiğini ayırt edemiyordu. Fixture'ın SINADIĞI sayılar
+# değişmesin diye aynı değerler burada AÇIKÇA yazıldı — testin motoru artık
+# görünür.
+SOLID_FIXTURE_GIRDI = {
+    'chamber_diameter': 100,
+    'grain_length': 500,
+    'core_diameter': 30,
+    'chamber_pressure': 40,
+    'propellant_type': 'apcp',
+}
+
+LIQUID_FIXTURE_GIRDI = {
+    'thrust': 10000,
+    'chamber_pressure': 100,
+    'mixture_ratio': 2.5,
+    'fuel_type': 'rp1',
+    'oxidizer_type': 'lox',
+}
 
 
 @pytest.fixture(scope='module')
 def liquid_results():
-    return _post('/calculate_liquid')
+    return _post('/calculate_liquid', LIQUID_FIXTURE_GIRDI)
 
 
 @pytest.fixture(scope='module')

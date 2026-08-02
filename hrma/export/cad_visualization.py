@@ -267,6 +267,54 @@ def _injector_spec(motor_data):
     }
 
 
+#: Yapısal analiz sonucunda kamara/kasa cidarının yaşadığı ÜÇ ayrı şema.
+#: Motor tipleri aynı büyüklüğü farklı adla yayımlıyor — imalata giden STEP
+#: yalnız ilkini tanıdığı için katı ve sıvı motorda cidarı BULAMIYOR ve
+#: 0.045·D geometrik yedeğine düşüyordu (Faz 4B / A8).
+#: Ölçüm (Ø100 mm katı motor, HEAD a7ff1e7): analiz
+#: case_analysis.wall_thickness_mm = 2.40 mm, STEP'in ürettiği cidar 4.50 mm.
+#: Her giriş: (blok_adı, as_designed_anahtar, önerilen_anahtar,
+#: as_designed_kesin_mi) — değerler mm.
+#: Son alan: blokta ``design_mode`` yoksa as-designed kalınlığın gerilmelerin
+#: GERÇEKTEN hesaplandığı kalınlık olduğunu bildirir. Katıda
+#: ``hoop_stress = P·r/t_wall`` doğrudan ``_case_design()``in verdiği
+#: ``wall_thickness_mm`` ile, sıvıda ``chamber_structure.wall_thickness`` ile
+#: hesaplanır; önerilen/gerekli kalınlık ayrı bir alandır. Öneriyi çizmek
+#: kullanıcının tasarımını sessizce değiştirirdi (hibritte Y5 ile kapatılan
+#: kusurun aynısı).
+CHAMBER_WALL_SCHEMAS = (
+    # hibrit / ortak yapısal modül (analysis/structural_analysis.py)
+    ('chamber_analysis', 'wall_thickness_used_mm', 'recommended_thickness',
+     False),
+    # katı motor (engines/solid_rocket_engine.py::_calculate_structural_analysis)
+    ('case_analysis', 'wall_thickness_mm', 'recommended_wall_thickness_mm',
+     True),
+    # sıvı motor (engines/liquid_rocket_engine.py::_calculate_structural_loads)
+    ('chamber_structure', 'wall_thickness', 'required_wall_thickness', True),
+)
+
+
+def _chamber_wall_block(struct):
+    """Yapısal sonuçtaki cidar bloğunu şema sırasına göre bulur.
+
+    Döner: (blok_sözlüğü, as_designed_mm|None, önerilen_mm|None, blok_adı|None,
+            as_designed_kesin_mi)
+    """
+    struct = struct or {}
+    for block_name, used_key, recommended_key, as_designed_is_authoritative \
+            in CHAMBER_WALL_SCHEMAS:
+        block = struct.get(block_name)
+        if not isinstance(block, dict):
+            continue
+        used_mm = _real_nested(struct, (block_name, used_key))
+        recommended_mm = _real_nested(struct, (block_name, recommended_key))
+        if used_mm is None and recommended_mm is None:
+            continue
+        return (block, used_mm, recommended_mm, block_name,
+                as_designed_is_authoritative)
+    return {}, None, None, None, False
+
+
 def _chamber_wall_design(motor_data):
     """Kamara cidarı: ÇİZİLECEK kalınlık + yapısal öneri + hangi SF'nin geçerli olduğu.
 
@@ -299,28 +347,31 @@ def _chamber_wall_design(motor_data):
         note            -> çizilen ile önerilen farklıysa uyarı metni, yoksa None
     """
     struct = (motor_data or {}).get('structural_analysis') or {}
-    chamber = struct.get('chamber_analysis') or {}
-
-    recommended_mm = _real_nested(struct, ('chamber_analysis', 'recommended_thickness'))
-    used_mm = _real_nested(struct, ('chamber_analysis', 'wall_thickness_used_mm'))
+    # Üç motor tipinin üç ayrı şeması tek yerden çözülür (A8).
+    (chamber, used_mm, recommended_mm, block_name,
+     as_designed_is_authoritative) = _chamber_wall_block(struct)
     design_mode = chamber.get('design_mode')
     safety_factor = (_real_scalar(chamber.get('safety_factor_total'))
-                     or _real_scalar(chamber.get('hoop_safety_factor')))
+                     or _real_scalar(chamber.get('hoop_safety_factor'))
+                     or _real_scalar(chamber.get('safety_factor')))
 
     # Kullanıcının cidarı YALNIZ 'verify' modunda açıkça bildirilmiştir.
     # Mod bilinmiyorsa (eski sözlükler) eski davranış korunur: öneri çizilir.
-    if design_mode == 'verify' and used_mm is not None:
+    if (used_mm is not None
+            and (design_mode == 'verify' or as_designed_is_authoritative)):
         thickness_mm = used_mm
-        # Sayı yine yapısal analizin çıktı alanından (wall_thickness_used_mm)
-        # gelir; 'verify' modunda bu, çağıranın bildirdiği as-designed cidardır.
+        # Sayı yine yapısal analizin çıktı alanından (wall_thickness_used_mm /
+        # wall_thickness_mm / wall_thickness) gelir; bu, gerilmelerin
+        # hesaplandığı as-designed cidardır.
         source = ('structural analysis (as-designed wall thickness, '
-                  'verified against the pressure load)')
+                  f'verified against the pressure load) [{block_name}]')
     elif recommended_mm is not None:
         thickness_mm = recommended_mm
-        source = 'structural analysis (recommended thickness)'
+        source = f'structural analysis (recommended thickness) [{block_name}]'
     elif used_mm is not None:
         thickness_mm = used_mm
-        source = 'structural analysis (thickness used in the stress check)'
+        source = ('structural analysis (thickness used in the stress check) '
+                  f'[{block_name}]')
     else:
         thickness_mm = None
         source = 'not available'
@@ -342,6 +393,7 @@ def _chamber_wall_design(motor_data):
         'design_mode': design_mode,
         'safety_factor': safety_factor,
         'note': note,
+        'schema': block_name,
     }
 
 
@@ -1809,8 +1861,27 @@ class MotorCADDesigner:
 
         return 0.0
 
+    #: STL dosyalarının birimi. STL formatının birim başlığı YOKTUR; CAD ve
+    #: dilimleyici yazılımların fiili sözleşmesi milimetredir ve bu projenin
+    #: STEP çıktısı da (AP214) mm'dir. Mesh'ler ise METRE ile kurulur, bu
+    #: yüzden dışa aktarımda ölçeklenirler.
+    #: Faz 4B / A1 — ölçülen kusur: aynı ZIP'te STEP zarfı 1069.62 mm iken
+    #: STL zarfı 1.0696 (metre) idi; README ve ZIP manifesti "mm" diyordu.
+    #: 1000× birim hatası, kapatılmış tank STEP hatasının aynı sınıfı.
+    STL_UNITS_PER_METRE = 1000.0
+
     def export_stl_files(self, assembly_meshes: List, output_dir: str = None):
         """Export STL files for 3D printing/machining.
+
+        BİRİM SÖZLEŞMESİ (A1): dosyalar MİLİMETRE yazılır — STEP ile aynı.
+        Mesh'ler metre kurulduğu için dışa aktarımda ``STL_UNITS_PER_METRE``
+        ile ölçeklenmiş bir KOPYA yazılır; çağıranın mesh nesneleri (Plotly
+        görselleştirmesi ve kütle dökümü aynı nesneleri kullanır) DEĞİŞMEZ.
+
+        YOL SÖZLEŞMESİ (A10): dönen liste MUTLAK dosya yollarıdır ve gerçekten
+        yazılan dosyaları gösterir; ilk eleman varsa birleşik
+        ``motor_assembly.stl``tir. Çağıran bu yolları kullanmalıdır — sabit
+        bir dizinden (``cwd/cad_exports``) okumak yanlış/eski dosya sunar.
 
         v2.6.26 — İSTEKLER ARASI KİRLENME KAPATILDI.
 
@@ -1832,24 +1903,40 @@ class MotorCADDesigner:
         """
 
         import os
+        from hrma.export.export_workspace import (
+            atomic_produce, new_workspace, purge_stale_workspaces)
         if output_dir is None:
-            import tempfile
-            output_dir = tempfile.mkdtemp(prefix='hrma_stl_')
+            purge_stale_workspaces()  # D10: çökme sonrası kalanları topla
+            output_dir = new_workspace('hrma_stl_')
         else:
             os.makedirs(output_dir, exist_ok=True)
+        output_dir = os.path.abspath(output_dir)
 
         exported_files = []
         valid_meshes = []
+
+        def _mm(mesh):
+            """Metre kurulmuş mesh'in MİLİMETRE ölçekli KOPYASI (A1).
+
+            Kopya şart: aynı nesneler Plotly görselleştirmesinde ve kütle
+            dökümünde kullanılıyor; yerinde ölçeklemek onları da bozardı.
+            """
+            scaled = mesh.copy()
+            scaled.apply_scale(self.STL_UNITS_PER_METRE)
+            return scaled
 
         try:
             # First export individual components
             for name, mesh in assembly_meshes:
                 if mesh is not None and hasattr(mesh, 'export'):
-                    filename = f"{output_dir}/{name.lower().replace(' ', '_')}.stl"
+                    filename = os.path.join(
+                        output_dir, f"{name.lower().replace(' ', '_')}.stl")
                     try:
-                        mesh.export(filename)
+                        mesh_mm = _mm(mesh)
+                        # Atomik yazma (D1): yarım STL indirilmesin.
+                        atomic_produce(filename, mesh_mm.export)
                         exported_files.append(filename)
-                        valid_meshes.append(mesh)
+                        valid_meshes.append(mesh_mm)
                         print(f"Successfully exported: {filename}")
                     except Exception as e:
                         # OPUS DENETİM DÜZELTMESİ: eski kod hata durumunda
@@ -1865,9 +1952,11 @@ class MotorCADDesigner:
             if valid_meshes:
                 try:
                     import trimesh.util
+                    # valid_meshes ZATEN mm ölçekli kopyalardır (bkz. _mm)
                     combined_mesh = trimesh.util.concatenate(valid_meshes)
-                    assembly_filename = f"{output_dir}/motor_assembly.stl"
-                    combined_mesh.export(assembly_filename)
+                    assembly_filename = os.path.join(output_dir,
+                                                     'motor_assembly.stl')
+                    atomic_produce(assembly_filename, combined_mesh.export)
                     exported_files.append(assembly_filename)
                     print(f"Successfully exported combined assembly: {assembly_filename}")
                 except Exception as e:

@@ -758,18 +758,45 @@ class SixDOFTrajectory:
         (pitch doğal frekansı %1.5 yüksek). Kaynak: paralel eksen teoremi;
         tekdüze silindir atalet momenti standart tablo.
 
+        A6 (v2.6.26): F162 yalnız DOCSTRING'i güncellemişti; paralel eksen
+        terimi components-yok dalına HİÇ girmemişti (``git show ea6582b``
+        farkında bu dalın gövdesi değişmiyor). İki dal aynı aracı farklı
+        tarif edildiğinde farklı I_t üretiyordu: tekdüze bir çubuğu nokta
+        kütlelere bölüp ``components`` olarak versen Σ m_i(x_i − x_cg)²
+        = mL²/12 + m(x_cg − L/2)² çıkar, yani components dalı Steiner
+        terimini ZATEN içeriyordu. ÖLÇÜM (m = 25 kg, r = 0.05 m, L = 2 m,
+        x_cg = 0.55·L): eski 8.348958 kg·m², yeni 8.598958 kg·m² — eski
+        değer %2.91 EKSİKTİ (pitch doğal frekansı %1.5 yüksek). Yukarıdaki
+        F162 notundaki %3.0 aynı farkın ESKİ değere bölünmüşüdür
+        (0.25/8.348958); %2.91 ise doğru değere bölünmüşüdür (0.25/8.598958).
+
         Sınır (dürüst beyan): bileşenler nokta kütle sayılır; uzun bir
         bileşenin kendi boyuna öz-ataleti (m·l²/12) hesaba katılmaz, bu da
         I_t'yi bir miktar EKSİK tahmin eder. Roll ataleti her iki modelde de
         tekdüze silindir kabulüdür (bileşenlerden etkilenmez).
+
+        İkinci sınır (dürüst beyan): her iki dal da ataleti BEYAN EDİLEN
+        x_cg noktası etrafında, kütle modelini burun-referanslı [0, L]
+        çerçevesinde alır. Tekdüze bir çubuğun kendi ağırlık merkezi L/2'dir;
+        x_cg ≠ L/2 verildiğinde dağılım fiilen tekdüze DEĞİLDİR ve bu sayı
+        bir kestirimdir. Motoru kıçta toplu bir araçta gerçek merkezcil
+        atalet bu değerden büyük, kütlesi öne doğru düzgün artan bir araçta
+        küçük çıkar; sapma mertebesi m·(x_cg − L/2)² kadardır.
         """
         r = self.aero.d / 2.0
         I_x = 0.5 * m * r * r
-        if self.components is None:
-            I_t = m * (3.0 * r * r + self.aero.L ** 2) / 12.0
-            return I_x, I_t
         if x_cg is None:
             x_cg = self.x_cg_full
+        if self.components is None:
+            # Merkezcil (geometrik merkezden geçen) terim + Huygens-Steiner
+            # kaydırması. Euler denklemleri ve aerodinamik moment kolu
+            # (r_cp_b = x_cp − x_cg) x_cg etrafında yazıldığı için atalet de
+            # aynı nokta etrafında olmalı; components dalıyla bu sayede
+            # birebir aynı sözleşmeyi kullanır.
+            d_cg = x_cg - 0.5 * self.aero.L
+            I_t = m * (3.0 * r * r + self.aero.L ** 2) / 12.0 \
+                + m * d_cg * d_cg
+            return I_x, I_t
         frac = min(max((m - self.m_dry) / max(self.m_prop, 1e-9), 0.0), 1.0)
         I_t = m * (3.0 * r * r) / 12.0
         for m_i, x_i, is_prop in self.components:
@@ -917,13 +944,25 @@ class SixDOFTrajectory:
                         method='RK45', max_step=max_step,
                         events=[hit_ground, apogee_event, tumble_event],
                         dense_output=False, rtol=1e-5, atol=1e-7)
-        end_reason = 'time_limit'
-        if sol.t_events[0].size:
+        # B5 — ÇÖZÜCÜ BAŞARISI DENETLENİR (v2.6.26). Eski kod ``sol.success``
+        # ve ``sol.message`` alanlarını HİÇ okumuyordu: adım küçültmede
+        # tıkanan (``status = −1``) bir entegrasyonda ``sol.y`` yine de
+        # kesildiği ana kadarki kısmi yörüngeyi taşıdığı için, çökmenin
+        # olduğu yükseklik "apoje", o ana kadarki α ise "kararlılık hükmü"
+        # diye yayımlanabiliyordu. Artık türetilmiş büyüklükler yalnız
+        # yakınsayan çözümde yayımlanır.
+        converged = bool(sol.success)
+        solver_message = str(getattr(sol, 'message', '') or '')
+        if not converged:
+            end_reason = 'solver_failed'
+        elif sol.t_events[0].size:
             end_reason = 'ground'
         elif sol.t_events[1].size:
             end_reason = 'apogee'
         elif sol.t_events[2].size:
             end_reason = 'tumble_detected'
+        else:
+            end_reason = 'time_limit'
 
         t = sol.t
         # Entegrasyon çerçevesi (E,N,U) — tüm iç hesaplar bu sırada yapılır.
@@ -935,7 +974,11 @@ class SixDOFTrajectory:
         # Türetilmiş büyüklükler
         speed = np.linalg.norm(v, axis=0)
         alt = r[2]
-        i_apogee = int(np.argmax(alt))
+        # Çözücü ilk adımda çökerse ``sol.t`` yalnız t0'ı taşıyabilir; en kötü
+        # ihtimalle boş dizide argmax ValueError atar. Kısmi seri yine
+        # yayımlanır ama türetilmiş skaler HİÇBİRİ (bkz. aşağıdaki
+        # ``converged`` bloğu) geçerli sonuç gibi verilmez.
+        i_apogee = int(np.argmax(alt)) if alt.size else 0
         alpha_hist, mach_hist = [], []
         for k in range(len(t)):
             qk = q[:, k] / np.linalg.norm(q[:, k])
@@ -985,7 +1028,7 @@ class SixDOFTrajectory:
         r_out = r[_rows]
         v_out = v[_rows]
 
-        return {
+        out = {
             'time': t,
             'position': r_out,                # 3×N [m] (x=K, y=D, z=yukarı)
             'velocity': v_out,
@@ -1000,19 +1043,37 @@ class SixDOFTrajectory:
             'speed': speed,
             'mach': np.array(mach_hist),
             'alpha_deg': alpha_arr,
-            'apogee': float(alt[i_apogee]),
-            'apogee_time': float(t[i_apogee]),
-            'max_speed': float(speed.max()),
-            'max_mach': float(np.max(mach_hist)),
+            'apogee': float(alt[i_apogee]) if alt.size else None,
+            'apogee_time': float(t[i_apogee]) if t.size else None,
+            'max_speed': float(speed.max()) if speed.size else None,
+            'max_mach': float(np.max(mach_hist)) if mach_hist else None,
             'max_alpha_deg': max_alpha,
             'end_reason': end_reason,
             # Yatay sapmanın normu satır sırasından bağımsızdır (permütasyon
             # ortonormal) ama tutarlılık için çıktı dizisinden okunur.
-            'lateral_drift_at_end': float(np.hypot(r_out[0, -1], r_out[1, -1])),
+            'lateral_drift_at_end': (
+                float(np.hypot(r_out[0, -1], r_out[1, -1]))
+                if r_out.shape[1] else None),
+            # Statik marj / C_Nα / CP SAF GEOMETRİDİR: entegrasyondan değil
+            # Barrowman kapalı formundan gelir, bu yüzden çözücü çökse bile
+            # geçerlidir ve None'a çevrilmez.
             'static_margin_full': float(sm_full),
             'static_margin_empty': float(sm_empty),
             'stable': bool(sm_full > 1.0 and sm_empty > 1.0 and
                            max_alpha < 15.0),
             'cn_alpha': float(self.aero.cn_alpha),
             'x_cp': float(self.aero.x_cp),
+            # B5: çözücü hükmü sonucun bir parçasıdır, çağıran okuyabilsin.
+            'converged': converged,
+            'solver_message': solver_message,
         }
+        if not converged:
+            # Entegrasyon çökmüş: apoje, tepe hız/Mach, maksimum α ve
+            # kararlılık hükmü YAYIMLANMAZ. Kısmi zaman serileri (çözücünün
+            # çöküşe kadar gerçekten ürettiği değerler) korunur ama
+            # 'end_reason' = 'solver_failed' ile açıkça damgalıdır; hiçbir
+            # yerde uydurma yedek değer konmaz.
+            for _key in ('apogee', 'apogee_time', 'max_speed', 'max_mach',
+                         'max_alpha_deg', 'stable', 'lateral_drift_at_end'):
+                out[_key] = None
+        return out

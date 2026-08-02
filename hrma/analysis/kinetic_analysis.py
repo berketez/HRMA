@@ -310,17 +310,25 @@ class NozzleKineticAnalyzer:
                 temp_ratio = 2.0 / (gamma + 1.0)
             else:
                 # Supersonic expansion (simplified)
+                # B5b: ``_estimate_mach_from_area_ratio`` yakınsamazsa
+                # ValueError YÜKSELİR ve burada BİLEREK yutulmaz. Tek bir
+                # istasyonun Mach'ı belirsizse basınç, sıcaklık ve kalış
+                # süresi zinciri de belirsizdir; uydurma bir Mach ile
+                # devam etmek sessiz yanlış sonuç üretir. İstek düzeyinde
+                # hata (app.py 500) kısmi-sahte sonuçtan yeğdir.
                 mach_approx = self._estimate_mach_from_area_ratio(area_ratio, gamma)
                 pressure_ratio = (1 + (gamma-1)/2 * mach_approx**2)**(-gamma/(gamma-1))
                 temp_ratio = (1 + (gamma-1)/2 * mach_approx**2)**(-1)
-            
+
             station = {
                 'station_id': i,
                 'area_ratio': area_ratio,
                 'area': throat_area * area_ratio,
                 'pressure': pressure_chamber * pressure_ratio,
                 'temperature': temperature_chamber * temp_ratio,
-                'mach_number': self._estimate_mach_from_area_ratio(area_ratio, gamma),
+                # Boğazda (area_ratio == 1) mach_approx tanımlı değil; o dalda
+                # kök bulucuya hiç gidilmez, fonksiyon doğrudan 1.0 döner.
+                'mach_number': (1.0 if area_ratio == 1.0 else mach_approx),
                 'residence_time': 0.0,  # Will be calculated
                 'axial_position': i / (n_stations - 1)  # Normalized position
             }
@@ -333,8 +341,24 @@ class NozzleKineticAnalyzer:
         return stations
     
     def _estimate_mach_from_area_ratio(self, area_ratio: float, gamma: float) -> float:
-        """Estimate Mach number from area ratio using isentropic relations"""
-        
+        """Alan oranından Mach sayısı (izentropik alan-Mach bağıntısı).
+
+        B5b (v2.6.26): eski kod çıplak ``except:`` ile ``return 2.0``
+        yapıyordu. İki ayrı kusur vardı:
+          1. Çıplak ``except`` her şeyi (``KeyboardInterrupt`` dâhil) yutuyor,
+             hangi hatanın olduğu hiçbir yere yazılmıyordu.
+          2. Yedek değer olarak Mach 2.0 UYDURULUYORDU. Bu sayının alan
+             oranıyla hiçbir ilgisi yok: ε=100 için gerçek çözüm M≈5.4,
+             ε=2 için M≈2.2. Uydurma Mach doğrudan istasyon basıncına,
+             sıcaklığına ve kalış süresine (``_calculate_residence_times``)
+             giriyor, yani sessiz bir yanlış sonuç üretiyordu.
+        Artık yakınsamama sessizce yutulmaz: ``ValueError`` yükselir ve
+        kararı çağıran verir. Yedek/varsayılan Mach değeri YOKTUR.
+
+        Raises:
+            ValueError: kök bulucu yakınsamazsa veya süpersonik olmayan
+                (M ≤ 1) bir kök dönerse.
+        """
         if area_ratio == 1.0:
             return 1.0
         elif area_ratio < 1.0:
@@ -344,16 +368,44 @@ class NozzleKineticAnalyzer:
             # Supersonic - use iterative solution
             def mach_area_relation(M):
                 return (1/M) * ((2/(gamma+1)) * (1 + (gamma-1)/2 * M**2))**((gamma+1)/(2*(gamma-1))) - area_ratio
-            
-            # Initial guess
-            M_guess = 2.0 * np.sqrt(area_ratio - 1)
-            
+
+            # Başlangıç tahmini SÜPERSONİK dalda tutulur. Alan-Mach bağıntısı
+            # ε > 1 için iki köklüdür (biri M < 1, biri M > 1); eski tahmin
+            # 2·√(ε−1) küçük ε'de 1'in altında kalıyor ve kök bulucu SUBSONİK
+            # köke iniyordu. ÖLÇÜM (γ=1.25, ε=1.0381 — 50 istasyonlu ε=6.25
+            # lülesinin ikinci istasyonu): eski tahmin 0.3904 → kök 0.80498,
+            # yani süpersonik lülede subsonik Mach. Eski kod bunu
+            # ``max(1.001, mach)`` ile 1.001'e KIRPIYORDU: uydurma bir değer,
+            # ilk ~15 istasyonun hepsinde aynı sahte 1.001. Tabanı 1.5 yapmak
+            # kökü doğru dala kilitler — 8 farklı ε (2…200) × 49 istasyon =
+            # 392 örnekte 392/392 süpersonik köke yakınsadı (|f| < 1e−8).
+            M_guess = max(1.5, 2.0 * np.sqrt(area_ratio - 1))
+
+            # fsolve yakınsamama durumunda İSTİSNA ATMAZ; sessizce kötü bir
+            # kök döndürür. Bu yüzden ``full_output`` ile ``ier`` bayrağı
+            # okunur (ier == 1 → çözüm bulundu).
             try:
-                mach = fsolve(mach_area_relation, M_guess)[0]
-                return max(1.001, mach)  # Ensure supersonic
-            except:
-                return 2.0  # Fallback value
-    
+                root, _info, ier, mesg = fsolve(
+                    mach_area_relation, M_guess, full_output=True)
+            except (ValueError, TypeError, ArithmeticError,
+                    FloatingPointError) as exc:
+                raise ValueError(
+                    f'Mach could not be solved from area ratio '
+                    f'{area_ratio:.4f} (gamma={gamma:.4f}): {exc}'
+                ) from exc
+            if ier != 1:
+                raise ValueError(
+                    f'Area-Mach relation did not converge for area ratio '
+                    f'{area_ratio:.4f} (gamma={gamma:.4f}): {mesg}')
+            mach = float(root[0])
+            if not np.isfinite(mach) or mach <= 1.0:
+                raise ValueError(
+                    f'Area-Mach solver returned a non-supersonic root '
+                    f'M={mach!r} for area ratio {area_ratio:.4f} '
+                    f'(gamma={gamma:.4f}); the supersonic branch requires '
+                    f'M > 1.')
+            return mach
+
     def _calculate_residence_times(self, stations: List[Dict], geometry: Dict, chamber_conditions: Dict):
         """Calculate residence time at each station"""
         

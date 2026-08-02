@@ -16,12 +16,12 @@ kullanıcıya AÇIKÇA raporlar (sessiz düşüş yok).
 """
 
 import os
-import tempfile
-from datetime import datetime
 
 import numpy as np
 
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+from hrma.export.export_workspace import (
+    atomic_produce, new_workspace, purge_stale_workspaces)
 from hrma.utils.input_guard import safe_name
 
 try:
@@ -68,11 +68,28 @@ def _revolve_profile(points_rz):
     return part.part
 
 
+def _export_step_atomic(shape, path):
+    """STEP dosyasını ATOMİK yazar (yarım dosya okunamasın — D1)."""
+    return atomic_produce(path, lambda tmp: export_step(shape, tmp))
+
+
 def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
-    """Motor bileşenlerini STEP olarak üretir; dosya yolu listesi döner.
+    """Motor bileşenlerini STEP olarak üretir; dosya yolu SÖZLÜĞÜ döner.
 
     motor_type: 'hybrid' (grain+enjektör), 'solid' (grain var, enjektör yok),
     'liquid' (enjektör var, grain yok).
+
+    SÖZLEŞME (D1, v2.6.26): ``out_dir`` verilmezse her çağrı KENDİ benzersiz
+    geçici dizinini alır (``mkdtemp``). Eski davranış saniye çözünürlüklü bir
+    zaman damgasıydı ve ``exist_ok=True`` ile aynı saniyedeki iki istek aynı
+    dizine yazıyordu. Dönen sözlüğün değerleri MUTLAK yollardır; çağıran
+    dosyaları okuduktan sonra dizini silmelidir
+    (``export_workspace.cleanup_workspace``).
+
+    A8 (fail-closed): kamara/kasa cidar kalınlığı yapısal analizden
+    okunamazsa ``ValueError`` yükseltilir. Eskiden ``0.045·D_ch`` yedeğine
+    düşülüyordu; ölçüldü (Ø100 mm katı motor): analiz 2.40 mm, STEP 4.50 mm —
+    imalata analizde hiç doğrulanmamış bir cidar gidiyordu.
     """
     _require()
     has_grain = motor_type in ('hybrid', 'solid')
@@ -81,10 +98,13 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     md = motor_results or {}
     # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
     name = safe_name(md.get('motor_name'))
-    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     if out_dir is None:
-        out_dir = os.path.join(tempfile.gettempdir(), f'hrma_step_{stamp}')
-    os.makedirs(out_dir, exist_ok=True)
+        # Çökme sonrası kalanları topla (D10), sonra kendi dizinini aç.
+        purge_stale_workspaces()
+        out_dir = new_workspace('hrma_step_')
+    else:
+        os.makedirs(out_dir, exist_ok=True)
+    out_dir = os.path.abspath(out_dir)
 
     # ---- boyutlar (mm) ----
     L = _num(md.get('chamber_length'), 0.3) * 1000
@@ -95,10 +115,17 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
                    _num(md.get('grain_length'), 0.8 * L / 1000) * 1000), 0.92 * L)
     r_p0 = _num(gd.get('port_diameter_initial_mm'),
                 _num(md.get('port_diameter_initial'), 0.03) * 1000) / 2
-    struct = md.get('structural_analysis') or {}
-    wall = min(max(_num((struct.get('chamber_analysis') or {})
-                        .get('recommended_thickness'), 0.045 * D_ch), 3.0),
-               0.12 * D_ch)
+    # Cidar TEK çözümleyiciden gelir (üç motor tipinin üç ayrı anahtar şeması
+    # orada tanınır): chamber_analysis / case_analysis / chamber_structure.
+    from hrma.export.cad_visualization import _chamber_wall_thickness_m
+    wall_m, wall_src = _chamber_wall_thickness_m(md)
+    if wall_m is None:
+        raise ValueError(
+            'chamber wall thickness is not available from the structural '
+            'analysis (looked for chamber_analysis / case_analysis / '
+            'chamber_structure); refusing to emit a manufacturing STEP with '
+            'an assumed wall. Run the structural analysis first.')
+    wall = wall_m * 1000.0
     liner = min(max(0.02 * D_ch, 1.5), 5.0)
     cap = min(max(1.6 * wall, 8.0), 0.3 * rc + 8.0)
 
@@ -112,18 +139,19 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     ]
     chamber = _revolve_profile(chamber_profile)
     files['chamber'] = os.path.join(out_dir, f'{name}_chamber.step')
-    export_step(chamber, files['chamber'])
+    _export_step_atomic(chamber, files['chamber'])
     chamber.label = 'chamber'
     solids.append(chamber)
 
     # ---- Nozul: iç kontur + duvar ofseti (tek kontur kaynağı) ----
-    pts, meta = sample_nozzle_inner_contour(md)
+    # İmalat çıktısı: ıraksak boy hesaplanmadıysa katı ÜRETİLMEZ (A5).
+    pts, meta = sample_nozzle_inner_contour(md, require_solved_length=True)
     wall_noz = max(3.0, 0.1 * _num(md.get('throat_diameter'), 0.02) * 1000)
     inner = [(L + z, r) for z, r in pts]
     outer = [(z, r + wall_noz) for z, r in reversed(inner)]
     nozzle = _revolve_profile(inner + outer)
     files['nozzle'] = os.path.join(out_dir, f'{name}_nozzle.step')
-    export_step(nozzle, files['nozzle'])
+    _export_step_atomic(nozzle, files['nozzle'])
     nozzle.label = 'nozzle'
     solids.append(nozzle)
 
@@ -138,7 +166,7 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
                          rotation=(0, 90, 0), mode=Mode.SUBTRACT)
         grain = grain_bp.part
         files['fuel_grain'] = os.path.join(out_dir, f'{name}_fuel_grain.step')
-        export_step(grain, files['fuel_grain'])
+        _export_step_atomic(grain, files['fuel_grain'])
         grain.label = 'fuel_grain'
         solids.append(grain)
 
@@ -161,7 +189,7 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
                              rotation=(0, 90, 0), mode=Mode.SUBTRACT)
         injector = inj_bp.part
         files['injector'] = os.path.join(out_dir, f'{name}_injector.step')
-        export_step(injector, files['injector'])
+        _export_step_atomic(injector, files['injector'])
         injector.label = 'injector'
         solids.append(injector)
 
@@ -169,7 +197,7 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     # Parça adları CAD ağacında görünsün (SolidWorks/Fusion 'COMPOUND ×5' sorunu)
     assembly = Compound(children=solids, label='HRMA_motor_assembly')
     files['assembly'] = os.path.join(out_dir, f'{name}_assembly.step')
-    export_step(assembly, files['assembly'])
+    _export_step_atomic(assembly, files['assembly'])
 
     return files
 
@@ -203,10 +231,13 @@ def generate_tank_step(tank_data, out_dir=None):
     """
     _require()
 
-    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # D1: saniye çözünürlüklü zaman damgası yerine istek başına benzersiz dizin.
     if out_dir is None:
-        out_dir = os.path.join(tempfile.gettempdir(), f'hrma_tank_step_{stamp}')
-    os.makedirs(out_dir, exist_ok=True)
+        purge_stale_workspaces()
+        out_dir = new_workspace('hrma_tank_step_')
+    else:
+        os.makedirs(out_dir, exist_ok=True)
+    out_dir = os.path.abspath(out_dir)
 
     files = {}
     for key in ('fuel_tank', 'oxidizer_tank'):
@@ -232,5 +263,5 @@ def generate_tank_step(tank_data, out_dir=None):
             with Locations((Lc, 0, 0)):
                 Sphere(radius=r)
         files[key] = os.path.join(out_dir, f'{key}.step')
-        export_step(bp.part, files[key])
+        _export_step_atomic(bp.part, files[key])
     return files

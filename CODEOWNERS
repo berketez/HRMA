@@ -1,0 +1,38 @@
+# HRMA code owners
+#
+# GitHub requests a review from the owner of every path a pull request touches.
+#
+# HONEST LIMIT: this file only *requests* reviews. It becomes a requirement
+# only when branch protection with "Require review from Code Owners" is enabled
+# on `main`. As of 2026-08-02 `main` is not protected, so treat the entries
+# below as the documented owner of each area, not as an enforced gate.
+#
+# Format: <path pattern>  <owner>
+
+# Default owner for everything not matched below.
+*                                   @berketez
+
+# --- Physics and analysis: a wrong number here reaches a real motor ---------
+/hrma/engines/                      @berketez
+/hrma/analysis/                     @berketez
+/hrma/data/burn_rate_db.py          @berketez
+/hrma/constants.py                  @berketez
+
+# --- Verification & validation: the evidence base for every claim ----------
+/hrma/validation/                   @berketez
+/hrma/data/validation_records/      @berketez
+/docs/VALIDATION_STATUS.md          @berketez
+/docs/STANDART_ATIFLARI.md          @berketez
+/docs/BULGU_KAYIT_DEFTERI.md        @berketez
+
+# --- Export: units and geometry cross the module boundary here -------------
+/hrma/export/                       @berketez
+
+# --- Release chain: the two worst incidents in this project's history ------
+/packaging/                         @berketez
+/.github/                           @berketez
+/CODEOWNERS                         @berketez
+/SECURITY.md                        @berketez
+
+# --- Guard tests: the contract, not an afterthought ------------------------
+/tests/                             @berketez

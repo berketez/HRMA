@@ -14,9 +14,23 @@ STEP dosyası indiriyordu.
 
 Hata yalnızca veri VARKEN ortaya çıkıyordu: veri yoksa varsayılan 0.3 metreydi
 ve ×1000 ile doğru 300 mm'yi veriyordu. Bu yüzden gözden kaçmıştı.
-"""
 
-import re
+---------------------------------------------------------------------------
+Faz 4B / F — BU BEKÇİ TESTİ KUSURU KORUYORDU (2 Ağustos 2026)
+
+Eski ölçüm yöntemi STEP dosyasının METNİNDEKİ ``CARTESIAN_POINT`` girdilerini
+tarıyordu ve "gövde boyu 800 mm" iddiasını GEÇİRİYORDU. Oysa aynı dosya CAD
+çekirdeğiyle geri okunduğunda (``import_step(...).bounding_box()``) katının
+gerçek zarfı **1100 mm** çıkıyor. Sebep: yarıküre başlıklar
+``SPHERICAL_SURFACE`` olarak yazılır ve kürenin kutupları dosyada nokta
+olarak GEÇMEZ; metin taraması yalnız silindirin uçlarını görür.
+
+Yani test, ölçtüğünü sandığı şeyi ölçmüyordu. Artık ölçüm CAD çekirdeğiyle
+yapılır. Ölçülen fark analiz modeliyle katı modelin FARKLI GEOMETRİLER
+olmasından kaynaklanır (A11: analiz düz kapaklı silindir, STEP silindir + iki
+TAM küre) ve bu dosyada açıkça raporlanır; tank tek-geometri işi ayrı bir
+dalgada yapılacak.
+"""
 
 import pytest
 
@@ -26,18 +40,22 @@ pytestmark = pytest.mark.skipif(
     not getattr(step_export, 'BUILD123D_AVAILABLE', True),
     reason='build123d kurulu değil (STEP üretimi atlanır)')
 
+#: Testte üretilen tankların analiz (girdi) boyutları — mm.
+TANK_INPUT_MM = {
+    'fuel_tank': {'diameter': 300.0, 'length': 800.0},
+    'oxidizer_tank': {'diameter': 300.0, 'length': 900.0},
+}
 
-def _bbox(path):
-    """STEP dosyasındaki CARTESIAN_POINT'lerden koordinat aralıklarını çıkarır."""
-    txt = open(path, encoding='utf-8', errors='ignore').read()
-    xs, ys, zs = [], [], []
-    for grp in re.findall(r"CARTESIAN_POINT\s*\(\s*''\s*,\s*\(([^)]*)\)", txt):
-        try:
-            a, b, c = (float(v) for v in grp.split(','))
-        except ValueError:
-            continue
-        xs.append(a); ys.append(b); zs.append(c)
-    return xs, ys, zs
+
+def _solid_size_mm(path):
+    """STEP'i CAD çekirdeğiyle geri okur; GERÇEK katı zarfını (X, Y, Z) verir.
+
+    Metin taraması değil: küresel yüzeylerin kutupları dosyada nokta olarak
+    bulunmadığı için metinden ölçülen zarf eksik çıkıyordu (bkz. modül notu).
+    """
+    from build123d import import_step
+    bb = import_step(path).bounding_box()
+    return float(bb.size.X), float(bb.size.Y), float(bb.size.Z)
 
 
 @pytest.fixture(scope='module')
@@ -45,8 +63,7 @@ def tank_files(tmp_path_factory):
     out = tmp_path_factory.mktemp('tank_step')
     try:
         return step_export.generate_tank_step(
-            {'fuel_tank': {'diameter': 300.0, 'length': 800.0},
-             'oxidizer_tank': {'diameter': 300.0, 'length': 900.0}},
+            {k: dict(v) for k, v in TANK_INPUT_MM.items()},
             out_dir=str(out))
     except Exception as exc:  # build123d/OCC yoksa anlamlı atla
         pytest.skip(f'STEP üretilemedi: {exc}')
@@ -59,24 +76,76 @@ class TestTankStepGeometry:
         for key, path in tank_files.items():
             assert os.path.getsize(path) > 1000, f'{key} neredeyse boş'
 
-    def test_dimensions_are_millimetres_not_metres(self, tank_files):
-        """300 mm girdi -> yarıçap 150 mm; 1000× ölçeklenirse test kırılır."""
-        xs, ys, zs = _bbox(tank_files['fuel_tank'])
-        assert xs and zs, 'STEP koordinatları ayrıştırılamadı'
-        radius = max(max(abs(v) for v in zs), max(abs(v) for v in ys or [0]))
-        assert radius == pytest.approx(150.0, abs=1.0), (
-            f'yarıçap {radius:.1f} mm — 150 mm bekleniyordu '
-            '(1000× birim hatası geri gelmiş olabilir)')
-        length = max(xs) - min(xs)
-        assert length == pytest.approx(800.0, abs=1.0), (
-            f'gövde boyu {length:.1f} mm — 800 mm bekleniyordu')
+    @pytest.mark.parametrize('key', sorted(TANK_INPUT_MM))
+    def test_diameter_is_millimetres_not_metres(self, tank_files, key):
+        """Çap 1000× hatasına karşı KESİN bekçi: 300 mm girdi -> 300 mm zarf.
 
-    def test_no_coordinate_is_absurdly_large(self, tank_files):
-        """Hiçbir koordinat 10 m'yi aşmamalı (birim hatasının imzası)."""
-        for key, path in tank_files.items():
-            xs, ys, zs = _bbox(path)
-            worst = max((abs(v) for v in xs + ys + zs), default=0.0)
-            assert worst < 10_000.0, f'{key}: {worst:.0f} mm koordinat var'
+        Çap, katı modelin enine zarfıdır ve analiz modeliyle BİREBİR aynıdır
+        (küre yarıçapı = silindir yarıçapı). Bu yüzden burada tam eşitlik
+        aranabilir; 1000× hata anında yakalanır.
+        """
+        _x, y, z = _solid_size_mm(tank_files[key])
+        expected = TANK_INPUT_MM[key]['diameter']
+        for axis, size in (('Y', y), ('Z', z)):
+            assert size == pytest.approx(expected, rel=1e-6), (
+                f'{key} {axis} zarfı {size:.3f} mm — {expected:.1f} mm '
+                'bekleniyordu (1000× birim hatası geri gelmiş olabilir)')
+
+    @pytest.mark.parametrize('key', sorted(TANK_INPUT_MM))
+    def test_axial_envelope_difference_is_reported_and_understood(
+            self, tank_files, key):
+        """Katı zarfı ile analiz boyu arasındaki fark ÖLÇÜLÜR ve açıklanır.
+
+        Ölçüldü (HEAD a7ff1e7): fuel_tank X zarfı 1100.0 mm, analiz gövde boyu
+        800.0 mm; oxidizer_tank 1200.0 / 900.0. Fark her ikisinde de tam
+        olarak bir ÇAP kadardır (300 mm) çünkü STEP modeli silindirin iki
+        ucuna TAM küre ekler (yarıküre değil, kesişim değil). Yani fark
+        rastgele bir sapma değil, bilinen bir geometri farkıdır (A11).
+
+        Bu test farkın BEKLENEN büyüklükte kalmasını sabitler: başlık modeli
+        değişirse (ör. eliptik kapak, yarıküre kesişimi) burası kırmızıya
+        döner ve kimse farkı sessizce büyütemez.
+        """
+        x, _y, _z = _solid_size_mm(tank_files[key])
+        body_mm = TANK_INPUT_MM[key]['length']
+        diameter_mm = TANK_INPUT_MM[key]['diameter']
+        overhang = x - body_mm
+        assert overhang == pytest.approx(diameter_mm, rel=1e-6), (
+            f'{key}: katı zarfı {x:.1f} mm, analiz gövdesi {body_mm:.1f} mm; '
+            f'fark {overhang:.1f} mm — iki tam küre başlık için beklenen fark '
+            f'{diameter_mm:.1f} mm. Başlık geometrisi değişmiş olabilir.')
+
+    @pytest.mark.parametrize('key', sorted(TANK_INPUT_MM))
+    def test_no_dimension_is_absurdly_large(self, tank_files, key):
+        """Hiçbir zarf ölçüsü 10 m'yi aşmamalı (birim hatasının imzası)."""
+        worst = max(_solid_size_mm(tank_files[key]))
+        assert worst < 10_000.0, f'{key}: {worst:.0f} mm zarf ölçüsü var'
+
+
+class TestAcikBorcTankTekGeometri:
+    """AÇIK BORÇ — analiz ile katı model AYNI tankı anlatmıyor (A11).
+
+    Analiz düz kapaklı silindir kabul eder (gövde boyu = toplam boy); STEP
+    modeli silindire iki TAM küre ekler. Ölçüldü: fuel_tank analiz 800.0 mm,
+    STEP 1100.0 mm (%37,5 fark); oxidizer_tank 900.0 / 1200.0 (%33,3).
+    Hacim de aynı sebeple ayrışır.
+
+    Aşağıdaki test DOĞRU sözleşmeyi yazar: katının eksenel zarfı analizin
+    verdiği boya eşit olmalıdır. Bugün geçmiyor, bu yüzden ``xfail`` ile
+    AÇIK BORÇ olarak işaretli — atlanmıyor, her koşuda GERÇEKTEN çalışıyor.
+    Tank tek-geometri işi bitince test geçecek ve ``strict=True`` sayesinde
+    XPASS raporlanıp KIRMIZI verecek: o an bu işaretin kaldırılması gerekir.
+    Yani borç kapanınca kimse bunu unutamaz.
+    """
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason='A11 açık borç: tank tek geometri işi henüz yapılmadı — STEP '
+               'silindire iki tam küre ekliyor, analiz düz kapak varsayıyor')
+    @pytest.mark.parametrize('key', sorted(TANK_INPUT_MM))
+    def test_solid_axial_envelope_equals_analysis_length(self, tank_files, key):
+        x, _y, _z = _solid_size_mm(tank_files[key])
+        assert x == pytest.approx(TANK_INPUT_MM[key]['length'], rel=1e-3)
 
 
 class TestUnitEnvelopeGuard:

@@ -960,7 +960,93 @@ class NozzleDesigner:
         }
 
 
-def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26):
+def _bell_length_fraction(noz_type):
+    """15° konik referansa göre bell uzunluk kesri (bilinmiyorsa None).
+
+    Sutton & Biblarz 9. baskı Şek. 3-14: %80 bell = 15° konik boyun 0.80'i.
+    Kesirlerin TEK TANIM YERİ ``liquid_rocket_engine.NOZZLE_TYPE_GEOMETRY``;
+    burada kopya sabit TUTULMAZ, tembel içe aktarımla oradan okunur
+    (CLAUDE.md kural 11 — parametre tutarlılığı).
+    """
+    try:
+        from hrma.engines.liquid_rocket_engine import NOZZLE_TYPE_GEOMETRY
+    except Exception:  # ağır modül yüklenemezse sessiz düşme yok, None döner
+        return None
+    rec = NOZZLE_TYPE_GEOMETRY.get(str(noz_type).strip().lower())
+    if not rec:
+        return None
+    try:
+        frac = float(rec['length_fraction'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return frac if np.isfinite(frac) and frac > 0 else None
+
+
+def _resolve_divergent_length_mm(noz_type, div, ds_noz, angles, md,
+                                 re, rt, half_angle):
+    """Iraksak lüle boyunu [mm] ÇÖZÜCÜDEN okur; türetmek zorunda kalırsa beyan eder.
+
+    Faz 4B / A5 — ölçülen kusur: burada tek yedek yol
+    ``(re - rt) / tan(half_angle)`` idi ve ``half_angle`` bell lülede
+    ``nozzle_angles['divergent_half_angle_deg']`` alanından geliyordu. O alan
+    bell'de BOĞAZ açısıdır (bell_80 -> 30°, bell_60 -> 34°), konik yarı açı
+    değil. Sonuç: bell_80 çözücü 107.69 mm iken export 62.48 mm (-41.99%),
+    bell_60 80.77 -> 53.48 mm (-33.79%). Konikte sapma +0.78% (Rao boğaz yayı).
+
+    Döner: (uzunluk_mm, kaynak_etiketi). Kaynak 'solver' ile başlıyorsa değer
+    çözücünündür; 'derived'/'NOT SOLVED' ile başlıyorsa türetilmiştir ve
+    çağıran (imalat çıktısı üreten) bunu reddedebilir.
+    """
+    conical = str(noz_type).strip().lower() == 'conical'
+
+    # 1) Ortak geometri sözlüğü (hrma/export/motor_geometry.py, METRE)
+    v = _finite_positive(md.get('nozzle_divergent_length'))
+    if v is not None:
+        return v * 1000.0, 'solver (normalised motor_geometry, metres)'
+    # 2) NozzleDesigner konturu (mm)
+    v = _finite_positive(div.get('length'))
+    if v is not None:
+        return v, 'solver (nozzle_contour.divergent.length)'
+    # 3) Hibrit tasarım özeti (mm)
+    v = _finite_positive(ds_noz.get('divergent_length_mm'))
+    if v is not None:
+        return v, 'solver (design_summary.nozzle.divergent_length_mm)'
+    # 4) Katı motorun açı bloğu (mm)
+    v = _finite_positive(angles.get('divergent_length_mm'))
+    if v is not None:
+        return v, 'solver (nozzle_angles.divergent_length_mm)'
+
+    # --- Buradan sonrası TÜRETME: çözücü boyu vermedi ---
+    l_conical_15 = (re - rt) / np.tan(np.radians(15.0))
+    if conical:
+        # Konikte açı ile boy aynı bilgidir; türetme kesindir.
+        return ((re - rt) / np.tan(np.radians(half_angle)),
+                'derived from the conical half angle (exact for a cone)')
+    frac = _bell_length_fraction(noz_type)
+    if frac is not None:
+        return (frac * l_conical_15,
+                f'NOT SOLVED: {noz_type} length-fraction model '
+                f'({frac:.2f} x 15 deg conical, Sutton & Biblarz Fig. 3-14)')
+    # Bilinmeyen bell benzeri tip: boğaz açısını yarı açı sanmak YASAK,
+    # bunun yerine 15° konik referans boyu kullanılır ve AÇIKÇA beyan edilir.
+    return (l_conical_15,
+            f'NOT SOLVED: unknown nozzle type {noz_type!r}; 15 deg conical '
+            'reference length used (the reported divergent half angle is the '
+            'throat angle for bell contours and must not be used as a cone '
+            'angle)')
+
+
+def _finite_positive(value):
+    """Sonlu ve pozitifse float döndürür, değilse None (uydurma yedek yok)."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if (np.isfinite(f) and f > 0) else None
+
+
+def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26,
+                                require_solved_length=False):
     """Nozul iç akış yolu örneklemesi — 2D kesit, 3D görselleştirme ve CAD
     üretimi için TEK ortak geometri kaynağı.
 
@@ -971,10 +1057,15 @@ def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26):
     Döndürür: (points, meta)
       points: [(z_mm, r_mm), ...] — z=0 konverjan başlangıcı (kamara çıkışı)
       meta: {'z_throat': mm, 'z_exit': mm, 'r_throat': mm, 'r_exit': mm,
-             'noz_type': str}
+             'noz_type': str, 'divergent_length_mm': mm,
+             'divergent_length_source': str}
     Not: nozzle_contour.convergent.length KULLANILMAZ — NozzleDesigner'ın
     kendi daralma oranı oda yarıçapından (≈1.5·rt) türediği için hibrit
     kamara çapıyla tutarsızdır (dikey duvar görünümü yaratır).
+
+    ``require_solved_length=True`` (imalata giden STEP/DXF): ıraksak boy
+    çözücüden gelmiyorsa ValueError yükseltilir — uydurma boyla katı model
+    üretilmez (Faz 4B / A5, fail-closed).
     """
 
     def _num(v, fb):
@@ -1003,11 +1094,22 @@ def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26):
     half_angle = max(1.0, _num(div.get('half_angle'),
                                _num(angles.get('divergent_half_angle_deg'), 15.0)))
     conv_angle = max(1.0, _num(angles.get('convergent_half_angle_deg'), 30.0))
-    L_conv = _num(ds_noz.get('convergent_length_mm'),
-                  (rc - rt) / np.tan(np.radians(conv_angle)))
-    L_div = _num(div.get('length'),
-                 _num(ds_noz.get('divergent_length_mm'),
-                      (re - rt) / np.tan(np.radians(half_angle))))
+    # Yakınsak koni: ortak geometri sözlüğü (metre) -> tasarım özeti (mm) ->
+    # yakınsak yarı açıdan türetme (konide açı ile boy aynı bilgidir).
+    _conv_m = _finite_positive(md.get('nozzle_convergent_length'))
+    L_conv = (_conv_m * 1000.0 if _conv_m is not None else
+              _num(ds_noz.get('convergent_length_mm'),
+                   (rc - rt) / np.tan(np.radians(conv_angle))))
+    L_div, L_div_source = _resolve_divergent_length_mm(
+        noz_type, div, ds_noz, angles, md, re, rt, half_angle)
+    # Fail-closed YALNIZ gerçekten hesaplanamayan hâlde: konik lülede açı ile
+    # boy aynı bilgidir ('derived ... exact for a cone'), o kabul edilir;
+    # 'NOT SOLVED' ile başlayan kaynaklar imalat çıktısına giremez.
+    if require_solved_length and L_div_source.startswith('NOT SOLVED'):
+        raise ValueError(
+            'nozzle divergent length is not available from the solver '
+            f'({L_div_source}); refusing to build a manufacturing model from '
+            'an unsolved length')
     Rn = _num(conv.get('throat_radius_curvature'), 0.382 * rt)
 
     pts = []
@@ -1046,6 +1148,12 @@ def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26):
                         v * v * p0r + 2 * v * u * p1r + u * u * p2r))
         z_exit = p2z
 
+    # divergent_length_mm = GERÇEKTEN çizilen boy (konikte Rao yayı yüzünden
+    # açıdan türetilen boydan ~%1 farklıdır); source o boyun nereden geldiğini
+    # söyler. Tüketici 'NOT SOLVED' ile başlayan bir kaynağı görürse boyun
+    # hesaplanmadığını bilir (sessiz varsayım yok).
     meta = {'z_throat': z_throat, 'z_exit': z_exit,
-            'r_throat': rt, 'r_exit': pts[-1][1], 'noz_type': noz_type}
+            'r_throat': rt, 'r_exit': pts[-1][1], 'noz_type': noz_type,
+            'divergent_length_mm': z_exit - z_throat,
+            'divergent_length_source': L_div_source}
     return pts, meta

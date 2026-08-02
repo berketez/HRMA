@@ -1159,10 +1159,16 @@
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s13_4.desc">Mathematical optimization enables systematic design improvement. Objective functions (maximize Isp, minimize mass) are optimized subject to constraints (pressure limits, size restrictions). Lagrange multipliers identify optimal operating points.</span></p>
         </div>
 
-        <!-- Section 14: NASA Standards Based Advanced Analysis -->
+        <!-- Section 14: İleri analiz figürlerinin arkasındaki bağıntılar.
+             DENETİM DÜZELTMESİ (2026-08-02, C5): eski başlık "NASA Standards
+             Based Advanced Analysis", eski giriş "Professional-grade analysis  IDDIA-LINT-MUAF
+             methods based on validated NASA standards" idi. Depoda hiçbir kod  IDDIA-LINT-MUAF
+             bu standartlara uygunluk denetimi yapmıyor ve hiçbir bağımsız
+             doğrulama ("validated") yok; ikisi de kazanılmamış iddiaydı.
+             Yeni metin yalnız bağıntıların KAYNAĞINI beyan eder. -->
         <div class="section" id="nasa-standards">
-            <h2 data-i18n="fx.s14.h">14. NASA Standards Based Advanced Analysis</h2>
-            <p data-i18n="fx.s14.intro">Professional-grade analysis methods based on validated NASA standards and documents.</p>
+            <h2 data-i18n="fx.s14.h">14. Reference Relations Behind the Advanced Analysis Figures</h2>
+            <p data-i18n="fx.s14.intro">Relations used by the advanced analysis panel, each with the source the implementation follows. Where the shipped code evaluates a different or more detailed model than the expression shown, the description says so. This section records what is computed; it is not a statement of compliance with any standard.</p>
             
             <h3 data-i18n="fx.s14_1.h">14.1 Chamber Pressure-Mixture Ratio 3D Response Surface (NASA SP-125)</h3>
             <div class="formula-box">
@@ -1174,7 +1180,11 @@
             <div class="formula-box">
                 $f_{mixture}(O/F) = 1 - 0.3 \left(\frac{O/F - O/F_{opt}}{O/F_{opt}}\right)^2$
             </div>
-            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_1.desc">NASA SP-125 correlation shows optimal performance occurs around 50-70 bar chamber pressure. Combustion instability regions exist at high pressure with low O/F ratios (Pc > 80 bar, O/F < 2.0) and low pressure with high O/F ratios (Pc < 15 bar, O/F > 5.0).</span></p>
+            <!-- Ölçüm (visualization.py:2538-2545): 3B yüzeyin her düğümü
+                 gerçek bir CombustionAnalyzer.analyze_combustion çağrısıdır;
+                 yukarıdaki iki şekil fonksiyonu 2026-07-19 uydurma denetiminde
+                 koddan KALDIRILDI. Açıklama bunu artık söylüyor. -->
+            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_1.desc">The two shape functions above are an illustrative fit only. The 3D surface HRMA draws is solved node by node from the chemical-equilibrium combustion solver for the selected propellant pair, so the optimum ridge and its location come from the solution, not from these expressions.</span></p>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
                 <tr><td>$P_c$</td><td data-i18n="fx.var.chamber_pressure">Chamber pressure</td><td>bar</td><td>10-100</td></tr>
@@ -1183,7 +1193,15 @@
                 <tr><td>$O/F_{opt}$</td><td data-i18n="fx.var.optimal_mixture_ratio">Optimal mixture ratio</td><td>-</td><td>2.5-4.0</td></tr>
             </table>
             
-            <h3 data-i18n="fx.s14_2.h">14.2 Nozzle Mach-Area Ratio Relations (NASA-STD-5012)</h3>
+            <!-- DENETİM DÜZELTMESİ (2026-08-02, C2): kaynak NASA-STD-5012
+                 yazıyordu. O belgenin gerçek adı "Strength and Life Assessment
+                 Requirements for Liquid-Fueled Space Propulsion System Engines"
+                 (Rev. B, 2016) — yorulma/sürünme ve motorun yapısal
+                 kalifikasyonu; içinde tek bir gaz dinamiği bağıntısı yok.
+                 Kodun gerçekten çözdüğü bağıntılar: alan-Mach, izantropik
+                 çıkış Mach'ı ve normal şok (nozzle_flow_1d.py:12-26 kaynak
+                 listesi: Anderson 3.28-3.31/3.51-3.63/5.20, NACA Rapor 1135). -->
+            <h3 data-i18n="fx.s14_2.h">14.2 Nozzle Mach-Area Ratio Relations (NACA Report 1135; Anderson, Modern Compressible Flow)</h3>
             <div class="formula-box">
                 $\frac{A}{A^*} = \frac{1}{M}\left[\frac{2}{\gamma+1}\left(1 + \frac{\gamma-1}{2}M^2\right)\right]^{\frac{\gamma+1}{2(\gamma-1)}}$
             </div>
@@ -1193,7 +1211,7 @@
             <div class="formula-box">
                 $M_{shock} = M_1 \sqrt{\frac{(\gamma-1)M_1^2 + 2}{2\gamma M_1^2 - (\gamma-1)}}$ <span data-i18n="fx.ann.normal_shock">(Normal shock)</span>
             </div>
-            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_2.desc">NASA-STD-5012 provides isentropic flow relations for nozzle design. Shock formation occurs when exit pressure deviates from design conditions. Over-expansion (Pe < Pa) causes external shocks, while under-expansion (Pe > Pa) reduces performance.</span></p>
+            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_2.desc">The area-Mach relation, the isentropic exit-Mach relation and the normal-shock relation are standard compressible-flow results: tabulated in NACA Report 1135, "Equations, Tables, and Charts for Compressible Flow" (Ames Research Staff, 1953) and derived in Anderson, "Modern Compressible Flow", 3rd ed. HRMA solves the area-Mach relation with Brent's method on the correct branch — subsonic upstream of the throat, supersonic downstream. Over-expansion (Pe < Pa) can drive shocks and flow separation; under-expansion (Pe > Pa) leaves expansion work unused. Earlier releases cited NASA-STD-5012 here; that document is "Strength and Life Assessment Requirements for Liquid-Fueled Space Propulsion System Engines" and contains no gas-dynamic relations.</span></p>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
                 <tr><td>$A/A^*$</td><td data-i18n="fx.var.area_ratio">Area ratio</td><td>-</td><td>1-50</td></tr>
@@ -1202,7 +1220,13 @@
                 <tr><td>$\gamma$</td><td data-i18n="fx.var.specific_heat_ratio">Specific heat ratio</td><td>-</td><td>1.15-1.4</td></tr>
             </table>
             
-            <h3 data-i18n="fx.s14_3.h">14.3 Wall Heat Flux Analysis (NASA SP-8124)</h3>
+            <!-- DENETİM DÜZELTMESİ (2026-08-02, C3): NASA SP-8124'ün gerçek
+                 adı "Liquid Rocket Engine Self-Cooled Combustion Chambers"
+                 (1977, NTRS 78N21211) — "Thermal Design Criteria" değil.
+                 Ayrıca ısı akısını hesaplayan asıl bağıntı Bartz (1957);
+                 aşağıdaki eksenel/zamansal şekil fonksiyonları 2026-07-19
+                 uydurma denetiminde koddan kaldırıldı. -->
+            <h3 data-i18n="fx.s14_3.h">14.3 Wall Heat Flux Analysis (Bartz 1957; NASA SP-8124)</h3>
             <div class="formula-box">
                 $q_w(x,t) = q_{base} \cdot f_{axial}(x) \cdot f_{temporal}(t)$
             </div>
@@ -1215,7 +1239,7 @@
             <div class="formula-box">
                 $Nu = 0.023 Re^{0.8} Pr^{0.4}$ <span data-i18n="fx.ann.dittus_boelter_correlation">(Dittus-Boelter correlation)</span>
             </div>
-            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_3.desc">NASA SP-8124 thermal criteria show heat flux peaks at throat location with temporal buildup. Thermal runaway occurs when qw > 5 MW/m². Cooling system design must handle 150-200% of steady-state flux during transients.</span></p>
+            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_3.desc">HRMA computes the gas-side wall heat flux from the Bartz correlation (Bartz, "A Simple Equation for Rapid Estimation of Rocket Nozzle Convective Heat Transfer Coefficients", Jet Propulsion 27, 1957) on the shared nozzle contour, with Leckner gas radiation; the time axis is a lumped-capacitance heat-sink wall, so the flux decays as the wall soaks. The axial and temporal shape functions above are illustrative and are not the model the application evaluates. NASA SP-8124, "Liquid Rocket Engine Self-Cooled Combustion Chambers" (1977), is the design reference for uncooled and self-cooled chambers. Dittus-Boelter is Dittus and Boelter, Univ. of California Publications in Engineering 2:443 (1930).</span></p>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
                 <tr><td>$q_w$</td><td data-i18n="fx.var.wall_heat_flux">Wall heat flux</td><td>MW/m²</td><td>1-10</td></tr>
@@ -1237,7 +1261,13 @@
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_4.desc">Instability occurs when acoustic oscillations (100-10,000 Hz) couple with combustion. Critical Strouhal numbers (0.2-0.3) indicate vortex shedding. Positive growth rates lead to destructive oscillations requiring damping systems.</span></p>
             
-            <h3 data-i18n="fx.s14_5.h">14.5 Pressure Drop Analysis (NASA-STD-5012)</h3>
+            <!-- DENETİM DÜZELTMESİ (2026-08-02, C2): burada da kaynak
+                 NASA-STD-5012 yazıyordu. O standart motor mukavemeti ve
+                 ömrünü kapsar; besleme hattı hidroliğiyle ilgisi yok.
+                 Enjektör basınç düşümünü HRMA orifis denklemiyle çözüyor
+                 (injector_design.py:316,436,842 kaynak notu: Sutton &
+                 Biblarz Böl. 8; Huzel & Huang NASA SP-125 Böl. 4). -->
+            <h3 data-i18n="fx.s14_5.h">14.5 Pressure Drop Analysis (Sutton &amp; Biblarz Ch. 8; Huzel &amp; Huang, NASA SP-125 Ch. 4)</h3>
             <div class="formula-box">
                 $\Delta P_{total} = \Delta P_{injection} + \Delta P_{acceleration} + \Delta P_{friction}$
             </div>
@@ -1247,7 +1277,7 @@
             <div class="formula-box">
                 $\Delta P_{accel} = \rho V \frac{dV}{dx}$ <span data-i18n="fx.ann.momentum_change">(Momentum change)</span>
             </div>
-            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_5.desc">Total pressure drop includes injection losses (K = 0.5-2.0), acceleration due to heat addition, and friction losses. Design margins require 20-30% above calculated values for system reliability.</span></p>
+            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_5.desc">Total pressure drop includes injection losses, acceleration due to heat addition and friction losses. HRMA sizes the injector from the orifice equation, m_dot = Cd A sqrt(2 rho dP) (Sutton and Biblarz, "Rocket Propulsion Elements", 9th ed., Ch. 8; Huzel and Huang, NASA SP-125, "Design of Liquid Propellant Rocket Engines", Ch. 4), so the loss coefficient is K = 1/Cd^2. Acceleration from heat addition is a Rayleigh-flow effect and pipe friction follows Darcy-Weisbach. The 20-30% feed-system margin often quoted is common design practice, not a value HRMA computes. Earlier releases cited NASA-STD-5012 here; that standard covers engine strength and life assessment, not feed-system hydraulics.</span></p>
             
             <h3 data-i18n="fx.s14_6.h">14.6 Performance Degradation Factors</h3>
             <div class="formula-box">

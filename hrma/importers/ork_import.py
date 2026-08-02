@@ -33,10 +33,18 @@ import re
 import zipfile
 import zlib
 import xml.etree.ElementTree as ET
+import xml.parsers.expat as expat
 
 import numpy as np
 
 from hrma.importers import motor_file
+
+try:
+    # defusedxml varsa ayrıştırıcı DTD/varlık/harici başvuruyu HİÇ çözmez;
+    # bekçi regex'ine bağımlılık kalmaz.
+    from defusedxml.ElementTree import fromstring as _defused_fromstring
+except ImportError:  # pragma: no cover - paket yoksa expat sertleştirmesi devrede
+    _defused_fromstring = None
 
 # --- ZIP/gzip bomba koruması sınırları ---
 # Açılmış toplam içerik sınırı; 20 MB'lık upload sınırıyla (api.py) birlikte
@@ -51,8 +59,35 @@ FIN_SCANLINE_SAMPLES = 513
 # Gövde çapı gruplama toleransı [m] — 0.1 mm altı farklar aynı çap sayılır
 DIAMETER_DISTINCT_TOL_M = 1e-4
 
-# XML güvenliği: DTD/entity bildirimli belgeler işlenmeden reddedilir
+# XML güvenliği: DTD/entity bildirimli belgeler işlenmeden reddedilir.
+#
+# ÖLÇÜM (Faz 4 denetimi): bu tarama YALNIZCA ham bayt üzerinde yapılıyordu.
+# UTF-8 kodlu içerik "DTD rejected" alırken aynı içeriğin UTF-16 kopyası
+# (494 bayt -> 1000 karakter) bekçiyi ATLATIP ayrıştırıcıya ulaşıyordu:
+# UTF-16'da '<!DOCTYPE' baytları '<\x00!\x00D\x00O\x00...' biçiminde olduğu
+# için bayt regex'i eşleşmiyor. Düzeltme üç katmanlıdır:
+#   1) ham bayt regex'i (ucuz, UTF-8/ASCII için hızlı ret),
+#   2) kodlama tespiti + metne çevirip metin regex'i (kodlamadan bağımsız),
+#   3) expat'ın KENDİ kodlama çözümüyle yapısal tarama (kesin katman),
+# ve ayrıştırma da DTD/varlık çözmeyen bir ayrıştırıcıyla yapılır.
 _XML_FORBIDDEN = re.compile(rb'<!\s*(?:DOCTYPE|ENTITY)', re.IGNORECASE)
+_XML_FORBIDDEN_TEXT = re.compile(r'<!\s*(?:DOCTYPE|ENTITY)', re.IGNORECASE)
+
+# Kullanıcıya dönen tek ret mesajı (UI kuralı: İngilizce)
+_XML_RED_MESAJI = ('XML documents containing DTD or ENTITY declarations '
+                   'are rejected for security reasons.')
+
+# Bayt sırası işareti (BOM) -> kodlama
+_BOM_KODLAMALARI = (
+    (b'\x00\x00\xfe\xff', 'utf-32-be'),
+    (b'\xff\xfe\x00\x00', 'utf-32-le'),
+    (b'\xef\xbb\xbf', 'utf-8-sig'),
+    (b'\xfe\xff', 'utf-16-be'),
+    (b'\xff\xfe', 'utf-16-le'),
+)
+
+# <?xml ... encoding="..."?> bildirimi (yalnız ASCII uyumlu kodlamalarda görünür)
+_XML_DECL_ENCODING_RE = re.compile(rb'''encoding\s*=\s*["']([A-Za-z0-9._\-]+)["']''')
 
 # Burun biçimi eşlemesi: HRMA BarrowmanAero yalnız ogive/conical/parabolic
 # tanır; birebir karşılığı olmayan biçimler parabolic'e YAKLAŞTIRILIR ve
@@ -73,6 +108,130 @@ _SKIP_TAGS = frozenset({
 
 class _ZipSafetyError(Exception):
     """ZIP güvenlik reddi (traversal / bomba)."""
+
+
+class _XMLGuvenlikRed(Exception):
+    """XML güvenlik reddi: DTD ya da varlık (entity) bildirimi bulundu."""
+
+
+# ---------------------------------------------------------------------------
+# XML güvenliği: kodlamadan bağımsız DTD/ENTITY bekçisi + sert ayrıştırıcı
+# ---------------------------------------------------------------------------
+def _xml_kodlama_adaylari(raw):
+    """Ham baytlar için olası kodlamaları öncelik sırasıyla döndür.
+
+    Sıra: BOM -> baytların sıfır deseni (XML özdevinimli tanıma) ->
+    ``<?xml encoding="...">`` bildirimi -> yaygın varsayılanlar.
+    """
+    adaylar = []
+    for bom, enc in _BOM_KODLAMALARI:
+        if raw.startswith(bom):
+            adaylar.append(enc)
+            break
+
+    if not adaylar and len(raw) >= 4:
+        b0, b1, b2, b3 = raw[0], raw[1], raw[2], raw[3]
+        # XML belgesi '<' ile başlar; sıfır bayt deseni genişliği ele verir
+        if b0 == 0 and b1 == 0 and b3 != 0:
+            adaylar.append('utf-32-be')
+        elif b1 == 0 and b2 == 0 and b3 == 0:
+            adaylar.append('utf-32-le')
+        elif b0 == 0 and b1 != 0:
+            adaylar.append('utf-16-be')
+        elif b0 != 0 and b1 == 0:
+            adaylar.append('utf-16-le')
+
+    bildirim = _XML_DECL_ENCODING_RE.search(raw[:512])
+    if bildirim:
+        try:
+            adaylar.append(bildirim.group(1).decode('ascii'))
+        except UnicodeDecodeError:
+            pass
+
+    adaylar.extend(('utf-8', 'utf-16', 'utf-32'))
+    # Sırayı bozmadan tekrarları at
+    gorulen, sirali = set(), []
+    for enc in adaylar:
+        anahtar = enc.lower()
+        if anahtar not in gorulen:
+            gorulen.add(anahtar)
+            sirali.append(enc)
+    return sirali
+
+
+def _xml_metinleri(raw):
+    """Ham baytları çözülebilen TÜM aday kodlamalarla metne çevir.
+
+    Tek bir "doğru" kodlama seçilmez: her başarılı çözüm ayrı ayrı
+    taranır, böylece yanlış tahmin bekçiyi kör etmez.
+    """
+    metinler = []
+    for enc in _xml_kodlama_adaylari(raw):
+        try:
+            metinler.append(raw.decode(enc))
+        except (UnicodeDecodeError, LookupError, ValueError):
+            continue
+    return metinler
+
+
+def _xml_yapisal_tarama(raw):
+    """expat'ın kendi kodlama çözümüyle DTD/varlık bildirimi ara.
+
+    Kesin katman: expat kodlamayı (UTF-8/UTF-16 BE-LE/ISO-8859-1...)
+    kendisi çözdüğü için tarama kodlamadan bağımsızdır. Belge bozuksa
+    burada karar verilmez — asıl ayrıştırıcının hata mesajı korunur.
+
+    Returns
+    -------
+    bool
+        DTD/varlık bildirimi görüldüyse True.
+    """
+    parser = expat.ParserCreate()
+
+    def _red(*args, **kwargs):
+        raise _XMLGuvenlikRed(_XML_RED_MESAJI)
+
+    parser.StartDoctypeDeclHandler = _red
+    parser.EntityDeclHandler = _red
+    parser.UnparsedEntityDeclHandler = _red
+    # Harici varlık başvurusunu ÇÖZME (0 => expat hata verir, dosya/URL
+    # açılmaz): SSRF ve yerel dosya sızdırma yolu kapatılır.
+    parser.ExternalEntityRefHandler = lambda *args, **kwargs: 0
+
+    try:
+        parser.Parse(raw, True)
+    except _XMLGuvenlikRed:
+        return True
+    except expat.ExpatError:
+        # Biçim hatası: kararı asıl ayrıştırıcı versin
+        return False
+    return False
+
+
+def _xml_guvenlik_denetimi(raw):
+    """Üç katmanlı DTD/ENTITY bekçisi; reddedilirse hata mesajı döndür."""
+    if _XML_FORBIDDEN.search(raw):
+        return _XML_RED_MESAJI
+    for metin in _xml_metinleri(raw):
+        if _XML_FORBIDDEN_TEXT.search(metin):
+            return _XML_RED_MESAJI
+    if _xml_yapisal_tarama(raw):
+        return _XML_RED_MESAJI
+    return None
+
+
+def _guvenli_xml_ayristir(raw):
+    """DTD/varlık çözmeyen ayrıştırıcıyla kök elemanı döndür.
+
+    defusedxml kuruluysa ``forbid_dtd/forbid_entities/forbid_external``
+    ile ayrıştırılır. Kurulu değilse belge zaten yukarıdaki expat
+    taramasından geçmiştir; ayrıca CPython'un ElementTree'si harici
+    varlıkları hiçbir koşulda ağdan/diskten çözmez.
+    """
+    if _defused_fromstring is not None:
+        return _defused_fromstring(raw, forbid_dtd=True,
+                                   forbid_entities=True, forbid_external=True)
+    return ET.fromstring(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -426,13 +585,19 @@ def parse_ork(data):
     else:
         xml_bytes = data
 
-    if _XML_FORBIDDEN.search(xml_bytes):
-        return {'error': ('XML documents containing DTD or ENTITY '
-                          'declarations are rejected for security '
-                          'reasons.')}
+    guvenlik_reddi = _xml_guvenlik_denetimi(xml_bytes)
+    if guvenlik_reddi is not None:
+        return {'error': guvenlik_reddi}
     try:
-        root = ET.fromstring(xml_bytes)
+        root = _guvenli_xml_ayristir(xml_bytes)
     except ET.ParseError as exc:
+        return {'error': f'Invalid XML in .ork file: {exc}'}
+    except ValueError as exc:
+        # defusedxml'in DTD/varlık/harici başvuru reddi ValueError türevidir
+        # (DefusedXmlException). Bekçi zaten yakalamış olmalı; bu dal
+        # ayrıştırıcının son sözünü kullanıcıya aynı mesajla iletir.
+        if type(exc).__module__.startswith('defusedxml'):
+            return {'error': _XML_RED_MESAJI}
         return {'error': f'Invalid XML in .ork file: {exc}'}
     if root.tag != 'openrocket':
         return {'error': ('Not an OpenRocket design file (root element '

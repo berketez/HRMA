@@ -1,8 +1,24 @@
 # HRMA: Validation Status & Known Limitations
 
-*Last updated: 2026-07-18. This document states honestly what HRMA has been verified
+*Last updated: 2026-08-02. This document states honestly what HRMA has been verified
 against, where it is reliable, and where it is not. HRMA is a **preliminary-design
 and educational tool**, not a flight-qualification tool.*
+
+**Provenance of the machine-generated block.** The table between the
+`AUTO-CORRELATION` markers below was regenerated on **2026-08-02 (UTC)** by
+`python3 -m hrma.validation.status_report` — correlation runner **v1**, record
+adapter **v1** — from the working tree based on commit **`a7ff1e7`**
+(`a7ff1e7591ea8acf58cfede3a08acda88be8b7e9`). Two independent runs produced a
+byte-identical block, so the numbers are reproducible, not a single draw.
+
+Before this regeneration the block was **stale**: it still carried the
+2026-07-24 run, whose `hybrid | thrust | main` row had since been deliberately
+removed from the runner (F022 — thrust error is an algebraic copy of the isp
+error, so it is not an independent validation metric) and whose hybrid
+regression-rate figures no longer matched the code. Staleness is now checked
+mechanically: `tests/test_faz4_yayin_kapisi.py` re-runs the correlation and
+fails if this block is not what today's code produces. If that test is red,
+regenerate — do not hand-edit the table.
 
 ## 2026-07-18: Correlation-driven physics review (v2.5.0)
 
@@ -35,12 +51,18 @@ corrections** (never by feeding measured values back into the model):
 
 **Honesty notes on the new table (read before quoting numbers):**
 
-- The **hybrid isp/thrust cells got *worse* on paper (+1.8 % → +9.6 %) and this
+- The **hybrid isp cell got *worse* on paper (+1.8 % → +9.6 %) and this
   is correct**: the old +1.8 % was two errors cancelling (c\* deficit × ideal-CF
   excess). With c\* fixed, the ideal-CF optimism is visible. HRMA predicts
   *theoretical* performance; the residual is consistent with un-modelled nozzle
   losses and delivered efficiency (records carry no nozzle geometry to do
-  better without guessing).
+  better without guessing). *(2026-07-27, F022: the matching `thrust` cell was
+  removed from the main table rather than reported alongside isp. thrust =
+  ṁ\_record · g₀ · Isp\_model, so its error was an algebraic copy of the isp
+  error — |isp\_err − thrust\_err| ≤ 0.055 percentage points across the 18
+  shared tests — and counting it separately inflated one comparison into two
+  apparently independent cells. `test_correlation_guards.py` now fails if the
+  cell reappears.)*
 - The **solid burn_rate cell (0.5 % medAPE) is in-sample**: the regime
   coefficients are the source author's own least-squares fits of the same 27
   strand points. It validates data entry + the piecewise implementation, not
@@ -49,12 +71,16 @@ corrections** (never by feeding measured values back into the model):
   chain: measured η_c\* (0.77–0.90 in the GOX campaign) is deliberately *not*
   fed back (circularity ban). The worst main-layer test is the throttling test
   4Thr-1, run with a steady-state average-ṁ model (tagged `off_nominal`).
-- The **hybrid regression_rate cell (−20.2 %, medAPE 35.1 %)** is now honest
-  rather than accidentally neutral: the Karabeyoglu paraffin subset sits near
-  its own published law, while the Rezaei low-flux HTPB/N₂O subset is
-  under-predicted by up to ~2×, a **documented model limit** (single published
-  a–n per fuel; Doran 2007 validity ≈ 10–30 g/cm²·s; radiation and small-motor
-  effects dominate below that). No coefficient was tuned to fix this.
+- The **hybrid regression_rate cell (−24.9 %, medAPE 36.7 %)** is now honest
+  rather than accidentally neutral, and the aggregate hides two very different
+  populations. Measured on the 2026-08-02 run, split by source:
+  **Karabeyoglu paraffin/GOX, n = 17: bias +0.4 %, medAPE 4.7 %** — sitting on
+  its own published law; **Rezaei low-flux HTPB/N₂O, n = 18: bias −48.7 %,
+  medAPE 49.3 %** — under-predicted by roughly 2×. The second half is a
+  **documented model limit**, not a data error (single published a–n per fuel;
+  Doran 2007 validity ≈ 10–30 g/cm²·s; radiation and small-motor effects
+  dominate below that). No coefficient was tuned to fix this, which is why the
+  aggregate cell reads worse than a tuned model would.
 - One record (`...t4l-12`) was anomaly-flagged after the source PDF was
   re-checked: the paper's own Table 2 port diameter contradicts its own
   G columns and the grain OD (physically impossible chain). The published
@@ -157,7 +183,7 @@ markers is machine-generated; the rest of this document remains hand-written.
 <!-- AUTO-CORRELATION:BEGIN -->
 *This block is auto-generated from the real-experiment correlation run; do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
-- Generated: 2026-07-24 (runner v1, adapter v1)
+- Generated: 2026-08-02 (runner v1, adapter v1)
 - Experiment DB content hash: `2ee2a86bbd6968e4d0c7d4a5f770665cc31094b6c0ba6e1dc2fb9d6971d9eca4`
 - Records: 209 total, scored 95, insufficient inputs 107, not supported (v1) 7, runner errors 0
 - Signed error convention: (predicted - measured) / measured x 100. Outliers are flagged, never dropped; anomaly-flagged records are aggregated separately.
@@ -168,8 +194,7 @@ markers is machine-generated; the rest of this document remains hand-written.
 | hybrid | chamber_pressure | main | 35 | +16.8 | 13.8 | 20.7 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 |
 | hybrid | isp | main | 18 | +9.6 | 9.1 | 10.5 | hyb-rezaei2018-htpb-n2o-t69 |
 | hybrid | port_diameter_final | main | 18 | -9.4 | 10.1 | 10.6 | hyb-rezaei2018-htpb-n2o-t65 |
-| hybrid | regression_rate | main | 35 | -20.2 | 35.1 | 35.8 | hyb-rezaei2018-htpb-n2o-t69 |
-| hybrid | thrust | main | 18 | +9.6 | 9.1 | 10.5 | hyb-rezaei2018-htpb-n2o-t69 |
+| hybrid | regression_rate | main | 35 | -24.9 | 36.7 | 35.4 | hyb-rezaei2018-htpb-n2o-t69 |
 | liquid | isp_sl | main | 4 | +2.0 | 2.1 | 2.2 | liq-rd180-atlas-spec |
 | liquid | isp_vac | main | 14 | +0.9 | 1.2 | 2.2 | liq-vulcain21-2020-spec |
 | liquid | thrust_vac | main | 4 | -0.4 | 0.2 | 0.6 | liq-rd0120-energia-spec |
@@ -177,7 +202,7 @@ markers is machine-generated; the rest of this document remains hand-written.
 | hybrid | c_star | anomaly | 4 | +13.7 | 13.5 | 15.5 | hyb-heydari2017-htpb-n2o-s4a1-3 |
 | hybrid | chamber_pressure | anomaly | 13 | +53.2 | 32.6 | 98.2 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
 | hybrid | port_diameter_final | anomaly | 4 | -8.1 | 8.0 | 8.2 | hyb-heydari2017-htpb-n2o-s4a1-1 |
-| hybrid | regression_rate | anomaly | 9 | +5.8 | 7.8 | 20.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 |
+| hybrid | regression_rate | anomaly | 9 | -4.9 | 14.7 | 20.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 |
 | hybrid | thrust | anomaly | 4 | +28.5 | 27.7 | 29.1 | hyb-heydari2017-htpb-n2o-s4a1-3 |
 <!-- AUTO-CORRELATION:END -->
 

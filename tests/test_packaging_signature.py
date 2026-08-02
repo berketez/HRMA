@@ -33,6 +33,7 @@ Bu test dosyası o hata sınıfının geri gelmesini engeller.
 """
 
 import pathlib
+import re
 import shlex
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -166,11 +167,27 @@ def test_yayin_kapisi_imza_kontrolu_yapar():
         'DMG içeriği sıkı doğrulamadan geçirilmiyor'
 
 
-def test_kapi_basliklari_alti_kapi():
-    """Kapı sayısı imza kapısıyla 6'ya çıktı; başlıklar tutarlı olmalı."""
+def test_kapi_basliklari_tutarli():
+    """Kapı başlıkları kendi içinde tutarlı ve boşluksuz numaralanmalı.
+
+    v2.6.26: bu test kapı sayısını 6 olarak SABİTLİYORDU. Yayın kapısına
+    "3/7  Yapı ↔ commit zaman sırası" eklenince (v2.6.25'te ikili, temsil
+    ettiği commit'ten 36 dk 51 sn ÖNCE üretilmişti) test kırıldı — yani
+    testin kilitlediği şey bir sözleşme değil, o günkü kapı sayısıydı.
+    Artık payda dosyadan OKUNUR: kapı eklemek testi kırmaz, ama paydası
+    farklı ya da atlanmış numara varsa kırar.
+    """
     metin = GATE_SH.read_text(encoding='utf-8')
-    for n in range(1, 7):
-        assert f'baslik "{n}/6' in metin, f'{n}/6 kapı başlığı yok'
+    basliklar = re.findall(r'baslik "(\d+)/(\d+)\s', metin)
+    assert basliklar, 'hiç kapı başlığı bulunamadı'
+
+    paydalar = {payda for _, payda in basliklar}
+    assert len(paydalar) == 1, f'kapı başlıkları farklı payda taşıyor: {paydalar}'
+    toplam = int(paydalar.pop())
+
+    numaralar = sorted(int(n) for n, _ in basliklar)
+    assert numaralar == list(range(1, toplam + 1)), \
+        f'kapı numaraları 1..{toplam} aralığını boşluksuz doldurmuyor: {numaralar}'
 
 
 def test_kabuk_sozdizimi_gecerli():

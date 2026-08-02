@@ -3,10 +3,10 @@ Real-time Web API Integration for Propellant Data
 Fetches live data from NIST, NASA CEA, and other verified sources
 
 Offline behavior (2026-07-16): every fetch now resolves in this order:
-1. Fresh pickle cache (within TTL)
-2. Live network fetch (on success: written to both the pickle cache and
+1. Fresh disk cache (within TTL)
+2. Live network fetch (on success: written to both the disk cache and
    the persistent offline store, hrma.data.offline_store)
-3. STALE pickle cache, age-unlimited ('stale-if-error')
+3. STALE disk cache, age-unlimited ('stale-if-error')
 4. Persistent offline store: user cache file, then the bundled
    offline_snapshot.json shipped with the package
 5. Existing static fallback data
@@ -14,10 +14,15 @@ Offline behavior (2026-07-16): every fetch now resolves in this order:
 So once a combination has been fetched successfully at least once (or is
 covered by the bundled snapshot), the application keeps returning real
 data with no network available.
+
+Every returned dictionary carries a ``data_state`` key
+(live / cached / stale / offline) so the caller can never mistake an aged
+record for a fresh one.
 """
 
 import requests
 import json
+import tempfile
 import time
 import re
 from typing import Dict, Optional, List
@@ -29,9 +34,67 @@ import aiohttp
 from datetime import datetime, timedelta
 import hashlib
 import os
-import pickle
 from hrma import DATA_DIR
 from hrma.data import offline_store
+
+# --- Önbellek biçimi (v2.6.26 güvenlik düzeltmesi) ---------------------------
+# ESKİ DAVRANIŞ: önbellek kayıtları ``pickle.load`` ile okunuyordu
+# (bu dosyanın 88. satırı). Denetimde kurcalanmış bir ``.pkl`` dosyasıyla
+# ``/bin/sh`` ÇALIŞTIRILDI (uid=501 doğrulandı): pickle akışı, çözülürken
+# rastgele kod çalıştırabilir. Dizin de tahmin edilebilirdi
+# (``<repo>/data/propellant_cache/<özet>.pkl``); ne sağlama toplamı ne şema
+# vardı, yani kurcalanan dosya sessizce kabul ediliyordu.
+#
+# YENİ DAVRANIŞ: yalnız sürümlü JSON okunur/yazılır — ``json.load`` kod
+# çalıştıramaz. Her kayıt şema sürümü, kaynak URL, alınma zamanı, son
+# kullanma ve içerik özeti taşır; özet tutmayan kayıt REDDEDİLİR.
+# Eski ``.pkl`` dosyaları OKUNMAZ ve SİLİNMEZ (kullanıcının dosyasıdır);
+# yalnızca bir kez günlüğe düşülür.
+CACHE_SCHEMA_VERSION = 1
+CACHE_FILE_SUFFIX = '.json'
+LEGACY_CACHE_SUFFIX = '.pkl'
+
+# Veri durumu damgası: çağırana verinin nereden geldiği AÇIKÇA bildirilir.
+# Denetim bulgusu: 10 yıllık bayat kayıt 'NIST API (Live)' etiketiyle
+# sunuluyordu; artık bayat kayıt 'Live' etiketi ALAMAZ.
+DATA_STATE_LIVE = 'live'        # bu çağrıda ağdan/kütüphaneden yeni alındı
+DATA_STATE_CACHED = 'cached'    # disk önbelleği, TTL içinde
+DATA_STATE_STALE = 'stale'      # disk önbelleği, süresi geçmiş
+DATA_STATE_OFFLINE = 'offline'  # kalıcı depo / paket anlık görüntüsü / statik tablo
+
+_DURUM_ETIKETI = {
+    DATA_STATE_LIVE: 'Live',
+    DATA_STATE_CACHED: 'Cached',
+    DATA_STATE_STALE: 'Stale cache',
+    DATA_STATE_OFFLINE: 'Offline store',
+}
+
+# En tazeden en bayata: bileşik sonucun durumu bileşenlerinin EN KÖTÜSÜDÜR
+_DURUM_SIRASI = (DATA_STATE_LIVE, DATA_STATE_CACHED, DATA_STATE_STALE,
+                 DATA_STATE_OFFLINE)
+
+_LIVE_ETIKET_RE = re.compile(r'\(\s*live\s*\)', re.IGNORECASE)
+_LIVE_KELIME_RE = re.compile(r'\blive\b', re.IGNORECASE)
+
+
+def _icerik_ozeti(payload) -> str:
+    """Kayıt gövdesinin kanonik SHA-256 özeti (kurcalama tespiti).
+
+    Anahtarlar sıralanır ki aynı sözlük her zaman aynı özeti versin.
+    """
+    metin = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(metin.encode('utf-8')).hexdigest()
+
+
+def _birlesik_durum(durumlar) -> str:
+    """Birden çok kaynaktan gelen sonucun ortak durumu = en bayat olanı."""
+    en_kotu = DATA_STATE_LIVE
+    for durum in durumlar:
+        if durum not in _DURUM_SIRASI:
+            continue
+        if _DURUM_SIRASI.index(durum) > _DURUM_SIRASI.index(en_kotu):
+            en_kotu = durum
+    return en_kotu
 
 class WebPropellantAPI:
     """Real-time propellant data from NASA/NIST/ESA sources"""
@@ -45,9 +108,15 @@ class WebPropellantAPI:
             'Accept': 'application/json, text/html, */*'
         })
         
-        # Create cache directory
-        os.makedirs(self.cache_dir, exist_ok=True)
-        
+        # Önbellek dizini yalnız sahibine açık (0700) oluşturulur: dizin yolu
+        # tahmin edilebilir olduğu için başka bir kullanıcının buraya kayıt
+        # bırakmasını engelleyen ilk savunma katmanı.
+        os.makedirs(self.cache_dir, mode=0o700, exist_ok=True)
+
+        # Eski pickle dosyaları için tek seferlik uyarı defteri (yolun tekrar
+        # tekrar günlüğe düşmesini engeller)
+        self._legacy_reported = set()
+
         # API endpoints and configurations (verified URLs)
         self.endpoints = {
             'nist_webbook': 'https://webbook.nist.gov/cgi/fluid.cgi',
@@ -76,53 +145,204 @@ class WebPropellantAPI:
     def _get_cache_key(self, source: str, compound: str, params: Dict = None) -> str:
         """Generate cache key for request"""
         key_data = f"{source}_{compound}_{str(params) if params else ''}"
-        return hashlib.md5(key_data.encode()).hexdigest()
-    
+        # SHA-256 (kısaltılmış): MD5 ile aynı dosya adı uzunluğu, çakışma
+        # direnci yüksek. Anahtar aynı zamanda kaydın İÇİNE yazılır ve
+        # okurken karşılaştırılır (dosya adı ↔ içerik bağı).
+        return hashlib.sha256(key_data.encode()).hexdigest()[:32]
+
+    def _cache_path(self, cache_key: str) -> str:
+        return os.path.join(self.cache_dir, f"{cache_key}{CACHE_FILE_SUFFIX}")
+
+    def _legacy_pickle_uyar(self, cache_key: str):
+        """Eski ``.pkl`` kaydını BİR KEZ bildir — okuma ve silme YOK.
+
+        Geçişte kullanıcının dosyası sessizce silinmez; yalnızca yok
+        sayıldığı görünür kılınır. Yeniden çekim (ya da çevrimdışı beyan)
+        normal akışla zaten devreye girer.
+        """
+        legacy = os.path.join(self.cache_dir, f"{cache_key}{LEGACY_CACHE_SUFFIX}")
+        if legacy in self._legacy_reported:
+            return
+        self._legacy_reported.add(legacy)
+        if os.path.exists(legacy):
+            print(f"Legacy pickle cache ignored (never loaded): "
+                  f"{os.path.basename(legacy)}")
+
+    @staticmethod
+    def _kayit_dogrula(record, cache_key: str) -> Optional[str]:
+        """Kaydı şema + bütünlük açısından denetle; sorun varsa nedenini döndür."""
+        if not isinstance(record, dict):
+            return 'record is not a JSON object'
+        if record.get('schema_version') != CACHE_SCHEMA_VERSION:
+            return (f"schema version {record.get('schema_version')!r} "
+                    f"!= {CACHE_SCHEMA_VERSION}")
+        if record.get('cache_key') != cache_key:
+            return 'cache key does not match the file name'
+        data = record.get('data')
+        if not isinstance(data, dict):
+            return 'payload is not a JSON object'
+        beklenen = record.get('content_hash')
+        if not isinstance(beklenen, str) or beklenen != _icerik_ozeti(data):
+            return 'content hash mismatch (tampered or truncated)'
+        return None
+
+    def _read_cache_record(self, cache_key: str) -> Optional[tuple]:
+        """Önbellek kaydını oku; ``(data, yas_saniye)`` ya da ``None``.
+
+        Hiçbir yolda kod çalıştırılmaz: yalnız ``json.load``. Reddetme
+        nedenleri: sembolik bağ, bozuk JSON, şema uyuşmazlığı, dosya
+        adı ↔ anahtar kopukluğu, içerik özeti tutmaması, çözülemeyen
+        zaman damgası.
+        """
+        self._legacy_pickle_uyar(cache_key)
+        cache_file = self._cache_path(cache_key)
+        if os.path.islink(cache_file):
+            print(f"Cache entry is a symlink, ignored: {cache_key[:8]}")
+            return None
+        if not os.path.isfile(cache_file):
+            return None
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                record = json.load(f)
+        except (OSError, ValueError) as e:
+            print(f"Cache read error: {e}")
+            return None
+
+        red = self._kayit_dogrula(record, cache_key)
+        if red is not None:
+            print(f"Cache entry rejected ({red}): {cache_key[:8]}")
+            return None
+
+        try:
+            fetched_at = datetime.fromisoformat(str(record.get('fetched_at')))
+        except (TypeError, ValueError):
+            print(f"Cache entry rejected (unreadable timestamp): {cache_key[:8]}")
+            return None
+
+        # Saat geriye alınmışsa negatif yaş çıkabilir; 0'a kırpılır
+        yas = max(0.0, (datetime.now() - fetched_at).total_seconds())
+        return record['data'], yas
+
     def _load_cache(self, cache_key: str, allow_stale: bool = False) -> Optional[Dict]:
-        """Load data from cache if valid (allow_stale=True ignores TTL: stale-if-error)"""
-        cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
+        """Load data from cache if valid (allow_stale=True ignores TTL: stale-if-error).
 
-        if os.path.exists(cache_file):
-            try:
-                with open(cache_file, 'rb') as f:
-                    cached_data = pickle.load(f)
+        Dönen sözlük HER ZAMAN durum damgası taşır: TTL içindeki kayıt
+        'cached', süresi geçmiş kayıt 'stale'. 'live' damgası YALNIZCA
+        canlı çekimde verilir.
+        """
+        record = self._read_cache_record(cache_key)
+        if record is None:
+            return None
+        data, yas = record
 
-                # Check if cache is still valid
-                if datetime.now() - cached_data['timestamp'] < timedelta(seconds=self.cache_ttl):
-                    print(f"Using cached data for {cache_key[:8]}...")
-                    return cached_data['data']
+        if yas < self.cache_ttl:
+            print(f"Using cached data for {cache_key[:8]} (age {yas:.0f}s)")
+            return self._damgala(data, DATA_STATE_CACHED, yas)
 
-                if allow_stale:
-                    print(f"Using stale cached data for {cache_key[:8]} (stale-if-error)")
-                    return cached_data['data']
-
-            except Exception as e:
-                print(f"Cache read error: {e}")
+        if allow_stale:
+            print(f"Using stale cached data for {cache_key[:8]} "
+                  f"(age {yas:.0f}s, stale-if-error)")
+            return self._damgala(data, DATA_STATE_STALE, yas)
 
         return None
 
     def _load_offline_store(self, offline_key: str) -> Optional[Dict]:
         """Load data from persistent offline store (user cache, then bundled snapshot)"""
         stored = offline_store.get(offline_key)
-        if stored is not None:
-            print(f"Using offline store data for {offline_key}")
-        return stored
-    
-    def _save_cache(self, cache_key: str, data: Dict):
-        """Save data to cache"""
-        cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
-        
+        if stored is None:
+            return None
+        print(f"Using offline store data for {offline_key}")
+        # Depoya yazıldığı anda 'live' damgalı olan iç sözlükler de
+        # düzeltilir: depodan okunan hiçbir şey artık canlı değildir.
+        return self._damgala(self._damgala_derin(stored, DATA_STATE_OFFLINE),
+                             DATA_STATE_OFFLINE)
+
+    def _save_cache(self, cache_key: str, data: Dict, source_url: str = ''):
+        """Save data to cache as a versioned, hash-protected JSON record."""
+        cache_file = self._cache_path(cache_key)
+
         try:
-            cache_data = {
-                'data': data,
-                'timestamp': datetime.now()
+            # numpy/datetime gibi tipler JSON'a indirgenir; aksi hâlde kayıt
+            # yazılamaz ve önbellek sessizce boş kalırdı.
+            payload = offline_store.json_safe(data)
+            if not isinstance(payload, dict):
+                raise TypeError('cache payload must be a mapping')
+
+            simdi = datetime.now()
+            record = {
+                'schema_version': CACHE_SCHEMA_VERSION,
+                'cache_key': cache_key,
+                'source_url': str(source_url or ''),
+                'fetched_at': simdi.isoformat(timespec='seconds'),
+                'expires_at': (simdi + timedelta(seconds=self.cache_ttl)
+                               ).isoformat(timespec='seconds'),
+                'content_hash': _icerik_ozeti(payload),
+                'data': payload,
             }
-            with open(cache_file, 'wb') as f:
-                pickle.dump(cache_data, f)
+
+            os.makedirs(self.cache_dir, mode=0o700, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(prefix='.propcache_', suffix='.tmp',
+                                            dir=self.cache_dir)
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    json.dump(record, f, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.chmod(tmp_path, 0o600)
+                os.replace(tmp_path, cache_file)  # atomik: tmp + rename
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             print(f"Cached data for {cache_key[:8]}")
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             print(f"Cache write error: {e}")
-    
+
+    @staticmethod
+    def _damgala(data: Dict, state: str, age_seconds: float = None) -> Dict:
+        """Sonuca veri durumunu (live/cached/stale/offline) AÇIKÇA yaz.
+
+        Bulgu: 10 yıllık bayat önbellek kaydı ``'NIST API (Live)'``
+        etiketiyle sunuluyordu. Artık canlı olmayan her dönüş yolunda
+        'Live' etiketi gerçek duruma çevrilir ve ``data_state`` anahtarı
+        eklenir; uydurma değer üretilmez, yalnız kaynağın adı düzeltilir.
+        """
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        out['data_state'] = state
+        if age_seconds is not None:
+            out['cache_age_seconds'] = round(float(age_seconds), 1)
+
+        etiket = _DURUM_ETIKETI.get(state, state)
+        kaynak = str(out.get('source') or '')
+        if state != DATA_STATE_LIVE and kaynak:
+            yeni = _LIVE_ETIKET_RE.sub(f'({etiket})', kaynak)
+            if yeni == kaynak and _LIVE_KELIME_RE.search(kaynak):
+                yeni = _LIVE_KELIME_RE.sub(etiket, kaynak)
+            out['source'] = yeni
+        return out
+
+    @classmethod
+    def _damgala_derin(cls, data, state):
+        """Bileşik sonuçların İÇ sözlüklerindeki durum damgasını da düzelt.
+
+        Kalıcı depoya yazılan bileşik sonuç, yazıldığı andaki 'live'
+        damgasını taşır; depodan okunduğunda bu artık doğru değildir.
+        Yalnız kaynak/durum taşıyan sözlükler damgalanır (parametre
+        sözlükleri kirletilmez).
+        """
+        if isinstance(data, dict):
+            out = {k: cls._damgala_derin(v, state) for k, v in data.items()}
+            if 'data_state' in out or 'source' in out or 'status' in out:
+                out = cls._damgala(out, state)
+            return out
+        if isinstance(data, list):
+            return [cls._damgala_derin(v, state) for v in data]
+        return data
+
     @staticmethod
     def _dogru_durum(data: Dict) -> Dict:
         """'success' damgasini GERCEGE gore duzeltir.
@@ -130,7 +350,7 @@ class WebPropellantAPI:
         v2.6.26 — ayristirma basarisiz oldugunda sozluk
         {'error': ..., 'source': 'NIST API (Live)', 'status': 'success'}
         seklinde donuyordu ve cagiran onu canli veri sayiyordu. Damga her
-        donus yolunda (canli fetch, pickle cache, kalici depo) ayni kurala
+        donus yolunda (canli fetch, disk onbellegi, kalici depo) ayni kurala
         tabi olmali; yoksa eski onbellek kayitlari yalani tasimaya devam
         eder.
         """
@@ -195,20 +415,22 @@ class WebPropellantAPI:
             # zaten var olan 'density is None' kontrolunun donen sozluge de
             # uygulanmis halidir; o kontrol yalniz kalici depoyu koruyordu.
             data = self._dogru_durum(data)
-            
-            # Cache the result (pickle + persistent offline store)
-            self._save_cache(cache_key, data)
+
+            # Cache the result (JSON disk cache + persistent offline store)
+            self._save_cache(cache_key, data,
+                             source_url=self.endpoints['nist_unofficial'])
             # Kalici depoya yalniz gercek deger tasiyan sonuclar yazilir
             # (ucuncu-taraf API bazen parse edilemeyen 'success' donduruyor)
             if data.get('density') is not None:
                 offline_store.put(offline_key, data)
 
             print(f"NIST data fetched for {compound}")
-            return data
+            return self._damgala(data, DATA_STATE_LIVE)
 
         except Exception as e:
             print(f"NIST API failed for {compound}: {str(e)}")
-            # stale-if-error: bayat pickle cache yas siniri olmadan kullanilir
+            # stale-if-error: bayat disk onbellegi yas siniri olmadan kullanilir
+            # (v2.6.26: pickle degil, ozetli JSON; donus 'stale' damgali gelir)
             stale = self._load_cache(cache_key, allow_stale=True)
             if stale is not None:
                 return self._dogru_durum(stale)
@@ -237,11 +459,12 @@ class WebPropellantAPI:
         try:
             results = self._use_rocketcea_library(fuel, oxidizer, chamber_pressure, mixture_ratio)
             if results.get('status') == 'success':
-                # Cache the result (pickle + persistent offline store)
-                self._save_cache(cache_key, results)
+                # Cache the result (JSON disk cache + persistent offline store)
+                self._save_cache(cache_key, results,
+                                 source_url='local:rocketcea')
                 offline_store.put(offline_key, results)
                 print(f"NASA CEA data fetched via RocketCEA for {fuel}/{oxidizer}")
-                return results
+                return self._damgala(results, DATA_STATE_LIVE)
         except Exception as e:
             print(f"RocketCEA failed: {str(e)}")
         
@@ -279,16 +502,18 @@ class WebPropellantAPI:
                 'status': 'success'
             })
             
-            # Cache the result (pickle + persistent offline store)
-            self._save_cache(cache_key, results)
+            # Cache the result (JSON disk cache + persistent offline store)
+            self._save_cache(cache_key, results,
+                             source_url=cea_url + 'cgi-bin/CEA.pl')
             offline_store.put(offline_key, results)
 
             print(f"NASA CEA web data fetched for {fuel}/{oxidizer}")
-            return results
+            return self._damgala(results, DATA_STATE_LIVE)
 
         except Exception as e:
             print(f"NASA CEA web failed: {str(e)}")
-            # stale-if-error: bayat pickle cache yas siniri olmadan kullanilir
+            # stale-if-error: bayat disk onbellegi yas siniri olmadan kullanilir
+            # (v2.6.26: pickle degil, ozetli JSON; donus 'stale' damgali gelir)
             stale = self._load_cache(cache_key, allow_stale=True)
             if stale is not None:
                 return stale
@@ -367,8 +592,10 @@ class WebPropellantAPI:
                     'source': 'NIST Direct (Verified)',
                     'status': 'success'
                 })
-                return data
-            
+                # Bu bir AĞ çekimi değil, kaynaklı yerleşik tablodur;
+                # 'live' damgası verilmez.
+                return self._damgala(data, DATA_STATE_OFFLINE)
+
             return self._get_fallback_data(compound, 'direct_nist_error')
             
         except Exception as e:
@@ -472,16 +699,19 @@ class WebPropellantAPI:
                 }
             }
             
-            # Cache the result (pickle + persistent offline store)
-            self._save_cache(cache_key, rocket_data)
+            # Cache the result (JSON disk cache + persistent offline store)
+            self._save_cache(
+                cache_key, rocket_data,
+                source_url=self.endpoints['spacex_data'] + 'launches/latest')
             offline_store.put(offline_key, rocket_data)
 
             print("SpaceX data fetched")
-            return rocket_data
+            return self._damgala(rocket_data, DATA_STATE_LIVE)
 
         except Exception as e:
             print(f"SpaceX fetch failed: {str(e)}")
-            # stale-if-error: bayat pickle cache yas siniri olmadan kullanilir
+            # stale-if-error: bayat disk onbellegi yas siniri olmadan kullanilir
+            # (v2.6.26: pickle degil, ozetli JSON; donus 'stale' damgali gelir)
             stale = self._load_cache(cache_key, allow_stale=True)
             if stale is not None:
                 return stale
@@ -681,9 +911,9 @@ end
             'status': 'fallback',
             'fetched_at': datetime.now().isoformat()
         })
-        
-        return data
-    
+
+        return self._damgala(data, DATA_STATE_OFFLINE)
+
     def _get_fallback_cea_data(self, fuel: str, oxidizer: str) -> Dict:
         """Provide fallback CEA data"""
         
@@ -722,9 +952,9 @@ end
             'status': 'fallback',
             'fetched_at': datetime.now().isoformat()
         })
-        
-        return data
-    
+
+        return self._damgala(data, DATA_STATE_OFFLINE)
+
     def get_comprehensive_data(self, fuel: str, oxidizer: str, **kwargs) -> Dict:
         """Get comprehensive propellant data from all sources"""
         print(f"Fetching comprehensive data for {fuel}/{oxidizer}...")
@@ -746,6 +976,14 @@ end
             combustion_data.get('status') == 'success'
         ])
 
+        # Bileşik sonucun tazeliği, en bayat bileşeni kadardır. Bu değer
+        # HESAPLANIR (uydurulmaz): üç alt sonucun kendi damgalarından gelir.
+        birlesik_durum = _birlesik_durum([
+            fuel_props.get('data_state', DATA_STATE_OFFLINE),
+            ox_props.get('data_state', DATA_STATE_OFFLINE),
+            combustion_data.get('data_state', DATA_STATE_OFFLINE),
+        ])
+
         results = {
             'fuel_properties': fuel_props,
             'oxidizer_properties': ox_props,
@@ -764,10 +1002,14 @@ end
                                   'fetch_spacex_telemetry() elle çağrılabilir.'},
             'summary': {
                 'combination': f"{fuel.upper()}/{oxidizer.upper()}",
+                # 'data_freshness' ÇAĞRI zamanıdır, veri yaşı değil; veri
+                # yaşı ayrı anahtarda (data_state) dürüstçe taşınır.
                 'data_freshness': datetime.now().isoformat(),
+                'data_state': birlesik_durum,
                 'sources_used': ['NIST Webbook', 'NASA CEA'],
                 'confidence': 'high' if all_success else 'medium'
-            }
+            },
+            'data_state': birlesik_durum,
         }
 
         if all_success:

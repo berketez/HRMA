@@ -145,18 +145,23 @@ class NASARealtimeValidator:
 
         error_pct = abs(calculated_throat_mm - expected_mm) / expected_mm * 100
 
-        # Doğrulama seviyeleri
+        # Sapma bandı — HÜKÜM DEĞİL, yalnız yüzdenin hangi aralığa düştüğü.
+        # DENETİM DÜZELTMESİ (2026-08-02, C4): eski etiketler 'EXCELLENT' /
+        # 'GOOD' / 'ACCEPTABLE' / 'POOR' idi; %15'lik bir boğaz çapı sapmasına
+        # "ACCEPTABLE" demek, dayanağı olmayan bir kabul hükmüdür. Bandın
+        # sınırları da kalibre edilmiş değil, yalnız okuma kolaylığı için
+        # seçilmiş yuvarlak sayılardır; etiket artık bunu söylüyor.
         if error_pct < 2.0:
-            status = 'EXCELLENT'
+            status = 'DEVIATION < 2%'
             color = '🟢'
         elif error_pct < 5.0:
-            status = 'GOOD'
+            status = 'DEVIATION 2-5%'
             color = '🟡'
         elif error_pct < 15.0:
-            status = 'ACCEPTABLE'
+            status = 'DEVIATION 5-15%'
             color = '🟠'
         else:
-            status = 'POOR'
+            status = 'DEVIATION > 15%'
             color = '🔴'
 
         return {
@@ -167,7 +172,18 @@ class NASARealtimeValidator:
             'error_percent': error_pct,
             'nasa_source': reference['source'],
             'validation_time': datetime.now().isoformat(),
-            'recommendation': self._get_recommendation(error_pct)
+            # Karşılaştırmanın NE OLDUĞU ve NE OLMADIĞI ayrı alanlarda da
+            # makinece okunabilir dursun (tüketici yalnız metni basmasın).
+            'comparison_basis': (
+                f"single published throat diameter of {motor_name} "
+                f"({reference['source']})"
+                + (' scaled by sqrt(F/Pc) to the requested operating point'
+                   if scale_note else '')),
+            'comparison_is_not': (
+                'not a validation campaign: one geometric quantity, one '
+                'operating point, no test data, no uncertainty budget'),
+            'recommendation': self._comparison_statement(
+                error_pct, motor_name, reference['source'], bool(scale_note)),
         }
     
     def daily_validation_report(self) -> str:
@@ -280,16 +296,39 @@ class NASARealtimeValidator:
             pass
         return None
     
-    def _get_recommendation(self, error_pct: float) -> str:
-        """Hata yüzdesine göre öneri döndür"""
-        if error_pct < 1.0:
-            return "Calculation is NASA-grade accurate"
-        elif error_pct < 5.0:
-            return "Good accuracy for engineering purposes"
-        elif error_pct < 15.0:
-            return "Acceptable for preliminary design"
-        else:
-            return "Requires parameter review and calibration"
+    def _comparison_statement(self, error_pct: float, motor_name: str,
+                              source: str, scaled: bool) -> str:
+        """Karşılaştırmayı olgusal olarak anlatır — hüküm vermez.
+
+        DENETİM DÜZELTMESİ (2026-08-02, C4). Eski ``_get_recommendation``
+        TEK bir yüzde hatasından üç yasak hüküm üretiyordu:
+
+        IDDIA-LINT-MUAF-BASLANGIC (kaldırılan kusurun birebir alıntısı)
+            error < 1%   -> "Calculation is NASA-grade accurate"
+            error < 5%   -> "Good accuracy for engineering purposes"
+            error < 15%  -> "Acceptable for preliminary design"
+        IDDIA-LINT-MUAF-BITIS
+
+        Üçü de kazanılmamış iddiaydı. Karşılaştırılan şey TEK bir sayıydı:
+        yayımlanmış bir motorun boğaz çapı. Bunun ne akreditasyonla
+        ("NASA-grade") ne de bir tasarım aşamasının kabulüyle  IDDIA-LINT-MUAF
+        ("preliminary design") ilgisi var; ölçülen doğruluk bandı bile
+        yalnız o tek geometrik büyüklüğe ve tek çalışma noktasına ait.
+
+        Yerine geçen metin şunları verir: sapma yüzdesi, karşılaştırılan
+        kaynak, ölçekleme uygulandı mı, ve karşılaştırmanın NE OLMADIĞI.
+        """
+        scale_clause = (
+            ', after scaling the reference throat by sqrt(F/Pc) to the '
+            'requested operating point' if scaled else '')
+        return (
+            f'Computed throat diameter differs by {error_pct:.2f}% from the '
+            f'published {motor_name} throat diameter ({source})'
+            f'{scale_clause}. This is a single-point comparison of one '
+            f'geometric quantity against one published motor: it is not a '
+            f'validation of the analysis, carries no uncertainty budget, '
+            f'and says nothing about accuracy at other operating points or '
+            f'for other quantities.')
 
 
 def run_daily_validation():

@@ -34,6 +34,71 @@ POST_CHAMBER_D_FACTOR_MIN = 0.3
 POST_CHAMBER_D_FACTOR_MAX = 3.0
 
 
+# ---------------------------------------------------------------------------
+# TASARIM ÖZETİ DURUM SÖZLÜĞÜ (Faz 4B, bulgu B1/B2/A3)
+#
+# Aynı sözlük üç motor dosyasında da BİREBİR tanımlıdır (hybrid / liquid /
+# solid). Çapraz import bilinçli olarak YAPILMAZ: katı ve sıvı motor, hibridin
+# Cantera'ya kadar uzanan import zincirini çekmek zorunda kalmamalıdır. Üç
+# dosyadaki değerlerin aynı kaldığı makinece denetlenir:
+#   tests/test_faz4_motor_kapilari.py::test_durum_sozlugu_uc_motorda_ayni
+#
+# Kötüden iyiye sıra — aynı koşuda birden çok durum geçerliyse EN KÖTÜSÜ yazılır:
+#   NOT_CONVERGED > UNVALIDATED_ESTIMATE > TARGET_NOT_MET
+#   > ESTIMATED_WITH_DEFAULTS > CALCULATED > OPTIMIZED
+#
+# Anlamlar:
+#   OPTIMIZED               gerçek bir eniyileme çağrıldı ve BAŞARIYLA döndü
+#   CALCULATED              kullanıcı girdisinden deterministik çözüm; eniyileme
+#                           çalışmadı ama uydurulan girdi de yok
+#   ESTIMATED_WITH_DEFAULTS kritik bir girdi verilmedi, yerleşik varsayılanla
+#                           dolduruldu (bkz. _defaults_used)
+#   TARGET_NOT_MET          çözüm yakınsadı ama istenen tasarım hedefi
+#                           (ör. yanma süresi) tutturulamadı
+#   UNVALIDATED_ESTIMATE    bu girdi çifti için fizik modellenmiyor; sayılar
+#                           yer tutucudur, mühendislik değeri yoktur
+#   NOT_CONVERGED           sayısal çözüm yakınsamadı; sonuç kullanılamaz
+#
+# ÖLÇÜM (2 Ağustos 2026, HEAD a7ff1e7) — sözlüğün var oluş sebebi: hibrit motor
+# itki/süre verilmeden koşturulduğunda _defaults_used listesi
+# ['nozzle_material', 'thrust', 'burn_time'] doluyor, buna rağmen
+# design_summary.status koşulsuz 'OPTIMIZED' yazıyordu ve liste sonuç
+# JSON'unda HİÇ görünmüyordu (14 append, 0 okuma, 0 yayım).
+# ---------------------------------------------------------------------------
+DESIGN_STATUS_OPTIMIZED = 'OPTIMIZED'
+DESIGN_STATUS_CALCULATED = 'CALCULATED'
+DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS = 'ESTIMATED_WITH_DEFAULTS'
+DESIGN_STATUS_TARGET_NOT_MET = 'TARGET_NOT_MET'
+DESIGN_STATUS_UNVALIDATED_ESTIMATE = 'UNVALIDATED_ESTIMATE'
+DESIGN_STATUS_NOT_CONVERGED = 'NOT_CONVERGED'
+
+DESIGN_STATUS_SEVERITY = {
+    DESIGN_STATUS_OPTIMIZED: 0,
+    DESIGN_STATUS_CALCULATED: 1,
+    DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS: 2,
+    DESIGN_STATUS_TARGET_NOT_MET: 3,
+    DESIGN_STATUS_UNVALIDATED_ESTIMATE: 4,
+    DESIGN_STATUS_NOT_CONVERGED: 5,
+}
+
+
+def _worst_design_status(*statuses):
+    """Verilen durumların EN KÖTÜSÜNÜ döndürür.
+
+    Bilinmeyen bir etiket gelirse en kötü kabul edilir: sözlüğe yeni bir durum
+    eklenip sıralamaya yazılmadığında sonuç iyimser tarafa kayamaz.
+    """
+    en_kotu = DESIGN_STATUS_OPTIMIZED
+    bilinmeyen = len(DESIGN_STATUS_SEVERITY)
+    for durum in statuses:
+        if durum is None:
+            continue
+        if (DESIGN_STATUS_SEVERITY.get(durum, bilinmeyen)
+                > DESIGN_STATUS_SEVERITY.get(en_kotu, bilinmeyen)):
+            en_kotu = durum
+    return en_kotu
+
+
 def _w(code: str, severity: str = "warning", **params) -> Dict:
     """i18n uyarısı: dile bağlı sabit metin YERİNE yapısal kayıt.
 
@@ -2452,9 +2517,62 @@ class HybridRocketEngine:
         total_mass = (self.m_total + dry_mass_est
                       if dry_mass_est is not None else None)
 
+        # --- Tasarım durumu: beyan kanalını OKUYAN kapı (Faz 4B, bulgu B1) ---
+        # Burada koşulsuz 'OPTIMIZED' yazıyordu. Kurucudaki :223-227 yorumu
+        # "design_summary.status bu bayrağı okur" diyordu ama okuyan yoktu:
+        # ölçüldü (2 Ağustos 2026), itki/süre verilmeden koşulan hibritte
+        # _defaults_used = ['nozzle_material', 'thrust', 'burn_time'] dolu,
+        # status yine 'OPTIMIZED'. Aynı ölü kanal :1930'da bir kez daha
+        # bildirilmişti (erken web tükenmesi de status'a girmiyordu).
+        #
+        # Hibritte GERÇEK bir tasarım eniyileyicisi ÇALIŞMAZ: find_optimum_of_ratio
+        # yalnız danışma amaçlıdır, sonucu 'optimum_analysis' olarak raporlanır ve
+        # tasarım O/F'sini DEĞİŞTİRMEZ (bkz. bu fonksiyonda optimum_of'un tek
+        # kullanımı: :2568 civarı rapor alanları). Bu yüzden hibrit motorun en iyi
+        # durumu 'CALCULATED'tir; 'OPTIMIZED' hiçbir koşulda üretilmez.
+        durum_gerekce = []
+        durum = DESIGN_STATUS_CALCULATED
+        defaults_used = list(getattr(self, '_defaults_used', []) or [])
+        fallbacks_used = list(getattr(self, '_fallback_used', []) or [])
+        if defaults_used:
+            durum = _worst_design_status(
+                durum, DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS)
+            durum_gerekce.append(
+                'critical inputs were not supplied and fall back to built-in '
+                'defaults: ' + ', '.join(defaults_used))
+        if fallbacks_used:
+            # Alt modül çöküp yedek yola düşmek de "tam çözüm" değildir.
+            durum = _worst_design_status(
+                durum, DESIGN_STATUS_ESTIMATED_WITH_DEFAULTS)
+            durum_gerekce.append(
+                'a sub-model failed and a fallback path was used: '
+                + ', '.join(fallbacks_used))
+        if getattr(self, '_web_exhausted', False):
+            # Port çapı sınırına yanma süresi dolmadan ulaşıldı: istenen
+            # yanma süresi TUTTURULAMADI (bkz. :1930 yorumu).
+            durum = _worst_design_status(durum, DESIGN_STATUS_TARGET_NOT_MET)
+            durum_gerekce.append(
+                f'the fuel web was exhausted at '
+                f'{float(getattr(self, "t_burn_effective", self.t_b)):.3f} s, '
+                f'before the requested burn time of {float(self.t_b):.3f} s')
+
+        # Listeler ÜST DÜZEYDE de yayımlanır: arayüz ve dış tüketiciler
+        # (PDF/CAD/export) design_summary'ye inmeden bakabilsin.
+        basic_results['defaults_used'] = defaults_used
+        basic_results['fallbacks_used'] = fallbacks_used
+
         basic_results['design_summary'] = {
-            'title': f'{self.motor_name or "Hybrid Motor"} - Optimal Design',
-            'status': 'OPTIMIZED',
+            'title': f'{self.motor_name or "Hybrid Motor"} - Design Summary',
+            'status': durum,
+            # Durumun NEDEN o etiket olduğu okunabilir olmalı; etiketin tek
+            # başına gezinmesi bu bulgunun ta kendisiydi.
+            'status_basis': (durum_gerekce if durum_gerekce else
+                             ['all critical inputs were supplied by the user; '
+                              'no optimiser is applied to a hybrid design, so '
+                              'the best attainable status is '
+                              + DESIGN_STATUS_CALCULATED]),
+            'defaults_used': defaults_used,
+            'fallbacks_used': fallbacks_used,
             'key_dimensions': {
                 'chamber_diameter_mm': chamber_diameter * 1000,
                 'chamber_length_mm': self.L * 1000,
@@ -2479,8 +2597,12 @@ class HybridRocketEngine:
                 'convergent_length_mm': L_conv * 1000,
                 'divergent_length_mm': L_div * 1000,
             },
-            'recommendation': ('Optimised design for the given parameters. '
-                               'Nozzle angles and grain geometry are sized to the design point.'),
+            # v2.6.26 (bulgu B1): metin "Optimised design ..." diyordu; hibritte
+            # hiçbir tasarım eniyileyicisi çalışmadığı için bu iddia yanlıştı.
+            # Boyutlandırma yapılır, eniyileme yapılmaz.
+            'recommendation': ('Design sized for the given parameters. Nozzle '
+                               'angles and grain geometry are sized to the '
+                               'design point; no design optimiser is applied.'),
         }
 
         # Add advanced analysis results if available

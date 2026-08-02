@@ -18,13 +18,21 @@ Her iki üretici de dosya YOLU döndürür; Flask endpoint'i dosyayı stream ede
 import io
 import os
 import json
-import tempfile
 from datetime import datetime
 
 import numpy as np
 
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+from hrma.export.export_workspace import (
+    atomic_produce, new_workspace, purge_stale_workspaces)
 from hrma.utils.input_guard import safe_name
+
+#: DXF birim başlığı: 4 = millimetre (DXF referansı, $INSUNITS tablosu).
+#: ezdxf.new(..., setup=True) varsayılanı 6'dır (METRE) ve depoda hiçbir yerde
+#: ezilmiyordu; üretilen geometri ise mm (ölçüldü: X aralığı 0 -> 1077.04).
+#: Yani CAD yazılımı çizimi 1000× büyük ölçekliyordu — A1'deki STL hatasının
+#: aynı sınıfı. Faz 4B / A2.
+DXF_INSUNITS_MILLIMETERS = 4
 
 
 def _num(v, fb):
@@ -164,12 +172,19 @@ def generate_drawing_pdf(motor_results, out_path=None):
     name = safe_name((motor_results or {}).get('motor_name'))
     stamp = datetime.now().strftime('%Y-%m-%d')
 
+    # D1: dosya adı GÜN çözünürlüklüydü ve paylaşılan /tmp köküne yazıyordu —
+    # aynı motor adıyla gelen iki eşzamanlı istek aynı dosyayı eziyordu.
+    # Artık her iş kendi mkdtemp dizinini alır; ad çakışması imkânsız.
     if out_path is None:
-        out_path = os.path.join(tempfile.gettempdir(),
+        purge_stale_workspaces()
+        out_path = os.path.join(new_workspace('hrma_drawings_'),
                                 f'{name}_drawings_{stamp}.pdf')
+    out_path = os.path.abspath(out_path)
 
     page_w, page_h = landscape(A4)
-    c = rl_canvas.Canvas(out_path, pagesize=landscape(A4))
+    # Yazma ATOMİK: reportlab doğrudan hedefe yazarsa yarım PDF okunabilir.
+    work_path = out_path + '.part'
+    c = rl_canvas.Canvas(work_path, pagesize=landscape(A4))
 
     def title_block(page_title, sheet, total):
         """Standart antet: alt şerit — proje / sayfa / tarih / ölçek notu."""
@@ -181,7 +196,7 @@ def generate_drawing_pdf(motor_results, out_path=None):
         c.drawString(14 * MM, 18 * MM, f'HRMA — {name}')
         c.setFont('Helvetica', 9)
         c.drawString(14 * MM, 13 * MM,
-                     'High-Fidelity Rocket Motor Analysis — solver-generated geometry')
+                     'HRMA — solver-generated geometry')
         c.setFont('Helvetica-Bold', 10)
         c.drawRightString(page_w - 14 * MM, 18 * MM, page_title)
         c.setFont('Helvetica', 9)
@@ -274,6 +289,7 @@ def generate_drawing_pdf(motor_results, out_path=None):
     c.showPage()
 
     c.save()
+    os.replace(work_path, out_path)
     return out_path
 
 
@@ -282,18 +298,28 @@ def generate_drawing_pdf(motor_results, out_path=None):
 # ---------------------------------------------------------------------------
 
 def generate_dxf(motor_results, out_path=None):
-    """2D imalat çizimi (DXF R2010): iç akış yolu + kamara + grain profili."""
+    """2D imalat çizimi (DXF R2010): iç akış yolu + kamara + grain profili.
+
+    Birim: MİLİMETRE — dosyaya ``$INSUNITS = 4`` olarak da yazılır (A2).
+    Eşzamanlılık: ``out_path`` verilmezse her çağrı kendi geçici dizinini alır
+    ve dosya atomik yazılır (D1).
+    """
     import ezdxf
 
     d = _dims_mm(motor_results)
     # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
     name = safe_name((motor_results or {}).get('motor_name'))
     if out_path is None:
+        purge_stale_workspaces()
         out_path = os.path.join(
-            tempfile.gettempdir(),
+            new_workspace('hrma_dxf_'),
             f"{name}_profile_{datetime.now().strftime('%Y%m%d')}.dxf")
+    out_path = os.path.abspath(out_path)
 
     doc = ezdxf.new('R2010', setup=True)
+    # Geometri mm; başlık da mm demeli. ezdxf varsayılanı 6 (metre) —
+    # ayarlanmadığında CAD çizimi 1000× büyük ölçeklendiriyordu.
+    doc.header['$INSUNITS'] = DXF_INSUNITS_MILLIMETERS
     doc.layers.add('CONTOUR', color=1)      # kırmızı — iç akış yolu
     doc.layers.add('OUTLINE', color=5)      # mavi — dış duvarlar
     doc.layers.add('CENTERLINE', color=3)   # yeşil — eksen
@@ -310,16 +336,21 @@ def generate_dxf(motor_results, out_path=None):
     msp.add_lwpolyline(upper, dxfattribs={'layer': 'CONTOUR'})
     msp.add_lwpolyline(lower, dxfattribs={'layer': 'CONTOUR'})
 
-    # Kamara dış duvarı (temsili et kalınlığı: yapısal analizden ya da %4.5)
-    struct = (motor_results or {}).get('structural_analysis') or {}
-    wall = _num((struct.get('chamber_analysis') or {}).get('recommended_thickness'),
-                0.045 * d['D_ch'])
-    for s in (1, -1):
-        msp.add_lwpolyline(
-            [(0, s * (rc + wall)), (L, s * (rc + wall))],
-            dxfattribs={'layer': 'OUTLINE'})
-    msp.add_lwpolyline([(0, -(rc + wall)), (0, rc + wall)],
-                       dxfattribs={'layer': 'OUTLINE'})
+    # Kamara dış duvarı — kalınlık YALNIZ yapısal analizden gelir.
+    # A8: burası da ``chamber_analysis`` anahtarını arıyor, katı/sıvı motorda
+    # bulamayınca 0.045·D uydurmasına düşüyordu. Artık üç şemayı tanıyan tek
+    # çözümleyici kullanılır; değer yoksa dış duvar ÇİZİLMEZ ve çizim bunu
+    # yazıyla söyler (imalatçı uydurma bir et kalınlığı ölçmesin).
+    from hrma.export.cad_visualization import _chamber_wall_thickness_m
+    wall_m, wall_src = _chamber_wall_thickness_m(motor_results)
+    wall = (wall_m * 1000.0) if wall_m is not None else None
+    if wall is not None:
+        for s in (1, -1):
+            msp.add_lwpolyline(
+                [(0, s * (rc + wall)), (L, s * (rc + wall))],
+                dxfattribs={'layer': 'OUTLINE'})
+        msp.add_lwpolyline([(0, -(rc + wall)), (0, rc + wall)],
+                           dxfattribs={'layer': 'OUTLINE'})
 
     # Grain profili (başlangıç portu, kesikli görünüm yerine ayrı katman)
     zg0 = 0.35 * max(4.0, L - d['L_g'])
@@ -335,16 +366,25 @@ def generate_dxf(motor_results, out_path=None):
                  dxfattribs={'layer': 'CENTERLINE', 'linetype': 'CENTER'})
 
     # Ölçü metinleri (basit, imalatçıya yeterli açıklıkta)
+    y_wall = rc + (wall if wall is not None else 0.0)
     labels = [
-        (L / 2, rc + wall + 12, f"L_chamber = {L:.1f} mm"),
+        (L / 2, y_wall + 12, f"L_chamber = {L:.1f} mm"),
         (L + meta['z_throat'], d['d_t'] / 2 + 14, f"Ø_throat = {d['d_t']:.2f} mm"),
         (z_end, d['d_e'] / 2 + 14, f"Ø_exit = {d['d_e']:.2f} mm"),
         (-10, rc + 8, f"Ø_chamber = {d['D_ch']:.1f} mm"),
-        ((zg0 + zg1) / 2, -(rc + wall + 16), f"grain {d['L_g']:.1f} mm, port Ø{d['d_p0']:.1f}→{d['d_pf']:.1f} mm"),
+        ((zg0 + zg1) / 2, -(y_wall + 16), f"grain {d['L_g']:.1f} mm, port Ø{d['d_p0']:.1f}→{d['d_pf']:.1f} mm"),
+        (0.0, -(y_wall + 30),
+         (f"WALL THICKNESS = {wall:.2f} mm [{wall_src}]" if wall is not None
+          else 'WALL THICKNESS: NOT AVAILABLE FROM THE ANALYSIS - '
+               'outer profile not drawn')),
+        (0.0, -(y_wall + 40),
+         f"NOZZLE DIVERGENT LENGTH: {meta['divergent_length_source']}"),
+        (0.0, -(y_wall + 50), 'ALL DIMENSIONS IN MILLIMETRES ($INSUNITS=4)'),
     ]
     for x, y, text in labels:
         msp.add_text(text, dxfattribs={'layer': 'TEXT', 'height': 5.0}
                      ).set_placement((x, y))
 
-    doc.saveas(out_path)
+    # Yazma ATOMİK (D1): yarım DXF HTTP 200 ile indirilmesin.
+    atomic_produce(out_path, doc.saveas)
     return out_path

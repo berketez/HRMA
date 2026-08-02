@@ -130,24 +130,69 @@ def test_ag_kapali_get_propellant_for_ui(user_dir, monkeypatch):
 # ---------------- web_api: stale-if-error yolu ----------------
 
 def test_web_api_stale_if_error(user_dir, tmp_path, monkeypatch):
-    """TTL dolmuş pickle cache, ağ hatasında yaş sınırsız servis edilmeli."""
-    pkl_dir = tmp_path / "pkl"
-    pkl_dir.mkdir()
-    monkeypatch.setattr(web_api, "cache_dir", str(pkl_dir))
+    """TTL dolmuş disk kaydı, ağ hatasında yaş sınırsız servis edilmeli.
+
+    v2.6.26: bu test kaydı ``pickle`` olarak tohumluyordu. Kurcalanmış bir
+    ``.pkl`` ile kod çalıştırılabildiği ölçüldüğü için okuma yolu sürümlü,
+    özet korumalı JSON'a taşındı (``_read_cache_record``). Testin sınadığı
+    YETENEK değişmedi — çevrimdışı dayanıklılık — yalnız kaydın biçimi
+    değişti. Bayat kaydın artık 'Live' etiketi ALAMADIĞI da eklendi.
+    """
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr(web_api, "cache_dir", str(cache_dir))
     monkeypatch.setattr(web_api.session, "get", _raise_connection_error)
     monkeypatch.setattr(web_api.session, "post", _raise_connection_error)
 
-    # 5 saat önce yazılmış (TTL=1 saat dolmuş) cache girişi hazırla;
     # density kasıtlı olarak statik fallback'ten farklı: bayat yolun kanıtı
     seeded = {"compound": "lox", "density": 999.9, "status": "success",
               "source": "NIST API (Live)"}
     cache_key = web_api._get_cache_key("nist", "lox")
-    with open(pkl_dir / f"{cache_key}.pkl", "wb") as f:
-        pickle.dump({"data": seeded,
-                     "timestamp": datetime.now() - timedelta(hours=5)}, f)
+
+    # Kaydı modülün KENDİ yazıcısıyla üret — şema sürümü ve içerik özeti
+    # böylece yapıca doğru kurulur, test şema değişince bayatlamaz. Sonra
+    # yalnız zaman damgaları 5 saat geriye alınır (TTL=1 saat dolmuş olur);
+    # content_hash yalnız 'data' alanını kapsadığı için kayıt geçerli kalır.
+    web_api._save_cache(cache_key, seeded)
+    yol = cache_dir / f"{cache_key}.json"
+    kayit = json.loads(yol.read_text(encoding="utf-8"))
+    eski = datetime.now() - timedelta(hours=5)
+    kayit["fetched_at"] = eski.isoformat(timespec="seconds")
+    kayit["expires_at"] = (eski + timedelta(hours=1)).isoformat(timespec="seconds")
+    yol.write_text(json.dumps(kayit, ensure_ascii=False), encoding="utf-8")
 
     out = web_api.fetch_nist_data("lox")
     assert out["density"] == 999.9
+    # Bayat kayıt canlı gibi sunulamaz
+    assert out["data_state"] == "stale"
+    assert "Live" not in str(out.get("source", ""))
+
+
+def test_eski_pickle_kaydi_hic_yuklenmez(user_dir, tmp_path, monkeypatch):
+    """Eski ``.pkl`` önbelleği okunmaz — kurcalanmışsa kod çalıştıramaz.
+
+    Denetimde kurcalanmış bir ``.pkl`` ile ``/bin/sh`` çalıştırılabildiği
+    ölçüldü (uid doğrulandı). Okuma yolu JSON'a taşındı; bu test eski
+    dosyanın SESSİZCE geri gelmesini engeller. Dosya silinmez, yok sayılır.
+    """
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr(web_api, "cache_dir", str(cache_dir))
+    monkeypatch.setattr(web_api.session, "get", _raise_connection_error)
+    monkeypatch.setattr(web_api.session, "post", _raise_connection_error)
+
+    seeded = {"compound": "lox", "density": 999.9, "status": "success"}
+    cache_key = web_api._get_cache_key("nist", "lox")
+    pkl = cache_dir / f"{cache_key}.pkl"
+    with open(pkl, "wb") as f:
+        pickle.dump({"data": seeded,
+                     "timestamp": datetime.now()}, f)
+
+    out = web_api.fetch_nist_data("lox")
+    # Pickle'daki değer HİÇBİR yoldan sonuca geçmemeli
+    assert out.get("density") != 999.9
+    # Kullanıcının dosyası silinmemeli (geçişte sessiz veri kaybı olmaz)
+    assert pkl.exists()
 
 
 def test_web_api_offline_store_yolu(user_dir, tmp_path, monkeypatch):

@@ -41,7 +41,13 @@ class TankCADGenerator:
         """Generate complete CAD package for propellant tanks"""
         
         # Create temporary directory for CAD files
-        temp_dir = tempfile.mkdtemp(prefix='tank_cad_')
+        # D10: /tmp birikmesi (ölçüldü: 77 dizin / 17 MB, temizlik yolu yok).
+        # Dizin artık ortak çalışma alanı yardımcısından alınır; her açılışta
+        # 24 saatten eski HRMA geçici dizinleri toplanır.
+        from hrma.export.export_workspace import (
+            new_workspace, purge_stale_workspaces)
+        purge_stale_workspaces()
+        temp_dir = new_workspace('tank_cad_')
         
         try:
             if FREECAD_AVAILABLE:

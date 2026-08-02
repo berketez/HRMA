@@ -1,0 +1,242 @@
+name: release
+
+# HRMA yayın zinciri — SIRAYI zorlar: test -> sürüm bağlantısı -> yayın denetimi.
+#
+# NEDEN BU DOSYA VAR (Faz 4 denetimi E1/E3, 2026-08-02)
+# -----------------------------------------------------
+# v2.6.25'e kadar `.github/workflows/` altında yalnız tests.yml vardı; yayının
+# kendisini denetleyen hiçbir otomasyon yoktu. Ölçülen sonuç (GitHub API, UTC):
+#
+#   22:46:25  DMG + EXE üretildi
+#   23:23:16  commit d908ae7        <-- ikili kaynaktan 36 dk 51 sn ÖNCE
+#   23:23:50  CI başladı
+#   23:30:44  SÜRÜM YAYINLANDI      <-- CI hâlâ koşuyordu
+#   23:38:09  CI yeşil bitti        <-- yayından 7 dk 25 sn SONRA
+#
+# Yerel kapı (packaging/release_gate.sh) bunu yayından ÖNCE engeller. Bu iş
+# akışı ikinci savunma hattıdır: yayın yine de olduysa, GitHub'ın kendi
+# kayıtlarından zaman sırasını yeniden ölçer ve tutmuyorsa KIRMIZI olur.
+#
+# KAPSAM DIŞI (bilinçli): kod imzalama, notarization, tedarik zinciri
+# doğrulaması (TUF/Sigstore). Bu iş akışı kurulum paketi ÜRETMEZ — .dmg/.exe
+# yerel makinede üretilir. Burada zorlanan şey yalnız SIRA ve TAM-SHA BAĞIdır.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published, released]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1) Etiketlenen ağaçta tam test takımı. Sürüm bağlantısı buna bağlıdır.
+  # -------------------------------------------------------------------------
+  test:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # RocketCEA kaynaktan derleniyor (paketlenmiş NASA CEA Fortran kodu).
+      - name: Sistem bağımlılıkları
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran
+
+      - name: Python bağımlılıkları
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install cantera
+
+      # numpy<2 pini tests.yml'de olduğu gibi burada da korunmalı; build123d
+      # kurulursa numpy 2.x gelir ve np.trapz kaybolur (2026-07-23 kazası).
+      - name: Ortam teyidi (numpy pini korunuyor mu)
+        run: |
+          python -c "import numpy; assert numpy.__version__.startswith('1.'), 'numpy<2 pini bozuldu'; print('numpy', numpy.__version__)"
+
+      - name: Test paketi
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: .
+        run: |
+          pytest tests/ -q --junitxml=pytest-report.xml
+
+      - name: Test raporu (başarısız koşuda da yüklenir)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pytest-report
+          path: pytest-report.xml
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------
+  # 2) Sürüm bağlantısı: etiket adı ile depodaki sürüm beyanları aynı mı?
+  #    Yerel kapının 1/7 adımının makine tarafındaki karşılığı.
+  # -------------------------------------------------------------------------
+  surum-baglantisi:
+    if: github.event_name != 'release'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Etiket ↔ paket sürümü ↔ changelog ↔ sürüm notu ↔ README
+        env:
+          ETIKET: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          etiket = os.environ.get('ETIKET', '')
+          hatalar = []
+
+          kaynak = open('hrma/__init__.py', encoding='utf-8').read()
+          eslesme = re.search(r'^__version__ = "(.*)"', kaynak, re.M)
+          if not eslesme:
+              print('hrma/__init__.py icinde __version__ yok')
+              sys.exit(1)
+          surum = eslesme.group(1)
+          print(f'paket surumu : {surum}')
+          print(f'etiket       : {etiket}')
+
+          # workflow_dispatch dal ustunde kosabilir; o durumda etiket kiyasi
+          # anlamsizdir, yalniz ic tutarlilik olculur.
+          if etiket.startswith('v'):
+              if etiket != f'v{surum}':
+                  hatalar.append(f"etiket '{etiket}' paket surumu 'v{surum}' ile eslesmiyor")
+          else:
+              print('etiket yok (workflow_dispatch) — etiket kiyasi atlandi')
+
+          changelog = json.load(open('hrma/data/changelog.json', encoding='utf-8'))
+          ust = changelog['versions'][0]['version']
+          if ust != surum:
+              hatalar.append(f"changelog en ust girdi '{ust}', paket '{surum}'")
+
+          notlar = f'packaging/release_notes_v{surum}.md'
+          if not os.path.isfile(notlar):
+              hatalar.append(f'surum notu yok: {notlar}')
+          else:
+              govde = open(notlar, encoding='utf-8').read()
+              for dil in ('en', 'tr'):
+                  if f'<!--HRMA-LANG:{dil}-->' not in govde:
+                      hatalar.append(f"surum notunda '{dil}' dil imi yok")
+
+          readme = open('README.md', encoding='utf-8').read()
+          if f'HRMA-Setup-{surum}' not in readme:
+              hatalar.append(f'README indirme linkleri {surum} degil')
+
+          for h in hatalar:
+              print(f'KALDI  {h}')
+          if hatalar:
+              sys.exit(1)
+          print('GECTI  surum beyanlari tutarli')
+          PY
+
+  # -------------------------------------------------------------------------
+  # 3) Yayın sonrası denetim: sıra gerçekten tutuldu mu?
+  #
+  #    Bu iş yalnız `release` olayında koşar ve GitHub'ın kendi zaman
+  #    damgalarını okur. Yerel kapı atlanmış olsa bile buradaki kırmızı
+  #    sürüm sayfasında ve commit'te görünür.
+  # -------------------------------------------------------------------------
+  yayin-denetimi:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Yayın ↔ commit ↔ CI zaman sırası
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPO: ${{ github.repository }}
+          ETIKET: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          ETIKET_SHA="$(git rev-list -n 1 "refs/tags/${ETIKET}")"
+          echo "etiket ${ETIKET} -> commit ${ETIKET_SHA}"
+          git show -s --format=%cI "$ETIKET_SHA" > commit_zamani.txt
+          gh api "repos/${DEPO}/actions/runs?head_sha=${ETIKET_SHA}&per_page=100" > kosular.json
+          gh api "repos/${DEPO}/releases/tags/${ETIKET}" > surum.json
+          python3 - <<'PY'
+          import datetime as dt
+          import json
+          import sys
+
+          def zaman(metin):
+              if not metin:
+                  return None
+              return dt.datetime.fromisoformat(metin.replace('Z', '+00:00'))
+
+          commit_zamani = zaman(open('commit_zamani.txt', encoding='utf-8').read().strip())
+          kosular = json.load(open('kosular.json', encoding='utf-8'))['workflow_runs']
+          surum = json.load(open('surum.json', encoding='utf-8'))
+          yayin_zamani = zaman(surum.get('published_at'))
+
+          hatalar = []
+          print(f'commit zamani : {commit_zamani}')
+          print(f'yayin zamani  : {yayin_zamani}')
+
+          # (a) Bu TAM SHA icin 'tests' is akisi yesil mi?
+          testler = [k for k in kosular if k.get('name') == 'tests']
+          yesil = [k for k in testler if k.get('conclusion') == 'success']
+          if not testler:
+              hatalar.append(f"bu SHA icin 'tests' kosusu YOK — surum dogrulanmamis kaynaktan")
+          elif not yesil:
+              durumlar = ', '.join(f"{k.get('status')}/{k.get('conclusion')}" for k in testler)
+              hatalar.append(f"'tests' bu SHA'da yesil degil ({durumlar})")
+
+          # (b) CI, yayindan ONCE bitmis mi? (v2.6.25: yayin CI'dan 7 dk 25 sn once)
+          if yesil and yayin_zamani:
+              bitis = min(z for z in (zaman(k.get('updated_at')) for k in yesil) if z)
+              print(f'tests bitisi  : {bitis}')
+              if bitis > yayin_zamani:
+                  fark = (bitis - yayin_zamani).total_seconds() / 60.0
+                  hatalar.append(
+                      f'SURUM CI BITMEDEN YAYINLANDI: yayin {yayin_zamani}, '
+                      f'tests bitisi {bitis} ({fark:.1f} dk sonra)')
+
+          # (c) Her artefakt commit'ten SONRA mi uretilmis?
+          #     (v2.6.25: DMG+EXE commit'ten 36 dk 51 sn once uretilmisti)
+          varliklar = surum.get('assets') or []
+          if not varliklar:
+              hatalar.append('surumde hic artefakt yok')
+          for varlik in varliklar:
+              olusma = zaman(varlik.get('created_at'))
+              ad = varlik.get('name')
+              if olusma is None:
+                  hatalar.append(f'{ad}: created_at okunamadi')
+              elif commit_zamani and olusma < commit_zamani:
+                  fark = (commit_zamani - olusma).total_seconds() / 60.0
+                  hatalar.append(
+                      f'{ad}: commit\'ten {fark:.1f} dk ONCE yuklendi — '
+                      f'ikili bu kaynagi temsil etmiyor')
+              else:
+                  print(f'GECTI  {ad} commit sonrasi ({olusma})')
+
+          for h in hatalar:
+              print(f'KALDI  {h}')
+          if hatalar:
+              sys.exit(1)
+          print('GECTI  yayin zinciri sirasi dogru')
+          PY

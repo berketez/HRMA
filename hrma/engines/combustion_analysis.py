@@ -51,6 +51,13 @@ AIR_N2_MOLE_FRACTION = 0.79
 _OPTIMUM_OF_CACHE = {}
 _OPTIMUM_OF_CACHE_MAX = 16
 
+# Denge çözümü memoizasyonunun (CombustionAnalyzer.memoize) hücre üst sınırı.
+# Faz 4B / bulgu A7: anahtar nicemlemesi kaldırıldığı için hücre sayısı artık
+# yalnız BİREBİR aynı istekte paylaşılır ve bir üst sınır gerekir. Ölçülen en
+# büyük gerçek iş yükü 25x25 = 625 noktalık Isp yüzeyidir
+# (visualization._isp_surface_solve); bu sınır onun altı katından fazlasıdır.
+EQUILIBRIUM_CACHE_MAX = 4096
+
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
 
@@ -59,14 +66,22 @@ class CombustionAnalyzer:
         self.R_universal = R_UNIVERSAL  # J/(kmol·K)
 
         # Denge çözümü memoizasyonu (v2.5.0 UQ, ARGE spec 6.2): memoize=True
-        # iken analyze_combustion sonuçları (yakıt, oksitleyici, O/F@0.01,
-        # Pc@0.1, T) anahtarıyla instance ömürlü önbelleğe alınır. Yuvarlama
-        # YALNIZ anahtardadır — hesap girdileri yuvarlanmaz; c* yüzeyi (O/F,Pc)
-        # üzerinde pürüzsüz olduğundan 0.01/0.1 çözünürlüğün hatası << %0.1
-        # (motor içi _perf_cache zaten O/F@0.05 yuvarlıyor; bu daha sıkı).
-        # Varsayılan memoize=False: nominal davranış bire bir korunur.
+        # iken analyze_combustion sonuçları instance ömürlü önbelleğe alınır.
+        #
+        # Faz 4B (bulgu A7): anahtar artık TAM değerlerle kurulur. Eski anahtar
+        # O/F'yi 0.01'e, Pc'yi 0.1 bar'a, T'yi 0.1 K'e, ε'yu 0.01'e NİCEMLİYORDU
+        # ve bu, birbirinden fiziksel olarak AYRI istekleri aynı hücreye
+        # düşürüyordu. Gerekçe ve ölçüm analyze_combustion içindeki anahtar
+        # bloğunda yazılıdır.
+        #
+        # Üst sınır: tam anahtar, nicemli anahtardan daha çok hücre üretebilir
+        # (yalnız birebir aynı istek isabet eder), bu yüzden önbellek artık
+        # sınırlıdır. Aynı dosyadaki _OPTIMUM_OF_CACHE ile aynı desen: sınır
+        # aşılınca en eski kayıt düşer (FIFO). 4096 hücre, ölçülen en büyük iş
+        # yükünün (25x25 = 625 noktalık Isp yüzeyi) altı katından fazladır.
         self.memoize = bool(memoize)
         self._equilibrium_cache = {}
+        self._equilibrium_cache_max = EQUILIBRIUM_CACHE_MAX
 
         # Cantera gaz objesi - NASA-CEA veritabanı kullanarak
         # _mechanism_id: yüklenen mekanizmanın kimliği — optimum O/F
@@ -223,21 +238,67 @@ class CombustionAnalyzer:
         # eta yalnız iki türetilmiş alanı (eta_c_star, c_star_delivered)
         # etkiler ve isabet halinde kopya üstünde yeniden uygulanır. Böylece
         # UQ örnekleri arasında eta değişse de pahalı denge çözümü paylaşılır.
+        #
+        # --- ANAHTAR NİCEMLEMESİ KALDIRILDI (Faz 4B, bulgu A7) -------------
+        # Eski anahtar O/F'yi 0.01'e, Pc'yi 0.1 bar'a, T'yi 0.1 K'e ve ε'yu
+        # 0.01'e nicemliyordu. Bu, önbelleği "yaklaşık eşit girdiler aynı
+        # cevabı alsın" hâline getiriyordu — yani KULLANICI GİRDİYİ
+        # DEĞİŞTİRİYOR, CEVAP DEĞİŞMİYORDU.
+        #
+        # ÖLÇÜM (2 Ağustos 2026, HEAD a7ff1e7; htpb/N2O, O/F=6):
+        #   memoize=True iken Pc=20.04 bar isteği Pc=20.00 sonucunu döndürüyor,
+        #   c* bit-aynı. Aynısı O/F=6.004 için de geçerli.
+        #   Nicemlemenin YUTTUĞU fark (memoize=False ile ölçüldü):
+        #     inputs.chamber_pressure          20.00 -> 20.04  (%0.200)
+        #     stations.chamber.pressure        20.00 -> 20.04  (%0.200)
+        #     stations.chamber.density       1.85612 -> 1.85976 (%0.196)
+        #     stations.throat.pressure       11.4419 -> 11.4647 (%0.199)
+        #     performance.c_star                              (%0.0015)
+        #   Yani sonuç sözlüğü, ÇÖZÜLMEYEN bir basıncı "girdi" diye geri
+        #   bildiriyordu: hata c*'ta küçük, girdi yankısında ise tam bir yalan.
+        #
+        # ÖLÇÜT: nicemleme, çözümün duyarlılığından daha kaba olmamalı. Yoğunluk
+        # Pc ile 1:1 ölçekleniyor (dρ/ρ = dPc/Pc), yani 0.1 bar nicemleme 20
+        # bar'da %0.5'e kadar yoğunluk hatası demektir — sabitin kendisinden
+        # büyük. Bu ölçütü sağlayan tek eşik "nicemleme yok"tur.
+        #
+        # İSABET ORANI ETKİSİ (aynı gün ölçüldü, gerçek çağrı izleriyle):
+        #   O/F taraması (60 nokta):  nicemli %0.0 -> tam %0.0   (fark yok)
+        #   Pc-O/F ızgarası (625):    nicemli %0.0 -> tam %0.0   (fark yok)
+        #   UQ hibrit N=40 (84 çağrı): nicemli %47.6 -> tam %2.4
+        # Görselleştirme yolları hiç etkilenmiyor (linspace noktaları zaten
+        # birbirinden ayrı). UQ'da isabet düşüyor çünkü o "isabetler" fiziksel
+        # olarak AYRI örneklerdi: Pc örnekler arasında 18.98-20.00 bar, ε ise
+        # 3.68-3.82 aralığında değişiyordu ve nicemleme komşu örnekleri aynı
+        # cevaba bağlıyordu — belirsizlik yayılımının tam da ölçmesi gereken
+        # farkı siliyordu. Bedel ölçüldü: tek denge çözümü 0.027 s;
+        # test_hybrid_fast_budget_end_to_end 9.68 s / 60 s üst sınır.
         cache_key = None
         if self.memoize:
             try:
+                anahtar_sayilari = [float(of_ratio), float(chamber_pressure)]
+                if chamber_temperature is not None:
+                    anahtar_sayilari.append(float(chamber_temperature))
+                if expansion_ratio is not None:
+                    anahtar_sayilari.append(float(expansion_ratio))
+                bilesim = tuple(sorted((str(k).lower(), float(v))
+                                       for k, v in fuel_composition.items()))
+                anahtar_sayilari.extend(v for _, v in bilesim)
+                if not all(np.isfinite(x) for x in anahtar_sayilari):
+                    # NaN kendine eşit olmadığı için asla isabet etmez, ama
+                    # her çağrıda yeni bir hücre açar. Önbelleksiz devam.
+                    raise ValueError('non-finite cache key component')
                 cache_key = (
-                    tuple(sorted((str(k).lower(), round(float(v), 6))
-                                 for k, v in fuel_composition.items())),
+                    bilesim,
                     str(oxidizer_type).lower(),
-                    int(round(float(of_ratio) * 100)),          # O/F @ 0.01
-                    int(round(float(chamber_pressure) * 10)),   # Pc  @ 0.1 bar
+                    float(of_ratio),
+                    float(chamber_pressure),
                     None if chamber_temperature is None
-                    else int(round(float(chamber_temperature) * 10)),
+                    else float(chamber_temperature),
                     # ε çıkış istasyonunu (p_e, T_e, bileşim, isp, cf)
                     # değiştirdiği için anahtara GİRMELİDİR (v2.6.2/F034).
                     None if expansion_ratio is None
-                    else int(round(float(expansion_ratio) * 100)),
+                    else float(expansion_ratio),
                 )
             except (TypeError, ValueError):
                 cache_key = None  # anahtarlanamayan girdi: önbelleksiz devam
@@ -397,6 +458,14 @@ class CombustionAnalyzer:
         }
 
         if cache_key is not None:
+            # Faz 4B (bulgu A7): tam anahtarla hücre sayısı artabilir, bu yüzden
+            # önbellek sınırlı — en eski kayıt düşer (FIFO; dict ekleme sırasını
+            # korur). Aynı dosyadaki _OPTIMUM_OF_CACHE ile aynı desen.
+            if (cache_key not in self._equilibrium_cache
+                    and len(self._equilibrium_cache)
+                    >= self._equilibrium_cache_max):
+                self._equilibrium_cache.pop(
+                    next(iter(self._equilibrium_cache)))
             # Kopya sakla: çağıran sonucu mutasyona uğratsa bile önbellek bozulmaz
             self._equilibrium_cache[cache_key] = copy.deepcopy(result)
 
