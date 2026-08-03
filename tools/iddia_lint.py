@@ -93,8 +93,17 @@ USER_FACING_DOC_TARGETS: Tuple[str, ...] = (
 DEFAULT_SCAN_TARGETS: Tuple[str, ...] = ('hrma',) + USER_FACING_DOC_TARGETS
 
 SCANNED_SUFFIXES = ('.py', '.js', '.html', '.md', '.tex')
+#: Taranmayan dizin ADLARI. Son üçü DERLEME ARTIĞIDIR ve 3 Ağustos 2026'da
+#: eklendi: ``packaging`` tarama hedefine girince (sürüm notları için, H5-5)
+#: ``packaging/win/payload/app/hrma/app.py`` da taranmaya başladı — bu,
+#: uygulamanın ESKİ bir derlemeden kalma tam kopyasıdır ve içinde o gün
+#: kaynaktan kaldırılmış "ready for manufacturing" ifadesi hâlâ duruyordu.
+#: Artığı kaynak sanıp rapor etmek yanlış: derleme sırasında
+#: ``build_win_payload.sh`` ``$SRC/hrma``'yı taze rsync'liyor. Kaynak ağacında
+#: bu adlarda dizin YOK (kontrol edildi), yani ad bazlı atlama güvenli.
 SKIPPED_DIR_NAMES = {'__pycache__', 'node_modules', '.git', 'venv', '.venv',
-                     'archive'}
+                     'archive',
+                     'payload', 'libs', 'build.noindex'}
 SKIPPED_FILE_SUFFIXES = ('.min.js',)
 
 INLINE_EXEMPT = 'IDDIA-LINT-MUAF'
