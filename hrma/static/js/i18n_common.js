@@ -204,6 +204,13 @@
             'app.val.tankPositive': 'Tank pressure must be positive',
             'app.val.tankTooLow': 'Tank pressure ({tank} bar) must be higher than chamber pressure ({pc} bar). Minimum required: {min} bar',
             'app.val.thrustPositive': 'Thrust must be positive',
+            // Doğrulama durumu kodları (validation_system.py:245-249).
+            // 2026-08-03 (Faz 6, T31): bu üç anahtar HİÇ yoktu; ekranda
+            // 'VALIDATION STATUS: [OBJECT OBJECT]' çıkıyordu, sonra da
+            // ham 'warning'/'critical' sözcükleri. Artık cümle kuruyor.
+            'status.critical': 'critical findings present',
+            'status.warnings': 'warnings present',
+            'status.normal': 'no findings',
             'app.warn.critical': 'CRITICAL',
             'app.warn.validationStatus': 'Validation status:',
             'app.warn.warning': 'WARNING',
@@ -2098,6 +2105,10 @@
             'app.val.tankPositive': 'Tank basıncı pozitif olmalı',
             'app.val.tankTooLow': 'Tank basıncı ({tank} bar) oda basıncından ({pc} bar) yüksek olmalı. Gereken alt sınır: {min} bar',
             'app.val.thrustPositive': 'İtki pozitif olmalı',
+            // Doğrulama durumu kodları (bkz. EN blokundaki not, Faz 6 / T31).
+            'status.critical': 'kritik bulgu var',
+            'status.warnings': 'uyarı var',
+            'status.normal': 'bulgu yok',
             'app.warn.critical': 'KRİTİK',
             'app.warn.validationStatus': 'Doğrulama durumu:',
             'app.warn.warning': 'UYARI',

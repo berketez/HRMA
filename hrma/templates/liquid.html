@@ -5151,7 +5151,11 @@ Please provide:
             let html = '';
             if (validation.overall_status) {
                 const statusCls = critical.length ? 'warning-status-critical' : 'warning-status-regular';
-                html += `<div class="warning-status ${statusCls}">${statusLabel} ${validation.overall_status}</div>`;
+                // 2026-08-03 (Faz 6, T31): overall_status düz metin DEĞİL,
+                // uyarılar gibi {code, params, severity} sözlüğü — doğrudan
+                // gömülünce "[object Object]" basıyordu. app.js'te aynı hata
+                // aynı gün düzeltildi; iki sayfa aynı çözücüyü kullanır.
+                html += `<div class="warning-status ${statusCls}">${statusLabel} ${warnToText(validation.overall_status)}</div>`;
             }
             const inputTag = T('liq.msg.input_warning_tag', 'INPUT');
             critical.forEach(w => { html += item(criticalTag, w, 'warning-critical'); });

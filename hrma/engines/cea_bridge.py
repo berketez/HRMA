@@ -176,12 +176,29 @@ def ensure_isolated_cea_data_dir() -> Optional[str]:
         except Exception:
             return None
         target = tempfile.mkdtemp(prefix='hrma-cea-%d-' % os.getpid())
+        # `cea_obj` modülü veri dizini global'inin KENDİ kopyasını taşır
+        # (paketin __init__'indeki blok orada tekrarlanmıştır); asıl
+        # kullanılan bu olduğu için önce o sabitlenir.
+        #
+        # 2026-08-03: burada yalnız resmî ayarlayıcı deneniyordu ve o
+        # patlarsa fonksiyon None dönüyordu. CI'da (Linux, rocketcea
+        # KAYNAKTAN derleniyor) tam bu oldu: izolasyon sessizce kapandı ve
+        # test_faz5_motor "CEA veri dizini bu sürece sabitlenemedi" dedi.
+        # Fonksiyonun işi tek bir şey — ROCKETCEA_DATA_DIR'ı sürece özel bir
+        # dizine çevirmek. Ayarlayıcı yoksa ya da patlarsa global DOĞRUDAN
+        # yazılır; bu, sürümden bağımsız olarak aynı sonucu verir. Yalnız
+        # global de yazılamıyorsa vazgeçilir.
+        _pinlendi = False
         try:
-            # `cea_obj` modülü veri dizini global'inin KENDİ kopyasını taşır
-            # (paketin __init__'indeki blok orada tekrarlanmıştır); asıl
-            # kullanılan bu olduğu için önce o sabitlenir.
             _cea_module.set_rocketcea_data_dir(target, do_print=False)
+            _pinlendi = True
         except Exception:
+            try:
+                _cea_module.ROCKETCEA_DATA_DIR = target
+                _pinlendi = True
+            except Exception:
+                _pinlendi = False
+        if not _pinlendi:
             _remove_cea_data_dir(target)
             return None
         try:

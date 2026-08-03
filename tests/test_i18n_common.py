@@ -162,7 +162,14 @@ def used_keys():
 
 
 #: Çeviri anahtarı biçimi: en az iki nokta-ayrık parça, harf/rakam/alt çizgi.
-PY_KEY_RE = re.compile(r"['\"]((?:warn|panel|common|risk|out)\.[\w.]+)['\"]")
+# 2026-08-03 (Faz 6, T31): 'status' ön eki listede YOKTU. Doğrulama durumu
+# kodları (status.critical / status.warnings / status.normal) tam da bu yolla
+# üretiliyor — hrma/validation/validation_system.py:245-249 — ama tarama onları
+# görmediği için sözlüğe eklenmeleri "ölü çeviri" sayılıyordu. Ön ek listesi
+# Python'ın GERÇEKTEN gönderdiği ad alanlarını yansıtmalı, yoksa bekçi doğru
+# eklemeyi engeller.
+PY_KEY_RE = re.compile(
+    r"['\"]((?:warn|panel|common|risk|out|status)\.[\w.]+)['\"]")
 
 
 def python_dispatched_keys():

@@ -27,8 +27,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.6.25.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.25-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-2.6.26.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.26-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -142,8 +142,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.6.25.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.25-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.25/HRMA-Setup-2.6.25-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-2.6.26.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.26-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -237,12 +237,12 @@ HRMA/
 
 ## Version
 
-**HRMA v2.6.25**
+**HRMA v2.6.26**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - A preliminary-design and educational rocket-propulsion analysis tool
   (not a flight-qualification tool — see the scope note above)
-- Last Updated: July 2026
+- Last Updated: August 2026
 
 **v2.6.26 is a wiring release.** It adds no physics. An empirical audit of the
 hybrid page measured, field by field, whether typing a value into an input
@@ -305,6 +305,21 @@ sanitised on export (ZIP-Slip and CSV/XLSX formula injection); the local API's
 Host gate applies to `GET`/`HEAD`/`OPTIONS` as well, closing a DNS-rebinding
 read path; and the chemical database no longer writes to disk at import time,
 so a read-only installation starts.
+
+**v2.6.26 is about numbers that were wrong and screens that said things the
+solver never said.** The ascent trajectory was off by a factor of 20 for every
+vehicle with a thrust-to-weight ratio below about 2.9 — measured at 85° with
+T/W 2.19, apogee came out 13.86 m where an independent reference integration
+gives 286.86 m. A solid motor's characteristic velocity helper returned
+508.7 m/s for a propellant whose real value is near 1470 (one term in the
+formula was inverted), and the design form reported three times the propellant
+mass the solver used. Running two copies of the application at once crashed
+both. The launch-site page's only button had never worked. Every screen was
+then audited in a browser — 164 buttons, 107 analyses, 68 charts — and the 76
+findings that came out of it are closed, each tied to a test that fails if the
+defect returns. The exhaust plume is now derived from the solver's nozzle exit
+state instead of invented constants, and it is not drawn at all when there is
+no exit state to draw it from. Full list: `packaging/release_notes_v2.6.26.md`.
 
 **v2.6.25 is a field fix.** v2.6.2 shipped with a red CI run and was unusable
 on a real machine: a fixed CORS origin list recognised only port 8080, while

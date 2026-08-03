@@ -143,7 +143,12 @@ fi
 # Atlama olduysa uyarı, sürüm notunun EN BAŞINA girer (kaynak dosya
 # değiştirilmez; geçici bir kopya üretilir).
 if [ -n "$KAPI_ATLAMA_UYARISI" ]; then
-    GECICI_NOT="$(mktemp -t hrma_release_notes)"
+    # 2026-08-03: şablon "hrma_release_notes" idi. BSD mktemp (macOS) bunu
+    # kabul eder, GNU mktemp (Linux/CI) "too few X's in template" deyip
+    # 1 döner — betik orada ölüyordu. Yayın hep macOS'tan yapıldığı için
+    # fark edilmemişti; CI'da ilk kez koştuğunda çıktı. Üç X iki tarafta da
+    # geçerlidir.
+    GECICI_NOT="$(mktemp -t hrma_release_notes.XXXXXX)"
     cat > "$GECICI_NOT" <<UYARI
 > **UYARI — YAYIN KAPISI ATLANDI (TASLAK).**
 > Bu taslak, packaging/release_gate.sh doğrulamaları KOŞTURULMADAN üretildi:

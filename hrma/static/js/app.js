@@ -1091,9 +1091,16 @@ function displayWarnings(warnings, validation) {
     let html = '';
     if (validation && validation.overall_status) {
         const statusCls = critical.length ? 'warning-status-critical' : 'warning-status-regular';
+        // 2026-08-03 (Faz 6, T31): burada `${validation.overall_status}` vardı.
+        // overall_status da uyarılar gibi {code, params, severity} sözlüğüdür
+        // (validation_system.py:245-249), düz metin değil — şablona doğrudan
+        // gömülünce ekrana "VALIDATION STATUS: [OBJECT OBJECT]" basılıyordu.
+        // Yukarıdaki warnToText bu şekli zaten çözüyor ve kendi yorumunda aynı
+        // regresyonun v2.6.2'de yaşandığını yazıyor; uyarı metinleri ondan
+        // geçiyordu, durum satırı geçmiyordu.
         html += `<div class="warning-status ${statusCls}">`
             + T('app.warn.validationStatus', 'Validation status:') + ' '
-            + `${validation.overall_status}</div>`;
+            + `${warnToText(validation.overall_status)}</div>`;
     }
     const critLabel = T('app.warn.critical', 'CRITICAL');
     const warnLabel = T('app.warn.warning', 'WARNING');
