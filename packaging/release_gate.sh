@@ -268,15 +268,34 @@ if [ "$DUMAN_SONUC" -ne 0 ]; then
     basarisiz "sunucu ${PORT} portunda 60 sn içinde ayağa kalkmadı"
 else
     basarili "sunucu ${PORT} portunda ayakta"
+    # 2026-08-03: üç uca da TEK yük gönderiliyordu. Hibritte yetiyordu ama
+    # Faz 5'te katı ve sıvı uçlarına zorunlu-girdi doğrulaması eklendi
+    # (eksik girdiyle varsayılan doldurup tasarım üretmek YASAK) ve ikisi de
+    # haklı olarak 422 dönmeye başladı. Kapı bunu "beklenmeyen" sayıp yayını
+    # durduruyordu — yani doğru davranış kapıyı kilitliyordu. Artık her uç
+    # kendi tam yükünü alıyor; amaç uygulamanın GERÇEKTEN hesap yaptığını
+    # ölçmek, bu yüzden `use_tutorial_defaults` kestirmesi KULLANILMIYOR.
+    YUK_HIBRIT='{"motor_name":"kapi","thrust":5000,"chamber_pressure":25,
+                 "of_ratio":7.0,"burn_time":10,"fuel_type":"htpb",
+                 "oxidizer_type":"n2o","expansion_ratio":8.0,"l_star":1.0}'
+    YUK_KATI='{"motor_name":"kapi","motor_type":"solid","chamber_diameter":100,
+               "outer_diameter":100,"core_diameter":30,"grain_length":500,
+               "grain_count":3,"propellant_type":"apcp","chamber_pressure":40}'
+    YUK_SIVI='{"motor_name":"kapi","motor_type":"liquid","thrust":10000,
+               "burn_time":400,"chamber_pressure":50,"fuel_type":"rp1",
+               "oxidizer_type":"lox","mixture_ratio":2.3}'
     for UC in "/calculate:hibrit" "/calculate_solid:katı" "/calculate_liquid:sıvı"; do
         YOL="${UC%%:*}"; AD="${UC##*:}"
+        case "$YOL" in
+            /calculate_solid)  YUK="$YUK_KATI" ;;
+            /calculate_liquid) YUK="$YUK_SIVI" ;;
+            *)                 YUK="$YUK_HIBRIT" ;;
+        esac
         KOD="$(curl -s -o /tmp/hrma_gate_body.json -w '%{http_code}' \
                -X POST "http://127.0.0.1:${PORT}${YOL}" \
                -H 'Content-Type: application/json' \
                -H "Origin: http://127.0.0.1:${PORT}" \
-               -d '{"motor_name":"kapi","thrust":5000,"chamber_pressure":25,
-                    "of_ratio":7.0,"burn_time":10,"fuel_type":"htpb",
-                    "oxidizer_type":"n2o","expansion_ratio":8.0,"l_star":1.0}' \
+               -d "$YUK" \
                2>/dev/null)"
         if [ "$KOD" = "403" ]; then
             basarisiz "$AD motor: ${PORT} portunda 403 — v2.6.2 hatası GERİ GELDİ"
