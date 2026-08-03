@@ -18,7 +18,7 @@ Design guarantees (see hrma/data/validation_records/SCHEMA.md):
 3. No new dependencies: the validator is hand-written (``jsonschema`` is
    intentionally NOT used; it is not in the packaged bundle).
 
-Hata mesajlari Turkce'dir (kuratorluk PR'larinda dogrudan okunur).
+Hata mesajları Türkçedir (küratörlük PR'larında doğrudan okunur).
 """
 
 from __future__ import annotations
@@ -96,18 +96,18 @@ _UNCERTAINTY_ALLOWED = frozenset(("value", "type", "coverage_k", "source"))
 
 
 class ValidationRecordError(ValueError):
-    """Kayit sema denetiminden gecemedi (veya yukleme kurali ihlali)."""
+    """Kayıt şema denetiminden geçemedi (veya yükleme kuralı ihlali)."""
 
     def __init__(self, errors: List[str], path: Optional[Union[str, Path]] = None):
         self.errors = list(errors)
         self.path = str(path) if path is not None else None
         prefix = f"{self.path}: " if self.path else ""
-        message = prefix + "kayit dogrulamasi basarisiz:\n  - " + "\n  - ".join(self.errors)
+        message = prefix + "kayıt doğrulaması başarısız:\n  - " + "\n  - ".join(self.errors)
         super().__init__(message)
 
 
 def _is_number(value: Any) -> bool:
-    """Sonlu gercek sayi mi (bool SAYI degildir)."""
+    """Sonlu gerçek sayı mı (bool SAYI DEĞİLDİR)."""
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
@@ -116,52 +116,52 @@ def _is_nonempty_str(value: Any) -> bool:
 
 
 def _validate_curve(key: str, curve: Dict[str, Any], errors: List[str]) -> None:
-    """measured altindaki egri objesini denetle: {"time_s": [...], "value": [...]}."""
+    """measured altındaki eğri objesini denetle: {"time_s": [...], "value": [...]}."""
     extra = set(curve) - {"time_s", "value"}
     if extra:
         errors.append(
-            f"measured.{key}: egri objesinde bilinmeyen alan(lar): {sorted(extra)} "
+            f"measured.{key}: eğri objesinde bilinmeyen alan(lar): {sorted(extra)} "
             f"(izin verilen: time_s, value)"
         )
     for part in ("time_s", "value"):
         if part not in curve:
-            errors.append(f"measured.{key}: egri objesinde '{part}' listesi eksik")
+            errors.append(f"measured.{key}: eğri objesinde '{part}' listesi eksik")
     times = curve.get("time_s")
     values = curve.get("value")
     for part_name, seq in (("time_s", times), ("value", values)):
         if seq is None:
             continue
         if not isinstance(seq, list) or len(seq) < 2:
-            errors.append(f"measured.{key}.{part_name}: en az 2 elemanli liste olmali")
+            errors.append(f"measured.{key}.{part_name}: en az 2 elemanlı liste olmalı")
         elif not all(_is_number(v) for v in seq):
-            errors.append(f"measured.{key}.{part_name}: tum elemanlar sonlu sayi olmali")
+            errors.append(f"measured.{key}.{part_name}: tüm elemanlar sonlu sayı olmalı")
     if isinstance(times, list) and isinstance(values, list):
         if len(times) != len(values):
             errors.append(
                 f"measured.{key}: time_s ({len(times)}) ve value ({len(values)}) "
-                f"uzunluklari esit olmali"
+                f"uzunlukları eşit olmalı"
             )
         if len(times) >= 2 and all(_is_number(v) for v in times):
             if any(t2 <= t1 for t1, t2 in zip(times, times[1:])):
-                errors.append(f"measured.{key}.time_s: kesin artan olmali (zaman serisi)")
+                errors.append(f"measured.{key}.time_s: kesin artan olmalı (zaman serisi)")
 
 
 def validate_record(record: Any) -> List[str]:
-    """Tek kaydi sema kurallarina gore denetle; hata listesi dondur (bos = gecerli).
+    """Tek kaydı şema kurallarına göre denetle; hata listesi döndür (boş = geçerli).
 
-    Elle yazilmis dogrulayici — jsonschema bagimliligi bilinçli olarak yok.
-    Mesajlar Turkce ve alan-adresli ("source.confidence: ..." gibi).
+    Elle yazılmış doğrulayıcı — jsonschema bağımlılığı bilinçli olarak yok.
+    Mesajlar Türkçe ve alan adresli ("source.confidence: ..." gibi).
     """
     errors: List[str] = []
 
     if not isinstance(record, dict):
-        return ["kayit bir JSON objesi (sozluk) olmali"]
+        return ["kayıt bir JSON objesi (sözlük) olmalı"]
 
-    # --- bilinmeyen ust duzey alanlar (yazim hatasi korumasi) ---
+    # --- bilinmeyen üst düzey alanlar (yazım hatası koruması) ---
     unknown = set(record) - _TOP_LEVEL_ALLOWED
     if unknown:
         errors.append(
-            f"bilinmeyen ust duzey alan(lar): {sorted(unknown)} "
+            f"bilinmeyen üst düzey alan(lar): {sorted(unknown)} "
             f"(izin verilenler: {sorted(_TOP_LEVEL_ALLOWED)})"
         )
 
@@ -181,30 +181,30 @@ def validate_record(record: Any) -> List[str]:
     test_id = record.get("test_id")
     if test_id is not None:
         if not _is_nonempty_str(test_id):
-            errors.append("test_id: bos olmayan bir metin olmali")
+            errors.append("test_id: boş olmayan bir metin olmalı")
         elif not _TEST_ID_RE.match(test_id):
             errors.append(
-                f"test_id: '{test_id}' desen disi — [a-z0-9][a-z0-9_.-]{{2,63}} "
-                f"bekleniyor (or. 'hyb-rezaei2018-t26')"
+                f"test_id: '{test_id}' desen dışı — [a-z0-9][a-z0-9_.-]{{2,63}} "
+                f"bekleniyor (ör. 'hyb-rezaei2018-t26')"
             )
 
     # --- motor_type / record_type ---
     if "motor_type" in record and record["motor_type"] not in MOTOR_TYPES:
         errors.append(
-            f"motor_type: '{record['motor_type']}' gecersiz "
-            f"(gecerli degerler: {list(MOTOR_TYPES)})"
+            f"motor_type: '{record['motor_type']}' geçersiz "
+            f"(geçerli değerler: {list(MOTOR_TYPES)})"
         )
     if "record_type" in record and record["record_type"] not in RECORD_TYPES:
         errors.append(
-            f"record_type: '{record['record_type']}' gecersiz "
-            f"(gecerli degerler: {list(RECORD_TYPES)})"
+            f"record_type: '{record['record_type']}' geçersiz "
+            f"(geçerli değerler: {list(RECORD_TYPES)})"
         )
 
     # --- source ---
     source = record.get("source")
     if source is not None:
         if not isinstance(source, dict):
-            errors.append("source: bir obje olmali (citation/access/confidence/date_checked)")
+            errors.append("source: bir obje olmalı (citation/access/confidence/date_checked)")
         else:
             unknown_src = set(source) - _SOURCE_ALLOWED
             if unknown_src:
@@ -213,71 +213,71 @@ def validate_record(record: Any) -> List[str]:
                 if field not in source:
                     errors.append(f"source.{field}: zorunlu alan eksik")
             if "citation" in source and not _is_nonempty_str(source["citation"]):
-                errors.append("source.citation: bos olmayan tam kunye metni olmali")
+                errors.append("source.citation: boş olmayan tam künye metni olmalı")
             if "access" in source and source["access"] not in ACCESS_VALUES:
                 errors.append(
-                    f"source.access: '{source['access']}' gecersiz "
-                    f"(gecerli degerler: {list(ACCESS_VALUES)})"
+                    f"source.access: '{source['access']}' geçersiz "
+                    f"(geçerli değerler: {list(ACCESS_VALUES)})"
                 )
             if "confidence" in source and source["confidence"] not in CONFIDENCE_LEVELS:
                 errors.append(
-                    f"source.confidence: '{source['confidence']}' gecersiz "
-                    f"(gecerli degerler: {list(CONFIDENCE_LEVELS)})"
+                    f"source.confidence: '{source['confidence']}' geçersiz "
+                    f"(geçerli değerler: {list(CONFIDENCE_LEVELS)})"
                 )
             if "date_checked" in source:
                 dc = source["date_checked"]
                 if not (isinstance(dc, str) and _DATE_RE.match(dc)):
-                    errors.append("source.date_checked: 'YYYY-AA-GG' bicimli tarih olmali")
+                    errors.append("source.date_checked: 'YYYY-AA-GG' biçimli tarih olmalı")
             for opt in ("doi", "erratum"):
                 if opt in source and source[opt] is not None and not _is_nonempty_str(source[opt]):
-                    errors.append(f"source.{opt}: metin veya null olmali (tahmin YAZILMAZ)")
+                    errors.append(f"source.{opt}: metin veya null olmalı (tahmin YAZILMAZ)")
             if "url" in source and not _is_nonempty_str(source["url"]):
-                errors.append("source.url: bos olmayan metin olmali")
+                errors.append("source.url: boş olmayan metin olmalı")
             if ("data_extraction" in source
                     and source["data_extraction"] not in DATA_EXTRACTION_VALUES):
                 errors.append(
-                    f"source.data_extraction: '{source['data_extraction']}' gecersiz "
-                    f"(gecerli degerler: {list(DATA_EXTRACTION_VALUES)})"
+                    f"source.data_extraction: '{source['data_extraction']}' geçersiz "
+                    f"(geçerli değerler: {list(DATA_EXTRACTION_VALUES)})"
                 )
 
     # --- propellants ---
     propellants = record.get("propellants")
     if propellants is not None:
         if not isinstance(propellants, dict) or not propellants:
-            errors.append("propellants: bos olmayan bir obje olmali (or. oxidizer/fuel)")
+            errors.append("propellants: boş olmayan bir obje olmalı (ör. oxidizer/fuel)")
         else:
             for key, value in propellants.items():
                 if not (value is None or isinstance(value, str) or _is_number(value)):
-                    errors.append(f"propellants.{key}: metin, sayi veya null olmali")
+                    errors.append(f"propellants.{key}: metin, sayı veya null olmalı")
 
     # --- geometry ---
     geometry = record.get("geometry")
     if geometry is not None:
         if not isinstance(geometry, dict):
-            errors.append("geometry: bir obje olmali")
+            errors.append("geometry: bir obje olmalı")
         else:
             for key, value in geometry.items():
                 if not (value is None or isinstance(value, (str, bool)) or _is_number(value)):
-                    errors.append(f"geometry.{key}: metin, sayi, bool veya null olmali")
+                    errors.append(f"geometry.{key}: metin, sayı, bool veya null olmalı")
 
     # --- inputs ---
     inputs = record.get("inputs")
     if inputs is not None:
         if not isinstance(inputs, dict) or not inputs:
-            errors.append("inputs: bos olmayan bir obje olmali (deneyde ayarlanan buyuklukler)")
+            errors.append("inputs: boş olmayan bir obje olmalı (deneyde ayarlanan büyüklükler)")
         else:
             for key, value in inputs.items():
                 if not _is_number(value):
                     errors.append(
-                        f"inputs.{key}: sonlu bir sayi olmali "
-                        f"(olculmemis girdi kayda hic yazilmaz, null kullanilmaz)"
+                        f"inputs.{key}: sonlu bir sayı olmalı "
+                        f"(ölçülmemiş girdi kayda hiç yazılmaz, null kullanılmaz)"
                     )
 
     # --- measured ---
     measured = record.get("measured")
     if measured is not None:
         if not isinstance(measured, dict) or not measured:
-            errors.append("measured: bos olmayan bir obje olmali (deneyde olculen sonuclar)")
+            errors.append("measured: boş olmayan bir obje olmalı (deneyde ölçülen sonuçlar)")
         else:
             for key, value in measured.items():
                 if value is None or _is_number(value):
@@ -286,25 +286,25 @@ def validate_record(record: Any) -> List[str]:
                     _validate_curve(key, value, errors)
                 else:
                     errors.append(
-                        f"measured.{key}: sonlu sayi, null veya egri objesi "
-                        f"({{'time_s': [...], 'value': [...]}}) olmali"
+                        f"measured.{key}: sonlu sayı, null veya eğri objesi "
+                        f"({{'time_s': [...], 'value': [...]}}) olmalı"
                     )
 
-    # --- dongusellik bekcisi: inputs ve measured kesisemez ---
+    # --- döngüsellik bekçisi: inputs ve measured kesişemez ---
     if isinstance(inputs, dict) and isinstance(measured, dict):
         overlap = sorted(set(inputs) & set(measured))
         if overlap:
             errors.append(
-                f"dongusellik bekcisi: su anahtar(lar) hem inputs hem measured "
-                f"icinde: {overlap} — bir buyukluk ayni anda girdi ve olculen "
-                f"sonuc olamaz (girdiyle 'dogrulama' donguseldir)"
+                f"döngüsellik bekçisi: şu anahtar(lar) hem inputs hem measured "
+                f"içinde: {overlap} — bir büyüklük aynı anda girdi ve ölçülen "
+                f"sonuç olamaz (girdiyle 'doğrulama' döngüseldir)"
             )
 
     # --- measurement_uncertainty ---
     unc = record.get("measurement_uncertainty")
     if unc is not None:
         if not isinstance(unc, dict):
-            errors.append("measurement_uncertainty: bir obje olmali")
+            errors.append("measurement_uncertainty: bir obje olmalı")
         else:
             known_keys = set()
             if isinstance(inputs, dict):
@@ -315,12 +315,12 @@ def validate_record(record: Any) -> List[str]:
                 if key not in known_keys:
                     errors.append(
                         f"measurement_uncertainty.{key}: bu anahtar ne inputs ne "
-                        f"measured icinde tanimli — belirsizlik yalnizca kayitli "
-                        f"bir buyukluge baglanabilir"
+                        f"measured içinde tanımlı — belirsizlik yalnızca kayıtlı "
+                        f"bir büyüklüğe bağlanabilir"
                     )
                 if not isinstance(entry, dict):
                     errors.append(
-                        f"measurement_uncertainty.{key}: obje olmali "
+                        f"measurement_uncertainty.{key}: obje olmalı "
                         f"({{'value': ..., 'coverage_k': ...}})"
                     )
                     continue
@@ -334,53 +334,53 @@ def validate_record(record: Any) -> List[str]:
                     errors.append(f"measurement_uncertainty.{key}.value: zorunlu alan eksik")
                 elif not (_is_number(entry["value"]) and entry["value"] > 0):
                     errors.append(
-                        f"measurement_uncertainty.{key}.value: pozitif sonlu sayi olmali "
-                        f"(belirsizlik ASLA uydurulmaz; kaynak vermiyorsa alan hic yazilmaz)"
+                        f"measurement_uncertainty.{key}.value: pozitif sonlu sayı olmalı "
+                        f"(belirsizlik ASLA uydurulmaz; kaynak vermiyorsa alan hiç yazılmaz)"
                     )
                 if "type" in entry and entry["type"] not in UNCERTAINTY_TYPES:
                     errors.append(
                         f"measurement_uncertainty.{key}.type: "
-                        f"{list(UNCERTAINTY_TYPES)} icinden olmali"
+                        f"{list(UNCERTAINTY_TYPES)} içinden olmalı"
                     )
                 if "coverage_k" in entry:
                     ck = entry["coverage_k"]
                     if not (ck is None or _is_number(ck) or _is_nonempty_str(ck)):
                         errors.append(
-                            f"measurement_uncertainty.{key}.coverage_k: sayi, metin "
-                            f"(or. 'stated') veya null olmali"
+                            f"measurement_uncertainty.{key}.coverage_k: sayı, metin "
+                            f"(ör. 'stated') veya null olmalı"
                         )
 
     # --- anomaly ---
     anomaly = record.get("anomaly")
     if anomaly is not None:
         if not isinstance(anomaly, dict):
-            errors.append("anomaly: bir obje olmali ({'flag': bool, 'note': str})")
+            errors.append("anomaly: bir obje olmalı ({'flag': bool, 'note': str})")
         else:
             unknown_an = set(anomaly) - {"flag", "note"}
             if unknown_an:
                 errors.append(f"anomaly: bilinmeyen alan(lar): {sorted(unknown_an)}")
             flag = anomaly.get("flag")
             if not isinstance(flag, bool):
-                errors.append("anomaly.flag: bool olmali (zorunlu)")
+                errors.append("anomaly.flag: bool olmalı (zorunlu)")
             if flag is True and not _is_nonempty_str(anomaly.get("note")):
-                errors.append("anomaly.note: flag true ise bos olmayan aciklama zorunlu")
+                errors.append("anomaly.note: flag true ise boş olmayan açıklama zorunlu")
             if "note" in anomaly and anomaly["note"] is not None \
                     and not isinstance(anomaly["note"], str):
-                errors.append("anomaly.note: metin olmali")
+                errors.append("anomaly.note: metin olmalı")
 
     # --- units_original / digitized / synthetic / tags / notes ---
     if "units_original" in record and not _is_nonempty_str(record["units_original"]):
-        errors.append("units_original: kaynagin orijinal birimlerini ozetleyen metin olmali")
+        errors.append("units_original: kaynağın orijinal birimlerini özetleyen metin olmalı")
     if "digitized" in record and not isinstance(record["digitized"], bool):
-        errors.append("digitized: bool olmali (grafikten sayisallastirma bayragi)")
+        errors.append("digitized: bool olmalı (grafikten sayısallaştırma bayrağı)")
     if "synthetic" in record and not isinstance(record["synthetic"], bool):
-        errors.append("synthetic: bool olmali (varsayilan false)")
+        errors.append("synthetic: bool olmalı (varsayılan false)")
     if "tags" in record:
         tags = record["tags"]
         if not isinstance(tags, list) or not all(_is_nonempty_str(t) for t in tags):
-            errors.append("tags: bos olmayan metinlerden olusan liste olmali")
+            errors.append("tags: boş olmayan metinlerden oluşan liste olmalı")
     if "notes" in record and not isinstance(record["notes"], str):
-        errors.append("notes: metin olmali")
+        errors.append("notes: metin olmalı")
 
     return errors
 

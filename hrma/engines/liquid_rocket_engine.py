@@ -4429,7 +4429,122 @@ class LiquidRocketEngine:
             setattr(self, _k, _v)
 
         return altitude_data
-    
+
+    def _nozzle_exit_design_block(self, altitude_performance):
+        """Nozul çıkış durumu bloğu — motor_viz3d.js plume veri sözleşmesi.
+
+        v2.6.26 sahte-plume sökümünden sonra 3-B egzoz yalnız GERÇEK çıkış
+        büyüklükleriyle çizilir; ``readNozzleExit`` (motor_viz3d.js) şunları
+        okur ve biri eksikse plume'u HİÇ çizmez:
+
+            nozzle_design.performance.exit_pressure     [bar]
+            nozzle_design.performance.ambient_pressure  [bar]
+            nozzle_design.performance.exit_mach         [-]
+            nozzle_design.performance.exit_velocity     [m/s]  (yedek adres)
+            gamma, chamber_temperature, exit_diameter   (üst düzey)
+
+        Hibrit motor bu şemayı ``design_nozzle`` çıktısıyla yayımlıyordu;
+        sıvı motor AYNI büyüklükleri irtifa tablosunda zaten hesaplıyor ama
+        hiç yayımlamıyordu — sıvı sayfasında egzozun hiç çizilmemesinin
+        nedeni buydu. Bu blok yeni bir şey HESAPLAMAZ:
+        ``calculate_altitude_performance`` çıktısının deniz seviyesi
+        satırındaki (altitude == 0) gerçek değerleri sözleşme adlarıyla
+        yeniden yayımlar.
+
+        Çıkış hızı için not: hibritte ``readNozzleExit`` önce
+        ``altitude_performance.altitude_performance[0].exit_velocity``
+        (sözlük-sarmalı) adresine bakar. Sıvıda üst düzey
+        ``altitude_performance`` DÜZ LİSTEDİR ve liquid.html o listeyi
+        ``results.altitude_performance.length`` / ``.map`` ile tüketir;
+        sarmalamak o paneli kırar. Bu yüzden çıkış hızı sözleşmenin YEDEK
+        adresinde (``performance.exit_velocity``) yayımlanır — JS tam olarak
+        bu sıra için yazılmıştır (liste sarmalı bulunamazsa perf'e düşer).
+
+        Deniz seviyesi satırı çözülememişse değer UYDURULMAZ: alanlar null
+        döner ve gerekçe ``exit_state_basis`` içinde NOT_MODELLED olarak
+        yazar (plume çizilmez).
+        """
+        sea_level = None
+        if isinstance(altitude_performance, list) and altitude_performance:
+            row = altitude_performance[0]
+            if isinstance(row, dict) and row.get('altitude') == 0:
+                sea_level = row
+
+        def _finite(value):
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return None
+            return value if np.isfinite(value) else None
+
+        exit_pressure = ambient_pressure = exit_mach = exit_velocity = None
+        if sea_level is not None:
+            exit_pressure = _finite(sea_level.get('exit_pressure_bar'))
+            ambient_pressure = _finite(sea_level.get('pressure'))
+            exit_mach = _finite(sea_level.get('exit_mach_number'))
+            exit_velocity = _finite(sea_level.get('exit_velocity'))
+
+        source = ('liquid_rocket_engine.calculate_altitude_performance '
+                  'sea-level (altitude = 0 m) row of THIS design')
+        if None in (exit_pressure, ambient_pressure, exit_mach,
+                    exit_velocity):
+            return {
+                'performance': {
+                    'exit_pressure': None,
+                    'ambient_pressure': None,
+                    'exit_mach': None,
+                    'exit_velocity': None,
+                    'exit_state_basis': (
+                        'NOT_MODELLED: the sea-level row of the altitude '
+                        'performance table could not be resolved, so the '
+                        'nozzle exit state is not published. No value is '
+                        'invented; the 3-D exhaust plume stays off.'),
+                    'exit_state_source': source,
+                },
+                'schema_source': ('motor_viz3d.js readNozzleExit contract '
+                                  '(nozzle_design.performance), shared with '
+                                  'the hybrid engine'),
+            }
+
+        return {
+            'performance': {
+                # bar — ε ile tutarlı izentropik çıkış statik basıncı
+                # (Sutton & Biblarz 9th ed., Eq. 3-25 ailesi).
+                'exit_pressure': exit_pressure,
+                'exit_pressure_basis': (
+                    'isentropic static pressure at the geometric exit Mach '
+                    'of the design nozzle (Sutton & Biblarz 9th ed., '
+                    'Eq. 3-25 family); sea-level row of the altitude '
+                    'performance table'),
+                # bar — ISA deniz seviyesi (irtifa tablosunun kendi atmosferi)
+                'ambient_pressure': ambient_pressure,
+                'ambient_pressure_basis': (
+                    'ISA / US Standard Atmosphere 1976 at 0 m, the same '
+                    'atmosphere model as the altitude performance table'),
+                # [-] — çıkış Mach'ı GEOMETRİDEN (Ae/At, gamma) çözülür,
+                # ortam basıncından değil (v2.5.2 düzeltmesi).
+                'exit_mach': exit_mach,
+                'exit_mach_basis': (
+                    'solved from the design area ratio Ae/At and gamma '
+                    '(supersonic branch); independent of ambient pressure'),
+                # m/s — v_e = Me·a_exit, a_exit yanma gazının R\'si ve
+                # izentropik çıkış statik sıcaklığıyla.
+                'exit_velocity': exit_velocity,
+                'exit_velocity_basis': (
+                    'v_e = Me * sqrt(gamma * R_gas * T_exit_static) with '
+                    'combustion-gas R and the isentropic exit static '
+                    'temperature; sea-level row. Published here (the '
+                    'readNozzleExit fallback address) because the liquid '
+                    'top-level altitude_performance is a plain list '
+                    'consumed by liquid.html and cannot be dict-wrapped '
+                    'like the hybrid one'),
+                'exit_state_source': source,
+            },
+            'schema_source': ('motor_viz3d.js readNozzleExit contract '
+                              '(nozzle_design.performance), shared with '
+                              'the hybrid engine'),
+        }
+
     def calculate_performance(self):
         """Calculate overall engine performance"""
         # Basic geometry
@@ -4508,7 +4623,13 @@ class LiquidRocketEngine:
         # Altitude performance analysis
         altitudes = [0, 1000, 5000, 10000, 20000, 50000, 80000, 100000]  # m
         altitude_performance = self.calculate_altitude_performance(altitudes)
-        
+
+        # Nozul çıkış durumu (plume sözleşmesi): deniz seviyesi satırının
+        # GERÇEK değerleri hibritle aynı şema adları altında yayımlanır —
+        # bkz. _nozzle_exit_design_block docstring'i.
+        nozzle_design_block = self._nozzle_exit_design_block(
+            altitude_performance)
+
         # Advanced subsystem analysis
         propellant_tanks = self._design_propellant_tanks()
         detailed_feed_system = self._analyze_detailed_feed_system()
@@ -4647,7 +4768,16 @@ class LiquidRocketEngine:
             
             # Altitude performance
             'altitude_performance': altitude_performance,
-            
+
+            # --- Nozul çıkış durumu: 3-B egzoz (plume) veri sözleşmesi ---
+            # motor_viz3d.js readNozzleExit bu adresleri okur; hibritle aynı
+            # şema. Değerler irtifa tablosunun deniz seviyesi satırından
+            # gelir, yeni hesap yoktur (_nozzle_exit_design_block).
+            # gamma ve chamber_temperature sözleşmenin üst düzey adresleri —
+            # bu sözlükte zaten yayımlıdır ('gamma', 'chamber_temperature'),
+            # exit_diameter de metre cinsinden yukarıda ('Geometry') vardır.
+            'nozzle_design': nozzle_design_block,
+
             # Feed System (Enhanced)
             'feed_system': self.feed_system,
 

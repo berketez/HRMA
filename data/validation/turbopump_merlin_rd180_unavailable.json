@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "case": "turbopump_merlin_rd180_unavailable",
+  "description_tr": "OLUMSUZ KAYIT. Yol haritası C1, doğrulama kümesinde 'Merlin, RD-180, RL10 için yayımlanmış N, çark çapı ve NPSH' istiyor. Bu turda RL10 ve F-1 için birincil kaynak bulundu; Merlin 1D ve RD-180 için BULUNAMADI. Bu dosya, boşluğun sessizce doldurulmasını (ikincil derlemelerden sayı çekilmesini) engellemek için var — arayan bir sonraki kişi aramanın yapıldığını ve sonucun ne olduğunu görsün.",
+  "discipline": "turbopump",
+  "inputs": {
+    "engines": [
+      "Merlin 1D",
+      "RD-180"
+    ]
+  },
+  "expected_outputs": {
+    "NOT_MODELLED": "Turbopompa mil devri, çark çapı ve NPSH değerleri bu iki motor için saygın birincil kaynakta (NASA NTRS, AIAA, üretici teknik yayını) BULUNAMADI.",
+    "search_performed_tr": [
+      "NTRS ve AIAA taraması: RD-180 turbopompa mil devri — yalnız mimari tarifi (iki yanma odasını besleyen tek turbopompa, oksitleyici-zengin kademeli yanma) bulundu, sayısal devir bulunamadı.",
+      "SpaceX resmi Falcon 9 sayfası: yalnız itki yayımlanmış; turbopompa büyüklükleri hiç yayımlanmamış (depodaki liq-merlin1d-thrust-spec.json kaydı aynı sınırı zaten belgeliyor).",
+      "NPO Energomash birincil datasheet'i erişilemedi (depodaki liq-rd180-atlas-spec.json kaydı aynı erişim sorununu 2026-07-23'te kaydetmiş; durum değişmedi)."
+    ]
+  },
+  "why_not_filled_from_secondary_tr": "Astronautix / Wikipedia / hobi derlemelerinde bu iki motor için devir sayıları dolaşıyor. Bunlar tek başına birincil kaynağa dayandırılamadığı ve birbirini kopyaladığı için doğrulama capası OLARAK KULLANILAMAZ. Depo kuralı: kaynaksız bırakmak, yanlış kaynak göstermekten iyidir (docs/STANDART_ATIFLARI.md).",
+  "recommended_substitutes": [
+    "turbopump_rl10a33_design_point.json — küçük ölçek, yüksek devir, LH2 (30250 rpm)",
+    "turbopump_f1_saturnv.json — büyük ölçek, düşük devir, RP-1 (5500 rpm)",
+    "Bu ikisi C1'in ölçek aralığını RL10-F-1 arasında zaten kapsıyor."
+  ],
+  "source": {
+    "title": "Arama kaydı (birincil kaynak bulunamadı)",
+    "author": "HRMA doğrulama veri toplama turu",
+    "year": 2026,
+    "url_or_doi": "yok — olumsuz sonuç kaydı"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "not_applicable",
+  "tags": [
+    "negative_record",
+    "turbopump",
+    "not_modelled",
+    "gap_declaration"
+  ]
+}

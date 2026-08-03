@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0",
+  "case": "turbopump_rl10a33a_geometry",
+  "description_tr": "RL10A-3-3A yakıt ve LOX pompalarının DONANIM geometrisi: çark çapı, kanat çıkış yüksekliği, türbin ortalama çapı. Yol haritası C1'in çıktısı tam olarak bu büyüklüklerdir — bu kayıt, çark çapı tahmininin karşılaştırılacağı tek yayımlanmış sayı kümesidir.",
+  "discipline": "turbopump",
+  "inputs": {
+    "engine": "RL10A-3-3A",
+    "propellants": {
+      "oxidizer": "lox",
+      "fuel": "lh2"
+    },
+    "fuel_pump_architecture": "iki kademeli santrifüj, kanatsız difüzör, konik çıkış salyangozu; 1. kademede indüser",
+    "lox_pump_architecture": "indüser + tek kademeli santrifüj, kanatsız difüzör, konik çıkış salyangozu",
+    "turbine_architecture": "iki kademeli eksenel, kısmi girişli, aksiyon (impulse) türbini",
+    "drive": "yakıt pompası ve türbin ortak milde; LOX pompası dişli takımıyla tahrik ediliyor"
+  },
+  "expected_outputs": {
+    "hardware_geometry": {
+      "_status": "PUBLISHED_HARDWARE",
+      "fuel_pump_impeller_diameter_in": {
+        "stage1": 7.07,
+        "stage2": 7.07
+      },
+      "fuel_pump_exit_blade_height_in": {
+        "stage1": 0.23,
+        "stage2": 0.22
+      },
+      "lox_pump_impeller_diameter_in": 4.2,
+      "lox_pump_exit_blade_height_in": 0.251,
+      "turbine_meanline_diameter_in": 5.9
+    },
+    "model_predicted_operating_point": {
+      "_status": "MODEL_PREDICTION_NOT_MEASUREMENT",
+      "fuel_pump_head_ft": {
+        "stage1": 16969,
+        "stage2": 17989
+      },
+      "fuel_pump_mass_flow_lbm_s": {
+        "stage1": 6.051,
+        "stage2": 6.008
+      },
+      "fuel_pump_temperature_rise_R": {
+        "stage1": 9.23,
+        "stage2": 10.2
+      },
+      "fuel_pump_efficiency": {
+        "stage1": 0.581,
+        "stage2": 0.5619
+      },
+      "fuel_pump_shaft_speed_rpm": 31537,
+      "turbine_pressure_ratio_tt": 1.39,
+      "turbine_mass_flow_lbm_s": 5.89,
+      "turbine_temperature_drop_R": 24.5,
+      "lox_pump_head_ft": 1212,
+      "lox_pump_mass_flow_lbm_s": 31.4,
+      "lox_pump_fluid_temperature_rise_R": 3.85,
+      "lox_pump_efficiency": 0.6422,
+      "lox_pump_shaft_speed_rpm": 12615
+    },
+    "rotordynamics": {
+      "tp_mass_moment_of_inertia_lbf_in_s2": 0.0776,
+      "tp_drag_moment_lbf_in": 20.0,
+      "reference_shaft": "yakıt pompası mili"
+    },
+    "NOT_PUBLISHED": [
+      "NPSH",
+      "emme özgül devri (Nss)",
+      "indüser çapı",
+      "kanat sayısı"
+    ]
+  },
+  "units": "in, ft, lbm/s, R, rpm, lbf-in-s^2, lbf-in",
+  "source": {
+    "title": "RL10A-3-3A Rocket Engine Modeling Project, NASA TM-107318, Tablo 2.2.1 ve 2.3.1",
+    "author": "NASA Lewis Research Center",
+    "year": 1997,
+    "url_or_doi": "https://ntrs.nasa.gov/api/citations/19970010379/downloads/19970010379.pdf"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "KRİTİK AYRIM — kaynağın kendi dipnotu: tablodaki head/debi/verim/devir değerleri 'model tarafından öngörülen tipik çalışma noktası' değerleridir, ÖLÇÜM DEĞİLDİR. Bu yüzden iki ayrı bloğa bölündü: geometri (PUBLISHED_HARDWARE, yüksek güven) ve çalışma noktası (MODEL_PREDICTION_NOT_MEASUREMENT, kıyasta capa olarak kullanılmamalı). Depodaki liq-rl10a33a-nominal-spec.json kaydı aynı ayrımı yapıyor; bu kayıt onunla TUTARLIDIR (7.07 in ve 4.2 in orada da var). NPSH bu belgede de YOK — C1'in NPSH marjı iddiası bu kaynakla doğrulanamaz.",
+  "tags": [
+    "engine_anchor",
+    "turbopump",
+    "geometry",
+    "lh2",
+    "lox",
+    "primary_source"
+  ]
+}

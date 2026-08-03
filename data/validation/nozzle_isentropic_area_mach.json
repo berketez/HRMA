@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "case": "nozzle_isentropic_area_mach",
+  "description_tr": "Yarı-1B lüle çözücüsünün temel kabul testi: verilen alan oranı için ses altı ve ses üstü Mach kökleri ve karşılık gelen basınç oranları. Alan-Mach bağıntısının iki kökü vardır; bir çözücünün en sık yaptığı hata yanlış kökü seçmektir, bu vaka onu yakalar.",
+  "discipline": "nozzle_flow",
+  "inputs": {
+    "gamma": 1.4,
+    "area_ratios": [
+      2.0,
+      4.0
+    ],
+    "flow_assumption": "kalorik olarak mükemmel gaz, izentropik, yarı-1B"
+  },
+  "expected_outputs": {
+    "area_ratio_2.0": {
+      "mach_subsonic": 0.305903834,
+      "p_over_p0_subsonic": 0.937162502,
+      "mach_supersonic": 2.197198122,
+      "p_over_p0_supersonic": 0.093932646
+    },
+    "area_ratio_4.0": {
+      "mach_subsonic": 0.146548214,
+      "p_over_p0_subsonic": 0.985110688,
+      "mach_supersonic": 2.940179169,
+      "p_over_p0_supersonic": 0.029786963
+    }
+  },
+  "reference_formulas": {
+    "area_mach": "A/A* = (1/M) [ (2/(g+1)) (1 + (g-1)/2 M^2) ]^((g+1)/(2(g-1)))",
+    "isentropic_pressure": "p/p0 = [1 + (g-1)/2 M^2]^(-g/(g-1))"
+  },
+  "units": "boyutsuz",
+  "tolerance_pct": 0.01,
+  "source": {
+    "title": "Modern Compressible Flow with Historical Perspective, Bölüm 5 (yarı-1B lüle akışı)",
+    "author": "J. D. Anderson, Jr.",
+    "year": 2003,
+    "url_or_doi": "McGraw-Hill, ISBN 978-0072424430 (bağıntı standarttır; A/A*=2 için 0.3059 / 2.1972 klasik ders kitabı değeridir)"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Değerler alan-Mach bağıntısının Brent kök bulucuyla 1e-9 toleransında çözülmesiyle üretildi; A/A*=2 için çıkan 0.305904297 / 2.197198050 ders kitaplarında yaygın olarak verilen 0.3059 / 2.1972 değerleriyle birebir örtüşüyor — yani hesabımız bağımsız olarak teyitlidir. Kitap metni KOPYALANMADI; bağıntı ve künye alındı. Bu vaka ANALİTİKTİR, deneysel değildir.",
+  "tags": [
+    "analytic_derived",
+    "quasi_1d",
+    "area_mach",
+    "anderson"
+  ]
+}

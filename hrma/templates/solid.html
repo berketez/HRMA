@@ -4850,7 +4850,7 @@ Please provide:
                 portFinalM = Math.min(grainOuterDiaM * 0.95, portInitM * 1.6);
             }
 
-            return {
+            var data = {
                 viz_motor_type: 'solid',            // enjektör + oks. girişini gizler
                 chamber_diameter: chamberDiaM,      // m
                 chamber_length: chamberLenM,        // m
@@ -4875,6 +4875,26 @@ Please provide:
                 // (T_c*0.002) bir yer tutucu; ısı haritasını yanıltıcı
                 // değerlerle doldurmamak için "veri yok" fallback'i bırakıldı.
             };
+
+            // --- Egzoz (plume) sözleşmesi — motor_viz3d.js readNozzleExit ---
+            // Çözücü yanıtında VAR olan alanlar viz sözlüğüne AYNEN taşınır;
+            // olmayan alan sözlüğe HİÇ konmaz (undefined/uydurma değer yasak):
+            // eksikse readNozzleExit null döner ve plume dürüstçe çizilmez.
+            //   nozzle_design.performance.(exit_pressure, ambient_pressure,
+            //   exit_mach), combustion_analysis.compositions.chamber.gamma
+            //   (ya da düz gamma), chamber_temperature [K],
+            //   altitude_performance.altitude_performance[0].exit_velocity [m/s]
+            // Son üç anahtar (cooling_channels / injector_pattern /
+            // nozzle_contour) plume'a değil sonraki dalganın CAD çizimlerine
+            // veri yolu — ad değiştirmeden passthrough.
+            ['nozzle_design', 'combustion_analysis', 'gamma',
+             'chamber_temperature', 'altitude_performance',
+             'cooling_channels', 'injector_pattern', 'nozzle_contour'
+            ].forEach(function (key) {
+                if (r[key] !== undefined) data[key] = r[key];
+            });
+
+            return data;
         }
 
         // '3D CAD Design' panelinin grafik kabı (FAZ 6, T21).

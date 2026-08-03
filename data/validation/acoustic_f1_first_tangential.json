@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0",
+  "case": "acoustic_f1_first_tangential",
+  "description_tr": "F-1 motorunun geliştirme sırasında ÖLÇÜLEN birinci teğetsel (1T) kararsızlık frekansları. Bu kayıt bir 'model doğru çıkıyor' vakası DEĞİLDİR — tam tersine, sert cidar akustik formülünün gerçek bir motorda ne kadar SAPTIĞINI belgeler. Akustik modülün asıl sınavı budur: 500 Hz'i tutturmak değil, tutturamadığını beyan etmek.",
+  "discipline": "acoustics",
+  "inputs": {
+    "engine": "F-1 (Saturn V S-IC)",
+    "propellants": {
+      "oxidizer": "lox",
+      "fuel": "rp1"
+    },
+    "chamber_pressure_injector_face_kpa": 7757,
+    "chamber_pressure_throat_stagnation_kpa": 6757,
+    "combustion_temperature_K": 3572,
+    "characteristic_velocity_throat_m_s": 1660,
+    "throat_area_cm2": 6206,
+    "chamber_radius_m": {
+      "_status": "NOT_PUBLISHED_IN_THIS_SOURCE",
+      "note_tr": "Oefelein & Yang oda YARIÇAPINI vermiyor. Aşağıdaki türetmelerde R = 0.50 m duyarlılık taraması için KULLANILDI, capa olarak DEĞİL. Gerçek yarıçap ayrı bir birincil kaynaktan (ör. Rocketdyne R-3896-1 teknik el kitabı) alınmalıdır."
+    }
+  },
+  "expected_outputs": {
+    "measured_1T_frequencies_hz": {
+      "_status": "PUBLISHED_MEASUREMENT",
+      "5U_flatface_injector_unit005": 538,
+      "5U_baffled_injector_unit076": 460,
+      "double_row_cluster_injector_unit067": 454,
+      "PFRT_configuration_characteristic": 500,
+      "amplitude_pct_of_chamber_pressure": {
+        "unit005": 150,
+        "unit076": 65,
+        "unit067": 400
+      }
+    },
+    "mode_identification": "birinci teğetsel (1T), tek yönde dönen (spinning)",
+    "baffle_configuration": {
+      "number_of_compartments": 13,
+      "baffle_length_cm": 7.62,
+      "description_tr": "2 dairesel + 12 radyal bölme, enjektör yüzünü 13 gözeye ayırıyor"
+    }
+  },
+  "model_gap_analysis": {
+    "_status": "DERIVED_BY_US_NOT_PUBLISHED",
+    "equilibrium_sound_speed_m_s": 1196.17,
+    "equilibrium_sound_speed_basis": "a = c* / [ (1/g) ((g+1)/2)^((g+1)/(2(g-1))) ], c*=1660 m/s, gamma=1.22 varsayımı",
+    "predicted_1T_hz_rigid_wall": {
+      "R_0.45m": 778.9,
+      "R_0.50m": 701.0,
+      "R_0.55m": 637.3
+    },
+    "measured_range_hz": [
+      454,
+      538
+    ],
+    "implied_effective_sound_speed_m_s_at_R0.50": [
+      774.7,
+      918.0
+    ],
+    "finding_tr": "Sert cidar formülü denge ses hızıyla ~700 Hz veriyor; ölçülen 454-538 Hz. Yani formül gerçek motorda %30-55 YÜKSEK tahmin ediyor. Sebep uydurma değil, bilinen fizik: enjektöre yakın bölgede yanma tamamlanmamıştır, ortalama sıcaklık ve dolayısıyla etkin ses hızı denge değerinin altındadır; ayrıca yarıçap varsayımı da belirsizdir. HRMA bu modu hesaplarsa bu sapmayı BEYAN ETMELİ, 500 Hz'i tutturduğunu iddia etmemelidir.",
+    "gamma_assumption_warning_tr": "gamma = 1.22 BİZİM VARSAYIMIMIZDIR, kaynakta yoktur. Ses hızı türetmesi bu varsayıma duyarlıdır; bu yüzden implied_effective_sound_speed değerleri capa değil, mertebe göstergesidir."
+  },
+  "units": "Hz, kPa, K, m/s, cm, cm^2",
+  "source": {
+    "title": "Comprehensive Review of Liquid-Propellant Combustion Instabilities in F-1 Engines, Tablo 2 ve Tablo 4",
+    "author": "J. C. Oefelein ve V. Yang",
+    "year": 1993,
+    "url_or_doi": "Journal of Propulsion and Power, Cilt 9, Sayı 5, s. 657-677; doi:10.2514/3.23674"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Frekanslar makalenin Tablo 4'ünden doğrudan okundu (538/460/454 Hz, dipnot 'First tangential mode'); 500 Hz PFRT değeri metinden. Oda basıncı, sıcaklık ve c* Tablo 2'den. Tablo 2'nin iç tutarlılığı ayrıca sınandı: p_boğaz*A_t/mdot = 1660.09 m/s, yayımlanan 1660 m/s ile birebir (bkz. turbopump_f1_saturnv.json). Frekans değerleri YÜKSEK güvenlidir; model_gap_analysis bloğu ise BİZİM türetmemizdir ve yarıçap + gamma varsayımlarına bağlıdır — orası düşük güvenlidir ve öyle işaretlenmiştir.",
+  "tags": [
+    "published_measurement",
+    "acoustics",
+    "combustion_instability",
+    "f1",
+    "model_gap_documented",
+    "primary_source"
+  ]
+}

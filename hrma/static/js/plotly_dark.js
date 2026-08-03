@@ -392,7 +392,14 @@
     var TO_IMAGE_BUTTON = {
         __hrmaToImage: true,
         name: 'toImage',
-        title: 'Download plot as a png',
+        /* GETTER: modebar ipucu metni her çizimde yeniden okunur, bu yüzden
+           dil değişince (redrawAllPlots) kendiliğinden tazelenir. Sabit dize
+           olsaydı yükleme anındaki dilde donar ve TR modda İngilizce kalırdı
+           — ekrandaki tek İngilizce kalıntı modebar ipucu olurdu. */
+        get title() {
+            var tr = translator();
+            return tr ? tr('Download plot as a png') : 'Download plot as a png';
+        },
         icon: CAMERA_ICON,
         click: function (gd) {
             var opts = Object.assign({}, EXPORT_IMAGE_DEFAULTS,

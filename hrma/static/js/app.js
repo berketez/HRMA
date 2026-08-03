@@ -10,6 +10,12 @@ function TF(key, params, fallback) {
         return (params && name in params) ? String(params[name]) : whole;
     });
 }
+// Sunucudan DÜZ METİN gelen uyarı/hata satırı — sözlük + desen; eşleşme
+// yoksa metin AYNEN döner. i18n_charts.js yoksa metin dokunulmadan geçer.
+function SRV(text) {
+    return (window.I18N && window.I18N.serverText)
+        ? window.I18N.serverText(text) : text;
+}
 
 // currentResults is defined in advanced.html to avoid conflicts
 
@@ -597,10 +603,15 @@ function safePlotCreate(elementId, plotData) {
 
         } catch (e) {
             console.warn(`Failed to create plot for ${elementId}:`, e);
-            element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Plot data unavailable</div>';
+            // Yedek metinler de çevrilir: anahtar = İngilizce metnin kendisi
+            // (i18n_charts.js sözleşmesi), böylece i18n_common.js'e yeni
+            // anahtar eklemeden TR karşılığı sözlükten gelir.
+            element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">'
+                + SRV('Plot data unavailable') + '</div>';
         }
     } else if (element) {
-        element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No data available</div>';
+        element.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">'
+            + SRV('No data available') + '</div>';
     }
 }
 
@@ -690,7 +701,8 @@ function displayPlots(plots) {
                 }
             } catch (e) {
                 console.warn('Failed to create 3D motor plot:', e);
-                motor3DElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">3D visualization unavailable</div>';
+                motor3DElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">'
+                    + SRV('3D visualization unavailable') + '</div>';
             }
         }
     } else if (!viz3dMounted && plots.motor_3d && plots.motor_3d.error) {
@@ -1066,12 +1078,19 @@ function displayWarnings(warnings, validation) {
         }
         depth = depth || 0;
         if (w === null || w === undefined) return '';
-        if (typeof w === 'string') return w;
+        // Düz metin dalı: {code, params} sözleşmesine geçmemiş uyarılar
+        // (hrma/validation, hrma/importers, regen_cooling gibi düz
+        // İngilizce üretenler) buradan geçiyor. serverText sözlük + desen
+        // sırasıyla çevirir, eşleşme yoksa metni AYNEN döndürür.
+        // NOT: bu yorumda "yıldızlı yol" yazmayın — tests/test_i18n_common.py
+        // yorum temizleyicisi satır yorumunun içindeki eğik-çizgi-yıldızı
+        // blok yorum başlangıcı sanıp dosyanın gerisini siliyor (ölçüldü).
+        if (typeof w === 'string') return SRV(w);
         if (Array.isArray(w)) {
             return w.map(x => warnToText(x, depth + 1)).filter(Boolean).join(' · ');
         }
         if (typeof w !== 'object') return String(w);
-        if (!w.code) return w.message || w.text || JSON.stringify(w);
+        if (!w.code) return SRV(w.message || w.text || JSON.stringify(w));
         if (depth > 4) return w.code;
         const p = {};
         Object.keys(w.params || {}).forEach(k => {

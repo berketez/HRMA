@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "case": "structural_lame_thick_cylinder_si",
+  "description_tr": "Kalın cidarlı silindir, SI birimlerinde. VM25 ile AYNI fiziği farklı birim sisteminde sınar. Amacı bekçilik: bir çözücü psi/inç vakasını geçip SI vakasında kalıyorsa, hata fizikte değil birim dönüşümündedir. Beklenen değerler Lamé bağıntılarından tam olarak türetildi (deneysel değil, analitik).",
+  "discipline": "structural",
+  "inputs": {
+    "inner_radius_m": 0.1,
+    "outer_radius_m": 0.2,
+    "internal_pressure_pa": 50000000.0,
+    "external_pressure_pa": 0.0,
+    "youngs_modulus_pa": 200000000000.0,
+    "poissons_ratio": 0.3,
+    "stress_state": "plane_stress_open_end"
+  },
+  "expected_outputs": {
+    "radial_stress_pa": {
+      "r_0.10m": -50000000.0,
+      "r_0.15m": -12962962.96,
+      "r_0.20m": 0.0
+    },
+    "tangential_stress_pa": {
+      "r_0.10m": 83333333.33,
+      "r_0.15m": 46296296.3,
+      "r_0.20m": 33333333.33
+    },
+    "von_mises_stress_pa": {
+      "r_0.10m": 116666666.67
+    },
+    "radial_displacement_m": {
+      "r_0.10m": 4.916667e-05
+    }
+  },
+  "reference_formulas": {
+    "sigma_r": "p_i a^2/(b^2-a^2) (1 - b^2/r^2)",
+    "sigma_theta": "p_i a^2/(b^2-a^2) (1 + b^2/r^2)",
+    "von_mises_plane_stress": "sqrt(sigma_r^2 - sigma_r sigma_theta + sigma_theta^2)"
+  },
+  "units": "Pa, m",
+  "tolerance_pct": 0.1,
+  "source": {
+    "title": "Lamé kalın cidar çözümü (klasik elastisite); ANSYS VM25 ile aynı bağıntı ailesi",
+    "author": "G. Lamé (1852); çağdaş sunum: Timoshenko & Goodier, Theory of Elasticity",
+    "year": 1852,
+    "url_or_doi": "https://examples.mapdl.docs.pyansys.com/verif-manual/vm-025.html"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Bu vaka İNTERNETTEN ALINMADI, kapalı formdan TÜRETİLDİ — kaynak alanı bağıntının künyesidir, sayıların değil. Sayılar tam kesirli: sigma_theta(a) = 50 MPa * (16+64)/(64-16) / ... = 250/3 MPa = 83.3333 MPa. Böyle işaretlendiği için 'yayımlanmış ölçüm' sayılmaz; analitik referanstır.",
+  "tags": [
+    "analytic_derived",
+    "lame",
+    "si_units",
+    "unit_guard"
+  ]
+}

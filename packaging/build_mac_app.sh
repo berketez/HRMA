@@ -214,6 +214,85 @@ rsync -a --exclude='__pycache__' "$SRC/hrma" "$RES/app/"
 # verisi hrma/data/validation_records/ altında, git'te izleniyor.
 rsync -a --exclude='experimental_data.db' "$SRC/data" "$RES/app/"
 cp "$B/launcher.py" "$RES/app/launcher.py"
+
+# --- Örnek projeler ---------------------------------------------------------
+# 2026-08-03: examples/ HİÇBİR paketleme betiğinde geçmiyordu. Yayınlanan
+# v2.6.26 DMG'si mount edilip ölçüldü: .app içinde TEK BİR .hrma yok.
+# Oysa examples/README.md kullanıcıya "bu dizindeki dosyaları
+# ~/Documents/HRMA/projects'e kopyalayın" diyor — kurulumla gelmeyen bir
+# dizini kopyalamasını istiyordu. Örnekler artık pakete girer.
+# generate_examples.py da girer: örneği üreten betik yanında durmazsa
+# kullanıcı sayının nereden geldiğini göremez.
+rsync -a --exclude='__pycache__' "$SRC/examples" "$RES/app/"
+# Sayı SABİT YAZILMAZ: depodaki .hrma sayısı ne ise pakette o kadar olmalı.
+# Böylece örnek eklenince bekçi güncellenmek zorunda kalmaz ama paketleme
+# sırasında bir örnek düşerse derleme durur.
+ORNEK_KAYNAK="$(find "$SRC/examples" -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ')"
+ORNEK_PAKET="$(find "$RES/app/examples" -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ')"
+if [ "$ORNEK_KAYNAK" -lt 1 ]; then
+    echo "HATA: depoda hiç örnek proje yok (examples/*.hrma) — paket örneksiz çıkardı"; exit 1
+fi
+if [ "$ORNEK_PAKET" != "$ORNEK_KAYNAK" ]; then
+    echo "HATA: örnek proje sayısı tutmuyor (depo $ORNEK_KAYNAK, paket $ORNEK_PAKET)"; exit 1
+fi
+echo "      örnek proje: $ORNEK_PAKET adet (.hrma) + generate_examples.py"
+
+# --- BUILD_INFO.json --------------------------------------------------------
+# Paketin İÇİNE gömülen köken kaydı. Neden gerekli: yayın kapısının 3/8 adımı
+# ikilinin commit'ten sonra üretildiğini yalnız DOSYA ZAMANINDAN (mtime)
+# okuyabiliyordu. mtime hangi AĞAÇTAN derlendiğini söylemez — `touch` bile
+# eski bir paketi yeni gösterir. v2.6.25'te ikili, temsil ettiği commit'ten
+# 36 dk 51 sn ÖNCE üretilmişti ve bunu hiçbir kontrol yakalamadı.
+# Buradaki kayıt kapıda HEAD ile karşılaştırılır (release_gate.sh 3/8).
+#
+# UYDURMA YASAK: git okunamazsa alan null yazılır ve gerekçesi `*_basis`
+# alanında beyan edilir. Derleme bu yüzden ÖLMEZ (git'siz bir dışa aktarımdan
+# derleme meşru olabilir) ama kapı sha'sız paketi yayınlatmaz — yani karar
+# yayın anında, kanıta bakarak verilir.
+python3 - "$RES/app/BUILD_INFO.json" "$VERSION" "$SRC" "macos-arm64" \
+         "packaging/build_mac_app.sh" <<'PY'
+import datetime
+import json
+import subprocess
+import sys
+
+hedef, surum, kok, platform, betik = sys.argv[1:6]
+
+
+def git(*argumanlar):
+    try:
+        p = subprocess.run(['git', '-C', kok, *argumanlar],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+sha = git('rev-parse', 'HEAD')
+durum = git('status', '--porcelain')
+kayit = {
+    'schema': 1,
+    'version': surum,
+    'platform': platform,
+    'builder': betik,
+    'sha': sha,
+    'sha_basis': ('git rev-parse HEAD, derleme anında (%s)' % betik) if sha
+                 else 'ÖLÇÜLEMEDİ: git yok ya da bu ağaç depo değil — sha null',
+    'tree_dirty': None if durum is None else bool(durum),
+    'tree_dirty_basis': ('git status --porcelain' if durum is not None
+                         else 'ÖLÇÜLEMEDİ: git yok ya da bu ağaç depo değil'),
+    'built_at_utc': datetime.datetime.now(
+        datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'built_at_basis': 'derleme makinesinin UTC saati; sıralama içindir, '
+                      'köken kanıtı sha alanıdır',
+}
+with open(hedef, 'w', encoding='utf-8') as f:
+    json.dump(kayit, f, ensure_ascii=False, indent=2, sort_keys=True)
+    f.write('\n')
+print('      BUILD_INFO.json: sha=%s tree_dirty=%s'
+      % (kayit['sha'][:8] if kayit['sha'] else 'YOK', kayit['tree_dirty']))
+PY
+[ -f "$RES/app/BUILD_INFO.json" ] || { echo "HATA: BUILD_INFO.json yazılamadı"; exit 1; }
 # v2.5.4 kök temizliği: icon.icns artık packaging/ altında
 # v2.6.25: iki ayrı simge varlığı — icon.icns TAM TAŞMA (Tahoe kendi karo
 # maskesini uygular), icon_runtime.png önceden yuvarlatılmış (launcher

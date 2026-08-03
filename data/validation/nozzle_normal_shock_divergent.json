@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "case": "nozzle_normal_shock_divergent",
+  "description_tr": "Iraksak kesitte, alan oranı 2.0 olan istasyonda duran normal şok. Şok öncesi/sonrası Mach, statik basınç sıçraması ve toplam basınç kaybı. Aşırı genişlemiş lüle davranışının (yol haritası F1'in yarı-1B öncülü) temel taşı; şok konumu çözücüsünün kabul testidir.",
+  "discipline": "nozzle_flow",
+  "inputs": {
+    "gamma": 1.4,
+    "shock_station_area_ratio": 2.0,
+    "upstream_state": "izentropik ses üstü dal"
+  },
+  "expected_outputs": {
+    "mach_upstream": 2.197198122,
+    "mach_downstream": 0.547431655,
+    "static_pressure_ratio_p2_p1": 5.465626183,
+    "total_pressure_ratio_p02_p01": 0.629412896
+  },
+  "reference_formulas": {
+    "M2": "M2^2 = (1 + (g-1)/2 M1^2) / (g M1^2 - (g-1)/2)",
+    "p2_p1": "p2/p1 = 1 + (2g/(g+1)) (M1^2 - 1)",
+    "p02_p01": "p02/p01 = [ ((g+1)M1^2/2) / (1 + (g-1)/2 M1^2) ]^(g/(g-1)) * [ (2g/(g+1)) M1^2 - (g-1)/(g+1) ]^(-1/(g-1))"
+  },
+  "units": "boyutsuz",
+  "tolerance_pct": 0.01,
+  "source": {
+    "title": "Modern Compressible Flow with Historical Perspective, Bölüm 3 ve 5 (normal şok, lülede şok)",
+    "author": "J. D. Anderson, Jr.",
+    "year": 2003,
+    "url_or_doi": "McGraw-Hill, ISBN 978-0072424430"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "M1 değeri nozzle_isentropic_area_mach.json ile AYNI kökten geliyor (2.197198050), yani iki vaka zincirleme tutarlıdır. Rankine-Hugoniot bağıntıları standarttır ve burada bağımsız olarak hesaplandı. Toplam basınç kaybı %37.06 — şok bulunan bir lülede itki kaybının büyüklük mertebesini verir.",
+  "tags": [
+    "analytic_derived",
+    "normal_shock",
+    "quasi_1d",
+    "overexpanded"
+  ]
+}

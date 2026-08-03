@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "case": "twophase_particle_loading_loss",
+  "description_tr": "Yoğuşmuş faz (tanecik) yükünün c* ve Isp üzerindeki etkisi. Bu kayıt İKİYE AYRILMIŞTIR: (a) DENGE limiti — tanecikler gazla tam ısıl ve hız dengesinde; karışım termodinamiğinden TAM olarak türetilir, kapalı formdur; (b) GECİKME (lag) kaybı — taneciklerin gazın gerisinde kalmasından doğan ek kayıp; görgüldür ve bu turda birincil kaynaktan DOĞRULANAMADI. İkisi karıştırılmamalıdır.",
+  "discipline": "two_phase",
+  "inputs": {
+    "beta_definition": "beta = yoğuşmuş fazın toplam kütle içindeki oranı",
+    "worked_example": {
+      "gas_constant_J_kgK": 320.0,
+      "gas_cp_J_kgK": 2000.0,
+      "condensed_phase_cs_J_kgK": 1400.0,
+      "chamber_temperature_K": 3500.0,
+      "beta_values": [
+        0.0,
+        0.1,
+        0.3
+      ]
+    }
+  },
+  "expected_outputs": {
+    "equilibrium_limit": {
+      "_status": "DERIVED_ANALYTICALLY_EXACT",
+      "beta_0.00": {
+        "R_mix": 320.0,
+        "cp_mix": 2000.0,
+        "cv_mix": 1680.0,
+        "gamma_mix": 1.190476,
+        "cstar_m_s": 1636.5255,
+        "loss_pct": 0.0
+      },
+      "beta_0.10": {
+        "R_mix": 288.0,
+        "cp_mix": 1940.0,
+        "cv_mix": 1652.0,
+        "gamma_mix": 1.174334,
+        "cstar_m_s": 1560.2066,
+        "loss_pct": 4.6635
+      },
+      "beta_0.30": {
+        "R_mix": 224.0,
+        "cp_mix": 1820.0,
+        "cv_mix": 1596.0,
+        "gamma_mix": 1.140351,
+        "cstar_m_s": 1390.6985,
+        "loss_pct": 15.0213
+      }
+    },
+    "lag_loss": {
+      "_status": "NOT_MODELLED",
+      "reason_tr": "Hız ve ısıl gecikmeden doğan EK kayıp için görgül bağıntı bu turda saygın birincil kaynaktan alınamadı. AFRPL kökenli olduğu söylenen '%5 alüminyum başına %1 Isp kaybı' pratik kuralı web özetinde görüldü ancak birincil belge (DTIC AD/A-004 666) indirilemedi — bu yüzden BU KAYDA YAZILMAMIŞTIR. Doğrulanmadan kullanılmamalıdır.",
+      "what_is_missing_tr": [
+        "tanecik çapına bağlı gecikme parametresi (Stokes sayısı benzeri)",
+        "lüle boyutuna (ölçek) bağımlılık",
+        "geçerlilik aralığı (tanecik çapı, alan oranı, oda basıncı)"
+      ]
+    }
+  },
+  "reference_formulas": {
+    "R_mix": "R_mix = (1 - beta) * R_gas   (yalnız gaz basınca katkı verir)",
+    "cp_mix": "cp_mix = (1 - beta) cp_gas + beta * c_s",
+    "cv_mix": "cv_mix = (1 - beta) cv_gas + beta * c_s",
+    "gamma_mix": "gamma_mix = cp_mix / cv_mix",
+    "cstar": "c* = sqrt(R_mix T_c / gamma_mix) * ((gamma_mix+1)/2)^((gamma_mix+1)/(2(gamma_mix-1)))",
+    "validity_tr": "Bu bağıntı ailesi YALNIZ denge (gecikmesiz) limitinde geçerlidir: tanecikler gazla aynı hızda ve aynı sıcaklıkta varsayılır. Gerçek kayıp bundan BÜYÜKTÜR. Ayrıca yoğuşmuş fazın hacmi ihmal edilir (tanecik hacim oranı << 1)."
+  },
+  "units": "J/(kg K), K, m/s, %",
+  "tolerance_pct": 0.1,
+  "source": {
+    "title": "Rocket Propulsion Elements, iki-faz akış ve metal içeren yakıtlar bölümü",
+    "author": "G. P. Sutton ve O. Biblarz",
+    "year": 2016,
+    "url_or_doi": "Wiley, 9. baskı, ISBN 978-1118753651"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "low",
+  "verification_note_tr": "GÜVEN DÜŞÜK VE SEBEBİ AÇIK: karışım bağıntıları standart termodinamiktir ve burada bağımsız olarak türetilip sayısal olarak hesaplandı (bu kısım güvenilir). Ancak Sutton'ın kitabı bu turda AÇILAMADI — dolayısıyla (a) bölüm ve denklem numarası VERİLMEMİŞTİR, (b) Sutton'ın kendi görgül tanecik gecikme bağıntısı ALINAMAMIŞTIR. Yani bu kayıt Sutton'ın söylediğinin değil, standart karışım termodinamiğinin kaydıdır; künye yönlendirme amaçlıdır. TEK KAYNAKLI ve doğrulanmamış olduğu için CLAUDE kural 14 uyarınca confidence:low. Modül yazılmadan önce kitabın ilgili bölümü açılıp denklem numaraları ve gecikme bağıntısı eklenmelidir. Örnek girdiler (R=320, cp=2000, c_s=1400) TEMSİLİ değerlerdir, belirli bir yakıtın ölçülmüş özellikleri DEĞİLDİR — vaka sayısal doğrulama içindir.",
+  "tags": [
+    "analytic_derived",
+    "two_phase",
+    "particle_loading",
+    "incomplete_source",
+    "low_confidence",
+    "not_modelled_declared"
+  ]
+}

@@ -13,8 +13,33 @@ SetCompressorDictSize 64
 !endif
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\HRMA"
 
+; --- Çıktı dizini -----------------------------------------------------------
+; 2026-08-03: OutFile göreli ve dizinsizdi ("HRMA-Setup-x.y.z.exe"), yani exe
+; makensis'in çalışma dizinine (pratikte packaging/) düşüyordu. Oysa yayın
+; kapısı da (packaging/release_gate.sh) yükleme betiği de (publish_release.sh)
+; exe'yi depo kökündeki dist/ altında arıyor — her yayında dosya elle
+; taşınıyordu ve taşımayı unutan "artefakt yok" hatası alıyordu.
+;
+; Yol ${__FILEDIR__} (bu .nsi dosyasının dizini) üzerinden kurulur: böylece
+; makensis ister packaging/ içinden ister depo kökünden çağrılsın exe hep
+; aynı yere düşer. Ayraç olarak '/' kullanılır; hem POSIX makensis hem de
+; Windows dosya API'si kabul eder.
+!ifndef OUTDIR
+  !define OUTDIR "${__FILEDIR__}/../dist"
+!endif
+; dist/ yoksa NSIS "can't open output file" ile düşer — derleme zamanında
+; oluştur. Windows'ta cmd ayraç olarak '\' ister, bu yüzden ayrı bir kopya
+; hazırlanır. Dönüş değeri BİLEREK karşılaştırılmıyor: dizin zaten varsa
+; mkdir sıfırdan farklı döner ve bu bir hata değildir.
+!ifdef NSIS_WIN32_MAKENSIS
+  !searchreplace OUTDIR_YEREL "${OUTDIR}" "/" "\"
+  !system 'if not exist "${OUTDIR_YEREL}" mkdir "${OUTDIR_YEREL}"'
+!else
+  !system 'mkdir -p "${OUTDIR}"'
+!endif
+
 Name "${APPFULL}"
-OutFile "HRMA-Setup-${VERSION}.exe"
+OutFile "${OUTDIR}/HRMA-Setup-${VERSION}.exe"
 RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\HRMA"
 

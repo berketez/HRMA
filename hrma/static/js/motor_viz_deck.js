@@ -34,6 +34,25 @@
         multiport: 'Multi-Port', finocyl: 'Finocyl'
     };
 
+    /* Kamera ön ayarı adları: motor_viz3d.cycleCameraPreset() küçük harf
+       anahtar döndürür, ekranda İngilizce karşılığı TX()'ten geçer. */
+    var CAM_LABELS = {
+        iso: 'Iso', side: 'Side', nozzle: 'Nozzle', injector: 'Injector'
+    };
+
+    /* Uzun sabit metinler tek yerde: hem ilk çizimde hem refreshLabels()'ta
+       AYNI İngilizce kaynaktan çevrilsinler (kaynak ikiye ayrılırsa biri
+       sözlükte, öteki dışında kalır ve dil değişiminde metin donar). */
+    var DESIGN_STATUS_TEXT =
+        'GEOMETRY PREVIEW — 3D shape only; performance figures are unchanged. ' +
+        'Re-run Calculate to update the analysis.';
+    var HEAT_LEGEND_TEXT = 'WALL HEAT FLUX — BARTZ (A<sub>t</sub>/A)<sup>0.9</sup>';
+    var STATUS_STANDBY = 'STANDBY';
+    var STATUS_BURNOUT = 'BURNOUT';
+    var STATUS_BURNING = 'COMBUSTION ACTIVE';
+    var DEFAULT_TITLE = 'MOTOR SIMULATION';
+    var DEFAULT_SUBTITLE = 'PARAMETRIC 3D MODEL — LIVE GEOMETRY FROM SOLVER OUTPUT';
+
     // Tasarım modu slider aralıkları (taban değerin katı olarak)
     var DESIGN_DIA_SPAN = [0.6, 1.4];      // kamara çapı: ±%40
     var DESIGN_LEN_SPAN = [0.6, 1.6];      // kamara/grain boyu: -%40 … +%60
@@ -48,6 +67,28 @@
     // i18n köprüsü — i18n.js yoksa İngilizce yedek metin döner
     function T(key, fallback) {
         return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
+    }
+
+    /* Güverte metinleri için ikinci köprü: ANAHTAR = İNGİLİZCE METNİN
+       KENDİSİ (i18n_charts.js sözleşmesi). Neden T() değil: `viz.*` anahtar
+       uzayı i18n_common.js'te tanımlı ve bu dosyayla birlikte
+       güncellenemiyor; oysa i18n_charts.js sözlüğü zaten "metin = anahtar"
+       kuralıyla çalışıyor ve register() ile I18N'e katılıyor. Eşleşme
+       bulunamazsa metin AYNEN döner (asla anahtar, asla boş).
+       2026-08-03: bu dosyanın görünür metinlerinin tamamı sabit
+       İngilizceydi — TR modda 3B güverte tek kelime Türkçe göstermiyordu. */
+    function TX(text) {
+        var api = window.I18N || window.HRMAChartI18N;
+        return (api && typeof api.chartText === 'function') ? api.chartText(text) : text;
+    }
+
+    function portLabel(shape) {
+        return TX(PORT_LABELS[shape] || PORT_LABELS.circular);
+    }
+
+    function camLabel(name) {
+        return TX(CAM_LABELS[name] ||
+                  (String(name).charAt(0).toUpperCase() + String(name).slice(1)));
     }
 
     function isNum(v) { return typeof v === 'number' && isFinite(v); }
@@ -73,6 +114,8 @@
         var chips = [];
 
         // Katı ve hibritte port/web anlamlıdır (yakıt grain'i regrese eder)
+        // label = İNGİLİZCE kaynak metin; ekrana basılırken TX()'ten geçer
+        // (refreshLabels dil değişiminde aynı kaynaktan yeniden yazar).
         if (!isLiquid) {
             chips.push({ id: p + '_port', label: isSolid ? 'Core &Oslash;' : 'Port &Oslash;' });
             chips.push({ id: p + '_web', label: 'Web Remaining' });
@@ -152,14 +195,14 @@
                 '  <div class="viz-design" id="' + p + '_design" style="display: none;">' +
                 ctrls.map(function (c) {
                     return '<div class="viz-dctrl">' +
-                        '<div class="dk"><span>' + c.label + '</span>' +
+                        '<div class="dk"><span id="' + p + '_dl_' + c.key + '">' +
+                        TX(c.label) + '</span>' +
                         '<b id="' + p + '_dv_' + c.key + '">—</b></div>' +
                         '<input type="range" id="' + p + '_ds_' + c.key + '" min="0" max="' +
                         DESIGN_SLIDER_STEPS + '" value="0"></div>';
                 }).join('') +
                 '    <div class="viz-dstatus" id="' + p + '_dstatus">' +
-                'GEOMETRY PREVIEW — 3D shape only; performance figures are unchanged. ' +
-                'Re-run Calculate to update the analysis.</div>' +
+                TX(DESIGN_STATUS_TEXT) + '</div>' +
                 '  </div>';
         }
 
@@ -167,38 +210,41 @@
             '<div class="viz-deck">' +
             '  <div class="viz-head">' +
             '    <div>' +
-            '      <div class="viz-title"><span class="viz-dot"></span>' + opts.title + '</div>' +
-            '      <div class="viz-sub">' + opts.subtitle + '</div>' +
+            '      <div class="viz-title" id="' + p + '_title"><span class="viz-dot"></span>' +
+                     TX(opts.title) + '</div>' +
+            '      <div class="viz-sub" id="' + p + '_sub">' + TX(opts.subtitle) + '</div>' +
             '    </div>' +
             '    <div class="viz-toolbar">' +
-            '      <button class="viz-btn active" id="' + p + '_btn_cut">Cutaway</button>' +
-            '      <button class="viz-btn active" id="' + p + '_btn_dim">Dimensions</button>' +
-            '      <button class="viz-btn warn active" id="' + p + '_btn_plume">Exhaust</button>' +
-            '      <button class="viz-btn" id="' + p + '_btn_exp">Exploded</button>' +
+            '      <button class="viz-btn active" id="' + p + '_btn_cut">' + TX('Cutaway') + '</button>' +
+            '      <button class="viz-btn active" id="' + p + '_btn_dim">' + TX('Dimensions') + '</button>' +
+            '      <button class="viz-btn warn active" id="' + p + '_btn_plume">' + TX('Exhaust') + '</button>' +
+            '      <button class="viz-btn" id="' + p + '_btn_exp">' + TX('Exploded') + '</button>' +
             (hasPort
-                ? '      <button class="viz-btn" id="' + p + '_btn_portshape">Port: ' +
-                  (PORT_LABELS[opts.portShape] || 'Circular') + '</button>'
+                ? '      <button class="viz-btn" id="' + p + '_btn_portshape">' +
+                  TX('Port') + ': ' + portLabel(opts.portShape) + '</button>'
                 : '') +
-            '      <button class="viz-btn warn" id="' + p + '_btn_heat">Heat Map</button>' +
+            '      <button class="viz-btn warn" id="' + p + '_btn_heat">' + TX('Heat Map') + '</button>' +
             (ctrls.length
-                ? '      <button class="viz-btn warn" id="' + p + '_btn_design">Design Mode</button>'
+                ? '      <button class="viz-btn warn" id="' + p + '_btn_design">' +
+                  TX('Design Mode') + '</button>'
                 : '') +
-            '      <button class="viz-btn" id="' + p + '_btn_rot">Orbit</button>' +
-            '      <button class="viz-btn" id="' + p + '_btn_cam">Cam: Iso</button>' +
+            '      <button class="viz-btn" id="' + p + '_btn_rot">' + TX('Orbit') + '</button>' +
+            '      <button class="viz-btn" id="' + p + '_btn_cam">' +
+                       TX('Cam') + ': ' + camLabel('iso') + '</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_quality">HQ</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_speed">1&times;</button>' +
             '      <button class="viz-btn" id="' + p + '_btn_frame">' +
                        T('viz.btnFrame', 'Frame') + '</button>' +
-            '      <button class="viz-btn" id="' + p + '_btn_reset">Reset View</button>' +
+            '      <button class="viz-btn" id="' + p + '_btn_reset">' + TX('Reset View') + '</button>' +
             '    </div>' +
             '  </div>' +
             '  <div class="viz-stage">' +
             '    <div id="' + p + '_viewport" style="position: absolute; inset: 0;"></div>' +
             '    <div class="viz-corner tl"></div><div class="viz-corner tr"></div>' +
             '    <div class="viz-corner bl"></div><div class="viz-corner br"></div>' +
-            '    <div class="viz-status" id="' + p + '_status">STANDBY</div>' +
+            '    <div class="viz-status" id="' + p + '_status">' + TX(STATUS_STANDBY) + '</div>' +
             '    <div class="viz-heatlegend" id="' + p + '_heatlegend" style="display: none;">' +
-            '      <div>WALL HEAT FLUX — BARTZ (A<sub>t</sub>/A)<sup>0.9</sup></div>' +
+            '      <div id="' + p + '_hl_head">' + TX(HEAT_LEGEND_TEXT) + '</div>' +
             '      <div class="bar"></div>' +
             '      <div class="lbl"><span id="' + p + '_hl_min">—</span><span id="' + p + '_hl_max">—</span></div>' +
             '      <div class="tw" id="' + p + '_hl_wall">—</div>' +
@@ -213,7 +259,7 @@
             '  <div class="viz-telemetry">' +
             chips.map(function (c) {
                 return '<div class="viz-chip" id="' + c.id + '_chip">' +
-                    '<div class="k">' + c.label + '</div>' +
+                    '<div class="k" id="' + c.id + '_k">' + TX(c.label) + '</div>' +
                     '<div class="v" id="' + c.id + '">—</div></div>';
             }).join('') +
             '  </div>' +
@@ -226,8 +272,8 @@
         if (!(window.MotorViz3D && MotorViz3D.isSupported())) return null;
 
         opts = Object.assign({
-            title: 'MOTOR SIMULATION',
-            subtitle: 'PARAMETRIC 3D MODEL — LIVE GEOMETRY FROM SOLVER OUTPUT',
+            title: DEFAULT_TITLE,
+            subtitle: DEFAULT_SUBTITLE,
             motorType: motorData.viz_motor_type || 'hybrid',
             portShape: 'circular'
         }, opts || {});
@@ -260,9 +306,15 @@
                 slider.style.setProperty('--p', (pr / 10) + '%');
                 clock.innerHTML = 't = <b>' + s.time.toFixed(2) + '</b> s / ' + s.burnTime.toFixed(2) + ' s';
                 if (status) {
-                    if (s.burning) { status.textContent = 'COMBUSTION ACTIVE'; status.classList.add('burning'); }
-                    else if (s.time >= s.burnTime - 1e-3) { status.textContent = 'BURNOUT'; status.classList.remove('burning'); }
-                    else { status.textContent = 'STANDBY'; status.classList.remove('burning'); }
+                    // Durum metni onTick'te YENİDEN yazıldığı için dil
+                    // değişimini kendiliğinden yakalar; kaynağı da veri
+                    // niteliğinde saklanır ki duran sahnede refreshLabels
+                    // aynı durumu doğru dilde tazeleyebilsin.
+                    var src = s.burning ? STATUS_BURNING
+                            : (s.time >= s.burnTime - 1e-3 ? STATUS_BURNOUT : STATUS_STANDBY);
+                    status.setAttribute('data-src', src);
+                    status.textContent = TX(src);
+                    status.classList.toggle('burning', !!s.burning);
                 }
                 setChip(p + '_port', s.portDiameter.toFixed(1), 'mm', s.burning);
                 setChip(p + '_web', (s.webRemaining * 100).toFixed(0), '%', s.burning);
@@ -316,7 +368,7 @@
         function syncPortBtn() {
             var b = el(p + '_btn_portshape');
             if (!b) return;
-            b.textContent = 'Port: ' + PORT_LABELS[viz.state.portShape];
+            b.textContent = TX('Port') + ': ' + portLabel(viz.state.portShape);
             b.classList.toggle('active', viz.state.portShape !== 'circular');
         }
 
@@ -344,9 +396,12 @@
 
         // Kamera preset döngüsü (Iso → Side → Nozzle → Injector)
         var camBtn = el(p + '_btn_cam');
+        var camPreset = 'iso';
         if (camBtn) camBtn.onclick = function () {
             var name = viz.cycleCameraPreset();
-            if (name) camBtn.textContent = 'Cam: ' + name.charAt(0).toUpperCase() + name.slice(1);
+            if (!name) return;
+            camPreset = name;
+            camBtn.textContent = TX('Cam') + ': ' + camLabel(name);
         };
         // Kalite anahtarı: HQ ↔ PERF (düşük pixelRatio + az partikül)
         var qBtn = el(p + '_btn_quality');
@@ -380,8 +435,8 @@
             if (!info) {
                 heatBtn.classList.remove('active');
                 if (legend) legend.style.display = 'none';
-                heatBtn.textContent = 'Heat Map (no data)';
-                setTimeout(function () { heatBtn.textContent = 'Heat Map'; }, 1800);
+                heatBtn.textContent = TX('Heat Map (no data)');
+                setTimeout(function () { heatBtn.textContent = TX('Heat Map'); }, 1800);
                 return;
             }
             var on = viz.setHeatMap(!viz.state.heatMap);
@@ -396,8 +451,10 @@
                     el(p + '_hl_min').textContent = fmt(info.qChamber);
                     el(p + '_hl_max').textContent = fmt(info.qThroat);
                     el(p + '_hl_wall').textContent =
-                        (info.tWallInner ? 'T_wall inner ' + info.tWallInner.toFixed(0) + ' K' : '') +
-                        (info.tWallOuter ? ' / outer ' + info.tWallOuter.toFixed(0) + ' K' : '');
+                        (info.tWallInner
+                            ? TX('T_wall inner') + ' ' + info.tWallInner.toFixed(0) + ' K' : '') +
+                        (info.tWallOuter
+                            ? ' / ' + TX('outer') + ' ' + info.tWallOuter.toFixed(0) + ' K' : '');
                 }
             }
         };
@@ -495,7 +552,63 @@
             viz.setTime((this.value / 1000) * viz.dims.burnTime);
         };
 
-        return { viz: viz, prefix: p, update: function (md) { MotorViz3D.update(md); } };
+        /* --- Dil değişiminde metinleri tazele -----------------------------
+           Güverte tek seferlik innerHTML ile kuruluyor; kanca olmadan dil
+           değişince ekrandaki 3B güverte İLK yüklenen dilde donuyordu
+           (plotly_dark.js grafikler için aynı sorunu redrawAllPlots ile
+           çözüyor). Sahne yeniden kurulmaz — YALNIZ metinler yazılır, yani
+           kamera açısı, oynatma konumu ve tasarım sliderları korunur. */
+        function setText(id, text) {
+            var e = el(id);
+            if (e) e.textContent = text;
+        }
+
+        function refreshLabels() {
+            var titleEl = el(p + '_title');
+            if (titleEl) {
+                titleEl.innerHTML = '<span class="viz-dot"></span>' + TX(opts.title);
+            }
+            setText(p + '_sub', TX(opts.subtitle));
+            setText(p + '_btn_cut', TX('Cutaway'));
+            setText(p + '_btn_dim', TX('Dimensions'));
+            setText(p + '_btn_plume', TX('Exhaust'));
+            setText(p + '_btn_exp', TX('Exploded'));
+            setText(p + '_btn_rot', TX('Orbit'));
+            setText(p + '_btn_reset', TX('Reset View'));
+            setText(p + '_btn_design', TX('Design Mode'));
+            setText(p + '_btn_frame', T('viz.btnFrame', 'Frame'));
+            setText(p + '_btn_cam', TX('Cam') + ': ' + camLabel(camPreset));
+            if (heatBtn) setText(p + '_btn_heat', TX('Heat Map'));
+            if (el(p + '_btn_portshape')) syncPortBtn();
+
+            var hlHead = el(p + '_hl_head');
+            if (hlHead) hlHead.innerHTML = TX(HEAT_LEGEND_TEXT);
+            setText(p + '_dstatus', TX(DESIGN_STATUS_TEXT));
+
+            // Durum rozeti: duran sahnede onTick yazmaz, kaynağı okunur
+            var st = el(p + '_status');
+            if (st) st.textContent = TX(st.getAttribute('data-src') || STATUS_STANDBY);
+
+            chips.forEach(function (c) {
+                var k = el(c.id + '_k');
+                if (k) k.innerHTML = TX(c.label);
+            });
+            ctrls.forEach(function (c) {
+                var lab = el(p + '_dl_' + c.key);
+                if (lab) lab.innerHTML = TX(c.label);
+            });
+        }
+
+        if (window.I18N && typeof window.I18N.onChange === 'function') {
+            window.I18N.onChange(refreshLabels);
+        } else if (typeof document !== 'undefined' && document.addEventListener) {
+            document.addEventListener('hrma:langchange', refreshLabels);
+        }
+
+        return {
+            viz: viz, prefix: p, refreshLabels: refreshLabels,
+            update: function (md) { MotorViz3D.update(md); }
+        };
     }
 
     window.MotorVizDeck = { create: create };

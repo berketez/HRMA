@@ -226,12 +226,16 @@ const out = {};
     out.serverEn = { exact: sandbox.I18N.serverText('Flash boiling risk detected') };
 }
 
-/* ---- 6. Metin listesi çevirisi (kapsam bekçisi için) ---- */
+/* ---- 6. Metin listesi çevirisi (kapsam bekçisi için) ----
+   Aynı liste HEM chartText HEM serverText'ten geçirilir: figür metinleri
+   birinciyi, API uyarıları ikinciyi kullanır ve iki boru hattının kural
+   tabloları ayrıdır (PATTERNS vs MSG_PATTERNS). */
 if (TEXTS_FILE) {
     const { sandbox } = boot();
     sandbox.I18N.setLang('tr');
     const texts = JSON.parse(fs.readFileSync(TEXTS_FILE, 'utf8'));
     out.translated = texts.map((s) => sandbox.I18N.chartText(s));
+    out.translatedServer = texts.map((s) => sandbox.I18N.serverText(s));
 }
 
 function finish() {
@@ -483,6 +487,43 @@ HYBRID_PAYLOAD = {
     'oxidizer_type': 'n2o', 'expansion_ratio': 5,
 }
 
+# Uygulama yalnız geri döngü Host başlığına yanıt verir (DNS-rebinding kapısı)
+CALC_HEADERS = {'Host': '127.0.0.1:8080'}
+
+#: Katı ve sıvı uçların yükü ELDE UYDURULMAZ — depodaki gerçek örnek
+#: projelerden okunur. Uydurma bir yük ya 422 alır (kapı reddeder) ya da
+#: gerçekte hiç üretilmeyen bir figür kümesi çıkarır; ikisi de kapsamı
+#: yanlış ölçer. tests/test_example_projects.py aynı dosyaları kullanıyor.
+EXAMPLES_DIR = REPO_ROOT / 'examples'
+EXAMPLE_NAMES = {
+    '/calculate_solid': 'Example Solid KNDX BATES 75mm',
+    '/calculate_liquid': 'Example Liquid LOX-RP1 25kN',
+}
+
+
+def _example_payload(endpoint):
+    path = EXAMPLES_DIR / (EXAMPLE_NAMES[endpoint] + '.hrma')
+    data = json.loads(path.read_text(encoding='utf-8'))
+    return dict(data['inputs']['fields'])
+
+
+#: Kapsam bekçisinin taradığı hesap uçları. Üçü de taranır: sözlük yalnız
+#: hibrit yolda denendiği sürece katı/sıvı sayfalarına özgü figürler
+#: (Kn eğrisi, rejeneratif soğutma panosu, grain regresyonu) sessizce
+#: İngilizce kalıyordu — ÖLÇÜLDÜ, 2026-08-03.
+COVERAGE_ENDPOINTS = ('/calculate', '/calculate_solid', '/calculate_liquid')
+
+#: Çeviri kapsamı alt sınırı. DÜŞÜRMEK YASAK — düşük çıkarsa eksik metin
+#: i18n_charts.js sözlüğüne (sabit metin) veya PATTERNS/MSG_PATTERNS
+#: tablosuna (sayı taşıyan metin) eklenir.
+COVERAGE_MIN = 0.95
+
+#: Düz metin uyarı/öneri listelerini taşıyan yanıt alanları. Bunlar
+#: {code, params} sözleşmesine geçmemiş uçlardan gelir ve istemcide
+#: I18N.serverText'ten geçer (analysis_dock.js::warnText, app.js::SRV).
+WARNING_FIELDS = ('warnings', 'recommendations', 'safety_notes',
+                  'safety_devices_required', 'notes')
+
 
 def _axis_title(node, sink):
     if not isinstance(node, dict):
@@ -536,6 +577,27 @@ def _walk(node, sink, depth=0):
         _collect_figure_texts(node, sink)
 
 
+def _collect_warning_texts(node, sink, depth=0):
+    """Düz METİN uyarı/öneri satırlarını toplar.
+
+    {code, params} sözlüğü olan uyarılar ATLANIR: onlar I18N.tf ile
+    anahtardan çevriliyor ve kapsamları test_warning_contract.py'nin işi.
+    Burada aranan, hâlâ düz İngilizce dize döndüren uçlar.
+    """
+    if depth > 10:
+        return
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in WARNING_FIELDS and isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str):
+                        sink.add(item)
+            _collect_warning_texts(value, sink, depth + 1)
+    elif isinstance(node, list):
+        for value in node[:80]:
+            _collect_warning_texts(value, sink, depth + 1)
+
+
 def _translatable(text):
     """Çevrilmesi BEKLENEN metin mi? (salt sayı/sembol/teknik jeton değilse)"""
     stripped = re.sub(r'<[^>]*>', ' ', text)
@@ -544,34 +606,113 @@ def _translatable(text):
     return bool(words)
 
 
-@needs_node
-def test_backend_figur_metinleri_kapsam_bekcisi(harness, tmp_path):
-    """/calculate figürlerindeki çevrilebilir metinlerin >= %80'i çevrilmeli.
+def _normalize(texts):
+    out = {re.sub(r'\s+', ' ', t).strip() for t in texts}
+    out.discard('')
+    return out
 
-    Backend yeni bir grafik metni ekler ve sözlüğe girmezse bu test kırılır.
-    DÜŞÜK ÇIKARSA EŞİĞİ DÜŞÜRME — eksik metinleri i18n_charts.js'e ekle.
+
+@pytest.fixture(scope='module')
+def hesap_yanitlari():
+    """Üç hesap ucunu BİR KEZ koşturup figür + uyarı metinlerini toplar.
+
+    Modül kapsamlı: sıvı uç ~4 s, hibrit ~2 s sürüyor; her testte yeniden
+    koşturmak bu dosyanın süresini üçe katlardı.
     """
     from hrma.app import app
 
     client = app.test_client()
-    response = client.post('/calculate', json=HYBRID_PAYLOAD)
-    assert response.status_code == 200, '/calculate düştü: %s' % response.status_code
+    toplanan = {}
+    for endpoint in COVERAGE_ENDPOINTS:
+        payload = (HYBRID_PAYLOAD if endpoint == '/calculate'
+                   else _example_payload(endpoint))
+        response = client.post(endpoint, json=payload, headers=CALC_HEADERS)
+        figurler, uyarilar = set(), set()
+        if response.status_code == 200:
+            body = response.get_json()
+            _walk(body, figurler)
+            _collect_warning_texts(body, uyarilar)
+        toplanan[endpoint] = {
+            'status': response.status_code,
+            'figur': _normalize(figurler),
+            'uyari': _normalize(uyarilar),
+        }
+    return toplanan
 
-    sink = set()
-    _walk(response.get_json(), sink)
-    sink = {re.sub(r'\s+', ' ', t).strip() for t in sink}
-    sink.discard('')
-    assert len(sink) >= 20, 'figürlerden yeterli metin toplanamadı (%d)' % len(sink)
 
-    beklenen = sorted(t for t in sink if _translatable(t))
-    assert beklenen, 'çevrilebilir metin bulunamadı — toplayıcı bozulmuş olabilir'
-
-    ceviriler = run_harness(harness, texts=beklenen, tmp_path=tmp_path)['translated']
+def _kapsam_olc(harness, tmp_path, metinler, alan):
+    """(oran, eksik_liste) — metinleri node düzeneğinden geçirip ölçer."""
+    beklenen = sorted(t for t in metinler if _translatable(t))
+    if not beklenen:
+        return None, []
+    sonuc = run_harness(harness, texts=beklenen, tmp_path=tmp_path)
+    ceviriler = sonuc['translated' if alan == 'figur' else 'translatedServer']
     eksik = [t for t, c in zip(beklenen, ceviriler) if t == c]
-    oran = 1.0 - len(eksik) / float(len(beklenen))
+    return 1.0 - len(eksik) / float(len(beklenen)), eksik
 
-    detay = '\n  '.join(eksik[:25])
-    assert oran >= 0.80, (
-        'Grafik çeviri kapsamı %%%.1f (>= %%80 olmalı). Sözlükte olmayan %d metin:\n  %s'
-        % (100 * oran, len(eksik), detay)
+
+@needs_node
+@pytest.mark.parametrize('endpoint', COVERAGE_ENDPOINTS)
+def test_backend_figur_metinleri_kapsam_bekcisi(harness, tmp_path, hesap_yanitlari,
+                                                endpoint):
+    """Her hesap ucunun figür metinlerinin >= %95'i çeviriden geçmeli.
+
+    Backend yeni bir grafik metni ekler ve sözlüğe girmezse bu test kırılır.
+    DÜŞÜK ÇIKARSA EŞİĞİ DÜŞÜRME — eksik metinler assert iletisinde tek tek
+    listeleniyor; sabit metinler i18n_charts.js sözlüğüne, sayı taşıyanlar
+    PATTERNS tablosuna eklenir.
+    """
+    yanit = hesap_yanitlari[endpoint]
+    assert yanit['status'] == 200, (
+        '%s hesap ucu düştü (HTTP %s) — bu bir ÇEVİRİ hatası değil, uç '
+        'bozuk. Önce ucu onarın; kapsam ölçülemedi.'
+        % (endpoint, yanit['status'])
+    )
+    metinler = yanit['figur']
+    assert len(metinler) >= 20, (
+        '%s figürlerinden yeterli metin toplanamadı (%d) — toplayıcı bozulmuş '
+        'olabilir' % (endpoint, len(metinler))
+    )
+
+    oran, eksik = _kapsam_olc(harness, tmp_path, metinler, 'figur')
+    assert oran is not None, \
+        '%s: çevrilebilir metin bulunamadı — toplayıcı bozulmuş olabilir' % endpoint
+    assert oran >= COVERAGE_MIN, (
+        '%s grafik çeviri kapsamı %%%.1f (>= %%%.0f olmalı). Çevrilemeyen %d '
+        'metin:\n  %s'
+        % (endpoint, 100 * oran, 100 * COVERAGE_MIN, len(eksik),
+           '\n  '.join(eksik))
+    )
+
+
+@needs_node
+def test_backend_uyari_metinleri_kapsam_bekcisi(harness, tmp_path, hesap_yanitlari):
+    """Düz metin API uyarılarının >= %95'i serverText'ten geçmeli.
+
+    Bu bekçi 2026-08-03'te eklendi: serverText Temmuz'da yazılmıştı ama
+    hiçbir yerden ÇAĞRILMIYORDU, dolayısıyla MSG_PATTERNS tablosu ölü
+    koddu ve düz-İngilizce uyarılar TR modda İngilizce kalıyordu. Kapsam
+    ölçülmediği sürece aynı boşluk sessizce geri gelebilir.
+    """
+    tumu, dusen = set(), []
+    for endpoint in COVERAGE_ENDPOINTS:
+        yanit = hesap_yanitlari[endpoint]
+        if yanit['status'] != 200:
+            dusen.append('%s (HTTP %s)' % (endpoint, yanit['status']))
+            continue
+        tumu |= yanit['uyari']
+    assert not dusen, (
+        'Hesap uçları düştü, uyarı kapsamı ölçülemedi: %s — bu bir ÇEVİRİ '
+        'hatası değil.' % ', '.join(dusen)
+    )
+    if not tumu:
+        pytest.skip('bu koşuda düz metin uyarı üretilmedi')
+
+    oran, eksik = _kapsam_olc(harness, tmp_path, tumu, 'uyari')
+    if oran is None:
+        pytest.skip('toplanan uyarıların hiçbiri çevrilebilir metin değil')
+    assert oran >= COVERAGE_MIN, (
+        'API uyarı çeviri kapsamı %%%.1f (>= %%%.0f olmalı). Çevrilemeyen %d '
+        'mesaj:\n  %s'
+        % (100 * oran, 100 * COVERAGE_MIN, len(eksik), '\n  '.join(eksik))
     )

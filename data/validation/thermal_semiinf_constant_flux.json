@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "case": "thermal_semiinf_constant_flux",
+  "description_tr": "Yarı-sonsuz katı, yüzeyde SABİT ısı akısı (Neumann sınır koşulu). Basamak sıcaklık vakasından farklı bir sınır koşulu ailesini sınar — lüle cidarında gerçekte olan budur (akı dayatılır, sıcaklık değil). Ablatif/ısı yutucu cidar hesabının kabul testi.",
+  "discipline": "thermal",
+  "inputs": {
+    "geometry": "semi_infinite_solid_x_ge_0",
+    "initial_temperature_K": 300.0,
+    "surface_heat_flux_W_m2": 1000000.0,
+    "thermal_diffusivity_m2_s": 1e-05,
+    "thermal_conductivity_W_mK": 15.0,
+    "boundary_condition": "neumann_constant_flux_at_x0",
+    "probe_points": [
+      {
+        "x_m": 0.0,
+        "t_s": 100.0
+      },
+      {
+        "x_m": 0.01,
+        "t_s": 100.0
+      }
+    ]
+  },
+  "expected_outputs": {
+    "temperature_rise_K": {
+      "x0.000_t100": 2378.832155,
+      "x0.010_t100": 1771.389731
+    },
+    "temperature_K": {
+      "x0.000_t100": 2678.832155,
+      "x0.010_t100": 2071.389731
+    }
+  },
+  "reference_formulas": {
+    "delta_T": "T(x,t) - T_i = (2 q0 sqrt(alpha t)/k) * ierfc( x/(2 sqrt(alpha t)) ), ierfc(z) = exp(-z^2)/sqrt(pi) - z erfc(z)",
+    "surface_value": "T(0,t) - T_i = 2 q0 sqrt(alpha t / pi) / k"
+  },
+  "units": "K, m, s, W/m^2",
+  "tolerance_pct": 1.0,
+  "source": {
+    "title": "Conduction of Heat in Solids, 2nd ed., Bölüm 2 (yarı-sonsuz katı, sabit yüzey akısı)",
+    "author": "H. S. Carslaw ve J. C. Jaeger",
+    "year": 1959,
+    "url_or_doi": "Oxford University Press, ISBN 978-0198533689"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Yüzey değeri iki bağımsız yoldan doğrulandı: (a) genel ierfc bağıntısı x=0'da 2378.832155 K veriyor, (b) kapalı yüzey formülü 2 q0 sqrt(alpha t/pi)/k = 2e6*sqrt(1e-3/pi)/15 = 2378.832 K. İkisi birebir tuttu. Bu sıcaklık artışı gerçek bir malzemede erime demektir — vaka SAYISAL doğrulama içindir, malzeme davranışı iddiası DEĞİLDİR.",
+  "tags": [
+    "analytic_derived",
+    "transient_conduction",
+    "neumann_bc",
+    "carslaw_jaeger"
+  ]
+}

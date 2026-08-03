@@ -4118,6 +4118,24 @@ Please provide:
                 if (orificeDia !== null) data.injector_design.orifice_diameter_mm = orificeDia;
             }
 
+            // --- Egzoz (plume) sözleşmesi — motor_viz3d.js readNozzleExit ---
+            // Çözücü yanıtında VAR olan alanlar viz sözlüğüne AYNEN taşınır;
+            // olmayan alan sözlüğe HİÇ konmaz (undefined/uydurma değer yasak):
+            // eksikse readNozzleExit null döner ve plume dürüstçe çizilmez.
+            //   nozzle_design.performance.(exit_pressure, ambient_pressure,
+            //   exit_mach), combustion_analysis.compositions.chamber.gamma
+            //   (ya da düz gamma), chamber_temperature [K],
+            //   altitude_performance.altitude_performance[0].exit_velocity [m/s]
+            // Son üç anahtar (cooling_channels / injector_pattern /
+            // nozzle_contour) plume'a değil sonraki dalganın CAD çizimlerine
+            // veri yolu — ad değiştirmeden passthrough.
+            ['nozzle_design', 'combustion_analysis', 'gamma',
+             'chamber_temperature', 'altitude_performance',
+             'cooling_channels', 'injector_pattern', 'nozzle_contour'
+            ].forEach((key) => {
+                if (results[key] !== undefined) data[key] = results[key];
+            });
+
             return data;
         }
 

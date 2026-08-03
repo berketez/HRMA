@@ -60,6 +60,19 @@
             return (params && name in params) ? String(params[name]) : whole;
         });
     }
+    // Sunucudan DÜZ METİN gelen uyarı/hata satırı. i18n_charts.js'in
+    // serverText'i sözlük + desen sırasıyla çevirir; eşleşme yoksa metni
+    // AYNEN döndürür (asla anahtar, asla boş). Guard'lı: i18n_charts.js
+    // yüklenmemişse metin olduğu gibi geçer.
+    //
+    // 2026-08-03: serverText Temmuz'da yazılmış ama HİÇBİR YERDEN
+    // çağrılmıyordu — 20+ kurallı MSG_PATTERNS tablosu ölü koddu ve
+    // {code, params} sözleşmesine geçmemiş bütün API uyarıları TR modda
+    // İngilizce kalıyordu. Kanal vardı, kapı yoktu.
+    function SRV(text) {
+        return (window.I18N && window.I18N.serverText)
+            ? window.I18N.serverText(text) : text;
+    }
     // Çevrilebilir nitelik: anahtar varsa data-i18n basar (dil değişince
     // I18N.apply() metni kendiliğinden tazeler).
     function i18nAttr(key) {
@@ -175,7 +188,7 @@
     function warnText(w, depth) {
         depth = depth || 0;
         if (w === null || w === undefined) return '';
-        if (typeof w === 'string') return w;
+        if (typeof w === 'string') return SRV(w);   // düz metin dalı: çevir
         if (Array.isArray(w)) {
             return w.map(function (x) { return warnText(x, depth + 1); })
                     .filter(function (s) { return s; })

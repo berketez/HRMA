@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "case": "thermal_bartz_accuracy_band",
+  "description_tr": "Bartz bağıntısının YAYIMLANMIŞ hata bandı. Bu kayıt bir 'doğru cevap' vakası DEĞİLDİR — Bartz'ın deneye göre ne kadar saptığının ölçülmüş sınırlarıdır. HRMA'nın gaz tarafı ısı taşınım katsayısı bu banda oturmalı; bandın DIŞINA çıkarsa hata bizdedir, bandın İÇİNDE kalması ise Bartz'ın kendi belirsizliğidir.",
+  "discipline": "thermal",
+  "inputs": {
+    "correlation": "Bartz 1957 basitleştirilmiş boru akışı (Nusselt) bağıntısı",
+    "test_motor": "küçük katı yakıtlı motor; amonyum perklorat + polibütadien akrilik asit (PBAA)",
+    "propellant_composition_pct": {
+      "ammonium_perchlorate": 83.3,
+      "pbaa_fuel": 14.4,
+      "other": 2.3
+    },
+    "throat_insert": "ZTA grafit",
+    "chamber_pressures_psia": [
+      220,
+      410,
+      742
+    ],
+    "measurement_area_ratios": {
+      "pc_220_410": {
+        "convergent": 1.785,
+        "throat": 1.0,
+        "divergent": 2.369
+      },
+      "pc_742": {
+        "convergent": 2.067,
+        "throat": 1.0,
+        "divergent": 3.764
+      }
+    }
+  },
+  "expected_outputs": {
+    "qualitative_finding_tr": "Yakınsak bölge ve boğazda ölçülen katsayılar Bartz'ın HER İKİ yönteminin (korelasyon bağıntısı ve sınır tabaka çözümü) tahminlerinden TUTARLI OLARAK DÜŞÜK.",
+    "published_error_bands_pct": [
+      {
+        "band": "+50",
+        "condition": "korelasyon bağıntısı, Pc 75-250 psia aralığı",
+        "note_tr": "bağıntı yaklaşık %50 yüksek tahmin ediyor"
+      },
+      {
+        "band": "+45",
+        "condition": "boğazda, Kolozsi hava verisi (Pc 225 ve 370 psia, T0 1100-1200 R)",
+        "note_tr": "korelasyon bağıntısı boğazda %45 yüksek"
+      },
+      {
+        "band": "+80 ila -45",
+        "condition": "boğaz bölgesi, Welsh & Witte N2O4-hidrazin verisi (P0 80-290 psia)",
+        "note_tr": "en geniş yayımlanmış saçılım; en iyi uyum ıraksak bölgede"
+      }
+    ],
+    "NOT_DIGITIZED": "Raporun sayısal h_g değerleri yalnız ŞEKİL olarak (zaman-katsayı grafikleri, Şekil 16/19 vb.) yayımlanmış; tablo hâlinde verilmemiş. Grafikten okuma YAPILMADI — uydurma sayı üretmemek için bu kayıt sayısal h_g İÇERMEZ."
+  },
+  "reference_formulas": {
+    "bartz": "h_g = (0.026/D_t^0.2) * (mu^0.2 cp / Pr^0.6) * (p_c g / c*)^0.8 * (D_t/R_c)^0.1 * (A_t/A)^0.9 * sigma",
+    "formula_source": "Bartz (1957); sigma yoğunluk/viskozite düzeltme çarpanıdır"
+  },
+  "units": "psia, boyutsuz alan oranı",
+  "source": {
+    "title": "A Comparison of Experimental Heat-Transfer Coefficients in a Nozzle With Analytical Predictions From Bartz's Methods for Various Combustion Chamber Pressures in a Solid Propellant Rocket Motor",
+    "author": "NASA Langley Research Center / North Carolina State University (danışman: J. N. Perkins)",
+    "year": 1971,
+    "url_or_doi": "https://ntrs.nasa.gov/api/citations/19710011726/downloads/19710011726.pdf"
+  },
+  "secondary_source": {
+    "title": "A Simple Equation for Rapid Estimation of Rocket Nozzle Convective Heat Transfer Coefficients",
+    "author": "D. R. Bartz",
+    "year": 1957,
+    "url_or_doi": "Jet Propulsion, Cilt 27, Sayı 1, s. 49-51; doi:10.2514/8.12572"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Hata bantları NASA raporunun METNİNDEN doğrudan okundu (özet ve literatür taraması bölümleri), grafikten değil. Bartz bağıntısının kendi katsayıları 1957 makalesinin künyesiyle verildi; makale metni bu turda AÇILMADI, bağıntı biçimi ikincil kaynaklardan bilinen standart formdur — bu yüzden bağıntının üs değerleri BİRİNCİL KAYNAKTAN TEYİTLİ DEĞİLDİR, kullanılmadan önce 1957 makalesiyle karşılaştırılmalıdır.",
+  "tags": [
+    "error_band",
+    "bartz",
+    "heat_transfer",
+    "published_experiment",
+    "no_fabricated_values"
+  ]
+}

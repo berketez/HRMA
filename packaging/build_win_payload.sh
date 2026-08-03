@@ -79,6 +79,73 @@ rsync -a --exclude='__pycache__' "$SRC/hrma" "$W/app/"
 rsync -a --exclude='experimental_data.db' "$SRC/data" "$W/app/"
 cp "$B/launcher.py" "$W/app/launcher.py"
 
+# --- Örnek projeler ---------------------------------------------------------
+# Gerekçe build_mac_app.sh'ta: examples/ hiçbir paketleme betiğinde geçmiyordu,
+# yayınlanan pakette tek bir .hrma yoktu ama README kullanıcıya o dosyaları
+# kopyalamasını söylüyordu. İki platform aynı içeriği taşır.
+rsync -a --exclude='__pycache__' "$SRC/examples" "$W/app/"
+ORNEK_KAYNAK="$(find "$SRC/examples" -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ')"
+ORNEK_PAKET="$(find "$W/app/examples" -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ')"
+if [ "$ORNEK_KAYNAK" -lt 1 ]; then
+    echo "HATA: depoda hiç örnek proje yok (examples/*.hrma)"; exit 1
+fi
+if [ "$ORNEK_PAKET" != "$ORNEK_KAYNAK" ]; then
+    echo "HATA: örnek proje sayısı tutmuyor (depo $ORNEK_KAYNAK, payload $ORNEK_PAKET)"; exit 1
+fi
+echo "      örnek proje: $ORNEK_PAKET adet (.hrma) + generate_examples.py"
+
+# --- BUILD_INFO.json --------------------------------------------------------
+# Gerekçe build_mac_app.sh'ta (mtime kökeni kanıtlamaz). Windows tarafında
+# kapı bu kaydı exe'nin İÇİNDEN okuyamaz — NSIS arşivini açacak araç
+# (7z/nsisunz) her makinede yok. Bu yüzden kapı, exe'nin derlendiği STAGING
+# ağacındaki kaydı okur (packaging/win/payload/app/BUILD_INFO.json) ve bunu
+# açıkça öyle beyan eder: doğrulanan şey exe ikilisi değil, exe'nin
+# üretildiği ağaçtır.
+python3 - "$W/app/BUILD_INFO.json" "$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/hrma/__init__.py")" \
+         "$SRC" "windows-amd64-payload" "packaging/build_win_payload.sh" <<'PY'
+import datetime
+import json
+import subprocess
+import sys
+
+hedef, surum, kok, platform, betik = sys.argv[1:6]
+
+
+def git(*argumanlar):
+    try:
+        p = subprocess.run(['git', '-C', kok, *argumanlar],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+sha = git('rev-parse', 'HEAD')
+durum = git('status', '--porcelain')
+kayit = {
+    'schema': 1,
+    'version': surum,
+    'platform': platform,
+    'builder': betik,
+    'sha': sha,
+    'sha_basis': ('git rev-parse HEAD, derleme anında (%s)' % betik) if sha
+                 else 'ÖLÇÜLEMEDİ: git yok ya da bu ağaç depo değil — sha null',
+    'tree_dirty': None if durum is None else bool(durum),
+    'tree_dirty_basis': ('git status --porcelain' if durum is not None
+                         else 'ÖLÇÜLEMEDİ: git yok ya da bu ağaç depo değil'),
+    'built_at_utc': datetime.datetime.now(
+        datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'built_at_basis': 'derleme makinesinin UTC saati; sıralama içindir, '
+                      'köken kanıtı sha alanıdır',
+}
+with open(hedef, 'w', encoding='utf-8') as f:
+    json.dump(kayit, f, ensure_ascii=False, indent=2, sort_keys=True)
+    f.write('\n')
+print('      BUILD_INFO.json: sha=%s tree_dirty=%s'
+      % (kayit['sha'][:8] if kayit['sha'] else 'YOK', kayit['tree_dirty']))
+PY
+[ -f "$W/app/BUILD_INFO.json" ] || { echo "HATA: BUILD_INFO.json yazılamadı"; exit 1; }
+
 echo "[5/6] Bytecode ön-derleme (ilk açılışı hızlandırır)..."
 # .pyc formatı platformdan bağımsızdır; sürüm eşleşmesi yeter (3.12 ↔ 3.12).
 # __pycache__ artık SİLİNMİYOR — ilk açılışta derleme bedeli kalkıyor.
@@ -92,5 +159,11 @@ python3 -m compileall -q -j 0 "$W/libs" "$W/app" || true
 
 echo "[6/6] Temizlik + boyut:"
 rm -rf "$W/libs/bin" 2>/dev/null || true
+# NSIS çıktısı artık depo kökündeki dist/ altına yazılıyor (hrma.nsi OUTDIR).
+# Önceden exe packaging/ altına düşüyor, yayın kapısı ve publish_release.sh
+# ise dist/ bekliyordu — her yayında elle taşınıyordu. Dizini burada da
+# hazırlıyoruz ki `makensis` yalnız dizin yok diye düşmesin.
+mkdir -p "$SRC/dist"
 du -sh "$W"
 echo "TAMAM: $W"
+echo "Sonraki adım: makensis -DVERSION=<sürüm> packaging/hrma.nsi  ->  $SRC/dist/"

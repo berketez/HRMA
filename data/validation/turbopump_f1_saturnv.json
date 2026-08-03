@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "case": "turbopump_f1_saturnv",
+  "description_tr": "F-1 (Saturn V S-IC) turbopompası: tek milde iki santrifüj pompa ve iki kademeli aksiyon türbini. RL10'un karşı ucu — büyük ölçek, düşük devir, LOX/RP-1. Turbopompa boyutlandırma zincirinin ölçek bağımsızlığını sınamak için RL10 ile BİRLİKTE kullanılmalıdır (RL10: 30250 rpm / 580 gpm, F-1: 5500 rpm / 15600 gpm — iki buçuk mertebe debi farkı).",
+  "discipline": "turbopump",
+  "inputs": {
+    "engine": "F-1",
+    "propellants": {
+      "oxidizer": "lox",
+      "fuel": "rp1"
+    },
+    "architecture": "ortak milde iki santrifüj pompa (biri yakıt biri oksitleyici) + iki kademeli aksiyon türbini",
+    "chamber_pressure_injector_face_kpa": 7757,
+    "chamber_pressure_injector_face_psia": 1125,
+    "mixture_ratio_engine": 2.27,
+    "mixture_ratio_chamber": 2.4,
+    "throat_area_cm2": 6206,
+    "throat_area_in2": 962
+  },
+  "expected_outputs": {
+    "shaft": {
+      "speed_rpm": 5500,
+      "power_MW": 40,
+      "power_hp": 53000
+    },
+    "fuel_pump": {
+      "mass_flow_kg_s": 796,
+      "mass_flow_lbm_s": 1754,
+      "volumetric_flow_l_s": 984,
+      "volumetric_flow_gpm": 15600,
+      "inlet_temperature_K": 290,
+      "inlet_temperature_F": 60,
+      "inlet_density_kg_m3": 808,
+      "inlet_pressure_kpa": 310,
+      "inlet_pressure_psia": 45,
+      "discharge_pressure_kpa": 13000,
+      "discharge_pressure_psia": 1856,
+      "discharge_pressure_stated_elsewhere_mpa": 12.9,
+      "developed_head_m": 1575,
+      "developed_head_ft": 5168
+    },
+    "oxidizer_pump": {
+      "mass_flow_kg_s": 1804,
+      "mass_flow_lbm_s": 3978,
+      "volumetric_flow_l_s": 1577,
+      "volumetric_flow_gpm": 25000,
+      "inlet_temperature_K": 90,
+      "inlet_temperature_F": -298,
+      "inlet_density_kg_m3": 1143,
+      "inlet_pressure_kpa": 450,
+      "inlet_pressure_psia": 65,
+      "discharge_pressure_kpa": 11000,
+      "discharge_pressure_psia": 1600,
+      "developed_head_m": 944,
+      "developed_head_ft": 3097
+    },
+    "NOT_PUBLISHED": [
+      "NPSH",
+      "çark çapı",
+      "indüser geometrisi",
+      "emme özgül devri"
+    ]
+  },
+  "derived_cross_checks": {
+    "_status": "DERIVED_BY_US_NOT_PUBLISHED",
+    "specific_speed_us_rpm_gpm_ft": {
+      "fuel_pump": 1127.0,
+      "oxidizer_pump": 2094.7,
+      "formula": "Ns = N sqrt(Q)/H^0.75"
+    },
+    "head_vs_pressure_rise_consistency": {
+      "fuel": {
+        "delta_p_kpa": 12690,
+        "rho_g_H_kpa": 12479.9,
+        "sapma_pct": 1.7
+      },
+      "oxidizer": {
+        "delta_p_kpa": 10550,
+        "rho_g_H_kpa": 10581.3,
+        "sapma_pct": 0.3
+      }
+    },
+    "cstar_check": {
+      "formula": "c* = p_throat_stag * A_t / mdot_chamber",
+      "computed_m_s": 1660.09,
+      "published_m_s": 1660,
+      "sapma_pct": 0.005
+    }
+  },
+  "units": "kg/s, lbm/s, l/s, gpm, K, F, kg/m^3, kPa, psia, m, ft, rpm, MW, hp",
+  "source": {
+    "title": "Comprehensive Review of Liquid-Propellant Combustion Instabilities in F-1 Engines, Tablo 2",
+    "author": "J. C. Oefelein ve V. Yang",
+    "year": 1993,
+    "url_or_doi": "Journal of Propulsion and Power, Cilt 9, Sayı 5, s. 657-677; doi:10.2514/3.23674"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Tablo 2 İÇ TUTARLILIK bakımından üç bağımsız yoldan sınandı ve GEÇTİ: (1) c* = p_boğaz*A_t/mdot = 1660.09 m/s, tablonun yayımladığı 1660 m/s ile birebir; (2) oksitleyici pompada basınç yükselişi 10550 kPa, rho*g*H = 10581 kPa (%0.3 sapma); (3) yakıtta 12690 kPa'ya karşı 12480 kPa (%1.7). ERRATUM: tablonun 'Developed head, m, in.' başlığındaki ikinci birim YANLIŞ — 5168 ve 3097 sayıları FİT'tir, inç değil (5168 ft = 1575.2 m, 3097 ft = 944.0 m; tablonun kendi metrik sütunuyla birebir tutuyor). HRMA bu sayıları okurken ft varsaymalıdır. Yakıt tahliye basıncı tabloda 13000 kPa (1856 psia), metinde 12.9 MPa (1870 psia) olarak veriliyor — %1 tutarsızlık kaynağın kendisindedir, ikisi de yazıldı.",
+  "tags": [
+    "engine_anchor",
+    "turbopump",
+    "lox_rp1",
+    "large_scale",
+    "primary_source",
+    "erratum"
+  ]
+}

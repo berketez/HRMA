@@ -5,7 +5,10 @@
  * parametrik motor modeli kurar: gövde + kapak + enjektör + grain + Rao
  * konturlu C-D nozul. Kesit (cutaway) görünümü, yanma animasyonu
  * (port regresyonu port_history serisinden), egzoz plume partikül sistemi,
- * ölçü etiketleri ve patlatılmış görünüm içerir.
+ * ölçü etiketleri, patlatılmış görünüm ve CAD kipi (ortografik görünüşler,
+ * teknik-resim leader ölçüleri, nötr stüdyo) içerir. Soğutma kanalları /
+ * enjektör deseni / lüle konturu YALNIZ çözücü verisi varsa çizilir;
+ * yoksa durum çipleri bunu beyan eder (sahte veri yasağı, v2.6.27).
  *
  * Genel kullanım:
  *   MotorViz3D.mount('viewport_div_id', results.motor, { onTick: fn })
@@ -46,6 +49,412 @@
     // IDEAL_EXPANSION_EPS (=8) KALDIRILDI (v2.6.26): pe/pa oranını
     // `(8/eps)^1.15` diye tahmin etmek için kullanılıyordu; hem 8 hem 1.15
     // dayanaksızdı. Artık gerçek çıkış ve ortam basıncı okunuyor.
+
+    // ==================================================================
+    // Görsel kalite saf fonksiyonları (2026-08-03, 3B sahne kalitesi)
+    //
+    // Bunlar THREE'siz saf matematiktir; node bekçi testleri
+    // (tests/test_viz3d_gorsel_kalite.py) metinden çıkarıp izole sınar.
+    // Fizik değerleri DEĞİŞMEZ — yalnız görsel sunum (kadraj, boyut,
+    // görünürlük aktarımı, ölçek) burada hesaplanır.
+    // ==================================================================
+
+    // --- Kamera kadrajı (kalem 4) -------------------------------------
+    // Eski kural dist = max(L*1.15, R*6) yalnız dikey FOV'u örtük varsayar,
+    // viewport en-boy oranını hiç kullanmazdı; L/D≈19,7 varsayılan gövdede
+    // motor kare yüksekliğinin ~%6'sını dolduruyordu (ölçüldü 2026-08-03).
+    // Yeni kural:
+    //  * Sınırlayıcı kutunun 8 köşesi bakış eksenine izdüşürülür; mesafe
+    //    HEM yatay HEM dikey FOV kısıtını sağlayan en küçük değerdir.
+    //  * Uzun-ince gövdede (L/D > CAMERA_SLENDER_RATIO) açılış kompozisyonu
+    //    motoru ekran köşegenine yatırır: köşegen kenardan uzun olduğu için
+    //    gövde kadrajı çaprazlama doldurur, boş kalan pay düşer.
+    var CAMERA_FOV_DEG = 40;         // _initRenderer'daki dikey FOV ile aynı
+    var CAMERA_FIT_MARGIN = 1.12;    // kutu ile kadraj kenarı arasındaki pay
+    var CAMERA_SLENDER_RATIO = 6;    // L/D eşiği: üstünde köşegen kompozisyon
+    var CAMERA_DIR_REGULAR = { x: 0.22, y: 0.30, z: 1.0 };   // klasik 3/4 bakış
+    var CAMERA_DIR_DIAGONAL = { x: 0.85, y: 0.95, z: 1.0 };  // eksen köşegene yatar
+
+    function cameraFrameFit(halfLen, maxRadius, fovDeg, aspect) {
+        var slender = halfLen / Math.max(maxRadius, 1e-6) > CAMERA_SLENDER_RATIO;
+        var raw = slender ? CAMERA_DIR_DIAGONAL : CAMERA_DIR_REGULAR;
+        var n = Math.sqrt(raw.x * raw.x + raw.y * raw.y + raw.z * raw.z);
+        var d = { x: raw.x / n, y: raw.y / n, z: raw.z / n };
+        var tv = Math.tan(fovDeg * Math.PI / 360);
+        var th = tv * Math.max(aspect || 1, 0.2);
+        // Kamera uzayı eksenleri (up = +Y): xAxis = normalize(up × d),
+        // yAxis = d × xAxis (d birim, xAxis ⊥ d → yAxis de birim)
+        var xn = Math.sqrt(d.z * d.z + d.x * d.x);
+        var xAxis = { x: d.z / xn, y: 0, z: -d.x / xn };
+        var yAxis = {
+            x: d.y * xAxis.z,
+            y: d.z * xAxis.x - d.x * xAxis.z,
+            z: -d.y * xAxis.x
+        };
+        var corners = [], sx, sy, sz, i, p, along, cx, cy;
+        for (sx = -1; sx <= 1; sx += 2)
+            for (sy = -1; sy <= 1; sy += 2)
+                for (sz = -1; sz <= 1; sz += 2)
+                    corners.push({ x: sx * halfLen, y: sy * maxRadius, z: sz * maxRadius });
+        var dist = maxRadius * 2.5;  // taban: yakın düzlem / parça içi emniyeti
+        for (i = 0; i < corners.length; i++) {
+            p = corners[i];
+            along = p.x * d.x + p.y * d.y + p.z * d.z;   // bakış ekseni bileşeni
+            cx = p.x * xAxis.x + p.y * xAxis.y + p.z * xAxis.z;
+            cy = p.x * yAxis.x + p.y * yAxis.y + p.z * yAxis.z;
+            dist = Math.max(dist,
+                along + CAMERA_FIT_MARGIN * Math.abs(cx) / th,
+                along + CAMERA_FIT_MARGIN * Math.abs(cy) / tv);
+        }
+        // Doluluk: köşelerin normalize ekran koordinatlarındaki yayılımı
+        // ([-1,1] tam kadraj) — teşhis/bekçi metriği
+        var minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+        for (i = 0; i < corners.length; i++) {
+            p = corners[i];
+            along = p.x * d.x + p.y * d.y + p.z * d.z;
+            cx = p.x * xAxis.x + p.y * xAxis.y + p.z * xAxis.z;
+            cy = p.x * yAxis.x + p.y * yAxis.y + p.z * yAxis.z;
+            var u = cx / (th * (dist - along));
+            var v = cy / (tv * (dist - along));
+            minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+            minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+        }
+        return {
+            dist: dist, dir: d, slender: slender,
+            fill: Math.max(maxU - minU, maxV - minV) / 2
+        };
+    }
+
+    // Lüle bölgesi (kalem 4, ikincil preset): çıkış düzlemi çevresinde,
+    // jet çekirdeği + ilk şok hücrelerini içine alan kadraj kutusu.
+    function nozzleRegion(totalLen, exitRadius, bodyRadius) {
+        var halfLen = Math.max(0.10 * totalLen, 3 * exitRadius);
+        return {
+            halfLen: halfLen,
+            radius: Math.max(1.4 * exitRadius, bodyRadius),
+            targetOffset: halfLen * 0.4   // hedef çıkışın önünde (jet çekirdeği)
+        };
+    }
+
+    // --- Egzoz plume görünürlüğü (kalem 1-2-3) ------------------------
+    // Parçacık boyutu ekran-piksel hedeflidir. three.js r128
+    // PointsMaterial (sizeAttenuation) nokta çapı:
+    //     çap_px ≈ size · (viewportH / 2) / derinlik
+    // Ev kadrajında derinlik ≈ kamera oturtma mesafesi. Eski kural
+    // size = max(3, re·0.55) yalnız çıkış yarıçapına bağlıydı; kamera
+    // L/D≈19,7 gövdeyi çerçevelerken parçacık ekranda ~4 px kalıyordu
+    // ("üç-beş noktacık" görüntüsü, ölçüldü 2026-08-03). Alt sınırlar
+    // korunur: yakın kadrajda eski re tabanlı boyuta düşülür.
+    var PLUME_PARTICLE_TARGET_PX = 14;   // ev kadrajında hedef nokta çapı (px)
+    function plumeParticleSize(exitRadius, camDist, viewportH) {
+        var vh = viewportH > 0 ? viewportH : 520;
+        var byScreen = 2 * PLUME_PARTICLE_TARGET_PX * camDist / vh;
+        return Math.max(3, exitRadius * 0.55, byScreen);
+    }
+
+    // Görünür plume boy bütçesi: motor boyunun katı. Eskiden ömür sabitti,
+    // boyu hız belirliyordu → jet ~2,2·L'ye dek uzayıp kadraj dışına
+    // taşıyordu. Şimdi boy bütçelenir, ömür boydan türetilir (life = boy/hız).
+    var PLUME_LEN_PER_MOTOR = 1.2;
+    // Parçacık yoğunluğu: (plume boyu / motor boyu) birimi başına parçacık.
+    // 750 · 1,2 = 900 → eski toplamla aynı mertebe; boy bütçesi değişirse
+    // sayı onunla ORANTILI değişir, ekran yoğunluğu düşmez (kalem 1).
+    var PLUME_PARTICLES_PER_UNIT = 750;
+    function plumeLengthMm(totalLen) {
+        return PLUME_LEN_PER_MOTOR * totalLen;
+    }
+    function plumeParticleCount(totalLen) {
+        return Math.round(PLUME_PARTICLES_PER_UNIT *
+            plumeLengthMm(totalLen) / Math.max(totalLen, 1e-6));
+    }
+    // Parçacık ömrü: ortalama menzil ≈ plume boyu (life = boy / hız);
+    // ±%25 saçılım türbülanslı jetin menzil dağılımını temsil eder.
+    function plumeLifeSeconds(plumeLen, speed, rand) {
+        return (plumeLen / Math.max(speed, 1e-6)) * (0.75 + 0.5 * rand);
+    }
+
+    // Renk-yaşam eğrisi (kalem 2): parlaklık serbest türbülanslı jetin
+    // merkez-hattı sıcaklık sönümünü izler — potansiyel çekirdek sonrası
+    // ΔT ∝ 1/(x/D) (ör. Pope, Turbulent Flows §5.1; eksenel mesafe x,
+    // yaşam oranı f ile orantılı). Eski (1-f)² eğrisi f>0.4'te fiilen
+    // sıfırdı: ömrün son 2/3'ü görünmüyordu. 1/(1+3f): f=1'de çekirdek
+    // parlaklığının 1/4'ü kalır (3 katsayısı bu uç değeri seçer) —
+    // kuyruk soğumuş AMA seçilebilir. Renk kayması soğumayı verir:
+    // beyaz-mavi çekirdek → turuncu → derin kızıl. Bantlar eski paletin
+    // aynısıdır; keyfî süsleme eklenmedi.
+    function plumeColorAt(f, intensity) {
+        var fade = intensity / (1 + 3 * f);
+        var r, g, b;
+        if (f < 0.18) { r = 1.0; g = 1.0; b = 1.05; }
+        else if (f < 0.5) { r = 1.0; g = 0.62; b = 0.22; }
+        else { r = 0.85; g = 0.32; b = 0.08; }
+        return { r: r * fade, g: g * fade, b: b * fade, fade: fade };
+    }
+
+    // Şok elması görünürlük aktarımı (kalem 3): fiziksel sürücü |1 − pe/pa|
+    // DEĞİŞMEDİ; ekrana aktarım Stevens güç yasasıyla sıkıştırılır
+    // (algılanan şiddet ≈ uyaran^n; parlaklık için n ≈ 0.33-0.5 — Stevens,
+    // Psychol. Rev. 64, 1957). n = 0.4 ile adapte lülede (|1−pe/pa| ≈ 0.06)
+    // görünürlük ≈ 0.33 → zayıf ama SEÇİLEBİLİR; güçlü sapmada 1'e doyar;
+    // tam genişlemede 0 (hücre yapısı fiziksel olarak yok).
+    var DIAMOND_VIS_EXPONENT = 0.4;
+    function diamondVisibility(pressureRatio) {
+        if (!isFinite(pressureRatio)) return 0;
+        var mismatch = Math.min(Math.abs(1 - pressureRatio), 1);
+        return mismatch <= 0 ? 0 : Math.pow(mismatch, DIAMOND_VIS_EXPONENT);
+    }
+
+    // --- Zemin ızgarası (kalem 5) -------------------------------------
+    // Birim hücre YUVARLAK mutlak kademeden seçilir ve motorla ölçeklenmez:
+    // sahnede mutlak uzunluk referansı verir. Eski hücre L/10'du (ölçülen
+    // varsayılan tasarımda 167 mm) ve motorla birlikte ölçekleniyordu —
+    // mutlak referans değeri yoktu. Kural: motor boyunun 1/20'sini aşmayan
+    // en büyük kademe; çok küçük motorda 10 mm tabana düşülür.
+    var GRID_CELL_STEPS_MM = [100, 50, 10];
+    function gridCellMm(totalLen) {
+        for (var i = 0; i < GRID_CELL_STEPS_MM.length; i++) {
+            if (GRID_CELL_STEPS_MM[i] <= totalLen / 20) return GRID_CELL_STEPS_MM[i];
+        }
+        return GRID_CELL_STEPS_MM[GRID_CELL_STEPS_MM.length - 1];
+    }
+    // Izgara açıklığı ~3 motor boyu; hücrenin TAM katına yuvarlanır (kesik
+    // kenar hücresi olmasın) ve çift hücre sayısı seçilir (merkez çizgisi
+    // motor ekseniyle çakışsın).
+    function gridSpanMm(totalLen, cellMm) {
+        var cells = Math.max(8, Math.ceil((totalLen * 3) / cellMm));
+        if (cells % 2) cells += 1;
+        return cells * cellMm;
+    }
+    // Köşe rozeti metni: hücre boyu beyanı (gerçek seçilen değer yazılır)
+    function gridBadgeText(cellMm) {
+        return 'ızgara ' + cellMm + ' mm';
+    }
+
+    // --- Ölçü etiketleri (kalem 6-7) ----------------------------------
+    // Rozet ölçeği boy VE çapla sınırlı: rozet yüksekliği = 0.62·scaleBase
+    // ve 0.62·0.8 ≈ 0.50 → rozet motor dış çapının yarısını aşamaz. Eski
+    // kural yalnız boya bağlıydı (L·0.055): L/D≈19,7 gövdede rozet çapın
+    // %63'üne çıkıp modeli örtüyordu (ölçüldü 2026-08-03).
+    function labelScaleBase(totalLen, outerDiameter) {
+        return Math.min(totalLen * 0.055, outerDiameter * 0.8);
+    }
+    // Kılavuz çizgi payı yarıçapa oranlı; rozet yüksekliğinin (0.62·scale)
+    // altına inmez ki metin gövdeye yapışmasın.
+    function labelLeaderOffset(radius, scaleBase) {
+        return Math.max(radius * 0.45, scaleBase * 0.62);
+    }
+    // Etiket metinleri (kalem 7): sahne dili TÜRKÇE'ye tekleştirildi —
+    // canvas sprite UTF-8 çizer, 'ic/dis' ASCII kaçışının teknik gerekçesi
+    // yoktu. GRAIN/CHAMBER İngilizce kalıntıları da Türkçeleşti: yakıt
+    // çekirdeği boyu 'YAKIT', sıvı motorda yanma odası boyu 'ODA'.
+    function dimensionLabelTexts(v) {
+        var lgWord = v.motorType === 'liquid' ? 'ODA ' : 'YAKIT ';
+        return {
+            chamber: 'ØC iç ' + v.chamberInnerMm.toFixed(1) + ' / dış '
+                + v.chamberOuterMm.toFixed(1) + ' mm',
+            throat: 'ØT ' + v.throatMm.toFixed(1) + ' mm',
+            exit: 'ØE ' + v.exitMm.toFixed(1) + ' mm',
+            total: 'L ' + v.totalMm.toFixed(0) + ' mm  •  '
+                + lgWord + v.grainMm.toFixed(0) + ' mm'
+        };
+    }
+
+    // ==================================================================
+    // CAD verisi saf fonksiyonları (2026-08-04, v2.6.27 — ikinci tur)
+    //
+    // Veri sözleşmesi (şablon adaptörleri passthrough geçirir; motor tarafı
+    // yayımlama işi ayrı ajanda sürüyor — bu bloklar ÇOĞU yanıtta HENÜZ YOK):
+    //   cooling_channels: { n_channels, channel_width_m, channel_height_m,
+    //                       land_width_m, _basis }
+    //   injector_pattern: { n_holes, hole_diameter_m, pattern_type
+    //                       ('showerhead'|'impinging'|'swirl'),
+    //                       impingement_angle_deg?, n_rings?, _basis }
+    //   nozzle_contour:   { points: [[z_m, r_m], ...], _basis }
+    //
+    // Kural (sahte veri yasağı): veri VARSA gerçek geometri çizilir; YOKSA
+    // hiçbir şey çizilmez ve durum çipi bunu açıkça beyan eder. Bilinmeyen
+    // ya da bozuk şekilli blok = veri yok sayılır (savunmacı okuma).
+    // Bekçi testleri: tests/test_viz3d_cad_kipi.py (node ile izole sınama).
+    // ==================================================================
+
+    // --- Kaynak-renk eşlemesi (tasarım dili) ---------------------------
+    // Sahnedeki her çip/rozet rengi verinin GERÇEK kaynağına bağlıdır;
+    // keyfî süs rengi yok (B4 kaynak-renklendirmenin temeli):
+    //   computed = çözücü hesapladı (camgöbeği)
+    //   user     = kullanıcı girdisi (beyaz)
+    //   assumed  = varsayım / yerel üretim (amber)
+    //   missing  = modellenmedi / veri yok (gri)
+    var SOURCE_COLORS = {
+        computed: '#39d6ec',
+        user: '#e8edf2',
+        assumed: '#ffb347',
+        missing: '#8a93a0'
+    };
+
+    function sourceColor(kind) {
+        return SOURCE_COLORS[kind] || SOURCE_COLORS.missing;
+    }
+
+    // --- B1: soğutma kanalları (sahte 8 bilezik söküldü) --------------
+    // Eski kod her sıvı motora, veriden bağımsız 8 dekoratif çevresel
+    // "soğutma bileziği" çiziyordu. Gerçek rejeneratif kanallar EKSENELDİR;
+    // sayı ve kesit ölçüleri çözücünün cooling_channels bloğundan okunur.
+    // Blok yoksa ya da bozuksa null döner — hiçbir kanal çizilmez.
+    function coolingChannelSpec(md) {
+        var cc = md && md.cooling_channels;
+        if (!cc || typeof cc !== 'object') return null;
+        var n = num(cc.n_channels, 0);
+        var w = num(cc.channel_width_m, NaN) * 1000;
+        var h = num(cc.channel_height_m, NaN) * 1000;
+        var land = num(cc.land_width_m, NaN) * 1000;
+        if (!(n >= 1) || !isFinite(w) || w <= 0 || !isFinite(h) || h <= 0) {
+            return null;
+        }
+        return {
+            nChannels: Math.round(n),
+            widthMm: w,
+            heightMm: h,
+            landMm: (isFinite(land) && land > 0) ? land : null,
+            basis: cc._basis || null
+        };
+    }
+
+    // Kanal yerleşimi: n kanal çevreye eşit açıyla dizilir. Spec null ise
+    // BOŞ liste döner (0 kanal) — uydurma kanal yasak.
+    function coolingChannelLayout(spec) {
+        if (!spec) return [];
+        var out = [];
+        for (var i = 0; i < spec.nChannels; i++) {
+            out.push({
+                phi: (i / spec.nChannels) * TAU,
+                widthMm: spec.widthMm,
+                heightMm: spec.heightMm
+            });
+        }
+        return out;
+    }
+
+    // --- B2: enjektör deseni derinliği --------------------------------
+    // injector_pattern bloğu yoksa null döner ve sahnede HİÇBİR ek desen
+    // grafiği çizilmez (mevcut delik deseni davranışı aynen korunur —
+    // o zaten injector_results/injector_design gerçek kaynağından gelir).
+    function readInjectorPattern(md) {
+        var ip = md && md.injector_pattern;
+        if (!ip || typeof ip !== 'object') return null;
+        var n = num(ip.n_holes, 0);
+        var type = String(ip.pattern_type || '').toLowerCase();
+        if (!(n >= 1) || !type) return null;
+        var dia = num(ip.hole_diameter_m, NaN) * 1000;
+        var ang = num(ip.impingement_angle_deg, NaN);
+        var rings = num(ip.n_rings, 0);
+        return {
+            nHoles: Math.round(n),
+            holeDiaMm: (isFinite(dia) && dia > 0) ? dia : null,
+            patternType: type,
+            // Sözleşme iki jet ARASINDAKİ tam açıyı verir; çizim yarım
+            // açıyla çalışır (extractDims'teki impingement_angle_deg / 2
+            // geleneğiyle aynı).
+            impingeHalfDeg: (isFinite(ang) && ang > 0) ? ang / 2 : null,
+            nRings: (rings >= 1) ? Math.round(rings) : null,
+            basis: ip._basis || null
+        };
+    }
+
+    // Çarpışma istasyonu: enjektör yüzünden r yarıçapında çıkan, eksene
+    // doğru yarım açı θ ile eğik jet, itki eksenini z = r / tan(θ)
+    // istasyonunda keser (düz geometri — uydurma katsayı yok). Geçersiz
+    // girdi null döner ve çizgi çizilmez.
+    function impingementApexZ(ringRadiusMm, halfAngleDeg) {
+        var a = clamp(num(halfAngleDeg, NaN), 5, 85);
+        if (!isFinite(a) || !(ringRadiusMm > 0)) return null;
+        return ringRadiusMm / Math.tan(a * Math.PI / 180);
+    }
+
+    // --- B3: lüle konturu tek kaynaktan -------------------------------
+    // Çözücü örneklenmiş konturu (points, metre cinsinden [z, r] çiftleri)
+    // yayımladıysa iç kontur ORADAN okunur; yoksa yerel üretim sürer ve
+    // sahne bunu 'kontur: yerel üretim' çipiyle beyan eder (kaynak
+    // şeffaflığı). Bozuk nokta (NaN, negatif yarıçap, artmayan z) görülen
+    // dizi bütünüyle reddedilir — yarım gerçek kontur çizilmez.
+    function selectNozzleContour(contour) {
+        var pts = contour && contour.points;
+        if (Array.isArray(pts) && pts.length >= 3) {
+            var out = [];
+            for (var i = 0; i < pts.length; i++) {
+                var p = pts[i];
+                var z = num(p && p[0], NaN) * 1000;
+                var r = num(p && p[1], NaN) * 1000;
+                if (!isFinite(z) || !isFinite(r) || r < 0
+                    || (out.length && z <= out[out.length - 1].z)) {
+                    out = null;
+                    break;
+                }
+                out.push({ z: z, r: r });
+            }
+            if (out) {
+                return {
+                    source: 'solver',
+                    points: out,
+                    basis: (contour && contour._basis) || null
+                };
+            }
+        }
+        return { source: 'local', points: null, basis: null };
+    }
+
+    // --- CAD kipi: ortografik görünüş preset'leri (kalem 4a) ----------
+    // Teknik resim görünüşleri; bakış yönleri DÜNYA uzayında (motor ekseni
+    // dünya +X). 'front' yan profili (alın görünüş), 'top' üstten, 'side'
+    // eksen boyu görünüşü, 'iso' izometrik verir. Frustum yarı boyutları
+    // sınırlayıcı kutunun izdüşümünden türer, viewport en-boy oranına
+    // oturtulur — kutu her presette tam kadraj içinde kalır.
+    var ORTHO_MARGIN = 1.08;
+    var ORTHO_PRESETS = {
+        front: { x: 0, y: 0, z: 1 },
+        top: { x: 0, y: 1, z: 0 },
+        side: { x: 1, y: 0, z: 0 },
+        iso: { x: 1, y: 1, z: 1 }
+    };
+
+    function orthoPresetFrustum(name, halfLen, maxRadius, aspect) {
+        var raw = ORTHO_PRESETS[name] || ORTHO_PRESETS.iso;
+        var n = Math.sqrt(raw.x * raw.x + raw.y * raw.y + raw.z * raw.z);
+        var d = { x: raw.x / n, y: raw.y / n, z: raw.z / n };
+        // Üstten bakışta up=+Y bakış yönüyle paralel kalır; teknik resim
+        // kuralı: üst görünüşte motor ekseni ekranda yatay yatar → up = -Z
+        var up = (Math.abs(d.y) > 0.99)
+            ? { x: 0, y: 0, z: -1 } : { x: 0, y: 1, z: 0 };
+        // Kamera eksenleri: xAxis = normalize(up × d), yAxis = d × xAxis
+        var cxv = up.y * d.z - up.z * d.y;
+        var cyv = up.z * d.x - up.x * d.z;
+        var czv = up.x * d.y - up.y * d.x;
+        var cn = Math.sqrt(cxv * cxv + cyv * cyv + czv * czv);
+        var xAxis = { x: cxv / cn, y: cyv / cn, z: czv / cn };
+        var yAxis = {
+            x: d.y * xAxis.z - d.z * xAxis.y,
+            y: d.z * xAxis.x - d.x * xAxis.z,
+            z: d.x * xAxis.y - d.y * xAxis.x
+        };
+        var halfW = 0, halfH = 0, sx, sy, sz, px, py, p;
+        for (sx = -1; sx <= 1; sx += 2)
+            for (sy = -1; sy <= 1; sy += 2)
+                for (sz = -1; sz <= 1; sz += 2) {
+                    p = { x: sx * halfLen, y: sy * maxRadius, z: sz * maxRadius };
+                    px = p.x * xAxis.x + p.y * xAxis.y + p.z * xAxis.z;
+                    py = p.x * yAxis.x + p.y * yAxis.y + p.z * yAxis.z;
+                    halfW = Math.max(halfW, Math.abs(px));
+                    halfH = Math.max(halfH, Math.abs(py));
+                }
+        halfW *= ORTHO_MARGIN;
+        halfH *= ORTHO_MARGIN;
+        // Viewport en-boy oranına oturt: kısıtlayıcı ekseni koru, diğerini aç
+        var a = Math.max(aspect || 1, 0.2);
+        if (halfW / halfH < a) halfW = halfH * a; else halfH = halfW / a;
+        return {
+            dir: d, up: up, halfW: halfW, halfH: halfH,
+            dist: 2.5 * (halfLen + maxRadius)
+        };
+    }
 
     // ------------------------------------------------------------------
     // Yardımcılar
@@ -210,6 +619,14 @@
         sp.renderOrder = 10;
         sp.userData.aspect = w / h;
         return sp;
+    }
+
+    // Durum çipi: mevcut rozet kalıbı (textSprite) + kaynak-renk eşlemesi.
+    // Metin rengi ve çerçeve SOURCE_COLORS tablosundan gelir — çipin rengi
+    // verinin gerçek kaynağını beyan eder (tasarım dili, B4 temeli).
+    function statusChip(text, kind) {
+        var col = sourceColor(kind);
+        return textSprite(text, { color: col, border: col });
     }
 
     // ------------------------------------------------------------------
@@ -474,6 +891,21 @@
         var Rn = num(conv.throat_radius_curvature, 0.382 * rt);
         var Rconv = num(conv.throat_curvature_convergent, 1.5 * rt);
 
+        // B3 (v2.6.27): çözücü örneklenmiş konturu yayımladıysa TEK KAYNAK
+        // odur — boğaz istasyonu (Lc) ve diverjan boyu (Ld) da konturun
+        // kendisinden türer ki boğaz alevi, grafit insert ve ölçü okları
+        // çizilen geometriyle aynı yerde dursun.
+        var contourSel = selectNozzleContour(contour);
+        if (contourSel.points) {
+            var cpts = contourSel.points;
+            var iThroat = 0;
+            for (var ct = 1; ct < cpts.length; ct++) {
+                if (cpts[ct].r < cpts[iThroat].r) iThroat = ct;
+            }
+            Lc = cpts[iThroat].z - cpts[0].z;
+            Ld = cpts[cpts.length - 1].z - cpts[iThroat].z;
+        }
+
         var capT = clamp(1.6 * casingWall, 8, 0.3 * rc + 8);
         var flangeT = clamp(0.8 * capT, 6, 26);
         var flangeLip = clamp(0.10 * rc, 4, 18);
@@ -545,6 +977,14 @@
             // Bu değerler çözücüde ZATEN hesaplanıyor; aşağıda okunuyorlar.
             // Yoksa null kalır ve plume HİÇ çizilmez (uydurma alev yasak).
             nozzleExit: readNozzleExit(md),
+            // v2.6.27 CAD veri sözleşmesi (savunmacı okuma): bloklar çoğu
+            // yanıtta henüz yok — yoksa null/[] kalır ve HİÇBİR şey çizilmez,
+            // durum çipi 'veri yok' beyan eder (sahte veri yasağı).
+            cooling: coolingChannelSpec(md),
+            injPattern: readInjectorPattern(md),
+            contourPoints: contourSel.points,
+            contourSource: contourSel.source,
+            contourBasis: contourSel.basis,
             of0: num(md.of_ratio_initial, num(md.of_ratio, 2)),
             portHist: md.port_history || null,
             ofShift: md.of_shift_performance || null,
@@ -807,6 +1247,17 @@
     // ------------------------------------------------------------------
 
     function nozzleInnerContour(dims) {
+        // B3 (v2.6.27): kontur TEK KAYNAKTAN. Çözücü nozzle_contour.points
+        // yayımladıysa iç kontur oradan örneklenir (ilk nokta konverjan
+        // başlangıcına, dims.Lch'ye oturtulur; boylar metreden mm'ye
+        // selectNozzleContour'da çevrildi). Yerel üretim yalnız veri yokken
+        // çalışır ve sahnede 'kontur: yerel üretim' çipiyle beyan edilir.
+        if (dims.contourPoints && dims.contourPoints.length >= 3) {
+            var zRef = dims.contourPoints[0].z;
+            return dims.contourPoints.map(function (cp) {
+                return { z: dims.Lch + (cp.z - zRef), r: cp.r };
+            });
+        }
         var pts = [];
         var z0 = dims.Lch;          // konverjan başlangıcı
         var zt = dims.Lch + dims.Lc; // boğaz istasyonu
@@ -958,7 +1409,8 @@
             cutaway: true, labels: true, plume: true,
             exploded: false, autoRotate: false,
             portShape: 'circular',   // circular | star | multiport | finocyl
-            heatMap: false           // duvar ısıl akı giydirmesi
+            heatMap: false,          // duvar ısıl akı giydirmesi
+            cadMode: false           // ortografik görünüşler + teknik ölçüler
         };
         this._explodeF = 0; // 0=montajlı, 1=patlatılmış
         this._lastPortR = -1;
@@ -966,10 +1418,13 @@
 
         this._initRenderer();
         this._initSceneGraph();
+        this._buildToolbar();
         this._buildMotor();
+        // Kamera plume'dan ÖNCE oturur: parçacık boyutu kadraj mesafesine
+        // (_camDist) bağlıdır (kalem 1)
+        this._fitCamera();
         this._buildPlume();
         this._buildLabels();
-        this._fitCamera();
         this._bindResize();
 
         this._clock = new THREE.Clock();
@@ -999,10 +1454,24 @@
         this.container.appendChild(this.renderer.domElement);
 
         this.camera = new THREE.PerspectiveCamera(40, w / h, 1, 100000);
-        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+        // Perspektif kamera kalıcı referansı: CAD kipi this.camera'yı
+        // ortografik kamerayla değiştirir, çıkışta buradan geri yüklenir
+        this._perspCam = this.camera;
+        this._makeControls(this.camera);
+    };
+
+    // OrbitControls verilen kameraya (yeniden) bağlanır. r128 OrbitControls
+    // kamera up vektörünü kuruluşta yakalar; CAD preset'leri up değiştirdiği
+    // için preset/kip geçişinde controls yeniden kurulur.
+    MotorScene.prototype._makeControls = function (cam) {
+        var oldTarget = this.controls ? this.controls.target.clone() : null;
+        if (this.controls && this.controls.dispose) this.controls.dispose();
+        this.controls = new THREE.OrbitControls(cam, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
         this.controls.autoRotateSpeed = 0.9;
+        if (oldTarget) this.controls.target.copy(oldTarget);
+        return this.controls;
     };
 
     MotorScene.prototype._initSceneGraph = function () {
@@ -1185,16 +1654,39 @@
             closure.add(collar);
         }
 
-        // Sıvı motor: rejeneratif soğutma kanalı bilezikleri (görsel detay)
+        // B1 (v2.6.27): SAHTE 8 BİLEZİK SÖKÜLDÜ. Eski kod her sıvı motora,
+        // veriden bağımsız 8 dekoratif çevresel "soğutma bileziği" çiziyordu
+        // — hesaplanmayan şey çizilmez. Gerçek rejeneratif kanallar EKSENEL
+        // akar; sayı ve kesit ölçüleri çözücünün cooling_channels bloğundan
+        // gelir. Veri yoksa hiçbir kanal çizilmez ve durum çipi bunu beyan
+        // eder ('soğutma kanalları: veri yok').
+        this._coolingChip = null;
         if (isLiquid) {
-            var nRib = 8;
-            var ribGeo = new THREE.TorusGeometry(d.rcOut + 1.2, 1.4, 10, 48);
-            for (var rb = 0; rb < nRib; rb++) {
-                var rib = new THREE.Mesh(ribGeo, mats.bolt);
-                rib.rotation.x = Math.PI / 2;
-                rib.position.y = d.Lch * (0.12 + 0.76 * rb / (nRib - 1));
-                rib.castShadow = true;
-                casing.add(rib);
+            var chans = coolingChannelLayout(d.cooling);
+            if (chans.length) {
+                // Tek paylaşımlı birim küp + kanal başına mesh: kesit GERÇEK
+                // genişlik x yükseklik (mm), kanal dış cidara oturur ve
+                // kamarayı boydan tarar. Land genişliği çizimde kanallar
+                // arası boşluk olarak kendiliğinden görünür (2·π·R/n − w).
+                var chanLen = d.Lch * 0.92;
+                var chanGeo = new THREE.BoxGeometry(1, 1, 1);
+                var chanR = d.rcOut + chans[0].heightMm / 2;
+                for (var ch = 0; ch < chans.length; ch++) {
+                    var chn = chans[ch];
+                    var chMesh = new THREE.Mesh(chanGeo, mats.steel);
+                    chMesh.scale.set(chn.widthMm, chanLen, chn.heightMm);
+                    chMesh.rotation.y = chn.phi;
+                    chMesh.position.set(chanR * Math.sin(chn.phi),
+                        d.Lch * 0.5, chanR * Math.cos(chn.phi));
+                    chMesh.userData.phi = chn.phi;
+                    chMesh.userData.hideInCut = true; // kesit açıklığında gizlenir
+                    chMesh.castShadow = true;
+                    casing.add(chMesh);
+                }
+            } else {
+                this._coolingChip = {
+                    text: 'soğutma kanalları: veri yok', kind: 'missing'
+                };
             }
         }
 
@@ -1365,6 +1857,68 @@
                     }
                 });
             }
+
+            // B2 (v2.6.27): enjektör deseni derinliği — YALNIZ çözücü
+            // injector_pattern yayımladıysa çizilir; veri yoksa mevcut
+            // davranış AYNEN korunur (delik deseni zaten gerçek kaynaktan).
+            var pat = d.injPattern;
+            if (pat && pat.patternType.indexOf('imping') === 0
+                && pat.impingeHalfDeg) {
+                // Çarpışma noktası çizgileri: delik çiftlerinden itki ekseni
+                // üstündeki kesişime. İstasyon uydurma değil, düz geometri:
+                // z = r / tan(θ) (impingementApexZ). Çizgi sayısı gösterimde
+                // mevcut delik çizimiyle aynı tavana bağlıdır (12 çift) —
+                // sayının beyanı deliklerin kendisindedir.
+                var ringR = rMaxO * 0.68;
+                var apexDz = impingementApexZ(ringR, pat.impingeHalfDeg);
+                if (apexDz !== null) {
+                    var impMat = new THREE.LineBasicMaterial({
+                        color: new THREE.Color(sourceColor('computed')),
+                        transparent: true, opacity: 0.8, toneMapped: false
+                    });
+                    var nPairLines = Math.max(1,
+                        Math.min(Math.round(pat.nHoles / 2), 12));
+                    var apexPt = new THREE.Vector3(0, injFace + apexDz, 0);
+                    for (var il = 0; il < nPairLines; il++) {
+                        var ilPhi = (il / nPairLines) * TAU;
+                        var impGeoLine = new THREE.BufferGeometry().setFromPoints([
+                            new THREE.Vector3(ringR * Math.sin(ilPhi), injFace,
+                                ringR * Math.cos(ilPhi)),
+                            apexPt
+                        ]);
+                        var iline = new THREE.Line(impGeoLine, impMat);
+                        iline.userData.phi = ilPhi;
+                        iline.userData.hideInCut = true;
+                        injector.add(iline);
+                    }
+                }
+            } else if (pat && pat.patternType === 'swirl' && pat.impingeHalfDeg) {
+                // Swirl açı gösterimi: sprey konisi V-çizgileri + açı çipi.
+                // Açı GERÇEK veriden (impingement_angle_deg); açı yoksa bu
+                // blok hiç çalışmaz — koni de çip de çizilmez.
+                var swHalf = clamp(pat.impingeHalfDeg, 5, 85);
+                var swLen = Math.min(0.30 * d.Lch, 6 * d.rc);
+                var swR = swLen * Math.tan(THREE.MathUtils.degToRad(swHalf));
+                var swMat = new THREE.LineBasicMaterial({
+                    color: new THREE.Color(sourceColor('computed')),
+                    transparent: true, opacity: 0.8, toneMapped: false
+                });
+                [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(function (sdir) {
+                    var swGeo = new THREE.BufferGeometry().setFromPoints([
+                        new THREE.Vector3(0, injFace, 0),
+                        new THREE.Vector3(sdir[0] * swR, injFace + swLen,
+                            sdir[1] * swR)
+                    ]);
+                    injector.add(new THREE.Line(swGeo, swMat));
+                });
+                var swChip = statusChip(
+                    'sprey açısı ' + (2 * swHalf).toFixed(0) + '°', 'computed');
+                var swH = Math.max(6, Math.min(d.Lch * 0.05, d.rc * 0.8));
+                swChip.scale.set(swH * swChip.userData.aspect, swH, 1);
+                swChip.position.set(0, injFace + swLen * 1.12, 0);
+                injector.add(swChip);
+            }
+
             // Hibrit: kapaktan port girişine uzanan ateşleyici (pirinç gövde)
             if (!isLiquid) {
                 var igR = clamp(0.09 * d.rc, 2.5, 8);
@@ -1452,9 +2006,9 @@
         this._applyExplode(this._explodeF);
         this._applyHeatMap();
 
-        // Zemin: gölge düzlemi + ızgara. İlk kurulumda üretilir; sonraki
-        // kurulumlarda (tasarım modu boyut değiştirir) konum ve ölçek
-        // motorun güncel boyutuna göre tazelenir (görev 5a — bayatlamayı önler)
+        // Zemin: gölge düzlemi + ızgara. Gölge düzlemi ilk kurulumda üretilir
+        // ve motor boyuyla ölçeklenir (yalnız gölge alanıdır); sonraki
+        // kurulumlarda konum tazelenir (görev 5a — bayatlamayı önler)
         var floorY = -(this.dims.rcOut + this.dims.flangeLip) * 1.9;
         if (!this._floor) {
             var shadowPlane = new THREE.Mesh(
@@ -1464,19 +2018,92 @@
             shadowPlane.rotation.x = -Math.PI / 2;
             shadowPlane.receiveShadow = true;
             this.scene.add(shadowPlane);
-            var grid = new THREE.GridHelper(this._totalLen * 3, 30, 0x0e6f80, 0x123340);
-            grid.material.transparent = true;
-            grid.material.opacity = 0.35;
-            this.scene.add(grid);
             this._floor = shadowPlane;
-            this._grid = grid;
             this._floorBaseLen = this._totalLen;   // ölçek referansı
         }
         var fScale = this._totalLen / (this._floorBaseLen || this._totalLen);
         this._floor.position.y = floorY;
         this._floor.scale.setScalar(fScale);
+        // Izgara (kalem 5): MUTLAK birim hücre — yuvarlak kademe (10/50/100
+        // mm), motorla ÖLÇEKLENMEZ; hücre boyu köşe rozetinde beyan edilir.
+        // Hücre/açıklık değişince yeniden kurulur (tasarım modu).
+        var cell = gridCellMm(this._totalLen);
+        var span = gridSpanMm(this._totalLen, cell);
+        if (!this._grid || this._gridCell !== cell || this._gridSpan !== span) {
+            if (this._grid) {
+                this.scene.remove(this._grid);
+                if (this._grid.geometry) this._grid.geometry.dispose();
+                if (this._grid.material) this._grid.material.dispose();
+            }
+            if (this._gridBadge) {
+                this.scene.remove(this._gridBadge);
+                if (this._gridBadge.material.map) this._gridBadge.material.map.dispose();
+                this._gridBadge.material.dispose();
+            }
+            var grid = new THREE.GridHelper(span, Math.round(span / cell),
+                0x0e6f80, 0x123340);
+            grid.material.transparent = true;
+            grid.material.opacity = 0.35;
+            this.scene.add(grid);
+            this._grid = grid;
+            this._gridCell = cell;
+            this._gridSpan = span;
+            // Köşe rozeti: seçilen hücre boyu (mutlak referans beyanı)
+            var badge = textSprite(gridBadgeText(cell), {
+                border: 'rgba(20, 111, 128, 0.7)', color: '#7fd4e2'
+            });
+            badge.material.depthTest = true;   // HUD değil, zemin mobilyası
+            badge.renderOrder = 0;
+            var bh = Math.max(cell * 1.1, span * 0.03);
+            badge.scale.set(bh * badge.userData.aspect, bh, 1);
+            this._gridBadge = badge;
+            this._gridBadgeH = bh;
+            this.scene.add(badge);
+        }
         this._grid.position.y = floorY + 0.5;
-        this._grid.scale.setScalar(fScale);
+        this._grid.scale.setScalar(1);   // motorla ölçeklenmez (kalem 5)
+        this._gridBadge.position.set(this._gridSpan * 0.42,
+            floorY + this._gridBadgeH * 0.8, this._gridSpan * 0.42);
+        // Izgara yeniden kurulduysa CAD nötr stüdyo stili korunur
+        if (this.state.cadMode) this._applyCadGridStyle(true);
+
+        // Durum çipleri (kaynak şeffaflığı, v2.6.27): her çip GERÇEK bir
+        // duruma bağlıdır ve rengi SOURCE_COLORS eşlemesinden gelir.
+        //  * kontur kaynağı her motorda beyan edilir (çözücü/yerel üretim)
+        //  * sıvı motorda soğutma kanalı verisi yoksa 'veri yok' çipi
+        var chipDefs = [];
+        if (this._coolingChip) chipDefs.push(this._coolingChip);
+        chipDefs.push(d.contourSource === 'solver'
+            ? { text: 'kontur: çözücü', kind: 'computed' }
+            : { text: 'kontur: yerel üretim', kind: 'assumed' });
+        this._buildStatusChips(chipDefs, floorY);
+    };
+
+    // Durum çiplerini zemin köşesine (ızgara rozetinin karşısına) dizer.
+    // Çipler HUD süsü değil BEYANDIR: yalnız gerçek durumlar listelenir.
+    MotorScene.prototype._buildStatusChips = function (defs, floorY) {
+        if (this._chipGroup) {
+            this.scene.remove(this._chipGroup);
+            this._chipGroup.traverse(function (o) {
+                if (o.material) {
+                    if (o.material.map) o.material.map.dispose();
+                    o.material.dispose();
+                }
+            });
+        }
+        var g = this._chipGroup = new THREE.Group();
+        var span = this._gridSpan || this._totalLen * 3;
+        var bh = this._gridBadgeH || span * 0.03;
+        for (var i = 0; i < defs.length; i++) {
+            var sp = statusChip(defs[i].text, defs[i].kind);
+            sp.material.depthTest = true;   // HUD değil, zemin mobilyası
+            sp.renderOrder = 0;
+            sp.scale.set(bh * sp.userData.aspect, bh, 1);
+            sp.position.set(-span * 0.42,
+                floorY + bh * (0.8 + 1.25 * i), span * 0.42);
+            g.add(sp);
+        }
+        this.scene.add(g);
     };
 
     // Grain katısını verilen eşdeğer port yarıçapıyla yeniden kur.
@@ -1709,15 +2336,15 @@
             THREE.MathUtils.degToRad(PLUME_REF_EXIT_ANGLE_DEG)) * pressureTurn;
 
         // Şok elmalarının ŞİDDETİ basınç uyumsuzluğuyla artar; tam genişlemiş
-        // jette (pe = pa) hücre yapısı kaybolur. Bu artık ölçülen bir sapma:
-        var mismatch = clamp(Math.abs(1 - ex.pressureRatio), 0, 1);
-
+        // jette (pe = pa) hücre yapısı kaybolur. Sürücü ölçülen |1 − pe/pa|
+        // sapmasıdır; EKRANA aktarım diamondVisibility transfer fonksiyonuyla
+        // yapılır (kalem 3 — adapte lülede seçilebilir, sapmada belirgin).
         return {
             spread: clamp(spread, 0.4, 3.5),
             // Prandtl-Pack hücre aralığı (readNozzleExit'te hesaplandı).
             // 0 ise hücre yapısı yok demektir; çizim onu atlar.
             diamondSpacing: ex.cellSpacingMm,
-            diamondStrength: clamp(mismatch, 0, 1),
+            diamondStrength: diamondVisibility(ex.pressureRatio),
             expansionState: ex.expansionState,
             exitVelocity: ex.exitVelocity,
             exitTemperature: ex.exitTemperature
@@ -1726,9 +2353,12 @@
 
     MotorScene.prototype._buildPlume = function () {
         var d = this.dims;
-        var N = 900;
-        this._plumeN = N;
         this._plumeInfo = this._plumeAero();
+        // Boy bütçesi + parçacık sayısı boyla orantılı (kalem 1): jet
+        // kadrajda kalır, ekran yoğunluğu motor boyundan bağımsız kalır.
+        this._plumeLen = plumeLengthMm(this._totalLen);
+        var N = plumeParticleCount(this._totalLen);
+        this._plumeN = N;
         var geo = new THREE.BufferGeometry();
         var pos = new Float32Array(N * 3);
         var col = new Float32Array(N * 3);
@@ -1737,7 +2367,10 @@
         this._pState = new Float32Array(N * 5); // vy, vr, phi, life, maxLife
 
         var mat = new THREE.PointsMaterial({
-            size: Math.max(3, d.re * 0.55),
+            // Boyut ekran-piksel hedefli (kalem 1): kadraj mesafesi _camDist
+            // _fitCamera'da bu kurulumdan önce hesaplanır
+            size: plumeParticleSize(d.re, this._camDist,
+                this.container.clientHeight || 520),
             map: glowTexture('rgba(255,255,255,1)', 'rgba(255,150,60,0.6)'),
             vertexColors: true, transparent: true, depthWrite: false,
             blending: THREE.AdditiveBlending, sizeAttenuation: true,
@@ -1816,7 +2449,11 @@
         // ve toplu, koni (θ büyük) geniş bir jet üretir (görev 6)
         st[i * 5 + 1] = speed * (0.05 + 0.10 * Math.random()) * spread;
         st[i * 5 + 2] = phi;
-        var maxLife = 0.35 + Math.random() * 0.5;
+        // Ömür boy bütçesinden türer (kalem 1): ortalama menzil ≈ plume
+        // boyu — eski sabit 0.35-0.85 s ömür jeti ~2,2·L'ye taşırıyordu
+        var maxLife = plumeLifeSeconds(
+            this._plumeLen || plumeLengthMm(this._totalLen),
+            speed, Math.random());
         st[i * 5 + 3] = scatter ? Math.random() * maxLife : 0;
         st[i * 5 + 4] = maxLife;
         if (pos) {
@@ -1874,15 +2511,10 @@
             var vr = st[o5 + 1] * dt * (0.4 + f * 1.6);
             pos[o3 + 0] += Math.sin(st[o5 + 2]) * vr;
             pos[o3 + 2] += Math.cos(st[o5 + 2]) * vr;
-            // Renk yaşam eğrisi: beyaz-mavi çekirdek → turuncu → söner
-            var fade = (1 - f) * (1 - f) * intensity;
-            if (f < 0.18) {
-                col[o3] = 1.0 * fade; col[o3 + 1] = 1.0 * fade; col[o3 + 2] = 1.05 * fade;
-            } else if (f < 0.5) {
-                col[o3] = 1.0 * fade; col[o3 + 1] = 0.62 * fade; col[o3 + 2] = 0.22 * fade;
-            } else {
-                col[o3] = 0.85 * fade; col[o3 + 1] = 0.32 * fade; col[o3 + 2] = 0.08 * fade;
-            }
+            // Renk yaşam eğrisi (kalem 2): soğuma → renk kayması; kuyruk
+            // ömür sonuna dek seçilebilir kalır (plumeColorAt beyanlı eğri)
+            var pc = plumeColorAt(f, intensity);
+            col[o3] = pc.r; col[o3 + 1] = pc.g; col[o3 + 2] = pc.b;
         }
         geo.attributes.position.needsUpdate = true;
         geo.attributes.color.needsUpdate = true;
@@ -1916,22 +2548,59 @@
             });
         }
         var g = this._labelGroup = new THREE.Group();
+        // Ölçü değerleri ÇÖZÜCÜDEN gelir → çizgi rengi kaynak-renk
+        // eşlemesinin 'computed' camgöbeğidir (tasarım dili)
         var lineMat = new THREE.LineBasicMaterial({
-            color: 0x39d6ec, transparent: true, opacity: 0.75, depthTest: false,
+            color: new THREE.Color(sourceColor('computed')),
+            transparent: true, opacity: 0.75, depthTest: false,
             toneMapped: false
         });
-        var scaleBase = this._totalLen * 0.055;
+        // Rozet ölçeği boy VE çapla sınırlı (kalem 6): rozet yüksekliği
+        // (0.62·scaleBase) dış çapın yarısını aşamaz — eski L·0.055 kuralı
+        // L/D≈19,7 gövdede rozeti çapın %63'üne çıkarıyordu
+        var scaleBase = labelScaleBase(this._totalLen, 2 * d.rcOut);
+        var cad = this.state.cadMode;
 
-        // Etiketler açıklığın karşısında (lathe -X ⇒ dünya +Y, üstte) durur
+        // Etiketler açıklığın karşısında (lathe -X ⇒ dünya +Y, üstte) durur.
+        // CAD kipinde (kalem 4b) rozet çizgisi teknik-resim leader'ına
+        // döner: geometriye ok uçlu eğik çizgi + yatay iniş + metin.
         function callout(zPos, rFrom, text, extra) {
-            var off = rFrom + (extra || scaleBase * 0.9);
+            // Kılavuz çizgi payı yarıçapa oranlı (kalem 6)
+            var off = rFrom + (extra || labelLeaderOffset(rFrom, scaleBase));
+            var hgt = scaleBase * 0.62;
+            if (cad) {
+                var tip = new THREE.Vector3(-rFrom, zPos, 0);
+                var elbow = new THREE.Vector3(-off - scaleBase * 0.35,
+                    zPos + scaleBase * 0.5, 0);
+                var land = new THREE.Vector3(elbow.x - scaleBase * 0.9,
+                    elbow.y, 0);
+                g.add(new THREE.Line(
+                    new THREE.BufferGeometry().setFromPoints([tip, elbow, land]),
+                    lineMat));
+                // Ok ucu: leader doğrultusunda geriye açılan V
+                var dir = elbow.clone().sub(tip).normalize();
+                var perp = new THREE.Vector3(-dir.y, dir.x, 0);
+                var ah = scaleBase * 0.22;
+                [1, -1].forEach(function (s) {
+                    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+                        tip,
+                        tip.clone().add(dir.clone().multiplyScalar(ah))
+                            .add(perp.clone().multiplyScalar(s * ah * 0.38))
+                    ]), lineMat));
+                });
+                var spC = textSprite(text);
+                spC.scale.set(hgt * spC.userData.aspect, hgt, 1);
+                spC.position.set(land.x - (hgt * spC.userData.aspect) / 2,
+                    land.y + hgt * 0.65, 0);
+                g.add(spC);
+                return;
+            }
             var pts = [
                 new THREE.Vector3(-rFrom, zPos, 0),
                 new THREE.Vector3(-off - scaleBase * 0.35, zPos, 0)
             ];
             g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
             var sp = textSprite(text);
-            var hgt = scaleBase * 0.62;
             sp.scale.set(hgt * sp.userData.aspect, hgt, 1);
             sp.position.set(-off - scaleBase * 0.4 - (hgt * sp.userData.aspect) / 2, zPos, 0);
             g.add(sp);
@@ -1940,17 +2609,25 @@
         // v2.6.26 (Y3): ölçü oku dış yüzeyden çıkıp İÇ çapı yazıyordu. Ölçü
         // tablosunda aynı karışıklık atölyede 2 x cidar kadar (ölçülen koşuda
         // 31,8 mm) yanlış boru seçtiriyordu. Artık ikisi de AÇIKÇA yazılır.
-        callout(d.Lch * 0.30, d.rcOut,
-            'ØC ic ' + d.Dch.toFixed(1) + ' / dis '
-            + (2 * d.rcOut).toFixed(1) + ' mm');
-        callout(d.Lch + d.Lc, d.rt + 2, 'ØT ' + d.dt.toFixed(1) + ' mm', scaleBase * 1.5);
-        callout(this._nozzleInfo.zExit - 2, this._nozzleInfo.rExit + d.nozzleWall, 'ØE ' + d.de.toFixed(1) + ' mm');
+        // Metinler dimensionLabelTexts'ten gelir (kalem 7 — sahne dili tek,
+        // Türkçe; 'iç/dış' UTF-8 yazılır).
+        var texts = dimensionLabelTexts({
+            motorType: d.motorType,
+            chamberInnerMm: d.Dch,
+            chamberOuterMm: 2 * d.rcOut,
+            throatMm: d.dt,
+            exitMm: d.de,
+            totalMm: this._nozzleInfo.zExit + d.capT,
+            grainMm: d.Lg
+        });
+        callout(d.Lch * 0.30, d.rcOut, texts.chamber);
+        callout(d.Lch + d.Lc, d.rt + 2, texts.throat, scaleBase * 1.5);
+        callout(this._nozzleInfo.zExit - 2, this._nozzleInfo.rExit + d.nozzleWall, texts.exit);
 
         // Toplam uzunluk = kapak dışı → nozul çıkışı (2D kesitle aynı tanım;
-        // oksitleyici giriş borusu hariç). GRAIN etiketi sıvıda anlamsız —
-        // orada Lg yanma odası boyudur, CHAMBER olarak yazılır.
-        var lgLabel = (d.motorType === 'liquid' ? 'CHAMBER ' : 'GRAIN ') + d.Lg.toFixed(0) + ' mm';
-        var totalTxt = textSprite('L ' + (this._nozzleInfo.zExit + d.capT).toFixed(0) + ' mm  •  ' + lgLabel,
+        // oksitleyici giriş borusu hariç). YAKIT etiketi sıvıda anlamsız —
+        // orada Lg yanma odası boyudur, ODA olarak yazılır.
+        var totalTxt = textSprite(texts.total,
             { border: 'rgba(255,150,60,0.55)', color: '#ffd9a8' });
         var th = scaleBase * 0.62;
         totalTxt.scale.set(th * totalTxt.userData.aspect, th, 1);
@@ -1968,9 +2645,19 @@
     MotorScene.prototype._fitCamera = function () {
         var L = this._totalLen;
         var R = this.dims.rcOut + this.dims.flangeLip;
-        var dist = Math.max(L * 1.15, R * 6);
-        this._camHome = new THREE.Vector3(L * 0.22, L * 0.30, dist);
-        this.camera.position.copy(this._camHome).multiplyScalar(1.5); // intro dolly başlangıcı
+        // Kadraj PERSPEKTİF kameraya oturur; CAD kipindeyken aktif kamera
+        // ortografiktir ve kendi preseti aşağıda ayrıca tazelenir.
+        var cam = this._perspCam || this.camera;
+        // En-boy oranına duyarlı kadraj (kalem 4): kutu köşeleri hem yatay
+        // hem dikey FOV'a oturtulur; uzun-ince gövdede köşegen kompozisyon
+        var aspect = cam.aspect ||
+            ((this.container.clientWidth || 800) / (this.container.clientHeight || 520));
+        var fit = cameraFrameFit(L / 2, R, CAMERA_FOV_DEG, aspect);
+        var dist = fit.dist;
+        this._camDist = dist;   // parçacık boyutu bu mesafeye göre seçilir
+        this._camHome = new THREE.Vector3(
+            fit.dir.x * dist, fit.dir.y * dist, fit.dir.z * dist);
+        cam.position.copy(this._camHome).multiplyScalar(1.5); // intro dolly başlangıcı
         this.controls.target.set(0, 0, 0);
         this._keyLight.position.set(L * 0.8, L * 1.1, L * 0.7);
         var sc = this._keyLight.shadow.camera;
@@ -1978,8 +2665,10 @@
         this._keyLight.shadow.camera.updateProjectionMatrix();
         this._rimCyan.position.set(-L * 0.9, L * 0.25, -L * 0.9);
         this._rimOrange.position.set(L * 1.0, -L * 0.35, -L * 0.7);
-        this.camera.far = dist * 30;
-        this.camera.updateProjectionMatrix();
+        cam.far = Math.max(dist, L) * 30;
+        cam.updateProjectionMatrix();
+        // CAD kipindeyken geometri değişimi ortografik kadrajı da tazeler
+        if (this.state.cadMode) this.setCadPreset(this._cadPresetName || 'iso');
     };
 
     MotorScene.prototype._bindResize = function () {
@@ -1988,9 +2677,13 @@
             if (self._disposed) return;
             var w = self.container.clientWidth, h = self.container.clientHeight;
             if (w < 10 || h < 10) return;
-            self.camera.aspect = w / h;
-            self.camera.updateProjectionMatrix();
+            self._perspCam.aspect = w / h;
+            self._perspCam.updateProjectionMatrix();
             self.renderer.setSize(w, h);
+            // CAD kipinde ortografik frustum yeni en-boy oranına oturtulur
+            if (self.state.cadMode) {
+                self.setCadPreset(self._cadPresetName || 'iso');
+            }
         });
         this._ro.observe(this.container);
     };
@@ -2204,21 +2897,25 @@
         this._lastPortR = -1;
         this._buildMotor();
         this._buildLabels();
-        if (this._plume) {
-            this._plumeInfo = this._plumeAero();   // yeni geometri → yeni jet fiziği
-            this._updateDiamondPositions();
-            this._plume.material.size = Math.max(3, this.dims.re * 0.55);
-            for (var i = 0; i < this._plumeN; i++) this._resetParticle(i, true);
-        }
-        // Kamera refit: uzunluk VEYA dış yarıçap (rcOut+flangeLip) yüzde
-        // 15'ten fazla değiştiyse yeniden oturt (görev 5b — yalnız uzunluğa
-        // bakmak çap sliderında kadrajı bayat bırakıyordu)
+        // Kamera refit ÖNCE: parçacık boyutu kadraj mesafesinden (_camDist)
+        // türediği için plume tazelemesi güncel mesafeyle yapılmalı (kalem 1).
+        // Uzunluk VEYA dış yarıçap (rcOut+flangeLip) yüzde 15'ten fazla
+        // değiştiyse yeniden oturt (görev 5b — yalnız uzunluğa bakmak çap
+        // sliderında kadrajı bayat bırakıyordu)
         var newRad = this.dims.rcOut + this.dims.flangeLip;
         if (Math.abs(this._totalLen - oldLen) / oldLen > 0.15 ||
             Math.abs(newRad - oldRad) / oldRad > 0.15) {
             this._fitCamera();
             this._introT = 1;
             this.camera.position.copy(this._camHome);
+        }
+        if (this._plume) {
+            this._plumeInfo = this._plumeAero();   // yeni geometri → yeni jet fiziği
+            this._updateDiamondPositions();
+            this._plumeLen = plumeLengthMm(this._totalLen);
+            this._plume.material.size = plumeParticleSize(this.dims.re,
+                this._camDist, this.container.clientHeight || 520);
+            for (var i = 0; i < this._plumeN; i++) this._resetParticle(i, true);
         }
     };
     MotorScene.prototype.setLabels = function (on) {
@@ -2243,6 +2940,11 @@
         return this.state.speed;
     };
     MotorScene.prototype.resetCamera = function () {
+        // CAD kipinde sıfırlama aktif ortografik preseti yeniden oturtur
+        if (this.state.cadMode) {
+            this.setCadPreset(this._cadPresetName || 'iso');
+            return;
+        }
         this.camera.position.copy(this._camHome);
         this.controls.target.set(0, 0, 0);
         this._introT = 1;
@@ -2268,19 +2970,40 @@
         // Yanma süresi timeline'ı gerçek transient süresine oturt
         this.dims.burnTime = this._transient.tEnd;
     };
-    // Kamera preset'leri: iso (ana), side (tam yan), nozzle (egzoz arkası),
-    // injector (baş taraf). Mesafe _camHome yarıçapından türetilir.
+    // Kamera preset'leri: iso (ana), side (tam yan), nozzle (lüle bölgesi),
+    // injector (baş taraf). iso/side/injector mesafeyi _camHome
+    // yarıçapından alır; nozzle artık lüle bölgesine ODAKLI ikincil
+    // kadrajdır (kalem 4): hedef çıkış düzlemi + jet çekirdeği, mesafe
+    // nozzleRegion kutusuna oturtulur — tam gövde mesafesi değil.
     MotorScene.prototype.setCameraPreset = function (name) {
+        // CAD kipinde perspektif preset istekleri en yakın ortografik
+        // görünüşe yönlendirilir (deck butonları CAD'de de iş görsün)
+        if (this.state.cadMode) {
+            var cadMap = { iso: 'iso', side: 'side', nozzle: 'front', injector: 'top' };
+            return this.setCadPreset(cadMap[name] || 'iso');
+        }
         var r = this._camHome.length();
-        var presets = {
-            iso: this._camHome.clone(),
-            side: new THREE.Vector3(0, 0, r),
-            nozzle: new THREE.Vector3(r * 0.85, -r * 0.25, r * 0.35),
-            injector: new THREE.Vector3(-r * 0.85, r * 0.25, r * 0.35)
-        };
-        var p = presets[name] || presets.iso;
+        var target = new THREE.Vector3(0, 0, 0);
+        var p;
+        if (name === 'nozzle' && this._nozzleInfo) {
+            var d = this.dims;
+            var aspect = this.camera.aspect || 1.54;
+            var reg = nozzleRegion(this._totalLen, d.re, d.rcOut + d.flangeLip);
+            var fit = cameraFrameFit(reg.halfLen, reg.radius, CAMERA_FOV_DEG, aspect);
+            var zExitW = this._nozzleInfo.zExit - this._zCenter;
+            target.set(zExitW + reg.targetOffset, 0, 0);
+            p = new THREE.Vector3(0.62, -0.22, 1).normalize()
+                .multiplyScalar(fit.dist).add(target);
+        } else {
+            var presets = {
+                iso: this._camHome.clone(),
+                side: new THREE.Vector3(0, 0, r),
+                injector: new THREE.Vector3(-r * 0.85, r * 0.25, r * 0.35)
+            };
+            p = presets[name] || presets.iso;
+        }
         this.camera.position.copy(p);
-        this.controls.target.set(0, 0, 0);
+        this.controls.target.copy(target);
         this._introT = 1;
         return name;
     };
@@ -2309,6 +3032,215 @@
         }
         return label;
     };
+    // ------------------------------------------------------------------
+    // CAD kipi (v2.6.27, kalem 4): ortografik görünüşler + teknik-resim
+    // leader ölçüleri + nötr stüdyo. Kip geçişi durum KAYBETMEZ: kesit,
+    // zaman çizelgesi, patlatma, etiket görünürlüğü aynen sürer; perspektif
+    // kamera konumu girişte saklanır, çıkışta birebir geri yüklenir.
+    // ------------------------------------------------------------------
+
+    MotorScene.prototype.setCadMode = function (on) {
+        on = !!on;
+        if (this.state.cadMode === on) return on;
+        this.state.cadMode = on;
+        if (on) this._enterCad(); else this._exitCad();
+        // Ölçü etiketleri kipe uygun tarzda yeniden kurulur (CAD'de leader)
+        this._buildLabels();
+        this._syncToolbar();
+        return on;
+    };
+
+    MotorScene.prototype._enterCad = function () {
+        // Mevcut görünüm + stil durumu saklanır (çıkışta geri yüklenir)
+        this._cadSaved = {
+            pos: this.camera.position.clone(),
+            target: this.controls.target.clone(),
+            background: this.scene.background,
+            rimCyan: this._rimCyan.intensity,
+            rimOrange: this._rimOrange.intensity,
+            autoRotate: this.state.autoRotate
+        };
+        this._introT = 1;   // giriş dolly'si CAD kadrajını ezmesin
+        if (!this._orthoCam) {
+            this._orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 10);
+        }
+        this.camera = this._orthoCam;
+        this.setCadPreset(this._cadPresetName || 'iso');
+        // Nötr stüdyo (kalem 4c): koyu-nötr fon, jant ışıkları kapalı,
+        // sade ızgara, mat malzemeler — hepsi gerçek duruma bağlı stil,
+        // süs animasyonu yok; çıkışta aynen geri alınır.
+        this.scene.background = new THREE.Color(0x14171c);
+        this._rimCyan.intensity = 0;
+        this._rimOrange.intensity = 0;
+        this.state.autoRotate = false;
+        this._applyCadGridStyle(true);
+        this._applyCadMaterials(true);
+    };
+
+    MotorScene.prototype._exitCad = function () {
+        var s = this._cadSaved || {};
+        this.camera = this._perspCam;
+        this._makeControls(this.camera);
+        if (s.pos) this.camera.position.copy(s.pos);
+        this.controls.target.copy(s.target || new THREE.Vector3(0, 0, 0));
+        if (s.background) this.scene.background = s.background;
+        this._rimCyan.intensity = (s.rimCyan !== undefined) ? s.rimCyan : 0.55;
+        this._rimOrange.intensity = (s.rimOrange !== undefined) ? s.rimOrange : 0.15;
+        this.state.autoRotate = !!s.autoRotate;
+        this._applyCadGridStyle(false);
+        this._applyCadMaterials(false);
+        this._cadSaved = null;
+    };
+
+    // Izgara stili: CAD'de nötr gri, sade; normal kipte GridHelper'ın
+    // kuruluş değerleri (vertexColors + 0.35 opaklık) deterministiktir,
+    // saklamak yerine doğrudan geri yazılır.
+    MotorScene.prototype._applyCadGridStyle = function (on) {
+        if (!this._grid) return;
+        var m = this._grid.material;
+        if (on) {
+            m.vertexColors = false;
+            m.color.setHex(0x3d434b);
+            m.opacity = 0.22;
+        } else {
+            m.vertexColors = true;
+            m.color.setHex(0xffffff);
+            m.opacity = 0.35;
+        }
+        m.needsUpdate = true;
+    };
+
+    // Malzeme stili: CAD'de mat (düşük metalness, yüksek roughness, sönük
+    // yansıma). Orijinal değerler malzeme üstünde saklanır ve çıkışta
+    // birebir geri yüklenir — malzemeler paylaşımlı olduğundan kalıcı
+    // mutasyon bırakılmaz.
+    MotorScene.prototype._applyCadMaterials = function (on) {
+        var mats = this.mats;
+        if (!mats) return;
+        Object.keys(mats).forEach(function (k) {
+            var m = mats[k];
+            if (!m || !m.isMaterial) return;
+            if (on) {
+                if (m.userData._cadOrig === undefined) {
+                    m.userData._cadOrig = {
+                        metalness: m.metalness,
+                        roughness: m.roughness,
+                        envMapIntensity: m.envMapIntensity
+                    };
+                }
+                if (m.metalness !== undefined) m.metalness = Math.min(m.metalness, 0.15);
+                if (m.roughness !== undefined) m.roughness = Math.max(m.roughness, 0.75);
+                if (m.envMapIntensity !== undefined) m.envMapIntensity = 0.15;
+            } else if (m.userData._cadOrig !== undefined) {
+                var o = m.userData._cadOrig;
+                if (o.metalness !== undefined) m.metalness = o.metalness;
+                if (o.roughness !== undefined) m.roughness = o.roughness;
+                if (o.envMapIntensity !== undefined) m.envMapIntensity = o.envMapIntensity;
+                delete m.userData._cadOrig;
+            }
+        });
+    };
+
+    // Ortografik görünüş preseti: front | top | side | iso. Frustum
+    // matematiği saf orthoPresetFrustum'dadır (bekçi testli); burada yalnız
+    // kameraya uygulanır. Up vektörü değişebildiği için controls yeniden
+    // bağlanır (r128 OrbitControls up'ı kuruluşta yakalar).
+    MotorScene.prototype.setCadPreset = function (name) {
+        if (!this.state.cadMode || !this._orthoCam) return null;
+        name = ORTHO_PRESETS[name] ? name : 'iso';
+        this._cadPresetName = name;
+        var L = this._totalLen || 100;
+        var R = (this.dims.rcOut + this.dims.flangeLip) || 10;
+        var aspect = (this.container.clientWidth || 800) /
+            (this.container.clientHeight || 520);
+        var f = orthoPresetFrustum(name, L / 2, R, aspect);
+        var cam = this._orthoCam;
+        cam.left = -f.halfW; cam.right = f.halfW;
+        cam.top = f.halfH; cam.bottom = -f.halfH;
+        cam.near = 1;
+        cam.far = f.dist * 4;
+        cam.up.set(f.up.x, f.up.y, f.up.z);
+        cam.position.set(f.dir.x * f.dist, f.dir.y * f.dist, f.dir.z * f.dist);
+        cam.lookAt(0, 0, 0);
+        cam.updateProjectionMatrix();
+        this._makeControls(cam);
+        this.controls.target.set(0, 0, 0);
+        this.controls.update();
+        this._syncToolbar();
+        return name;
+    };
+
+    // ------------------------------------------------------------------
+    // Araç çubuğu: CAD kipi anahtarı + ortografik görünüş butonları.
+    // Koyu HUD temasıyla TUTARLI: textSprite rozetleriyle aynı mono
+    // tipografi ve renk ailesi (camgöbeği çerçeve, koyu zemin).
+    // ------------------------------------------------------------------
+
+    MotorScene.prototype._buildToolbar = function () {
+        if (getComputedStyle(this.container).position === 'static') {
+            this.container.style.position = 'relative';
+        }
+        var bar = document.createElement('div');
+        bar.style.cssText = [
+            'position:absolute', 'top:8px', 'right:8px', 'z-index:5',
+            'display:flex', 'gap:4px', 'align-items:center',
+            'font:600 11px "SF Mono","JetBrains Mono",Consolas,monospace'
+        ].join(';');
+        var self = this;
+        function mkBtn(label, title) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = label;
+            b.title = title || label;
+            b.style.cssText = [
+                'padding:3px 8px', 'border-radius:6px', 'cursor:pointer',
+                'background:rgba(4,12,20,0.78)',
+                'border:1px solid rgba(0,229,255,0.45)',
+                'color:#9beaf7', 'font:inherit', 'letter-spacing:0.4px'
+            ].join(';');
+            bar.appendChild(b);
+            return b;
+        }
+        this._cadPresetBtns = {};
+        [['front', 'ÖN'], ['top', 'ÜST'], ['side', 'YAN'], ['iso', 'İZO']]
+            .forEach(function (pr) {
+                var b = mkBtn(pr[1], 'Ortografik görünüş: ' + pr[1]);
+                b.style.display = 'none';
+                b.addEventListener('click', function () {
+                    self.setCadPreset(pr[0]);
+                });
+                self._cadPresetBtns[pr[0]] = b;
+            });
+        this._cadBtn = mkBtn('CAD',
+            'CAD kipi: ortografik görünüşler + teknik ölçüler + nötr stüdyo');
+        this._cadBtn.addEventListener('click', function () {
+            self.setCadMode(!self.state.cadMode);
+        });
+        this._toolbar = bar;
+        this.container.appendChild(bar);
+        this._syncToolbar();
+    };
+
+    MotorScene.prototype._syncToolbar = function () {
+        if (!this._toolbar) return;
+        var on = !!this.state.cadMode;
+        var self = this;
+        if (this._cadBtn) {
+            this._cadBtn.style.background = on
+                ? 'rgba(0,229,255,0.22)' : 'rgba(4,12,20,0.78)';
+            this._cadBtn.style.color = on ? '#e8f9ff' : '#9beaf7';
+        }
+        Object.keys(this._cadPresetBtns || {}).forEach(function (k) {
+            var b = self._cadPresetBtns[k];
+            b.style.display = on ? '' : 'none';
+            var active = on && self._cadPresetName === k;
+            b.style.borderColor = active
+                ? 'rgba(0,229,255,0.9)' : 'rgba(0,229,255,0.45)';
+            b.style.background = active
+                ? 'rgba(0,229,255,0.22)' : 'rgba(4,12,20,0.78)';
+        });
+    };
+
     // PNG kare yakalama (görev 7): render hemen ardından senkron toDataURL —
     // arabellek aynı görev içinde okunduğu için preserveDrawingBuffer gerekmez
     MotorScene.prototype.snapshot = function () {
@@ -2339,6 +3271,11 @@
         this.renderer.dispose();
         if (this.renderer.domElement.parentNode === this.container) {
             this.container.removeChild(this.renderer.domElement);
+        }
+        // Araç çubuğu DOM'u da bırakılır (mount zaten innerHTML temizler,
+        // ama dispose tek başına da sızıntısız olmalı)
+        if (this._toolbar && this._toolbar.parentNode === this.container) {
+            this.container.removeChild(this._toolbar);
         }
     };
 
@@ -2372,6 +3309,12 @@
         setTransient: function (tr) { if (viz) viz.setTransient(tr); },
         setCameraPreset: function (name) { return viz ? viz.setCameraPreset(name) : null; },
         cycleCameraPreset: function () { return viz ? viz.cycleCameraPreset() : null; },
+        // CAD kipi (v2.6.27): ortografik görünüşler + teknik ölçüler
+        setCadMode: function (on) { return viz ? viz.setCadMode(on) : null; },
+        setCadPreset: function (name) { return viz ? viz.setCadPreset(name) : null; },
+        // Kaynak-renk eşlemesi dışa açık: sayfa/deck çipleri aynı tabloyu
+        // kullanabilir (tasarım dili tek gerçeklik)
+        SOURCE_COLORS: SOURCE_COLORS,
         setQuality: function (mode) { return viz ? viz.setQuality(mode) : null; },
         // Görünür karenin PNG data-URL'i (indirme butonları için)
         snapshot: function () { return viz ? viz.snapshot() : null; },

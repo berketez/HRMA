@@ -1,0 +1,216 @@
+{
+  "schema_version": "1.0",
+  "case": "turbopump_rl10a33_design_point",
+  "description_tr": "RL10A-3-3 yakıt ve oksitleyici pompalarının tasarım noktası, üç karışım oranında. Pratt & Whitney tasarım raporunun Tablo V-I'inden okundu. Turbopompa boyutlandırma zincirinin (yol haritası C1) birincil sıvı-hidrojen capası: devir, debi, yükseklik, verim ve mil gücü AYNI ANDA verildiği için özgül devir zinciri uçtan uca sınanabilir.",
+  "discipline": "turbopump",
+  "inputs": {
+    "engine": "RL10A-3-3",
+    "propellants": {
+      "oxidizer": "lox",
+      "fuel": "lh2"
+    },
+    "mixture_ratios": [
+      4.4,
+      5.0,
+      5.6
+    ],
+    "chamber_pressure_throat_total_psia": [
+      383.7,
+      385.2,
+      385.3
+    ],
+    "chamber_pressure_injector_face_psia": [
+      392.8,
+      394.6,
+      395.0
+    ],
+    "chamber_throat_diameter_in": 5.14,
+    "fuel_flow_lb_s": [
+      6.11,
+      5.63,
+      5.24
+    ],
+    "oxidizer_flow_lb_s": [
+      26.9,
+      28.16,
+      29.37
+    ]
+  },
+  "expected_outputs": {
+    "oxidizer_pump": {
+      "inlet_total_pressure_psia": [
+        60.5,
+        60.5,
+        60.5
+      ],
+      "inlet_temperature_R": [
+        175.3,
+        175.3,
+        175.3
+      ],
+      "inlet_density_lb_ft3": [
+        68.8,
+        68.8,
+        68.8
+      ],
+      "flow_rate_gpm": [
+        175.5,
+        183.7,
+        191.3
+      ],
+      "head_rise_ft": [
+        1182,
+        1123,
+        1068
+      ],
+      "speed_rpm": [
+        12390,
+        12100,
+        11840
+      ],
+      "efficiency_pct": [
+        61.9,
+        63.2,
+        64.3
+      ],
+      "horsepower": [
+        93.5,
+        90.9,
+        88.6
+      ],
+      "discharge_pressure_psia": [
+        625.3,
+        597.1,
+        570.9
+      ]
+    },
+    "fuel_pump": {
+      "stages": 2,
+      "inlet_total_pressure_psia": [
+        30.0,
+        30.0,
+        30.0
+      ],
+      "inlet_temperature_R": [
+        38.3,
+        38.3,
+        38.3
+      ],
+      "inlet_density_lb_ft3": [
+        4.35,
+        4.35,
+        4.35
+      ],
+      "discharge_density_lb_ft3": [
+        4.25,
+        4.23,
+        4.21
+      ],
+      "flow_rate_gpm": [
+        630.7,
+        580.9,
+        540.0
+      ],
+      "head_rise_ft": [
+        33930,
+        32740,
+        31550
+      ],
+      "speed_rpm": [
+        30970,
+        30250,
+        29590
+      ],
+      "efficiency_pct": [
+        55.9,
+        54.7,
+        53.6
+      ],
+      "horsepower": [
+        635.5,
+        574.7,
+        524.1
+      ],
+      "discharge_pressure_psia": [
+        1030.9,
+        991.3,
+        952.6
+      ],
+      "leakage_lb_s": [
+        0.07,
+        0.07,
+        0.07
+      ]
+    },
+    "turbine": {
+      "inlet_total_pressure_psia": [
+        722.3,
+        698.1,
+        676.5
+      ],
+      "inlet_total_temperature_R": [
+        316.5,
+        353.9,
+        386.6
+      ],
+      "discharge_static_pressure_psia": [
+        498.5,
+        496.3,
+        492.2
+      ],
+      "speed_rpm": [
+        30970,
+        30250,
+        29590
+      ],
+      "efficiency_pct": [
+        73.5,
+        72.9,
+        72.5
+      ],
+      "horsepower": [
+        731.1,
+        667.8,
+        614.7
+      ],
+      "flow_lb_s": [
+        5.99,
+        5.35,
+        4.87
+      ]
+    },
+    "shaft_critical_speeds_rpm": {
+      "fuel": 65000,
+      "oxidizer": 40000
+    }
+  },
+  "derived_cross_checks": {
+    "_status": "DERIVED_BY_US_NOT_PUBLISHED",
+    "note_tr": "Aşağıdakiler yayımlanmış değil; yayımlanmış sayılardan bizim türettiğimiz kontrol büyüklükleridir.",
+    "specific_speed_us_rpm_gpm_ft": {
+      "oxidizer_pump_MR5.0": 845.4,
+      "fuel_pump_per_stage_MR5.0": 503.8,
+      "fuel_pump_overall_MR5.0": 299.6,
+      "formula": "Ns = N sqrt(Q) / H^0.75  (N: rpm, Q: gpm, H: ft)"
+    }
+  },
+  "units": "psia, R, lb/ft^3, gpm, ft, rpm, %, hp, lb/s, in (raporun orijinal birimleri)",
+  "value_kind": "design_point_prediction",
+  "source": {
+    "title": "Design Report for RL10A-3-3 Rocket Engine, PWA FR-1769",
+    "author": "Pratt & Whitney Aircraft (Florida Research and Development Center)",
+    "year": 1966,
+    "url_or_doi": "https://www.nasa.gov/wp-content/uploads/2025/06/design-report-for-rl-10-a-3-3-1966.pdf"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Sayılar PDF'in Tablo V-I metninden doğrudan okundu (OCR), grafikten değil. DİKKAT: bunlar TASARIM NOKTASI TAHMİNLERİDİR, test ölçümü DEĞİLDİR — bu yüzden value_kind alanı 'design_point_prediction'. Depoda zaten bulunan hrma/data/validation_records/liquid/liq-rl10a33a-*.json kayıtları RL10A-3-3A (sonraki varyant) içindir; bu kayıt RL10A-3-3'tür, KARIŞTIRILMAMALIDIR. NPSH ve çark çapı bu raporda VERİLMEMİŞTİR (yalnız 'düşük net pozitif emme basıncında azami çalışma aralığı' nitel ifadesi var) — çark çapı için turbopump_rl10a33a_geometry.json kaydına bakılmalıdır. MR 5.0 sütununda yakıt debisi OCR'de 540.i okundu, 540.0 kabul edildi; bu tek değer DÜŞÜK GÜVENLİdir.",
+  "tags": [
+    "engine_anchor",
+    "turbopump",
+    "lh2",
+    "lox",
+    "primary_source",
+    "design_prediction"
+  ]
+}

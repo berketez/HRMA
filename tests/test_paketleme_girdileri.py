@@ -98,6 +98,51 @@ def test_kosulsuz_girdiler_depoda_var(betik):
         '\nYa girdiyi depoya ekleyin ya da kullanımı `[ -d ... ]` ile koruyun.')
 
 
+#: Depo kökünden (``$SRC``) okunan girdiler. ``$B`` (packaging/) tarafındaki
+#: girdiler yukarıda denetleniyordu ama betikler uygulama kaynaklarını depo
+#: kökünden alır: ``hrma``, ``data`` ve 2026-08-03'ten beri ``examples``.
+#: Birinin adı değişir de betik güncellenmezse paketleme o satırda ölür —
+#: ya da (rsync'te olduğu gibi) SESSİZCE eksik paket üretir.
+KAYNAK_SRC = re.compile(r'\b(?:cp|rsync|tar|unzip|ditto)\b[^\n]*?"\$SRC/([^"]+)"')
+
+
+@pytest.mark.parametrize('betik', BETIKLER)
+def test_kosulsuz_src_girdileri_depoda_var(betik):
+    satirlar = _betik_oku(betik)
+    eksik = []
+    for i, satir in enumerate(satirlar):
+        if satir.strip().startswith('#'):
+            continue
+        for m in KAYNAK_SRC.finditer(satir):
+            yol = m.group(1).rstrip('/.')
+            if os.path.exists(os.path.join(KOK, yol)):
+                continue
+            if _korumali(satirlar, i):
+                continue
+            eksik.append('%s:%d  $SRC/%s' % (betik, i + 1, yol))
+    assert not eksik, (
+        'Derleme betiği depo kökünde OLMAYAN bir kaynağı kopyalıyor:\n  '
+        + '\n  '.join(eksik))
+
+
+def test_ornek_projeler_iki_platforma_da_giriyor():
+    """``examples/`` her iki pakete de girmeli (2026-08-03 arızası).
+
+    Yayınlanan DMG mount edildi: ``Resources/app`` altında tek bir ``.hrma``
+    yoktu. ``examples/README.md`` ise kullanıcıya o dosyaları proje dizinine
+    kopyalamasını söylüyor — var olmayan bir dizini işaret ediyordu. İki
+    platform aynı içeriği taşımazsa arıza yalnız birinde geri gelir.
+    """
+    ornekler = [a for a in os.listdir(os.path.join(KOK, 'examples'))
+                if a.endswith('.hrma')]
+    assert ornekler, 'examples/ altında .hrma yok — bekçinin ölçütü kalmaz'
+    for betik in ('build_mac_app.sh', 'build_win_payload.sh'):
+        kod = '\n'.join(s for s in _betik_oku(betik)
+                        if not s.lstrip().startswith('#'))
+        assert re.search(r'rsync[^\n]*"\$SRC/examples"', kod), (
+            '%s örnek projeleri pakete kopyalamıyor' % betik)
+
+
 def test_uretilen_muafiyetleri_hala_gecerli():
     """``URETILEN`` muafiyetleri gerçekten üretiliyor mu?
 

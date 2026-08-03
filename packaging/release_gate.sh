@@ -17,14 +17,31 @@
 # Ayrıca sürümü kullanılamaz yapan 403 hatasını HİÇBİR test yakalayamazdı:
 # test, kodun kör noktasını paylaşıyordu (ikisi de portun 8080 olduğunu
 # varsayıyordu) ve uygulama hiçbir zaman 8080 dışında bir portta çalıştırılıp
-# denenmemişti. Bu yüzden aşağıdaki 6/7 kapısı CANLI sunucuyu VARSAYILAN
+# denenmemişti. Bu yüzden aşağıdaki 6/8 kapısı CANLI sunucuyu VARSAYILAN
 # OLMAYAN bir portta ayağa kaldırıp gerçekten hesap yaptırır.
 #
 # v2.6.26 EKLERİ (Faz 4 denetimi E1/E2)
 # --------------------------------------
-# 3/7  Yapı ↔ commit zaman sırası: artefakt commit'ten ÖNCE üretilmişse KALDI.
-# 4/7  CI kontrolü artık bu SHA'nın BÜTÜN koşularını sayar (tek koşu değil) ve
+# 3/8  Yapı ↔ commit zaman sırası: artefakt commit'ten ÖNCE üretilmişse KALDI.
+# 4/8  CI kontrolü artık bu SHA'nın BÜTÜN koşularını sayar (tek koşu değil) ve
 #      tamamlanmamış koşu varsa KALDI der — "CI'ı beklemeden yayınlama" hatası.
+#
+# 2026-08-03 EKLERİ (paket İÇERİĞİ denetlenmiyordu)
+# --------------------------------------------------
+# Kapı bugüne kadar paketin VAR olduğuna, imzalı olduğuna ve uygulamanın 200
+# döndürdüğüne bakıyordu; İÇİNDE ne olduğuna hiç bakmıyordu. Ölçülen üç sonuç:
+#   - Yayınlanan DMG mount edildi: examples/ dizini YOK, tek bir .hrma yok.
+#     Oysa examples/README.md kullanıcıya o dosyaları kopyalamasını söylüyor.
+#   - Bir önceki sürümde DMG 526 MB'den 383 MB'ye düştü (bytecode ön-derleme
+#     kaybı) ve kimse fark etmedi — boyut sapması ölçülmüyordu.
+#   - 6/8 duman testi yalnız HTTP 200'e bakıyordu: uç boş/eksik gövde de
+#     dönse kapı "hesap yapıyor" diyordu.
+# Eklenenler:
+#   3/8  mtime'ın YANINA BUILD_INFO.sha == HEAD karşılaştırması (mtime hangi
+#        AĞAÇTAN derlendiğini söyleyemez; `touch` bile onu tazeler).
+#   6/8  gövde denetimi: plots.performance ve nozzle_design.performance.
+#        exit_mach > 1 — alan yoksa AÇIK HATA, kapı durur.
+#   8/8  paket içerik manifesti + bir önceki yayına göre boyut sapması.
 #
 # Kullanım:
 #   bash packaging/release_gate.sh            # tam kapı (yayın öncesi)
@@ -50,8 +67,35 @@ baslik()   { printf "\n=== %s ===\n" "$1"; }
 
 PY="${PYTHON:-python3}"
 
+# Artefakt boyutunun bir önceki yayına göre kabul edilen sapma sınırı (%).
+# 8/8 adımında kullanılır; tek tanım burada durur ki eşik betiğin içine
+# dağılmasın.
+BOYUT_TOLERANS_YUZDE=20
+
+# --- DMG yardımcıları -------------------------------------------------------
+# Kapının üç ayrı adımı (3/8 köken, 7/8 imza, 8/8 içerik) DMG'nin İÇİNE
+# bakmak zorunda. Her biri kendi mount/detach çiftini elle yazınca bir yerde
+# detach unutuluyor ve /Volumes'ta asılı kalan bir birim sonraki koşuyu
+# bozuyor. Bağlama tek yerden yapılır.
+dmg_bagla() {   # $1 = dmg yolu; başarılıysa mount noktasını stdout'a basar
+    local nokta
+    nokta="$(mktemp -d /tmp/hrma_gate_mnt.XXXXXX)"
+    if hdiutil attach -readonly -nobrowse -noverify -mountpoint "$nokta" "$1" \
+       >/dev/null 2>&1; then
+        echo "$nokta"
+        return 0
+    fi
+    rmdir "$nokta" 2>/dev/null || true
+    return 1
+}
+
+dmg_coz() {     # $1 = mount noktası
+    hdiutil detach "$1" >/dev/null 2>&1 || hdiutil detach "$1" -force >/dev/null 2>&1 || true
+    rmdir "$1" 2>/dev/null || true
+}
+
 # ---------------------------------------------------------------------------
-baslik "1/7  Sürüm tutarlılığı"
+baslik "1/8  Sürüm tutarlılığı"
 # ---------------------------------------------------------------------------
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' hrma/__init__.py)"
 if [ -z "$VERSION" ]; then
@@ -81,7 +125,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "2/7  Git durumu"
+baslik "2/8  Git durumu"
 # ---------------------------------------------------------------------------
 if [ -n "$(git status --porcelain)" ]; then
     basarisiz "çalışma ağacı kirli — commit edilmemiş değişiklikle sürüm çıkmaz"
@@ -101,7 +145,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "3/7  Yapı ↔ commit zaman sırası"
+baslik "3/8  Yapı ↔ commit zaman sırası"
 # ---------------------------------------------------------------------------
 # v2.6.25'te yayınlanan ikili, temsil ettiği kaynaktan ÖNCE üretilmişti.
 # Ölçülen zaman damgaları (GitHub API, UTC):
@@ -139,8 +183,69 @@ else
     done
 fi
 
+# --- BUILD_INFO: paketin İÇİNDEKİ köken kaydı -------------------------------
+# mtime yalnızca "ne zaman dokunuldu" der. Hangi AĞAÇTAN derlendiğini
+# söyleyemez: `touch dist/*.dmg` bile üç yıllık bir paketi "commit'ten sonra
+# üretilmiş" gösterir. Derleme betikleri artık paketin içine BUILD_INFO.json
+# gömüyor (build_mac_app.sh / build_win_payload.sh); burada o kayıttaki sha
+# HEAD ile karşılaştırılır. Eşleşmiyorsa yayınlanacak ikili BAŞKA bir ağacı
+# temsil ediyor demektir.
+#
+# Kapsam beyanı: macOS tarafında kayıt DMG'nin İÇİNDEN okunur (kullanıcıya
+# giden şey odur). Windows tarafında exe'nin içi açılamıyor — NSIS arşivini
+# açacak araç her makinede yok — bu yüzden exe'nin derlendiği STAGING ağacı
+# (packaging/win/payload/app/BUILD_INFO.json) okunur. Doğrulanan şey exe
+# ikilisi DEĞİL, exe'nin üretildiği ağaçtır; aradaki fark mtime kontrolüyle
+# kapatılır (payload commit'ten sonra, exe payload'dan sonra üretilir).
+KOKEN_OKU='
+import json, sys
+try:
+    k = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception as e:
+    print("OKUNAMADI\t%s" % e); raise SystemExit(0)
+print("%s\t%s\t%s" % (k.get("sha") or "YOK", k.get("tree_dirty"),
+                      k.get("version") or "YOK"))
+'
+koken_denetle() {   # $1 = BUILD_INFO.json yolu, $2 = insan okunur ad
+    local kayit sha kirli surum
+    if [ ! -f "$1" ]; then
+        basarisiz "$2: BUILD_INFO.json yok — paket hangi ağaçtan derlendiğini taşımıyor (yeniden derleyin)"
+        return
+    fi
+    kayit="$("$PY" -c "$KOKEN_OKU" "$1" 2>/dev/null || echo '')"
+    sha="$(printf '%s' "$kayit" | cut -f1)"
+    kirli="$(printf '%s' "$kayit" | cut -f2)"
+    surum="$(printf '%s' "$kayit" | cut -f3)"
+    if [ -z "$kayit" ] || [ "$sha" = "OKUNAMADI" ]; then
+        basarisiz "$2: BUILD_INFO.json okunamadı ($kayit)"
+    elif [ "$sha" = "YOK" ] || [ "$sha" = "None" ]; then
+        basarisiz "$2: BUILD_INFO.sha boş — derleme sırasında git okunamamış, köken KANITSIZ"
+    elif [ "$sha" != "$YEREL" ]; then
+        basarisiz "$2: BUILD_INFO.sha=${sha:0:8} != HEAD=${YEREL:0:8} — paket BAŞKA bir ağaçtan derlenmiş. YENİDEN DERLE."
+    elif [ "$kirli" = "True" ]; then
+        basarisiz "$2: paket KİRLİ çalışma ağacından derlenmiş (BUILD_INFO.tree_dirty) — commit edilmemiş değişiklik içeriyor"
+    elif [ "$surum" != "$VERSION" ]; then
+        basarisiz "$2: BUILD_INFO.version=$surum, paket sürümü $VERSION — eşleşmiyor"
+    else
+        basarili "$2: köken kanıtlı (sha ${sha:0:8} = HEAD, ağaç temiz, v$surum)"
+    fi
+}
+
+if [ "$(uname)" = "Darwin" ] && [ -f "$DMG_YOL" ]; then
+    KOKEN_MNT="$(dmg_bagla "$DMG_YOL" || echo '')"
+    if [ -n "$KOKEN_MNT" ]; then
+        koken_denetle "$KOKEN_MNT/HRMA.app/Contents/Resources/app/BUILD_INFO.json" "DMG içeriği"
+        dmg_coz "$KOKEN_MNT"
+    else
+        basarisiz "DMG mount edilemedi, köken kaydı okunamadı: $DMG_YOL"
+    fi
+elif [ "$(uname)" != "Darwin" ]; then
+    atlandi "DMG köken kaydı yalnız macOS'ta okunabilir (hdiutil)"
+fi
+koken_denetle "packaging/win/payload/app/BUILD_INFO.json" "Windows payload (exe'nin derlendiği ağaç)"
+
 # ---------------------------------------------------------------------------
-baslik "4/7  GitHub Actions (bu commit)"
+baslik "4/8  GitHub Actions (bu commit)"
 # ---------------------------------------------------------------------------
 # CI KONTROLÜ ATLANAMAZ (v2.6.25 yayınından çıkan ders).
 #
@@ -205,7 +310,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "5/7  Tam test takımı"
+baslik "5/8  Tam test takımı"
 # ---------------------------------------------------------------------------
 # Yalnız BU adım atlanabilir: yerel tam takım, CI'ın temiz makinede koştuğu
 # takımın aynısıdır. 3/6 yeşilse buradaki koşu fazladan bir doğrulamadır.
@@ -224,7 +329,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "6/7  Canlı duman testi — VARSAYILAN OLMAYAN portta"
+baslik "6/8  Canlı duman testi — VARSAYILAN OLMAYAN portta"
 # ---------------------------------------------------------------------------
 # v2.6.2'yi kullanılamaz yapan hata tam buradaydı: uygulama 8080 dışında bir
 # porta düştüğünde kendi sayfası kendi API'sinden 403 alıyordu. Bu kapı gerçek
@@ -284,6 +389,85 @@ else
     YUK_SIVI='{"motor_name":"kapi","motor_type":"liquid","thrust":10000,
                "burn_time":400,"chamber_pressure":50,"fuel_type":"rp1",
                "oxidizer_type":"lox","mixture_ratio":2.3}'
+
+    # 2026-08-03: bu adım YALNIZ HTTP koduna bakıyordu. 200 "sunucu ayakta"
+    # demektir, "hesap yaptı" demez: uç boş bir sözlük, yalnız uyarı listesi
+    # ya da grafiksiz bir gövde de dönse kapı GEÇİYORDU. Artık gövdenin
+    # kendisi denetleniyor — biri çizim, biri fizik tarafından iki alan:
+    #   plots.performance                      -> performans panosu üretildi
+    #   nozzle_design.performance.exit_mach>1  -> lüle gerçekten süpersonik
+    #
+    # Lüle çözümünün yeri uçtan uca AYNI DEĞİL: hibrit yanıtında ölçüldü
+    # (2026-08-03, /calculate) -> motor.nozzle_design.performance.exit_mach
+    # = 3.000; üst düzey nozzle_design ise null. Bu yüzden denetleyici SAYILI
+    # ve AÇIKÇA YAZILMIŞ bir aday yol listesinde arar — gövdeyi baştan sona
+    # tarayıp "bir yerde exit_mach var" demez (o, alakasız bir alt nesneden
+    # gelen sayıyı kanıt sayardı). Aday yolların hiçbirinde alan yoksa kapı
+    # DURUR: eksik alan "denetlenemedi" değil, denetimin BAŞARISIZ olmasıdır.
+    GOVDE_DENETI="$(mktemp /tmp/hrma_gate_body_check.XXXXXX)"
+    cat > "$GOVDE_DENETI" <<'PY'
+import json
+import sys
+
+#: exit_mach'in aranacağı yollar. Yeni bir uç başka bir yere koyarsa buraya
+#: EKLENİR — sessizce kabul edilmez.
+ADAY_YOLLAR = (
+    ('nozzle_design', 'performance', 'exit_mach'),
+    ('motor', 'nozzle_design', 'performance', 'exit_mach'),
+)
+
+
+def gez(kok, yol):
+    dugum = kok
+    for anahtar in yol:
+        if not isinstance(dugum, dict) or anahtar not in dugum:
+            return None, False
+        dugum = dugum[anahtar]
+    return dugum, True
+
+
+try:
+    with open(sys.argv[1], encoding='utf-8') as f:
+        govde = json.load(f)
+except Exception as hata:
+    print('gövde JSON olarak ayrıştırılamadı: %s' % hata)
+    raise SystemExit(0)
+
+if not isinstance(govde, dict):
+    print('gövde sözlük değil: %s' % type(govde).__name__)
+    raise SystemExit(0)
+
+eksik = []
+cizimler = govde.get('plots')
+if not isinstance(cizimler, dict):
+    eksik.append('plots (yok ya da sözlük değil)')
+elif not cizimler.get('performance'):
+    eksik.append('plots.performance (boş/yok — performans panosu üretilmedi)')
+
+mach, bulundu, bulunan_yol = None, False, None
+for yol in ADAY_YOLLAR:
+    mach, bulundu = gez(govde, yol)
+    if bulundu:
+        bulunan_yol = '.'.join(yol)
+        break
+
+if not bulundu:
+    eksik.append('exit_mach hiçbir aday yolda yok (%s) — lüle çözümü yanıtta '
+                 'taşınmıyor' % ' | '.join('.'.join(y) for y in ADAY_YOLLAR))
+elif not isinstance(mach, (int, float)) or isinstance(mach, bool):
+    eksik.append('%s sayı değil: %r' % (bulunan_yol, mach))
+elif not mach > 1.0:
+    eksik.append('%s=%.3f — süpersonik değil (>1 bekleniyor)'
+                 % (bulunan_yol, mach))
+elif len(sys.argv) > 2:
+    # Kanıt DOSYAYA yazılır, stdout'a değil: stdout'un sözleşmesi "yalnız
+    # sorunlar" — başarıda tek karakter bile basılmaz ki kapı, python
+    # çökerse (yığın izi stdout'a düşer) onu sessizce başarı sanmasın.
+    with open(sys.argv[2], 'w', encoding='utf-8') as f:
+        f.write('%s=%.3f' % (bulunan_yol, mach))
+
+print('; '.join(eksik))
+PY
     for UC in "/calculate:hibrit" "/calculate_solid:katı" "/calculate_liquid:sıvı"; do
         YOL="${UC%%:*}"; AD="${UC##*:}"
         case "$YOL" in
@@ -300,18 +484,26 @@ else
         if [ "$KOD" = "403" ]; then
             basarisiz "$AD motor: ${PORT} portunda 403 — v2.6.2 hatası GERİ GELDİ"
         elif [ "$KOD" = "200" ]; then
-            basarili "$AD motor: ${PORT} portunda hesap yapıyor (200)"
+            rm -f /tmp/hrma_gate_body_kanit.txt
+            GOVDE_EKSIK="$("$PY" "$GOVDE_DENETI" /tmp/hrma_gate_body.json \
+                           /tmp/hrma_gate_body_kanit.txt 2>&1 || true)"
+            if [ -z "$GOVDE_EKSIK" ]; then
+                basarili "$AD motor: ${PORT} portunda hesap yapıyor (200, plots.performance + $(cat /tmp/hrma_gate_body_kanit.txt 2>/dev/null || echo 'exit_mach kanıtı yazılamadı'))"
+            else
+                basarisiz "$AD motor: 200 döndü ama gövde eksik -> $GOVDE_EKSIK"
+            fi
         else
             basarisiz "$AD motor: beklenmeyen HTTP $KOD ($(head -c 160 /tmp/hrma_gate_body.json))"
         fi
     done
 fi
+rm -f "${GOVDE_DENETI:-}" 2>/dev/null || true
 
 kill $SUNUCU_PID 2>/dev/null || true
 trap - EXIT
 
 # ---------------------------------------------------------------------------
-baslik "7/7  macOS paket imzası"
+baslik "7/8  macOS paket imzası"
 # ---------------------------------------------------------------------------
 # v2.6.25 güncelleme çökmesi (2026-07-28): build_mac_app.sh içindeki codesign
 # hatayı `2>/dev/null || true` ile yutuyordu; paket İMZASIZ üretildi ve ÜÇ
@@ -347,7 +539,7 @@ else
         basarisiz ".app İMZASIZ/BOZUK: $(head -1 /tmp/hrma_gate_codesign.log)"
     fi
 
-    # DMG_YOL 3/7 adımında tanımlandı (yapı ↔ commit zaman sırası).
+    # DMG_YOL 3/8 adımında tanımlandı (yapı ↔ commit zaman sırası).
     if [ ! -f "$DMG_YOL" ]; then
         basarisiz "DMG yok: $DMG_YOL — önce packaging/build_dmg.sh"
     else
@@ -379,6 +571,148 @@ else
         rmdir "$DMG_MNT" 2>/dev/null || true
     fi
 fi
+
+# ---------------------------------------------------------------------------
+baslik "8/8  Paket içerik manifesti + boyut sapması"
+# ---------------------------------------------------------------------------
+# Kapının hiçbir adımı paketin İÇİNE bakmıyordu. İki ölçülmüş sonuç:
+#   a) Yayınlanan DMG mount edildi: Resources/app/examples YOK, tek .hrma yok.
+#      examples/README.md ise kullanıcıya "bu dizindeki dosyaları projeler
+#      klasörüne kopyalayın" diyor — var olmayan bir dizini işaret ediyordu.
+#   b) Bir önceki sürümde DMG 526 MB'den 383 MB'ye düştü (bytecode ön-derleme
+#      kaybı) ve kimse fark etmedi. İmza geçerliydi, uygulama açılıyordu,
+#      kapı yeşildi; eksik olan şey ölçülmüyordu.
+# Bu adım paketin taşıması gereken parçaları TEK TEK sayar ve artefakt
+# boyutunu bir önceki yayınla karşılaştırır.
+#
+# Beklenen örnek sayısı SABİT YAZILMAZ: depodaki examples/*.hrma ne kadarsa
+# pakette o kadar olmalı. Örnek eklendiğinde bekçi kendini günceller, örnek
+# paketlemede düştüğünde kapı kapanır.
+REPO_ORNEK="$(find "$SRC/examples" -maxdepth 1 -name '*.hrma' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$REPO_ORNEK" -lt 1 ]; then
+    basarisiz "depoda örnek proje yok (examples/*.hrma) — manifest ölçüsü kurulamıyor"
+fi
+
+manifest_denetle() {   # $1 = app kökü (Resources ya da payload), $2 = ad
+    local kok="$1" ad="$2" ornek onderleme_app onderleme_libs
+    if [ ! -d "$kok/app" ]; then
+        basarisiz "$ad: app/ dizini yok ($kok/app)"
+        return
+    fi
+    ornek="$(find "$kok/app/examples" -maxdepth 1 -name '*.hrma' 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$ornek" = "$REPO_ORNEK" ] && [ "$ornek" -gt 0 ]; then
+        basarili "$ad: $ornek örnek proje (.hrma) pakette"
+    else
+        basarisiz "$ad: örnek proje sayısı $ornek, depoda $REPO_ORNEK — examples/ pakete girmemiş"
+    fi
+    [ -f "$kok/app/examples/generate_examples.py" ] \
+        && basarili "$ad: generate_examples.py pakette (örneklerin kaynağı)" \
+        || basarisiz "$ad: generate_examples.py yok — örneklerin nereden geldiği paketten okunamıyor"
+    [ -f "$kok/app/launcher.py" ] \
+        && basarili "$ad: launcher.py yerinde" \
+        || basarisiz "$ad: launcher.py YOK — paket açılamaz"
+    [ -f "$kok/app/hrma/app.py" ] \
+        && basarili "$ad: hrma/ paketi yerinde" \
+        || basarisiz "$ad: hrma/ yok ya da eksik (app.py bulunamadı)"
+    [ -d "$kok/app/data" ] \
+        && basarili "$ad: data/ yerinde" \
+        || basarisiz "$ad: data/ YOK — katalog dosyaları eksik"
+    # Ön-derleme: v2.6.25'te sessizce kaybolan şey buydu. Sayı BASILIR ki
+    # "var/yok" değil, ne kadar olduğu da kayda geçsin.
+    onderleme_app="$(find "$kok/app/hrma" -maxdepth 3 -type d -name '__pycache__' 2>/dev/null | wc -l | tr -d ' ')"
+    onderleme_libs="$(find "$kok/libs" -maxdepth 2 -type d -name '__pycache__' 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$onderleme_app" -gt 0 ] && [ "$onderleme_libs" -gt 0 ]; then
+        basarili "$ad: bytecode ön-derleme var (hrma $onderleme_app, libs $onderleme_libs __pycache__)"
+    else
+        basarisiz "$ad: ön-derleme EKSİK (hrma $onderleme_app, libs $onderleme_libs) — ilk açılış dakikalarca sürer"
+    fi
+}
+
+if [ "$(uname)" != "Darwin" ]; then
+    atlandi "DMG içeriği yalnız macOS'ta okunabilir (hdiutil) — Windows payload aşağıda denetlenir"
+elif [ ! -f "$DMG_YOL" ]; then
+    basarisiz "DMG yok: $DMG_YOL — içerik manifesti denetlenemiyor"
+else
+    ICERIK_MNT="$(dmg_bagla "$DMG_YOL" || echo '')"
+    if [ -z "$ICERIK_MNT" ]; then
+        basarisiz "DMG mount edilemedi, içerik denetlenemedi: $DMG_YOL"
+    else
+        manifest_denetle "$ICERIK_MNT/HRMA.app/Contents/Resources" "DMG içeriği"
+        dmg_coz "$ICERIK_MNT"
+    fi
+fi
+
+# Windows tarafı: exe'nin içi açılamadığı için üretildiği payload ağacı
+# denetlenir (aynı kapsam beyanı 3/8 adımında).
+if [ -d "packaging/win/payload" ]; then
+    manifest_denetle "packaging/win/payload" "Windows payload"
+else
+    atlandi "packaging/win/payload yok — Windows içerik manifesti denetlenmedi (temiz klon?)"
+fi
+
+# --- Boyut sapması ----------------------------------------------------------
+# Taban kaynağı BEYAN EDİLİR. Sıra bilinçli:
+#   1) packaging/last_release_sizes.json — operatörün depoya YAZDIĞI taban.
+#      Büyük ama meşru bir değişiklik (yeni bağımlılık, yeni veri seti) olduğunda
+#      kaçış yolu budur: gerekçesiyle birlikte commit edilir, gözden geçirilir.
+#      Beklenen biçim:
+#        {"tag": "v2.6.25", "dmg_bytes": 546683953, "exe_bytes": 227285327,
+#         "_source": "gh release view v2.6.25 --json assets (2026-08-03)",
+#         "_note": "neden bu taban"}
+#   2) gh api — bir ÖNCEKİ yayının GERÇEK varlık boyutları (ölçülmüş veri).
+# İkisi de yoksa sapma DENETLENMEZ ve bu açıkça söylenir; uydurma taban YOK.
+TABAN_DOSYA="packaging/last_release_sizes.json"
+DMG_TABAN=""; EXE_TABAN=""; TABAN_KAYNAK=""
+if [ -f "$TABAN_DOSYA" ]; then
+    DMG_TABAN="$("$PY" -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print(d.get('dmg_bytes') or '')" "$TABAN_DOSYA" 2>/dev/null || echo '')"
+    EXE_TABAN="$("$PY" -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print(d.get('exe_bytes') or '')" "$TABAN_DOSYA" 2>/dev/null || echo '')"
+    TABAN_KAYNAK="$TABAN_DOSYA (depoda beyan edilmiş taban)"
+elif command -v gh >/dev/null 2>&1; then
+    ONCEKI_ETIKET="$(gh release list --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null | grep -vx "v${VERSION}" | head -1 || true)"
+    if [ -n "$ONCEKI_ETIKET" ]; then
+        ONCEKI_VARLIK="$(gh release view "$ONCEKI_ETIKET" --json assets \
+                         --jq '.assets[] | [.name, .size] | @tsv' 2>/dev/null || true)"
+        DMG_TABAN="$(printf '%s\n' "$ONCEKI_VARLIK" | awk -F'\t' '$1 ~ /macOS\.dmg$/ {print $2; exit}')"
+        EXE_TABAN="$(printf '%s\n' "$ONCEKI_VARLIK" | awk -F'\t' '$1 ~ /\.exe$/ {print $2; exit}')"
+        TABAN_KAYNAK="gh api — $ONCEKI_ETIKET yayınının gerçek varlık boyutları"
+    fi
+fi
+
+if [ -n "$TABAN_KAYNAK" ]; then
+    echo "  (boyut tabanı: $TABAN_KAYNAK)"
+else
+    atlandi "boyut tabanı YOK (ne $TABAN_DOSYA ne gh erişimi) — sapma denetlenmedi"
+fi
+
+boyut_karsilastir() {   # $1 = artefakt yolu, $2 = taban bayt, $3 = ad
+    local yeni sapma mutlak
+    if [ ! -f "$1" ]; then
+        basarisiz "$3: artefakt yok ($1) — boyut ölçülemiyor"
+        return
+    fi
+    yeni="$("$PY" -c "import os,sys;print(os.path.getsize(sys.argv[1]))" "$1" 2>/dev/null || echo '')"
+    if [ -z "$yeni" ]; then
+        basarisiz "$3: boyut okunamadı ($1)"
+        return
+    fi
+    # Taban yalnız SAYIYSA karşılaştırılır; boş/bozuk taban "denetlendi"
+    # sayılmaz, açıkça denetlenmedi denir (uydurma taban yok).
+    case "${2:-}" in
+        ''|*[!0-9]*|0)
+            atlandi "$3: $((yeni / 1048576)) MB ölçüldü; geçerli taban olmadığı için sapma DENETLENMEDİ"
+            return ;;
+    esac
+    sapma=$(( (yeni - $2) * 100 / $2 ))
+    mutlak="${sapma#-}"
+    if [ "$mutlak" -gt "$BOYUT_TOLERANS_YUZDE" ]; then
+        basarisiz "$3: $((yeni / 1048576)) MB, taban $(($2 / 1048576)) MB — %${sapma} sapma (sınır ±%${BOYUT_TOLERANS_YUZDE}). İçeriği doğrulayın; sapma meşruysa $TABAN_DOSYA dosyasına gerekçesiyle yeni taban yazın."
+    else
+        basarili "$3: $((yeni / 1048576)) MB, taban $(($2 / 1048576)) MB — %${sapma} sapma (sınır ±%${BOYUT_TOLERANS_YUZDE})"
+    fi
+}
+
+boyut_karsilastir "$DMG_YOL" "$DMG_TABAN" "DMG boyutu"
+boyut_karsilastir "$EXE_YOL" "$EXE_TABAN" "EXE boyutu"
 
 # ---------------------------------------------------------------------------
 printf "\n============================================\n"

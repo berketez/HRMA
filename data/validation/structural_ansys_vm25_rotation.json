@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "case": "structural_ansys_vm25_rotation",
+  "description_tr": "Aynı kalın cidarlı silindir, iç basınç kaldırılmış, 1000 rad/s ile dönüyor. ANSYS VM25 Durum 2. Merkezkaç gövde kuvvetinin doğru uygulandığını sınar — turbopompa çarkı gerilmesi (yol haritası C1) için gereken tam yükleme tipi.",
+  "discipline": "structural",
+  "inputs": {
+    "inner_radius_in": 4.0,
+    "outer_radius_in": 8.0,
+    "internal_pressure_psi": 0.0,
+    "youngs_modulus_psi": 30000000.0,
+    "poissons_ratio": 0.3,
+    "density_lbf_s2_per_in4": 0.00073,
+    "angular_velocity_rad_s": 1000.0,
+    "stress_state": "plane_stress"
+  },
+  "expected_outputs": {
+    "tangential_stress_psi": {
+      "r_4in": 40588.0,
+      "r_5.43in": 29436.0
+    },
+    "radial_stress_psi": {
+      "r_4in": 0.0,
+      "r_5.43in": 4753.0
+    }
+  },
+  "reference_formulas": {
+    "sigma_theta": "rho w^2 (3+nu)/8 * [a^2 + b^2 + a^2 b^2/r^2 - ((1+3nu)/(3+nu)) r^2]",
+    "sigma_r": "rho w^2 (3+nu)/8 * [a^2 + b^2 - a^2 b^2/r^2 - r^2]",
+    "formula_source": "Dönen halka, düzlem gerilme; Timoshenko, Strength of Materials Part II"
+  },
+  "units": "psi, in, rad/s",
+  "tolerance_pct": 0.5,
+  "source": {
+    "title": "Ansys Mechanical APDL Verification Manual, VM25: Stresses in a Long Cylinder (Case 2, rotation)",
+    "author": "Ansys, Inc. (PyMAPDL doğrulama örneği olarak yeniden yayımlandı)",
+    "year": 2025,
+    "url_or_doi": "https://examples.mapdl.docs.pyansys.com/verif-manual/vm-025.html"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Dört hedefin dördü de dönen halka bağıntılarından bağımsız olarak yeniden hesaplandı: sigma_theta(4)=40586 (hedef 40588), sigma_theta(5.43)=29435 (hedef 29436), sigma_r(5.43)=4753.6 (hedef 4753). Sapma yuvarlamadan, 0.01%'in altında. Düzlem gerilme formu tuttu; düzlem şekil değiştirme formu TUTMADI.",
+  "tags": [
+    "analytic_anchor",
+    "rotating_disc",
+    "centrifugal",
+    "ansys_vm",
+    "turbopump_relevant"
+  ]
+}

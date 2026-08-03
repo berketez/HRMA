@@ -1,25 +1,53 @@
 name: release
 
-# HRMA yayın zinciri — SIRAYI zorlar: test -> sürüm bağlantısı -> yayın denetimi.
+# HRMA yayın hattı — etiket atılır, runner'lar derler, TASLAK sürüm açılır.
 #
-# NEDEN BU DOSYA VAR (Faz 4 denetimi E1/E3, 2026-08-02)
-# -----------------------------------------------------
-# v2.6.25'e kadar `.github/workflows/` altında yalnız tests.yml vardı; yayının
-# kendisini denetleyen hiçbir otomasyon yoktu. Ölçülen sonuç (GitHub API, UTC):
+# NEDEN BU DOSYA VAR
+# ------------------
+# (1) v2.6.25 (Faz 4 denetimi E1/E3, 2026-08-02). Ölçülen sıra (GitHub API, UTC):
 #
-#   22:46:25  DMG + EXE üretildi
-#   23:23:16  commit d908ae7        <-- ikili kaynaktan 36 dk 51 sn ÖNCE
-#   23:23:50  CI başladı
-#   23:30:44  SÜRÜM YAYINLANDI      <-- CI hâlâ koşuyordu
-#   23:38:09  CI yeşil bitti        <-- yayından 7 dk 25 sn SONRA
+#       22:46:25  DMG + EXE üretildi
+#       23:23:16  commit d908ae7        <-- ikili kaynaktan 36 dk 51 sn ÖNCE
+#       23:23:50  CI başladı
+#       23:30:44  SÜRÜM YAYINLANDI      <-- CI hâlâ koşuyordu
+#       23:38:09  CI yeşil bitti        <-- yayından 7 dk 25 sn SONRA
 #
-# Yerel kapı (packaging/release_gate.sh) bunu yayından ÖNCE engeller. Bu iş
-# akışı ikinci savunma hattıdır: yayın yine de olduysa, GitHub'ın kendi
-# kayıtlarından zaman sırasını yeniden ölçer ve tutmuyorsa KIRMIZI olur.
+# (2) v2.6.26 (2026-08-03). Kapı artefakt tazeliğini ölçmeye başlayınca her
+#     düzeltme commit'i o ölçümü sıfırladı: dmg + exe ELLE DÖRT KEZ yeniden
+#     derlendi. İnsan eli derlediği sürece "ikili hangi ağacı temsil ediyor"
+#     sorusu her commit'te yeniden açılır.
 #
-# KAPSAM DIŞI (bilinçli): kod imzalama, notarization, tedarik zinciri
-# doğrulaması (TUF/Sigstore). Bu iş akışı kurulum paketi ÜRETMEZ — .dmg/.exe
-# yerel makinede üretilir. Burada zorlanan şey yalnız SIRA ve TAM-SHA BAĞIdır.
+# Çözüm aynı: ikiliyi etiketlenen ağaçtan MAKİNE üretsin. Etiket bir kez
+# atılır, artefakt o commit'ten doğar, köken kaydı (BUILD_INFO.sha) etikete
+# eşitlenir ve bu iş akışı bunu ölçer.
+#
+# İNSANDA KALAN KARAR: bu iş akışı yalnızca TASLAK açar. Taslak GitHub'da
+# görünmez, hrma/utils/update_checker.py taslakları okumaz — yani hiçbir
+# kullanıcının makinesine inmez. draft -> published dönüşümü elle yapılır.
+#
+# NEREDE NE KOŞUYOR (ölçülmüş gerekçeler, ayrıntı docs/dev/yayin_otomasyonu.md)
+# ----------------------------------------------------------------------------
+#   macOS paketi  -> SELF-HOSTED runner (Berke'nin Mac'i). GitHub'ın barındırdığı
+#                    macOS runner'ı bu paketi DERLEYEMEZ:
+#                      a) build_mac_app.sh:159 `cp -R /opt/anaconda3/lib/
+#                         python3.12/site-packages/rocketcea` — sabit yerel yol,
+#                         `set -e` altında, o makinede yok -> derleme ölür.
+#                         (rocketcea'nın PyPI'da mac wheel'i yok; betiğin kendi
+#                         notu bunu söylüyor.)
+#                      b) packaging/runtime/pbs-mac.tar.gz .gitignore'da
+#                         (satır 28) ve git geçmişinde hiç yok — depoda değil.
+#                         Karşılığı olan bir upstream sürüme de bağlanamıyor
+#                         (arşivde PYTHON.json yok), yani "benzerini indir"
+#                         demek TEST EDİLMEMİŞ bir runtime paketlemek olurdu.
+#   Windows paketi -> ubuntu-latest (GitHub'ın runner'ı). Buradaki tek yerel
+#                    girdi python-embed-win.zip idi ve ÖLÇÜLDÜ: sha256
+#                    4acbed6d... python.org'un python-3.12.10-embed-amd64.zip
+#                    dosyasıyla BAYT BAYT AYNI. Yani indirilip doğrulanabiliyor;
+#                    derleme betiği zaten çapraz çalışıyor (pip --platform
+#                    win_amd64). Sahte bir eşdeğer değil, aynı dosya.
+#
+# KAPSAM DIŞI (bilinçli): Apple Developer ID imzası/notarization, Authenticode,
+# tedarik zinciri kanıtı (TUF/Sigstore). macOS imzası ad-hoc'tur (codesign -s -).
 
 on:
   push:
@@ -29,73 +57,54 @@ on:
     types: [published, released]
   workflow_dispatch:
 
+# DİKKAT — `pull_request` BİLEREK YOK. macOS işi self-hosted bir runner'da,
+# yani Berke'nin kendi makinesinde koşuyor. Depo herkese açık; fork'tan gelen
+# bir PR bu iş akışını tetikleyebilseydi yabancı kod o makinede çalışırdı.
+# Etiket push'u yalnız yazma yetkisi olanın yapabileceği bir eylemdir.
+
 permissions:
   contents: read
   actions: read
 
+concurrency:
+  # Aynı etiket için ikinci bir koşu self-hosted runner'ın çalışma dizinini
+  # ortasından böler. Sıraya girsin, iptal ETMESİN: yarım kalan bir derleme
+  # elde kalan artefakti belirsiz hale getirir.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Derleme girdilerinin PİNLENMİŞ özetleri. Bunlar "sürüm numarası" değil
+  # dosya kimliğidir: girdi değişirse iş KIRMIZI olur ve pin'in bilinçli
+  # güncellenmesini bekler. Sessiz runtime kayması böyle engellenir.
+  #
+  # Ölçüm (2026-08-03, /Users/apple/HRMA/packaging/runtime):
+  #   shasum -a 256 pbs-mac.tar.gz        -> 12d6700f...
+  #   shasum -a 256 python-embed-win.zip  -> 4acbed6d...
+  #   curl python.org/.../python-3.12.10-embed-amd64.zip -> 4acbed6d...  (AYNI)
+  PBS_MAC_SHA256: '12d6700f7e8f222639f0ee5bbd173082c3041aeb65af8f9828e4216bc8047de6'
+  WIN_EMBED_SHA256: '4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3'
+  WIN_EMBED_URL: 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
+
 jobs:
-  # -------------------------------------------------------------------------
-  # 1) Etiketlenen ağaçta tam test takımı. Sürüm bağlantısı buna bağlıdır.
-  # -------------------------------------------------------------------------
-  test:
-    if: github.event_name != 'release'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-
-      # RocketCEA kaynaktan derleniyor (paketlenmiş NASA CEA Fortran kodu).
-      - name: Sistem bağımlılıkları
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gfortran
-
-      - name: Python bağımlılıkları
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install cantera
-
-      # numpy<2 pini tests.yml'de olduğu gibi burada da korunmalı; build123d
-      # kurulursa numpy 2.x gelir ve np.trapz kaybolur (2026-07-23 kazası).
-      - name: Ortam teyidi (numpy pini korunuyor mu)
-        run: |
-          python -c "import numpy; assert numpy.__version__.startswith('1.'), 'numpy<2 pini bozuldu'; print('numpy', numpy.__version__)"
-
-      - name: Test paketi
-        env:
-          MPLBACKEND: Agg
-          PYTHONPATH: .
-        run: |
-          pytest tests/ -q --junitxml=pytest-report.xml
-
-      - name: Test raporu (başarısız koşuda da yüklenir)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-pytest-report
-          path: pytest-report.xml
-          if-no-files-found: ignore
-
-  # -------------------------------------------------------------------------
-  # 2) Sürüm bağlantısı: etiket adı ile depodaki sürüm beyanları aynı mı?
-  #    Yerel kapının 1/7 adımının makine tarafındaki karşılığı.
-  # -------------------------------------------------------------------------
+  # ==========================================================================
+  # 1) SÜRÜM BAĞLANTISI  — packaging/release_gate.sh kapı 1/8'in aynası
+  #
+  # Ucuz ve hızlı olduğu için derleme işlerinden ÖNCE koşar: yanlış etiketlenmiş
+  # bir ağaç için bir saatlik paketleme başlatmanın anlamı yok.
+  # ==========================================================================
   surum-baglantisi:
+    name: Sürüm bağlantısı (kapı 1/8)
     if: github.event_name != 'release'
-    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      surum: ${{ steps.oku.outputs.surum }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Etiket ↔ paket sürümü ↔ changelog ↔ sürüm notu ↔ README
+        id: oku
         env:
           ETIKET: ${{ github.ref_name }}
         run: |
@@ -143,6 +152,9 @@ jobs:
           if f'HRMA-Setup-{surum}' not in readme:
               hatalar.append(f'README indirme linkleri {surum} degil')
 
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f'surum={surum}\n')
+
           for h in hatalar:
               print(f'KALDI  {h}')
           if hatalar:
@@ -150,14 +162,689 @@ jobs:
           print('GECTI  surum beyanlari tutarli')
           PY
 
-  # -------------------------------------------------------------------------
-  # 3) Yayın sonrası denetim: sıra gerçekten tutuldu mu?
+  # ==========================================================================
+  # 2) TAM TEST TAKIMI + CANLI DUMAN TESTİ
+  #    kapı 5/8 (tam takım) ve kapı 6/8 (varsayılan olmayan portta duman)
   #
-  #    Bu iş yalnız `release` olayında koşar ve GitHub'ın kendi zaman
-  #    damgalarını okur. Yerel kapı atlanmış olsa bile buradaki kırmızı
-  #    sürüm sayfasında ve commit'te görünür.
-  # -------------------------------------------------------------------------
+  # Bağımlılık kurulumu pahalı (rocketcea kaynaktan derleniyor), bu yüzden iki
+  # kapı adımı TEK işte ama AYRI adımlarda koşar: hangisinin düştüğü
+  # arayüzde tek bakışta görünür.
+  # ==========================================================================
+  testler:
+    name: Tam takım + duman (kapı 5/8, 6/8)
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # RocketCEA kaynaktan derleniyor (paketlenmiş NASA CEA Fortran kodu).
+      - name: Sistem bağımlılıkları
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran
+
+      # Node.js ATLANAMAZ: 30 test dosyası ön yüz sözleşmelerini `node` ile
+      # doğruluyor ve node yoksa SESSİZCE atlıyor. tests.yml'de 2026-08-03'te
+      # düzeltildi; burada da olmazsa aynı kör nokta yayın hattında açık kalır.
+      - name: Node.js (ön yüz sözleşme testleri için)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Python bağımlılıkları
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install cantera
+
+      # numpy<2 pini: build123d kurulursa numpy 2.x gelir ve np.trapz kaybolur
+      # (2026-07-23 kazası, 194 test düştü).
+      - name: Ortam teyidi (numpy pini + node + PyYAML gerçekten var mı)
+        run: |
+          python -c "import numpy; assert numpy.__version__.startswith('1.'), 'numpy<2 pini bozuldu'; print('numpy', numpy.__version__)"
+          python -c "import yaml; print('PyYAML', yaml.__version__)"
+          node --version
+          python -c "import shutil; assert shutil.which('node'), 'node PATH icinde yok — on yuz testleri sessizce atlanir'"
+
+      - name: Test paketi
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: .
+        run: |
+          pytest tests/ -q -rs --junitxml=pytest-report.xml
+
+      # Atlanan testler görünür olsun. Eşik UYGULANMAZ: bu işin atlama sayısı
+      # ölçülmedi, uydurma bir bütçe koymak yanlış olurdu. STEP/CAD kolunun
+      # SIFIR atlama bütçesi tests.yml'deki `step-export` işinde uygulanır ve
+      # bu iş akışı onun yeşilliğini aşağıda `ci-durumu` işinde arar.
+      - name: Atlama envanteri (bilgi amaçlı)
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          if not os.path.exists('pytest-report.xml'):
+              print('rapor yok'); raise SystemExit(0)
+          root = ET.parse('pytest-report.xml').getroot()
+          suite = root if root.tag == 'testsuite' else root.find('testsuite')
+          gercek = [tc for tc in suite.iter('testcase')
+                    if (tc.find('skipped') is not None
+                        and tc.find('skipped').get('type') == 'pytest.skip')]
+          print(f"toplam={suite.get('tests')} atlanan={len(gercek)}")
+          for tc in gercek:
+              print(f"  ATLANDI {tc.get('classname')}::{tc.get('name')} "
+                    f"-> {tc.find('skipped').get('message', '')[:120]}")
+          PY
+
+      # ----------------------------------------------------------------------
+      # KAPI 6/8 AYNASI — canlı duman testi, VARSAYILAN OLMAYAN portta.
+      #
+      # v2.6.2'yi kullanılamaz yapan hata buradaydı: uygulama 8080 dışında bir
+      # porta düştüğünde kendi sayfası kendi API'sinden 403 alıyordu ve hiçbir
+      # test bunu yakalayamıyordu (test de kodun kör noktasını paylaşıyordu).
+      #
+      # Yükler packaging/release_gate.sh 6/8 ile AYNI tutulur. `use_tutorial_
+      # defaults` kestirmesi BİLEREK kullanılmaz: ölçülen şey uygulamanın
+      # gerçekten hesap yaptığı.
+      # ----------------------------------------------------------------------
+      - name: Canlı duman testi (kapı 6/8)
+        # Kırmızı pytest bu adımı ATLATMAMALI: ikisi ayrı kapı adımı, ikisinin
+        # sonucu da tek koşuda görünmeli. (İptalde koşmaz.)
+        if: success() || failure()
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: .
+        run: |
+          set -uo pipefail
+          # Kabuk `bash -e` ile başlar; kapı betiğinde errexit YOK ve olmamalı:
+          # her uç kendi sonucunu bassın, karar sonda toplansın. Yoksa ilk
+          # bağlantı hatası geri kalan iki motoru hiç denemeden işi bitirir.
+          set +e
+          PORT=8087
+          python3 - "$PORT" > /tmp/duman_sunucu.log 2>&1 <<'PY' &
+          import logging
+          import sys
+
+          from hrma.app import app
+
+          port = int(sys.argv[1])
+          logging.getLogger('werkzeug').setLevel(logging.ERROR)
+          try:
+              from waitress import serve
+              logging.getLogger('waitress').setLevel(logging.ERROR)
+              serve(app, host='127.0.0.1', port=port, threads=4, _quiet=True)
+          except ImportError:
+              app.run(host='127.0.0.1', port=port, debug=False,
+                      threaded=True, use_reloader=False)
+          PY
+          SUNUCU_PID=$!
+          trap 'kill $SUNUCU_PID 2>/dev/null || true' EXIT
+
+          HAZIR=1
+          for _ in $(seq 1 60); do
+              if curl -sf "http://127.0.0.1:${PORT}/" -o /dev/null 2>/dev/null; then
+                  HAZIR=0; break
+              fi
+              sleep 1
+          done
+          if [ "$HAZIR" -ne 0 ]; then
+              echo "KALDI  sunucu ${PORT} portunda 60 sn içinde ayağa kalkmadı"
+              tail -40 /tmp/duman_sunucu.log || true
+              exit 1
+          fi
+          echo "GEÇTİ  sunucu ${PORT} portunda ayakta"
+
+          YUK_HIBRIT='{"motor_name":"kapi","thrust":5000,"chamber_pressure":25,
+                       "of_ratio":7.0,"burn_time":10,"fuel_type":"htpb",
+                       "oxidizer_type":"n2o","expansion_ratio":8.0,"l_star":1.0}'
+          YUK_KATI='{"motor_name":"kapi","motor_type":"solid","chamber_diameter":100,
+                     "outer_diameter":100,"core_diameter":30,"grain_length":500,
+                     "grain_count":3,"propellant_type":"apcp","chamber_pressure":40}'
+          YUK_SIVI='{"motor_name":"kapi","motor_type":"liquid","thrust":10000,
+                     "burn_time":400,"chamber_pressure":50,"fuel_type":"rp1",
+                     "oxidizer_type":"lox","mixture_ratio":2.3}'
+
+          HATA=0
+          for UC in "/calculate:hibrit" "/calculate_solid:katı" "/calculate_liquid:sıvı"; do
+              YOL="${UC%%:*}"; AD="${UC##*:}"
+              case "$YOL" in
+                  /calculate_solid)  YUK="$YUK_KATI" ;;
+                  /calculate_liquid) YUK="$YUK_SIVI" ;;
+                  *)                 YUK="$YUK_HIBRIT" ;;
+              esac
+              KOD="$(curl -s -o /tmp/duman_govde.json -w '%{http_code}' \
+                     -X POST "http://127.0.0.1:${PORT}${YOL}" \
+                     -H 'Content-Type: application/json' \
+                     -H "Origin: http://127.0.0.1:${PORT}" \
+                     -d "$YUK" 2>/dev/null)"
+              if [ "$KOD" = "403" ]; then
+                  echo "KALDI  $AD motor: ${PORT} portunda 403 — v2.6.2 hatası GERİ GELDİ"
+                  HATA=1
+              elif [ "$KOD" = "200" ]; then
+                  echo "GEÇTİ  $AD motor: ${PORT} portunda hesap yapıyor (200)"
+              else
+                  echo "KALDI  $AD motor: beklenmeyen HTTP $KOD ($(head -c 200 /tmp/duman_govde.json))"
+                  HATA=1
+              fi
+          done
+          exit "$HATA"
+
+      - name: Test raporu (başarısız koşuda da yüklenir)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pytest-report
+          path: pytest-report.xml
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # 3) CI DURUMU — packaging/release_gate.sh kapı 4/8'in aynası
+  #
+  # Kapının 4/8 adımının TAMAMI burada koşamaz: bu iş akışının kendi koşusu
+  # yayın anında "tamamlanmamış" görünür, yani kapının kuralını harfiyen
+  # uygulasa kendi kendini kilitlerdi. Burada ölçülen şey `tests` iş akışının
+  # BU SHA'daki durumudur — asıl kanıt odur, çünkü STEP/CAD kolunun 47 bekçisi
+  # (build123d) yalnız orada koşar; bu iş akışının kendi takımı onları atlar.
+  #
+  # `testler` işinden SONRA koşar ki, etiket commit'le birlikte atıldığında
+  # tests.yml'ye bitmesi için makul süre tanınmış olsun.
+  # ==========================================================================
+  ci-durumu:
+    name: tests iş akışı bu SHA'da yeşil mi (kapı 4/8)
+    if: github.event_name != 'release'
+    needs: testler
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: "'tests' koşusunun sonucu"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${DEPO}/actions/runs?head_sha=${SHA}&per_page=100" > kosular.json
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          sha = os.environ['SHA']
+          kosular = json.load(open('kosular.json', encoding='utf-8'))['workflow_runs']
+          testler = [k for k in kosular if k.get('name') == 'tests']
+
+          print(f'SHA {sha[:8]} için {len(kosular)} koşu, bunların {len(testler)} tanesi "tests"')
+          for k in testler:
+              print(f"  tests: status={k.get('status')} conclusion={k.get('conclusion')} {k.get('html_url')}")
+
+          if not testler:
+              sys.exit(
+                  "KALDI  bu SHA için 'tests' iş akışı HİÇ koşmamış.\n"
+                  "       tests.yml yalnız main'e push ve PR'da tetiklenir; etiket\n"
+                  "       push'u onu tetiklemez. Yani etiket, main'e push edilmemiş\n"
+                  "       (ya da CI'ı henüz bitmemiş) bir commit'e atılmış olabilir.\n"
+                  "       STEP/CAD kolunun 47 bekçisi SADECE orada koşar; bu iş\n"
+                  "       akışının kendi takımı onları atlar. Önce commit'i main'e\n"
+                  "       push edip tests.yml'in yeşil bitmesini bekleyin.")
+
+          bekleyen = [k for k in testler if k.get('status') != 'completed']
+          if bekleyen:
+              sys.exit("KALDI  'tests' bu SHA'da hâlâ koşuyor — yayın CI'ı BEKLER "
+                       "(v2.6.25 tam olarak böyle yayınlandı). Bitince bu işi "
+                       "yeniden çalıştırın.")
+
+          basarisiz = [k for k in testler if k.get('conclusion') != 'success']
+          if basarisiz:
+              durum = ', '.join(str(k.get('conclusion')) for k in basarisiz)
+              sys.exit(f"KALDI  'tests' bu SHA'da yeşil değil ({durum})")
+
+          print("GEÇTİ  'tests' iş akışı bu SHA'da yeşil")
+          PY
+
+  # ==========================================================================
+  # 4) macOS PAKETİ — .app + .dmg  (SELF-HOSTED runner)
+  #
+  # Neden self-hosted: dosya başındaki gerekçe. Özetle GitHub'ın macOS
+  # runner'ında build_mac_app.sh iki yerde ölür (sabit /opt/anaconda3 rocketcea
+  # yolu; depoda olmayan ve upstream'e bağlanamayan pbs-mac.tar.gz).
+  #
+  # Runner kurulumu (bir kereliktir, docs/dev/yayin_otomasyonu.md):
+  #   ~/.hrma-build-cache/runtime/pbs-mac.tar.gz  hazır olmalı.
+  # Yol HRMA_BUILD_INPUTS deposu değişkeniyle değiştirilebilir.
+  # ==========================================================================
+  mac-paket:
+    name: macOS paketi (.app + .dmg)
+    if: github.event_name != 'release'
+    needs: surum-baglantisi
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 120
+    env:
+      SURUM: ${{ needs.surum-baglantisi.outputs.surum }}
+      GIRDI_DIZINI: ${{ vars.HRMA_BUILD_INPUTS || '~/.hrma-build-cache/runtime' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # actions/checkout varsayılan olarak `git clean -ffdx` koşar; .gitignore'daki
+      # her şey (packaging/mac, packaging/win, packaging/runtime, dist) her
+      # koşuda silinir. Yani önbellek yok, her derleme sıfırdan. Bilinçli:
+      # doğruluk hızdan önce gelir — "eski libs önbelleğinden gelen paket"
+      # tam olarak kaçındığımız şey.
+      - name: Derleme girdisi (pbs-mac.tar.gz) — özet doğrulamalı
+        run: |
+          set -euo pipefail
+          DIZIN="$(eval echo "$GIRDI_DIZINI")"
+          KAYNAK="$DIZIN/pbs-mac.tar.gz"
+          if [ ! -f "$KAYNAK" ]; then
+              echo "KALDI  derleme girdisi yok: $KAYNAK"
+              echo "       Bu arşiv depoda DEĞİL (.gitignore:28) ve doğrulanabilir bir"
+              echo "       upstream sürüme bağlanamıyor. Runner makinesinde bir kez"
+              echo "       yerine konmalı:"
+              echo "         mkdir -p \"$DIZIN\""
+              echo "         cp <HRMA deposu>/packaging/runtime/pbs-mac.tar.gz \"$DIZIN\"/"
+              exit 1
+          fi
+          mkdir -p packaging/runtime
+          cp "$KAYNAK" packaging/runtime/pbs-mac.tar.gz
+          OLCULEN="$(shasum -a 256 packaging/runtime/pbs-mac.tar.gz | cut -d' ' -f1)"
+          if [ "$OLCULEN" != "$PBS_MAC_SHA256" ]; then
+              echo "KALDI  pbs-mac.tar.gz özeti pin ile uyuşmuyor."
+              echo "       beklenen: $PBS_MAC_SHA256"
+              echo "       ölçülen : $OLCULEN"
+              echo "       Runtime bilerek değiştiyse .github/workflows/release.yml"
+              echo "       içindeki PBS_MAC_SHA256 pinini güncelleyin. Sessiz runtime"
+              echo "       kayması yayınlanmasın diye bu iş burada durur."
+              exit 1
+          fi
+          echo "GEÇTİ  pbs-mac.tar.gz özeti pin ile aynı ($PBS_MAC_SHA256)"
+
+      # Temiz checkout'ta bu betik NO-OP'tur (ölçüldü: iki uyarı basar, 0 kodla
+      # çıkar) — girdileri makineden GETİRMEZ, yalnız yerel symlink'leri geri
+      # çevirir. Yine de koşuyor: runner çalışma dizini kalıcıdır ve elle
+      # symlink bırakılmış bir durumda paketlemeyi kırık bağlantıyla yapmayı
+      # engelleyen tek şey odur.
+      - name: Derleme girdisi bekçisi (symlink kalmadı mı)
+        run: bash packaging/restore_build_inputs.sh
+
+      - name: HRMA.app derle
+        run: bash packaging/build_mac_app.sh
+
+      - name: DMG derle
+        run: bash packaging/build_dmg.sh
+
+      # ----------------------------------------------------------------------
+      # KAPI 3/8 + 7/8 AYNASI — köken kaydı ve imza, DMG'nin İÇİNDEN.
+      #
+      # 3/8: mtime hangi AĞAÇTAN derlendiğini söyleyemez (`touch` bile eski bir
+      #      paketi tazeler). BUILD_INFO.sha == etiketin SHA'sı olmak zorunda.
+      #      CI'da bu bağ zaten güçlü — ikili etiketlenen ağaçtan bu koşuda
+      #      doğuyor — ama ölçülmeden "güçlü" demek varsayımdır.
+      # 7/8: v2.6.25'te codesign hatası yutuluyordu ve ÜÇ SÜRÜM imzasız çıktı.
+      #      Kullanıcıya giden şey diskteki .app değil DMG içeriğidir, o yüzden
+      #      sıkı doğrulama xattr'sız kopyada yapılır (gate 7/8 ile aynı yöntem).
+      # ----------------------------------------------------------------------
+      - name: DMG köken kaydı + imza (kapı 3/8, 7/8)
+        env:
+          ETIKET_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          # Kapı betiğiyle aynı davranış: her kontrol koşsun, sonuç sonda
+          # toplansın (kabuk `bash -e` ile başlıyor, errexit kapatılıyor).
+          set +e
+          DMG="dist/HRMA-Setup-${SURUM}-macOS.dmg"
+          APP_BUILD="packaging/mac/build.noindex/HRMA.app"
+          HATA=0
+
+          if codesign --verify --deep "$APP_BUILD" 2>/tmp/imza.log; then
+              echo "GEÇTİ  .app imzası geçerli: $APP_BUILD"
+          else
+              echo "KALDI  .app İMZASIZ/BOZUK: $(head -1 /tmp/imza.log)"; HATA=1
+          fi
+
+          MNT="$(mktemp -d /tmp/hrma_ci_mnt.XXXXXX)"
+          if ! hdiutil attach -readonly -nobrowse -noverify -mountpoint "$MNT" "$DMG" >/dev/null 2>&1; then
+              echo "KALDI  DMG mount edilemedi: $DMG"; rmdir "$MNT" 2>/dev/null || true; exit 1
+          fi
+          trap 'hdiutil detach "$MNT" >/dev/null 2>&1 || hdiutil detach "$MNT" -force >/dev/null 2>&1 || true; rmdir "$MNT" 2>/dev/null || true' EXIT
+
+          python3 - "$MNT/HRMA.app/Contents/Resources/app/BUILD_INFO.json" \
+                    "$ETIKET_SHA" "$SURUM" <<'PY' || HATA=1
+          import json
+          import sys
+
+          yol, etiket_sha, surum = sys.argv[1:4]
+          try:
+              k = json.load(open(yol, encoding='utf-8'))
+          except Exception as e:
+              sys.exit(f'KALDI  DMG içinde BUILD_INFO.json okunamadı: {e}')
+
+          sha = k.get('sha')
+          if not sha:
+              sys.exit('KALDI  BUILD_INFO.sha boş — köken KANITSIZ')
+          if sha != etiket_sha:
+              sys.exit(f'KALDI  BUILD_INFO.sha={sha[:8]} != etiket SHA={etiket_sha[:8]} '
+                       '— paket BAŞKA bir ağaçtan derlenmiş')
+          if k.get('tree_dirty'):
+              sys.exit('KALDI  paket KİRLİ çalışma ağacından derlenmiş')
+          if k.get('version') != surum:
+              sys.exit(f"KALDI  BUILD_INFO.version={k.get('version')}, paket sürümü {surum}")
+          print(f'GEÇTİ  DMG kökeni kanıtlı (sha {sha[:8]} = etiket, ağaç temiz, v{surum})')
+          PY
+
+          if codesign --verify --deep "$MNT/HRMA.app" 2>/tmp/imza.log; then
+              echo "GEÇTİ  DMG içindeki HRMA.app imzası geçerli"
+          else
+              echo "KALDI  DMG içindeki HRMA.app İMZASIZ/BOZUK: $(head -1 /tmp/imza.log)"; HATA=1
+          fi
+
+          echo "  (sıkı doğrulama: xattr'sız kopya çıkarılıyor, ~2 dk)"
+          SIKI="$(mktemp -d /tmp/hrma_ci_strict.XXXXXX)"
+          if ditto --noextattr --norsrc "$MNT/HRMA.app" "$SIKI/HRMA.app" 2>/tmp/imza.log \
+             && codesign --verify --deep --strict "$SIKI/HRMA.app" 2>/tmp/imza.log; then
+              echo "GEÇTİ  DMG içeriği SIKI doğrulamadan geçti (--deep --strict)"
+          else
+              echo "KALDI  DMG içeriği sıkı doğrulamada kaldı: $(head -1 /tmp/imza.log)"; HATA=1
+          fi
+          rm -rf "$SIKI"
+
+          # --- Paket içerik manifesti ---------------------------------------
+          # packaging/release_gate.sh başlığı bir "8/8 paket içerik denetimi"
+          # anlatıyor ama betikte öyle bir adım YOK (başlıklar 1/8..7/8'de
+          # bitiyor — ölçüldü). Burada yerine geçen bir denetim iddia
+          # edilmiyor; yalnız ÖLÇÜLEN gerçek sayılar basılır ve örnek proje
+          # sayısı depoyla karşılaştırılır (yayınlanan v2.6.26 DMG'sinde tek
+          # bir .hrma yoktu — 2026-08-03 ölçümü).
+          echo "--- paket içerik manifesti (ölçülen) ---"
+          echo "DMG boyutu     : $(du -h "$DMG" | cut -f1)"
+          echo "Resources kökü : $(ls "$MNT/HRMA.app/Contents/Resources" | tr '\n' ' ')"
+          ORNEK_DEPO="$(find examples -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ')"
+          ORNEK_PAKET="$(find "$MNT/HRMA.app/Contents/Resources/app/examples" -maxdepth 1 -name '*.hrma' 2>/dev/null | wc -l | tr -d ' ')"
+          echo "örnek proje    : depo=$ORNEK_DEPO paket=$ORNEK_PAKET"
+          if [ "$ORNEK_PAKET" != "$ORNEK_DEPO" ]; then
+              echo "KALDI  örnek proje sayısı tutmuyor"; HATA=1
+          fi
+
+          exit "$HATA"
+
+      - name: DMG'yi artefakt olarak yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: hrma-dmg
+          path: dist/HRMA-Setup-${{ needs.surum-baglantisi.outputs.surum }}-macOS.dmg
+          if-no-files-found: error
+          # DMG zaten LZMA sıkıştırılmış (ULMO); tekrar sıkıştırmak yalnız
+          # zaman harcar, boyut kazandırmaz.
+          compression-level: 0
+          retention-days: 14
+
+  # ==========================================================================
+  # 5) WINDOWS PAKETİ — payload + NSIS exe  (ubuntu-latest, GitHub runner'ı)
+  #
+  # Neden burada koşabiliyor:
+  #   - build_win_payload.sh zaten ÇAPRAZ çalışıyor: pip --platform win_amd64
+  #     --only-binary=:all: ile Windows wheel'lerini indiriyor, derleme yok.
+  #     (Bugüne kadar Mac üstünde koşuyordu; Linux'ta da aynı iş.)
+  #   - Tek yerel girdisi python-embed-win.zip idi; python.org'daki
+  #     python-3.12.10-embed-amd64.zip ile sha256 ÖLÇÜLEREK aynı bulundu.
+  #     Yani "benzeri" değil, aynı dosya indiriliyor.
+  #   - makensis Debian/Ubuntu'da paketli ve hrma.nsi POSIX makensis yolunu
+  #     zaten ele alıyor (NSIS_WIN32_MAKENSIS ifdef'i).
+  # ==========================================================================
+  win-paket:
+    name: Windows paketi (payload + .exe)
+    if: github.event_name != 'release'
+    needs: surum-baglantisi
+    runs-on: ubuntu-latest
+    timeout-minutes: 180   # NSIS /SOLID lzma, 1,2 GB payload — uzun sürer
+    env:
+      SURUM: ${{ needs.surum-baglantisi.outputs.surum }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # build_win_payload.sh'ın kendi teyidi python3'ün TAM 3.12 olmasını şart
+      # koşuyor (gömülü python312 ile .pyc uyumu için).
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Sistem bağımlılıkları (nsis, rsync, unzip)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis nsis-common rsync unzip
+
+      # HIZLI BAŞARISIZLIK: payload derlemesi ~30 dk sürüyor. makensis'in bu
+      # depodaki .nsi kalıplarını (`!system`, script dizinine göreli `File`)
+      # desteklediği ÖNCE sınanır ki, bir saat sonra derleyicide düşmeyelim.
+      # NOT: göreli `File` yolunun betiğin KENDİ dizinine göre çözüldüğü
+      # ölçüldü (makensis 3.12, hem depo kökünden hem packaging/ içinden aynı
+      # çıktı) — hrma.nsi'deki "win/payload/..." yolları bu yüzden çalışır.
+      - name: makensis yetenek probu
+        run: |
+          set -euo pipefail
+          makensis -VERSION
+          mkdir -p /tmp/nsisprobe/sub
+          echo veri > /tmp/nsisprobe/sub/data.txt
+          cat > /tmp/nsisprobe/probe.nsi <<'NSI'
+          Unicode true
+          Name "probe"
+          !define OUTDIR "${__FILEDIR__}/out"
+          !system 'mkdir -p "${OUTDIR}"'
+          OutFile "${OUTDIR}/probe.exe"
+          InstallDir "$LOCALAPPDATA\probe"
+          Section "s"
+            SetOutPath "$INSTDIR"
+            File /r "sub"
+          SectionEnd
+          NSI
+          makensis /tmp/nsisprobe/probe.nsi > /tmp/nsisprobe/log 2>&1 || {
+              echo "KALDI  makensis bu depodaki .nsi kalıplarını derleyemedi:"
+              tail -20 /tmp/nsisprobe/log
+              exit 1
+          }
+          test -f /tmp/nsisprobe/out/probe.exe
+          echo "GEÇTİ  makensis '!system' ve script-göreli 'File' destekliyor"
+
+      - name: Derleme girdisi (gömülü Windows Python) — özet doğrulamalı
+        run: |
+          set -euo pipefail
+          mkdir -p packaging/runtime
+          curl -sSfL --retry 3 --max-time 300 -o packaging/runtime/python-embed-win.zip "$WIN_EMBED_URL"
+          OLCULEN="$(sha256sum packaging/runtime/python-embed-win.zip | cut -d' ' -f1)"
+          if [ "$OLCULEN" != "$WIN_EMBED_SHA256" ]; then
+              echo "KALDI  indirilen gömülü Python özeti pin ile uyuşmuyor."
+              echo "       kaynak  : $WIN_EMBED_URL"
+              echo "       beklenen: $WIN_EMBED_SHA256"
+              echo "       ölçülen : $OLCULEN"
+              exit 1
+          fi
+          echo "GEÇTİ  gömülü Python, Berke'nin yerel kopyasıyla BAYT BAYT aynı"
+
+      - name: Derleme girdisi bekçisi (symlink kalmadı mı)
+        run: bash packaging/restore_build_inputs.sh
+
+      - name: Windows payload derle
+        run: bash packaging/build_win_payload.sh
+
+      # KAPI 3/8 AYNASI — Windows tarafı.
+      # KAPSAM BEYANI (release_gate.sh ile aynı): doğrulanan şey exe ikilisi
+      # DEĞİL, exe'nin üretildiği STAGING ağacıdır. NSIS arşivini açacak araç
+      # her makinede yok. Aradaki farkı kapatan şey sıradır: payload bu koşuda
+      # etiketlenen ağaçtan üretildi, exe de hemen ardından payload'dan.
+      - name: Payload köken kaydı (kapı 3/8, kapsam beyanlı)
+        env:
+          ETIKET_SHA: ${{ github.sha }}
+        run: |
+          python3 - packaging/win/payload/app/BUILD_INFO.json "$ETIKET_SHA" "$SURUM" <<'PY'
+          import json
+          import sys
+
+          yol, etiket_sha, surum = sys.argv[1:4]
+          try:
+              k = json.load(open(yol, encoding='utf-8'))
+          except Exception as e:
+              sys.exit(f'KALDI  BUILD_INFO.json okunamadı: {e}')
+          sha = k.get('sha')
+          if not sha:
+              sys.exit('KALDI  BUILD_INFO.sha boş — köken KANITSIZ')
+          if sha != etiket_sha:
+              sys.exit(f'KALDI  BUILD_INFO.sha={sha[:8]} != etiket SHA={etiket_sha[:8]} '
+                       '— payload BAŞKA bir ağaçtan üretilmiş')
+          if k.get('tree_dirty'):
+              sys.exit('KALDI  payload KİRLİ çalışma ağacından üretilmiş')
+          if k.get('version') != surum:
+              sys.exit(f"KALDI  BUILD_INFO.version={k.get('version')}, paket sürümü {surum}")
+          print(f'GEÇTİ  payload kökeni kanıtlı (sha {sha[:8]} = etiket, ağaç temiz, v{surum})')
+          print('BEYAN  doğrulanan şey exe ikilisi değil, exe\'nin üretildiği ağaçtır')
+          PY
+
+      - name: NSIS kurucu derle
+        run: |
+          set -euo pipefail
+          makensis -DVERSION="$SURUM" packaging/hrma.nsi
+          EXE="dist/HRMA-Setup-${SURUM}.exe"
+          test -f "$EXE" || { echo "KALDI  exe üretilmedi: $EXE"; exit 1; }
+          echo "--- paket içerik manifesti (ölçülen) ---"
+          echo "exe boyutu     : $(du -h "$EXE" | cut -f1)"
+          echo "payload boyutu : $(du -sh packaging/win/payload | cut -f1)"
+          echo "örnek proje    : depo=$(find examples -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ') payload=$(find packaging/win/payload/app/examples -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ')"
+
+      - name: EXE'yi artefakt olarak yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: hrma-exe
+          path: dist/HRMA-Setup-${{ needs.surum-baglantisi.outputs.surum }}.exe
+          if-no-files-found: error
+          # NSIS çıktısı zaten solid-LZMA; tekrar sıkıştırmanın kazancı yok.
+          compression-level: 0
+          retention-days: 14
+
+  # ==========================================================================
+  # 6) TASLAK SÜRÜM — artefaktları topla, TASLAK aç, insana bırak
+  #
+  # BURADA YAYIN YOK. packaging/publish_release.sh TASLAK=1 ile çağrılır:
+  # taslak GitHub'da görünmez ve hrma/utils/update_checker.py taslakları
+  # okumaz, yani hiçbir kullanıcıya inmez. draft -> published dönüşümü elle
+  # yapılır ve o an `yayin-denetimi` işi (aşağıda) devreye girer.
+  #
+  # KAPIYI_ATLA=1 kullanılıyor ÇÜNKÜ kapının tamamı bir runner'da koşamaz
+  # (2/8 ayrık HEAD'de üst akış dalı bulamaz, 4/8 bu koşunun kendisini
+  # "tamamlanmamış" görüp kendini kilitler). Atlama SESSİZ DEĞİL: betik
+  # gerekçeyi taslağın GÖVDESİNE yazar, yani "Publish" düğmesine basacak kişi
+  # neyin koşup neyin koşmadığını orada görür.
+  # ==========================================================================
+  taslak-yayin:
+    name: TASLAK sürüm + artefakt yükleme
+    # Yalnız etiket push'unda. workflow_dispatch bilerek DIŞARIDA: dal
+    # üstünde çalışan bir koşu var olmayan bir etikete sürüm açmamalı
+    # (gh release create eksik etiketi kendisi yaratır — istenmeyen etiket).
+    if: github.event_name != 'release' && startsWith(github.ref, 'refs/tags/v')
+    needs: [surum-baglantisi, testler, ci-durumu, mac-paket, win-paket]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      SURUM: ${{ needs.surum-baglantisi.outputs.surum }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hrma-dmg
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hrma-exe
+          path: dist
+
+      - name: Artefaktlar yerinde mi
+        run: |
+          set -euo pipefail
+          DMG="dist/HRMA-Setup-${SURUM}-macOS.dmg"
+          EXE="dist/HRMA-Setup-${SURUM}.exe"
+          test -f "$DMG" || { echo "KALDI  $DMG yok"; exit 1; }
+          test -f "$EXE" || { echo "KALDI  $EXE yok"; exit 1; }
+          ls -lh "$DMG" "$EXE"
+
+      - name: TASLAK sürüm aç (publish_release.sh)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ETIKET: ${{ github.ref_name }}
+          DEPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Etiket için sürüm ZATEN varsa: yayınlanmışa DOKUNULMAZ, taslağa
+          # artefakt tazelenir. Yeniden koşu (re-run) böyle güvenli olur.
+          DURUM="$(gh release view "$ETIKET" --repo "$DEPO" --json isDraft \
+                   --jq '.isDraft' 2>/dev/null || echo 'yok')"
+          if [ "$DURUM" = "false" ]; then
+              echo "KALDI  $ETIKET zaten YAYINLANMIŞ bir sürüm. Bu iş akışı"
+              echo "       yayınlanmış sürüme dokunmaz. Artefaktları elle"
+              echo "       güncellemek istiyorsanız bunu bilerek yapın."
+              exit 1
+          fi
+          if [ "$DURUM" = "true" ]; then
+              echo "BEYAN  $ETIKET için TASLAK zaten var — artefaktlar tazeleniyor."
+              echo "       Taslak gövdesi DEĞİŞTİRİLMİYOR; bu koşuda hangi kapı"
+              echo "       adımlarının koştuğu iş kaydında ve iş özetindedir."
+              gh release upload "$ETIKET" \
+                  "dist/HRMA-Setup-${SURUM}-macOS.dmg" \
+                  "dist/HRMA-Setup-${SURUM}.exe" \
+                  --repo "$DEPO" --clobber
+              exit 0
+          fi
+
+          # Bu metin taslağın GÖVDESİNE girer — "Publish" düğmesine basacak
+          # kişinin okuyacağı tek kayıt budur. Neyin koşup neyin koşmadığı
+          # burada açıkça yazılı olmalı.
+          GEREKCE="CI taslağı (.github/workflows/release.yml): artefaktlar etiketlenen ağaçtan bu koşuda üretildi. KOŞAN kapı adımları — 1/8 sürüm dizgileri; 3/8 köken kaydı (BUILD_INFO.sha == etiket SHA, hem DMG içinden hem Windows payload'dan, ağaç temiz); 5/8 tam test takımı; 6/8 canlı duman testi (8087 portu, üç motor türü, Origin başlıklı); 7/8 macOS imzası (--deep, DMG içeriği için --deep --strict); 4/8 karşılığı olarak 'tests' iş akışının bu SHA'da yeşil bittiği ayrı bir işte doğrulandı. KOŞMAYAN — 2/8 git durumu: etiket üzerinde ayrık HEAD'de üst akış dalı yoktur, yerine etiket SHA'sı ile derlenen ağacın SHA'sı karşılaştırıldı. Otomasyon paketin üretildiğini ve imzalı olduğunu kanıtlar, KURULUM DENEYİMİNİ kanıtlamaz: yayına çevirmeden önce en az bir artefaktı indirip kurun. Ayrıntı: docs/dev/yayin_otomasyonu.md"
+
+          TASLAK=1 KAPIYI_ATLA=1 KAPIYI_ATLA_GEREKCE="$GEREKCE" \
+              bash packaging/publish_release.sh
+
+      - name: İş özeti
+        if: always()
+        env:
+          ETIKET: ${{ github.ref_name }}
+          DEPO: ${{ github.repository }}
+        run: |
+          {
+            echo "## HRMA ${ETIKET} — TASLAK sürüm"
+            echo
+            echo "Artefaktlar etiketlenen ağaçtan bu koşuda üretildi."
+            echo
+            echo "| Kapı adımı | Durum |"
+            echo "|---|---|"
+            echo "| 1/8 sürüm dizgileri | koştu |"
+            echo "| 2/8 git durumu | **koşmadı** — ayrık HEAD'de üst akış dalı yok; yerine etiket SHA ↔ derleme SHA karşılaştırıldı |"
+            echo "| 3/8 köken kaydı (BUILD_INFO.sha) | koştu (DMG içi + win payload) |"
+            echo "| 4/8 CI durumu | \`tests\` iş akışının bu SHA'daki sonucu ayrı işte ölçüldü |"
+            echo "| 5/8 tam test takımı | koştu |"
+            echo "| 6/8 canlı duman testi | koştu |"
+            echo "| 7/8 macOS imzası | koştu (--deep, DMG içeriği --deep --strict) |"
+            echo "| 8/8 paket içerik denetimi | release_gate.sh'ta **böyle bir adım yok** (başlıklar 1/8..7/8); yerine ölçülen içerik manifesti basıldı |"
+            echo
+            echo "**Yayına çevirme kararı insandadır.** https://github.com/${DEPO}/releases"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================================
+  # 7) YAYIN SONRASI DENETİM — sıra gerçekten tutuldu mu?
+  #
+  # Yalnız `release` olayında koşar ve GitHub'ın KENDİ zaman damgalarını okur.
+  # Taslağı elle yayına çeviren kişi bu iş akışını hiç çalıştırmaz; buradaki
+  # kırmızı sürüm sayfasında ve commit'te görünür.
+  # ==========================================================================
   yayin-denetimi:
+    name: Yayın sonrası zaman sırası denetimi
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 15

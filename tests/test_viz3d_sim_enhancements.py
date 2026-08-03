@@ -254,10 +254,23 @@ def test_plume_physics_coupling():
 # ---------------------------------------------------------------------------
 
 def test_floor_and_grid_follow_motor_size():
+    # 2026-08-04: Eski sürüm ızgaranın motorla ÖLÇEKLENMESİNİ şart koşuyordu
+    # (this._grid.scale.setScalar(fScale)) — bu tam olarak "ızgara mutlak
+    # uzunluk referansı olamıyor" kusurunu kilitliyordu (altıncı vaka).
+    # Doğru davranış: zemin (gölge düzlemi) motoru takip eder, ızgara ise
+    # yuvarlak birim hücreye (gridCellMm) oturur ve ölçeklenmek yerine
+    # hücre/açıklık değişince yeniden kurulur; hücre boyutu rozetle beyan edilir.
     src = _read(VIZ3D)
     assert '_floorBaseLen' in src
-    assert re.search(r'this\._grid\.scale\.setScalar\(fScale\)', src)
+    assert re.search(r'this\._floor\.scale\.setScalar\(fScale\)', src)
     assert re.search(r'this\._floor\.position\.y\s*=\s*floorY', src)
+    assert not re.search(r'this\._grid\.scale\.setScalar\((?!1\))', src), (
+        'ızgara motorla ölçeklenmemeli (setScalar(1) sabitleme serbest) — '
+        'yuvarlak birim hücreyle yeniden kurulmalı')
+    assert re.search(r'this\._grid\.scale\.setScalar\(1\)', src)
+    assert 'gridCellMm' in src
+    assert re.search(r'this\._gridCell\s*!==\s*cell', src)
+    assert '_gridBadge' in src
 
 
 def test_camera_refit_uses_radius_too():

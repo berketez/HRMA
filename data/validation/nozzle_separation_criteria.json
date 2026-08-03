@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "case": "nozzle_separation_criteria",
+  "description_tr": "Aşırı genişlemiş lülede akış ayrılması için beş yayımlanmış görgül kriter, orijinal künyeleriyle. Kriterler BİRBİRİYLE UYUŞMAZ — bu bir hata değil, alanın gerçek durumudur. HRMA bir kriter seçerse hangisini seçtiğini beyan etmeli, tek 'doğru' ayrılma basıncı varmış gibi göstermemelidir.",
+  "discipline": "nozzle_flow",
+  "inputs": {
+    "definitions": {
+      "p_sep": "ayrılmanın başladığı noktadaki cidar basıncı",
+      "p_a": "ortam basıncı",
+      "p_c": "yanma odası (toplam) basıncı",
+      "Ma_sep": "ayrılma noktasındaki cidar Mach sayısı"
+    }
+  },
+  "expected_outputs": {
+    "criteria": [
+      {
+        "name": "Summerfield",
+        "formula": "p_sep/p_a = 0.35 ... 0.40",
+        "kind": "sabit aralık",
+        "source_citation": "M. Summerfield, C. Foster, W. Swan, 'Flow Separation in Overexpanded Supersonic Exhaust Nozzles', Jet Propulsion, Cilt 24, Sayı 9, s. 319-321, 1954",
+        "note_tr": "İlk ve en kaba kriter; Mach'a da basınç oranına da bağlı değil."
+      },
+      {
+        "name": "Schilling",
+        "formula": "p_sep/p_a = 0.583 * (p_c/p_a)^(-0.195)",
+        "kind": "basınç oranına bağlı",
+        "validity_tr": "kısa çan lüleler için önerilmiştir",
+        "source_citation": "M. Schilling, 'Flow Separation in a Rocket Nozzle', Yüksek Lisans Tezi, University of Buffalo, 1962"
+      },
+      {
+        "name": "Kalt ve Badal",
+        "formula": "p_sep/p_a = (2/3) * (p_c/p_a)^(-1/5)",
+        "kind": "basınç oranına bağlı",
+        "source_citation": "S. Kalt, D. Badal, 'Conical Rocket Nozzle Performance under Flow-Separated Conditions', Journal of Spacecraft and Rockets, Cilt 2, Sayı 3, s. 447-449, 1965",
+        "note_tr": "Schilling kriterinin sadeleştirilmiş hâli."
+      },
+      {
+        "name": "Schmucker",
+        "formula": "p_sep/p_a = (1.88 * Ma_sep - 1)^(-0.64)",
+        "kind": "Mach'a bağlı",
+        "source_citation": "R. Schmucker, 'Strömungsvorgänge beim Betrieb überexpandierter Düsen chemischer Raketentriebwerke, Teil 1: Strömungsablösung', Bericht TB-7, Technische Universität München, 1973"
+      },
+      {
+        "name": "Stark",
+        "formula": "p_sep/p_a = pi / (3 * Ma_sep)",
+        "kind": "Mach'a bağlı",
+        "source_citation": "R. H. Stark, 'Flow Separation in Rocket Nozzles, a Simple Criteria', AIAA 2005-3940, 2005",
+        "note_tr": "DLR'nin soğuk ve sıcak akış veri tabanına dayanan en yeni kriter; yazar Schmucker'ın yüksek Mach'ta ayrılma basıncını fazla tahmin ettiğini ölçmüştür."
+      }
+    ],
+    "worked_values": {
+      "_status": "DERIVED_BY_US_FROM_PUBLISHED_FORMULAS",
+      "schmucker": {
+        "Ma_2.0": 0.522178,
+        "Ma_3.0": 0.37448,
+        "Ma_4.0": 0.301218
+      },
+      "stark": {
+        "Ma_2.0": 0.523599,
+        "Ma_3.0": 0.349066,
+        "Ma_4.0": 0.261799
+      },
+      "kalt_badal": {
+        "pc_pa_30": 0.337664,
+        "pc_pa_100": 0.265405
+      },
+      "schilling": {
+        "pc_pa_30": 0.300352,
+        "pc_pa_100": 0.237503
+      }
+    },
+    "spread_note_tr": "Ma_sep = 4.0'da Schmucker 0.301, Stark 0.262 veriyor — aralarında %15 fark var. Bu, kriterlerin gerçek belirsizliğidir; HRMA tek bir sayıyı 'ayrılma basıncı' diye kesin göstermemelidir."
+  },
+  "units": "boyutsuz basınç oranları",
+  "source": {
+    "title": "Flow Separation in Rocket Nozzles, a Simple Criteria (AIAA 2005-3940), Ek bölümü",
+    "author": "R. H. Stark (DLR Lampoldshausen)",
+    "year": 2005,
+    "url_or_doi": "https://elib.dlr.de/49253/1/AIAA2005-3940.pdf"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Kriter bağıntıları Stark'ın makalesinin Ek tablosundan alındı; her birinin ORİJİNAL künyesi aynı makalenin kaynakçasından okundu (yani ikinci elden aktarma değil, künye zinciri tam). SCHMUCKER PARANTEZİ: PDF metin çıkarımında parantez konumu belirsizdi. İki olası okuma sayısal olarak sınandı: (1.88*Ma - 1)^-0.64 Ma=2..4 için 0.52...0.30 veriyor (makalenin şekillerindeki bantla birebir); 1.88*(Ma-1)^-0.64 ise 1.88...0.93 veriyor, yani p_sep > p_a — FİZİKSEL OLARAK İMKANSIZ. Bu yüzden birinci okuma kesinleştirildi. Stark bağıntısındaki 'Pi' sembolü sayı pi olarak okundu; Ma=2'de 0.5236 vermesi makalenin veri bandıyla tutarlıdır.",
+  "tags": [
+    "empirical_criteria",
+    "flow_separation",
+    "overexpanded",
+    "primary_source",
+    "disagreement_documented"
+  ]
+}

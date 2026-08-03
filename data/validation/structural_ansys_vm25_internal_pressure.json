@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "case": "structural_ansys_vm25_internal_pressure",
+  "description_tr": "Uzun kalın cidarlı silindir yalnız iç basınç altında. ANSYS Mechanical APDL Doğrulama Kılavuzu VM25, Durum 1. Hedef değerler Lamé (kalın cidar) kapalı çözümünden gelir; bu vaka eksenel simetrik yapısal çözücünün (yol haritası D1) birincil kabul testidir.",
+  "discipline": "structural",
+  "inputs": {
+    "inner_radius_in": 4.0,
+    "outer_radius_in": 8.0,
+    "internal_pressure_psi": 30000.0,
+    "youngs_modulus_psi": 30000000.0,
+    "poissons_ratio": 0.3,
+    "density_lbf_s2_per_in4": 0.00073,
+    "angular_velocity_rad_s": 0.0,
+    "stress_state": "plane_stress_open_end",
+    "axial_stress_psi": 0.0
+  },
+  "expected_outputs": {
+    "radial_stress_psi": {
+      "r_4in": -30000.0,
+      "r_6in": -7778.0,
+      "r_8in": 0.0
+    },
+    "tangential_stress_psi": {
+      "r_4in": 50000.0,
+      "r_6in": 27778.0,
+      "r_8in": 20000.0
+    },
+    "radial_displacement_in": {
+      "r_4in": 0.0078666
+    }
+  },
+  "reference_formulas": {
+    "sigma_r": "p_i * a^2/(b^2 - a^2) * (1 - b^2/r^2)",
+    "sigma_theta": "p_i * a^2/(b^2 - a^2) * (1 + b^2/r^2)",
+    "u_r_plane_stress": "a^2 p_i r / (E (b^2 - a^2)) * [(1 - nu) + (1 + nu) b^2/r^2]",
+    "formula_source": "Lamé kalın cidar çözümü; Timoshenko, Strength of Materials Part II"
+  },
+  "units": "psi, in (kaynağın orijinal birimleri)",
+  "tolerance_pct": 0.5,
+  "source": {
+    "title": "Ansys Mechanical APDL Verification Manual, VM25: Stresses in a Long Cylinder",
+    "author": "Ansys, Inc. (PyMAPDL doğrulama örneği olarak yeniden yayımlandı)",
+    "year": 2025,
+    "url_or_doi": "https://examples.mapdl.docs.pyansys.com/verif-manual/vm-025.html"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Altı gerilme hedefinin ALTISI DA Lamé bağıntılarından bağımsız olarak yeniden hesaplandı ve birebir tuttu (r=4: -30000/50000; r=6: -7777.78/27777.78; r=8: 0/20000). Yer değiştirme hedefi 0.0078666 in yalnız DÜZLEM GERİLME (açık uç, sigma_z = 0) varsayımıyla çıkıyor; düzlem şekil değiştirme 0.0076267 in, kapalı uç 0.0074667 in verir. Bu yüzden inputs.stress_state açıkça yazıldı — çözücü düzlem şekil değiştirme kurarsa bu vaka HAKLI olarak kırmızı olur.",
+  "tags": [
+    "analytic_anchor",
+    "lame",
+    "thick_wall",
+    "ansys_vm",
+    "axisymmetric"
+  ]
+}

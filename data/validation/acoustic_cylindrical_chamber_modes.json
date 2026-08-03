@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "case": "acoustic_cylindrical_chamber_modes",
+  "description_tr": "Sert cidarlı silindirik odanın akustik özmod frekansları: boyuna, teğetsel ve radyal. Bessel türev kökleri kapalı formdur, bu yüzden vaka TAM ANALİTİKTİR — akustik kararlılık modülünün mod frekansı hesabının kabul testi. Bu kayıt yalnız GEOMETRİK-AKUSTİK kısmı doğrular; yanma tepkisi ve kararlılık tahmini AYRI bir iştir ve bu vakayla doğrulanmaz.",
+  "discipline": "acoustics",
+  "inputs": {
+    "geometry": "sert cidarlı düz silindir",
+    "chamber_radius_m": 0.5,
+    "chamber_length_m": 1.0,
+    "speed_of_sound_m_s": 1000.0,
+    "boundary_condition": "her yüzeyde sert cidar (dp/dn = 0)"
+  },
+  "expected_outputs": {
+    "bessel_derivative_roots": {
+      "_definition": "alpha_mn: J_m'(alpha) = 0 denkleminin n. sıfırdan farklı kökü",
+      "1T_m1_n1": 1.841184,
+      "2T_m2_n1": 3.054237,
+      "1R_m0_n1": 3.831706,
+      "3T_m3_n1": 4.201189,
+      "1T1R_m1_n2": 5.331443,
+      "2R_m0_n2": 7.015587
+    },
+    "mode_frequencies_hz": {
+      "1L": 500.0,
+      "1T": 586.067,
+      "2T": 972.193809,
+      "1R": 1219.669891,
+      "3T": 1337.279974,
+      "1T1R": 1697.050942,
+      "2R": 2233.130594
+    }
+  },
+  "reference_formulas": {
+    "transverse": "f_mn = alpha_mn * a / (2 pi R)",
+    "longitudinal": "f_qL = q * a / (2 L)   (iki ucu kapalı/sert)",
+    "combined": "f = (a/2) * sqrt( (alpha_mn/(pi R))^2 + (q/L)^2 )"
+  },
+  "units": "Hz, m, m/s",
+  "tolerance_pct": 0.1,
+  "source": {
+    "title": "Liquid Propellant Rocket Combustion Instability, NASA SP-194 (silindirik oda akustik modları ve Bessel kökleri standart sunumu)",
+    "author": "D. T. Harrje ve F. H. Reardon (editörler)",
+    "year": 1972,
+    "url_or_doi": "https://ntrs.nasa.gov/citations/19720026079"
+  },
+  "retrieved": "2026-08-03",
+  "confidence": "high",
+  "verification_note_tr": "Bessel kökleri scipy.special.jnp_zeros ile 6 haneye HESAPLANDI, hafızadan yazılmadı; 1T = 1.841184 ve 1R = 3.831706 literatürde yaygın verilen 1.8412 / 3.8317 değerleriyle birebir. Frekanslar verilen R, L, a için tam bağıntıdan üretildi (uydurma değil, hesaplanmış). KAYNAK UYARISI: SP-194 künyesi bağıntıların standart referansı olarak verilmiştir; belge bu turda AÇILMADI, dolayısıyla sayfa/denklem numarası YOKTUR. Bağıntıların kendisi klasik akustiktir ve bağımsız olarak türetilebilir; künye doğrulaması gereken tek şey SP-194'ün tam adı ve yılıdır.",
+  "tags": [
+    "analytic_derived",
+    "acoustics",
+    "chamber_modes",
+    "bessel",
+    "computed_not_recalled"
+  ]
+}
