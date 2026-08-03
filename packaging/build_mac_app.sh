@@ -138,8 +138,23 @@ mkdir -p "$RES/libs"
 if [ -d "$B/mac/libs" ]; then
     cp -R "$B/mac/libs/." "$RES/libs/"
 else
-    echo "      mac/libs önbelleği yok — libs pip ile sıfırdan kurulacak"
+    echo "      mac/libs önbelleği yok — libs pinli listeden kurulacak"
 fi
+
+# 2026-08-03: bu adım YOKTU ve macOS paketi bu yüzden hiç üretilemiyordu.
+# Aşağıdaki pip çağrıları yalnız pywebview/pyobjc/proxy_tools kuruyor; flask,
+# numpy, scipy, reportlab, openpyxl gibi ANA bağımlılıkların tamamı
+# `mac/libs` önbelleğinden gelmesi bekleniyordu. O dizin depoda yok, yani
+# temiz bir makinede derleme 179. satırdaki "HATA: reportlab eksik!"
+# denetiminde ölüyordu — ölçüldü.
+# Windows tarafı aynı listeyi zaten kullanıyor (build_win_payload.sh:54);
+# iki platform artık TEK pinli kaynaktan besleniyor. Önbellek varsa bile
+# koşulur: betiğin kendi notu "mac/libs eski bir kopyadan geliyorsa bile bu
+# adım güncel tutar" diyor, aynı ilke.
+echo "      pinli bağımlılıklar (requirements_bundle.txt)..."
+python3 -m pip install --target "$RES/libs" --upgrade \
+    --only-binary=:all: -r "$B/requirements_bundle.txt" \
+    --no-warn-script-location
 # rocketcea: PyPI'da mac wheel yok — çalışan anaconda ortamından kopyala (arm64, numpy 1.26.4 uyumlu)
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea "$RES/libs/"
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea-*.dist-info "$RES/libs/" 2>/dev/null || true

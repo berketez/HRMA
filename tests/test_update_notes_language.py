@@ -16,8 +16,19 @@ from hrma.utils.update_checker import (
 )
 
 
-def _iki_dilli_govde(en_uzunluk=8000, tr_uzunluk=8000):
-    """Gerçek vakayı taklit eder: TR imi 4000 karakterin ÇOK ötesinde başlar."""
+def _iki_dilli_govde(en_uzunluk=None, tr_uzunluk=None):
+    """Gerçek vakayı taklit eder: TR imi SINIRIN ötesinde başlar.
+
+    2026-08-03: uzunluklar eskiden 8000'e sabitlenmişti, çünkü sınır 4000'di.
+    Sınır 16000'e çıkınca kurgunun ÖNCÜLÜ çöktü (8072 > 16000 yanlış) ve test
+    bir kusuru değil kendi eski varsayımını sınar oldu. Artık uzunluklar
+    sınırdan türüyor: kurgu, sınır ne olursa olsun "TR imi sınırın ötesinde"
+    koşulunu sağlar.
+    """
+    if en_uzunluk is None:
+        en_uzunluk = NOTES_MAX_CHARS + 2000
+    if tr_uzunluk is None:
+        tr_uzunluk = NOTES_MAX_CHARS + 2000
     en = "# HRMA v2.6.26 — Quality release\nEN icerik satiri.\n" + "E" * en_uzunluk
     tr = "# HRMA v2.6.26 — Kalite sürümü\nTR içerik satırı.\n" + "T" * tr_uzunluk
     return "<!--HRMA-LANG:en-->\n%s\n<!--HRMA-LANG:tr-->\n%s" % (en, tr)
@@ -40,7 +51,7 @@ class TestDilBolme:
 
 class TestKirpma:
     def test_turkce_bolum_kirpmada_dusmez(self):
-        """Asıl kusur buydu: TR bölümü 4000'in ötesinde başlıyor."""
+        """Asıl kusur buydu: TR bölümü SINIRIN ötesinde başlıyor."""
         govde = _iki_dilli_govde()
         assert govde.index("<!--HRMA-LANG:tr-->") > NOTES_MAX_CHARS
 
@@ -51,7 +62,8 @@ class TestKirpma:
         assert "Quality release" in kirpilmis
 
     def test_her_bolum_ayri_sinirlanir(self):
-        govde = _iki_dilli_govde(en_uzunluk=9000, tr_uzunluk=9000)
+        govde = _iki_dilli_govde(en_uzunluk=NOTES_MAX_CHARS + 5000,
+                                 tr_uzunluk=NOTES_MAX_CHARS + 5000)
         for kod, metin in split_notes_by_language(clip_notes(govde)).items():
             assert len(metin) <= NOTES_MAX_CHARS, kod
 
@@ -62,7 +74,17 @@ class TestKirpma:
         assert "<!--HRMA-LANG:tr-->" in kirpilmis
 
     def test_tek_dilli_govde_eskisi_gibi_kirpilir(self):
-        assert len(clip_notes("x" * 9000)) == NOTES_MAX_CHARS
+        """Tek dilli gövde de sınırlanır.
+
+        Eşitlik DEĞİL "<=" sınanır: kırpma artık satır/boşluk sınırına geri
+        sarıyor ve "kısaltıldı" beyanı ekliyor, yani sonuç sınırın tam
+        üstünde durmaz (2026-08-03, sessiz kırpma düzeltmesi).
+        """
+        uzun = "x" * (NOTES_MAX_CHARS + 5000)
+        kirpik = clip_notes(uzun)
+        assert len(kirpik) <= NOTES_MAX_CHARS
+        assert len(kirpik) > NOTES_MAX_CHARS * 0.5, 'kırpma metni yok etmiş'
+        assert len(clip_notes("x" * 10)) == 10, 'sınır altı gövde kırpılmamalı'
 
     def test_imsiz_iki_dilli_govde_basliktan_bolunur(self):
         """Atom yedek yolu: GitHub HTML yorum satırı taşımaz (ölçüldü: im 0)."""
