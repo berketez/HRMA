@@ -536,6 +536,50 @@
         }
     }
 
+    // ==================================================================
+    // ÖN DOLUM ANLAMLI BASAMAĞI  (Faz 6 / T66 + T45)
+    // ------------------------------------------------------------------
+    // Çözücünün döndürdüğü değer alana HAM basılıyordu. ÖLÇÜLDÜ
+    // (2026-08-03, uygulama 8084):
+    //   /solid   — 62 ad_f_* alanının 21'i altı ve fazlası ondalıklı:
+    //              ad_f_joint_seal_diameter_mm      = 106.00000000000001
+    //              ad_f_thermal_chamber_diameter    = 0.10600000000000001
+    //              ad_f_structural_thrust           = 7521.506959698284
+    //              ad_f_thermal_burn_time           = 1.7830261808052195
+    //   /liquid  — 75 alanın 27'si:
+    //              ad_f_thermal_chamber_temperature = 3707.0404366159974
+    //              ad_f_cooling_throat_diameter     = 0.03081137601957565
+    //              ad_f_cooling_gamma               = 1.1568199924202172
+    //              ad_f_safety_propellant_mass      = 1665.7718758554495
+    // İlk iki örnek saf kayan nokta artığıdır (106 ve 0,106'nın ikili
+    // gösterimi), gerisi ise çözücünün taşıyamayacağı bir kesinlik vaadidir:
+    // CEA denge sıcaklığının belirsizliği onlarca K, Bartz ısı akısınınki
+    // ~%20, malzeme dayanım saçılması ~%5'tir.
+    //
+    // Burada YALNIZ görüntü değil GÖNDERİLEN sayı da değişir: alan bir
+    // <input>, POST gövdesi formdan okunuyor. Dolayısıyla yuvarlamanın
+    // hesaba etkisi ölçüldü — aynı ön dolum değerleri ham ve N anlamlı
+    // basamağa yuvarlanmış hâlde üç uca gönderilip tüm sayısal çıktı
+    // alanlarındaki en büyük bağıl fark alındı (thermal 100, structural 147,
+    // safety 99 alan):
+    //   12 basamak -> 5,8e-12    6 basamak -> 5,1e-06
+    //    5 basamak -> 3,2e-05    4 basamak -> 1,0e-04    3 basamak -> 3,8e-03
+    // 6 basamakta en kötü çıktı sapması %0,0005 — modellerin kendi
+    // belirsizliğinin (%1 ve üstü) dört mertebe altında, yani mühendislik
+    // anlamında kayıpsız. Alan artık okunabilir ve "ekranda görünen değer =
+    // gönderilen değer" sözleşmesi de bozulmaz (görüntü-yalnız yuvarlama
+    // bunu bozardı: 3707,04 gösterip 3707,0404366159974 göndermek olurdu).
+    // ==================================================================
+    const DOCK_SIGFIG = 6;
+
+    // Büyüklükten bağımsız anlamlı basamak yuvarlaması: hem 3707,04 hem
+    // 0,0308114 aynı kuralla kısalır (toFixed bunu yapamaz).
+    function dockSigFig(value, digits) {
+        const v = Number(value);
+        if (!Number.isFinite(v) || v === 0) return v;
+        return Number(v.toPrecision(digits || DOCK_SIGFIG));
+    }
+
     // ------------------------------------------------------------------
     // Öneri (fromResults) uygulama — kullanıcının elle değiştirdiği
     // alanlar (data-dirty) EZİLMEZ; POST her zaman formdan okunur.
@@ -576,7 +620,10 @@
                 }
                 return;
             }
-            if (typeof v === 'number' && Number.isFinite(v)) el.value = v;
+            // Anlamlı basamak: ham float değil (T66 + T45, gerekçe yukarıda)
+            if (typeof v === 'number' && Number.isFinite(v)) {
+                el.value = dockSigFig(v);
+            }
         });
     }
 
@@ -846,6 +893,10 @@
             fmt: fmt,
             pick: pick,
             kindColor: kindColor,
+            // Kendi form DOM'unu kuran paneller (feed_panel gibi) ön dolumda
+            // aynı anlamlı basamak kuralını kullansın diye dışa verilir.
+            sigFig: dockSigFig,
+            SIGFIG: DOCK_SIGFIG,
             TBL: TBL,
             TD: TD,
             // --- Çözücü sonucu okuma (merkezi birim çözümlemesi) ---

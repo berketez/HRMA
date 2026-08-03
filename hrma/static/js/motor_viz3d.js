@@ -286,13 +286,34 @@
     //
     // Kural: gerilmelerin hesaplandığı kalınlık çizilir. 'verify' modunda bu
     // kullanıcının cidarıdır; 'size' modunda zaten önerilen kalınlığa eşittir.
+    // Üç motor tipinin üç ayrı yapısal şeması — sunucudaki
+    // cad_visualization.CHAMBER_WALL_SCHEMAS tablosunun BİREBİR eşi.
+    // [blok, as-designed alanı, önerilen alanı, as-designed kesin mi]
+    // Faz 6 / T06: burada yalnız hibrit şeması (chamber_analysis) vardı;
+    // katı (case_analysis) ve sıvı (chamber_structure) motorlarda anahtar
+    // tutmuyor, güverte 0,045·D geometrik yedeğine düşüyordu.
+    var CASING_WALL_SCHEMAS = [
+        ['chamber_analysis', 'wall_thickness_used_mm', 'recommended_thickness', false],
+        ['case_analysis', 'wall_thickness_mm', 'recommended_wall_thickness_mm', true],
+        ['chamber_structure', 'wall_thickness', 'required_wall_thickness', true]
+    ];
+
     function resolveCasingWall(md, Dch) {
-        var ca = ((md && md.structural_analysis) || {}).chamber_analysis || {};
-        var used = num(ca.wall_thickness_used_mm, null);
-        var recommended = num(ca.recommended_thickness, null);
-        if (ca.design_mode === 'verify' && used !== null && used > 0) return used;
-        if (recommended !== null && recommended > 0) return recommended;
-        if (used !== null && used > 0) return used;
+        var struct = (md && md.structural_analysis) || {};
+        for (var i = 0; i < CASING_WALL_SCHEMAS.length; i++) {
+            var s = CASING_WALL_SCHEMAS[i];
+            var blk = struct[s[0]];
+            if (!blk || typeof blk !== 'object') continue;
+            var used = num(blk[s[1]], null);
+            var recommended = num(blk[s[2]], null);
+            if (used === null && recommended === null) continue;
+            // Gerilmelerin hesaplandığı kalınlık çizilir: 'verify' modunda
+            // (ya da as-designed alanı kesin olan şemalarda) kullanıcının
+            // cidarı, aksi hâlde yapısal önerinin kendisi.
+            if ((blk.design_mode === 'verify' || s[3]) && used !== null && used > 0) return used;
+            if (recommended !== null && recommended > 0) return recommended;
+            if (used !== null && used > 0) return used;
+        }
         // Yapısal sonuç yok: sunucu tarafındaki AYNI geometrik yedek kural
         // (CHAMBER_WALL_FALLBACK_FRACTION = 0.045) — mesh ile çelişmesin.
         return Math.max(4, 0.045 * Dch);
@@ -406,15 +427,33 @@
         // kaldırıldı (kullanıcının kalınlığını sessizce değiştiriyordu).
         var casingWall = Math.max(0.2, resolveCasingWall(md, Dch));
         var nozzleWall = clamp(num(md.nozzle_geometry && md.nozzle_geometry.wall_thickness, Math.max(3, 0.1 * dt)), 2.5, 0.25 * dt + 6);
-        var liner = clamp(0.02 * Dch, 1.5, 5);
+        // Grain dış yarıçapı çözücünün BEYAN ETTİĞİ çaptan okunur; liner
+        // (yalıtım + boşluk) bu çapla kasa deliği arasındaki farktan ÇIKAR.
+        // Faz 6 / T06: eski kod liner'i clamp(0.02*Dch, 1.5, 5) diye
+        // uyduruyor, grain dışını da rc - liner sanıyordu. Ölçüldü
+        // (/calculate_solid): yalıtım 0 / 0,5 / 3 / 20 mm iken kasa deliği
+        // 100 / 101 / 106 / 140 mm, grain 100 mm'de sabit — fark
+        // kullanıcının yalıtımını birebir verir.
+        var dGrainOut = num(gd.outer_diameter_mm, num(gd.grain_outer_diameter_mm, NaN));
+        var rGrainOut, liner;
+        if (isFinite(dGrainOut) && dGrainOut > 0 && dGrainOut / 2 <= rc + 1e-9) {
+            rGrainOut = Math.min(dGrainOut / 2, rc);
+            liner = Math.max(0, rc - rGrainOut);
+        } else {
+            liner = clamp(0.02 * Dch, 1.5, 5);
+            rGrainOut = rc - liner;
+        }
 
+        // T10: grain boyu ARTIK KIRPILMIYOR. Ölçüldü (hibrit varsayılan
+        // koşu): çözücü 1511,6 mm derken güverte künyesi 'GRAIN 1451 mm'
+        // yazıyordu (0,92 x 1575,5 mm oda boyu) — 2B kesitle aynı %4,1'lik
+        // sessiz kısaltma. Yakıt kütlesiyle çapraz doğrulandı: raporun
+        // yazdığı 1,54 kg ancak 1512,8 mm ile çıkıyor.
         var Lg = num(gd.grain_length_mm, num(md.grain_length, 0.8 * Lch / 1000) * 1000);
-        Lg = Math.min(Lg, 0.92 * Lch);
         var rPort0 = num(gd.port_diameter_initial_mm, num(md.port_diameter_initial, 0.03) * 1000) / 2;
         var rPortF = num(gd.port_diameter_final_mm, num(md.port_diameter_final, 0.05) * 1000) / 2;
-        var rGrainOut = rc - liner;
-        rPortF = Math.min(rPortF, rGrainOut - 1);
-        rPort0 = Math.min(rPort0, rPortF);
+        rPortF = Math.min(rPortF, rGrainOut);
+        rPort0 = Math.min(rPort0, rGrainOut);
 
         // Konverjan uzunluk: GERÇEK kamara yarıçapına dayanan design_summary
         // önceliklidir — nozzle_contour.convergent.length, NozzleDesigner'ın
@@ -439,9 +478,16 @@
         var flangeT = clamp(0.8 * capT, 6, 26);
         var flangeLip = clamp(0.10 * rc, 4, 18);
 
-        // Grain kamara içinde: ön yanma odası %35, art yanma odası %65
-        var slack = Math.max(4, Lch - Lg);
-        var zg0 = 0.35 * slack;
+        // Grain kamara içindeki yeri: çözücü ön/arka oda boyunu yayımlıyorsa
+        // O kullanılır (ölçüldü: 39,911 + 1511,596 + 23,946 = 1575,452 mm =
+        // chamber_length, bit-aynı); yoksa eski %35/%65 payı korunur.
+        var preCh = num(md.pre_chamber_length, NaN) * 1000;
+        var zg0;
+        if (isFinite(preCh) && preCh >= 0 && preCh + Lg <= Lch + 1e-6) {
+            zg0 = preCh;
+        } else {
+            zg0 = 0.35 * Math.max(0, Lch - Lg);
+        }
         var zg1 = zg0 + Lg;
 
         // Isıl veri (ısı haritası modu için): kamara/boğaz ısı akısı çapaları

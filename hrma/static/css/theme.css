@@ -41,25 +41,55 @@ html { min-height: 100%; background: var(--hd-bg0, #04070d); }
 
 body {
     font-family: var(--hd-sans);
-    /* Yıldız alanı (2026-07-20 isteği): ilk 5 katman birer yıldızlık
+    /* Yıldız alanı (2026-07-20 isteği): ilk 16 katman birer yıldızlık
        döşemedir — farklı döşeme boyutları örüntüyü kırar, alan rastgele
        görünür. Body arka planında oldukları için her zaman İÇERİĞİN
-       ALTINDA kalırlar (panellerin üstüne benek binmez). */
+       ALTINDA kalırlar (panellerin üstüne benek binmez).
+
+       2026-08-03: alan pratikte GÖRÜNMÜYORDU. İki sebep ölçüldü —
+       (1) döşemeler seyrekti: 1600x1000 görünür alanda toplam ~53 yıldız
+       düşüyordu, (2) alfalar 0.35-0.6 bandındaydı, #04070d zemin üstünde
+       gözle seçilmiyordu. Analiz sayfalarında paneller (rgba(10,19,33,0.88))
+       ekranın çoğunu kapattığı için yıldızlar yalnız panel aralarındaki
+       oluklarda kalıyor; o oluklarda görünür olması için yoğunluk şart.
+       Önce beş katman eklendi + alfalar yükseltildi (~53 -> ~131), sonra
+       Berke'nin "biraz daha artsın" isteğiyle altı katman daha: 1600x1000
+       görünür alanda ~250 yıldız, yani ortalama 80x80 piksellik bir kareye
+       bir yıldız. Katman sayısı background-size ve background-repeat
+       listeleriyle AYNI sırada ve AYNI uzunlukta kalmalı
+       (16 yıldız + 3 nebula + 1 zemin = 20 giriş). */
     background:
-        radial-gradient(1.4px 1.4px at 27px 36px, rgba(214, 240, 255, 0.6), transparent 100%),
-        radial-gradient(1px 1px at 133px 152px, rgba(170, 220, 255, 0.42), transparent 100%),
-        radial-gradient(1.7px 1.7px at 231px 64px, rgba(232, 248, 255, 0.55), transparent 100%),
-        radial-gradient(1px 1px at 74px 218px, rgba(160, 215, 255, 0.35), transparent 100%),
-        radial-gradient(1.2px 1.2px at 306px 125px, rgba(205, 238, 255, 0.5), transparent 100%),
+        radial-gradient(1.4px 1.4px at 27px 36px, rgba(214, 240, 255, 0.72), transparent 100%),
+        radial-gradient(1px 1px at 133px 152px, rgba(170, 220, 255, 0.55), transparent 100%),
+        radial-gradient(1.7px 1.7px at 231px 64px, rgba(232, 248, 255, 0.68), transparent 100%),
+        radial-gradient(1px 1px at 74px 218px, rgba(160, 215, 255, 0.48), transparent 100%),
+        radial-gradient(1.2px 1.2px at 306px 125px, rgba(205, 238, 255, 0.62), transparent 100%),
+        radial-gradient(1.3px 1.3px at 88px 190px, rgba(200, 235, 255, 0.5), transparent 100%),
+        radial-gradient(1px 1px at 210px 40px, rgba(165, 218, 255, 0.45), transparent 100%),
+        radial-gradient(1.6px 1.6px at 45px 300px, rgba(228, 246, 255, 0.6), transparent 100%),
+        radial-gradient(1px 1px at 280px 210px, rgba(175, 222, 255, 0.42), transparent 100%),
+        radial-gradient(1.4px 1.4px at 150px 95px, rgba(210, 240, 255, 0.55), transparent 100%),
+        radial-gradient(1.1px 1.1px at 62px 118px, rgba(196, 233, 255, 0.52), transparent 100%),
+        radial-gradient(1.5px 1.5px at 255px 175px, rgba(224, 245, 255, 0.6), transparent 100%),
+        radial-gradient(1px 1px at 118px 265px, rgba(168, 219, 255, 0.46), transparent 100%),
+        radial-gradient(1.3px 1.3px at 330px 55px, rgba(206, 238, 255, 0.56), transparent 100%),
+        radial-gradient(1px 1px at 22px 160px, rgba(178, 224, 255, 0.44), transparent 100%),
+        radial-gradient(1.6px 1.6px at 195px 235px, rgba(230, 247, 255, 0.58), transparent 100%),
         radial-gradient(1100px 520px at 85% -10%, rgba(0, 140, 200, 0.15), transparent 60%),
         radial-gradient(900px 620px at -10% 30%, rgba(0, 90, 160, 0.10), transparent 55%),
         radial-gradient(760px 500px at 72% 88%, rgba(96, 72, 190, 0.10), transparent 60%),
         linear-gradient(165deg, var(--hd-bg0) 0%, var(--hd-bg1) 60%, #070d18 100%);
     background-size:
         340px 260px, 470px 390px, 520px 310px, 390px 450px, 610px 370px,
+        300px 230px, 420px 280px, 360px 420px, 500px 330px, 270px 300px,
+        260px 200px, 380px 250px, 320px 360px, 440px 300px, 240px 280px,
+        350px 220px,
         auto, auto, auto, auto;
     background-repeat:
         repeat, repeat, repeat, repeat, repeat,
+        repeat, repeat, repeat, repeat, repeat,
+        repeat, repeat, repeat, repeat, repeat,
+        repeat,
         no-repeat, no-repeat, no-repeat, no-repeat;
     background-attachment: fixed;
     color: var(--hd-ink);

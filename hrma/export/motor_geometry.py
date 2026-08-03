@@ -301,8 +301,20 @@ def _put_nozzle_lengths(out, conv_mm, div_mm):
 def solid_results_to_motor_geometry(results):
     """/calculate_solid sonucundan hibrit-şekilli geometri (m) üretir.
 
-    Katıda 'port' çekirdek (core) deliğidir: başlangıç portu = core çapı,
-    son port = grain dış çapı (web tamamen yanar).
+    Katıda 'port' çekirdek (core) deliğidir: başlangıç portu = core çapı.
+
+    Son port için eskiden KOŞULSUZ ``grain_od_mm`` yazılıyordu, gerekçesi de
+    "web tamamen yanar" diye not düşülmüştü. Bu yalnız iç yüzeyin yandığı
+    (dış yüzey inhibitörlü) durumda doğrudur. Dış yüzey de yanıyorsa cephe
+    İKİ taraftan ilerler, tükenme yarı web'te olur ve grain dışı hiçbir zaman
+    porta dönüşmez.
+
+    2026-08-03 (Faz 6, T07 kök nedeni) ölçümü: varsayılan Ø100/Ø30 grain'de
+    inhibitör açık/kapalı arasında yanma süresi 2,1863 s -> 1,1757 s değişiyor
+    ama ``port_diameter_final`` iki koşuda da 100,0 mm dönüyordu — yani
+    tükenmenin yarıya indiğini bilen çözücüyle çelişiyordu. Çözücü doğru
+    sayıyı zaten yayımlıyor (``grain_design.web_burnout_mm`` +
+    ``web_basis``); burada o kullanılır, yoksa eski davranışa düşülür.
     """
     r = results or {}
     gd = r.get('grain_design') or {}
@@ -317,6 +329,15 @@ def solid_results_to_motor_geometry(results):
     chamber_l_mm = max(chamber_l_mm, grain_len_mm * 1.05)
     core_d_mm = _num(gd.get('inner_diameter_mm'), _num(r.get('core_diameter'), 30.0))
     grain_od_mm = _num(gd.get('outer_diameter_mm'), chamber_d_mm - 4.0)
+
+    # Son port: çözücünün tükenen web'i varsa ondan türetilir (bkz. üstteki
+    # açıklama). ``web_burnout_mm`` iç cepheden tüketilen kalınlıktır, port
+    # yarıçapı o kadar büyür — yani çap 2× artar.
+    web_burnout_mm = _num(gd.get('web_burnout_mm'), None)
+    if web_burnout_mm is not None and web_burnout_mm > 0:
+        port_final_mm = min(core_d_mm + 2.0 * web_burnout_mm, grain_od_mm)
+    else:
+        port_final_mm = grain_od_mm  # bilgi yoksa eski (tek cepheli) varsayım
 
     ang = r.get('nozzle_angles') or {}
     ds_noz = ((r.get('design_summary') or {}).get('nozzle')) or {}
@@ -337,7 +358,7 @@ def solid_results_to_motor_geometry(results):
         'propellant_mass_total': _num(r.get('propellant_mass'), 0.0),
         'grain_length': grain_len_mm / 1000.0,
         'port_diameter_initial': core_d_mm / 1000.0,
-        'port_diameter_final': grain_od_mm / 1000.0,
+        'port_diameter_final': port_final_mm / 1000.0,
         'grain_design': gd,
         'nozzle_angles': ang,
         'structural_analysis': r.get('structural_analysis') or {},

@@ -58,8 +58,19 @@
             font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
             color: var(--hd-cyan, #00e5ff); margin-bottom: 10px; font-weight: 600;
         }
-        #ls-left { top: 14px; left: 14px; width: 288px; max-height: calc(100% - 28px); overflow-y: auto; }
-        #ls-right { top: 14px; right: 14px; width: 300px; max-height: calc(100% - 28px); overflow-y: auto; }
+        /* T53 (2026-08-03) — ALT ŞERİT PAYI. Paneller görünümün altına kadar
+           uzadığı için sol panelin son düğmesi ("Resolve site") alttaki ölçek
+           çubuğunun ALTINDA kalıyordu. Ölçüldü (1600x1000): #ls-resolve
+           x=30 y=929 w=256 h=35 · #ls-scalebar x=14 y=928 w=189 h=58 →
+           6055 px² örtüşme = düğmenin %67,6'sı; elementFromPoint(düğme merkezi)
+           'ls-scalebar' döndürüyordu ve fare tıklaması hiç ulaşmıyordu
+           (Playwright 4 s'de zaman aşımı). Paneller artık alt kutulara pay
+           bırakır; pay JS'te GERÇEK kutu yüksekliğinden ölçülür
+           (bkz. layoutBottomReserve — doku notu açılınca/metin sarınca değişir).
+           Buradaki değerler yalnız JS çalışana kadar geçerli yedeklerdir. */
+        :root { --ls-reserve-left: 80px; --ls-reserve-right: 152px; }
+        #ls-left { top: 14px; left: 14px; width: 288px; max-height: calc(100% - 28px - var(--ls-reserve-left)); overflow-y: auto; }
+        #ls-right { top: 14px; right: 14px; width: 300px; max-height: calc(100% - 28px - var(--ls-reserve-right)); overflow-y: auto; }
         #ls-cursor {
             position: absolute; z-index: 20; left: 50%; top: 12px; transform: translateX(-50%);
             font-family: var(--hd-mono, monospace); font-size: 12px;
@@ -433,26 +444,76 @@
     //             rozetle işaretlenir, hesaplanmış bir motor sanılmasın.
     // =====================================================================
     var HANDOFF_KEY = 'hrma.flight.lastVehicle';
+    // T74 (2026-08-03) — motor_name normalde KULLANICI VERİSİDİR (kendi
+    // motorunun adı) ve çevrilmez. Örnek aracın adı ise veri değil, YER
+    // TUTUCUDUR; TR modda 'Example vehicle (örnek, hesaplanmış değil)' diye
+    // yarı Türkçe görünüyordu. name_key yalnız bu araca konur: adı olan
+    // gerçek motorlar aynen basılır, yer tutucu ad sözlükten gelir.
     var EXAMPLE_VEHICLE = {
-        motor_name: 'Example vehicle', thrust: 6500, burn_time: 7.5,
+        motor_name: 'Example vehicle', name_key: 'site.srcExample',
+        thrust: 6500, burn_time: 7.5,
         propellant_mass: 18, engine_inert_mass: 7, engine_od_m: 0.15,
         engine_length_m: 2.0, thrust_curve: null, source: 'example'
     };
     var currentVehicle = null;
+    // Araç metinlerini dil değişiminde YENİDEN basabilmek için son not
+    // saklanır (aşağıdaki renderVehicleText'e bak).
+    var currentVehicleNote = null;      // {key, fallback} | null
 
+    // T08 (2026-08-03) — İSİM ÇAKIŞMASI: bu kapsamda İKİ ayrı `num` bildirimi
+    // vardı; okuyucu num(id, fb) burada, biçimlendirici num(v, d) ise
+    // aşağıda (~:800). Fonksiyon bildirimleri hoisting'de SON tanıma bağlandığı
+    // için okuyucu tümüyle gölgeleniyordu: num('ls-a-bodydia', 0.15) →
+    // isFinite('ls-a-bodydia')=false → '--'. Sonuç: /api/six-dof-analysis'e
+    // 8 alan dizge olarak gidiyor, sunucu her denemede HTTP 422 dönüyordu
+    // ("dry_mass":"--7" imzası = '--' + engine_inert 7). Ölçüldü: "Fly this site"
+    // hiçbir koşulda çalışmıyordu. İki işlev de AYRIŞIK adlandırıldı; artık
+    // `num` diye bir ad kalmadı, aynı tuzak sessizce tekrarlanamaz.
     function num_(v) { var n = parseFloat(v); return isFinite(n) ? n : null; }
-    function num(id, fb) { var n = parseFloat((el(id) || {}).value); return isFinite(n) ? n : fb; }
+    // Girdi alanından sayı OKU (id ile); alan boş/geçersizse yedeğe düş.
+    function fieldNum(id, fb) { var n = parseFloat((el(id) || {}).value); return isFinite(n) ? n : fb; }
     function setRO(id, v, digits) {
         var e = el(id); if (!e) return;
         e.value = (v === null || v === undefined || !isFinite(v))
             ? '' : Number(v).toFixed(digits === undefined ? 2 : digits);
     }
 
+    // T74 (2026-08-03) — DİL DEĞİŞİNCE YENİDEN BASILAN METİNLER.
+    // Kusur: rozet ve not textContent ile BİR KEZ yazılıyordu; :906'daki
+    // onChange yalnız I18N.apply(document.body) çağırdığı için data-i18n
+    // taşımayan bu iki düğüm eski dilde kalıyordu. ÖLÇÜLDÜ (2026-08-03,
+    // sayfa EN açılıp TR'ye çevrildi): rozet 'Example vehicle (example, not
+    // calculated)', not 'No motor calculated in this session yet — showing
+    // the example vehicle.' — İKİSİ DE İngilizce kaldı; aynı sayfa TR olarak
+    // YENİDEN YÜKLENDİĞİNDE ise Türkçe basılıyordu, yani çeviri vardı,
+    // yeniden basım yoktu. Metin üretimi ayrı fonksiyona alındı ve dil
+    // değişiminde YALNIZ o çağrılır — girdi alanlarına (kullanıcının elle
+    // düzenlediği gövde çapı/boyu) dokunulmaz.
+    function renderVehicleText() {
+        var v = currentVehicle;
+        var nameEl = el('ls-vehicle-name');
+        if (nameEl) {
+            var name = (v && (v.name_key ? t(v.name_key, v.motor_name) : v.motor_name)) || '--';
+            var src = (v && v.source) || 'example';
+            nameEl.textContent = name + ' (' + t('site.src.' + src, src) + ')';
+        }
+        var note = el('ls-vehicle-note');
+        if (note) {
+            var msg = currentVehicleNote
+                ? t(currentVehicleNote.key, currentVehicleNote.fallback) : '';
+            // Hibrit atıl kütlesi tahmindir (≈0.25·propelan) — kullanıcı bunu
+            // ölçülmüş bir değer sanmamalı.
+            if (v && v.engine_inert_mass_is_estimate) {
+                msg += (msg ? ' ' : '') + t('site.inertEstimate',
+                    'Engine inert mass is an estimate (~0.25 x propellant), not a computed structure.');
+            }
+            note.textContent = msg;
+        }
+    }
+
     function applyVehicle(v, noteKey, noteFallback) {
         currentVehicle = v || null;
-        var name = (v && v.motor_name) || '--';
-        var src = (v && v.source) || 'example';
-        el('ls-vehicle-name').textContent = name + ' (' + t('site.src.' + src, src) + ')';
+        currentVehicleNote = noteKey ? { key: noteKey, fallback: noteFallback } : null;
         setRO('ls-v-thrust', v && v.thrust, 0);
         setRO('ls-v-burntime', v && v.burn_time, 2);
         setRO('ls-v-propmass', v && v.propellant_mass, 2);
@@ -467,15 +528,7 @@
             var minLen = Math.max(2.0, (num_(v.engine_length_m) || 0) + 1.0);
             if (!num_(bl.value) || num_(bl.value) < minLen) bl.value = minLen.toFixed(2);
         }
-        var note = el('ls-vehicle-note');
-        var msg = noteKey ? t(noteKey, noteFallback) : '';
-        // Hibrit atıl kütlesi tahmindir (≈0.25·propelan) — kullanıcı bunu
-        // ölçülmüş bir değer sanmamalı.
-        if (v && v.engine_inert_mass_is_estimate) {
-            msg += (msg ? ' ' : '') + t('site.inertEstimate',
-                'Engine inert mass is an estimate (~0.25 x propellant), not a computed structure.');
-        }
-        note.textContent = msg;
+        renderVehicleText();
     }
 
     function loadSessionVehicle(quiet) {
@@ -573,16 +626,77 @@
         if (!isFinite(n) || n <= 0) return '0 MB';
         return (n / 1048576).toFixed(1) + ' MB';
     }
+    // T74 (2026-08-03) — göstergedeki ' tile' birimi İngilizce sabitti ve
+    // metin textContent ile bir kez yazıldığı için dil değişiminde de
+    // tazelenmiyordu. Son SUNUCU yanıtı saklanır; dil değişince o veriden
+    // yeniden basılır (yeni istek atılmaz, sayı uydurulmaz — veri yoksa
+    // gösterge boş kalır).
+    var lastTileStatus = null;
+    function renderTileUsage() {
+        var e = el('ls-tile-usage');
+        if (!e) return;
+        if (!lastTileStatus) { e.textContent = ''; return; }
+        e.textContent = fmtBytes(lastTileStatus.bytes) + ' · '
+            + (lastTileStatus.tiles || 0) + ' ' + t('site.tileUnit', 'tile');
+    }
     function refreshTileUsage() {
         fetch('/api/tile/cache/status').then(function (r) { return r.json(); })
             .then(function (d) {
                 if (!d) return;
-                el('ls-tile-usage').textContent =
-                    fmtBytes(d.bytes) + ' · ' + (d.tiles || 0) + ' tile';
-                // Karo indirildiyse atıf göster (offline'da gizli kalır).
-                el('ls-tile-attr').style.display = (d.tiles > 0) ? '' : 'none';
+                // Sunucudan HANGİ iki alanı tükettiğimiz açıkça yazılır;
+                // yanıtın tamamı saklanmaz (ileride eklenecek bir alan
+                // göstergeye kazara sızmasın).
+                lastTileStatus = { bytes: d.bytes, tiles: d.tiles };
+                renderTileUsage();
             }).catch(function () { /* çevrimdışı: sessiz */ });
     }
+
+    // T54 (2026-08-03) — Gösterge CANLI DEĞİLDİ. refreshTileUsage yalnız iki
+    // yerden çağrılıyordu: sayfa açılışı ve "Clear map cache". Karolar indikçe
+    // hiç yenilenmediği için ölçüm şuydu: kamera TEXTURE_NOTE_ALT_M (400 km)
+    // altına indirilip karolar indirildikten sonra sunucu
+    // /api/tile/cache/status → 5 karo / 138 KB derken ekranda hâlâ
+    // "0 MB · 0 tile" yazıyordu; NASA GIBS atfı (#ls-tile-attr) ise hiç
+    // görünmüyordu (computed display: none). Oysa yukarıdaki A2 notu
+    // "kullanıcı hem kaynağı hem disk kullanımını görebilmeli" diyor.
+    //
+    // Çözüm: küre modülünün YAYIMLADIĞI gerçek karo durumunu izle
+    // (launch_site_globe.js:731 getTileInfo) ve durum DEĞİŞTİĞİNDE sunucuya tek
+    // istek at. Sabit aralıklı yoklama yok; ekrandaki sayı doğrudan sunucudan
+    // gelir, tahmin/yer tutucu üretilmez.
+    var tileSig = null, tileNextFetch = 0;
+    function watchTiles() {
+        var info = (globe && globe.getTileInfo) ? globe.getTileInfo() : null;
+        if (!info) return;
+        // Atıf ekranda GIBS görüntüsü VARKEN zorunludur — ölçüt disk önbelleği
+        // değil, o an çizilen karo kümesidir.
+        el('ls-tile-attr').style.display = info.active ? '' : 'none';
+        var sig = info.count + '|' + (info.anyFail ? 1 : 0);
+        if (sig === tileSig) return;
+        var now = Date.now();
+        if (now < tileNextFetch) return;   // en fazla saniyede bir sunucu isteği
+        tileNextFetch = now + 1000;
+        tileSig = sig;
+        refreshTileUsage();
+    }
+
+    // T53 — Alt kutuların (ölçek çubuğu / dürüstlük notları) GERÇEK yüksekliğini
+    // ölç, panellerin uzayabileceği sınırı ona göre daralt. Sabit sayı
+    // yazılmıyor: doku notu açılıp kapandıkça ve metin sarmaları değiştikçe
+    // yükseklik değişir.
+    function layoutBottomReserve() {
+        var root = document.documentElement;
+        var sb = el('ls-scalebar'), nb = el('ls-notes');
+        // 14 px alt kenar boşluğu + 8 px nefes payı
+        var l = ((sb && sb.offsetHeight) || 0) + 22;
+        var r = ((nb && nb.offsetHeight) || 0) + 22;
+        if (root.style.getPropertyValue('--ls-reserve-left') !== l + 'px')
+            root.style.setProperty('--ls-reserve-left', l + 'px');
+        if (root.style.getPropertyValue('--ls-reserve-right') !== r + 'px')
+            root.style.setProperty('--ls-reserve-right', r + 'px');
+    }
+    layoutBottomReserve();
+    window.addEventListener('resize', layoutBottomReserve);
     el('ls-clear-tiles').addEventListener('click', function () {
         var b = this; b.disabled = true;
         fetch('/api/tile/cache/clear', { method: 'POST' })
@@ -601,23 +715,41 @@
         if (isFinite(la) && isFinite(lo)) { globe.selectSite(la, lo, { frame: true }); }
     });
 
-    // Hazır saha kısayolları (küçük gömülü liste; kısıt değil)
+    // Hazır saha kısayolları (küçük gömülü liste; kısıt değil).
+    // T73 (2026-08-03) — Everest girdisi 'Mount Everest (yüksek arazi)' yazıyordu:
+    // locale=en-US tarayıcıda yedi seçenekten altısı İngilizce, biri TÜRKÇE idi
+    // (liste i18n'den geçmediği için TR modunda da aynı satır görünüyordu).
+    // Diğer altısı özel ad; yalnız bu girdide betimleyici bir ek var, o yüzden
+    // ek artık İngilizce ve i18n anahtarına bağlı. Anahtar sözlükte yoksa
+    // I18N.t yedeğe düşer (İngilizce), yani sözlük eklenene kadar da doğru
+    // görünür. Dördüncü sütun = i18n anahtarı (yoksa metin sabittir).
     var PRESETS = [
         ['ksc', 'Kennedy Space Center LC-39A', 28.6084, -80.6043],
         ['baikonur', 'Baikonur 1/5 (Gagarin Start)', 45.9200, 63.3422],
         ['kourou', 'Kourou ELA-3', 5.2390, -52.7683],
         ['mahia', 'Rocket Lab LC-1 (Mahia)', -39.2617, 177.8650],
         ['esrange', 'Esrange (Kiruna)', 67.8931, 21.1043],
-        ['everest', 'Mount Everest (yüksek arazi)', 27.9881, 86.9250],
+        ['everest', 'Mount Everest (high terrain)', 27.9881, 86.9250, 'site.presetEverest'],
         ['sinop', 'Sinop (TR)', 42.0231, 35.1531]
     ];
+    function presetLabel(p) { return p[4] ? t(p[4], p[1]) : p[1]; }
+    // Dil değişince yalnız etiketleri tazele (seçim korunur).
+    function relabelPresets() {
+        var sel = el('ls-presets');
+        if (!sel) return;
+        PRESETS.forEach(function (p, i) {
+            var o = sel.options[i + 1];            // 0. seçenek '—'
+            if (o && o.value === p[0]) o.textContent = presetLabel(p);
+        });
+    }
     (function fillPresets() {
         var sel = el('ls-presets');
         var opt0 = document.createElement('option');
         opt0.value = ''; opt0.textContent = '—'; sel.appendChild(opt0);
         PRESETS.forEach(function (p) {
             var o = document.createElement('option');
-            o.value = p[0]; o.textContent = p[1]; o.dataset.lat = p[2]; o.dataset.lon = p[3];
+            o.value = p[0]; o.textContent = presetLabel(p);
+            o.dataset.lat = p[2]; o.dataset.lon = p[3];
             sel.appendChild(o);
         });
         sel.addEventListener('change', function () {
@@ -647,11 +779,11 @@
             el('ls-r-elev').textContent = fmtM(s.elevation_m);
             el('ls-r-relief').textContent = (s.terrain_relief_m != null)
                 ? fmtM(s.terrain_relief_m) : '--';
-            el('ls-r-glocal').textContent = num(s.gravity_local_m_s2, 5) + ' m/s²';
-            el('ls-r-gstd').textContent = num(s.gravity_standard_m_s2, 5) + ' m/s²';
-            el('ls-r-temp').textContent = num(s.temperature_k, 1) + ' K';
-            el('ls-r-press').textContent = num(s.pressure_pa / 1000, 2) + ' kPa';
-            el('ls-r-erot').textContent = num(s.earth_rotation_speed_m_s, 1) + ' m/s';
+            el('ls-r-glocal').textContent = fmtNum(s.gravity_local_m_s2, 5) + ' m/s²';
+            el('ls-r-gstd').textContent = fmtNum(s.gravity_standard_m_s2, 5) + ' m/s²';
+            el('ls-r-temp').textContent = fmtNum(s.temperature_k, 1) + ' K';
+            el('ls-r-press').textContent = fmtNum(s.pressure_pa / 1000, 2) + ' kPa';
+            el('ls-r-erot').textContent = fmtNum(s.earth_rotation_speed_m_s, 1) + ' m/s';
             globe._siteElevM = s.elevation_m || 0;
             setStatus('');
         }).catch(function () {
@@ -673,22 +805,22 @@
         // burada TOPLANIR, propelan ise ayrı alan olarak gider. Panelde
         // "Airframe dry" alanı motor atılını İÇERMEZ (ipucu metni bunu söyler).
         var veh = currentVehicle || EXAMPLE_VEHICLE;
-        var dryTotal = num('ls-a-drymass', 18) + (num_(veh.engine_inert_mass) || 0);
+        var dryTotal = fieldNum('ls-a-drymass', 18) + (num_(veh.engine_inert_mass) || 0);
 
         var body = {
-            body_diameter: num('ls-a-bodydia', 0.15),
-            body_length: num('ls-a-bodylen', 3.0),
+            body_diameter: fieldNum('ls-a-bodydia', 0.15),
+            body_length: fieldNum('ls-a-bodylen', 3.0),
             nose_length: 0.5, nose_type: 'ogive',
             dry_mass: dryTotal,
             propellant_mass: num_(veh.propellant_mass) || 18,
             thrust: num_(veh.thrust) || 6500,
             burn_time: num_(veh.burn_time) || 7.5,
-            cd0: num('ls-a-cd0', 0.45),
-            fin_count: num('ls-a-fincount', 4),
+            cd0: fieldNum('ls-a-cd0', 0.45),
+            fin_count: fieldNum('ls-a-fincount', 4),
             fin_root_chord: 0.20, fin_tip_chord: 0.10,
-            fin_span: num('ls-a-finspan', 0.11), fin_sweep: 0.08,
-            launch_elevation_deg: num('ls-a-elev', 84),
-            launch_azimuth_deg: num('ls-a-azim', 90),
+            fin_span: fieldNum('ls-a-finspan', 0.11), fin_sweep: 0.08,
+            launch_elevation_deg: fieldNum('ls-a-elev', 84),
+            launch_azimuth_deg: fieldNum('ls-a-azim', 90),
             rail_length: 5,
             wind_speed: 6, wind_direction_deg: 270, t_max: 400,
             // B1 — Coriolis: çözücü saha enlemini alınca Dünya dönüşünü
@@ -780,6 +912,10 @@
 
     // ---- Ölçek göstergesi (her ~150 ms) ----
     setInterval(function () {
+        // T53/T54: bu iki iş getScaleInfo() null dönse de yapılmalı — bu yüzden
+        // erken çıkıştan ÖNCE çağrılıyorlar.
+        layoutBottomReserve();
+        watchTiles();
         var info = globe.getScaleInfo();
         if (!info) return;
         var lenM = info.metersPerPixel * 100;   // 100 px'lik bar
@@ -789,7 +925,9 @@
     }, 150);
 
     // ---- Biçimleyiciler ----
-    function num(v, d) { return (v == null || !isFinite(v)) ? '--' : Number(v).toFixed(d); }
+    // Sayıyı METNE çevir (bkz. T08 notu ~:443 — eskiden bu da `num` adındaydı
+    // ve yukarıdaki okuyucuyu gölgeliyordu).
+    function fmtNum(v, d) { return (v == null || !isFinite(v)) ? '--' : Number(v).toFixed(d); }
     function fmtM(v) { return (v == null || !isFinite(v)) ? '--' : Math.round(v) + ' m'; }
     function fmtKmM(v) {
         if (v == null || !isFinite(v)) return '--';
@@ -814,7 +952,13 @@
     });
     if (I18N && I18N.apply) { I18N.apply(document.body); markLang(); }
     if (I18N && I18N.onChange) I18N.onChange(function () {
-        I18N.apply(document.body); markLang(); renderEvents();
+        // relabelPresets: T73 — kısayol listesi JS ile basıldığı için
+        // I18N.apply onu görmez, etiketleri elle tazelemek gerekir.
+        // renderVehicleText / renderTileUsage: T74 — aynı sebep. Bu iki
+        // düğüm data-i18n TAŞIMAZ (metin çalışma anında birleştiriliyor),
+        // dolayısıyla I18N.apply onlara da erişemez.
+        I18N.apply(document.body); markLang(); renderEvents(); relabelPresets();
+        renderVehicleText(); renderTileUsage();
     });
 })();
 </script>

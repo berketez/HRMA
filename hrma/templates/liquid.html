@@ -1705,7 +1705,11 @@
                 <div id="single_point_tab" class="analysis-tab-content active">
                     <div class="analysis-subtabs">
                         <button class="subtab-button active" onclick="showSubTab('thrust_time')" data-i18n="liq.ui.thrust_time">Thrust & Time</button>
-                        <button class="subtab-button" onclick="showSubTab('total_impulse')" data-i18n="liq.ui.total_impulse">Total Impulse</button>
+                        <!-- T62: sekmenin içeriği motor alt sistemleridir (aşağıdaki
+                             bölüm başlığı da öyle diyor); adı da onu söylemeli.
+                             Toplam impuls artık "Thrust & Time" sekmesindeki motor
+                             künyesinde, çarpanlarıyla birlikte duruyor. -->
+                        <button class="subtab-button" onclick="showSubTab('total_impulse')" data-i18n="liq.ui.engine_subsystems">Engine Subsystems</button>
                     </div>
                     
                     <div id="thrust_time_content" class="subtab-content active">
@@ -2035,11 +2039,15 @@
                         `;
                         
                         // Update form fields if they exist
+                        // T45: veri tabanı değeri ham float olarak yazılınca alanda
+                        // 17 basamak görünüyordu; anlamlı basamağa yuvarlanır.
                         if (props.density && document.getElementById('fuel_density')) {
-                            document.getElementById('fuel_density').value = props.density;
+                            document.getElementById('fuel_density').value =
+                                liquidSigFig(props.density, LIQUID_SIGFIG_DENSITY);
                         }
                         if (props.viscosity && document.getElementById('fuel_viscosity')) {
-                            document.getElementById('fuel_viscosity').value = props.viscosity;
+                            document.getElementById('fuel_viscosity').value =
+                                liquidSigFig(props.viscosity, LIQUID_SIGFIG_TRANSPORT);
                         }
                     } else {
                         fuelSpan.innerHTML = `<div style="color: #ffc107;">${T('liq.js.using_cached_data', 'Using cached data')}</div>`;
@@ -2072,12 +2080,14 @@
                             <div style="font-size: 9px; color: #6c757d;">${T('liq.js.source_label', 'Source:')} ${oxData.source || 'API'}</div>
                         `;
                         
-                        // Update form fields if they exist
+                        // Update form fields if they exist (T45: bkz. yakıt kolu)
                         if (props.density && document.getElementById('oxidizer_density')) {
-                            document.getElementById('oxidizer_density').value = props.density;
+                            document.getElementById('oxidizer_density').value =
+                                liquidSigFig(props.density, LIQUID_SIGFIG_DENSITY);
                         }
                         if (props.viscosity && document.getElementById('oxidizer_viscosity')) {
-                            document.getElementById('oxidizer_viscosity').value = props.viscosity;
+                            document.getElementById('oxidizer_viscosity').value =
+                                liquidSigFig(props.viscosity, LIQUID_SIGFIG_TRANSPORT);
                         }
                     } else {
                         oxSpan.innerHTML = `<div style="color: #ffc107;">${T('liq.js.using_cached_data', 'Using cached data')}</div>`;
@@ -2258,8 +2268,8 @@
                     <h3>${T('liq.js.injection_system', 'Injection System')}</h3>
                     <table class="spec-table">
                         <tr><td>${T('liq.js.type', 'Type:')}</td><td>${results.injection_system.injector_type}</td></tr>
-                        <tr><td>${T('liq.js.fuel_vel', 'Fuel Vel:')}</td><td>${results.injection_system.fuel_injection_velocity} m/s</td></tr>
-                        <tr><td>${T('liq.js.ox_vel', 'Ox Vel:')}</td><td>${results.injection_system.ox_injection_velocity} m/s</td></tr>
+                        <tr><td>${T('liq.js.fuel_vel', 'Fuel Vel:')}</td><td>${hrmaFmt(results.injection_system.fuel_injection_velocity, LIQUID_DEC_VELOCITY_MS)} m/s</td></tr>
+                        <tr><td>${T('liq.js.ox_vel', 'Ox Vel:')}</td><td>${hrmaFmt(results.injection_system.ox_injection_velocity, LIQUID_DEC_VELOCITY_MS)} m/s</td></tr>
                         <tr><td>${T('liq.js.fuel_p', 'Fuel ΔP:')}</td><td>${results.injection_system.fuel_pressure_drop.toFixed(1)} bar</td></tr>
                     </table>
                 </div>
@@ -2297,47 +2307,15 @@
             displayDetailedAnalysis(results);
 
             // Altitude Performance Plot
+            // Şekil ortak yapıcıdan gelir (_buildAltitudeFigure): sabit debide
+            // Isp ile itki birebir orantılı olduğundan iki seri tek eğriye
+            // indirgenir ve sağ eksen o dönüşüme kilitlenir (T15); deniz
+            // seviyesi Isp'si HUD kartıyla çelişiyorsa grafiğin altına
+            // çözücünün gerekçesiyle yazılır (T42).
             if (results.altitude_performance && results.altitude_performance.length > 0) {
-                const altitudeIspTrace = {
-                    x: results.altitude_performance.map(p => p.altitude / 1000), // Convert to km
-                    y: results.altitude_performance.map(p => p.specific_impulse),
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    name: T('liq.msg.isp_vs_altitude', 'Isp vs Altitude'),
-                    line: { color: '#00e5ff', width: 3 },
-                    marker: { size: 6 },
-                    yaxis: 'y'
-                };
-                
-                const altitudeThrustTrace = {
-                    x: results.altitude_performance.map(p => p.altitude / 1000),
-                    y: results.altitude_performance.map(p => p.thrust / 1000), // Convert to kN
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    name: T('liq.msg.thrust_vs_altitude', 'Thrust vs Altitude'),
-                    line: { color: '#ff8c33', width: 3 },
-                    marker: { size: 6 },
-                    yaxis: 'y2'
-                };
-                
-                const altitudeLayout = {
-                    title: T('liq.msg.engine_performance_vs_altitude', 'Engine Performance vs Altitude'),
-                    xaxis: { title: T('liq.msg.altitude_km', 'Altitude (km)') },
-                    yaxis: { 
-                        title: T('liq.msg.specific_impulse_s', 'Specific Impulse (s)'),
-                        titlefont: { color: '#00e5ff' },
-                        tickfont: { color: '#00e5ff' }
-                    },
-                    yaxis2: {
-                        title: T('liq.msg.thrust_kn', 'Thrust (kN)'),
-                        titlefont: { color: '#ff8c33' },
-                        tickfont: { color: '#ff8c33' },
-                        overlaying: 'y',
-                        side: 'right'
-                    },
-                    showlegend: true
-                };
-                
+                const altFig = _buildAltitudeFigure(results, results.altitude_performance,
+                                                    { height: 420 });
+
                 // Create altitude plot container if it doesn't exist
                 if (!document.getElementById('altitude_plot')) {
                     const altitudePlotDiv = document.createElement('div');
@@ -2357,12 +2335,27 @@
                 // gelince grafik ~148 px'e eziliyor, eksen etiketleri üst üste
                 // lapa oluyordu (320/330/340/350 yığılması). Hem div hem layout
                 // yüksekliği sabitlenir ki Plots.resize de 420'de kalsın.
-                document.getElementById('altitude_plot').style.height = '420px';
-                altitudeLayout.height = 420;
-                liquidPlot('altitude_plot', [altitudeIspTrace, altitudeThrustTrace], altitudeLayout);
+                const altDiv = document.getElementById('altitude_plot');
+                altDiv.style.height = '420px';
+                liquidPlot('altitude_plot', altFig.traces, altFig.layout);
+                _liquidPlotNote(altDiv, 'altitude_plot_note', altFig.note);
             }
+
+            // Yan paneller yeni motorla eşitlenir: enjektör girdileri çözücü
+            // debilerine (T38), 6-DOF notu motor bağına (T02). Paneller henüz
+            // kurulmadıysa iki yardımcı da sessizce geri döner.
+            syncInjectorPanelToSolver(results);
+            updateSixDofEngineNote();
             
             // Design report
+            // T62 (Faz 6): 'Total Impulse' alt sekmesi toplam impulsü HİÇ
+            // göstermiyordu (içindeki beş grafik karışım oranı, irtifa, yanma
+            // verimi, kayıp pastası ve tank 3B görünümü). Sekme artık içeriğine
+            // göre adlandırıldı (Engine Subsystems) ve toplam impuls asıl yerine,
+            // motor künyesine kondu: I_t = F·t_b (sürekli rejim, sabit itki) —
+            // aynı türetme PDF yolunda da kullanılıyor. İki çarpan da yanına
+            // yazılır ki okuyucu hangi yanma süresiyle çarpıldığını görsün;
+            // ikisinden biri yoksa satır hiç basılmaz (uydurma değer yok).
             const reportDiv = document.getElementById('designReport');
             reportDiv.innerHTML = `
                 <table style="width: 100%; border-collapse: collapse;">
@@ -2372,7 +2365,7 @@
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.mixture_ratio', 'Mixture Ratio:')}</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.mixture_ratio} ${TF('liq.msg.optimal_value', { value: results.optimal_mixture_ratio }, '(Optimal: {value})')}</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${hrmaFmt(results.mixture_ratio, LIQUID_DEC_MIXTURE_RATIO)} ${TF('liq.msg.optimal_value', { value: hrmaFmt(results.optimal_mixture_ratio, LIQUID_DEC_MIXTURE_RATIO) }, '(Optimal: {value})')}</td>
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.mr_efficiency', 'MR Efficiency:')}</strong></td>
@@ -2392,12 +2385,18 @@
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.chamber_temperature', 'Chamber Temperature:')}</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.chamber_temperature} K</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${hrmaFmt(results.chamber_temperature, LIQUID_DEC_TEMPERATURE_K)} K</td>
                     </tr>
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.vacuum_expansion_ratio', 'Vacuum Expansion Ratio:')}</strong></td>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.expansion_ratio_vacuum.toFixed(1)}</td>
                     </tr>
+                    ${(typeof results.thrust === 'number' && isFinite(results.thrust)
+                       && typeof results.burn_time === 'number' && isFinite(results.burn_time)) ? `
+                    <tr>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.ui.total_impulse', 'Total Impulse')}</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${hrmaFmt(results.thrust * results.burn_time / 1000, 1)} kN&#183;s = ${hrmaFmt(results.thrust / 1000, 2)} kN &#215; ${hrmaFmt(results.burn_time, 1)} s</td>
+                    </tr>` : ''}
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.space_application', 'Space Application:')}</strong></td>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${T('liq.js.multi_altitude_optimized_design', 'Multi-altitude optimized design')}</td>
@@ -2600,7 +2599,7 @@
             
             // Performance Maps Tab Content
             if (results.performance_maps) {
-                updatePerformanceMapsTab(results.performance_maps);
+                updatePerformanceMapsTab(results.performance_maps, results);
             }
             
             // Feed System Analysis
@@ -2632,14 +2631,14 @@
             }
         }
         
-        function updatePerformanceMapsTab(performanceMaps) {
+        function updatePerformanceMapsTab(performanceMaps, results) {
             // Create performance optimization charts
             if (performanceMaps.mixture_ratio_optimization) {
                 createMixtureRatioChart(performanceMaps.mixture_ratio_optimization);
             }
-            
+
             if (performanceMaps.altitude_performance) {
-                createAltitudePerformanceChart(performanceMaps.altitude_performance);
+                createAltitudePerformanceChart(performanceMaps.altitude_performance, results);
             }
         }
         
@@ -2665,25 +2664,69 @@
             liquidPlot(chartDiv, [trace1], layout);
         }
         
-        function createAltitudePerformanceChart(altData) {
+        // T63 (Faz 6): Bu grafik ile ALTITUDE PERFORMANCE panelindeki
+        // altitude_plot AYNI başlığı taşıyıp AYNI fiziği çiziyordu, üstelik
+        // farklı çözünürlükte. Ölçüldü (2026-08-03): altitude_plot 8 nokta
+        // (0/1/5/10/20/50/80/100 km), bu grafik 13 EŞİT aralıklı nokta
+        // (0 / 8,33 / 16,67 … km); uç değerler birebir aynı (0 km 249,924 s,
+        // 100 km 337,359 s), yani ikisi aynı seriden geliyor. Eşit aralıklı
+        // örnekleme deniz seviyesindeki hızlı değişimi (0→8,33 km) düz çizgiye
+        // indirgiyordu — yani kaba kopya, iyisinin yanında yanlış görünüyordu.
+        //
+        // İki değişiklik: (1) seri artık ÇÖZÜCÜNÜN KANONİK dizisinden
+        // (results.altitude_performance) okunur; harita yalnız o dizi yoksa
+        // yedek olarak kullanılır — böylece iki grafik çelişemez.
+        // (2) Grafiğin kendine ait bir işi olur: çözücünün bildirdiği tam
+        // genleşme irtifası (nozzle_exit_pressure = ISA ortam basıncı)
+        // işaretlenir; bu sayı sayfada başka hiçbir yerde çizilmiyor.
+        function createAltitudePerformanceChart(altData, results) {
             const chartDiv = document.getElementById('altChart') || createChartDiv('altChart', T('liq.msg.altitude_performance_map', 'Altitude Performance Map'));
-            
+
+            const ap = (results && Array.isArray(results.altitude_performance)
+                        && results.altitude_performance.length)
+                ? results.altitude_performance : null;
+            const km = ap ? ap.map(p => (Number(p.altitude) || 0) / 1000)
+                          : altData.altitude_range.map(alt => alt / 1000);
+            const isp = ap ? ap.map(p => { const v = Number(p.specific_impulse);
+                                           return isFinite(v) ? v : null; })
+                           : altData.isp_vs_altitude;
+
             const trace1 = {
-                x: altData.altitude_range.map(alt => alt/1000), // Convert to km
-                y: altData.isp_vs_altitude,
+                x: km,
+                y: isp,
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: T('liq.msg.specific_impulse', 'Specific Impulse'),
                 line: { color: '#00e5ff', width: 3 }
             };
-            
+
             const layout = {
-                title: T('liq.msg.engine_performance_vs_altitude', 'Engine Performance vs Altitude'),
+                // Başlık altitude_plot'unkinden AYRI: iki grafik aynı adı
+                // taşıyıp farklı şey göstermesin.
+                title: T('liq.msg.altitude_performance_map', 'Altitude Performance Map'),
                 xaxis: { title: T('liq.msg.altitude_km', 'Altitude (km)') },
                 yaxis: { title: T('liq.msg.specific_impulse_s', 'Specific Impulse (s)') },
                 showlegend: true
             };
-            
+
+            // Tam genleşme irtifası — çözücünün kendi alanı; yoksa çizilmez.
+            const optAlt = Number(altData.optimal_altitude);
+            if (isFinite(optAlt)) {
+                const optKm = optAlt / 1000;
+                layout.shapes = [{
+                    type: 'line', xref: 'x', yref: 'paper',
+                    x0: optKm, x1: optKm, y0: 0, y1: 1,
+                    line: { color: '#ff8c33', width: 2, dash: 'dash' }
+                }];
+                // Etiket dile bağlı DEĞİL: sayı + SI simgesi (sözlük anahtarı
+                // gerektirmez, iki dilde de aynı okunur).
+                layout.annotations = [{
+                    x: optKm, xref: 'x', yref: 'paper', y: 1.02,
+                    text: hrmaFmt(optKm, 1) + ' km', showarrow: false,
+                    font: { color: '#ff8c33', size: 11 }
+                }];
+            }
+
             liquidPlot(chartDiv, [trace1], layout);
         }
         
@@ -2936,22 +2979,33 @@
                 analysis.combustion_efficiency,
                 analysis.mixing_efficiency * analysis.combustion_efficiency / 100
             ];
-            
+
+            // T65 (Faz 6): üçüncü çubuk 'Overall' diye etiketliydi; hemen
+            // yanındaki kayıp pastasının başlığı da 'Overall Efficiency: %82,4'
+            // diyor. İKİSİ FARKLI BÜYÜKLÜK: buradaki yalnız iki yanma veriminin
+            // çarpımı (ölçüldü 2026-08-03: 0,9478 × 0,97 = %91,94), pastadaki
+            // ise motorun altı çarpanlı genel verimi (%82,4). Aynı sekmede yan
+            // yana duran iki niteliksiz 'Overall' okuyucuyu yanıltıyordu.
+            // Etiket artık ne olduğunu SÖYLÜYOR: iki çarpanın çarpımı.
             const trace = {
-                x: ['Mixing', 'Combustion', 'Overall'],
+                x: ['Mixing', 'Combustion', 'Mixing × Combustion'],
                 y: efficiencies,
                 type: 'bar',
                 marker: {
                     color: ['#00e5ff', '#c792ea', '#ff8c33']
                 }
             };
-            
+
             const layout = {
                 title: T('liq.msg.combustion_efficiency_breakdown', 'Combustion Efficiency Breakdown'),
+                // x ekseni başlığı YOKTU (ölçüldü: xaxis.title = null; TR modda
+                // da eksen çifti ['Verim (%)', null]). Sayfadaki diğer bütün
+                // grafikler iki eksende de başlık taşıyor.
+                xaxis: { title: T('liq.ui.component_breakdown', 'Component Breakdown') },
                 yaxis: { title: T('liq.msg.efficiency', 'Efficiency (%)') },
                 showlegend: false
             };
-            
+
             liquidPlot(chartDiv, [trace], layout);
         }
         
@@ -2963,33 +3017,151 @@
             }
         }
         
+        // ==================================================================
+        // KAYIP PASTASI — bütçe ayrımı ve etiketler (Faz 6 / T40, T41)
+        // ==================================================================
+        // T41: `name.replace('_', ' ')` YALNIZ İLK alt çizgiyi değiştirir.
+        // Ölçüldü (2026-08-03): ekranda 'HEAT TRANSFER_LOSS',
+        // 'NOZZLE LENGTH_LOSS', 'BOUNDARY LAYER_LOSS' yazıyordu — tek
+        // kelimelik anahtarlarda hata görünmediği için gözden kaçmıştı.
+        const LOSS_LABEL_UNDERSCORE_RE = /_/g;
+
+        function _lossLabel(key) {
+            return String(key).replace(LOSS_LABEL_UNDERSCORE_RE, ' ').toUpperCase();
+        }
+
+        // T40: pastanın başlığı "Overall Efficiency: %82,4" diyor ama
+        // dilimlerden biri O ÇARPIMA ait değil. Çözücü bunu kendi
+        // loss_sources açıklamasında söylüyor (nozzle_length_loss →
+        // 'design comparison only, not part of the overall efficiency
+        // product'). Ölçüldü (2026-08-03, ε=50 koşusu): NOZZLE LENGTH_LOSS
+        // 8,028 puan / 26,848 toplam = pastanın %29,9'u; başlıktaki %82,4
+        // ise diğer ALTI çarpanın çarpımı (0,99832·0,97·0,98296·0,91650·
+        // 0,99624·0,94778 = 0,8237).
+        //
+        // Ayrım PROSE'a GÜVENMEZ, sayıyla doğrulanır: aday kalem
+        // çıkarıldığında kalanların çarpımı overall_efficiency'yi tutuyorsa
+        // ayrım kanıtlanmıştır. Tutmuyorsa hiçbir şey iddia edilmez —
+        // dilimler olduğu gibi kalır, yalnız başlıktaki verim iddiası
+        // düşürülür (uydurma sınıflandırma yapılmaz).
+        const EFF_PRODUCT_TOL_PCT = 0.05;   // puan; yuvarlama + kayan nokta payı
+        const EFF_OUTSIDE_PRODUCT_RE = /not part of the overall efficiency product/i;
+
+        function _effBudgetSplit(effData) {
+            const losses = (effData && effData.loss_breakdown) || {};
+            const keys = Object.keys(losses);
+            const split = { budget: keys.slice(), outside: [], verified: false };
+            const eff = effData && effData.efficiency_breakdown;
+            const overall = Number(effData && effData.overall_efficiency);
+            if (!eff || !isFinite(overall) || !keys.length) return split;
+
+            // Verimler YÜZDE gelir; çarpım için 100'e bölünür.
+            const product = function (ks) {
+                let p = 1;
+                for (let i = 0; i < ks.length; i++) {
+                    const v = Number(eff[ks[i]]);
+                    if (!isFinite(v)) return NaN;
+                    p *= v / 100;
+                }
+                return p * 100;
+            };
+
+            if (Math.abs(product(keys) - overall) <= EFF_PRODUCT_TOL_PCT) {
+                split.verified = true;          // her kalem bütçede
+                return split;
+            }
+            const sources = (effData.loss_sources) || {};
+            const flagged = keys.filter(function (k) {
+                return EFF_OUTSIDE_PRODUCT_RE.test(String(sources[k] || ''));
+            });
+            if (!flagged.length) return split;  // aday yok → sınıflandırma yok
+            const rest = keys.filter(function (k) { return flagged.indexOf(k) === -1; });
+            if (rest.length && Math.abs(product(rest) - overall) <= EFF_PRODUCT_TOL_PCT) {
+                split.budget = rest;
+                split.outside = flagged;
+                split.verified = true;
+            }
+            return split;
+        }
+
+        // Grafik altına açıklama satırı ekler/günceller/siler. Metin boşsa
+        // eski not KALDIRILIR (eski koşudan kalma açıklama asılı kalmasın).
+        function _liquidPlotNote(plotEl, noteId, html) {
+            if (!plotEl || !plotEl.parentNode) return;
+            let note = document.getElementById(noteId);
+            if (!html) {
+                if (note && note.parentNode) note.parentNode.removeChild(note);
+                return;
+            }
+            if (!note) {
+                note = document.createElement('p');
+                note.id = noteId;
+                note.style.cssText = 'font-family:var(--hd-mono, monospace);'
+                    + ' font-size:0.74rem; line-height:1.5; margin:8px 2px 0;'
+                    + ' color:var(--hd-ink-dim, #7d97a5);';
+                plotEl.parentNode.insertBefore(note, plotEl.nextSibling);
+            }
+            note.innerHTML = html;
+        }
+
         function createEfficiencyBreakdownChart(effData) {
             const chartDiv = document.getElementById('efficiencyChart') || createChartDiv('efficiencyChart', T('liq.msg.efficiency_distribution', 'Efficiency Distribution'));
-            
+
             if (!chartDiv) return;
-            
-            const lossNames = Object.keys(effData.loss_breakdown);
-            const lossValues = Object.values(effData.loss_breakdown);
-            
+
+            const split = _effBudgetSplit(effData);
+            const shown = split.verified ? split.budget : Object.keys(effData.loss_breakdown);
+
             const trace = {
-                labels: lossNames.map(name => name.replace('_', ' ').toUpperCase()),
-                values: lossValues,
+                labels: shown.map(_lossLabel),
+                values: shown.map(function (k) { return effData.loss_breakdown[k]; }),
                 type: 'pie',
                 hole: 0.4,
                 textinfo: 'label+percent',
                 textposition: 'outside'
             };
-            
+
+            // Başlıktaki verim iddiası ANCAK dilimlerle o verim aynı
+            // bütçeye aitse kurulur; doğrulanamadıysa nötr başlık basılır.
             const layout = {
-                title: TF('liq.msg.performance_losses_title',
-                    { value: effData.overall_efficiency.toFixed(1) },
-                    'Performance Losses (Overall Efficiency: {value}%)'),
+                title: split.verified
+                    ? TF('liq.msg.performance_losses_title',
+                        { value: effData.overall_efficiency.toFixed(1) },
+                        'Performance Losses (Overall Efficiency: {value}%)')
+                    : T('liq.msg.performance_losses_unreconciled',
+                        'Performance Losses (loss items could not be reconciled '
+                        + 'with the reported overall efficiency)'),
                 showlegend: true,
                 // Pasta grafikte 'x unified' anlamsız
                 hovermode: 'closest'
             };
 
             liquidPlot(chartDiv, [trace], layout);
+
+            // Bütçe dışı kalemler SİLİNMEZ; pastanın altında sayısıyla ve
+            // çözücünün kendi gerekçesiyle listelenir (bilgi kaybı yok).
+            const sources = effData.loss_sources || {};
+            let noteHtml = '';
+            if (split.verified && split.outside.length) {
+                noteHtml = '<strong>'
+                    + T('liq.msg.losses_outside_budget',
+                        'Not part of the overall efficiency product '
+                        + '(design comparison only, excluded from the pie):')
+                    + '</strong><br>'
+                    + split.outside.map(function (k) {
+                        const v = Number(effData.loss_breakdown[k]);
+                        return _lossLabel(k) + ' = '
+                            + (isFinite(v) ? v.toFixed(2) : 'n/a') + ' pt — '
+                            + String(sources[k] || '');
+                    }).join('<br>');
+            } else if (!split.verified) {
+                noteHtml = T('liq.msg.losses_not_reconciled',
+                    'The product of the individual efficiencies does not match '
+                    + 'the reported overall efficiency, so no item is claimed to '
+                    + 'be inside or outside the efficiency budget. All items are '
+                    + 'shown as returned by the solver.');
+            }
+            _liquidPlotNote(chartDiv, 'efficiencyChartNote', noteHtml);
         }
         
         function updateManufacturingTab(manufacturingData) {
@@ -3094,7 +3266,7 @@
                     <tr><td>${T('liq.js.level_sensors', 'Level Sensors:')}</td><td>${tankData.oxidizer_tank.internal_structures.instrumentation.level_sensors.count} capacitive probes</td></tr>
                     <tr><td>${T('liq.js.baffle_mass', 'Baffle Mass:')}</td><td>${tankData.oxidizer_tank.internal_structures.mass_breakdown.baffles.toFixed(1)} kg</td></tr>
                     <tr><td>${T('liq.js.total_internal_mass', 'Total Internal Mass:')}</td><td>${tankData.oxidizer_tank.internal_structures.mass_breakdown.total_mass.toFixed(1)} kg</td></tr>
-                    <tr><td>${T('liq.js.relief_valve', 'Relief Valve:')}</td><td>${tankData.oxidizer_tank.internal_structures.instrumentation.relief_valve.diameter} mm Ø</td></tr>
+                    <tr><td>${T('liq.js.relief_valve', 'Relief Valve:')}</td><td>${hrmaFmt(tankData.oxidizer_tank.internal_structures.instrumentation.relief_valve.diameter, 2)} mm Ø</td></tr>
                 </table>
             `;
             container.appendChild(internalsCard);
@@ -3127,6 +3299,48 @@
             container.appendChild(exportButton);
         }
         
+        // Girdap önleyici çap/yüksekliğini MİLİMETRE'ye çevirir (T13).
+        // Sunucu tarafındaki cad_export.normalize_anti_vortex_mm ile AYNI
+        // ölçütleri, aynı sırayla kullanır — iki taraf ayrışırsa aynı veriden
+        // iki farklı geometri çıkar (bu hatanın ta kendisi buydu).
+        // Çözemezse `null` döner: değer UYDURULMAZ.
+        function antiVortexMm(av) {
+            if (!av || typeof av !== 'object') return null;
+            const say = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+
+            // 1) Çözücü mm'yi açıkça yayımlıyorsa tahmine gerek yok.
+            const dMm = say(av.diameter_mm), hMm = say(av.height_mm);
+            if (dMm !== null && hMm !== null) return { diameter: dMm, height: hMm };
+
+            const d = say(av.diameter), h = say(av.height);
+            if (d === null || h === null) return null;
+
+            // 2) Çözücünün kendi geometrik özdeşliği: kanat göbekten dış çapa
+            //    uzar, yani her koşulda diameter[mm] === 2 x vane_radial_length_mm.
+            //    Ölçek bu özdeşlikten ÇIKARILIR, büyüklük sezgisinden değil.
+            const vane = say(av.vane_radial_length_mm);
+            if (vane !== null && vane > 0 && d > 0) {
+                const beklenen = 2 * vane, tol = 1e-6 * beklenen;
+                if (Math.abs(d - beklenen) <= tol) return { diameter: d, height: h };
+                if (Math.abs(d * 1000 - beklenen) <= tol)
+                    return { diameter: d * 1000, height: h * 1000 };
+            }
+
+            // 3) Özdeşlik yoksa sözlüğün kendi birim beyanına uyulur.
+            const beyan = String(av.units || '').trim().toLowerCase();
+            if (beyan === 'mm' || beyan === 'millimetre' || beyan === 'millimeter')
+                return { diameter: d, height: h };
+            if (beyan === 'm' || beyan === 'metre' || beyan === 'meter')
+                return { diameter: d * 1000, height: h * 1000 };
+
+            // 4) Ölçüt yok -> UYDURMA YOK.
+            // Konsol metni İNGİLİZCE: alt sayfalar tek dilli (tests/test_i18n.py
+            // ::test_no_turkish_left_in_visible_text bunu bekçiliyor).
+            console.warn('anti-vortex device unit could not be resolved; '
+                         + 'the device is not drawn', av);
+            return null;
+        }
+
         function createTankVisualization(tankData) {
             // Create 3D visualization of propellant tanks
             const chartDiv = document.getElementById('tankVisualization') || createChartDiv('tankVisualization', T('liq.msg.fuel_tank_3d_model', 'Fuel Tank 3D Model'));
@@ -3164,19 +3378,30 @@
             });
             
             // Add anti-vortex device
+            // T13 (2026-08-03): burada `diameter / 2000` ve `height / 1000`
+            // yazıyordu, yani düzenek MİLİMETRE sanılıyordu. Oysa çözücü bu
+            // İKİ alanı METRE yayımlar (liquid_rocket_engine.py, anti_vortex
+            // sözlüğü) — hemen üstteki bafl satırının 2000'e bölmesi DOĞRU
+            // çünkü bafl alanları gerçekten mm. Sonuç: 258,91 mm çaplı düzenek
+            // 0,2589 mm çizildi, yani gözle görünmez oldu (ölçüldü: mesh3d x
+            // uzanımı ±0,00012946 m). Birim artık tahmin edilmiyor,
+            // antiVortexMm() ile ÇÖZÜLÜYOR; çözülemezse iz hiç çizilmez.
             const antiVortex = oxTank.internal_structures.anti_vortex_device;
-            const antiVortexTrace = createCylinderTrace(0, 0, -oxL/2 + 0.05, 
-                antiVortex.diameter / 2000, antiVortex.height / 1000, 
-                T('liq.msg.anti_vortex_device', 'Anti-Vortex Device'), '#ff8c33', 0.8);
-            
+            const avMm = antiVortexMm(antiVortex);
+            const antiVortexTrace = avMm ? createCylinderTrace(0, 0, -oxL/2 + 0.05,
+                avMm.diameter / 2000, avMm.height / 1000,
+                T('liq.msg.anti_vortex_device', 'Anti-Vortex Device'), '#ff8c33', 0.8) : null;
+
             // Add inlet and outlet pipes
             const inletTrace = createCylinderTrace(0, 0, oxL/2 - 0.1, 
                 0.05, 0.2, T('liq.msg.inlet_pipe', 'Inlet Pipe'), '#2dd4a8', 0.7); // 100mm diameter inlet
             const outletTrace = createCylinderTrace(0, 0, -oxL/2 + 0.05, 
                 0.075, 0.1, T('liq.msg.outlet_pipe', 'Outlet Pipe'), '#ffd166', 0.7); // 150mm diameter outlet
             
-            // Combine all traces
-            const allTraces = [oxTankTrace, fuelTankTrace, antiVortexTrace, 
+            // Combine all traces (birimi çözülemeyen girdap önleyici DIŞARIDA
+            // kalır — yanlış ölçekli bir cisim çizmektense hiç çizmemek doğru)
+            const allTraces = [oxTankTrace, fuelTankTrace,
+                              ...(antiVortexTrace ? [antiVortexTrace] : []),
                               inletTrace, outletTrace, ...baffleTraces];
             
             const layout = {
@@ -3190,8 +3415,17 @@
                 showlegend: true,
                 // Sabit width KALDIRILDI (2026-07-19): kapsayıcı dar olduğunda
                 // grafik taşıyor, geniş olduğunda ortada küçük kalıyordu.
-                height: 600
+                height: 600,
+                // Kenar boşlukları sıfırlanır: 3B sahnede başlık dışında
+                // boşluğa harcanacak yer yok (2B eksen etiketi yok). Ölçüldü
+                // (2026-08-03): 1224x400 kutunun yalnız ortası kullanılıyordu.
+                margin: { l: 0, r: 0, t: 40, b: 0 }
             };
+
+            // Kap yüksekliği layout ile EŞİTLENİR: createChartDiv kabı 400 px
+            // yapıyor, layout ise 600 px istiyordu — Plotly 600 px çiziyor ama
+            // kap 400 px'de kaldığı için alt üçte biri kırpılıyordu.
+            chartDiv.style.height = layout.height + 'px';
 
             liquidPlot(chartDiv, allTraces, layout);
         }
@@ -3272,6 +3506,12 @@
                 color: color,
                 opacity: opacity,
                 name: name,
+                // T46 (Faz 6): Plotly'de mesh3d izleri VARSAYILAN OLARAK efsanede
+                // görünmez — layout.showlegend true olsa bile her izin kendi
+                // showlegend'i açılmadıkça kutu hiç çizilmez. Ölçüldü
+                // (2026-08-03): 19 adlandırılmış iz, efsane kutusu 0 px, yani
+                // kullanıcı 19 renkli cismi adsız görüyordu.
+                showlegend: true,
                 lighting: {
                     ambient: 0.18,
                     diffuse: 1,
@@ -3380,8 +3620,14 @@
                 const holeX = x + holeDistance * Math.cos(holeAngle);
                 const holeY = y + holeDistance * Math.sin(holeAngle);
                 
-                const holeTrace = createCylinderTrace(holeX, holeY, z, holeRadius, thickness * 2, 
+                const holeTrace = createCylinderTrace(holeX, holeY, z, holeRadius, thickness * 2,
                     TF('liq.msg.hole_n', { name: name, n: hole + 1 }, '{name} Hole {n}'), '#ffffff', 1.0);
+                // Delikler perdenin kendi efsane girdisine BAĞLANIR: adları
+                // (fare üstünde) korunur ama efsanede ayrı satır açmazlar.
+                // Aksi hâlde iki perde 12 satır üretip listeyi okunmaz yapardı
+                // (ölçüldü: 19 iz → 7 anlamlı girdi).
+                holeTrace.legendgroup = name;
+                holeTrace.showlegend = false;
                 holeTraces.push(holeTrace);
             }
             
@@ -3406,6 +3652,11 @@
                 color: color,
                 opacity: opacity,
                 name: name,
+                // Perde halkası efsanede TEK satır olur; delikleri aynı
+                // legendgroup'ta gizli izler olarak asılıdır (bkz. yukarısı),
+                // dolayısıyla bu satıra tıklamak perdeyi delikleriyle kapatır.
+                showlegend: true,
+                legendgroup: name,
                 lighting: {
                     ambient: 0.15,
                     diffuse: 0.8,
@@ -4056,6 +4307,33 @@ Please provide:
             drawEngineDiagram(results);        // engine_diagram (akış şeması)
         }
 
+        // ==================================================================
+        // ANLAMLI BASAMAK — ham float ekrana basılmaz (Faz 6 / T45)
+        // ==================================================================
+        // Ölçüldü (2026-08-03, RP-1/LOX varsayılan koşusu): künyede
+        // '(Optimal: 2.806883164944784)' 16 basamak, 'Chamber Temperature:
+        // 3707.0404366159974 K' 17 basamak, form alanında 'Oxidizer Density:
+        // 1141.1612390428575' ve 'Oxidizer Viscosity:
+        // 0.00019466085657300348' basılıyordu. Bunlar kayan nokta artığıdır,
+        // KESİNLİK DEĞİLDİR: CEA denge sıcaklığının belirsizliği onlarca K,
+        // NIST/CoolProp yoğunluk bağıntılarınınki ~%0,1, taşınım özelliklerinin
+        // (viskozite, iletkenlik) ~%1-2 düzeyindedir. Basılan basamak sayısı bu
+        // belirsizliğin altında kalmalı, yoksa arayüz olmayan bir kesinlik
+        // vaat eder.
+        const LIQUID_SIGFIG_DENSITY = 6;      // yoğunluk: bağıntı belirsizliğinin altında
+        const LIQUID_SIGFIG_TRANSPORT = 4;    // viskozite/iletkenlik: ~%1-2 belirsizlik
+        const LIQUID_DEC_TEMPERATURE_K = 0;   // CEA belirsizliği onlarca K
+        const LIQUID_DEC_MIXTURE_RATIO = 3;   // Excel dışa aktarımıyla aynı yuvarlama
+        const LIQUID_DEC_VELOCITY_MS = 2;     // enjeksiyon hızı: cm/s çözünürlüğü yeter
+
+        // Anlamlı basamağa yuvarlar. toFixed'den farkı: büyüklükten bağımsız
+        // çalışır, yani hem 1141,16 hem 0,0001947 aynı kuralla kısalır.
+        function liquidSigFig(value, digits) {
+            const v = Number(value);
+            if (!isFinite(v) || v === 0) return v;
+            return Number(v.toPrecision(digits));
+        }
+
         // Sayısal biçimlendirme — geçersiz/eksik değerde '—' döner.
         function hrmaFmt(v, dec, unit) {
             if (typeof v !== 'number' || !isFinite(v)) return '—';
@@ -4075,6 +4353,172 @@ Please provide:
             });
         }
 
+        // ==================================================================
+        // İRTİFA-PERFORMANS GRAFİĞİ — ortak kurucu (Faz 6 / T15, T42)
+        // ==================================================================
+        // T15: Sabit kütle debisinde Isp ile itki BİREBİR ORANTILIDIR
+        // (F = Isp·ṁ·g0). İki ayrı OTOMATİK ölçeklenen y ekseninde çizilince
+        // iki eğri aynı piksellere düşer: efsane iki seri vaat ederken
+        // grafikte tek eğri görünür. Ölçüldü (2026-08-03, ε=50 koşusu, 8
+        // nokta): eksen kesirleri arasındaki en büyük fark 4,4e-16 (kayan
+        // nokta gürültüsü), yani camgöbeği Isp eğrisi turuncunun ALTINDA
+        // tümüyle gizliydi.
+        //
+        // Çözüm: orantı SAYIYLA sınanır. Orantılıysa TEK eğri çizilir ve sağ
+        // eksen aynı eğrinin birim dönüşümü olacak biçimde KİLİTLENİR
+        // (kN = Isp·ṁ·g0/1000), böylece iki büyüklük de okunur ve hiçbir
+        // bilgi kaybolmaz. Orantı bozuksa (değişken debi) iki seri korunur.
+        const ALT_PROPORTIONAL_REL_TOL = 1e-9;   // ölçülen sapma ~1e-16
+        const ALT_RANGE_PAD_FRAC = 0.06;         // eksen ucundaki görsel pay
+        // Standart yerçekimi ivmesi (BIPM tanımı); çözücü tarafındaki
+        // hrma/constants.py::G_0 ile AYNI sayı. Burada yalnız görüntüleme
+        // için (ṁ = oran/g0) kullanılır, hiçbir sonuç bundan türetilmez.
+        const LIQUID_G0 = 9.80665;
+
+        // {oran, orantili, n} — oran = itki[N] / Isp[s] (yani ṁ·g0)
+        function _altSeriesRatio(ap) {
+            let ratio = null, worst = 0, n = 0;
+            for (let i = 0; i < ap.length; i++) {
+                const isp = Number(ap[i].specific_impulse);
+                const F = Number(ap[i].thrust);
+                if (!isFinite(isp) || !isFinite(F) || isp === 0) continue;
+                const r = F / isp;
+                n += 1;
+                if (ratio === null) { ratio = r; continue; }
+                worst = Math.max(worst, Math.abs(r - ratio) / Math.abs(ratio));
+            }
+            return { oran: ratio, n: n,
+                     orantili: (n >= 2 && ratio !== null && worst <= ALT_PROPORTIONAL_REL_TOL) };
+        }
+
+        // T42: HUD kartındaki deniz seviyesi Isp ile grafiğin 0 km noktası
+        // AYNI EKRANDA farklı çıkabiliyor (ölçüldü 2026-08-03: 244,86335 s ↔
+        // 249,92430 s, fark 5,061 s = %2,07) ve fark hiçbir yerde
+        // açıklanmıyordu. Sebebi çözücünün kendi kaydında yazılı:
+        // ε=50 lüle deniz seviyesinde ayrıldığı için deniz seviyesi demiri
+        // geçersiz ve seri VAKUM referansına demirlenmiş. Fark eşiği aşarsa
+        // grafiğin altına çözücünün KENDİ gerekçesiyle birlikte yazılır.
+        const ALT_SL_ISP_REL_TOL = 0.005;        // %0,5
+
+        function _altAnchorNote(results, ap) {
+            const hud = Number(results && results.isp_sea_level);
+            let p0 = null;
+            for (let i = 0; i < ap.length; i++) {
+                const alt = Number(ap[i].altitude);
+                if (!isFinite(alt)) continue;
+                if (p0 === null || alt < Number(p0.altitude)) p0 = ap[i];
+            }
+            if (!p0) return '';
+            const isp0 = Number(p0.specific_impulse);
+            if (!isFinite(hud) || !isFinite(isp0) || hud === 0) return '';
+            const diff = isp0 - hud;
+            if (Math.abs(diff) / Math.abs(hud) <= ALT_SL_ISP_REL_TOL) return '';
+            return '<strong>'
+                + T('liq.msg.alt_isp_mismatch_head',
+                    'Two sea-level Isp values on this page:')
+                + '</strong> '
+                + TF('liq.msg.alt_isp_mismatch_body',
+                    { hud: hud.toFixed(3), plot: isp0.toFixed(3),
+                      km: (Number(p0.altitude) / 1000).toFixed(0),
+                      diff: diff.toFixed(3),
+                      pct: (100 * diff / hud).toFixed(2) },
+                    'the metric card reports {hud} s while the {km} km point of '
+                    + 'this curve reports {plot} s ({diff} s, {pct}%). Reason '
+                    + 'reported by the solver for that point: ')
+                + '<em>' + String(p0.isp_anchor_basis || 'not reported') + '</em>';
+        }
+
+        // İki seriyi (Isp, itki) tek grafiğe kuran ortak yapıcı.
+        // {traces, layout, note} döner.
+        function _buildAltitudeFigure(results, ap, opts) {
+            const o = opts || {};
+            const km = ap.map(function (p) { return (Number(p.altitude) || 0) / 1000; });
+            const isp = ap.map(function (p) {
+                const v = Number(p.specific_impulse); return isFinite(v) ? v : null; });
+            const kN = ap.map(function (p) {
+                const v = Number(p.thrust); return isFinite(v) ? v / 1000 : null; });
+            const rel = _altSeriesRatio(ap);
+            // Isp serisinin adı çağırana bırakılır: 'Parametrik > Tek İrtifa'
+            // paneli bu seriyi 'Specific Impulse (Isp)' diye adlandırıyordu.
+            const ispName = o.ispName
+                || T('liq.msg.isp_vs_altitude', 'Isp vs Altitude');
+
+            const layout = {
+                title: T('liq.msg.engine_performance_vs_altitude', 'Engine Performance vs Altitude'),
+                xaxis: { title: T('liq.msg.altitude_km', 'Altitude (km)') },
+                yaxis: {
+                    title: T('liq.msg.specific_impulse_s', 'Specific Impulse (s)'),
+                    titlefont: { color: '#00e5ff' }, tickfont: { color: '#00e5ff' }
+                },
+                yaxis2: {
+                    title: T('liq.msg.thrust_kn', 'Thrust (kN)'),
+                    titlefont: { color: '#ff8c33' }, tickfont: { color: '#ff8c33' },
+                    overlaying: 'y', side: 'right'
+                },
+                showlegend: true, margin: { l: 60, r: 60, t: 60, b: 60 }
+            };
+            if (o.height) layout.height = o.height;
+
+            let traces, note = '';
+            if (rel.orantili) {
+                // İki eksen bağımsız ÖLÇEKLENMEZ: sağ eksen solun sabit katına
+                // KİLİTLENİR (kN = Isp·oran/1000). Böylece üst üste düşme bir
+                // otomatik ölçek kazası değil, fizikten gelen özdeşliktir.
+                // İki seri ayırt edilebilsin diye Isp SÜREKLİ ÇİZGİ, itki ise
+                // İÇİ BOŞ HALKA olarak çizilir: aynı yerde dururlar ama ikisi
+                // de görünür (eskiden ikisi de kalın çizgiydi, üstteki alttakini
+                // tümüyle örtüyordu).
+                const vals = isp.filter(function (v) { return v !== null; });
+                const lo = Math.min.apply(null, vals);
+                const hi = Math.max.apply(null, vals);
+                const pad = (hi - lo) * ALT_RANGE_PAD_FRAC || Math.abs(hi) * 0.05 || 1;
+                const y0 = lo - pad, y1 = hi + pad;
+                const k = rel.oran / 1000;                  // s → kN çarpanı
+                layout.yaxis.range = [y0, y1];
+                layout.yaxis2.range = [y0 * k, y1 * k];
+                // Not: hover şablonu parça parça birleştirilir — tek bir dize
+                // içinde '>metin<' kalıbı, çeviri denetiminde (i18n_pages
+                // test_no_raw_text_in_generated_html) HTML metni sanılıyor.
+                const HB = '<br' + '>', HX = '<extra></extra' + '>';
+                traces = [
+                    { x: km, y: isp, type: 'scatter', mode: 'lines',
+                      name: ispName,
+                      line: { color: '#00e5ff', width: 3 }, yaxis: 'y',
+                      hovertemplate: '%{x:.1f} km' + HB + '%{y:.2f} s' + HX },
+                    { x: km, y: kN, type: 'scatter', mode: 'markers',
+                      name: T('liq.msg.thrust_vs_altitude', 'Thrust vs Altitude'),
+                      marker: { size: 11, color: 'rgba(0,0,0,0)',
+                                line: { color: '#ff8c33', width: 2 } },
+                      yaxis: 'y2',
+                      hovertemplate: '%{x:.1f} km' + HB + '%{y:.3f} kN' + HX }
+                ];
+                note = TF('liq.msg.alt_series_proportional',
+                    { mdot: (rel.oran / LIQUID_G0).toFixed(4),
+                      k: (rel.oran / 1000).toFixed(6) },
+                    'The two series lie on top of each other by construction: '
+                    + 'mass flow is constant ({mdot} kg/s), so F = Isp·mdot·g0 '
+                    + 'and thrust [kN] = {k} x Isp [s]. The right-hand axis is '
+                    + 'locked to that exact conversion, Isp is drawn as the solid '
+                    + 'line and thrust as the open rings on it. Read Isp on the '
+                    + 'left axis and thrust on the right axis.');
+            } else {
+                traces = [
+                    { x: km, y: isp, type: 'scatter', mode: 'lines+markers',
+                      name: ispName,
+                      line: { color: '#00e5ff', width: 3 }, marker: { size: 6 },
+                      yaxis: 'y' },
+                    { x: km, y: kN, type: 'scatter', mode: 'lines+markers',
+                      name: T('liq.msg.thrust_vs_altitude', 'Thrust vs Altitude'),
+                      line: { color: '#ff8c33', width: 3, dash: 'dot' },
+                      marker: { size: 6 }, yaxis: 'y2' }
+                ];
+            }
+
+            const anchorNote = _altAnchorNote(results, ap);
+            if (anchorNote) note = note ? (note + '<br>' + anchorNote) : anchorNote;
+            return { traces: traces, layout: layout, note: note };
+        }
+
         // TASK 2 — Parametrik > Tek İrtifa: gerçek irtifa-performans serisi
         // (Özgül İtki + ikinci eksende İtki).
         function drawSingleAltitudePlot(results) {
@@ -4083,27 +4527,14 @@ Please provide:
             const ap = results && results.altitude_performance;
             if (!Array.isArray(ap) || ap.length === 0) {
                 div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">' + T('liq.js.no_altitude_performance_data_available', 'No altitude performance data available.') + '</p>';
+                _liquidPlotNote(div, 'altitude_analysis_plot_note', '');
                 return;
             }
-            const km = ap.map(p => (p.altitude || 0) / 1000);
-            const ispTrace = {
-                x: km, y: ap.map(p => p.specific_impulse),
-                type: 'scatter', mode: 'lines+markers', name: T('liq.msg.specific_impulse_isp', 'Specific Impulse (Isp)'),
-                line: { color: '#00e5ff', width: 3 }, marker: { size: 7 }, yaxis: 'y'
-            };
-            const thrustTrace = {
-                x: km, y: ap.map(p => (p.thrust || 0) / 1000),
-                type: 'scatter', mode: 'lines+markers', name: 'Thrust',
-                line: { color: '#ff8c33', width: 3, dash: 'dot' }, marker: { size: 7 }, yaxis: 'y2'
-            };
-            const layout = {
-                title: T('liq.msg.engine_performance_vs_altitude', 'Engine Performance vs Altitude'),
-                xaxis: { title: T('liq.msg.altitude_km', 'Altitude (km)') },
-                yaxis: { title: T('liq.msg.specific_impulse_s', 'Specific Impulse (s)'), titlefont: { color: '#00e5ff' }, tickfont: { color: '#00e5ff' } },
-                yaxis2: { title: T('liq.msg.thrust_kn', 'Thrust (kN)'), titlefont: { color: '#ff8c33' }, tickfont: { color: '#ff8c33' }, overlaying: 'y', side: 'right' },
-                showlegend: true, margin: { l: 60, r: 60, t: 60, b: 60 }
-            };
-            liquidPlot(div, [ispTrace, thrustTrace], layout);
+            const fig = _buildAltitudeFigure(results, ap, {
+                ispName: T('liq.msg.specific_impulse_isp', 'Specific Impulse (Isp)')
+            });
+            liquidPlot(div, fig.traces, fig.layout);
+            _liquidPlotNote(div, 'altitude_analysis_plot_note', fig.note);
         }
 
         // TASK 3 — Parametrik > İrtifa Profili: nozul parametrelerinin irtifayla
@@ -4412,22 +4843,13 @@ Please provide:
                 //   chamber_diameter, chamber_length → yanıtta zaten MM
                 //   throat_diameter, exit_diameter   → yanıtta METRE, ×1000
                 const cr = window.currentResults || {};
-                const motorData = {
-                    motor_name: document.getElementById('motor_name')?.value || 'UZAYTEK-LIQUID',
-                    motor_type: 'liquid',
-                    oxidizer_type: cr.oxidizer_type || document.getElementById('oxidizer_type')?.value,
-                    fuel_type: cr.fuel_type || document.getElementById('fuel_type')?.value,
-                    chamber_diameter: cr.chamber_diameter,
-                    chamber_length: cr.chamber_length,
-                    throat_diameter: (cr.throat_diameter != null) ? cr.throat_diameter * 1000 : undefined,
-                    exit_diameter: (cr.exit_diameter != null) ? cr.exit_diameter * 1000 : undefined,
-                    chamber_pressure: cr.chamber_pressure,
-                    of_ratio: cr.mixture_ratio,
-                    expansion_ratio: cr.expansion_ratio
-                };
+                const motorData = _liquidPdfMotorData(cr,
+                    document.getElementById('motor_name')?.value || 'UZAYTEK-LIQUID',
+                    document.getElementById('oxidizer_type')?.value,
+                    document.getElementById('fuel_type')?.value);
 
                 // Collect analysis results (if available)
-                const analysisResults = window.currentResults || {};
+                const analysisResults = _liquidPdfAnalysisResults(cr);
 
                 // Collect chart data (if any plots exist) — bu sayfadaki GERÇEK plot ID'leri
                 const charts = [];
@@ -4497,6 +4919,77 @@ Please provide:
                 // Restore button
                 if (btn) { btn.textContent = originalText; btn.disabled = false; }
             }
+        }
+
+        // ==================================================================
+        // PDF RAPOR GÖVDESİ (Faz 6 / T01) — saf kurucular
+        // ==================================================================
+        // Rapor üreticisi performans sayılarını `analysis_results.performance`
+        // altından ve KENDİ adlarıyla okur (hrma/export/pdf_generator.py:
+        // 483-489 ve 741-747: thrust / specific_impulse / chamber_pressure /
+        // exit_velocity / mass_flow_rate / burn_time / total_impulse). Sıvı
+        // çözücüsünün yanıtında böyle bir blok YOK; sayılar düz sözlükte ve
+        // başka adlarla duruyor (thrust, isp_sea_level, burn_time…).
+        // Ölçüldü (2026-08-03): yönetici özeti 'Maximum Thrust: 0.0 N /
+        // Specific Impulse: 0.0 s / Burn Time: 0.0 s / Total Impulse: 0.0 N·s'
+        // basıyordu, AYNI PDF'in analiz tablosu ise aynı satırlara 'N/A'
+        // yazıyordu (`.get(k, 0)` → 0.0 ile `_fmt(None)` → 'N/A' farkı).
+        // Köprü burada kurulur. Hesaplanamayan alan `null` gider ve raporda
+        // 'N/A' görünür — sıfır ya da uydurma sayı KONMAZ.
+        // Bu iki fonksiyon SAFTIR (DOM'a bakmaz) ki bekçi testi gövdeyi
+        // gerçek çözücü yanıtıyla ölçebilsin.
+        function _pdfNum(v) {
+            const n = Number(v);
+            return (typeof v !== 'undefined' && v !== null && v !== ''
+                    && isFinite(n)) ? n : null;
+        }
+
+        function _liquidPdfMotorData(cr, motorName, oxFallback, fuelFallback) {
+            cr = cr || {};
+            return {
+                motor_name: motorName || 'UZAYTEK-LIQUID',
+                motor_type: 'liquid',
+                // 'Propellant Type' satırı rapor tarafında motor_data'dan
+                // okunur; gönderilmediği için PDF s.3'te 'N/A (not reported by
+                // solver)' yazarken hemen altındaki satırlar 'Oxidizer: lox /
+                // Fuel: rp1' diyordu (belge içi çelişki). Çözücü bu adı zaten
+                // üretiyor (propellant_name).
+                propellant_type: cr.propellant_name,
+                oxidizer_type: cr.oxidizer_type || oxFallback,
+                fuel_type: cr.fuel_type || fuelFallback,
+                chamber_diameter: cr.chamber_diameter,
+                chamber_length: cr.chamber_length,
+                throat_diameter: (cr.throat_diameter != null) ? cr.throat_diameter * 1000 : undefined,
+                exit_diameter: (cr.exit_diameter != null) ? cr.exit_diameter * 1000 : undefined,
+                chamber_pressure: cr.chamber_pressure,
+                of_ratio: cr.mixture_ratio,
+                expansion_ratio: cr.expansion_ratio
+            };
+        }
+
+        function _liquidPdfAnalysisResults(cr) {
+            cr = cr || {};
+            const thrust = _pdfNum(cr.thrust);
+            const burn = _pdfNum(cr.burn_time);
+            // Çıkış hızı düz sözlükte yok; irtifa serisinin deniz seviyesi
+            // kaydında var (altitude_performance[0].exit_velocity). Seri yoksa
+            // alan null kalır — türetilmez.
+            const ap = Array.isArray(cr.altitude_performance) ? cr.altitude_performance : [];
+            const exitV = ap.length ? _pdfNum(ap[0].exit_velocity) : null;
+            return Object.assign({}, cr, {
+                performance: Object.assign({
+                    thrust: thrust,
+                    specific_impulse: _pdfNum(cr.isp_sea_level),
+                    chamber_pressure: _pdfNum(cr.chamber_pressure),
+                    exit_velocity: exitV,
+                    mass_flow_rate: _pdfNum(cr.total_mass_flow),
+                    burn_time: burn,
+                    // Toplam impuls = F·t_b (sürekli rejim, sabit itki);
+                    // ikisinden biri yoksa null.
+                    total_impulse: (thrust !== null && burn !== null)
+                        ? thrust * burn : null
+                }, cr.performance || {})
+            });
         }
 
         // ==================================================================
@@ -4580,6 +5073,46 @@ Please provide:
         // input_warnings (motorun girdi denetimi: aralık dışı, çelişkili ya da
         // çözücünün kendi hesapladığı alanlar). Hiçbiri yoksa panel gizlidir.
         // ==================================================================
+        // D-track (v2.6.2): uyarılar {code, params, severity} sözlüğü.
+        // Ham gömülürse "[object Object]" basılır. AnalysisDock'un özyinelemeli
+        // çeviricisi yüklüyse onu kullan (iç içe kayıtlar, ör. options listesi,
+        // orada da çözülür). Faz 6 / T44: bu çevirici artık uyarı panelinin
+        // yerel yardımcısı değil — Excel dışa aktarımı da AYNI metni yazsın
+        // diye modül düzeyine taşındı (ekranla teslimat tek kaynaktan konuşur).
+        function liquidWarnText(w) {
+            if (window.AnalysisDock && window.AnalysisDock.ui
+                && window.AnalysisDock.ui.warnText) {
+                return window.AnalysisDock.ui.warnText(w);
+            }
+            if (w === null || w === undefined) return '';
+            if (typeof w === 'string') return w;
+            if (w && w.code) {
+                return (window.I18N && window.I18N.tf)
+                    ? window.I18N.tf(w.code, w.params || {}, w.fallback || w.code)
+                    : (w.fallback || w.code);
+            }
+            return (w && (w.message || w.text)) || String(w);
+        }
+
+        // Ekranda gösterilen TÜM çözücü uyarıları, önem etiketiyle birlikte.
+        // displayLiquidWarnings ile aynı kaynakları aynı sırayla okur.
+        function liquidCollectWarnings(results) {
+            const r = results || {};
+            const validation = r.validation || {};
+            const out = [];
+            const push = (tag, list) => {
+                (Array.isArray(list) ? list : []).forEach(function (w) {
+                    const text = liquidWarnText(w);
+                    if (text) out.push({ tag: tag, code: (w && w.code) || '', text: text });
+                });
+            };
+            push(T('liq.msg.critical_warning_tag', 'CRITICAL'), validation.critical_warnings);
+            push(T('liq.msg.warning_tag', 'WARNING'), validation.regular_warnings);
+            push(T('liq.msg.warning_tag', 'WARNING'), r.warnings);
+            push(T('liq.msg.input_warning_tag', 'INPUT'), r.input_warnings);
+            return out;
+        }
+
         function displayLiquidWarnings(results) {
             const panel = document.getElementById('warningsPanel');
             const list = document.getElementById('warningsList');
@@ -4603,24 +5136,7 @@ Please provide:
                 return;
             }
 
-            // D-track (v2.6.2): uyarılar {code, params, severity} sözlüğü.
-            // Ham gömülürse "[object Object]" basılır. AnalysisDock'un
-            // özyinelemeli çeviricisi yüklüyse onu kullan (iç içe kayıtlar,
-            // ör. options listesi, orada da çözülür).
-            const warnToText = (w) => {
-                if (window.AnalysisDock && window.AnalysisDock.ui
-                    && window.AnalysisDock.ui.warnText) {
-                    return window.AnalysisDock.ui.warnText(w);
-                }
-                if (w === null || w === undefined) return '';
-                if (typeof w === 'string') return w;
-                if (w && w.code) {
-                    return (window.I18N && window.I18N.tf)
-                        ? window.I18N.tf(w.code, w.params || {}, w.fallback || w.code)
-                        : (w.fallback || w.code);
-                }
-                return (w && (w.message || w.text)) || String(w);
-            };
+            const warnToText = liquidWarnText;
             const item = (label, text, cls) =>
                 `<div class="warning-item ${cls}">` +
                 `<span class="warning-tag">${label}</span>` +
@@ -4836,6 +5352,30 @@ Please provide:
                 [T('liq.msg.cooling_channels', 'Cooling channels'), num(cool.cooling_channels, 0)],
                 [T('liq.msg.nozzle_length_mm', 'Nozzle length (mm)'), num(cool.nozzle_length, 2)]
             ];
+
+            // T44 (Faz 6): ekranda "bu sayı geometrik olarak imkânsız" denen
+            // değer atölyeye giden dosyaya UYARISIZ geçiyordu. Ölçüldü
+            // (2026-08-03): 'Cooling channels | 80' satırı ile aynı koşuda
+            // çözücünün 'warn.liquid.cooling_channels_do_not_fit' uyarısı
+            // (80 kanal 30,8 mm boğaz çevresine sığmıyor, geometrik üst sınır
+            // 21) yan yana duruyordu. Uyarı artık İLGİLİ SATIRIN HEMEN ALTINA
+            // düşer; teslimat ekranla aynı şeyi söyler.
+            const uyarilar = liquidCollectWarnings(cr);
+            const geomNotlari = uyarilar.filter(function (w) {
+                return w.code && (w.code.indexOf('cooling_channel') !== -1
+                                  || w.code.indexOf('channel_count') !== -1);
+            }).map(function (w) { return [w.tag, w.text]; });
+            if (geomNotlari.length) {
+                const kanalEtiketi = T('liq.msg.cooling_channels', 'Cooling channels');
+                const kanalSatiri = geom.findIndex(function (r) {
+                    return r[0] === kanalEtiketi;
+                });
+                // Not, ilgili satırın HEMEN ALTINA girer: sayfanın sonuna
+                // eklenen bir uyarı, kanal sayısını okuyan kişinin gözünden
+                // kaçar.
+                const nereye = (kanalSatiri >= 0) ? kanalSatiri + 1 : geom.length;
+                geom.splice.apply(geom, [nereye, 0].concat(geomNotlari));
+            }
             const injRows = [
                 [T('liq.ui.injector_type', 'Injector type'), inj.injector_type || ''],
                 [T('liq.msg.number_of_elements', 'Number of elements'), num(inj.number_of_elements, 0)],
@@ -4872,6 +5412,16 @@ Please provide:
                 { name: 'Injector', headers: ['Parameter', 'Value'], rows: injRows },
                 { name: 'Feed system', headers: ['Parameter', 'Value'], rows: feed }
             ];
+            // Uyarı sayfası SATIR BAŞINA bir kalem taşır ve yalnız uyarı varken
+            // eklenir (boş sayfa "her şey yolunda" izlenimi verirdi). Sayfa/başlık
+            // adları diğer sayfalarla aynı sözleşmede: dosya adları çevrilmez.
+            if (uyarilar.length) {
+                sheets.push({
+                    name: 'Warnings',
+                    headers: ['Severity', 'Warning'],
+                    rows: uyarilar.map(function (w) { return [w.tag, w.text]; })
+                });
+            }
 
             const stamp = new Date().toISOString().split('T')[0];
             const fname = _liquidMotorName() + '_analysis_' + stamp + '.xlsx';
@@ -5346,6 +5896,209 @@ Please provide:
             }
         }
         
+        // ==================================================================
+        // 6-DOF PANELİNE MOTOR BAĞI (Faz 6 / T02)
+        // ==================================================================
+        // Panel sözleşmesi sabit itkide {thrust, burn_time} çifti ister ve
+        // kütle tükenişini bu süreden türetir. Eskiden motorun itkisi
+        // (10 000 N) panelin FORM alanındaki yanma süresiyle (6 s)
+        // eşleştiriliyordu — ikisi birbirinden bağımsız olduğu için ortaya
+        // fiziksel olmayan bir toplam impuls çıkıyordu.
+        // Ölçüldü (2026-08-03, kuru 8 kg + itici 4 kg, ṁ = 4,164 kg/s):
+        //   ÖNCE : F·t_b = 10 000·6 = 60 000 N·s → ima edilen Isp 1529,6 s
+        //          (kimyasal üst sınır ~465 s); tepe 157 321,7 m, Mach 10,00.
+        //          Tsiolkovsky üst sınırı (yerçekimi/sürükleme SIFIR kabul,
+        //          Isp_sl ile) dv = 1186,4 m/s → 3,25 kat aşım.
+        //   SONRA: t_b = m_p/ṁ olduğundan F·t_b = m_p·Isp·g0 ÖZDEŞLİKLE
+        //          sağlanır; ima edilen Isp motorun kendi Isp'sine eşitlenir.
+        // Yanma süresi artık panelin form alanından DEĞİL, panelin itici
+        // kütlesi ile motorun debisinden gelir. Gerekli sayılar yoksa null
+        // dönülür ve panel kendi form değerlerine düşer (uydurma yok).
+        // Saf çekirdek (DOM'a bakmaz) — bekçi testi bunu doğrudan ölçer.
+        function _liquidSixDofDriveFrom(cr, mProp) {
+            if (!cr) return null;
+            const F = Number(cr.thrust);
+            const mdot = Number(cr.total_mass_flow);
+            const mp = Number(mProp);
+            if (!isFinite(F) || F <= 0 || !isFinite(mdot) || mdot <= 0
+                || !isFinite(mp) || mp <= 0) return null;
+            const burn = mp / mdot;
+            return { thrust: F, burn_time: burn, mdot: mdot, m_prop: mp,
+                     total_impulse: F * burn,
+                     implied_isp: (F * burn) / (mp * LIQUID_G0) };
+        }
+
+        function _liquidSixDofDrive() {
+            const propEl = document.getElementById('sd_prop_m');
+            return _liquidSixDofDriveFrom(window.currentResults,
+                propEl ? parseFloat(propEl.value) : NaN);
+        }
+
+        // Panelin içine "hangi sayılarla koşuyor" notunu basar/günceller.
+        // Ayrıca motorun nozul çıkış çapı araç gövdesinden genişse bunu
+        // söyler (ölçüldü: çıkış 217,87 mm ↔ gövde 100 mm — araç bu motoru
+        // taşıyamaz, panel bunu hiç işaretlemiyordu).
+        function updateSixDofEngineNote() {
+            const panel = document.getElementById('sixDofPanel');
+            if (!panel) return;
+            let note = document.getElementById('sd_engine_note');
+            if (!note) {
+                note = document.createElement('div');
+                note.id = 'sd_engine_note';
+                note.style.cssText = 'font-family:var(--hd-mono, monospace);'
+                    + ' font-size:0.75rem; line-height:1.55; margin:8px 0;'
+                    + ' color:var(--hd-ink-dim, #7d97a5);';
+                const status = document.getElementById('sd_status');
+                if (status && status.parentNode === panel) {
+                    panel.insertBefore(note, status);
+                } else {
+                    panel.appendChild(note);
+                }
+            }
+            const lines = [];
+            const drive = _liquidSixDofDrive();
+            const useCurve = document.getElementById('sd_use_curve');
+            if (drive && (!useCurve || useCurve.checked)) {
+                lines.push(TF('liq.msg.sixdof_engine_coupled',
+                    { thrust: drive.thrust.toFixed(1),
+                      mprop: drive.m_prop.toFixed(3),
+                      mdot: drive.mdot.toFixed(4),
+                      burn: drive.burn_time.toFixed(3),
+                      it: drive.total_impulse.toFixed(0),
+                      isp: drive.implied_isp.toFixed(1) },
+                    'Engine-coupled run: thrust {thrust} N, burn time = '
+                    + 'propellant {mprop} kg / engine mass flow {mdot} kg/s = '
+                    + '{burn} s (total impulse {it} N·s, implied Isp {isp} s). '
+                    + 'The burn time is derived here, not read from the Burn '
+                    + 'Time field above: pairing the engine thrust with an '
+                    + 'unrelated burn time violates the rocket equation.'));
+            } else if (window.currentResults) {
+                lines.push(T('liq.msg.sixdof_form_values',
+                    'Running with the Thrust / Burn Time fields of this panel '
+                    + '(engine coupling is off or the engine mass flow is not '
+                    + 'available). These two values are not checked against the '
+                    + 'propellant mass.'));
+            }
+            const cr = window.currentResults;
+            const bodyEl = document.getElementById('sd_body_d');
+            const bodyD = bodyEl ? parseFloat(bodyEl.value) : NaN;
+            const exitD = cr ? Number(cr.exit_diameter) : NaN;
+            if (isFinite(bodyD) && bodyD > 0 && isFinite(exitD) && exitD > bodyD) {
+                lines.push('<span style="color:var(--hd-warn, #ff8c33);">'
+                    + TF('liq.msg.sixdof_nozzle_wider_than_body',
+                        { exit: (exitD * 1000).toFixed(1),
+                          body: (bodyD * 1000).toFixed(1) },
+                        'Geometry conflict: the nozzle exit diameter is {exit} mm '
+                        + 'but the vehicle body diameter is {body} mm — this '
+                        + 'airframe cannot carry this engine.')
+                    + '</span>');
+            }
+            note.innerHTML = lines.join('<br>');
+        }
+
+        // ==================================================================
+        // ENJEKTÖR PANELİ — çözücü değerleriyle eşitleme (Faz 6 / T38)
+        // ==================================================================
+        // Panelin kendi sağlayıcısı değerleri YALNIZ BOŞ alana yazar
+        // (injector_panel.js::fillIfEmpty). Alanlar HTML varsayılanıyla dolu
+        // geldiği için sağlayıcı hiçbir zaman devreye girmiyordu.
+        // Ölçüldü (2026-08-03): panel 2 kg/s oks. + 0,8 kg/s yakıt ile
+        // boyutlandırırken çözücü 2,9746 / 1,1898 kg/s diyordu (-%32,8);
+        // yakıt yoğunluğu 810 ↔ 800 kg/m³. Sonuç: aynı sayfada aynı motor
+        // için birbiriyle çelişen İKİ enjektör tasarımı duruyordu.
+        // Kural: kullanıcının ELLE dokunduğu alan korunur (giriş olayında
+        // işaretlenir); dokunulmamış alan her yeni hesapta çözücü değerine
+        // eşitlenir. Fark kalırsa panelin altında sayısıyla yazılır.
+        const LIQUID_INJECTOR_FIELDS = [
+            ['inj_mdot_ox', 'ox_mdot', 'kg/s', 4],
+            ['inj_mdot_fuel', 'fuel_mdot', 'kg/s', 4],
+            ['inj_pc', 'pc', 'bar', 2],
+            ['inj_rho_ox', 'rho_ox', 'kg/m³', 1],
+            ['inj_rho_fuel', 'rho_fuel', 'kg/m³', 1]
+        ];
+
+        function _liquidInjectorSolverValues(results) {
+            const cr = results || window.currentResults;
+            if (!cr) return null;
+            const mfr = (cr.feed_system && cr.feed_system.mass_flow_rates) || {};
+            const num = function (v) {
+                const n = Number(v);
+                return (v !== null && typeof v !== 'undefined' && isFinite(n)) ? n : null;
+            };
+            return {
+                ox_mdot: num(mfr.oxidizer), fuel_mdot: num(mfr.fuel),
+                pc: num(cr.chamber_pressure),
+                rho_ox: num(cr.oxidizer_density), rho_fuel: num(cr.fuel_density)
+            };
+        }
+
+        // Kullanıcı dokunuşunu işaretle (programla yazma 'input' olayı
+        // üretmez, bu yüzden eşitleme kendi işaretini tetiklemez).
+        function markInjectorUserEdits() {
+            LIQUID_INJECTOR_FIELDS.forEach(function (f) {
+                const el = document.getElementById(f[0]);
+                if (!el || el.dataset.liquidEditBound) return;
+                el.dataset.liquidEditBound = '1';
+                el.addEventListener('input', function () {
+                    el.dataset.userEdited = '1';
+                });
+            });
+        }
+
+        function syncInjectorPanelToSolver(results) {
+            const panel = document.getElementById('injectorPanel');
+            const solver = _liquidInjectorSolverValues(results);
+            if (!panel || !solver) return;
+            markInjectorUserEdits();
+
+            const stale = [];
+            LIQUID_INJECTOR_FIELDS.forEach(function (f) {
+                const el = document.getElementById(f[0]);
+                const value = solver[f[1]];
+                if (!el || value === null) return;
+                if (!el.dataset.userEdited) {
+                    el.value = String(Number(value.toFixed(6)));
+                    return;
+                }
+                const cur = parseFloat(el.value);
+                if (isFinite(cur) && Math.abs(cur - value) > Math.abs(value) * 1e-6) {
+                    stale.push(TF('liq.msg.injector_field_differs',
+                        { field: f[0], form: cur.toFixed(f[3]),
+                          solver: value.toFixed(f[3]), unit: f[2],
+                          pct: (100 * (cur - value) / value).toFixed(1) },
+                        '{field}: panel {form} {unit} vs solver {solver} {unit} '
+                        + '({pct}%)'));
+                }
+            });
+
+            let note = document.getElementById('inj_solver_note');
+            if (!note) {
+                note = document.createElement('div');
+                note.id = 'inj_solver_note';
+                note.style.cssText = 'font-family:var(--hd-mono, monospace);'
+                    + ' font-size:0.75rem; line-height:1.55; margin:8px 0;'
+                    + ' color:var(--hd-ink-dim, #7d97a5);';
+                const status = document.getElementById('inj_status');
+                if (status && status.parentNode === panel) {
+                    panel.insertBefore(note, status);
+                } else {
+                    panel.appendChild(note);
+                }
+            }
+            const head = T('liq.msg.injector_synced_with_solver',
+                'Flow rates, chamber pressure and densities are taken from the '
+                + 'engine solution on this page; fields you edited yourself are '
+                + 'left untouched.');
+            note.innerHTML = stale.length
+                ? head + '<br><span style="color:var(--hd-warn, #ff8c33);">'
+                    + T('liq.msg.injector_fields_differ_head',
+                        'These panel inputs differ from the engine solution, so '
+                        + 'the injector below is NOT the injector of the motor '
+                        + 'reported above:')
+                    + '</span><br>' + stale.join('<br>')
+                : head;
+        }
+
         // Initialize
         updatePropellantPreview();
         markUnwiredInputs();
@@ -5399,14 +6152,23 @@ Please provide:
         document.addEventListener('DOMContentLoaded', function () {
             SixDofPanel.init({
                 anchorId: 'analysis-dock-anchor',
+                // İtki/yanma süresi çifti motorla TUTARLI kurulur; ayrıntı ve
+                // ölçüm için _liquidSixDofDrive() başlığındaki nota bak (T02).
                 thrustProvider: function () {
-                    if (window.currentResults && currentResults.thrust) {
-                        return { thrust: currentResults.thrust,
-                                 burn_time: parseFloat(
-                                     (document.getElementById('sd_burn') || {}).value) || 10 };
-                    }
-                    return null;
+                    const drive = _liquidSixDofDrive();
+                    updateSixDofEngineNote();
+                    if (!drive) return null;   // panel kendi form değerlerine düşer
+                    return { thrust: drive.thrust, burn_time: drive.burn_time };
                 },
+            });
+            // Not, koşudan ÖNCE de doğru olsun diye ilgili girdiler
+            // değiştikçe tazelenir (itici kütlesi, gövde çapı, eğri anahtarı).
+            ['sd_prop_m', 'sd_body_d', 'sd_use_curve'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('input', updateSixDofEngineNote);
+                    el.addEventListener('change', updateSixDofEngineNote);
+                }
             });
             // Enjektör tasarım paneli — hesap sonucundan ṁ/Pc/ρ otomatik dolar
             // (anchorId aynı gerekçeyle zorunlu, yukarıdaki nota bak)
@@ -5425,6 +6187,10 @@ Please provide:
                              rho_fuel: cr.fuel_density };
                 },
             });
+            // Panel kurulur kurulmaz kullanıcı dokunuşu dinlenir; sonuç
+            // varsa alanlar hemen çözücüye eşitlenir (T38).
+            markInjectorUserEdits();
+            if (window.currentResults) syncInjectorPanelToSolver(window.currentResults);
         });
     </script>
     <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->

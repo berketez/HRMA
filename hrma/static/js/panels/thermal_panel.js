@@ -126,7 +126,15 @@
         }], {
             title: T('panel.thermal.chartTemps', 'Wall Temperatures vs Material Limits'),
             yaxis: { title: T('common.axis.temperatureK', 'Temperature (K)'), rangemode: 'tozero' },
-            xaxis: { title: '' },
+            // T65 (2026-08-03) — x ekseninde BAŞLIK NESNESİ YOK, BİLEREK.
+            // Önceki hâli `xaxis: { title: '' }` idi; plotly_dark.js:92 boş
+            // dizgeyi de nesneye çeviriyor ve ÖLÇÜLEN layout şu oluyordu:
+            // {"text":"","font":{...},"standoff":8}. Metinsiz bir başlık
+            // nesnesi "başlık koymayı unuttuk" ile "başlık gereksiz"i aynı
+            // gösteriyor. Burada başlık GEREKSİZDİR: eksen kategoriktir ve
+            // etiketlerin kendisi (yanma gazı / adyabatik cidar / cidar iç /
+            // cidar dış) ölçülen büyüklüğü zaten söyler. Boş nesne yerine
+            // hiç nesne kurulmaz — niyet artık koddan okunur.
             shapes: shapes,
             annotations: annotations,
             height: 360,

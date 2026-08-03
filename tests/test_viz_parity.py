@@ -97,6 +97,9 @@ LIQUID_MOTOR = {
     "injector_design": {
         "injection_pressure_drop_ox_bar": 22.0,
         "ox_injection_velocity_m_s": 48.42,
+        # Faz 6 / T43: yakıt devresi de panoya girer (eski pano yalnız
+        # oksitleyiciyi, üstelik adını yazmadan gösteriyordu).
+        "fuel_injection_velocity_m_s": 49.50,
     },
 }
 
@@ -129,7 +132,8 @@ def test_hibrit_pano_yapisi_korunur():
         "Mass Flow Rates",
         "Pressure Distribution",
         "Regression Rate & Port Growth",
-        "Injector Performance",
+        # Faz 6 / T43: gösterge hangi büyüklüğü gösterdiğini adında söyler
+        "Oxidizer Injection Velocity",
     ]
     assert [t.get("type") for t in fig["data"]] == [
         "bar", "bar", "scatter", "scatter", "indicator",
@@ -149,11 +153,24 @@ def test_hibrit_pano_yapisi_korunur():
     assert gauge["gauge"]["threshold"]["value"] == pytest.approx(50.0)
 
 
-def test_hibrit_tank_basinci_yoksa_enjektorden_turetilir():
+def test_hibrit_tank_basinci_yoksa_cubuk_tank_adini_TASIMAZ():
+    """Faz 6 / T11 — türetilen sayı 'Tank' diye ETİKETLENEMEZ.
+
+    Bu testin eski hâli kusuru kilitliyordu: yalnız [30.0, 38.5, 8.5]
+    değerlerine bakıyor, üçüncü çubuğun hâlâ 'Tank' yazdığını görmüyordu.
+    Ölçüldü (3 Ağustos 2026, /calculate): tank basıncı alanına 30/50/90 bar
+    girilse de motor sözlüğünde 'tank' geçen anahtar dönmüyor, çubuk üçünde
+    de 24,0 bar (= Pc 20 + ΔP 4) gösteriyordu. Sayı yanlış değil, ADI
+    yanlıştı: Pc + ΔP enjektör GİRİŞ basıncıdır, tank basıncı ondan besleme
+    hattı kayıpları kadar yüksektir.
+    """
     md = dict(HYBRID_MOTOR)
     md.pop("tank_pressure")
     fig = _fig(create_performance_plots(md, HYBRID_INJECTOR))
-    assert fig["data"][1]["y"] == [30.0, 38.5, 8.5]
+    bar = fig["data"][1]
+    assert bar["y"] == [30.0, 38.5, 8.5]
+    assert "Tank" not in bar["x"], "türetilen değer tank basıncı diye sunuldu"
+    assert bar["x"] == ["Chamber", "Inj. inlet", "Inj. ΔP"]
 
 
 def test_hibrit_regresyon_hizi_port_gecmisinin_turevidir():
@@ -225,7 +242,8 @@ def test_sivi_pano_uretilir():
         "Mass Flow Rates",
         "Pressure Distribution",
         "Feed System Pressure Budget",
-        "Injector Performance",
+        # Faz 6 / T43: isimsiz gösterge yerine iki devreli, adlandırılmış panel
+        "Injection Velocity",
     ]
 
     rates = LIQUID_MOTOR["feed_system"]["mass_flow_rates"]
@@ -243,14 +261,17 @@ def test_sivi_pano_uretilir():
     budget = fig["data"][2]
     assert budget["x"] == ["Tank Outlet", "Main Valve", "Filters",
                            "Feed Lines", "Injector"]
-    # Gösterge 100 m/s'yi aşmayan gerçek enjeksiyon hızını gösterir
-    assert fig["data"][3]["value"] == pytest.approx(48.42)
+    # Enjeksiyon hızı paneli İKİ devreyi de adıyla gösterir (T43)
+    inj = fig["data"][3]
+    assert inj["type"] == "bar"
+    assert inj["x"] == ["Oxidizer", "Fuel"]
+    assert inj["y"] == [pytest.approx(48.42), pytest.approx(49.50)]
 
 
-def test_sivi_enjektor_hizi_tam_skalayi_asarsa_olcek_buyur():
-    md = json.loads(json.dumps(LIQUID_MOTOR))
-    md["injector_design"]["ox_injection_velocity_m_s"] = 130.0
-    fig = _fig(create_performance_plots(md, None))
+def test_hibrit_enjektor_hizi_tam_skalayi_asarsa_olcek_buyur():
+    """Gösterge ölçeği hibritte korunur (sıvı artık çubuk paneli kullanıyor)."""
+    inj = dict(HYBRID_INJECTOR, exit_velocity=130.0)
+    fig = _fig(create_performance_plots(HYBRID_MOTOR, inj))
     gauge = fig["data"][-1]
     assert gauge["gauge"]["axis"]["range"] == [0, 150]
     assert gauge["gauge"]["threshold"]["value"] == pytest.approx(75.0)

@@ -1267,7 +1267,13 @@ class HybridRocketEngine:
                     'conditions': combustion_results['conditions'],
                     'performance': combustion_results['performance'],
                     'gamma_avg': combustion_results['performance']['gamma_avg'],
-                    'mdot_total': self.mdot_total
+                    'mdot_total': self.mdot_total,
+                    # T33 (2026-08-03): irtifa tablosu artık motorun TESLİM
+                    # ETTİĞİ deniz seviyesi itkisine çapalanır. Bu alan
+                    # olmadan tablo lüle kayıplarını hiç uygulamıyor ve
+                    # 0 km'de manşetin 1000 N'u yerine ideal 1033,02 N
+                    # yazıyordu (%3,45; Isp'de 192,04 s ↔ manşet 185,90 s).
+                    'thrust_sea_level': self.F,
                 },
                 altitudes
             )
@@ -1305,7 +1311,11 @@ class HybridRocketEngine:
                     'performance': combustion_results['performance'],
                     'conditions': combustion_results['conditions'],
                     'chamber_pressure': self.P_c,
-                    'burn_time': self.t_b
+                    'burn_time': self.t_b,
+                    # T33: debi ARTIK Isp'den türetilmiyor, çözücüden geliyor
+                    # (eski türetme 0,5312 kg/s veriyordu, çözücününki
+                    # 0,548540 kg/s — aynı motor için iki farklı kütle akışı).
+                    'mdot_total': self.mdot_total,
                 }, altitudes_thrust
             )
         

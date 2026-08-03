@@ -75,6 +75,27 @@
     const CG_FULL_FRACTION = 0.55;
     const CG_EMPTY_FRACTION = 0.50;
     const NOSE_XCP_FACTOR = { conical: 2.0 / 3.0, ogive: 0.466, parabolic: 0.5 };
+    // T34 (2026-08-03) — HÜCUM AÇISININ GEÇERLİ OLDUĞU PENCERE.
+    // six_dof_trajectory.py içindeki ALPHA_VALID_MIN_TIME_S ve
+    // ALPHA_VALID_SPEED_FRACTION ile BİREBİR AYNI olmak ZORUNDA: arka uç
+    // rozetteki max_alpha'yı bu pencereyle ölçüyor, grafik ise maskesiz ham
+    // diziyi çiziyordu. ÖLÇÜLDÜ (varsayılan araç, 90° atış): grafik ekseni
+    // 0-90° iken rozet 1,62° diyordu (55 kat). 90° değeri rampada v≈0 iken
+    // oluşan bir ARTEFAKTTIR (q≈0, aerodinamik otorite yok), kararsızlık
+    // değil. tests/test_faz6_f8_motor.py iki dosyadaki sayıyı karşılaştırır.
+    const ALPHA_VALID_MIN_TIME_S = 1.0;
+    const ALPHA_VALID_SPEED_FRACTION = 0.10;
+    // T48 (2026-08-03) — MODELİN BEYAN EDİLEN GEÇERLİLİK SINIRI.
+    // Panel açıklaması (i18n_common.js::sixdof.intro) "Linear small-alpha
+    // aerodynamics (alpha < 15 deg)" diyor, ama bu sınır grafikte HİÇBİR YERDE
+    // ÇİZİLMİYORDU: kullanıcı α eğrisinin sınırı aşıp aşmadığını gözle
+    // okuyamıyordu. Sayı burada TEK yerde durur ve α grafiğine kesikli çizgi
+    // olarak basılır. Eksen sınırın altında kalıyorsa çizgi Plotly tarafından
+    // kırpılır (görünmez) — yani "her koşuda kırmızı çizgi" gürültüsü olmaz,
+    // yalnız gerçekten aşıldığında görünür.
+    // tests/test_faz6_panel.py bu sayının sixdof.intro metniyle aynı kaldığını
+    // kilitler: sınır değişirse metin de değişmek ZORUNDA.
+    const ALPHA_LINEAR_LIMIT_DEG = 15;
     const CP_MATCH_TOL_M = 1e-4;        // istemci↔backend CP tutarlılık eşiği [m]
     const CNA_MATCH_TOL = 1e-3;         // CN_α tutarlılık eşiği [1/rad]
     const MOTOR_ZONE_FRACTION = 0.2;    // şemada vurgulanan arka motor bölgesi
@@ -383,6 +404,8 @@
                 <span data-i18n="sixdof.layoutNote">${T('sixdof.layoutNote',
                     'Vehicle layout — live CG / CP preview (Barrowman, client-side)')}</span>
             </div>
+            <div id="sd_seed_note" style="display:none; font-family:var(--hd-mono);
+                 font-size:0.72rem; color:${COLORS.dim}; margin:2px 0 8px;"></div>
             <div id="sd_schematic" style="margin:6px 0;"></div>
             <div id="sd_margin" style="margin:6px 0; display:none;"></div>
             <div id="sd_errors" style="display:none; color:${COLORS.red};
@@ -1259,6 +1282,160 @@
             + '</div>';
     }
 
+    // ------------------------------------------------------------------
+    // HÜCUM AÇISI GRAFİĞİ (T34, 2026-08-03)
+    // ------------------------------------------------------------------
+    // KUSUR: grafik ham `ser.alpha_deg` dizisini çiziyordu. Rampada (v≈0)
+    // gövde ekseni dikey, bağıl rüzgâr neredeyse yatay olduğu için α t≈0'da
+    // 90°'ye fırlıyor; Plotly otomatik ölçeği 0-94,7'ye açıyor ve uçuşun
+    // GERÇEK bilgisi (α ≈ 1,6°) ezilip düz bir çizgi hâline geliyordu.
+    // Yanındaki rozet ise arka ucun maskelenmiş ölçümünü (1,62°) gösteriyor
+    // ve grafikle 55 kat çelişiyordu.
+    //
+    // DÜZELTME: seri, arka ucun kullandığı AYNI pencereyle ikiye ayrılır.
+    // Geçerli örneklemler ana eğri olur ve eksen ONA göre ölçeklenir;
+    // pencere dışındakiler ATILMAZ — kesikli ikinci eğri olarak kalır ve
+    // tepe değerleri açıklamada SAYIYLA yazılır (grafik dışına taştığı da
+    // söylenir). Rozetin değeri ayrıca yatay çizgi olarak gösterilir, yani
+    // iki gösterge artık aynı sayıyı işaret eder.
+    //
+    // Saf fonksiyon: Plotly çağrısı yok, testten doğrudan koşturulabilir.
+    function _buildAlphaFigure(ser, summary) {
+        const t = (ser && ser.time) || [];
+        const a = (ser && ser.alpha_deg) || [];
+        const v = (ser && ser.speed) || [];
+        const fin = (x) => typeof x === 'number' && isFinite(x);
+
+        let vMax = fin(summary && summary.max_speed) ? summary.max_speed : 0;
+        if (!(vMax > 0)) {
+            for (let i = 0; i < v.length; i++) { if (fin(v[i]) && v[i] > vMax) vMax = v[i]; }
+        }
+        const vFloor = ALPHA_VALID_SPEED_FRACTION * vMax;
+        const tApogee = fin(summary && summary.apogee_time)
+            ? summary.apogee_time : Infinity;
+
+        const xIn = [], yIn = [], xOut = [], yOut = [];
+        let peakIn = null, peakOut = null;
+        for (let i = 0; i < t.length; i++) {
+            if (!fin(t[i]) || !fin(a[i])) continue;
+            const fast = fin(v[i]) ? v[i] > vFloor : false;
+            const ok = t[i] > ALPHA_VALID_MIN_TIME_S && fast && t[i] < tApogee;
+            if (ok) {
+                xIn.push(t[i]); yIn.push(a[i]);
+                if (peakIn === null || a[i] > peakIn) peakIn = a[i];
+            } else {
+                xOut.push(t[i]); yOut.push(a[i]);
+                if (peakOut === null || a[i] > peakOut) peakOut = a[i];
+            }
+        }
+
+        // Eğri adları ve aşağıdaki açıklama BİLEREK dile bağlı değildir
+        // (sayı + SI/matematik simgesi): yeni bir sözlük anahtarı eklemek
+        // i18n_common.js'i düzenlemeyi gerektirirdi, o dosya bu turda başka
+        // bir sahipte. Anlam kaybı yok — pencere koşulu formülle yazılıyor.
+        const traces = [];
+        if (xIn.length) {
+            traces.push({
+                x: xIn, y: yIn, mode: 'lines', line: { width: 2 },
+                name: 'α [deg] · q > 0',
+            });
+        }
+        if (xOut.length) {
+            traces.push({
+                x: xOut, y: yOut, mode: 'markers', marker: { size: 4, opacity: 0.5 },
+                name: 'α [deg] · q ≈ 0',
+            });
+        }
+        if (!traces.length) {
+            // Hiç ölçüm yok: uydurma boş eğri çizilmez.
+            traces.push({ x: [], y: [], mode: 'lines', name: 'α [deg]' });
+        }
+
+        // Rozetin değeri (arka ucun maskelenmiş max α'sı) grafikte de görünsün
+        const badgeMax = fin(summary && summary.max_alpha_deg)
+            ? summary.max_alpha_deg : null;
+
+        // Eksen tavanı GEÇERLİ veriye göre: artefakt tavanı belirlemesin.
+        let yTop = 0;
+        if (peakIn !== null) yTop = peakIn;
+        if (badgeMax !== null && badgeMax > yTop) yTop = badgeMax;
+        const layout = {
+            title: T('sixdof.chartAlpha', 'Angle of Attack (weathercock response)'),
+            xaxis: { title: T('common.axis.timeS2', 'Time [s]') },
+            yaxis: { title: 'α [deg]', rangemode: 'tozero' },
+            height: 340,
+            legend: { orientation: 'h', y: 1.12 },
+            shapes: [], annotations: [],
+        };
+        if (yTop > 0) layout.yaxis.range = [0, yTop * 1.3];
+        if (badgeMax !== null) {
+            layout.shapes.push({
+                type: 'line', xref: 'paper', x0: 0, x1: 1,
+                yref: 'y', y0: badgeMax, y1: badgeMax,
+                // Düz altıgen kod: SVG stroke özniteliği CSS var() çözmez,
+                // tema değişkeni verilirse çizgi GÖRÜNMEZ olur.
+                line: { width: 1, dash: 'dash', color: '#ffd166' },
+            });
+        }
+
+        // T48 — küçük-α (lineer Barrowman) geçerlilik sınırı. Rozet
+        // çizgisinden SONRA eklenir: shapes[0] rozet değeri olarak kalsın
+        // (tests/test_faz6_f8_motor.py::test_t34_badge_and_chart_report_the_
+        // same_maximum o konuma bakıyor).
+        layout.shapes.push({
+            type: 'line', xref: 'paper', x0: 0, x1: 1,
+            yref: 'y', y0: ALPHA_LINEAR_LIMIT_DEG, y1: ALPHA_LINEAR_LIMIT_DEG,
+            line: { width: 1, dash: 'dot', color: '#ff5d73' },
+        });
+        // Etiket YALNIZ çizgi eksene giriyorsa basılır; aksi hâlde grafiğin
+        // dışında havada duran bir yazı olurdu. Metin bilerek dile bağlı
+        // değil (simge + sayı) — bu dosyadaki α notuyla aynı sözleşme.
+        const dataTop = Math.max(
+            peakIn === null ? -Infinity : peakIn,
+            peakOut === null ? -Infinity : peakOut,
+            badgeMax === null ? -Infinity : badgeMax);
+        const axisTop = layout.yaxis.range ? layout.yaxis.range[1] : dataTop;
+        if (isFinite(axisTop) && axisTop >= ALPHA_LINEAR_LIMIT_DEG) {
+            layout.annotations.push({
+                xref: 'paper', x: 0, xanchor: 'left',
+                yref: 'y', y: ALPHA_LINEAR_LIMIT_DEG, yanchor: 'bottom',
+                showarrow: false, text: 'α_lin = ' + ALPHA_LINEAR_LIMIT_DEG + '°',
+                font: { size: 10, color: '#ff5d73' },
+            });
+        }
+
+        // Dışlanan örneklemler SAYIYLA anlatılır — kaç tanesi, tepesi kaç
+        // derece ve eksenin dışına taşıp taşmadığı.
+        let note = null;
+        if (xOut.length) {
+            const top = layout.yaxis.range ? layout.yaxis.range[1] : null;
+            note = 'q > 0: t > ' + ALPHA_VALID_MIN_TIME_S + ' s ∧ v > '
+                + Math.round(ALPHA_VALID_SPEED_FRACTION * 100) + '% v_max ∧ t < t_apogee'
+                + '  →  ' + xIn.length + '/' + (xIn.length + xOut.length)
+                + ', α_max = ' + (peakIn === null ? '--' : peakIn.toFixed(2)) + '°'
+                + '   |   q ≈ 0: ' + xOut.length + '/' + (xIn.length + xOut.length)
+                + ', α_max = ' + peakOut.toFixed(1) + '°';
+            layout.annotations.push({
+                xref: 'paper', yref: 'paper', x: 0, y: -0.32,
+                xanchor: 'left', yanchor: 'top', showarrow: false,
+                align: 'left', text: note, font: { size: 10 },
+            });
+            layout.margin = { b: 96 };
+            if (top !== null && peakOut > top) layout.yaxis.range = [0, top];
+        }
+
+        return { traces: traces, layout: layout,
+                 excludedCount: xOut.length, includedCount: xIn.length,
+                 excludedPeak: peakOut, includedPeak: peakIn, note: note };
+    }
+
+    function drawAlphaPlot(div, ser, summary) {
+        const fig = _buildAlphaFigure(ser, summary);
+        Plotly.newPlot(div, fig.traces, fig.layout,
+                       { responsive: true, displaylogo: false });
+        return fig;
+    }
+
     function render(data, usedCurve) {
         lastRender = { data: data, usedCurve: usedCurve };
         const s = data.summary;
@@ -1363,15 +1540,7 @@
 
         const alphaDiv = $('sd_plot_alpha');
         alphaDiv.style.display = 'block';
-        Plotly.newPlot(alphaDiv, [
-            { x: ser.time, y: ser.alpha_deg, name: 'α [deg]', mode: 'lines',
-              line: { width: 2 } },
-        ], {
-            title: T('sixdof.chartAlpha', 'Angle of Attack (weathercock response)'),
-            xaxis: { title: T('common.axis.timeS2', 'Time [s]') },
-            yaxis: { title: 'α [deg]', rangemode: 'tozero' },
-            height: 340,
-        }, { responsive: true, displaylogo: false });
+        drawAlphaPlot(alphaDiv, ser, s);
 
         const trackDiv = $('sd_plot_track');
         trackDiv.style.display = 'block';
@@ -1449,6 +1618,71 @@
     }
 
     // ------------------------------------------------------------------
+    // T12 (2026-08-03) — TEK ARAÇ TANIMI: sayfadan tohumlama
+    // ------------------------------------------------------------------
+    // KUSUR: bu panel ve sayfanın yörünge paneli aynı roketi tarif etmiyordu.
+    // ÖLÇÜLDÜ (advanced.html, 2026-08-03): yörünge paneli #final_mass 25 kg /
+    // #reference_area 17671 mm² (Ø150 mm) / #drag_coefficient 0,50 okurken bu
+    // panel FIELDS'teki kuru 8,0 kg / Ø0,100 m / Cd₀ 0,45 ile uçuyordu —
+    // yani kütlede 3,1 kat, alın kesitinde 2,25 kat fark. Apoje iki panelde
+    // iki ayrı sayı veriyordu ve hiçbir yerde bunun iki AYRI araç olduğu
+    // yazmıyordu.
+    //
+    // ÇÖZÜM: sayfa `window.HRMAVehicleSpec.read()` yayımlıyorsa araç alanları
+    // BİR KEZ, kurulum anında oradan tohumlanır. Bağ TEK YÖNLÜDÜR (panel geri
+    // yazmaz → çevrim yok) ve tohumlama yalnız init'te olduğundan kullanıcının
+    // sonradan girdiği hiçbir değer ezilmez. Sayfa böyle bir tanım yayımlamazsa
+    // (solid.html / liquid.html) panel eski varsayılanlarıyla çalışır.
+    //
+    // Not satırı BİLEREK dile bağlı değildir: yalnız alan kimlikleri, sayılar
+    // ve SI birimleri içerir — bu dosyadaki α notuyla aynı sözleşme (yeni bir
+    // sözlük anahtarı i18n_common.js'i düzenlemeyi gerektirirdi, o dosya bu
+    // turda başka bir sahipte).
+    function seedFromPageVehicle() {
+        const api = window.HRMAVehicleSpec;
+        if (!api || typeof api.read !== 'function') return null;
+        let spec = null;
+        try { spec = api.read(); } catch (e) { spec = null; }
+        if (!spec) return null;
+
+        const src = spec.fields || {};
+        const parts = [];
+        function put(fieldId, specKey, digits, unit) {
+            const value = spec[specKey];
+            if (typeof value !== 'number' || !isFinite(value) || value <= 0) return;
+            const el = $(fieldId);
+            if (!el) return;
+            // Alanın KENDİ çözünürlüğünde yazılır (gövde çapı adımı 0,005 m);
+            // yuvarlama farkı alanda 3. haneden sonrasıdır.
+            el.value = value.toFixed(digits);
+            parts.push(fieldId + ' ← #' + (src[specKey] || '?')
+                       + ' = ' + value.toFixed(digits) + (unit ? ' ' + unit : ''));
+        }
+        // Tohumlanan alanlar YALNIZ GÖVDE tanımıdır: kuru kütle, gövde çapı,
+        // Cd₀. İtici kütlesi BİLEREK tohumlanmaz — o, itki/yanma süresiyle
+        // birlikte bir BÜTÜNDÜR ve yörünge paneli itkiyi bilmez. ÖLÇÜLDÜ
+        // (2026-08-03, /hybrid varsayılanları, sabit itki 1200 N × 6 s):
+        //   itici de tohumlanınca  m0 = 50,0 kg, T/W = 2,45,
+        //                          ima edilen Isp = 7200/(25·g0) = 29,4 s (saçma)
+        //   yalnız kuru tohumlanınca m0 = 29,0 kg, T/W = 4,22, Isp = 183,5 s
+        // İkinci hâl motorla tutarlı. İtici kütlesi zaten motor hesabından
+        // (thrustProvider) ya da içe aktarılan motor dosyasından gelir.
+        put('sd_dry_m', 'dry_mass_kg', 2, 'kg');
+        put('sd_body_d', 'body_diameter_m', 3, 'm');
+        put('sd_cd0', 'cd0', 2, '');
+
+        const note = $('sd_seed_note');
+        if (note) {
+            // Hiçbir alan tohumlanamadıysa satır GÖSTERİLMEZ — boş bir
+            // "kaynak" iddiası kullanıcıyı yanıltırdı.
+            note.textContent = parts.length
+                ? (String(spec.source || 'page') + ' → ' + parts.join('  ·  ')) : '';
+            note.style.display = parts.length ? '' : 'none';
+        }
+        return parts.length ? spec : null;
+    }
+
+    // ------------------------------------------------------------------
     // Kurulum — init imzası SABİT: 3 sayfa (advanced/solid/liquid) aynı
     // seçeneklerle çağırıyor ({anchorId, thrustProvider, defaults})
     // ------------------------------------------------------------------
@@ -1474,6 +1708,11 @@
             const el = map[k] && $(map[k]);
             if (el) el.value = v;
         });
+
+        // T12 — sayfa bir araç tanımı YAYIMLIYORSA panelin araç alanları
+        // ondan tohumlanır (cfg.defaults'tan SONRA: sayfanın açık tanımı
+        // sayfanın genel varsayılanını geçersiz kılar).
+        seedFromPageVehicle();
 
         // Bileşen tablosu varsayılan satırları
         defaultComponents().forEach(addComponentRow);

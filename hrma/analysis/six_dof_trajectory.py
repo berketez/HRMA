@@ -166,6 +166,23 @@ _CD_SUPERSONIC_MID = 1.3      # M=1.2 ara değeri
 _CD_SUPERSONIC_PLATEAU = 1.05  # yüksek süpersonik plato
 _CD_SUPERSONIC_TAU = 2.0      # platoya yaklaşma zaman sabiti [Mach]
 
+# ---------------------------------------------------------------------------
+# HÜCUM AÇISININ GEÇERLİ OLDUĞU PENCERE (T34, 2026-08-03)
+#
+# α yalnız araç aerodinamik otoriteye sahipken (dinamik basınç q = ½ρv²
+# anlamlı büyüklükteyken) bir kararlılık göstergesidir. Rampada ve apoje
+# civarında v → 0 olduğu için gövde ekseni ile bağıl rüzgâr arasındaki açı
+# 90°'ye fırlar; bu bir ARTEFAKTTIR, kararsızlık değil.
+#
+# Bu iki sayı ARAYÜZDE DE kullanılır: sixdof_panel.js grafiği aynı pencereyi
+# uygulayarak çizer. Eskiden arka uç maskeliyor, grafik maskesiz ham diziyi
+# çiziyordu; ölçüldü (varsayılan araç, 90° atış): grafik ekseni 0-90° iken
+# yanındaki rozet 1,62° diyordu (55 kat). İki taraf da bu tanımı kullanmak
+# ZORUNDA — tests/test_faz6_f8_motor.py iki dosyadaki sayıyı karşılaştırır.
+# ---------------------------------------------------------------------------
+ALPHA_VALID_MIN_TIME_S = 1.0      # rampa/ateşleme geçicisi bu süre boyunca atılır
+ALPHA_VALID_SPEED_FRACTION = 0.10  # hız tepe hızın bu kesrinin altındaysa q≈0
+
 
 def _drag_coefficient_mach(mach, cd0):
     """Mach-bağımlı eksenel katsayı.
@@ -1070,8 +1087,13 @@ class SixDOFTrajectory:
         # max_alpha yalnız hızın tepe hızın %10'unun üstünde olduğu aralıkta
         # ölçülür. (Coriolis'ten ÖNCE bu latent'ti: tam dikey atışta yanal hız
         # sıfır olduğundan apojede bile α=0 kalıyor, sahte 'kararsız' gizliydi.)
-        _v_floor = 0.10 * float(speed.max()) if speed.size else 0.0
-        burn_mask = (t > 1.0) & (speed > _v_floor)
+        #
+        # T34 (2026-08-03): eşikler modül sabitine taşındı, çünkü arayüz
+        # grafiği de AYNI pencereyi uygulamak zorunda (bkz.
+        # ALPHA_VALID_MIN_TIME_S / ALPHA_VALID_SPEED_FRACTION notu).
+        _v_floor = (ALPHA_VALID_SPEED_FRACTION * float(speed.max())
+                    if speed.size else 0.0)
+        burn_mask = (t > ALPHA_VALID_MIN_TIME_S) & (speed > _v_floor)
         if i_apogee > 0:
             burn_mask &= (t < t[i_apogee])
         max_alpha = float(alpha_arr[burn_mask].max()) if burn_mask.any() else 0.0

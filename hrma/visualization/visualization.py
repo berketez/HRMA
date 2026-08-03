@@ -1097,11 +1097,117 @@ def _perf_gauge_panel(title, value, unit='m/s'):
             'draw': draw, 'axes': axes}
 
 
-def _perf_dual_axis_panel(title, x, primary, secondary, x_title):
+def _perf_series_ratio(primary_ys, secondary_ys):
+    """İkinci serinin birinciye oranlarını ÖLÇER; ölçülemezse None.
+
+    Çift eksenli panellerde ikinci seri çoğu zaman birincinin bir sabitle
+    çarpımıdır (F = Cf·A_t·Pc, Kn = A_yanma/A_boğaz). Bunu VARSAYMAK yerine
+    ölçüyoruz: oran gerçekten sabitse panel bunu söyleyebilir, değilse hiçbir
+    şey iddia edilmez.
+    """
+    if not primary_ys or not secondary_ys or len(primary_ys) != len(secondary_ys):
+        return None
+    oranlar = []
+    for a, b in zip(primary_ys, secondary_ys):
+        try:
+            fa, fb = float(a), float(b)
+        except (TypeError, ValueError):
+            return None
+        if not (math.isfinite(fa) and math.isfinite(fb)):
+            return None
+        if fa == 0.0:
+            continue
+        oranlar.append(fb / fa)
+    return oranlar if len(oranlar) >= 3 else None
+
+
+def _perf_ratio_stats(oranlar):
+    """Oran listesinden (ortalama, bağıl yayılım); ortalama 0 ise None."""
+    if not oranlar:
+        return None
+    ort = sum(oranlar) / len(oranlar)
+    if ort == 0.0 or not math.isfinite(ort):
+        return None
+    return ort, (max(oranlar) - min(oranlar)) / abs(ort)
+
+
+# İkinci serinin "bağımsız bilgi taşımıyor" sayılma eşiği. 1e-9: oran yalnız
+# kayan nokta gürültüsü kadar oynuyor, yani seri BİREBİR birim dönüşümü.
+# 0,05: oran %5'ten az geziniyor, yani eğrinin BİÇİMİ birincininkiyle aynı;
+# fark yalnız yavaş değişen bir katsayıdan geliyor.
+PERF_RATIO_EXACT = 1e-9
+PERF_RATIO_NEAR = 0.05
+
+
+def _perf_relation_note(primary_ys, secondary_ys, primary_name, secondary_name,
+                        mul_unit, div_unit, formula, drift_cause):
+    """Ölçülen orandan panel beyanı üretir; oran sabit değilse None.
+
+    Döner: (kısa_eksen_etiketi, uzun_ipucu_cümlesi).
+
+    HİÇBİR SAYI UYDURULMAZ: hem çarpan hem yayılım bu koşunun KENDİ
+    serilerinden ölçülür. Oran gezinmeye başlarsa (ikinci seri gerçekten
+    bağımsız bilgi taşıyorsa) beyan hiç yazılmaz.
+
+    Çarpan 1'den küçükse bölme biçiminde yazılır: 'Kn = Burn Area / 11,50 cm²'
+    hem okunur hem de fiziksel büyüklüğü (A_boğaz) doğrudan gösterir;
+    'x 0,0869 1/cm²' aynı sayıyı söyler ama hiçbir şey anlatmaz.
+    """
+    oranlar = _perf_series_ratio(primary_ys, secondary_ys)
+    if oranlar is None:
+        return None
+    olcum = _perf_ratio_stats(oranlar)
+    if olcum is None:
+        return None
+    oran, yayilim = olcum
+    if yayilim > PERF_RATIO_NEAR:
+        return None
+    if abs(oran) < 1.0:
+        # Bölme biçimi: katsayı primary/secondary oranıdır. Yayılım da TERS
+        # listeden yeniden ölçülür — ort(1/x) != 1/ort(x) olduğu için düz
+        # listenin yayılımını yazmak, adı yazılan oranla uyuşmayan bir sayı
+        # bildirmek olurdu.
+        ters = [1.0 / r for r in oranlar if r]
+        ters_olcum = _perf_ratio_stats(ters)
+        if ters_olcum is None:
+            return None
+        katsayi, yayilim = ters_olcum
+        islem, soz, birim = '/', 'divided by', div_unit
+        oran_adi = '%s/%s' % (primary_name, secondary_name)
+    else:
+        islem, soz, katsayi, birim = 'x', 'multiplied by', oran, mul_unit
+        oran_adi = '%s/%s' % (secondary_name, primary_name)
+
+    if yayilim <= PERF_RATIO_EXACT:
+        kisa = '= %s %s %.4g %s' % (primary_name, islem, katsayi, birim)
+        uzun = ('%s &mdash; this axis is %s %s the constant %.6g %s. The ratio '
+                'was measured across this run and is fixed to within %.1e, so '
+                'the curve carries nothing the left axis does not already '
+                'show: it is a unit conversion, meant to be read as a second '
+                'scale.'
+                % (formula, primary_name, soz, katsayi, birim, yayilim))
+    else:
+        kisa = '&asymp; %s %s %.4g %s' % (primary_name, islem, katsayi, birim)
+        uzun = ('%s &mdash; this axis follows %s almost exactly: the measured '
+                '%s ratio is %.4g %s and varies by only %.2f%% over this run, '
+                'so both curves have the same shape. That small variation is '
+                '%s, not an independent quantity.'
+                % (formula, primary_name, oran_adi, katsayi, birim,
+                   100.0 * yayilim, drift_cause))
+    return kisa, uzun
+
+
+def _perf_dual_axis_panel(title, x, primary, secondary, x_title,
+                          relation=None):
     """İki eksenli zaman serisi paneli.
 
     primary/secondary: (y_listesi, ad, renk, y_ekseni_başlığı, hover_birimi)
     secondary None ise tek eksen çizilir.
+
+    relation: (kısa_etiket, uzun_açıklama) — sağ eksenin sol eksenden
+        TÜRETİLDİĞİ ölçülmüşse verilir (T52). Kısa etiket eksen başlığının
+        altına, uzun açıklama ikinci serinin ipucuna yazılır. Sayı
+        DEĞİŞTİRİLMEZ; yalnız serinin ne olduğu beyan edilir.
     """
     xs = _perf_series(x)
     if xs is None or primary is None:
@@ -1129,13 +1235,16 @@ def _perf_dual_axis_panel(title, x, primary, secondary, x_title):
             row=row, col=col
         )
         if sec is not None:
+            _hover = ('%{x:.2f} s<br>' + sec[1] + ': %{y:.2f} '
+                      + sec[4]).rstrip()
+            if relation:
+                _hover += '<br>' + relation[1]
             fig.add_trace(
                 go.Scatter(
                     x=xs, y=sec[0], mode='lines',
                     line=dict(color=sec[2], width=2),
                     name=sec[1],
-                    hovertemplate=('%{x:.2f} s<br>' + sec[1] +
-                                   ': %{y:.2f} ' + sec[4]).rstrip() + '<extra></extra>'
+                    hovertemplate=_hover + '<extra></extra>'
                 ),
                 row=row, col=col, secondary_y=True
             )
@@ -1144,7 +1253,13 @@ def _perf_dual_axis_panel(title, x, primary, secondary, x_title):
         fig.update_xaxes(title_text=x_title, row=row, col=col)
         fig.update_yaxes(title_text=ytitle1, secondary_y=False, row=row, col=col)
         if sec is not None:
-            fig.update_yaxes(title_text=sec[3], secondary_y=True,
+            # Sağ eksen başlığı DÖNDÜRÜLMÜŞ çizilir: uzun metin panel
+            # yüksekliğini aşar. Bu yüzden kısa etiket ayrı bir <br> satırına
+            # ve <sub> ile küçültülerek konur; tam cümle ipucundadır.
+            _yt = sec[3]
+            if relation:
+                _yt = _yt + '<br><sub>' + relation[0] + '</sub>'
+            fig.update_yaxes(title_text=_yt, secondary_y=True,
                              row=row, col=col)
 
     # time_axis: aynı panodaki zaman panelleri senkron zoom için eşlenir
@@ -1169,25 +1284,39 @@ def _perf_panels_hybrid(motor_data, injector_data):
         trace_name='Mass Flow'
     ))
 
-    # Basınç dağılımı — Tank çubuğu GERÇEK tank basıncını gösterir.
-    # Eski kod Pc + ΔP_enjektör yazıyordu; bu besleme hattı kayıplarını yok
-    # sayan bir tahmindi ve kullanıcının girdiği tank basıncıyla çelişiyordu.
+    # Basınç dağılımı — 'Tank' çubuğu YALNIZ gerçek tank basıncı geldiğinde
+    # bu adı taşır (T11, 3 Ağustos 2026).
+    #
+    # Ölçüldü: tank basıncı alanına 30 / 50 / 90 bar girilip /calculate
+    # çağrıldığında motor sözlüğünde 'tank' geçen HİÇBİR anahtar dönmüyor
+    # (grep sonucu boş), bu yüzden geri-düşüş dalı %100 çalışıyor ve çubuk
+    # üç koşuda da 24,0 bar (= oda 20 + enjektör ΔP 4) gösteriyordu. 30 bar
+    # girilen bir tank için 24 bar yazmak etiketin yanlış olduğunun tek
+    # başına kanıtıdır. Türetilen sayı yanlış değil — YANLIŞ ADLANDIRILMIŞTI:
+    # Pc + ΔP_enjektör, enjektör GİRİŞ (manifold) basıncıdır; tank basıncı
+    # ondan besleme hattı kayıpları kadar YÜKSEKTİR.
     chamber = _perf_num(motor_data.get('chamber_pressure'))
     inj_dp = _perf_num(injector_data.get('pressure_drop'))
     tank = _perf_num(motor_data.get('tank_pressure'))
-    if (tank is None or tank <= 0) and chamber is not None and inj_dp is not None:
-        tank = inj_dp + chamber
+    if tank is not None and tank > 0:
+        feed_label, feed_value = 'Tank', tank
+    elif chamber is not None and inj_dp is not None:
+        feed_label, feed_value = 'Inj. inlet', inj_dp + chamber
+    else:
+        feed_label, feed_value = 'Inj. inlet', None
     panels.append(_perf_bar_panel(
         'Pressure Distribution',
-        ['Chamber', 'Tank', 'Inj. ΔP'],
-        [chamber, tank, inj_dp],
+        ['Chamber', feed_label, 'Inj. ΔP'],
+        [chamber, feed_value, inj_dp],
         [COL_DANGER, '#00e5ff', COL_SAFE],
         '{:.1f} bar', 'Location', 'Pressure (bar)',
         trace_name='Pressure'
     ))
 
     panels.append(_perf_panel_regression(motor_data))
-    panels.append(_perf_gauge_panel('Injector Performance',
+    # T43 emsali: gösterge hangi büyüklüğü gösterdiğini adında söyler.
+    # Hibritte enjektörden YALNIZ oksitleyici geçer (yakıt katı grain'dir).
+    panels.append(_perf_gauge_panel('Oxidizer Injection Velocity',
                                     injector_data.get('exit_velocity')))
     return [p for p in panels if p]
 
@@ -1305,30 +1434,55 @@ def _perf_panels_solid(motor_data):
         ))
 
     # 3) İtki ve kamara basıncı zaman serisi
+    #
+    # SAĞ EKSEN BAĞIMSIZ BİLGİ TAŞIMIYOR (T52, 2026-08-03)
+    # ------------------------------------------------------------------
+    # F = Cf·A_t·Pc olduğundan itki eğrisi ile basınç eğrisinin BİÇİMİ
+    # aynıdır; aralarındaki oran yalnız Cf kadar gezinir. ÖLÇÜLDÜ (uygulama
+    # 8084, /solid varsayılan koşusu, 180 nokta): F/Pc = 152,86 ... 156,28
+    # N/bar, bağıl yayılım %2,20. Kullanıcı üst üste düşen iki eğri görüyor
+    # ama ikincisinin birincinin ölçeklenmişi olduğu HİÇBİR YERDE yazmıyordu.
+    # Oran KOŞU ANINDA ölçülür; sabit bir cümle gömmek, oranın gerçekten
+    # sabit olmadığı bir koşuda yalan olurdu.
     if t and thrust:
         sec = None
+        iliski = None
         if pressure and len(pressure) == len(t):
             sec = (pressure, 'Chamber Pressure', COL_DANGER,
                    'Pressure (bar)', 'bar')
+            iliski = _perf_relation_note(
+                thrust, pressure, 'Thrust', 'Chamber Pressure',
+                'bar/N', 'N/bar',
+                'F = C<sub>f</sub>&middot;A<sub>t</sub>&middot;P<sub>c</sub>',
+                'the thrust coefficient drifting with pressure ratio')
         panels.append(_perf_dual_axis_panel(
             'Thrust & Chamber Pressure vs Time', t,
             (thrust, 'Thrust', '#00e5ff', 'Thrust (N)', 'N'),
-            sec, 'Time (s)'
+            sec, 'Time (s)', relation=iliski
         ))
 
     # 4) Yanan yüzey alanı ve Kn (= A_burn / A_throat) evrimi
+    # Burada oran TAM SABİTTİR — bu modelde boğaz alanı zamanla değişmiyor.
+    # ÖLÇÜLDÜ (aynı koşu): Kn / A_yanma = 869,2646 m⁻², bağıl yayılım
+    # 1,3e-16, yani yalnız kayan nokta gürültüsü. Sağ eksen bir birim
+    # dönüşümünden ibarettir ve panel bunu artık söyler.
     if t and burn_area and len(burn_area) == len(t):
         area_cm2 = [a * M2_TO_CM2 for a in burn_area]
         d_throat_mm = _perf_num(motor_data.get('throat_diameter'))
         sec = None
+        iliski = None
         if d_throat_mm and d_throat_mm > 0:
             a_throat = math.pi * (d_throat_mm / M_TO_MM / 2.0) ** 2  # m^2
-            sec = ([a / a_throat for a in burn_area], 'Kn', COL_WARN_HI,
-                   'Kn (-)', '')
+            kn = [a / a_throat for a in burn_area]
+            sec = (kn, 'Kn', COL_WARN_HI, 'Kn (-)', '')
+            iliski = _perf_relation_note(
+                area_cm2, kn, 'Burn Area', 'Kn', '1/cm²', 'cm²',
+                'K<sub>n</sub> = A<sub>burn</sub> / A<sub>t</sub>',
+                'numerical noise only')
         panels.append(_perf_dual_axis_panel(
             'Burn Area & Kn vs Time', t,
             (area_cm2, 'Burn Area', '#c792ea', 'Burn Area (cm²)', 'cm²'),
-            sec, 'Time (s)'
+            sec, 'Time (s)', relation=iliski
         ))
 
     return [p for p in panels if p]
@@ -1415,12 +1569,32 @@ def _perf_panels_liquid(motor_data, injector_data):
             '{:.2f} bar', 'Component', 'Pressure Drop (bar)'
         ))
 
-    inj_velocity = _perf_num(inj_design.get('ox_injection_velocity_m_s'))
-    if inj_velocity is None:
-        inj_velocity = _perf_num(inj_system.get('ox_injection_velocity'))
-    if inj_velocity is None:
-        inj_velocity = _perf_num(injector_data.get('exit_velocity'))
-    panels.append(_perf_gauge_panel('Injector Performance', inj_velocity))
+    # Enjeksiyon hızı — İKİ devre birden, adları yazılı (T43, 3 Ağustos 2026).
+    #
+    # Eski panel tek bir isimsiz gösterge çiziyordu: '41,4 m/s', 0-100 skala,
+    # 20-50 yeşil, 50-100 kırmızı. Hangi akışkanın hızı olduğu HİÇBİR yerde
+    # yazmıyordu. Excel çıktısıyla eşleştirilerek belirlendi: bu OKSİTLEYİCİ
+    # enjeksiyon hızıydı; YAKIT devresi (49,50 m/s — kırmızı bandın hemen
+    # dibinde) hiç gösterilmiyordu. Kullanıcı "enjektörüm yeşil bölgede"
+    # sonucunu çıkarıyor, gösterilmeyen devre kırmızıya bir adım uzakta
+    # duruyordu. Çubuk paneli iki devreyi de adıyla gösterir; kaynağı
+    # belgelenmemiş yeşil/kırmızı bant da böylece kalkar.
+    v_ox = _perf_num(inj_design.get('ox_injection_velocity_m_s'))
+    if v_ox is None:
+        v_ox = _perf_num(inj_system.get('ox_injection_velocity'))
+    if v_ox is None:
+        v_ox = _perf_num(injector_data.get('exit_velocity'))
+    v_fuel = _perf_num(inj_design.get('fuel_injection_velocity_m_s'))
+    if v_fuel is None:
+        v_fuel = _perf_num(inj_system.get('fuel_injection_velocity'))
+    panels.append(_perf_bar_panel(
+        'Injection Velocity',
+        ['Oxidizer', 'Fuel'],
+        [v_ox, v_fuel],
+        [COL_SAFE, COL_WARN_HI],
+        '{:.1f} m/s', 'Circuit', 'Injection Velocity (m/s)',
+        trace_name='Injection Velocity'
+    ))
 
     return [p for p in panels if p]
 
@@ -2599,12 +2773,20 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
 
     # Tasarım noktası: motor sonucundan gelen Isp (base_isp) — taramayla
     # karşılaştırılabilsin diye AYRI işaretlenir, yüzeye karıştırılmaz.
+    # T18 (3 Ağustos 2026): tasarım noktası YALNIZ yüzey bu motorun kendi
+    # iticileriyle çözüldüyse basılır. Ölçüldü: RP-1/LOX sıvı motor sayfasında
+    # yüzey N2O/HTPB referans çiftiyle (bir HİBRİT çift) çözülüyor, üstüne
+    # RP-1/LOX motorun tasarım noktası (Pc=100 bar, O/F=2,5) kırmızı haçla
+    # basılıyordu; iki farklı itici sisteminin sayıları tek grafikte üst üste
+    # geldiği için noktanın yüzeye göre konumu hiçbir şey ifade etmiyordu.
     design_pc = _perf_num(ed.get('optimal_chamber_pressure')
                           if ed.get('optimal_chamber_pressure') is not None
                           else ed.get('chamber_pressure'))
     design_of = _perf_num(ed.get('optimal_of_ratio'))
     design_isp = _perf_num(ed.get('base_isp'))
-    if None not in (design_pc, design_of, design_isp):
+    design_point_withheld = (prop_supplied is False
+                             and None not in (design_pc, design_of, design_isp))
+    if prop_supplied and None not in (design_pc, design_of, design_isp):
         fig.add_trace(go.Scatter3d(
             x=[design_pc], y=[design_of], z=[design_isp],
             mode='markers',
@@ -2627,6 +2809,14 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
     note = ('Combustion-instability bands are NOT modeled here; the earlier '
             'shaded band had no sourced criterion and was removed. '
             'Sea-level expansion (Pe = 1 bar) is used for Isp.')
+    if design_point_withheld:
+        note = ('The motor design point is NOT drawn on this surface: the '
+                'sweep was solved for the reference pair above because the '
+                'caller did not supply this motor\'s propellant identity, so '
+                f'the design point (Pc {design_pc:.1f} bar, O/F '
+                f'{design_of:.2f}, Isp {design_isp:.1f} s) belongs to a '
+                'different propellant system and its position relative to '
+                'this surface would mean nothing. ') + note
     if solved == 0:
         note = ('Surface not available: the equilibrium solver rejected every '
                 'node of this sweep'
@@ -3346,6 +3536,138 @@ def _num_safe(v, fb):
         return fb
 
 
+# ---------------------------------------------------------------------------
+# Kesitin RADYAL ölçüleri — çözücüden okunur, türetilmez (Faz 6 / T06 + T39)
+# ---------------------------------------------------------------------------
+#
+# 3 Ağustos 2026 tarayıcı denetimi: kesit çiziminin yarıçap yönündeki bütün
+# ölçüleri girdiden BAĞIMSIZDI. Bu depoda ölçüldü (/calculate_solid,
+# /calculate_liquid yanıtları + kesit izlerinin y genlikleri):
+#
+#   * grain dış çapı 100 -> 60 mm değiştirildi; çizilen grain yarıçapı İKİ
+#     koşuda da 48,0 mm kaldı (çözücü 50,0 ve 30,0 diyordu),
+#   * kasa cidarı çözücüde 2 / 8 / 30 mm çıktı; çizilen cidar üçünde de
+#     4,5 mm (= 0,045·D geometrik yedeği),
+#   * sıvıda çözücü 5,00 mm (kullanıcı girdisi; DXF, STEP ve teknik çizim
+#     PDF'i de 5,00 mm) derken kesit 3,49 mm çiziyordu.
+#
+# Sebep tekti: cidar YALNIZ ``structural_analysis['chamber_analysis']
+# ['recommended_thickness']`` yolundan aranıyordu. Katı motor bloğu
+# ``case_analysis``, sıvı motor bloğu ``chamber_structure`` adını kullandığı
+# için anahtar hiç tutmuyor, sessizce geometrik yedeğe düşülüyordu; grain dış
+# yarıçapı ise hiç okunmuyor, ``rc - liner_t`` diye UYDURULUYORDU.
+#
+# Üç şemayı zaten tek tabloda çözen bir yer var: imalata giden çizimi üreten
+# ``hrma.export.cad_visualization``. Kesit artık oradan okur — ekrandaki
+# çizimin atölyeye giden çizimden farklı bir cidar göstermesi mümkün değil.
+
+#: Yapısal sonuç hiç yoksa kullanılacak geometrik yedek (cad_visualization ile
+#: aynı kesir; oradan içe aktarılamazsa bu değer kullanılır).
+CROSS_SECTION_WALL_FALLBACK_FRACTION = 0.045
+
+
+def _cross_section_wall_mm(motor_data, d_ch_mm):
+    """Kesitte çizilecek kamara cidarı [mm] + künye + yapısal öneri.
+
+    Döner: ``(kalinlik_mm, kaynak_metni, onerilen_mm|None)``.
+
+    Kalınlık CAD/DXF/STEP ile AYNI çözümleyiciden gelir
+    (``cad_visualization._chamber_wall_design``): gerilmelerin hesaplandığı
+    "as-designed" cidar çizilir, yapısal öneri ayrıca taşınır. Yapısal sonuç
+    yoksa geometrik yedeğe düşülür ve künye bunu AÇIKÇA söyler — uydurma sayı
+    sessizce basılmaz.
+    """
+    fallback_fraction = CROSS_SECTION_WALL_FALLBACK_FRACTION
+    design = None
+    try:
+        from hrma.export.cad_visualization import (
+            CHAMBER_WALL_FALLBACK_FRACTION, _chamber_wall_design)
+        fallback_fraction = CHAMBER_WALL_FALLBACK_FRACTION
+        design = _chamber_wall_design(motor_data)
+    except Exception:
+        design = None
+
+    if isinstance(design, dict):
+        t_m = _num_safe(design.get('thickness_m'), None)
+        if t_m is not None and t_m > 0:
+            return (t_m * 1000.0,
+                    str(design.get('source') or 'structural analysis'),
+                    _num_safe(design.get('recommended_mm'), None))
+
+    # Geometrik yedek: yalnız BURADA kırpılır (gerçek değer kırpılmaz —
+    # kullanıcının 30 mm cidarını 12 mm'ye çekmek T06'nın ta kendisiydi).
+    est = max(3.0, min(fallback_fraction * d_ch_mm, 0.12 * d_ch_mm))
+    return est, 'geometric estimate (no structural result in this solution)', None
+
+
+def _cross_section_grain_annulus(motor_data, rc_mm):
+    """Grain dış yarıçapı [mm] ve kasa deliğiyle arasındaki halka boşluğu.
+
+    Döner: ``(r_grain_disi_mm, halka_mm, kaynak_metni)``.
+
+    Grain dış çapı çözücünün BEYAN ETTİĞİ alandan okunur (katı:
+    ``outer_diameter_mm``, hibrit: ``grain_outer_diameter_mm``). Halka
+    kalınlığı bu iki çaptan ÇIKAR: ``(kasa_deliği − grain_dışı)/2``. Ölçüldü
+    (3 Ağustos 2026, /calculate_solid): yalıtım girdisi 0 / 0,5 / 3 / 20 mm
+    iken kasa deliği 100 / 101 / 106 / 140 mm oluyor, grain 100 mm'de
+    kalıyor — yani bu fark kullanıcının yalıtımını BİREBİR verir. Eski kod
+    yerine ``min(max(0,02·D, 1,5), 5,0)`` yazıyordu ve 20 mm yalıtımı 2,6 mm
+    çiziyordu.
+
+    Grain dış çapı yoksa (eski sözlükler) eski geometrik tahmin korunur ve
+    kaynak metni bunun tahmin olduğunu söyler.
+    """
+    gd = motor_data.get('grain_design') or {}
+    d_go = _num_safe(gd.get('outer_diameter_mm'), None)
+    if d_go is None:
+        d_go = _num_safe(gd.get('grain_outer_diameter_mm'), None)
+    if d_go is not None and 0 < d_go / 2.0 <= rc_mm + 1e-9:
+        r_go = min(d_go / 2.0, rc_mm)
+        return (r_go, max(0.0, rc_mm - r_go),
+                'solver grain outer diameter')
+    est = min(max(0.02 * 2.0 * rc_mm, 1.5), 5.0)
+    return (rc_mm - est, est,
+            'estimate (the solution does not report a grain outer diameter)')
+
+
+def _cross_section_final_port(motor_data, r_pf_mm, r_go_mm):
+    """Son port yarıçapı [mm] + efsane adı + gerekçe (çizilmeyecekse None).
+
+    Faz 6 / T07: efsanedeki "Final port Ø99,8 mm" HESAP DEĞİLDİ — eski kod
+    ``r_pf = min(r_pf, r_go - 1.0)`` yazıyordu, yani çizilen grain
+    yarıçapından 1 mm çıkarıyordu. Ölçüldü: inhibitör kutusu değiştirilse de
+    (yanma süresi 2,186 s -> 1,176 s değişiyor) etiket sabit kalıyordu.
+
+    Yeni kural: çözücünün bildirdiği son port çizilir. İki durumda sayı
+    İDDİA EDİLMEZ:
+      * son port grain dışına eşitse -> web tamamen tükenmiştir, etiket
+        bunu söyler (uydurma 1 mm ofset yok),
+      * grain'in DIŞ yüzeyi de yanıyorsa (``inhibitor``/``inhibitor_config``
+        'outer_surface' içermiyor) son port artık grain dış çapı DEĞİLDİR;
+        çözücü tükenen web'i yayımlamadığı için iz hiç çizilmez ve gerekçe
+        yazılır.
+    """
+    gd = motor_data.get('grain_design') or {}
+    cfg = str(gd.get('inhibitor_config') or gd.get('inhibitor') or '').lower()
+    outer_burns = bool(cfg) and 'outer_surface' not in cfg
+    full_web = r_pf_mm is not None and r_pf_mm >= r_go_mm - 1e-6
+
+    if outer_burns and full_web:
+        return (None, None,
+                'End-of-burn port is not drawn: the grain outer surface is '
+                'not inhibited, so the final port is NOT the grain outer '
+                f'diameter, and this solution reports only the geometric web '
+                f'({_num_safe(gd.get("web_thickness_mm"), 0.0):.1f} mm). '
+                'The solver does not publish the burnt-through web.')
+    if r_pf_mm is None or r_pf_mm <= 0:
+        return None, None, None
+    if full_web:
+        return (min(r_pf_mm, r_go_mm),
+                f'Final port Ø{2 * min(r_pf_mm, r_go_mm):.1f} mm '
+                '(web fully consumed)', None)
+    return r_pf_mm, f'Final port Ø{2 * r_pf_mm:.1f} mm', None
+
+
 def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     """Çözücü geometrisinden mühendislik eksenel kesit çizimi.
 
@@ -3395,26 +3717,86 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
 
     wall_noz = _num((motor_data.get('nozzle_geometry') or {}).get('wall_thickness'),
                     max(3.0, 0.1 * d_t))
-    wall_case = _num((struct.get('chamber_analysis') or {}).get('recommended_thickness'),
-                     0.045 * D_ch)
-    wall_case = min(max(wall_case, 3.0), 0.12 * D_ch)
-    liner_t = min(max(0.02 * D_ch, 1.5), 5.0)
+    # T06 + T39: cidar CAD/DXF/STEP ile aynı çözümleyiciden (üç motor tipinin
+    # üç yapısal şeması orada tek tabloda), grain dışı ve halka boşluğu ise
+    # çözücünün beyan ettiği grain dış çapından gelir.
+    wall_case, wall_source, wall_recommended = _cross_section_wall_mm(
+        motor_data, D_ch)
+    r_go, liner_t, annulus_source = _cross_section_grain_annulus(
+        motor_data, rc)
     cap_t = min(max(1.6 * wall_case, 8.0), 0.3 * rc + 8.0)
 
     L_g = _num(gd.get('grain_length_mm'),
                _num(motor_data.get('grain_length'), 0.8 * L / 1000) * 1000)
-    L_g = min(L_g, 0.92 * L)
     r_p0 = _num(gd.get('port_diameter_initial_mm'),
                 _num(motor_data.get('port_diameter_initial'), 0.03) * 1000) / 2
     r_pf = _num(gd.get('port_diameter_final_mm'),
                 _num(motor_data.get('port_diameter_final'), 0.05) * 1000) / 2
-    r_go = rc - liner_t
-    r_pf = min(r_pf, r_go - 1.0)
-    r_p0 = min(r_p0, r_pf)
+    r_pf_draw, final_port_name, final_port_note = _cross_section_final_port(
+        motor_data, r_pf, r_go)
+    r_p0 = min(r_p0, r_go)
 
-    # Eksen: z=0 baş kapak iç yüzü; grain önünde %35 ön oda payı
-    slack = max(4.0, L - L_g)
-    zg0, zg1 = 0.35 * slack, 0.35 * slack + L_g
+    # ------------------------------------------------------------------
+    # BATES SEGMENT YIĞINI (T70, 2026-08-03)
+    # ------------------------------------------------------------------
+    # Grain tek kesintisiz dörtgen olarak çiziliyordu. ÖLÇÜLDÜ (uygulama
+    # 8084, /calculate_solid, grain_count=3 grain_gap=2 mm):
+    #   grain_design.number_of_segments = 3
+    #   grain_design.segment_length_mm  = 166,667
+    #   grain_design.grain_length_mm    = 500,0
+    #   motor_geometry.chamber_length   = 604 mm  (= 500 + 2x2 boşluk + 100 kapak)
+    #   'Fuel grain' izi                x = 36,4 -> 536,4 mm, TEK blok
+    # Yani kasa boyu segment aralarını sayıyor ama çizim saymıyordu; kullanıcı
+    # üç parçalı bir yığını tek parça olarak görüyordu.
+    #
+    # Segment boyu ÇÖZÜCÜNÜN KENDİ sayısından alınır (segment_length_mm) —
+    # türetmek iki kaynak yaratırdı. Denetim önerisindeki
+    # `seg = (L_g - gap*(n-1))/n` formülü BİLEREK kullanılmadı: çözücüde
+    # segment_length = L_grain / n_segments (solid_rocket_engine.py:7179) ve
+    # boşluklar kasa boyuna AYRICA ekleniyor (_case_inner_length), yani L_g
+    # boşlukları İÇERMEZ. O formül 3 segmentte 165,33 mm verir ve çözücünün
+    # raporladığı 166,67 mm ile çelişirdi.
+    #
+    # grain_gap_mm çözücü sözlüğünde henüz YOK; anahtar gelene kadar boşluk
+    # 0 kabul edilir ve yığın eski konumunda bit-aynı kalır (uydurma boşluk
+    # çizilmez). Anahtar eklendiği gün çizim kendiliğinden doğrulanır.
+    grain_n_seg = 1
+    grain_gap_mm = 0.0
+    if has_grain:
+        _n = _num(gd.get('number_of_segments'), 1)
+        grain_n_seg = int(_n) if _n >= 1 else 1
+        if grain_n_seg > 1:
+            # Boşluk yalnız çok segmentli yığında anlamlıdır (çözücüde de
+            # öyle: _case_inner_length boşluğu yalnız BATES'te sayar ve
+            # BATES dışı her grain tipinde n_segments = 1).
+            grain_gap_mm = max(0.0, _num(gd.get('grain_gap_mm'), 0.0))
+    _seg_solver = _num(gd.get('segment_length_mm'), 0.0)
+    if (grain_n_seg > 1 and _seg_solver > 0
+            and abs(_seg_solver * grain_n_seg - L_g) <= 0.5):
+        grain_seg_mm = _seg_solver
+    else:
+        grain_seg_mm = L_g / grain_n_seg if grain_n_seg > 1 else L_g
+    # Yığının kapladığı eksenel boy: yakıt + aralar (boşlukta yakıt yoktur).
+    L_stack = grain_seg_mm * grain_n_seg + grain_gap_mm * (grain_n_seg - 1)
+
+    # Eksenel yerleşim (T10): grain boyu ARTIK KIRPILMIYOR. Eski kod
+    # `L_g = min(L_g, 0.92 * L)` yazıyordu; ölçüldü (hibrit varsayılan koşu):
+    # çözücü 1511,6 mm derken kesit ve 3B güverte 1449,4 mm çiziyordu
+    # (-62,2 mm, %-4,1) ve grafik kullanıcıyı bu çizimle imalat öncesi
+    # kontrole çağırıyordu. Konum artık çözücünün kendi ön/arka oda
+    # boylarından gelir: ölçüldü, 39,911 + 1511,596 + 23,946 = 1575,452 mm
+    # = chamber_length (bit-aynı).
+    # Yerleşim yığının TAM boyuna göre yapılır (T70): segment araları da yer
+    # kaplar, yoksa yığın kamaranın dışına taşardı.
+    pre_mm = _num_safe(motor_data.get('pre_chamber_length'), None)
+    pre_mm = pre_mm * 1000 if pre_mm is not None and pre_mm >= 0 else None
+    if pre_mm is not None and pre_mm + L_stack <= L + 1e-6:
+        zg0 = pre_mm
+    else:
+        zg0 = 0.35 * max(0.0, L - L_stack)
+    zg1 = zg0 + L_stack
+    # Grain kamaraya sığmıyorsa SESSİZCE kısaltmak yerine çelişki bildirilir.
+    grain_overflow = (has_grain and L_stack > L + 1e-6)
 
     # ---------------- Nozul iç konturu (ortak örnekleyici) ----------------
     # Geometri tek kaynaktan: 2D kesit, 3D görselleştirme ve CAD aynı konturu
@@ -3443,29 +3825,69 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
             name=name, legendgroup=lg or name, showlegend=legend,
             hoverinfo='text', hovertext=hover, hoveron='fills'))
 
-    def mirrored(z_pts, r_pts, fill, name, hover, lg=None):
-        poly(z_pts, r_pts, fill, name, hover, legend=True, lg=lg)
+    def mirrored(z_pts, r_pts, fill, name, hover, lg=None, legend=True):
+        # legend=False: aynı legendgroup'a giren ek parçalar (BATES segment
+        # yığını) efsaneye TEKRAR girmesin diye — tek 'Fuel grain' girdisi
+        # bütün segmentleri birlikte açar/kapar.
+        poly(z_pts, r_pts, fill, name, hover, legend=legend, lg=lg)
         poly(z_pts, [-r for r in r_pts], fill, name, hover, legend=False, lg=lg)
 
-    # Kamara duvarı + baş kapak (tek katı)
+    # Kamara duvarı + baş kapak (tek katı). Künye ÇİZİLEN kalınlığın nereden
+    # geldiğini ve yapısal önerinin ne olduğunu söyler (T39).
+    case_hover = (f'Chamber wall<br>Thickness (as drawn): {wall_case:.2f} mm'
+                  f'<br>Source: {wall_source}<br>Bore: Ø{D_ch:.1f} mm')
+    if (wall_recommended is not None
+            and abs(wall_recommended - wall_case) > 1e-6):
+        case_hover += (f'<br>Structural sizing recommends: '
+                       f'{wall_recommended:.2f} mm')
     case_z = [-cap_t, -cap_t, L, L, 0, 0]
     case_r = [0, rc + wall_case, rc + wall_case, rc, rc, 0]
-    mirrored(case_z, case_r, C_CASE, 'Chamber wall',
-             f'Chamber wall<br>Thickness: {wall_case:.1f} mm<br>Bore: Ø{D_ch:.1f} mm')
+    mirrored(case_z, case_r, C_CASE, 'Chamber wall', case_hover)
 
     if has_grain:
-        # Fenolik liner
-        liner_z = [2, 2, L - 2, L - 2]
-        liner_r = [r_go, rc - 0.2, rc - 0.2, r_go]
-        mirrored(liner_z, liner_r, C_LINER, 'Liner (insulation)',
-                 f'Phenolic liner<br>Thickness: {liner_t:.1f} mm')
+        # Kasa deliği ile grain dışı arasındaki halka: yalıtım + boşluk.
+        # Çözücü ikisini AYRI yayımlamadığı için tek bant olarak, adı da
+        # ne olduğunu söyleyecek biçimde çizilir (0 ise hiç çizilmez).
+        if liner_t > 0.05:
+            # İçe çekme payı bandın kendisinden büyük olamaz (ince halkada
+            # poligon ters dönerdi): en çok kalınlığın dörtte biri.
+            inset = min(0.2, 0.25 * liner_t)
+            liner_z = [2, 2, L - 2, L - 2]
+            liner_r = [r_go, rc - inset, rc - inset, r_go]
+            mirrored(liner_z, liner_r, C_LINER, 'Liner / annulus',
+                     (f'Radial gap between the case bore and the grain: '
+                      f'{liner_t:.2f} mm<br>= (Ø{D_ch:.1f} − Ø{2*r_go:.1f}) / 2'
+                      f'<br>Insulation + clearance ({annulus_source}); the '
+                      'solution does not split the two'))
 
-        # Yakıt grain'i (katıda port = çekirdek/core, son port = grain dışı)
-        grain_z = [zg0, zg0, zg1, zg1]
+        # Yakıt grain'i (katıda port = çekirdek/core).
+        # T70: çok segmentli yığın segment segment çizilir; tek segmentte
+        # (n=1) döngü tek dörtgen üretir, yani eski çıktı bit-aynıdır.
+        grain_tail = ''
+        if r_pf_draw is not None:
+            grain_tail = (f'<br>Port (final): Ø{2*r_pf_draw:.1f} mm'
+                          f'<br>Web: {r_pf_draw - r_p0:.1f} mm')
+        elif final_port_note:
+            grain_tail = '<br>Port (final): not reported'
         grain_r = [r_p0, r_go, r_go, r_p0]
-        mirrored(grain_z, grain_r, C_GRAIN, 'Fuel grain',
-                 (f'Fuel grain<br>Length: {L_g:.1f} mm<br>Port (initial): Ø{2*r_p0:.1f} mm'
-                  f'<br>Port (final): Ø{2*r_pf:.1f} mm<br>Web: {r_pf - r_p0:.1f} mm'))
+        for _i in range(grain_n_seg):
+            _a = zg0 + _i * (grain_seg_mm + grain_gap_mm)
+            _b = _a + grain_seg_mm
+            if grain_n_seg > 1:
+                _head = (f'Fuel grain segment {_i + 1}/{grain_n_seg}'
+                         f'<br>Segment length: {grain_seg_mm:.1f} mm'
+                         f'<br>Grain total: {L_g:.1f} mm'
+                         f' in {grain_n_seg} segments')
+                if grain_gap_mm > 0:
+                    _head += f'<br>Inter-segment gap: {grain_gap_mm:.1f} mm'
+            else:
+                _head = f'Fuel grain<br>Length: {L_g:.1f} mm'
+            mirrored([_a, _a, _b, _b], grain_r, C_GRAIN, 'Fuel grain',
+                     (_head
+                      + f'<br>Outer: Ø{2*r_go:.1f} mm ({annulus_source})'
+                      + f'<br>Port (initial): Ø{2*r_p0:.1f} mm'
+                      + grain_tail),
+                     lg='Fuel grain', legend=(_i == 0))
 
     # Enjektör plakası + tipe özel iç geometri (D1 ajanı gerçek enjektör
     # tipini motor sonucuna kablolar; tip bilinmiyorsa showerhead varsayılır)
@@ -3482,14 +3904,16 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
              (f'Nozzle ({noz_type})<br>Throat: Ø{d_t:.1f} mm<br>Exit: Ø{d_e:.1f} mm'
               f'<br>Expansion ratio: {(re/rt)**2:.1f}<br>Wall: {wall_noz:.1f} mm'))
 
-    # Son port çapı (kesikli) — eksenel kesitte yatay çizgi çifti
-    if has_grain:
+    # Son port çapı (kesikli) — eksenel kesitte yatay çizgi çifti.
+    # Sayı iddia edilemiyorsa iz HİÇ çizilmez, gerekçe not olarak yazılır (T07).
+    if has_grain and r_pf_draw is not None:
         for sgn, show in ((1, True), (-1, False)):
             fig.add_trace(go.Scatter(
-                x=[zg0, zg1], y=[sgn * r_pf, sgn * r_pf], mode='lines',
+                x=[zg0, zg1], y=[sgn * r_pf_draw, sgn * r_pf_draw], mode='lines',
                 line=dict(color='#d1495b', width=2, dash='dash'),
-                name=f'Final port Ø{2*r_pf:.1f} mm', showlegend=show,
-                hovertemplate=f'End-of-burn port: Ø{2*r_pf:.1f} mm<extra></extra>'))
+                name=final_port_name, showlegend=show,
+                hovertemplate=(f'End-of-burn port: Ø{2*r_pf_draw:.1f} mm'
+                               '<extra></extra>')))
 
     # Merkez ekseni (dash-dot, mühendislik konvansiyonu)
     fig.add_trace(go.Scatter(
@@ -3537,7 +3961,19 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
 
     dim_h(0, L, r_out + 16, f'L<sub>chamber</sub> = {L:.0f} mm')
     if has_grain:
-        dim_h(zg0, zg1, r_out + 42, f'Grain = {L_g:.0f} mm')
+        # Ölçü çizgisi yığının TAMAMINI kapsar; boşluk varsa etiket bunu
+        # açıkça söyler, yoksa "500 mm" yazıp 504 mm'lik bir aralığı
+        # göstermiş olurduk (T70).
+        if grain_n_seg > 1 and grain_gap_mm > 0:
+            _grain_lbl = (f'Grain stack = {L_stack:.0f} mm '
+                          f'({grain_n_seg} x {grain_seg_mm:.0f} + '
+                          f'{grain_n_seg - 1} x {grain_gap_mm:.0f} gap)')
+        elif grain_n_seg > 1:
+            _grain_lbl = (f'Grain = {L_g:.0f} mm '
+                          f'({grain_n_seg} x {grain_seg_mm:.0f} mm)')
+        else:
+            _grain_lbl = f'Grain = {L_g:.0f} mm'
+        dim_h(zg0, zg1, r_out + 42, _grain_lbl)
     dim_h(-cap_t, z_exit, -(max(r_out, re + wall_noz) + 30),
           f'L<sub>total</sub> = {z_exit + cap_t:.0f} mm', above=False)
     dim_v(-cap_t - 18, -rc, rc, f'Ø<sub>c</sub> = {D_ch:.1f} mm', side=-1)
@@ -3562,6 +3998,26 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     fig.add_annotation(x=z_throat + 0.55 * (z_exit - z_throat),
                        y=-(max(rt, re) + wall_noz), yshift=-48, text=angle_txt,
                        showarrow=False, font=dict(size=11, color=INK))
+
+    # Çizilemeyen/çelişkili ölçüler SESSİZ GEÇİLMEZ: kâğıda not düşülür
+    # (T07 son port, T10 grain boyu). Notlar figürün altına, kâğıt
+    # koordinatında yazılır ki eksen aralığından etkilenmesin.
+    notes = []
+    if has_grain and final_port_note:
+        notes.append(final_port_note)
+    if grain_overflow:
+        _stack_txt = (f'{L_stack:.1f} mm (grain {L_g:.1f} mm + '
+                      f'{grain_n_seg - 1} x {grain_gap_mm:.1f} mm gap)'
+                      if grain_n_seg > 1 and grain_gap_mm > 0
+                      else f'{L_stack:.1f} mm')
+        notes.append(f'Geometry conflict: the grain stack is {_stack_txt} long '
+                     f'but the chamber is {L:.1f} mm — drawn at full length, '
+                     'not trimmed to fit.')
+    if notes:
+        fig.add_annotation(
+            x=0.0, y=-0.20, xref='paper', yref='paper', xanchor='left',
+            showarrow=False, align='left',
+            text='<br>'.join(notes), font=dict(size=10, color='#d1495b'))
 
     # ---------------- Yerleşim (dijital blueprint) ----------------
     # Eksen aralıkları AÇIKÇA verilir; scaleanchor KULLANILMAZ. Plotly
@@ -3602,8 +4058,9 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
                     bgcolor='rgba(6,13,24,0.7)',
                     bordercolor='rgba(0,229,255,0.2)'),
         hovermode='closest',
-        margin=dict(l=70, r=40, t=90, b=60),
-        height=520,
+        # Not satırı varsa alt marj büyür — aksi hâlde metin kırpılır.
+        margin=dict(l=70, r=40, t=90, b=60 + (34 * len(notes) if notes else 0)),
+        height=520 + (34 * len(notes) if notes else 0),
     )
 
     return _fig_json(fig)

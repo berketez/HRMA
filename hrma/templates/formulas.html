@@ -307,8 +307,15 @@
             </table>
             
             <h3 data-i18n="fx.s1_2.h">1.2 Characteristic Velocity</h3>
+            <!-- T27 düzeltmesi (2026-08-03): kök içinde γ PAY'da yazılıydı
+                 (√(γRT_c/γ)), γ sadeleşince geriye √(RT_c) kalıyor ve bu kutu
+                 hemen altındaki Γ kutusundan √γ kadar sapıyordu.
+                 Ölçüldü (γ=1,2 · R=350 J/kg·K · T_c=3000 K):
+                   eski yazım 1730,8 m/s · Γ kutusu 1580,0 m/s → oran 1,0954 = √γ (+%9,5).
+                 Doğrusu √(R T_c/γ); kod da böyle:
+                 hrma/analysis/heat_transfer_analysis.py:474 → 1580,0 m/s. -->
             <div class="formula-box">
-                $c^* = \frac{p_c A_t}{\dot{m}} = \sqrt{\frac{\gamma R T_c}{\gamma}} \left(\frac{\gamma+1}{2}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
+                $c^* = \frac{p_c A_t}{\dot{m}} = \sqrt{\frac{R T_c}{\gamma}} \left(\frac{\gamma+1}{2}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
             </div>
             <div class="formula-box">
                 $c^* = \frac{\sqrt{R T_c}}{\Gamma}$ <span data-i18n="fx.ann.where">where</span> $\Gamma = \sqrt{\gamma} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
@@ -327,8 +334,16 @@
             </table>
             
             <h3 data-i18n="fx.s1_3.h">1.3 Thrust Coefficient</h3>
+            <!-- T26 düzeltmesi (2026-08-03): karekök yalnız 2γ²/(γ−1) kesrini
+                 kapsıyordu; (2/(γ+1))^… çarpanı kökün DIŞINDA kalmıştı.
+                 Sutton & Biblarz 9. baskı Eq. 3-30'da kök çarpımın TAMAMINI kapsar.
+                 Ölçüldü (γ=1,2 · p_e/p_c=0,01 · ayrılma terimi 0):
+                   eski yazım C_F=0,9736 · doğrusu C_F=1,6445.
+                 C_F yakınsak-ıraksak lülede 1'in altına inemez; aşağıdaki
+                 değişken tablosu da "1,2-2,0" diyor. Kod zaten doğruydu:
+                 hrma/analysis/nozzle_flow_1d.py:164 ideal_thrust_coefficient(). -->
             <div class="formula-box">
-                $C_F = \frac{F}{p_c A_t} = \sqrt{\frac{2\gamma^2}{\gamma-1}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{\gamma-1}} \sqrt{1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}} + \frac{(p_e-p_a)A_e}{p_c A_t}$
+                $C_F = \frac{F}{p_c A_t} = \sqrt{\frac{2\gamma^2}{\gamma-1} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{\gamma-1}} \left[1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}\right]} + \frac{(p_e-p_a)A_e}{p_c A_t}$
             </div>
             <div class="formula-box">
                 $C_F = C_{F,vac} - \frac{p_a A_e}{p_c A_t}$ <span data-i18n="fx.ann.atmospheric_correction">(atmospheric correction)</span>
@@ -362,14 +377,24 @@
             </table>
             
             <h3 data-i18n="fx.s1_5.h">1.5 Mass Flow Rate Relations</h3>
+            <!-- T55 düzeltmesi (2026-08-03): 1. ve 3. kutu boyutsal olarak
+                 tutarsızdı, ṁ birimi kg/s ÇIKMIYORDU.
+                 1. kutu eskiden ρ*·A_t·√γ·(2/(γ+1))^… idi → kg/m³·m² = kg/m;
+                 boğazdaki ses hızı çarpanı a*=√(2γRT_c/(γ+1)) tümden eksikti.
+                 3. kutu eskiden p_c'yi karekökün İÇİNDE taşıyordu → m²·√Pa·(s/m)
+                 = kg^0,5·m^0,5; doğrusunda p_c doğrusaldır (Sutton Eq. 3-24).
+                 Ölçüldü (A_t=0,002 m² · p_c=4 MPa · γ=1,2 · R=350 · T_c=3000 K):
+                   1. kutu (ideal, C_d=1) 5,0632 kg/s · 3. kutu (C_d=0,97) 4,9113 kg/s;
+                   oran 1,0309 = 1/C_d, yani iki kutu artık birbiriyle tutarlı.
+                   Eski yazımlar 0,00307 ve 0,00587 gibi birimsiz-uyumsuz sayılar veriyordu. -->
             <div class="formula-box">
-                $\dot{m} = \rho^* A_t \sqrt{\gamma} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
+                $\dot{m} = \rho^* A_t a^* = \rho^* A_t \sqrt{\frac{2\gamma R T_c}{\gamma+1}}$
             </div>
             <div class="formula-box">
                 $\rho^* = \frac{p_c}{R T_c} \left(\frac{2}{\gamma+1}\right)^{\frac{1}{\gamma-1}}$ <span data-i18n="fx.ann.throat_density">(throat density)</span>
             </div>
             <div class="formula-box">
-                $\dot{m} = C_d A_t \sqrt{\frac{2\gamma p_c}{\gamma+1}} \left(\frac{\gamma+1}{R T_c}\right)^{\frac{1}{2}}$
+                $\dot{m} = C_d A_t p_c \sqrt{\frac{\gamma}{R T_c}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}}$
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s1_5.desc">This equation governs the mass flow rate through the nozzle throat when sonic conditions (choked flow) are achieved. At the throat, the flow velocity equals the local speed of sound, creating a flow limitation that makes the mass flow rate independent of downstream pressure variations. This choked condition is essential for stable rocket motor operation and thrust control. The throat acts as a "flow meter" that precisely controls propellant consumption rate. Understanding this relationship is crucial for throat sizing, chamber pressure prediction, and ensuring proper pressure drop across injectors in liquid systems.</span></p>
             <div class="info">
@@ -515,8 +540,17 @@
             <div class="formula-box">
                 $\eta_c = \frac{c^*_{actual}}{c^*_{theoretical}}$
             </div>
+            <!-- T29 düzeltmesi (2026-08-03): ikinci kutu
+                 η_c = 1 − (T_wall − T_gas)/T_adiabatic yazıyordu. Roket odasında
+                 T_wall < T_gas olduğu için pay NEGATİF, ifade 1'in üstüne çıkıyordu.
+                 Ölçüldü: (800/3000/3200 K) → 1,688 · (1000/2800/3000) → 1,600 ·
+                 (500/3400/3500) → 1,829. Verim tanım gereği ≤1'dir.
+                 Yerine üstteki kutuyla TUTARLI sıcaklık biçimi konuldu: c* ∝ √T_c
+                 olduğundan (aynı γ, R'de) η_c = c*_act/c*_th = √(T_act/T_ad).
+                 Aynı üçlülerde: 0,968 · 0,966 · 0,986 — bölümün kendi bandıyla
+                 (sıvı %95-99, katı %92-97, hibrit %85-95) uyumlu. -->
             <div class="formula-box">
-                $\eta_c = 1 - \frac{T_{wall} - T_{gas}}{T_{adiabatic}}$
+                $\eta_c = \sqrt{\frac{T_{c,actual}}{T_{c,adiabatic}}} \leq 1$
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s3_4.desc">Combustion efficiency quantifies how closely real-world combustion approaches the theoretical ideal, accounting for incomplete mixing, finite reaction kinetics, heat losses, and non-uniform temperature distributions. This parameter is crucial for evaluating injector designs, chamber geometry, and operating conditions. Poor combustion efficiency manifests as reduced c* performance, incomplete propellant utilization, and potential combustion instability. The efficiency varies significantly between propulsion system types due to different mixing mechanisms and residence times. Engineers use efficiency measurements to optimize injector patterns, chamber length, and operating pressure for maximum performance while maintaining stability margins.</span></p>
             <div class="info">
@@ -719,8 +753,14 @@
             <div class="formula-box">
                 $G_{ox} = \frac{\dot{m}_{ox}}{A_{port}}$
             </div>
+            <!-- T28 düzeltmesi (2026-08-03): eski yazım a·G_ox^n/(1−n)·[1−(r₀/r_f)^(1−n)]
+                 idi; bu, §6.2'deki r(t) çözümünün zaman ortalaması DEĞİL ve n=1'de
+                 1/(1−n) sıfıra bölüyordu. Doğrusu ṙ = a(ṁ_ox/(πr²))^n yasasının
+                 kendi integralinden gelir: ṙ_avg = (r_f−r₀)/t_b.
+                 Ölçüldü (a=1e-4 · ṁ_ox=1 kg/s · r₀=0,05 m · n=0,8 · t_b=10 s →
+                 r_f=0,08105 m): doğru 0,003105 m/s · eski yazım 0,002224 m/s (−%28,4). -->
             <div class="formula-box">
-                $\dot{r}_{avg} = \frac{a G_{ox}^n}{1-n} \left[1 - \left(\frac{r_0}{r_f}\right)^{1-n}\right]$
+                $\dot{r}_{avg} = \frac{r_f - r_0}{t_b} = \frac{(2n+1)\, a \left(\frac{\dot{m}_{ox}}{\pi}\right)^n (r_f - r_0)}{r_f^{2n+1} - r_0^{2n+1}}$
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s6_1.desc">Hybrid motor regression rate analysis governs the fundamental combustion process where solid fuel is pyrolyzed and gasified by convective heat transfer from the boundary layer above the fuel surface. Unlike solid motors where burn rate depends primarily on pressure, hybrid regression rates are controlled by oxidizer mass flux and heat transfer mechanisms. The power-law relationship reflects the complex interaction between turbulent boundary layer heat transfer, fuel pyrolysis chemistry, and oxidizer flow dynamics. The regression exponent (typically 0.5-0.8) indicates that regression rate increases sublinearly with oxidizer flux, creating challenges for maintaining constant mixture ratios. Understanding this relationship is essential for predicting fuel consumption rates, optimizing port design, and achieving desired performance throughout the burn duration.</span></p>
             <table class="variable-table">
@@ -735,8 +775,16 @@
             <div class="formula-box">
                 $\frac{dr}{dt} = \dot{r} = a \left(\frac{\dot{m}_{ox}}{\pi r^2}\right)^n$
             </div>
+            <!-- T28 düzeltmesi (2026-08-03): üs 2(1−n) yazılmıştı; üstteki
+                 ṙ = a(ṁ_ox/(πr²))^n yasasının integrali 2n+1 verir
+                 (r^(2n) dr = a(ṁ_ox/π)^n dt → r^(2n+1) = r₀^(2n+1) + (2n+1)a(ṁ_ox/π)^n t).
+                 Ölçüldü (a=1e-4 · ṁ_ox=1 kg/s · r₀=0,05 m): n=0,5 t=10 s doğru
+                 0,06024 m / eski 0,05056 m (−%16,1); n=0,8 t=10 s doğru 0,08105 /
+                 eski 0,05007 (−%38,2); n=0,8 t=20 s (−%49,7). Marxman n katsayısı
+                 çoğu yakıtta 0,5-0,8 bandındadır, yani hata tam kullanım bandındaydı.
+                 Ayrıca n=1'de eski üs 1/(2(1−1)) → SIFIRA BÖLME; yenisinde 1/3. -->
             <div class="formula-box">
-                $r(t) = \left[r_0^{2(1-n)} + \frac{2a(1-n)\dot{m}_{ox}^n}{\pi^n} t\right]^{\frac{1}{2(1-n)}}$
+                $r(t) = \left[r_0^{2n+1} + (2n+1)\, a \left(\frac{\dot{m}_{ox}}{\pi}\right)^n t\right]^{\frac{1}{2n+1}}$
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s6_2.desc">Port diameter evolution analysis is fundamental to hybrid motor design as it determines how fuel consumption and mixture ratios change throughout the burn. As the port diameter increases, the oxidizer mass flux decreases (constant oxidizer flow through larger area), leading to reduced regression rates and shifting O/F ratios. This coupling creates complex feedback mechanisms that affect combustion efficiency, thrust profiles, and complete fuel utilization. The time-dependent port geometry directly impacts heat transfer patterns, pressure drop characteristics, and combustion zone locations. Understanding port evolution is crucial for predicting performance degradation, optimizing initial port sizing, designing multi-port configurations, and ensuring acceptable mixture ratios throughout the operational envelope. This analysis drives many fundamental hybrid motor design decisions.</span></p>
             <div class="info">
@@ -1326,7 +1374,17 @@
                 document.title = window.I18N.t('fx.docTitle', document.title);
             }
             function boot() {
-                if (window.I18N.mountSwitcher) window.I18N.mountSwitcher('.nav-links');
+                /* T76 (2026-08-03): bu sayfada dil denetimi VARDI ama diğer
+                   sayfalardan FARKLI tutamakla — / sayfası #langSelect,
+                   /launch-site [data-lang] düğmeleri, burası yalnız
+                   [data-hrma-lang-select]. Ölçüldü: langSelect=false, [data-lang]=0,
+                   [data-hrma-lang-select]=1 (75x25 px, görünür). Denetim eksik
+                   değil, ORTAK KİMLİĞİ eksikti; mount edilen seçiciye ana
+                   sayfayla aynı kimlik verilir (i18n.js:395 senkronu da bunu arar). */
+                var w = window.I18N.mountSwitcher
+                    ? window.I18N.mountSwitcher('.nav-links') : null;
+                var sel = (w && w.querySelector) ? w.querySelector('select') : null;
+                if (sel && !document.getElementById('langSelect')) sel.id = 'langSelect';
                 syncTitle();
                 window.I18N.onChange(syncTitle);
             }

@@ -701,6 +701,68 @@
     <script src="/static/js/panels/uncertainty_panel.js"></script>
     <script src="/static/js/panels/correlation_panel.js"></script>
     <script>
+        // =============================================================
+        // T12 (2026-08-03) — TEK ARAÇ TANIMI SÖZLEŞMESİ
+        // -------------------------------------------------------------
+        // ÖLÇÜLEN KUSUR: bu sayfadaki iki panel FARKLI roket uçuruyordu.
+        // Yörünge paneli #initial_mass 50 kg / #final_mass 25 kg /
+        // #reference_area 17671 mm² (Ø150 mm) / #drag_coefficient 0,50
+        // okuyor; 6-DOF paneli ise kendi alanlarında kuru 8,0 kg /
+        // itici 4,0 kg / gövde Ø0,100 m / Cd₀ 0,45 taşıyordu
+        // (sixdof_panel.js::FIELDS). Aynı motorun apojesi hangi panele
+        // baktığınıza göre değişiyordu; hiçbir yerde de bu iki aracın
+        // ayrı olduğu yazmıyordu.
+        //
+        // ÇÖZÜM TEK YÖNLÜ: yörünge paneli OTORİTEDİR. 6-DOF paneli
+        // sayfa yüklenirken buradan tohumlanır, geri besleme YOKTUR
+        // (çevrim oluşmaz). Tohumlama yalnız init anında bir kez olur,
+        // yani kullanıcının elle girdiği hiçbir değer ezilmez.
+        //
+        // Panel bu okuyucuyu ADIYLA arar; sözleşme:
+        //   window.HRMAVehicleSpec.read() -> {
+        //       source, fields,              // izlenebilirlik
+        //       dry_mass_kg, propellant_mass_kg,
+        //       body_diameter_m, cd0 }       // hesaplanamayan alan null
+        // Sayfa bu nesneyi tanımlamazsa (solid.html / liquid.html)
+        // 6-DOF paneli kendi varsayılanlarıyla çalışmaya devam eder.
+        // =============================================================
+        window.HRMAVehicleSpec = {
+            read: function () {
+                function n(id) {
+                    var e = document.getElementById(id);
+                    var v = e ? parseFloat(e.value) : NaN;
+                    return isFinite(v) ? v : null;
+                }
+                var mi = n('initial_mass'), mf = n('final_mass');
+                var areaMm2 = n('reference_area');
+                // Alın kesiti → eşdeğer gövde çapı. Yörünge çözücüsü
+                // sürüklemeyi bu ALANDAN hesapladığı için 6-DOF'un gövde
+                // çapı da aynı alanı vermelidir: A = πD²/4  →  D = √(4A/π).
+                // mm² → m² dönüşümü app.js'teki TEK kaynaktan (MM2_PER_M2).
+                var dBody = (areaMm2 !== null && areaMm2 > 0)
+                    ? Math.sqrt(4 * (areaMm2 / MM2_PER_M2) / Math.PI) : null;
+                return {
+                    source: 'trajectory-panel',
+                    // Hangi değerin HANGİ alandan geldiği izlenebilir olsun
+                    // diye kaynak alan adları da döner (panel bunu not
+                    // satırında aynen gösterir).
+                    fields: {
+                        dry_mass_kg: 'final_mass',
+                        propellant_mass_kg: 'initial_mass − #final_mass',
+                        body_diameter_m: 'reference_area',
+                        cd0: 'drag_coefficient'
+                    },
+                    dry_mass_kg: mf,
+                    // Yakılan itici = ateşleme kütlesi − sönüm kütlesi.
+                    // Sıra bozuksa (mi <= mf) uydurma yapılmaz: null döner.
+                    propellant_mass_kg:
+                        (mi !== null && mf !== null && mi > mf) ? (mi - mf) : null,
+                    body_diameter_m: dBody,
+                    cd0: n('drag_coefficient')
+                };
+            }
+        };
+
         // Transient + 6-DOF + Enjektör panelleri (yeni fizik katmanlarının UI'ı)
         document.addEventListener('DOMContentLoaded', function () {
             TransientPanel.init({ anchorId: 'trajectoryPanel' });
@@ -1539,7 +1601,18 @@
                              idi; 150 mm gövde (0.01767 m²) ancak 0.018 yazılabiliyor,
                              %1.7 hata giriyordu. JS /calculate_trajectory'ye m²
                              çevirip gönderir (backend sözleşmesi değişmedi). -->
-                        <input type="number" id="reference_area" value="100000" min="100" max="10000000" step="100">
+                        <!-- Faz 6 / T12: varsayılan 100000 mm² idi. Ölçüldü
+                             (2026-08-03): bu Ø356,8 mm gövde demek, motorun
+                             oda çapı ise Ø79,9 mm — 4,47 kat. Sürükleme
+                             kuvveti alanla doğru orantılı olduğundan apoje
+                             tahminini doğrudan bozuyordu. Yeni varsayılan
+                             alanın KENDİ yardım metninde zaten belgelenen
+                             örnektir (17671 mm² = Ø150 mm, oranı 1,88).
+                             Aracın gerçek alın kesiti sayfada BİLİNMEDİĞİ
+                             için otomatik hesaplanmaz; altındaki not her
+                             değişiklikte ima edilen gövde çapını ve oda
+                             çapına oranını ölçüp yazar. -->
+                        <input type="number" id="reference_area" value="17671" min="100" max="10000000" step="100">
                         <div class="help-text" data-i18n="adv.help.frontalAreaVehicle17671">Frontal area of the vehicle. 17671 mm² equals a 150 mm diameter body.</div>
                     </div>
                     <div class="form-group">
@@ -2127,6 +2200,33 @@
             return text;
         }
 
+        // ---- Sayı biçimi (Faz 6 / T09) ---------------------------------
+        // `Number.prototype.toLocaleString()` ARGÜMANSIZ çağrıldığında
+        // sayfanın dilini değil İŞLETİM SİSTEMİNİN yerelini kullanır. Bu
+        // sayfa İngilizce (`<html lang="en">`) iken tarayıcı yereli tr-TR
+        // olan bir makinede ölçüldü (2026-08-03, Playwright locale=tr-TR):
+        //     (10000).toLocaleString()  -> "10.000"
+        //     (150000).toLocaleString() -> "150.000"
+        //     (1000).toLocaleString()   -> "1.000"
+        // İngilizce okuyan kullanıcı için bu sırasıyla 10 / 150 / 1 demektir:
+        // toplam impuls 1000 KAT yanlış okunur. Nokta binlik ayırıcı kullanan
+        // her yerelde (tr, de, es, it, nl, pt) yeniden üretilir.
+        //
+        // Çözüm projenin kendi politikasıdır: `I18N.number` binlik ayırıcıyı
+        // BİLEREK kullanmaz ve ondalık ayırıcıyı sayfanın diline göre seçer
+        // (i18n.js:293 — "mühendislik çıktısında '1.234' değerinin 1234 mü
+        // 1,234 mü olduğu belirsizleşmesin"). Sözlük yüklenmemişse ayırıcısız
+        // düz ondalık gösterime düşülür; hiçbir durumda OS yereline dönülmez.
+        function i18nNumber(value, digits) {
+            if (typeof value !== 'number' || !isFinite(value)) { return ''; }
+            if (typeof window.I18N !== 'undefined' && window.I18N.number) {
+                return window.I18N.number(value, digits);
+            }
+            return (typeof digits === 'number' && isFinite(digits))
+                ? value.toFixed(Math.max(0, Math.min(20, digits)))
+                : String(value);
+        }
+
         // ---- Yanıt gövdesi okuma (Faz 5 / H3-B9) -----------------------
         // Uçların bir kısmı `sanitize_json_values` süzgecinden geçmiyor ve
         // sonlu olmayan sayıları JSON gövdesine Python söz dizimiyle
@@ -2394,7 +2494,11 @@
                 const thrust = parseFloat(document.getElementById('thrust').value || 0);
                 const burnTime = parseFloat(document.getElementById('burn_time').value || 0);
                 const totalImpulse = thrust * burnTime;
-                document.getElementById('calculated_impulse').textContent = totalImpulse.toLocaleString() + ' N⋅s';
+                // T09: `toLocaleString()` yerine `i18nNumber` — gerekçe ve
+                // ölçüm yardımcının başındaki yorumda. 0 basamak: itki × süre
+                // çarpımında uydurma hassasiyet gösterilmez.
+                document.getElementById('calculated_impulse').textContent =
+                    i18nNumber(totalImpulse, 0) + ' N⋅s';
             }
         }
 
@@ -3641,6 +3745,214 @@
                 params.style.display = checkbox.checked ? 'block' : 'none';
             }
         }
+
+        // ===== Yörünge aracı ile motorun eşitlenmesi (Faz 6 / T12) ========
+        //
+        // SORUN (ölçüldü 2026-08-03, Playwright, /hybrid, varsayılan motor):
+        //   Calculate ÖNCESİ ve SONRASI alanlar aynı kaldı:
+        //     initial_mass = 50 kg, final_mass = 25 kg  ->  itici 25 kg
+        //   Motorun raporladığı itici kütlesi ise 5,463 kg idi.
+        //   Yörüngenin ima ettiği Isp = F / ((Δm/t_b)·g0)
+        //                             = 1000 / ((25/10)·9,80665) = 40,79 s
+        //   Motorun ilan ettiği Isp   = 185,59 s
+        //   Yani yörünge paneli, motorun KENDİ özgül itkisini 4,55 KAT ihlal
+        //   eden bir uçuş simüle ediyordu. İki panel aynı sayfada çelişiyordu:
+        //   Trajectory apoje 1,09 km, 6-DOF apoje 8,31 km (7,6 kat fark).
+        //
+        // KÖK NEDEN: `initial_mass` bağımsız bir kullanıcı girdisiydi. Oysa
+        // fizik onu bağımlı kılar — kalkış kütlesi, kuru kütle ile motorun
+        // TAŞIDIĞI itici kütlesinin toplamıdır. Kullanıcının serbestçe
+        // seçebileceği tek büyüklük kuru kütledir (gövde + faydalı yük).
+        //
+        // ÇÖZÜM: m_0 = m_kuru + m_itici(motor). İtici kütlesi UYDURULMAZ,
+        // motor sonucundan (`propellant_mass_total`) okunur; motor sonucu
+        // yoksa alana DOKUNULMAZ ve not "motor sonucu bekleniyor" der.
+        // app.js:2286 bu alanları doğrudan DOM'dan okuduğu için eşitleme
+        // /api/trajectory-analysis'e giden gövdeyi de düzeltir.
+        //
+        // Referans alan BİLEREK otomatik doldurulmaz: aracın alın kesiti
+        // motor verisinden HESAPLANAMAZ (gövde çapı motorun oda çapından
+        // büyüktür, ne kadar büyük olduğu sayfada bilinmiyor). Uydurma sayı
+        // koymak yerine tutarlılık ölçülüp kullanıcıya gösterilir.
+        // NOT METİNLERİ NEDEN CÜMLE DEĞİL FORMÜL?
+        // Bu depoda alt sayfa şablonları TEK DİLLİDİR: çeviriler
+        // i18n_advanced.js'te durur, şablonda Türkçe dize bulunması yasaktır
+        // (tests/test_i18n.py::test_no_turkish_left_in_visible_text) ve
+        // şablonda geçen her `adv.*` anahtarının sözlükte karşılığı olmak
+        // zorundadır (tests/test_i18n_advanced.py::
+        // test_every_template_key_exists_in_dictionary). Yeni bir cümle
+        // eklemek bu yüzden i18n_advanced.js'i de düzenlemeyi gerektirir —
+        // o dosya bu görevin kapsamı dışında.
+        //
+        // Çözüm: notlar dile bağlı OLMAYAN parçalardan kurulur — sayılar, SI
+        // birim simgeleri ve zaten ÇEVRİLMİŞ mevcut anahtarlar. Böylece
+        // Türkçe modda İngilizce metin sızmaz (T57 sınıfı yeni bir kusur
+        // üretilmez) ve sözlük sözleşmesi bozulmaz.
+        var TRAJ_G0 = 9.80665;          // standart yerçekimi (CODATA)
+
+        function trajMotorOzeti() {
+            var m = (window.currentResults || {}).motor;
+            if (!m) { return null; }
+            var itici = m.propellant_mass_total;
+            if (typeof itici !== 'number' || !isFinite(itici) || itici <= 0) {
+                return null;
+            }
+            return {
+                itici_kg: itici,
+                thrust_N: m.thrust,
+                burn_time_s: m.burn_time,
+                isp_s: (typeof m.isp_actual === 'number') ? m.isp_actual : m.isp,
+                // Oda çapı metre cinsinden gelir (ölçüldü: 0,0798694 m).
+                oda_capi_mm: (typeof m.chamber_diameter === 'number'
+                              && isFinite(m.chamber_diameter))
+                    ? m.chamber_diameter * 1000 : null
+            };
+        }
+
+        // Alanın altındaki açıklama satırını üretir/bulur.
+        function trajNotAlani(id, sonrakiEl) {
+            var el = document.getElementById(id);
+            if (el) { return el; }
+            if (!sonrakiEl || !sonrakiEl.parentNode) { return null; }
+            el = document.createElement('div');
+            el.id = id;
+            el.className = 'help-text';
+            sonrakiEl.parentNode.appendChild(el);
+            return el;
+        }
+
+        // m_0 = m_kuru + m_itici. Motor sonucu yoksa alan DEĞİŞTİRİLMEZ.
+        function trajKalkisKutlesiniEsitle() {
+            var ozet = trajMotorOzeti();
+            var mi = document.getElementById('initial_mass');
+            var mf = document.getElementById('final_mass');
+            if (!mi || !mf) { return null; }
+            var not = trajNotAlani('initial_mass_note', mi);
+            if (!ozet) {
+                // Motor yokken hiçbir iddia yazılmaz: alan da not da
+                // dokunulmadan bırakılır.
+                if (not) { not.textContent = ''; }
+                return null;
+            }
+            var kuru = parseFloat(mf.value);
+            if (!isFinite(kuru) || kuru <= 0) { return null; }
+            var kalkis = kuru + ozet.itici_kg;
+            mi.value = kalkis.toFixed(3);
+            mi.readOnly = true;
+            // Denetlenebilirlik: türetilen kütlelerin ima ettiği özgül itki
+            // EKRANA yazılır. "Uyumlu" iddiası yerine iki sayı da gösterilir,
+            // kullanıcı farkı kendi görür. Isp = F / (ṁ·g0), ṁ = m_itici/t_b.
+            var ima_isp = null;
+            if (isFinite(ozet.thrust_N) && isFinite(ozet.burn_time_s)
+                && ozet.burn_time_s > 0) {
+                ima_isp = ozet.thrust_N
+                    / ((ozet.itici_kg / ozet.burn_time_s) * TRAJ_G0);
+            }
+            if (not) {
+                // Dile bağlı olmayan künye:  m_kuru + m_itici = m_0 kg · Isp x s
+                // 'Isp' hem İngilizcede hem Türkçede aynı simgedir ve zaten
+                // sözlükte kayıtlıdır (adv.txt.isp).
+                var satir = i18nNumber(kuru, 3) + ' + ' + i18nNumber(ozet.itici_kg, 3)
+                    + ' = ' + i18nNumber(kalkis, 3) + ' kg';
+                if (ima_isp !== null) {
+                    satir += '  ·  ' + i18nText('adv.txt.isp', 'Isp') + ' '
+                        + i18nNumber(ima_isp, 1) + ' s';
+                }
+                not.textContent = satir;
+            }
+            return kalkis;
+        }
+
+        // Referans alanın motorun oda çapıyla tutarlılığını ÖLÇER.
+        // Hiçbir değer yazmaz; yalnız ölçtüğünü yazar.
+        function trajReferansAlaniDenetle() {
+            var el = document.getElementById('reference_area');
+            if (!el) { return null; }
+            var not = trajNotAlani('reference_area_note', el);
+            var ozet = trajMotorOzeti();
+            var alan_mm2 = parseFloat(el.value);
+            if (!not || !isFinite(alan_mm2) || alan_mm2 <= 0) { return null; }
+            var govde_capi_mm = 2 * Math.sqrt(alan_mm2 / Math.PI);
+            // 'Ø {çap} mm' dile bağlı değildir; oda çapı için sayfanın zaten
+            // çevrilmiş etiketi kullanılır (adv.label.chamberDiameterMm —
+            // TR: 'Oda Çapı (mm)'), birimi etiketin içinde geldiğinden sayı
+            // çıplak yazılır.
+            var satir = 'Ø ' + i18nNumber(govde_capi_mm, 0) + ' mm';
+            if (!ozet || ozet.oda_capi_mm === null) {
+                not.textContent = satir;
+                not.style.color = '';
+                return { govde_capi_mm: govde_capi_mm, oran: null };
+            }
+            var oran = govde_capi_mm / ozet.oda_capi_mm;
+            not.textContent = satir + '  ·  '
+                + i18nText('adv.label.chamberDiameterMm', 'Chamber Diameter (mm)')
+                + ' ' + i18nNumber(ozet.oda_capi_mm, 1)
+                + '  ·  ' + i18nNumber(oran, 2) + '×';
+            // Gövde odadan küçük olamaz; 3 katın üstü de büyük olasılıkla
+            // güncellenmemiş varsayılandır. İkisi de sürükleme kuvvetini
+            // ve dolayısıyla apojeyi doğrudan bozar.
+            not.style.color = (oran < 1.0 || oran > 3.0)
+                ? 'var(--hd-orange, #ff8c33)' : '';
+            return { govde_capi_mm: govde_capi_mm, oran: oran };
+        }
+
+        function trajAraciEsitle() {
+            trajKalkisKutlesiniEsitle();
+            trajReferansAlaniDenetle();
+        }
+
+        // Hesap bittiğinde eşitle. `displayCalculationResults` app.js'te
+        // tanımlıdır ve app.js bu şablondan ÖNCE yüklenir; global adı burada
+        // sarmalamak app.js:176'daki çağrının çözüldüğü yeri değiştirir.
+        // Özgün işlev her koşulda çağrılır — eşitleme hata verse bile hesap
+        // sonuçlarının çizimi ASLA engellenmez.
+        (function () {
+            var ozgun = window.displayCalculationResults;
+            if (typeof ozgun !== 'function') { return; }
+            window.displayCalculationResults = function (results) {
+                var cikti = ozgun.apply(this, arguments);
+                try {
+                    trajAraciEsitle();
+                } catch (e) {
+                    console.error('Trajectory vehicle sync failed:', e);
+                }
+                return cikti;
+            };
+        })();
+
+        // 'Calculate Trajectory Performance' düğmesi app.js:2286'da alanları
+        // DOM'dan okur. Kullanıcı bu arada kuru kütleyi değiştirmiş olabilir;
+        // istek gitmeden önce kalkış kütlesi bir kez daha eşitlenir ki uca
+        // giden gövde ile ekranda yazan değer AYNI olsun.
+        (function () {
+            var ozgun = window.calculateTrajectory;
+            if (typeof ozgun !== 'function') { return; }
+            window.calculateTrajectory = function () {
+                try {
+                    trajAraciEsitle();
+                } catch (e) {
+                    console.error('Trajectory vehicle sync failed:', e);
+                }
+                return ozgun.apply(this, arguments);
+            };
+        })();
+
+        document.addEventListener('DOMContentLoaded', function () {
+            var mf = document.getElementById('final_mass');
+            if (mf) {
+                mf.addEventListener('input', function () {
+                    try { trajKalkisKutlesiniEsitle(); } catch (e) { /* yok say */ }
+                });
+            }
+            var ra = document.getElementById('reference_area');
+            if (ra) {
+                ra.addEventListener('input', function () {
+                    try { trajReferansAlaniDenetle(); } catch (e) { /* yok say */ }
+                });
+            }
+            // Motor sonucu henüz yokken de not görünsün.
+            try { trajAraciEsitle(); } catch (e) { /* yok say */ }
+        });
 
         // Toggle parametric parameters visibility
         function toggleParametricParams() {

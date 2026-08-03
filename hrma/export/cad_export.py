@@ -30,6 +30,166 @@ except ImportError:
     FREECAD_AVAILABLE = False
     print("FreeCAD not available - using fallback geometry generation")
 
+
+# ---------------------------------------------------------------------------
+# Girdap önleyici düzenek — birim normalizasyonu (T13, 3 Ağustos 2026)
+# ---------------------------------------------------------------------------
+#
+# NEDEN: Sıvı motor çözücüsü ``anti_vortex_device`` sözlüğünü İKİ FARKLI
+# birimle yayımlıyor (``liquid_rocket_engine.py:5650-5673``):
+#
+#     'diameter': av_diameter,                  # METRE
+#     'height':   av_height,                    # METRE
+#     'vane_radial_length_mm': ... * 1000.0,    # MİLİMETRE
+#     'vane_thickness': TANK_VANE_GAUGE_MM,     # MİLİMETRE
+#
+# Bu modül ise ürettiği paketin TAMAMINI milimetre olarak beyan ediyor
+# (``self.units = "mm"``, ``drawing_spec['units'] = 'mm'``,
+# ``project_info.units = 'mm'``). Eski kod çapı doğrudan mm sanıyordu
+# (``diameter = av_config['diameter']  # mm``), yani düzenek imalata giden
+# pakette tam 1000 kat küçük iniyordu.
+#
+# ÖLÇÜLDÜ (10 kN RP1/LOX, ``POST /export_tank_cad`` paketi, 3 Ağustos 2026):
+#   oxidizer_tank_geometry.json -> anti_vortex_device.diameter = 0,235585
+#   aynı sözlükte vane_radial_length_mm = 117,7923  ->  2x = 235,5846 mm
+#   oran 235,5846 / 0,235585 = 1000,0   (tank çapı 785,282 mm)
+#   yani paket mm olarak okunduğunda düzenek/tank oranı 0,0003 çıkıyordu;
+#   çözücünün beyan ettiği oran 0,30'dur.
+#
+# ÇEVİRİ NASIL DOĞRULANIR: büyüklük sezgisiyle DEĞİL, çözücünün kendi
+# geometrik özdeşliğiyle. Çözücü kanadı göbekten dış çapa uzatır
+# (``vane_radial_len = av_diameter / 2``), dolayısıyla
+#
+#     diameter[mm] == 2 x vane_radial_length_mm
+#
+# her koşulda geçerlidir. Ölçek çarpanı bu özdeşlikten ÇIKARILIR. Özdeşlik
+# tutmuyorsa ve sözlük kendi birimini de beyan etmiyorsa değer UYDURULMAZ:
+# alan ``None`` olur ve ``units`` alanı ``UNRESOLVED`` yazar.
+#
+# Yükseklik aynı çarpanı paylaşır çünkü çözücü ikisini de tank çapından aynı
+# aritmetikle üretir (``diameter * D_RATIO`` ve ``diameter * H_RATIO``): ikisi
+# tanım gereği aynı birimdedir.
+
+#: Özdeşlik karşılaştırmasının bağıl toleransı (kayan nokta gürültüsü payı).
+_AV_IDENTITY_RTOL = 1e-6
+
+
+def _as_float(value):
+    """Sayıya çevirir; çevrilemeyen ya da sonlu olmayan değer için ``None``."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if out != out or out in (float('inf'), float('-inf')):
+        return None
+    return out
+
+
+def normalize_anti_vortex_mm(av_config, tank_diameter_mm=None):
+    """Girdap önleyici sözlüğünü paketin birimine (mm) çevirir.
+
+    Dönen sözlük özgün alanları korur, ``diameter``/``height`` alanlarını
+    MİLİMETRE'ye çevirir ve çevirinin nasıl belirlendiğini açıkça yazar:
+
+    * ``units``                 -> ``'mm'`` ya da ``'UNRESOLVED'``
+    * ``solver_units``          -> kaynağın birimi (``'m'`` / ``'mm'`` / ...)
+    * ``unit_scale_to_mm``      -> uygulanan çarpan
+    * ``unit_resolution_basis`` -> çarpanın hangi ölçütle bulunduğu
+    * ``diameter_solver_value`` / ``height_solver_value`` -> ham değerler
+
+    ``tank_diameter_mm`` verilirse düzeneğin tanka SIĞDIĞI ayrıca ölçülür ve
+    ``fits_inside_tank`` alanıyla bildirilir (sığmıyorsa gizlenmez).
+    """
+    if not isinstance(av_config, dict):
+        return av_config
+
+    out = dict(av_config)
+    raw_d = _as_float(av_config.get('diameter'))
+    raw_h = _as_float(av_config.get('height'))
+    vane_mm = _as_float(av_config.get('vane_radial_length_mm'))
+
+    scale = None
+    solver_units = None
+    basis = None
+
+    # 1) Birincil ölçüt: çözücünün kendi geometrik özdeşliği.
+    if raw_d is not None and raw_d > 0 and vane_mm is not None and vane_mm > 0:
+        expected_mm = 2.0 * vane_mm
+        tol = _AV_IDENTITY_RTOL * expected_mm
+        if abs(raw_d - expected_mm) <= tol:
+            scale, solver_units = 1.0, 'mm'
+            basis = ('diameter already matches 2 x vane_radial_length_mm '
+                     '(the solver geometric identity), so it is already in '
+                     'millimetres - no conversion applied')
+        elif abs(raw_d * 1000.0 - expected_mm) <= tol:
+            scale, solver_units = 1000.0, 'm'
+            basis = ('diameter x 1000 matches 2 x vane_radial_length_mm (the '
+                     'solver geometric identity), so the solver published it '
+                     'in metres - converted to millimetres')
+
+    # 2) İkincil ölçüt: sözlük birimini kendisi beyan ediyorsa ona uyulur.
+    if scale is None:
+        declared = str(av_config.get('units', '')).strip().lower()
+        if declared in ('mm', 'millimetre', 'millimeter'):
+            scale, solver_units = 1.0, 'mm'
+            basis = 'unit taken from the declared "units" field of the source'
+        elif declared in ('m', 'metre', 'meter'):
+            scale, solver_units = 1000.0, 'm'
+            basis = 'unit taken from the declared "units" field of the source'
+
+    if scale is None:
+        # 3) Ölçüt yok -> UYDURMA YOK. Ham değer korunur, çevrilmiş alanlar
+        #    boş bırakılır ve paket bunu açıkça söyler.
+        out['diameter'] = None
+        out['height'] = None
+        out['units'] = 'UNRESOLVED'
+        out['solver_units'] = 'UNRESOLVED'
+        out['unit_scale_to_mm'] = None
+        out['unit_resolution_basis'] = (
+            'unit of diameter/height could not be resolved: the source has '
+            'neither a usable vane_radial_length_mm cross-check nor a '
+            'declared "units" field. No value is guessed - use '
+            'diameter_solver_value / height_solver_value with the unit of '
+            'whoever produced them.')
+    else:
+        out['diameter'] = None if raw_d is None else raw_d * scale
+        out['height'] = None if raw_h is None else raw_h * scale
+        out['units'] = 'mm'
+        out['solver_units'] = solver_units
+        out['unit_scale_to_mm'] = scale
+        out['unit_resolution_basis'] = basis
+
+    out['diameter_solver_value'] = av_config.get('diameter')
+    out['height_solver_value'] = av_config.get('height')
+
+    tank_d = _as_float(tank_diameter_mm)
+    if tank_d is not None and tank_d > 0 and _as_float(out.get('diameter')):
+        d_mm = float(out['diameter'])
+        out['fits_inside_tank'] = bool(0.0 < d_mm <= tank_d)
+        out['device_to_tank_diameter_ratio'] = d_mm / tank_d
+
+    return out
+
+
+def normalize_internal_structures(tank_config):
+    """``internal_structures`` kopyasını mm olarak tutarlı hâle getirir.
+
+    Yalnız ``anti_vortex_device`` çevrilir; bafl, ağız ve enstrümantasyon
+    alanlarını çözücü zaten mm yayımlıyor (``liquid_rocket_engine.py:5700+``).
+    """
+    internals = (tank_config or {}).get('internal_structures')
+    if not isinstance(internals, dict):
+        return internals
+    device = internals.get('anti_vortex_device')
+    if not isinstance(device, dict):
+        return internals
+    tank_d = ((tank_config.get('dimensions') or {}).get('diameter')
+              if isinstance(tank_config.get('dimensions'), dict) else None)
+    out = dict(internals)
+    out['anti_vortex_device'] = normalize_anti_vortex_mm(device, tank_d)
+    return out
+
+
 class TankCADGenerator:
     """Professional CAD file generator for propellant tanks"""
     
@@ -108,12 +268,14 @@ class TankCADGenerator:
                 mesh.write(stl_file)
                 exported_files.append(stl_file)
         
-        # Generate engineering drawings
-        self._generate_drawings(tank_data, output_dir)
-        
-        # Generate manufacturing specs
-        self._generate_manufacturing_specs(tank_data, output_dir)
-        
+        # Generate engineering drawings + manufacturing specs
+        # (2026-08-03: yedek yolda olduğu gibi burada da paket listesine
+        # eklenmiyorlardı; FreeCAD kurulu olsaydı aynı dosyalar bu yolda da
+        # ZIP dışında kalırdı.)
+        exported_files.append(self._generate_drawings(tank_data, output_dir))
+        exported_files.append(
+            self._generate_manufacturing_specs(tank_data, output_dir))
+
         # Close document
         FreeCAD.closeDocument(doc.Name)
         
@@ -177,7 +339,11 @@ class TankCADGenerator:
             structures.append(baffle_obj)
         
         # Create anti-vortex device
-        anti_vortex = internals['anti_vortex_device']
+        # T13: çözücü çapı/yüksekliği METRE yayımlıyor, bu paket ise mm ile
+        # çalışıyor. Katı kurulmadan önce birim normalize edilir.
+        anti_vortex = normalize_anti_vortex_mm(
+            internals['anti_vortex_device'],
+            (tank_config.get('dimensions') or {}).get('diameter'))
         av_obj = self._create_anti_vortex(anti_vortex, "Anti_Vortex_Device", doc)
         structures.append(av_obj)
         
@@ -241,43 +407,95 @@ class TankCADGenerator:
         
         return baffle_obj
     
+    @staticmethod
+    def anti_vortex_vane_geometry(av_config: Dict) -> Dict:
+        """Katı modelin kanat geometrisini ÇÖZÜCÜNÜN yayımladığı alandan kurar.
+
+        NEDEN (EK-GÖZLEM-2, 2026-08-03): kütle modeli ile katı model aynı
+        kanadı anlatmıyordu. Çözücü kanadı merkezden dış çapa uzatıp kütleyi
+        ``N x h x (D/2) x t x rho`` ile hesaplıyor — yani modelinde GÖBEK YOK
+        ve radyal uzunluk ``D/2``. Katı model ise ``hub_radius = 0,2 x D``
+        yapıp kanadı oradan ``D/2``'ye uzatıyordu: radyal uzunluk ``0,3 x D``,
+        yani yayımlanan kütlenin dayandığı uzunluktan **%40 kısa**. Aynı
+        nesnenin iki farklı geometrisi vardı; STEP dosyasını ölçen kullanıcı
+        arayüzdeki kütleyi doğrulayamazdı.
+
+        Bağlayıcı tanım ÇÖZÜCÜNÜNKİDİR, çünkü (1) kütle dökümüne giren ve
+        kullanıcıya bugün ulaşan sayı odur, (2) ``vane_radial_length_mm``
+        çözücünün açıkça YAYIMLADIĞI bir sözleşme alanıdır (birim çözümü de
+        zaten ona demirleniyor), (3) katı yolu FreeCAD kurulu olmadığı için
+        bugün hiç koşmuyor, dolayısıyla kırılacak bir tüketicisi yok.
+
+        Sonuç: radyal uzunluk yeniden TÜRETİLMEZ, yayımlanan alandan OKUNUR;
+        kanat merkezden başlar ve göbek eklenmez (kütle modelinde olmayan bir
+        kütle katıya konmaz).
+        """
+        diameter = float(av_config['diameter'])            # mm
+        half = diameter / 2.0
+        vane_len = _as_float(av_config.get('vane_radial_length_mm'))
+        if vane_len is None or vane_len <= 0:
+            # Alan yoksa çözücünün kendi özdeşliğine düşülür (D/2) — bu bir
+            # TAHMİN değil, aynı sözlükteki geometri tanımının kendisi.
+            vane_len = half
+            basis = ('vane_radial_length_mm missing; fell back to the solver '
+                     'geometric identity D/2')
+        else:
+            basis = ('radial length read from the solver published field '
+                     'vane_radial_length_mm (same length its mass model uses)')
+        return {
+            'vane_length_mm': vane_len,
+            # Kanat dış çapta biter; başlangıç yarıçapı buradan çıkar.
+            'vane_start_radius_mm': half - vane_len,
+            'vane_width_mm': float(av_config['vane_thickness']),
+            'vane_height_mm': float(av_config['height']),
+            'vane_count': int(av_config['vane_count']),
+            'hub_modelled': False,
+            'basis': basis,
+        }
+
     def _create_anti_vortex(self, av_config: Dict, name: str, doc) -> object:
-        """Create anti-vortex device with radial vanes"""
-        
-        diameter = av_config['diameter']        # mm
-        height = av_config['height']           # mm
-        vane_count = av_config['vane_count']
-        vane_thickness = av_config['vane_thickness']  # mm
-        
-        # Create central hub
-        hub_radius = diameter * 0.2  # 20% of total diameter
-        hub = Part.makeCylinder(hub_radius, height)
-        
-        # Create radial vanes
-        vane_length = (diameter/2) - hub_radius
-        vane_width = vane_thickness
-        vane_height = height
-        
+        """Create anti-vortex device with radial vanes.
+
+        GİRDİ SÖZLEŞMESİ (T13): ``av_config`` ``normalize_anti_vortex_mm``
+        çıktısı olmalıdır, yani ``diameter``/``height`` MİLİMETRE. Ham çözücü
+        sözlüğü doğrudan verilirse düzenek 1000 kat küçük kurulur; bu yüzden
+        birim çözülememişse katı üretmek yerine hata verilir (sessiz yanlış
+        geometri, açık hatadan beterdir).
+
+        Kanat ölçüleri ``anti_vortex_vane_geometry`` ile belirlenir; oradaki
+        not göbek/uzunluk kararının gerekçesini taşır (EK-GÖZLEM-2).
+        """
+        if av_config.get('units') == 'UNRESOLVED':
+            raise ValueError(
+                'anti-vortex device unit is unresolved; refusing to build a '
+                'solid from an unknown unit (see unit_resolution_basis)')
+        geom = self.anti_vortex_vane_geometry(av_config)
+        vane_count = geom['vane_count']
+        vane_length = geom['vane_length_mm']
+        vane_width = geom['vane_width_mm']
+        vane_height = geom['vane_height_mm']
+        start_r = geom['vane_start_radius_mm']
+
         vanes = []
         for i in range(vane_count):
             angle = (i / vane_count) * 2 * np.pi
-            
+
             # Create vane as a box
             vane_box = Part.makeBox(vane_length, vane_width, vane_height)
-            
+
             # Position vane
-            vane_box = vane_box.translate(FreeCAD.Vector(hub_radius, -vane_width/2, 0))
-            
+            vane_box = vane_box.translate(FreeCAD.Vector(start_r, -vane_width/2, 0))
+
             # Rotate vane
             vane_box = vane_box.rotate(FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1), np.degrees(angle))
-            
+
             vanes.append(vane_box)
-        
-        # Combine hub and vanes
-        av_solid = hub
-        for vane in vanes:
+
+        # Kanatlar birleştirilir; göbek EKLENMEZ (bkz. anti_vortex_vane_geometry)
+        av_solid = vanes[0]
+        for vane in vanes[1:]:
             av_solid = av_solid.fuse(vane)
-        
+
         # Create FreeCAD object
         av_obj = doc.addObject("Part::Feature", name)
         av_obj.Shape = av_solid
@@ -308,7 +526,10 @@ class TankCADGenerator:
                 'tank_type': tank_name,
                 'dimensions': tank_config['dimensions'],
                 'material': tank_config['structural']['material'],
-                'internal_structures': tank_config['internal_structures'],
+                # T13: paket mm beyan ediyor; girdap önleyicinin metre gelen
+                # çap/yükseklik alanları burada mm'ye çevrilir.
+                'internal_structures': normalize_internal_structures(
+                    tank_config),
                 'cad_instructions': self._generate_cad_instructions(tank_config),
                 'manufacturing_notes': self._generate_manufacturing_instructions(tank_config)
             }
@@ -317,14 +538,18 @@ class TankCADGenerator:
                 json.dump(geometry_spec, f, indent=2)
             exported_files.append(geom_file)
         
-        # Generate simple STL approximation
-        self._generate_simple_stl(tank_data, output_dir)
-
-        # Generate engineering drawings
-        self._generate_drawings(tank_data, output_dir)
-
-        # Generate manufacturing specs
-        self._generate_manufacturing_specs(tank_data, output_dir)
+        # ÖLÇÜLDÜ (2026-08-03): aşağıdaki üç üretici dosyalarını çalışma
+        # dizinine GERÇEKTEN yazıyordu ama hiçbiri exported_files'a
+        # eklenmediği için ZIP'e girmiyordu — indirilen paket yalnız 4 dosya
+        # içeriyordu (iki geometry.json + iki step). oxidizer_tank.stl,
+        # fuel_tank.stl, engineering_drawings.json ve
+        # manufacturing_checklist_TEMPLATE.json sessizce düşüyordu. Üstelik
+        # arayüzün başarı mesajı "STL files" ve "Engineering drawings"
+        # indiğini SÖYLÜYORDU: iddia ile gerçek çelişiyordu.
+        exported_files.extend(self._generate_simple_stl(tank_data, output_dir))
+        exported_files.append(self._generate_drawings(tank_data, output_dir))
+        exported_files.append(
+            self._generate_manufacturing_specs(tank_data, output_dir))
 
         # GERÇEK STEP (2026-07-13): FreeCAD'e gerek kalmadan build123d/OCC
         # ile tank katıları. Buton yıllardır "STEP/STL" diyordu ama STEP hiç
@@ -388,7 +613,10 @@ class TankCADGenerator:
             },
             'step5_anti_vortex': {
                 'operation': 'Create anti-vortex device',
-                'specs': tank_config['internal_structures']['anti_vortex_device']
+                # T13: modelleme talimatı da mm ile verilir (bkz. modül notu).
+                'specs': normalize_anti_vortex_mm(
+                    tank_config['internal_structures']['anti_vortex_device'],
+                    dimensions.get('diameter')),
             },
             'step6_assembly': {
                 'operation': 'Assemble all components',
@@ -396,25 +624,32 @@ class TankCADGenerator:
             }
         }
     
-    def _generate_simple_stl(self, tank_data: Dict, output_dir: str):
-        """Generate simple STL files for visualization"""
-        
-        for tank_name, tank_config in [('oxidizer_tank', tank_data['oxidizer_tank']), 
+    def _generate_simple_stl(self, tank_data: Dict, output_dir: str) -> List[str]:
+        """Generate simple STL files for visualization.
+
+        Yazdığı dosyaların yollarını DÖNDÜRÜR (2026-08-03): dönüş değeri
+        yoktu, çağıran da paket listesine ekleyemiyordu — dosyalar diske
+        yazılıp ZIP'e hiç girmiyordu (bkz. ``_generate_fallback_files``).
+        """
+        written = []
+        for tank_name, tank_config in [('oxidizer_tank', tank_data['oxidizer_tank']),
                                      ('fuel_tank', tank_data['fuel_tank'])]:
-            
+
             dimensions = tank_config['dimensions']
             stl_file = os.path.join(output_dir, f"{tank_name}.stl")
-            
+
             # Generate simple cylindrical mesh
             vertices, faces = self._generate_cylinder_mesh(
                 dimensions['diameter']/2,
                 dimensions['length'],
                 30  # resolution
             )
-            
+
             # Write STL file
             self._write_stl_file(stl_file, vertices, faces, tank_name)
-    
+            written.append(stl_file)
+        return written
+
     def _generate_cylinder_mesh(self, radius: float, height: float, resolution: int) -> Tuple[List, List]:
         """Generate cylinder mesh vertices and faces"""
         
@@ -474,9 +709,13 @@ class TankCADGenerator:
             
             f.write(f"endsolid {name}\n")
     
-    def _generate_drawings(self, tank_data: Dict, output_dir: str):
-        """Generate 2D engineering drawings"""
-        
+    def _generate_drawings(self, tank_data: Dict, output_dir: str) -> str:
+        """Generate 2D engineering drawings.
+
+        Yazdığı dosyanın yolunu DÖNDÜRÜR (2026-08-03) — ayrıntı için
+        ``_generate_simple_stl``.
+        """
+
         # Create drawing specification
         drawing_spec = {
             'title': 'Propellant Tank Assembly',
@@ -494,9 +733,15 @@ class TankCADGenerator:
         drawing_file = os.path.join(output_dir, 'engineering_drawings.json')
         with open(drawing_file, 'w') as f:
             json.dump(drawing_spec, f, indent=2)
-    
-    def _generate_manufacturing_specs(self, tank_data: Dict, output_dir: str):
+        return drawing_file
+
+    def _generate_manufacturing_specs(self, tank_data: Dict,
+                                      output_dir: str) -> str:
         """Jenerik imalat KONTROL LİSTESİ üretir — tasarımdan türetilmiş değil.
+
+        Yazdığı dosyanın yolunu DÖNDÜRÜR (2026-08-03) — ayrıntı için
+        ``_generate_simple_stl``.
+
 
         v2.6.2 dürüstlük düzeltmesi:
         Bu dosya eskiden ``manufacturing_specifications.json`` adıyla ve
@@ -597,7 +842,8 @@ class TankCADGenerator:
                                  'manufacturing_checklist_TEMPLATE.json')
         with open(spec_file, 'w', encoding='utf-8') as f:
             json.dump(manufacturing_spec, f, indent=2, ensure_ascii=False)
-    
+        return spec_file
+
     def _create_zip_package(self, temp_dir: str, files: List[str]) -> str:
         """Create ZIP package of all CAD files"""
         
@@ -628,12 +874,19 @@ class TankCADGenerator:
         }
     
     def _create_side_view(self, tank_data: Dict) -> Dict:
-        """Create side view drawing data"""
+        """Create side view drawing data.
+
+        Çizim künyesi ``'units': 'mm'`` diyor, bu yüzden girdap önleyici de
+        mm olarak taşınır (T13).
+        """
+        ox = tank_data['oxidizer_tank']
         return {
             'view_type': 'side',
             'shows_internal_structures': True,
-            'baffles': tank_data['oxidizer_tank']['internal_structures']['slosh_baffles'],
-            'anti_vortex': tank_data['oxidizer_tank']['internal_structures']['anti_vortex_device']
+            'baffles': ox['internal_structures']['slosh_baffles'],
+            'anti_vortex': normalize_anti_vortex_mm(
+                ox['internal_structures']['anti_vortex_device'],
+                (ox.get('dimensions') or {}).get('diameter')),
         }
     
     def _create_section_view(self, tank_data: Dict) -> Dict:

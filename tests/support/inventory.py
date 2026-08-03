@@ -47,6 +47,13 @@ _READ_PATTERNS = (
     re.compile(r"\bval\(\s*['\"]([\w-]+)['\"]"),      # yardımcı sarmalayıcılar
     re.compile(r"\bnumById\(\s*['\"]([\w-]+)['\"]"),
     re.compile(r"\bfieldValue\(\s*['\"]([\w-]+)['\"]"),
+    # optNum: "boş bırakılırsa anahtar GÖNDERİLMEZ" okuyucusu (Faz 6 / T68,
+    # solid.html paraşüt alanları). Diğer sarmalayıcılardan farkı, geçersiz
+    # ya da boş değerde yedek sayı DÖNDÜRMEMESİDİR — çözücünün "verilmedi"
+    # ile "değer geldi" ayrımını yapabilmesi buna bağlı. Okuma biçimi
+    # açısından numById ile aynıdır: alanı id'siyle okur, dolayısıyla o
+    # alanlar "hiçbir yerde okunmuyor" sayılmamalıdır.
+    re.compile(r"\boptNum\(\s*['\"]([\w-]+)['\"]"),
 )
 
 

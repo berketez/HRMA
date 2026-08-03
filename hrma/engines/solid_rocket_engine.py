@@ -743,6 +743,10 @@ class SolidRocketEngine:
         # sayısı, star geometrisi...). Monte Carlo yeniden kurulum için
         # constructor argümanları da saklanır.
         self.overrides = dict(overrides or {})
+        # Boğaz alanı sabitlemesi (T19): None = normal tasarım akışı, boğaz
+        # tasarım noktasından boyutlandırılır. Yalnız ``pin_throat_area``
+        # doldurur (üretim toleransı Monte Carlo'su).
+        self._pinned_throat_area_m2 = None
         self._ctor_args = dict(
             grain_type=grain_type, propellant_type=propellant_type,
             chamber_diameter=chamber_diameter, grain_length=grain_length,
@@ -3935,6 +3939,26 @@ class SolidRocketEngine:
         nom_burn = float(nominal['burn_time'])
         nom_pmax = float(np.max(nominal['thrust_curve']['pressure']))
 
+        # ------------------------------------------------------------------
+        # DONANIM SABİT, YAKIT PARTİSİ DEĞİŞKEN (T19, 2026-08-03)
+        #
+        # Ölçülen kusur: her örneklem kendi (bozulmuş) a, n, ρ, c* değerleriyle
+        # YENİ bir motor kuruyordu ve boğaz alanı da o değerlerden
+        # boyutlandırılıyordu. Boğaz A_t = ρ·Ab0·r(Pc)·c*/(Pc·1e5) tam olarak
+        # Pc'yi geri verecek şekilde seçildiği için t=0 basıncı YAPISAL olarak
+        # tasarım Pc'sine kilitleniyordu: 300 koşuda tepe basıncı
+        # σ = 0,0457 bar / CV %0,11 (itki CV'si %3,9 iken), yani
+        # 'tepe basıncı ≤ nominal×1,2' kabul ölçütü HİÇ başarısız olamıyordu
+        # ama %98 başarı oranına dahil ediliyordu — sahte bir gösterge.
+        #
+        # Gerçek üretim toleransı analizinde işlenmiş boğaz TEKTİR; değişen
+        # yakıttır. Denge basıncı o zaman Pc ∝ a^(1/(1-n)) ile gerçekten
+        # oynar. Nominal boğaz bir kez ölçülür ve her örnekleme sabitlenir.
+        # ------------------------------------------------------------------
+        nom_throat_area, _nom_flux = self._design_throat_area()
+        if not np.isfinite(nom_throat_area) or nom_throat_area <= 0.0:
+            nom_throat_area = None
+
         # initial_temp düzeltmesi self.a'ya zaten işlendi — örneklem
         # kurulumunda ikinci kez uygulanmasın
         base_ov = dict(self.overrides)
@@ -3965,7 +3989,10 @@ class SolidRocketEngine:
                 self.n + rng.normal(0.0, mc['burn_rate_n_abs_sigma']),
                 -0.5, 0.99))
             try:
-                r = SolidRocketEngine(overrides=ov, **args).calculate_performance()
+                sample_engine = SolidRocketEngine(overrides=ov, **args)
+                if nom_throat_area is not None:
+                    sample_engine.pin_throat_area(nom_throat_area)
+                r = sample_engine.calculate_performance()
                 if isinstance(r, dict) and r.get('error'):
                     raise ValueError(r['error'])
                 s_thrust = float(r['average_thrust'])
@@ -4015,6 +4042,20 @@ class SolidRocketEngine:
             # Makine tarafı: arayüz/dışa aktarım metni ayrıştırmak zorunda
             # kalmasın diye ölçütün sayıları da verilir.
             'criteria_detail': dict(mc),
+            # T19: hangi büyüklüğün DONANIM (sabit), hangisinin PARTİ
+            # (değişken) sayıldığı çıktıda beyan edilir — tepe basıncının
+            # neden oynayabildiği (ya da oynamadığı) buradan okunur.
+            'fixed_hardware': {
+                'throat_area_m2': nom_throat_area,
+                'throat_diameter_mm': (
+                    2000.0 * float(np.sqrt(nom_throat_area / np.pi))
+                    if nom_throat_area else None),
+                'basis': (
+                    'the machined throat is a single piece of hardware and is '
+                    'held at the nominal design value for every sample; only '
+                    'the propellant lot (a, n, density, c*) varies, so the '
+                    'chamber pressure is free to move with the lot'),
+            },
             'thrust': _stats(samples['thrust'], nom_thrust),
             'isp': _stats(samples['isp'], nom_isp),
             'burn_time': _stats(samples['burn_time'], nom_burn),
@@ -5232,6 +5273,16 @@ class SolidRocketEngine:
         ``throat_tolerance: ±0.01 mm`` yazıyordu, yani beyan edilen toleransın
         35 katı. İmalata giden çap artık çözücünün çapıdır.
 
+        DONANIM SABİTLENMESİ (``pin_throat_area``, T19 / 2026-08-03)
+        ------------------------------------------------------------
+        Boğaz alanı SABİTLENMİŞSE bu metot yeniden boyutlandırma YAPMAZ,
+        sabitlenen alanı döndürür. Bunun tek meşru kullanıcısı üretim
+        toleransı Monte Carlo'sudur: orada donanım (işlenmiş boğaz) tektir,
+        değişen şey yakıt partisidir. Sabitleme olmadan her örneklem kendi
+        yakıtına göre YENİ bir boğaz açıyor ve oda basıncı yapısal olarak
+        tasarım Pc'sine kilitleniyordu (ölçüldü: 300 koşuda tepe basıncı
+        σ = 0,0457 bar, CV %0,11 — itki CV'si %3,9 iken).
+
         Dönüş: (A_t_etkin [m²], tasarım noktası port kütle akısı [kg/m²s]).
         """
         A_burn_0 = self.calculate_burn_area(0.0)
@@ -5259,11 +5310,36 @@ class SolidRocketEngine:
                     break
                 r_design = r_new
             m_dot_design = self.rho_p * A_burn_0 * r_design
-            A_t = m_dot_design * self.c_star / (self.P_c * 1e5)  # m², t=0
+            pinned = getattr(self, '_pinned_throat_area_m2', None)
+            if pinned is not None:
+                # Donanım sabit: boğaz yakıt partisine göre yeniden açılmaz.
+                A_t = float(pinned)
+            else:
+                A_t = m_dot_design * self.c_star / (self.P_c * 1e5)  # m², t=0
         finally:
             # Yan etki bırakma: akı, çağıran neredeyse orada kalır.
             self.mass_flux = flux_saved
         return float(A_t), float(mass_flux_design)
+
+    def pin_throat_area(self, area_m2):
+        """Boğaz alanını SABİTLE — donanım tektir, yakıt partisi değişkendir.
+
+        Üretim toleransı Monte Carlo'su için eklendi (T19, 2026-08-03).
+        Normal (tasarım) akışta ÇAĞRILMAZ; çağrılmadığında davranış
+        bit-özdeş korunur çünkü ``_design_throat_area`` yalnız bu öznitelik
+        ``None`` değilken devreye girer.
+
+        area_m2: etkin (akış) boğaz alanı [m²]. None → sabitlemeyi kaldırır.
+        """
+        if area_m2 is None:
+            self._pinned_throat_area_m2 = None
+            return
+        a = float(area_m2)
+        if not np.isfinite(a) or a <= 0.0:
+            raise ValueError(
+                'pin_throat_area: alan pozitif ve sonlu olmalı; '
+                f'verilen {area_m2!r}')
+        self._pinned_throat_area_m2 = a
 
     def _estimate_throat_diameter(self):
         """İmal edilecek (GEOMETRİK) tasarım boğaz çapı [m].
@@ -5409,6 +5485,53 @@ class SolidRocketEngine:
         epsilon = self._estimate_expansion_ratio()
         return d_throat * np.sqrt(epsilon)
 
+    def _dry_mass_breakdown(self):
+        """Kuru kütlenin BİLEŞEN DÖKÜMÜ [kg] — T03 (2026-08-03).
+
+        Toplam zaten hesaplanıyordu ama yalnız TEK sayı olarak yayımlanıyordu.
+        Arayüzdeki 'Total Dry Mass' alanı ise kendi ipucunda "kasa + lüle +
+        yalıtım + aviyonik + kapak toplamı" diyor; kullanıcı bileşenleri elle
+        girip 4,300 kg beyan ederken çözücü geometriden 20,409 kg buluyordu
+        (4,7 kat) ve iki sayı yan yana, açıklamasız duruyordu. Dökümü
+        yayımlamak arayüzün bileşen alanlarını çözücünün kendi değerleriyle
+        doldurabilmesini ve farkın nereden geldiğinin görülmesini sağlar.
+
+        Dönüş: {'case_kg', 'closure_kg', 'nozzle_kg', 'insulation_kg',
+                'igniter_misc_kg', 'total_kg', 'basis'}.
+        """
+        material, sigma_y, SF, t_wall = self._case_design()
+        rho_case = self._case_density()
+        L_case = self._case_inner_length()
+        d_case = self._case_inner_diameter()
+
+        case_shell_mass = np.pi * d_case * L_case * t_wall * rho_case
+        closure_mass = case_shell_mass * SOLID_CASE_CLOSURE_MASS_FRACTION
+        structural_mass = case_shell_mass + closure_mass
+        # Lüle ve ateşleyici/montaj kalemleri YAPISAL kütlenin oranıdır
+        # (aşağıdaki toplamla birebir aynı çarpanlar).
+        nozzle_mass = structural_mass * 0.15
+        igniter_misc_mass = structural_mass * 0.05
+
+        t_ins = getattr(self, 'insulation_thickness_m', 0.0)
+        insulation_mass = (np.pi * (self.D_chamber + t_ins) * t_ins * L_case
+                           * SOLID_INSULATION['density_kg_m3'])
+
+        total = (structural_mass * 1.20) + insulation_mass
+        return {
+            'case_kg': float(case_shell_mass),
+            'closure_kg': float(closure_mass),
+            'nozzle_kg': float(nozzle_mass),
+            'insulation_kg': float(insulation_mass),
+            'igniter_misc_kg': float(igniter_misc_mass),
+            'total_kg': float(total),
+            'basis': (
+                'case shell from the hoop-stress wall thickness and the case '
+                'material density; closures as a fixed fraction of the shell; '
+                'nozzle and igniter/misc as fractions of the structural mass; '
+                'insulation from the entered insulation thickness. Avionics '
+                'are NOT part of the motor and are not included here'),
+        }
+
     def _calculate_dry_mass(self):
         """Estimate dry mass of motor from geometry.
 
@@ -5418,6 +5541,10 @@ class SolidRocketEngine:
         - Forward + aft closures: ~30% of case mass
         - Nozzle: ~15% of total dry mass
         - Igniter + misc: ~5% of total dry mass
+
+        Bileşen dökümü ``_dry_mass_breakdown`` ile AYNI formüllerden gelir
+        (T03); bu metodun döndürdüğü toplam orada da ``total_kg`` olarak
+        yayımlanır — iki yol ayrışırsa test yakalar.
         """
         # Case wall thickness — TEK kaynak (_case_design); kullanıcının
         # yield_strength / safety_factor / case_thickness / case_material
@@ -7088,9 +7215,24 @@ class SolidRocketEngine:
         else:
             burn_profile = 'neutral'
 
+        # T24 (2026-08-03): 'web_thickness_mm' GEOMETRİK web'tir
+        # ((dış - çekirdek)/2). Dış yüzey de yanıyorsa (inhibit_outer
+        # işaretsiz — varsayılan yapılandırma) web İKİ cepheden tükenir ve
+        # gerçekte tükenen kalınlık bunun YARISIDIR. Ölçüldü: geometrik
+        # 35,0 mm ↔ tükenen 17,5 mm. Arayüz tablosu tek bir 'Web Thickness'
+        # satırı gösterdiği için hangi tanımın kastedildiği belirsizdi;
+        # ikisi de artık AYRI alanlarda ve hangi tabanda olduğu beyan edilir.
         grain_design = {
             'grain_type': self.grain_type,
             'web_thickness_mm': web_thickness_val * 1000,
+            'web_burnout_mm': web_burnout * 1000,
+            'web_basis': ('two_sided' if web_burnout < web_thickness_val
+                          else 'single_sided'),
+            'web_basis_note': (
+                'web_thickness_mm is the geometric web ((outer - core)/2); '
+                'web_burnout_mm is the thickness actually consumed. They '
+                'differ when the outer surface burns as well, because the '
+                'web is then consumed from both faces'),
             'outer_diameter_mm': self.D_chamber * 1000,
             'inner_diameter_mm': self.D_core * 1000,
             'grain_length_mm': self.L_grain * 1000,
@@ -7226,6 +7368,9 @@ class SolidRocketEngine:
                 'dry_mass_kg': dry_mass,
                 'total_mass_kg': total_mass,
                 'mass_fraction': mass_fraction,
+                # T03: kuru kütlenin BİLEŞEN dökümü — arayüz kendi bileşen
+                # alanlarını çözücünün sayılarıyla doldurabilsin diye.
+                'inert_breakdown': self._dry_mass_breakdown(),
             },
             'performance': {
                 'peak_thrust_N': max_thrust,

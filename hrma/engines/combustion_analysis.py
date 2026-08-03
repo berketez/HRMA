@@ -1421,54 +1421,161 @@ class CombustionAnalyzer:
             _OPTIMUM_OF_CACHE[cache_key] = copy.deepcopy(out)
         return out
     
-    def calculate_altitude_performance(self, motor_data: Dict, altitudes: List[float]) -> Dict:
-        """Calculate performance at different altitudes"""
-        
-        performance_data = []
-        
-        for altitude in altitudes:
-            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants;
-            # eski satır-içi 2-katman kopyası tekilleştirildi, v2.5.2)
-            T = isa_temperature(altitude)          # K
-            P = isa_pressure(altitude) * BAR_PER_PA  # bar
+    @staticmethod
+    def _fixed_nozzle_altitude_sweep(mdot: float, v_exit: float, P_e_bar: float,
+                                     T_e: float, R_e: float,
+                                     altitudes: List[float],
+                                     thrust_sea_level: Optional[float] = None
+                                     ) -> Tuple[List[Dict], Dict]:
+        """Sabit geometrili lülede irtifa taraması — TEK TANIM NOKTASI.
 
-            # Adjust performance for altitude
-            # DENETIM DUZELTMESI (Sutton & Biblarz 9. baski, Eq. 3-29): SABIT
-            # geometrili nozul. Ae/At sabit oldugundan cikis Mach'i, Pe ve
-            # v_exit SABITTIR; irtifa yalnizca (Pe - Pa)*Ae basinc-itki
-            # terimini degistirir. Eski kod her irtifada Pe=Pa (tam genlesme)
-            # varsayip v_exit'i yeniden cozuyor ve basinc-itki terimini hic
-            # eklemiyordu -> irtifa kazanimi ve vakum Isp'i sistematik abartili.
-            P_c = motor_data['chamber_pressure']                      # bar
-            v_exit = motor_data['performance']['velocities']['exit']  # m/s (SABIT, tasarim)
-            P_e_bar = motor_data['conditions']['exit']['P']           # bar (tasarim cikis basinci)
-            T_e = motor_data['conditions']['exit']['T']               # K (tasarim cikis statik)
-            R_e = motor_data['gas_constants']['exit']                 # J/(kg·K)
-            c_star = motor_data['performance']['c_star']              # m/s
-            mdot = motor_data.get('mdot_total', 1.0)                  # kg/s
-            # Cikis alani sureklilikten: Ae = mdot/(rho_e*v_exit),
-            # rho_e = Pe/(R_e*T_e) (ideal gaz). Sabit nozul icin Ae SABIT.
-            A_e = mdot * R_e * T_e / (P_e_bar * PA_PER_BAR * v_exit)  # m²
-            # F = mdot*v_exit + (Pe - Pa)*Ae; Pa = P (irtifa ambiyansi, bar).
-            thrust = mdot * v_exit + (P_e_bar - P) * PA_PER_BAR * A_e  # N
-            isp = thrust / (mdot * G_0)                              # s
-            # CF = F/(Pc*At); At = c_star*mdot/Pc -> CF = F/(mdot*c_star).
-            cf = thrust / (mdot * c_star)
-            
-            performance_data.append({
+        T33 DÜZELTMESİ (2026-08-03). Aynı motor için sayfada İKİ irtifa
+        tablosu vardı ve ikisi de farklı bir deniz seviyesi itkisi
+        yayımlıyordu: ``calculate_altitude_performance`` çözücünün kütle
+        debisini (0,548540 kg/s) İDEAL çıkış hızıyla çarpıp 1033,02 N,
+        ``calculate_thrust_at_altitudes`` ise teslim edilen itkiyi (1000 N)
+        İDEAL Isp'ye bölerek uydurma bir debi (0,531 kg/s) türetip 998,56 N
+        diyordu (%3,45 fark). Manşet ise 1000 N / 185,90 s idi, yani hiçbiri
+        manşetle uyuşmuyordu (Isp'de %3,30 fark).
+
+        Kök neden TEK: lüle kayıpları (sapma, sürtünme, kinetik, iki-fazlı)
+        bu tablolara hiç uygulanmıyordu. Kayıplar MOMENTUM terimini düşürür,
+        basınç-alan terimini değil (geometri kayıptan etkilenmez):
+
+            F(h) = eta_v · mdot · v_e_ideal + (P_e - P_a) · A_e
+            A_e  = mdot · R_e · T_e / (P_e · v_e_ideal)      [süreklilik]
+
+        eta_v bir başparmak kuralı DEĞİLDİR: çözücünün teslim ettiği deniz
+        seviyesi itkisinden tek değerli olarak çözülür —
+
+            eta_v = (F_dsl - (P_e - P_ISA0)·A_e) / (mdot · v_e_ideal)
+
+        Böylece tarama 0 km'de manşetin sayısını AYNEN verir ve irtifa
+        eğilimi doğru fizikte kalır. Çapa verilmezse eta_v = 1 (ideal) olur
+        ve bu durum ``velocity_efficiency_basis`` ile açıkça bildirilir —
+        sessizce ideal sayı yayımlanmaz.
+
+        Dönüş: (satırlar, meta).
+        """
+        mdot = float(mdot)
+        v_exit = float(v_exit)
+        P_e_pa = float(P_e_bar) * PA_PER_BAR
+        # Çıkış alanı süreklilikten: A_e = mdot/(rho_e·v_e), rho_e = Pe/(R_e·T_e)
+        if P_e_pa > 0.0 and v_exit > 0.0:
+            A_e = mdot * float(R_e) * float(T_e) / (P_e_pa * v_exit)   # m²
+        else:
+            A_e = 0.0
+
+        P_sl_pa = isa_pressure(0.0)                                    # Pa
+        eta_v = 1.0
+        eta_raw = None
+        if thrust_sea_level is not None and mdot > 0.0 and v_exit > 0.0:
+            try:
+                f_sl = float(thrust_sea_level)
+            except (TypeError, ValueError):
+                f_sl = float('nan')
+            if np.isfinite(f_sl) and f_sl > 0.0:
+                eta_raw = ((f_sl - (P_e_pa - P_sl_pa) * A_e)
+                           / (mdot * v_exit))
+        if eta_raw is not None and 0.5 <= eta_raw <= 1.0:
+            eta_v = float(eta_raw)
+            basis = ('nozzle loss factor solved from the delivered sea-level '
+                     'thrust of this motor; applied to the momentum term only '
+                     '(the pressure-area term is geometric)')
+        elif eta_raw is not None:
+            # Çapa çıkış istasyonuyla tutarsız: sessizce kırpmak yerine
+            # ideal değere dönülür ve ham oran çıktıda bırakılır.
+            basis = (f'delivered sea-level thrust anchor rejected: the '
+                     f'implied nozzle loss factor is {eta_raw:.4f}, outside '
+                     f'the physical range 0.5-1.0; the ideal (loss-free) '
+                     f'exit velocity is used instead')
+        else:
+            basis = ('NOT_ANCHORED: no delivered sea-level thrust was '
+                     'supplied, so the ideal (loss-free) exit velocity is '
+                     'used and these numbers are upper bounds')
+
+        # Vakum itkisi (P_a = 0) — irtifa verimlerinin paydası
+        thrust_vacuum = eta_v * mdot * v_exit + P_e_pa * A_e
+
+        rows = []
+        for altitude in altitudes:
+            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants)
+            T = isa_temperature(altitude)              # K
+            P = isa_pressure(altitude) * BAR_PER_PA    # bar
+            thrust = eta_v * mdot * v_exit + (P_e_pa - P * PA_PER_BAR) * A_e
+            isp = thrust / (mdot * G_0) if mdot > 0 else 0.0
+            rows.append({
                 'altitude': altitude,
                 'pressure': P,
                 'temperature': T,
-                'exit_velocity': v_exit,
-                'cf': cf,
+                'thrust': thrust,
                 'isp': isp,
-                'thrust': thrust
+                'exit_velocity': v_exit,
             })
-        
+
+        meta = {
+            'mass_flow_kg_s': mdot,
+            'exit_area_m2': A_e,
+            'velocity_efficiency': eta_v,
+            'velocity_efficiency_raw': eta_raw,
+            'velocity_efficiency_basis': basis,
+            'anchored_to_delivered_thrust': bool(eta_raw is not None
+                                                 and 0.5 <= eta_raw <= 1.0),
+            'thrust_vacuum_n': thrust_vacuum,
+        }
+        return rows, meta
+
+    def calculate_altitude_performance(self, motor_data: Dict, altitudes: List[float]) -> Dict:
+        """Calculate performance at different altitudes.
+
+        DENETIM DUZELTMESI (Sutton & Biblarz 9. baski, Eq. 3-29): SABIT
+        geometrili nozul. Ae/At sabit oldugundan cikis Mach'i, Pe ve v_exit
+        SABITTIR; irtifa yalnizca (Pe - Pa)*Ae basinc-itki terimini
+        degistirir.
+
+        T33 (2026-08-03): itki/Isp artik ``_fixed_nozzle_altitude_sweep``
+        TEK tanim noktasindan gelir ve motor_data['thrust_sea_level']
+        verildiyse cozucunun TESLIM ETTIGI deniz seviyesi itkisine capalanir
+        — kardes tablo ``calculate_thrust_at_altitudes`` ile ayni sayilari
+        verir (eskiden 0 km'de 1033,02 N ve 998,56 N diye iki farkli cevap
+        vardi, ikisi de mansetin 1000 N'undan farkliydi).
+        """
+
+        performance_data = []
+        if not altitudes:
+            return {'altitude_performance': [], 'sea_level_isp': 0,
+                    'vacuum_isp': 0}
+
+        v_exit = motor_data['performance']['velocities']['exit']  # m/s (SABIT, tasarim)
+        P_e_bar = motor_data['conditions']['exit']['P']           # bar (tasarim cikis basinci)
+        T_e = motor_data['conditions']['exit']['T']               # K (tasarim cikis statik)
+        R_e = motor_data['gas_constants']['exit']                 # J/(kg·K)
+        c_star = motor_data['performance']['c_star']              # m/s
+        mdot = motor_data.get('mdot_total', 1.0)                  # kg/s
+
+        rows, meta = self._fixed_nozzle_altitude_sweep(
+            mdot, v_exit, P_e_bar, T_e, R_e, altitudes,
+            thrust_sea_level=motor_data.get('thrust_sea_level'))
+
+        for row in rows:
+            # CF = F/(Pc*At); At = c_star*mdot/Pc -> CF = F/(mdot*c_star).
+            cf = row['thrust'] / (mdot * c_star) if mdot * c_star else 0.0
+            performance_data.append({
+                'altitude': row['altitude'],
+                'pressure': row['pressure'],
+                'temperature': row['temperature'],
+                'exit_velocity': row['exit_velocity'],
+                'cf': cf,
+                'isp': row['isp'],
+                'thrust': row['thrust'],
+            })
+
         return {
             'altitude_performance': performance_data,
             'sea_level_isp': performance_data[0]['isp'] if performance_data else 0,
-            'vacuum_isp': max([p['isp'] for p in performance_data]) if performance_data else 0
+            'vacuum_isp': max([p['isp'] for p in performance_data]) if performance_data else 0,
+            # T33: hangi kaybin uygulandigi (ya da uygulanmadigi) beyan edilir
+            'nozzle_loss_model': meta,
         }
     
     def _calculate_thermodynamic_properties(self, chamber_comp: Dict, throat_comp: Dict, 
@@ -1776,53 +1883,94 @@ class CombustionAnalyzer:
 
     def calculate_thrust_at_altitudes(self, total_impulse: float, motor_data: Dict, 
                                     altitudes: List[float]) -> Dict:
-        """Calculate thrust at different altitudes from total impulse"""
-        
+        """Calculate thrust at different altitudes from total impulse.
+
+        T33 (2026-08-03) — KÜTLE DEBİSİ ARTIK UYDURULMUYOR. Eski kod
+        ``base_mdot = teslim edilen itki / (İDEAL Isp · g0)`` diyordu; bu iki
+        ayrı verim tanımını böler ve çözücünün gerçek debisiyle uyuşmayan bir
+        sayı üretir (ölçüldü: 0,5312 kg/s ↔ çözücünün 0,548540 kg/s'i,
+        %3,4 sapma). Debi artık ``motor_data['mdot_total']`` ile çözücüden
+        gelir; verilmezse eski türetme korunur ve ``mass_flow_basis`` ile
+        bildirilir. İrtifa taraması kardeş tabloyla AYNI tanım noktasından
+        (``_fixed_nozzle_altitude_sweep``) yapılır.
+
+        T32 (2026-08-03) — 'impulse_efficiency' %110'a çıkıyordu. Metrik
+        deniz seviyesi tasarım impulsüne normalize ediliyordu
+        (etkin/deniz-seviyesi), oysa panelin kendi açıklaması "vakum
+        impulsünün fiilen teslim edilen yüzdesi" diyor ve bir VERİM
+        göstergesi %100'ü aşamaz. Payda artık gerçek VAKUM impulsüdür
+        (F_vac = eta_v·mdot·v_e + P_e·A_e, yani P_a = 0), dolayısıyla oran
+        yapısı gereği ≤ 1'dir ve vakumda tam olarak 1 olur. Deniz seviyesine
+        göre kazanç bilgisi kaybolmadı: ayrı ve DOĞRU adlandırılmış
+        ``impulse_gain_vs_sea_level`` alanında duruyor.
+        """
+
         thrust_data = []
-        
+        if not altitudes:
+            return {'thrust_altitude_data': [], 'input_total_impulse': total_impulse,
+                    'base_thrust_sea_level': 0, 'max_thrust': 0,
+                    'max_thrust_altitude': None, 'vacuum_thrust': 0}
+
         # Base performance at sea level
         base_isp = motor_data['performance']['isp']
-        base_thrust = total_impulse / motor_data.get('burn_time', 10)  # Default 10s burn
-        base_mdot = base_thrust / (base_isp * G_0)
-        
-        for altitude in altitudes:
-            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants)
-            T = isa_temperature(altitude)          # K
-            P = isa_pressure(altitude) * BAR_PER_PA  # bar
+        burn_time = motor_data.get('burn_time', 10)                    # s
+        base_thrust = total_impulse / burn_time                        # N (TESLİM EDİLEN)
+        solver_mdot = motor_data.get('mdot_total')
+        if solver_mdot is not None and float(solver_mdot) > 0.0:
+            base_mdot = float(solver_mdot)
+            mass_flow_basis = ('mass flow taken from the solver '
+                               '(mdot_total), not derived from Isp')
+        else:
+            base_mdot = base_thrust / (base_isp * G_0)
+            mass_flow_basis = ('NOT_FROM_SOLVER: mdot_total was not supplied, '
+                               'so the mass flow is derived as thrust / '
+                               '(Isp x g0) and mixes two efficiency '
+                               'definitions')
 
-            # DENETIM DUZELTMESI (Sutton & Biblarz 9. baski, Eq. 3-29): SABIT
-            # geometrili nozul. Ae/At sabit oldugundan v_exit ve Pe SABITTIR;
-            # irtifa yalnizca (Pe - Pa)*Ae basinc-itki terimini degistirir.
-            # Eski kod her irtifada Pe=Pa (tam genlesme) varsayip v_exit'i
-            # yeniden cozuyor ve basinc-itki terimini hic eklemiyordu ->
-            # vakum itki ve Isp'i sistematik olarak abartiliyordu.
-            v_exit = motor_data['performance']['velocities']['exit']   # m/s (SABIT, tasarim)
-            P_e_bar = motor_data['conditions']['exit']['P']            # bar (tasarim cikis basinci)
-            T_e = motor_data['conditions']['exit']['T']                # K
-            R_e = motor_data['performance']['gas_constants']['exit']   # J/(kg·K)
-            burn_time = motor_data.get('burn_time', 10)                # s
-            # Cikis alani sureklilikten: Ae = mdot/(rho_e*v_exit),
-            # rho_e = Pe/(R_e*T_e) (ideal gaz). Sabit nozul icin Ae SABIT.
-            A_e = base_mdot * R_e * T_e / (P_e_bar * PA_PER_BAR * v_exit)  # m²
-            thrust_alt = base_mdot * v_exit + (P_e_bar - P) * PA_PER_BAR * A_e  # N
-            isp_alt = thrust_alt / (base_mdot * G_0)                   # s
-            effective_total_impulse = thrust_alt * burn_time
-            
+        v_exit = motor_data['performance']['velocities']['exit']   # m/s (SABIT, tasarim)
+        P_e_bar = motor_data['conditions']['exit']['P']            # bar (tasarim cikis basinci)
+        T_e = motor_data['conditions']['exit']['T']                # K
+        R_e = motor_data['performance']['gas_constants']['exit']   # J/(kg·K)
+
+        rows, meta = self._fixed_nozzle_altitude_sweep(
+            base_mdot, v_exit, P_e_bar, T_e, R_e, altitudes,
+            thrust_sea_level=base_thrust)
+        meta['mass_flow_basis'] = mass_flow_basis
+
+        # Vakum impulsü — irtifa veriminin PAYDASI (T32)
+        vacuum_total_impulse = meta['thrust_vacuum_n'] * burn_time
+
+        for row in rows:
+            effective_total_impulse = row['thrust'] * burn_time
             thrust_data.append({
-                'altitude': altitude,
-                'pressure': P,
-                'temperature': T,
-                'thrust': thrust_alt,
-                'isp': isp_alt,
-                'exit_velocity': v_exit,
+                'altitude': row['altitude'],
+                'pressure': row['pressure'],
+                'temperature': row['temperature'],
+                'thrust': row['thrust'],
+                'isp': row['isp'],
+                'exit_velocity': row['exit_velocity'],
                 'effective_total_impulse': effective_total_impulse,
-                'impulse_efficiency': effective_total_impulse / total_impulse
+                # ≤ 1 by construction: payda VAKUM impulsü (P_a = 0 halinde
+                # bu motorun teslim edebileceği en büyük impuls).
+                'impulse_efficiency': (effective_total_impulse
+                                       / vacuum_total_impulse
+                                       if vacuum_total_impulse else 0.0),
+                # Eski (deniz seviyesine göre) oran — bir VERİM değil, KAZANÇ
+                'impulse_gain_vs_sea_level': (effective_total_impulse
+                                              / total_impulse
+                                              if total_impulse else 0.0),
             })
-        
+
         return {
             'thrust_altitude_data': thrust_data,
             'input_total_impulse': total_impulse,
             'base_thrust_sea_level': base_thrust,
+            'vacuum_total_impulse': vacuum_total_impulse,
+            'impulse_efficiency_basis': (
+                'delivered impulse at that altitude divided by the VACUUM '
+                'impulse of the same motor; 1.0 means nothing is lost to back '
+                'pressure, so the value cannot exceed 1'),
+            'nozzle_loss_model': meta,
             'max_thrust': max([p['thrust'] for p in thrust_data]),
             'max_thrust_altitude': thrust_data[np.argmax([p['thrust'] for p in thrust_data])]['altitude'],
             # v2.6.26 — bu bir SONUÇ gibi duruyor ama tarama

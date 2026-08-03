@@ -617,6 +617,18 @@ class TrajectoryAnalyzer:
                 'cross_sectional_area': cross_sectional_area
             }
         }
+        # --- KURTARMA SİSTEMİ ÖZETİ (T68, 2026-08-03) --------------------
+        # Ölçülen kusur: iniş fazı bir PARAŞÜTLE çözülüyor ama bunu söyleyen
+        # hiçbir üst düzey alan yoktu; bilgi yalnız
+        # ``trajectory.phases.descent`` içine gömülüydü. Sonuç: 4,11 km'lik
+        # apojeden sonra 750 s süren bir iniş, kullanıcının girdiği gövde
+        # sürüklemesiyle (Cd 0,5 / A 0,008 m²) açıklanamıyordu — balistik
+        # iniş ~30 s sürerdi. Panel, grafik etiketi ve dışa aktarım bu bloğu
+        # okuyabilsin diye özet çözümün KENDİSİNDEN türetilir; hiçbir sayı
+        # varsayılmaz, olmayan büyüklük None kalır.
+        result['recovery'] = self._recovery_summary(
+            powered_flight, coasting_flight, descent_flight, trajectory_data)
+
         # Fırlatma sahası uygulandıysa çözümün hangi konumda yapıldığı
         # sonuçla birlikte döner (rapor/UI bunu gösterir); saha yoksa anahtar
         # eklenmez ve çıktı sözleşmesi eskisiyle birebir aynı kalır.
@@ -627,6 +639,72 @@ class TrajectoryAnalyzer:
         if self.warnings:
             result['warnings'] = list(self.warnings)
         return result
+
+    @staticmethod
+    def _recovery_summary(powered: Dict, coasting: Dict, descent: Dict,
+                          trajectory: Dict) -> Dict:
+        """Kurtarma sisteminin ÜST DÜZEY özeti — T68 (2026-08-03).
+
+        İniş fazının hangi modelle çözüldüğü buradan tek bakışta okunur:
+        paraşüt açıldı mı, ne zaman, hangi alan/Cd ile, bunların kaçı
+        VARSAYIM ve inişin kendisi ne kadar sürdü. Bütün sayılar çözümden
+        ölçülür; iniş tamamlanmadıysa (zaman sınırı/çözücü hatası) ilgili
+        alanlar ``None`` kalır — zaman ufkunun son noktası "iniş" diye
+        yayımlanmaz.
+        """
+        deployed = bool(descent.get('recovery_deployed', False))
+        if not deployed:
+            return {
+                'deployed': False,
+                'reason': descent.get('reason') or descent.get('end_reason'),
+                'descent_model': 'NOT_MODELLED',
+                'basis': ('the descent phase did not run (the vehicle reached '
+                          'the ground earlier), so no recovery system is part '
+                          'of this solution'),
+            }
+
+        # İniş fazının uçuş zaman ekseni üzerindeki başlangıcı
+        t_descent_start = (float(powered['time'][-1])
+                           + float(coasting['time'][-1]))
+        delay = descent.get('parachute_deploy_delay_s')
+        t_deploy = (t_descent_start + float(delay)) if delay is not None else None
+
+        landing_time = descent.get('landing_time')
+        descent_duration = (float(landing_time)
+                            if landing_time is not None else None)
+        apogee_altitude = None
+        try:
+            apogee_altitude = float(coasting['position_z'][-1])
+        except (KeyError, IndexError, TypeError, ValueError):
+            apogee_altitude = None
+        mean_rate = None
+        if (descent_duration and descent_duration > 0.0
+                and apogee_altitude is not None):
+            mean_rate = apogee_altitude / descent_duration
+
+        return {
+            'deployed': True,
+            'descent_model': 'parachute',
+            'deploy_time_s': t_deploy,
+            'descent_start_time_s': t_descent_start,
+            'descent_duration_s': descent_duration,
+            'mean_descent_rate_m_s': mean_rate,
+            'landing_velocity_m_s': descent.get('landing_velocity'),
+            'parachute_area_m2': descent.get('parachute_area_m2'),
+            'parachute_cd': descent.get('parachute_cd'),
+            'parachute_deploy_delay_s': delay,
+            'assumed': {
+                'area': bool(descent.get('parachute_area_assumed')),
+                'cd': bool(descent.get('parachute_cd_assumed')),
+                'deploy_delay': bool(descent.get('parachute_deploy_delay_assumed')),
+            },
+            'basis': ('the descent is solved with a parachute, NOT with the '
+                      'body drag entered for the ascent: after the deploy '
+                      'delay the drag area switches to the parachute area at '
+                      'the parachute Cd. Any component flagged in "assumed" '
+                      'is a model default, not a qualified recovery design, '
+                      'and the descent time scales directly with it'),
+        }
 
     def _aero_drag_components(self, vx: float, vz: float, rho: float,
                              altitude: float, area: float, cd_override: Optional[float],
@@ -1514,10 +1592,18 @@ class TrajectoryAnalyzer:
         # Create subplots
         fig = make_subplots(
             rows=3, cols=2,
+            # BAŞLIK ÇAKIŞMASI (T67, 2026-08-03) — altıncı hücrenin künyesi
+            # BİLEREK boş. Ölçüldü: gösterge kendi başlığını
+            # ('Maximum Altitude (km)') hücrenin tepesine yazıyor, künye
+            # ('Performance Summary') ise annotations[5]'te x=0,775 y=0,22222
+            # ile TAM AYNI noktada duruyordu; iki metin üst üste biniyordu.
+            # Gösterge başlığı birimi de taşıdığı için daha bilgili olan odur
+            # ve göstergenin İKİ dalı (apoje var / yok) da kendi başlığını
+            # zaten yazar — künye her hâlükârda gereksizdi.
             subplot_titles=(
                 'Trajectory Profile', 'Altitude vs Time',
                 'Velocity Profile', 'Acceleration Profile',
-                'Flight Phases', 'Performance Summary'
+                'Flight Phases', ''
             ),
             specs=[
                 [{'type': 'scatter'}, {'type': 'scatter'}],
@@ -1585,6 +1671,48 @@ class TrajectoryAnalyzer:
             row=1, col=2
         )
 
+        # 2b. KURTARMA SİSTEMİ GÖRÜNÜR OLSUN (T68, 2026-08-03)
+        # ------------------------------------------------------------------
+        # Ölçülen kusur: 'Altitude vs Time' grafiğinde 4,11 km'lik apojeden
+        # sonra 750 saniyelik bir iniş çizgisi vardı ve hiçbir yerde bunun
+        # bir PARAŞÜTten geldiği yazmıyordu. Kullanıcı panele Cd 0,5 /
+        # A 0,008 m² girmişti; o değerlerle balistik iniş ~30 s sürer, yani
+        # grafik kullanıcının kendi girdisiyle açıklanamıyordu. Açılma anı
+        # artık işaretlenir ve ölçülen paraşüt parametreleri (varsayım
+        # olanlar işaretiyle) üstüne yazılır. Sayı yoksa işaret KONMAZ.
+        recovery = trajectory_data.get('recovery') or {}
+        if recovery.get('deployed') and recovery.get('deploy_time_s') is not None:
+            t_dep = float(recovery['deploy_time_s'])
+            _t_axis = _as_list(trajectory['time'])
+            _alt_axis = _as_list(trajectory['altitude'])
+            z_dep = None
+            for _t, _z in zip(_t_axis, _alt_axis):
+                if _t >= t_dep:
+                    z_dep = float(_z)
+                    break
+            if z_dep is not None:
+                _assumed = recovery.get('assumed') or {}
+                _flag = ' (assumed)' if _assumed.get('area') or _assumed.get('cd') else ''
+                _area = recovery.get('parachute_area_m2')
+                _cd = recovery.get('parachute_cd')
+                _rate = recovery.get('mean_descent_rate_m_s')
+                _label = 'Parachute deploy'
+                _detail = 'Parachute deploy at %.1f s' % t_dep
+                if _area is not None and _cd is not None:
+                    _detail += ' — %.3f m2 at Cd %.2f%s' % (_area, _cd, _flag)
+                if _rate is not None:
+                    _detail += '; mean descent %.1f m/s' % _rate
+                fig.add_trace(
+                    go.Scatter(
+                        x=[t_dep], y=[z_dep / 1000.0],
+                        mode='markers',
+                        name=_label,
+                        marker=dict(color='magenta', size=11, symbol='diamond'),
+                        hovertemplate=_detail.replace('%', '%%'),
+                    ),
+                    row=1, col=2
+                )
+
         # 3. Velocity profile
         fig.add_trace(
             go.Scatter(
@@ -1627,7 +1755,13 @@ class TrajectoryAnalyzer:
         phase_times = _as_list([0, powered_phase['burnout_time'],
                                 powered_phase['burnout_time'] + coasting_phase['apogee_time'],
                                 trajectory['time'][-1]])
-        phase_names = ['Launch', 'Burnout', 'Apogee', 'Landing']
+        # T68: iniş paraşütle çözüldüyse etiket bunu SÖYLER — 'Landing' tek
+        # başına, uçuşun son yarısının bir kurtarma sisteminden geldiğini
+        # gizliyordu.
+        _landing_label = ('Landing under parachute'
+                          if (trajectory_data.get('recovery') or {}).get('deployed')
+                          else 'Landing')
+        phase_names = ['Launch', 'Burnout', 'Apogee', _landing_label]
         phase_altitudes = _as_list([0, powered_phase['position_z'][-1] / 1000,
                                     coasting_phase['position_z'][-1] / 1000, 0])
         # Faz zamanları monoton olmalı; uçuş erken sonlandıysa (yere çarpma /
@@ -1675,9 +1809,19 @@ class TrajectoryAnalyzer:
             )
         else:
             max_altitude_km = float(_max_alt_raw / 1000)
+            # BOŞ DELTA SÖKÜLDÜ (T67, 2026-08-03): mode 'gauge+number+delta'
+            # idi ama delta.reference HİÇ verilmiyordu. Ölçüldü (uygulama
+            # 8084, /api/trajectory-analysis): iz 8 = Indicator,
+            # mode='gauge+number+delta', 'delta' anahtarı yok, value=6,5951 km
+            # -> Plotly sayının altına referansı olmayan bir değişim alanı
+            # çiziyordu; ekranda içi boş bir yer tutucu kalıyordu. Uydurma bir
+            # referans (0 km, hedef apoje vb.) KONMAZ: karşılaştırılacak bir
+            # sayı yoksa alan da olmaz. Anlamlı bir referans (ör. kullanıcının
+            # hedef apojesi) çözücüye bağlandığı gün mode'a 'delta' geri
+            # eklenip delta={'reference': hedef} ile BİRLİKTE verilmelidir.
             fig.add_trace(
                 go.Indicator(
-                    mode="gauge+number+delta",
+                    mode="gauge+number",
                     value=max_altitude_km,
                     title={'text': "Maximum Altitude (km)"},
                     domain={'x': [0, 1], 'y': [0, 1]},

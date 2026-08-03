@@ -566,8 +566,30 @@
                             <span class="tooltip-text" data-i18n="solid.ui.theoretical_performance_parameter_independent_of">Theoretical performance parameter independent of nozzle design. Higher values indicate better propellant performance. APCP: 1500-1600 m/s, KNSU: 1200-1300 m/s.</span>
                         </div>
                     </label>
-                    <input type="number" id="char_velocity" value="1550" step="0.1">
-                    <button type="button" onclick="calculateCharVelocity()" style="margin-top: 5px; padding: 5px 10px; font-size: 12px;" data-i18n="solid.ui.calculate">Calculate</button>
+                    <!-- FAZ 6 (T51, 3 Ağustos 2026): bant EKLENDİ + teslim
+                         edilen c* görünür kılındı. Alan bandın DIŞINDA sessizce
+                         DÜŞÜYORDU: motor char_velocity'yi yalnız [800, 2500]
+                         m/s aralığında uyguluyor
+                         (solid_rocket_engine.py:1200
+                          `_override_val('char_velocity', 800.0, 2500.0)`),
+                         dışında yakıt tablosunun değerine dönüyor ve bunu
+                         söylemiyordu. Ölçüm (varsayılan motor):
+                           form 1550   -> çözücü 1472,5 m/s (uygulandı)
+                           form 2400   -> çözücü 2280,0 m/s (uygulandı)
+                           form  508,7 -> çözücü 1518,3 m/s (DÜŞTÜ)
+                           form 3000   -> çözücü 1518,3 m/s (DÜŞTÜ)
+                         yani 508,7 ile 3000 arası 5,9 kat, sonuç birebir aynı.
+                         Bant ipucu ve teslim edilen değer #char_velocity_band
+                         içine JS ile yazılır (dile bağlı olmayan sayı + SI
+                         simgesi; 'c*' testin çevrilmeyen kısaltma listesinde). -->
+                    <input type="number" id="char_velocity" value="1550" step="0.1" min="800" max="2500">
+                    <small id="char_velocity_band" style="display:block; margin-top:4px; font-family:var(--hd-mono, monospace); font-size:0.72rem; color:#7d97a5;"></small>
+                    <!-- Bant ipucu düğmeden SONRA tazelenir. Çağrı bilerek
+                         calculateCharVelocity() içine konmadı: o fonksiyon
+                         şablondan sökülüp node'da tek başına koşturuluyor
+                         (tests/test_faz6_f1a_kati.py::js_function) ve gövdesine
+                         eklenen her dış çağrı o düzeneği kırar. -->
+                    <button type="button" onclick="calculateCharVelocity(); updateCharVelocityBand(window.currentResults);" style="margin-top: 5px; padding: 5px 10px; font-size: 12px;" data-i18n="solid.ui.calculate">Calculate</button>
                 </div>
                 <div class="form-group">
                     <label>
@@ -616,15 +638,37 @@
                     </label>
                     <input type="number" id="grain_count" value="3" min="1">
                 </div>
+                <!-- FAZ 6 (T24, 3 Ağustos 2026): Web Thickness alanı ÇIKTI oldu
+                     (readonly). Çözücü web'i geometriden türetir
+                     (solid_rocket_engine.py:6959, (D_grain - D_core)/2) ve
+                     buraya yazılan sayıyı yalnız tutarsızlık uyarısı için
+                     okur. Ölçüm: 25 -> 5 mm değişiminde yanma süresi 1,024 s,
+                     ortalama itki 12602 N ve yakıt 6,611 kg birebir aynı
+                     kalıyor, tablo her iki durumda 35,0 mm yazıyordu — yani
+                     alan düzenlenebilir ama ölüydü. Değer artık türetilenle
+                     aynı: geometri değişince updateWebThickness tazeler.
+
+                     FAZ 6 (T24 kalan yarı, 3 Ağustos 2026): ipucu metni de
+                     düzeltildi. Eski metin alanı bir GİRDİ gibi anlatıyordu
+                     ("amatör motorlarda tipik 15-50 mm") ve web'in iki
+                     cepheden tükenebileceğinden hiç söz etmiyordu. Ölçüldü
+                     (8082 koşusu): sayfanın varsayılanında dış yüzey yasaklı
+                     (inhibit_outer seçili) olduğu için web_basis
+                     'single_sided' ve web_burnout_mm = web_thickness_mm =
+                     35,0 mm; dış yüzey yasağı KALDIRILDIĞINDA aynı geometri
+                     için web_basis 'two_sided' ve web_burnout_mm 17,5 mm
+                     oluyor — yani fiilen yanan kalınlık geometrik web'in
+                     YARISI. Kullanıcı yanma süresini 35 mm üstünden okursa
+                     o yapılandırmada 2 kat hata yapar. -->
                 <div class="form-group">
                     <label>
                         <span data-i18n="solid.ui.web_thickness">Web Thickness</span> <span class="unit">(mm)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.minimum_thickness_of_propellant_that_burns">Minimum thickness of propellant that burns away completely. Determines burn time and structural integrity. Typically 15-50mm for amateur motors.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.minimum_thickness_of_propellant_that_burns">Derived output: the propellant thickness implied by the grain geometry ((outer - core)/2). When the outer surface burns as well the web is consumed from both faces, so the thickness actually burnt is half of it (see web_burnout_mm).</span>
                         </div>
                     </label>
-                    <input type="number" id="web_thickness" value="25" step="0.1">
+                    <input type="number" id="web_thickness" value="35" step="0.1" readonly>
                 </div>
                 <div class="form-group">
                     <label>
@@ -790,11 +834,38 @@
             </div>
 
             <!-- Inhibitor Settings -->
+            <!-- FAZ 6 (T49, 3 Ağustos 2026): VARSAYILAN DÜZEN DÜZELTİLDİ.
+                 Eskiden ön/arka yüz kaplı, DIŞ yüzey açıktı (front=T, rear=T,
+                 outer=F). Bu bir BATES grain'i DEĞİLDİR — tam tersidir: dış
+                 silindir içe doğru yanar, yanan alan hızla küçülür. Ölçüm
+                 (varsayılan motor, /solid): itki 15845 -> 9727 N (-%38,6),
+                 tepe/ortalama 1,26 — yani gerileyici. Oysa aynı sayfanın
+                 'Thrust Curve' yardımı 'BATES (neutral)' diyor ve grain tipi
+                 varsayılanı da 'bates'.
+                 BATES tanımı gereği dış yüzeyi KAPLI, uç yüzleri AÇIK olan
+                 çekirdek yanmalı silindirdir (Sutton & Biblarz, Rocket
+                 Propulsion Elements 9. baskı, Böl. 12): çekirdek genişledikçe
+                 büyüyen yan alan, kısalan uçların kaybını dengeler.
+                 Ölçülen dört düzen (başlangıç -> bitiş itkisi):
+                   front=T rear=T outer=F : 15845 -> 9727 N  (-%38,6)  ESKİ
+                   front=T rear=T outer=T :  5142 -> 9920 N  (+%92,9)
+                   front=F rear=F outer=T :  6114 -> 6236 N  (+%2,0)   YENİ
+                   front=F rear=F outer=F : 16821 -> 7944 N  (-%52,8)
+                 Yalnız üçüncüsü sayfanın kendi iddiasıyla tutarlı; başlangıç
+                 ve bitiş itkisi %2 içinde, tepe/ortalama 1,10.
+                 Çözücünün KENDİ etiketi de aynı şeyi söylüyor:
+                 grain_design.burn_profile eski düzende 'regressive'
+                 (inhibitor_config 'front_face_and_rear_face', Kn 78,1 -> 59,1),
+                 yeni düzende 'neutral' (inhibitor_config 'outer_surface',
+                 Kn 78,2 -> 79,8). Üstelik motorun kendi varsayılanları zaten
+                 doğruydu (solid_rocket_engine.py:1413-1415: front=False,
+                 rear=False, outer=True); form onları koşulsuz gönderdiği için
+                 motorun BATES tanımını sessizce eziyordu. -->
             <div style="margin: 15px 0;">
                 <h3 style="color: #2c3e50; margin-bottom: 10px;" data-i18n="solid.ui.inhibitor_coating">Inhibitor Coating</h3>
                 <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                     <label style="display: flex; align-items: center; gap: 8px;">
-                        <input type="checkbox" id="inhibit_front" checked> 
+                        <input type="checkbox" id="inhibit_front">
                         <span data-i18n="solid.ui.front_face">Front Face</span>
                         <div class="tooltip" style="margin-left: 5px;">
                             <div class="tooltip-icon">?</div>
@@ -802,7 +873,7 @@
                         </div>
                     </label>
                     <label style="display: flex; align-items: center; gap: 8px;">
-                        <input type="checkbox" id="inhibit_rear" checked> 
+                        <input type="checkbox" id="inhibit_rear">
                         <span data-i18n="solid.ui.rear_face">Rear Face</span>
                         <div class="tooltip" style="margin-left: 5px;">
                             <div class="tooltip-icon">?</div>
@@ -810,7 +881,7 @@
                         </div>
                     </label>
                     <label style="display: flex; align-items: center; gap: 8px;">
-                        <input type="checkbox" id="inhibit_outer"> 
+                        <input type="checkbox" id="inhibit_outer" checked>
                         <span data-i18n="solid.ui.outer_surface">Outer Surface</span>
                         <div class="tooltip" style="margin-left: 5px;">
                             <div class="tooltip-icon">?</div>
@@ -1404,7 +1475,18 @@
                         <span data-i18n="solid.ui.total_dry_mass">Total Dry Mass</span> <span class="unit">(kg)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.total_mass_excluding_propellant_case_nozzle">Total mass excluding propellant (case + nozzle + insulation + avionics + closures). Represents final vehicle mass after propellant burnout.</span>
+                            <!-- FAZ 6 (T03 kalan yarı, 3 Ağustos 2026): ipucu
+                                 aviyoniği MOTORUN kalemi sayıyordu. Çözücünün
+                                 kendi gerekçesi bunu açıkça yalanlıyor:
+                                 inert_breakdown.basis "Avionics are NOT part
+                                 of the motor and are not included here" diyor
+                                 ve toplamı yalnız kasa + kapak + lüle +
+                                 yalıtım + ateşleyici/montaj'dan kuruyor.
+                                 Ölçüldü (varsayılan tasarım, 8082 koşusu):
+                                 çözücü 20,283 kg (12,551 + 3,765 + 2,447 +
+                                 0,704 + 0,816), form ise 4,300 kg (aviyonik
+                                 0,200 kg dâhil) beyan ediyordu. -->
+                            <span class="tooltip-text" data-i18n="solid.ui.total_mass_excluding_propellant_case_nozzle">Sum of the component fields above (case + nozzle + insulation + avionics + closures). Avionics are a VEHICLE item, NOT part of the motor: the motor dry mass computed by the solver leaves them out. The reconciliation table below shows the solver value next to this one, component by component.</span>
                         </div>
                     </label>
                     <input type="number" id="dry_mass" step="0.001" readonly min="0.1" max="65000">
@@ -1420,6 +1502,17 @@
                     <input type="number" id="wet_mass" step="0.001" readonly min="0.1" max="130000">
                 </div>
             </div>
+            <!-- FAZ 6 (T03 kalan yarı, 3 Ağustos 2026): çözücü ile formun
+                 atıl kütle uzlaştırması. Çözücü artık dökümü yayımlıyor
+                 (design_summary.masses.inert_breakdown) ve bileşenlerin
+                 toplamı dry_mass_kg'ye 1e-12 bağıl toleransla eşit; ölçüldü
+                 (varsayılan tasarım, 8082 koşusu): 12,550969 + 3,765291 +
+                 2,447439 + 0,703601 + 0,815813 = 20,283113 = dry_mass_kg.
+                 Form ise 2,5 + 0,5 + 0,3 + 0,2 + 0,8 = 4,300 kg beyan
+                 ediyordu (4,7 kat) ve iki sayı yan yana, AÇIKLAMASIZ
+                 duruyordu. Tablo hesaptan sonra doldurulur; hesap yoksa
+                 gizli kalır — sayı UYDURULMAZ. -->
+            <div id="inertReconcile" style="display:none; margin-top:14px;"></div>
         </div>
 
         <!-- 8. Measurement / Test Equipment -->
@@ -1707,11 +1800,35 @@
                     <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.burn_time_s">Burn Time (s)</span>
                         <input type="number" id="traj_burn_time" value="2" step="0.1" style="margin-top:4px;">
                     </label>
+                    <!-- FAZ 6 (T68 kalan yarı, 3 Ağustos 2026): kurtarma
+                         girdileri. İniş fazı bir PARAŞÜTLE çözülüyor ama
+                         panelde onu belirleyen tek bir alan yoktu; iniş hızı
+                         araçtan bağımsız, çözücünün belgelenmiş varsayımından
+                         (2,0 m² / Cd 1,4 / 2,0 s) türüyordu. Ölçüldü
+                         (8082 koşusu): varsayılan istekte iniş 263,8 s,
+                         ortalama 5,58 m/s, yere çarpma 5,35 m/s ve üç
+                         büyüklüğün ÜÇÜ de assumed=true.
+                         ALANLAR BİLEREK BOŞ: boş bırakılan alan isteğe
+                         KONMAZ, böylece çözücü "verilmedi" ile "null geldi"
+                         ayrımını yapıp varsayım damgasını basabiliyor
+                         (trajectory_analysis.py:476-526). -->
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.parachute_area_m2">Parachute Area (m2)</span>
+                        <input type="number" id="parachute_area" step="0.1" min="0" placeholder="—" style="margin-top:4px;">
+                    </label>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.parachute_cd">Parachute Cd</span>
+                        <input type="number" id="parachute_cd" step="0.05" min="0" placeholder="—" style="margin-top:4px;">
+                    </label>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.parachute_deploy_delay_s">Deploy Delay after Apogee (s)</span>
+                        <input type="number" id="parachute_deploy_delay" step="0.5" min="0" placeholder="—" style="margin-top:4px;">
+                    </label>
                 </div>
                 <div style="text-align:center; margin-top:14px;">
                     <button type="button" class="btn btn-primary" onclick="computeTrajectory()" data-i18n="solid.ui.compute_trajectory">Compute Trajectory</button>
                 </div>
                 <div id="trajectory_plots" class="plot-container"></div>
+                <!-- Kurtarma özeti: yalnız yanıttaki `recovery` bloğundan
+                     doldurulur, hesap yoksa boş kalır (FAZ 6, T68). -->
+                <div id="trajectory_recovery" style="margin-top:10px;"></div>
             </div>
 
             <!-- Analysis Dock çapası: güverte JS ile bu çapanın ÖNÜNE kurulur
@@ -1820,6 +1937,42 @@
             return [lo - pad, hi + pad];
         }
 
+        // Bastırılmış sıfırı EKSENİN ÜSTÜNDE ilan et (FAZ 6, T69).
+        // Yukarıdaki bant seçimi bilinçli bir karardır ama işaretsiz kaldığında
+        // yanıltıyor: uç yanmalı grain'de eğri 532,66 -> 530,41 N (%0,42) iken
+        // y ekseni tam o bandı kapladığı için grafik "dik düşüş" gibi okunuyordu
+        // (ölçüm 3 Ağustos 2026: eksen aralığı [530,23 ; 532,84], eksende hiçbir
+        // uyarı yok). Çözüm eksen aralığını bozmak DEĞİL — okuyucuya bandın
+        // sıfırı içermediğini ve bandın göreli genişliğini söylemek.
+        // Metin bilerek dile bağlı değildir: yalnız sayı, SI simgesi ve
+        // matematik işareti; ilk satır zaten çevrilmiş eksen başlığıdır.
+        function hrmaSigStr(v) {
+            return String(Number(v.toPrecision(5)));
+        }
+        function hrmaMarkSuppressedZero(axis, values) {
+            if (!axis) return false;
+            var nums = (values || []).filter(function (v) {
+                return typeof v === 'number' && isFinite(v);
+            });
+            if (nums.length < 2) return false;
+            var lo = Math.min.apply(null, nums);
+            var hi = Math.max.apply(null, nums);
+            if (!(hi > lo)) return false;
+            if (lo <= 0 && hi >= 0) return false;        // sıfır bandın içinde
+            var ref = Math.max(Math.abs(lo), Math.abs(hi));
+            var pct = (hi - lo) / ref * 100;
+            var band = '0 ∉ [' + hrmaSigStr(lo) + ' … ' + hrmaSigStr(hi)
+                + ']  Δ ' + pct.toFixed(pct < 1 ? 2 : 1) + ' %';
+            if (typeof axis.title === 'string') {
+                axis.title = axis.title + '<br>' + band;
+            } else if (axis.title && typeof axis.title === 'object') {
+                axis.title.text = (axis.title.text || '') + '<br>' + band;
+            } else {
+                axis.title = band;
+            }
+            return true;
+        }
+
         // Backend'den gelen HAZIR figürler (kesit, yörünge) için hafif dokunuş:
         // yalnız sabit width kaldırılır + autosize açılır; eksen semantiğine
         // (equal-aspect kesit vb.) karışılmaz.
@@ -1828,6 +1981,26 @@
             delete out.width;
             out.autosize = true;
             return out;
+        }
+
+        // Çizimden HEMEN SONRA kabın gerçek yüksekliğini uygula (FAZ 6, T20).
+        // Plotly, newPlot anında kabın yüksekliğini ölçer. Kap o an henüz BOŞ
+        // olduğu için theme.css'in `.plot-container:empty { min-height:140px
+        // !important }` kuralı geçerlidir: Plotly 140 px ölçer ve SVG'yi o boya
+        // kilitler; kenar boşlukları düşünce çizim alanına 2 px kalır.
+        // Ölçüm (3 Ağustos 2026, #altitude_plot): kap 422 px, SVG 140 px,
+        // .bg 2 px — Isp eğrisi (214,2 -> 287,3 s) düz çizgiye iniyor, y ekseni
+        // etiketleri üst üste biniyordu. Çizim bittiğinde kap artık :empty
+        // değildir, bu yüzden tek bir resize doğru yüksekliği verir; pencereyi
+        // yeniden boyutlandırmanın hatayı "düzeltmesinin" sebebi de buydu.
+        function hrmaFitPlot(divId) {
+            var div = document.getElementById(divId);
+            if (!div || !window.Plotly || !Plotly.Plots) return;
+            var fit = function () {
+                try { Plotly.Plots.resize(div); } catch (e) { /* çizim yoksa sessiz */ }
+            };
+            if (window.requestAnimationFrame) requestAnimationFrame(fit);
+            else fit();
         }
 
         // Ortak 2B eksen kalitesi: autosize (sabit width YOK), x unified hover,
@@ -1844,7 +2017,11 @@
                 spikedash: 'dot', rangemode: 'normal'
             }, out.yaxis || {});
             var rng = hrmaAxisRange(yValues);
-            if (rng && out.yaxis.range === undefined) out.yaxis.range = rng;
+            if (rng && out.yaxis.range === undefined) {
+                out.yaxis.range = rng;
+                // Bandı ekseninde ilan et (FAZ 6, T69) — sıfır dışarıdaysa.
+                hrmaMarkSuppressedZero(out.yaxis, yValues);
+            }
             return out;
         }
 
@@ -2073,6 +2250,9 @@
                 el.value = val;
                 applied++;
             });
+            // Katalog c* alanını da yazıyor; bant ipucu onunla tazelenmeli
+            // (FAZ 6, T51 — katalog değeri de bandın dışına düşebilir).
+            updateCharVelocityBand(window.currentResults);
 
             // Rejim yasalı yakıtlarda (KNDX/KNSB) a/n tasarım basıncından
             // çözülür — katalogtaki tek (a, n) çifti referans basınca aittir.
@@ -2456,7 +2636,12 @@
                 [T('solid.msg.throat_diameter_mm', 'Throat diameter (mm)'), num(r.throat_diameter, 2)],
                 [T('solid.msg.exit_diameter_mm', 'Exit diameter (mm)'), num(r.exit_diameter, 2)],
                 [T('solid.msg.expansion_ratio', 'Expansion ratio'), num(r.expansion_ratio, 3)],
-                [T('solid.msg.case_inner_diameter_mm', 'Case inner diameter (mm)'), num(r.chamber_diameter, 1)],
+                // FAZ 6 (T22): Excel sayfası da kasa iç çapını yazar. Buradaki
+                // r.chamber_diameter grain dış çapıydı; aynı dosyada 'Grain'
+                // sayfası zaten onu 'Outer diameter' olarak taşıyor, yani sayı
+                // iki sayfada aynı adla farklı anlamda görünüyordu.
+                [T('solid.msg.case_inner_diameter_mm', 'Case inner diameter (mm)'),
+                 num(((r.cad_design || {}).case_design || {}).inner_diameter, 1)],
                 [T('solid.msg.nozzle_length_mm', 'Nozzle length (mm)'), num(nz.nozzle_length_mm, 1)],
                 [T('solid.msg.convergent_half_angle_deg', 'Convergent half angle (deg)'), num(nz.convergent_half_angle_deg, 1)],
                 [T('solid.msg.divergent_half_angle_deg', 'Divergent half angle (deg)'), num(nz.divergent_half_angle_deg, 1)]
@@ -2586,6 +2771,28 @@
                 thrust: trThrust,
                 isp: trIsp
             };
+            // FAZ 6 (T68 kalan yarı, 3 Ağustos 2026): kurtarma girdileri.
+            // `getv` KULLANILMAZ — o boş alanda bir yedek sayı döndürür ve
+            // anahtarı yine gönderirdi. Çözücü "verilmedi" ile "değer geldi"
+            // ayrımını ANAHTARIN VARLIĞINDAN yapıyor; boş alan gönderilirse
+            // kullanıcının hiç vermediği bir paraşüt beyan edilmiş olur ve
+            // 'assumed' damgası haksız yere düşer.
+            const optNum = function (id) {
+                const el = document.getElementById(id);
+                if (!el || String(el.value).trim() === '') return null;
+                const v = parseFloat(el.value);
+                return (isFinite(v) && v > 0) ? v : null;
+            };
+            const chute = {
+                parachute_area: optNum('parachute_area'),
+                parachute_cd: optNum('parachute_cd'),
+                parachute_deploy_delay: optNum('parachute_deploy_delay')
+            };
+            Object.keys(chute).forEach(function (k) {
+                if (chute[k] !== null) body[k] = chute[k];
+            });
+            const recDiv = document.getElementById('trajectory_recovery');
+            if (recDiv) recDiv.innerHTML = '';
             div.innerHTML = '<p style="text-align:center; color:#7d97a5; padding:40px;">' + T('solid.js.computing_trajectory', 'Computing trajectory...') + '</p>';
             try {
                 const resp = await fetch('/api/trajectory-analysis', {
@@ -2598,11 +2805,107 @@
                     throw new Error(d.error || T('solid.msg.trajectory_data_could_not_be_retrieved', 'Trajectory data could not be retrieved'));
                 }
                 const fig = JSON.parse(d.plot_data);
+                // FAZ 6 (T50, 3 Ağustos 2026): 'Computing trajectory...'
+                // satırı SİLİNMELİ. Plotly 1.58.5 makePlotFramework'ü çizim
+                // kabını `insert('div', ':first-child')` ile EKLER, kabın
+                // mevcut içeriğini temizlemez; bu yüzden durum paragrafı
+                // grafiğin ALTINDA kalıyordu. Ölçüldü (3 Ağustos 2026):
+                // hesap 0,2 s sürdüğü ve 9 iz çizildiği hâlde 2., 10. ve 25.
+                // saniyede metin hâlâ ekrandaydı — iş bitmiş, gösterge hâlâ
+                // "çalışıyor" diyordu.
+                div.innerHTML = '';
                 Plotly.newPlot(div, fig.data, hrmaFigureLayout(fig.layout), HRMA_PLOT_CONFIG);
+                // İniş fazının hangi modelle çözüldüğü grafiğin altında
+                // yazıyla da beyan edilir (FAZ 6, T68).
+                renderRecoverySummary((d.trajectory_data || {}).recovery, chute);
             } catch (e) {
                 div.innerHTML = '<p style="text-align:center; color:#ff7a85; padding:40px;">'
                     + T('solid.msg.trajectory_could_not_be_computed', 'Trajectory could not be computed: ') + e.message + '</p>';
             }
+        }
+
+        // ---- Kurtarma sistemi özeti (FAZ 6, T68 kalan yarı — 3 Ağustos 2026) ----
+        //
+        // Yörünge yanıtındaki `trajectory_data.recovery` bloğu panelde HİÇ
+        // gösterilmiyordu. Ölçüldü (8082, varsayılan istek): apojeden sonra
+        // iniş 263,8 s sürüyor ve ortalama hız 5,58 m/s — kullanıcının
+        // girdiği gövde sürüklemesiyle (Cd 0,5 / A 0,008 m²) bu İMKÂNSIZ,
+        // balistik iniş onlarca saniye sürerdi. Farkı açıklayan bilgi
+        // (paraşüt 2,0 m² @ Cd 1,4, apojeden 2,0 s sonra) yanıtta vardı ama
+        // ekranda yoktu. Hiçbir sayı burada üretilmez: yalnız çözücünün
+        // yayımladığı alanlar basılır, olmayan alan '—' kalır.
+        //
+        // `sent`: kullanıcının GERÇEKTEN gönderdiği değerler (gönderilmeyen
+        // alan null). Çözücü bir büyüklüğü 'assumed' diye damgalarken
+        // kullanıcı onu göndermişse istek yolda DÜŞMÜŞ demektir; bu sessizce
+        // yutulmaz, açıkça uyarı basılır.
+        function renderRecoverySummary(rec, sent) {
+            const box = document.getElementById('trajectory_recovery');
+            if (!box) return;
+            if (!rec) { box.innerHTML = ''; return; }
+
+            const n = function (v, d) {
+                return (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : '—';
+            };
+            const assumed = rec.assumed || {};
+            const mark = function (flag) {
+                return flag ? ' ' + T('solid.msg.recovery_assumed', '(assumed)') : '';
+            };
+
+            if (!rec.deployed) {
+                // Paraşüt açılmadıysa bunu SÖYLE — sessiz kalmak, kullanıcının
+                // iniş fazını balistik sanmasına yol açıyordu.
+                const why = (typeof rec.basis === 'string' && rec.basis) ? rec.basis : '';
+                box.innerHTML = '<p style="color:#7d97a5; font-size:13px;" title="'
+                    + why + '">'
+                    + T('solid.msg.recovery_not_deployed',
+                        'No recovery system is part of this solution: the descent '
+                        + 'phase did not run.')
+                    + '</p>';
+                return;
+            }
+
+            const parts = [];
+            parts.push('<p style="font-size:13px; margin:0 0 4px;"><strong>'
+                + T('solid.msg.recovery_heading', 'Recovery system') + '</strong></p>');
+            parts.push('<p style="font-size:13px; color:#9fdcec; margin:0;">'
+                + TF('solid.msg.recovery_deployed',
+                     {
+                         area: n(rec.parachute_area_m2, 2) + mark(assumed.area),
+                         cd: n(rec.parachute_cd, 2) + mark(assumed.cd),
+                         delay: n(rec.parachute_deploy_delay_s, 1) + mark(assumed.deploy_delay),
+                         duration: n(rec.descent_duration_s, 1),
+                         rate: n(rec.mean_descent_rate_m_s, 2),
+                         landing: n(rec.landing_velocity_m_s, 2)
+                     },
+                     'Descent solved under a parachute: {area} m2 at Cd {cd}, opening '
+                     + '{delay} s after apogee. Descent lasts {duration} s at a mean '
+                     + '{rate} m/s and the vehicle lands at {landing} m/s.')
+                + '</p>');
+
+            // Gönderilen değer çözücüye ULAŞMADI mı? İki belirti: (a) çözücü
+            // o büyüklüğü hâlâ 'assumed' sayıyor, (b) döndürdüğü sayı
+            // gönderilenden farklı. İkisi de kanaldaki kopukluğun kanıtıdır.
+            const ignored = [];
+            [['parachute_area', 'area', 'parachute_area_m2'],
+             ['parachute_cd', 'cd', 'parachute_cd'],
+             ['parachute_deploy_delay', 'deploy_delay', 'parachute_deploy_delay_s']]
+                .forEach(function (t) {
+                    const gonderilen = (sent || {})[t[0]];
+                    if (gonderilen === null || gonderilen === undefined) return;
+                    const donen = rec[t[2]];
+                    const farkli = (typeof donen !== 'number' || !isFinite(donen)
+                                    || Math.abs(donen - gonderilen) > 1e-9);
+                    if (assumed[t[1]] === true || farkli) ignored.push(t[0]);
+                });
+            if (ignored.length) {
+                parts.push('<p style="font-size:13px; color:#ff7a85; margin:6px 0 0;">'
+                    + TF('solid.msg.recovery_inputs_ignored', { fields: ignored.join(', ') },
+                         'The values you entered did NOT reach the solver ({fields}); '
+                         + 'the numbers above are the solver defaults.')
+                    + '</p>');
+            }
+            box.innerHTML = parts.join('');
         }
 
         // Yörünge girdilerini mevcut tasarımdan ön-doldur (kullanıcı düzenleyebilir).
@@ -2614,17 +2917,58 @@
                 if (el.dataset.userOverride === 'true') return;
                 el.value = val.toFixed(digits);
             };
-            const wet = parseFloat((document.getElementById('wet_mass') || {}).value);
-            const dry = parseFloat((document.getElementById('dry_mass') || {}).value);
-            setIfEmptyOrAuto('traj_initial_mass', isFinite(wet) ? wet : NaN, 3);
-            setIfEmptyOrAuto('traj_final_mass', isFinite(dry) ? dry : NaN, 3);
+            // FAZ 6 (T05, 3 Ağustos 2026): kütleler ÇÖZÜCÜDEN gelir, form
+            // alanlarından değil. Form kütle bloğu kullanıcının beyan ettiği
+            // bileşen kütlelerinin toplamıdır (varsayılanda 4,300 kg kuru) ve
+            // motorun hesaplanan atıl kütlesiyle (20,409 kg) ilgisizdir. Oradan
+            // ön-dolunca yörünge 19,833 kg yakıt harcıyordu — oysa motorda
+            // 6,611 kg var; örtük Isp = 12909,3 N·s / (19,833·9,81) = 66 s,
+            // sayfanın aynı koşuda ilan ettiği Isp ise 199,1 s idi. Çözücünün
+            // kütleleriyle fark tam propellant_mass kadar olur.
+            const masses = (results.design_summary || {}).masses || {};
+            setIfEmptyOrAuto('traj_initial_mass', masses.total_mass_kg, 3);
+            setIfEmptyOrAuto('traj_final_mass', masses.dry_mass_kg, 3);
             setIfEmptyOrAuto('traj_burn_time', results.burn_time, 3);
-            // Referans alan: kasa dış kesiti (mm çapından m² alana)
-            const dMm = results.chamber_diameter;
+            // Referans alan: kasa DIŞ kesiti (mm çapından m² alana).
+            // FAZ 6: burada results.chamber_diameter kullanılıyordu; o değer
+            // grain dış çapıdır (100,0 mm), kasa dış çapı ise cidar + yalıtımla
+            // 111,1 mm — sürükleme alanında %23 fark. Yorumun söz verdiği ölçü
+            // çözücünün kasa tasarımından alınır; yoksa alan ön-doldurulmaz.
+            const dMm = ((results.cad_design || {}).case_design || {}).outer_diameter;
             if (typeof dMm === 'number' && isFinite(dMm) && dMm > 0) {
                 const area = Math.PI * Math.pow(dMm / 2000, 2);
                 setIfEmptyOrAuto('traj_ref_area', area, 5);
             }
+        }
+
+        // 6-DOF paneli girdilerini son hesaptan ön-doldur (FAZ 6, T23).
+        // Analiz rıhtımının başlığı "Inputs are pre-filled from the latest
+        // calculation results" diyor, ama sd_* alanları panelin KURULUM
+        // varsayılanlarında kalıyordu. Ölçüm (3 Ağustos 2026): itki 1200 N /
+        // motor 12602,1 N (10,5x), yanma 6 s / 1,024 s (5,9x), kuru 8 kg /
+        // 20,409 kg (2,6x), yakıt 4 kg / 6,611 kg (1,7x) — aynı koşuda ad_*
+        // panelleri doğru doluyordu. Kullanıcının elle yazdığı değer EZİLMEZ;
+        // Component kipinde kütleler bileşen tablosundan türetildiği için
+        // (readOnly) o alanlara dokunulmaz.
+        var _sixDofAutoWrite = false;
+        function prefillSixDofInputs(results) {
+            if (!results) return;
+            const masses = (results.design_summary || {}).masses || {};
+            const setAuto = function (id, val, digits) {
+                const el = document.getElementById(id);
+                if (!el || el.readOnly) return;
+                if (el.dataset.userOverride === 'true') return;
+                if (typeof val !== 'number' || !isFinite(val) || val <= 0) return;
+                el.value = val.toFixed(digits);
+                // Panel şemayı/doğrulamayı 'input' olayıyla tazeler.
+                _sixDofAutoWrite = true;
+                try { el.dispatchEvent(new Event('input', { bubbles: true })); }
+                finally { _sixDofAutoWrite = false; }
+            };
+            setAuto('sd_thrust', results.average_thrust, 1);
+            setAuto('sd_burn', results.burn_time, 3);
+            setAuto('sd_dry_m', masses.dry_mass_kg, 3);
+            setAuto('sd_prop_m', results.propellant_mass, 3);
         }
 
         // Comprehensive calculation functions
@@ -2633,14 +2977,57 @@
             const gamma = parseFloat(document.getElementById('gamma').value) || 1.25;
             const M = parseFloat(document.getElementById('molecular_weight').value) || 28.5;
             
-            // c* = sqrt(gamma * R * Tc / M) / (gamma * ((gamma + 1) / 2)^((gamma + 1) / (2 * (gamma - 1))))
+            // c* = sqrt(gamma * R * Tc / M) / (gamma * (2 / (gamma + 1))^((gamma + 1) / (2 * (gamma - 1))))
+            //
+            // FAZ 6 (T04, 3 Ağustos 2026): üssün TABANI tersine yazılmıştı —
+            // ((gamma+1)/2) yerine (2/(gamma+1)) olmalı. gamma=1,25 için taban
+            // 1,6989 yerine 0,58862; oran 2,886. Ölçüm: düğme 1550 m/s'lik alanı
+            // 508,7 m/s yapıyordu; APCP için bu FİZİKSEL OLARAK İMKÂNSIZ
+            // (yayımlanmış bant 1400-1600 m/s, sayfanın kendi çözücüsü 1472,5).
+            // Düzeltmeden sonra 1468,1 m/s — katalogla %0,3 uyumlu.
+            // Kaynak: Sutton & Biblarz, Rocket Propulsion Elements 9. baskı,
+            // c* = sqrt(R·Tc/gamma)·((gamma+1)/2)^((gamma+1)/(2(gamma-1))); bu
+            // biçim aşağıdaki pay/payda ayrımıyla cebirsel olarak özdeştir.
             const R = 8314.4621; // J/(kmol·K)
             const numerator = Math.sqrt(gamma * R * tc / M);
             const exponent = (gamma + 1) / (2 * (gamma - 1));
-            const denominator = gamma * Math.pow((gamma + 1) / 2, exponent);
+            const denominator = gamma * Math.pow(2 / (gamma + 1), exponent);
             
             const cStar = numerator / denominator;
             document.getElementById('char_velocity').value = cStar.toFixed(1);
+        }
+
+        // ---- c* kabul bandı ve TESLİM EDİLEN değer (FAZ 6, T51) ----
+        // Motorun uyguladığı aralık: solid_rocket_engine.py:1200
+        // `_override_val('char_velocity', 800.0, 2500.0)`. Bandın dışındaki
+        // girdi sessizce yok sayılıp yakıt tablosunun c*'ı kullanılıyordu;
+        // 508,7 ile 3000 m/s (5,9 kat) birebir aynı sonucu veriyordu.
+        // Buradaki iki sayı da TEK doğruluk kaynağı olan motordan gelir:
+        // bant sabitleri yukarıdaki satırın aynası, teslim edilen değer ise
+        // hesabın döndürdüğü results.c_star'dır (uydurma yok).
+        var CSTAR_MIN_MS = 800;
+        var CSTAR_MAX_MS = 2500;
+        function updateCharVelocityBand(results) {
+            const el = document.getElementById('char_velocity');
+            const note = document.getElementById('char_velocity_band');
+            if (!el || !note) return;
+            const v = parseFloat(el.value);
+            const disarida = isFinite(v) && (v < CSTAR_MIN_MS || v > CSTAR_MAX_MS);
+            // Metin bilerek dile bağlı DEĞİL: yalnız sayı, SI simgesi, matematik
+            // işareti ve 'c*' (i18n testinin çevrilmeyen kısaltma listesinde).
+            // Uyarı simgesi kullanılmaz — sayfa sözleşmesi emoji yasaklıyor
+            // (tests/test_solid_page_contract.py::test_no_emoji_in_page);
+            // bandın dışındalık '∉' ile ve kırmızı renkle söylenir.
+            let text = disarida
+                ? 'c* ' + v.toFixed(1) + ' ∉ [' + CSTAR_MIN_MS + ' , '
+                  + CSTAR_MAX_MS + '] m/s'
+                : CSTAR_MIN_MS + ' ≤ c* ≤ ' + CSTAR_MAX_MS + ' m/s';
+            const teslim = results ? results.c_star : null;
+            if (typeof teslim === 'number' && isFinite(teslim) && isFinite(v)) {
+                text += '   |   c* ' + v.toFixed(1) + ' → ' + teslim.toFixed(1) + ' m/s';
+            }
+            note.textContent = text;
+            note.style.color = disarida ? '#ff7a85' : '#7d97a5';
         }
 
         function calculatePropellantMass() {
@@ -2648,54 +3035,285 @@
             const outerDiameter = parseFloat(document.getElementById('outer_diameter').value) || 100;
             const coreDiameter = parseFloat(document.getElementById('core_diameter').value) || 30;
             const grainLength = parseFloat(document.getElementById('grain_length').value) || 500;
-            const grainCount = parseFloat(document.getElementById('grain_count').value) || 3;
             const grainType = document.getElementById('grain_type').value;
+            // grain_count BİLEREK okunmuyor: 'Grain Length' çözücüde TOPLAM
+            // yığın boyudur, segment sayısı onu böler (T03/T25, aşağıya bak).
             
             // Convert to meters
             const Do = outerDiameter / 1000;
             const Di = coreDiameter / 1000;
             const L = grainLength / 1000;
             
-            let grainVolume = 0;
-            
+            // Hacim = (disk alanı - PORT alanı) x boy. Port yakıtı ÇIKARIR;
+            // eski kodda star uçları ve finocyl kanatçıkları EKLENİYORDU
+            // (slotted'da ise gerekçesiz 1,2 çarpanı vardı). Ölçülen sapmalar
+            // (form/çözücü): star 3,36x, finocyl 3,39x, slotted 3,93x,
+            // wagon_wheel 3,24x, end_burner 2,73x — 3,000'lik ortak çarpan
+            // segment hatasıydı, kalanı bu işaret/biçim hatasıydı.
+            // Tarayıcı yalnız KAPALI FORMU olan kesitleri hesaplar; finocyl ve
+            // slotted çözücüde poligon ofseti (shapely) ister ve çözücü de
+            // paket yoksa sayı UYDURMAYIP hata verir (_require_shapely).
+            // Burada da uydurulmaz: alan boş kalır, hesaptan sonra çözücünün
+            // değeri yazılır (applyMassFeedback).
+            const Ro = Do / 2;
+            const Ri = Di / 2;
+            const diskArea = Math.PI * Ro * Ro;
+            let grainVolume = null;
+
             switch(grainType) {
                 case 'bates':
-                    grainVolume = Math.PI * (Math.pow(Do/2, 2) - Math.pow(Di/2, 2)) * L;
+                    grainVolume = Math.PI * (Ro * Ro - Ri * Ri) * L;
                     break;
-                    
-                case 'star':
-                    const starPoints = parseFloat(document.getElementById('star_points').value) || 6;
-                    const starRadius = parseFloat(document.getElementById('star_radius').value) || 15;
-                    const Rs = (starRadius / 1000) / 2;
-                    
-                    const starArea = Math.PI * (Math.pow(Do/2, 2) - Math.pow(Di/2, 2)) + 
-                                    starPoints * 0.5 * Rs * Rs * Math.sin(2 * Math.PI / starPoints);
-                    grainVolume = starArea * L;
+
+                case 'end_burner':
+                    // Çekirdeksiz tam silindir (sigara yanması) —
+                    // solid_rocket_engine.py:2866 ile aynı.
+                    grainVolume = diskArea * L;
                     break;
-                    
-                case 'finocyl':
-                    const finCount = parseFloat(document.getElementById('fin_count').value) || 4;
-                    const finWidth = (parseFloat(document.getElementById('fin_width').value) || 8) / 1000;
-                    const finLength = (parseFloat(document.getElementById('fin_length').value) || 20) / 1000;
-                    
-                    const baseVolume = Math.PI * (Math.pow(Do/2, 2) - Math.pow(Di/2, 2)) * L;
-                    const finVolume = finCount * finWidth * finLength * L;
-                    grainVolume = baseVolume + finVolume;
+
+                case 'star': {
+                    // Port kesiti 2N köşeli zikzak: vadiler Ri, uçlar Ri+derinlik
+                    // (_star_port_polygon). Böyle bir poligonun alanı tam olarak
+                    // N·Ri·(Ri+d)·sin(pi/N)'dir. Derinlik çözücüdeki fiziksel
+                    // sınırla kırpılır (_star_params: 0,8·web).
+                    const starPoints = Math.round(parseFloat(document.getElementById('star_points').value) || 6);
+                    const depthMm = parseFloat(document.getElementById('star_radius').value) || 15;
+                    const maxDepth = 0.8 * Math.max((Do - Di) / 2, 0.002);
+                    const depth = Math.min(depthMm / 1000, maxDepth);
+                    const portArea = starPoints * Ri * (Ri + depth)
+                                     * Math.sin(Math.PI / starPoints);
+                    grainVolume = Math.max(diskArea - portArea, 0) * L;
                     break;
-                    
-                case 'slotted':
-                    grainVolume = Math.PI * (Math.pow(Do/2, 2) - Math.pow(Di/2, 2)) * L * 1.2;
+                }
+
+                case 'wagon_wheel': {
+                    // 7 delik (merkez + 6 çevre), delik yarıçapı D_core/4.
+                    // Çakışmasız kabulü çözücünün kendi kapalı-form yolundakiyle
+                    // aynıdır (solid_rocket_engine.py:2891).
+                    const rCore = Di / 2 / 2;
+                    grainVolume = Math.max(diskArea - 7 * Math.PI * rCore * rCore, 0) * L;
                     break;
-                    
+                }
+
                 default:
-                    grainVolume = Math.PI * (Math.pow(Do/2, 2) - Math.pow(Di/2, 2)) * L;
+                    // finocyl / slotted: kapalı form yok -> önizleme yapılmaz
+                    grainVolume = null;
             }
             
-            const totalVolume = grainVolume * grainCount;
-            const propellantMass = totalVolume * density;
-            
-            document.getElementById('propellant_mass').value = propellantMass.toFixed(3);
+            // FAZ 6 (T03, 3 Ağustos 2026): burada `grainVolume * grainCount`
+            // vardı. Çözücü 'grain_length' alanını TOPLAM yığın boyu sayar ve
+            // onu grain_count segmente böler (solid_rocket_engine.py:7052,
+            // `segment_length = self.L_grain / n_segments`); hacim zaten tüm
+            // yığındır, segment sayısıyla çarpmak yakıtı N kat şişirir.
+            // Ölçüm (varsayılan tasarım, N=3): form 19,833 kg — çözücü,
+            // motor tablosu, Excel, .eng ve CAD sekmesi 6,611 kg (oran tam
+            // 3,000). Düzeltmeden sonra form da 6,611 kg.
+            // Doğrulama: pi/4·(0,100²−0,030²)·0,5 m·1850 kg/m³ = 6,611 kg.
+            const massField = document.getElementById('propellant_mass');
+            if (grainVolume === null || !isFinite(grainVolume) || grainVolume <= 0) {
+                massField.value = '';      // hesaplanamıyor -> sayı uydurulmaz
+            } else {
+                massField.value = (grainVolume * density).toFixed(3);
+            }
             updateTotalMasses();
+        }
+
+        // Hesap sonrası kütle geri-beslemesi (FAZ 6, T03).
+        // #propellant_mass bir ÇIKTI alanıdır (readonly): tek doğruluk kaynağı
+        // çözücünün grain hacmidir. Yukarıdaki kapalı-form önizleme yalnız
+        // hesap ÖNCESİ içindir; finocyl/slotted'da hiç önizleme yapılmaz.
+        function applyMassFeedback(results) {
+            const el = document.getElementById('propellant_mass');
+            const v = results && results.propellant_mass;
+            if (!el || typeof v !== 'number' || !isFinite(v) || v <= 0) return;
+            el.value = v.toFixed(3);
+            updateTotalMasses();
+        }
+
+        // ---- Atıl kütle dökümü (FAZ 6, T03 kalan yarı — 3 Ağustos 2026) ----
+        //
+        // Motorun kütle bileşenleri çözücünün ÇIKTISIDIR: motor kendi alan
+        // sözleşmesinde bunları `structural_output` diye ilan ediyor
+        // (solid_rocket_engine.py:955 — case/nozzle/closure/insulation/
+        // avionics). Yani forma yazılan sayı hesaba HİÇ girmiyordu; yine de
+        // ekranda "Total Dry Mass" olarak duruyor ve çözücünün sayısıyla
+        // uzlaşmıyordu. Ölçüldü (varsayılan tasarım, 8082 koşusu): form
+        // 4,300 kg, çözücü 20,283 kg — 4,7 kat, hiçbir yerde açıklanmıyor.
+        //
+        // Çözücünün dökümü ile formun alanları arasındaki eşleme:
+        //   case_mass       <- case_kg
+        //   nozzle_mass     <- nozzle_kg
+        //   insulation_mass <- insulation_kg
+        //   closure_mass    <- closure_kg + igniter_misc_kg
+        // Son satırdaki toplama KEYFİ değil: kapak alanının kendi ipucu
+        // "Includes igniter and nozzle mounting provisions" diyor, yani
+        // ateşleyici/montaj payının formdaki karşılığı tam olarak o alan.
+        // Bu eşlemeyle bileşenlerin toplamı çözücünün dry_mass_kg'sine
+        // BİREBİR eşit kalır (ölçüldü: 12,550969 + 2,447439 + 0,703601 +
+        // (3,765291 + 0,815813) = 20,283113 = dry_mass_kg).
+        //
+        // AVİYONİK bilerek DIŞARIDA: çözücü gerekçesini kendi yazıyor —
+        // "Avionics are NOT part of the motor and are not included here".
+        // Form alanı yerinde kalır (araç kalemi olarak anlamlı) ama
+        // çözücüden doldurulmaz ve uzlaştırma tablosunda ayrı gösterilir.
+        var INERT_FIELD_MAP = [
+            { id: 'case_mass',       key: 'solid.ui.case_mass',       fallback: 'Case Mass',
+              parts: ['case_kg'] },
+            { id: 'nozzle_mass',     key: 'solid.ui.nozzle_mass',     fallback: 'Nozzle Mass',
+              parts: ['nozzle_kg'] },
+            { id: 'insulation_mass', key: 'solid.ui.insulation_mass', fallback: 'Insulation Mass',
+              parts: ['insulation_kg'] },
+            { id: 'closure_mass',    key: 'solid.ui.closure_mass',    fallback: 'Closure Mass',
+              parts: ['closure_kg', 'igniter_misc_kg'] }
+        ];
+
+        // Dökümdeki bileşen(ler)in toplamı; parçalardan biri sayı değilse
+        // null döner (yarım toplam yazmak sayı uydurmaktır).
+        function inertPartSum(breakdown, parts) {
+            var total = 0;
+            for (var i = 0; i < parts.length; i++) {
+                var v = (breakdown || {})[parts[i]];
+                if (typeof v !== 'number' || !isFinite(v)) return null;
+                total += v;
+            }
+            return total;
+        }
+
+        // Çözücünün bileşen kütlelerini forma yazar. Kullanıcının ELLE
+        // değiştirdiği alan EZİLMEZ (dataset.userOverride) — o alan
+        // uzlaştırma tablosunda fark olarak görünür.
+        function applyInertBreakdown(results) {
+            var masses = ((results || {}).design_summary || {}).masses || {};
+            var breakdown = masses.inert_breakdown;
+            if (!breakdown) { renderInertReconcile(results); return; }
+            INERT_FIELD_MAP.forEach(function (f) {
+                var el = document.getElementById(f.id);
+                if (!el || el.dataset.userOverride === 'true') return;
+                var v = inertPartSum(breakdown, f.parts);
+                if (v === null || v <= 0) return;   // eksik veride alan bozulmaz
+                el.value = v.toFixed(3);
+            });
+            updateTotalMasses();
+            renderInertReconcile(results);
+        }
+
+        // Çözücü ile formu BİLEŞEN BİLEŞEN karşılaştıran tablo. Amaç,
+        // 'Total Dry Mass' ile çözücünün kuru kütlesi arasındaki farkın
+        // nereden geldiğini tek bakışta göstermek. Hiçbir hücre uydurulmaz:
+        // çözücü değeri yoksa '—', fark hesaplanamıyorsa '—' yazılır.
+        function renderInertReconcile(results) {
+            var box = document.getElementById('inertReconcile');
+            if (!box) return;
+            var masses = ((results || {}).design_summary || {}).masses || {};
+            var breakdown = masses.inert_breakdown;
+            if (!breakdown) { box.style.display = 'none'; box.innerHTML = ''; return; }
+
+            var formVal = function (id) {
+                var el = document.getElementById(id);
+                var v = el ? parseFloat(el.value) : NaN;
+                return isFinite(v) ? v : null;
+            };
+            var cell = function (v) { return (v === null) ? '—' : v.toFixed(3); };
+            var delta = function (a, b) {
+                if (a === null || b === null) return '—';
+                var d = b - a;
+                // Gösterilen basamağa yuvarlandığında sıfır olan fark
+                // İŞARETSİZ yazılır: alanlar 3 haneye yuvarlandığı için
+                // -1e-7 gibi artıklar '-0.000' diye görünüyordu ve sistematik
+                // bir sapma varmış izlenimi veriyordu (ölçüldü, 3 Ağustos).
+                if (Math.abs(d) < 0.0005) return (0).toFixed(3);
+                return (d > 0 ? '+' : '') + d.toFixed(3);
+            };
+            var cellCss = 'padding:5px 8px; border-bottom:1px solid var(--hd-line, rgba(0,229,255,0.14));';
+            var numCss = cellCss + ' text-align:right; font-variant-numeric:tabular-nums;';
+
+            var rows = [];
+            var solverSum = 0;
+            var formSum = 0;
+            var sumKnown = true;
+            INERT_FIELD_MAP.forEach(function (f) {
+                var s = inertPartSum(breakdown, f.parts);
+                var m = formVal(f.id);
+                if (s === null || m === null) { sumKnown = false; }
+                else { solverSum += s; formSum += m; }
+                rows.push('<tr><td style="' + cellCss + '">' + T(f.key, f.fallback) + '</td>'
+                    + '<td style="' + numCss + '">' + cell(s) + '</td>'
+                    + '<td style="' + numCss + '">' + cell(m) + '</td>'
+                    + '<td style="' + numCss + '">' + delta(s, m) + '</td></tr>');
+            });
+
+            // Motor kuru kütlesi: çözücü tarafında dry_mass_kg (tek doğruluk
+            // kaynağı), form tarafında yukarıdaki dört alanın toplamı.
+            var solverDry = (typeof masses.dry_mass_kg === 'number'
+                             && isFinite(masses.dry_mass_kg)) ? masses.dry_mass_kg
+                            : (sumKnown ? solverSum : null);
+            rows.push('<tr><td style="' + cellCss + '"><strong>'
+                + T('solid.msg.motor_dry_mass', 'Motor dry mass') + '</strong></td>'
+                + '<td style="' + numCss + '"><strong>' + cell(solverDry) + '</strong></td>'
+                + '<td style="' + numCss + '"><strong>'
+                + cell(sumKnown ? formSum : null) + '</strong></td>'
+                + '<td style="' + numCss + '"><strong>'
+                + delta(solverDry, sumKnown ? formSum : null) + '</strong></td></tr>');
+
+            // Aviyonik: çözücünün dökümünde YOK, bu bir araç kalemi. Sütunu
+            // '—' bırakmak bilinçli — orada bir sayı olsaydı motorun parçası
+            // olduğu iddia edilmiş olurdu.
+            var avionics = formVal('avionics_mass');
+            rows.push('<tr><td style="' + cellCss + '">'
+                + T('solid.ui.avionics_mass', 'Avionics Mass') + ' — '
+                + T('solid.msg.vehicle_item_not_motor', 'vehicle item, not part of the motor')
+                + '</td><td style="' + numCss + '">—</td>'
+                + '<td style="' + numCss + '">' + cell(avionics) + '</td>'
+                + '<td style="' + numCss + '">—</td></tr>');
+
+            var fieldDry = formVal('dry_mass');
+            rows.push('<tr><td style="' + cellCss + '">'
+                + T('solid.ui.total_dry_mass', 'Total Dry Mass') + '</td>'
+                + '<td style="' + numCss + '">—</td>'
+                + '<td style="' + numCss + '">' + cell(fieldDry) + '</td>'
+                + '<td style="' + numCss + '">—</td></tr>');
+
+            // Çözücünün kendi gerekçesi (basis) title'a konur — uygulamanın
+            // geri kalanıyla aynı kalıp (bkz. fmtField/missingReason).
+            var basis = (typeof breakdown.basis === 'string') ? breakdown.basis : '';
+            box.innerHTML =
+                '<h3 style="font-size:14px; margin:0 0 6px;" title="' + basis + '">'
+                + T('solid.msg.inert_reconcile_title',
+                    'Inert mass: solver vs. the fields above') + '</h3>'
+                + '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
+                + '<thead><tr>'
+                + '<th style="' + cellCss + ' text-align:left;">'
+                + T('solid.ui.parameter', 'Parameter') + '</th>'
+                + '<th style="' + numCss + '">'
+                + T('solid.msg.solver_kg', 'Solver (kg)') + '</th>'
+                + '<th style="' + numCss + '">'
+                + T('solid.msg.form_kg', 'Form (kg)') + '</th>'
+                + '<th style="' + numCss + '">'
+                + T('solid.msg.difference_kg', 'Difference (kg)') + '</th>'
+                + '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+            box.style.display = 'block';
+        }
+
+        // Web kalınlığı ÇIKTIDIR (FAZ 6, T24): çözücü onu geometriden türetir
+        // (solid_rocket_engine.py:6959 `(D_chamber - D_core)/2`) ve kullanıcının
+        // yazdığı sayıyı yalnız tutarsızlık uyarısı için okur. Ölçüm: alan
+        // 25 -> 5 mm yapıldığında yanma süresi (1,024 s), ortalama itki
+        // (12602 N) ve yakıt kütlesi (6,611 kg) BİREBİR aynı kalıyordu; tablo
+        // her iki durumda da 35,0 mm gösteriyordu. Alan artık düzenlenemez ve
+        // türetilen değeri gösterir; hesap sonrası çözücünün değeriyle tazelenir.
+        function updateWebThickness(results) {
+            const el = document.getElementById('web_thickness');
+            if (!el) return;
+            const gd = (results && results.grain_design) || {};
+            let web = gd.web_thickness_mm;
+            if (typeof web !== 'number' || !isFinite(web)) {
+                const outer = parseFloat(document.getElementById('outer_diameter').value);
+                const core = parseFloat(document.getElementById('core_diameter').value);
+                if (!isFinite(outer) || !isFinite(core)) return;
+                web = (outer - core) / 2;
+            }
+            if (!isFinite(web) || web <= 0) return;
+            el.value = web.toFixed(1);
         }
 
         function updateTotalMasses() {
@@ -3042,20 +3660,52 @@
             const gd = r.grain_design || {};
             const nz = r.nozzle_angles || {};
 
+            // FAZ 6 (T22, 3 Ağustos 2026): 'Case Inner Diameter' satırı
+            // r.chamber_diameter'ı basıyordu; o değer çözücüde GRAIN DIŞ
+            // ÇAPIDIR (solid_rocket_engine.py:1453 — 'outer_diameter' onu ezer)
+            // ve kasa iç çapı = grain + 2·yalıtım'dır (_case_inner_diameter,
+            // satır 1553). Ölçüm: varsayılan koşuda tablo 100,0 mm derken
+            // kesit Ø_c = 106,0 mm, CAD sekmesi 106 mm, cıvata analizi 106,0 mm,
+            // rıhtım girdisi 0,106 m gösteriyordu; yalıtım 3 -> 20 yapılınca
+            // kesit 140,0'a çıkarken tablo 100,0'da kalıyordu. Doğruluk kaynağı
+            // çözücünün kasa tasarımıdır; yoksa alan '—' olur (grain dış çapı
+            // zaten ayrı satırda duruyor, uydurma değer konmaz).
+            const caseInnerMm = ((r.cad_design || {}).case_design || {}).inner_diameter;
+
             // Motor uzunluğu: kasa uzunluğu (motor_length_mm), yoksa toplam uzunluk
             const motorLen = (typeof ds.motor_length_mm === 'number' && isFinite(ds.motor_length_mm))
                 ? ds.motor_length_mm : ds.total_length_mm;
+
+            // FAZ 6 (T24 kalan yarı, 3 Ağustos 2026): tabloda TEK 'Web
+            // Thickness' satırı vardı ve o satır GEOMETRİK web'i yazıyordu.
+            // Ölçüldü (8082 koşusu, dış yüzey yasağı kaldırılmış BATES):
+            // çözücü aynı yanıtta web_thickness_mm = 35,0 mm ve
+            // web_burnout_mm = 17,5 mm yayımlıyor, web_basis = 'two_sided'
+            // (sayfanın varsayılanında inhibit_outer seçili olduğundan basis
+            // 'single_sided' ve iki sayı da 35,0 mm — o da doğru davranış).
+            // Yanma süresini belirleyen
+            // FİİLEN TÜKENEN kalınlıktır; tablo 35,0 diyerek okuyucuyu 2 kat
+            // yanıltıyordu. Ana satır artık tükenen web'i, hemen altındaki
+            // satır geometrik web'i gösterir. Sayı uydurulmaz: çözücü
+            // web_burnout_mm vermezse fmtNum '—' basar.
+            const twoSided = gd.web_basis === 'two_sided';
+            const webBurnLabel = T('solid.msg.web_burnt', 'Web Burnt')
+                + (twoSided
+                    ? ' ' + T('solid.msg.web_two_sided', '(both faces)')
+                    : '');
 
             const rows = [
                 [T('solid.msg.throat_diameter', 'Throat Diameter'),         fmtNum(r.throat_diameter, 2),          'mm'],
                 [T('solid.msg.exit_diameter', 'Exit Diameter'),         fmtNum(r.exit_diameter, 2),            'mm'],
                 [T('solid.msg.expansion_ratio_2', 'Expansion Ratio'),    fmtNum(r.expansion_ratio, 2),          ''],
-                [T('solid.msg.case_inner_diameter', 'Case Inner Diameter'),       fmtNum(r.chamber_diameter, 1),         'mm'],
+                [T('solid.msg.case_inner_diameter', 'Case Inner Diameter'),       fmtNum(caseInnerMm, 1),                'mm'],
                 [T('solid.msg.motor_length', 'Motor Length'),     fmtNum(motorLen, 1),                   'mm'],
                 [T('solid.msg.grain_outer_diameter', 'Grain Outer Diameter'),     fmtNum(gd.outer_diameter_mm, 1),       'mm'],
                 [T('solid.ui.core_diameter', 'Core Diameter'),      fmtNum(gd.inner_diameter_mm, 1),       'mm'],
                 [T('solid.ui.grain_length', 'Grain Length'),         fmtNum(gd.grain_length_mm, 1),         'mm'],
-                [T('solid.ui.web_thickness', 'Web Thickness'),      fmtNum(gd.web_thickness_mm, 1),        'mm'],
+                [webBurnLabel,                                      fmtNum(gd.web_burnout_mm, 1),          'mm'],
+                [T('solid.msg.web_geometric', 'Web Thickness (geometric)'),
+                                                                    fmtNum(gd.web_thickness_mm, 1),        'mm'],
                 [T('solid.msg.kn_initial', 'Kn (initial)'),     fmtNum(gd.Kn_initial, 0),              ''],
                 [T('solid.msg.kn_final', 'Kn (final)'),           fmtNum(gd.Kn_final, 0),                ''],
                 ['C*',                 fmtNum(r.c_star, 0),                   'm/s'],
@@ -3094,6 +3744,54 @@
             panel.style.display = 'none';   // veri yok → yalan panel gösterme
         }
 
+        // ---- Çift eksenli alt grafiklerde seriyi eksenine bağla (FAZ 6, T52) ----
+        // Performans panosunun 3. ve 4. alt grafiği iki seriyi İKİ y ekseninde
+        // çiziyor (yaxis3/yaxis4 ve yaxis5/yaxis6). İki seri de birbirinin tam
+        // katı olduğu için (F = Cf·At·Pc ve Kn = A_yanma/A_boğaz) eğriler
+        // ÜST ÜSTE düşüyor; ekranda tek çizgi görünüyordu ve panonun tek
+        // efsanesi hangi rengin hangi eksene ait olduğunu söylemiyordu.
+        // Ölçüm (3 Ağustos 2026): 6 iz, 4 efsane girdisi ('Thrust',
+        // 'Chamber Pressure', 'Burn Area', 'Kn'), hiçbirinde eksen bilgisi yok,
+        // hiçbirinde line.dash yok.
+        // Burada iki şey yapılır, ikisi de yalnız SUNUM:
+        //   1) sağ eksene bağlı seri noktalı çizilir -> iki eğri ayrışır,
+        //   2) efsane adına eksen yönü eklenir (← sol eksen, → sağ eksen).
+        // Yön işaretleri figürün KENDİ eksen tanımından okunur (side/overlaying),
+        // dile bağlı değildir; hiçbir sayı değiştirilmez.
+        function markDualAxisSeries(fig) {
+            if (!fig || !Array.isArray(fig.data) || !fig.layout) return 0;
+            const axKey = function (tr) {
+                const a = tr.yaxis || 'y';
+                return 'yaxis' + a.slice(1);          // 'y4' -> 'yaxis4'
+            };
+            const isRight = function (key) {
+                const ax = fig.layout[key];
+                return !!(ax && (ax.side === 'right' || ax.overlaying));
+            };
+            // Yalnız gerçekten İKİ eksenli hücrelerdeki izler işaretlenir:
+            // sağ eksen hangi sol ekseni örtüyorsa o çift birbirine bağlıdır.
+            const overlaid = {};
+            Object.keys(fig.layout).forEach(function (k) {
+                const ax = fig.layout[k];
+                if (ax && ax.overlaying) overlaid[ax.overlaying] = true;   // 'y3'
+            });
+            let marked = 0;
+            fig.data.forEach(function (tr) {
+                if (!tr || tr.showlegend === false || !tr.name) return;
+                const key = axKey(tr);
+                const self = tr.yaxis || 'y';
+                if (isRight(key)) {
+                    tr.line = Object.assign({}, tr.line, { dash: 'dot' });
+                    tr.name = tr.name + ' →';
+                    marked++;
+                } else if (overlaid[self]) {
+                    tr.name = tr.name + ' ←';
+                    marked++;
+                }
+            });
+            return marked;
+        }
+
         // Performans panosu (hibrit paritesi): plots.performance figur JSON'u.
         function renderSolidPerformance(results) {
             const panel = document.getElementById('solid_performance_panel');
@@ -3104,6 +3802,7 @@
                     const fig = (typeof raw === 'string') ? JSON.parse(raw) : raw;
                     if (fig && Array.isArray(fig.data) && fig.data.length) {
                         panel.style.display = 'block';
+                        markDualAxisSeries(fig);          // FAZ 6, T52
                         Plotly.newPlot('solid_performance_plots', fig.data,
                             hrmaFigureLayout(fig.layout), HRMA_PLOT_CONFIG);
                         return;
@@ -3328,6 +4027,15 @@
             // Nozul input geri-beslemesi: backend'in hesapladığı throat/exit/oran
             // değerlerini forma yaz (bu üç alan çıktı olarak işaretli).
             applyNozzleFeedback(results);
+            // Kütle + web kalınlığı geri-beslemesi (FAZ 6, T03/T24): bu alanlar
+            // da çıktıdır, tek doğruluk kaynağı çözücüdür.
+            applyMassFeedback(results);
+            // Atıl kütle dökümü (FAZ 6, T03 kalan yarı): bileşen alanları
+            // çözücünün sayılarıyla dolar, uzlaştırma tablosu tazelenir.
+            applyInertBreakdown(results);
+            updateWebThickness(results);
+            // c* bandı + teslim edilen değer (FAZ 6, T51)
+            updateCharVelocityBand(results);
 
             // Thrust curve
             const thrustTrace = {
@@ -3404,17 +4112,26 @@
                 }
                 
                 Plotly.newPlot('altitude_plot', [altitudeTrace], altitudeLayout, HRMA_PLOT_CONFIG);
+                hrmaFitPlot('altitude_plot');   // FAZ 6, T20 — 2 px'lik çizim alanı
             }
+
+            // '3D CAD Design' panelinin kabını doldur (FAZ 6, T21)
+            renderCadPanel(results);
 
             // Uyarı paneli + yörünge girdilerinin ön-doldurulması
             displaySolidWarnings(results);
             prefillTrajectoryInputs(results);
+            prefillSixDofInputs(results);   // FAZ 6, T23
 
             // Comprehensive analysis tabs like hybrid/liquid systems
             displayComprehensiveAnalysis(results);
         }
         
         function displayComprehensiveAnalysis(results) {
+            // FAZ 6 (T22): 'Chamber Diameter' satırı da kasa iç çapını gösterir.
+            // Önce results.chamber_diameter basılıyordu; o değer grain dış
+            // çapıdır (ölçüm: sayfada aynı anda 100,0 mm 'Chamber Diameter'
+            // ile 106,0 mm kesit/CAD/cıvata çapı dolaşıyordu).
             // Create comprehensive analysis section
             const reportDiv = document.getElementById('designReport');
             
@@ -3442,7 +4159,7 @@
                                     <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
                                         <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant_type', 'Propellant Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.propellant_name}</td></tr>
                                         <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.grain_type', 'Grain Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.grain_type.toUpperCase()}</td></tr>
-                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.chamber_diameter', 'Chamber Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.chamber_diameter.toFixed(1)} mm</td></tr>
+                                        <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.chamber_diameter', 'Chamber Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtNum(((results.cad_design || {}).case_design || {}).inner_diameter, 1)} mm</td></tr>
                                         <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.grain_length', 'Grain Length:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.grain_length.toFixed(1)} mm</td></tr>
                                         <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.core_diameter', 'Core Diameter:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.core_diameter.toFixed(1)} mm</td></tr>
                                         <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.propellant_mass', 'Propellant Mass:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${results.propellant_mass.toFixed(3)} kg</td></tr>
@@ -3605,8 +4322,19 @@
                     }
                 });
             });
+            // c* bandı: açılışta ve her düzenlemede tazelenir (FAZ 6, T51).
+            // Yakıt kataloğu da bu alanı yazdığı için 'change' dinlenir.
+            const cs = document.getElementById('char_velocity');
+            if (cs) {
+                ['input', 'change'].forEach(function (ev) {
+                    cs.addEventListener(ev, function () {
+                        updateCharVelocityBand(window.currentResults);
+                    });
+                });
+            }
+            updateCharVelocityBand(window.currentResults);
         });
-        
+
         // Ask AI Analysis
         function askAI() {
             if (!currentResults) {
@@ -4149,6 +4877,33 @@ Please provide:
             };
         }
 
+        // '3D CAD Design' panelinin grafik kabı (FAZ 6, T21).
+        // Ölçüm (3 Ağustos 2026): başarılı hesaptan VE '3D Visualization'
+        // düğmesine basıldıktan 60 s sonra bile #cad_visualization boştu —
+        // innerHTML uzunluğu 0, canvas 0, görünür yükseklik 140 px ve kapta
+        // theme.css'in 'NO DATA — RUN ANALYSIS TO GENERATE THIS PLOT' yer
+        // tutucusu duruyordu; konsol hatası ve 4xx/5xx yoktu. Model yalnız
+        // aşağıdaki 'Motor Specifications -> CAD Design' sekmesine (#cad_3d_view)
+        // çiziliyordu, oysa panelin kendi açıklaması 'Interactive 3D CAD model /
+        // Rotate (drag), zoom (scroll)' diyor. Panel artık aynı çözücü
+        // ölçüleriyle (cad_design.*) doldurulur. Ölçü eksikse
+        // create3DMotorVisualization boş veri + eksik alan listesi döndürür:
+        // uydurma geometri çizilmez.
+        function renderCadPanel(results) {
+            const div = document.getElementById('cad_visualization');
+            if (!div || !window.Plotly || !results) return;
+            try {
+                const viz = create3DMotorVisualization(results);
+                Plotly.newPlot('cad_visualization', viz.data,
+                               hrmaFigureLayout(viz.layout), HRMA_PLOT_CONFIG);
+                hrmaFitPlot('cad_visualization');
+            } catch (e) {
+                // Tanı iletisi (kullanıcı arayüzü metni DEĞİL) — sözlüğe
+                // yeni anahtar açmadan konsola yazılır, panel boş kalır.
+                console.error('CAD panel could not be drawn:', e);
+            }
+        }
+
         function show3DVisualization() {
             if (!currentResults) {
                 showWarning(T('solid.msg.please_perform_calculations_first', 'Please perform calculations first!'));
@@ -4635,6 +5390,14 @@ Please provide:
                     element.addEventListener('input', calculatePropellantMass);
                 }
             });
+
+            // Türetilen web kalınlığı (FAZ 6, T24): grain çapları değişince tazelenir
+            ['outer_diameter', 'core_diameter'].forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('input', function () { updateWebThickness(); });
+                }
+            });
             
             // Set up total mass calculations
             const individualMasses = ['case_mass', 'nozzle_mass', 'insulation_mass', 'avionics_mass', 'closure_mass'];
@@ -4644,6 +5407,28 @@ Please provide:
                     element.addEventListener('input', updateTotalMasses);
                 }
             });
+
+            // FAZ 6 (T03 kalan yarı): kullanıcı bir bileşen kütlesini ELLE
+            // yazarsa applyInertBreakdown o alanı EZMEZ — yazdığı sayı
+            // uzlaştırma tablosunda 'fark' sütununda görünür. Aviyonik zaten
+            // çözücüden doldurulmuyor (motorun kalemi değil), o yüzden
+            // işaretlenmesine gerek yok.
+            ['case_mass', 'nozzle_mass', 'insulation_mass', 'closure_mass']
+                .forEach(function (id) {
+                    const el = document.getElementById(id);
+                    if (el) el.addEventListener('input', function () {
+                        el.dataset.userOverride = 'true';
+                        renderInertReconcile(window.currentResults);
+                    });
+                });
+            // Aviyonik alanı işaretlenmez (çözücüden hiç doldurulmuyor) ama
+            // 'Total Dry Mass' satırını değiştirdiği için tabloyu tazeler.
+            (function () {
+                const el = document.getElementById('avionics_mass');
+                if (el) el.addEventListener('input', function () {
+                    renderInertReconcile(window.currentResults);
+                });
+            })();
             
             // Yörünge girdileri: kullanıcı elle yazarsa ön-doldurma ezmez
             ['traj_initial_mass', 'traj_final_mass', 'traj_drag_coeff',
@@ -4657,6 +5442,7 @@ Please provide:
             // Initialize calculations
             updateGrainPreview();
             calculatePropellantMass();
+            updateWebThickness();       // FAZ 6, T24 — türetilen web
             updateExpansionRatio();
 
             // Katalog tabloları + veritabanı rozetleri
@@ -4787,6 +5573,18 @@ Please provide:
                     return null;
                 },
             });
+            // FAZ 6 (T23): kullanıcı bu alanları elle yazarsa hesap sonrası
+            // ön-doldurma onları ezmez (yörünge girdileriyle aynı sözleşme).
+            // Ön-doldurmanın kendi yazması bayrakla ayırt edilir.
+            ['sd_thrust', 'sd_burn', 'sd_dry_m', 'sd_prop_m'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('input', function () {
+                    if (!_sixDofAutoWrite) el.dataset.userOverride = 'true';
+                });
+            });
+            // Panel DOM'u bu noktada kuruldu: sonuç zaten varsa (dil değişimi,
+            // yeniden çizim) alanları hemen tazele.
+            if (window.currentResults) prefillSixDofInputs(window.currentResults);
         });
     </script>
     <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->

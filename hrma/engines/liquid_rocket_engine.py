@@ -5647,10 +5647,24 @@ class LiquidRocketEngine:
         anti_vortex_mass = (TANK_ANTIVORTEX_VANE_COUNT * av_height
                             * vane_radial_len * vane_thickness_m
                             * rho_internals)                  # kg
+        # T13 (2026-08-03): bu sözlük yıllarca AYNI kayıtta iki birim
+        # yayımladı — 'diameter'/'height' METRE, 'vane_radial_length_mm' ve
+        # 'vane_thickness' MİLİMETRE — ve hiçbir yerde birim BEYAN edilmedi.
+        # Her tüketici tahmin etmek zorunda kaldı, ikisi de yanlış tahmin
+        # etti: /liquid 3B görünümü çapı 2000'e bölüp düzeneği 258,91 mm
+        # yerine 0,26 mm çizdi (gözle görünmez), cad_export ise ZIP'e 0,2356
+        # yazdı. Çözüm birimi VERİYLE birlikte taşımak: 'units' alanı
+        # 'diameter'/'height' alanlarının birimini beyan eder, '*_mm' alanları
+        # ise tahmine hiç gerek bırakmaz. Eski metre alanları geriye uyumluluk
+        # için bırakıldı (cad_export.normalize_anti_vortex_mm onları çözücünün
+        # kendi geometrik özdeşliğinden zaten doğru çeviriyor).
         anti_vortex = {
             'type': 'Radial vanes',
             'diameter': av_diameter,                          # m
             'height': av_height,                              # m
+            'units': 'm',                # 'diameter'/'height' alanlarının birimi
+            'diameter_mm': av_diameter * 1000.0,              # mm
+            'height_mm': av_height * 1000.0,                  # mm
             'vane_count': TANK_ANTIVORTEX_VANE_COUNT,
             'vane_count_basis': (
                 'geometric proportioning choice: the vane count is a fixed '

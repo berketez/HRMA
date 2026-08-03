@@ -164,15 +164,16 @@ GAS_DP_PC_RECOMMENDED = 0.10    # önerilen alt sınır
 # Biblarz Böl. 9). Kesin optimum eleman geometrisine bağlıdır.
 GAS_GAS_J_GOOD = (1.0, 10.0)
 
+# T47: aynı gerekçeyle bu liste de İngilizce sabitlendi (bkz. REFERENCES).
 GAS_GAS_REFERENCES = [
-    'J.D. Anderson, Modern Compressible Flow 3. baskı, Böl. 3 '
-    '(izentropik orifis debisi, kritik basınç oranı)',
-    'NASA SP-8089 (1976) — ΔP/Pc kararlılık ilkesi (sıvı; gaz-gaz bandı '
-    'mühendislik kılavuzu olarak etiketli)',
-    'Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 8-9 '
-    '(koaksiyel enjektör, momentum-akı oranı)',
-    'S. Pal, R.J. Santoro ve ark. (Penn State) GO2/GH2 shear-coax yanma '
-    'çalışmaları — momentum-akı oranı ve karışım',
+    'J.D. Anderson, Modern Compressible Flow 3rd ed., Ch. 3 '
+    '(isentropic orifice flow, critical pressure ratio)',
+    'NASA SP-8089 (1976) — ΔP/Pc stability principle (liquid; the gas-gas '
+    'band is labelled as engineering guidance)',
+    'Sutton & Biblarz, Rocket Propulsion Elements 9th ed., Ch. 8-9 '
+    '(coaxial injector, momentum-flux ratio)',
+    'S. Pal, R.J. Santoro et al. (Penn State) GO2/GH2 shear-coax combustion '
+    'studies — momentum-flux ratio and mixing',
 ]
 
 # N₂O doyma ENTROPİSİ [J/(kg·K)]: T[K], s_l, s_v — CoolProp/Span-Wagner'dan
@@ -207,18 +208,24 @@ _N2O_ENTROPY_TABLE = np.array([
 
 _SAT = N2OSaturation(use_coolprop=False)  # tabloyla deterministik (test tekrarlanabilirliği)
 
+# T47 (2026-08-03): bu künyelerin niteleyicileri Türkçeydi ('9. baskı',
+# 'Böl.', '(manifold pratiği)' …) ve panel listeyi dilden bağımsız olarak
+# olduğu gibi basıyordu — İngilizce modda Türkçe metin görünüyordu (ölçüldü:
+# /liquid, dil seçicisine dokunulmadan). Kaynak künyeleri çeviri nesnesi
+# DEĞİLDİR: yazar adı, dergi adı ve baskı bilgisi künyenin parçasıdır ve
+# uluslararası biçimiyle yazılır. Bu yüzden künyeler İngilizce sabitlendi.
 REFERENCES = [
     'NASA SP-8089 (1976) — Liquid Rocket Engine Injectors',
-    'Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 8-9',
-    'Huzel & Huang, Böl. 4 (manifold pratiği)',
-    'Lefebvre & McDonell, Atomization and Sprays 2. baskı',
-    'Dyer ve ark., AIAA 2007-5702 (NHNE)',
-    'Nurick, ASME J. Fluids Eng. 1976 (kavitasyon/flip)',
-    'Rupe, JPL 20-195 (1953) — karışım kriteri',
+    'Sutton & Biblarz, Rocket Propulsion Elements 9th ed., Ch. 8-9',
+    'Huzel & Huang, Ch. 4 (manifold practice)',
+    'Lefebvre & McDonell, Atomization and Sprays 2nd ed.',
+    'Dyer et al., AIAA 2007-5702 (NHNE)',
+    'Nurick, ASME J. Fluids Eng. 1976 (cavitation/flip)',
+    'Rupe, JPL 20-195 (1953) — mixing criterion',
     'Elkotb, PECS 1982 (SMD)',
-    'Giffen & Muraszew (1953) — swirl teorisi',
+    'Giffen & Muraszew (1953) — swirl theory',
     'Casiano/Hulka/Yang, JPP 26(5) 2010 + Cheng 2017 + AIAA 2000-3871 (pintle)',
-    'NASA NTRS 20190001326 (N₂O enjektör izolasyonu)',
+    'NASA NTRS 20190001326 (N₂O injector isolation)',
 ]
 
 
@@ -1264,9 +1271,9 @@ def _design_gas_gas_coaxial(spec, warnings, assumptions):
         'velocity_ratio_VR': float(vr),
     }
 
-    desc = (f"{n} adet gaz-gaz shear-coax eleman "
-            f"(iç {inner_stream} postu d={d_inner*1e3:.2f} mm, anülüs boşluğu "
-            f"{gap*1e3:.2f} mm, eleman D={d_elem_outer*1e3:.2f} mm); "
+    desc = (f"{n} gas-gas shear-coax elements "
+            f"(inner {inner_stream} post d={d_inner*1e3:.2f} mm, annulus gap "
+            f"{gap*1e3:.2f} mm, element D={d_elem_outer*1e3:.2f} mm); "
             f"J={j_mom:.2f}, VR={vr:.2f}")
 
     return {
@@ -1276,6 +1283,11 @@ def _design_gas_gas_coaxial(spec, warnings, assumptions):
         'ox_circuit': ox_circuit,
         'fuel_circuit': fuel_circuit,
         'pattern': {
+            # T47: içerik artık İngilizce (paneli dilden bağımsız basıyor).
+            # '_tr' ekli ad YANILTICI ama injector_panel.js:348 bu anahtarı
+            # okuduğu için kaldırılmadı; dilden bağımsız 'description' yanına
+            # eklendi, tüketici geçince eski anahtar düşürülebilir.
+            'description': desc,
             'description_tr': desc,
             'n_elements': int(n),
             'impingement': None,
@@ -1515,8 +1527,8 @@ def design_injector(spec):
             nu_f = mu_f / fuel['_rho']
             smd_fuel_um = smd_elkotb(nu_f, sigma_f, fuel['_rho'], rho_gas,
                                      fuel['delta_p_bar'] * PA_PER_BAR) * 1e6
-        desc = (f"{ox['n_orifices']} delikli showerhead "
-                f"(d={ox['orifice_d_mm']:.2f} mm, eksenel paralel jetler)")
+        desc = (f"{ox['n_orifices']}-orifice showerhead "
+                f"(d={ox['orifice_d_mm']:.2f} mm, axial parallel jets)")
 
     elif inj_type in ('impinging_doublet', 'impinging_triplet', 'like_impinging'):
         smd_ox = smd_impinging(d_ox_m, v_ox, rho_ox_l, sigma_ox)
@@ -1581,8 +1593,8 @@ def design_injector(spec):
                     rupe=round(float(rupe), 2), band_lo=float(MR_BAND[0]),
                     band_hi=float(MR_BAND[1])))
             n_elements = min(ox['n_orifices'], fuel['n_orifices'])
-            desc = (f"{n_elements} çift unlike doublet, 2θ={2*half:.0f}°, "
-                    f"serbest jet {FREE_JET_LD:.0f}·d_j")
+            desc = (f"{n_elements} unlike doublet pairs, 2θ={2*half:.0f}°, "
+                    f"free jet {FREE_JET_LD:.0f}·d_j")
         elif inj_type == 'impinging_triplet' and fuel is not None:
             d_f_m = fuel['orifice_d_mm'] * 1e-3
             v_f = fuel['velocity_m_s']
@@ -1599,7 +1611,7 @@ def design_injector(spec):
                             'momentum ratio = 1); the achieved value is '
                             'reported separately as tmr')}
             n_elements = max(1, min(ox['n_orifices'] // 2, fuel['n_orifices']))
-            desc = (f"{n_elements} adet O-F-O triplet (dış 2×oks., orta yakıt), "
+            desc = (f"{n_elements} O-F-O triplets (outer 2×ox., centre fuel), "
                     f"2θ={2*half:.0f}°")
             if not ok:
                 warnings.append(_w(
@@ -1607,8 +1619,8 @@ def design_injector(spec):
                     tmr=float(tmr)))
         else:  # like_impinging (kendi içinde çarpışan çiftler)
             n_elements = max(1, ox['n_orifices'] // 2)
-            desc = (f"{n_elements} adet like-doublet (aynı akışkan çiftleri), "
-                    f"2θ={2*half:.0f}° — blowapart riski yok")
+            desc = (f"{n_elements} like-doublets (same-fluid pairs), "
+                    f"2θ={2*half:.0f}° — no blowapart risk")
             assumptions.append(_w(
                 'warn.injector.like_impinging_no_mr', 'info'))
 
@@ -1677,8 +1689,8 @@ def design_injector(spec):
         correlation = 'impinging-We13'
         spray_half = theta
         n_elements = 1
-        desc = (f"Oksitleyici merkezli hibrit pintle: D_p={d_p_m*1e3:.1f} mm, "
-                f"{n_holes}×{d_hole*1e3:.2f} mm radyal delik, anülüs "
+        desc = (f"Oxidizer-centred hybrid pintle: D_p={d_p_m*1e3:.1f} mm, "
+                f"{n_holes}×{d_hole*1e3:.2f} mm radial holes, annulus "
                 f"{t_ann*1e3:.2f} mm, TMR={tmr:.2f} → θ={theta:.0f}°")
 
     elif inj_type == 'pintle':
@@ -1736,8 +1748,8 @@ def design_injector(spec):
         correlation = 'impinging-We13'
         spray_half = theta
         n_elements = 1
-        desc = (f"Yakıt merkezli pintle: D_p={d_p_m*1e3:.1f} mm, "
-                f"{n_holes}×{d_hole*1e3:.2f} mm radyal delik, TMR={tmr:.2f} "
+        desc = (f"Fuel-centred pintle: D_p={d_p_m*1e3:.1f} mm, "
+                f"{n_holes}×{d_hole*1e3:.2f} mm radial holes, TMR={tmr:.2f} "
                 f"→ θ={theta:.0f}°")
 
     else:  # swirl / coax_swirl
@@ -1780,7 +1792,7 @@ def design_injector(spec):
         correlation = 'Lefebvre-swirl'
         assumptions.append(_w(
             'warn.injector.swirl_chamber_radius_assumed', 'info'))
-        desc = (f"{'Koaksiyel ' if inj_type == 'coax_swirl' else ''}basınç-swirl: "
+        desc = (f"{'Coaxial ' if inj_type == 'coax_swirl' else ''}pressure-swirl: "
                 f"K={K:.3f}, 2θ={2*sw['theta_deg']:.0f}°, "
                 f"film {sw['film_t_ratio']*r_o*1e3:.2f} mm")
         if fuel is not None:
@@ -1833,6 +1845,8 @@ def design_injector(spec):
         'ox_circuit': ox,
         'fuel_circuit': fuel,
         'pattern': {
+            # T47: bkz. gaz-gaz dalındaki aynı not.
+            'description': desc,
             'description_tr': desc,
             'n_elements': int(n_elements),
             'impingement': impingement,

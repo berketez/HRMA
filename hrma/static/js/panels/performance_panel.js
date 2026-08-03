@@ -38,6 +38,10 @@
         ['heat_flux', 'panel.performance.figHeat', 'Wall Heat Flux Waterfall'],
     ];
 
+    // Motorun itici kimliği (fromResults'ta yakalanır, her istekte eklenir).
+    // Form alanı DEĞİL: kullanıcı elle giremez, dolayısıyla motorla çelişemez.
+    let sonIticiler = { fuel_type: null, oxidizer_type: null };
+
     // ------------------------------------------------------------------
     // Dock buildPayload aynası: POST gövdesi HER ZAMAN formdan okunur
     // (panel dock dosyasına dokunmadan aynı sözleşmeyi uygular)
@@ -55,6 +59,10 @@
             const v = parseFloat(el.value);
             if (Number.isFinite(v)) payload[key] = v;
         });
+        // İtici kimliği (T18): bilinmiyorsa GÖNDERİLMEZ — uydurma bir çift
+        // yollamaktansa uç kendi referans çiftine düşsün ve bunu beyan etsin.
+        if (sonIticiler.fuel_type) payload.fuel_type = sonIticiler.fuel_type;
+        if (sonIticiler.oxidizer_type) payload.oxidizer_type = sonIticiler.oxidizer_type;
         return payload;
     }
 
@@ -232,6 +240,20 @@
         const m = (r && r.motor) || r || {};
         const geo = (m.motor_geometry && typeof m.motor_geometry === 'object')
             ? m.motor_geometry : null;
+
+        // 2026-08-03 (Faz 6, T18 kök nedeni): itici KİMLİĞİ hiçbir zaman
+        // isteğe girmiyordu. Uç (app.py::advanced_performance_analysis)
+        // `fuel_type` / `oxidizer_type` alanlarını zaten okuyor, ama panel
+        // yalnız SAYISAL form alanlarını gönderiyordu — sonuçta RP-1/LOX
+        // sayfasında bile denge yüzeyi N2O/HTPB referans çiftiyle çözülüyor,
+        // üstüne o yüzeye ait olmayan bir tasarım noktası basılıyordu.
+        // Kimlik burada yakalanır (motor sonucu tek doğruluk kaynağıdır) ve
+        // readFormPayload her istekte ekler; arayüze yeni alan eklenmez,
+        // kullanıcının elle tutarlı tutması gerekmez.
+        sonIticiler = {
+            fuel_type: m.fuel_type || m.fuel || null,
+            oxidizer_type: m.oxidizer_type || m.oxidizer || null,
+        };
         const sug = {
             chamber_pressure: m.chamber_pressure,
             burn_time: m.burn_time,

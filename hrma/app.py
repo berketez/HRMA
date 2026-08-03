@@ -1351,6 +1351,30 @@ def calculate():
         # Calculate motor geometry and performance
         motor_results = engine.calculate()
 
+        # 2026-08-03 (Faz 6, T11 kök nedeni): kullanıcının girdiği tank basıncı
+        # motor sonucuna HİÇ yazılmıyordu. Ölçüldü: tank 30 / 50 / 90 bar ile
+        # /calculate çağrıldığında 90+ anahtarlı motor sözlüğünde 'tank' geçen
+        # tek bir anahtar yoktu. Değer çözücüde VARDI (aynı koşuda kavitasyon
+        # uyarısı K_c = -0,01 diyor, bu ancak P1 = 50 bar ile çıkar) ama
+        # yayımlanmıyordu. Sonuç: basınç dağılımı çubuğu 'Tank' etiketiyle
+        # Pc + ΔP geri düşüşünü gösteriyordu — kullanıcı 90 bar girse de
+        # ekranda 24 bar duruyordu.
+        # BURAYA konuyor, sonuç sözlüğünün kurulduğu yere DEĞİL: grafikler
+        # aşağıda (satır ~1520 create_performance_plots) üretiliyor ve
+        # motor_results'ı o an okuyor. Sonradan eklenen alan çubuğa yansımaz —
+        # ilk denemede tam bu hata yapıldı ve ölçümle yakalandı.
+        # Alan geldiği anda görselleştirme tarafında yapılacak bir şey yok:
+        # _perf_panels_hybrid zaten motor_data.get('tank_pressure') okuyor ve
+        # gerçek değer gelince çubuğu 'Tank' diye adlandırıyor; gelmezse
+        # dürüst 'Inj. inlet' etiketine düşüyor.
+        _tank_p = data.get('tank_pressure')
+        if _tank_p is not None:
+            try:
+                motor_results['tank_pressure'] = float(_tank_p)
+                motor_results['tank_pressure_source'] = 'user_input'
+            except (TypeError, ValueError):
+                pass  # geçersiz girdi: alan hiç konmaz, çubuk dürüst etikete düşer
+
         # Design injector
         injector = InjectorDesign(
             mdot_ox=motor_results['mdot_ox'],
@@ -4039,7 +4063,20 @@ def tile_proxy(layer_key, z, x, y):
     # Karolar içerik-adresli (layer/date/z/x/y) — değişmezler.
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     resp.headers['X-Tile-Cached'] = '1' if res.get('cached') else '0'
-    resp.headers['X-Tile-Attribution'] = res.get('attribution', '')
+    # 2026-08-03 (Faz 6, T54-ek): burada bir ``X-Tile-Attribution`` başlığı vardı
+    # ve atıf metnini olduğu gibi yazıyordu. Metin em-dash içeriyor
+    # ("NASA GIBS — Blue Marble ...") ; HTTP başlıkları latin-1 kodlanır ve
+    # U+2014 latin-1'de YOKTUR. Sonuç sessiz değil ama görünmez bir arıza:
+    # werkzeug durum satırını yazdıktan SONRA send_header'da
+    # ``UnicodeEncodeError`` atıyordu, yani günlüğe "200" düşüyor ama istemciye
+    # tek bayt gitmiyordu. Ölçüldü: ``curl --max-time 15 /api/tile/...`` ->
+    # exit 28, 0 bayt, 15 s asılı; karo diske YAZILIYOR (önbellek büyüyor) ama
+    # ekrana gelmiyor. Tarayıcıda daha kötüsü: Chrome host başına 6 bağlantı
+    # tutar, altı karo isteği asılınca sayfanın TÜM ağ trafiği duruyordu.
+    # Başlık zaten hiçbir yerde okunmuyordu; atıf ``/api/tile/cache/status``
+    # gövdesinde (UTF-8 JSON) yayımlanıyor ve arayüz #ls-tile-attr'ı oradan
+    # dolduruyor. Düz yazı HTTP başlığına KONMAZ — geri eklenirse
+    # tests/test_faz6_baslik_kodlama.py düşer.
     return resp
 
 
@@ -4097,7 +4134,22 @@ def flight_vehicle():
             from hrma.utils import projects
             # load_project -> (doc, warnings) çifti döndürür
             doc, load_warnings = projects.load_project(name)
-            motor_type, vehicle = fv.recompute_from_project(doc)
+            # Faz 6 / T30: ``recompute_from_project`` (motor_type, RESULTS)
+            # döndürür — normalize edilmiş araç DEĞİL. Buradaki eski kod ikinci
+            # değeri doğrudan ``vehicle`` sanıyordu; uca ham motor sonucu
+            # (ÖLÇÜLDÜ: 50 anahtar, thrust=None, motor_name=None, source=None)
+            # gidiyordu. launch_site.html ``num_(veh.thrust) || 6500`` yazdığı
+            # için kullanıcı kendi projesini seçtiğinde çözücüye ÖRNEK aracın
+            # 6500 N'u gidiyor, itki eğrisi ise projeden geliyordu: karışık
+            # kökenli araç. 'results' kolu zaten normalize ediyor; bu kol da
+            # aynı tek şemaya indirgemek zorunda (flight_vehicle.py modül
+            # başındaki şema; tests/test_flight_vehicle.py:362 aynı deseni
+            # kullanıyor).
+            motor_type, results = fv.recompute_from_project(doc)
+            vehicle = fv.normalize(
+                motor_type, results,
+                motor_name=(doc.get('name') if isinstance(doc, dict) else None) or name,
+                source='project')
             if load_warnings:
                 vehicle['load_warnings'] = list(load_warnings)
             # Proje airframe taşıyorsa geri ver — panel alanları doldurulsun.
@@ -5404,6 +5456,103 @@ def export_stl():
 
 
 
+# ---------------------------------------------------------------------------
+# Faz 6 / T14 — depolama durumu düzeltmesi (gaz fazı sızıntısı)
+#
+# ``open_source_propellant_api.DEFAULT_STORAGE_STATE`` her akışkanı GERÇEK
+# saklama koşulunda sorar (LOX 90,19 K doymuş sıvı, LH2 20,28 K, N2O 293,15 K
+# kendinden basınçlı). Ama ``get_comprehensive_properties`` imzası
+# ``temperature=298.15, pressure=101325`` VARSAYILANIYLA geliyor ve bu değerleri
+# açıkça geçiriyor; ``temperature is None`` dalı hiç çalışmıyor, yani depolama
+# durumu mantığı ETKİSİZ kalıyor.
+#
+# ÖLÇÜLDÜ (2026-08-03, /api/get-propellant-properties):
+#     lox : density 1,3088 kg/m³  (doğrusu 1141,16 →  872x)
+#     n2o : density 1,8089 kg/m³  (doğrusu  785,10 →  434x)
+#     lh2 : density 0,0823 kg/m³  (doğrusu   70,95 →  862x)
+#     lox : viscosity 2,055e-5 Pa·s (doğrusu 1,947e-4 → 9,5x)
+# Bu sayılar /liquid Panel 1'deki "Oxidizer Density" alanına YAZILIYOR
+# (liquid.html:2075-2081) ve yanına yeşil "Real-time Data" rozeti konuyor.
+# Çözücünün kendisi 1141,7 kullandığı için form ile hesap 872 kat ayrışıyordu.
+#
+# DÜZELTMENİN İLKESİ — kanıtlı değiştirme: bir alan ancak değeri YANLIŞ
+# DURUMDAKİ CoolProp sorgusunun (298,15 K / 1 atm) döndürdüğü sayıyla birebir
+# eşleşiyorsa değiştirilir. Böylece yerel tablodan gelen değerlere DOKUNULMAZ.
+# Bu ayrım şart: yerel tablo ``specific_heat``'i kJ/(kg·K) tutuyor (LH2 14,3;
+# RP-1 2,1), CoolProp ise J/(kg·K) veriyor (LH2 9722,9). Körü körüne üzerine
+# yazmak 1000x'lik sessiz bir birim hatası doğururdu.
+# ---------------------------------------------------------------------------
+
+#: Duruma (T, P, faz) bağlı olan ve bu yüzden yanlış durumda sorulduğunda
+#: fiziksel olarak anlamsız çıkan alanlar. Hepsi iki yolda da SI: kg/m³,
+#: Pa·s, W/(m·K), J/(kg·K).
+_STATE_DEPENDENT_PROPS = ('density', 'viscosity', 'thermal_conductivity',
+                          'specific_heat')
+
+#: CoolProp'un depolama durumunda döndürdüğü durum künyesi alanları.
+_STORAGE_STATE_META = ('state_temperature_K', 'state_pressure_Pa', 'phase')
+
+
+def _coolprop_state(propellant_name, temperature=None, pressure=None):
+    """CoolProp özelliklerini getir; başarısızlıkta boş sözlük.
+
+    ``temperature=None`` -> akışkanın ``DEFAULT_STORAGE_STATE`` girdisi
+    (kriyojenlerde doymuş sıvı). Açık sıcaklık verilirse o kullanılır.
+    CoolProp kurulu değilse ya da akışkanı tanımıyorsa termofiziksel anahtar
+    HİÇ gelmez — bu durumda düzeltme yapılmaz (uydurma değer yok).
+    """
+    try:
+        props = propellant_api.get_coolprop_properties(
+            propellant_name, temperature, pressure)
+    except Exception:
+        return {}
+    return props if isinstance(props, dict) else {}
+
+
+def _same_number(a, b):
+    """İki değer aynı CoolProp sorgusundan mı geldi? (bit-eş ya da 1e-12 bağıl)"""
+    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        return False
+    if isinstance(a, bool) or isinstance(b, bool):
+        return False
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return False
+    return math.isclose(a, b, rel_tol=1e-12, abs_tol=0.0)
+
+
+def _correct_storage_state(propellant_name, merged_props):
+    """Yanlış durumdan (298 K / 1 atm) sızmış alanları depolama durumuyla değiştir.
+
+    Dönüş: ``(merged_props, storage_state | None, coolprop_katkisi_var_mi)``.
+
+    * Bir alan yalnız değeri ORTAM sorgusunun sonucuyla eşleşiyorsa değişir —
+      yani sızıntı olduğu KANITLANMIŞSA. Yerel tablodan gelen değer korunur.
+    * Depolama durumunda karşılığı olmayan sızmış alan SİLİNİR; yerine tahmin
+      konmaz (sıvı yoğunluğu + gaz viskozitesi karışımı üretmemek için).
+    """
+    storage = _coolprop_state(propellant_name)
+    if not any(k in storage for k in _STATE_DEPENDENT_PROPS):
+        # CoolProp bu akışkanı tanımıyor (RP-1, HTPB, kerosen) ya da kurulu
+        # değil: düzeltilecek bir şey yok, uydurma da yapılmaz.
+        return merged_props, None, False
+
+    ambient = _coolprop_state(propellant_name, 298.15, 101325)
+    for key in _STATE_DEPENDENT_PROPS:
+        if key not in merged_props:
+            continue
+        if not _same_number(merged_props.get(key), ambient.get(key)):
+            continue                      # yerel tablodan gelmiş — dokunma
+        if key in storage:
+            merged_props[key] = storage[key]
+        else:
+            merged_props.pop(key, None)   # doğrusu yok -> alan kaldırılır
+
+    state = {k: storage.get(k) for k in _STORAGE_STATE_META if k in storage}
+    if storage.get('state'):
+        state['description'] = storage['state']
+    return merged_props, (state or None), True
+
+
 @app.route('/api/get-propellant-properties', methods=['POST'])
 def get_propellant_properties():
     """Get propellant properties from open-source databases"""
@@ -5411,25 +5560,42 @@ def get_propellant_properties():
         data = request.json
         propellant_type = data.get('propellant_type', 'hybrid_fuel')
         propellant_name = data.get('propellant_name', 'htpb')
-        
+
         # First try local database
         local_props = propellant_db.get_propellant_properties(propellant_name)
-        
+
         # Then fetch from open-source APIs
         api_props = propellant_api.get_propellant_for_ui(propellant_type, propellant_name)
-        
+
         # Merge properties (API data takes precedence for real-time accuracy)
         if local_props:
             merged_props = {**local_props, **api_props}
         else:
-            merged_props = api_props
-        
+            merged_props = dict(api_props)
+
+        # T14: gaz fazı sızıntısını gerçek depolama durumuyla değiştir.
+        merged_props, storage_state, coolprop_used = _correct_storage_state(
+            propellant_name, merged_props)
+        if storage_state:
+            merged_props['storage_state'] = storage_state
+
+        # T14 (künye dürüstlüğü): ``get_coolprop_properties`` akışkanı hiç
+        # tanımasa bile ``source`` alanını koşulsuz 'CoolProp (NIST
+        # REFPROP-based)' yazıyor (open_source_propellant_api.py:378). RP-1 ve
+        # HTPB'de CoolProp TEK BİR sayı bile üretmiyor; künye o hâlde yalanmış
+        # oluyor. Katkı yoksa gerçek kaynağı (yerel tablo) bildir.
+        source = api_props.get('data_source', 'Combined sources')
+        if not coolprop_used and str(source).startswith('CoolProp'):
+            source = ((local_props or {}).get('source')
+                      or 'Built-in propellant table')
+            merged_props['data_source'] = source
+
         return jsonify({
             'status': 'success',
             'properties': merged_props,
-            'source': api_props.get('data_source', 'Combined sources')
+            'source': source
         })
-        
+
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 

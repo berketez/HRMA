@@ -941,8 +941,24 @@
             a.href = target + '?project=' + encodeURIComponent(p.name);
             a.className = 'aux-link';
             var mini = summaryMini(p.results_summary);
-            a.textContent = p.name + ' [' + String(p.motor_type || '?').toUpperCase() + ']'
-                + (mini ? ' — ' + mini : '');
+            a.textContent = p.name + ' [' + String(p.motor_type || '?').toUpperCase() + ']';
+            // T75 (2026-08-03): index.html'in `.aux-link { text-transform:
+            // uppercase }` kuralı ŞERİDİN TAMAMINI büyütüyordu. ÖLÇÜLDÜ: DOM
+            // metni "Isp 207.1 s · It 13428 N·s" doğruyken ekranda
+            // "ISP 207.1 S · IT 13428 N·S" görünüyordu. SI'da saniyenin simgesi
+            // küçük 's'; büyük 'S' SIEMENS'tir — yani özgül impuls "207,1
+            // siemens", toplam impuls "13428 newton-siemens" okunuyordu.
+            // Simge büyük/küçük harfi anlam taşır (Fpk/Isp/It de öyle), bu
+            // yüzden özet parçası kendi kabında dönüşümü kapatır. Proje adı ve
+            // motor tipi rozeti şeridin görsel düzenine uysun diye dışarıda
+            // kalır. Bekçi: tests/test_faz6_f5_app.py.
+            if (mini) {
+                var em = document.createElement('span');
+                em.style.textTransform = 'none';
+                em.setAttribute('data-si-units', '1');
+                em.textContent = ' — ' + mini;
+                a.appendChild(em);
+            }
             list.appendChild(a);
         });
         section.appendChild(list);

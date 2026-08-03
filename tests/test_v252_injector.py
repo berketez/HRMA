@@ -254,15 +254,44 @@ class TestPressureDistribution:
         y = list(bars[0]['y'])
         assert y[x.index('Tank')] == pytest.approx(55.0)
 
-    def test_tank_bar_falls_back_when_missing(self):
+    def test_tank_bar_yoksa_cubuk_tank_adini_tasimaz(self):
+        """Tank basıncı bilinmiyorsa çubuk 'Tank' DİYE ETİKETLENMEZ.
+
+        2026-08-03 (Faz 6, T11): bu testin eski hâli kusuru kilitliyordu.
+        ``tank_pressure`` yokken ``Pc + ΔP``'yi hesaplayıp çubuğa yine 'Tank'
+        yazan davranışı "beklenen" ilan ediyordu. Oysa ``Pc + ΔP`` enjektör
+        GİRİŞİ basıncıdır; tank basıncı besleme hattı kayıpları kadar daha
+        yüksektir. Kullanıcı tanka 30/50/90 bar girerken çubuk üçünde de
+        sabit 24 bar gösteriyordu — ölçüldü, T11 bulgusu.
+
+        Geri düşüş DEĞERİ yanlış değil; yanlış olan ETİKETİ. Düzeltmeden
+        sonra etiket gerçeği söylüyor: 'Inj. inlet'. Bu test artık hem
+        değeri hem etiketi sınar — kusur geri gelirse (36,0'a yine 'Tank'
+        denirse) düşer.
+        """
         md = dict(MOTOR)
         md.pop('tank_pressure')
         fig = json.loads(create_performance_plots(md, INJECTOR))
-        bars = [t for t in fig['data'] if t.get('type') == 'bar'
-                and 'Tank' in (t.get('x') or [])]
-        x = list(bars[0]['x'])
-        y = list(bars[0]['y'])
-        assert y[x.index('Tank')] == pytest.approx(36.0)  # Pc + dP
+        basinc = [t for t in fig['data'] if t.get('type') == 'bar'
+                  and 'Chamber' in (t.get('x') or [])]
+        assert basinc, 'basınç dağılımı çubuğu figürde yok'
+        x = list(basinc[0]['x'])
+        y = list(basinc[0]['y'])
+        assert 'Tank' not in x, (
+            "tank basıncı verilmediği hâlde çubuk 'Tank' diye etiketlenmiş: %s "
+            "— gösterilen değer enjektör girişi basıncı, tank basıncı değil" % x)
+        assert 'Inj. inlet' in x, "geri düşüş etiketi 'Inj. inlet' olmalı: %s" % x
+        assert y[x.index('Inj. inlet')] == pytest.approx(36.0)  # Pc + ΔP
+
+    def test_tank_bar_varsa_gercek_tank_basincini_gosterir(self):
+        """Tank basıncı verildiğinde çubuk 'Tank' adını taşır ve o değeri gösterir."""
+        fig = json.loads(create_performance_plots(MOTOR, INJECTOR))
+        basinc = [t for t in fig['data'] if t.get('type') == 'bar'
+                  and 'Chamber' in (t.get('x') or [])]
+        x = list(basinc[0]['x'])
+        y = list(basinc[0]['y'])
+        assert 'Tank' in x
+        assert y[x.index('Tank')] == pytest.approx(55.0)
 
 
 # ---------------------------------------------------------------------------
