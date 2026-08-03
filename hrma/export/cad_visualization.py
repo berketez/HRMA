@@ -501,7 +501,16 @@ class MotorCADDesigner:
         # Yerel kopyada çalış: aşağıdaki motor_data.update(...) çağrıcının
         # motor_results sözlüğünü YERİNDE değiştiriyordu (chamber_length'i
         # kaba L* kuralıyla ezip /calculate yanıtını bozuyordu)
-        motor_data = dict(motor_data)
+        #
+        # Faz 5B / H4-2: kopya artık aynı zamanda BİRİM olarak normalize
+        # edilir. Ölçüldü (HEAD 9d3728e): ham ``/calculate_solid`` yanıtı
+        # verilince STL zarfı 126 313 × 126 313 × 174 992 mm çıkıyordu
+        # (gerçek 126.31 × 126.31 × 782.68 mm) — çünkü buradaki her okuma
+        # girdiyi koşulsuz METRE kabul ediyordu, katı rotası ise mm döndürür.
+        from hrma.export.motor_geometry import (
+            normalise_export_geometry, resolve_grain_m)
+        motor_data, _unit_report = normalise_export_geometry(motor_data)
+        grain_geo, grain_reason = resolve_grain_m(motor_data)
 
         try:
             # Extract motor parameters from calculation results
@@ -558,10 +567,18 @@ class MotorCADDesigner:
             wall_noz = noz_geo.get('wall_thickness')
             wall_noz = (wall_noz / 1000.0) if wall_noz else max(0.003, 0.1 * throat_diameter)
 
-            # Grain: gerçek port + gerçek boy
-            port_diameter = _real('port_diameter_initial', 1e-4, 2.0) or chamber_diameter * 0.4
-            grain_length = _real('grain_length', 0.005, 5.0) or (chamber_length - 0.05)
-            grain_length = min(grain_length, 0.98 * chamber_length)
+            # Grain: gerçek port + gerçek boy. H4-1: yoksa GRAIN ÇİZİLMEZ.
+            # Eski kod portu ``chamber_diameter * 0.4``, boyu
+            # ``chamber_length - 0.05`` ile uyduruyordu; sıvı çift yakıtlı
+            # motorda grain fiziksel olarak yokken STL/3B görünümde
+            # Ø39.7 mm portlu bir katı yakıt bloğu görünüyordu (ölçüldü:
+            # liquid fuel_grain.stl 95.22 × 95.22 × 47.96 mm).
+            if grain_geo is not None:
+                port_diameter = grain_geo['port_initial']
+                grain_length = min(grain_geo['length'], 0.98 * chamber_length)
+            else:
+                port_diameter = None
+                grain_length = None
             liner = min(max(0.02 * chamber_diameter, 0.0015), 0.005)
 
             # Enjektör: TEK doğruluk kaynağı (_injector_spec) — teknik çizim,
@@ -616,12 +633,17 @@ class MotorCADDesigner:
             print("CAD Debug - Creating injector mesh...")
             injector_mesh = self._create_injector_head(chamber_diameter, motor_data)
 
-            print("CAD Debug - Creating fuel grain mesh...")
-            slack = max(0.004, chamber_length - grain_length)
-            zg0 = 0.35 * slack
-            fuel_grain_mesh = self._grain_solid(
-                chamber_diameter / 2 - liner, port_diameter / 2, zg0, zg0 + grain_length
-            )
+            if grain_geo is not None:
+                print("CAD Debug - Creating fuel grain mesh...")
+                slack = max(0.004, chamber_length - grain_length)
+                zg0 = 0.35 * slack
+                fuel_grain_mesh = self._grain_solid(
+                    chamber_diameter / 2 - liner, port_diameter / 2, zg0,
+                    zg0 + grain_length
+                )
+            else:
+                print("CAD Debug - no grain in the result; grain mesh skipped")
+                fuel_grain_mesh = None
 
             # ---- Yerleşim: z=0 kapak iç yüzü, kamara [0, L], nozul [L, L+Ln] ----
             assembly_meshes = []
@@ -638,8 +660,9 @@ class MotorCADDesigner:
             injector_mesh.visual.face_colors = [150, 150, 150, 200]
             assembly_meshes.append(('Injector', injector_mesh))
 
-            fuel_grain_mesh.visual.face_colors = [139, 69, 19, 150]
-            assembly_meshes.append(('Fuel Grain', fuel_grain_mesh))
+            if fuel_grain_mesh is not None:
+                fuel_grain_mesh.visual.face_colors = [139, 69, 19, 150]
+                assembly_meshes.append(('Fuel Grain', fuel_grain_mesh))
 
             print("CAD Debug - Creating plotly visualization...")
             # Create plotly visualization
@@ -1720,6 +1743,32 @@ class MotorCADDesigner:
                 'nozzle_mass': nozzle_mass,  # kg
                 'injector_mass': injector_mass,  # kg
                 'total_dry_mass': dry_mass,  # kg
+                # H4-7: bu toplam motorun TAM kuru kütlesi DEĞİLDİR — kapaklar
+                # (uç tıpalar) burada yok, yapısal analizin toplamında var.
+                # Ölçüldü (2 kN hibrit): burası 13,7130 kg,
+                # structural_analysis...total_weight 16,8366 kg (%22,8 fark) ve
+                # ikisi de "kuru kütle" adıyla yayımlanıyordu. Kapsam artık
+                # sayının yanında yazar; .eng dosyası da farkı beyan eder
+                # (openrocket_integration.dry_mass_reconciliation).
+                'total_dry_mass_scope': (
+                    'chamber + as-drawn nozzle + injector plate. Closures / '
+                    'end caps are NOT included here; the structural weight '
+                    'analysis reports them and its total is what the .eng '
+                    'export writes.'),
+                # Lülenin OTORİTATİF kütlesi budur: çizilen katının kesik koni
+                # halkası hacmi V = pi(2*t*r_ort + t^2)*L. Formül Faz 4'te Lean
+                # ile ispatlandı (docs/BICIMSEL_ISPATLAR.md,
+                # HRMA.frustumAnnulusVolume_eq_integral). Aynı sonuçtaki diğer
+                # iki lüle kütlesi YAKLAŞIMDIR ve kaynağında öyle beyanlıdır:
+                # structural %30 başparmak kuralı, nozzle_design yalnız
+                # diverjan koni.
+                'nozzle_mass_basis': (
+                    'AUTHORITATIVE: as-drawn solid, frustum-annulus volume '
+                    'V = pi(2*t*r_mid + t^2)*L with the same contour, wall and '
+                    'material as the STEP/STL parts; formula formally verified '
+                    '(docs/BICIMSEL_ISPATLAR.md). The rule-of-thumb nozzle '
+                    'weight in structural_analysis and the divergent-cone-only '
+                    'estimate in nozzle_design are approximations, not this.'),
                 # Kütlelerin neye dayandığı kullanıcıya açıkça söylenir.
                 'wall_thickness_mm': (wall_m * 1000.0) if wall_m else None,
                 'wall_thickness_source': wall_source,

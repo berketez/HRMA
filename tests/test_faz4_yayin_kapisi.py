@@ -461,6 +461,104 @@ def test_is_akisi_action_surumleri_acik():
 
 
 # ---------------------------------------------------------------------------
+# H5-2 / H5-4 (Faz 5) — CI'da SESSİZCE atlanan bekçiler
+# ---------------------------------------------------------------------------
+
+#: `step-export` işinin gerçekten koşturması gereken STEP/CAD test dosyaları.
+#: Bunlar Faz 4'ün A1 (STL/DXF 1000× birim hatası), A4 (NaN geometriden katı
+#: cisim), A8 (katı cidarı) ve A11 (tank geometrisi) bulgularının bekçileridir.
+STEP_TEST_DOSYALARI = (
+    "tests/test_step_import.py",
+    "tests/test_tank_step_units.py",
+    "tests/test_faz4_export_geometri.py",
+    "tests/test_faz4_app_export.py",
+    "tests/test_export_generators.py",
+)
+
+
+def test_step_export_isi_gercekten_kosuyor():
+    """H5-2: STEP/CAD bekçileri CI'da HER ZAMAN atlanıyordu.
+
+    Ölçüm (3 Ağustos 2026, HEAD 9d3728e) — yukarıdaki beş dosya:
+      * build123d KURULU ortam  : 143 passed, 2 xfailed, 0 atlandı
+      * build123d YOK ortam (CI): 98 passed, **47 skipped**
+    Yani 47 bekçi CI'da hiç koşmuyordu ve bu "yeşil" sayılıyordu.
+
+    Sözleşme: ``tests.yml`` içinde build123d KURAN ve bu beş dosyayı
+    koşturan ayrı bir iş bulunmalı. Sadece "iş var" yetmez — işin
+    fail-closed olması gerekir, yoksa kütüphane kurulamadığında testler
+    yine sessizce atlanır ve iş yeşil kalır.
+    """
+    metin = (ISAKISI_DIZINI / "tests.yml").read_text(encoding="utf-8")
+    veri = _is_akisi_yukle("tests.yml")
+    isler = veri["jobs"]
+    assert "step-export" in isler, (
+        "tests.yml'de 'step-export' işi yok — STEP bekçileri CI'da yine "
+        f"atlanır (bulunan işler: {sorted(isler)})")
+
+    adimlar = isler["step-export"]["steps"]
+    komutlar = "\n".join(a.get("run", "") for a in adimlar)
+
+    # (a) build123d gerçekten kurulmalı
+    assert re.search(r"pip install\s+build123d", komutlar), (
+        "step-export işi build123d kurmuyor")
+
+    # (b) numpy pini geri alınmalı (build123d numpy 2.x'e yükseltir)
+    assert re.search(r'pip install\s+"numpy[^"]*<2"', komutlar), (
+        "build123d kurulumundan sonra numpy<2 pini geri alınmıyor")
+
+    # (c) FAIL-CLOSED ortam teyidi: build123d yoksa/np pini bozuksa iş kırılır
+    assert "BUILD123D_AVAILABLE" in komutlar, (
+        "step_export.BUILD123D_AVAILABLE doğrulanmıyor — kütüphane "
+        "kurulamazsa testler yine sessizce atlanır")
+
+    # (d) beş dosyanın beşi de koşmalı
+    for dosya in STEP_TEST_DOSYALARI:
+        assert dosya in komutlar, f"step-export işi {dosya} koşmuyor"
+
+
+def test_step_export_isinde_atlama_butcesi_sifir():
+    """H5-2: 'atlandı' başarı sayılamaz — bütçe SIFIR olmalı.
+
+    Bu işte atlama bütçesi 0'dır: gerçek bir ``pytest.skip`` çıkarsa iş
+    kırmızıya döner. ``xfail`` atlama sayılmaz (junit XML xfail'i de
+    ``<skipped>`` olarak yazar; ayırt edici alan ``type``'tır).
+    """
+    veri = _is_akisi_yukle("tests.yml")
+    adimlar = veri["jobs"]["step-export"]["steps"]
+    komutlar = "\n".join(a.get("run", "") for a in adimlar)
+
+    assert "--junitxml=step-report.xml" in komutlar, (
+        "atlama sayısı ölçülemiyor: junit raporu üretilmiyor")
+    assert "pytest.skip" in komutlar and "pytest.xfail" in komutlar, (
+        "atlama denetimi gerçek skip ile xfail'i ayırt etmiyor")
+    assert re.search(r"sys\.exit\(", komutlar), (
+        "atlama bütçesi kırmızıya dönmüyor — yalnız bilgi basıyor")
+
+
+def test_yonetisim_bekcilerinin_bagimliligi_bildirilmis():
+    """H5-4: PyYAML hiçbir requirements dosyasında yoktu.
+
+    Ölçüm (3 Ağustos 2026): ``grep -in yaml requirements*.txt`` → 0 sonuç.
+    Kurulu paketlerin hiçbiri PyYAML çekmiyordu (cantera ``ruamel.yaml``
+    ister — farklı pakettir, ``import yaml`` sağlamaz). Sonuç: bu dosyadaki
+    üç ``pytest.importorskip("yaml")`` CI'da her koşuda tetikleniyor ve
+    4 yönetişim testi SESSİZCE atlanıyordu (E3 ve E5 bekçileri dahil).
+    """
+    metin = (DEPO / "requirements-dev.txt").read_text(encoding="utf-8")
+    satirlar = [s.strip() for s in metin.splitlines()
+                if s.strip() and not s.strip().startswith("#")]
+    assert any(re.match(r"(?i)pyyaml\b", s) for s in satirlar), (
+        "PyYAML requirements-dev.txt'de bildirilmemiş — yönetişim bekçileri "
+        f"CI'da sessizce atlanır (bulunan: {satirlar})")
+
+    # CI kurulumu doğrulamalı ki bağımlılık düşerse iş kırmızı olsun.
+    ci = (ISAKISI_DIZINI / "tests.yml").read_text(encoding="utf-8")
+    assert "import yaml" in ci, (
+        "tests.yml PyYAML'in gerçekten kurulduğunu doğrulamıyor")
+
+
+# ---------------------------------------------------------------------------
 # E4 — VALIDATION_STATUS.md bayatlığı
 # ---------------------------------------------------------------------------
 

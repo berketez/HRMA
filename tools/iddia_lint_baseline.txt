@@ -79,3 +79,37 @@ hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 2ebe10e67790 | MEŞ
 # 10 kayıt AYIKLANDI: karşılık geldikleri satır ağaçta artık yok
 # (düzeltildi ya da yeniden yazıldı). Kayıtlar burada tutulmaz, çünkü
 # defter YAŞAYAN isabetlerin envanteridir; tarihsel iz git geçmişindedir.
+
+# ---------------------------------------------------------------------------
+# 3 Ağustos 2026 — Faz 5 / H5-5: tarama kullanıcıya GİDEN BELGELERE genişletildi
+#
+# Araç o güne kadar yalnız hrma/ ağacını ve yalnız .py/.js/.html uzantılarını
+# tarıyordu; README, kullanma kılavuzu ve sürüm notları HİÇ görülmemişti.
+# Genişletme sonrası 21 yeni isabet çıktı. Bunlardan ALTISI gerçek ihlaldi
+# ve DÜZELTİLDİ (kayda alınmadı, çünkü artık ağaçta yoklar):
+#   README.md:1              ürün adı "High-Fidelity Rocket Motor Analysis"
+#                            -> "Rocket Motor Analysis Suite" (uygulamanın
+#                            kendi başlığı: templates/index.html:6)
+#   docs/README.md:6,45      "digital twin" -> "interactive 3D model" / "3D model"
+#   docs/USER_MANUAL.md:7,148,342   aynı düzeltme
+# Bu beş "digital twin" satırı, packaging/release_notes_v2.6.1.md:47'nin
+# "wording is now 'interactive 3D model' THROUGHOUT" dediği düzeltmenin
+# hayatta kalan koluydu.
+#
+# Aşağıdaki 15 kayıt MEŞRU kullanımdır.
+# ---------------------------------------------------------------------------
+README.md | high_fidelity | 8abd39843c57 | MEŞRU: kinetik çözüm kademesinin ADI (Fast / Engineering / High-Fidelity).
+README.md | high_fidelity | 6a2962a98e0f | MEŞRU: kademe adlarını sayan dosya ağacı yorumu.
+INSTALL.md | high_fidelity | 650ec22e4bb3 | MEŞRU: cantera'nın hangi kademeyi açtığını söyleyen kurulum notu.
+CONTRIBUTING.md | nasa_grade | 9a85bb269674 | MEŞRU: katkı kılavuzu YASAK iddiaları örnekliyor; kuralın kendisini alıntılıyor.
+CONTRIBUTING.md | professional_grade | 9a85bb269674 | MEŞRU: aynı satır — yasak iddia örneği.
+docs/USER_MANUAL.md | high_fidelity | b4e7347f8794 | MEŞRU: kademe adı; cantera olmadan hangi kademenin kapalı olduğunu söylüyor.
+docs/USER_MANUAL.md | high_fidelity | d5610807d940 | MEŞRU: kademe adına atıf (uzun süren hesap örneği).
+docs/USER_MANUAL.md | high_fidelity | f4aa11648d9e | MEŞRU: kademe adı; "long" ayarının hangi kademe olduğunu söylüyor.
+docs/USER_MANUAL.md | high_fidelity | b758dfc6545b | MEŞRU: kademe tanımı başlığı (`high_fidelity` kimliğiyle birlikte).
+docs/USER_MANUAL.md | high_fidelity | 0880e9324d0c | MEŞRU: kademe adı; yedeğe düşüldüğünü bildiren uyarı başlığı.
+docs/USER_MANUAL.md | high_fidelity | d9de718b1c1b | MEŞRU: OLUMSUZLANMIŞ ifade — "deliberately NOT a high-fidelity simulation".
+packaging/release_notes_v2.5.0.md | high_fidelity | aefb4e5fc078 | MEŞRU: v2.5.0 sürüm notu, belirsizlik kademesinin adını sayıyor.
+packaging/release_notes_v2.5.0.md | guaranteed | 218468b029a2 | MEŞRU: sayısal sonuç garantisi değil, determinist yazılım davranışı (0. örnek = nominal vaka).
+packaging/release_notes_v2.5.1.md | digital_twin | df6eaa9f23d2 | MEŞRU: v2.5.1 TARİHSEL sürüm notu, o gün geçerli olan adlandırmayı anlatıyor; geriye dönük değiştirilmez.
+packaging/release_notes_v2.6.1.md | digital_twin | 849042d6154f | MEŞRU: v2.6.1 sürüm notu, KALDIRILAN ifadeyi alıntılıyor ("wording is now 'interactive 3D model'").

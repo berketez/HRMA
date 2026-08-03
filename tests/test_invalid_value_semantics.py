@@ -275,3 +275,73 @@ class TestExportStlNoSilentZeroGeometry:
         assert r.status_code == 200, r.get_data(as_text=True)[:300]
         assert 'sla' in r.headers['Content-Type']
         assert len(r.data) > 10000
+
+
+# ---------------------------------------------------------------------------
+# (e) B11 (Faz 5): doğrulayıcı METİN sayıda çökmez
+# ---------------------------------------------------------------------------
+
+class TestValidatorSurvivesStringNumbers:
+    """Sayısal alanın metin gelmesi doğrulayıcıyı DÜŞÜREMEZ.
+
+    Ölçüm (3 Ağustos 2026, HEAD 9d3728e — düzeltme öncesi):
+    ``validate_motor_data({... 'thrust': '1000' ...}, 'hybrid')``
+    ``TypeError: '>' not supported between instances of 'str' and 'int'``
+    ile çöküyordu; ``/calculate`` bu ham Python hatasını HTTP 400 gövdesinde
+    kullanıcıya gösteriyordu. Aynısı ``burn_time``, ``chamber_temperature``
+    ve ``throat_diameter`` için de ölçüldü.
+
+    Sözleşme: doğrulayıcı istisna atmaz; sayısal olmayan alan için
+    ANLAŞILIR bir hata mesajı üretir. Form gönderimi ve kayıtlı ``.hrma``
+    projeleri sayıları metin taşıyabildiği için bu en olağan bozulmadır.
+    """
+
+    BASE = {'thrust': 1000, 'burn_time': 5, 'fuel_type': 'htpb',
+            'oxidizer_type': 'n2o', 'of_ratio': 6.0, 'chamber_diameter': 0.1}
+
+    @pytest.mark.parametrize('field', [
+        'thrust', 'burn_time', 'chamber_temperature',
+        'throat_diameter', 'exit_diameter', 'chamber_pressure'])
+    def test_string_number_does_not_raise(self, validator, field):
+        data = dict(self.BASE)
+        data[field] = '1000' if field in ('thrust', 'chamber_temperature') \
+            else '0.02'
+        is_valid, messages = validator.validate_motor_data(data, 'hybrid')
+        # İstisna atmadıysa buraya gelinir; ayrıca hüküm de tutarlı olmalı.
+        assert isinstance(is_valid, bool)
+        assert isinstance(messages, list)
+
+    @pytest.mark.parametrize('field', [
+        'thrust', 'burn_time', 'throat_diameter', 'exit_diameter'])
+    def test_string_number_is_reported_as_non_numeric(self, validator, field):
+        """Hata metni ham Python istisnası değil, alanı adlandıran cümledir."""
+        data = dict(self.BASE)
+        data[field] = '0.02'
+        is_valid, messages = validator.validate_motor_data(data, 'hybrid')
+        assert is_valid is False
+        birlesik = ' | '.join(messages)
+        assert f'{field} must be numeric' in birlesik, birlesik
+        assert 'not supported between instances' not in birlesik, (
+            'ham TypeError metni kullanıcıya sızıyor — B11 geri gelmiş')
+
+    def test_numeric_path_still_emits_the_safety_warnings(self, validator):
+        """Düzeltme uyarıları SUSTURMAMALI: eşikler hâlâ tetiklenmeli."""
+        data = dict(self.BASE, thrust=60000, burn_time=90,
+                    chamber_temperature=4000)
+        is_valid, messages = validator.validate_motor_data(data, 'hybrid')
+        assert is_valid is True
+        birlesik = ' | '.join(messages).lower()
+        assert 'high thrust' in birlesik
+        assert 'extreme temperature' in birlesik
+        assert 'long burn time' in birlesik
+
+    def test_calculate_endpoint_returns_a_readable_message(self, client):
+        """Uçtan uca: /calculate artık ham TypeError göstermez."""
+        body = {'motor_type': 'hybrid', 'thrust': '1000', 'burn_time': 5,
+                'fuel_type': 'htpb', 'oxidizer_type': 'n2o', 'of_ratio': 6.0}
+        r = client.post('/calculate', json=body,
+                        headers={'Host': '127.0.0.1:8080'})
+        assert r.status_code == 400
+        govde = r.get_data(as_text=True)
+        assert 'thrust must be numeric' in govde, govde[:300]
+        assert 'not supported between instances' not in govde

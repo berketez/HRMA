@@ -2201,7 +2201,24 @@ class HybridRocketEngine:
             'exit_area': self.Ae,
             'exit_diameter': self.d_e,
             'expansion_ratio': self.epsilon,
+            # FAZ 5 / H4-9 — "chamber_volume" adı depoda ÜÇ farklı büyüklüğü
+            # ve İKİ farklı birimi taşıyor. Ölçüm (aynı hibrit motor):
+            #   motor.chamber_volume         0,00073161 m³ =  731,6 cm³
+            #       -> L*_istenen x A_t, yani TASARIM HEDEFİ
+            #   motor.chamber_volume_actual  0,00322147 m³ = 3221,5 cm³
+            #       -> portun sardığı GERÇEK serbest hacim (4,4 kat büyük)
+            #   cad_design...geometry_summary.chamber_volume  8011,58 cm³
+            #       -> pi/4·D²·L BRÜT silindir (grain'i hiç saymıyor)
+            # Adın kendisi hangi büyüklük olduğunu söylemediği için tüketiciler
+            # (panel, CAD, rapor) farklı sayıları aynı etiketle gösteriyordu.
+            # Motor tarafı artık birimini ve TANIMINI açıkça yayımlar; eski
+            # anahtarlar geriye uyum için aynen korunur.
             'chamber_volume': self.V_c,
+            'chamber_volume_m3': self.V_c,
+            'chamber_volume_basis': (
+                'DESIGN TARGET chamber volume in m^3: requested L* times '
+                'throat area (L* x A_t). NOT the free volume of the built '
+                'chamber and NOT the gross cylinder swept by the case.'),
             'chamber_diameter': self.D_ch,
             'chamber_length': self.L,
             # L* modeli (v2.5.2): kamara boyu = grain + ön-yanma + art-yanma.
@@ -2220,6 +2237,11 @@ class HybridRocketEngine:
             'design_safety_factor_input': self.design_safety_factor,
             'nozzle_material': self.nozzle_material,
             'chamber_volume_actual': getattr(self, 'V_c_actual', self.V_c),
+            'chamber_volume_actual_m3': getattr(self, 'V_c_actual', self.V_c),
+            'chamber_volume_actual_basis': (
+                'ACTUAL free volume in m^3 enclosed by the fuel port plus the '
+                'pre/post-combustion chambers at the design instant; this is '
+                'what L*_achieved is computed from.'),
             
             # Fuel grain
             'port_diameter_initial': self.D_port_initial,
@@ -2508,9 +2530,34 @@ class HybridRocketEngine:
                 candidate = weight.get(key)
                 if candidate is not None and np.isfinite(float(candidate)):
                     dry_mass_est = float(candidate)
+                    # FAZ 5 / H4-7 — bu metin motorun kuru kütlesinin
+                    # KAPSAMINI yanlış anlatıyordu ("real geometry" diyor ama
+                    # lüle payı %30 başparmak kuralı, enjektör ise hiç yok).
+                    # Ölçüm (2 kN N2O/HTPB hibrit): aynı yanıtta İKİ ayrı
+                    # "kuru kütle" var ve %22,8 ayrışıyorlar:
+                    #   structural...weight_analysis.total_weight  16,8366 kg
+                    #       kamara + kapaklar + %30-kuralı lüle, ENJEKTÖR YOK
+                    #   cad_design...mass_breakdown.total_dry_mass 13,7130 kg
+                    #       kamara + ÇİZİLEN lüle + enjektör, KAPAKLAR YOK
+                    # OTORİTE burada BEYAN edilir: uçuş zinciri (.eng dosyası,
+                    # yörünge, T/W) yapısal analizin toplamını kullanır, çünkü
+                    # kapakları ve kullanıcının gerçek cidar kalınlığını içeren
+                    # tek toplam odur. Lüle KÜTLESİ için otorite ise çizilen
+                    # katıdır (bkz. openrocket_integration.dry_mass_
+                    # reconciliation) — %30 kuralı kaynağında "ESTIMATE"
+                    # olarak beyanlıdır.
                     dry_mass_basis = (
-                        'structural analysis: chamber + nozzle + closures '
-                        'from real geometry and material density')
+                        'AUTHORITATIVE dry mass for the flight chain (.eng, '
+                        'trajectory, T/W): structural_analysis.weight_analysis'
+                        '.total_weight = chamber shell (real wall thickness x '
+                        'material density) + end closures + nozzle. SCOPE '
+                        'LIMITS: the nozzle share is a 30%-of-chamber rule of '
+                        'thumb (see nozzle_weight_basis), and the injector is '
+                        'NOT included. The CAD mass breakdown '
+                        '(cad_design.performance_summary.mass_breakdown.'
+                        'total_dry_mass) is a DIFFERENT total: it uses the '
+                        'as-drawn nozzle and the injector but omits the '
+                        'closures, so the two do not agree.')
                     break
         except (TypeError, ValueError, AttributeError):
             dry_mass_est = None

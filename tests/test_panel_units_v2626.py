@@ -382,8 +382,14 @@ class TestMetreAlanlari:
         """1000 kat sapma HER İKİ yönde de bu bandın dışına düşer."""
         rec = _sug(panel_suggestions, motor_type, panel_id)
         value = rec['suggestions'].get(field)
-        if value is None:
-            pytest.skip('değer üretilmiyor — ayrı test bunu bildiriyor')
+        # Faz 5 / H5-6: eskiden ``pytest.skip('değer üretilmiyor — ayrı test
+        # bunu bildiriyor')`` idi. Kardeş test (test_deger_uretiliyor) aynı
+        # şeyi zaten kırmızıya çeviriyor, ama burada atlamak birim
+        # sözleşmesinin sınanmadığını GİZLİYORDU. Ölçüldü (3 Ağustos 2026):
+        # 252 testin hiçbirinde bu atlama tetiklenmiyor.
+        assert value is not None, (
+            f'{panel_id}.{field} ({motor_type}) null — birim sözleşmesi hiç '
+            'sınanamadı (kardeş test test_deger_uretiliyor da kırmızı olmalı)')
         lo, hi = BAND_M[geo_key]
         assert lo < value < hi, (
             f'{panel_id}.{field} ({motor_type}) = {value} m fiziksel bandın '
@@ -394,8 +400,10 @@ class TestMetreAlanlari:
         """Değer, hrma/export/motor_geometry.py'nin SI değeriyle aynı olmalı."""
         rec = _sug(panel_suggestions, motor_type, panel_id)
         value = rec['suggestions'].get(field)
-        if value is None:
-            pytest.skip('değer üretilmiyor — ayrı test bunu bildiriyor')
+        # Faz 5 / H5-6: fail-open atlama kaldırıldı (yukarıdaki nota bakınız).
+        assert value is not None, (
+            f'{panel_id}.{field} ({motor_type}) null — bağımsız oracle ile '
+            'karşılaştırma hiç yapılamadı')
         expected = si_geometry[motor_type].get(geo_key)
         assert isinstance(expected, (int, float)) and math.isfinite(expected), (
             f'oracle {motor_type}.{geo_key} vermedi')

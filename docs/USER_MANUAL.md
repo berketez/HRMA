@@ -4,7 +4,7 @@ HRMA (UZAYTEK Rocket Motor Analysis) is a desktop application for the
 preliminary design and analysis of hybrid, solid, and liquid rocket motors.
 It runs a local Flask engine behind a native desktop window (pywebview) and
 presents results in a dark-themed web interface with an interactive 3D
-digital twin, an Analysis Deck of engineering panels, and working CAD /
+model, an Analysis Deck of engineering panels, and working CAD /
 drawing / report exports.
 
 This manual describes HRMA **v2.6.26**.
@@ -145,7 +145,7 @@ CAD, drawing, and report outputs are written to `Documents/HRMA`.
 
 All three designer pages share the same structure: an input form, a
 Calculate button, a results HUD, standalone panels (transient / injector /
-6-DOF where applicable), the Analysis Deck, the 3D digital twin, and export
+6-DOF where applicable), the Analysis Deck, the interactive 3D model, and export
 buttons.
 
 ## 4. The Calculate Workflow (Hybrid Page)
@@ -339,7 +339,7 @@ time and returns the real Pc(t) and F(t) histories:
 - **Stability guards**: NASA SP-8089 injector pressure-drop margins are
   checked at every time step and reported as warnings.
 - The resulting thrust curve feeds the OpenRocket `.eng` export, the 6-DOF
-  panel, and the burn animation of the 3D digital twin.
+  panel, and the burn animation of the interactive 3D model.
 
 ### Injector Design (hybrid and liquid pages)
 

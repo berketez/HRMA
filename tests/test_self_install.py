@@ -186,7 +186,15 @@ def test_win_helper_icerigi():
     bat = si.build_win_helper(1234, r"C:\Users\u\Downloads\Setup.exe",
                               r"C:\Users\u\AppData\Local\HRMA")
     # NSIS sessiz kurulum: /D= son parametre ve TIRNAKSIZ; start kullanılmaz
-    assert '"C:\\Users\\u\\Downloads\\Setup.exe" /S '
+    #
+    # Faz 5 / H5-7 düzeltmesi — ÖLÜ ASSERTION: bu satır eskiden
+    #     assert '"C:\\Users\\u\\Downloads\\Setup.exe" /S '
+    # yazıyordu; ``in bat`` unutulmuştu, yani boş olmayan bir dize her zaman
+    # doğru sayılıyordu (ölçüm: bool(dize) is True). Dize bugün gerçekten
+    # ``bat`` içinde var, o yüzden gizlenen aktif bir kusur yoktu; fakat exe
+    # yolunun TIRNAKLANMASINI başka hiçbir assertion sınamıyordu — boşluklu
+    # bir indirme yolunda tırnağın kaybolması sessizce geçerdi.
+    assert '"C:\\Users\\u\\Downloads\\Setup.exe" /S ' in bat
     satirlar = [l for l in bat.splitlines() if "/S /D=" in l]
     assert len(satirlar) == 1
     assert satirlar[0].rstrip().endswith(r"/D=C:\Users\u\AppData\Local\HRMA")
@@ -195,6 +203,28 @@ def test_win_helper_icerigi():
     assert r"pythonw.exe" in bat and "launcher.py" in bat
     # Sessiz kurulum başarısızsa normal kurucuya düşülür
     assert "if not exist" in bat
+    bat.encode("ascii")
+
+
+def test_win_helper_bosluklu_yolu_tirnaklar():
+    """Boşluklu indirme yolu tırnak içinde kalmalı; /D= yine tırnaksız.
+
+    Ölü assertion'ın (yukarıdaki H5-7 notu) örttüğü GERÇEK boşluk buydu:
+    exe yolunun tırnaklanması hiçbir yerde sınanmıyordu. Windows'ta indirme
+    dizini neredeyse her zaman boşluk içerir (``C:\\Users\\Ad Soyad\\...``);
+    tırnak düşerse cmd.exe yolu iki argümana böler ve sessiz kurulum
+    çalışmaz. NSIS kuralı gereği ``/D=`` argümanı tam tersine TIRNAKSIZ
+    olmak zorundadır — ikisi aynı satırda birlikte doğrulanır.
+    """
+    bat = si.build_win_helper(99, r"C:\Users\ad soyad\Downloads\HRMA Setup.exe",
+                              r"C:\Program Files\HRMA")
+    satirlar = [l for l in bat.splitlines() if "/S /D=" in l]
+    assert len(satirlar) == 1, satirlar
+    satir = satirlar[0].rstrip()
+    assert '"C:\\Users\\ad soyad\\Downloads\\HRMA Setup.exe" /S ' in satir, (
+        f'boşluklu exe yolu tırnaksız kalmış: {satir!r}')
+    assert satir.endswith(r"/D=C:\Program Files\HRMA"), satir
+    assert '/D="' not in bat, 'NSIS /D= tırnaklanamaz'
     bat.encode("ascii")
 
 

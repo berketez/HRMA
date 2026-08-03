@@ -303,8 +303,16 @@ class TestSafetyAndRecommendation:
         # MAWP'yi tepe ile akma arasına yerleştir
         mawp = 0.5 * (peak + min(yield_p, peak * 1.5))
         mawp = max(min(mawp, peak - 0.1), 0.1)
-        if mawp >= peak or peak > yield_p:
-            pytest.skip("geometri bu vakada MARGINAL bandı üretmiyor")
+        # Faz 5 / H5-6 — FAIL-OPEN ATLAMA kaldırıldı: eskiden
+        # ``pytest.skip("geometri bu vakada MARGINAL bandı üretmiyor")`` idi.
+        # Testin kendi kurgusu bozulduğunda (tepe basınç akma basıncını aşarsa
+        # ya da MAWP tepenin altına yerleştirilemezse) MARGINAL bandı HİÇ
+        # sınanmadan yeşil kalıyordu. Ölçüldü (3 Ağustos 2026): 252 testlik
+        # koşuda bu atlama tetiklenmiyor — kurgu geçerli.
+        assert mawp < peak and peak <= yield_p, (
+            f"MARGINAL bandı kurulamadı: tepe={peak:.2f} bar, "
+            f"akma={yield_p:.2f} bar, denenen MAWP={mawp:.2f} bar — "
+            "model değiştiyse bu testin kurgusu güncellenmeli")
         out = self._run(pipe_mawp_bar=mawp)
         assert out['status'] == 'MARGINAL'
 
@@ -326,9 +334,17 @@ class TestSafetyAndRecommendation:
         """Önerilen kapanma süresi uygulanınca tepe ~ MAWP'ye iner."""
         out = self._run(pipe_mawp_bar=15.0)
         t_rec = out['recommended_closure_time_ms']
-        # Önerilen süre kritik süreden büyükse yavaş rejim geçerlidir
-        if t_rec <= out['critical_closure_time_ms'] * (1 + 1e-9):
-            pytest.skip("öneri kritik süreyle sınırlı; ani zaten güvenli değil")
+        # Önerilen süre kritik süreden büyükse yavaş rejim geçerlidir.
+        # Faz 5 / H5-6 — FAIL-OPEN ATLAMA kaldırıldı: eskiden
+        # ``pytest.skip("öneri kritik süreyle sınırlı; ani zaten güvenli
+        # değil")`` idi. Bu vaka (MAWP=15 bar) bilerek tepe > MAWP olacak
+        # şekilde seçilmiştir; önerinin kritik süreyle sınırlı kalması
+        # önerinin ANLAMSIZ olduğu anlamına gelir ve görünmesi gerekir.
+        # Ölçüldü (3 Ağustos 2026): atlama tetiklenmiyor.
+        assert t_rec > out['critical_closure_time_ms'] * (1 + 1e-9), (
+            f"önerilen kapanma süresi ({t_rec} ms) kritik süreye "
+            f"({out['critical_closure_time_ms']} ms) sıkışmış — öneri tepeyi "
+            "MAWP'ye indiremez")
         out2 = self._run(pipe_mawp_bar=15.0, valve_closure_time_ms=t_rec)
         assert out2['peak_pressure_bar'] == pytest.approx(
             out2['pipe']['mawp_bar'], rel=1e-3)

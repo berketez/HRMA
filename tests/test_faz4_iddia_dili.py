@@ -100,6 +100,48 @@ class TestLintAraci:
             f'{f.path}:{f.line_no} [{f.rule_id}] {f.line_text[:120]}'
             for f in new_hits)
 
+    def test_kullaniciya_giden_belgeler_de_taraniyor(self):
+        """H5-5 (Faz 5): araç belgeleri HİÇ taramıyordu.
+
+        Ölçüm (3 Ağustos 2026, HEAD 9d3728e): ``DEFAULT_SCAN_ROOT = hrma/``
+        ve ``SCANNED_SUFFIXES = ('.py', '.js', '.html')`` idi; yani
+        ``README.md``, ``docs/USER_MANUAL.md``, ``docs/user_guide/*.tex`` ve
+        sürüm notları taranmıyordu. Aynı kurallar belgelere uygulanınca beş
+        satırda hâlâ "digital twin" yazdığı görüldü — oysa
+        ``packaging/release_notes_v2.6.1.md:47`` bu ifadenin "throughout"
+        değiştirildiğini söylüyordu. Ayrıca ``hrma/app.py:786``
+        (``/user-guide/open``) ``docs/user_guide`` içeriğini doğrudan
+        kullanıcıya açıyor.
+        """
+        assert {'.md', '.tex'} <= set(iddia_lint.SCANNED_SUFFIXES), (
+            f'belge uzantıları taranmıyor: {iddia_lint.SCANNED_SUFFIXES}')
+
+        hedefler = set(iddia_lint.DEFAULT_SCAN_TARGETS)
+        for zorunlu in ('hrma', 'README.md', 'docs/USER_MANUAL.md',
+                        'docs/user_guide'):
+            assert zorunlu in hedefler, (
+                f'{zorunlu} varsayılan tarama hedeflerinde yok: '
+                f'{sorted(hedefler)}')
+
+        # Tarama gerçekten belge dosyalarına DOKUNUYOR mu (yol listesi boş
+        # kalmasın diye kanıt: en az bir .md kayıtlı isabet üretiyor).
+        yollar = {f.path for f in iddia_lint.scan()}
+        assert any(y.endswith('.md') for y in yollar), (
+            'hiçbir .md dosyası taranmamış — hedef listesi çalışmıyor')
+
+    def test_digital_twin_ifadesi_belgelerden_kalkti(self):
+        """H5-5: v2.6.1'in "throughout" iddiası artık gerçekten doğru.
+
+        Tarihsel sürüm notları (``packaging/release_notes_v2.5.1.md``,
+        ``v2.6.1.md``) hariç tutulur: onlar kaldırılan ifadeyi ALINTILAR ve
+        geriye dönük değiştirilmez; kayıt defterinde gerekçeleriyle durur.
+        """
+        canli = [f for f in iddia_lint.scan()
+                 if f.rule_id == 'digital_twin'
+                 and not f.path.startswith('packaging/release_notes_')]
+        assert not canli, '\n'.join(
+            f'{f.path}:{f.line_no} {f.line_text[:120]}' for f in canli)
+
     def test_baseline_her_kaydin_gerekcesi_var(self):
         baseline = iddia_lint.load_baseline()
         assert baseline, 'kayıt defteri boş — dosya bulunamamış olabilir'

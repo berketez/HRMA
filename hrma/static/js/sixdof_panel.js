@@ -916,13 +916,18 @@
             // İstemci Barrowman ↔ backend tutarlılık bekçisi
             const client = computeBarrowman(g);
             const s = data.summary;
-            if (isFinite(client.xCp) &&
+            // H1-B10: `s.x_cp` / `s.cn_alpha` çözücü çöktüğünde null gelir
+            // (ölçüldü: dry_mass=0 -> summary alanlarının hepsi null).
+            // null ile aritmetik 0 gibi davranır, eşik aşılır ve
+            // `null.toFixed(4)` TypeError atardı. Karşılaştırma yalnız İKİ
+            // taraf da sayıysa yapılır.
+            if (isFinite(client.xCp) && Number.isFinite(s.x_cp) &&
                 Math.abs(client.xCp - s.x_cp) > CP_MATCH_TOL_M) {
                 console.warn('SixDofPanel: client-side Barrowman CP (' +
                     client.xCp.toFixed(4) + ' m) does not match backend x_cp (' +
                     s.x_cp.toFixed(4) + ' m) — formulas out of sync?');
             }
-            if (isFinite(client.cnAlpha) &&
+            if (isFinite(client.cnAlpha) && Number.isFinite(s.cn_alpha) &&
                 Math.abs(client.cnAlpha - s.cn_alpha) > CNA_MATCH_TOL) {
                 console.warn('SixDofPanel: client-side CN_alpha (' +
                     client.cnAlpha.toFixed(3) + ') does not match backend (' +
@@ -1260,26 +1265,75 @@
         const ser = data.series;
         const badges = $('sd_badges');
 
-        let html = badge(s.stable ? T('sixdof.bandStable', 'STABLE')
+        // ==============================================================
+        // NULL ALAN KAPISI (Faz 5 / H1-B10)
+        // --------------------------------------------------------------
+        // Uç, ölçemediği büyüklüğü BİLEREK `null` yayımlıyor: çözücü
+        // çöktüğünde ve zirveye varılmadan entegrasyon ufkuna dayanıldığında
+        // (`end_reason = 'time_limit'`) apoje / apoje anı / kararlılık
+        // hükmü null döner.
+        // ÖLÇÜLDÜ (2026-08-03, POST /api/six-dof-analysis,
+        // {dry_mass:20, propellant_mass:10, thrust:3000, burn_time:5, t_max:1}):
+        //   HTTP 200, summary.apogee = null, apogee_time = null, stable = null
+        // ESKİ KOD `s.apogee_time.toFixed(1)` çağırıyordu -> TypeError
+        // ("Cannot read properties of null (reading 'toFixed')"); paneldeki
+        // try/catch bunu yakalayıp durum satırına ham JS mesajını basıyordu.
+        // Kullanıcı "entegrasyon zirveye varmadan bitti" yerine ayrıştırıcı
+        // gürültüsü görüyordu. Ayrıca `s.stable` null iken `s.stable ? ... : ...`
+        // dalı UYDURMA BİR HÜKÜM basıyordu: ölçülmemiş kararlılık "UNSTABLE"
+        // diye gösteriliyordu.
+        // Kural: sayı yoksa SAYI BASILMAZ; niçin olmadığı yazılır.
+        // ==============================================================
+        const numOf = (v) => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+        const fx = (v, d) => { const n = numOf(v); return n === null ? null : n.toFixed(d); };
+
+        let html;
+        if (numOf(s.stable) === null && typeof s.stable !== 'boolean') {
+            html = badge(T('sixdof.stabilityNotEvaluated',
+                           'STABILITY NOT EVALUATED'), 'warn');
+        } else {
+            html = badge(s.stable ? T('sixdof.bandStable', 'STABLE')
                                   : T('sixdof.unstable', 'UNSTABLE'), s.stable ? 'ok' : 'err');
-        html += badge(TF('sixdof.badgeApogee',
-                         { km: (s.apogee / 1000).toFixed(2), t: s.apogee_time.toFixed(1) },
-                         'APOGEE {km} km @ {t} s'), 'info');
-        html += badge(TF('sixdof.badgeMaxMach', { m: s.max_mach.toFixed(2) },
-                         'MAX MACH {m}'), 'info');
-        html += badge(TF('sixdof.badgeMaxAlpha', { a: s.max_alpha_deg.toFixed(1) },
-                         'MAX alpha {a} deg'), s.max_alpha_deg < 10 ? 'ok' : 'warn');
+        }
+
+        const apKm = fx(numOf(s.apogee) === null ? null : s.apogee / 1000, 2);
+        const apT = fx(s.apogee_time, 1);
+        if (apKm !== null && apT !== null) {
+            html += badge(TF('sixdof.badgeApogee', { km: apKm, t: apT },
+                             'APOGEE {km} km @ {t} s'), 'info');
+        } else {
+            html += badge(T('sixdof.apogeeNotReported',
+                            'APOGEE NOT REPORTED — the integration ended before '
+                            + 'a peak was found'), 'warn');
+        }
+
+        const mach = fx(s.max_mach, 2);
+        if (mach !== null) {
+            html += badge(TF('sixdof.badgeMaxMach', { m: mach }, 'MAX MACH {m}'), 'info');
+        }
+        const alpha = fx(s.max_alpha_deg, 1);
+        if (alpha !== null) {
+            html += badge(TF('sixdof.badgeMaxAlpha', { a: alpha }, 'MAX alpha {a} deg'),
+                          s.max_alpha_deg < 10 ? 'ok' : 'warn');
+        }
         // NASA amatör roket pratiği: hedef 1.5-2 kalibre; >3 aşırı-stabil
         // (rüzgâra dönme + irtifa kaybı) — 2026-07-15 GPT-5.6 çapraz kontrol önerisi
-        const smMin = Math.min(s.static_margin_full, s.static_margin_empty);
-        const smMax = Math.max(s.static_margin_full, s.static_margin_empty);
-        const smKind = smMin <= 1 ? 'err' : (smMax > 3 ? 'warn' : 'ok');
-        html += badge(TF('sixdof.badgeMargin',
-                         { full: s.static_margin_full.toFixed(2),
-                           empty: s.static_margin_empty.toFixed(2) },
-                         'MARGIN {full} / {empty} cal')
-            + (smMax > 3 ? ' — ' + T('sixdof.overStable', 'OVER-STABLE') : ''), smKind);
-        html += badge(`CNα ${s.cn_alpha.toFixed(2)} · CP ${s.x_cp.toFixed(3)} m`, 'info');
+        const smFull = numOf(s.static_margin_full);
+        const smEmpty = numOf(s.static_margin_empty);
+        if (smFull !== null && smEmpty !== null) {
+            const smMin = Math.min(smFull, smEmpty);
+            const smMax = Math.max(smFull, smEmpty);
+            const smKind = smMin <= 1 ? 'err' : (smMax > 3 ? 'warn' : 'ok');
+            html += badge(TF('sixdof.badgeMargin',
+                             { full: smFull.toFixed(2), empty: smEmpty.toFixed(2) },
+                             'MARGIN {full} / {empty} cal')
+                + (smMax > 3 ? ' — ' + T('sixdof.overStable', 'OVER-STABLE') : ''), smKind);
+        }
+        const cnAlpha = fx(s.cn_alpha, 2);
+        const xCp = fx(s.x_cp, 3);
+        if (cnAlpha !== null && xCp !== null) {
+            html += badge(`CNα ${cnAlpha} · CP ${xCp} m`, 'info');
+        }
         html += badge(T('sixdof.thrustBadge', 'THRUST') + ': '
             + (usedCurve ? T('sixdof.computedCurve', 'COMPUTED CURVE')
                          : T('sixdof.constantThrust', 'CONSTANT')), 'info');

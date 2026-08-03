@@ -205,14 +205,18 @@ class MotorDataValidator:
         """Check physical consistency of parameters"""
         
         # Throat must be smaller than chamber
-        throat_d = motor_data.get('throat_diameter')
+        # Faz 5 / B11 ile aynı kusur: bu iki alan da HAM okunuyordu ve metin
+        # geldiğinde karşılaştırma çöküyordu. Ölçüldü (3 Ağustos 2026):
+        # throat_diameter="0.02" -> TypeError: '>=' not supported between
+        # instances of 'str' and 'float'.
+        throat_d = _num(motor_data.get('throat_diameter'))
         chamber_d = _num(motor_data.get('chamber_diameter'))
         if throat_d and chamber_d and throat_d >= chamber_d:
             errors.append(f"Throat diameter ({throat_d}m) must be smaller than "
                         f"chamber diameter ({chamber_d}m)")
-        
+
         # Exit must be larger than throat
-        exit_d = motor_data.get('exit_diameter')
+        exit_d = _num(motor_data.get('exit_diameter'))
         if throat_d and exit_d and exit_d <= throat_d:
             errors.append(f"Exit diameter ({exit_d}m) must be larger than "
                         f"throat diameter ({throat_d}m)")
@@ -245,8 +249,34 @@ class MotorDataValidator:
     
     def _perform_safety_checks(self, motor_data: Dict, motor_type: str,
                               errors: List, warnings: List):
-        """Perform safety-critical checks"""
-        
+        """Perform safety-critical checks.
+
+        v2.6.26 / Faz 5 (B11) — TİP DENETİMSİZ KARŞILAŞTIRMA:
+        Aşağıdaki üç eşik (``thrust``, ``chamber_temperature``,
+        ``burn_time``) değeri ``motor_data.get(...)`` ile HAM okuyup
+        doğrudan ``>`` ile karşılaştırıyordu. Sayısal bir alan metin olarak
+        geldiğinde (form gönderimi ya da kayıtlı ``.hrma`` projesinden gelen
+        en olağan bozulma) satır ham Python hatası veriyordu:
+
+            thrust="1000"              -> TypeError: '>' not supported
+            burn_time="5"                 between instances of 'str' and 'int'
+            chamber_temperature="3000"
+
+        Ölçüm (3 Ağustos 2026, HEAD 9d3728e): üç alanın üçü de
+        ``validate_motor_data(..., 'hybrid')`` çağrısını istisnayla
+        düşürüyordu; ``/calculate`` bu yüzden HTTP 400 + ham TypeError
+        metniyle komple kilitleniyordu. Oysa aynı fonksiyonun ilk bloğu
+        (:107) "thrust must be numeric, got str" diye ANLAŞILIR hatayı zaten
+        üretmişti — kullanıcı onu hiç göremiyordu, çünkü bu blok ondan sonra
+        koşup çöküyordu.
+
+        Düzeltme: ``chamber_pressure``'ın v2.6.26'da zaten yaptığı gibi
+        ``_num()`` kullanılır. ``_num`` sayıya çevrilemeyen değere None döner
+        ve o kontrol ATLANIR (sessizce 0 varsayılmaz); alanın sayısal
+        olmadığı bilgisi yukarıdaki tip denetiminden zaten hata listesine
+        girmiştir.
+        """
+
         # Chamber pressure safety factor
         chamber_p = _num(motor_data.get('chamber_pressure'))
         if chamber_p:
@@ -254,9 +284,9 @@ class MotorDataValidator:
             if burst_p > 2000:  # Extreme pressure warning
                 warnings.append(f"CRITICAL: Burst pressure ({burst_p} bar) requires "
                               "specialized high-pressure equipment")
-        
+
         # Thrust level safety
-        thrust = motor_data.get('thrust')
+        thrust = _num(motor_data.get('thrust'))
         if thrust:
             if thrust > 50000:  # 50 kN
                 warnings.append(f"High thrust ({thrust}N) requires professional "
@@ -264,15 +294,16 @@ class MotorDataValidator:
             elif thrust > 10000:  # 10 kN
                 warnings.append(f"Moderate thrust ({thrust}N) requires reinforced "
                               "test stand and remote operations")
-        
+
         # Temperature warnings
-        temperature = motor_data.get('chamber_temperature', motor_data.get('temperature'))
+        temperature = _num(motor_data.get('chamber_temperature',
+                                          motor_data.get('temperature')))
         if temperature and temperature > 3500:
             warnings.append(f"Extreme temperature ({temperature}K) requires "
                           "advanced cooling and thermal protection")
-        
+
         # Burn time warnings
-        burn_time = motor_data.get('burn_time')
+        burn_time = _num(motor_data.get('burn_time'))
         if burn_time and burn_time > 60:
             warnings.append(f"Long burn time ({burn_time}s) requires thermal "
                           "management and structural analysis")

@@ -2,7 +2,11 @@
 # HRMA DMG kurucu
 set -euo pipefail
 B="$(cd "$(dirname "$0")" && pwd)"
-SRC="/Users/apple/Desktop/dosyalar/HRMA"
+SRC="$(cd "$B/.." && pwd)"   # depo kökü — betiğin konumundan türetilir
+# 2026-08-03: burada sabit "/Users/apple/Desktop/dosyalar/HRMA" yazıyordu.
+# Depo /Users/apple/HRMA'ya taşınmıştı; eski yolda yalnız paketleme
+# artıkları kalmıştı ve içinde hrma/ ile data/ YOKTU. Yani paketleme
+# çalıştırılsaydı boş bir ağaçtan kopyalayacaktı.
 # build.noindex: Spotlight bu ağacı indekslemesin (sahte "HRMA" kopyaları)
 STAGE="$B/mac/build.noindex/dmg_stage"
 DIST="$SRC/dist"

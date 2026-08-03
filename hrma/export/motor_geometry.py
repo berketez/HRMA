@@ -4,6 +4,30 @@ Kesit çizimi (create_improved_motor_cross_section), STEP/STL üreticileri ve
 teknik çizimler hibrit-şekilli, METRE bazlı bir motor_data sözlüğü bekler.
 Katı motor rotası mm bazlı, sıvı motor rotası KARIŞIK birimli (chamber mm,
 throat/exit m) sonuç döndürür — dönüşümler burada tek noktada yapılır.
+
+BİRİM SÖZLEŞMESİ (Faz 5B / H4-2) — bu modül dışa aktarım katmanının TEK
+birim otoritesidir. Ölçüldü (HEAD 9d3728e, 3 Ağustos 2026): ``/calculate_solid``
+yanıtı doğrudan ``/api/export-dxf``e verilince çizim ``Ø_chamber = 100000.0 mm``
+(gerçek 100.0), ``Ø_throat = 47927.25 mm`` (gerçek 47.93), STEP/STL zarfları da
+1000× büyük çıkıyordu; sıvıda ``Ø_chamber = 99192.1 mm`` yazarken boğaz/çıkış
+DOĞRU idi — yani TEK çizimde kamara lülenin 1000 katıydı. Sebep: üreticilerin
+her biri girdiyi koşulsuz METRE kabul edip 1000 ile çarpıyordu
+(``drawing_generator._dims_mm``, ``step_export``, ``cad_visualization``), oysa
+katı rotası mm, sıvı rotası karışık birim döndürüyor.
+
+Çözüm tek noktada: ``normalise_export_geometry`` gelen sözlüğün birimini
+AÇIKÇA çözer ve METRE cinsinden bir kopya döndürür; kopya ``length_units='m'``
+beyanını ve alan-başına hangi yoldan çözüldüğünü gösteren
+``geometry_unit_resolution`` kaydını taşır. Çözüm sırası:
+
+  1. ``motor_geometry`` alt sözlüğü — bu modülde normalize edilmiştir, SI
+     GARANTİLİ (``/calculate_solid`` ve ``/calculate_liquid`` yanıtlarında
+     hazır gelir).
+  2. ``length_units`` beyanı ('m' / 'mm').
+  3. Büyüklük çıkarımı — eşikler aşağıda tek yerde tanımlı.
+
+Hiçbir yolda çözülemeyen alan **uydurulmaz**: değer ``None`` kalır ve
+üreticiler "hesaplanmadı" diye beyan eder.
 """
 
 import numpy as np
@@ -15,6 +39,228 @@ def _num(v, fb):
         return f if np.isfinite(f) else fb
     except (TypeError, ValueError):
         return fb
+
+
+# ---------------------------------------------------------------------------
+# Birim çıkarım eşikleri — TEK tanım noktası (CLAUDE.md kural 11).
+# ---------------------------------------------------------------------------
+# Bu sınıftaki (amatör/üniversite) motorlarda bir çap metre cinsinden 1 m'yi,
+# bir boy 5 m'yi geçmez; geçiyorsa değer milimetredir. Belirsiz bant (ör. 1.0)
+# çap için mm kabul edilir: 1 m boğaz bu yazılımın kapsamı dışında, 1 mm boğaz
+# ise gerçek bir mikro-motor ölçüsüdür. Eşikler daha önce
+# ``openrocket_integration.py`` içinde tanımlıydı ve dışa aktarımın geri
+# kalanından habersizdi; artık oradan da buradan içe aktarılır.
+DIAMETER_SI_MAX_M = 1.0
+LENGTH_SI_MAX_M = 5.0
+THICKNESS_SI_MAX_M = 0.1
+
+#: Birimi çözülen uzunluk alanları ve her birinin SI üst sınırı.
+EXPORT_LENGTH_FIELDS = {
+    'chamber_diameter': DIAMETER_SI_MAX_M,
+    'throat_diameter': DIAMETER_SI_MAX_M,
+    'exit_diameter': DIAMETER_SI_MAX_M,
+    'port_diameter_initial': DIAMETER_SI_MAX_M,
+    'port_diameter_final': DIAMETER_SI_MAX_M,
+    'chamber_length': LENGTH_SI_MAX_M,
+    'grain_length': LENGTH_SI_MAX_M,
+    'nozzle_length': LENGTH_SI_MAX_M,
+    'nozzle_convergent_length': LENGTH_SI_MAX_M,
+    'nozzle_divergent_length': LENGTH_SI_MAX_M,
+}
+
+#: ``length_units`` beyanında kabul edilen yazımlar.
+_DECLARED_METRE = frozenset({'m', 'metre', 'meter', 'metres', 'meters', 'si'})
+_DECLARED_MM = frozenset({'mm', 'millimetre', 'millimeter', 'millimetres',
+                          'millimeters'})
+
+#: Grain verisi bulunamadığında üreticilerin basacağı gerekçe. Sıvı çift
+#: yakıtlı motorda katı yakıt bloğu FİZİKSEL OLARAK yoktur; eski kod bu
+#: durumda 240 mm boyunda, Ø30→50 mm portlu bir grain uydurup imalat
+#: çizimine, STEP montajına ve STL'e koyuyordu (Faz 5B / H4-1).
+GRAIN_NOT_IN_RESULT = (
+    'NOT MODELLED: the analysis result carries no solid grain geometry '
+    '(no grain_design, grain_length or port diameter). A liquid bipropellant '
+    'engine has no grain; nothing is drawn in its place.')
+
+
+def length_in_meters(value, si_max):
+    """Bir uzunluğu metreye çevirir; birimi büyüklüğünden çıkarır.
+
+    Döner: ``(metre veya None, 'si' | 'mm' | 'missing')``. Üst seviye motor
+    sonuçları birimi beyan etmediği için başka yol yok; çağıran hangi yolun
+    seçildiğini raporlar.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None, 'missing'
+    if not np.isfinite(f) or f <= 0.0:
+        return None, 'missing'
+    if f > si_max:
+        return f / 1000.0, 'mm'
+    return f, 'si'
+
+
+def declared_length_unit(motor_results):
+    """``length_units`` beyanını çözer: 'm', 'mm' ya da None (beyan yok)."""
+    declared = str((motor_results or {}).get('length_units') or '').strip().lower()
+    if declared in _DECLARED_METRE:
+        return 'm'
+    if declared in _DECLARED_MM:
+        return 'mm'
+    return None
+
+
+def resolve_length_m(motor_results, key, si_max=None):
+    """Tek bir uzunluk alanını METRE olarak çözer; kaynağını da döndürür.
+
+    Döner: ``(metre veya None, kaynak)``. Kaynak değerleri:
+    ``motor_geometry`` (normalize blok, SI garantili), ``declared:m``,
+    ``declared:mm``, ``si`` / ``mm`` (büyüklük çıkarımı), ``missing``.
+    """
+    md = motor_results if isinstance(motor_results, dict) else {}
+    if si_max is None:
+        si_max = EXPORT_LENGTH_FIELDS.get(key, LENGTH_SI_MAX_M)
+
+    geo = md.get('motor_geometry')
+    if isinstance(geo, dict):
+        try:
+            f = float(geo.get(key))
+        except (TypeError, ValueError):
+            f = None
+        if f is not None and np.isfinite(f) and f > 0.0:
+            return f, 'motor_geometry'
+
+    declared = declared_length_unit(md)
+    if declared is not None:
+        try:
+            f = float(md.get(key))
+        except (TypeError, ValueError):
+            return None, 'missing'
+        if not np.isfinite(f) or f <= 0.0:
+            return None, 'missing'
+        return (f if declared == 'm' else f / 1000.0), f'declared:{declared}'
+
+    value, unit = length_in_meters(md.get(key), si_max)
+    return value, unit
+
+
+def resolve_grain_m(motor_results):
+    """Grain geometrisini METRE olarak çözer; yoksa ``None`` döner.
+
+    Döner: ``(sözlük veya None, gerekçe)``. Sözlük anahtarları
+    ``length``, ``port_initial``, ``port_final`` (metre; sonuncusu None
+    olabilir) ve ``source``.
+
+    UYDURMA YOK: boy ya da başlangıç portu çözülemiyorsa grain HİÇ
+    döndürülmez — çağıran çizmez ve gerekçeyi basar.
+    """
+    md = motor_results if isinstance(motor_results, dict) else {}
+    # Normalize blok varsa grain de oradan okunur (SI garantili).
+    geo = md.get('motor_geometry')
+    sources = []
+    if isinstance(geo, dict):
+        sources.append((geo, 'motor_geometry'))
+    sources.append((md, 'motor result'))
+
+    for node, label in sources:
+        gd = node.get('grain_design') if isinstance(node, dict) else None
+        gd = gd if isinstance(gd, dict) else {}
+        # ``*_mm`` ekli anahtarlar birimini BEYAN eder — çıkarım yapılmaz.
+        length_mm = _first_positive(gd.get('grain_length_mm'))
+        port0_mm = _first_positive(gd.get('port_diameter_initial_mm'),
+                                   gd.get('inner_diameter_mm'))
+        port1_mm = _first_positive(gd.get('port_diameter_final_mm'),
+                                   gd.get('outer_diameter_mm'))
+        length_m = length_mm / 1000.0 if length_mm is not None else None
+        port0_m = port0_mm / 1000.0 if port0_mm is not None else None
+        port1_m = port1_mm / 1000.0 if port1_mm is not None else None
+        src = f'{label}.grain_design (mm, declared)'
+
+        if length_m is None or port0_m is None:
+            # Beyansız üst seviye alanlar — birim çıkarımı ile.
+            lv, lsrc = resolve_length_m(node, 'grain_length')
+            p0, p0src = resolve_length_m(node, 'port_diameter_initial')
+            p1, _p1src = resolve_length_m(node, 'port_diameter_final')
+            if length_m is None and lv is not None:
+                length_m, src = lv, f'{label}.grain_length ({lsrc})'
+            if port0_m is None and p0 is not None:
+                port0_m = p0
+                src = f'{src}; port from {label} ({p0src})'
+            if port1_m is None and p1 is not None:
+                port1_m = p1
+
+        if length_m is not None and port0_m is not None:
+            return {'length': length_m, 'port_initial': port0_m,
+                    'port_final': port1_m, 'source': src}, None
+
+    return None, GRAIN_NOT_IN_RESULT
+
+
+def _first_positive(*values):
+    """İlk sonlu-pozitif değeri döndürür; yoksa None (uydurma yedek YOK)."""
+    for v in values:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(f) and f > 0.0:
+            return f
+    return None
+
+
+def normalise_export_geometry(motor_results):
+    """Dışa aktarım üreticileri için girdiyi METRE'ye indirger.
+
+    Döner: ``(kopya, rapor)``.
+
+    * ``kopya`` — girdinin sığ kopyası; çözülebilen uzunluk alanları METRE
+      olarak yeniden yazılır, ``length_units='m'`` beyanı eklenir. Çözülemeyen
+      alanlar DOKUNULMAZ (uydurma değer yazılmaz) ve raporda ``missing``
+      görünür.
+    * ``rapor`` — ``{'fields': {alan: kaynak}, 'notes': [...],
+      'grain': {...} | None, 'grain_reason': str | None}``.
+
+    Fonksiyon idempotenttir: çıktısını tekrar verirseniz ``declared:m``
+    yoluyla aynı değerleri döndürür (ölçüldü, bkz. tests/test_faz5_cizim_birim).
+    """
+    md = motor_results if isinstance(motor_results, dict) else {}
+    out = dict(md)
+    fields = {}
+    notes = []
+
+    for key, si_max in EXPORT_LENGTH_FIELDS.items():
+        if key not in md and not isinstance(md.get('motor_geometry'), dict):
+            continue
+        value, source = resolve_length_m(md, key, si_max)
+        if value is None:
+            if key in md:
+                fields[key] = 'missing'
+            continue
+        fields[key] = source
+        if source in ('mm', 'declared:mm'):
+            notes.append(f'{key} read as mm ({float(md[key]):.6g}) -> '
+                         f'{value:.6g} m')
+        out[key] = value
+
+    grain, grain_reason = resolve_grain_m(md)
+    if grain is not None:
+        out['grain_length'] = grain['length']
+        out['port_diameter_initial'] = grain['port_initial']
+        if grain['port_final'] is not None:
+            out['port_diameter_final'] = grain['port_final']
+        fields['grain'] = grain['source']
+
+    # Beyan: bundan sonra bu sözlüğü okuyan herkes METRE görür.
+    out['length_units'] = 'm'
+    report = {
+        'fields': fields,
+        'notes': notes,
+        'grain': grain,
+        'grain_reason': grain_reason,
+    }
+    out['geometry_unit_resolution'] = report
+    return out, report
 
 
 def _real_mm(*values):

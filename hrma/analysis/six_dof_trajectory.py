@@ -471,6 +471,37 @@ def _mk_warning(code, severity='warning', **params):
     return {'code': code, 'params': params, 'severity': severity}
 
 
+def _require_finite(**values):
+    """Sonlu-değer kapısı (Faz 5 / B7) — sonlu değilse ``ValueError``.
+
+    ÖLÇÜLDÜ (HEAD 9d3728e): ``thrust = NaN`` ile kurulan çözücüde
+    ``solve(t_max=400)`` 60 saniyede DÖNMEDİ (``timeout`` çıkış kodu 124);
+    sağlıklı çağrı 0,09 s sürüyor. Sebep: NaN türevler RK45'in adım kabul
+    ölçütünü hiçbir zaman sağlamaz, adım sonsuza kadar küçülür. Tek istek
+    bir işçi iş parçacığını süresiz tutar (masaüstü paketinde kilitlenme).
+
+    Eski muhafız (``if not thrust or not burn_time``) bunu yakalamıyordu:
+    ``not float('nan')`` Python'da ``False``'tur, yani NaN "verilmiş geçerli
+    değer" sayılıyordu. Flask'ın JSON çözümleyicisi de ``NaN``/``Infinity``
+    literallerini kabul ediyor, yani girdi uçtan gelebiliyor.
+    """
+    bad = []
+    for name, value in values.items():
+        if value is None:
+            bad.append(f"{name}=None")
+            continue
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            bad.append(f"{name}={value!r}")
+            continue
+        if not np.isfinite(f):
+            bad.append(f"{name}={f!r}")
+    if bad:
+        raise ValueError(
+            "6-DOF çözücüsü sonlu olmayan girdiyle çağrıldı: " + ", ".join(bad))
+
+
 class SixDOFTrajectory:
     def __init__(self, aero, dry_mass, propellant_mass,
                  thrust_curve=None, thrust=None, burn_time=None,
@@ -523,6 +554,27 @@ class SixDOFTrajectory:
                         _inertia). None → tekdüze narin-gövde modeli
                         (geriye dönük birebir aynı sonuç).
         """
+        # B7 — SONLU-DEĞER KAPISI, çözücüye girmeden önce (fail-closed).
+        # Kütle bölen olarak kullanılır (a = F/m), bu yüzden pozitiflik de
+        # burada denetlenir; NaN kütle de aynı süresiz kilitlenmeyi yapar.
+        _require_finite(dry_mass=dry_mass, propellant_mass=propellant_mass,
+                        cd0=cd0, wind_speed=wind_speed,
+                        wind_direction_deg=wind_direction_deg,
+                        launch_elevation_deg=launch_elevation_deg,
+                        launch_azimuth_deg=launch_azimuth_deg,
+                        launch_altitude=launch_altitude or 0.0,
+                        rail_length=rail_length, roll_damping=roll_damping)
+        if latitude_deg is not None:
+            _require_finite(latitude_deg=latitude_deg)
+        if nozzle_exit_area is not None:
+            _require_finite(nozzle_exit_area=nozzle_exit_area)
+        if thrust_reference_pressure is not None:
+            _require_finite(thrust_reference_pressure=thrust_reference_pressure)
+        if float(dry_mass) + float(propellant_mass) <= 0.0 or float(dry_mass) <= 0.0:
+            raise ValueError(
+                "6-DOF çözücüsü pozitif kuru kütle ister "
+                f"(dry_mass={dry_mass!r}, propellant_mass={propellant_mass!r})")
+
         self.aero = aero
         self.m_dry = float(dry_mass)
         self.m_prop = float(propellant_mass)
@@ -530,6 +582,9 @@ class SixDOFTrajectory:
         if thrust_curve is not None:
             t = np.asarray(thrust_curve['time'], dtype=float)
             F = np.asarray(thrust_curve['thrust'], dtype=float)
+            if not (np.all(np.isfinite(t)) and np.all(np.isfinite(F))):
+                raise ValueError(
+                    "thrust_curve 'time'/'thrust' sonlu olmayan değer içeriyor")
             # B3: net doğrulama — boş/tek-nokta/uyumsuz uzunluk çağıran
             # katmanda anlaşılır ValueError (endpoint 400) olsun; aksi halde
             # t[0] IndexError → 500 sızıyordu.
@@ -551,8 +606,13 @@ class SixDOFTrajectory:
             self.t_burn = float(t[-1])
             self._impulse = float(np.trapz(F, t))
         else:
+            # DİKKAT: ``not thrust`` NaN'ı yakalamaz (``not float('nan')`` =
+            # False). Sonlu-değer kapısı bu yüzden AYRI çağrılır (B7).
+            _require_finite(thrust=thrust, burn_time=burn_time)
             if not thrust or not burn_time:
                 raise ValueError("thrust_curve yoksa thrust ve burn_time zorunlu")
+            if float(burn_time) <= 0.0:
+                raise ValueError(f"burn_time pozitif olmalı (burn_time={burn_time!r})")
             self._t_thrust = np.array([0.0, float(burn_time)])
             self._F_thrust = np.array([float(thrust), float(thrust)])
             self.t_burn = float(burn_time)
@@ -920,6 +980,11 @@ class SixDOFTrajectory:
         |ω| > 15 rad/s (takla) tespiti de erken sonlandırır — Barrowman
         lineer aerodinamiği o rejimde zaten geçersizdir.
         """
+        # Bu KOŞUYA ait uyarılar. ``self.warnings`` (kuruluş uyarıları)
+        # BOZULMAZ: solve() birden çok kez çağrılabilir ve aynı uyarının
+        # üst üste birikmesi sayım/gösterimi bozar.
+        solve_warnings = list(self.warnings)
+
         self._r0 = np.zeros(3)
         y0 = np.concatenate([
             self._r0, np.zeros(3), self.q0, np.zeros(3)])
@@ -1076,4 +1141,30 @@ class SixDOFTrajectory:
             for _key in ('apogee', 'apogee_time', 'max_speed', 'max_mach',
                          'max_alpha_deg', 'stable', 'lateral_drift_at_end'):
                 out[_key] = None
+        elif end_reason == 'time_limit':
+            # B6 (Faz 5) — ZAMAN SINIRI SONUÇ DEĞİLDİR.
+            #
+            # Eski kod alanları YALNIZ ``converged == False`` iken None
+            # yapıyordu. Zaman sınırında ``sol.success`` True olduğu için
+            # ``apogee = max(alt)`` — yani ENTEGRASYON UFKUNUN sonundaki
+            # irtifa — "apoje" diye yayımlanıyordu. ÖLÇÜLDÜ (HEAD 9d3728e):
+            #   t_max = 1 s      -> apogee = 46,19 m  @ apogee_time = 1,0 s
+            #   thrust = 1e7 N   -> apogee = 787 781 371 m @ 400,0 s
+            # İki koşuda da araç HÂLÂ TIRMANIYORDU; verilen sayı bir apoje
+            # değil, ufkun kestiği yerdeki irtifadır.
+            #
+            # Zirveye varılmadığı için apoje ve apoje anı YAYIMLANMAZ.
+            # ``stable`` de yayımlanmaz: hüküm ``max_alpha < 15°`` koşulunu
+            # içerir ve bu koşul yalnız ufkun İÇİNDE ölçülmüştür — kalan
+            # uçuşta aşılıp aşılmadığı bilinmiyor.
+            # Tepe hız / Mach / α ufuk içindeki GERÇEK ölçümlerdir ama üst
+            # sınır değil ALT SINIRDIR; ayrı bir bayrakla damgalanır.
+            for _key in ('apogee', 'apogee_time', 'stable'):
+                out[_key] = None
+            out['peak_values_are_lower_bounds'] = True
+            out['t_max_s'] = float(t_max)
+            solve_warnings.append(_mk_warning(
+                'warn.sixdof.integration_time_limit', 'error',
+                t_max_s=float(t_max)))
+        out['warnings'] = solve_warnings
         return out

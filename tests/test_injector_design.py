@@ -462,9 +462,13 @@ class TestEndpoint:
                 'mdot_ox': 1.2, 'mdot_fuel': 0.5, 'rho_ox': 1141.0,
                 'rho_fuel': 810.0, 'Pc_bar': 20.0}
         resp = client.post('/api/injector-design', json=body)
-        if resp.status_code == 404:
-            pytest.skip('/api/injector-design henüz kablolanmadı '
-                        '(backend ajanı bekleniyor)')
+        # Faz 5 / H5-6: eskiden ``if resp.status_code == 404: pytest.skip(
+        # '/api/injector-design henüz kablolanmadı')`` idi. Uç ARTIK
+        # kablolanmış durumda (ölçüldü, 3 Ağustos 2026: HTTP 200); geçici
+        # atlamanın yerinde kalması, ucun ileride yanlışlıkla kaldırılmasını
+        # yeşil gösterirdi.
+        assert resp.status_code != 404, (
+            '/api/injector-design ucu kaybolmuş — enjektör paneli kablosuz kalır')
         assert resp.status_code == 200
         data = resp.get_json()
         assert data['status'] == 'success'

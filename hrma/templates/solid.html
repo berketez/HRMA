@@ -3807,6 +3807,16 @@ Please provide:
             `;
         }
         
+        // Faz 5 / H4-11: kür sıcaklığı K -> °C çevriminde 273 kullanılıyordu.
+        // Mutlak sıfır 273,15 K'dir; 0,15 K'lik sapma sabit tekilliğini bozar
+        // (hrma/constants.py aynı çevrimi 273.15 ile yapar).
+        // ÖLÇÜLDÜ (2026-08-03, examples/Example Solid KNDX BATES 75mm.hrma ->
+        // /calculate_solid): curing_process.temperature_k = 398,0 K.
+        //   önce : 398,0 - 273    = 125,00 -> ekranda "125 °C"
+        //   sonra: 398,0 - 273,15 = 124,85 -> ekranda "125 °C"
+        // 0 ondalıkla basıldığı için EKRAN DEĞİŞMEZ; düzeltilen şey sabitin
+        // kendisidir (ondalık artırılırsa ya da başka bir kür sıcaklığı
+        // gelirse fark görünür olurdu).
         function generateManufacturingAnalysisHTML(results) {
             const manufacturing = results.manufacturing_analysis || {};
             const propellantManuf = manufacturing.propellant_manufacturing || {};
@@ -3827,7 +3837,7 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.curing_process', 'Curing Process')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.temperature', 'Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(curing, 'temperature_k', 0, '\u00B0C', v => v - 273)}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.temperature', 'Temperature:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(curing, 'temperature_k', 0, '\u00B0C', v => v - 273.15)}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.duration', 'Duration:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(curing, 'time_hours', 0, T('solid.js.hours', 'hours'))}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.pressure', 'Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${T('solid.js.atmospheric', 'Atmospheric')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.humidity_control', 'Humidity Control:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${T('solid.js.required', 'Required')}</td></tr>

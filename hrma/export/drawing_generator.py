@@ -43,23 +43,135 @@ def _num(v, fb):
         return fb
 
 
-def _dims_mm(motor_results):
-    """Çizimlerde kullanılan ana boyutları (mm) tek yerden çıkarır."""
-    md = motor_results or {}
-    gd = md.get('grain_design') or {}
-    return {
-        'L': _num(md.get('chamber_length'), 0.3) * 1000,
-        'D_ch': _num(md.get('chamber_diameter'), 0.1) * 1000,
-        'd_t': _num(md.get('throat_diameter'), 0.02) * 1000,
-        'd_e': _num(md.get('exit_diameter'), 0.08) * 1000,
-        'L_g': _num(gd.get('grain_length_mm'),
-                    _num(md.get('grain_length'), 0.24) * 1000),
-        'd_p0': _num(gd.get('port_diameter_initial_mm'),
-                     _num(md.get('port_diameter_initial'), 0.03) * 1000),
-        'd_pf': _num(gd.get('port_diameter_final_mm'),
-                     _num(md.get('port_diameter_final'), 0.05) * 1000),
-        'eps': _num(md.get('expansion_ratio'), 4.0),
+class DrawingGeometryError(ValueError):
+    """İmalat çizimi için zorunlu ölçü çözülemedi — çizim ÜRETİLMEZ."""
+
+
+#: Ölçüsü çözülemeyen satırların çizimde ve tabloda göründüğü metin.
+NOT_RESOLVED = 'NOT AVAILABLE FROM THE ANALYSIS'
+
+
+def _prepare(motor_results):
+    """Girdiyi METRE'ye indirger ve çizim ölçülerini (mm) çıkarır.
+
+    Faz 5B / H4-1 ve H4-2. İki ayrı kusur burada kapanır:
+
+    * Birim: ``_dims_mm`` girdiyi KOŞULSUZ metre kabul edip 1000 ile
+      çarpıyordu. Ölçüldü (HEAD 9d3728e): ``/calculate_solid`` yanıtı
+      doğrudan verilince ``Ø_chamber = 100000.0 mm`` (gerçek 100.0),
+      ``Ø_throat = 47927.25 mm`` (gerçek 47.93); sıvıda kamara 99192.1 mm
+      iken boğaz/çıkış doğruydu — tek çizimde iki farklı ölçek. Artık birim
+      ``motor_geometry.normalise_export_geometry`` ile AÇIKÇA çözülür ve
+      nozul konturu da aynı normalize sözlükten örneklenir (kontur
+      örnekleyicisi de metre bekliyor: ölçüldü, ham katı girdide z aralığı
+      0..174 848 mm çıkıyordu).
+    * Grain: eski kod grain boyu/portu için SABİT YEDEK taşıyordu
+      (0.24 m / 0.03 m / 0.05 m). Sıvı çift yakıtlı motorda grain YOKTUR;
+      yedekler devreye girip imalat çizimine 240 mm boyunda, Ø30→50 mm
+      portlu UYDURMA bir katı yakıt bloğu koyuyordu. Artık grain yalnız
+      sonuçta gerçekten varsa çizilir.
+
+    Döner: ``(normalize_motor_data, dims)``.
+    """
+    from hrma.export.motor_geometry import normalise_export_geometry
+
+    md, report = normalise_export_geometry(motor_results)
+
+    def mm(key):
+        try:
+            f = float(md.get(key))
+        except (TypeError, ValueError):
+            return None
+        return f * 1000.0 if (np.isfinite(f) and f > 0.0) else None
+
+    grain = report['grain']
+    dims = {
+        'L': mm('chamber_length'),
+        'D_ch': mm('chamber_diameter'),
+        'd_t': mm('throat_diameter'),
+        'd_e': mm('exit_diameter'),
+        'eps': _num(md.get('expansion_ratio'), None),
+        'grain': ({'L_g': grain['length'] * 1000.0,
+                   'd_p0': grain['port_initial'] * 1000.0,
+                   'd_pf': (grain['port_final'] * 1000.0
+                            if grain['port_final'] is not None else None),
+                   'source': grain['source']}
+                  if grain is not None else None),
+        'grain_reason': report['grain_reason'],
+        'units': report['fields'],
     }
+    return md, dims
+
+
+def _dims_mm(motor_results):
+    """Çizimlerde kullanılan ana boyutları (mm) tek yerden çıkarır.
+
+    Çözülemeyen ölçü ``None`` döner — uydurma yedek ÜRETİLMEZ. Grain verisi
+    yoksa ``dims['grain'] is None`` ve ``dims['grain_reason']`` nedeni söyler.
+    """
+    return _prepare(motor_results)[1]
+
+
+def _mm_text(value, pattern='{:.1f}'):
+    """Ölçüyü 'x.x mm' olarak yazar; çözülemediyse açık beyan basar."""
+    if value is None:
+        return NOT_RESOLVED
+    return pattern.format(value) + ' mm'
+
+
+def _wrap(text, width):
+    """Uzun metni sabit genişlikte satırlara böler (sayfadan taşma olmasın)."""
+    words = str(text).split()
+    if not words:
+        return ['']
+    lines, cur = [], words[0]
+    for w in words[1:]:
+        if len(cur) + 1 + len(w) <= width:
+            cur += ' ' + w
+        else:
+            lines.append(cur)
+            cur = w
+    lines.append(cur)
+    return lines
+
+
+def _unit_note(units):
+    """Alan-başına birim çözümünü tek satırlık beyana çevirir."""
+    labels = {
+        'motor_geometry': 'normalised motor_geometry (SI)',
+        'declared:m': 'declared m',
+        'declared:mm': 'declared mm',
+        'si': 'inferred m',
+        'mm': 'inferred mm',
+        'missing': 'not available',
+    }
+    seen = []
+    for key in ('chamber_diameter', 'chamber_length', 'throat_diameter',
+                'exit_diameter'):
+        src = units.get(key)
+        if src is None:
+            continue
+        text = labels.get(src, src)
+        if text not in seen:
+            seen.append(text)
+    if not seen:
+        return NOT_RESOLVED
+    return ('all dimensions printed in mm; input resolved as '
+            + ', '.join(seen))
+
+
+def _require_drawable(dims):
+    """Kamara çapı/boyu olmadan imalat çizimi üretilmez (fail-closed)."""
+    missing = [name for name, key in (('chamber_diameter', 'D_ch'),
+                                      ('chamber_length', 'L'))
+               if dims[key] is None]
+    if missing:
+        raise DrawingGeometryError(
+            'cannot draw a manufacturing view without ' + ' and '.join(missing)
+            + '; the analysis result does not carry it (checked '
+              'motor_geometry, the declared length_units and the top-level '
+              'fields). Run the analysis again instead of receiving a drawing '
+              'built from generator defaults.')
 
 
 def _render_or_raise(fig, width, height):
@@ -167,7 +279,10 @@ def generate_drawing_pdf(motor_results, out_path=None):
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas as rl_canvas
 
-    d = _dims_mm(motor_results)
+    # Birim TEK noktada çözülür; sayfa 1 kesiti ve enjektör deseni de aynı
+    # normalize sözlükten üretilir (aksi hâlde tablo mm, kesit metre olurdu).
+    motor_results, d = _prepare(motor_results)
+    _require_drawable(d)
     # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
     name = safe_name((motor_results or {}).get('motor_name'))
     stamp = datetime.now().strftime('%Y-%m-%d')
@@ -244,17 +359,30 @@ def generate_drawing_pdf(motor_results, out_path=None):
     spec = _injector_spec(motor_results)
     conv_deg, div_deg, noz_type = _nozzle_half_angles(motor_results)
 
+    # Grain satırları YALNIZ gerçekten grain'i olan motorda basılır. Sıvı
+    # motorda eskiden sabit yedeklerden gelen "Grain length 240.0 mm /
+    # Port diameter 30.0→50.0 mm" satırları gerçek ölçülerle aynı tabloda,
+    # dayanak beyanı olmadan duruyordu (Faz 5B / H4-1).
+    grain = d['grain']
+    if grain is not None:
+        grain_rows = [
+            ('Grain length', _mm_text(grain['L_g'])),
+            ('Port diameter (initial)', _mm_text(grain['d_p0'])),
+            ('Port diameter (final)', _mm_text(grain['d_pf'])),
+        ]
+    else:
+        grain_rows = [('Solid grain', d['grain_reason'] or NOT_AVAILABLE_SPEC)]
+
     rows = [
-        ('Chamber inner diameter', f"{d['D_ch']:.1f} mm"),
-        ('Chamber length', f"{d['L']:.1f} mm"),
+        ('Chamber inner diameter', _mm_text(d['D_ch'])),
+        ('Chamber length', _mm_text(d['L'])),
         ('Chamber wall thickness',
          f"{wall_m * 1000:.2f} mm  [{wall_src}]" if wall_m else NOT_AVAILABLE_SPEC),
-        ('Grain length', f"{d['L_g']:.1f} mm"),
-        ('Port diameter (initial)', f"{d['d_p0']:.1f} mm"),
-        ('Port diameter (final)', f"{d['d_pf']:.1f} mm"),
-        ('Throat diameter', f"{d['d_t']:.2f} mm"),
-        ('Exit diameter', f"{d['d_e']:.2f} mm"),
-        ('Expansion ratio', f"{d['eps']:.2f}"),
+    ] + grain_rows + [
+        ('Throat diameter', _mm_text(d['d_t'], '{:.2f}')),
+        ('Exit diameter', _mm_text(d['d_e'], '{:.2f}')),
+        ('Expansion ratio',
+         f"{d['eps']:.2f}" if d['eps'] is not None else NOT_AVAILABLE_SPEC),
         ('Nozzle type / half angles',
          f"{noz_type}; conv "
          f"{('%.1f deg' % conv_deg) if conv_deg else 'n/a'}, div "
@@ -274,6 +402,9 @@ def generate_drawing_pdf(motor_results, out_path=None):
         ('Injector material',
          (motor_results or {}).get('injector_material') or NOT_AVAILABLE_SPEC),
         ('Pressure test requirement', '1.5 x MEOP hydrostatic before firing'),
+        # Birim sözleşmesi çizimin ÜSTÜNDE beyan edilir: imalatçı ölçülerin
+        # hangi girdi biriminden çevrildiğini görebilmeli (Faz 5B / H4-2).
+        ('Input length units', _unit_note(d['units'])),
     ]
     y = page_h - 45 * MM
     c.setFont('Helvetica-Bold', 11)
@@ -283,9 +414,12 @@ def generate_drawing_pdf(motor_results, out_path=None):
     c.line(30 * MM, y, page_w - 30 * MM, y)
     c.setFont('Helvetica', 10)
     for label, val in rows:
-        y -= 8 * MM
-        c.drawString(30 * MM, y, label)
-        c.drawString(140 * MM, y, val)
+        # Uzun gerekçe metinleri sayfadan taşmasın; satır satır sarılır.
+        for i, chunk in enumerate(_wrap(val, 62)):
+            y -= 6 * MM if i else 8 * MM
+            if i == 0:
+                c.drawString(30 * MM, y, label)
+            c.drawString(140 * MM, y, chunk)
     c.showPage()
 
     c.save()
@@ -306,7 +440,12 @@ def generate_dxf(motor_results, out_path=None):
     """
     import ezdxf
 
-    d = _dims_mm(motor_results)
+    # Birim TEK noktada çözülür ve kontur örnekleyicisine de NORMALİZE sözlük
+    # verilir; aksi hâlde ham katı/sıvı yanıtında kontur 1000× büyük çıkıyordu
+    # (ölçüldü: ham katı girdide z aralığı 0..174 848 mm, normalize edilmişte
+    # 0..174.7 mm).
+    motor_results, d = _prepare(motor_results)
+    _require_drawable(d)
     # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
     name = safe_name((motor_results or {}).get('motor_name'))
     if out_path is None:
@@ -352,13 +491,25 @@ def generate_dxf(motor_results, out_path=None):
         msp.add_lwpolyline([(0, -(rc + wall)), (0, rc + wall)],
                            dxfattribs={'layer': 'OUTLINE'})
 
-    # Grain profili (başlangıç portu, kesikli görünüm yerine ayrı katman)
-    zg0 = 0.35 * max(4.0, L - d['L_g'])
-    zg1 = zg0 + d['L_g']
-    for s in (1, -1):
-        msp.add_lwpolyline(
-            [(zg0, s * d['d_p0'] / 2), (zg1, s * d['d_p0'] / 2)],
-            dxfattribs={'layer': 'OUTLINE'})
+    # Grain profili — YALNIZ sonuçta gerçekten grain varsa çizilir.
+    # H4-1: burada sabit yedekler vardı (0.24 m boy, Ø0.03→0.05 m port) ve
+    # sıvı motorda devreye girip imalat çizimine olmayan bir katı yakıt
+    # bloğu koyuyordu. Grain yoksa hiçbir şey çizilmez; not yazıyla düşülür.
+    grain = d['grain']
+    if grain is not None:
+        zg0 = 0.35 * max(4.0, L - grain['L_g'])
+        zg1 = zg0 + grain['L_g']
+        for s in (1, -1):
+            msp.add_lwpolyline(
+                [(zg0, s * grain['d_p0'] / 2), (zg1, s * grain['d_p0'] / 2)],
+                dxfattribs={'layer': 'OUTLINE'})
+        port_text = (f"grain {grain['L_g']:.1f} mm, port "
+                     f"Ø{grain['d_p0']:.1f}"
+                     + (f"→{grain['d_pf']:.1f} mm" if grain['d_pf'] is not None
+                        else ' mm (final port not reported)'))
+        grain_label = ((zg0 + zg1) / 2, port_text)
+    else:
+        grain_label = (0.0, 'SOLID GRAIN: ' + (d['grain_reason'] or NOT_RESOLVED))
 
     # Eksen çizgisi
     z_end = noz[-1][0] if noz else L
@@ -369,10 +520,13 @@ def generate_dxf(motor_results, out_path=None):
     y_wall = rc + (wall if wall is not None else 0.0)
     labels = [
         (L / 2, y_wall + 12, f"L_chamber = {L:.1f} mm"),
-        (L + meta['z_throat'], d['d_t'] / 2 + 14, f"Ø_throat = {d['d_t']:.2f} mm"),
-        (z_end, d['d_e'] / 2 + 14, f"Ø_exit = {d['d_e']:.2f} mm"),
+        (L + meta['z_throat'],
+         (d['d_t'] / 2 if d['d_t'] is not None else rc) + 14,
+         'Ø_throat = ' + _mm_text(d['d_t'], '{:.2f}')),
+        (z_end, (d['d_e'] / 2 if d['d_e'] is not None else rc) + 14,
+         'Ø_exit = ' + _mm_text(d['d_e'], '{:.2f}')),
         (-10, rc + 8, f"Ø_chamber = {d['D_ch']:.1f} mm"),
-        ((zg0 + zg1) / 2, -(y_wall + 16), f"grain {d['L_g']:.1f} mm, port Ø{d['d_p0']:.1f}→{d['d_pf']:.1f} mm"),
+        (grain_label[0], -(y_wall + 16), grain_label[1]),
         (0.0, -(y_wall + 30),
          (f"WALL THICKNESS = {wall:.2f} mm [{wall_src}]" if wall is not None
           else 'WALL THICKNESS: NOT AVAILABLE FROM THE ANALYSIS - '
@@ -380,6 +534,8 @@ def generate_dxf(motor_results, out_path=None):
         (0.0, -(y_wall + 40),
          f"NOZZLE DIVERGENT LENGTH: {meta['divergent_length_source']}"),
         (0.0, -(y_wall + 50), 'ALL DIMENSIONS IN MILLIMETRES ($INSUNITS=4)'),
+        # H4-2: geometrinin hangi girdi biriminden çevrildiği dosyada yazar.
+        (0.0, -(y_wall + 60), 'INPUT UNITS: ' + _unit_note(d['units'])),
     ]
     for x, y, text in labels:
         msp.add_text(text, dxfattribs={'layer': 'TEXT', 'height': 5.0}

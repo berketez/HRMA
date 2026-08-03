@@ -90,12 +90,29 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     okunamazsa ``ValueError`` yükseltilir. Eskiden ``0.045·D_ch`` yedeğine
     düşülüyordu; ölçüldü (Ø100 mm katı motor): analiz 2.40 mm, STEP 4.50 mm —
     imalata analizde hiç doğrulanmamış bir cidar gidiyordu.
+
+    Faz 5B / H4-1 ve H4-2 (ölçüldü, HEAD 9d3728e):
+
+    * Birim: girdi KOŞULSUZ metre kabul ediliyordu. ``/calculate_solid``
+      yanıtı doğrudan verilince STEP montaj zarfı 174 992 × 98 156 mm
+      çıkıyordu (gerçek 782.68 × 98.16 mm). Artık birim
+      ``motor_geometry.normalise_export_geometry`` ile açıkça çözülür.
+    * Grain: ``motor_type`` varsayılanı 'hybrid' olduğu ve rota katmanı bu
+      argümanı hiç geçmediği için SIVI motorda da ``fuel_grain.step``
+      üretiliyordu (ölçüldü: 85.22 mm boyunda, Ø30 mm portlu uydurma bir
+      blok). Grain artık yalnız sonuçta gerçekten varsa üretilir.
     """
     _require()
-    has_grain = motor_type in ('hybrid', 'solid')
+    from hrma.export.motor_geometry import (
+        normalise_export_geometry, resolve_grain_m)
+
+    md, _report = normalise_export_geometry(motor_results)
+    grain_geo, _grain_reason = resolve_grain_m(md)
+    # Grain iki koşulun İKİSİNİ birden ister: motor tipi grain taşıyor olmalı
+    # VE çözümde gerçek grain geometrisi bulunmalı. Yedek ölçü YOK.
+    has_grain = motor_type in ('hybrid', 'solid') and grain_geo is not None
     has_injector = motor_type in ('hybrid', 'liquid')
 
-    md = motor_results or {}
     # Ad dosya yoluna giriyor: mutlak yol / '..' geçmesin (K-1).
     name = safe_name(md.get('motor_name'))
     if out_dir is None:
@@ -106,15 +123,22 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
         os.makedirs(out_dir, exist_ok=True)
     out_dir = os.path.abspath(out_dir)
 
-    # ---- boyutlar (mm) ----
-    L = _num(md.get('chamber_length'), 0.3) * 1000
-    D_ch = _num(md.get('chamber_diameter'), 0.1) * 1000
+    # ---- boyutlar (mm) — girdi yukarıda METRE'ye indirgendi ----
+    L_m = md.get('chamber_length')
+    D_m = md.get('chamber_diameter')
+    if not (isinstance(L_m, (int, float)) and np.isfinite(L_m) and L_m > 0
+            and isinstance(D_m, (int, float)) and np.isfinite(D_m) and D_m > 0):
+        raise ValueError(
+            'chamber_length / chamber_diameter could not be resolved from the '
+            'analysis result (checked motor_geometry, the declared '
+            'length_units and the top-level fields); refusing to emit a '
+            'manufacturing STEP built from generator defaults.')
+    L = float(L_m) * 1000.0
+    D_ch = float(D_m) * 1000.0
     rc = D_ch / 2
-    gd = md.get('grain_design') or {}
-    L_g = min(_num(gd.get('grain_length_mm'),
-                   _num(md.get('grain_length'), 0.8 * L / 1000) * 1000), 0.92 * L)
-    r_p0 = _num(gd.get('port_diameter_initial_mm'),
-                _num(md.get('port_diameter_initial'), 0.03) * 1000) / 2
+    if has_grain:
+        L_g = min(grain_geo['length'] * 1000.0, 0.92 * L)
+        r_p0 = grain_geo['port_initial'] * 1000.0 / 2
     # Cidar TEK çözümleyiciden gelir (üç motor tipinin üç ayrı anahtar şeması
     # orada tanınır): chamber_analysis / case_analysis / chamber_structure.
     from hrma.export.cad_visualization import _chamber_wall_thickness_m

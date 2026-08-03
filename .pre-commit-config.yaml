@@ -70,10 +70,19 @@ repos:
   #
   # Faz 4 audit measured it: of the three standard titles checked by hand, all
   # three were wrong, and the PDF/UI printed verdicts ("NASA-grade accurate")
-  # that no code path earns. tools/iddia_lint.py scans hrma/ against the
-  # registry in docs/STANDART_ATIFLARI.md and exits 1 on an unregistered hit.
+  # that no code path earns. tools/iddia_lint.py scans the source tree against
+  # the registry in docs/STANDART_ATIFLARI.md and exits 1 on an unregistered
+  # hit.
   #
-  # It always scans the whole hrma/ tree (pass_filenames: false) because the
+  # Faz 5 / H5-5 (2026-08-03): the scan used to cover only hrma/ and only
+  # .py/.js/.html, so README, the user manual and the release notes were never
+  # checked -- and five surviving "digital twin" lines were found there, long
+  # after release_notes_v2.6.1.md claimed the wording had been replaced
+  # "throughout". The scan now also covers the user-facing documents
+  # (iddia_lint.USER_FACING_DOC_TARGETS), so the trigger list below must
+  # include them too, otherwise a docs-only commit skips the hook.
+  #
+  # It always scans the whole target set (pass_filenames: false) because the
   # registry is global; it is fast because it is a line scan.
   # ---------------------------------------------------------------------
   - repo: local
@@ -83,4 +92,4 @@ repos:
         entry: python3 tools/iddia_lint.py
         language: system
         pass_filenames: false
-        files: ^(hrma/|tools/iddia_lint|docs/STANDART_ATIFLARI\.md)
+        files: '^(hrma/|tools/iddia_lint|docs/STANDART_ATIFLARI\.md|README\.md|INSTALL\.md|CONTRIBUTING\.md|docs/README\.md|docs/USER_MANUAL\.md|docs/RELEASE\.md|docs/user_guide/|packaging/)'

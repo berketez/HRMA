@@ -3,7 +3,11 @@
 set -euo pipefail
 
 B="$(cd "$(dirname "$0")" && pwd)"
-SRC="/Users/apple/Desktop/dosyalar/HRMA"
+SRC="$(cd "$B/.." && pwd)"   # depo kökü — betiğin konumundan türetilir
+# 2026-08-03: burada sabit "/Users/apple/Desktop/dosyalar/HRMA" yazıyordu.
+# Depo /Users/apple/HRMA'ya taşınmıştı; eski yolda yalnız paketleme
+# artıkları kalmıştı ve içinde hrma/ ile data/ YOKTU. Yani paketleme
+# çalıştırılsaydı boş bir ağaçtan kopyalayacaktı.
 # build.noindex: Spotlight ".noindex" ile biten klasörleri indekslemez —
 # aksi halde derleme kopyaları Spotlight/Launchpad'de 3 ayrı "HRMA" olarak
 # görünüyordu (2026-07-15 şikayeti).

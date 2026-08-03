@@ -76,10 +76,46 @@ DEFAULT_PARACHUTE_CD = 1.4
 # kendi varsayımı; gerçek sistemde zaman gecikmeli/barometrik ayırma).
 DEFAULT_PARACHUTE_DEPLOY_DELAY_S = 2.0
 
+# --- ÇÖZÜCÜ PENCERELERİ (zaman-aşımı tavanları) ---------------------------
+# Bu üç sayı ENTEGRASYON UFKUDUR, sonuç değildir. Faz 5 / B1'de ölçüldü:
+# olay (apoje / yere temas) tetiklenmediğinde kod pencerenin SON noktasını
+# "apoje" ve "iniş" diye yayımlıyordu — 30° atışta apoje −54 722 m, uçuş
+# süresi tam olarak (t_b+2)+300+1000 = 1306 s çıkıyordu, yani üç tavanın
+# toplamı. Artık her fazın hangi OLAYLA bittiği ``end_reason`` ile
+# yayımlanır ve tavana çarpan koşuda türetilmiş büyüklükler None olur.
+POWERED_PHASE_MARGIN_S = 2.0     # yanma sonrası geçiş payı
+COASTING_TIME_LIMIT_S = 300.0    # yanma-sonu → apoje penceresi
+# İniş penceresi 1000 s -> 3600 s. GEREKÇE (ölçülmüş): 20 kg araç + 20 m²
+# paraşütte iniş hızı 3,41 m/s'dir ve 4 km'den inmek 1071 s sürer — yani
+# TAMAMEN GERÇEKÇİ bir kurtarma tasarımı eski 1000 s tavanını aşıyordu ve
+# kod tavanı "iniş" diye yayımlıyordu. Tavan bir sonuç değil, sayısal
+# ufuktur; geniş tutulması hiçbir uçuşun sayısını DEĞİŞTİRMEZ (yere temas
+# olayı zaten daha önce sonlandırır), yalnız "bilinmiyor" hâllerini azaltır.
+# Maliyet ölçüldü: 50 m² paraşütte 0,097 s -> 0,169 s.
+DESCENT_TIME_LIMIT_S = 3600.0    # apoje → yere temas penceresi
+
+# Yer teması olayının "kurulma" anı [s]. Araç t=0'da tam olarak yer
+# düzlemindedir (z = launch_altitude); olay fonksiyonu bu anda sıfır
+# olduğundan kalkışta hemen tetiklenmesin diye ilk anlarda pozitif ofset
+# uygulanır. Kardeş 6-DOF modülü aynı deseni kullanır
+# (``six_dof_trajectory.solve.hit_ground``: ``y[2] + 1e-6 if t < 1.0``).
+GROUND_EVENT_ARM_S = 0.05
+
 
 def _mk_warning(code, severity='warning', **params):
     """Uyarı sözleşmesi: ``{code, params, severity}`` (v2.6.2 D-track)."""
     return {'code': code, 'params': params, 'severity': severity}
+
+
+def _finite_or_none(value) -> Optional[float]:
+    """Sonlu bir float ise değeri, değilse None döndürür (sessiz yedek YOK)."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if np.isfinite(f) else None
 
 
 def _as_list(values) -> list:
@@ -309,6 +345,74 @@ class TrajectoryAnalyzer:
         vz_wind = 0.0  # yatay rüzgar varsayımı
         return vx_wind, vz_wind
 
+    # ------------------------------------------------------------------
+    # GİRDİ MUHAFIZI — sonlu-değer denetimi (Faz 5 / B7)
+    # ------------------------------------------------------------------
+    def _guard_solver_inputs(self, motor_data: Dict, launch_params: Dict) -> None:
+        """Çözücüye girmeden ÖNCE sonlu-değer ve pozitiflik denetimi.
+
+        ÖLÇÜLDÜ (Faz 5 / B7, HEAD 9d3728e): ``thrust = NaN`` ile çağrılan
+        ``calculate_trajectory`` 45 saniyede DÖNMEDİ (``timeout`` çıkış kodu
+        124). Sebep: NaN türevler adım kabul kriterini hiçbir zaman
+        sağlamıyor, RK45 adımı sonsuza kadar küçültüyor. Tek istek bir işçi
+        iş parçacığını süresiz tutar — masaüstü paketinde uygulama kilitlenir.
+        Aynı hata kardeş 6-DOF çözücüsünde de ölçüldü (o da düzeltildi).
+
+        Fail-closed: sonlu olmayan ya da fiziksel olarak imkânsız girdide
+        ``ValueError`` atılır; sessizce "makul" bir yedek değer KONMAZ.
+        """
+        problems = []
+
+        def _check(name, value, *, positive=False, non_negative=False):
+            f = _finite_or_none(value)
+            if f is None:
+                problems.append(f"{name}={value!r} sonlu bir sayı değil")
+                return None
+            if positive and f <= 0.0:
+                problems.append(f"{name}={f!r} pozitif olmalı")
+            elif non_negative and f < 0.0:
+                problems.append(f"{name}={f!r} negatif olamaz")
+            return f
+
+        # Motor: dinamiğe DOĞRUDAN giren üç büyüklük.
+        _check('motor_data.thrust', motor_data.get('thrust'), non_negative=True)
+        _check('motor_data.burn_time', motor_data.get('burn_time'),
+               positive=True)                 # mdot = m_p / t_b → sıfır bölen
+        _check('motor_data.propellant_mass_total',
+               motor_data.get('propellant_mass_total'), non_negative=True)
+        # Araç: kütle bölen olarak kullanılıyor (a = F/m).
+        _check('vehicle_mass_dry', self.vehicle_mass_dry, positive=True)
+        _check('vehicle_diameter', self.vehicle_diameter, positive=True)
+        _check('drag_coefficient', self.drag_coefficient, non_negative=True)
+
+        # Fırlatma parametreleri: yalnız VERİLENLER denetlenir.
+        for key in ('launch_angle', 'launch_altitude', 'wind_speed',
+                    'wind_direction', 'launch_latitude', 'parachute_area',
+                    'parachute_cd', 'parachute_deploy_delay',
+                    'launch_rail_length'):
+            if launch_params.get(key) is not None:
+                _check(f'launch_params.{key}', launch_params.get(key))
+
+        if problems:
+            raise ValueError(
+                'Yörünge çözücüsü geçersiz girdiyle çağrıldı: '
+                + '; '.join(problems))
+
+    @staticmethod
+    def _resolve_rail_length(launch_params: Dict) -> Optional[float]:
+        """Fırlatma rayı boyunu çözer — VERİLMEDİYSE None (uydurma yok).
+
+        Faz 5 / B2: model rayı hiç bilmiyordu, itki 1 m/s'lik keyfi bir
+        eşikte hız vektörüne kilitleniyordu. Ray boyu bir GİRDİDİR; yoksa
+        modellenmemiş sayılır ve bu açıkça beyan edilir.
+        """
+        for key in ('launch_rail_length', 'rail_length'):
+            if launch_params.get(key) is not None:
+                length = _finite_or_none(launch_params.get(key))
+                if length is not None and length > 0.0:
+                    return length
+        return None
+
     def calculate_trajectory(self, motor_data: Dict, launch_params: Dict) -> Dict:
         """
         Calculate complete trajectory from launch to landing
@@ -320,6 +424,9 @@ class TrajectoryAnalyzer:
         Returns:
             Complete trajectory data with analysis
         """
+
+        # B7 — çözücüye girmeden önce sonlu-değer kapısı (fail-closed).
+        self._guard_solver_inputs(motor_data, launch_params)
 
         # Extract motor parameters
         thrust = motor_data['thrust']  # N
@@ -422,33 +529,83 @@ class TrajectoryAnalyzer:
         total_mass_loaded = self.vehicle_mass_dry + propellant_mass
         cross_sectional_area = np.pi * (self.vehicle_diameter / 2) ** 2
 
+        # --- YER DÜZLEMİ (Faz 5 / B3) -----------------------------------
+        # Zemin, FIRLATMA SAHASI kotudur — deniz seviyesi değil. Araç bu
+        # kotun altına inemez; temas bir SONLANDIRMA olayıdır. Ölçüldü
+        # (HEAD 9d3728e, 30° atış): güçlü faz z = −140,67 m'de bitiyordu,
+        # serbest faz −54 722 m'ye iniyordu, iniş fazı −65 802 m'de duruyordu;
+        # ``_atm_full`` negatif irtifayı 0'a kırptığı için araç 65 km yer
+        # altında deniz seviyesi yoğunluğunda "uçuyordu".
+        ground_level = float(launch_altitude)
+
+        # --- FIRLATMA RAYI (Faz 5 / B2) ---------------------------------
+        rail_length = self._resolve_rail_length(launch_params)
+        if rail_length is None:
+            self.warnings.append(_mk_warning(
+                'warn.trajectory.launch_rail_not_modelled', 'warning'))
+
         # Phase 1: Powered flight (motor burning)
         powered_flight = self._calculate_powered_flight(
             thrust, burn_time, total_mass_loaded, propellant_mass,
-            launch_angle, launch_altitude, cross_sectional_area, wind_vec
+            launch_angle, launch_altitude, cross_sectional_area, wind_vec,
+            rail_length=rail_length, ground_level=ground_level
         )
 
         # Phase 2: Coasting flight (after burnout)
-        coasting_flight = self._calculate_coasting_flight(
-            powered_flight['final_state'], cross_sectional_area, wind_vec
-        )
-
-        # Phase 3: Descent with recovery
-        descent_flight = self._calculate_descent_flight(
-            coasting_flight['apogee_state'], cross_sectional_area, wind_vec
-        )
+        # Güçlü faz yerle temasla bittiyse sonraki fazlar HİÇ koşmaz —
+        # araç zaten yerdedir; "apoje" ve "iniş" diye ayrı bir sayı üretmek
+        # olmayan bir uçuşu raporlamak olurdu.
+        if powered_flight['end_reason'] == 'ground':
+            coasting_flight = self._skipped_coasting_phase(
+                powered_flight['final_state'], 'ground_impact_in_powered_flight')
+            descent_flight = self._skipped_descent_phase(
+                powered_flight['final_state'], 'ground_impact_in_powered_flight')
+        else:
+            coasting_flight = self._calculate_coasting_flight(
+                powered_flight['final_state'], cross_sectional_area, wind_vec,
+                ground_level=ground_level
+            )
+            if coasting_flight['end_reason'] == 'ground':
+                descent_flight = self._skipped_descent_phase(
+                    coasting_flight['apogee_state'],
+                    'ground_impact_in_coasting_flight')
+            else:
+                # Phase 3: Descent with recovery
+                descent_flight = self._calculate_descent_flight(
+                    coasting_flight['apogee_state'], cross_sectional_area,
+                    wind_vec, ground_level=ground_level
+                )
 
         # Combine all phases
         trajectory_data = self._combine_flight_phases(
             powered_flight, coasting_flight, descent_flight
         )
 
+        # --- UÇUŞ HÜKMÜ (Faz 5 / B1 + B6) -------------------------------
+        flight_status = self._resolve_flight_status(
+            powered_flight, coasting_flight, descent_flight)
+
         # Calculate performance metrics
         performance_metrics = self._calculate_performance_metrics(
-            trajectory_data, motor_data, launch_params
+            trajectory_data, motor_data, launch_params, flight_status
         )
 
         result = {
+            'flight_status': flight_status,
+            'launch_rail': {
+                'modelled': rail_length is not None,
+                'length_m': rail_length,
+                'exit_velocity_m_s': powered_flight.get('rail_exit_velocity'),
+                'exit_time_s': powered_flight.get('rail_exit_time'),
+                'basis': (
+                    'launch rail modelled: attitude locked along the rail '
+                    'until the vehicle has travelled rail length'
+                    if rail_length is not None else
+                    'NOT_MODELLED: launch_rail_length was not supplied, so no '
+                    'rail constraint and no attitude dynamics are modelled; '
+                    'thrust is held along the launch attitude for the whole '
+                    'burn and the pitch-over is NOT computed'),
+            },
             'trajectory': trajectory_data,
             'performance': performance_metrics,
             'motor_data': motor_data,
@@ -509,8 +666,44 @@ class TrajectoryAnalyzer:
                                   total_mass: float, propellant_mass: float,
                                   launch_angle: float, launch_altitude: float,
                                   cross_sectional_area: float,
-                                  wind_vec: Tuple[float, float]) -> Dict:
-        """Calculate powered flight phase (motor burning)"""
+                                  wind_vec: Tuple[float, float],
+                                  rail_length: Optional[float] = None,
+                                  ground_level: float = 0.0) -> Dict:
+        """Calculate powered flight phase (motor burning).
+
+        FIRLATMA RAYI VE TUTUM (Faz 5 / B2 düzeltmesi)
+        ----------------------------------------------
+        Eski kod itki yönünü ``v > 1.0 m/s`` olur olmaz hız vektörüne
+        kilitliyordu (yerçekimi dönüşü). Bu eşik FİZİKSEL DEĞİL, keyfiydi:
+        ``dγ/dt = −g·cos γ / v`` bağıntısı v→0 iken ıraksar, bu yüzden model
+        kalkıştan hemen sonra roketi yatırıyordu. ÖLÇÜLDÜ (HEAD 9d3728e,
+        F=600 N, T/W=2,19, 85° atış): yanma daha bitmeden γ = −0,52°, güçlü
+        faz z = −48 m'de bitiyor, apoje 13,86 m çıkıyordu; aynı atmosfer ve
+        sürükleme fonksiyonuyla bağımsız referans 279,96-286,86 m veriyor
+        (20 kat fark). Gerçek roket bu bölgede fırlatma rayının normal
+        kuvvetiyle kısıtlıdır.
+
+        İki AÇIKÇA BEYAN EDİLMİŞ rejim vardır — ikisinde de sihirli sayı yok:
+
+        1. ``rail_length`` VERİLDİ: ray boyunca hareket ray eksenine
+           kısıtlanır (net kuvvetin ray doğrultusuna izdüşümü alınır, dik
+           bileşenleri ray normal kuvveti karşılar), tutum ray açısında
+           kilitlidir. Araç ray boyunu katedince serbest bırakılır ve
+           itki hız vektörüne döner (yerçekimi dönüşü) — bu noktada hız
+           artık sıfırdan uzaktır, yani bağıntı iyi tanımlıdır.
+           Kardeş 6-DOF modülü aynı sözleşmeyi kullanır
+           (``six_dof_trajectory._derivatives``: ``on_rail`` izdüşümü).
+
+        2. ``rail_length`` VERİLMEDİ: tutum dinamiği MODELLENMEZ. İtki tüm
+           yanma boyunca fırlatma doğrultusunda tutulur ve sonuç
+           ``launch_rail.modelled = False`` ile damgalanır. Uydurma bir ray
+           boyu ya da uydurma bir hız eşiği KONMAZ.
+        """
+
+        # Ray/fırlatma doğrultusu birim vektörü (yükseliş açısı konvansiyonu).
+        rail_ux = float(np.cos(launch_angle))
+        rail_uz = float(np.sin(launch_angle))
+        rail_modelled = rail_length is not None and rail_length > 0.0
 
         def powered_flight_dynamics(t, y):
             """Dynamics during powered flight"""
@@ -530,16 +723,28 @@ class TrajectoryAnalyzer:
                 mdot = 0
                 thrust_current = 0
 
-            # İtki yönü: başlangıçta YÜKSELİŞ AÇISI boyunca (90°=dikey),
-            # araç hız kazandıkça hız vektörüne (yer çekimi yönelimi/gravity turn).
+            # İtki yönü — bkz. metot docstring'i (B2).
             # KONVANSIYON: vertical = sin(theta_elev), horizontal = cos(theta_elev).
-            v_mag = np.sqrt(vx ** 2 + vz ** 2)
-            if v_mag > 1.0:  # gravity-turn: itki hız vektörü boyunca
-                thrust_direction_x = vx / v_mag
-                thrust_direction_z = vz / v_mag
-            else:  # ilk kalkış: rampa açısı boyunca
-                thrust_direction_x = np.cos(launch_angle)  # yatay bileşen
-                thrust_direction_z = np.sin(launch_angle)  # dikey bileşen (90°->1)
+            on_rail = False
+            if rail_modelled:
+                # Ray üzerinde katedilen mesafe (fırlatma noktasından).
+                s_rail = np.hypot(x - 0.0, z - launch_altitude)
+                on_rail = bool(s_rail < rail_length and t <= burn_time)
+
+            if on_rail or not rail_modelled:
+                # Ray üstünde ya da tutum modellenmiyorken: fırlatma doğrultusu
+                thrust_direction_x = rail_ux
+                thrust_direction_z = rail_uz
+            else:
+                # Raydan çıktı: yerçekimi dönüşü (itki hız vektörü boyunca).
+                # Ray çıkış hızı sıfırdan uzak olduğu için bağıntı iyi tanımlı.
+                v_mag = np.sqrt(vx ** 2 + vz ** 2)
+                if v_mag > 0.0:
+                    thrust_direction_x = vx / v_mag
+                    thrust_direction_z = vz / v_mag
+                else:
+                    thrust_direction_x = rail_ux
+                    thrust_direction_z = rail_uz
 
             # Thrust force
             Fx_thrust = thrust_current * thrust_direction_x
@@ -558,6 +763,20 @@ class TrajectoryAnalyzer:
             Fx_total = Fx_thrust + Fx_drag
             Fz_total = Fz_thrust + Fz_drag + Fz_gravity
 
+            if on_rail:
+                # Ray kısıtı: hareket ray eksenine kilitli. Net kuvvetin ray
+                # doğrultusundaki bileşeni kalır; dik bileşenleri ray normal
+                # kuvveti karşılar (ideal, sürtünmesiz ray).
+                f_parallel = Fx_total * rail_ux + Fz_total * rail_uz
+                if f_parallel < 0.0 and np.hypot(vx, vz) <= 1e-9:
+                    # Araç rampada DURUYOR ve net kuvvet aşağı: ray tutucusu
+                    # ağırlığı karşılar (T/W < 1 → kalkış YOK). Hareket
+                    # başladıktan sonra negatif kuvvet yavaşlatma olarak
+                    # aynen etkir — serbest yolculuk verilmez.
+                    f_parallel = 0.0
+                Fx_total = f_parallel * rail_ux
+                Fz_total = f_parallel * rail_uz
+
             # Accelerations
             ax = Fx_total / mass
             az = Fz_total / mass
@@ -571,12 +790,43 @@ class TrajectoryAnalyzer:
         y0 = [0, launch_altitude, 0, 0, total_mass]  # x, z, vx, vz, mass
 
         # Time span (extend beyond burn time for transition)
-        t_span = (0, burn_time + 2)
-        t_eval = np.linspace(0, burn_time + 2, max(int((burn_time + 2) * 50), 10))
+        t_end = burn_time + POWERED_PHASE_MARGIN_S
+        t_span = (0, t_end)
+        t_eval = np.linspace(0, t_end, max(int(t_end * 50), 10))
+
+        # B3 — YER TEMASI SONLANDIRMA OLAYI.
+        # Araç t=0'da tam olarak yer düzlemindedir; olay ilk anlarda
+        # "kurulmamış" tutulur (GROUND_EVENT_ARM_S), aksi halde kalkışta
+        # hemen tetiklenirdi.
+        def ground_event(t, y):
+            gap = y[1] - ground_level
+            return gap + 1.0 if t < GROUND_EVENT_ARM_S else gap
+        ground_event.terminal = True
+        ground_event.direction = -1
 
         # Solve ODE -- RK45 (solve_ivp) ile tutarlı çözücü
         sol = solve_ivp(powered_flight_dynamics, t_span, y0, t_eval=t_eval,
-                        method='RK45', rtol=1e-8, atol=1e-9)
+                        method='RK45', rtol=1e-8, atol=1e-9,
+                        events=ground_event)
+
+        # Çözücü hükmü (B1): hangi olay bitirdi?
+        if not sol.success:
+            end_reason = 'solver_failed'
+        elif sol.t_events[0].size:
+            end_reason = 'ground'
+        else:
+            end_reason = 'burn_window_complete'
+
+        # Ray çıkışı: ray doğrultusunda katedilen mesafe ray boyunu geçtiği an.
+        rail_exit_time = None
+        rail_exit_velocity = None
+        if rail_modelled and sol.t.size:
+            s_hist = np.hypot(sol.y[0] - 0.0, sol.y[1] - launch_altitude)
+            beyond = np.nonzero(s_hist >= rail_length)[0]
+            if beyond.size:
+                k = int(beyond[0])
+                rail_exit_time = float(sol.t[k])
+                rail_exit_velocity = float(np.hypot(sol.y[2][k], sol.y[3][k]))
 
         # YANMA-SONU (burnout) ÖRNEKLEME — v2.6.2 fizik denetimi (bulgu F028).
         #
@@ -615,10 +865,85 @@ class TrajectoryAnalyzer:
             'burnout_state': [bo['x'], bo['z'], bo['vx'], bo['vz'], bo['mass']],
             'burnout_altitude': bo['z'],
             'burnout_velocity': float(np.hypot(bo['vx'], bo['vz'])),
+            # B1/B3: fazın hangi OLAYLA bittiği sonucun parçasıdır.
+            'end_reason': end_reason,
+            # Yanma-sonu gerçekten görüldü mü (yoksa faz daha önce yerle mi
+            # bitti)? burnout_* alanları bu durumda çarpma anını taşır.
+            'burnout_reached': bool(sol.t.size and float(sol.t[-1]) >= burn_time),
+            'lifted_off': bool(sol.y[1].size and
+                               float(np.max(sol.y[1])) > ground_level + 1e-6),
+            # B2: ray modellendi mi, çıkış hangi anda/hızda oldu?
+            'rail_modelled': bool(rail_modelled),
+            'rail_length_m': float(rail_length) if rail_modelled else None,
+            'rail_exit_time': rail_exit_time,
+            'rail_exit_velocity': rail_exit_velocity,
+            'solver_message': str(getattr(sol, 'message', '') or ''),
+        }
+
+    # ------------------------------------------------------------------
+    # ATLANAN FAZLAR — uçuş yerle bittiğinde (B3)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _skipped_coasting_phase(final_state: List, reason: str) -> Dict:
+        """Tek noktalı (dejenere) serbest faz — hiç koşmadı.
+
+        Araç güçlü fazda yere çarptıysa "apoje" diye bir an yoktur. Faz
+        tek noktalı bir dizi olarak döner; ``_combine_flight_phases`` zaten
+        ``[1:]`` dilimlediği için birleşik yörüngeye HİÇBİR nokta eklemez.
+        """
+        x, z, vx, vz, mass = (float(v) for v in final_state[:5])
+        return {
+            'time': np.array([0.0]),
+            'position_x': np.array([x]),
+            'position_z': np.array([z]),
+            'velocity_x': np.array([vx]),
+            'velocity_z': np.array([vz]),
+            'apogee_time': 0.0,
+            'apogee_altitude': z,
+            'apogee_state': [x, z, vx, vz, mass],
+            'apogee_reached': False,
+            'end_reason': 'skipped',
+            'skipped_reason': reason,
+        }
+
+    @staticmethod
+    def _skipped_descent_phase(final_state: List, reason: str) -> Dict:
+        """Tek noktalı (dejenere) iniş fazı — kurtarma sistemi hiç açılmadı.
+
+        Araç apojeye varmadan yere çarptı: "iniş hızı" burada balistik
+        ÇARPMA hızıdır, paraşütten türetilmiş bir güvenlik metriği değildir.
+        Bu ayrım ``landing_velocity_basis`` ile açıkça beyan edilir.
+        """
+        x, z, vx, vz, _mass = (float(v) for v in final_state[:5])
+        return {
+            'time': np.array([0.0]),
+            'position_x': np.array([x]),
+            'position_z': np.array([z]),
+            'velocity_x': np.array([vx]),
+            'velocity_z': np.array([vz]),
+            'landing_time': 0.0,
+            'landing_velocity': float(np.hypot(vx, vz)),
+            'landing_position_x': x,
+            'landed': True,
+            'recovery_deployed': False,
+            'end_reason': 'skipped',
+            'skipped_reason': reason,
+            # Paraşüt HİÇ devreye girmedi: alan/Cd sayıları bu sonuca
+            # girmediği için yayımlanmaz (uydurma değer konmaz).
+            'parachute_area_m2': None,
+            'parachute_cd': None,
+            'parachute_deploy_delay_s': None,
+            'parachute_area_assumed': False,
+            'parachute_cd_assumed': False,
+            'parachute_deploy_delay_assumed': False,
+            'landing_velocity_basis': (
+                'ballistic ground impact before apogee; the recovery system '
+                'was never deployed in this run'),
         }
 
     def _calculate_coasting_flight(self, initial_state: List, cross_sectional_area: float,
-                                   wind_vec: Tuple[float, float]) -> Dict:
+                                   wind_vec: Tuple[float, float],
+                                   ground_level: float = 0.0) -> Dict:
         """Calculate coasting flight phase (ballistic trajectory to apogee)"""
 
         mass = initial_state[4]  # Constant mass after burnout
@@ -654,12 +979,35 @@ class TrajectoryAnalyzer:
         apogee_event.terminal = True
         apogee_event.direction = -1
 
-        t_span = (0, 300)  # Maximum 300 seconds
+        # B3 — yer teması bu fazda da sonlandırma olayıdır. Araç serbest faza
+        # zaten alçalarak girdiyse (vz < 0) apoje olayı HİÇ tetiklenmez;
+        # eskiden entegrasyon 300 s tavanına kadar yeraltında sürüyordu.
+        def ground_event(t, y):
+            return y[1] - ground_level
+        ground_event.terminal = True
+        ground_event.direction = -1
+
+        t_span = (0, COASTING_TIME_LIMIT_S)
 
         # Solve ODE
-        sol = solve_ivp(coasting_dynamics, t_span, y0, events=apogee_event,
+        sol = solve_ivp(coasting_dynamics, t_span, y0,
+                        events=[apogee_event, ground_event],
                         method='RK45', rtol=1e-8, atol=1e-9, dense_output=True,
                         max_step=0.5)
+
+        # B1 — ÇÖZÜCÜ HÜKMÜ. Eskiden hiçbir olay denetimi yoktu: olay
+        # tetiklenmediğinde ``sol.t[-1]`` (= 300 s tavanı) "apoje anı",
+        # ``sol.y[1][-1]`` "apoje irtifası" diye yayımlanıyordu.
+        if not sol.success:
+            end_reason = 'solver_failed'
+        elif sol.t_events[0].size:
+            end_reason = 'apogee'
+        elif sol.t_events[1].size:
+            end_reason = 'ground'
+        else:
+            end_reason = 'time_limit'
+
+        apogee_reached = (end_reason == 'apogee')
 
         return {
             'time': sol.t,
@@ -667,13 +1015,21 @@ class TrajectoryAnalyzer:
             'position_z': sol.y[1],
             'velocity_x': sol.y[2],
             'velocity_z': sol.y[3],
+            # DİKKAT: apoje anı/irtifası YALNIZ ``apogee_reached`` True iken
+            # gerçek apojedir. Diğer hâllerde fazın SON noktasıdır ve
+            # ``end_reason`` bunu açıkça söyler; tüketici hükmü okumalıdır.
             'apogee_time': sol.t[-1],
             'apogee_altitude': sol.y[1][-1],
-            'apogee_state': [sol.y[0][-1], sol.y[1][-1], sol.y[2][-1], sol.y[3][-1], initial_state[4]]
+            'apogee_state': [sol.y[0][-1], sol.y[1][-1], sol.y[2][-1], sol.y[3][-1], initial_state[4]],
+            'apogee_reached': bool(apogee_reached),
+            'end_reason': end_reason,
+            'time_limit_s': COASTING_TIME_LIMIT_S,
+            'solver_message': str(getattr(sol, 'message', '') or ''),
         }
 
     def _calculate_descent_flight(self, apogee_state: List, cross_sectional_area: float,
-                                  wind_vec: Tuple[float, float]) -> Dict:
+                                  wind_vec: Tuple[float, float],
+                                  ground_level: float = 0.0) -> Dict:
         """Calculate descent flight phase (with recovery system).
 
         F080 (v2.6.2): paraşüt alanı/Cd artık KULLANICI GİRDİSİDİR
@@ -743,17 +1099,31 @@ class TrajectoryAnalyzer:
         # Initial conditions at apogee
         y0 = apogee_state[:4]
 
-        # Ground impact event
+        # Ground impact event — zemin FIRLATMA SAHASI kotudur (B3), deniz
+        # seviyesi değil. Saha rakımı verilmemişse ground_level = 0 olduğu
+        # için eski davranış birebir korunur.
         def ground_event(t, y):
-            return y[1]  # z = 0 (ground level)
+            return y[1] - ground_level
         ground_event.terminal = True
         ground_event.direction = -1
 
-        t_span = (0, 1000)  # Maximum 1000 seconds (paraşütlü iniş uzun sürebilir)
+        t_span = (0, DESCENT_TIME_LIMIT_S)  # paraşütlü iniş uzun sürebilir
 
         # Solve ODE
         sol = solve_ivp(descent_dynamics, t_span, y0, events=ground_event,
                         method='RK45', rtol=1e-8, atol=1e-9, max_step=1.0)
+
+        # B1 — İNİŞ FAZINDA DA ÇÖZÜCÜ HÜKMÜ. Ölçüldü (HEAD 9d3728e):
+        # paraşüt alanı 20 m² olduğunda araç 1000 s sonunda hâlâ 185,11 m
+        # havadaydı; kod yine de ``landing_time = 1000,00 s`` ve
+        # ``landing_velocity = 3,412 m/s`` yayımlıyor, uyarı üretmiyordu.
+        if not sol.success:
+            end_reason = 'solver_failed'
+        elif sol.t_events[0].size:
+            end_reason = 'ground'
+        else:
+            end_reason = 'time_limit'
+        landed = (end_reason == 'ground')
 
         return {
             'time': sol.t,
@@ -761,9 +1131,18 @@ class TrajectoryAnalyzer:
             'position_z': sol.y[1],
             'velocity_x': sol.y[2],
             'velocity_z': sol.y[3],
-            'landing_time': sol.t[-1],
-            'landing_velocity': np.sqrt(sol.y[2][-1] ** 2 + sol.y[3][-1] ** 2),
-            'landing_position_x': sol.y[0][-1],
+            # Yere temas ölçülmediyse iniş anı/hızı BİLİNMİYOR: entegrasyon
+            # ufkunun son noktası "iniş" diye yayımlanmaz.
+            'landing_time': float(sol.t[-1]) if landed else None,
+            'landing_velocity': (
+                float(np.hypot(sol.y[2][-1], sol.y[3][-1])) if landed else None),
+            'landing_position_x': float(sol.y[0][-1]) if landed else None,
+            'landed': bool(landed),
+            'recovery_deployed': True,
+            'end_reason': end_reason,
+            'time_limit_s': DESCENT_TIME_LIMIT_S,
+            'solver_message': str(getattr(sol, 'message', '') or ''),
+            'final_altitude_m': float(sol.y[1][-1]),
             # F080: iniş hızının hangi kurtarma sisteminden çıktığı görünür
             'parachute_area_m2': chute_area,
             'parachute_cd': chute_cd,
@@ -830,15 +1209,99 @@ class TrajectoryAnalyzer:
             }
         }
 
-    def _calculate_performance_metrics(self, trajectory: Dict, motor_data: Dict, launch_params: Dict) -> Dict:
+    # ------------------------------------------------------------------
+    # UÇUŞ HÜKMÜ (Faz 5 / B1 + B3 + B6)
+    # ------------------------------------------------------------------
+    def _resolve_flight_status(self, powered: Dict, coasting: Dict,
+                               descent: Dict) -> Dict:
+        """Üç fazın ``end_reason``'larından tek bir uçuş hükmü çıkarır.
+
+        Ayrım ÖNEMLİ, çünkü iki farklı başarısızlık sınıfı var:
+
+        * ``time_limit`` / ``solver_failed`` → SAYI BİLİNMİYOR. Entegrasyon
+          ufkunun son noktası apoje ya da iniş DEĞİLDİR; ondan türetilen
+          büyüklükler yayımlanmaz (None). Faz 5 / B1 ve B6 tam olarak budur.
+        * ``ground`` → SAYI BİLİNİYOR ama TASARIM BAŞARISIZ. Araç apojeye
+          varmadan yere çarptı; hesaplanan irtifa/menzil/süre gerçek uçuşun
+          gerçek sayılarıdır, sonuç ``error`` şiddetiyle damgalanır.
+        """
+        reasons = {
+            'powered': powered.get('end_reason'),
+            'coasting': coasting.get('end_reason'),
+            'descent': descent.get('end_reason'),
+        }
+        broken = {phase: reason for phase, reason in reasons.items()
+                  if reason in ('time_limit', 'solver_failed')}
+
+        # Hangi türetilmiş büyüklük bilinmiyor?
+        apogee_unknown = reasons['coasting'] in ('time_limit', 'solver_failed')
+        landing_unknown = (
+            apogee_unknown
+            or reasons['descent'] in ('time_limit', 'solver_failed')
+            or reasons['powered'] in ('time_limit', 'solver_failed'))
+
+        ground_impact_phase = None
+        if reasons['powered'] == 'ground':
+            ground_impact_phase = 'powered'
+        elif reasons['coasting'] == 'ground':
+            ground_impact_phase = 'coasting'
+
+        if broken:
+            end_reason = next(iter(broken.values()))
+        elif ground_impact_phase is not None:
+            end_reason = 'ground_impact_before_apogee'
+        elif reasons['descent'] == 'ground':
+            end_reason = 'landed'
+        else:
+            end_reason = reasons['descent'] or 'unknown'
+
+        for phase, reason in broken.items():
+            limit = {'coasting': COASTING_TIME_LIMIT_S,
+                     'descent': DESCENT_TIME_LIMIT_S}.get(phase)
+            self.warnings.append(_mk_warning(
+                'warn.trajectory.solver_no_event', 'error',
+                phase=phase, reason=reason, time_limit_s=limit))
+        if ground_impact_phase is not None:
+            self.warnings.append(_mk_warning(
+                'warn.trajectory.ground_impact_before_apogee', 'error',
+                phase=ground_impact_phase,
+                lifted_off=bool(powered.get('lifted_off', True))))
+
+        return {
+            'valid': not broken,
+            'end_reason': end_reason,
+            'phase_end_reasons': reasons,
+            'apogee_reached': bool(coasting.get('apogee_reached', False)),
+            'landed': bool(descent.get('landed', False)),
+            'ground_impact_phase': ground_impact_phase,
+            'lifted_off': bool(powered.get('lifted_off', True)),
+            'apogee_unknown': bool(apogee_unknown),
+            'landing_unknown': bool(landing_unknown),
+            'basis': (
+                'each ODE phase reports the event that ended it; a phase that '
+                'ran into its integration time limit is NOT a result and its '
+                'derived quantities are published as null'),
+        }
+
+    def _calculate_performance_metrics(self, trajectory: Dict, motor_data: Dict,
+                                       launch_params: Dict,
+                                       flight_status: Optional[Dict] = None) -> Dict:
         """Calculate trajectory performance metrics"""
 
+        # B1 — bilinmeyen büyüklükler YAYIMLANMAZ. flight_status verilmediyse
+        # (eski çağıranlar) davranış eskisi gibidir.
+        status = flight_status or {}
+        apogee_unknown = bool(status.get('apogee_unknown', False))
+        landing_unknown = bool(status.get('landing_unknown', False))
+
         # Basic trajectory metrics
-        max_altitude = np.max(trajectory['altitude'])
+        max_altitude = None if apogee_unknown else np.max(trajectory['altitude'])
+        # Tepe hız ve tepe ivme yanma fazında oluşur; serbest/iniş fazı
+        # tavana çarpsa bile bu iki sayı GERÇEKTİR, bu yüzden korunur.
         max_velocity = np.max(trajectory['velocity_magnitude'])
         max_acceleration = np.max(trajectory['acceleration'])
-        total_flight_time = trajectory['time'][-1]
-        range_distance = trajectory['position_x'][-1]
+        total_flight_time = None if landing_unknown else trajectory['time'][-1]
+        range_distance = None if landing_unknown else trajectory['position_x'][-1]
 
         # Motor performance metrics
         # Kalkış itki-ağırlık oranı BRÜT (yüklü) kütleyle hesaplanır:
@@ -867,7 +1330,7 @@ class TrajectoryAnalyzer:
 
         # Safety metrics
         descent = trajectory['phases']['descent']
-        landing_velocity = descent['landing_velocity']
+        landing_velocity = None if landing_unknown else descent['landing_velocity']
         # Yük faktörü (g cinsinden ivme) STANDART g0 ile ifade edilir —
         # havacılık konvansiyonu; saha yerçekimiyle ölçeklenmez.
         max_g_force = max_acceleration / self.g0
@@ -896,18 +1359,31 @@ class TrajectoryAnalyzer:
                     descent.get('parachute_cd_assumed', False)),
                 'parachute_area_basis': descent.get('parachute_area_basis'),
                 'parachute_cd_basis': descent.get('parachute_cd_basis'),
+                # B1/B3: iniş hızının hangi olaydan çıktığı (paraşütlü iniş mi,
+                # balistik çarpma mı, yoksa hiç ölçülmedi mi) görünür olmalı.
+                'landing_velocity_basis': descent.get(
+                    'landing_velocity_basis',
+                    'parachute descent integrated to ground contact'
+                    if descent.get('landed') else None),
+                'recovery_deployed': descent.get('recovery_deployed'),
             },
             'motor_performance': {
                 'thrust_to_weight_ratio': thrust_to_weight,
                 'total_impulse_to_weight': total_impulse_to_weight,
                 'burnout_altitude': burnout_altitude,
                 'burnout_velocity': burnout_velocity,
-                'altitude_efficiency': burnout_altitude / max_altitude * 100 if max_altitude > 0 else 0.0  # %
+                # Apoje bilinmiyorsa ya da pozitif değilse oran TANIMSIZDIR.
+                # Eski kod bu durumda 0.0 yayımlıyordu — hesaplanmamış bir
+                # sayıyı "sıfır verim" gibi göstermek yanıltıcıdır.
+                'altitude_efficiency': (
+                    burnout_altitude / max_altitude * 100
+                    if (max_altitude is not None and max_altitude > 0) else None)
             },
             'phase_breakdown': {
                 'powered_flight_time': powered['burnout_time'],
-                'coasting_time': trajectory['phases']['coasting']['apogee_time'],
-                'descent_time': descent['landing_time'],
+                'coasting_time': (None if apogee_unknown
+                                  else trajectory['phases']['coasting']['apogee_time']),
+                'descent_time': None if landing_unknown else descent['landing_time'],
                 # F028: apoje zamanı MUTLAK uçuş zamanıdır. Serbest faz
                 # t = powered['time'][-1] = burn_time + 2 s'de başlar (güçlü
                 # faz geçiş payıyla entegre edilir), fakat eski kod ofset
@@ -916,8 +1392,17 @@ class TrajectoryAnalyzer:
                 # birleşik yörüngenin gerçek tepe zamanı 26.47 s.
                 # _combine_flight_phases zaten powered['time'][-1] ofsetini
                 # kullanıyor; burası artık onunla TUTARLI.
-                'apogee_time': (float(powered['time'][-1]) +
-                                float(trajectory['phases']['coasting']['apogee_time']))
+                # Serbest faz apoje olayıyla bitmediyse (araç güçlü fazda
+                # tepe yapıp yere çarptı) yukarıdaki toplam ÇARPMA anını
+                # verirdi — "apoje" etiketiyle yanlış sayı olurdu. O hâlde
+                # birleşik yörüngenin gerçek tepe anı okunur.
+                'apogee_time': (
+                    None if apogee_unknown else
+                    (float(powered['time'][-1]) +
+                     float(trajectory['phases']['coasting']['apogee_time']))
+                    if trajectory['phases']['coasting'].get('apogee_reached')
+                    else float(trajectory['time'][
+                        int(np.argmax(trajectory['altitude']))]))
             }
         }
 
@@ -1145,6 +1630,17 @@ class TrajectoryAnalyzer:
         phase_names = ['Launch', 'Burnout', 'Apogee', 'Landing']
         phase_altitudes = _as_list([0, powered_phase['position_z'][-1] / 1000,
                                     coasting_phase['position_z'][-1] / 1000, 0])
+        # Faz zamanları monoton olmalı; uçuş erken sonlandıysa (yere çarpma /
+        # zaman aşımı) yukarıdaki dört nokta artık sıralı değildir. Böyle bir
+        # koşuda apoje/iniş işaretçisi ÇİZİLMEZ — olmayan bir olayı grafikte
+        # göstermek uydurma veridir.
+        if not all(phase_times[i] <= phase_times[i + 1]
+                   for i in range(len(phase_times) - 1)):
+            cut = 2 if phase_times[1] <= phase_times[-1] else 1
+            phase_times = phase_times[:cut] + [float(trajectory['time'][-1])]
+            phase_altitudes = (phase_altitudes[:cut] +
+                               [float(trajectory['altitude'][-1] / 1000)])
+            phase_names = phase_names[:cut] + ['Flight end']
 
         fig.add_trace(
             go.Scatter(
@@ -1162,30 +1658,46 @@ class TrajectoryAnalyzer:
         )
 
         # 6. Performance summary gauge
-        max_altitude_km = float(performance['trajectory_metrics']['max_altitude'] / 1000)
-        fig.add_trace(
-            go.Indicator(
-                mode="gauge+number+delta",
-                value=max_altitude_km,
-                title={'text': "Maximum Altitude (km)"},
-                domain={'x': [0, 1], 'y': [0, 1]},
-                gauge={
-                    'axis': {'range': [0, max(10, max_altitude_km * 1.2)]},
-                    'bar': {'color': "darkblue"},
-                    'steps': [
-                        {'range': [0, max_altitude_km * 0.5], 'color': "lightgray"},
-                        {'range': [max_altitude_km * 0.5, max_altitude_km * 0.8], 'color': "yellow"},
-                        {'range': [max_altitude_km * 0.8, max_altitude_km * 1.2], 'color': "green"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "red", 'width': 4},
-                        'thickness': 0.75,
-                        'value': max_altitude_km
+        # B1: apoje bilinmiyorsa (çözücü olayı tetiklenmedi) göstergeye SAYI
+        # KONMAZ. Uydurma 0 km yazmak "roket hiç yükselmedi" demek olurdu.
+        _max_alt_raw = performance['trajectory_metrics'].get('max_altitude')
+        if _max_alt_raw is None:
+            # Sayı yok: gösterge boş bırakılır, başlık nedeni söyler.
+            fig.add_trace(
+                go.Indicator(
+                    mode="number",
+                    value=None,
+                    title={'text': "Maximum Altitude — NOT AVAILABLE "
+                                   "(solver did not reach apogee)"},
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                ),
+                row=3, col=2
+            )
+        else:
+            max_altitude_km = float(_max_alt_raw / 1000)
+            fig.add_trace(
+                go.Indicator(
+                    mode="gauge+number+delta",
+                    value=max_altitude_km,
+                    title={'text': "Maximum Altitude (km)"},
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    gauge={
+                        'axis': {'range': [0, max(10, max_altitude_km * 1.2)]},
+                        'bar': {'color': "darkblue"},
+                        'steps': [
+                            {'range': [0, max_altitude_km * 0.5], 'color': "lightgray"},
+                            {'range': [max_altitude_km * 0.5, max_altitude_km * 0.8], 'color': "yellow"},
+                            {'range': [max_altitude_km * 0.8, max_altitude_km * 1.2], 'color': "green"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': max_altitude_km
+                        }
                     }
-                }
-            ),
-            row=3, col=2
-        )
+                ),
+                row=3, col=2
+            )
 
         # Update layout
         fig.update_layout(

@@ -296,11 +296,39 @@ class TestCachingPerformance:
         avg_ms = (time.perf_counter() - t) / 50.0 * 1000.0
         assert avg_ms < 100.0, f'önbellekli çağrı çok yavaş: {avg_ms:.3f} ms'
 
-    def test_rounding_shares_cache(self):
-        """Yuvarlama sınırındaki komşu girdiler aynı sonucu vermeli (deterministik)."""
+    def test_ayni_girdi_bit_ayni_sonuc(self):
+        """Determinizm: AYNI girdi iki kez çağrılınca bit-aynı sonuç.
+
+        Bu testin eski hâli (``test_rounding_shares_cache``) determinizmi
+        nicemlemeyle karıştırıyordu: ``Pc=100.4, MR=3.601`` ile
+        ``Pc=100.0, MR=3.60`` sonuçlarının ``rel=1e-12`` içinde EŞİT olmasını
+        istiyordu. Determinizm "aynı girdi → aynı çıktı" demektir; "farklı
+        girdi → aynı çıktı" demek DEĞİLDİR. İkincisi bir kusurdur — Faz 5
+        avında ölçüldü (H2 #3): önbellek anahtarı basıncı tam sayı bar
+        çözünürlüğüne indirdiği için kullanıcı girdiyi değiştiriyor, cevap
+        değişmiyordu. Nicemleme sıkılaştırılınca bu test kırıldı; kırılması
+        DOĞRU davranışın kanıtıdır.
+        """
         a = get_combustion_properties('methane', 'lox', 100.4, 3.601)['c_star_m_s']
-        b = get_combustion_properties('methane', 'lox', 100.0, 3.60)['c_star_m_s']
-        assert a == pytest.approx(b, rel=1e-12)
+        b = get_combustion_properties('methane', 'lox', 100.4, 3.601)['c_star_m_s']
+        assert a == b, 'aynı girdi iki farklı sonuç verdi — determinizm bozuk'
+
+    def test_farkli_basinc_farkli_sonuc(self):
+        """Fiziksel olarak farklı çalışma noktası aynı sayıyı DÖNDÜREMEZ.
+
+        Ölçüm (3 Ağustos 2026, nicemleme düzeltmesi sonrası):
+        ``Pc=100.0`` → c* 1829,8116 m/s, ``Pc=100.4`` → c* 1829,8902 m/s.
+        Düzeltmeden önce ikisi de 1829,8116 idi (önbellek anahtarı ayrımı
+        yutuyordu).
+        """
+        p100 = get_combustion_properties('methane', 'lox', 100.0, 3.60)['c_star_m_s']
+        p104 = get_combustion_properties('methane', 'lox', 100.4, 3.601)['c_star_m_s']
+        assert p100 != p104, (
+            'Pc 100.0 ile 100.4 aynı c* verdi — önbellek anahtarı fiziksel '
+            'ayrımı yutuyor (Faz 5 / H2 #3 nüksetti)')
+        # Fark küçük ama gerçek olmalı: %0.001 - %1 bandı makul.
+        bagil = abs(p104 - p100) / p100
+        assert 1e-5 < bagil < 1e-2, f'beklenmedik bağıl fark: {bagil:.2e}'
 
 
 if __name__ == '__main__':  # elle hızlı çalıştırma

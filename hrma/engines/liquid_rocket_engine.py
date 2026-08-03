@@ -4232,6 +4232,12 @@ class LiquidRocketEngine:
                 gamma_term * stagnation_term
                 * (1 - Pe_Pc_sl ** ((gamma - 1) / gamma))
             )
+            # Vakum ideal CF: ortam-eşlenik zincirde P_e/P_c -> 0 limiti.
+            # Daima pozitiftir, kutbu yoktur — ikinci demir adayı (aşağı).
+            CF_ideal_vac = np.sqrt(gamma_term * stagnation_term)
+            # Sabit lülede çıkış statik basıncı (bar); ayrılma ölçütü için.
+            # Ortam-eşlenik zincirde tanımsızdır (lüle her irtifada eşlenir).
+            pe_fixed_bar = None
 
             # SABİT LÜLE (kullanıcı ε girdiyse): çıkış basıncı ortamla birlikte
             # DEĞİŞMEZ; CF'in basınç-itki terimi irtifayla değişir
@@ -4241,8 +4247,9 @@ class LiquidRocketEngine:
                 try:
                     CF_ideal, _ = self._cf_at(self.expansion_ratio,
                                               pressure_atm)
-                    CF_ideal_sl, _ = self._cf_at(self.expansion_ratio,
-                                                 self.P_a)
+                    CF_ideal_sl, pe_fixed_bar = self._cf_at(
+                        self.expansion_ratio, self.P_a)
+                    CF_ideal_vac, _ = self._cf_at(self.expansion_ratio, 0.0)
                 except Exception:
                     pass
 
@@ -4273,17 +4280,85 @@ class LiquidRocketEngine:
             # demirlenir ve ideal CF orani ile irtifaya tasinir. Boylece deniz
             # seviyesinde thrust = CF*Pc*A_t = komuta edilen itki (birebir) ve
             # hicbir irtifada CEA vakum referansi (isp_vac) asilmaz.
-            isp_altitude = min(self.isp_sl * CF_ideal / CF_ideal_sl, self.isp_vac)
+            #
+            # FAZ 5 / H2-2 DÜZELTMESİ — İŞARET TERS DÖNMESİ VE KUTUP.
+            # Demir oranı Isp/CF aslında bir ODA büyüklüğüdür (c*_teslim /
+            # (C_D·g0)) ve irtifadan bağımsız olmalıdır. Deniz seviyesi demiri
+            # `self.isp_sl / CF_ideal_sl` yalnız lüle deniz seviyesinde
+            # AYRILMADAN çalışıyorsa geçerlidir: aşırı genişlemiş lülede
+            # CF_ideal_sl önce küçülür, sonra SIFIRI GEÇER, sonra negatif olur.
+            # Pay (CEA'nın ayrılma düzeltmeli isp_sl'i) ile payda (ayrılmayı
+            # HİÇ görmeyen ideal CF) farklı modellerden geldiği için oran
+            # patlıyordu.
+            #
+            # ÖLÇÜM (25 kN LOX/RP-1, Pc=70 bar, MR=2,3; 3 Ağustos 2026):
+            #     ε    P_e[bar]  ayrılma?  isp_sl/CF_sl    isp_vac/CF_vac
+            #     8    1.2848    hayır         177.913          178.610
+            #    16    0.5174    hayır         177.117          178.546
+            #    25    0.2908    EVET          176.156          178.520
+            #   100    0.0500    EVET          151.326          178.427
+            #   135    0.0343    EVET         6152.295          178.407
+            #   138    0.0334    EVET     -1017083.901          178.406
+            #   250    0.0159    EVET         -158.074          178.370
+            # Vakum demiri %0,14 bandında SABİT; deniz seviyesi demiri ayrılma
+            # başlar başlamaz kullanılamaz hale geliyor. Düzeltme öncesi
+            # ε=138'de 50 km satırı Isp = -2 029 819 s ve itki = -197 247,8 kN
+            # yayımlıyordu (HTTP 200, `error` alanı yok). ε = 100-300 bandı
+            # uydurma değil: vakum üst kademe lüleleri oradadır (RL10B-2 ≈ 280).
+            #
+            # Ortam-eşlenik (rubber-nozzle) zincirde demir DEĞİŞMEZ: orada
+            # CF_ideal_sl daima pozitiftir ve deniz seviyesinde itki komuta
+            # edilen itke birebir eşittir (ölçüldü: 25,000 kN). Bu yüzden
+            # vakum demirine yalnız deniz seviyesi demiri GEÇERSİZKEN düşülür.
+            sl_anchor_ok = bool(CF_ideal_sl > 0.0)
+            if pe_fixed_bar is not None:
+                # Summerfield ölçütü (NOZZLE_SEPARATION_PRESSURE_RATIO = 0,40):
+                # ayrılan lülede ideal CF gerçek itkiyi temsil etmez.
+                sl_anchor_ok = sl_anchor_ok and bool(
+                    pe_fixed_bar >= NOZZLE_SEPARATION_PRESSURE_RATIO * self.P_a)
+            if sl_anchor_ok:
+                isp_per_cf = self.isp_sl / CF_ideal_sl
+                isp_anchor_basis = (
+                    'delivered Isp anchored at the sea-level design point '
+                    '(attached flow); Isp = (isp_sl / CF_sl) * CF(altitude)')
+            elif CF_ideal_vac > 0.0:
+                isp_per_cf = self.isp_vac / CF_ideal_vac
+                isp_anchor_basis = (
+                    'delivered Isp anchored at the vacuum reference; the '
+                    'sea-level anchor is invalid because this nozzle is '
+                    'separated at sea level (Summerfield criterion, '
+                    'Pe < %.2f * Pa)' % NOZZLE_SEPARATION_PRESSURE_RATIO)
+            else:
+                isp_per_cf = None
+                isp_anchor_basis = 'not_modelled (no positive ideal-CF anchor)'
 
-            # Thrust at altitude (constant mass flow)
-            thrust_altitude = self.mdot_total * isp_altitude * self.g0
-
-            # Actual thrust coefficient (zincirle tutarli: CF = F / (Pc * A_t))
-            CF_actual = thrust_altitude / (self.P_c * 1e5 * self.A_t)
-
-            # Performance ratios
-            isp_ratio = isp_altitude / self.isp_sl
-            thrust_ratio = thrust_altitude / self.F
+            if isp_per_cf is None or not (CF_ideal > 0.0):
+                # Bu irtifada ideal tek boyutlu teori NEGATİF itki katsayısı
+                # veriyor: lüle tamamen ayrılmış rejimde. HRMA akış ayrılmasını
+                # ÇÖZMEZ, bu yüzden sayı UYDURULMAZ — alanlar null döner ve
+                # gerekçesi satırın kendisinde yazar. (Ayrılma ayrıca
+                # `warn.liquid.flow_separation` ile de bildirilir.)
+                isp_altitude = None
+                thrust_altitude = None
+                CF_actual = None
+                isp_ratio = None
+                thrust_ratio = None
+                not_modelled_reason = (
+                    'ideal 1-D thrust coefficient is not positive at this '
+                    'ambient pressure (CF_ideal = %.4f): the nozzle is fully '
+                    'separated and flow separation is NOT modelled here'
+                    % float(CF_ideal))
+            else:
+                isp_altitude = min(isp_per_cf * CF_ideal, self.isp_vac)
+                # Thrust at altitude (constant mass flow)
+                thrust_altitude = self.mdot_total * isp_altitude * self.g0
+                # Actual thrust coefficient (zincirle tutarli: CF = F/(Pc*A_t))
+                CF_actual = thrust_altitude / (self.P_c * 1e5 * self.A_t)
+                # Performance ratios
+                isp_ratio = (isp_altitude / self.isp_sl
+                             if self.isp_sl else None)
+                thrust_ratio = thrust_altitude / self.F if self.F else None
+                not_modelled_reason = None
 
             # Exit conditions
             # v2.5.2 DUZELTMESI (Codex bulgusu, liquid:2154): cikis Mach'i
@@ -4342,7 +4417,11 @@ class LiquidRocketEngine:
                 # farkindan gelen itki terimi (cikis Mach'i degil).
                 'exit_pressure_bar': exit_pressure_bar,
                 'pressure_thrust': pressure_thrust,
-                'reynolds_number': Re_throat
+                'reynolds_number': Re_throat,
+                # H2-2: Isp'nin hangi referansa demirlendiği ve satır
+                # çözülemediyse NEDEN çözülemediği veriyle birlikte gider.
+                'isp_anchor_basis': isp_anchor_basis,
+                'not_modelled_reason': not_modelled_reason,
             })
 
         # Tasarım noktası geometrisini geri yükle (bkz. yukarıdaki not).
@@ -7053,6 +7132,18 @@ class LiquidRocketEngine:
         mr_hi = getattr(self, 'of_scan_max', None) or (
             optimal_mr * (1.0 + PERF_MAP_MR_SPAN))
         mr_range = np.linspace(mr_lo, mr_hi, PERF_MAP_MR_POINTS)
+        # FAZ 5 / H2-5 DÜZELTMESİ — `mixture_ratio_efficiency` kendi tanımını
+        # aşıyordu. Gösterge "seçilen O/F'nin Isp'si / bu taramanın maksimumu"
+        # diye tanımlı, yani <= %100 olmalı; ölçülen (Pc=11 bar, LOX/RP-1,
+        # O/F=2,3) %100,02585694901296 idi. Sebep: eşit aralıklı ızgara
+        # SEÇİLEN O/F'yi içermeyebiliyor, dolayısıyla tasarım noktasının
+        # Isp'si ızgara maksimumunu aşabiliyordu (aşım %0,026).
+        # Çözüm sayıyı kırpmak DEĞİL, tasarım noktasını taramanın KENDİSİNE
+        # koymak: eğri artık gerçekten tasarım noktasından geçiyor ve oran
+        # tanım gereği <= %100 oluyor.
+        if not bool(np.any(np.isclose(mr_range, float(self.MR),
+                                      rtol=0.0, atol=1e-9))):
+            mr_range = np.sort(np.append(mr_range, float(self.MR)))
         isp_vs_mr, cstar_vs_mr = [], []
         for mr in mr_range:
             if abs(mr - self.MR) < 1e-9:
@@ -7093,8 +7184,12 @@ class LiquidRocketEngine:
         altitude_range = np.linspace(0.0, PERF_MAP_ALT_MAX_M,
                                      PERF_MAP_ALT_POINTS)
         alt_data = self.calculate_altitude_performance(altitude_range.tolist())
-        isp_vs_alt = [float(p['specific_impulse']) for p in alt_data]
-        thrust_vs_alt = [float(p['thrust']) for p in alt_data]
+        # H2-2: ayrılmış rejimde satır `None` döner (sayı uydurulmaz); grafik
+        # dizisi de boşluk taşır — `float(None)` ile çökmemeli.
+        isp_vs_alt = [None if p['specific_impulse'] is None
+                      else float(p['specific_impulse']) for p in alt_data]
+        thrust_vs_alt = [None if p['thrust'] is None else float(p['thrust'])
+                         for p in alt_data]
 
         # --- O/F verimi: AYNI taramanın kendisinden ------------------------
         # Eskiden burada `getattr(self, 'mr_efficiency', ...)` okunuyordu;
@@ -7108,7 +7203,9 @@ class LiquidRocketEngine:
             mr_efficiency_pct = float(self.isp_vac) / max(isp_valid) * 100.0
             mr_efficiency_basis = (
                 'Isp(vac) at the selected O/F divided by the maximum Isp of '
-                'this very O/F scan (same solver chain, CEA-anchored)')
+                'this very O/F scan (same solver chain, CEA-anchored); the '
+                'selected O/F is itself one of the scan points, so the ratio '
+                'cannot exceed 100%')
         else:
             mr_efficiency_pct = None
             mr_efficiency_basis = 'not_modelled (the O/F scan did not solve)'

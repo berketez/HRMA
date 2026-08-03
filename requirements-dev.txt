@@ -10,7 +10,27 @@
 pytest>=8.0.0
 pypdf>=5.0.0           # üretilen PDF raporlarının içeriğini doğrulayan testler
 
-# NOT: build123d ve OCP (STEP export testleri) BİLEREK yok — numpy>=2
-# istiyorlar, HRMA ise numpy<2 pinli. Kurulunca numpy 2.x'e yükseliyor ve
-# np.trapz kayboluyor (2026-07-23 CI koşusunda 194 test düştü). O testler
-# pytest.importorskip ile atlanır; ayrıntı INSTALL.md'de.
+# PyYAML — yayın kapısı YÖNETİŞİM bekçileri için ZORUNLUDUR.
+#
+# Faz 5 / H5-4 ölçümü (3 Ağustos 2026): PyYAML hiçbir requirements dosyasında
+# yoktu ve listedeki hiçbir paket onu dolaylı olarak çekmiyordu (cantera
+# `ruamel.yaml` ister — FARKLI pakettir, `import yaml` sağlamaz). Sonuç:
+# `tests/test_faz4_yayin_kapisi.py` içindeki üç `pytest.importorskip("yaml")`
+# CI'da her koşuda tetikleniyor ve 4 test SESSİZCE atlanıyordu:
+#   :376 release iş akışı YAML denetimi (Faz 4 / E3 bekçisi)
+#   :676 .pre-commit-config.yaml denetimi
+#   :733 CITATION.cff denetimi          (Faz 4 / E5 bekçisi)
+# Ölçüm komutu (yaml'ı ImportError atan bir shim'le maskeleyerek):
+#   PYTHONPATH=<shim>:. pytest tests/test_faz4_yayin_kapisi.py -q -rs
+#   -> düzeltme öncesi: 24 passed, 4 skipped
+PyYAML>=6.0
+
+# NOT: build123d ve OCP (STEP export testleri) bu dosyada YOK — numpy>=2
+# istiyorlar, HRMA ise numpy<2 pinli; buraya konursa `pip install -r
+# requirements-dev.txt` numpy'yi 2.x'e yükseltir ve np.trapz kaybolur
+# (2026-07-23 CI koşusunda 194 test bu yüzden düştü).
+# Faz 5 / H5-2 düzeltmesi: bu yüzden ARTIK AYRI BİR CI İŞİ var
+# (.github/workflows/tests.yml -> `step-export` işi): build123d orada
+# kurulur, numpy pini hemen geri alınır ve 5 STEP test dosyası GERÇEKTEN
+# koşturulur; o iş sıfır-atlama denetimiyle biter, yani "atlandı" artık
+# başarı sayılmaz. Yerel kurulum için: pip install build123d

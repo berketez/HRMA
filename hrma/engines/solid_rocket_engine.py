@@ -203,6 +203,29 @@ SOLID_CASE_DESIGN = {
     'relief_fraction_of_design': 0.85,
 }
 
+# Ön + arka kapak kütlesinin kasa kabuğu kütlesine oranı — TEK tanım noktası.
+# Hem kuru kütle zinciri (`_calculate_dry_mass`) hem maliyet modeli
+# (`_calculate_cost_analysis`) bunu kullanır; daha önce ikisi ayrı ayrı
+# (0.30 ve 1.15) yazılıydı ve aynı kasa iki farklı kütleyle fiyatlanıyordu.
+SOLID_CASE_CLOSURE_MASS_FRACTION = 0.30
+
+# Katalog malzeme anahtarı -> maliyet modeli malzeme AİLESİ eşlemesi
+# (Faz 5 / H4-8). `SOLID_COST_PARAMS['case_materials']` yalnız dört jenerik
+# aile taşır; `_case_design()` ise materials_db anahtarlarını döndürür
+# (steel_4130, titanium_6al4v, ...). Eşleme YOKKEN eski kod sessizce
+# ALÜMİNYUMA düşüyordu: titanyum kasa, modelin kendi titanyum satırına göre
+# 9,8 kat ucuz fiyatlanıyordu (4430x90 / 2700x15). Artık eşlenemeyen malzeme
+# fiyatlanmaz ve bu durum açıkça bildirilir — sessiz varsayılan YOK.
+SOLID_CASE_COST_FAMILY = {
+    'steel': 'steel', 'steel_4130': 'steel', 'steel_4340': 'steel',
+    'ss_304': 'steel', 'ss_316': 'steel', 'ss_17_4ph': 'steel',
+    'aluminum': 'aluminum', 'aluminum_6061': 'aluminum',
+    'al_2024_t3': 'aluminum', 'al_7075_t6': 'aluminum',
+    'titanium': 'titanium', 'titanium_6al4v': 'titanium',
+    'ti_grade2_cp': 'titanium',
+    'composite': 'composite', 'carbon_carbon': 'composite',
+}
+
 # ---------------------------------------------------------------------------
 # Monte Carlo üretim saçılımı ve başarı ölçütü — TEK tanım noktası.
 # v2.6.26 (P4): bu sayılar İKİ yerde ayrı ayrı yazılıydı — bir kez örneklemeyi
@@ -826,6 +849,58 @@ class SolidRocketEngine:
             return None
         return float(a_ref)
 
+    def _burn_rate_publication(self):
+        """Yanma hızı yasasının yanıttaki DÜRÜST gösterimi (Faz 5 / H2-4).
+
+        Parçalı rejim tablosu (KNDX/KNSB) etkinken kullanıcının tek üslü
+        ``a``/``n`` çifti hesaba HİÇ girmez. Bu durumda:
+          * ``burn_rate_coefficient`` / ``burn_rate_exponent`` -> ``None``
+            (kullanılmayan sayı "kullanılan katsayı" gibi gösterilmez),
+          * kullanıcının girdisi ``*_input`` ekiyle ayrıca yayımlanır,
+          * gerçekten kullanılan rejim tablosu ``burn_rate_law`` ile verilir.
+        Yasa yoksa alanlar eskisi gibi tek üslü Saint-Robert çiftidir.
+        """
+        law_key = getattr(self, 'burn_rate_law_key', None)
+        if not law_key:
+            return {
+                'burn_rate_coefficient': self.a,
+                'burn_rate_exponent': self.n,
+                'burn_rate_basis': (
+                    'single-exponent Saint-Robert law r = a * Pc^n with the '
+                    'coefficients supplied for this propellant'),
+                'burn_rate_law': None,
+            }
+        try:
+            from hrma.data import burn_rate_db as _brdb
+            law = _brdb.BURN_RATE_LAWS[law_key]
+            regimes = [dict(r) for r in law.get('regimes', [])]
+            law_name = law.get('name')
+            law_units = law.get('units')
+            law_source = law.get('source')
+        except Exception:
+            regimes, law_name, law_units, law_source = [], None, None, None
+        return {
+            # Tek bir (a, n) çifti bu motorun yanma hızını TEMSİL ETMİYOR:
+            # yanma boyunca Pc rejim sınırlarını geçiyor ve her rejimin kendi
+            # üsteli var (KNDX'te bir rejimde n negatif). Sayı uydurulmaz.
+            'burn_rate_coefficient': None,
+            'burn_rate_exponent': None,
+            'burn_rate_coefficient_input': self.a,
+            'burn_rate_exponent_input': self.n,
+            'burn_rate_basis': (
+                'piecewise regime table "%s" evaluated at the INSTANTANEOUS '
+                'chamber pressure; the single a/n pair entered for this '
+                'motor was NOT used (no single exponent represents this law)'
+                % law_key),
+            'burn_rate_law': {
+                'key': law_key,
+                'name': law_name,
+                'units': law_units,
+                'source': law_source,
+                'regimes': regimes,
+            },
+        }
+
     def unwired_inputs(self):
         """Çözücünün BİLİNÇLİ olarak kullanmadığı form alanları.
 
@@ -900,6 +975,16 @@ class SolidRocketEngine:
             'informational': [
                 'humidity', 'wind_speed', 'heat_value', 'ignition_delay',
             ],
+            # FAZ 5 / H2-4: katalog yakıtında (KNDX/KNSB) yanma hızı parçalı
+            # rejim tablosundan ANLIK basınçla okunur; kullanıcının tek üslü
+            # a/n çifti hesaba GİRMEZ (ölçüldü: n = 0,2 / 0,688 / 0,95 ->
+            # 15 anlamlı basamak aynı sonuç). Yasa etkin DEĞİLKEN bu liste
+            # boştur, çünkü o zaman alanlar gerçekten canlıdır — beyan
+            # çürümesi (`declared_but_live`) böyle önlenir.
+            'overridden_by_regime_table': (
+                ['burn_rate_coefficient', 'burn_rate_exponent']
+                if getattr(self, 'burn_rate_law_key', None) else []
+            ),
         }
 
     def _nozzle_material_key(self):
@@ -3732,6 +3817,14 @@ class SolidRocketEngine:
                     # farklı sayı olamaz): _grain_mechanics kaydı.
                     'temperature_k': float(
                         self._grain_mechanics()['cure_temperature_k']),
+                    # FAZ 5 / H4-11 — arayüz bu değeri kendisi Celsius'a
+                    # çeviriyor ve 273,15 yerine 273 kullanıyordu
+                    # (templates/solid.html: `v => v - 273`). Çevrim artık
+                    # doğru sabitle SUNUCUDA yapılır ve hazır yayımlanır;
+                    # aynı büyüklüğün iki yerde iki farklı sabitle
+                    # çevrilmesine gerek kalmaz.
+                    'temperature_c': float(
+                        self._grain_mechanics()['cure_temperature_k']) - 273.15,
                     'time_hours': 24,
                     'pressure_kpa': 101.325,
                     'humidity_control': 'Required',
@@ -3947,11 +4040,30 @@ class SolidRocketEngine:
         grain_vol = np.pi / 4.0 * max(self.D_chamber ** 2 - self.D_core ** 2, 0.0) \
             * self.L_grain
         m_prop = grain_vol * self.rho_p
-        wall = min(max(0.045 * self.D_chamber, 0.003), 0.12 * self.D_chamber)
-        material = str(self.overrides.get('case_material') or 'aluminum').lower()
-        rho_case, usd_case = p['case_materials'].get(
-            material, p['case_materials']['aluminum'])
-        m_case = np.pi * self.D_chamber * self.L_grain * 1.15 * wall * rho_case
+
+        # FAZ 5 / H4-8 DÜZELTMESİ — kasa MALİYETİ ile kasa KÜTLESİ iki ayrı
+        # modelden besleniyordu. Ölçüm (aynı motor, `case_material` override):
+        #   case_material     kütle ρ   maliyet ρ   $/kg   kasa $
+        #   (yok)               7800      2700       15     32,9
+        #   steel_4130          7800      2700       15     32,9
+        #   titanium_6al4v      4430      2700       15     32,9
+        # Yani katalog anahtarı verilen HER durumda maliyet modeli sessizce
+        # alüminyuma düşüyordu ve titanyum kasa 9,8 kat ucuz fiyatlanıyordu.
+        # Cidar da ayrıydı: maliyet 0,045·D (4,5 mm), yapısal analiz 2,4 mm.
+        # Artık kütle zinciriyle AYNI tek kaynaklardan beslenir:
+        #   malzeme + cidar  -> _case_design()
+        #   yoğunluk         -> _case_density()
+        #   kasa geometrisi  -> _case_inner_diameter() / _case_inner_length()
+        #   kapak payı       -> SOLID_CASE_CLOSURE_MASS_FRACTION
+        case_material, _sy_cost, _sf_cost, wall = self._case_design()
+        rho_case = self._case_density()
+        m_case = (np.pi * self._case_inner_diameter() * self._case_inner_length()
+                  * wall * rho_case) * (1.0 + SOLID_CASE_CLOSURE_MASS_FRACTION)
+        cost_family = SOLID_CASE_COST_FAMILY.get(
+            str(case_material or '').strip().lower())
+        usd_case = (p['case_materials'][cost_family][1]
+                    if cost_family else None)
+
         d_t = self._estimate_throat_diameter()
         m_nozzle = min(max(0.8 * (d_t / 0.05) ** 2, 0.2), 60.0)
         m_insul = np.pi * self.D_chamber * self.L_grain * 0.003 * 1200.0
@@ -3959,13 +4071,32 @@ class SolidRocketEngine:
         mat = {
             'propellant': m_prop * p['propellant_usd_per_kg'].get(
                 self.propellant_type, p['propellant_usd_per_kg']['default']),
-            'case_materials': m_case * usd_case,
             'nozzle': m_nozzle * p['nozzle_usd_per_kg'],
             'insulation': m_insul * p['insulation_usd_per_kg'],
         }
+        if usd_case is not None:
+            mat['case_materials'] = m_case * usd_case
         mat['hardware'] = 0.15 * sum(mat.values())
         mat = {k: round(v, 1) for k, v in mat.items()}
-        mat['total_materials'] = round(sum(mat.values()), 1)
+        if usd_case is None:
+            # Bu malzemenin birim fiyatı modelde YOK. Sessizce başka bir
+            # malzemeye düşmek yerine kalem fiyatlanmaz ve toplam da
+            # "eksik toplam" olarak yayımlanmaz — sayı uydurulmaz.
+            mat['case_materials'] = None
+            mat['total_materials'] = None
+        else:
+            mat['total_materials'] = round(sum(mat.values()), 1)
+        mat['case_mass_kg'] = round(float(m_case), 4)
+        mat['case_cost_basis'] = (
+            'case shell + closures from the SAME source as the dry-mass chain '
+            '(_case_design wall %.2f mm, _case_density %.0f kg/m3, closures '
+            '%.0f%%); unit price from the "%s" family'
+            % (wall * 1000.0, rho_case,
+               SOLID_CASE_CLOSURE_MASS_FRACTION * 100.0, cost_family)
+            if cost_family else
+            'not_priced: case material "%s" has no unit price in '
+            'SOLID_COST_PARAMS[\'case_materials\'] and the model does NOT '
+            'substitute another material' % case_material)
 
         # İşçilik: süreler kütle/boyutla ölçeklenir, saat ücreti tek katsayı
         hr = p['labor_usd_per_hour']
@@ -3992,14 +4123,22 @@ class SolidRocketEngine:
         }
         dev['total_development'] = round(sum(dev.values()), 0)
 
-        recurring = mat['total_materials'] + man['total_manufacturing']
+        # H4-8: kasa fiyatlanamadıysa malzeme toplamı None'dur; eksik bir
+        # toplamı "tekrarlayan maliyet" diye yayımlamak sahte sayı olurdu.
+        if mat['total_materials'] is None:
+            recurring = None
+        else:
+            recurring = mat['total_materials'] + man['total_manufacturing']
         return {
             'material_costs_usd': mat,
             'manufacturing_costs_usd': man,
             'development_costs_usd': dev,
             'cost_per_flight': {
-                'recurring_cost_usd': round(recurring, 1),
-                'cost_per_ns_impulse': round(recurring / max(total_impulse, 1.0), 4),
+                'recurring_cost_usd': (None if recurring is None
+                                       else round(recurring, 1)),
+                'cost_per_ns_impulse': (
+                    None if recurring is None
+                    else round(recurring / max(total_impulse, 1.0), 4)),
             },
             'basis': ('Parametrik tahmin: birim fiyatlar SOLID_COST_PARAMS, '
                       'kütleler grain/kasa geometrisinden. Kesin fiyat değildir.'),
@@ -5295,7 +5434,9 @@ class SolidRocketEngine:
         case_shell_mass = np.pi * d_case * L_case * t_wall * rho_case
 
         # Forward + aft closure mass (~30% of shell mass, simplified)
-        closure_mass = case_shell_mass * 0.30
+        # H4-8: oran TEK tanım noktasından gelir; maliyet modeli de aynı
+        # sabiti kullanır (daha önce orada 1.15 yazılıydı).
+        closure_mass = case_shell_mass * SOLID_CASE_CLOSURE_MASS_FRACTION
 
         # Subtotal structural mass
         structural_mass = case_shell_mass + closure_mass
@@ -7137,8 +7278,21 @@ class SolidRocketEngine:
             # Propellant properties
             'density': self.rho_p,
             'c_star': self.c_star,
-            'burn_rate_coefficient': self.a,
-            'burn_rate_exponent': self.n,
+            # FAZ 5 / H2-4 DÜZELTMESİ — katalog yakıtında (KNDX/KNSB) yanma
+            # hızı PARÇALI rejim tablosundan okunur ve kullanıcının a/n çifti
+            # HİÇ kullanılmaz. Ölçüldü (kndx, Pc=30 bar, aynı geometri):
+            #   n=0.200 -> isp=138.1603514622613  burn_time=1.8649276127370293
+            #   n=0.688 -> isp=138.1603514622613  burn_time=1.8649276127370293
+            #   n=0.950 -> isp=138.1603514622613  burn_time=1.8649276127370293
+            # yani 15 anlamlı basamak aynı. Ezme `warn.solid.piecewise_law_
+            # active` ile beyan ediliyordu AMA bu iki alan kullanıcının
+            # kullanılmayan değerini geri yayımlıyordu; alan adı "hesapta
+            # kullanılan katsayı" gibi okunduğu için kullanıcı verdiği sayının
+            # işe yaradığını sanıyordu. Artık ezme varken alanlar null döner,
+            # kullanıcının girdisi ayrı ve AÇIKÇA "_input" ekiyle yayımlanır,
+            # gerçekten kullanılan rejim tablosu `burn_rate_law` altında
+            # verilir. (`unwired_inputs()` de bu durumu bildirir.)
+            **self._burn_rate_publication(),
             'chamber_temperature': self.T_c,
             'chamber_pressure': self.P_c,
             

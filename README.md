@@ -1,4 +1,4 @@
-# HRMA - High-Fidelity Rocket Motor Analysis
+# HRMA - Rocket Motor Analysis Suite
 
 [![tests](https://github.com/berketez/HRMA/actions/workflows/tests.yml/badge.svg)](https://github.com/berketez/HRMA/actions/workflows/tests.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

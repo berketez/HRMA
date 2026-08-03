@@ -133,6 +133,24 @@ app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
 #: dönmediği için sınırsız t_max bitmeyen entegrasyona yol açıyordu.
 _SIXDOF_T_MAX_LIMIT_S = 3600.0
 
+#: 6-DOF çözücüsü için DUVAR SAATİ bütçesi [s] (Faz 5B / B5).
+#:
+#: ÖLÇÜM (HEAD 9d3728e, bu makine): NaN girdili tek bir istek 900 saniye
+#: boyunca DÖNMEDİ — üç sonlandırma olayının üçü de karşılaştırmaya dayanıyor
+#: ve NaN durumunda hiçbiri işaret değiştiremiyor. Kök neden Dalga 1'de
+#: çözücü tarafında kapatıldı (sonlu-değer denetimi); bu bütçe İKİNCİ
+#: savunma hattıdır.
+#:
+#: Sayı ölçümle seçildi. Geçerli ve fiziksel girdiyle ölçülen EN KÖTÜ süre
+#: (t_max = 3600 s üst sınırında, burn_time = 3600 s) **10,1 s**; itki
+#: 1e7 N + t_max 3600 s ile 8,1 s; sağlıklı çağrı 0,09 s. 60 s, ölçülen en
+#: kötü hâlin ~6 katı — meşru hiçbir koşu kesilmez, ama bir gerileme
+#: yeniden sonsuz döngü açarsa istek kilitlenmez.
+#:
+#: Uygulama daemon iş parçacığıdır: kesilemeyen bir çözücüyü öldüremeyiz, ama
+#: ISTEK dönebilir ve daemon olduğu için süreç kapanışını da bloke etmez.
+_SIXDOF_WALL_CLOCK_BUDGET_S = 60.0
+
 # GÜVENLİK — v2.6.2: joker CORS kaldırıldı.
 #
 # Burada eskiden argümansız ``CORS(app)`` vardı; flask-cors varsayılanı TÜM
@@ -376,6 +394,32 @@ PARAMETRIC_NON_NEGATIVE_PARAMS = frozenset({
     'expansion_ratio', 'thrust_coefficient', 'atmospheric_pressure',
 })
 
+#: Parametrik taramanın TOPLAM İŞ BÜTÇESİ [s] (Faz 5B / B12).
+#:
+#: ``PARAMETRIC_MAX_STEPS`` bir ADIM sınırıdır, SÜRE sınırı değil — ve süre
+#: makineden makineye değişir. ÖLÇÜLDÜ (HEAD 9d3728e, bu makine):
+#:   20 adım (varsayılan) -> 13,3 s ; 60 adım -> 40,4 s ; 100 adım -> 67,8 s
+#: yani izin verilen en büyük tarama tek bir iş parçacığını ~68 saniye
+#: tutuyordu. İş kuyruğu ya da iptal yok; waitress ``threads=8`` altında
+#: bunlar doğrudan bloke istektir.
+#:
+#: Bütçe İKİ yerde uygulanır:
+#:   1) ERKEN REDDETME — ilk nokta çözüldükten sonra ÖLÇÜLEN nokta maliyeti
+#:      adım sayısıyla çarpılır; öngörü bütçeyi aşıyorsa istek ~1 saniyede
+#:      422 ile döner (68 saniye beklemek yerine). Öngörü uydurma değil,
+#:      kullanıcının kendi makinesinde ölçülen değerdir.
+#:   2) SERT DURDURMA — döngü içinde geçen süre bütçeyi aşarsa tarama
+#:      kesilir; yarım eğri "başarılı tam tarama" gibi yayımlanmaz.
+#:
+#: 30 s, arayüzün varsayılanı olan 10 adımın (~6,7 s) dört katından fazla
+#: yer bırakır. Daha uzun taramayı isteyen ``time_budget_s`` gönderir —
+#: yetenek kaybı yok, ama sessiz 68 saniyelik donma da yok.
+PARAMETRIC_TIME_BUDGET_DEFAULT_S = 30.0
+
+#: ``time_budget_s`` ile istenebilecek en büyük bütçe [s]. Bunun üstü
+#: senkron bir HTTP isteğinde savunulamaz.
+PARAMETRIC_TIME_BUDGET_MAX_S = 300.0
+
 
 def _parametric_point_rejection(sweep_param, value):
     """Bu süpürme noktası fiziksel olarak geçerli mi?
@@ -537,6 +581,156 @@ def _reject_cross_origin():
     return None
 
 
+#: Gövde kapısının kendi okuma bütçesi. Bunun ÜSTÜNDEKİ istekler kapıya
+#: uğramaz: ``/api/import/ork`` (20 MiB), ``/api/import/motor-file`` (2 MiB)
+#: ve ``/api/projects/save`` kendi boyut kapılarını ``request.content_length``
+#: ile ÖNCE çalıştırıyor; gövdeyi burada okumak o kapıları etkisiz bırakırdı.
+#: Kapının kapattığı vakalar (bozuk JSON, skaler, dizi) küçük gövdelerdir.
+_JSON_BODY_GATE_MAX_BYTES = 1024 * 1024
+
+
+@app.before_request
+def _reject_malformed_json_body():
+    """JSON gövdesi bozuk / sözlük değilse 500 yerine 400 döndürür.
+
+    Faz 5B / H3-B7 ÖLÇÜMÜ (HEAD 9d3728e; 65 uç tarandı):
+    bozuk JSON ``{"a":`` 47 uçta, JSON skaler ``42`` 54 uçta, JSON dizi ``[]``
+    23 uçta **HTTP 500** üretiyordu; boş gövde de aynı sınıftaydı. Tüm 500'lerin
+    124 tanesi (261 içinde) yalnızca bu BİÇİMSEL nedendendi. İki kök neden vardı
+    ve ikisi de tek tek uçlarda değil, ortak desende:
+
+      1. ``request.json`` bozuk gövdede ``werkzeug.BadRequest`` atar; uçların
+         ``except Exception`` bloğu bunu yakalayıp 500'e çevirir. Yanıt gövdesi
+         komik biçimde 400 metnini taşıyordu ama HTTP kodu 500'dü.
+      2. Gövde sözlük değilse ``data.get(...)`` →
+         ``AttributeError: 'int' object has no attribute 'get'`` → 500.
+
+    ``app.py`` içinde 62 ``request.json``/``get_json`` kullanımı var, yalnız
+    7'si ``silent=True``. Kapıyı 55 yere tek tek yazmak yerine buraya, tek
+    yere kondu: gövde ayrıştırılamıyorsa ya da JSON nesnesi (sözlük) değilse
+    istek uca hiç ulaşmaz.
+
+    Kapsam bilinçli olarak dar:
+
+    * Yalnız gövde taşıyan metodlar (POST/PUT/PATCH).
+    * Yalnız ``Content-Type`` JSON ise — ``multipart/form-data`` yükleme
+      uçlarına (``/api/validation/upload-csv``, ``/api/import/*``,
+      ``/api/step/import``) DOKUNULMAZ.
+    * Yalnız ``_JSON_BODY_GATE_MAX_BYTES`` altındaki gövdeler; büyükler kendi
+      boyut kapılarına gider.
+
+    Ret kodları makine-okur: ``empty_json_body`` / ``malformed_json_body`` /
+    ``body_not_an_object``. Boş gövde de burada kapanır: RFC 8259'a göre boş
+    dize geçerli JSON DEĞİLDİR ve ölçümde 5 uçta 500 üretiyordu.
+    """
+    if request.method not in ('POST', 'PUT', 'PATCH'):
+        return None
+    if not request.is_json:
+        return None
+    # ``content_length`` yoksa (chunked gövde, ya da hiç gövde yok) kapı yine
+    # çalışır: o durumda uçların KENDİ boyut kapıları da zaten devre dışıdır
+    # (hepsi ``content_length is not None`` şartına bağlı), üst sınırı
+    # ``MAX_CONTENT_LENGTH`` (32 MiB) verir. Bu dal olmadan "boş gövde" vakası
+    # kapıdan kaçıyordu — ölçüldü: 5 uçta 500 kalmıştı.
+    length = request.content_length
+    if length is not None and length > _JSON_BODY_GATE_MAX_BYTES:
+        return None
+
+    raw = request.get_data(cache=True)
+    if not raw.strip():
+        return jsonify({
+            'status': 'error',
+            'error': 'empty_json_body',
+            'message': ('The request declared Content-Type: application/json '
+                        'but the body was empty. Send a JSON object.'),
+        }), 400
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return jsonify({
+            'status': 'error',
+            'error': 'malformed_json_body',
+            'message': ('The request body is not valid JSON and could not be '
+                        'parsed. No analysis was attempted.'),
+        }), 400
+    if not isinstance(parsed, dict):
+        return jsonify({
+            'status': 'error',
+            'error': 'body_not_an_object',
+            'message': ('The request body must be a JSON object (a mapping of '
+                        'field names to values); received '
+                        + type(parsed).__name__ + '.'),
+        }), 400
+    return None
+
+
+#: Hata gövdesindeki tek bir metin alanının üst sınırı (karakter).
+#: ÖLÇÜLDÜ (ast taraması, ``hrma/app.py``): 300 karakteri geçen tek satırlık
+#: tek bir ileti sabiti var — ``app.py:5438``, 343 karakter. 2000 bunun beş
+#: katından fazla, yani meşru hiçbir ileti kırpılmaz.
+_ERROR_TEXT_MAX_CHARS = 2000
+
+
+def _clip_echo(value, limit=200):
+    """Kullanıcı girdisini yanıta yankılarken kırpar; kırpmayı beyan eder.
+
+    ``_clip_error_body`` yalnız HTTP >= 400 gövdelerini tarar; başarı
+    gövdesindeki yankılar (ölçüldü: ``/api/get-fuel-properties`` → ``note``,
+    100 049 karakter, HTTP 200) buradan geçer.
+    """
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return (text[:limit]
+            + f'... [truncated by HRMA: {limit} of {len(text)} characters]')
+
+
+def _clip_long_strings(node, limit, state):
+    """Hata gövdesindeki aşırı uzun metinleri kırpar; kırpmayı BEYAN eder."""
+    if isinstance(node, dict):
+        return {k: _clip_long_strings(v, limit, state) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_clip_long_strings(v, limit, state) for v in node]
+    if isinstance(node, str) and len(node) > limit:
+        state['clipped'] = True
+        return (node[:limit]
+                + f'... [truncated by HRMA: {limit} of {len(node)} characters]')
+    return node
+
+
+@app.after_request
+def _clip_error_body(response):
+    """Hata yanıtındaki devasa metinleri kırpar (Faz 5B / H3-B13).
+
+    ÖLÇÜM (HEAD 9d3728e): 100 000 karakterlik tek bir alan gönderildiğinde
+    ``/calculate`` **200 109 baytlık** bir 400 gövdesi döndürüyordu — girdi
+    hem ``details[0]`` (doğrulayıcı iletisi) hem ``motor_type`` yankısı olarak
+    iki kez kopyalanmıştı. Aynı gövde Faz 4/D7'de ölçülen günlük ve destek
+    paketi kanalına da gidiyor.
+
+    Kırpma yalnız **hata** yanıtlarında (HTTP >= 400) çalışır: başarı
+    gövdelerinde çizim/plot JSON'u meşru olarak on binlerce karakter
+    olabiliyor (ölçüldü: ``/api/quick-geometry`` → ``plots.motor``, 27 238
+    karakter) ve onlara dokunmak veri kaybı olurdu.
+
+    Kırpılan metin sessizce kısaltılmaz; sonuna kaç karakterin atıldığını
+    söyleyen açık bir beyan eklenir. Kırpma olmadıysa gövde bayt bayt
+    DEĞİŞTİRİLMEZ.
+    """
+    if response.status_code < 400 or response.direct_passthrough:
+        return response
+    if not response.is_json:
+        return response
+    body = response.get_json(silent=True)
+    if body is None:
+        return response
+    state = {'clipped': False}
+    clipped = _clip_long_strings(body, _ERROR_TEXT_MAX_CHARS, state)
+    if state['clipped']:
+        response.set_data(json.dumps(clipped, sort_keys=True))
+    return response
+
+
 @app.after_request
 def _add_security_headers(response):
     """Yerel arayüze uygulanabilir asgari güvenlik başlıkları.
@@ -681,6 +875,97 @@ def validate_positive(value, name):
     if value <= 0:
         raise ValueError(f"{name} must be positive, given: {value}")
     return True
+
+
+def _collect_unphysical_fields(data, positive=(), non_negative=(),
+                               ranges=None, finite=()):
+    """Fiziksel olarak imkânsız sayısal girdileri makine-okur biçimde toplar.
+
+    Faz 5B ortak kapısı. Üç uç aynı sınıf hatayı üretiyordu ve üçünde de kök
+    neden aynıydı: alan "verilmiş" sayılıyor, ama İŞARETİ/SONLULUĞU hiç
+    denetlenmiyor. Ölçülen örnekler (HEAD ``9d3728e``):
+
+    * ``/analyze_thermal_safety`` — bütün sayılar ``"NaN"`` iken ``risk_level``
+      **HIGH'dan LOW'a** dönüyordu (IEEE-754'te NaN ile yapılan her
+      karşılaştırma ``False``, bu yüzden hiçbir risk dalı girmiyor).
+    * ``/analyze_structural_safety`` — ``chamber_length=0`` ve
+      ``throat_diameter=0`` ile HTTP 200 + tam yapısal hüküm; dört zorunlu
+      alanın hepsi ``-1`` iken de HTTP 200.
+    * ``/api/six-dof-analysis`` — ``cd0=-1`` (negatif sürükleme) HTTP 200 ve
+      4277 m/s tepe hız; ``body_diameter=0`` HTTP 500 (sıfıra bölme).
+
+    Sözleşme, ``hrma/utils/input_guard.py``'nin ilkesiyle aynı: **``0`` ile
+    "verilmedi" ASLA karıştırılmaz.** Bu yüzden ``None``/``''`` (verilmedi)
+    burada hiç incelenmez — eksik alan kapısı ayrıdır; yalnızca GÖNDERİLMİŞ
+    değerler denetlenir.
+
+    Args:
+        data: İstek sözlüğü.
+        positive: Kesinlikle ``> 0`` olması gereken alan adları.
+        non_negative: ``>= 0`` olması gereken alan adları (0 = "yok/serbest").
+        ranges: ``{alan: (alt, ust)}`` kapalı aralık denetimi.
+        finite: İşareti serbest ama sonlu olmak zorunda olan alan adları
+            (ör. ``launch_altitude`` — Lut Gölü eksi rakımdadır).
+
+    Returns:
+        Ret listesi; her öğe ``{'field', 'reason', 'value'}``. Boş liste =
+        gönderilen sayıların hepsi fiziksel olarak mümkün.
+        ``reason`` kodları: ``not_a_number`` | ``not_finite`` |
+        ``must_be_positive`` | ``must_be_non_negative`` | ``out_of_range``.
+    """
+    problems = []
+
+    def _numeric(key):
+        """(hata_sozlugu, deger) — hata varsa deger ``None``."""
+        raw = data.get(key)
+        if raw is None or raw == '':
+            return None, None
+        if isinstance(raw, bool):
+            # ``True`` Python'da 1.0'a çevrilir; bir uzunluk/kütle alanında
+            # bu sessiz bir tip hatasıdır, sayı değildir.
+            return {'field': key, 'reason': 'not_a_number',
+                    'value': _clip_echo(raw, 60)}, None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return {'field': key, 'reason': 'not_a_number',
+                    'value': _clip_echo(raw, 60)}, None
+        if not math.isfinite(value):
+            return {'field': key, 'reason': 'not_finite',
+                    'value': _clip_echo(raw, 60)}, None
+        return None, value
+
+    for key in positive:
+        problem, value = _numeric(key)
+        if problem is not None:
+            problems.append(problem)
+        elif value is not None and value <= 0:
+            problems.append({'field': key, 'reason': 'must_be_positive',
+                             'value': value})
+
+    for key in non_negative:
+        problem, value = _numeric(key)
+        if problem is not None:
+            problems.append(problem)
+        elif value is not None and value < 0:
+            problems.append({'field': key, 'reason': 'must_be_non_negative',
+                             'value': value})
+
+    for key, (low, high) in (ranges or {}).items():
+        problem, value = _numeric(key)
+        if problem is not None:
+            problems.append(problem)
+        elif value is not None and not (low <= value <= high):
+            problems.append({'field': key, 'reason': 'out_of_range',
+                             'value': value,
+                             'allowed_range': [low, high]})
+
+    for key in finite:
+        problem, _value = _numeric(key)
+        if problem is not None:
+            problems.append(problem)
+
+    return problems
 
 
 def build_time_history(motor_results):
@@ -903,6 +1188,84 @@ def changelog():
 @app.route('/test-simple')
 def test_simple():
     return '<h1>SIMPLE TEST</h1><p>If you see this, Flask is working!</p><a href="/">Home Page</a>'
+
+#: Gönderilen ile kullanılan değeri "aynı" saymak için bağıl tolerans.
+#: Yalnız yuvarlama/kayan nokta farkını yutar; 2500 K yerine 1681 K
+#: kullanıldığında ayrım net biçimde görünür.
+_INPUT_ECHO_REL_TOL = 1e-6
+
+
+def _declare_overridden_inputs(data, motor_results, fields):
+    """Gönderilmiş ama çözücünün ÜZERİNE YAZDIĞI girdileri beyan eder.
+
+    B10 ÖLÇÜMÜ (HEAD ``9d3728e``) — ``/calculate`` (hibrit),
+    ``chamber_temperature`` dışında her şey sabit:
+
+    ======================  =====  ==================================
+    gönderilen Tc           HTTP   sonucun sha256 imzası
+    ======================  =====  ==================================
+    (yok)                   200    ``d6fa7ad9d8df4f7d`` (referans)
+    2500                    200    **bit-aynı**
+    3500                    200    **bit-aynı**
+    0                       200    **bit-aynı**
+    -3000                   200    **bit-aynı**
+    ======================  =====  ==================================
+
+    Yanıt her durumda ``motor.chamber_temperature = 1681,73`` diyordu —
+    yani kullanıcının verdiği sayı atılıyor ve yerine çözücünün bulduğu
+    değer, "bu senin girdin değil" demeden geri veriliyordu. Üstelik aynı
+    değer ``openrocket.flight_profile.motor_data`` ve
+    ``trajectory.motor_data`` içinde de yankılanıyor.
+
+    Sessizce yok sayılan girdi olmaz: alan modele bağlanamıyorsa
+    KULLANILMADIĞI açıkça yazılır. Beyan VARSAYIMLA değil ÖLÇÜMLE üretilir —
+    gönderilen sayı ile sonuçta fiilen duran sayı karşılaştırılır; eşitse
+    hiçbir şey beyan edilmez.
+
+    Returns:
+        Beyan listesi; her öğe ``{'field', 'submitted', 'used_by_model',
+        'reason', 'message'}``. Değer gerçekten kullanılmışsa boş liste.
+    """
+    declarations = []
+    if not isinstance(motor_results, dict):
+        return declarations
+    for field in fields:
+        raw = data.get(field)
+        if raw is None or raw == '':
+            continue
+        try:
+            submitted = float(raw)
+        except (TypeError, ValueError):
+            continue
+        used = motor_results.get(field)
+        try:
+            used_value = float(used)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(submitted) or not math.isfinite(used_value):
+            continue
+        if math.isclose(submitted, used_value,
+                        rel_tol=_INPUT_ECHO_REL_TOL, abs_tol=0.0):
+            continue
+        declarations.append({
+            'field': field,
+            'submitted': submitted,
+            'used_by_model': used_value,
+            'reason': 'solved_by_model',
+            'message': (f"'{field}' was supplied as {submitted:g} but the "
+                        f'solver computes this quantity itself; the analysis '
+                        f'and every echo of this field in the response use '
+                        f'{used_value:g}.'),
+        })
+    return declarations
+
+
+#: ``/calculate`` içinde çözücünün üzerine yazdığı, bu yüzden beyan edilen
+#: girdiler. Hibrit motorda hazne sıcaklığı yanma çözümünün SONUCUDUR
+#: (``hybrid_rocket_engine.py`` içinde ``self.T_c`` denge/ampirik çözümle
+#: yeniden atanır), girdisi değil.
+_CALCULATE_SOLVER_OWNED_FIELDS = ('chamber_temperature',)
+
 
 @app.route('/calculate', methods=['POST'])
 def calculate():
@@ -1383,6 +1746,14 @@ def calculate():
         if validation_report is not None:
             results['validation'] = validation_report
 
+        # Faz 5B / B10 — sessizce yok sayılan girdi olmaz. Gönderilen değer
+        # ile sonuçta fiilen duran değer karşılaştırılır; farklıysa alanın
+        # KULLANILMADIĞI beyan edilir (bkz. _declare_overridden_inputs).
+        inputs_not_used = _declare_overridden_inputs(
+            data, motor_results, _CALCULATE_SOLVER_OWNED_FIELDS)
+        if inputs_not_used:
+            results['inputs_not_used'] = inputs_not_used
+
         # Sanitize results to handle NaN and Infinity values
         try:
             sanitized_results = sanitize_json_values(results)
@@ -1731,10 +2102,57 @@ def six_dof_analysis():
       CG:   x_cg_full, x_cg_empty [m, burundan] (ops.)
 
     Çıktı: apoje, maks hız/Mach/α, statik marj (dolu/boş), stabilite
-    hükmü, yörünge zaman serileri (seyreltilmiş).
+    hükmü, yörünge zaman serileri (seyreltilmiş), ``solver_wall_time_s``.
+
+    Faz 5B / B5 — FİZİKSEL GİRDİ KAPISI + DUVAR SAATİ BÜTÇESİ.
     """
     try:
         data = request.json or {}
+
+        # --- FİZİKSEL GİRDİ KAPISI (Faz 5B / B5, H1-B5) ------------------
+        # Bu uç bütün sayıları ``float(...)`` ile alıp doğrudan çözücüye
+        # geçiriyordu; işaret/aralık denetimi hiçbir katmanda yoktu.
+        # ÖLÇÜLDÜ (HEAD 9d3728e, HTTP 200 / status "success"):
+        #   dry_mass = -5   -> apoje 3,95e14 m (2637 AU), tepe hız 9,96e11 m/s
+        #                      (ışık hızının 3322 katı), stable = True
+        #   cd0 = -1        -> apoje 1 060 260 m, tepe hız 4277 m/s (negatif
+        #                      sürükleme aracı hızlandırıyor)
+        #   thrust = -3000  -> HTTP 200, apoje 0,0, stable = True
+        #   body_diameter=0 -> HTTP 500 'float division by zero'
+        #                      (BarrowmanAero, ``(s/self.d)**2``)
+        # ``stable: True`` hükmü tamamen geometrik statik marjdan geldiği
+        # için ışık hızının 3322 katında uçan araca da "KARARLI" damgası
+        # basılıyordu. Dalga 1 çözücü tarafında kütle/itki/sonluluk
+        # denetimlerini kapattı; burası UÇ tarafıdır ve geri kalan geometri,
+        # sürükleme ve atış açısı alanlarını da kapatır.
+        # Desen ``/analyze_safety`` ile aynı: 422 + makine-okur alan listesi.
+        invalid = _collect_unphysical_fields(
+            data,
+            positive=('body_diameter', 'body_length', 'nose_length',
+                      'dry_mass', 'rail_length', 'thrust', 'burn_time',
+                      'x_cg_full', 'x_cg_empty'),
+            non_negative=('propellant_mass', 'fin_count', 'fin_root_chord',
+                          'fin_tip_chord', 'fin_span', 'fin_sweep',
+                          'fin_position', 'wind_speed'),
+            # cd0 = 0 sürüklemesiz idealleştirmedir (meşru); negatifi enerji
+            # üretir. Üst uç 5, kanatlı bir roket için fazlasıyla geniştir
+            # (tipik cd0 0,3-0,8; küt gövdeli en kötü hâl ~2).
+            ranges={'cd0': (0.0, 5.0),
+                    'launch_elevation_deg': (0.0, 90.0),
+                    'latitude_deg': (-90.0, 90.0)},
+            finite=('launch_azimuth_deg', 'wind_direction_deg',
+                    'launch_altitude'),
+        )
+        if invalid:
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_six_dof_input',
+                'message': ('A flight solution cannot be produced from '
+                            'physically impossible inputs. Nothing was '
+                            'integrated.'),
+                'invalid_fields': invalid,
+            }), 422
+
         from hrma.analysis.six_dof_trajectory import (
             BarrowmanAero, SixDOFTrajectory)
         aero = BarrowmanAero(
@@ -1784,7 +2202,44 @@ def six_dof_analysis():
                           'an unbounded horizon never terminates for escape '
                           'trajectories.'),
             }), 400
-        res = solver.solve(t_max=t_max)
+
+        # --- DUVAR SAATİ BÜTÇESİ (Faz 5B / B5) ---------------------------
+        # ``solve_ivp``'ye duvar saati bütçesi verilemiyor ve çözücü
+        # kesilemiyor; ama İSTEK bekletilmek zorunda değil. Çözüm daemon bir
+        # iş parçacığında koşar: bütçe dolarsa uç 503 ile döner, iş parçacığı
+        # kendi başına biter ve daemon olduğu için süreç kapanışını bloke
+        # etmez. Ölçülen en kötü meşru süre 10,1 s (bkz.
+        # ``_SIXDOF_WALL_CLOCK_BUDGET_S``), yani bu yol normalde HİÇ
+        # tetiklenmez — bir gerileme olursa arayüz kilitlenmesin diye vardır.
+        import time as _time
+        _outcome = {}
+
+        def _run_solver():
+            try:
+                _outcome['res'] = solver.solve(t_max=t_max)
+            except BaseException as exc:      # noqa: BLE001 - yeniden atılır
+                _outcome['exc'] = exc
+
+        _t0 = _time.monotonic()
+        _worker = threading.Thread(target=_run_solver, daemon=True,
+                                   name='sixdof-solve')
+        _worker.start()
+        _worker.join(timeout=_SIXDOF_WALL_CLOCK_BUDGET_S)
+        _elapsed = _time.monotonic() - _t0
+        if _worker.is_alive():
+            return jsonify({
+                'status': 'error',
+                'error': 'six_dof_time_budget_exceeded',
+                'message': ('The 6-DOF integration did not finish within the '
+                            f'{_SIXDOF_WALL_CLOCK_BUDGET_S:g} s budget. No '
+                            'partial trajectory is reported: an unfinished '
+                            'integration is not a flight.'),
+                'budget_s': _SIXDOF_WALL_CLOCK_BUDGET_S,
+                't_max_s': t_max,
+            }), 503
+        if 'exc' in _outcome:
+            raise _outcome['exc']
+        res = _outcome['res']
 
         # Zaman serilerini ~300 noktaya seyrelt
         import numpy as _np
@@ -1804,8 +2259,11 @@ def six_dof_analysis():
             'max_alpha_deg', 'static_margin_full', 'static_margin_empty',
             'stable', 'cn_alpha', 'x_cp', 'end_reason',
             'lateral_drift_at_end')}
+        # ÖLÇÜLEN süre — uydurma değil, yukarıdaki monotonic farkı. Bütçenin
+        # ne kadarının kullanıldığı böylece dışarıdan izlenebilir.
         return jsonify(sanitize_json_values({
-            'status': 'success', 'summary': summary, 'series': series}))
+            'status': 'success', 'summary': summary, 'series': series,
+            'solver_wall_time_s': _elapsed}))
     except ValueError as e:
         return jsonify({'status': 'error', 'error': str(e)}), 400
     except Exception as e:
@@ -1949,6 +2407,20 @@ _TP_MODE_KEYS = {
                               'material'),
 }
 
+#: Mod bazlı ZORUNLU alanlar. ``ThermalProtectionAnalyzer`` imzalarındaki
+#: varsayılansız (positional) argümanların birebir karşılığı — ölçüldü:
+#:   ablative_thickness    -> ['q_net_W_m2']
+#:   heat_sink_transient   -> ['h_gas_W_m2K','T_recovery_K','burn_time_s',
+#:                             'wall_thickness_m']
+#:   radiation_equilibrium -> ['h_gas_W_m2K','T_recovery_K']
+#: (``inspect.signature`` ile, ``hrma/analysis/thermal_protection.py``.)
+_TP_MODE_REQUIRED = {
+    'ablative': ('q_net_W_m2',),
+    'heat_sink': ('h_gas_W_m2K', 'T_recovery_K', 'burn_time_s',
+                  'wall_thickness_m'),
+    'radiation_equilibrium': ('h_gas_W_m2K', 'T_recovery_K'),
+}
+
 
 @app.route('/api/thermal-protection', methods=['POST'])
 @app.route('/api/analysis/thermal-protection', methods=['POST'])
@@ -1968,6 +2440,7 @@ def thermal_protection_analysis():
 
     Yanıt 200: ThermalProtectionAnalyzer.analyze() sözlüğü (model_note
     alanı 'Simplified model' rozetine bağlanır). Hata 400: {'error': ...}.
+    Eksik zorunlu alanda 422 + ``missing_fields`` (Faz 5B / B8).
     """
     try:
         data = request.json or {}
@@ -1979,6 +2452,31 @@ def thermal_protection_analysis():
 
         params = {k: data[k] for k in _TP_MODE_KEYS[mode]
                   if data.get(k) not in (None, '')}
+
+        # --- ZORUNLU ALAN KAPISI (Faz 5B / B8) ---------------------------
+        # ÖLÇÜLDÜ (HEAD 9d3728e): panelde sayısal bir alanı BOŞALTMAK 500
+        # üretiyordu, çünkü ham Python imza hatası dışarı sızıyordu:
+        #   q_net_W_m2:''   -> 500 "ablative_thickness() missing 1 required
+        #                          positional argument: 'q_net_W_m2'"
+        #   h_gas_W_m2K:''  -> 500 (heat_sink_transient, aynı desen)
+        #   T_recovery_K:'' -> 500 (radiation_equilibrium, aynı desen)
+        #   {} (boş gövde)  -> 500 (mod varsayılanı 'ablative')
+        # Zincir: ``analysis_dock.js`` boş alanı payload'a hiç koymuyor
+        # (``if (Number.isFinite(v))``), yukarıdaki satır da ``''`` olanı
+        # eliyor; zorunlu argüman böylece kayboluyordu. Panel ``data.error``
+        # değerini ekrana bastığı için kullanıcı ham Python metnini görüyordu.
+        # Bu bir istemci hatasıdır (500 değil) ve makine-okur olmalıdır.
+        missing = [key for key in _TP_MODE_REQUIRED[mode]
+                   if key not in params]
+        if missing:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_thermal_protection_input',
+                'message': (f"Mode '{mode}' cannot be analysed without these "
+                            'inputs; they have no default.'),
+                'mode': mode,
+                'missing_fields': missing,
+            }), 422
 
         if mode == 'ablative' and data.get('q_star_MJ_kg') not in (None, ''):
             params['q_star_J_kg'] = float(data['q_star_MJ_kg']) * 1e6
@@ -2859,10 +3357,38 @@ def parametric_analysis():
                 'requested': sweep_points,
                 'status': 'invalid_input'}), 422
         
+        # TOPLAM İŞ BÜTÇESİ (Faz 5B / B12). Bkz.
+        # PARAMETRIC_TIME_BUDGET_DEFAULT_S.
+        # ``or`` ile varsayılana düşülmez: ``time_budget_s = 0`` yanlışsıl
+        # (falsy) bir değerdir ve sessizce 30 saniyeye çevrilirse kullanıcı
+        # sıfır bütçe istediğini sanır. Yalnız GERÇEKTEN verilmemiş alan
+        # varsayılana düşer.
+        _budget_raw = data.get('time_budget_s')
+        if _budget_raw is None or _budget_raw == '':
+            _budget_raw = PARAMETRIC_TIME_BUDGET_DEFAULT_S
+        try:
+            time_budget_s = float(_budget_raw)
+        except (TypeError, ValueError):
+            return jsonify({
+                'error': "'time_budget_s' must be a number (seconds)",
+                'status': 'invalid_input'}), 422
+        if not (math.isfinite(time_budget_s)
+                and 0.0 < time_budget_s <= PARAMETRIC_TIME_BUDGET_MAX_S):
+            return jsonify({
+                'error': (f"'time_budget_s' must be in (0, "
+                          f"{PARAMETRIC_TIME_BUDGET_MAX_S:g}] seconds; a "
+                          f"synchronous request cannot block longer."),
+                'requested': time_budget_s,
+                'status': 'invalid_input'}), 422
+
         sweep_range = [param_start, param_end]
-        
+
         # Generate sweep values
         sweep_values = np.linspace(sweep_range[0], sweep_range[1], sweep_points)
+
+        import time as _time
+        _sweep_t0 = _time.monotonic()
+        _budget_stop = None
 
         results = []
         # A9 (2026-08-02): başarısız noktalar artık SESSİZCE ATLANMIYOR.
@@ -2871,7 +3397,18 @@ def parametric_analysis():
         # eğrinin bir parçasının hiç hesaplanmadığını göremiyordu.
         failed_points = []
 
-        for value in sweep_values:
+        for _point_index, value in enumerate(sweep_values):
+            # SERT DURDURMA: bütçe dolduysa yeni nokta BAŞLATILMAZ.
+            _elapsed = _time.monotonic() - _sweep_t0
+            if _elapsed >= time_budget_s:
+                _budget_stop = {
+                    'reason': 'time_budget_exhausted',
+                    'elapsed_s': round(_elapsed, 3),
+                    'budget_s': time_budget_s,
+                    'points_started': _point_index,
+                }
+                break
+
             rejection = _parametric_point_rejection(sweep_param, value)
             if rejection is not None:
                 failed_points.append({
@@ -2945,7 +3482,35 @@ def parametric_analysis():
                     point_result['total_flight_time'] = trajectory_data['performance']['trajectory_metrics']['total_flight_time']
                 
                 results.append(point_result)
-                
+
+                # ERKEN REDDETME: ilk çözülen noktanın ÖLÇÜLEN maliyetiyle
+                # tüm taramanın süresi öngörülür. Öngörü bütçeyi aşıyorsa
+                # kullanıcıyı 68 saniye bekletmek yerine hemen söylenir ve
+                # bu makinede kaç adımın sığdığı BİLDİRİLİR (ölçüme dayalı,
+                # uydurma değil).
+                if _point_index == 0 and len(results) == 1:
+                    _per_point_s = _time.monotonic() - _sweep_t0
+                    _projected_s = _per_point_s * sweep_points
+                    if _projected_s > time_budget_s:
+                        _fits = int(time_budget_s / _per_point_s) \
+                            if _per_point_s > 0 else sweep_points
+                        return jsonify({
+                            'status': 'invalid_input',
+                            'error': 'parametric_time_budget_exceeded',
+                            'message': (
+                                f'This sweep is projected to take '
+                                f'{_projected_s:.1f} s, over the '
+                                f'{time_budget_s:g} s budget. Reduce '
+                                f"'param_steps' or raise 'time_budget_s' "
+                                f'(max {PARAMETRIC_TIME_BUDGET_MAX_S:g} s).'),
+                            'measured_seconds_per_point': round(
+                                _per_point_s, 3),
+                            'projected_seconds': round(_projected_s, 1),
+                            'budget_s': time_budget_s,
+                            'points_requested': int(sweep_points),
+                            'points_that_fit_budget': max(2, _fits),
+                        }), 422
+
             except Exception as e:
                 # Nokta çözülemedi: girdisi ve nedeni yanıta girer.
                 print(f"Failed calculation for {sweep_param}={value}: {str(e)}")
@@ -2970,7 +3535,15 @@ def parametric_analysis():
             'points_succeeded': len(results),
             'points_failed': len(failed_points),
             'failed_points': failed_points,
+            # ÖLÇÜLEN toplam süre (monotonic farkı), uydurma değil.
+            'sweep_wall_time_s': round(_time.monotonic() - _sweep_t0, 3),
         }
+        # Bütçe yüzünden kesilen tarama TAM tarama gibi yayımlanmaz: kaç
+        # noktanın hiç BAŞLATILMADIĞI açıkça yazılır.
+        if _budget_stop is not None:
+            _not_started = int(sweep_points) - _budget_stop['points_started']
+            response['truncated_by_time_budget'] = dict(
+                _budget_stop, points_not_attempted=_not_started)
         if results:
             # Kısmi tarama hâlâ çizilebilir bir eğridir, bu yüzden
             # 'success' sözleşmesi korunur (advanced.html:3571 yalnız
@@ -2981,6 +3554,14 @@ def parametric_analysis():
                 response['warning'] = (
                     f'{len(failed_points)} of {sweep_points} sweep points '
                     f'could not be computed; see failed_points.')
+            if _budget_stop is not None:
+                response['warning'] = (
+                    f'The sweep was cut short after '
+                    f"{response['truncated_by_time_budget']['elapsed_s']} s "
+                    f'(budget {time_budget_s:g} s); '
+                    f"{response['truncated_by_time_budget']['points_not_attempted']}"
+                    f' of {sweep_points} points were never attempted. The '
+                    f'curve is partial; see truncated_by_time_budget.')
         else:
             # Hiçbir nokta hesaplanamadı — bu bir başarı değildir.
             response['status'] = 'error'
@@ -3356,13 +3937,19 @@ def get_live_oxidizer_properties():
             properties = oxidizer_properties[oxidizer_type]
             
             print(f"OXIDIZER RESPONSE: {oxidizer_type} - density: {properties['density']:.1f} kg/m³")
-            
-            return jsonify({
+
+            # Faz 5B / H3-B9: ``temperature`` yankısı ve sıcaklığa bağlı
+            # yoğunluk sonlu olmayan değer taşıyabiliyordu. Ölçüldü:
+            # ``temperature: Infinity`` gönderilince gövde
+            # ``"temperature":Infinity`` çıkıyordu — Python ``json.loads``
+            # kabul eder, tarayıcının ``JSON.parse``'ı ETMEZ, panel gerçek
+            # sorun yerine ayrıştırma hatası gösterir.
+            return jsonify(sanitize_json_values({
                 'status': 'success',
                 'properties': properties,
                 'source': 'HRMA Oxidizer Database',
                 'temperature': temperature
-            })
+            }))
         else:
             return jsonify({
                 'status': 'error', 
@@ -3560,12 +4147,18 @@ def altitude_to_pressure():
             P11 = P0 * (T11 / T0) ** ((g * M) / (R * L))
             pressure = P11 * np.exp((-g * M * (altitude - 11000)) / (R * T11))
         
-        return jsonify({
+        # Faz 5B / H3-B9: ölçüldü — ``altitude: -Infinity`` gönderilince gövde
+        # ``{"altitude":-Infinity,"pressure":Infinity,"temperature":Infinity}``
+        # çıkıyordu. Bu RFC 8259 dışıdır; ``advanced.html:4404``'teki
+        # ``await response.json()`` çağrısı patlar ve kullanıcı gerçek sorun
+        # yerine bir ayrıştırma hatası görür. Süzgeç sonlu olmayan değeri
+        # ``null`` yapar — uydurma sayı KOYMAZ.
+        return jsonify(sanitize_json_values({
             'altitude': altitude,
             'pressure': pressure,
             'temperature': T if altitude < 11000 else T11
-        })
-        
+        }))
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -3861,16 +4454,72 @@ def _zip_files(file_map, readme_text=None, text_map=None):
     return buf
 
 
+#: Çizim uçlarının BEYAN EDİLEN birim sözleşmesi. Aşağıdaki
+#: ``_declare_drawing_units`` her çağrıda gelen geometriyi bu birime indirger
+#: ve sözlüğe ``length_units`` damgasını basar.
+DRAWING_ENDPOINT_LENGTH_UNIT = 'm'
+
+
+def _declare_drawing_units(motor_data):
+    """Çizim uçlarına giren geometrinin birimini ÇÖZER ve BEYAN EDER.
+
+    Faz 5B / H4-2 ÖLÇÜMÜ (HEAD 9d3728e): ``/api/export-dxf`` girdinin birimi
+    hakkında hiçbir şey söylemiyordu; üretici (``drawing_generator._dims_mm``)
+    girdiyi KOŞULSUZ metre kabul edip 1000 ile çarpıyordu. Hibrit yanıtı SI
+    olduğu için tarayıcıdan görünmüyordu, ama ``/calculate_solid`` yanıtı
+    doğrudan uca verilince çizim 1000× büyük çıkıyordu::
+
+        Ø_throat  = 47927.25 mm   (gerçek 47.93 mm)
+        Ø_chamber = 100000.0 mm   (gerçek 100.0 mm)
+
+    Sıvıda daha da kötüsü: kamara 1000× büyük, boğaz/çıkış DOĞRU — tek çizimde
+    iki farklı ölçek. Kök neden, sözleşmenin hiçbir tarafta yazılı olmamasıydı;
+    depoda aynı sorunun BEŞ ayrı, birbirinden habersiz çözümü vardı
+    (``openrocket_integration``, ``performance_panel.js``, ``analysis_dock.js``,
+    ``pdf_generator``, ``drawing_generator``).
+
+    Bu fonksiyon uç tarafındaki payı kapatır ve iki şey yapar:
+
+      1. Dönüşümü TEK yerden geçirir — ortak
+         ``hrma.export.motor_geometry.normalise_export_geometry``. Kendi eşiğini
+         ya da kendi çarpanını KURMAZ.
+      2. Sonucu ``length_units='m'`` damgasıyla beyan eder; bundan sonra bu
+         sözlüğü okuyan her üretici birimi tahmin etmek zorunda değildir.
+
+    Ortak normalize edici idempotenttir (damgalı sözlüğü tekrar verirseniz
+    ``declared:m`` yoluyla aynı değerleri döndürür), bu yüzden üreticinin
+    kendisi de aynı işlevi çağırıyorsa çift dönüşüm OLMAZ.
+
+    Çözülemeyen alanlara DOKUNULMAZ (uydurma değer yazılmaz); hangi alanın
+    hangi yoldan çözüldüğü dönen sözlükteki ``geometry_unit_resolution``
+    raporunda durur.
+    """
+    if not isinstance(motor_data, dict):
+        return motor_data
+    from hrma.export.motor_geometry import normalise_export_geometry
+    normalised, _report = normalise_export_geometry(motor_data)
+    normalised['length_units'] = DRAWING_ENDPOINT_LENGTH_UNIT
+    return normalised
+
+
 @app.route('/api/export-dxf', methods=['POST'])
 def export_dxf():
-    """2D imalat çizimi (DXF): iç akış konturu + kamara + grain profili."""
+    """2D imalat çizimi (DXF): iç akış konturu + kamara + grain profili.
+
+    BİRİM SÖZLEŞMESİ: bu uç girdinin birimini VARSAYMAZ. Gelen geometri
+    ``_declare_drawing_units`` ile metreye indirgenir ve ``length_units='m'``
+    damgasıyla üreticiye verilir (gerekçe: bkz. o fonksiyonun açıklaması).
+    """
     try:
         from hrma.export.drawing_generator import generate_dxf
         motor_data = (request.json or {}).get('motor_data', {})
         # A4 kapısı: sonlu olmayan geometriden imalat çizimi üretilmez.
+        # Kapı HAM girdide çalışır — birim çözümü sonlu olmayanı gizlemesin.
         rejected = _reject_unexportable_geometry(motor_data)
         if rejected:
             return rejected
+        # H4-2: birim burada, TEK yerde çözülür ve beyan edilir.
+        motor_data = _declare_drawing_units(motor_data)
         path = generate_dxf(motor_data)
         name = safe_name(motor_data.get('motor_name'))
         return send_file(path, as_attachment=True,
@@ -3883,7 +4532,14 @@ def export_dxf():
 
 @app.route('/api/export-drawings-pdf', methods=['POST'])
 def export_drawings_pdf():
-    """Antetli çok sayfalı teknik çizim PDF'i (kesit + enjektör + tablo)."""
+    """Antetli çok sayfalı teknik çizim PDF'i (kesit + enjektör + tablo).
+
+    BİRİM SÖZLEŞMESİ ``/api/export-dxf`` ile aynıdır: girdi varsayılmaz,
+    ``_declare_drawing_units`` ile metreye indirgenip beyan edilir. Bu uç ve
+    DXF ucu aynı ``_dims_mm`` yolundan geçtiği için sözleşme de ortaktır —
+    ölçülen kusur (katı/sıvı sonucunda 1000× büyük ölçü tablosu) ikisinde de
+    aynıydı.
+    """
     try:
         from hrma.export.drawing_generator import generate_drawing_pdf
         motor_data = (request.json or {}).get('motor_data', {})
@@ -3891,6 +4547,8 @@ def export_drawings_pdf():
         rejected = _reject_unexportable_geometry(motor_data)
         if rejected:
             return rejected
+        # H4-2: birim burada, TEK yerde çözülür ve beyan edilir.
+        motor_data = _declare_drawing_units(motor_data)
         path = generate_drawing_pdf(motor_data)
         name = safe_name(motor_data.get('motor_name'))
         return send_file(path, as_attachment=True,
@@ -3903,14 +4561,33 @@ def export_drawings_pdf():
 
 @app.route('/api/export-step', methods=['POST'])
 def export_step_files():
-    """Gerçek STEP katıları (build123d): bileşenler + assembly, ZIP olarak."""
+    """Gerçek STEP katıları (build123d): bileşenler + assembly, ZIP olarak.
+
+    Faz 5B / H3-B14 ÖLÇÜMÜ (HEAD 9d3728e): boş gövdeyle (``{}``) bu uç DOĞRU
+    biçimde 422 dönüyordu — ama önce +433 MB KALICI bellek alıyordu:
+
+        app import sonrasi tepe RSS : 216.4 MB
+        POST /api/export-step {}    : 422, 3.41 s, tepe RSS 649.4 MB
+
+    Sebep sıra hatasıydı: ``from hrma.export.step_export import ...`` satırı
+    kapıdan ÖNCE geliyordu, yani reddedilecek bir istek bile build123d/OCC
+    yığınını sürece yüklüyordu. ``sys.modules`` yüklü kaldığı için maliyet
+    kalıcıdır; masaüstü uygulamasının ayak izi TEK bir başarısız export
+    denemesiyle 220 MB'tan ~650 MB'a çıkıyordu.
+
+    Düzeltme: ithalat kapının ARKASINA alındı. Kabul edilen istekte maliyet
+    aynıdır (katı üretmek için o yığın gerçekten gerekli); reddedilen istekte
+    hiç ödenmez. Bellek başka bir yerde tutulmuyor — tek tutucu modül
+    nesnelerinin kendisi, dolayısıyla "yükleme" tek serbest bırakma noktası.
+    """
     try:
-        from hrma.export.step_export import generate_step_assembly
         motor_data = (request.json or {}).get('motor_data', {})
         # A4 kapısı: sonlu olmayan geometriden katı cisim üretilmez.
         rejected = _reject_unexportable_geometry(motor_data)
         if rejected:
             return rejected
+        # H3-B14: ağır ithalat KAPIDAN SONRA — reddedilen istek ödemez.
+        from hrma.export.step_export import generate_step_assembly
         files = generate_step_assembly(motor_data)
         name = safe_name(motor_data.get('motor_name'))
         arc = {f'{name}_{k}.step': p for k, p in files.items()}
@@ -3929,9 +4606,47 @@ def export_step_files():
 
 @app.route('/api/export-stl-zip', methods=['POST'])
 def export_stl_zip():
-    """Tüm bileşen STL'leri + birleşik assembly tek ZIP'te."""
+    """Tüm bileşen STL'leri + birleşik assembly tek ZIP'te.
+
+    Faz 5B / H3-B4 ÖLÇÜMÜ (HEAD 9d3728e): bu uç KARDEŞLERİNDEN farklı olarak
+    hiçbir geometri kapısından geçmiyordu. Aynı ``motor_data`` üç uca
+    gönderildiğinde:
+
+        motor_data   /api/export-stl   /api/export-complete-zip  BURASI
+        {}           400               422 missing_export_geometry  200, 120 426 baytlık ZIP
+        hepsi 0      422               422                          500
+        negatif      422               422                          500
+        NaN          422               422                          500
+
+    Boş ``motor_data`` ile dönen ZIP'in içi ölçüldü: ``motor_assembly.stl``
+    sınırlayıcı kutusu ``109 x 109 x 489.7`` — bu kullanıcının motoru değil,
+    ``cad_visualization.py:507-509``'daki ŞABLON (0.1 / 0.02 / 0.04 m). Yani
+    hiç hesap yapmamış bir kullanıcı "başarıyla indirilmiş" bir imalat dosyası
+    alıyordu. Kısmi veri daha sinsiydi: tek alan eksik olduğunda uydurulan
+    ölçü ZIP'te hiçbir yerde beyan edilmiyordu.
+
+    Düzeltme: kardeş EXPORT uçlarının kapısı AYNI BİÇİMDE uygulanır —
+    ``_reject_unexportable_geometry`` (sonlu olmayan alan, ya da hiçbir
+    birincil ölçü sonlu-pozitif değil → 422). ``/api/export-dxf``,
+    ``/api/export-drawings-pdf``, ``/api/export-step`` ve
+    ``/api/export-complete-zip`` tam olarak bu kapıyı kullanıyor; eksik olan
+    tek uç burasıydı. Kapı üretimden ÖNCE koşar: reddedilen istekte CAD
+    montajı hiç kurulmaz.
+
+    AÇIK KALAN ASİMETRİ (bilinçli, karar gerektirir): ``/api/export-stl``
+    ayrıca ``_STL_REQUIRED_FIELDS`` sözleşmesini uyguluyor ve hibritte
+    ``port_diameter`` istiyor; bu uç istemiyor. Aynı sözleşmeyi buraya da
+    koymak, ``tests/test_faz4_app_export.py::TestPackageReadmeHonesty``
+    fikstürünü (``GOOD_GEOMETRY``, ``port_diameter`` taşımıyor) reddeder ve
+    üç README bekçisini kırar. Sözleşmeyi sıkılaştırmak fikstürün de
+    değişmesini gerektirdiği için ayrı bir karardır; burada ölçülen kusur
+    (kapı YOK) kapatıldı, sözleşme genişletilmedi.
+    """
     try:
         motor_data = (request.json or {}).get('motor_data', {})
+        rejected = _reject_unexportable_geometry(motor_data)
+        if rejected:
+            return rejected
         cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
         if not cad_data or 'assembly_meshes' not in cad_data:
             return jsonify({'status': 'error',
@@ -4522,6 +5237,41 @@ _STL_REQUIRED_FIELDS = {
 }
 
 
+def _reject_incomplete_stl_geometry(motor_data):
+    """STL sözleşmesi kapısı: eksikse ``(yanıt, 422)``, tamsa ``None``.
+
+    Faz 5B / H3-B4: bu denetim ``/api/export-stl`` gövdesine gömülüydü, yani
+    adı yoktu ve tek başına sınanamıyordu. Artık adlandırılmış tek bir yerde
+    durur; sözleşmeyi paylaşmak isteyen bir uç eklendiğinde denetimi ikinci
+    kez yazmak zorunda kalmaz (kusurun sınıfı tam olarak buydu). Yanıt gövdesi
+    bilerek değiştirilmedi — istemciler ve mevcut bekçiler aynı
+    ``status``/``missing_fields`` alanlarını okuyor.
+
+    ``/api/export-stl-zip`` bu kapıyı ŞU AN kullanmıyor; gerekçe o ucun
+    açıklamasında (fikstür sahipliği kaynaklı, ayrı karar).
+
+    ``0`` burada "verilmedi" ile aynı kefeye konur (mevcut davranış korundu):
+    sıfır çaplı ya da sıfır boylu bir katı imal edilemez, dolayısıyla ret
+    nedeni her iki okumada da aynıdır.
+    """
+    if not isinstance(motor_data, dict):
+        motor_data = {}
+    motor_type = motor_data.get('motor_type', 'hybrid')
+    required = _STL_REQUIRED_FIELDS.get(motor_type,
+                                        _STL_REQUIRED_FIELDS['hybrid'])
+    missing = [f for f in required if motor_data.get(f) in (None, '', 0)]
+    if not missing:
+        return None
+    return jsonify({
+        'status': 'incomplete_geometry',
+        'error': ('Cannot export STL: required geometry is missing. '
+                  'These values define the exported solid and are not '
+                  'assumed on your behalf.'),
+        'missing_fields': missing,
+        'motor_type': motor_type,
+    }), 422
+
+
 @app.route('/api/export-stl', methods=['POST'])
 def export_stl():
     """Motor tasarımını STL olarak dışa aktarır — FAIL-CLOSED.
@@ -4557,19 +5307,12 @@ def export_stl():
         motor_data = motor_validator.sanitize_export_data(motor_data)
 
         # Zorunlu geometri denetimi — "iyi niyetli varsayılan" YOK.
-        required = _STL_REQUIRED_FIELDS.get(motor_type,
-                                            _STL_REQUIRED_FIELDS['hybrid'])
-        missing = [f for f in required
-                   if motor_data.get(f) in (None, '', 0)]
-        if missing:
-            return jsonify({
-                'status': 'incomplete_geometry',
-                'error': ('Cannot export STL: required geometry is missing. '
-                          'These values define the exported solid and are not '
-                          'assumed on your behalf.'),
-                'missing_fields': missing,
-                'motor_type': motor_type,
-            }), 422
+        # Faz 5B / H3-B4: kapı buradan ``_reject_incomplete_stl_geometry``
+        # içine taşındı; ``/api/export-stl-zip`` de aynı yerden geçiyor.
+        # ``motor_type`` sanitize sonrası sözlükten yeniden okunur.
+        incomplete = _reject_incomplete_stl_geometry(motor_data)
+        if incomplete:
+            return incomplete
 
         cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
 
@@ -4791,12 +5534,17 @@ def regression_analysis():
         if data.get('compare_fuels', False):
             comparison_plot = regression_analyzer.compare_fuel_types(motor_data)
         
-        return jsonify({
+        # Faz 5B / H3-B9: ölçüldü — ``motor_data`` içinde sonlu olmayan bir
+        # değer varken yanıt 198 adet ham ``Infinity`` ve 1 ham ``NaN``
+        # taşıyordu (``regression_data.port_diameter`` dizisi baştan sona).
+        # Tarayıcı bu gövdeyi ayrıştıramaz. Süzgeç null'a çevirir; sayı
+        # UYDURULMAZ, dizi kısaltılmaz.
+        return jsonify(sanitize_json_values({
             'status': 'success',
             'regression_data': regression_data,
             'regression_plot': regression_plot,
             'comparison_plot': comparison_plot
-        })
+        }))
         
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
@@ -5202,6 +5950,32 @@ def analyze_structural_safety():
                 'missing_fields': missing,
             }), 422
 
+        # --- KAPI 1b: 0 "verildi" SAYILMAZ (Faz 5B / B6) -----------------
+        # KAPI 1 yalnız ``None``/``''`` bakıyordu, yani 0 gerçek bir değer
+        # kabul ediliyordu. ÖLÇÜLDÜ (HEAD 9d3728e), dört zorunlu alan tek tek
+        # 0 yapıldığında:
+        #   chamber_pressure=0 -> HTTP 500 'float division by zero'
+        #   chamber_diameter=0 -> HTTP 500 'float division by zero'
+        #   chamber_length=0   -> HTTP 200 + TAM yapısal hüküm
+        #   throat_diameter=0  -> HTTP 200 + TAM yapısal hüküm
+        # Yani sıfır boyda / sıfır çapta bir oda için emniyet hükmü
+        # çıkarılıyordu. Negatifi daha da kötüydü: dördünde de -1 ile
+        # HTTP 200 + tam hüküm. Ayrıca ``chamber_pressure=[1,2]`` (liste)
+        # HTTP 500 "float() argument ... not 'list'" veriyordu.
+        # ``hrma/utils/input_guard.py:9-12`` projenin kendi ilkesini zaten
+        # yazıyor: "0 ile 'verilmedi' ASLA karıştırılmaz".
+        invalid = _collect_unphysical_fields(
+            data, positive=REQUIRED_STRUCTURAL_FIELDS + ('burn_time',))
+        if invalid:
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_structural_input',
+                'message': ('A structural assessment cannot be produced for a '
+                            'chamber with non-finite or non-positive '
+                            'dimensions. No verdict was computed.'),
+                'invalid_fields': invalid,
+            }), 422
+
         # Extract parameters
         chamber_pressure = float(data.get('chamber_pressure'))  # bar
         chamber_diameter = float(data.get('chamber_diameter'))  # m
@@ -5337,12 +6111,109 @@ def analyze_structural_safety():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+#: ``/analyze_thermal_safety`` girdilerinden fiziksel olarak POZİTİF olmak
+#: zorunda olanlar. Hepsi mutlak ölçekte bir büyüklük: mutlak sıcaklık,
+#: mutlak basınç, uzunluk, süre, kütle debisi. Sıfır veya negatifi olan yok.
+_THERMAL_SAFETY_POSITIVE_FIELDS = (
+    'chamber_pressure', 'chamber_temperature', 'chamber_diameter',
+    'chamber_length', 'burn_time', 'mdot_total', 'wall_thickness',
+)
+
+#: Kazanılmamış termal hükmün yerine yazılan değer. ``'LOW'`` sırasına
+#: GİRMEZ; ``STRUCTURAL_VERDICT_NOT_EVALUATED`` ile aynı sözleşme.
+THERMAL_VERDICT_NOT_EVALUATED = 'NOT_EVALUATED'
+
+
+def _withhold_unevaluated_thermal_verdict(thermal_results):
+    """Sonlu olmayan emniyet katsayılarından çıkarılan risk hükmünü geri çeker.
+
+    B2 ÖLÇÜMÜ (HEAD ``9d3728e``) — aynı motor, üç girdi:
+
+    ======================  =====  ==========  ==========  ============
+    girdi                   HTTP   risk_level  melting_sf  stress_sf
+    ======================  =====  ==========  ==========  ============
+    normal                  200    **HIGH**    0,5967      22,15
+    bütün sayılar ``NaN``   200    **LOW**     ``null``    **1000000,0**
+    bütün sayılar ``-1``    200    **LOW**     8,073       **1000000,0**
+    ======================  =====  ==========  ==========  ============
+
+    Yani bozuk girdi güvenlik hükmünü TERS çeviriyordu: kullanıcı "risk
+    düşük" görüp devam ediyordu. Kök neden
+    ``heat_transfer_analysis.py:_analyze_thermal_safety`` içinde IEEE-754
+    NaN karşılaştırma tuzağı: ``nan < 1.5`` ve ``nan < 2.0`` ikisi de
+    ``False``, ``nan > 0`` da ``False``. Hiçbir dal girmediği için
+    ``risk_level`` başlangıç değeri ``'LOW'``da kalıyor ve
+    ``stress_safety_factor`` sentinel ``1e6`` olarak yayımlanıyordu.
+
+    Asıl koruma girdi kapısıdır (aşağıda, ``_collect_unphysical_fields``);
+    bu işlev İKİNCİ savunma hattıdır: hesap içinde başka bir yoldan NaN
+    doğarsa hüküm yine ``NOT_EVALUATED`` olur — bozuk girdi risk seviyesini
+    ASLA DÜŞÜREMEZ.
+
+    Yerinde değiştirir ve geri çekilen hüküm sayısını döner.
+    """
+    if not isinstance(thermal_results, dict):
+        return 0
+    safety = thermal_results.get('safety_analysis')
+    if not isinstance(safety, dict):
+        return 0
+
+    # Hükmün DAYANDIĞI üç sayı. Biri bile sonlu değilse hüküm kazanılmamıştır.
+    unevaluated = []
+    for key in ('temperature_safety_factor', 'melting_safety_factor',
+                'stress_safety_factor'):
+        value = safety.get(key)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            unevaluated.append(key)
+            continue
+        if not math.isfinite(numeric):
+            unevaluated.append(key)
+
+    if not unevaluated:
+        return 0
+
+    safety['risk_level'] = THERMAL_VERDICT_NOT_EVALUATED
+    safety['risk_level_withheld_because'] = (
+        'The risk level is derived from safety factors that could not be '
+        'computed as finite numbers ('
+        + ', '.join(unevaluated)
+        + '). A missing computation is not a low risk, so no risk level is '
+          'published.')
+    safety['unevaluated_safety_factors'] = unevaluated
+    return 1
+
+
 @app.route('/analyze_thermal_safety', methods=['POST'])
 def analyze_thermal_safety():
-    """Detailed thermal safety analysis endpoint"""
+    """Detailed thermal safety analysis endpoint.
+
+    Faz 5B / B2 — İKİ KAPI EKLENDİ:
+
+    **1. Fiziksel girdi kapısı.** Gönderilen sayıların sonlu ve pozitif
+    olması zorunlu (``_THERMAL_SAFETY_POSITIVE_FIELDS``); değilse 422 +
+    ``invalid_fields``, hiçbir hüküm üretilmez.
+
+    **2. Kazanılmamış hüküm geri çekilir.** Bkz.
+    ``_withhold_unevaluated_thermal_verdict``.
+    """
     try:
-        data = request.json
-        
+        data = request.json or {}
+
+        # --- KAPI 1: bozuk girdi risk seviyesini DÜŞÜREMEZ ---------------
+        invalid = _collect_unphysical_fields(
+            data, positive=_THERMAL_SAFETY_POSITIVE_FIELDS)
+        if invalid:
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_thermal_input',
+                'message': ('A thermal safety verdict cannot be produced from '
+                            'non-finite or non-positive values. No risk level '
+                            'was computed.'),
+                'invalid_fields': invalid,
+            }), 422
+
         # Extract parameters
         chamber_pressure = float(data.get('chamber_pressure', 20))  # bar
         chamber_temperature = float(data.get('chamber_temperature', 3000))  # K
@@ -5374,7 +6245,12 @@ def analyze_thermal_safety():
             ambient_temp=293.15,
             cooling_type=cooling_type
         )
-        
+
+        # --- KAPI 2: kazanılmamış hüküm yayımlanmaz ----------------------
+        # sanitize_json_values NaN'ı ``null``a çevirir, yani geri çekme
+        # ONDAN ÖNCE yapılmalı — sonrasında sonlu-olmama bilgisi kaybolur.
+        _withhold_unevaluated_thermal_verdict(thermal_results)
+
         return jsonify({
             'status': 'success',
             'thermal_analysis': sanitize_json_values(thermal_results)
@@ -5804,7 +6680,14 @@ def get_fuel_properties():
                 'status': 'success',
                 'properties': sanitize_json_values(fallback_props),
                 'source': 'Cached Database',
-                'note': f'Species {species_name} not found in NASA CEA, using cached data'
+                # Faz 5B / H3-B13: ``species_name`` doğrudan kullanıcı
+                # girdisidir. 100 000 karakterlik bir ``fuel_type`` ile bu
+                # not 100 049 karakter oluyordu (ölçüldü, HTTP 200 — yani
+                # ``_clip_error_body`` kapsamı DIŞINDA). Yankı kaynağında
+                # kırpılır ve kırpma açıkça beyan edilir.
+                'note': ('Species '
+                         + _clip_echo(species_name)
+                         + ' not found in NASA CEA, using cached data')
             })
             
     except Exception as e:

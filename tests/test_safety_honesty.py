@@ -70,15 +70,51 @@ class TestNoFabricatedProbability:
         for mode in modes:
             assert 'probability' not in json.dumps(mode).lower(), mode
 
-    @pytest.mark.parametrize('wall_thickness', [0.002, 0.005, 0.020])
-    def test_likelihood_still_responds_to_the_design(self, wall_thickness):
-        """Nitel sınıf da olsa tasarımla değişmeli — sabit etiket olmasın."""
-        motor = dict(MOTOR, wall_thickness=wall_thickness)
+    @staticmethod
+    def _likelihood(wall_thickness):
         result = SafetyAnalyzer().analyze_comprehensive_safety(
-            motor_data=motor, propellant_mass=5, propellant_type='composite',
+            motor_data=dict(MOTOR, wall_thickness=wall_thickness),
+            propellant_mass=5, propellant_type='composite',
             facility_type='test_stand', material='steel_4130')
-        assert (result.get('structural_safety') or {}).get(
-            'failure_likelihood', {}).get('likelihood_class') is not None
+        return (result.get('structural_safety') or {}).get(
+            'failure_likelihood') or {}
+
+    def test_likelihood_still_responds_to_the_design(self):
+        """Nitel sınıf da olsa tasarımla değişmeli — sabit etiket olmasın.
+
+        Faz 5 / H5-3 düzeltmesi — BEKÇİ KENDİ SÖZLEŞMESİNİ SINAMIYORDU:
+        Bu test eskiden ``@parametrize('wall_thickness', [0.002, 0.005,
+        0.020])`` ile üç AYRI koşu yapıp her birinde yalnız
+        ``likelihood_class is not None`` bakıyordu. İki kusuru vardı:
+        (1) parametrizasyon yüzünden üç değer birbiriyle HİÇ
+        karşılaştırılmıyordu; (2) seçilen üç kalınlığın üçü de aynı banda
+        düşüyordu.
+
+        Ölçüm (3 Ağustos 2026, steel_4130, Pc=40 bar, D=100 mm):
+
+            0,50 mm -> HIGH     2,00 mm -> LOW
+            1,00 mm -> MEDIUM   5,00 mm -> LOW      20,0 mm -> LOW
+
+        Yani eski testin seçtiği 2/5/20 mm'nin üçü de LOW; kod
+        ``likelihood_class = 'LOW'`` diye SABİTLENSE test yine yeşil
+        kalıyordu. Artık bant sınırlarını geçen üç kalınlık tek testte
+        çözülür ve sınıfların GERÇEKTEN farklı olduğu iddia edilir.
+        """
+        siniflar = {wt: self._likelihood(wt).get('likelihood_class')
+                    for wt in (0.0005, 0.001, 0.005)}
+        assert None not in siniflar.values(), siniflar
+        assert len(set(siniflar.values())) == 3, (
+            f'nitel sınıf tasarımla değişmiyor (sabit etiket?): {siniflar}')
+
+    def test_likelihood_does_not_get_worse_as_the_wall_gets_thicker(self):
+        """Yön de doğru olmalı: kalın cidar daha KÖTÜ sınıf veremez."""
+        sira = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
+        kalinliklar = (0.0005, 0.001, 0.002, 0.005, 0.020)
+        skorlar = [sira[self._likelihood(wt)['likelihood_class']]
+                   for wt in kalinliklar]
+        assert skorlar == sorted(skorlar, reverse=True), (
+            f'cidar kalınlaştıkça risk sınıfı artıyor: '
+            f'{dict(zip(kalinliklar, skorlar))}')
 
 
 class TestGuidanceIsSourced:
@@ -125,6 +161,60 @@ class TestNoCertificationVerdict:
         report = limits.generate_safety_report()
         assert 'NOT EVALUATED' not in report
         assert 'not a safety certification' in report
+
+
+class TestSafetyLimitsHasNoUnreachableSurface:
+    """H5-8 (Faz 5): ``safety_limits`` fiilen ölü koddan temizlendi.
+
+    Ölçüm (3 Ağustos 2026, HEAD 9d3728e — temizlik öncesi, depo genelinde
+    grep; kendi tanımı ve kendi dosyası hariç):
+
+        comprehensive_check    -> üretim 0, test 0
+        check_chamber_pressure -> üretim 0, test 0
+        check_wall_temperature -> üretim 0, test 0
+        check_thrust           -> üretim 0, test 0
+        check_mass_flow_rate   -> üretim 0, test 0
+        MotorValidator         -> depo genelinde 0 referans
+        check_throat_diameter  -> üretim 1 (liquid_rocket_engine.py:2723)
+
+    Dört ``check_*`` yalnız ``comprehensive_check`` içinden çağrılıyordu, o
+    da hiç çağrılmıyordu: hiçbiri hiçbir zaman koşmadı. 361 satırlık modül
+    "çalışan kapsamlı güvenlik denetimi" izlenimi veriyordu. Bu sınıf, ölü
+    yüzeyin ÇAĞRI YERİ OLMADAN geri gelmesini engeller.
+    """
+
+    #: Üretimde çağrılan yüzey.
+    URETIMDE_CANLI = {'check_throat_diameter'}
+    #: Üretimde çağrılmayan ama BİLEREK korunan test yüzeyi (gerekçesi
+    #: modülün docstring'inde): 2026-07-28 fail-open düzeltmesinin bekçileri.
+    TEST_YUZEYI = {'generate_safety_report', 'clear_violations'}
+
+    def test_public_surface_is_exactly_what_is_declared(self):
+        genel = {ad for ad in vars(SafetyLimits)
+                 if not ad.startswith('_') and callable(vars(SafetyLimits)[ad])}
+        assert genel == self.URETIMDE_CANLI | self.TEST_YUZEYI, (
+            'safety_limits genel yüzeyi beyanla uyuşmuyor; yeni bir metot '
+            'eklendiyse ÇAĞRI YERİYLE birlikte gelmeli ve burada '
+            f'beyan edilmeli (bulunan: {sorted(genel)})')
+
+    def test_live_entry_point_is_still_wired(self):
+        """Tek canlı çağrı yeri kaybolmamalı — kaybolursa modül tümden ölür."""
+        import pathlib
+        kaynak = (pathlib.Path(__file__).resolve().parents[1]
+                  / 'hrma' / 'engines' / 'liquid_rocket_engine.py'
+                  ).read_text(encoding='utf-8')
+        assert 'safety.check_throat_diameter(' in kaynak, (
+            'safety_limits modülünün üretimdeki TEK çağrı yeri kaybolmuş')
+
+    def test_removed_dead_surface_did_not_come_back(self):
+        import hrma.analysis.safety_limits as modul
+        for ad in ('comprehensive_check', 'check_chamber_pressure',
+                   'check_wall_temperature', 'check_thrust',
+                   'check_mass_flow_rate'):
+            assert not hasattr(SafetyLimits, ad), (
+                f'{ad} geri gelmiş — üretim çağrısı olmadan eklenemez')
+        assert not hasattr(modul, 'MotorValidator'), (
+            'MotorValidator geri gelmiş — depo genelinde hiç referansı yoktu')
 
 
 class TestSafetyEndpointFailsClosed:

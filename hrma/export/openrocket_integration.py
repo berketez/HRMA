@@ -246,9 +246,15 @@ VEHICLE_SOURCE_LABELS = {
 # cinsinden 1 m'yi, bir boy 5 m'yi geçmez; geçiyorsa değer milimetredir.
 # Belirsiz bant (ör. 1.0) çap için mm kabul edilir: 1 m boğaz bu yazılımın
 # kapsamı dışında, 1 mm boğaz ise gerçek bir mikro-motor ölçüsüdür.
-DIAMETER_SI_MAX_M = 1.0
-LENGTH_SI_MAX_M = 5.0
-THICKNESS_SI_MAX_M = 0.1
+#
+# Faz 5B / H4-2: eşikler burada tanımlıydı ve dışa aktarımın geri kalanı
+# (DXF, teknik çizim PDF'i, STEP, STL, rapor PDF'i) bu çözümden habersizdi —
+# her biri kendi varsayımıyla çalışıyordu. Tek tanım noktası artık
+# ``motor_geometry`` (CLAUDE.md kural 11); buradaki adlar geri uyum için
+# korunur ve oradan içe aktarılır.
+from hrma.export.motor_geometry import (  # noqa: E402
+    DIAMETER_SI_MAX_M, LENGTH_SI_MAX_M, THICKNESS_SI_MAX_M,
+    length_in_meters as _length_in_meters_shared)
 
 # .eng başlığındaki 2. alanın ne olduğu: RASP formatında motor KASA (gövde)
 # çapıdır, boğaz çapı değil. Kasa dış çapı bulunamazsa hangi ölçünün yazıldığı
@@ -270,13 +276,9 @@ def _length_in_meters(value, si_max: float) -> Tuple[Optional[float], str]:
 
     Döner: (metre, 'si' | 'mm' | 'missing'). Üst seviye sonuçlar birimi beyan
     etmediği için başka yol yok; çağıran hangi yolun seçildiğini raporlar.
+    Gövde ``motor_geometry.length_in_meters``tir — TEK tanım noktası.
     """
-    f = _finite_positive(value)
-    if f is None:
-        return None, 'missing'
-    if f > si_max:
-        return f / 1000.0, 'mm'
-    return f, 'si'
+    return _length_in_meters_shared(value, si_max)
 
 
 def _nested(data, *path):
@@ -918,6 +920,113 @@ class OpenRocketExporter:
         return points
 
     @staticmethod
+    def dry_mass_reconciliation(motor_data: Dict) -> Optional[Dict]:
+        """İki ayrı "kuru kütle" toplamını karşılaştırır, otoriteyi BEYAN eder.
+
+        Faz 5B / H4-7. ÖLÇÜLDÜ (HEAD 9d3728e, 2 kN N2O/HTPB hibrit): aynı
+        motor sonucunda iki toplam birden "kuru kütle" adıyla yayımlanıyor ve
+        aralarında %22,8 fark var; ayrıca ÜÇ ayrı lüle kütlesi dolaşıyor
+        (24,5× fark):
+
+          yol                                         değer      kapsam
+          structural...weight_analysis.total_weight   16,8366 kg kamara+kapaklar
+                                                                 +%30-kuralı lüle,
+                                                                 ENJEKTÖR YOK
+          cad_design...mass_breakdown.total_dry_mass  13,7130 kg kamara+çizilen
+                                                                 lüle+enjektör,
+                                                                 KAPAKLAR YOK
+          structural...weight_analysis.nozzle_weight   3,8362 kg %30 başparmak
+                                                                 kuralı (beyanlı)
+          cad_design...mass_breakdown.nozzle_mass      0,2003 kg ÇİZİLEN KATI
+          nozzle_design.geometry.estimated_mass        0,1567 kg yalnız diverjan
+
+        OTORİTE: lüle kütlesi için ÇİZİLEN KATI (``cad_design`` dökümü).
+        Hacim modeli ``V = π(2·t·r_ort + t²)·L`` kesik koni halkası formülüdür
+        ve Faz 4'te Lean ile ispatlandı (docs/BICIMSEL_ISPATLAR.md,
+        ``HRMA.frustumAnnulusVolume_eq_integral``); %30 kuralı ise kaynağında
+        "ESTIMATE ... not a geometry calculation" diye beyanlıdır.
+
+        Bu metot HİÇBİR kütleyi değiştirmez — hangi sayının dosyaya gittiğini,
+        hangisinin yaklaşım olduğunu ve iki toplamın neyi dışarıda bıraktığını
+        yazar. ``.eng`` başlığına bu satırlar düşülür ki dosyayı açan kişi
+        16,8366 kg ile 13,7130 kg arasındaki farkı görsün.
+
+        Döner: karşılaştırma sözlüğü, ya da karşılaştıracak ikinci bir kaynak
+        yoksa ``None``.
+        """
+        md = motor_data if isinstance(motor_data, dict) else {}
+        weight = _nested(md, 'structural_analysis', 'weight_analysis') or {}
+        breakdown = (_nested(md, 'cad_design', 'performance_summary',
+                             'mass_breakdown')
+                     or _nested(md, 'performance_summary', 'mass_breakdown')
+                     or {})
+        if not isinstance(weight, dict) or not isinstance(breakdown, dict):
+            return None
+
+        struct_total = _finite_positive(weight.get('total_weight'))
+        cad_total = _finite_positive(breakdown.get('total_dry_mass'))
+        if struct_total is None or cad_total is None:
+            return None
+
+        drawn_nozzle = _finite_positive(breakdown.get('nozzle_mass'))
+        rule_nozzle = _finite_positive(weight.get('nozzle_weight'))
+        solver_nozzle = _finite_positive(
+            _nested(md, 'nozzle_design', 'geometry', 'estimated_mass'))
+        end_caps = _finite_positive(weight.get('end_caps_weight'))
+        injector = _finite_positive(breakdown.get('injector_mass'))
+
+        lines = [
+            '; NOTE - two dry masses exist for this motor and they do not '
+            'agree:',
+            f';   .eng loaded mass uses structural_analysis total = '
+            f'{struct_total:.3f} kg '
+            '(chamber + closures + rule-of-thumb nozzle; injector NOT included)',
+            f';   CAD mass breakdown total = {cad_total:.3f} kg '
+            '(chamber + as-drawn nozzle + injector; closures NOT included)',
+            f';   difference = {abs(struct_total - cad_total):.3f} kg '
+            f'({abs(struct_total - cad_total) / struct_total * 100.0:.1f}% of '
+            'the value written above)',
+        ]
+        if drawn_nozzle is not None:
+            lines.append(
+                f';   AUTHORITATIVE nozzle mass = {drawn_nozzle:.4f} kg - the '
+                'as-drawn solid (frustum-annulus volume, formally verified: '
+                'docs/BICIMSEL_ISPATLAR.md)')
+        if rule_nozzle is not None:
+            basis = str(weight.get('nozzle_weight_basis') or
+                        'declared estimate').strip()
+            lines.append(
+                f';   APPROXIMATION in the .eng total: nozzle = '
+                f'{rule_nozzle:.4f} kg - {" ".join(basis.split())[:120]}')
+        if solver_nozzle is not None:
+            lines.append(
+                f';   APPROXIMATION (not used by any export): nozzle = '
+                f'{solver_nozzle:.4f} kg - divergent cone only')
+
+        return {
+            'eng_total_kg': struct_total,
+            'eng_total_scope': ('chamber + closures + rule-of-thumb nozzle; '
+                                'injector not included'),
+            'cad_total_kg': cad_total,
+            'cad_total_scope': ('chamber + as-drawn nozzle + injector; '
+                                'closures not included'),
+            'difference_kg': abs(struct_total - cad_total),
+            'difference_percent': (abs(struct_total - cad_total)
+                                   / struct_total * 100.0),
+            'nozzle_authoritative_kg': drawn_nozzle,
+            'nozzle_authoritative_basis': (
+                'as-drawn solid; frustum-annulus volume V = pi(2*t*r_mid + '
+                't^2)*L, formally verified (docs/BICIMSEL_ISPATLAR.md)'),
+            'nozzle_approximations_kg': {
+                'structural_rule_of_thumb': rule_nozzle,
+                'solver_divergent_cone_only': solver_nozzle,
+            },
+            'end_caps_kg': end_caps,
+            'injector_kg': injector,
+            'comment_lines': lines,
+        }
+
+    @staticmethod
     def resolve_inert_mass(motor_data: Dict) -> Tuple[Optional[float], str]:
         """Motorun kuru (kasa/yapı) kütlesini GERÇEK analizden çözer.
 
@@ -1193,6 +1302,12 @@ class OpenRocketExporter:
                          "(no structural analysis in this export) - apogee "
                          "will be overestimated until you set the case mass "
                          "in OpenRocket")
+        # H4-7: aynı sonuçta ikinci bir "kuru kütle" varsa fark dosyada yazar;
+        # okuyan kişi hangi sayının OpenRocket'a gittiğini ve hangi kalemin
+        # yaklaşım olduğunu görmeli (sessiz ayrışma yasak).
+        reconciliation = self.dry_mass_reconciliation(motor_data)
+        if reconciliation:
+            lines.extend(reconciliation['comment_lines'])
         lines.append(";")
         manufacturer = "UZAYTEK"
         delays = "P"  # RASP: tıpalı motor (ejeksiyon yükü yok); "0" anında ateşleme demekti

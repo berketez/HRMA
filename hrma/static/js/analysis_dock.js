@@ -580,11 +580,53 @@
         });
     }
 
+    // ==================================================================
+    // ZORUNLU ALAN SÖZLEŞMESİ  (Faz 5 / H3-B8)
+    // ------------------------------------------------------------------
+    // Alan tanımındaki varsayılan (f[2]) SONLU BİR SAYIYSA alan zorunludur.
+    // Varsayılanı boş dize olan alanlar tasarım gereği isteğe bağlıdır ve
+    // etiketlerinde bunu zaten söylerler:
+    //   protection_panel  q_star_MJ_kg  "blank = band"
+    //   protection_panel  emissivity    "blank = material"
+    //   vessel_panel      wall_thickness_mm "blank = auto-size"
+    //   joint_panel       external_axial_load_n "(N, optional)"
+    //
+    // ESKİ DAVRANIŞ: boş alan payload'a hiç konmuyordu ("backend kendi
+    // varsayılanını kullanır" varsayımı). Uç için ZORUNLU olan bir argüman
+    // böyle kaybolunca ham Python istisnası kullanıcıya geri dönüyordu.
+    // ÖLÇÜLDÜ (2026-08-03, app.test_client, /api/thermal-protection,
+    // mode=ablative):
+    //   tam gövde                      -> HTTP 200
+    //   q_net_W_m2 alanı boş ('')      -> HTTP 500
+    //     {"error":"ThermalProtectionAnalyzer.ablative_thickness() missing
+    //       1 required positional argument: 'q_net_W_m2'"}
+    //   q_net_W_m2 alanı hiç yok       -> HTTP 500 (aynı metin)
+    //
+    // YENİ DAVRANIŞ: eksik zorunlu alan varsa istek HİÇ GÖNDERİLMEZ ve
+    // hangi alanların boş olduğu kullanıcıya adıyla söylenir. Uydurma
+    // varsayılan KONMAZ — boş alan bir değer değildir.
+    // ==================================================================
+    function requiredFieldInfo(spec) {
+        const optional = {};
+        const labels = {};
+        (spec.fields || []).forEach(function (f) {
+            const def = f[2];
+            if (!(typeof def === 'number' && Number.isFinite(def))) {
+                optional[f[0]] = true;
+            }
+            labels[f[0]] = T(f[4], f[1]);
+        });
+        return { optional: optional, labels: labels };
+    }
+
+    // {payload, missing} döner. `missing` boş değilse istek gönderilmemelidir.
     function buildPayload(spec) {
         applySuggestions(spec);
         const payload = {};
+        const missing = [];
         const sec = document.getElementById('ad_sec_' + spec.id);
-        if (!sec) return payload;
+        if (!sec) return { payload: payload, missing: missing };
+        const info = requiredFieldInfo(spec);
         sec.querySelectorAll('[data-field]').forEach(function (el) {
             const key = el.getAttribute('data-field');
             if (el.tagName === 'SELECT') {
@@ -592,10 +634,46 @@
                 return;
             }
             const v = parseFloat(el.value);
-            if (Number.isFinite(v)) payload[key] = v;
-            // NaN → alan gönderilmez, backend kendi varsayılanını kullanır
+            if (Number.isFinite(v)) {
+                payload[key] = v;
+                return;
+            }
+            // Boş / sayı olmayan alan: isteğe bağlıysa gönderilmez (uç kendi
+            // bandını/malzemesini kullanır), zorunluysa istek durdurulur.
+            if (!info.optional[key]) missing.push(info.labels[key] || key);
         });
-        return payload;
+        return { payload: payload, missing: missing };
+    }
+
+    // ------------------------------------------------------------------
+    // YANIT GÖVDESİ OKUMA  (Faz 5 / H3-B9)
+    // ------------------------------------------------------------------
+    // Bazı uçlar `sanitize_json_values` süzgecinden geçmiyor ve sonlu
+    // olmayan sayıları JSON'a Python söz dizimiyle yazıyor. RFC 8259'da
+    // Infinity/NaN diye bir değer YOKTUR; tarayıcının JSON.parse'ı bunu
+    // reddeder, `response.json()` fırlatır.
+    // ÖLÇÜLDÜ (2026-08-03, app.test_client):
+    //   POST /api/altitude-to-pressure {"altitude": -Infinity}
+    //     -> HTTP 200  {"altitude":-Infinity,"pressure":Infinity,...}
+    //   POST /api/oxidizer-properties {"temperature": Infinity}
+    //     -> HTTP 200  ..."temperature":Infinity}
+    // Ham ayrıştırıcı mesajı ("Unexpected token 'I'...") kullanıcıya hiçbir
+    // şey anlatmaz. Burada AÇIK bir hataya çevrilir, ham gövde konsola
+    // yazılır ve hata yukarı fırlatılır — YUTULMAZ, panel boş kalmaz.
+    async function readJsonBody(resp) {
+        const text = await resp.text();
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            if (window.console && console.error) {
+                console.error('[AnalysisDock] geçersiz JSON gövdesi (HTTP '
+                    + resp.status + '):', text);
+            }
+            throw new Error(TF('common.badJson', { status: resp.status },
+                'Server replied HTTP {status} but the body is not valid JSON '
+                + '(Infinity/NaN are not JSON values). Nothing was drawn; the '
+                + 'raw body is in the browser console.'));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -606,6 +684,17 @@
         const root = document.getElementById('ad_root_' + spec.id);
         const btn = document.getElementById('ad_run_' + spec.id);
         if (!status || !root || !btn) return;
+        // Gövde ÖNCE kurulur: zorunlu alan boşsa uca hiç gidilmez (H3-B8).
+        const built = buildPayload(spec);
+        if (built.missing.length) {
+            root.style.display = 'none';
+            status.textContent = TF('dock.missingFields',
+                { fields: built.missing.join(', ') },
+                'Required fields are empty: {fields}. The request was not '
+                + 'sent — a blank field is not a value. Enter a number (or '
+                + 'reload the suggestion) and run again.');
+            return;
+        }
         btn.disabled = true;
         root.style.display = 'none';
         status.textContent = spec.long
@@ -615,9 +704,9 @@
             const resp = await fetch(spec.endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildPayload(spec)),
+                body: JSON.stringify(built.payload),
             });
-            const data = await resp.json();
+            const data = await readJsonBody(resp);
             if (!resp.ok || data.status === 'error') {
                 throw new Error(data.error || ('HTTP ' + resp.status));
             }

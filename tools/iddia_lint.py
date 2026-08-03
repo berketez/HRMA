@@ -60,8 +60,41 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SCAN_ROOT = os.path.join(REPO_ROOT, 'hrma')
 BASELINE_PATH = os.path.join(REPO_ROOT, 'tools', 'iddia_lint_baseline.txt')
 
-SCANNED_SUFFIXES = ('.py', '.js', '.html')
-SKIPPED_DIR_NAMES = {'__pycache__', 'node_modules', '.git', 'venv', '.venv'}
+#: Kullanıcıya GİDEN belgeler (Faz 5 / H5-5).
+#:
+#: Ölçüm (3 Ağustos 2026, HEAD 9d3728e): araç yalnız ``hrma/`` ağacını ve
+#: yalnız ``.py/.js/.html`` uzantılarını tarıyordu. Yani ``README.md``,
+#: ``docs/USER_MANUAL.md``, ``docs/user_guide/*.tex`` ve sürüm notları HİÇ
+#: taranmıyordu — oysa ``hrma/app.py:786`` (``/user-guide/open``) kullanıcıya
+#: doğrudan ``docs/user_guide`` içeriğini açıyor. Aynı kuralları belgelere
+#: uygulayınca çıkan isabetlerin arasında düzeltilmiş sayılan bir kusurun
+#: hayatta kalan kolu vardı: ``packaging/release_notes_v2.6.1.md:47``
+#: "'digital twin' wording is now 'interactive 3D model' THROUGHOUT" diyordu,
+#: ama ``docs/README.md`` ve ``docs/USER_MANUAL.md`` beş yerde hâlâ
+#: "digital twin" yazıyordu.
+#:
+#: Kapsam sınırı bilinçlidir: DENETİM ve PLAN belgeleri (``docs/archive/``,
+#: bulgu defterleri, faz planları, ``paper/``) buraya alınmadı; onlar
+#: kaldırdıkları kusuru BİREBİR alıntılamak zorundadır, taranırlarsa araç
+#: kendi kanıt defterini ihlal sayar. Buradaki liste "kullanıcının eline
+#: geçen metin" ölçütüyle seçilmiştir.
+USER_FACING_DOC_TARGETS: Tuple[str, ...] = (
+    'README.md',
+    'INSTALL.md',
+    'CONTRIBUTING.md',
+    'docs/README.md',
+    'docs/USER_MANUAL.md',
+    'docs/RELEASE.md',
+    'docs/user_guide',      # /user-guide/open ile kullanıcıya açılır
+    'packaging',            # sürüm notları güncelleme akışında gösterilir
+)
+
+#: Varsayılan tarama hedefleri: kaynak ağacı + kullanıcıya giden belgeler.
+DEFAULT_SCAN_TARGETS: Tuple[str, ...] = ('hrma',) + USER_FACING_DOC_TARGETS
+
+SCANNED_SUFFIXES = ('.py', '.js', '.html', '.md', '.tex')
+SKIPPED_DIR_NAMES = {'__pycache__', 'node_modules', '.git', 'venv', '.venv',
+                     'archive'}
 SKIPPED_FILE_SUFFIXES = ('.min.js',)
 
 INLINE_EXEMPT = 'IDDIA-LINT-MUAF'
@@ -169,14 +202,26 @@ def _line_hash(text: str) -> str:
     return hashlib.sha1(normalised.encode('utf-8')).hexdigest()[:12]
 
 
+def _is_scannable(name: str) -> bool:
+    return (name.endswith(SCANNED_SUFFIXES)
+            and not name.endswith(SKIPPED_FILE_SUFFIXES))
+
+
 def _iter_source_files(root: str) -> Iterable[str]:
+    """``root`` bir DİZİN ya da tek bir DOSYA olabilir.
+
+    Tek dosya desteği H5-5 ile geldi: kullanıcıya giden belgelerin bir kısmı
+    (``README.md``, ``docs/USER_MANUAL.md``) dizin değil tek dosyadır.
+    """
+    if os.path.isfile(root):
+        if _is_scannable(os.path.basename(root)):
+            yield root
+        return
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames
                              if d not in SKIPPED_DIR_NAMES)
         for name in sorted(filenames):
-            if not name.endswith(SCANNED_SUFFIXES):
-                continue
-            if name.endswith(SKIPPED_FILE_SUFFIXES):
+            if not _is_scannable(name):
                 continue
             yield os.path.join(dirpath, name)
 
@@ -214,11 +259,29 @@ def scan_file(abs_path: str) -> List[Finding]:
     return findings
 
 
-def scan(root: str = DEFAULT_SCAN_ROOT) -> List[Finding]:
-    """``root`` altındaki kaynak dosyaları tara."""
+def scan(root: Optional[str] = None) -> List[Finding]:
+    """Tara.
+
+    ``root`` verilmezse varsayılan hedef kümesi taranır: kaynak ağacı
+    (``hrma/``) + kullanıcıya giden belgeler (``USER_FACING_DOC_TARGETS``).
+    Tek bir dizin ya da dosya da verilebilir.
+    """
+    if root is None:
+        hedefler = [os.path.join(REPO_ROOT, t) for t in DEFAULT_SCAN_TARGETS]
+    else:
+        hedefler = [root]
+
     findings: List[Finding] = []
-    for path in _iter_source_files(root):
-        findings.extend(scan_file(path))
+    gorulen = set()
+    for hedef in hedefler:
+        if not os.path.exists(hedef):
+            continue
+        for path in _iter_source_files(hedef):
+            gercek = os.path.realpath(path)
+            if gercek in gorulen:      # hedefler örtüşürse iki kez sayma
+                continue
+            gorulen.add(gercek)
+            findings.extend(scan_file(path))
     return findings
 
 
@@ -265,8 +328,9 @@ def _format(finding: Finding) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--root', default=DEFAULT_SCAN_ROOT,
-                        help='taranacak kök dizin (varsayılan: hrma/)')
+    parser.add_argument('--root', default=None,
+                        help='tek bir kök dizin/dosya tara (varsayılan: '
+                             'hrma/ + kullanıcıya giden belgeler)')
     parser.add_argument('--all', action='store_true',
                         help='kayıttakiler dahil bütün isabetleri göster')
     parser.add_argument('--debt', action='store_true',
@@ -298,7 +362,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     new_hits = unbaselined(findings, baseline)
     debts = open_debts(baseline)
-    print(f'Taranan kök : {os.path.relpath(args.root, REPO_ROOT)}')
+    if args.root is None:
+        kok = ', '.join(DEFAULT_SCAN_TARGETS)
+    else:
+        kok = os.path.relpath(args.root, REPO_ROOT)
+    print(f'Taranan kök : {kok}')
     print(f'Toplam isabet: {len(findings)}  '
           f'(kayıtlı {len(findings) - len(new_hits)}, '
           f'kayıtsız {len(new_hits)}, açık borç {len(debts)})')

@@ -3,7 +3,7 @@
 HRMA (UZAYTEK Rocket Motor Analysis) is a desktop application for
 preliminary design and analysis of hybrid, solid, and liquid rocket motors:
 a local Flask engine behind a native window (pywebview), a dark-themed UI
-with a 13-panel Analysis Deck, a Three.js 3D digital twin, and working
+with a 13-panel Analysis Deck, a Three.js interactive 3D model, and working
 STL/STEP/DXF/drawing-PDF/report exports.
 
 ## Primary documents (repository root)
@@ -42,5 +42,5 @@ hrma/
 ├── validation/       # verification & user static-fire CSV validation
 ├── visualization/    # Plotly chart builders
 ├── templates/        # index, hybrid, solid, liquid, formulas pages
-└── static/           # theme CSS, Three.js digital twin, Analysis Deck panels
+└── static/           # theme CSS, Three.js 3D model, Analysis Deck panels
 ```

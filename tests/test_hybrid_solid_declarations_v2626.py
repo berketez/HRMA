@@ -186,8 +186,15 @@ class TestHibritBeyanlariDogru:
         çözümden gelir.
         """
         ozet = hybrid['injector_design']
-        if ozet.get('status') == 'not_analyzed':
-            pytest.skip('devre çözücüsü bu tasarımı boyutlandıramadı')
+        # Faz 5 / H5-6 — FAIL-OPEN ATLAMA kaldırıldı: eskiden
+        # ``pytest.skip('devre çözücüsü bu tasarımı boyutlandıramadı')`` idi.
+        # Enjektör devre çözücüsünün ÜRETİMDE kırılması tam olarak bu testin
+        # görmesi gereken şeydir; atlarsa "tek kaynak" sözleşmesi hiç
+        # sınanmadan yeşil kalır. Ölçüldü (3 Ağustos 2026): bu fikstür
+        # tasarımı bugün boyutlandırılıyor, atlama hiç tetiklenmiyor.
+        assert ozet.get('status') != 'not_analyzed', (
+            'enjektör devre çözücüsü bu referans tasarımı boyutlandıramadı — '
+            f'özet: {ozet}')
         devre = hybrid['injector_design_detail']['ox_circuit']
         assert ozet['discharge_coefficient'] == devre['cd']
         assert ozet['discharge_coefficient_basis'] == devre['cd_basis']
@@ -343,8 +350,13 @@ class TestKatiBeyanlariDogru:
 
     def test_atesleyici_gaz_ozellikleri_katalog_kaydidir(self, solid):
         grain = solid['cad_design']['igniter_system']['igniter_grain']
-        if grain.get('mass_status') != 'sized':
-            pytest.skip('ateşleyici şarjı boyutlandırılamadı')
+        # Faz 5 / H5-6 — FAIL-OPEN ATLAMA kaldırıldı: eskiden
+        # ``pytest.skip('ateşleyici şarjı boyutlandırılamadı')`` idi; şarj
+        # boyutlandırması kırılınca katalog beyanı bekçisi de sessizce
+        # düşüyordu. Ölçüldü (3 Ağustos 2026): mass_status == 'sized'.
+        assert grain.get('mass_status') == 'sized', (
+            'ateşleyici şarjı boyutlandırılamadı — katalog beyanı hiç '
+            f'sınanamadı (mass_status={grain.get("mass_status")!r})')
         metin = grain['basis'].lower()
         for jeton in ('flame temperature', 'molecular weight', 'mol',
                       'catalogue'):

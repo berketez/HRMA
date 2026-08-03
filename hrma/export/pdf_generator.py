@@ -230,8 +230,11 @@ class PDFReportGenerator:
     def _length_scale_to_mm(motor_data: Dict) -> Tuple[float, str]:
         """Girdi uzunluk birimini çözer; (mm'ye çarpan, birim_adı) döner.
 
-        Açık bildirim (`length_units`) varsa ona uyulur; yoksa motorun en büyük
-        uzunluk alanına bakılır (bkz. LENGTH_UNIT_METRE_MAX).
+        DİKKAT — bu yardımcı motorun TAMAMINA tek ölçek uygular ve yalnız
+        sözlüğün her alanı aynı birimdeyse doğrudur. Sıvı motor yanıtı AYNI
+        sözlükte iki birim taşır (kamara mm, boğaz/çıkış m), bu yüzden alan
+        başına çözüm için ``_fmt_length_mm`` kullanılır; bu fonksiyon yalnız
+        tabloya basılan "girdi birimi" özeti için durur.
         """
         declared = str((motor_data or {}).get('length_units') or '').lower()
         if declared in ('m', 'metre', 'meter'):
@@ -251,17 +254,85 @@ class PDFReportGenerator:
             return 1.0, 'mm'  # ölçü yok; dönüşüm uygulanmaz
         return (1000.0, 'm') if largest < LENGTH_UNIT_METRE_MAX else (1.0, 'mm')
 
+    #: Alan başına birim çözümünün kullanıcıya basılan etiketi.
+    _UNIT_SOURCE_LABELS = {
+        'motor_geometry': 'normalised motor_geometry (SI)',
+        'declared:m': 'declared m',
+        'declared:mm': 'declared mm',
+        'si': 'inferred m',
+        'mm': 'inferred mm',
+        'missing': 'not available',
+    }
+
     def _fmt_length_mm(self, motor_data: Dict, key: str,
                        pattern: str = '{:.2f}') -> str:
-        """Uzunluğu daima mm olarak biçimlendirir (birim otomatik çözülür)."""
-        scale, _unit = self._length_scale_to_mm(motor_data)
-        try:
-            value = float(motor_data.get(key))
-        except (TypeError, ValueError):
+        """Uzunluğu daima mm olarak biçimlendirir (birim ALAN BAŞINA çözülür).
+
+        Faz 5B / H4-3 düzeltmesi. Eski gövde motorun EN BÜYÜK uzunluk alanına
+        bakıp tüm alanlara TEK ölçek uyguluyordu. Sıvı yanıtı aynı sözlükte
+        iki birim taşıdığı için (kamara mm, boğaz/çıkış m) en büyük alan 99.19
+        (mm) çıkıyor, ölçek 1.0 seçiliyor ve metre cinsinden duran boğaz/çıkış
+        olduğu gibi basılıyordu. ÖLÇÜLDÜ (10 kN LOX/RP-1, HEAD 9d3728e):
+        ``Throat Diameter 0.03 mm`` (gerçek 28.34 mm),
+        ``Exit Diameter 0.10 mm`` (gerçek 103.06 mm) — 1000× küçük, üstelik
+        raporun kendi satırı "input interpreted as mm" diye TEMİN ediyordu.
+
+        Artık her alan ``motor_geometry.resolve_length_m`` ile ayrı ayrı
+        çözülür (öncelik: normalize ``motor_geometry`` bloğu → ``length_units``
+        beyanı → büyüklük çıkarımı). Çözülemeyen alan 'N/A' basar.
+        """
+        from hrma.export.motor_geometry import resolve_length_m
+
+        value_m, source = resolve_length_m(motor_data or {}, key)
+        if value_m is None:
+            if source == 'missing' and key not in (motor_data or {}):
+                return 'N/A'
             return 'N/A'
-        if value != value or value in (float('inf'), float('-inf')):
-            return 'N/A'
-        return pattern.format(value * scale) + ' mm'
+        return pattern.format(value_m * 1000.0) + ' mm'
+
+    #: Birim çözümü TÜM alanlarda aynıysa basılan tek satırlık beyan.
+    _UNIFORM_UNIT_NOTES = {
+        'si': 'mm (input interpreted as m)',
+        'mm': 'mm (input interpreted as mm)',
+        'declared:m': 'mm (input interpreted as m, declared by the caller)',
+        'declared:mm': 'mm (input interpreted as mm, declared by the caller)',
+        'motor_geometry': ('mm (input interpreted as m, from the normalised '
+                           'motor_geometry block)'),
+    }
+
+    def _length_unit_note(self, motor_data: Dict) -> str:
+        """Ölçülerin hangi girdi biriminden çevrildiğini ÖLÇEREK beyan eder.
+
+        H4-3: eski satır KOŞULSUZ "input interpreted as <tek birim>" yazıyordu
+        ve sıvı motorda bu bir TEMİNATTI — aynı sözlükte iki birim varken
+        okuyucuya tek birim çözüldüğü söyleniyordu. Artık tek birim iddiası
+        yalnız GERÇEKTEN tüm alanlar aynı yoldan çözüldüğünde basılır; aksi
+        hâlde hangi alanın hangi birimden geldiği tek tek yazılır.
+        """
+        from hrma.export.motor_geometry import resolve_length_m
+
+        resolved = []
+        for key in ('chamber_diameter', 'chamber_length', 'throat_diameter',
+                    'exit_diameter'):
+            if key not in (motor_data or {}) and not isinstance(
+                    (motor_data or {}).get('motor_geometry'), dict):
+                continue
+            _value, source = resolve_length_m(motor_data or {}, key)
+            if source == 'missing':
+                continue
+            resolved.append((key, source))
+        if not resolved:
+            return 'mm (no dimension available to convert)'
+
+        sources = {src for _key, src in resolved}
+        if len(sources) == 1:
+            only = sources.pop()
+            return self._UNIFORM_UNIT_NOTES.get(
+                only, f'mm (input interpreted as {only})')
+        detail = ', '.join(
+            f'{key}={self._UNIT_SOURCE_LABELS.get(src, src)}'
+            for key, src in resolved)
+        return 'mm (input resolved per field: ' + detail + ')'
 
     def generate_motor_analysis_report(self, motor_data: Dict, analysis_results: Dict,
                                      charts: List[str], report_type: str = 'complete') -> bytes:
@@ -501,9 +572,10 @@ class PDFReportGenerator:
         # Configuration table
         config_data = []
         
-        # Ölçüler daima mm basılır; girdi birimi otomatik çözülür ve tabloda
-        # açıkça yazılır (hibrit yolu metre, katı yolu mm gönderiyor).
-        _scale, input_unit = self._length_scale_to_mm(motor_data)
+        # Ölçüler daima mm basılır; girdi birimi ALAN BAŞINA çözülür ve
+        # tabloda açıkça yazılır (hibrit yolu metre, katı yolu mm, sıvı yolu
+        # aynı sözlükte İKİSİNİ birden gönderiyor — H4-3).
+        unit_note = self._length_unit_note(motor_data)
 
         # Basic parameters
         config_data.extend([
@@ -516,7 +588,7 @@ class PDFReportGenerator:
             ['Throat Diameter', self._fmt_length_mm(motor_data, 'throat_diameter')],
             ['Exit Diameter', self._fmt_length_mm(motor_data, 'exit_diameter')],
             ['Expansion Ratio', self._fmt(motor_data.get('expansion_ratio'))],
-            ['Dimension units', f'mm (input interpreted as {input_unit})']
+            ['Dimension units', unit_note]
         ])
 
         # Motora özgü satırlar VERİ VARLIĞINA göre eklenir; eskiden yalnız

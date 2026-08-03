@@ -2127,6 +2127,43 @@
             return text;
         }
 
+        // ---- Yanıt gövdesi okuma (Faz 5 / H3-B9) -----------------------
+        // Uçların bir kısmı `sanitize_json_values` süzgecinden geçmiyor ve
+        // sonlu olmayan sayıları JSON gövdesine Python söz dizimiyle
+        // yazıyor. RFC 8259'da Infinity/NaN diye bir değer YOKTUR:
+        // Python `json.loads` bunları kabul eder, tarayıcının JSON.parse'ı
+        // ETMEZ — `response.json()` fırlatır.
+        // ÖLÇÜLDÜ (2026-08-03, app.test_client):
+        //   POST /api/oxidizer-properties {"temperature": Infinity}
+        //     -> HTTP 200, gövdede  "temperature":Infinity
+        //   POST /api/regression-analysis (motor_data içinde inf)
+        //     -> HTTP 200, gövdede  "port_diameter":[30.0,Infinity,...]
+        // Eskiden kullanıcı yalnız tarayıcının ayrıştırıcı gürültüsünü
+        // ("Unexpected token 'I'...") görüyordu. Artık hata AÇIKÇA
+        // adlandırılıyor, ham gövde konsola yazılıyor ve istisna yukarı
+        // fırlatılıyor — mevcut catch blokları onu ekrana basar. Hata
+        // YUTULMAZ; sessizce boş panel gösterilmez.
+        // NOT: 'common.badJson' anahtarı i18n_common.js'tedir; bu sayfada
+        // analysis_dock.js o sözlüğü kendiliğinden yükler. Sözlük yoksa
+        // İngilizce yedek metin basılır.
+        async function readJsonBodyStrict(response) {
+            const raw = await response.text();
+            try {
+                return JSON.parse(raw);
+            } catch (parseError) {
+                console.error('Invalid JSON body (HTTP ' + response.status + '):', raw);
+                const key = 'common.badJson';
+                const fallback = 'The server replied HTTP ' + response.status
+                    + ' but the body is not valid JSON (Infinity and NaN are '
+                    + 'not JSON values). Nothing was drawn; the raw body is in '
+                    + 'the browser console.';
+                const text = (typeof window.I18N !== 'undefined' && window.I18N.tf)
+                    ? window.I18N.tf(key, { status: response.status }, fallback)
+                    : fallback;
+                throw new Error(text);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof window.I18N === 'undefined') return;
             // Dil seçiciyi navigasyona bas (Ana Sayfa'daki seçiciyle aynı depo)
@@ -2950,12 +2987,13 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         oxidizer_type: oxType,
-                        temperature: temperature 
+                        temperature: temperature
                     })
                 });
-                
-                const result = await response.json();
-                
+
+                // H3-B9: geçersiz JSON gövdesi sessizce yutulmaz
+                const result = await readJsonBodyStrict(response);
+
                 if (result.status === 'success') {
                     // Adjusted according to response structure from backend
                     const properties = result.properties || result.data;
@@ -4400,9 +4438,10 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                
-                const result = await response.json();
-                
+
+                // H3-B9: geçersiz JSON gövdesi sessizce yutulmaz
+                const result = await readJsonBodyStrict(response);
+
                 if (result.status === 'success') {
                     displayRegressionResults(result);
                     document.getElementById('exportRegressionBtn').disabled = false;

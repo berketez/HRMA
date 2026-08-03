@@ -198,13 +198,28 @@ class TestPackageReadmeHonesty:
 
     @staticmethod
     def _step_zip(client):
-        """STEP paketi; üretici bu ortamda çalışamıyorsa test atlanır."""
+        """STEP paketi. FAIL-CLOSED: yalnız build123d yoksa atlanır.
+
+        Faz 5 / H5-6 düzeltmesi — FAIL-OPEN ATLAMA: burası eskiden
+        ``if resp.status_code != 200: pytest.skip(...)`` yazıyordu. Yani
+        STEP üreticisi HANGİ sebeple kırılırsa kırılsın (500, 422, bozuk
+        geometri kapısı, üretici içindeki istisna) test ATLANIYOR, kırmızıya
+        DÖNMÜYORDU. Ölçüm (3 Ağustos 2026): build123d yokken bu satır
+        2 testi atlıyordu (``SKIPPED [2] tests/test_faz4_app_export.py:205``,
+        HTTP 501) — yani A1'in uçtan uca kolu CI'da hiç koşmuyordu.
+
+        Yeni sözleşme: kütüphanenin YOKLUĞU (ortam gerçeği) atlanır,
+        kütüphane varken üreticinin KIRIKLIĞI kırmızıya döner.
+        """
+        pytest.importorskip(
+            'build123d',
+            reason='build123d kurulu değil — STEP üretimi bu ortamda yok '
+                   '(CI tarafında `step-export` işi bunu KURAR ve koşturur)')
         resp = client.post('/api/export-step',
                            json={'motor_data': GOOD_GEOMETRY})
-        if resp.status_code != 200:
-            pytest.skip('STEP üreticisi bu ortamda çalışmadı '
-                        f'(HTTP {resp.status_code}) — A1 birim metni ayrıca '
-                        'test_step_readme_text_unit ile birim olarak sınanıyor')
+        assert resp.status_code == 200, (
+            f'build123d kurulu ama STEP üreticisi HTTP {resp.status_code} '
+            f'döndü: {resp.get_data(as_text=True)[:300]}')
         return resp
 
     def test_step_readme_unit_comes_from_the_file_header(self, client):
@@ -249,8 +264,13 @@ class TestPackageReadmeHonesty:
         archive = zipfile.ZipFile(io.BytesIO(resp.data))
         assembly = [n for n in archive.namelist()
                     if n.endswith('motor_assembly.stl')]
-        if not assembly:
-            pytest.skip('paket birleşik assembly içermiyor')
+        # Faz 5 / H5-6: burası eskiden ``pytest.skip('paket birleşik assembly
+        # içermiyor')`` idi. Birleşik assembly'nin KAYBOLMASI tam olarak bu
+        # testin yakalaması gereken şeydir; atlarsa kusur görünmez olur.
+        # Ölçüldü (3 Ağustos 2026): paket bugün motor_assembly.stl içeriyor.
+        assert assembly, (
+            'STL paketinde motor_assembly.stl yok — birleşik model kaybolmuş '
+            f'(paket içeriği: {sorted(archive.namelist())})')
         mesh = trimesh.load_mesh(
             io.BytesIO(archive.read(assembly[0])), file_type='stl')
         expected = 'yes' if mesh.is_watertight else 'no'
@@ -614,9 +634,14 @@ class TestDownloadNameSanitisation:
                                motor_name='../../../../etc/passwd'),
             'analysis_results': {}, 'charts': [],
         })
-        if resp.status_code != 200:
-            pytest.skip(f'PDF üretilemedi ({resp.status_code}); '
-                        'ad temizliği ayrı testte birim olarak sınanıyor')
+        # Faz 5 / H5-6: eskiden ``if resp.status_code != 200: pytest.skip(...)``
+        # idi — PDF üretici kırılınca yol-geçişi (path traversal) bekçisi de
+        # sessizce atlanıyordu. Ölçüldü (3 Ağustos 2026): üç rapor türü de
+        # HTTP 200 üretiyor, yani atlama bugün zaten tetiklenmiyordu; artık
+        # üretici kırılırsa kırmızıya döner.
+        assert resp.status_code == 200, (
+            f'{report_type} PDF üretilemedi (HTTP {resp.status_code}): '
+            f'{resp.get_data(as_text=True)[:200]}')
         disposition = self._disposition(resp)
         assert '..' not in disposition
         assert 'etc' not in disposition or '/' not in disposition

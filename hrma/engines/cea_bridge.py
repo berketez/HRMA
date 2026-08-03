@@ -33,7 +33,13 @@ Türkçe yorumlar, İngilizce tanımlayıcılar (proje stili).
 
 from __future__ import annotations
 
+import atexit
 import functools
+import math
+import os
+import shutil
+import tempfile
+import threading
 from typing import Any, Dict, Optional, Tuple
 
 # --------------------------------------------------------------------------
@@ -62,10 +68,140 @@ FALLBACK_EPS_ANCHOR = 200.0
 _EPS_ANCHOR_TOL = 0.5   # bu farkın altındaki ε istekleri çapayla aynı sayılır
 
 # Önbelleğe alınacak yuvarlama hassasiyetleri (görev sözleşmesi)
-_PC_ROUND = 0        # bar tam sayı
+#
+# Faz 5 / H2-3 DÜZELTMESİ — oda basıncı artık MUTLAK değil BAĞIL çözünürlükte
+# nicemlenir. Eski `_PC_ROUND = 0` (bar tam sayı) ölçülen sonucu şuydu:
+#
+#   Pc=70.00  c_star=1810.060493  T_c=3584.2090
+#   Pc=70.49  c_star=1810.060493  T_c=3584.2090   <- bit-aynı
+#   Pc=70.50  c_star=1810.060493  T_c=3584.2090   <- bit-aynı
+#   Pc=70.51  c_star=1810.277025  T_c=3585.8915   <- basamak
+#
+# yani yarım bar genişliğinde bir düzlük ve ardından süreksiz sıçrama.
+# En düşük izinli basınçta (10 bar) etki en büyüktü: girdide %0,19 fark
+# (10,49 -> 10,51) c*'da %0,103 sıçrama yaratıyordu. Aynı yanıtta c* ve
+# T_c basamaklı, `isp_sea_level` sürekli (geometriden geliyor) olduğu için
+# Isp tam olarak c*·CF/g0 değildi.
+#
+# Yeni ölçüt: nicemleme adımı, o basınçta çözümün gerçek duyarlılığından
+# DAHA KABA olmamalı. c* logaritmik olarak Pc'ye bağlı olduğundan ölçütü
+# sağlayan doğal biçim ANLAMLI BASAMAK yuvarlamasıdır: 6 anlamlı basamak,
+# 10 bar'da 1e-5 bar, 500 bar'da 5e-4 bar adım demektir — c*'daki bağıl
+# etkisi 1e-6'nın altında, yani fiziksel olarak görünmez. Bu, kayan nokta
+# gürültüsünü (1e-12 mertebesi) hâlâ aynı anahtara toplayarak önbelleğin
+# asıl işini (aynı çalışma noktasının tekrarı) korur.
+_PC_SIG_DIGITS = 6   # oda basıncı: 6 anlamlı basamak (bağıl ~1e-6)
 _MR_ROUND = 2        # O/F iki ondalık
 _EPS_ROUND = 1       # alan oranı bir ondalık
 _AMB_ROUND = 3       # ortam basıncı (bar) üç ondalık
+
+
+def _round_significant(value: float, digits: int) -> float:
+    """`value`'yu `digits` anlamlı basamağa yuvarla (bağıl nicemleme).
+
+    Mutlak `round(x, n)` küçük ve büyük değerlerde farklı bağıl çözünürlük
+    verir; CEA girdileri (Pc) birkaç on kat aralığa yayıldığı için bağıl
+    nicemleme kullanılır. 0 ve sonlu olmayan değerler olduğu gibi döner.
+    """
+    x = float(value)
+    if x == 0.0 or not math.isfinite(x):
+        return x
+    exponent = math.floor(math.log10(abs(x)))
+    return round(x, int(digits) - 1 - int(exponent))
+
+
+# --------------------------------------------------------------------------
+# Süreç yalıtımı ve iş parçacığı güvenliği (Faz 5 / H5-1, ÖLÇÜLDÜ)
+# --------------------------------------------------------------------------
+# RocketCEA, NASA CEA'nın Fortran kodunu sarar. Fortran tarafının iki ayrı
+# PAYLAŞIMLI durumu vardır:
+#
+#   1. ÇALIŞMA DOSYALARI (f.inp, f.out, temp.dat) TEK bir veri dizininde
+#      tutulur. Varsayılan `~/RocketCEA` — yani KULLANICI BAŞINA SABİT,
+#      süreçler arasında ortak (rocketcea/cea_obj.py:41).
+#   2. ÇÖZÜM DURUMU Fortran COMMON bloklarında (modül düzeyi global) durur;
+#      aynı süreçteki bütün iş parçacıkları bu tek kopyayı paylaşır.
+#
+# Ölçüm (3 Ağustos 2026, düzeltme ÖNCESİ, bu depo):
+#   * 6 eşzamanlı SÜREÇ × 120 CEA çağrısı -> 2 süreç `exit=2` ile ÖLDÜ:
+#       "At line 5462 of file ../rocketcea/py_cea.f (unit = 13,
+#        file = '/Users/apple/RocketCEA/temp.dat')
+#        Fortran runtime error: End of file"
+#     Fortran çalışma zamanı hatası Python istisnası DEĞİLDİR: süreç
+#     traceback bırakmadan ölür, `except` ile yakalanamaz. Kullanıcı
+#     uygulamayı iki kez açarsa (ya da iki pytest koşusu) süreç çöker.
+#   * 6 eşzamanlı İŞ PARÇACIĞI × 36 CEA çağrısı (TEK süreç) -> çökme yok,
+#     ama Fortran çöplenmiş girdiyle döndü:
+#       "Bad Solution in CalcPCoPE (desired Area Ratio= 23.0 actual= inf)
+#        input gam= 0.0"
+#     yani SESSİZCE YANLIŞ sayı. Aynı iş yükü tek iş parçacığında koşunca
+#     0 uyarı verdi — fark iş parçacığı sayısından geliyor, girdiden değil.
+#     Üretimde `waitress serve(threads=8)` çalışıyor.
+#
+# Düzeltme iki katmanlıdır:
+#   A) Süreç başına ÖZEL veri dizini (`set_rocketcea_data_dir`) — süreçler
+#      artık birbirinin temp.dat'ını ezmez. Deneysel doğrulama: 6/6 exit=0.
+#   B) Süreç içi RLock — aynı süreçteki iş parçacıkları COMMON blokları
+#      sırayla kullanır. Önbellek İSABETLERİ kilide GİRMEZ (lru_cache
+#      sarmalayıcısı kilidin dışındadır), yani sıcak yolun maliyeti sıfır.
+_CEA_STATE_LOCK = threading.RLock()
+_CEA_DATA_DIR: Optional[str] = None
+
+
+def _remove_cea_data_dir(path: str) -> None:
+    """Süreç kapanırken kendi CEA çalışma dizinini sil (atexit kancası)."""
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def ensure_isolated_cea_data_dir() -> Optional[str]:
+    """RocketCEA çalışma dizinini BU SÜRECE özel bir dizine sabitle.
+
+    Bir kez çalışır (idempotent), sonucu döndürür. RocketCEA kurulu değilse
+    ya da sabitlenemezse ``None`` döner ve çağıran taraf eski davranışla
+    devam eder — bu fonksiyon hiçbir koşulda hesabı düşürmez.
+
+    ÖNEMLİ: ``CEA_Obj.__init__`` veri dizinini örnek başına ``pathPrefix``
+    içine DONDURUR (rocketcea/cea_obj.py:394), bu yüzden çağrı İLK
+    ``CEA_Obj`` kurulmadan ÖNCE yapılmalıdır.
+    """
+    global _CEA_DATA_DIR
+    if _CEA_DATA_DIR is not None:
+        return _CEA_DATA_DIR
+    with _CEA_STATE_LOCK:
+        if _CEA_DATA_DIR is not None:
+            return _CEA_DATA_DIR
+        try:
+            import rocketcea
+            import rocketcea.cea_obj as _cea_module
+        except Exception:
+            return None
+        target = tempfile.mkdtemp(prefix='hrma-cea-%d-' % os.getpid())
+        try:
+            # `cea_obj` modülü veri dizini global'inin KENDİ kopyasını taşır
+            # (paketin __init__'indeki blok orada tekrarlanmıştır); asıl
+            # kullanılan bu olduğu için önce o sabitlenir.
+            _cea_module.set_rocketcea_data_dir(target, do_print=False)
+        except Exception:
+            _remove_cea_data_dir(target)
+            return None
+        try:
+            # Paket düzeyindeki ikinci kopya da aynı dizine çekilir ki
+            # köprü dışından CEA_Obj kuran modüller de aynı yerde çalışsın.
+            rocketcea.set_rocketcea_data_dir(target, do_print=False)
+        except Exception:
+            pass
+        # Windows'ta boşluklu yol 8.3 kısa yola çevrilebildiği için
+        # ETKİN dizin geri okunur.
+        effective = str(getattr(_cea_module, 'ROCKETCEA_DATA_DIR', target))
+        try:
+            os.makedirs(effective, exist_ok=True)
+        except Exception:
+            pass
+        atexit.register(_remove_cea_data_dir, effective)
+        if effective != target:
+            atexit.register(_remove_cea_data_dir, target)
+        _CEA_DATA_DIR = effective
+        return _CEA_DATA_DIR
 
 # --------------------------------------------------------------------------
 # HRMA adı -> RocketCEA kart adı eşlemesi
@@ -117,9 +253,12 @@ def is_rocketcea_available() -> bool:
     """RocketCEA import edilebiliyor mu? (bir kez denenir, sonuç önbelleklenir)."""
     try:
         import rocketcea.cea_obj  # noqa: F401
-        return True
     except Exception:
         return False
+    # H5-1: veri dizini İLK CEA_Obj kurulmadan önce bu sürece sabitlenir;
+    # `pathPrefix` örnek başına dondurulduğu için sonrası geç kalır.
+    ensure_isolated_cea_data_dir()
+    return True
 
 
 @functools.lru_cache(maxsize=32)
@@ -136,10 +275,15 @@ def _cea_obj(ox_card: str, fuel_card: str, fac_cr: Optional[float] = None):
     ``None`` ise klasik sonsuz-alan (infinite-area) çözümü kullanılır —
     eski davranış, geriye uyumlu.
     """
+    # H5-1: kurucu hem veri dizinini yaratıp kütüphane dosyalarını kopyalar
+    # hem de `pathPrefix`i dondurur; ikisi de yalıtılmış dizinde ve tek
+    # iş parçacığında olmalı.
+    ensure_isolated_cea_data_dir()
     from rocketcea.cea_obj import CEA_Obj
-    if fac_cr is None:
-        return CEA_Obj(oxName=ox_card, fuelName=fuel_card)
-    return CEA_Obj(oxName=ox_card, fuelName=fuel_card, fac_CR=float(fac_cr))
+    with _CEA_STATE_LOCK:
+        if fac_cr is None:
+            return CEA_Obj(oxName=ox_card, fuelName=fuel_card)
+        return CEA_Obj(oxName=ox_card, fuelName=fuel_card, fac_CR=float(fac_cr))
 
 
 # --------------------------------------------------------------------------
@@ -161,6 +305,26 @@ def _compute_rocketcea(
     lru_cache ile sarılıdır; dönen sözlük DEĞİŞTİRİLMEMELİDİR (public sarmalayıcı
     kopya üretir).
     """
+    # H5-1: py_cea (Fortran) çözüm durumunu COMMON bloklarında tutar; aynı
+    # süreçteki iş parçacıkları bunu paylaşır ve eşzamanlı çağrıda birbirinin
+    # girdisini eziyor (ölçüldü: 6 iş parçacığında "input gam= 0.0"). Çağrı
+    # serileştirilir. Önbellek İSABETLERİ buraya hiç girmez, çünkü lru_cache
+    # sarmalayıcısı bu gövdenin dışındadır.
+    with _CEA_STATE_LOCK:
+        return _compute_rocketcea_locked(
+            fuel_card, ox_card, pc_bar, mr, eps, ambient_bar, fac_cr)
+
+
+def _compute_rocketcea_locked(
+    fuel_card: str,
+    ox_card: str,
+    pc_bar: float,
+    mr: float,
+    eps: Optional[float],
+    ambient_bar: Optional[float],
+    fac_cr: Optional[float] = None,
+) -> Dict[str, Any]:
+    """`_compute_rocketcea` gövdesi — YALNIZ `_CEA_STATE_LOCK` altında çağrılır."""
     c = _cea_obj(ox_card, fuel_card, fac_cr)
     pc_psia = pc_bar * BAR_TO_PSIA
 
@@ -378,7 +542,7 @@ def get_combustion_properties(
     # 1) RocketCEA yolu (eşleme varsa ve kütüphane kuruluysa)
     if fuel_card and ox_card and is_rocketcea_available():
         try:
-            pc_key = round(float(pc_bar), _PC_ROUND)
+            pc_key = _round_significant(float(pc_bar), _PC_SIG_DIGITS)
             mr_key = round(float(mr), _MR_ROUND)
             eps_key = round(float(expansion_ratio), _EPS_ROUND) if expansion_ratio else None
             # F090: 0.0 bar geçerli bir girdidir (vakum) — `if ambient_bar`

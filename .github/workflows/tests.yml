@@ -43,21 +43,53 @@ jobs:
           # ama denge kimyası testlerinin gerçekten koşması için kuruluyor.
           pip install cantera
 
-      # build123d (STEP export) CI'da BİLEREK kurulmuyor: 0.11.x numpy>=2
+      # build123d (STEP export) bu işte BİLEREK kurulmuyor: 0.11.x numpy>=2
       # istiyor ve kurulduğunda numpy'yi 1.26'dan 2.5'e yükseltip tüm paketi
       # kırıyor (np.trapz numpy 2'de kaldırıldı — 2026-07-23 CI koşusunda 194
-      # test bu yüzden düştü). STEP testleri pytest.importorskip ile atlanır.
-      # Kalıcı çözüm numpy 2 geçişidir; ayrı iş olarak planlandı.
+      # test bu yüzden düştü). STEP testleri AYRI `step-export` işinde,
+      # numpy pini geri alınarak ve SIFIR-ATLAMA denetimiyle koşar
+      # (Faz 5 / H5-2). Kalıcı çözüm numpy 2 geçişidir; ayrı iş olarak
+      # planlandı.
       - name: Ortam teyidi (numpy pini korunuyor mu)
         run: |
           python -c "import numpy; print('numpy', numpy.__version__); assert numpy.__version__.startswith('1.'), 'numpy<2 pini bozuldu'"
+
+      # PyYAML yönetişim bekçileri için zorunludur (Faz 5 / H5-4). Kurulu
+      # olmadığında 4 test SESSİZCE atlanıyordu; artık kurulumu doğrulanır ki
+      # requirements-dev.txt'den düşerse iş kırmızıya dönsün, testler sessizce
+      # atlanmasın.
+      - name: Yönetişim bekçisi bağımlılığı (PyYAML) gerçekten kurulu mu
+        run: |
+          python -c "import yaml; print('PyYAML', yaml.__version__)"
 
       - name: Test paketi
         env:
           MPLBACKEND: Agg
           PYTHONPATH: .
         run: |
-          pytest tests/ -q --junitxml=pytest-report.xml
+          pytest tests/ -q -rs --junitxml=pytest-report.xml
+
+      # Atlanan testler görünür olsun: "atlandı" sessiz kalmamalı. Burada bir
+      # eşik UYGULANMAZ — bu işin tam takım atlama sayısı CI ortamında
+      # ölçülmedi, uydurma bir bütçe koymak yanlış olurdu. Eşik yalnız
+      # ölçülmüş olan `step-export` işinde uygulanır.
+      - name: Atlama envanteri (bilgi amaçlı)
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          if not os.path.exists('pytest-report.xml'):
+              print('rapor yok'); raise SystemExit(0)
+          root = ET.parse('pytest-report.xml').getroot()
+          suite = root if root.tag == 'testsuite' else root.find('testsuite')
+          gercek = [tc for tc in suite.iter('testcase')
+                    if (tc.find('skipped') is not None
+                        and tc.find('skipped').get('type') == 'pytest.skip')]
+          print(f"toplam={suite.get('tests')} atlanan={len(gercek)}")
+          for tc in gercek:
+              print(f"  ATLANDI {tc.get('classname')}::{tc.get('name')} "
+                    f"-> {tc.find('skipped').get('message', '')[:120]}")
+          PY
 
       - name: Test raporu (başarısız koşuda da yüklenir)
         if: always()
@@ -65,4 +97,126 @@ jobs:
         with:
           name: pytest-report
           path: pytest-report.xml
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------
+  # STEP/CAD export testleri — AYRI iş (Faz 5 / H5-2)
+  #
+  # Ölçüm (3 Ağustos 2026, HEAD 9d3728e): build123d kurulu OLMAYAN bir ortamda
+  # bu beş dosya "98 passed, 47 skipped" veriyordu; build123d kurulu ortamda
+  # "143 passed, 2 xfailed". Yani STEP/CAD kolunun 47 bekçisi CI'da HER ZAMAN
+  # atlanıyordu — Faz 4'ün A1 (STL/DXF 1000× birim), A4 (NaN geometri → katı
+  # cisim), A8 (katı cidarı) ve A11 (tank geometrisi) bulgularının bekçileri
+  # dahil. "Atlandı" başarı sayılamaz.
+  #
+  # Neden ayrı iş: build123d 0.11.x metadata'sı `numpy<3,>=2` deklare eder ve
+  # kurulumu numpy'yi 2.x'e yükseltir; ana pakette numpy<2 pini zorunludur
+  # (np.trapz). Bu iş build123d'yi kurar, ARDINDAN numpy pinini geri alır.
+  # Bunun çalıştığı yerelde ölçüldü: build123d 0.11.1 + numpy 1.26.4 birlikte
+  # kurulu ve 145 testin tamamı koşuyor (metadata kısıtı çalışma zamanında
+  # bağlayıcı değil; numpy 2 başlıklarıyla derlenen ikili modüller numpy 1.x
+  # ile çalışma zamanında uyumludur).
+  step-export:
+    name: STEP/CAD export (build123d)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Sistem bağımlılıkları
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran libgl1 libglu1-mesa
+
+      - name: Python bağımlılıkları
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: build123d + numpy pinini geri alma
+        run: |
+          # build123d numpy'yi 2.x'e yükseltir; hemen ardından pin geri alınır.
+          pip install build123d
+          pip install "numpy>=1.24,<2"
+
+      # FAIL-CLOSED: ikisinden biri sağlanmazsa iş burada kırmızı olur.
+      # Aksi hâlde testler yine sessizce atlanır ve hiçbir şey sınanmamış
+      # olurdu — bu işin var oluş sebebi tam olarak bunu engellemek.
+      - name: Ortam teyidi (build123d VAR ve numpy hâlâ 1.x)
+        run: |
+          python - <<'PY'
+          import numpy
+          assert numpy.__version__.startswith('1.'), \
+              f'numpy pini geri alınamadı: {numpy.__version__}'
+          import build123d
+          print('build123d', getattr(build123d, '__version__', '?'),
+                '| numpy', numpy.__version__)
+          from hrma.export import step_export
+          assert getattr(step_export, 'BUILD123D_AVAILABLE', False), \
+              'step_export build123d yok diyor — STEP testleri atlanacaktı'
+          PY
+        env:
+          PYTHONPATH: .
+
+      - name: STEP/CAD test dosyaları
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: .
+        run: |
+          pytest tests/test_step_import.py \
+                 tests/test_tank_step_units.py \
+                 tests/test_faz4_export_geometri.py \
+                 tests/test_faz4_app_export.py \
+                 tests/test_export_generators.py \
+                 -q -rs --junitxml=step-report.xml
+
+      # ATLAMA BÜTÇESİ = 0. xfail atlama sayılmaz (junit XML xfail'i de
+      # <skipped> olarak yazar, tipi 'pytest.xfail'dir); yalnız gerçek
+      # pytest.skip sayılır.
+      - name: Atlama bütçesi — SIFIR
+        if: always()
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse('step-report.xml').getroot()
+          suite = root if root.tag == 'testsuite' else root.find('testsuite')
+          toplam = int(suite.get('tests', 0))
+          # junit XML, xfail'i de <skipped> olarak yazar; ayirt edici alan
+          # 'type'tir. Butce yalnizca type == 'pytest.skip' olanlara bakar,
+          # type == 'pytest.xfail' olanlar atlama SAYILMAZ.
+          atlanan = [tc for tc in suite.iter('testcase')
+                     if (tc.find('skipped') is not None
+                         and tc.find('skipped').get('type') == 'pytest.skip')]
+          print(f'toplanan={toplam} gercek_atlanan={len(atlanan)}')
+          for tc in atlanan:
+              print(f"  ATLANDI {tc.get('classname')}::{tc.get('name')} "
+                    f"-> {tc.find('skipped').get('message', '')[:160]}")
+          hata = []
+          if atlanan:
+              hata.append(f'{len(atlanan)} test atlandi — bu iste atlama '
+                          'butcesi SIFIRDIR')
+          # 3 Agustos 2026 olcumu: 145 test toplandi (143 passed + 2 xfailed).
+          # Alt sinir, toplama coktugunde "0 test, 0 atlama" ile yesil kalmayi
+          # engeller.
+          if toplam < 140:
+              hata.append(f'yalnizca {toplam} test toplandi; 3 Agustos 2026 '
+                          'olcumu 145 idi — toplama kirilmis olabilir')
+          if hata:
+              sys.exit('STEP kapisi: ' + '; '.join(hata))
+          print('STEP kapisi: TAMAM')
+          PY
+
+      - name: STEP test raporu
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-report
+          path: step-report.xml
           if-no-files-found: ignore

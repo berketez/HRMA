@@ -61,12 +61,16 @@ def _solid_size_mm(path):
 @pytest.fixture(scope='module')
 def tank_files(tmp_path_factory):
     out = tmp_path_factory.mktemp('tank_step')
-    try:
-        return step_export.generate_tank_step(
-            {k: dict(v) for k, v in TANK_INPUT_MM.items()},
-            out_dir=str(out))
-    except Exception as exc:  # build123d/OCC yoksa anlamlı atla
-        pytest.skip(f'STEP üretilemedi: {exc}')
+    # Faz 5 / H5-6 — FAIL-OPEN ATLAMA kaldırıldı: burası eskiden
+    # ``except Exception as exc: pytest.skip(f'STEP üretilemedi: {exc}')``
+    # yazıyordu. Modülün başındaki ``pytestmark`` zaten build123d yokluğunu
+    # ATLAMAYLA karşılıyor; buraya gelen bir istisna kütüphane VARKEN
+    # üreticinin kırıldığı anlamına gelir ve tam olarak bu dosyanın (A11
+    # tank geometrisi bekçileri) yakalaması gereken şeydir. Sessizce
+    # atlanırsa 13 bekçi birden görünmez olur.
+    return step_export.generate_tank_step(
+        {k: dict(v) for k, v in TANK_INPUT_MM.items()},
+        out_dir=str(out))
 
 
 class TestTankStepGeometry:
