@@ -45,6 +45,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import importlib.util
 import zipfile
 
 import pytest
@@ -329,6 +330,16 @@ class TestT13BirimCozulemezse:
 # EK-GÖZLEM-1 — indirilen paket, mesajın SÖYLEDİĞİ dosyaları içeriyor
 # ===========================================================================
 
+#: build123d kurulu mu? STEP dışa aktarımının TEK sağlayıcısı odur.
+#: CI'ın ana pytest işinde BİLEREK kurulmaz (0.11.x numpy>=2 istiyor ve tüm
+#: paketi kırıyor — .github/workflows/tests.yml'deki nota bakın); STEP testleri
+#: ayrı `step-export` işinde koşar. Bu yüzden bekçi ortamı ölçer: build123d
+#: varsa .step dosyaları ŞART, yoksa dürüst geri düşüş (STEP_NOT_AVAILABLE.txt)
+#: şart. İkisi de sınanmazsa bekçi ya CI'da yanlış kırılır ya da geri düşüşün
+#: sessizce boş kalmasını görmez.
+STEP_VAR = importlib.util.find_spec('build123d') is not None
+
+
 @pytest.fixture(scope='module')
 def paket_adlari(tank_data):
     """Kullanıcının indirdiği ZIP'in gerçek dosya listesi."""
@@ -356,8 +367,18 @@ class TestEkGozlem1PaketIcerigi:
          'manufacturing_checklist_TEMPLATE.json'),
         ('Geometry definitions', 'oxidizer_tank_geometry.json'),
         ('Geometry definitions', 'fuel_tank_geometry.json'),
-        ('STEP files (CATIA/SolidWorks compatible)', 'oxidizer_tank.step'),
-        ('STEP files (CATIA/SolidWorks compatible)', 'fuel_tank.step'),
+        pytest.param('STEP files (CATIA/SolidWorks compatible)',
+                     'oxidizer_tank.step',
+                     marks=pytest.mark.skipif(
+                         not STEP_VAR,
+                         reason='build123d yok — STEP yerine dürüst geri '
+                                'düşüş sınanır (aşağıdaki test)')),
+        pytest.param('STEP files (CATIA/SolidWorks compatible)',
+                     'fuel_tank.step',
+                     marks=pytest.mark.skipif(
+                         not STEP_VAR,
+                         reason='build123d yok — STEP yerine dürüst geri '
+                                'düşüş sınanır (aşağıdaki test)')),
     ])
     def test_claimed_file_is_actually_in_the_package(self, paket_adlari,
                                                      iddia, dosya):
@@ -367,10 +388,36 @@ class TestEkGozlem1PaketIcerigi:
 
     def test_written_files_are_not_silently_dropped(self, paket_adlari):
         """Diske yazılan her dosya pakete girmeli (sessiz düşme bekçisi)."""
-        assert len(paket_adlari) >= 8, (
-            'paket %d dosya içeriyor; üreticilerin yazdığı dosyalardan '
-            'bazıları listeye eklenmemiş olabilir: %s'
-            % (len(paket_adlari), paket_adlari))
+        # build123d yokken iki .step yerine tek bir açıklama dosyası girer.
+        beklenen = 8 if STEP_VAR else 7
+        assert len(paket_adlari) >= beklenen, (
+            'paket %d dosya içeriyor (beklenen >= %d, build123d %s); '
+            'üreticilerin yazdığı dosyalardan bazıları listeye eklenmemiş '
+            'olabilir: %s'
+            % (len(paket_adlari), beklenen,
+               'var' if STEP_VAR else 'yok', paket_adlari))
+
+    @pytest.mark.skipif(STEP_VAR, reason='build123d kurulu — .step sınanıyor')
+    def test_step_yoksa_paket_bunu_ACIKCA_soyler(self, tank_data):
+        """STEP üretilemiyorsa paket sessiz kalmamalı.
+
+        Kullanıcı arayüzde "STEP files (CATIA/SolidWorks compatible)" yazısını
+        görüp paketi açtığında .step bulamıyorsa, en azından NEDEN bulamadığını
+        okuyabilmeli. Boş bir paket ya da açıklamasız eksiklik, bu sürümün
+        kapattığı "ekran veriden fazlasını söylüyor" sınıfına girer.
+        """
+        from hrma.export.cad_export import cad_generator
+        zip_path = cad_generator.generate_tank_cad(tank_data)
+        with zipfile.ZipFile(zip_path) as zf:
+            adlar = zf.namelist()
+            assert 'STEP_NOT_AVAILABLE.txt' in adlar, (
+                'build123d yok ve paket bunu hiçbir yerde söylemiyor: %s'
+                % sorted(adlar))
+            metin = zf.read('STEP_NOT_AVAILABLE.txt').decode('utf-8', 'replace')
+        assert len(metin.strip()) >= 20, (
+            'STEP_NOT_AVAILABLE.txt neredeyse boş: %r' % metin[:80])
+        assert 'build123d' in metin.lower(), (
+            'açıklama eksikliğin SEBEBİNİ söylemiyor: %r' % metin[:200])
 
     def test_stl_files_are_not_empty(self, tank_data, tmp_path):
         """Dosya adı pakette görünüyor diye içi dolu sayılmaz."""
