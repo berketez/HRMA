@@ -42,7 +42,15 @@ DOWNLOAD_PREFIX = "https://github.com/%s/releases/download/" % GITHUB_REPO
 # tamamına değil: v2.6.26'da gövde 16045 karakterdi ve `<!--HRMA-LANG:tr-->`
 # imi 8072. karakterde başlıyordu; tek parça [:4000] kırpması Türkçe bölümü
 # istemciye HİÇ ulaştırmıyordu, Türkçe arayüzde sürüm notu İngilizce çıkıyordu.
-NOTES_MAX_CHARS = 4000
+#
+# 2026-08-03: sınırın kendisi dayanaksızdı ve 4000 karakter gerçek sürüm
+# notlarına yetmiyordu. Ölçüldü: v2.6.26 bölümleri 8161 (en) / 7774 (tr),
+# depodaki en büyük tarihsel bölüm 8929 karakter (v2.6.2). Yani her gerçek
+# sürüm notu bu sınırın iki katıydı ve kullanıcı notun yarısını cümle
+# ortasında kesilmiş hâlde görüyordu — üstelik kesildiğine dair hiçbir işaret
+# olmadan. Sınır ölçülen en büyük bölümün ~1,8 katına çekildi; amacı yükü
+# sınırlamak, notu budamak değil.
+NOTES_MAX_CHARS = 16000
 _LANG_MARK_RE = re.compile(r"<!--\s*HRMA-LANG:([a-z]{2})\s*-->", re.I)
 # Atom yedek yolunda GitHub HTML yorumlarını düşürür (2026-07-29'da canlı
 # akışta ölçüldü: im sayısı 0); orada bölümler sürüm başlıklarından ayrılır.
@@ -65,6 +73,34 @@ def split_notes_by_language(body):
     return {k: v for k, v in bolumler.items() if v}
 
 
+#: Sınır aşıldığında metnin sonuna eklenen beyan. Kırpmanın SESSİZ olmaması
+#: şart: kullanıcı yarım kalmış bir cümle görüp onu notun tamamı sanmamalı.
+NOTES_CLIP_MARK_EN = "\n\n_… release notes shortened; full text on the release page._"
+NOTES_CLIP_MARK_TR = "\n\n_… sürüm notu kısaltıldı; tam metin sürüm sayfasında._"
+
+
+def _kirp(metin, limit, kod=None):
+    """Sınırı aşan metni SATIR SINIRINDA keser ve kesildiğini beyan eder.
+
+    2026-08-03: eskiden düz ``metin[:limit]`` yapılıyordu. Ölçüldü: v2.6.26
+    Türkçe bölümü 3989. karakterde, "göndermiyordu" kelimesinin ortasında
+    kesiliyor ve kullanıcıya hiçbir işaret verilmiyordu. Yarım cümleyi notun
+    tamamı sanmak, ekranın veriden fazlasını söylemesiyle aynı sınıf hata.
+    """
+    if len(metin) <= limit:
+        return metin
+    im = NOTES_CLIP_MARK_TR if kod == 'tr' else NOTES_CLIP_MARK_EN
+    pay = max(0, limit - len(im))
+    kesik = metin[:pay]
+    # Satır sınırına geri sar; satır bulunamazsa (tek uzun satır) boşluğa sar.
+    for ayrac in ('\n', ' '):
+        i = kesik.rfind(ayrac)
+        if i > pay * 0.5:          # çok geriye sarıp metni yok etmesin
+            kesik = kesik[:i]
+            break
+    return kesik.rstrip() + im
+
+
 def clip_notes(body, limit=NOTES_MAX_CHARS):
     """Gövdeyi DİL BÖLÜMÜ BAŞINA kırpar; imleri koruyarak birleştirir."""
     if not body:
@@ -72,13 +108,13 @@ def clip_notes(body, limit=NOTES_MAX_CHARS):
     bolumler = split_notes_by_language(body)
     if bolumler:
         return "\n\n".join(
-            "<!--HRMA-LANG:%s-->\n%s" % (kod, metin[:limit])
+            "<!--HRMA-LANG:%s-->\n%s" % (kod, _kirp(metin, limit, kod))
             for kod, metin in bolumler.items()
         )
     parcalar = [x.strip() for x in _SECTION_HEAD_RE.split(body) if x.strip()]
     if len(parcalar) >= 2:
-        return "\n\n".join(x[:limit] for x in parcalar)
-    return body[:limit]
+        return "\n\n".join(_kirp(x, limit) for x in parcalar)
+    return _kirp(body, limit)
 
 # API yanıtı bu süre boyunca önbellekte tutulur (aynı oturumda her sayfa
 # yenilemesinde GitHub'a gitmemek için; anonim limit 60 istek/saat).

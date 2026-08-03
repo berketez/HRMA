@@ -362,6 +362,27 @@ weathercocking into wind, and apogee. Use it for stability screening
 (small angle-of-attack aerodynamics), not for tumbling or large-alpha
 flight.
 
+### Trajectory and recovery (solid page)
+
+"Compute Trajectory" integrates the ascent from the motor's own thrust
+and specific impulse — if no calculation has been run, the panel says so
+instead of inventing a motor.
+
+The descent is solved with a parachute. Three optional fields control it:
+**Parachute Area (m²)**, **Parachute Cd**, and **Deploy Delay after
+Apogee (s)**.
+
+Leaving a field **empty is meaningful**: the solver then uses its own
+documented assumption and the summary under the plot stamps that value
+*(assumed)*. Filling a field makes it yours and the stamp disappears. The
+summary always says which model produced the descent, so a slow descent
+is never mistaken for a ballistic one — for the default assumption
+(2.0 m², Cd 1.4, 2.0 s delay) that is a mean descent rate of a few metres
+per second, which the body's own drag could not produce.
+
+If the parachute never deploys, the summary says that too, with the
+reason, rather than staying silent.
+
 ## 7. The Analysis Deck
 
 The Analysis Deck is a tabbed panel container (categories: THERMAL,
@@ -482,7 +503,13 @@ solver output, not a canned model. Features:
 - **Wall heat-flux map**: chamber and nozzle surfaces colored by the
   Bartz-distributed heat flux, anchored to the heat-transfer module's
   real q and wall-temperature values.
-- **Exhaust plume** visualization.
+- **Exhaust plume**, built from the solver's own nozzle exit state: exit
+  pressure against ambient pressure decides whether the jet is
+  under-expanded, ideally expanded or over-expanded, particle speed comes
+  from the computed exit velocity, and shock cell spacing follows the
+  Prandtl–Pack relation `L_s = 1.306 · D_j · √(M_j² − 1)`. If the solver
+  has not produced an exit state, **no plume is drawn** — an empty nozzle
+  means "not computed", never "no exhaust".
 - Grain port cross-sections: circular, star, multi-port, and finocyl
   (area-equivalent visualization; ballistics uses the circular-equivalent
   port).
@@ -697,8 +724,9 @@ flight-dynamics inputs. Masses that OpenRocket stores only as
 density-times-geometry arrive marked *estimated* and stay editable. A
 mapping report lists everything that was mapped, approximated or skipped
 (parachutes and rail buttons do not affect the aerodynamic model, for
-example). If the file contains OpenRocket's own saved simulation results,
-HRMA shows a side-by-side comparison card after your 6-DOF run.
+example — recovery is a separate input, see the Trajectory panel below).
+If the file contains OpenRocket's own saved simulation results, HRMA
+shows a side-by-side comparison card after your 6-DOF run.
 
 **CAD solids (.step/.stp).** "Import from CAD (STEP)" on the design
 pages analyzes the solid, finds the motor axis and every cylindrical or

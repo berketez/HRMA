@@ -34,6 +34,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gfortran
 
+      # Node.js — ATLANAMAZ. 30 test dosyası ön yüz sözleşmelerini (i18n
+      # sözlükleri, plume fiziği, viz3d, panel birimleri, sayfa sözleşmeleri)
+      # JS'i `node` ile çalıştırıp doğruluyor ve node yoksa SESSİZCE atlıyor.
+      # 2026-08-03'e kadar bu iş akışında node hiç kurulmamıştı, yani o
+      # bekçilerin hiçbiri CI'da bir kez bile koşmadı — Faz 5'te yakalanan
+      # "47 STEP testi her zaman atlanıyor" kalıbının aynısı.
+      # Aşağıdaki "Sıfır atlama" adımı bunun tekrar sessizleşmesini engeller.
+      - name: Node.js (ön yüz sözleşme testleri için)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Python bağımlılıkları
         run: |
           python -m pip install --upgrade pip
@@ -61,6 +73,14 @@ jobs:
       - name: Yönetişim bekçisi bağımlılığı (PyYAML) gerçekten kurulu mu
         run: |
           python -c "import yaml; print('PyYAML', yaml.__version__)"
+
+      # Aynı gerekçeyle node da doğrulanır: `shutil.which('node')` None
+      # dönerse 30 dosyadaki ön yüz bekçileri kırmızı vermeden atlanır ve
+      # "paket yeşil" görüntüsü korunur. Kurulum düşerse iş burada kırılsın.
+      - name: Ön yüz bekçisi bağımlılığı (node) gerçekten kurulu mu
+        run: |
+          node --version
+          python -c "import shutil; assert shutil.which('node'), 'node PATH\'te yok — ön yüz testleri sessizce atlanır'"
 
       - name: Test paketi
         env:

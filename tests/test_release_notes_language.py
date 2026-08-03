@@ -395,3 +395,76 @@ def test_sunucu_dil_bolumlerini_ayri_gonderir(monkeypatch):
     for dil in ('en', 'tr'):
         assert '<!--HRMA-LANG:%s-->' % dil in r['notes'], (
             '%s imi eski istemciler için korunmamış' % dil)
+
+
+# ---------------------------------------------------------------------------
+# Kırpma sessiz olmamalı (Faz 6 / 3 Ağustos 2026)
+# ---------------------------------------------------------------------------
+#
+# Ölçülen arıza: ``NOTES_MAX_CHARS`` 4000'di ve gerçek sürüm notları bunun iki
+# katıydı (v2.6.26: 8161 en / 7774 tr; depodaki en büyük tarihsel bölüm 8929).
+# Kırpma düz ``metin[:limit]`` olduğu için Türkçe bölüm 3989. karakterde,
+# "göndermiyordu" kelimesinin ORTASINDA kesiliyordu ve kullanıcıya kesildiğine
+# dair hiçbir işaret verilmiyordu. Yarım cümleyi notun tamamı sanmak, bu
+# sürümün kapattığı "ekran veriden fazlasını söylüyor" sınıfının aynısı.
+
+def test_gercek_surum_notu_sinira_sigar():
+    """Depodaki en büyük dil bölümü sınırın altında kalmalı.
+
+    Sınır yükü bağlamak içindir, notu budamak için değil. Gerçek bir sürüm
+    notu sınırı aşıyorsa sınır yanlıştır.
+    """
+    import glob
+
+    from hrma.utils import update_checker as uc
+
+    en_buyuk, nerede = 0, ''
+    for yol in glob.glob(str(_paket_kok() / 'release_notes_v*.md')):
+        with open(yol, encoding='utf-8') as f:
+            govde = f.read()
+        bolumler = uc.split_notes_by_language(govde) or {'?': govde}
+        for kod, metin in bolumler.items():
+            if len(metin) > en_buyuk:
+                en_buyuk, nerede = len(metin), '%s[%s]' % (yol.split('/')[-1], kod)
+    assert en_buyuk <= uc.NOTES_MAX_CHARS, (
+        'en büyük sürüm notu bölümü (%s, %d karakter) NOTES_MAX_CHARS=%d '
+        'sınırını aşıyor — kullanıcı notun bir kısmını hiç görmez'
+        % (nerede, en_buyuk, uc.NOTES_MAX_CHARS))
+
+
+def test_kirpma_satir_sinirinda_ve_beyanli():
+    """Sınır aşılırsa kelime ortasında kesilmemeli ve kesildiği yazmalı."""
+    from hrma.utils import update_checker as uc
+
+    with open(_paket_kok() / 'release_notes_v2.6.26.md', encoding='utf-8') as f:
+        govde = f.read()
+
+    kirpik = uc.clip_notes(govde, limit=1200)
+    bolumler = uc.split_notes_by_language(kirpik)
+    assert set(bolumler) == {'en', 'tr'}, 'kırpma dil bölümlerini düşürmüş'
+
+    for kod, metin in bolumler.items():
+        assert len(metin) <= 1200, '%s bölümü sınırı aşıyor: %d' % (kod, len(metin))
+        im = uc.NOTES_CLIP_MARK_TR if kod == 'tr' else uc.NOTES_CLIP_MARK_EN
+        assert metin.endswith(im.strip()), (
+            '%s bölümü kırpıldığı hâlde beyan taşımıyor; son 40: %r'
+            % (kod, metin[-40:]))
+        govde_kismi = metin[:-len(im.strip())].rstrip()
+        # Satır ya da boşluk sınırında kesilmiş olmalı: kesilen yerin hemen
+        # ardından gelen karakter kaynakta boşluk/satır sonu olmalı.
+        assert govde_kismi, '%s bölümü tamamen boşaltılmış' % kod
+        kaynak = bolumler_kaynak(govde)[kod]
+        ard = kaynak[len(govde_kismi):len(govde_kismi) + 1]
+        assert ard in ('', ' ', '\n'), (
+            '%s bölümü kelime ortasında kesilmiş: ...%r|%r...'
+            % (kod, govde_kismi[-25:], ard))
+
+
+def bolumler_kaynak(govde):
+    from hrma.utils import update_checker as uc
+    return uc.split_notes_by_language(govde)
+
+
+def _paket_kok():
+    import pathlib
+    return pathlib.Path(__file__).resolve().parents[1] / 'packaging'

@@ -127,7 +127,19 @@ echo "[2/8] Python runtime..."
 tar -xzf "$B/runtime/pbs-mac.tar.gz" -C "$RES"   # 'python/' kökünü açar
 
 echo "[3/8] libs..."
-cp -R "$B/mac/libs" "$RES/libs"
+# 2026-08-03 (Faz 7 hazırlığı): burada koşulsuz `cp -R "$B/mac/libs"` vardı ve
+# `packaging/mac/` dizini DEPODA YOK — betik ilk çalıştırmada tam bu satırda
+# ölüyordu, yani macOS paketi hiç üretilemezdi. `mac/libs` bir GİRDİ değil,
+# hızlandırma ÖNBELLEĞİdir: aşağıdaki `pip install --target "$RES/libs"`
+# adımları dizini zaten sıfırdan doldurur. Varsa kullanılır (kurulum hızlanır),
+# yoksa boş dizinle devam edilir. Sonraki `cp -R ... "$RES/libs/"` çağrıları
+# hedef dizinin VAR olmasını beklediği için mkdir koşulsuzdur.
+mkdir -p "$RES/libs"
+if [ -d "$B/mac/libs" ]; then
+    cp -R "$B/mac/libs/." "$RES/libs/"
+else
+    echo "      mac/libs önbelleği yok — libs pip ile sıfırdan kurulacak"
+fi
 # rocketcea: PyPI'da mac wheel yok — çalışan anaconda ortamından kopyala (arm64, numpy 1.26.4 uyumlu)
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea "$RES/libs/"
 cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea-*.dist-info "$RES/libs/" 2>/dev/null || true
