@@ -33,6 +33,35 @@ PRE_CHAMBER_D_FACTOR = 0.5
 POST_CHAMBER_D_FACTOR_MIN = 0.3
 POST_CHAMBER_D_FACTOR_MAX = 3.0
 
+# --- Grain/kamara narinlik (L/D) uyarı eşiği (v2.6.27, yol haritası A10) ---
+# ÖLÇÜLDÜ (bu depo, 2026-08-03): varsayılan girdiler (1000 N, 10 s, O/F 2,5,
+# Pc 20 bar, tek port, G_ox = 350 kg/m²·s) grain L/D = 18,9 ve kamara
+# L/D = 19,7 üretiyor — 80 mm çapında 1,58 m'lik bir boru — ve HİÇBİR uyarı
+# çıkmıyordu. Düşük O/F'de daha da kötü: O/F = 2,0'de L/D = 26,3 ölçüldü.
+# Tek-port hibrit pratiğinde bu narinlikte grain'ler çok-porta geçirilir
+# (Sutton & Biblarz 9. baskı Böl. 16 — çok portlu grain gerekçesi;
+# Chiaverini & Kuo 2007 — hacimsel verim/port yerleşimi). Eşik bir mühendislik
+# pratiği bandıdır, tek bir yayımlanmış sabit değildir; TEK yerde tanımlanır
+# ve uyarı parametresi olarak aynen yayımlanır (kopya eşik yasak). Aynı koşuda
+# port_count = 4 seçilince L/D 8,6'ya düşüyor — öneri metninin dayanağı budur.
+GRAIN_LD_WARN_THRESHOLD = 10.0
+
+# --- N2O tank blowdown bloğu sabitleri (v2.6.27, yol haritası A1) ---
+# Doluluk oranı: tank_blowdown/transient_ballistics imzalarındaki 0,85 ile
+# aynı değer, ama burada ADLI sabit olarak beyan edilir ve bloğa açıkça
+# geçirilir (hibrit sayfasında henüz doluluk girdisi yok; varsayılan
+# kullanıldığı sonuçta beyan edilir). Adım sayısı: t_b/200 çözünürlük 10 s
+# yanmada 50 ms'dir; blok danışma amaçlıdır, tasarım noktası sayılarını
+# DEĞİŞTİRMEZ. Nokta sayısı tavanı port_history'deki ~200 örnekleme
+# deseniyle aynı gerekçeyle yanıt boyutunu sınırlar.
+TANK_FILL_FRACTION_DEFAULT = 0.85
+TANK_BLOWDOWN_N_STEPS = 200
+TANK_BLOWDOWN_MAX_POINTS = 240
+# Enjektör modülüyle AYNI doymuş depolama varsayımı (bkz. _compile_results
+# içindeki inj_spec['T_ox_K'] dalı): kullanıcı tank sıcaklığı vermezse iki
+# modül de aynı 293,15 K değerini kullanır — tek kaynak, iki kopya sayı yok.
+TANK_TEMPERATURE_DEFAULT_K = 293.15
+
 
 # ---------------------------------------------------------------------------
 # TASARIM ÖZETİ DURUM SÖZLÜĞÜ (Faz 4B, bulgu B1/B2/A3)
@@ -1161,6 +1190,42 @@ class HybridRocketEngine:
         else:
             self.l_star_note = ''
 
+        # --- Grain/kamara narinlik (L/D) uyarısı (v2.6.27, yol haritası) ---
+        # TEŞHİS KANITI: varsayılan girdiler L/D ≈ 19,7'lik bir boru üretiyor
+        # ve kullanıcıya hiçbir uyarı çıkmıyordu (ölçüm GRAIN_LD_WARN_THRESHOLD
+        # sabitinin başındaki yorumda). Kamara L/D her zaman grain L/D'den
+        # büyüktür (L = L_grain + ön + art oda); ikisi de raporlanır ki
+        # kullanıcı hangi büyüklüğün eşiği aştığını görsün.
+        #
+        # UYARI KODU BİLEREK 'hybrid.' ÖNEKİYLE, çeviri sözlüğü öneki İLE
+        # DEĞİL: sözlük hrma/static/js/i18n_common.js içindedir ve o dosya bu
+        # değişikliğin kapsamı dışındadır; sözlükte karşılığı olmayan bir
+        # motor-önekli kod tests/test_engine_warning_i18n.py bekçisini kırar.
+        # Kullanıcıya metin yine ULAŞIR: hem app.js hem analysis_dock.js
+        # uyarı çevirisinde `fallback` alanını destekler (I18N.tf üçüncü
+        # argüman) ve yer tutucuları params'tan doldurur. Sözlüğe EN/TR
+        # kayıtları eklendiğinde kod motor önekine taşınmalı ve fallback
+        # kaldırılmalıdır.
+        grain_ld = (self.L_grain / self.D_ch) if self.D_ch > 0 else 0.0
+        chamber_ld = (self.L / self.D_ch) if self.D_ch > 0 else 0.0
+        if max(grain_ld, chamber_ld) > GRAIN_LD_WARN_THRESHOLD:
+            ld_uyari = _w('hybrid.grain_slenderness_high', 'warning',
+                          grain_ld=round(float(grain_ld), 1),
+                          chamber_ld=round(float(chamber_ld), 1),
+                          threshold=GRAIN_LD_WARN_THRESHOLD)
+            ld_uyari['fallback'] = (
+                'Grain L/D = {grain_ld} and chamber L/D = {chamber_ld} '
+                'exceed the single-port design-practice threshold of '
+                '{threshold}: the motor is an unusually long, thin tube. '
+                'Increase the port count or enlarge the port diameter '
+                '(lower the design G_ox) to shorten the grain. — '
+                'Grain L/D = {grain_ld} ve kamara L/D = {chamber_ld}, '
+                'tek-port tasarım pratiği eşiği {threshold} değerini aşıyor: '
+                'motor alışılmadık ölçüde uzun ve ince bir boruya dönüşüyor. '
+                'Grain boyunu kısaltmak için port sayısını artırın ya da '
+                'port çapını büyütün (tasarım G_ox değerini düşürün).')
+            self.design_warnings.append(ld_uyari)
+
         # Calculate propellant masses
         self.m_ox = self.mdot_ox * self.t_b
         # Yakıt kütlesi grain geometrisinden (denetim bulgusu #6):
@@ -2187,6 +2252,229 @@ class HybridRocketEngine:
                       'assumption is the CR -> infinity limit of this model.'),
         }
 
+    def _tank_blowdown_block(self):
+        """N₂O kendinden-basınçlı tank blowdown bloğu (yol haritası A1).
+
+        hrma/analysis/tank_blowdown.py bu sürüme kadar motor sonucuna HİÇ
+        bağlı değildi (yalnız injector_design N2OSaturation'ı ve app.py'nin
+        ayrı transient uç noktası kullanıyordu); hibrit sayfası regülatörlü
+        (sabit ṁ_ox) beslemeyi sessizce varsayıyordu. Oysa N₂O hibritlerin
+        büyük bölümü regülatörsüz uçar: tank basıncı yanma boyunca düşer,
+        ṁ_ox ve itki onunla düşer — hibritin en karakteristik davranışı.
+
+        Blok, ÇÖZÜCÜNÜN GERÇEK değerlerinden kurulur (m_ox, ṁ_ox, Pc, At,
+        grain geometrisi) ve TransientBallistics'in blowdown modunu kullanır:
+        denge iki-faz N₂O tankı (Whitmore & Chandler, JPP 27(4) 2011) +
+        tasarım noktasında kalibre edilmiş SPI enjektör orifisi + yarı-kararlı
+        kamara kapanışı. Şekil verilmez, eğri uydurulmaz.
+
+        Girdi eksik ya da model uygulanamazsa (N₂O dışı oksitleyici, tank
+        sıcaklığı model bandı dışı, Pc ≥ tank basıncı, uq_mode) blok sayı
+        İÇERMEZ: status NOT_MODELLED + gerekçe döner. Sahte eğri, eğrisizlikten
+        kötüdür.
+        """
+        basis = (
+            'equilibrium two-phase N2O tank blowdown '
+            '(hrma/analysis/tank_blowdown.N2OTankBlowdown; Whitmore & '
+            'Chandler, JPP 27(4) 2011) coupled by '
+            'hrma/analysis/transient_ballistics.TransientBallistics: an SPI '
+            'injector orifice (mdot = K*sqrt(2*rho_l*dP)) calibrated to '
+            'deliver the solver design mdot_ox at the real initial tank '
+            'pressure, and a quasi-steady chamber '
+            'Pc = mdot_total*c*(O/F)/(Cd*At) with the port regressing per '
+            'Marxman. All inputs (m_ox, mdot_ox, Pc, At, grain geometry) are '
+            'the solver values of THIS run. Tank wall is adiabatic; throat '
+            'erosion is off in this advisory block. The headline design '
+            'numbers (thrust, Isp, Pc) remain the regulated design point and '
+            'are NOT re-rated by this block.')
+        if self.uq_mode:
+            return {
+                'status': 'NOT_MODELLED',
+                'basis': basis,
+                'reason': ('skipped in uq_mode (advisory block, same policy '
+                           'as the optimum-O/F search and altitude tables); '
+                           'run the nominal design for the blowdown curve.'),
+            }
+        ox = (getattr(self, 'oxidizer_type', None) or '').lower()
+        if ox != 'n2o':
+            return {
+                'status': 'NOT_MODELLED',
+                'basis': basis,
+                'reason': (
+                    f'the self-pressurised blowdown model in '
+                    f'hrma/analysis/tank_blowdown.py is N2O-specific '
+                    f'(N2O saturation table / CoolProp N2O EOS); no tank '
+                    f'model exists for oxidizer "{ox}". The design point '
+                    f'assumes a regulated (constant mdot_ox) feed.'),
+            }
+        if self.tank_temperature is not None:
+            t_tank = float(self.tank_temperature)
+            t_tank_source = 'user input (tank_temperature)'
+        else:
+            t_tank = TANK_TEMPERATURE_DEFAULT_K
+            t_tank_source = (
+                f'default {TANK_TEMPERATURE_DEFAULT_K} K saturated-storage '
+                f'assumption (same default the injector module uses)')
+        try:
+            # Ertelenmiş import: transient_ballistics kendisi bu modülü
+            # import eder (motor tipine bakmadan); modül seviyesinde çapraz
+            # import döngüsü kurmamak için _analyze_nozzle_material'daki
+            # ThroatErosionModel deseniyle aynı yol izlenir.
+            from hrma.analysis.transient_ballistics import TransientBallistics
+            tb = TransientBallistics(
+                self, feed_mode='blowdown',
+                tank_temperature=t_tank,
+                liquid_fill_fraction=TANK_FILL_FRACTION_DEFAULT,
+                n_steps=TANK_BLOWDOWN_N_STEPS)
+            sol = tb.solve()
+        except Exception as exc:
+            # Tipik meşru sebepler: Pc >= Psat(T_tank) (blowdown beslemesi
+            # fiziksel olarak imkânsız) ya da tank sıcaklığı 240-306 K model
+            # bandı dışında. Hesap zinciri KIRILMAZ; blok gerekçeyle boş kalır.
+            return {
+                'status': 'NOT_MODELLED',
+                'basis': basis,
+                'reason': (f'the blowdown model could not run for this '
+                           f'design: {exc}'),
+                'initial_temperature_K': t_tank,
+                'initial_temperature_source': t_tank_source,
+            }
+        n = len(sol['time'])
+        if n == 0:
+            return {
+                'status': 'NOT_MODELLED',
+                'basis': basis,
+                'reason': (f'the blowdown solver stopped before the first '
+                           f'step (end event: {sol["end_event"]}); no curve '
+                           f'exists to publish.'),
+                'end_event': sol['end_event'],
+                'initial_temperature_K': t_tank,
+                'initial_temperature_source': t_tank_source,
+            }
+
+        # ~TANK_BLOWDOWN_MAX_POINTS noktaya seyreltme (port_history deseni):
+        # yanıt boyutu sınırlanır, son nokta daima korunur.
+        stride = max(1, n // TANK_BLOWDOWN_MAX_POINTS)
+        idx = list(range(0, n, stride))
+        if idx[-1] != n - 1:
+            idx.append(n - 1)
+
+        def _pick(arr, scale=1.0):
+            return [float(arr[i]) * scale for i in idx]
+
+        # Tankın KENDİ zarf uyarıları (bant kenetlenmesi, ideal-gaz kuyruğu,
+        # üçlü nokta tabanı) solve() uyarılarına dahil değildir — burada
+        # birleştirilir ki zarf ihlali kullanıcıdan saklanmasın.
+        blok_uyarilari = list(sol.get('warnings') or [])
+        for tank_uyari in (getattr(tb.tank, 'warnings', None) or []):
+            if tank_uyari not in blok_uyarilari:
+                blok_uyarilari.append(tank_uyari)
+
+        f0 = float(sol['thrust'][0])
+        f_son = float(sol['thrust'][-1])
+        return {
+            'status': 'modelled',
+            'basis': basis,
+            'feed_mode': 'blowdown',
+            'tank_volume_m3': float(tb.tank.V),
+            'tank_volume_basis': (
+                'tank volume sized from the solver oxidizer mass: '
+                'V = (m_ox / rho_l(T_tank)) / liquid fill fraction; m_ox and '
+                'rho_l are solver/EOS values of this run, not assumptions'),
+            'liquid_fill_fraction': TANK_FILL_FRACTION_DEFAULT,
+            'liquid_fill_fraction_basis': (
+                'declared default (ullage margin for liquid thermal '
+                'expansion); the hybrid page has no tank fill input yet'),
+            'initial_temperature_K': t_tank,
+            'initial_temperature_source': t_tank_source,
+            'initial_pressure_bar': float(sol['tank_pressure'][0]) / 1e5,
+            'initial_pressure_basis': (
+                'N2O saturation pressure at the initial tank temperature '
+                '(CoolProp / embedded Span-Wagner saturation table)'),
+            'time_s': _pick(sol['time']),
+            'tank_pressure_bar': _pick(sol['tank_pressure'], 1e-5),
+            'tank_temperature_K': _pick(sol['tank_temperature']),
+            'mdot_ox_kg_s': _pick(sol['mdot_ox']),
+            'thrust_N': _pick(sol['thrust']),
+            'chamber_pressure_bar': _pick(sol['chamber_pressure'], 1e-5),
+            'thrust_initial_N': f0,
+            'thrust_final_N': f_son,
+            'thrust_decay_fraction': (1.0 - f_son / f0) if f0 > 0 else None,
+            'burn_duration_s': float(sol['burn_duration']),
+            'total_impulse_Ns': float(sol['total_impulse']),
+            'end_event': sol['end_event'],
+            'warnings': blok_uyarilari,
+        }
+
+    def _not_modelled_declarations(self):
+        """Modellenmeyen fizik kalemlerinin AÇIK beyanı (yol haritası A10).
+
+        Sıvı motor 50'den fazla, katı motor onlarca beyan taşırken hibrit
+        4 beyanla geziyordu: kullanıcı hibritte sessiz varsayımlarla
+        karşılaşıyordu. Buradaki HER kalem iki koşulu birden sağlar:
+
+          1. Sıvı/katı motorun beyan ettiği (ya da bağladığı) ve hibritte de
+             fiziksel olarak geçerli bir kalemdir;
+          2. Hibrit çözücüde o hesabın GERÇEKTEN var olmadığı kod okunarak
+             doğrulanmıştır (2026-08-03 taraması: bu dosyada ignit*/valve/
+             feed_line/acoustic/liner/ablat*/insulat*/slosh/pressure_vessel
+             için sıfır eşleşme).
+
+        Beyan uydurulmaz: modellenen bir şeyi "modellenmiyor" ilan etmek de
+        yalandır (sıvı motorda min_throttle beyanı böyle çürümüştü). Bu
+        yüzden yalnız yokluğu doğrulanan kalemler listelenir; zaten kendi
+        bloğunda beyanlı olanlar (boğaz erozyonu 'rigid throat', kinetik
+        verim 'not_modelled' teşhisi, çok-port eşdeğer modeli uyarısı)
+        BURADA TEKRARLANMAZ — tek kaynak ilkesi.
+        """
+        return {
+            'feed_system': (
+                'NOT_MODELLED: the oxidizer feed system (feed lines, valves, '
+                'regulator, plumbing, instrumentation) is not modelled '
+                'anywhere in the hybrid solver; the only feed element solved '
+                'is the injector orifice plan (injector_design_detail). '
+                'Component and sensor counts cannot be derived without a '
+                'P&ID model, so none are published — the liquid engine '
+                'declares the same limit.'),
+            'ignition_startup_transient': (
+                'NOT_MODELLED: there is no igniter model and no start-up '
+                'ramp; the time-marching burn and the published thrust_curve '
+                'start at the design operating point at t=0. Ignition delay, '
+                'flame spreading over the grain and the chamber-filling '
+                'pressurisation transient are absent.'),
+            'shutdown_transient': (
+                'NOT_MODELLED: there is no commanded shutdown (oxidizer '
+                'valve closing) model; the simulated burn ends only at fuel '
+                'web or oxidizer exhaustion. The blowdown vapour tail-off in '
+                'the tank_blowdown block carries its own order-of-magnitude '
+                'declaration.'),
+            'combustion_stability_acoustics': (
+                'NOT_MODELLED: no acoustic-mode analysis and no hybrid '
+                'low-frequency (boundary-layer coupled) instability model '
+                'exists in this solver; the only stability check is the '
+                'SP-8089 feed-coupled pressure-drop (dP/Pc) criterion '
+                'reported by the injector module and the blowdown solver.'),
+            'thermal_protection_liner': (
+                'NOT_MODELLED: ablative liner / insulation thermal '
+                'protection between the grain and the case, and post-'
+                'combustion chamber insulation, are not sized '
+                '(hrma/analysis/thermal_protection.py exists but is not '
+                'wired to the hybrid solver); the wall thermal solution '
+                'puts the combustion-gas boundary layer directly on the '
+                'structural wall.'),
+            'oxidizer_tank_structure_slosh': (
+                'NOT_MODELLED: oxidizer tank structure (pressure-vessel '
+                'wall sizing, tank mass) and propellant slosh are not '
+                'modelled (pressure_vessel / slosh_analysis modules are not '
+                'wired to the hybrid solver); the tank_blowdown block '
+                'models only the thermodynamic state of the tank contents.'),
+            'throttle_response_restart': (
+                'NOT_MODELLED: no throttle response model and no restart '
+                'capability model; oxidizer flow-control hardware does not '
+                'exist in this solver. The liquid engine declares the same '
+                'items in its transient_not_modelled list.'),
+        }
+
     def _compile_results(self, combustion_results=None, nozzle_results=None,
                         altitude_performance=None, optimum_of=None, thrust_altitude_analysis=None,
                         heat_transfer_results=None, structural_results=None,
@@ -2439,11 +2727,13 @@ class HybridRocketEngine:
             ox_name = (getattr(self, 'oxidizer_type', None) or 'n2o').lower()
             if ox_name == 'n2o':
                 # Tank sıcaklığı v2.5.2'de motor girdisi; verilmezse doymuş
-                # depolama 293.15 K varsayımı (transient/blowdown ile aynı)
+                # depolama varsayımı — tank_blowdown bloğuyla AYNI adlı
+                # sabitten (v2.6.27: 293,15 literali merkezileşti; iki modül
+                # farklı varsayılan sıcaklık kullanamaz).
                 inj_spec['fluid_ox'] = 'n2o'
                 inj_spec['T_ox_K'] = (self.tank_temperature
                                       if self.tank_temperature is not None
-                                      else 293.15)
+                                      else TANK_TEMPERATURE_DEFAULT_K)
             # Oda gazı yoğunluğu (SMD için): T_c ve MW = R_evrensel/R_spesifik
             if getattr(self, 'T_c', None) and getattr(self, 'R', None):
                 inj_spec['T_c_K'] = self.T_c
@@ -2574,6 +2864,27 @@ class HybridRocketEngine:
         total_mass = (self.m_total + dry_mass_est
                       if dry_mass_est is not None else None)
 
+        # --- T60 kalıntısı (v2.6.27): "toplam motor boyu" İKİ tanımla
+        # geziyordu. total_motor_length (yukarıda) kamara + yakınsak +
+        # ıraksak toplamıdır ve ÖN KAPAĞI İÇERMEZ; 3B görünümün "L" etiketi
+        # ise kapak DAHİL ölçer (motor_viz3d.js: zExit + capT). Aynı ad
+        # altında iki tanım, atölyede yanlış boy demektir. İki büyüklük de
+        # AÇIK adla ve beyanla yayımlanır; eski alan geriye uyum için kalır.
+        # Kapak boyu UYDURULMAZ: yapısal kapak analizinin gerçekten
+        # boyutlandırdığı eksenel kalınlık (head_thickness_used_mm) yoksa
+        # kapaklı boy None kalır ve beyanı nedenini söyler.
+        cap_len_m = None
+        try:
+            _ec = (structural_results or {}).get('end_cap_analysis') or {}
+            _cap_mm = _ec.get('head_thickness_used_mm')
+            if _cap_mm is not None and np.isfinite(float(_cap_mm)) \
+                    and float(_cap_mm) > 0:
+                cap_len_m = float(_cap_mm) / 1000.0
+        except (TypeError, ValueError, AttributeError):
+            cap_len_m = None
+        total_motor_length_with_caps = (
+            total_motor_length + cap_len_m if cap_len_m is not None else None)
+
         # --- Tasarım durumu: beyan kanalını OKUYAN kapı (Faz 4B, bulgu B1) ---
         # Burada koşulsuz 'OPTIMIZED' yazıyordu. Kurucudaki :223-227 yorumu
         # "design_summary.status bu bayrağı okur" diyordu ama okuyan yoktu:
@@ -2636,6 +2947,30 @@ class HybridRocketEngine:
                 'nozzle_throat_diameter_mm': self.d_t * 1000,
                 'nozzle_exit_diameter_mm': self.d_e * 1000,
                 'total_motor_length_mm': total_motor_length * 1000,
+                # T60: eski alanın kapsamı adında görünmüyordu; iki açık ad.
+                'total_motor_length_chamber_nozzle_mm':
+                    total_motor_length * 1000,
+                'total_motor_length_with_caps_mm': (
+                    total_motor_length_with_caps * 1000
+                    if total_motor_length_with_caps is not None else None),
+                'forward_closure_length_mm': (
+                    cap_len_m * 1000 if cap_len_m is not None else None),
+                'total_motor_length_basis': (
+                    'total_motor_length_chamber_nozzle_mm (= the legacy '
+                    'total_motor_length_mm) is chamber + convergent + '
+                    'divergent nozzle sections and EXCLUDES the forward '
+                    'closure (end cap). total_motor_length_with_caps_mm '
+                    'additionally includes the forward closure axial '
+                    'thickness taken from the structural end-cap analysis '
+                    '(head_thickness_used_mm); the aft end of a hybrid is '
+                    'the nozzle itself, no separate aft cap length exists. '
+                    'The 3D view total-length label is cap-inclusive, so it '
+                    'corresponds to the with-caps definition (its cap depth '
+                    'is a display heuristic, not this structural value).'
+                    + ('' if cap_len_m is not None else
+                       ' with_caps is None because the structural end-cap '
+                       'analysis is unavailable in this run; the length is '
+                       'not fabricated.')),
                 'total_mass_kg': total_mass,
                 'dry_mass_estimate_kg': dry_mass_est,
                 # Kütlenin nereden geldiği görünür olmalı: eskiden bu alan
@@ -2695,6 +3030,23 @@ class HybridRocketEngine:
 
         if nozzle_material_results:
             basic_results['nozzle_material_analysis'] = nozzle_material_results
+
+        # --- A1 (yol haritası): N₂O kendinden-basınçlı tank blowdown bloğu.
+        # Çözücünün gerçek değerlerinden kurulur; uygulanamazsa NOT_MODELLED
+        # gerekçesiyle boş döner (ayrıntı _tank_blowdown_block docstring'i).
+        basic_results['tank_blowdown'] = self._tank_blowdown_block()
+
+        # --- A10 (yol haritası): modellenmeyen fizik açıkça beyan edilir.
+        basic_results['not_modelled'] = self._not_modelled_declarations()
+        basic_results['not_modelled_basis'] = (
+            'explicit declarations of physics this hybrid solver does NOT '
+            'compute (roadmap A10; the pattern the liquid and solid engines '
+            'already follow). Every entry was verified against the code: the '
+            'named computation exists nowhere in the hybrid chain, and items '
+            'already declared at their own source (rigid-throat erosion, '
+            'kinetic-efficiency diagnosis, multi-port equivalent-model '
+            'warning) are not duplicated here. A declared absence is honest; '
+            'a fabricated number is not.')
 
         # v2.6.26: hibrit motor uyarıları TOPLUYOR ama sonuç sözlüğüne HİÇ
         # koymuyordu; ``self.design_warnings`` listesi nesneyle birlikte

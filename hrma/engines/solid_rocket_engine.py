@@ -1961,6 +1961,54 @@ class SolidRocketEngine:
         self._pe_ratio_cache = (key, ratio)
         return ratio
 
+    def _nozzle_exit_state(self):
+        """Sabit geometrili nozulun çıkış düzlemi durumu (tasarım Pc'de).
+
+        Egzoz (plume) gösterimi ve nozul performans raporu için TEK tanım
+        noktası. Hepsi aynı izentropik kümeden türer (Sutton & Biblarz
+        9. baskı, Denk. 3-15/3-16/3-25):
+
+          * P_e/P_c: ε'dan çözülür (bkz. _exit_pressure_ratio — itki
+            eğrisinin kullandığı çözümün AYNISI, yeni fizik yok),
+          * M_e: aynı oranın kapalı form tersi,
+          * T_e = T_c / (1 + (γ-1)/2·M_e²),
+          * v_e = M_e·√(γ·R_s·T_e), R_s = R_UNIVERSAL / MW_egzoz.
+
+        _exit_pressure_ratio sayısal çözümü başaramazsa (ratio = 0 döner)
+        alanlar None kalır — sayı UYDURULMAZ, egzoz çizilmez.
+        """
+        gamma = float(self.gamma)
+        epsilon = float(self._estimate_expansion_ratio())
+        pe_ratio = float(self._exit_pressure_ratio(epsilon))
+        p_amb = float(getattr(self, 'ambient_pressure_bar',
+                              SEA_LEVEL_PRESSURE_BAR))
+        state = {
+            'expansion_ratio': epsilon,
+            'ambient_pressure_bar': p_amb,
+            'exit_pressure_bar': None,
+            'exit_mach': None,
+            'exit_temperature_k': None,
+            'exit_velocity_ms': None,
+        }
+        if pe_ratio <= 0.0:
+            return state
+        # P_e/P_c = [1+(γ-1)/2·M²]^(-γ/(γ-1)) bağıntısının kapalı form tersi
+        m_e_sq = (2.0 / (gamma - 1.0)) * (pe_ratio
+                                          ** (-(gamma - 1.0) / gamma) - 1.0)
+        if m_e_sq <= 0.0:
+            return state
+        m_e = float(np.sqrt(m_e_sq))
+        t_exit = float(self.T_c) / (1.0 + 0.5 * (gamma - 1.0) * m_e * m_e)
+        r_specific = R_UNIVERSAL / float(getattr(self, 'mw_exhaust', 26.0))
+        v_exit = float(m_e * np.sqrt(gamma * r_specific * t_exit))
+        state.update({
+            'exit_pressure_bar': float(pe_ratio * self.P_c),
+            'exit_mach': m_e,
+            'exit_temperature_k': t_exit,
+            'exit_velocity_ms': v_exit,
+        })
+        return state
+
     def _thrust_coefficient(self, P_c_bar):
         """SABİT GEOMETRİLİ nozulun itki katsayısı CF(P_c).
 
@@ -3240,7 +3288,15 @@ class SolidRocketEngine:
             
             # Specific impulse at this altitude
             isp_altitude = CF_actual * self.c_star / self.g0
-            
+
+            # Çıkış hızı — bu satırın KENDİ modeliyle tutarlı: satır o
+            # irtifada optimum genişlemiş (Pe = Pa) nozulu analiz eder;
+            # optimum genişlemede basınç-itki terimi sıfırdır, dolayısıyla
+            # v_e = F/mdot = CF·c* = Isp·g0 (Sutton & Biblarz 9. baskı,
+            # Denk. 2-16/3-30 özel hâli). Egzoz gösterimi (readNozzleExit)
+            # dizinin ilk elemanından bu alanı okur.
+            exit_velocity = CF_actual * self.c_star
+
             altitude_data.append({
                 'altitude': alt,
                 'temperature': T,
@@ -3259,6 +3315,12 @@ class SolidRocketEngine:
                 'thrust_coefficient': CF_actual,
                 'nozzle_efficiency': eta_nozzle,
                 'specific_impulse': isp_altitude,
+                'exit_velocity': float(exit_velocity),  # m/s
+                'exit_velocity_basis': (
+                    'optimum expansion at this altitude (Pe = Pa): pressure '
+                    'thrust is zero, so v_e = CF*c* = Isp*g0 for this row\'s '
+                    'own optimally expanded nozzle (delivered c* and nozzle '
+                    'efficiency applied)'),
                 'thrust_ratio': 1.0  # deniz seviyesine göre normalize edilir (aşağıda)
             })
 
@@ -4639,6 +4701,8 @@ class SolidRocketEngine:
         # olası döngüsel importu önler.
         from hrma.analysis.transient_ballistics import ThroatErosionModel
         _t_gas = self._throat_gas_temperatures()
+        # Çıkış düzlemi durumu (egzoz/plume şeması) — tek tanım noktası
+        _exit_state = self._nozzle_exit_state()
         _ero = ThroatErosionModel.for_material('graphite')  # nozul malzemesi
         _pc_bar = float(self.P_c)
         _ero_rate = _ero.rate_mm_s(_pc_bar)                 # mm/s @ tasarım Pc
@@ -4693,6 +4757,36 @@ class SolidRocketEngine:
                           'turned nozzle, not a computed result.'),
             },
             'performance': {
+                # Egzoz (plume) şeması — hibritle AYNI adlar (motor_viz3d.js
+                # readNozzleExit bunları okur: exit_pressure, ambient_pressure,
+                # exit_mach, exit_velocity). Katı motorda bu blok yoktu; bu
+                # yüzden katı sayfasında egzoz HİÇ çizilmiyordu. Değerler
+                # çözücünün KENDİ izentropik çözümünden gelir
+                # (_nozzle_exit_state — _exit_pressure_ratio ile aynı çözüm),
+                # sayısal çözüm başarısızsa None kalır ve egzoz çizilmez.
+                'exit_pressure': _exit_state['exit_pressure_bar'],  # bar
+                'exit_pressure_basis': 'isentropic_area_ratio',
+                'ambient_pressure': _exit_state['ambient_pressure_bar'],  # bar
+                'ambient_pressure_basis': (
+                    'back pressure the thrust curve uses '
+                    '(self.ambient_pressure_bar: user test_altitude / '
+                    'atm_pressure input, sea level 1.01325 bar by default)'),
+                'exit_mach': _exit_state['exit_mach'],
+                'exit_mach_basis': (
+                    'closed-form inverse of the isentropic pressure ratio '
+                    'solved from the fixed expansion ratio '
+                    '(Sutton & Biblarz 9th ed. Eq. 3-25)'),
+                'exit_velocity': _exit_state['exit_velocity_ms'],  # m/s
+                'exit_velocity_basis': (
+                    'isentropic exit plane: v_e = M_e*sqrt(gamma*R_s*T_e), '
+                    'T_e = T_c/(1+(gamma-1)/2*M_e^2), '
+                    'R_s = R_universal/MW_exhaust; no nozzle efficiency '
+                    'applied (gas velocity magnitude, not effective '
+                    'exhaust velocity)'),
+                'exit_temperature_k': _exit_state['exit_temperature_k'],
+                'exit_temperature_basis': (
+                    'isentropic static temperature at the exit plane from '
+                    'the same T_c/gamma/M_e set'),
                 # Kalem 17 (P3): sabit 1.65 yerine motorun KENDİ CF tanımı
                 # (_thrust_coefficient — Sutton & Biblarz Denk. 3-30/3-31,
                 # sabit geometri + gerçek ortam basıncı). İtki eğrisi bu
@@ -7394,6 +7488,15 @@ class SolidRocketEngine:
         all_warnings = (list(self.design_warnings) + run_warnings
                         + self._design_health_warnings(curve))
 
+        # Egzoz (plume) şeması: motor_viz3d.js readNozzleExit
+        # nozzle_design.performance.{exit_pressure, ambient_pressure,
+        # exit_mach, exit_velocity} okur. Katı sonuçlarında nozzle_design
+        # yalnız cad_design'ın İÇİNDE ve salt geometriydi; bu yüzden katı
+        # sayfasında egzoz HİÇ çizilmiyordu. Blok, cad_design.nozzle_design
+        # ile AYNI üreticiden gelir (_design_nozzle_geometry) — aynı motor
+        # için iki farklı nozul raporu oluşmaz.
+        nozzle_design_block = self._design_nozzle_geometry()
+
         return {
             # Input parameters
             'grain_type': self.grain_type,
@@ -7419,7 +7522,19 @@ class SolidRocketEngine:
             'exit_diameter_vacuum': d_exit_vacuum * 1000,  # mm
             'expansion_ratio': epsilon_sea_level,
             'expansion_ratio_vacuum': epsilon_vacuum,
-            
+
+            # Nozul tasarımı + çıkış düzlemi performansı (egzoz/plume şeması;
+            # motor_viz3d.js readNozzleExit'in okuduğu adlarla, hibritle aynı)
+            'nozzle_design': nozzle_design_block,
+            # readNozzleExit'in gamma yedek yolu: md.gamma. Hibrit gamma'yı
+            # combustion_analysis.compositions.chamber.gamma altında yayımlar;
+            # katıda CEA/Cantera bileşim çözümü yok, gamma yakıt kaydından
+            # gelir ve itki/genişleme çözümünün kullandığı değerin AYNISIDIR.
+            'gamma': float(self.gamma),
+            'gamma_basis': ('isentropic expansion coefficient from the '
+                            'propellant record; the same value the thrust '
+                            'coefficient and expansion-ratio solutions use'),
+
             # Propellant properties
             'density': self.rho_p,
             'c_star': self.c_star,
