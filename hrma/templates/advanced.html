@@ -670,6 +670,11 @@
     <script src="/static/js/motor_viz3d.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/transient_panel.js"></script>
+    <!-- A1/A10 kullanıcı yüzü: /calculate yanıtındaki tank_blowdown eğrileri
+         + not_modelled beyan şeridi. Transient panelden BAĞIMSIZDIR: o panel
+         ayrı bir uç noktayı elle koşturur, bu panel ana hesapla kendiliğinden
+         dolar (bekçi: tests/test_blowdown_panel.py). -->
+    <script src="/static/js/blowdown_panel.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
     <!-- Enjektör kesit şemaları: injector_panel.js window.InjectorSchematics
          yoksa şema kutusunu SESSİZCE gizliyordu (denetim bulgusu 2026-07-22)
@@ -766,6 +771,13 @@
         // Transient + 6-DOF + Enjektör panelleri (yeni fizik katmanlarının UI'ı)
         document.addEventListener('DOMContentLoaded', function () {
             TransientPanel.init({ anchorId: 'trajectoryPanel' });
+            // A1/A10 kullanıcı yüzü: tank_blowdown eğrileri + not_modelled
+            // beyan şeridi. init, displayCalculationResults'ı sarar; her ana
+            // hesapta panel kendiliğinden dolar (elle koşturma gerekmez).
+            if (window.BlowdownPanel) {
+                BlowdownPanel.init({ anchorId: 'trajectoryPanel',
+                                     declAnchorId: 'notModelledStrip' });
+            }
             SixDofPanel.init({
                 anchorId: 'trajectoryPanel',
                 thrustProvider: function () {
@@ -1700,6 +1712,12 @@
                 </button>
             </div>
             
+            <!-- A10 beyan şeridi: hibrit sonucundaki not_modelled beyanlarının
+                 açılır listesi. blowdown_panel.js hesap SONRASI doldurur;
+                 beyan metinleri SONUÇTAN gelir, şablonda sabit liste yoktur.
+                 Yanıt yokken boş ve gizli kalır (hesapsız rozet basılmaz). -->
+            <div id="notModelledStrip" style="display: none;"></div>
+
             <!-- Performance Metrics -->
             <div class="panel">
                 <h2 data-i18n="adv.sec.performanceSummary">Performance Summary</h2>

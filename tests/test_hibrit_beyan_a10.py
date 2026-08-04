@@ -67,19 +67,30 @@ def kompakt_motor():
 
 # Sıvı/katı motorun beyan ettiği (ya da bağladığı) ve hibritte de geçerli
 # olan, hibrit çözücüde YOKLUĞU kod okunarak doğrulanmış kalemler.
+#
+# v2.6.27 A5/A2 bağlamaları iki beyanı ÇÜRÜTTÜ ve liste gerçeğe göre
+# güncellendi (çürümüş beyan taşımak beyansızlıktan kötüdür):
+#   * 'thermal_protection_liner' KALKTI — astar boyutlandırma + cidar
+#     sıcaklık geçmişi artık sonuçtaki thermal_protection bloğunda
+#     GERÇEKTEN hesaplanıyor (tests/test_hibrit_baglama_a5a8a2.py bekçisi).
+#   * 'oxidizer_tank_structure_slosh' DARALDI -> 'oxidizer_tank_structure':
+#     slosh artık oxidizer_tank_slosh bloğunda modelleniyor; beyanda yalnız
+#     tank YAPISI (basınçlı kap boyutlandırması, pressure_vessel bağlaması
+#     A3) kaldı.
 BEKLENEN_BEYANLAR = {
     'feed_system',
     'ignition_startup_transient',
     'shutdown_transient',
     'combustion_stability_acoustics',
-    'thermal_protection_liner',
-    'oxidizer_tank_structure_slosh',
+    'oxidizer_tank_structure',
     'throttle_response_restart',
 }
 
 # Beyanın modellenmiş KARŞILIĞI sayılacak anahtarlar: bunlardan biri sonuçta
 # belirirse ilgili beyan çürümüştür ve kaldırılmalıdır (yanlış beyan
-# beyansızlıktan kötüdür).
+# beyansızlıktan kötüdür). Kaldırılan beyanların satırları da kaldırıldı:
+# artık o anahtarların sonuçta BELİRMESİ beklenen davranıştır ve kendi
+# bekçi dosyası pozitif yönde sınar.
 CELISKI_ANAHTARLARI = {
     'feed_system': {'feed_system', 'feed_lines', 'valve_count',
                     'sensor_count', 'check_valve_count'},
@@ -88,11 +99,8 @@ CELISKI_ANAHTARLARI = {
     'shutdown_transient': {'shutdown_time', 'shutdown_sequence'},
     'combustion_stability_acoustics': {'acoustic_analysis', 'acoustic_modes',
                                        'instability_frequency'},
-    'thermal_protection_liner': {'liner_thickness', 'ablative_thickness',
-                                 'insulation_thickness'},
-    'oxidizer_tank_structure_slosh': {'slosh_frequency', 'slosh_analysis',
-                                      'tank_wall_thickness',
-                                      'tank_structural_mass'},
+    'oxidizer_tank_structure': {'tank_wall_thickness',
+                                'tank_structural_mass'},
     'throttle_response_restart': {'throttle_response', 'min_throttle_pct',
                                   'restart_capability'},
 }

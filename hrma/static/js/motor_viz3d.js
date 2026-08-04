@@ -182,10 +182,20 @@
     // kuyruk soğumuş AMA seçilebilir. Renk kayması soğumayı verir:
     // beyaz-mavi çekirdek → turuncu → derin kızıl. Bantlar eski paletin
     // aynısıdır; keyfî süsleme eklenmedi.
-    function plumeColorAt(f, intensity) {
+    // v2.6.27 alev estetiği (kalem 2): üçüncü bağımsız değişken exitTempK
+    // verildiyse yaş bantları yerine SICAKLIK sürücülü akkor rengi kullanılır:
+    // T(f) yukarıdaki 1/(1+3f) soğuma modelinden (flameTempAt), renk
+    // flameColorFromT akkor yaklaşımından. Zincir: gerçek T_c → izentropik
+    // Te (readNozzleExit) → T(f) → renk. Te yoksa (eski kayıt / eksik Tc)
+    // beyanlı eski bant paleti sürer — davranış değişmez, uydurma Te yok.
+    function plumeColorAt(f, intensity, exitTempK) {
         var fade = intensity / (1 + 3 * f);
         var r, g, b;
-        if (f < 0.18) { r = 1.0; g = 1.0; b = 1.05; }
+        if (typeof exitTempK === 'number' && isFinite(exitTempK)
+            && exitTempK > 0) {
+            var tc = flameColorFromT(flameTempAt(f, exitTempK));
+            r = tc.r; g = tc.g; b = tc.b;
+        } else if (f < 0.18) { r = 1.0; g = 1.0; b = 1.05; }
         else if (f < 0.5) { r = 1.0; g = 0.62; b = 0.22; }
         else { r = 0.85; g = 0.32; b = 0.08; }
         return { r: r * fade, g: g * fade, b: b * fade, fade: fade };
@@ -202,6 +212,152 @@
         if (!isFinite(pressureRatio)) return 0;
         var mismatch = Math.min(Math.abs(1 - pressureRatio), 1);
         return mismatch <= 0 ? 0 : Math.pow(mismatch, DIAMOND_VIS_EXPONENT);
+    }
+
+    // ==================================================================
+    // Alev estetiği saf fonksiyonları (2026-08-04, egzoz tutarlı aleve)
+    //
+    // Teşhis: egzoz üç motorda da gerçek veriyle yanıyor ama görünüm
+    // 'patlamış mısır' — sert kenarlı ayrık parlak toplar, banda bölünmüş
+    // sabit renk, parçacıkların altında süreklilik katmanı yok. Aşağıdaki
+    // fonksiyonlar YALNIZ görsel sunumu düzeltir; sürücüler değişmedi —
+    // her parametre readNozzleExit'in gerçek çıkış durumundan türer.
+    // Bekçi testleri: tests/test_alev_estetigi.py (node ile izole sınama).
+    // ==================================================================
+
+    // --- Kalem 1a: sprite opaklık profili (Gauss) ---------------------
+    // Türbülanslı jetin zaman-ortalamalı hız/skaler profili öz-benzer ve
+    // eksende tepeli, Gauss biçimindedir (Pope, Turbulent Flows §5.1);
+    // tek parçacığın ışık lekesi de aynı biçimde yumuşatılır — eski iki
+    // duraklı gradyanın geniş parlak göbeği sert kenarlı 'top' artefaktı
+    // üretiyordu. sigma=0.30: kenarda (t=1) opaklık e^(-1/0.18) ≈ 0.004,
+    // kırpma halkası görünmez.
+    var FLAME_SPRITE_SIGMA = 0.30;
+    function flameSpriteAlpha(t) {
+        if (!(t >= 0)) return 1;
+        if (t >= 1) return 0;
+        return Math.exp(-(t * t) / (2 * FLAME_SPRITE_SIGMA * FLAME_SPRITE_SIGMA));
+    }
+    // Radyal gradyan durakları: [0,1] üzerinde eşit aralıklı n örnek.
+    function flameSpriteStops(n) {
+        var count = (n >= 2) ? Math.floor(n) : 9;
+        var out = [];
+        for (var i = 0; i < count; i++) {
+            var t = i / (count - 1);
+            out.push({ t: t, alpha: flameSpriteAlpha(t) });
+        }
+        return out;
+    }
+
+    // --- Kalem 1b: doğuş yarıçapı dağılımı (eksene yoğun) -------------
+    // Eski sqrt(u) örneklemesi kesitte ALANCA eşdağılımdı: kenar eksen
+    // kadar doluydu, additive toplama hiçbir yerde doymuyordu → ayrık
+    // toplar. Jetin kütle akısı eksende tepe yapar (yukarıdaki Gauss
+    // profili ile aynı gerekçe); u^1 örneklemesi radyal yoğunluğu sabit,
+    // alan yoğunluğunu ~1/r yapar — additive birikim çekirdeği beyaza
+    // doyurur, kenar kendiliğinden seyrelir. Üs 0.5 = eski alanca
+    // eşdağılım; 1.0 eksene yoğun (üs sabiti bekçi testiyle kilitli).
+    var PLUME_SPAWN_R_FRACTION = 0.75;
+    var PLUME_SPAWN_EXPONENT = 1.0;
+    function plumeSpawnRadius(exitRadius, u) {
+        var uu = Math.max(0, Math.min(1, u));
+        return exitRadius * PLUME_SPAWN_R_FRACTION
+            * Math.pow(uu, PLUME_SPAWN_EXPONENT);
+    }
+
+    // --- Kalem 2: sıcaklık sürücülü renk ------------------------------
+    // Parçacık sıcaklığı: çekirdek T = Te (çözücünün gerçek çıkış statik
+    // sıcaklığı — readNozzleExit'te Tc'den izentropik türetilir), sonrası
+    // MEVCUT soğuma modeliyle düşer: merkez hattı fazlalık sıcaklığı
+    // ΔT ∝ 1/(x/D) (Pope §5.1 — plumeColorAt'ın 1/(1+3f) sönümüyle AYNI
+    // eğri; renk ve parlaklık tek modelden sürülür). Ta = 300 K ortam.
+    var FLAME_AMBIENT_K = 300;
+    function flameTempAt(f, exitTempK) {
+        var ff = Math.max(0, Math.min(1, f));
+        return FLAME_AMBIENT_K + (exitTempK - FLAME_AMBIENT_K) / (1 + 3 * ff);
+    }
+
+    // Akkor renk yaklaşımı: yayılan ışık sıcaklıkla kızıl → turuncu →
+    // sarı-beyaz → beyaz sırasını izler (Planck ışıması; görünür ışıma
+    // Draper noktası ~798 K'de başlar). Kesin CIE dönüşümü yerine BEYANLI
+    // parçalı doğrusal çapalar — sürücü GERÇEK sıcaklıktır, bantlar keyfi
+    // yaş eşiği değil akkor sırasının nicelenmiş hali. 3300 K üstü doyar
+    // (uç renk eski paletin beyaz-mavi çekirdeğiyle aynı: 1/1/1.05).
+    var FLAME_COLOR_ANCHORS = [
+        [800, 0.00, 0.00, 0.00],   // Draper noktası: ışıma eşiği
+        [1100, 0.45, 0.03, 0.01],  // sönük derin kızıl
+        [1600, 0.95, 0.22, 0.05],  // kızıl-turuncu
+        [2100, 1.00, 0.55, 0.16],  // turuncu
+        [2700, 1.00, 0.85, 0.50],  // sarı-beyaz
+        [3300, 1.00, 1.00, 1.05]   // beyaza doyum (roket çekirdeği)
+    ];
+    function flameColorFromT(tK) {
+        var a = FLAME_COLOR_ANCHORS;
+        if (!isFinite(tK) || tK <= a[0][0]) return { r: 0, g: 0, b: 0 };
+        var last = a[a.length - 1];
+        if (tK >= last[0]) return { r: last[1], g: last[2], b: last[3] };
+        for (var i = 1; i < a.length; i++) {
+            if (tK <= a[i][0]) {
+                var f = (tK - a[i - 1][0]) / (a[i][0] - a[i - 1][0]);
+                return {
+                    r: a[i - 1][1] + (a[i][1] - a[i - 1][1]) * f,
+                    g: a[i - 1][2] + (a[i][2] - a[i - 1][2]) * f,
+                    b: a[i - 1][3] + (a[i][3] - a[i - 1][3]) * f
+                };
+            }
+        }
+        return { r: last[1], g: last[2], b: last[3] };
+    }
+
+    // --- Kalem 3: çekirdek alev konisi --------------------------------
+    // Prandtl-Meyer fonksiyonu ν(M) [derece] — standart gaz dinamiği:
+    // ν = sqrt((γ+1)/(γ-1))·atan(sqrt((γ-1)/(γ+1)·(M²-1))) − atan(sqrt(M²-1))
+    function prandtlMeyerDeg(mach, gamma) {
+        if (!isFinite(mach) || mach <= 1 || !isFinite(gamma) || gamma <= 1) {
+            return 0;
+        }
+        var k = Math.sqrt((gamma + 1) / (gamma - 1));
+        var m2 = Math.sqrt(mach * mach - 1);
+        return (k * Math.atan(m2 / k) - Math.atan(m2)) * 180 / Math.PI;
+    }
+
+    // Koni: çıkış düzleminde TAM re yarıçapıyla başlar (jet kesit
+    // sürekliliği) ve gerçek ilk genleşme açısıyla açılır:
+    //     θ_koni = θ_geo + [ν(Mj) − ν(Me)]
+    // θ_geo lülenin gerçek diverjan/çıkış açısı; Me çözücünün çıkış
+    // Mach'ı, Mj tam genişlemiş jet Mach'ı (readNozzleExit pe/pa'dan
+    // hesaplar). Az genişlemiş jette dudaktaki basınç dengelenmesi akışı
+    // Prandtl-Meyer yelpazesiyle ν(Mj)−ν(Me) kadar DIŞA döndürür; aşırı
+    // genişlemişte Mj<Me → dönüş negatif, jet sınırı içeri büzülür.
+    // Boy: süpersonik jet potansiyel çekirdeği ~6-10·De bandında (Lau,
+    // Morris & Fisher, J. Fluid Mech. 93, 1979 ölçüm bandı) → 8·De alınır,
+    // plume boy bütçesiyle sınırlanır. [-12°, 40°] kırpması ve 0.3·re
+    // taban yarıçapı GÖRSEL emniyettir (bozuk uç veride sahne çökmesin),
+    // fizik iddiası değildir.
+    var PLUME_CORE_LEN_DE = 8;
+    var FLAME_CONE_MIN_R_FRACTION = 0.3;
+    function plumeConeSpec(exitRadius, thetaGeoDeg, exitMach, jetMach,
+        gamma, maxLen) {
+        if (!(exitRadius > 0) || !isFinite(thetaGeoDeg)) return null;
+        var turn = prandtlMeyerDeg(jetMach, gamma)
+            - prandtlMeyerDeg(exitMach, gamma);
+        var half = Math.max(-12, Math.min(40, thetaGeoDeg + turn));
+        var len = PLUME_CORE_LEN_DE * 2 * exitRadius;
+        if (maxLen > 0) len = Math.min(len, maxLen);
+        var r1 = exitRadius + Math.tan(half * Math.PI / 180) * len;
+        r1 = Math.max(FLAME_CONE_MIN_R_FRACTION * exitRadius, r1);
+        return {
+            halfAngleDeg: half, turnDeg: turn,
+            r0: exitRadius, r1: r1, lengthMm: len
+        };
+    }
+
+    // Koninin verilen eksenel istasyondaki yerel yarıçapı — şok elması
+    // sprite'ları jet sınırıyla hizalamak için (kalem 4).
+    function coneRadiusAt(spec, distMm) {
+        if (!spec || !(spec.lengthMm > 0)) return null;
+        var t = Math.max(0, Math.min(1, distMm / spec.lengthMm));
+        return spec.r0 + (spec.r1 - spec.r0) * t;
     }
 
     // --- Zemin ızgarası (kalem 5) -------------------------------------
@@ -497,6 +653,27 @@
         grad.addColorStop(0, inner);
         grad.addColorStop(0.35, outer);
         grad.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, 128, 128);
+        var tex = new THREE.CanvasTexture(c);
+        tex.minFilter = THREE.LinearFilter;
+        return tex;
+    }
+
+    // Alev parçacık dokusu (kalem 1a): flameSpriteStops'un Gauss profili
+    // NÖTR beyaz alfa rampası olarak çizilir — ton TAMAMEN vertex renginden
+    // (plumeColorAt → gerçek sıcaklık sürücüsü) gelir; dokuya gömülü keyfi
+    // turuncu yok (eski glowTexture çifti egzozdan çıkarıldı). 128 px:
+    // glowTexture ile aynı doku bütçesi (kalem 5).
+    function flameSpriteTexture() {
+        var c = makeCanvas(128, 128);
+        var g = c.getContext('2d');
+        var grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+        var stops = flameSpriteStops(9);
+        for (var i = 0; i < stops.length; i++) {
+            grad.addColorStop(stops[i].t,
+                'rgba(255,255,255,' + stops[i].alpha.toFixed(4) + ')');
+        }
         g.fillStyle = grad;
         g.fillRect(0, 0, 128, 128);
         var tex = new THREE.CanvasTexture(c);
@@ -2371,7 +2548,9 @@
             // _fitCamera'da bu kurulumdan önce hesaplanır
             size: plumeParticleSize(d.re, this._camDist,
                 this.container.clientHeight || 520),
-            map: glowTexture('rgba(255,255,255,1)', 'rgba(255,150,60,0.6)'),
+            // Yumuşak Gauss sprite (kalem 1a): nötr alfa rampası — ton
+            // vertex renginden (gerçek sıcaklık sürücüsü) gelir
+            map: flameSpriteTexture(),
             vertexColors: true, transparent: true, depthWrite: false,
             blending: THREE.AdditiveBlending, sizeAttenuation: true,
             toneMapped: false
@@ -2397,7 +2576,81 @@
             this.model.add(s);
             this._diamonds.push(s);
         }
+        // Çekirdek koni katmanı KONUMLARDAN ÖNCE kurulur: elmas ölçekleri
+        // koninin yerel yarıçapına hizalanır (kalem 4)
+        this._rebuildFlameCone();
         this._updateDiamondPositions();
+    };
+
+    // ------------------------------------------------------------------
+    // Çekirdek alev konisi (kalem 3): parçacık bulutunun ALTINA sürekli,
+    // yarı saydam additive katman. Parçacıklar sürekli akışın ayrık
+    // örnekleridir; koni bu sürekliliği verir — 'patlamış mısır' yerine
+    // gövdesi olan jet. Açı plumeConeSpec'ten (gerçek Me, Mj, γ, θ_geo),
+    // renk flameColorFromT'den (gerçek Te) türer. Çözücü çıkış durumu
+    // yoksa koni HİÇ kurulmaz — parçacıklarla aynı sözleşme (sahte veri
+    // yasağı). Draw call bütçesi (kalem 5): dış zarf + iç çekirdek =
+    // +2 mesh (sınır +3, bekçi: tests/test_alev_estetigi.py).
+    // ------------------------------------------------------------------
+    MotorScene.prototype._rebuildFlameCone = function () {
+        if (this._flameGroup) {
+            this.model.remove(this._flameGroup);
+            this._flameGroup.traverse(function (o) {
+                if (o.geometry) o.geometry.dispose();
+                if (o.material) o.material.dispose();
+            });
+            this._flameGroup = null;
+        }
+        this._coneSpec = null;
+        var d = this.dims;
+        var ex = d.nozzleExit;
+        if (!ex || !this._plumeInfo) return;
+        // Geometrik açı _plumeAero ile AYNI seçim ve kırpma (okuma —
+        // fizik sürücüsüne dokunulmaz)
+        var thetaDeg = clamp(d.nozType === 'conical' ? d.halfAngle : d.thetaE,
+            2, 35);
+        var spec = plumeConeSpec(d.re, thetaDeg, ex.exitMach, ex.jetMach,
+            ex.gamma, 0.6 * (this._plumeLen || plumeLengthMm(this._totalLen)));
+        if (!spec) return;
+        this._coneSpec = spec;
+        // Renk gerçek çıkış sıcaklığından; Te yoksa (Tc eksik) plumeColorAt
+        // fallback bandının çekirdek turuncusu — iki katman aynı palete düşer
+        var col = (isFinite(ex.exitTemperature) && ex.exitTemperature > 0)
+            ? flameColorFromT(ex.exitTemperature)
+            : { r: 1.0, g: 0.62, b: 0.22 };
+        this._flameGroup = new THREE.Group();
+        var self = this;
+        // CylinderGeometry(üstR, altR, boy): +Y jet yönü — alt uç (r0)
+        // çıkış düzleminde, üst uç (r1) aşağı akışta
+        function addCone(r0, r1, len, baseOpacity) {
+            var geo = new THREE.CylinderGeometry(
+                Math.max(r1, 0.01), Math.max(r0, 0.01), len,
+                32, 1, true);
+            var mat = new THREE.MeshBasicMaterial({
+                color: new THREE.Color(Math.min(col.r, 1), Math.min(col.g, 1),
+                    Math.min(col.b, 1)),
+                transparent: true, opacity: baseOpacity,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+                side: THREE.DoubleSide, toneMapped: false
+            });
+            var mesh = new THREE.Mesh(geo, mat);
+            mesh.position.y = len / 2;
+            mesh.renderOrder = 1;
+            mesh.userData.baseOpacity = baseOpacity;
+            self._flameGroup.add(mesh);
+            return mesh;
+        }
+        // Dış zarf: jet sınırı — tam boy, çok saydam (parçacıklar üstünde
+        // parlar). İç çekirdek: potansiyel çekirdeğin sıcak merkezi —
+        // boyun %60'ı, daha dar ve daha parlak. Opaklıklar görsel aktarım
+        // sabitleridir (fizik iddiası değil); şiddet _updatePlume'da
+        // itkiyle (throttle) modüle edilir.
+        addCone(spec.r0, spec.r1, spec.lengthMm, 0.10);
+        var lenIn = 0.6 * spec.lengthMm;
+        addCone(0.55 * spec.r0,
+            0.55 * coneRadiusAt(spec, lenIn), lenIn, 0.22);
+        this._flameGroup.position.y = this._nozzleInfo.zExit;
+        this.model.add(this._flameGroup);
     };
 
     // Elmas konum/ölçekleri geometriye bağlı — update() sonrası da çağrılır.
@@ -2415,9 +2668,18 @@
         }
         for (var k = 0; k < this._diamonds.length; k++) {
             this._diamonds[k].visible = true;
-            this._diamonds[k].position.set(0,
-                this._nozzleInfo.zExit + d.de * 0.9 + k * info.diamondSpacing, 0);
-            this._diamonds[k].scale.setScalar(d.re * (1.5 - k * 0.18));
+            var yk = d.de * 0.9 + k * info.diamondSpacing;
+            this._diamonds[k].position.set(0, this._nozzleInfo.zExit + yk, 0);
+            // Elmas ölçeği koni katmanıyla hizalı (kalem 4): parlama o
+            // istasyondaki jet sınırı yarıçapına (coneRadiusAt) oturur —
+            // eski re·(1.5−0.18k) dizisi koniden bağımsız büzülüyordu.
+            // 1.6 katsayısı parlama halesinin çekirdekten taşma payıdır
+            // (görsel aktarım). Aralık Prandtl-Pack'ten, şiddet
+            // |1−pe/pa| sürücüsünden gelmeye DEVAM eder; adapte lülede
+            // zayıf kalması fiziğin kendisidir (hücre yapısı pe=pa'da
+            // kaybolur — diamondVisibility bunu beyan eder).
+            var rLoc = coneRadiusAt(this._coneSpec, yk);
+            this._diamonds[k].scale.setScalar(1.6 * (rLoc || d.re));
         }
     };
 
@@ -2428,10 +2690,11 @@
             ? this._plume.geometry.attributes.position.array : null;
         var info = this._plumeInfo;
         var spread = info ? info.spread : 1;
-        // Doğuş noktası: çıkış kesitinde eşdağılımlı. Buradaki rastgelelik
-        // SAHTELİK DEĞİLDİR — sürekli bir akışı ayrık parçacıklarla çizmenin
-        // doğru yoludur (sqrt, dairesel kesitte alanca eşdağılım verir).
-        var rSpawn = d.re * 0.75 * Math.sqrt(Math.random());
+        // Doğuş noktası: çıkış kesitinde EKSENE YOĞUN dağılım (kalem 1b,
+        // plumeSpawnRadius). Rastgelelik sahtelik değildir — sürekli akışın
+        // ayrık örneklemesidir; jet kütle akısı eksende tepe yaptığı için
+        // örnekleme de eksene ağırlıklıdır (eski sqrt alanca eşdağılımdı).
+        var rSpawn = plumeSpawnRadius(d.re, Math.random());
         var phi = Math.random() * TAU;
         // v2.6.26: hız artık ÇÖZÜCÜNÜN nozul çıkış hızından ölçekleniyor.
         // Eskiden `_totalLen * (2.2 + rastgele*1.6)` idi; modelin uzunluğuna
@@ -2473,16 +2736,17 @@
         if (!this._plumeInfo) {
             this._plume.visible = false;
             if (geo && geo.setDrawRange) geo.setDrawRange(0, 0);
+            if (this._flameGroup) this._flameGroup.visible = false;
             for (var h = 0; h < this._diamonds.length; h++) {
                 this._diamonds[h].visible = false;
             }
             return;
         }
         this._plume.visible = true;
+        var info = this._plumeInfo;
         var pos = geo.attributes.position.array;
         var col = geo.attributes.color.array;
         var st = this._pState;
-        var zExit = this._nozzleInfo.zExit;
         // Kalite anahtarı (perf modu) partikül tavanını düşürür
         var qf = this._qualityFactor || 1.0;
         var active = Math.floor(this._plumeN * qf * clamp(intensity, 0, 1));
@@ -2500,24 +2764,37 @@
             var o5 = i * 5, o3 = i * 3;
             st[o5 + 3] += dt;
             if (st[o5 + 3] >= st[o5 + 4]) {
+                // Yeniden doğuş TEK yoldan: _resetParticle konumu da yazar
+                // (eksene yoğun dağılım, kalem 1b) — buradaki eski sqrt
+                // kopyası ikinci bir dağılım tanımlıyordu, kaldırıldı
                 this._resetParticle(i, false);
-                pos[o3 + 0] = 0; pos[o3 + 1] = zExit - 2; pos[o3 + 2] = 0;
-                var rs = this.dims.re * 0.7 * Math.sqrt(Math.random());
-                pos[o3 + 0] = rs * Math.sin(st[o5 + 2]);
-                pos[o3 + 2] = rs * Math.cos(st[o5 + 2]);
             }
             var f = st[o5 + 3] / st[o5 + 4]; // 0..1 yaşam oranı
             pos[o3 + 1] += st[o5 + 0] * dt * velScale;
             var vr = st[o5 + 1] * dt * (0.4 + f * 1.6);
             pos[o3 + 0] += Math.sin(st[o5 + 2]) * vr;
             pos[o3 + 2] += Math.cos(st[o5 + 2]) * vr;
-            // Renk yaşam eğrisi (kalem 2): soğuma → renk kayması; kuyruk
-            // ömür sonuna dek seçilebilir kalır (plumeColorAt beyanlı eğri)
-            var pc = plumeColorAt(f, intensity);
+            // Renk yaşam eğrisi (kalem 2): SICAKLIK sürücülü — zincir
+            // gerçek T_c → izentropik Te (readNozzleExit) → 1/(1+3f)
+            // soğuma → akkor rengi. Te yoksa beyanlı bant paleti (fallback)
+            var pc = plumeColorAt(f, intensity, info.exitTemperature);
             col[o3] = pc.r; col[o3 + 1] = pc.g; col[o3 + 2] = pc.b;
         }
         geo.attributes.position.needsUpdate = true;
         geo.attributes.color.needsUpdate = true;
+
+        // Çekirdek koni şiddeti (kalem 3): itkiyle (throttle) orantılı,
+        // hafif titreşimli — elmaslardaki flick kalıbının yavaşlatılmışı
+        // (türbülans temsili; taban opaklık kuruluşta userData'da)
+        if (this._flameGroup) {
+            this._flameGroup.visible = true;
+            var cflick = 0.85 + 0.15 * Math.sin(this._clock.elapsedTime * 23);
+            for (var m = 0; m < this._flameGroup.children.length; m++) {
+                var cm = this._flameGroup.children[m];
+                cm.material.opacity =
+                    cm.userData.baseOpacity * clamp(intensity, 0, 1) * cflick;
+            }
+        }
 
         // Elmas şiddeti basınç uyumsuzluğuyla (|1 − pe/pa| yaklaşımı) ölçekli:
         // ideale yakın genişlemede elmaslar söner, sapmada belirginleşir
@@ -2790,6 +3067,8 @@
         // Plume: yalnız aktif yanmada görünür (duraklatınca söner)
         if (this._plume) {
             this._plume.visible = st.plume && throttle > 0.01;
+            // Koni katmanı parçacıklarla AYNI görünürlük sözleşmesini izler
+            if (this._flameGroup) this._flameGroup.visible = this._plume.visible;
             if (this._plume.visible) this._updatePlume(dt, throttle);
             else this._diamonds.forEach(function (s) { s.material.opacity = 0; });
         }
@@ -2911,8 +3190,11 @@
         }
         if (this._plume) {
             this._plumeInfo = this._plumeAero();   // yeni geometri → yeni jet fiziği
-            this._updateDiamondPositions();
             this._plumeLen = plumeLengthMm(this._totalLen);
+            // Koni katmanı yeni çıkış durumuyla yeniden kurulur; elmas
+            // ölçekleri koniye hizalandığı için konumlardan ÖNCE gelir
+            this._rebuildFlameCone();
+            this._updateDiamondPositions();
             this._plume.material.size = plumeParticleSize(this.dims.re,
                 this._camDist, this.container.clientHeight || 520);
             for (var i = 0; i < this._plumeN; i++) this._resetParticle(i, true);

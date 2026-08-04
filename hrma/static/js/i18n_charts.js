@@ -526,6 +526,20 @@
             'steel': 'steel',
             'titanium': 'titanium',
             'α [deg]': 'α [deg]',
+
+            /* 2026-08-04 — app.py'nin son Türkçe hata/uyarı borcu EN'e
+               çevrildi; TR karşılıkları buradan döner (serverText). */
+            'CAD assembly could not be generated': 'CAD assembly could not be generated',
+            'STL generation failed': 'STL generation failed',
+            'injector design error': 'injector design error',
+            'Required inputs for the solid motor calculation are missing; defaults were not applied and no design was produced.': 'Required inputs for the solid motor calculation are missing; defaults were not applied and no design was produced.',
+            'Geometry mode takes diameter/length/core, design-point mode takes thrust + burn time. For the tutorial scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'Geometry mode takes diameter/length/core, design-point mode takes thrust + burn time. For the tutorial scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.',
+            'Required inputs for the liquid motor calculation are missing; defaults were not applied and no design was produced.': 'Required inputs for the liquid motor calculation are missing; defaults were not applied and no design was produced.',
+            'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.',
+            'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results': 'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results',
+            'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement': 'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement',
+            'the model COMPUTES the recess from the inner jet diameter; see the value in the results': 'the model COMPUTES the recess from the inner jet diameter; see the value in the results',
+            'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array': 'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array',
         },
         tr: {            '3D Hybrid Rocket Motor Visualization': 'Hibrit Roket Motoru 3B Görselleştirme',
             '3D Motor Assembly': '3B Motor Montajı',
@@ -980,6 +994,20 @@
             'steel': 'çelik',
             'titanium': 'titanyum',
             'α [deg]': 'α [derece]',
+
+            /* 2026-08-04 — app.py'nin son Türkçe hata/uyarı borcu EN'e
+               çevrildi; TR karşılıkları buradan döner (serverText). */
+            'CAD assembly could not be generated': 'CAD montajı üretilemedi',
+            'STL generation failed': 'STL üretilemedi',
+            'injector design error': 'enjektör tasarım hatası',
+            'Required inputs for the solid motor calculation are missing; defaults were not applied and no design was produced.': 'Katı motor hesabı için zorunlu girdiler eksik; varsayılanla doldurulup tasarım üretilmedi.',
+            'Geometry mode takes diameter/length/core, design-point mode takes thrust + burn time. For the tutorial scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'Geometri kipinde çap/boy/çekirdek, tasarım noktası kipinde itki + yanma süresi verilir. Öğretici senaryo için "use_tutorial_defaults": true gönderin; sonuç "defaults_applied" alanıyla hangi girdilerin varsayılandan geldiğini beyan eder.',
+            'Required inputs for the liquid motor calculation are missing; defaults were not applied and no design was produced.': 'Sıvı motor hesabı için zorunlu girdiler eksik; varsayılanla doldurulup tasarım üretilmedi.',
+            'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'Öğretici/tanıtım senaryosu için "use_tutorial_defaults": true gönderin; sonuç "defaults_applied" alanıyla hangi girdilerin varsayılandan geldiğini beyan eder.',
+            'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results': 'model bu mesafeyi çarpışma açısı ve delik çapından HESAPLAR; sonuçtaki değere bakınız',
+            'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement': 'bu yol benzer-akışkan (like-on-like) doublet modeller; momentum oranı ölçütü farklı-akışkan çarpışmada geçerlidir',
+            'the model COMPUTES the recess from the inner jet diameter; see the value in the results': 'model girintiyi iç jet çapından HESAPLAR; sonuçtaki değere bakınız',
+            'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array': 'bu yol tek koaksiyel eleman boyutlandırır; çok elemanlı dizilim için Enjektör Tasarımı panelini kullanınız',
         }
     };
 
@@ -1238,7 +1266,22 @@
         [/^Cavitation risk: Nurick cavitation number K_c = (\S+) < (\S+) \((.+)\)$/,
          'Kavitasyon riski: Nurick kavitasyon sayısı K_c = $1 < $2 ($3)'],
         [/^Target injection velocity \((.+)\) is not set by hole count: with Cd=(\S+) the achieved velocity is (.+)\. Reaching the target needs dP = (.+) \(currently (.+)\)\.$/,
-         'Hedef püskürtme hızı ($1) delik sayısıyla belirlenmiyor: Cd=$2 ile ulaşılan hız $3. Hedefe ulaşmak için dP = $4 gerekir (şu an $5).']
+         'Hedef püskürtme hızı ($1) delik sayısıyla belirlenmiyor: Cd=$2 ile ulaşılan hız $3. Hedefe ulaşmak için dP = $4 gerekir (şu an $5).'],
+
+        /* --- app.py son i18n borcu (2026-08-04): tüketilmeyen enjektör
+           girdisi uyarıları + CAD/yörünge hata gövdeleri.
+           SIRA ÖNEMLİ: özel 'pattern is not modelled' kuralı, genel
+           'was not consumed' kuralından ÖNCE gelmeli — genel kuralın
+           2. grubu yalnız SÖZLÜKTEN geçer, iç içe desen çözemez. */
+        [/^Input '(.+)' was not consumed: the '(.+)' pattern is not modelled on this path; use the Injector Design panel for a full solution \((.+)\)$/,
+         '\'$1\' girdisi kullanılmadı: \'$2\' düzeni bu yolda modellenmiyor; tam çözüm için Enjektör Tasarımı panelini kullanınız ($3)'],
+        [/^Input '(.+)' was not consumed: (.+)$/,
+         '\'$1\' girdisi kullanılmadı: $2', [2]],
+        [/^the '(.+)' pattern is not modelled on this path; use the Injector Design panel for a full solution \((.+)\)$/,
+         '\'$1\' düzeni bu yolda modellenmiyor; tam çözüm için Enjektör Tasarımı panelini kullanınız ($2)'],
+        [/^CAD generation failed: (.+)$/, 'CAD üretilemedi: $1'],
+        [/^Trajectory plot could not be generated: (.+)$/,
+         'Yörünge grafiği üretilemedi: $1']
     ];
 
     /* "Etiket: değer" ve "Taban (birim)" kalıplarında yalnız etiket/taban

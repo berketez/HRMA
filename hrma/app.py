@@ -1367,6 +1367,11 @@ def calculate():
             # v2.6.26: contraction_ratio arayuzden GONDERILIYOR ama buraya
             # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
             # degisimiydi, yani alan tamamen oluydu.
+            # v2.6.27 (A8): fırlatma sahası motora GEÇMİYORDU — motor tarafı
+            # hazır ve testliydi ama API her koşuda NOT_MODELLED dönüyordu.
+            # Sözleşme: resolve_launch_site() çıktısı ya da en az
+            # {'elevation_m'} / {'latitude_deg','longitude_deg'} taşıyan sözlük.
+            launch_site=data.get('launch_site'),
             contraction_ratio=data.get('contraction_ratio', 0),
             # v2.6.26 (P2 devri): enjektor plaka kalinligi ve ortam sicakligi
             # formda VARDI ama motora hic gecmiyordu.
@@ -1509,32 +1514,36 @@ def calculate():
         # da SONUÇ olarak hesapladığı alanlar kullanıcıya gerekçesiyle döner.
         _inj_type = data.get('injector_type', 'showerhead')
         _unused = []
+        # i18n sözleşmesi (2026-08-04): backend EN üretir; TR karşılıkları
+        # i18n_charts.js sözlüğünde/MSG_PATTERNS'ta durur (serverText çevirir).
         if _inj_type == 'impingement':
             if data.get('impingement_distance'):
                 _unused.append(('impingement_distance',
-                                'model bu mesafeyi çarpışma açısı ve delik '
-                                'çapından HESAPLAR; sonuçtaki değere bakınız'))
+                                'the model COMPUTES this distance from the '
+                                'impingement angle and hole diameter; see the '
+                                'value in the results'))
             if data.get('momentum_ratio'):
                 _unused.append(('momentum_ratio',
-                                'bu yol benzer-akışkan (like-on-like) doublet '
-                                'modeller; momentum oranı ölçütü farklı-akışkan '
-                                'çarpışmada geçerlidir'))
+                                'this path models like-on-like doublets; the '
+                                'momentum-ratio criterion applies to unlike '
+                                'impingement'))
             _pat = data.get('impingement_pattern')
             if _pat and _pat not in ('like_on_like', 'doublet'):
                 _unused.append(('impingement_pattern',
-                                f"'{_pat}' düzeni bu yolda modellenmiyor; tam "
-                                'çözüm için Enjektör Tasarımı panelini '
-                                'kullanınız (doublet/triplet/like/coax-swirl)'))
+                                f"the '{_pat}' pattern is not modelled on "
+                                'this path; use the Injector Design panel '
+                                'for a full solution '
+                                '(doublet/triplet/like/coax-swirl)'))
         elif _inj_type == 'coaxial':
             if data.get('recess_length'):
                 _unused.append(('recess_length',
-                                'model girintiyi iç jet çapından HESAPLAR; '
-                                'sonuçtaki değere bakınız'))
+                                'the model COMPUTES the recess from the inner '
+                                'jet diameter; see the value in the results'))
             if data.get('n_elements'):
                 _unused.append(('n_elements',
-                                'bu yol tek koaksiyel eleman boyutlandırır; '
-                                'çok elemanlı dizilim için Enjektör Tasarımı '
-                                'panelini kullanınız'))
+                                'this path sizes a single coaxial element; '
+                                'use the Injector Design panel for a '
+                                'multi-element array'))
         if _unused and isinstance(injector_results, dict):
             injector_results['unused_inputs'] = [
                 {'field': f, 'reason': r} for f, r in _unused]
@@ -1995,6 +2004,11 @@ def quick_geometry():
             # v2.6.26: contraction_ratio arayuzden GONDERILIYOR ama buraya
             # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
             # degisimiydi, yani alan tamamen oluydu.
+            # v2.6.27 (A8): fırlatma sahası motora GEÇMİYORDU — motor tarafı
+            # hazır ve testliydi ama API her koşuda NOT_MODELLED dönüyordu.
+            # Sözleşme: resolve_launch_site() çıktısı ya da en az
+            # {'elevation_m'} / {'latitude_deg','longitude_deg'} taşıyan sözlük.
+            launch_site=data.get('launch_site'),
             contraction_ratio=data.get('contraction_ratio', 0),
             # v2.6.26 (P2 devri): enjektor plaka kalinligi ve ortam sicakligi
             # formda VARDI ama motora hic gecmiyordu.
@@ -2087,6 +2101,11 @@ def transient_analysis():
             # v2.6.26: contraction_ratio arayuzden GONDERILIYOR ama buraya
             # hic gecirilmiyordu - motorda olcum sonucu sifir yaprak
             # degisimiydi, yani alan tamamen oluydu.
+            # v2.6.27 (A8): fırlatma sahası motora GEÇMİYORDU — motor tarafı
+            # hazır ve testliydi ama API her koşuda NOT_MODELLED dönüyordu.
+            # Sözleşme: resolve_launch_site() çıktısı ya da en az
+            # {'elevation_m'} / {'latitude_deg','longitude_deg'} taşıyan sözlük.
+            launch_site=data.get('launch_site'),
             contraction_ratio=data.get('contraction_ratio', 0),
             # v2.6.26 (P2 devri): enjektor plaka kalinligi ve ortam sicakligi
             # formda VARDI ama motora hic gecmiyordu.
@@ -2190,7 +2209,8 @@ def injector_design_api():
         design = design_injector(spec)
         if isinstance(design, dict) and design.get('status') == 'error':
             return jsonify({'status': 'error',
-                            'error': design.get('error', 'tasarım hatası')}), 400
+                            'error': design.get('error',
+                                                'injector design error')}), 400
         return jsonify(sanitize_json_values(
             {'status': 'success', 'design': design}))
     except ValueError as e:
@@ -3087,19 +3107,22 @@ def calculate_solid():
                   f"missing={len(eksik_girdiler)}")
             return jsonify({
                 'status': 'incomplete_input',
-                'error': ('Katı motor hesabı için zorunlu girdiler eksik; '
-                          'varsayılanla doldurulup tasarım üretilmedi.'),
+                # i18n: backend EN üretir; TR karşılığı i18n_charts.js sözlüğünde.
+                'error': ('Required inputs for the solid motor calculation '
+                          'are missing; defaults were not applied and no '
+                          'design was produced.'),
                 'missing_fields': eksik_girdiler,
                 'required_fields': {
                     'always': ['chamber_pressure', 'propellant_type'],
                     'either_geometry': list(GEOMETRI_ALANLARI),
                     'or_design_point': list(TASARIM_NOKTASI_ALANLARI),
                 },
-                'hint': ('Geometri kipinde çap/boy/çekirdek, tasarım noktası '
-                         'kipinde itki + yanma süresi verilir. Öğretici '
-                         'senaryo için "use_tutorial_defaults": true '
-                         'gönderin; sonuç "defaults_applied" alanıyla hangi '
-                         'girdilerin varsayılandan geldiğini beyan eder.'),
+                'hint': ('Geometry mode takes diameter/length/core, '
+                         'design-point mode takes thrust + burn time. For '
+                         'the tutorial scenario send '
+                         '"use_tutorial_defaults": true; the result declares '
+                         'which inputs came from defaults in the '
+                         '"defaults_applied" field.'),
             }), 422
         uygulanan_varsayilanlar = []
         if ogretici_mod and eksik_girdiler:
@@ -3340,14 +3363,16 @@ def calculate_liquid():
                   f"missing={len(eksik_girdiler)}")
             return jsonify({
                 'status': 'incomplete_input',
-                'error': ('Sıvı motor hesabı için zorunlu girdiler eksik; '
-                          'varsayılanla doldurulup tasarım üretilmedi.'),
+                # i18n: backend EN üretir; TR karşılığı i18n_charts.js sözlüğünde.
+                'error': ('Required inputs for the liquid motor calculation '
+                          'are missing; defaults were not applied and no '
+                          'design was produced.'),
                 'missing_fields': eksik_girdiler,
                 'required_fields': list(KRITIK_GIRDILER),
-                'hint': ('Öğretici/tanıtım senaryosu için '
-                         '"use_tutorial_defaults": true gönderin; sonuç '
-                         '"defaults_applied" alanıyla hangi girdilerin '
-                         'varsayılandan geldiğini beyan eder.'),
+                'hint': ('For the tutorial/demo scenario send '
+                         '"use_tutorial_defaults": true; the result declares '
+                         'which inputs came from defaults in the '
+                         '"defaults_applied" field.'),
             }), 422
         uygulanan_varsayilanlar = []
         if ogretici_mod and eksik_girdiler:
@@ -3521,7 +3546,9 @@ def _motor_cad_zip_response(geo, motor_type, default_name):
     """
     name = safe_name(geo.get('motor_name'), default=default_name)
     arc = {}
-    manifest = [f'HRMA CAD paketi — {name} ({motor_type})', '']
+    # i18n: README/hata metinleri EN üretilir (backend sözleşmesi); hata
+    # gövdesinin TR karşılığı i18n_charts.js MSG_PATTERNS'ta.
+    manifest = [f'HRMA CAD package — {name} ({motor_type})', '']
 
     # STEP (gerçek parametrik katılar)
     try:
@@ -3529,7 +3556,7 @@ def _motor_cad_zip_response(geo, motor_type, default_name):
         step_files = generate_step_assembly(geo, motor_type=motor_type)
         for key, path in step_files.items():
             arc[f'step/{name}_{key}.step'] = path
-        manifest.append(f'STEP: {len(step_files)} dosya (AP214, mm)')
+        manifest.append(f'STEP: {len(step_files)} files (AP214, mm)')
     except Exception as e:
         manifest.append(f'STEP: FAILED ({e})')
 
@@ -3542,13 +3569,14 @@ def _motor_cad_zip_response(geo, motor_type, default_name):
         stl_files = cad_designer.export_stl_files(meshes) if meshes else []
         for p in stl_files:
             arc[safe_arcname('stl', os.path.basename(p))] = p
-        manifest.append(f'STL: {len(stl_files)} dosya (mm, 3D baskı/CAM)')
+        manifest.append(f'STL: {len(stl_files)} files (mm, 3D printing/CAM)')
     except Exception as e:
         manifest.append(f'STL: FAILED ({e})')
 
     if not arc:
         return jsonify({'status': 'error',
-                        'error': 'CAD üretilemedi: ' + ' | '.join(manifest)}), 500
+                        'error': ('CAD generation failed: '
+                                  + ' | '.join(manifest))}), 500
 
     buf = _zip_files(arc, readme_text='\n'.join(manifest) + '\n')
     return send_file(buf, as_attachment=True,
@@ -4940,12 +4968,13 @@ def export_stl_zip():
             return rejected
         cad_data = cad_designer.generate_3d_motor_assembly(motor_data)
         if not cad_data or 'assembly_meshes' not in cad_data:
+            # i18n: EN üretilir; TR karşılığı i18n_charts.js sözlüğünde.
             return jsonify({'status': 'error',
-                            'error': 'CAD montajı üretilemedi'}), 500
+                            'error': 'CAD assembly could not be generated'}), 500
         stl_files = cad_designer.export_stl_files(cad_data['assembly_meshes'])
         if not stl_files:
             return jsonify({'status': 'error',
-                            'error': 'STL üretilemedi'}), 500
+                            'error': 'STL generation failed'}), 500
         name = safe_name(motor_data.get('motor_name'))
         arc = {os.path.basename(p): p for p in stl_files}
         # A1: birim ve su-sızdırmazlık iddiası kaldırıldı; metin artık
@@ -6084,8 +6113,9 @@ def trajectory_analysis():
             # (trajectory_data) hesaplandığı için yanıt yine gönderilir ama
             # grafiğin ÜRETİLEMEDİĞİ açıkça bildirilir.
             trajectory_plot = None
+            # i18n: EN üretilir; TR karşılığı i18n_charts.js MSG_PATTERNS'ta.
             plot_error_message = (
-                'Yörünge grafiği üretilemedi: %s' % plot_error)
+                'Trajectory plot could not be generated: %s' % plot_error)
 
         return jsonify({
             'status': 'success',
@@ -7252,7 +7282,8 @@ def advanced_performance_analysis():
                     # diyordu; SP-125'in gerçek adı bu değil. Doğrulanmış ad
                     # docs/STANDART_ATIFLARI.md'de (NTRS/ADS 1971NASSP.125.....H).
                     'reference': ('NASA SP-125 — Huzel & Huang, Design of '
-                                  'Liquid Propellant Rocket Engines (2. baskı, 1971)'),
+                                  'Liquid Propellant Rocket Engines '
+                                  '(2nd ed., 1971)'),
                     'description': 'Shows optimum O/F ratio and chamber pressure regions with combustion instability bands'
                 }
             })

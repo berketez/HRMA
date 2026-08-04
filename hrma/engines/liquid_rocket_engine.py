@@ -756,6 +756,31 @@ TANK_PORT_STUB_LD = 3.0
 # birbirinden habersiz kayabilir.
 TANK_PRESSURE_TRANSDUCER_COUNT = 2
 TANK_LEVEL_PROBE_POSITIONS = (0.25, 0.5, 0.75, 0.95)   # doluluk kesri
+# --- A2: itici çalkantısı (slosh) bağlaması (v2.6.27) -----------------------
+# Çalkantı modeli hrma.analysis.slosh_analysis'tir (NASA SP-106 / Dodge 2000
+# doğrusal serbest yüzey, dik rijit silindir). Motor tarafında TEK varsayım
+# eksenel ivmedir: uçuş ivme profili bu çözücüde yoktur (yörünge modülüyle
+# bağlanması yol haritasında ayrı kalemdir), bu yüzden g_eff = 1g alınır ve
+# çıktıda adıyla beyan edilir. Sayı uydurulmaz: 1g yer/statik durumun ta
+# kendisidir ve uçuşta frekans sqrt(g_eff) ile ölçeklenir (SP-106 Eq. 2.4).
+TANK_SLOSH_G_EFF_BASIS = (
+    'g_eff = 9.80665 m/s2 (standard gravity): ground/static condition. HRMA '
+    'does not couple the flight axial-acceleration profile into the tank '
+    'model, so the in-flight slosh frequency is NOT reported; it scales as '
+    'sqrt(g_eff/g0) per NASA SP-106 Eq. 2.4 - rescale for a known thrust '
+    'acceleration.')
+# --- A6: besleme hattı su koçu (water hammer) bağlaması (v2.6.27) -----------
+# hrma.analysis.water_hammer FLUID_PROPERTIES tablosunda hacimsel modülü
+# TABLOLU olan itici anahtarları. n2o4/mmh/udmh/lh2/methane/ethanol için
+# tablo değeri YOKTUR; o hatlar NOT_MODELLED beyanıyla boş döner (bulk modül
+# uydurulmaz) ve kullanıcı /api/water-hammer ucuna bulk_modulus_Pa +
+# density_kg_m3 vererek özel sıvı analizi yapabilir.
+WATER_HAMMER_FLUID_KEY = {'lox': 'lox', 'rp1': 'rp1'}
+# Besleme borusu malzemesi: motorun bir hat malzemesi SEÇİMİ yoktur (hat
+# geometrisi yalnız akış hızına göre boyutlanır). Kullanıcı
+# 'feed_line_material' vermezse su koçu modülünün kendi paslanmaz varsayılanı
+# kullanılır ve kaynağı çıktıda beyan edilir.
+WATER_HAMMER_DEFAULT_PIPE_MATERIAL = 'ss_304'
 # API RP 520 Part I sertifikalı emniyet vanası boşaltma katsayısı.
 RELIEF_VALVE_DISCHARGE_COEFF = 0.975
 # Emniyet vanası ayar basıncı / tank işletme basıncı (ASME VIII Div.1 UG-134:
@@ -5790,6 +5815,27 @@ class LiquidRocketEngine:
             fuel_tank_diameter, fuel_tank_length, 'fuel',
             tank_pressure, mdot_fuel)
         
+        # --- A2 (v2.6.27): çalkantı analizi — tankın KENDİ geometrisiyle ---
+        # Sıvı yüksekliği rezerv dahil sıvı hacminden (ullage hariç):
+        # h = V_sıvı / (pi R^2). Bafl geometrisi iç yapı listesinden okunur.
+        ox_fill_height = ox_volume_req / (np.pi * (ox_tank_diameter / 2) ** 2)
+        fuel_fill_height = fuel_volume_req / (np.pi
+                                              * (fuel_tank_diameter / 2) ** 2)
+        ox_slosh = self._tank_slosh_analysis(
+            'oxidizer', ox_tank_diameter / 2, ox_fill_height,
+            rho_ox, rho_ox_source, ox_tank_internals)
+        fuel_slosh = self._tank_slosh_analysis(
+            'fuel', fuel_tank_diameter / 2, fuel_fill_height,
+            rho_fuel, rho_fuel_source, fuel_tank_internals)
+
+        # --- A3 (v2.6.27): basınçlı kap analizi — tank kartıyla AYNI girdi --
+        ox_vessel = self._tank_pressure_vessel_analysis(
+            'oxidizer_tank', tank_pressure, ox_tank_diameter,
+            ox_wall_thickness, tank_material)
+        fuel_vessel = self._tank_pressure_vessel_analysis(
+            'fuel_tank', tank_pressure, fuel_tank_diameter,
+            fuel_wall_thickness, fuel_tank_material)
+
         # Tank mass estimation
         ox_tank_surface_area = np.pi * ox_tank_diameter * ox_tank_length + 2 * np.pi * (ox_tank_diameter/2)**2
         fuel_tank_surface_area = np.pi * fuel_tank_diameter * fuel_tank_length + 2 * np.pi * (fuel_tank_diameter/2)**2
@@ -5838,7 +5884,10 @@ class LiquidRocketEngine:
                     'tank_mass': ox_tank_mass,  # kg
                     'mass_fraction': ox_tank_mass / ox_mass  # tank mass / propellant mass
                 },
-                'internal_structures': ox_tank_internals
+                'internal_structures': ox_tank_internals,
+                # A2/A3 (v2.6.27): çalkantı + basınçlı kap bağlamaları.
+                'slosh': ox_slosh,
+                'pressure_vessel': ox_vessel,
             },
             'fuel_tank': {
                 'propellant_type': self.fuel_type.upper(),
@@ -5870,7 +5919,10 @@ class LiquidRocketEngine:
                     'mass_fraction': fuel_tank_mass / fuel_mass,  # tank mass / propellant mass
                     'insulation': 'Multi-Layer Insulation (MLI)' if self.fuel_type == 'lh2' else 'None'
                 },
-                'internal_structures': fuel_tank_internals
+                'internal_structures': fuel_tank_internals,
+                # A2/A3 (v2.6.27): çalkantı + basınçlı kap bağlamaları.
+                'slosh': fuel_slosh,
+                'pressure_vessel': fuel_vessel,
             },
             'system_summary': {
                 'total_propellant_mass': ox_mass + fuel_mass,  # kg
@@ -5893,6 +5945,152 @@ class LiquidRocketEngine:
             }
         }
     
+    def _tank_slosh_analysis(self, propellant_type, radius_m, fill_height_m,
+                             rho, rho_source, internals):
+        """Tank çalkantı (slosh) analizi — hrma.analysis.slosh_analysis ile.
+
+        Yol haritası A2 (v2.6.27). Fizik künyesi: NASA SP-106 Böl. 2
+        (Abramson & Bauer) / Dodge (2000) doğrusal serbest yüzey çalkantısı,
+        dik rijit dairesel silindir; halka bafl sönümü Miles (1958) yarı
+        ampirik kestirimi. Modül app.py /api/slosh-analysis ucunda ZATEN
+        bağlıydı ama tank kartı kendi hesapladığı geometriyle onu hiç
+        çağırmıyordu — kullanıcı bafl listesi görüyor, çalkantı frekansını
+        göremiyordu.
+
+        Girdilerin TAMAMI motorun kendi çözümünden gelir:
+          - yarıçap ve sıvı yüksekliği tank boyutlandırmasından
+            (h = V_sıvı / (pi R^2); V_sıvı rezerv dahil gerçek sıvı hacmi),
+          - yoğunluk _propellant_density'nin tek kaynağından,
+          - bafl geometrisi _design_tank_internals'ın GERÇEK halka bafl
+            listesinden: serbest yüzeyin altındaki EN YAKIN bafl
+            değerlendirilir (Miles modeli tek düz halka içindir).
+        Tek varsayım g_eff = 1g'dir ve TANK_SLOSH_G_EFF_BASIS ile beyan
+        edilir; uçuş ivmesi bağlanmaz (sayı uydurulmaz).
+        """
+        try:
+            from hrma.analysis.slosh_analysis import analyze_slosh
+        except Exception as exc:                      # pragma: no cover
+            return {'status': 'not_computed',
+                    'basis': f'slosh module unavailable: {exc}'}
+
+        radius_m = float(radius_m)
+        fill_height_m = float(fill_height_m)
+        if radius_m <= 0.0 or fill_height_m <= 0.0:
+            return {'status': 'not_computed',
+                    'basis': ('tank radius or liquid depth is non-positive - '
+                              'no slosh problem exists for an empty tank')}
+
+        # Serbest yüzeyin altındaki en yakın GERÇEK bafl (pozisyonlar tank
+        # tabanından; dizilim simetrik olduğundan yön seçimi sonucu
+        # değiştirmez). Bafl genişliği halka listesinin kendi ölçüsüdür.
+        baffle_kwargs = {}
+        baffle_basis = ('no ring baffle lies below the free surface at this '
+                        'fill level - a target-damping baffle recommendation '
+                        'is reported instead (Miles 1958 inversion)')
+        baffles = (internals or {}).get('slosh_baffles') or []
+        depths = []
+        for b in baffles:
+            z_m = float(b.get('position', 0.0)) / 1000.0   # mm -> m (tabandan)
+            depth = fill_height_m - z_m
+            if depth > 0.0:
+                depths.append((depth, b))
+        if depths:
+            depth, near = min(depths, key=lambda t: t[0])
+            width_m = float(near.get('ring_width_mm', 0.0)) / 1000.0
+            width_ratio = min(max(width_m / radius_m, 0.0), 1.0)
+            if width_ratio > 0.0:
+                baffle_kwargs = {
+                    'baffle_width_ratio': width_ratio,
+                    'baffle_depth_ratio': depth / radius_m,
+                }
+                baffle_basis = (
+                    'the ring baffle of the tank internals list nearest '
+                    'below the full-fill free surface, evaluated with its '
+                    'actual ring width (Miles 1958 single flat ring; the '
+                    'wave amplitude is the module\'s declared small-'
+                    'amplitude design point)')
+
+        try:
+            result = analyze_slosh(radius=radius_m,
+                                   fill_height=fill_height_m,
+                                   g_eff=G_0, fluid_density=float(rho),
+                                   **baffle_kwargs)
+        except Exception as exc:
+            return {'status': 'not_computed',
+                    'basis': f'slosh analysis rejected the inputs: {exc}'}
+
+        result = dict(result)
+        result.update({
+            'status': 'computed',
+            'propellant': propellant_type,
+            'g_eff_basis': TANK_SLOSH_G_EFF_BASIS,
+            'fill_height_basis': (
+                'liquid depth h = V_liquid / (pi R^2) from the tank sizing '
+                'model (reserve-loaded liquid volume, single _size_tank '
+                'source); the cylinder is the same one the tank card '
+                'publishes'),
+            'density_source': rho_source,
+            'baffle_basis': baffle_basis,
+            'basis': (
+                'computed by hrma.analysis.slosh_analysis (NASA SP-106 / '
+                'Dodge 2000 linear slosh, upright rigid cylinder) with the '
+                'tank geometry and propellant density of THIS design; the '
+                'same analyser serves /api/slosh-analysis'),
+        })
+        return result
+
+    def _tank_pressure_vessel_analysis(self, tank_label, tank_pressure_pa,
+                                       diameter_m, wall_thickness_m,
+                                       material_key):
+        """Tank basınçlı kap analizi — hrma.analysis.pressure_vessel ile.
+
+        Yol haritası A3 (v2.6.27). Katı motordaki desenin sıvı karşılığı
+        (solid_rocket_engine._calculate_safety_analysis): membran gerekli
+        kalınlık + kapak (başlık) kalınlıkları + MAWP/proof/burst zinciri
+        merkezi PressureVesselAnalyzer'dan okunur (AIAA S-080 modu; Faupel
+        kalın cidar + ince cidar plastik limit kopması). Girdiler tank
+        kartının KENDİ değerleridir: MEOP = tank basıncı, çap/cidar/malzeme
+        tank boyutlandırmasından — iki kart çelişemez.
+
+        Cidar tasarım sıcaklığı ORTAM alınır ve beyan edilir: HRMA'da tank
+        termal modeli yok. Kriyojenik iticide (LOX/LH2) düşük sıcaklık
+        tokluğu (DBTT) denetimi bu çağrıda DEVREYE GİRMEZ; sayı uydurmak
+        yerine sınır açıkça yazılır.
+        """
+        try:
+            from hrma.analysis.pressure_vessel import PressureVesselAnalyzer
+            res = PressureVesselAnalyzer().analyze(
+                meop_bar=max(float(tank_pressure_pa) / PA_PER_BAR, 1e-6),
+                inner_diameter_mm=float(diameter_m) * 1000.0,
+                material=material_key,
+                wall_thickness_mm=float(wall_thickness_m) * 1000.0)
+        except Exception as exc:
+            return {'status': 'not_computed',
+                    'basis': f'pressure-vessel analysis rejected the inputs: '
+                             f'{exc}'}
+
+        res = dict(res)
+        if res.get('status') == 'FAIL':
+            self._warn('warn.liquid.tank_vessel_fail', 'critical',
+                       tank=tank_label,
+                       burst_margin=round(float(res.get('burst_margin', 0.0)),
+                                          2))
+        res.update({
+            'basis': (
+                'computed by hrma.analysis.pressure_vessel (AIAA S-080 '
+                'membrane + UG-32-form head closures, Faupel/thin-wall '
+                'burst) with the MEOP, diameter, wall thickness and '
+                'material of THIS tank card - the same analyser the solid '
+                'motor safety panel uses'),
+            'temperature_basis': (
+                'wall design temperature assumed ambient: HRMA has no tank '
+                'thermal model. For cryogenic propellants the low-'
+                'temperature toughness (DBTT) screening of the pressure-'
+                'vessel module is NOT engaged at the storage temperature - '
+                'verify material toughness separately'),
+        })
+        return res
+
     def _design_tank_internals(self, diameter, length, propellant_type,
                                tank_pressure_pa=None, mdot=None):
         """Tank iç yapıları — GEOMETRİDEN ve DEBİDEN hesaplanır.
@@ -6030,8 +6228,11 @@ class LiquidRocketEngine:
                 'thickness_basis': (
                     'minimum manufacturing gauge - NOT sized against the slosh '
                     'load; NASA SP-8031 ring-baffle sizing needs the vehicle '
-                    'axial acceleration and wave height, neither of which is '
-                    'modelled here'),
+                    'axial acceleration and wave height. v2.6.27: the tank '
+                    'slosh block DOES now report modal frequency/mass at a '
+                    'declared 1 g (A2 wiring), but the flight acceleration '
+                    'and the design wave height remain unmodelled, so the '
+                    'plate thickness is still a gauge, not a load result'),
                 'thickness_load_sized': False,
                 'hole_diameter': hole_diameter * 1000.0,       # mm
                 'hole_pitch_mm': hole_pitch * 1000.0,
@@ -6218,7 +6419,10 @@ class LiquidRocketEngine:
             },
             'not_modelled': [
                 'slosh load sizing of the baffle and vane plate thickness '
-                '(NASA SP-8031; needs vehicle axial acceleration)',
+                '(NASA SP-8031; needs vehicle axial acceleration). Modal '
+                'slosh frequency/mass ARE reported in the tank slosh block '
+                'at a declared 1 g (v2.6.27, A2), but no load sizing is '
+                'performed from them',
                 'critical submergence / gas-ingestion criterion for the outlet '
                 '(NASA SP-8004)',
             ],
@@ -6434,6 +6638,145 @@ class LiquidRocketEngine:
                       'specific speed; efficiency curve is an incidence-loss '
                       'model anchored at the BEP efficiency '
                       '(similarity-scaled estimate)'),
+        }
+
+    def _feed_water_hammer_analysis(self, drops, tank_bar, pressure_fed):
+        """Besleme hattı su koçu analizi — hrma.analysis.water_hammer ile.
+
+        Yol haritası A6 (v2.6.27). Fizik künyesi: Joukowsky/Allievi toplu
+        parametre su koçu (Wylie & Streeter, "Fluid Transients" 1978) +
+        Michaud yavaş kapanma + kolon ayrılması denetimi; modül app.py
+        /api/water-hammer ucunda ZATEN bağlıydı ama motorun kendi hat
+        verisiyle hiç çağrılmıyordu.
+
+        Girdi envanteri (KOD OKUNARAK çıkarıldı — hangileri gerçekten
+        hesaplanıyor):
+          - hat İÇ ÇAPI ve HIZI: hesaplanıyor (_calculate_line_diameter /
+            _line_pressure_drops; drops sözlüğünün kendi değerleri),
+          - hat UZUNLUĞU: FEED_LINE_LENGTH_DEFAULT_M — beyanlı yerleşim
+            varsayımı (basınç düşümüyle AYNI tek tanım),
+          - çalışma basıncı: hesaplanıyor (turbopompada pompa basma basıncı,
+            basınç beslemelide tank basıncı),
+          - boru CİDAR KALINLIĞI: HİÇBİR YERDE hesaplanmıyor -> kullanıcı
+            girdisi (feed_line_wall_thickness [mm]); verilmezse hat bloğu
+            NOT_MODELLED döner, sayı UYDURULMAZ,
+          - vana KAPANMA SÜRESİ: hesaplanmıyor -> kullanıcı girdisi
+            (valve_closure_time_ms); verilmezse analizör ANİ kapanma (tam
+            Joukowsky, muhafazakâr üst sınır) varsayar ve bunu kendisi
+            beyan eder (closure_regime alanı),
+          - sıvı hacimsel modülü: yalnız FLUID_PROPERTIES tablosundaki
+            iticiler için (WATER_HAMMER_FLUID_KEY); tablosuz itici hattı
+            NOT_MODELLED döner.
+        """
+        wall_mm = self._override_val('feed_line_wall_thickness', 0.1, 50.0,
+                                     'Feed line wall thickness', ' mm')
+        closure_ms = self._override_val('valve_closure_time_ms', 0.1, 6e5,
+                                        'Valve closure time', ' ms')
+        pipe_material = str(self.overrides.get('feed_line_material')
+                            or WATER_HAMMER_DEFAULT_PIPE_MATERIAL).strip()
+        pipe_material_source = (
+            'user input (feed line material)'
+            if self.overrides.get('feed_line_material')
+            else f"not supplied -> '{WATER_HAMMER_DEFAULT_PIPE_MATERIAL}' "
+                 'assumed (HRMA does not model a line material choice)')
+
+        def _line_block(label, propellant, line, working_bar, rho):
+            fluid_key = WATER_HAMMER_FLUID_KEY.get(str(propellant).lower())
+            missing = []
+            if fluid_key is None:
+                missing.append(
+                    f"no tabulated liquid bulk modulus for '{propellant}' "
+                    '(water_hammer FLUID_PROPERTIES covers '
+                    f'{sorted(WATER_HAMMER_FLUID_KEY)}); use /api/water-'
+                    'hammer with bulk_modulus_Pa + density_kg_m3 for a '
+                    'custom fluid')
+            if wall_mm is None:
+                missing.append(
+                    'feed_line_wall_thickness [mm] not supplied - no feed-'
+                    'line wall thickness is computed anywhere in HRMA (the '
+                    'line is sized for flow velocity only), and the elastic-'
+                    'pipe wave speed cannot be evaluated without it')
+            if missing:
+                return {
+                    'status': 'NOT_MODELLED',
+                    'basis': ('water-hammer transient not evaluated for '
+                              'this line; inputs are not invented. '
+                              + ' | '.join(missing)),
+                    'required_inputs': (
+                        ['feed_line_wall_thickness'] if wall_mm is None
+                        else []),
+                }
+            try:
+                from hrma.analysis.water_hammer import WaterHammerAnalyzer
+                res = WaterHammerAnalyzer().analyze(
+                    fluid=fluid_key,
+                    line_length_m=FEED_LINE_LENGTH_DEFAULT_M,
+                    line_id_mm=float(line['line_diameter_mm']),
+                    wall_thickness_mm=float(wall_mm),
+                    working_pressure_bar=float(working_bar),
+                    flow_velocity_m_s=float(line['line_velocity_m_s']),
+                    valve_closure_time_ms=closure_ms,
+                    pipe_material=pipe_material,
+                    density_kg_m3=float(rho))
+            except Exception as exc:
+                return {'status': 'not_computed',
+                        'basis': ('water-hammer analysis rejected the '
+                                  f'inputs: {exc}')}
+            res = dict(res)
+            if res.get('status') == WaterHammerAnalyzer.STATUS_UNSAFE:
+                self._warn('warn.liquid.water_hammer_unsafe', 'critical',
+                           line=label,
+                           peak_bar=round(float(
+                               res.get('design_peak_pressure_bar', 0.0)), 1),
+                           yield_bar=round(float(
+                               (res.get('pipe') or {})
+                               .get('hoop_yield_pressure_bar', 0.0)), 1))
+            res.update({
+                'line': label,
+                'line_length_basis': FEED_LINE_LENGTH_BASIS,
+                'working_pressure_basis': (
+                    'tank pressure (pressure-fed cycle)' if pressure_fed
+                    else 'pump discharge pressure of this line (chamber '
+                         'pressure + line/injector losses, or the cycle '
+                         'balance solution when it converges)'),
+                'flow_velocity_basis': (
+                    'the SAME line velocity the Darcy-Weisbach feed '
+                    'pressure-drop chain computes (mdot/(rho*A) at the '
+                    'standard-rounded line diameter)'),
+                'valve_closure_time_source': (
+                    'user input (valve closure time)'
+                    if closure_ms is not None else
+                    'not supplied -> instantaneous closure assumed by the '
+                    'analyser (full Joukowsky rise, conservative upper '
+                    'bound); supply valve_closure_time_ms for the slow-'
+                    'closure estimate'),
+                'pipe_material_source': pipe_material_source,
+                'density_source': ('engine propellant density (single '
+                                   '_propellant_density source), not the '
+                                   'fluid-table nominal'),
+                'basis': (
+                    'computed by hrma.analysis.water_hammer (Joukowsky/'
+                    'Allievi + Michaud slow closure + column-separation '
+                    'check) with the line diameter, velocity and working '
+                    'pressure of THIS engine; the same analyser serves '
+                    '/api/water-hammer'),
+            })
+            return res
+
+        ox_working = (tank_bar if pressure_fed
+                      else drops['pump_discharge_pressure_ox'])
+        fuel_working = (tank_bar if pressure_fed
+                        else drops['pump_discharge_pressure_fuel'])
+        return {
+            'oxidizer_line': _line_block('oxidizer_line', self.oxidizer_type,
+                                         drops['oxidizer_line'], ox_working,
+                                         self.rho_ox),
+            'fuel_line': _line_block('fuel_line', self.fuel_type,
+                                     drops['fuel_line'], fuel_working,
+                                     self.rho_fuel),
+            'model': ('Joukowsky/Allievi feed-line water hammer '
+                      '(hrma.analysis.water_hammer); per-line evaluation at '
+                      'the main valve'),
         }
 
     def _analyze_detailed_feed_system(self):
@@ -6666,6 +7009,10 @@ class LiquidRocketEngine:
             'feed_pressure_input_bar': feed_input,
             'required_pump_discharge_bar': drops['pump_discharge_pressure_ox'],
             'performance_margins': margins,
+            # A6 (v2.6.27): besleme hattı su koçu — motorun kendi hat
+            # verisiyle (çap/hız/basınç), eksik girdiler beyanla.
+            'water_hammer': self._feed_water_hammer_analysis(
+                drops, tank_bar, pressure_fed),
         }
     
     def _turbine_exhaust_pressure_bar(self):
@@ -7841,6 +8188,99 @@ class LiquidRocketEngine:
         """Hazne cidar kalınlığı [m] — yapısal tasarımla tek kaynak."""
         return self._structural_design()['thickness_m']
 
+    #: Kapak/enjektör flanşı cıvata birleşiminin varsayılan kabulleri — TEK
+    #: tanım noktası (katı motordaki SOLID_CLOSURE_JOINT_DEFAULTS deseninin
+    #: sıvı karşılığı). Bunlar HESAP DEĞİL, kullanıcı girdisi verilmediğinde
+    #: kullanılan sözleşme değerleridir ve çıktıda adıyla beyan edilirler.
+    LIQUID_CLOSURE_JOINT_DEFAULTS = {
+        'size': 'M8',
+        'property_class': '8.8',
+        'member_material': 'aluminum_6061',
+        'bolt_count_range': (1, 200),
+    }
+
+    def _closure_joint_analysis(self):
+        """Kapak/enjektör flanşı cıvata birleşimi — hrma.analysis.bolted_joint.
+
+        Yol haritası A4 (v2.6.27). Katı motordaki bağlanma deseninin birebir
+        sıvı karşılığı (solid_rocket_engine._closure_joint_analysis): çözüm
+        ``analyze_bolted_joint`` (Shigley Böl. 8 / ISO 898-1 /
+        NASA-STD-5020A ön-yük saçılımı) ve /api/bolted-joint ucunda ZATEN
+        vardı; sıvı motor onu hiç çağırmıyordu.
+
+        Ayırıcı yük = oda basıncı x sızdırmazlık alanı; sızdırmazlık çapı
+        hazne İÇ çapıdır (basıncın kapağa/enjektör plakasına ittiği alan).
+        Cıvata sayısı kullanıcı girdisidir (closure_bolt_count); verilmezse
+        birleşim BOYUTLANDIRILMAZ — sayı uydurulmaz.
+        """
+        cfg = self.LIQUID_CLOSURE_JOINT_DEFAULTS
+        lo, hi = cfg['bolt_count_range']
+        count = self._override_val('closure_bolt_count', lo, hi,
+                                   'Closure bolt count')
+        if count is None or int(count) < 1:
+            return {
+                'status': 'not_sized',
+                'basis': ('No closure bolt count was supplied, so the joint '
+                          'is not sized. Enter the number of closure bolts '
+                          'to get separation and proof safety factors.'),
+            }
+        size = str(self.overrides.get('closure_bolt_size')
+                   or cfg['size']).strip().upper()
+        prop_class = str(self.overrides.get('closure_bolt_class')
+                         or cfg['property_class']).strip()
+        seal_diameter_mm = self._chamber_diameter() * 1000.0
+        try:
+            from hrma.analysis.bolted_joint import analyze_bolted_joint
+            res = analyze_bolted_joint(
+                pressure_bar=float(self.P_c),
+                seal_diameter_mm=float(seal_diameter_mm),
+                bolt_count=int(count),
+                size=size,
+                property_class=prop_class,
+                member_material=cfg['member_material'])
+        except Exception as exc:
+            return {
+                'status': 'not_sized',
+                'basis': f'Bolted-joint analysis rejected the inputs: {exc}',
+            }
+        sf = res.get('safety_factors', {})
+        sep = res.get('separation', {})
+        tq = res.get('torque', {})
+        return {
+            'status': 'sized',
+            'bolt_count': int(count),
+            'bolt_size': size,
+            'property_class': prop_class,
+            # Sıkma torku ön yükten ve cıvata çapından çıkar (T = K·F_i·d,
+            # Shigley Denk. 8-27); değer analizörün kendi torque() çıktısıdır
+            # — katı motorla aynı şema.
+            'tightening_torque_nm': tq.get('recommended_torque_Nm'),
+            'nut_factor_K': tq.get('K_nut_factor'),
+            'thread_condition': tq.get('condition'),
+            'preload_scatter_percent': tq.get('preload_uncertainty_pct'),
+            'tightening_torque_basis': (
+                'T = K x F_i x d (Shigley 10th ed. Eq. 8-27) with '
+                'F_i = 0.75 x proof load (reusable joint) from ISO 898-1 '
+                'proof strength; torque control scatters the achieved preload '
+                'by the percentage above'),
+            'seal_diameter_mm': float(seal_diameter_mm),
+            'pressure_bar': float(self.P_c),
+            'proof_safety_factor': sf.get('proof_SF_min'),
+            'separation_factor': sf.get('separation_factor_n0_min'),
+            'overload_factor': sf.get('overload_factor_nL_min'),
+            'separated': sep.get('separated'),
+            'governing_basis': sf.get('governing_basis'),
+            'member_material': cfg['member_material'],
+            'assumptions': res.get('assumptions'),
+            'warnings': res.get('warnings'),
+            'source': res.get('source'),
+            'basis': ('Separating load = chamber pressure x sealed area '
+                      '(chamber inner diameter); safety factors from the '
+                      'bolted-joint analyser used by /api/bolted-joint - '
+                      'the same wiring pattern as the solid motor closure '
+                      'joint.'),
+        }
+
     def _calculate_structural_loads(self):
         """Structural analysis for chamber and nozzle design"""
         s = self._structural_design()
@@ -7874,7 +8314,10 @@ class LiquidRocketEngine:
                 'operating_temperature': self.T_c,  # K
                 'thermal_cycles': getattr(self, 'thermal_cycles',
                                           THERMAL_CYCLES_DEFAULT)
-            }
+            },
+            # A4 (v2.6.27): kapak/enjektör flanşı cıvata birleşimi — katı
+            # motorla aynı şema adı (closure_joint) ve aynı analizör.
+            'closure_joint': self._closure_joint_analysis(),
         }
     
     def _calculate_thermal_protection_system(self, cooling=None):

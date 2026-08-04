@@ -63,6 +63,28 @@ TANK_BLOWDOWN_MAX_POINTS = 240
 # modül de aynı 293,15 K değerini kullanır — tek kaynak, iki kopya sayı yok.
 TANK_TEMPERATURE_DEFAULT_K = 293.15
 
+# --- A2/A5 modül bağlama sabitleri (v2.6.27, yol haritası) ------------------
+# Oksitleyici tankı boy/çap oranı. Sıvı motordaki TANK_LD_RATIO ile AYNI
+# değerdir; çapraz import bilinçli olarak yapılmaz (bkz. yukarıdaki durum
+# sözlüğü notu: motor dosyaları birbirinin import zincirini çekmez). İki
+# kopyanın eşit kaldığı bekçiyle denetlenir:
+#   tests/test_hibrit_baglama_a5a8a2.py::test_tank_ld_orani_sivi_motorla_ayni
+OX_TANK_LD_RATIO = 2.5
+OX_TANK_LD_RATIO_BASIS = (
+    'length/diameter ratio L/D = 2.5, a structural-efficiency design choice '
+    'for a cylindrical tank (the same declared value the liquid engine uses '
+    'as TANK_LD_RATIO); NOT optimised against buckling or vehicle packaging '
+    '- neither is modelled here. The tank diameter and length follow from '
+    'this ratio and the required volume')
+# Hibrit kamara yalıtım astarı varsayılan malzemesi. thermal_protection
+# modülünün tanıdığı üç ablatiften biri; silika-fenolik, hibrit/katı kamara
+# yalıtımında yaygın seçimdir (NASA SP-8091 sınıfı bant, modül tablosu).
+# TASARIM SEÇİMİDİR, çözüm değildir — çıktıda adıyla beyan edilir.
+LINER_MATERIAL_DEFAULT = 'silica_phenolic'
+# Cidar sıcaklık geçmişi örnekleme tavanı: port_history'deki ~200 nokta
+# deseniyle aynı gerekçe (yanıt boyutu sınırlanır, son nokta korunur).
+WALL_HISTORY_MAX_POINTS = 200
+
 
 # ---------------------------------------------------------------------------
 # TASARIM ÖZETİ DURUM SÖZLÜĞÜ (Faz 4B, bulgu B1/B2/A3)
@@ -325,7 +347,8 @@ class HybridRocketEngine:
                  cooling_type='natural',
                  safety_factor=None, chamber_length_override=None,
                  nozzle_material=None, ambient_temperature=None,
-                 plate_thickness=None, orifice_inlet=None):
+                 plate_thickness=None, orifice_inlet=None,
+                 launch_site=None):
         
         # Tasarım uyarıları (v2.6.2): kullanıcıya ULAŞAN kanal. Liste her
         # şeyden ÖNCE kurulur; aksi hâlde erken üretilen uyarılar kaybolur
@@ -380,6 +403,22 @@ class HybridRocketEngine:
             plate_thickness)
         self.injector_orifice_inlet = self._resolve_orifice_inlet(
             orifice_inlet)
+
+        # --- Fırlatma sahası girdisi (v2.6.27, yol haritası A8) -------------
+        # resolve_launch_site() çıktısı ya da en az {'elevation_m'} veya
+        # {'latitude_deg','longitude_deg'} taşıyan bir sözlük beklenir.
+        # Verilmezse None kalır ve launch_site_performance bloğu gerekçesiyle
+        # boş döner (sayı uydurulmaz). Sözlük OLMAYAN girdi sessizce
+        # yutulmaz: ham hâliyle saklanır ve bloğun NOT_MODELLED gerekçesi
+        # kullanıcıya neyin kullanılamadığını söyler (kullanıcıya ULAŞAN
+        # kanal bloğun kendisidir; yeni bir warn.* kodu gerektirmez).
+        if isinstance(launch_site, dict) and launch_site:
+            self.launch_site_input = dict(launch_site)
+            self._launch_site_raw_invalid = None
+        else:
+            self.launch_site_input = None
+            self._launch_site_raw_invalid = (
+                None if launch_site is None else str(launch_site)[:80])
 
         # Handle thrust/burn_time vs total_impulse input
         if total_impulse is None:
@@ -2409,6 +2448,578 @@ class HybridRocketEngine:
             'warnings': blok_uyarilari,
         }
 
+    def _thermal_protection_block(self, heat_transfer_results):
+        """Kamara yalıtım astarı + çıplak cidar ısı-yutucu geçmişi (A5).
+
+        FİZİK KÜNYESİ
+        -------------
+        * Astar boyutlandırma: Seviye-1 Q* (ablasyon ısısı) modeli,
+          ṡ = q_net/(ρ·Q*), gereken kalınlık = toplam çekilme × tasarım payı
+          (NASA SP-8091 sınıfı; Sutton & Biblarz 9. baskı Böl. 8.5) —
+          hrma.analysis.thermal_protection.ThermalProtectionAnalyzer.
+          ablative_thickness. Katı motorun kapak yalıtımı bağlanma deseniyle
+          AYNI şema (alan adları solid _ablative_liner_sizing ile birebir).
+        * Cidar sıcaklık geçmişi: 1B explicit FD ısı-yutucu çözümü
+          (Incropera & DeWitt 6. baskı §5.10; Sutton & Biblarz Böl. 8.4) —
+          aynı modülün heat_sink_transient'i, store_history=True.
+
+        GİRDİLER MOTORUN KENDİ ZİNCİRİNDEN GELİR: kamara/boğaz ısı akıları,
+        kurtarma sıcaklığı ve referans cidar sıcaklığı analyze_heat_transfer
+        sonucundan (Bartz + Leckner), yanma süresi zaman-adımlı çözücünün
+        etkin süresi, cidar kalınlığı/malzemesi kullanıcının termal modele
+        giden değerleridir. Girdi eksikse blok SAYI İÇERMEZ: status
+        NOT_MODELLED + gerekçe döner (sahte kalınlık, kalınlıksızlıktan
+        kötüdür).
+        """
+        basis = (
+            'chamber insulation liner sized with the Level-1 Q* ablation '
+            'model (hrma/analysis/thermal_protection.py, NASA SP-8091-class '
+            'band; Sutton & Biblarz 9th ed. Ch. 8.5) and a bare-wall 1-D '
+            'explicit-FD heat-sink temperature history (same module, '
+            'Incropera & DeWitt 6th ed. Sec. 5.10). All driving inputs are '
+            'THIS run\'s solver values: Bartz+Leckner chamber/throat design '
+            'fluxes, the recovery temperature and the reference wall '
+            'temperature from the heat transfer analysis, the effective '
+            'time-marching burn time, and the user wall thickness/material. '
+            'The liner sizing and the wall history are NOT coupled: the '
+            'history is the UNPROTECTED wall (no liner credit) and shows '
+            'why the liner is needed.')
+        if self.uq_mode:
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': ('skipped in uq_mode (advisory block, same policy '
+                           'as the blowdown and altitude tables); run the '
+                           'nominal design for the thermal protection '
+                           'sizing.'),
+            }
+        gs = (heat_transfer_results or {}).get('gas_side_analysis') or {}
+        q_chamber = gs.get('chamber_heat_flux')      # W/m²
+        q_throat = gs.get('throat_heat_flux')        # W/m²
+        taw = gs.get('adiabatic_wall_temperature')   # K
+        tw_ref = gs.get('reference_wall_temperature')  # K
+        t_burn = float(getattr(self, 't_burn_effective', 0.0)
+                       or getattr(self, 't_b', 0.0) or 0.0)
+        eksik = [ad for ad, deger in (
+            ('chamber_heat_flux', q_chamber), ('throat_heat_flux', q_throat),
+            ('adiabatic_wall_temperature', taw),
+            ('reference_wall_temperature', tw_ref)) if not (
+                deger is not None and np.isfinite(float(deger))
+                and float(deger) > 0)]
+        if eksik or t_burn <= 0:
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': (
+                    'the thermal protection sizing needs the heat transfer '
+                    'analysis (Bartz fluxes / recovery temperature) and a '
+                    'positive burn time; missing or non-physical in this '
+                    'run: ' + ', '.join(eksik + (
+                        ['burn_time'] if t_burn <= 0 else []))),
+            }
+        q_chamber = float(q_chamber)
+        q_throat = float(q_throat)
+        taw = float(taw)
+        tw_ref = float(tw_ref)
+        try:
+            from hrma.analysis.thermal_protection import (
+                ThermalProtectionAnalyzer)
+            analyzer = ThermalProtectionAnalyzer()
+        except Exception as exc:                       # pragma: no cover
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': f'thermal protection module unavailable: {exc}',
+            }
+
+        def _liner(station, function, q_W_m2, station_note):
+            """Tek istasyon astar boyutu — katı motorla AYNI alan adları."""
+            try:
+                sizing = analyzer.ablative_thickness(
+                    q_net_W_m2=q_W_m2,
+                    burn_time_s=t_burn,
+                    material=LINER_MATERIAL_DEFAULT)
+            except Exception as exc:
+                return {
+                    'material': LINER_MATERIAL_DEFAULT,
+                    'thickness': None,
+                    'thickness_status': 'NOT_MODELLED',
+                    'function': function,
+                    'basis': f'Ablative sizing failed at the {station}: {exc}',
+                }
+            liner_basis = (
+                f"Level-1 Q* ablation sizing at the {station}: required "
+                f"thickness = total recession x design margin "
+                f"{sizing['design_margin']:g}. Heat flux "
+                f"({q_W_m2 / 1e3:.0f} kW/m2) and burn time "
+                f"({t_burn:.2f} s) are this run's solver values. "
+                f"Liner material '{LINER_MATERIAL_DEFAULT}' is a declared "
+                f"design choice, not a solved selection. " + station_note)
+            return {
+                'material': sizing['material_name'],
+                'thickness': float(sizing['required_thickness_mm']),  # mm
+                'thickness_status': 'sized',
+                'function': function,
+                'total_recession_mm': float(sizing['total_recession_mm']),
+                'recession_rate_mm_s': float(sizing['recession_rate_mm_s']),
+                'design_margin': float(sizing['design_margin']),
+                'q_star_mj_kg': float(sizing['q_star_MJ_kg']),
+                'heat_flux_kw_m2': q_W_m2 / 1e3,
+                'burn_time_s': t_burn,
+                'basis': liner_basis,
+                'model_note': sizing['model_note'],
+                'source': sizing['source'],
+            }
+
+        chamber_liner = _liner(
+            'pre/post-combustion chamber wall',
+            'Protect the chamber sections whose wall sees combustion gas '
+            'directly (pre- and post-combustion chambers)',
+            q_chamber,
+            'Over the grain itself the FUEL is the ablator; this liner '
+            'covers the chamber sections not shielded by fuel. Flux is the '
+            'Bartz CHAMBER-station design flux of this run.')
+        nozzle_entry_liner = _liner(
+            'aft mixing chamber / nozzle entry',
+            'Protect the convergent entry region ahead of the throat',
+            q_throat,
+            'Flux is the Bartz THROAT design flux: the nozzle-entry flux is '
+            'below the throat value, so this thickness is a conservative '
+            'UPPER bound, not a station-resolved value (same declaration '
+            'the solid engine makes for its closures).')
+
+        # --- Çıplak cidar ısı-yutucu sıcaklık geçmişi ----------------------
+        # Sürücü katsayı, ısı modülünün KENDİ kamara tasarım akısından geri
+        # çözülür: h_eff = q_kamara/(Taw − Tw_ref). Bu, Leckner gaz
+        # radyasyonunu da taşınım katsayısına KATLANMIŞ hâlde taşır ve öyle
+        # beyan edilir (ikinci bir Bartz hesabı YAPILMAZ — tek kaynak).
+        wall_history = None
+        if taw - tw_ref <= 0:
+            wall_history = {
+                'status': 'NOT_MODELLED',
+                'reason': ('recovery temperature does not exceed the '
+                           'reference wall temperature; no positive driving '
+                           'potential exists to reconstruct h_eff from.'),
+            }
+        else:
+            h_eff = q_chamber / (taw - tw_ref)
+            # Ortam/başlangıç sıcaklığı ısı modülünün FİİLEN kullandığı
+            # değerden okunur (tek kaynak; iki modül iki farklı ortam
+            # varsayamaz). Yoksa parametre hiç GEÇİLMEZ ve modülün kendi
+            # varsayılanı geçerli olur — buradan ikinci sayı uydurulmaz.
+            hs_kwargs = {}
+            t_initial_source = ('thermal_protection module default '
+                                '(no ambient value was available from the '
+                                'heat transfer analysis)')
+            try:
+                t0 = float(heat_transfer_results['design_parameters']
+                           ['ambient_temperature'])
+                if np.isfinite(t0) and t0 > 0:
+                    hs_kwargs['T_initial_K'] = t0
+                    t_initial_source = (
+                        'the ambient temperature the heat transfer analysis '
+                        'actually used (single source)')
+            except (KeyError, TypeError, ValueError):
+                pass
+            try:
+                hs = analyzer.heat_sink_transient(
+                    h_gas_W_m2K=h_eff,
+                    T_recovery_K=taw,
+                    burn_time_s=t_burn,
+                    wall_thickness_m=float(self.wall_thickness),
+                    wall_material=self.chamber_material,
+                    store_history=True,
+                    **hs_kwargs)
+            except Exception as exc:
+                wall_history = {
+                    'status': 'NOT_MODELLED',
+                    'reason': f'heat-sink transient could not run: {exc}',
+                }
+            else:
+                # ~WALL_HISTORY_MAX_POINTS noktaya seyreltme (port_history
+                # deseni): son nokta daima korunur.
+                hist = hs.get('history') or {}
+                t_list = list(hist.get('t_s') or [])
+                tw_list = list(hist.get('T_inner_K') or [])
+                idx = []
+                if t_list:
+                    stride = max(1, len(t_list) // WALL_HISTORY_MAX_POINTS)
+                    idx = list(range(0, len(t_list), stride))
+                    if idx[-1] != len(t_list) - 1:
+                        idx.append(len(t_list) - 1)
+                wall_history = {
+                    'status': 'modelled',
+                    'wall_material': hs['wall_material'],
+                    'material_name': hs['material_name'],
+                    'wall_thickness_m': hs['wall_thickness_m'],
+                    'h_eff_W_m2K': float(h_eff),
+                    'h_eff_basis': (
+                        'effective gas-side coefficient reconstructed from '
+                        'the heat transfer analysis of this run: h_eff = '
+                        'chamber design flux / (T_recovery - T_wall_ref). '
+                        'It therefore LUMPS the Leckner gas-radiation share '
+                        'into a convection coefficient; no second Bartz '
+                        'evaluation is made (single source).'),
+                    'T_recovery_K': hs['T_recovery_K'],
+                    'T_initial_K': hs['T_initial_K'],
+                    'T_initial_source': t_initial_source,
+                    'time_s': [float(t_list[i]) for i in idx],
+                    'wall_inner_temperature_K': [float(tw_list[i])
+                                                 for i in idx],
+                    'T_inner_final_K': hs['T_inner_K'],
+                    'T_outer_final_K': hs['T_outer_K'],
+                    'max_service_temp_K': hs['max_service_temp_K'],
+                    'exceeds_limit': hs['exceeds_limit'],
+                    'time_to_limit_s': hs['time_to_limit_s'],
+                    'melting_point_K': hs['melting_point_K'],
+                    'exceeds_melting': hs['exceeds_melting'],
+                    'time_to_melting_s': hs['time_to_melting_s'],
+                    'model_valid': hs['model_valid'],
+                    'validity_note': hs['validity_note'],
+                    'model_note': hs['model_note'],
+                    'basis': (
+                        'UNPROTECTED (bare) structural wall heat-sink '
+                        'history — no liner credit, gas side directly on '
+                        'the wall. It bounds the no-liner case and shows '
+                        'why the liner sized above is needed; liner '
+                        'ablation and wall conduction are NOT coupled.'),
+                }
+
+        return {
+            'status': 'modelled',
+            '_basis': basis,
+            'burn_time_s': t_burn,
+            'burn_time_source': (
+                'effective time-marching burn time (web/oxidizer limited)'
+                if getattr(self, '_web_exhausted', False)
+                else 'design burn time (time-marching completed the full '
+                     'requested burn)'),
+            'chamber_liner': chamber_liner,
+            'nozzle_entry_liner': nozzle_entry_liner,
+            'wall_temperature_history': wall_history,
+        }
+
+    def _launch_site_block(self):
+        """Fırlatma sahası rakım/ortam düzeltmesi (yol haritası A8).
+
+        FİZİK KÜNYESİ
+        -------------
+        * Saha atmosferi: USSA 1976 (hrma.constants ISA yardımcıları,
+          hrma.analysis.launch_site.atmosphere_at üzerinden — sıvı/katı
+          irtifa tablolarının kullandığı AYNI tek kaynak).
+        * Yerel yerçekimi: WGS84 Somigliana + serbest-hava açılımı
+          (NIMA TR8350.2 Denk. 4-1/4-3, launch_site.local_gravity).
+        * İtki düzeltmesi: F = ṁ·v_e + (P_e − P_a)·A_e (Sutton & Biblarz
+          9. baskı Denk. 2-14). Ortam basıncı yalnız basınç-itki terimine
+          girer; ṁ, Pc, c* kamara büyüklükleridir ve değişmez. Dolayısıyla
+          F_saha − F_tasarım = (P_a,tasarım − P_a,saha)·A_e — genişleme
+          oranı kullanıcı vermiş olsun olmasın geçerli bir özdeşliktir.
+
+        KRİTİK AYRIM (launch_site modülünün sözleşmesi): Isp ZİNCİRİ
+        STANDART g0 = 9.80665 İLE KALIR. Yerel g yalnız ağırlık/T-W
+        büyüklüklerine girer; burada hiçbir Isp yerel g ile bölünmez.
+
+        Saha girdisi yoksa blok sayı içermez (status NOT_MODELLED).
+        """
+        basis = (
+            'site ambient correction of the delivered design point using '
+            'hrma/analysis/launch_site.py (USSA 1976 atmosphere via the '
+            'same central ISA helpers the liquid/solid altitude tables '
+            'use; WGS84 normal gravity, NIMA TR8350.2). Thrust correction '
+            'is the pressure-thrust identity F_site = F_design + '
+            '(P_a_design - P_a_site) * A_e (Sutton & Biblarz 9th ed. '
+            'Eq. 2-14): ambient pressure enters ONLY the pressure-thrust '
+            'term; mdot, Pc and c* are chamber quantities and unchanged. '
+            'Isp is reported with STANDARD g0 = 9.80665 m/s2 regardless '
+            'of the site (Isp is an engine property, not a site property); '
+            'local gravity is published separately for weight/T-W use.')
+        if self.uq_mode:
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': ('skipped in uq_mode (advisory block, same policy '
+                           'as the blowdown and altitude tables).'),
+            }
+        site = self.launch_site_input
+        if not site:
+            gecersiz = getattr(self, '_launch_site_raw_invalid', None)
+            if gecersiz is not None:
+                sebep = (
+                    f'the launch_site input was not a usable dict '
+                    f'(got {gecersiz!r}); expected a resolve_launch_site() '
+                    f'result or at least elevation_m or latitude_deg + '
+                    f'longitude_deg. The design point keeps the constructor '
+                    f'ambient pressure P_a as-is.')
+            else:
+                sebep = ('no launch site was supplied (launch_site input '
+                         'absent); the design point keeps the constructor '
+                         'ambient pressure P_a as-is.')
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': sebep,
+            }
+        ae = getattr(self, 'Ae', None)
+        mdot = getattr(self, 'mdot_total', None)
+        if not (ae and np.isfinite(float(ae)) and float(ae) > 0
+                and mdot and np.isfinite(float(mdot)) and float(mdot) > 0):
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': ('the nozzle exit area / mass flow are not solved '
+                           'yet; run calculate() before the site '
+                           'correction.'),
+            }
+        try:
+            from hrma.analysis.launch_site import (
+                atmosphere_at, local_gravity, resolve_launch_site)
+        except Exception as exc:                       # pragma: no cover
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': f'launch_site module unavailable: {exc}',
+            }
+
+        def _num(anahtar):
+            deger = site.get(anahtar)
+            try:
+                deger = float(deger)
+            except (TypeError, ValueError):
+                return None
+            return deger if np.isfinite(deger) else None
+
+        lat = _num('latitude_deg')
+        lon = _num('longitude_deg')
+        elev = _num('elevation_m')
+        p_site_pa = _num('pressure_pa')
+        t_site_k = _num('temperature_k')
+        g_local = _num('gravity_local_m_s2')
+        try:
+            if p_site_pa is not None and t_site_k is not None:
+                site_source = ('caller-resolved site dict '
+                               '(resolve_launch_site schema: pressure and '
+                               'temperature taken as given)')
+                if elev is None:
+                    elev = 0.0
+                    site_source += ('; elevation_m was not supplied and is '
+                                    'reported as 0')
+            elif elev is not None:
+                atm = atmosphere_at(elev)
+                p_site_pa = atm['pressure_pa']
+                t_site_k = atm['temperature_k']
+                site_source = ('ISA (USSA 1976) standard-day atmosphere at '
+                               'the supplied site elevation')
+            elif lat is not None and lon is not None:
+                cozum = resolve_launch_site(lat, lon, use_online=False)
+                elev = float(cozum['elevation_m'])
+                p_site_pa = float(cozum['pressure_pa'])
+                t_site_k = float(cozum['temperature_k'])
+                if g_local is None:
+                    g_local = float(cozum['gravity_local_m_s2'])
+                site_source = (
+                    'resolve_launch_site(lat, lon) offline: '
+                    f"elevation source '{cozum['elevation_source']}', "
+                    f"atmosphere source '{cozum['atmosphere_source']}'")
+            else:
+                return {
+                    'status': 'NOT_MODELLED',
+                    '_basis': basis,
+                    'reason': (
+                        'the launch_site dict carries none of the usable '
+                        'key sets: {pressure_pa, temperature_k}, '
+                        '{elevation_m} or {latitude_deg, longitude_deg}.'),
+                }
+            if g_local is None and lat is not None:
+                g_local = float(local_gravity(lat, elev or 0.0))
+        except Exception as exc:
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': f'the site could not be resolved: {exc}',
+            }
+
+        p_design_pa = float(self.P_a) * 1e5
+        ae = float(ae)
+        mdot = float(mdot)
+        thrust_delta = (p_design_pa - float(p_site_pa)) * ae
+        f_site = float(self.F) + thrust_delta
+        isp_site = f_site / (mdot * self.g0)
+        return {
+            'status': 'modelled',
+            '_basis': basis,
+            'site_source': site_source,
+            'elevation_m': float(elev) if elev is not None else None,
+            'latitude_deg': lat,
+            'longitude_deg': lon,
+            'ambient_pressure_pa': float(p_site_pa),
+            'ambient_pressure_bar': float(p_site_pa) / 1e5,
+            'ambient_temperature_k': float(t_site_k),
+            'design_ambient_pressure_bar': float(self.P_a),
+            'design_ambient_pressure_basis': (
+                'the constructor atmospheric_pressure input the nozzle was '
+                'expanded against; the delta below is measured from it'),
+            'thrust_design_N': float(self.F),
+            'thrust_site_N': float(f_site),
+            'thrust_delta_N': float(thrust_delta),
+            'thrust_change_percent': (100.0 * thrust_delta / float(self.F)
+                                      if self.F else None),
+            'isp_design_s': float(self.Isp),
+            'isp_site_s': float(isp_site),
+            'gravity_standard_m_s2': float(self.g0),
+            'gravity_local_m_s2': (float(g_local) if g_local is not None
+                                   else None),
+            'gravity_basis': (
+                'Isp and the ideal delta-v chain use STANDARD g0 = 9.80665 '
+                'm/s2 at every site (BIPM definition; the launch_site '
+                'module contract). gravity_local_m_s2 is the WGS84 '
+                'Somigliana + free-air value for weight and thrust-to-'
+                'weight use only'
+                + ('' if g_local is not None else
+                   '; it is None because no latitude was supplied and '
+                   'local gravity is latitude-dependent — it is not '
+                   'fabricated')),
+            'not_modelled': [
+                'nozzle flow separation is not re-assessed at the site '
+                'ambient pressure; the nozzle design block carries its own '
+                'separation check at the design ambient',
+                'range safety / trajectory coupling of the site is the '
+                'launch-site page, not this block',
+            ],
+        }
+
+    def _oxidizer_tank_slosh_block(self, blowdown_block=None):
+        """Oksitleyici tankı çalkantı (slosh) analizi (yol haritası A2).
+
+        FİZİK KÜNYESİ
+        -------------
+        Dik dairesel silindirik tankta doğrusal serbest yüzey çalkantısı:
+        ω₁² = (λ₁·g/R)·tanh(λ₁·h/R), kütle oranı SP-106 eşdeğer mekanik
+        modeli, Miles (1958) halka bafl sönümleme kestirimi — NASA SP-106
+        (Abramson 1966) / Dodge 2000 / NASA SP-8009;
+        hrma.analysis.slosh_analysis.analyze_slosh (app.py'nin
+        /api/slosh-analysis ucuyla AYNI çözücü ve şema).
+
+        GİRDİLER: tank hacmi ve doluluk oranı blowdown bloğundan (aynı
+        tank için iki farklı hacim OLAMAZ; blowdown koşamadıysa aynı
+        boyutlandırma formülü beyanla uygulanır), sıvı kütlesi çözücünün
+        m_ox'u, tank çapı beyanlı L/D tasarım oranından. g_eff SABİT 1 g'dir
+        ve öyle beyan edilir — uçuş ivmesiyle (g_eff = T/m) bağlaşım
+        yörünge bağlamasına bırakılmıştır (NOT_MODELLED notu blokta).
+        """
+        basis = (
+            'linear free-surface slosh of the oxidizer liquid in an upright '
+            'rigid circular-cylindrical tank '
+            '(hrma/analysis/slosh_analysis.py: NASA SP-106 / Dodge 2000 '
+            'modal relations, Miles 1958 ring-baffle damping estimate; the '
+            'same solver and schema as the /api/slosh-analysis endpoint). '
+            'Tank volume and fill fraction come from the tank_blowdown '
+            'block of THIS run (one tank, one volume); the tank diameter '
+            'follows from the declared L/D design ratio; the liquid mass '
+            'is the solver m_ox. g_eff is the constant standard 1-g value '
+            '(see g_eff_basis).')
+        if self.uq_mode:
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': ('skipped in uq_mode (advisory block, same policy '
+                           'as the blowdown and altitude tables).'),
+            }
+        m_ox = getattr(self, 'm_ox', None)
+        if not (m_ox and np.isfinite(float(m_ox)) and float(m_ox) > 0):
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': ('the oxidizer mass is not solved yet; run '
+                           'calculate() before the slosh block.'),
+            }
+        m_ox = float(m_ox)
+
+        # --- Tank hacmi: blowdown bloğu tek doğruluk kaynağı ---------------
+        blowdown = blowdown_block or {}
+        v_tank = None
+        fill = None
+        if blowdown.get('status') == 'modelled':
+            try:
+                v_tank = float(blowdown['tank_volume_m3'])
+                fill = float(blowdown['liquid_fill_fraction'])
+            except (KeyError, TypeError, ValueError):
+                v_tank = None
+        if v_tank and v_tank > 0 and fill and 0 < fill <= 1:
+            v_liquid = v_tank * fill
+            rho_liquid = m_ox / v_liquid
+            volume_source = (
+                'tank_blowdown block of this run (one tank, one volume); '
+                'the liquid density is the value implied by that sizing '
+                '(m_ox / liquid volume, i.e. the N2O EOS rho_l at the tank '
+                'temperature)')
+        else:
+            # Blowdown koşamadı (ör. N2O dışı oksitleyici): AYNI formül,
+            # çözücünün besleme sıvı yoğunluğuyla — V = (m_ox/rho_l)/doluluk.
+            rho_liquid = getattr(self, '_inj_rho_ox', None)
+            try:
+                rho_liquid = float(rho_liquid)
+            except (TypeError, ValueError):
+                rho_liquid = None
+            if not (rho_liquid and np.isfinite(rho_liquid)
+                    and rho_liquid > 0):
+                rho_liquid = float(self._get_oxidizer_density())
+            fill = TANK_FILL_FRACTION_DEFAULT
+            v_liquid = m_ox / rho_liquid
+            v_tank = v_liquid / fill
+            volume_source = (
+                'the blowdown model did not run for this design, so the '
+                'SAME sizing formula is applied directly: V = (m_ox / '
+                'rho_l) / liquid fill fraction, with the feed liquid '
+                'density the solver used for injector sizing and the '
+                'declared default fill fraction')
+
+        # --- Tank geometrisi: beyanlı L/D oranından ------------------------
+        # V = (π/4)·D²·L = (π/4)·D³·(L/D)  →  D = (4V/(π·(L/D)))^(1/3)
+        # (sıvı motorun tank boyutlandırmasıyla AYNI şema).
+        d_tank = (4.0 * v_tank / (np.pi * OX_TANK_LD_RATIO)) ** (1.0 / 3.0)
+        l_tank = d_tank * OX_TANK_LD_RATIO
+        r_tank = d_tank / 2.0
+        h_fill = v_liquid / (np.pi * r_tank ** 2)  # = fill · L_tank
+
+        try:
+            from hrma.analysis.slosh_analysis import analyze_slosh
+            slosh = analyze_slosh(radius=r_tank, fill_height=h_fill,
+                                  g_eff=self.g0, liquid_mass=m_ox)
+        except Exception as exc:
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': f'the slosh model could not run: {exc}',
+                'tank_volume_m3': float(v_tank),
+                'tank_volume_source': volume_source,
+            }
+
+        return {
+            'status': 'modelled',
+            '_basis': basis,
+            'tank_volume_m3': float(v_tank),
+            'tank_volume_source': volume_source,
+            'tank_diameter_m': float(d_tank),
+            'tank_length_m': float(l_tank),
+            'tank_ld_ratio': OX_TANK_LD_RATIO,
+            'tank_ld_ratio_basis': OX_TANK_LD_RATIO_BASIS,
+            'liquid_fill_fraction': float(fill),
+            'fill_height_m': float(h_fill),
+            'liquid_mass_kg': m_ox,
+            'liquid_mass_basis': 'the solver oxidizer mass of this run',
+            'liquid_density_kg_m3': float(rho_liquid),
+            'g_eff_m_s2': float(self.g0),
+            'g_eff_basis': (
+                'constant standard 1-g axial acceleration (ground / hover '
+                'condition). NOT_MODELLED: coupling g_eff to the flight '
+                'acceleration profile (g_eff = T/m during boost, which '
+                'raises the slosh frequency as sqrt(g_eff)) is not wired '
+                'to the trajectory yet — that is the follow-on work item; '
+                'the fill_sweep inside the slosh result covers the '
+                'draining-level dependence at 1 g only.'),
+            'slosh': slosh,
+        }
+
     def _not_modelled_declarations(self):
         """Modellenmeyen fizik kalemlerinin AÇIK beyanı (yol haritası A10).
 
@@ -2420,15 +3031,18 @@ class HybridRocketEngine:
              fiziksel olarak geçerli bir kalemdir;
           2. Hibrit çözücüde o hesabın GERÇEKTEN var olmadığı kod okunarak
              doğrulanmıştır (2026-08-03 taraması: bu dosyada ignit*/valve/
-             feed_line/acoustic/liner/ablat*/insulat*/slosh/pressure_vessel
-             için sıfır eşleşme).
+             feed_line/acoustic için sıfır eşleşme; 2026-08-04 A5/A2
+             bağlamalarıyla liner/ablat*/insulat* ve slosh beyanları
+             ÇÜRÜDÜ ve kaldırıldı/daraltıldı — bkz. _thermal_protection_block
+             ve _oxidizer_tank_slosh_block).
 
         Beyan uydurulmaz: modellenen bir şeyi "modellenmiyor" ilan etmek de
         yalandır (sıvı motorda min_throttle beyanı böyle çürümüştü). Bu
         yüzden yalnız yokluğu doğrulanan kalemler listelenir; zaten kendi
         bloğunda beyanlı olanlar (boğaz erozyonu 'rigid throat', kinetik
-        verim 'not_modelled' teşhisi, çok-port eşdeğer modeli uyarısı)
-        BURADA TEKRARLANMAZ — tek kaynak ilkesi.
+        verim 'not_modelled' teşhisi, çok-port eşdeğer modeli uyarısı,
+        slosh bloğunun sabit-1g beyanı, astar bloğunun kuple olmayan cidar
+        geçmişi beyanı) BURADA TEKRARLANMAZ — tek kaynak ilkesi.
         """
         return {
             'feed_system': (
@@ -2457,20 +3071,20 @@ class HybridRocketEngine:
                 'exists in this solver; the only stability check is the '
                 'SP-8089 feed-coupled pressure-drop (dP/Pc) criterion '
                 'reported by the injector module and the blowdown solver.'),
-            'thermal_protection_liner': (
-                'NOT_MODELLED: ablative liner / insulation thermal '
-                'protection between the grain and the case, and post-'
-                'combustion chamber insulation, are not sized '
-                '(hrma/analysis/thermal_protection.py exists but is not '
-                'wired to the hybrid solver); the wall thermal solution '
-                'puts the combustion-gas boundary layer directly on the '
-                'structural wall.'),
-            'oxidizer_tank_structure_slosh': (
-                'NOT_MODELLED: oxidizer tank structure (pressure-vessel '
-                'wall sizing, tank mass) and propellant slosh are not '
-                'modelled (pressure_vessel / slosh_analysis modules are not '
-                'wired to the hybrid solver); the tank_blowdown block '
-                'models only the thermodynamic state of the tank contents.'),
+            # v2.6.27 A5 bağlaması: 'thermal_protection_liner' beyanı
+            # KALDIRILDI — astar boyutlandırma ve cidar sıcaklık geçmişi
+            # artık thermal_protection bloğunda GERÇEKTEN hesaplanıyor;
+            # çürümüş beyan taşımak beyansızlıktan kötüdür (bu bloğun kendi
+            # ilkesi). Kalan sınırlar (astar-cidar kuplajı yok, malzeme
+            # seçimi tasarım kararı) bloğun KENDİ beyanlarındadır.
+            'oxidizer_tank_structure': (
+                'NOT_MODELLED: oxidizer tank STRUCTURE (pressure-vessel '
+                'wall sizing, tank structural mass) is not modelled (the '
+                'pressure_vessel module is not wired to the hybrid '
+                'solver). Propellant slosh IS now modelled in the '
+                'oxidizer_tank_slosh block (roadmap A2), and the '
+                'tank_blowdown block models the thermodynamic state of '
+                'the tank contents; neither sizes the tank wall.'),
             'throttle_response_restart': (
                 'NOT_MODELLED: no throttle response model and no restart '
                 'capability model; oxidizer flow-control hardware does not '
@@ -3038,6 +3652,21 @@ class HybridRocketEngine:
         # Çözücünün gerçek değerlerinden kurulur; uygulanamazsa NOT_MODELLED
         # gerekçesiyle boş döner (ayrıntı _tank_blowdown_block docstring'i).
         basic_results['tank_blowdown'] = self._tank_blowdown_block()
+
+        # --- A5 (yol haritası): kamara yalıtım astarı + çıplak cidar sıcaklık
+        # geçmişi — ısı transferi sonucunun gerçek akı/sıcaklıklarıyla beslenir;
+        # girdi yoksa NOT_MODELLED gerekçesiyle boş döner.
+        basic_results['thermal_protection'] = self._thermal_protection_block(
+            heat_transfer_results)
+
+        # --- A8 (yol haritası): fırlatma sahası rakım/ortam düzeltmesi —
+        # yalnız kullanıcı bir saha verdiyse; verilmediyse beyanla boş.
+        basic_results['launch_site_performance'] = self._launch_site_block()
+
+        # --- A2 (yol haritası): oksitleyici tankı slosh analizi — tank hacmi
+        # blowdown bloğundan (tek tank, tek hacim), g_eff sabit-1g beyanıyla.
+        basic_results['oxidizer_tank_slosh'] = self._oxidizer_tank_slosh_block(
+            basic_results['tank_blowdown'])
 
         # --- A10 (yol haritası): modellenmeyen fizik açıkça beyan edilir.
         basic_results['not_modelled'] = self._not_modelled_declarations()

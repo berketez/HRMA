@@ -8,11 +8,12 @@ YOKTUR; numpy + scipy.sparse yeterlidir (V2.7 dokümanı §3 ve §6 kararı).
 Planlanan modül yerleşimi (yol haritasıyla birebir):
 
     mesh_axisym.py        (z, r) düzleminde yapısal quad mesh üreticisi
-                          [BU DALGA — mevcut]
+                          [mevcut]
     structural_axisym.py  Eksenel simetrik lineer elastik çözücü + yakınsama
-                          sürücüsü [BU DALGA — mevcut]
+                          sürücüsü [mevcut]
     thermal_axisym.py     Eksenel simetrik GEÇİCİ ısı iletimi çözücüsü
-                          [SONRAKİ DALGA — henüz yok; V2.7 Aşama A]
+                          (geri Euler, Bartz konveksiyon BC, otomatik zaman
+                          adımı) [BU DALGA — mevcut; V2.7 Aşama A]
     planar_grain.py       Katı yakıt tanesi kesiti için 2B düzlemsel kip
                           (star/finocyl eksenel simetrik değildir)
                           [V2.7 Aşama C — henüz yok]
@@ -42,12 +43,29 @@ from hrma.fea.structural_axisym import (
     solve_with_refinement,
     von_mises,
 )
+from hrma.fea.thermal_axisym import (
+    AdiabaticBC,
+    AmbientBC,
+    ConvectionBC,
+    FixedTemperatureBC,
+    HeatFluxBC,
+    ThermalMaterial,
+    ThermalResult,
+    DEFAULT_DT_TOL,
+    DEFAULT_MAX_DT_HALVINGS,
+    DEFAULT_N_STEPS0,
+    STEFAN_BOLTZMANN_W_M2K4,
+    solve_transient,
+    solve_transient_auto,
+)
 
 # Çözücü kiplerinin dürüst durum beyanı (bkz. modül docstring'i).
 MODULE_STATUS = {
     "mesh_axisym": "IMPLEMENTED",
     "structural_axisym": "IMPLEMENTED",
-    "thermal_axisym": "NOT_IMPLEMENTED",   # sonraki dalga (V2.7 Aşama A)
+    "thermal_axisym": "IMPLEMENTED",       # bu dalga (V2.7 Aşama A) —
+                                           # doğrulama: tests/fea/
+                                           # test_termal_dogrulama.py
     "planar_grain": "NOT_IMPLEMENTED",     # V2.7 Aşama C
 }
 
@@ -67,5 +85,18 @@ __all__ = [
     "solve_pressure",
     "solve_with_refinement",
     "von_mises",
+    "AdiabaticBC",
+    "AmbientBC",
+    "ConvectionBC",
+    "FixedTemperatureBC",
+    "HeatFluxBC",
+    "ThermalMaterial",
+    "ThermalResult",
+    "DEFAULT_DT_TOL",
+    "DEFAULT_MAX_DT_HALVINGS",
+    "DEFAULT_N_STEPS0",
+    "STEFAN_BOLTZMANN_W_M2K4",
+    "solve_transient",
+    "solve_transient_auto",
     "MODULE_STATUS",
 ]
