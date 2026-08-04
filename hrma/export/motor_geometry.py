@@ -385,6 +385,7 @@ def liquid_results_to_motor_geometry(results):
     inj = r.get('injector_design') or {}
     ang = r.get('nozzle_angles') or {}
     cooling = r.get('cooling_system') or {}
+    n_elem = _first_positive(inj.get('number_of_elements'))
 
     out = {
         'motor_name': r.get('motor_name') or 'UZAYTEK_LIQUID',
@@ -401,8 +402,15 @@ def liquid_results_to_motor_geometry(results):
         'nozzle_angles': ang,
         'injector_design': {
             'injector_type': inj.get('injector_type'),
-            'number_of_orifices': int(_num(inj.get('number_of_elements'), 12)),
-            'orifice_diameter_mm': _num(inj.get('fuel_orifice_diameter_mm'), 1.5),
+            # v2.6.27: "12 delik / Ø1,5 mm" ikinci-katman uydurmaları
+            # KALDIRILDI. Sıvı motor bu değerleri her başarılı koşuda kendisi
+            # yayımlar (liquid_rocket_engine: number_of_elements /
+            # fuel_orifice_diameter_mm); yayımlamadıysa None taşınır ve
+            # imalat çıktısı (step_export) uydurmak yerine REDDEDER; çizim
+            # katmanı da 'hesaplanmadı' beyan eder (uydurma yedek YOK).
+            'number_of_orifices': (int(round(n_elem))
+                                   if n_elem is not None else None),
+            'orifice_diameter_mm': _real_mm(inj.get('fuel_orifice_diameter_mm')),
             'injection_pressure_drop_bar':
                 _num(inj.get('injection_pressure_drop_fuel_bar'), 0.0),
         },

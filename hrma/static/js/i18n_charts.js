@@ -1080,6 +1080,11 @@
     /* Sunucu mesajı desenleri (uyarı / doğrulama / hata metinleri).
        Yakalanan gruplar (sayı, malzeme adı, birim) korunur. */
     var MSG_PATTERNS = [
+        // Geçici-rejim (blowdown) kararlılık uyarıları — dinamik değerli
+        [/^t=(.+)s: ΔP\/Pc=(.+) < (.+) — combustion instability limit, simulation stopped$/,
+         't=$1 s: ΔP/Pc=$2 < $3 — yanma kararsızlığı sınırı, simülasyon durduruldu'],
+        [/^t=(.+)s: ΔP\/Pc=(.+) < (.+) — chugging risk \(SP-8089\)$/,
+         't=$1 s: ΔP/Pc=$2 < $3 — chugging riski (SP-8089)'],
         [/^(.+) value must be between (.+), given: (.+)$/,
          '$1 değeri $2 aralığında olmalı, girilen: $3', [1]],
         [/^(.+) must be positive, given: (.+)$/,

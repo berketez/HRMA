@@ -91,6 +91,15 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     düşülüyordu; ölçüldü (Ø100 mm katı motor): analiz 2.40 mm, STEP 4.50 mm —
     imalata analizde hiç doğrulanmamış bir cidar gidiyordu.
 
+    v2.6.27 (dürüstlük kapısı, enjektör): sonuç bir enjektör bloğu taşıyor
+    ama orifis sayısı/çapı çözülemiyorsa ``ValueError`` yükseltilir (eski
+    davranış: 12 × Ø1,5 mm uydurma plaka — ham sıvı sonucunda motorun
+    hesapladığı ``number_of_elements`` bile okunmuyordu). Sonuç enjektörden
+    hiç söz etmiyorsa parça grain ilkesindeki gibi (H4-1) çizilmez. Orifis
+    halka yarıçapı hiçbir çözücüde modellenmediği için desen verisi yoksa
+    katı, parça adına gömülü açık ``ASSUMED`` beyanıyla çizilir (bkz.
+    gövdedeki kapı notu).
+
     Faz 5B / H4-1 ve H4-2 (ölçüldü, HEAD 9d3728e):
 
     * Birim: girdi KOŞULSUZ metre kabul ediliyordu. ``/calculate_solid``
@@ -104,7 +113,7 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     """
     _require()
     from hrma.export.motor_geometry import (
-        normalise_export_geometry, resolve_grain_m)
+        _first_positive, normalise_export_geometry, resolve_grain_m)
 
     md, _report = normalise_export_geometry(motor_results)
     grain_geo, _grain_reason = resolve_grain_m(md)
@@ -153,6 +162,61 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     liner = min(max(0.02 * D_ch, 1.5), 5.0)
     cap = min(max(1.6 * wall, 8.0), 0.3 * rc + 8.0)
 
+    # ---- Enjektör girdileri: katı üretimine BAŞLAMADAN doğrula ----
+    # v2.6.27 dürüstlük kapısı: "12 delik × Ø1,5 mm" uydurma varsayılanları
+    # KALDIRILDI. Ölçüldü (denetçi, 2026-08-04): enjektör verisi hiç olmayan
+    # bir sonuçla bile buradan 12 delikli bir "imalat" plakası çıkıyordu;
+    # ham sıvı sonucunda ise motorun GERÇEKTEN hesapladığı plan
+    # (``number_of_elements`` / ``fuel_orifice_diameter_mm``) okunmayıp
+    # yerine yine 12 × Ø1,5 mm uyduruluyordu. Yeni sözleşme iki hâli ayırır:
+    #
+    # * Sonuç bir enjektör bloğu TAŞIYOR ama plan çözülemiyor (boş blok ya da
+    #   motorun ``status: not_analyzed`` beyanı) -> REDDET (A8 ilkesi).
+    #   Motorun kendi sözleşmesi (hybrid_rocket_engine, v2.6.26) delik planı
+    #   üretilemediğinde uydurma yedek üretmez — imalat çıktısı, motorun
+    #   reddettiği planı uyduramaz.
+    # * Sonuç enjektörden HİÇ söz etmiyor (ör. katı motor sonucu varsayılan
+    #   'hybrid' rotasından geçti) -> parça uydurulMAZ ve çizilMEZ — grain
+    #   ilkesinin (H4-1: "yalnız sonuçta gerçekten varsa üretilir") eşleniği.
+    #
+    # Doğrulama katı üretiminden ÖNCE yapılır ki ret hâlinde çalışma dizinine
+    # yarım dosya yazılmasın.
+    if has_injector:
+        inj = md.get('injector_design')
+        if not isinstance(inj, dict):
+            inj = md.get('injector')
+        if not isinstance(inj, dict):
+            has_injector = False  # sonuçta enjektör iddiası yok — çizilmez
+    if has_injector:
+        n_ori_f = _first_positive(inj.get('number_of_orifices'),
+                                  inj.get('n_holes'),
+                                  inj.get('number_of_elements'))
+        d_ori = _first_positive(inj.get('orifice_diameter_mm'),
+                                inj.get('hole_diameter'),
+                                inj.get('fuel_orifice_diameter_mm'))
+        if n_ori_f is None or d_ori is None:
+            raise ValueError(
+                'injector orifice count / diameter could not be resolved '
+                'from the analysis result (looked for injector_design / '
+                'injector: number_of_orifices | n_holes | number_of_elements '
+                'and orifice_diameter_mm | hole_diameter | '
+                'fuel_orifice_diameter_mm; the injector circuit model may '
+                'have reported status=not_analyzed); refusing to emit a '
+                'manufacturing STEP built from generator defaults.')
+        n_ori = int(round(n_ori_f))
+        # Halka yarıçapı: hiçbir çözücü orifis YERLEŞİMİNİ modellemez (devre
+        # modeli sayı/çap/ΔP verir, radyal konum vermez). Delik sayısı/çapının
+        # aksine bu "çözülemedi" değil "modellenmiyor" hâlidir; her enjektör
+        # STEP'ini reddetmek imalat çıktısını tümden öldürürdü. Depodaki
+        # yerleşik kalıp (safety_analysis 'ASSUMED L/D', water_hammer
+        # 'ASSUMED material') izlenir: değer gerçek desen verisinden
+        # gelmiyorsa katı ANCAK açık 'ASSUMED' beyanıyla çizilir ve beyan
+        # STEP dosyasının içinde, parça adında taşınır (CAD ağacında görünür).
+        ring_r_mm = _first_positive(inj.get('orifice_ring_radius_mm'))
+        ring_assumed = ring_r_mm is None
+        if ring_assumed:
+            ring_r_mm = 0.7 * rc
+
     files = {}
     solids = []
 
@@ -195,15 +259,14 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
         solids.append(grain)
 
     # ---- Enjektör plakası: gerçek orifis delikleri ----
+    # Delik sayısı/çapı yukarıdaki kapıdan gelir (çözülemediyse buraya hiç
+    # ulaşılmaz); halka yarıçapı desen verisi yoksa 'ASSUMED' beyanıyla çizilir.
     if has_injector:
-        inj = md.get('injector_design') or md.get('injector') or {}
-        n_ori = int(_num(inj.get('number_of_orifices') or inj.get('n_holes'), 12))
-        d_ori = _num(inj.get('orifice_diameter_mm') or inj.get('hole_diameter'), 1.5)
         t_inj = min(max(0.9 * cap, 6.0), 24.0)
         with BuildPart() as inj_bp:
             with Locations((4 + t_inj / 2, 0, 0)):
                 Cylinder(radius=rc - 0.5, height=t_inj, rotation=(0, 90, 0))
-            ring_r = 0.7 * rc
+            ring_r = float(ring_r_mm)
             k = max(n_ori, 1)
             for i in range(k):
                 a = 2 * np.pi * i / k
@@ -213,8 +276,12 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
                              rotation=(0, 90, 0), mode=Mode.SUBTRACT)
         injector = inj_bp.part
         files['injector'] = os.path.join(out_dir, f'{name}_injector.step')
+        # Beyan parça ADINDA taşınır: STEP dosyasına ve CAD ağacına gömülür,
+        # dosyayı açan imalatçı varsayımı görmeden deliği konumlandıramaz.
+        injector.label = (
+            'injector (orifice ring radius ASSUMED 0.7*R_chamber - not from '
+            'pattern analysis)' if ring_assumed else 'injector')
         _export_step_atomic(injector, files['injector'])
-        injector.label = 'injector'
         solids.append(injector)
 
     # ---- Assembly (tek dosya) ----
@@ -267,8 +334,19 @@ def generate_tank_step(tank_data, out_dir=None):
     for key in ('fuel_tank', 'oxidizer_tank'):
         td = (tank_data or {}).get(key) or {}
         # Girdi ZATEN mm — burada ölçek dönüşümü YOK (bkz. docstring).
-        D = _num(td.get('diameter'), 300.0)
-        Lc = _num(td.get('length'), 800.0)
+        # v2.6.27 dürüstlük kapısı: 300 / 800 mm uydurma varsayılanları
+        # KALDIRILDI. Ölçüldü (denetçi, 2026-08-04): ``generate_tank_step({})``
+        # hiç veri olmadan iki eksiksiz "imalat" tankı üretiyordu — Ø300 mm,
+        # 800 mm gövde, tamamı üreteç varsayımı. Kamara kolundaki ilke burada
+        # da geçerlidir: ölçü çözülemiyorsa STEP ÜRETİLMEZ.
+        D = _num(td.get('diameter'), None)
+        Lc = _num(td.get('length'), None)
+        if D is None or Lc is None or D <= 0.0 or Lc <= 0.0:
+            raise ValueError(
+                f'{key}.diameter / {key}.length could not be resolved from '
+                'the tank analysis result; refusing to emit a manufacturing '
+                'STEP built from generator defaults. Run the tank sizing '
+                'analysis first.')
         for label, val in (('diameter', D), ('length', Lc)):
             if not (_TANK_MIN_MM <= val <= _TANK_MAX_MM):
                 raise ValueError(

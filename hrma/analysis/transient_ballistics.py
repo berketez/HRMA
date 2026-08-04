@@ -423,16 +423,17 @@ class TransientBallistics:
                 dp_ratio = (self.tank.pressure - Pc_pa) / Pc_pa
                 if dp_ratio < DP_RATIO_UNSTABLE:
                     event = 'injector_unstable'
+                    # EN üretilir; TR çevirisi i18n_charts.js MSG_PATTERNS'te
                     warnings_list.append(
                         f"t={t:.2f}s: ΔP/Pc={dp_ratio:.3f} < "
-                        f"{DP_RATIO_UNSTABLE} — yanma kararsızlığı sınırı, "
-                        f"simülasyon durduruldu")
+                        f"{DP_RATIO_UNSTABLE} — combustion instability "
+                        f"limit, simulation stopped")
                     break
                 if dp_ratio < DP_RATIO_WARN and not any(
                         'chugging' in w for w in warnings_list):
                     warnings_list.append(
                         f"t={t:.2f}s: ΔP/Pc={dp_ratio:.2f} < {DP_RATIO_WARN} "
-                        f"— chugging riski (SP-8089)")
+                        f"— chugging risk (SP-8089)")
 
             F = self._thrust_coefficient(Pc_pa, eps_cur, pe_cur, cfm_cur) \
                 * Pc_pa * At

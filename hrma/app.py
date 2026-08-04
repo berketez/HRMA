@@ -664,6 +664,49 @@ def _reject_malformed_json_body():
     return None
 
 
+# --- Örnek proje tohumlama (ilk açılış) -------------------------------------
+# Kurulu üründe kullanıcı proje dizini ilk açılışta BOŞTUR; kullanıcıyı boş
+# formla bırakmamak için paketle gelen üç örnek .hrma projesi BİR KEZ
+# kopyalanır. Mantık hrma/utils/projects.py::seed_examples içindedir: damga
+# dosyası (.seeded_v1) sayesinde kullanıcı örnekleri silse de geri gelmezler,
+# var olan dosya asla ezilmez. Gerçek giriş noktaları (hrma/run.py,
+# packaging/launcher.py) yalnız 'hrma.app'i import ettiği için kanca burada,
+# İLK İSTEK anında çalışır — modül import'unda DEĞİL: testler bu modülü
+# import eder ve import yan etkisi gerçek kullanıcı dizinine yazardı.
+_example_seed_state = {'done': False}
+_EXAMPLE_SEED_LOCK = threading.Lock()
+
+
+@app.before_request
+def _seed_examples_once():
+    """İlk istekte örnek projeleri kullanıcı proje dizinine tohumlar.
+
+    pytest koşusunda atlanır: test istemcisi de before_request kancalarını
+    çalıştırır ve HRMA_PROJECTS_DIR ayarlamayan onlarca test gerçek
+    ~/Documents/HRMA/projects dizinine yazmış olurdu. Kancanın kendi bekçisi
+    (tests/test_ornek_tohumlama.py) bu bayrağı kaldırıp tmp dizinle sınar.
+    """
+    if _example_seed_state['done']:
+        return None
+    if 'PYTEST_CURRENT_TEST' in os.environ:
+        return None
+    with _EXAMPLE_SEED_LOCK:
+        if _example_seed_state['done']:
+            return None
+        # Bayrak, deneme BAŞARISIZ olsa da kalkar: her istekte diske vurmak
+        # olmaz; bir sonraki uygulama açılışı zaten yeniden dener.
+        _example_seed_state['done'] = True
+        try:
+            from hrma.utils import projects as _project_store
+            info = _project_store.seed_examples()
+            if info['status'] == 'seeded' and info['copied']:
+                app.logger.info('Example projects seeded: %s',
+                                ', '.join(info['copied']))
+        except Exception as seed_error:  # tohumlama isteği ASLA kırmaz
+            app.logger.warning('Example project seeding failed: %s', seed_error)
+    return None
+
+
 #: Hata gövdesindeki tek bir metin alanının üst sınırı (karakter).
 #: ÖLÇÜLDÜ (ast taraması, ``hrma/app.py``): 300 karakteri geçen tek satırlık
 #: tek bir ileti sabiti var — ``app.py:5438``, 343 karakter. 2000 bunun beş
@@ -1288,7 +1331,18 @@ def calculate():
         # Log warnings but continue
         if validation_messages:
             app.logger.info(f"Validation warnings: {validation_messages}")
-        
+
+        # P-6 (scratchpad/perf_audit_v262.md [P-6]): 10 Plotly figürünün
+        # üretimi istek süresinin yarısından fazlasıydı (ölçülen: 674 ms'nin
+        # ~%54'ü). include_plots=false gönderen istemci figür üretimini
+        # TOPTAN atlar; alan verilmezse davranış birebir eskisidir (tam figür
+        # seti). Bekçi + ölçüm: tests/test_istek_performansi.py.
+        include_plots = bool(data.get('include_plots', True))
+        # P-5 (perf_audit_v262 [P-5]): ?slim=1 sorgu parametresi ön yüzün hiç
+        # okumadığı ağır alanları düşürür — sonuç sözlüğü kurulduktan sonra,
+        # aşağıda uygulanır. Varsayılan (slim'siz) davranış değişmez.
+        slim = request.args.get('slim') == '1'
+
         # Create engine instance with support for total impulse
         # Only pass user-provided values, let the engine use fuel-specific defaults
         engine = HybridRocketEngine(
@@ -1519,20 +1573,26 @@ def calculate():
             app.logger.warning(f"Validation report skipped: {val_error}")
 
         # Create visualizations - Use improved visuals
-        try:
-            # New improved motor cross-section
-            motor_plot = create_improved_motor_cross_section(motor_results)
-        except Exception:
-            # Fallback to old version if new one fails
-            motor_plot = create_motor_plot(motor_results)
-        
-        try:
-            # New improved injector design
-            injector_plot = create_improved_injector_design(injector_results)
-        except Exception:
-            # Fallback to old version if new one fails
-            injector_plot = create_injector_plot(injector_results, data['injector_type'])
-        performance_plots = create_performance_plots(motor_results, injector_results)
+        # P-6: include_plots=false ise figür fonksiyonları HİÇ çağrılmaz;
+        # 'plots' aşağıda null olarak beyan edilir (boş figür uydurulmaz).
+        motor_plot = None
+        injector_plot = None
+        performance_plots = None
+        if include_plots:
+            try:
+                # New improved motor cross-section
+                motor_plot = create_improved_motor_cross_section(motor_results)
+            except Exception:
+                # Fallback to old version if new one fails
+                motor_plot = create_motor_plot(motor_results)
+
+            try:
+                # New improved injector design
+                injector_plot = create_improved_injector_design(injector_results)
+            except Exception:
+                # Fallback to old version if new one fails
+                injector_plot = create_injector_plot(injector_results, data['injector_type'])
+            performance_plots = create_performance_plots(motor_results, injector_results)
 
         # plots.injector = enjektör tip şeması, plots.performance = dashboard.
         # (Eski davranış şemayı dashboard ile eziyordu; ayrı div'lerde
@@ -1552,7 +1612,9 @@ def calculate():
         motor_3d_plot = None
 
         # Generate combustion analysis
-        if data.get('include_combustion_analysis', True):
+        # (combustion_data yalnız figüre gider; include_plots=false iken
+        # analizörü kurmak da gereksiz — P-6.)
+        if include_plots and data.get('include_combustion_analysis', True):
             try:
                 from hrma.engines.combustion_analysis import CombustionAnalyzer
                 combustion_analyzer = CombustionAnalyzer()
@@ -1579,7 +1641,7 @@ def calculate():
         # (Yapısal analiz çifte hesabı da kaldırıldı — bkz. yukarıdaki not.)
 
         # Generate real-time dashboard
-        if data.get('include_realtime_dashboard', True):
+        if include_plots and data.get('include_realtime_dashboard', True):
             try:
                 # Gerçek port_history serilerinden kur (eski 'time_history'
                 # anahtarı hiç üretilmiyordu — alt 3 panel hep boştu)
@@ -1590,7 +1652,7 @@ def calculate():
         
         # Generate 3D visualization
         motor_3d_plot = None
-        if data.get('include_3d_visualization', True):
+        if include_plots and data.get('include_3d_visualization', True):
             try:
                 motor_3d_plot = create_3d_motor_visualization(motor_results)
             except Exception as viz_error:
@@ -1605,15 +1667,15 @@ def calculate():
         mass_fractions_plot = None
         thrust_altitude_plot = None
         
-        if 'altitude_performance' in motor_results:
+        if include_plots and 'altitude_performance' in motor_results:
             altitude_performance_plot = create_altitude_performance_plot(
                 motor_results['altitude_performance']['altitude_performance']
             )
-        
-        if 'mass_fractions' in motor_results:
+
+        if include_plots and 'mass_fractions' in motor_results:
             mass_fractions_plot = create_mass_fractions_plot(motor_results['mass_fractions'])
-        
-        if 'thrust_altitude_analysis' in motor_results:
+
+        if include_plots and 'thrust_altitude_analysis' in motor_results:
             thrust_altitude_plot = create_thrust_altitude_plot(
                 motor_results['thrust_altitude_analysis']['thrust_altitude_data']
             )
@@ -1728,7 +1790,11 @@ def calculate():
             # Calculate trajectory
             try:
                 trajectory_data = trajectory_analyzer.calculate_trajectory(motor_results, launch_params)
-                trajectory_plot = trajectory_analyzer.create_trajectory_plots(trajectory_data)
+                # P-6: yörünge VERİSİ her koşulda hesaplanır (sunum değil,
+                # sonuç); yalnız figürü include_plots'a bağlıdır.
+                trajectory_plot = (
+                    trajectory_analyzer.create_trajectory_plots(trajectory_data)
+                    if include_plots else None)
             except Exception as traj_error:
                 print(f"Trajectory calculation error: {str(traj_error)}")
                 trajectory_data = {'error': f'Trajectory calculation failed: {str(traj_error)}'}
@@ -1763,7 +1829,9 @@ def calculate():
                 'combustion_analysis': combustion_analysis_plot,
                 'realtime_dashboard': real_time_dashboard_plot,
                 'motor_3d': motor_3d_plot
-            }
+            # P-6: figürler istenmediyse 'plots' null — anahtarların None ile
+            # tek tek doldurulması "figür var ama boş" izlenimi verirdi.
+            } if include_plots else None
         }
 
         # ValidationSystem raporu (UI kontratı: results.validation)
@@ -1777,6 +1845,28 @@ def calculate():
             data, motor_results, _CALCULATE_SOLVER_OWNED_FIELDS)
         if inputs_not_used:
             results['inputs_not_used'] = inputs_not_used
+
+        # P-5 (perf_audit_v262 [P-5]) — ?slim=1: ön yüzün HİÇ okumadığı iki
+        # ağır alan düşürülür (ölçülen: trajectory.trajectory 597,8 KB ham
+        # zaman serisi + trajectory.motor_data 70,5 KB, üst seviye 'motor'
+        # ile bit-aynı kopya; tüketici taraması perf_audit_v262 [P-5]).
+        # Yörünge ÖZETİ (apogee, evreler, kurtarma, uyarılar) yerinde kalır;
+        # düşürülen alanlar yanıtta AÇIKÇA beyan edilir — sessiz kesinti yok.
+        # Bu dalga yalnız altyapı + şema kilidi
+        # (tests/test_istek_performansi.py); ön yüz geçişi sonraki dalga.
+        if slim:
+            results['slim'] = True
+            if isinstance(trajectory_data, dict) and 'error' not in trajectory_data:
+                slim_trajectory = {
+                    k: v for k, v in trajectory_data.items()
+                    if k not in ('trajectory', 'motor_data')}
+                slim_trajectory['omitted_fields'] = {
+                    'trajectory': ('omitted by slim=1: raw time series; '
+                                   'the front end reads plots.trajectory'),
+                    'motor_data': ("omitted by slim=1: bit-identical copy "
+                                   "of the top-level 'motor' block"),
+                }
+                results['trajectory'] = slim_trajectory
 
         # Sanitize results to handle NaN and Infinity values
         try:
@@ -2912,6 +3002,29 @@ def water_hammer_api():
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
+class EngineContractViolation(TypeError):
+    """Motor ``calculate_performance()`` sözleşme ihlali (tip kapısı).
+
+    v2.6.27 — sessiz 200 kusuru (denetçi kanıtı, 2026-08-04): motor dict
+    yerine ``None`` döndürdüğünde ardındaki geniş çizim ``try/except``leri
+    ``None.setdefault`` hatasını yutuyor, uç ``success`` loglayıp HTTP 200
+    ``null`` gövdesi dönüyordu. Sözlük dışı sonuç sunucu tarafı bir sözleşme
+    ihlalidir — istemci hatası (400) değil; bu sınıf hata dalında 500'e
+    eşlenir. ``TypeError`` alt sınıfı olması bilinçli: kapı bir tip kapısıdır
+    ve gövdedeki ``error_type`` alanı da bunu söyler.
+    """
+
+
+def _require_dict_result(results, engine_name, route_name):
+    """Tip kapısı: motor sonucu dict değilse EngineContractViolation yükseltir."""
+    if not isinstance(results, dict):
+        raise EngineContractViolation(
+            f'{engine_name}.calculate_performance() must return a dict, got '
+            f'{type(results).__name__}; refusing to report {route_name} '
+            f'success for a result that was never computed.')
+    return results
+
+
 @app.route('/calculate_solid', methods=['POST'])
 def calculate_solid():
     trace_id = _request_trace_id()
@@ -3036,13 +3149,23 @@ def calculate_solid():
         # Calculate motor performance
         results = motor.calculate_performance()
 
+        # v2.6.27 tip kapısı — sözlük dışı sonuç burada durdurulur; aşağıdaki
+        # çizim try/except'leri artık DARALTILDIĞI için bu hatayı yutamaz
+        # (eski akış: None.setdefault yutulur, 'success' loglanır, HTTP 200
+        # 'null' döner — bkz. EngineContractViolation).
+        results = _require_dict_result(
+            results, 'SolidRocketEngine', 'calculate_solid')
+
         # Sanitize results
         sanitized_results = sanitize_json_values(results)
 
         # Hibrit paritesi: motor kesiti + ortak geometri (2026-07-13)
+        # v2.6.27: geometri dönüşümü try DIŞINA alındı — geniş kapsam,
+        # motor sonucunun bozukluğunu da yutuyordu; koruma yalnız kesit
+        # ÇİZİMİNİN kendisi içindir.
+        geo = solid_results_to_motor_geometry(sanitized_results)
+        sanitized_results['motor_geometry'] = sanitize_json_values(geo)
         try:
-            geo = solid_results_to_motor_geometry(sanitized_results)
-            sanitized_results['motor_geometry'] = sanitize_json_values(geo)
             sanitized_results.setdefault('plots', {})['motor'] = \
                 create_improved_motor_cross_section(geo, motor_type='solid')
         except Exception:
@@ -3073,13 +3196,115 @@ def calculate_solid():
               f"type={type(e).__name__}")
         print(f"[{trace_id}] Traceback: {error_traceback}")
         # v2.6.26: traceback yanittan cikarildi (bkz. /calculate notu).
+        # v2.6.27 tip kapısı: motor sözleşme ihlali SUNUCU hatasıdır — 500.
+        # Diğer istisnalar (girdi doğrulama vb.) 400 olarak kalır.
         return jsonify({
             'error': str(e),
             'error_type': type(e).__name__,
             # Kullanıcı destek talebinde bu kimliği verir; log satırı
             # gövdeyi saklamadan olayla eşleşir.
             'trace_id': trace_id
-        }), 400
+        }), (500 if isinstance(e, EngineContractViolation) else 400)
+
+# --- Motor stdout tekrar bastırma (konsol gürültüsü) ------------------------
+# ÖLÇÜLDÜ (2026-08-04, scratchpad noise_before): TEK /calculate_liquid çağrısı
+# stdout'a 301 satır basıyor, bunların yalnız 105'i benzersiz — "NASA
+# Validation" bloğu 27, "Effective C* set" satırları 4'er kez aynen
+# tekrarlıyor (kaynak: hrma/engines/liquid_rocket_engine.py; motor dosyası bu
+# bakım dalgasının kapsamı DIŞINDA, o yüzden süzgeç burada, çağıran katmanda).
+# Kural: bilgi SİLİNMEZ — her benzersiz satır İLK görüldüğü anda aynen basılır,
+# yalnız birebir aynı tekrarlar bastırılır ve kapanışta tek satırlık sayım
+# beyan edilir (total/unique/suppressed). Bekçi + ölçüm:
+# tests/test_istek_performansi.py.
+
+class _ThreadLocalLineDedup(io.TextIOBase):
+    """sys.stdout üstüne BİR kez takılan, iş parçacığı-yerel süzgeç.
+
+    Kapsam (begin_scope/end_scope) yalnız kendi iş parçacığında etkilidir;
+    kapsam yokken her yazma olduğu gibi alttaki akışa geçer. Böylece eşzamanlı
+    bir başka istek ne süzülür ne bozulur — contextlib.redirect_stdout'un
+    süreç-genel (ve iç içe çıkışta yanlış akım bırakabilen) davranışından
+    bilinçli olarak kaçınıldı.
+    """
+
+    def __init__(self, target):
+        self._target = target
+        self._scopes = threading.local()
+
+    @property
+    def target(self):
+        return self._target
+
+    def writable(self):
+        return True
+
+    def write(self, s):
+        state = getattr(self._scopes, 'state', None)
+        if state is None:
+            return self._target.write(s)
+        state['buffer'] += s
+        while '\n' in state['buffer']:
+            line, state['buffer'] = state['buffer'].split('\n', 1)
+            state['total'] += 1
+            seen = state['seen']
+            count = seen.get(line, 0)
+            seen[line] = count + 1
+            if count == 0:  # ilk görülüş aynen geçer, tekrarlar bastırılır
+                self._target.write(line + '\n')
+        return len(s)
+
+    def flush(self):
+        self._target.flush()
+
+    def begin_scope(self):
+        state = {'buffer': '', 'seen': {}, 'total': 0}
+        self._scopes.state = state
+        return state
+
+    def end_scope(self):
+        state = getattr(self._scopes, 'state', None)
+        self._scopes.state = None
+        if state and state['buffer']:
+            # Satır sonu gelmemiş kuyruk parçası kaybolmaz, aynen basılır.
+            self._target.write(state['buffer'])
+        return state
+
+
+_STDOUT_DEDUP_LOCK = threading.Lock()
+
+
+def _install_stdout_dedup():
+    """Süzgeci sys.stdout üstüne (bir kez) tak ve döndür.
+
+    pytest her testte sys.stdout'u kendi yakalayıcısıyla değiştirir; o yüzden
+    "takılı mı" denetimi her çağrıda yeniden yapılır — eski sarmalayıcı
+    değiştirilen akışla birlikte doğal olarak devreden çıkar.
+    """
+    with _STDOUT_DEDUP_LOCK:
+        if not isinstance(sys.stdout, _ThreadLocalLineDedup):
+            sys.stdout = _ThreadLocalLineDedup(sys.stdout)
+        return sys.stdout
+
+
+@contextlib.contextmanager
+def _dedup_engine_stdout(trace_id, route_name):
+    """Motor hesabı boyunca birebir tekrar eden stdout satırlarını bastır.
+
+    Çıkışta tek satırlık sayım basar (yalnız tekrar VARSA): kaç satır geldi,
+    kaçı benzersizdi, kaçı bastırıldı — bilgi silinmez, tekrar kesilir.
+    """
+    stream = _install_stdout_dedup()
+    stream.begin_scope()
+    try:
+        yield
+    finally:
+        state = stream.end_scope()
+        if state and state['total'] > len(state['seen']):
+            suppressed = state['total'] - len(state['seen'])
+            print(f"[{trace_id}] {route_name}.stdout_dedup "
+                  f"total={state['total']} unique={len(state['seen'])} "
+                  f"suppressed={suppressed}")
+
 
 @app.route('/calculate_liquid', methods=['POST'])
 def calculate_liquid():
@@ -3155,39 +3380,52 @@ def calculate_liquid():
         # göremiyordu. Motor artık aralık doğrulamalı `overrides` kabul ediyor;
         # bağlanamayan alanlar sonuçta `unwired_inputs`, aralık dışı değerler
         # `input_warnings` ile AÇIKÇA beyan ediliyor (sessiz yutma yok).
-        engine = LiquidRocketEngine(
-            thrust=thrust,
-            chamber_pressure=chamber_pressure,
-            mixture_ratio=mixture_ratio,
-            fuel_type=data.get('fuel_type', 'rp1'),
-            oxidizer_type=data.get('oxidizer_type', 'lox'),
-            cooling_type=data.get('cooling_type', 'regenerative'),
-            injector_type=data.get('injector_type', 'impinging'),
-            overrides=data
-        )
-        
-        # Calculate engine performance
-        results = engine.calculate_performance()
+        # Konsol gürültüsü: motor iç döngüleri aynı bilgi satırlarını yüzlerce
+        # kez basıyor (ölçüm ve gerekçe _ThreadLocalLineDedup üstündeki notta).
+        # Süzgeç yalnız motor hesabı + figür üretimini sarar; rotanın kendi
+        # [trace_id] satırları kapsam dışında kalır.
+        with _dedup_engine_stdout(trace_id, 'calculate_liquid'):
+            engine = LiquidRocketEngine(
+                thrust=thrust,
+                chamber_pressure=chamber_pressure,
+                mixture_ratio=mixture_ratio,
+                fuel_type=data.get('fuel_type', 'rp1'),
+                oxidizer_type=data.get('oxidizer_type', 'lox'),
+                cooling_type=data.get('cooling_type', 'regenerative'),
+                injector_type=data.get('injector_type', 'impinging'),
+                overrides=data
+            )
 
-        # Sanitize results
-        sanitized_results = sanitize_json_values(results)
+            # Calculate engine performance
+            results = engine.calculate_performance()
 
-        # Hibrit paritesi: motor kesiti + ortak geometri (2026-07-13)
-        try:
+            # v2.6.27 tip kapısı — bkz. calculate_solid'deki eş kapı ve
+            # EngineContractViolation gerekçesi (sessiz 200 kusuru).
+            results = _require_dict_result(
+                results, 'LiquidRocketEngine', 'calculate_liquid')
+
+            # Sanitize results
+            sanitized_results = sanitize_json_values(results)
+
+            # Hibrit paritesi: motor kesiti + ortak geometri (2026-07-13)
+            # v2.6.27: geometri dönüşümü try DIŞINA alındı — geniş kapsam,
+            # motor sonucunun bozukluğunu da yutuyordu; koruma yalnız kesit
+            # ÇİZİMİNİN kendisi içindir.
             geo = liquid_results_to_motor_geometry(sanitized_results)
             sanitized_results['motor_geometry'] = sanitize_json_values(geo)
-            sanitized_results.setdefault('plots', {})['motor'] = \
-                create_improved_motor_cross_section(geo, motor_type='liquid')
-        except Exception:
-            traceback.print_exc()  # kesit çizimi hesabı düşürmesin
+            try:
+                sanitized_results.setdefault('plots', {})['motor'] = \
+                    create_improved_motor_cross_section(geo, motor_type='liquid')
+            except Exception:
+                traceback.print_exc()  # kesit çizimi hesabı düşürmesin
 
-        # Hibrit paritesi (v2.5.2): performans panosu artık motor tipini
-        # sonuç sözlüğünden kendisi tespit ediyor, tek argümanla çağrılır.
-        try:
-            sanitized_results.setdefault('plots', {})['performance'] = \
-                create_performance_plots(sanitized_results)
-        except Exception:
-            traceback.print_exc()  # pano hesabı düşürmesin
+            # Hibrit paritesi (v2.5.2): performans panosu artık motor tipini
+            # sonuç sözlüğünden kendisi tespit ediyor, tek argümanla çağrılır.
+            try:
+                sanitized_results.setdefault('plots', {})['performance'] = \
+                    create_performance_plots(sanitized_results)
+            except Exception:
+                traceback.print_exc()  # pano hesabı düşürmesin
 
         # Öğretici modda üretilen sonuç, kendi girdisinin nereden geldiğini
         # TAŞIR: sayıya bakan biri bunun kullanıcı tasarımı değil tanıtım
@@ -3206,11 +3444,12 @@ def calculate_liquid():
               f"type={type(e).__name__}")
         print(f"[{trace_id}] Traceback: {error_traceback}")
         # v2.6.26: traceback yanittan cikarildi (bkz. /calculate notu).
+        # v2.6.27 tip kapısı: motor sözleşme ihlali SUNUCU hatasıdır — 500.
         return jsonify({
             'error': str(e),
             'error_type': type(e).__name__,
             'trace_id': trace_id
-        }), 400
+        }), (500 if isinstance(e, EngineContractViolation) else 400)
 
 @app.route('/api/solid-monte-carlo', methods=['POST'])
 def solid_monte_carlo():

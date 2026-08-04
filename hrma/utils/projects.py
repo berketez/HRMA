@@ -125,6 +125,123 @@ def _trash_dir() -> str:
     return path
 
 
+# --- Örnek proje tohumlama --------------------------------------------------
+
+#: Tohumlama damga dosyası. Nokta ile başlar: list_projects() dot-dosyaları
+#: zaten atlıyor, damga hiçbir listede proje olarak görünmez. Sürüm eki
+#: bilinçli: ilerde örnek seti köklü değişirse .seeded_v2 ile bir kez daha
+#: (yine ezmeden) tohumlanabilir.
+SEED_STAMP_FILENAME = '.seeded_v1'
+
+
+def _package_dir() -> str:
+    """hrma paket dizini (…/hrma). Testler bunu monkeypatch'ler."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def examples_source_dir() -> Optional[str]:
+    """Paketle gelen örnek .hrma projelerinin dizini; yoksa None.
+
+    Öncelik: HRMA_EXAMPLES_DIR ortam değişkeni (test/tanılama) > paket
+    kökünün YANINDAKİ examples/ dizini. "Paket kökünün yanı" desteklenen
+    her yerleşimde aynı yere düşer (self_install.py yerleşim şeması):
+
+      - geliştirme (git deposu): <depo>/hrma        → <depo>/examples
+      - paketli macOS: …/Contents/Resources/app/hrma → …/Resources/app/examples
+      - paketli Windows: <INSTDIR>/app/hrma          → <INSTDIR>/app/examples
+
+    Dizin gerçekten yoksa None döner — uydurulmuş bir yol döndürülmez,
+    tohumlama açıkça 'no_source' bildirir.
+    """
+    override = os.environ.get('HRMA_EXAMPLES_DIR')
+    if override:
+        return override if os.path.isdir(override) else None
+    candidate = os.path.join(os.path.dirname(_package_dir()), 'examples')
+    return candidate if os.path.isdir(candidate) else None
+
+
+def seed_examples() -> Dict:
+    """Paket örneklerini kullanıcı proje dizinine BİR KEZ tohumla.
+
+    Kurallar (v2.6.26 bakım dalgası):
+      * Damga dosyası (SEED_STAMP_FILENAME) varsa HİÇBİR şey yapılmaz —
+        kullanıcı örnekleri sildiyse her açılışta geri gelmezler.
+      * Var olan dosya ASLA ezilmez (kullanıcı aynı adla kendi projesini
+        kaydetmiş olabilir); atlanan dosyalar dönüşte beyan edilir.
+      * Ad kuralına uymayan kaynak dosyalar kopyalanmaz (kopyalansalar
+        list_projects onları 'unloadable' işaretlerdi) ve beyan edilir.
+      * Kopyalama atomiktir (tempfile + os.replace — _atomic_write_json
+        deseni); yarım dosya proje dizinine hiçbir koşulda düşmez.
+
+    Dönüş: {'status': 'seeded'|'already_seeded'|'no_source',
+            'copied': [...], 'skipped_existing': [...],
+            'skipped_invalid': [...], 'source_dir': str|None}
+    """
+    dest = projects_dir()
+    stamp_path = os.path.join(dest, SEED_STAMP_FILENAME)
+    result: Dict[str, Any] = {
+        'copied': [], 'skipped_existing': [], 'skipped_invalid': [],
+        'source_dir': None,
+    }
+    if os.path.exists(stamp_path):
+        result['status'] = 'already_seeded'
+        return result
+
+    source = examples_source_dir()
+    result['source_dir'] = source
+    if source is None:
+        result['status'] = 'no_source'
+        return result
+    try:
+        filenames = sorted(os.listdir(source))
+    except OSError:
+        result['status'] = 'no_source'
+        return result
+
+    for filename in filenames:
+        if filename.startswith('.') or not filename.endswith(FILE_EXT):
+            continue
+        stem = filename[:-len(FILE_EXT)]
+        try:
+            validate_name(stem)
+        except ProjectNameError:
+            result['skipped_invalid'].append(filename)
+            continue
+        target = os.path.join(dest, filename)
+        if os.path.exists(target):
+            result['skipped_existing'].append(filename)
+            continue
+        with open(os.path.join(source, filename), 'rb') as f:
+            blob = f.read()
+        fd, tmp_path = tempfile.mkstemp(
+            prefix='.hrma_seed_', suffix='.tmp', dir=dest)
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(blob)
+            os.replace(tmp_path, target)  # atomik: tmp + rename
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        result['copied'].append(filename)
+
+    # Damga, kopyalama BİTİNCE yazılır: yarıda kesilen tohumlama bir sonraki
+    # açılışta (yine ezmeden) tamamlanır. Hiç dosya kopyalanmamış olsa bile
+    # yazılır — hepsi zaten vardıysa da tohumlama "yapılmış" sayılır.
+    _atomic_write_json(stamp_path, {
+        'seeded_at': datetime.now().isoformat(timespec='seconds'),
+        'app_version': APP_VERSION,
+        'source_dir': source,
+        'copied': result['copied'],
+        'skipped_existing': result['skipped_existing'],
+        'skipped_invalid': result['skipped_invalid'],
+    })
+    result['status'] = 'seeded'
+    return result
+
+
 # --- Ad ve yol denetimi -----------------------------------------------------
 
 def validate_name(name: Any) -> str:

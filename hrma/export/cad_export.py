@@ -565,13 +565,20 @@ class TankCADGenerator:
             # doğru görünüyordu çünkü 0.3 m × 1000 = 300 mm idi — yani hata
             # yalnızca veri VARKEN ortaya çıkıyordu.
             step_files = generate_tank_step({
+                # v2.6.27 dürüstlük kapısı: buradaki 300.0 / 800.0 mm uydurma
+                # varsayılanları KALDIRILDI. Ölçü çözümde yoksa None geçer ve
+                # generate_tank_step 'refusing to emit a manufacturing STEP
+                # built from generator defaults' ValueError'ı ile REDDEDER;
+                # aşağıdaki except bunu STEP_NOT_AVAILABLE.txt notuna yazar —
+                # yani eksik veri artık Ø300×800 mm bir "imalat" tankına değil,
+                # açık bir ret beyanına dönüşür.
                 'fuel_tank': {
-                    'diameter': tank_data['fuel_tank']['dimensions'].get('diameter', 300.0),
-                    'length': tank_data['fuel_tank']['dimensions'].get('length', 800.0),
+                    'diameter': tank_data['fuel_tank']['dimensions'].get('diameter'),
+                    'length': tank_data['fuel_tank']['dimensions'].get('length'),
                 },
                 'oxidizer_tank': {
-                    'diameter': tank_data['oxidizer_tank']['dimensions'].get('diameter', 300.0),
-                    'length': tank_data['oxidizer_tank']['dimensions'].get('length', 800.0),
+                    'diameter': tank_data['oxidizer_tank']['dimensions'].get('diameter'),
+                    'length': tank_data['oxidizer_tank']['dimensions'].get('length'),
                 },
             }, out_dir=output_dir)
             exported_files.extend(step_files.values())
