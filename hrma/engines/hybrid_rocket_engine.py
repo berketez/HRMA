@@ -47,6 +47,61 @@ POST_CHAMBER_D_FACTOR_MAX = 3.0
 # port_count = 4 seçilince L/D 8,6'ya düşüyor — öneri metninin dayanağı budur.
 GRAIN_LD_WARN_THRESHOLD = 10.0
 
+# --- O/F -> performans ızgarası (v2.6.27, yol haritası A9) ------------------
+# Hibritte yakıt regresyonu r = a·G_ox^n olduğundan port büyüdükçe akı düşer,
+# yakıt debisi değişir ve O/F YANMA BOYUNCA KAYAR. Bu yüzden c* ve Isp her
+# zaman adımında yeniden çözülmelidir. Her adımda Cantera dengesi çözmek
+# pahalıdır (varsayılan koşuda 200 adım, uzun yanmalarda on binlerce), bu
+# yüzden denge çözümü SABİT bir O/F ızgarasının düğümlerinde bir kez
+# hesaplanır ve ara değerler ARA DEĞERLEMEYLE bulunur.
+#
+# ÖLÇÜLDÜ (bu depo, 2026-08-04, HTPB/N2O, Pc = 20 bar): önceki kod ara değeri
+# EN YAKIN düğüme YUVARLIYORDU ve bu yaklaşımın hatası hiçbir yerde beyan
+# edilmiyordu. Aynı O/F noktalarında c* hatası:
+#     O/F = 2,42 -> en yakın düğüm  -0,2367 %    doğrusal  +0,0010 %
+#     O/F = 2,47 -> en yakın düğüm  -0,2394 %    doğrusal  +0,0015 %
+#     O/F = 2,53 -> en yakın düğüm  +0,2487 %    doğrusal  +0,0024 %
+#     O/F = 2,58 -> en yakın düğüm  +0,2568 %    doğrusal  +0,0031 %
+# Yuvarlama, ızgara adımının yarısı kadar (±0,025) O/F hatası demektir;
+# c*'ta ±%0,26'ya varan sıçrama üretir ve Isp(t) eğrisinde ızgara geçişlerinde
+# BASAMAK olarak görünür. Doğrusal ara değerleme AYNI düğüm sayısıyla (aynı
+# denge çözümü maliyeti) hatayı iki mertebe düşürür.
+OF_PERF_GRID_STEP = 0.05
+# Ara değerleme hatası için BEYAN EDİLEN üst sınır [%]. Ölçülen en kötü değer
+# (%0,004) bunun bir mertebe altındadır; sınır ölçüme DEĞİL, ölçümün rahatça
+# altında kaldığı bir beyana bağlanır — böylece ızgara, yakıt ya da yanma
+# çözücüsü değişince bekçi kusuru kilitlemez (bir kalem gerçekten modellenince
+# sayı değişebilir, bekçi sabit sayıya bağlanmaz).
+OF_PERF_INTERP_ERROR_BOUND_PCT = 0.05
+# Hata ölçümü için düğümler ARASI (doğrusal ara değerlemenin en kötü konumu:
+# aralık ortası) örnek sayısı. Her örnek bir EK denge çözümüdür (ölçüldü:
+# ~20 ms/çözüm); 5 örnek ~0,1 s ek maliyet demektir.
+OF_PERF_ERROR_PROBE_COUNT = 5
+# Izgaranın alt ucu: O/F -> 0 kimyasal dengede anlamsızdır (yakıt yok). Eski
+# kod aynı korumayı `max(of_key, 0.1)` ile satır içinde yapıyordu; burada adlı
+# sabit olur (CLAUDE.md kural 11 — tek tanım yeri).
+OF_PERF_MIN = 0.1
+
+# --- O/F kayması uyarı eşiği (v2.6.27, yol haritası A9) --------------------
+# O/F(t) tasarım O/F'sinden bu ORANDAN fazla saparsa kullanıcı uyarılır:
+# manşetteki "tasarım Isp"si artık yanmanın tamamını temsil etmiyordur.
+#
+# Eşik bir MÜHENDİSLİK PRATİĞİ bandıdır, yayımlanmış tek bir sabit değildir
+# (GRAIN_LD_WARN_THRESHOLD ile aynı dürüstlük); TEK yerde tanımlanır ve uyarı
+# parametresi olarak aynen yayımlanır. Gerekçesi ölçülmüştür (bu depo,
+# 2026-08-04, HTPB/N2O, Pc = 20 bar):
+#   * c*'ın O/F duyarlılığı d ln c*/d ln(O/F): O/F = 2,5'te +0,304;
+#     4,0'da +0,206; optimum 6,8 civarında -0,059; 8,0'de -0,093.
+#     Yani eğrinin yalın (lean) tarafında %15 O/F sapması ~%4,6 c* (ve Isp)
+#     demektir — lüle + kinetik kayıp bütçesinin tamamıyla aynı mertebe.
+#     Optimum düzlüğünde aynı sapma %1'in altında kalır, orada uyarı gürültü
+#     olurdu; sabit O/F bandı bu iki durumu birlikte karşılar.
+#   * Ölçülen kaymalar: varsayılan koşu (regüleli besleme) +%3,83;
+#     aynı koşunun blowdown beslemesi -%7,22; 30 s yanma +%7,74;
+#     n = 0,75'e çıkarılmış regresyon üssü +%37,6 (ortalama Isp tasarım
+#     Isp'sinden +%8,0 farklı). Eşik bu bandın neresinde durduğunu ayırır.
+OF_SHIFT_WARN_FRACTION = 0.15
+
 # --- N2O tank blowdown bloğu sabitleri (v2.6.27, yol haritası A1) ---
 # Doluluk oranı: tank_blowdown/transient_ballistics imzalarındaki 0,85 ile
 # aynı değer, ama burada ADLI sabit olarak beyan edilir ve bloğa açıkça
@@ -460,8 +515,17 @@ class HybridRocketEngine:
         # O/F kayması -> anlık c*/Isp izleme (denetim bulgusu #2). False ise
         # performans tasarım O/F'sinde donar (eski hızlı davranış).
         self.track_performance = bool(track_performance)
-        # Anlık O/F->c*/Isp tablo önbelleği (pahalı denge çözümünü tekrarlamaz)
+        # Anlık O/F->c* tablo önbelleği: anahtar IZGARA DÜĞÜM İNDİSİ (tam
+        # sayı), değer teslim edilen c* [m/s]. Isp saklanmaz — CF ile
+        # türetildiği için sonradan değişen bir CF'yle tutarsız kalabilirdi.
         self._perf_cache = {}
+        # Yanma boyunca GERÇEKTEN katedilen O/F aralığı: ara değerleme hatası
+        # yalnız bu aralıkta ölçülür (uğranmamış bantta hata beyanı anlamsız).
+        self._perf_of_min = float('inf')
+        self._perf_of_max = float('-inf')
+        # Denge çözücüsü bir düğümde çöküp tasarım c*'ına düşüldü mü?
+        # Teşhis bloğu bunu beyan eder (sessiz yedeğe düşme yasak).
+        self._perf_solver_failed = False
         
         # Use None as marker for default values to be set by fuel type
         self.T_c = chamber_temperature  # K
@@ -1627,43 +1691,182 @@ class HybridRocketEngine:
 
         return c_star
 
+    def _perf_grid_c_star(self, node):
+        """O/F ızgarasının ``node`` düğümündeki teslim edilen c* [m/s].
+
+        Düğüm başına TEK denge çözümü yapılır ve sonuç düğüm İNDİSİYLE
+        (tam sayı) önbelleğe alınır. Anahtarın tam sayı olması bilinçlidir:
+        kayan noktalı O/F anahtarı 2.3000000000000003 gibi ikizler üretip aynı
+        düğümü iki kez çözdürebiliyordu.
+
+        Denge çözülemezse tasarım noktası c*'ına düşülür ve bu düşüş
+        ``_perf_solver_failed`` ile kaydedilir; ara değerleme teşhis bloğu bunu
+        beyan eder (sessiz yedeğe düşme yasak).
+        """
+        cached = self._perf_cache.get(node)
+        if cached is not None:
+            return cached
+        of_node = max(node * OF_PERF_GRID_STEP, OF_PERF_MIN)
+        try:
+            results = self.combustion_analyzer.analyze_combustion(
+                {self.fuel_type: 100.0},
+                getattr(self, 'oxidizer_type', None) or 'n2o',
+                of_node, self.P_c, None
+            )
+            c_node = float(results['performance']['c_star'])
+            # c* verimi tasarım noktasıyla tutarlı uygulanır (v2.5.0 UQ)
+            if self.eta_c_star is not None:
+                c_node = self.eta_c_star * c_node
+        except Exception:
+            c_node = float(getattr(self, 'C_star', None) or 1500.0)
+            self._perf_solver_failed = True
+        self._perf_cache[node] = c_node
+        return c_node
+
     def _instantaneous_performance(self, of_ratio):
-        """Anlık O/F'den anlık (c*, Isp) döndürür (denetim bulgusu #2).
+        """Anlık O/F'den anlık (c*, Isp) döndürür (denetim bulgusu #2; A9).
 
         O/F kayması performansa yansıtılır: yanma çözücü her O/F için c*'ı
         verir; Isp ise mevcut CF (nozul geometrisi sabit) ile c*'tan ölçeklenir
         (Isp = CF · c* / g0). CF burada O/F ile küçük değiştiği için tasarım
         CF'si kullanılır — bu, c*'taki (çok daha büyük) O/F duyarlılığını
-        yakalamak için yeterlidir ve nozul yeniden çözümünden kaçınır.
+        yakalamak için yeterlidir ve nozul yeniden çözümünden kaçınır. Bu sınır
+        ``of_shift`` bloğunun kendi beyanında yazılıdır.
 
-        O/F değerleri 0.05 çözünürlükte yuvarlanıp önbelleğe alınır
-        (Cantera denge çözümünü her time-marching adımında tekrarlamamak için).
+        YÖNTEM (v2.6.27, A9): c*(O/F) tablosu ``OF_PERF_GRID_STEP`` adımlı
+        düzgün bir ızgarada TEK KEZ çözülür, ara değer o aralığın iki düğümü
+        arasında DOĞRUSAL ARA DEĞERLEMEYLE bulunur. Önceki sürüm en yakın
+        düğüme yuvarlıyordu: aynı düğüm sayısıyla (aynı maliyetle) c*'ta
+        ±%0,26'ya varan hata ve Isp(t) eğrisinde ızgara geçişlerinde basamak
+        üretiyordu (ölçüm OF_PERF_GRID_STEP yorumunda). Ara değerleme hatası
+        UYDURULMAZ, ölçülür: ``_of_interpolation_diagnostics``.
+
+        c* düğümlerde saklanır, Isp saklanmaz: Isp = CF·c*/g0 olduğundan
+        önbelleğe alınmış bir Isp, sonradan değişen bir CF ile tutarsız
+        kalabilirdi.
         """
-        of_key = round(float(of_ratio) / 0.05) * 0.05
-        if of_key in self._perf_cache:
-            return self._perf_cache[of_key]
+        of = float(of_ratio)
+        if not np.isfinite(of):
+            of = float(self.OF)
+        of = max(of, OF_PERF_MIN)
 
-        try:
-            fuel_composition = {self.fuel_type: 100.0}
-            ox = getattr(self, 'oxidizer_type', None) or 'n2o'
-            results = self.combustion_analyzer.analyze_combustion(
-                fuel_composition, ox, max(of_key, 0.1), self.P_c, None
-            )
-            cstar_inst = results['performance']['c_star']
-            # c* verimi tasarım noktasıyla tutarlı uygulanır (v2.5.0 UQ)
-            if self.eta_c_star is not None:
-                cstar_inst = self.eta_c_star * cstar_inst
-        except Exception:
-            cstar_inst = getattr(self, 'C_star', 1500.0)
+        # Katedilen O/F aralığı: ara değerleme hatası TAM BU aralıkta ölçülür
+        # (hiç uğranmamış bir O/F bandında hata beyan etmek anlamsızdır).
+        if of < self._perf_of_min:
+            self._perf_of_min = of
+        if of > self._perf_of_max:
+            self._perf_of_max = of
+
+        lo_node = int(np.floor(of / OF_PERF_GRID_STEP))
+        c_lo = self._perf_grid_c_star(lo_node)
+        c_hi = self._perf_grid_c_star(lo_node + 1)
+        w = (of - lo_node * OF_PERF_GRID_STEP) / OF_PERF_GRID_STEP
+        cstar_inst = c_lo + (c_hi - c_lo) * w
 
         # CF tasarım değeri (calculate() önce CF'yi hesaplar); yoksa nominal.
         cf = getattr(self, 'CF', None)
         if cf is None or not np.isfinite(cf):
             cf = 1.5  # tipik hibrit deniz seviyesi CF (Sutton & Biblarz 9th ed.)
-        isp_inst = cf * cstar_inst / self.g0
-        self._perf_cache[of_key] = (cstar_inst, isp_inst)
-        return cstar_inst, isp_inst
-    
+        return cstar_inst, cf * cstar_inst / self.g0
+
+    def _of_interpolation_diagnostics(self):
+        """c*(O/F) ara değerlemesinin ÖLÇÜLEN hatası (yol haritası A9-2).
+
+        Yöntem: katedilen O/F aralığındaki ızgara aralıklarının ORTASINDA
+        (doğrusal ara değerlemenin en kötü konumu) tam denge çözümü yapılır ve
+        ara değerlemeyle karşılaştırılır. Hata beyan edilen sınırla birlikte
+        yayımlanır; sınır aşılırsa durum açıkça 'exceeds_declared_bound' olur.
+
+        Hiç anlık performans değerlendirilmediyse (track_performance kapalı)
+        ölçülecek bir şey yoktur: sayı UYDURULMAZ, NOT_MODELLED döner.
+        """
+        basis = (
+            'measured, not assumed: the equilibrium c*(O/F) table is solved on '
+            'a uniform O/F grid of step {step} and read back by piecewise-'
+            'linear interpolation; Isp(t) = CF_design * c*(t) / g0. The error '
+            'reported here is the relative difference between the interpolated '
+            'c* and a full equilibrium solution at the mid-point of grid '
+            'intervals (the worst position for linear interpolation), sampled '
+            'inside the O/F range the burn actually traverses.'
+        ).format(step=OF_PERF_GRID_STEP)
+        lo = self._perf_of_min
+        hi = self._perf_of_max
+        if not (np.isfinite(lo) and np.isfinite(hi)):
+            return {
+                'status': 'NOT_MODELLED',
+                'basis': basis,
+                'reason': ('no instantaneous performance point was evaluated '
+                           'in this run (track_performance is off), so there '
+                           'is no interpolation to measure.'),
+                'grid_step_of': OF_PERF_GRID_STEP,
+                'error_bound_pct': OF_PERF_INTERP_ERROR_BOUND_PCT,
+            }
+
+        node_lo = int(np.floor(lo / OF_PERF_GRID_STEP))
+        node_hi = int(np.floor(hi / OF_PERF_GRID_STEP))
+        aralikar = list(range(node_lo, max(node_hi, node_lo) + 1))
+        if len(aralikar) > OF_PERF_ERROR_PROBE_COUNT:
+            adim = len(aralikar) / float(OF_PERF_ERROR_PROBE_COUNT)
+            aralikar = [aralikar[int(k * adim)]
+                        for k in range(OF_PERF_ERROR_PROBE_COUNT)]
+
+        hatalar = []
+        for node in aralikar:
+            of_probe = (node + 0.5) * OF_PERF_GRID_STEP
+            if of_probe < OF_PERF_MIN:
+                continue
+            try:
+                results = self.combustion_analyzer.analyze_combustion(
+                    {self.fuel_type: 100.0},
+                    getattr(self, 'oxidizer_type', None) or 'n2o',
+                    of_probe, self.P_c, None
+                )
+                c_exact = float(results['performance']['c_star'])
+            except Exception:
+                continue
+            if self.eta_c_star is not None:
+                c_exact = self.eta_c_star * c_exact
+            if not np.isfinite(c_exact) or c_exact <= 0:
+                continue
+            c_interp = 0.5 * (self._perf_grid_c_star(node)
+                              + self._perf_grid_c_star(node + 1))
+            hatalar.append(abs(c_interp / c_exact - 1.0) * 100.0)
+
+        if not hatalar:
+            return {
+                'status': 'NOT_MODELLED',
+                'basis': basis,
+                'reason': ('the equilibrium solver could not be evaluated at '
+                           'any probe point, so the interpolation error was '
+                           'not measured; it is not estimated either.'),
+                'grid_step_of': OF_PERF_GRID_STEP,
+                'of_range_traversed': [float(lo), float(hi)],
+                'error_bound_pct': OF_PERF_INTERP_ERROR_BOUND_PCT,
+            }
+
+        en_buyuk = float(max(hatalar))
+        return {
+            'status': 'modelled',
+            'basis': basis,
+            'method': ('piecewise-linear interpolation of the equilibrium '
+                       'c*(O/F) table on a uniform grid'),
+            'grid_step_of': OF_PERF_GRID_STEP,
+            'grid_nodes_solved': len(self._perf_cache),
+            'of_range_traversed': [float(lo), float(hi)],
+            'error_probe_count': len(hatalar),
+            'error_max_pct': en_buyuk,
+            'error_mean_pct': float(sum(hatalar) / len(hatalar)),
+            'error_bound_pct': OF_PERF_INTERP_ERROR_BOUND_PCT,
+            'within_declared_bound': bool(
+                en_buyuk <= OF_PERF_INTERP_ERROR_BOUND_PCT),
+            'error_status': ('within_declared_bound'
+                             if en_buyuk <= OF_PERF_INTERP_ERROR_BOUND_PCT
+                             else 'exceeds_declared_bound'),
+            'equilibrium_solver_fallback_used': bool(
+                getattr(self, '_perf_solver_failed', False)),
+        }
+
+
     def _calculate_expansion_ratio(self):
         """Calculate optimal expansion ratio using correct isentropic formula"""
         pressure_ratio = self.P_c / self.P_a  # Pc/Pe
@@ -2051,6 +2254,12 @@ class HybridRocketEngine:
         self._mdot_total_history = []
         self._thrust_history = []
         self._pc_history = []
+        # A9: anlık YAKIT debisi ayrıca saklanır. Bu koşuda ṁ_ox sabit
+        # olduğundan ṁ_f = ṁ_toplam − ṁ_ox çıkarılabilirdi; ama O/F bloğu
+        # ṁ_ox'un DEĞİŞTİĞİ blowdown durumuyla aynı sözleşmeyi kullanır ve
+        # orada böyle bir çıkarma yanlış olurdu. İki durum aynı alan adlarını
+        # taşısın diye seri burada da açıkça tutulur.
+        self._mdot_f_history = []
 
         for i in range(num_steps):
             t_now = i * dt
@@ -2087,6 +2296,7 @@ class HybridRocketEngine:
                 # çünkü At yoksa Pc uydurulamaz — o nokta atlanır.
                 mdot_total_inst = self.mdot_ox + mdot_f_inst
                 self._mdot_total_history.append(mdot_total_inst)
+                self._mdot_f_history.append(mdot_f_inst)
                 self._thrust_history.append(
                     mdot_total_inst * isp_inst * self.g0)
                 # Pc BAR cinsinden saklanır: katı motorun thrust_curve
@@ -2414,6 +2624,32 @@ class HybridRocketEngine:
 
         f0 = float(sol['thrust'][0])
         f_son = float(sol['thrust'][-1])
+
+        # --- A9: bu bloğun KENDİ O/F kayması --------------------------------
+        # Regüleli tasarım noktasında ṁ_ox sabittir ve O/F yalnız port
+        # büyümesiyle kayar. Blowdown'da ṁ_ox da düşer, yani O/F'yi İKİ etki
+        # birden sürükler. Bu blok zaten ṁ_ox(t) ve ṁ_yakıt(t) serilerini
+        # çözüyordu ama yalnız ṁ_ox'u yayımlıyordu; O/F(t) dışarı hiç
+        # çıkmıyordu. Değerler çözücünün KENDİ dizilerinden gelir — of_shift
+        # bloğu bunları yeniden hesaplamaz, BURADAN okur (tek kaynak).
+        of_dizi = np.asarray(sol['of_ratio'], dtype=float)
+        mdot_f_dizi = np.asarray(sol['mdot_fuel'], dtype=float)
+        mdot_ox_dizi = np.asarray(sol['mdot_ox'], dtype=float)
+        of_tasarim = float(self.OF)
+        of_min = float(np.min(of_dizi))
+        of_max = float(np.max(of_dizi))
+        of_sapma = max(abs(of_min / of_tasarim - 1.0),
+                       abs(of_max / of_tasarim - 1.0)) if of_tasarim > 0 else None
+        # Teslim edilen ortalama Isp: toplam impuls / (harcanan itici · g0).
+        # Harcanan kütle, itki integraliyle AYNI kuralla (trapez) çözücünün
+        # kendi dizilerinden alınır; başka bir yerden kütle getirilirse
+        # I = Isp·m·g0 özdeşliği bozulurdu.
+        t_dizi = np.asarray(sol['time'], dtype=float)
+        m_harcanan = (float(np.trapz(mdot_ox_dizi + mdot_f_dizi, t_dizi))
+                      if len(t_dizi) > 1 else 0.0)
+        isp_teslim = (float(sol['total_impulse']) / (m_harcanan * self.g0)
+                      if m_harcanan > 0 else None)
+
         return {
             'status': 'modelled',
             'basis': basis,
@@ -2446,7 +2682,334 @@ class HybridRocketEngine:
             'total_impulse_Ns': float(sol['total_impulse']),
             'end_event': sol['end_event'],
             'warnings': blok_uyarilari,
+
+            # --- A9: O/F kayması (bu bloğun kendi çözümünden) --------------
+            'mdot_fuel_kg_s': _pick(sol['mdot_fuel']),
+            'of_ratio': _pick(sol['of_ratio']),
+            'of_ratio_basis': (
+                'O/F(t) = mdot_ox(t) / mdot_fuel(t) taken from THIS blowdown '
+                'solution: the oxidiser flow follows the falling tank '
+                'pressure and the fuel flow follows the regressing port, so '
+                'both drivers of the shift are present. The design point '
+                'assumes a regulated feed and therefore only sees the port '
+                'driver.'),
+            'of_ratio_design': of_tasarim,
+            'of_ratio_initial': float(of_dizi[0]),
+            'of_ratio_final': float(of_dizi[-1]),
+            'of_ratio_min': of_min,
+            'of_ratio_max': of_max,
+            'of_shift_fraction': of_sapma,
+            'propellant_consumed_kg': m_harcanan,
+            'isp_delivered_avg_s': isp_teslim,
+            'isp_delivered_avg_basis': (
+                'burn-averaged delivered specific impulse of THIS blowdown '
+                'run: total impulse divided by the propellant actually '
+                'consumed in the same solution (I = Isp * m * g0 holds '
+                'exactly). It is NOT the design-point Isp.'),
         }
+
+    def _of_shift_block(self, blowdown_block=None):
+        """O/F'nin yanma boyunca kayması ve bunun performansa bedeli (A9).
+
+        NEDEN VAR
+        ---------
+        Hibritte yakıt regresyon hızı r = a·G_ox^n olduğundan port çapı
+        büyüdükçe G_ox düşer, yakıt debisi değişir ve O/F yanma boyunca KAYAR.
+        Bu, hibridin en karakteristik davranışıdır — katı ve sıvı motorda
+        karşılığı yoktur. Çözücü O/F(t), c*(t) ve Isp(t) serilerini zaten
+        üretiyordu ama kullanıcıya yalnız dizi olarak veriyordu: "tasarım
+        Isp'si" ile "yanma boyunca GERÇEKLEŞEN ortalama Isp" arasındaki farkı
+        kimse hesaplamıyordu. Bu blok o farkı açıkça yayımlar.
+
+        İKİ BESLEME DURUMU
+        ------------------
+        * ``regulated``: tasarım noktası çözümü — ṁ_ox SABİT, O/F'yi yalnız
+          port büyümesi sürükler. Manşetteki sayılar (itki, Isp, Pc) bu
+          durumun tasarım noktasıdır.
+        * ``blowdown``: kendinden-basınçlı besleme — ṁ_ox da düşer, O/F'yi
+          iki etki birden sürükler. Diziler ``tank_blowdown`` bloğundan
+          OKUNUR, burada yeniden çözülmez (tek kaynak); blok modellenmemişse
+          bu durum gerekçesiyle boş kalır ve sayı uydurulmaz.
+
+        FARK NASIL ÖLÇÜLÜR
+        ------------------
+        Toplam impuls, zaman-adımlı çözümün KENDİ ayrıklaştırmasıyla toplanır
+        (I = Σ F_i·dt, her örnek kendi adım aralığını temsil eder). Trapez
+        kuralı burada YANLIŞ olurdu: seriler son adımın başında bitiyor, yani
+        trapez son dt'yi düşürüp yalnız ayrıklaştırmadan doğan bir eksiklik
+        üretiyor (ölçüldü: varsayılan koşuda trapez -%0,43, Riemann +%0,075 —
+        aradaki fark fizik değil, kırpma). Teslim edilen ortalama Isp aynı
+        eğrinin harcadığı kütleden alınır ki I = Isp·m·g0 özdeşliği tutsun.
+        """
+        basis = (
+            'the hybrid O/F shift: r = a*G_ox^n, so as the port grows G_ox '
+            'falls, the fuel flow changes and O/F drifts through the burn. '
+            'Every number here comes from the time-marching solution of THIS '
+            'run (port regression, instantaneous fuel flow, equilibrium '
+            'c*(O/F) table); nothing is shaped or assumed. Two limits are '
+            'declared rather than hidden: (1) the thrust coefficient is held '
+            'at its design value, so only the (much larger) c* sensitivity to '
+            'O/F is captured, and (2) c* is read from an interpolated '
+            'equilibrium grid whose measured error is published in the '
+            '"interpolation" field. The headline design numbers are NOT '
+            're-rated by this block.')
+
+        zaman = list(getattr(self, '_time_history', []) or [])
+        of_gecmis = list(getattr(self, '_of_history', []) or [])
+        isp_gecmis = list(getattr(self, '_isp_history', []) or [])
+        cstar_gecmis = list(getattr(self, '_cstar_history', []) or [])
+        itki_gecmis = list(getattr(self, '_thrust_history', []) or [])
+        mdot_gecmis = list(getattr(self, '_mdot_total_history', []) or [])
+        mdot_f_gecmis = list(getattr(self, '_mdot_f_history', []) or [])
+
+        tasarim = {
+            'of_ratio': float(self.OF),
+            'isp_s': float(getattr(self, 'Isp', float('nan'))),
+            'c_star_m_s': float(getattr(self, 'C_star', float('nan'))),
+            'burn_time_s': float(self.t_b),
+            'total_impulse_Ns': float(self.F) * float(self.t_b),
+            'basis': ('the design point: performance evaluated once at the '
+                      'design O/F with a regulated (constant) oxidiser flow. '
+                      'These are the numbers the headline panels show.'),
+        }
+
+        def _sapma_yuzde(gercek, referans):
+            if gercek is None or referans in (None, 0) or not np.isfinite(referans):
+                return None
+            return float((gercek / referans - 1.0) * 100.0)
+
+        if not (of_gecmis and isp_gecmis and itki_gecmis):
+            # Regüleli seri yoksa blok TAMAMEN susmaz: blowdown durumu
+            # bağımsız çözülmüştür ve ṁ_ox(t) oradan gelir. Susmak, var olan
+            # bir hesabı kullanıcıdan saklamak olurdu.
+            regulated = {
+                'status': 'NOT_MODELLED',
+                'reason': ('the instantaneous performance history is empty '
+                           '(track_performance is off), so the regulated '
+                           'O/F(t), Isp(t) and burn-averaged performance were '
+                           'not computed; they are not estimated either. Run '
+                           'with track_performance=True.'),
+            }
+            blowdown = self._of_shift_blowdown_case(
+                blowdown_block, tasarim, _sapma_yuzde)
+            var_mi = blowdown.get('status') != 'NOT_MODELLED'
+            blok = {
+                'status': 'modelled' if var_mi else 'NOT_MODELLED',
+                'basis': basis,
+                'design_point': tasarim,
+                'regulated': regulated,
+                'blowdown': blowdown,
+                'interpolation': self._of_interpolation_diagnostics(),
+            }
+            if var_mi:
+                self._emit_of_shift_warning(blok)
+            return blok
+
+        n_ornek = len(itki_gecmis)
+        t_son = float(getattr(self, 't_burn_effective', self.t_b))
+        dt = t_son / n_ornek if n_ornek else 0.0
+        toplam_impuls = float(sum(itki_gecmis) * dt)
+        harcanan_kutle = float(sum(mdot_gecmis) * dt) if mdot_gecmis else 0.0
+        isp_kutle_ort = (toplam_impuls / (harcanan_kutle * self.g0)
+                         if harcanan_kutle > 0 else None)
+        isp_zaman_ort = float(np.mean(isp_gecmis))
+        cstar_zaman_ort = float(np.mean(cstar_gecmis)) if cstar_gecmis else None
+
+        of_tasarim = float(self.OF)
+        of_min = float(min(of_gecmis))
+        of_max = float(max(of_gecmis))
+
+        regulated = {
+            'feed_basis': ('regulated feed: the oxidiser mass flow is held at '
+                           'the design value, so the O/F drift comes purely '
+                           'from the regressing port geometry.'),
+            'of_ratio_design': of_tasarim,
+            'of_ratio_initial': float(of_gecmis[0]),
+            'of_ratio_final': float(of_gecmis[-1]),
+            'of_ratio_min': of_min,
+            'of_ratio_max': of_max,
+            'of_shift_fraction': (
+                max(abs(of_min / of_tasarim - 1.0),
+                    abs(of_max / of_tasarim - 1.0))
+                if of_tasarim > 0 else None),
+            'of_shift_basis': (
+                'O/F(t) = mdot_ox / mdot_fuel(t) with mdot_fuel(t) = rho_f * '
+                'N_port * pi * D_port(t) * L_grain * r_dot(t) from the '
+                'time-marching solution. Because mdot_fuel scales as '
+                'D^(1-2n), the drift direction follows the regression '
+                'exponent: O/F rises for n > 0.5, falls for n < 0.5 and is '
+                'flat at n = 0.5.'),
+            'regression_exponent_n': float(self.n),
+            'burn_time_effective_s': t_son,
+            'samples': n_ornek,
+
+            'isp_time_avg_s': isp_zaman_ort,
+            'isp_mass_avg_s': isp_kutle_ort,
+            'isp_mass_avg_basis': (
+                'delivered burn-averaged Isp: total impulse of the curve '
+                'divided by the propellant the same curve consumes '
+                '(I = Isp * m * g0 holds exactly). This is the number to '
+                'compare against a static-fire result; isp_time_avg_s is the '
+                'unweighted time average of the instantaneous curve.'),
+            'c_star_time_avg_m_s': cstar_zaman_ort,
+            'total_impulse_Ns': toplam_impuls,
+            'total_impulse_basis': (
+                'I = sum(F_i * dt) over the time-marching samples, where each '
+                'sample represents its own step interval — the same '
+                'discretisation the port integration uses. The trapezoidal '
+                'rule would drop the final step and report a shortfall that '
+                'is numerical, not physical.'),
+            'propellant_consumed_kg': harcanan_kutle,
+
+            'isp_delta_vs_design_pct': _sapma_yuzde(isp_kutle_ort,
+                                                    tasarim['isp_s']),
+            'isp_time_avg_delta_vs_design_pct': _sapma_yuzde(
+                isp_zaman_ort, tasarim['isp_s']),
+            'c_star_delta_vs_design_pct': _sapma_yuzde(
+                cstar_zaman_ort, tasarim['c_star_m_s']),
+            'total_impulse_delta_vs_design_pct': _sapma_yuzde(
+                toplam_impuls, tasarim['total_impulse_Ns']),
+            'delta_basis': (
+                'each delta is (realised - design) / design x 100 with the '
+                'design values in the design_point field. A non-zero delta is '
+                'the cost of the O/F shift, not an error: the design point is '
+                'a single instant, the realised value is the whole burn.'),
+        }
+
+        blowdown = self._of_shift_blowdown_case(
+            blowdown_block, tasarim, _sapma_yuzde)
+
+        blok = {
+            'status': 'modelled',
+            'basis': basis,
+            'design_point': tasarim,
+            'regulated': regulated,
+            'blowdown': blowdown,
+            'interpolation': self._of_interpolation_diagnostics(),
+            'series_location': (
+                'the full regulated O/F(t), c*(t) and Isp(t) series are '
+                'published under of_shift_performance; this block carries the '
+                'summary, the blowdown case and the interpolation diagnosis '
+                'so the series are not duplicated in the response.'),
+        }
+        self._emit_of_shift_warning(blok)
+        return blok
+
+    @staticmethod
+    def _of_shift_blowdown_case(blowdown_block, design_point, delta_pct):
+        """Blowdown besleme durumunun O/F özeti — ``tank_blowdown``dan OKUNUR.
+
+        Diziler burada YENİDEN ÇÖZÜLMEZ: ṁ_ox(t), ṁ_yakıt(t) ve O/F(t) aynı
+        koşunun blowdown çözümünden gelir. İki blokta iki farklı ṁ_ox dolaşması
+        (aynı motor için iki gerçeklik) bu sürümde kapatılan hata sınıfının ta
+        kendisidir. Blok modellenmemişse gerekçesi taşınır, eğri uydurulmaz.
+        """
+        if not (isinstance(blowdown_block, dict)
+                and blowdown_block.get('status') == 'modelled'
+                and blowdown_block.get('of_ratio')):
+            gerekce = 'no blowdown solution exists for this design'
+            if isinstance(blowdown_block, dict):
+                gerekce = blowdown_block.get('reason') or gerekce
+            return {
+                'status': 'NOT_MODELLED',
+                'reason': (
+                    f'the blowdown O/F history is not available: {gerekce}. '
+                    f'A blowdown curve is not estimated from the regulated '
+                    f'one.'),
+            }
+        bd_isp = blowdown_block.get('isp_delivered_avg_s')
+        return {
+            'feed_basis': (
+                'self-pressurised (blowdown) feed: mdot_ox(t) comes from the '
+                'tank_blowdown block of THIS run — the same arrays, not a '
+                'second solution — so the falling tank pressure and the '
+                'regressing port drive the O/F together.'),
+            'source_block': 'tank_blowdown',
+            'time_s': list(blowdown_block.get('time_s') or []),
+            'of_ratio': list(blowdown_block['of_ratio']),
+            'mdot_ox_kg_s': list(blowdown_block.get('mdot_ox_kg_s') or []),
+            'mdot_fuel_kg_s': list(blowdown_block.get('mdot_fuel_kg_s') or []),
+            'of_ratio_design': blowdown_block.get('of_ratio_design'),
+            'of_ratio_initial': blowdown_block.get('of_ratio_initial'),
+            'of_ratio_final': blowdown_block.get('of_ratio_final'),
+            'of_ratio_min': blowdown_block.get('of_ratio_min'),
+            'of_ratio_max': blowdown_block.get('of_ratio_max'),
+            'of_shift_fraction': blowdown_block.get('of_shift_fraction'),
+            'isp_delivered_avg_s': bd_isp,
+            'total_impulse_Ns': blowdown_block.get('total_impulse_Ns'),
+            'burn_duration_s': blowdown_block.get('burn_duration_s'),
+            'end_event': blowdown_block.get('end_event'),
+            'isp_delta_vs_design_pct': delta_pct(bd_isp,
+                                                 design_point['isp_s']),
+            'total_impulse_delta_vs_design_pct': delta_pct(
+                blowdown_block.get('total_impulse_Ns'),
+                design_point['total_impulse_Ns']),
+        }
+
+    def _emit_of_shift_warning(self, of_shift_block):
+        """O/F kayması eşiği aşılırsa kullanıcıya ULAŞAN uyarıyı üretir (A9-4).
+
+        Eşik ``OF_SHIFT_WARN_FRACTION`` TEK yerde tanımlıdır ve uyarı
+        parametresi olarak aynen yayımlanır (kopya eşik yasak). Modellenen
+        besleme durumlarının EN KÖTÜSÜ karar verir: regüleli beslemede kayma
+        eşiğin altında kalıp blowdown'da aşılabilir, o durumda susmak
+        kullanıcıyı yanıltırdı.
+
+        ``_compile_results`` birden çok kez çağrılabildiği için aynı uyarı
+        iki kez eklenmez.
+
+        Bir besleme durumu ancak Isp sapmasını da SAYIYLA verebiliyorsa aday
+        olur: sözlük metni ``{isp_delta_pct}`` yer tutucusunu taşıdığından
+        sayısız bir uyarı ekranda "%None" basardı. Hiçbir aday kalmazsa uyarı
+        üretilmez ve nedeni bloğa yazılır — sessizce yutulmaz.
+        """
+        kod = 'warn.hybrid.of_shift_large'
+        mevcut = getattr(self, 'design_warnings', None)
+        if mevcut is None:
+            return
+        if any(k.get('code') == kod for k in mevcut):
+            return
+
+        en_kotu = None
+        eksik_isp = []
+        for ad in ('regulated', 'blowdown'):
+            durum = of_shift_block.get(ad)
+            if not isinstance(durum, dict):
+                continue
+            oran = durum.get('of_shift_fraction')
+            if oran is None or not np.isfinite(oran):
+                continue
+            if oran <= OF_SHIFT_WARN_FRACTION:
+                continue
+            isp_sapma = durum.get('isp_delta_vs_design_pct')
+            if isp_sapma is None:
+                isp_sapma = durum.get('isp_time_avg_delta_vs_design_pct')
+            if isp_sapma is None or not np.isfinite(isp_sapma):
+                eksik_isp.append(ad)
+                continue
+            if en_kotu is None or oran > en_kotu[1]:
+                en_kotu = (ad, float(oran), durum, float(isp_sapma))
+
+        if en_kotu is None:
+            if eksik_isp:
+                of_shift_block['warning_suppressed_reason'] = (
+                    'the O/F excursion exceeds the threshold in '
+                    f'{", ".join(eksik_isp)}, but the burn-averaged Isp of '
+                    'that case could not be computed, so the warning would '
+                    'have carried an empty performance figure. The excursion '
+                    'itself is reported in this block.')
+            return
+
+        ad, oran, durum, isp_sapma = en_kotu
+        mevcut.append(_w(
+            kod, 'warning',
+            feed_mode=ad,
+            of_design=round(float(self.OF), 2),
+            of_min=round(float(durum.get('of_ratio_min', self.OF)), 2),
+            of_max=round(float(durum.get('of_ratio_max', self.OF)), 2),
+            shift_pct=round(oran * 100.0, 1),
+            threshold_pct=round(OF_SHIFT_WARN_FRACTION * 100.0, 1),
+            isp_delta_pct=round(isp_sapma, 2)))
 
     def _thermal_protection_block(self, heat_transfer_results):
         """Kamara yalıtım astarı + çıplak cidar ısı-yutucu geçmişi (A5).
@@ -3667,6 +4230,29 @@ class HybridRocketEngine:
         # blowdown bloğundan (tek tank, tek hacim), g_eff sabit-1g beyanıyla.
         basic_results['oxidizer_tank_slosh'] = self._oxidizer_tank_slosh_block(
             basic_results['tank_blowdown'])
+
+        # --- A9 (yol haritası): O/F kayması ve tasarım noktasıyla farkı.
+        # ṁ_ox(t) blowdown bloğu modellendiyse ORADAN okunur (tek kaynak);
+        # okunamıyorsa blowdown durumu gerekçesiyle boş kalır. Uyarı bu çağrı
+        # içinde üretildiği için design_warnings anlık görüntüsünden ÖNCE
+        # yapılmalıdır (aşağıdaki warnings_list satırı).
+        basic_results['of_shift'] = self._of_shift_block(
+            basic_results['tank_blowdown'])
+        # Eski tüketiciler (motor_viz3d.js of_shift_performance okuyor) için
+        # farklar aynı blokta da yayımlanır; DİZİLER İKİ KEZ TAŞINMAZ.
+        of_perf = basic_results.get('of_shift_performance')
+        reg_ozet = basic_results['of_shift'].get('regulated')
+        if isinstance(of_perf, dict) and isinstance(reg_ozet, dict):
+            of_perf['of_ratio_design'] = reg_ozet['of_ratio_design']
+            of_perf['isp_mass_avg'] = reg_ozet['isp_mass_avg_s']
+            of_perf['isp_delta_vs_design_pct'] = \
+                reg_ozet['isp_delta_vs_design_pct']
+            of_perf['c_star_delta_vs_design_pct'] = \
+                reg_ozet['c_star_delta_vs_design_pct']
+            of_perf['total_impulse_Ns'] = reg_ozet['total_impulse_Ns']
+            of_perf['total_impulse_delta_vs_design_pct'] = \
+                reg_ozet['total_impulse_delta_vs_design_pct']
+            of_perf['summary_block'] = 'of_shift'
 
         # --- A10 (yol haritası): modellenmeyen fizik açıkça beyan edilir.
         basic_results['not_modelled'] = self._not_modelled_declarations()
