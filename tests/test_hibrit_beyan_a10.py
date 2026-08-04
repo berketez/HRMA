@@ -23,6 +23,7 @@
 """
 
 import json
+import pathlib
 import re
 import warnings
 
@@ -33,7 +34,7 @@ from hrma.engines.hybrid_rocket_engine import (
     HybridRocketEngine,
 )
 
-LD_UYARI_KODU = 'hybrid.grain_slenderness_high'
+LD_UYARI_KODU = 'warn.hybrid.grain_slenderness_high'
 
 
 def _kos(**degisiklik):
@@ -175,24 +176,41 @@ def test_ld_uyarisi_boru_motorda_cikiyor(boru_motor):
     assert kayit['params']['chamber_ld'] > GRAIN_LD_WARN_THRESHOLD
 
 
+def _ld_sozluk_metinleri():
+    """i18n_common.js'ten L/D uyarısının EN ve TR sözlük metinleri.
+
+    2026-08-04: metin geçici `fallback` alanından sözlüğe taşındı; bekçiler
+    artık kullanıcının GERÇEKTEN göreceği sözlük kayıtlarını sınar.
+    """
+    sozluk = (pathlib.Path(__file__).resolve().parents[1]
+              / 'hrma' / 'static' / 'js' / 'i18n_common.js'
+              ).read_text(encoding='utf-8')
+    metinler = re.findall(
+        re.escape(f"'{LD_UYARI_KODU}'") + r":\s*'((?:[^'\\]|\\.)*)'", sozluk)
+    assert len(metinler) == 2, (
+        f'L/D kodu sözlükte tam iki kez (EN+TR) bulunmalı: {len(metinler)}')
+    return metinler
+
+
 def test_ld_uyarisi_metni_iki_dilli_ve_oneri_iceriyor(boru_motor):
-    _, sonuc = boru_motor
-    metin = _ld_kayitlari(sonuc)[0]['fallback']
+    en, tr = _ld_sozluk_metinleri()
     # İngilizce yarı + öneri
-    assert 'Increase the port count' in metin
-    assert 'port diameter' in metin
+    assert 'Increase the port count' in en
+    assert 'port diameter' in en
     # Türkçe yarı + öneri; Türkçe karakterler ASCII'ye kaçmamış
-    assert 'port sayısını artırın' in metin
-    assert 'port çapını büyütün' in metin
-    assert 'aşıyor' in metin
+    assert 'port sayısını artırın' in tr
+    assert 'port çapını büyütün' in tr
+    assert 'aşıyor' in tr
 
 
 def test_ld_uyarisi_yer_tutuculari_parametrelerle_eslesiyor(boru_motor):
-    """Ekranda ham {x} kalmasın: fallback'teki her yer tutucu params'ta var."""
+    """Ekranda ham {x} kalmasın: sözlük metinlerindeki her yer tutucu
+    params'ta var (iki dilde de)."""
     _, sonuc = boru_motor
     kayit = _ld_kayitlari(sonuc)[0]
-    yer_tutucular = set(re.findall(r'\{(\w+)\}', kayit['fallback']))
-    assert yer_tutucular == set(kayit['params'])
+    for metin in _ld_sozluk_metinleri():
+        yer_tutucular = set(re.findall(r'\{(\w+)\}', metin))
+        assert yer_tutucular == set(kayit['params'])
 
 
 def test_ld_uyarisi_kompakt_motorda_cikmiyor(kompakt_motor):
@@ -203,19 +221,25 @@ def test_ld_uyarisi_kompakt_motorda_cikmiyor(kompakt_motor):
         'Eşiğin altındaki motor narinlik uyarısı almamalı')
 
 
-def test_ld_kodu_i18n_sozluk_bekcisiyle_catismaz(boru_motor):
-    """Kod motor çeviri öneki taşımaz ama fallback metni taşır.
+def test_ld_kodu_warn_onekli_ve_sozlukte(boru_motor):
+    """Kod warn. önekli ve sözlükte iki dilde karşılığı var.
 
-    Çeviri sözlüğü (i18n_common.js) bu değişikliğin kapsamı dışında; motor
-    önekli bir kod sözlükte karşılıksız kalıp i18n bekçisini kırardı ve
-    kullanıcı ham anahtar görürdü. Fallback yolu her iki uyarı
-    görüntüleyicide de (app.js, analysis_dock.js) desteklidir.
+    İlk sürümde sözlük dosyası başka bir değişikliğin kapsamındayken kod
+    bilerek motor önekiyle + fallback metniyle yayımlanmıştı. 2026-08-04:
+    EN/TR kayıtları i18n_common.js'e eklendi, kod warn. önekine taşındı,
+    fallback kaldırıldı — bu bekçi yeni sözleşmeyi kilitler (kapı bekçisi
+    test_no_raw_warnings_left_in_engines ile artık çelişmez).
     """
     _, sonuc = boru_motor
     kayit = _ld_kayitlari(sonuc)[0]
-    assert not kayit['code'].startswith('warn.')
-    assert isinstance(kayit.get('fallback'), str)
-    assert len(kayit['fallback']) > 80
+    assert kayit['code'].startswith('warn.')
+    assert 'fallback' not in kayit, 'geçici fallback kaldırılmış olmalı'
+
+    sozluk = (pathlib.Path(__file__).resolve().parents[1]
+              / 'hrma' / 'static' / 'js' / 'i18n_common.js'
+              ).read_text(encoding='utf-8')
+    assert sozluk.count(f"'{kayit['code']}'") >= 2, (
+        'kod sözlüğün hem EN hem TR bölümünde bulunmalı')
 
 
 # ---------------------------------------------------------------------------

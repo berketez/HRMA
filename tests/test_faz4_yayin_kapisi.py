@@ -259,9 +259,13 @@ def test_kapi_yesil_ise_herkese_acik_yayin_olur(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _kapi_bolumleri():
-    """Kapı betiğini ``baslik "N/7 ..."`` sınırlarından bölümlere ayırır."""
+    """Kapı betiğini ``baslik "N/8 ..."`` sınırlarından bölümlere ayırır.
+
+    2026-08-04: kapıya 8. adım (paket içerik manifesti + boyut sapması)
+    eklendi; ayrıştırıcı /7'den /8'e güncellendi.
+    """
     metin = KAPI_BETIGI.read_text(encoding="utf-8")
-    parcalar = re.split(r'^baslik "(\d)/7\s+([^"]*)"', metin, flags=re.M)
+    parcalar = re.split(r'^baslik "(\d)/8\s+([^"]*)"', metin, flags=re.M)
     bolumler = {}
     for indeks in range(1, len(parcalar), 3):
         bolumler[int(parcalar[indeks])] = parcalar[indeks + 2]
@@ -281,9 +285,9 @@ def _kod_satirlari(govde):
                      if not satir.lstrip().startswith("#"))
 
 
-def test_kapi_yedi_adimin_hepsini_iceriyor():
+def test_kapi_sekiz_adimin_hepsini_iceriyor():
     bolumler = _kapi_bolumleri()
-    assert sorted(bolumler) == list(range(1, 8)), sorted(bolumler)
+    assert sorted(bolumler) == list(range(1, 9)), sorted(bolumler)
 
 
 def test_ci_kontrolu_hicbir_atlama_bayragi_gormez():
@@ -303,7 +307,7 @@ def test_ci_kontrolu_hicbir_atlama_bayragi_gormez():
         kod = _kod_satirlari(govde)
         for bayrak in ("TAKIMI_ATLA", "HIZLI"):
             assert bayrak not in kod, (
-                f"{numara}/7 adımı '{bayrak}' atlama bayrağını görüyor — "
+                f"{numara}/8 adımı '{bayrak}' atlama bayrağını görüyor — "
                 f"atlanabilir hâle gelmiş")
 
     # Karşı yön: bayrak 5/7'de GERÇEKTEN duruyor olmalı. Yoksa test,
@@ -402,26 +406,39 @@ def test_is_akisi_dosyalari_gecerli_yaml():
 
 
 def test_release_is_akisi_sirayi_zorlar():
-    """E3: test -> sürüm bağlantısı -> yayın denetimi sırası."""
-    metin = (ISAKISI_DIZINI / "release.yml").read_text(encoding="utf-8")
+    """E3: testler yeşil olmadan taslak sürüm açılamaz.
 
-    # Ayrıştırıcısız da ölçülebilen çekirdek sözleşme: sürüm bağlantısı
-    # testin ARDINDAN koşar. `needs` düşerse iki iş paralelleşir ve
-    # "test yeşil olmadan sürüm doğrulandı" durumu geri gelir.
-    assert re.search(r"^\s*needs:\s*test\s*$", metin, re.M), (
-        "sürüm bağlantısı işinde 'needs: test' yok — sıra zorlanmıyor")
+    2026-08-04: release.yml etiket-tetiklemeli yayın hattına dönüştü
+    (7 iş: surum-baglantisi, testler, ci-durumu, mac-paket, win-paket,
+    taslak-yayin, yayin-denetimi). Eski bekçi literal ``needs: test``
+    metnini arıyordu — eski yapıyı kilitliyordu. Değişmez aynı kaldı:
+    yayın (taslak) işi, test ve CI işleri YEŞİL olmadan koşamaz; bunu
+    artık yapıya değil bağımlılık grafiğine bakarak sınıyoruz.
+    """
+    metin = (ISAKISI_DIZINI / "release.yml").read_text(encoding="utf-8")
     assert re.search(r"^\s*tags:\s*$", metin, re.M), (
         "v* etiketi zinciri başlatmıyor")
 
     veri = _is_akisi_yukle("release.yml")
     isler = veri["jobs"]
-    for ad in ("test", "surum-baglantisi", "yayin-denetimi"):
+    for ad in ("surum-baglantisi", "testler", "ci-durumu",
+               "taslak-yayin", "yayin-denetimi"):
         assert ad in isler, f"release iş akışında '{ad}' işi yok"
 
-    gerekli = isler["surum-baglantisi"].get("needs")
-    gerekli = [gerekli] if isinstance(gerekli, str) else (gerekli or [])
-    assert "test" in gerekli
+    # Çekirdek sözleşme: taslak sürümü açan iş, test + CI işlerine
+    # bağımlı olmak ZORUNDA. `needs` düşerse "test yeşil olmadan sürüm
+    # yayımlandı" durumu geri gelir.
+    taslak_needs = isler["taslak-yayin"].get("needs") or []
+    if isinstance(taslak_needs, str):
+        taslak_needs = [taslak_needs]
+    for on_kosul in ("testler", "ci-durumu", "surum-baglantisi"):
+        assert on_kosul in taslak_needs, (
+            f"taslak-yayin '{on_kosul}' işine bağımlı değil — "
+            f"sıra zorlanmıyor (needs={taslak_needs})")
 
+    # Eski yapıda sıra 'surum-baglantisi needs: test' ile kuruluyordu;
+    # yeni hatta surum-baglantisi bağımsız hızlı bir ön kontrol, sıra
+    # yukarıdaki taslak-yayin bağımlılıklarıyla zorlanıyor.
     assert "tags" in (veri["on"].get("push") or {})
 
 

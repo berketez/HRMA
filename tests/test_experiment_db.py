@@ -130,7 +130,9 @@ class TestValidator:
         record = make_valid_record()
         record["measured"]["burn_time_s"] = 6.55  # inputs'ta da var
         errors = validate_record(record)
-        assert any("dongusellik" in e and "burn_time_s" in e for e in errors), errors
+        # 2026-08-04: doğrulayıcı mesajları düzgün Türkçe imlaya geçti
+        # ("dongusellik" -> "döngüsellik") — bekçi yeni metni arar.
+        assert any("döngüsellik" in e and "burn_time_s" in e for e in errors), errors
 
     def test_inputs_value_must_be_number(self):
         record = make_valid_record()
@@ -199,7 +201,7 @@ class TestValidator:
             "time_s": [0.0, 1.0, 2.0], "value": [10.0, 11.0]
         }
         errors = validate_record(record)
-        assert any("uzunluklari esit" in e for e in errors)
+        assert any("uzunlukları eşit" in e for e in errors)
 
     def test_curve_time_must_increase(self):
         record = make_valid_record()

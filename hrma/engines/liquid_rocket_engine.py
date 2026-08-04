@@ -655,6 +655,23 @@ NOZZLE_TYPE_GEOMETRY = {
                   'modelled': False},
 }
 NOZZLE_TYPE_DEFAULT = 'bell_80'
+
+#: Devre modeli sözcüğü -> ``injector_pattern.pattern_type`` sözcüğü
+#: (motor_viz3d.js readInjectorPattern sözleşmesi; v2.6.27 B2). viz
+#: sözleşmesi 'imping*' önekini çarpışma çizgileri, 'swirl' sözcüğünü sprey
+#: konisi için özel işler; kalan tipler yalnız veri olarak taşınır.
+#: Eşlenmeyen tip için blok YAYIMLANMAZ — sözlüğe uydurma sözcük girmez.
+INJECTOR_PATTERN_WORD = {
+    'showerhead': 'showerhead',
+    'like_impinging': 'impinging',
+    'impinging_doublet': 'impinging',
+    'impinging_triplet': 'impinging',
+    'pintle': 'pintle',
+    'swirl': 'swirl',
+    'coax_swirl': 'swirl',
+    'gas_gas_coaxial': 'coaxial',
+}
+
 # Yakınsak (daralan) koni yarı açısı. TEK TANIM YERİ (CLAUDE.md kural 11):
 # hem soğutma entegrasyonundaki yakınsak uzunluk hem de sonuç sözlüğündeki
 # 'convergent_half_angle_deg' bu değeri kullanır; ikisi ayrı sabitken
@@ -4693,7 +4710,7 @@ class LiquidRocketEngine:
                            'used instead')
             design_status_basis = [gerekce]
 
-        return {
+        results = {
             # Input parameters
             'thrust': self.F,
             'chamber_pressure': self.P_c,
@@ -4892,7 +4909,165 @@ class LiquidRocketEngine:
                 ),
             },
         }
-    
+
+        # --- v2.6.27 (B3): lüle iç konturu TEK kaynaktan yayımlanır --------
+        # motor_viz3d.js selectNozzleContour bu bloğu okur; blok yoksa sahne
+        # yerel üretime düşer ve bunu çipiyle beyan eder. Örnekleyici, 2B
+        # kesit / STL-STEP dışa aktarımının kullandığı fonksiyonun AYNISIDIR
+        # (nozzle_design.sample_nozzle_inner_contour). Sıvı rotasının üst
+        # düzey birimleri KARIŞIKTIR (chamber mm, throat/exit m — bkz.
+        # export/motor_geometry.liquid_results_to_motor_geometry docstring'i);
+        # bu yüzden örnekleyiciye METRE bazlı ayrı bir sözlük kurulur ve
+        # değerler dışa aktarım otoritesinin okuduğu kaynakların TA
+        # KENDİSİDİR (cooling chamber/convergent/divergent, nozzle_geom
+        # throat/exit) — iki yol aynı geometriyi üretir.
+        #
+        # ORİJİN SÖZLEŞMESİ (doğrulandı): örnekleyicinin ilk noktası
+        # konverjan GİRİŞİDİR (kamara-lüle birleşimi) — s=0'da
+        # r = rt + (rc-rt)·(0.5+0.5·cos 0) = rc, z = 0; z çıkışa doğru artar.
+        # viz3d bu varsayımla çizer; boğaz-orijinli seri lüleyi yanlış
+        # konumlandırır. Bekçi: tests/test_motor_geometri_yayimi.py.
+        # Örnekleyici başarısız olursa blok yayımlanmaz (uydurma kontur yok).
+        try:
+            from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+            md_geo = {
+                # cooling sözlüğü mm taşır; burada metreye çevrilir.
+                'chamber_diameter': float(cooling['chamber_diameter']) / 1000.0,
+                'throat_diameter': float(nozzle_geom['throat_diameter']),  # m
+                'exit_diameter': float(nozzle_geom['exit_diameter']),      # m
+                'nozzle_angles': results['nozzle_angles'],
+                'nozzle_convergent_length':
+                    float(cooling['convergent_length']) / 1000.0,          # m
+                'nozzle_divergent_length':
+                    float(cooling['divergent_length']) / 1000.0,           # m
+            }
+            pts_mm, kontur_meta = sample_nozzle_inner_contour(md_geo)
+            results['nozzle_contour'] = {
+                'points': [[float(z) / 1000.0, float(r) / 1000.0]
+                           for z, r in pts_mm],
+                '_basis': (
+                    'sampled inner flow-path contour from hrma.engines.'
+                    'nozzle_design.sample_nozzle_inner_contour — the same '
+                    'sampler the 2D cross-section and the STL/STEP exports '
+                    'consume, fed with the liquid solver geometry in metres '
+                    '(cooling-integration chamber diameter and convergent/'
+                    'divergent lengths, nozzle throat/exit diameters). '
+                    'points are [z_m, r_m] pairs in metres; the FIRST point '
+                    'is the convergent inlet (chamber-nozzle junction, '
+                    'z = 0, r = chamber radius) and z increases toward the '
+                    'nozzle exit. Divergent length source: '
+                    + str(kontur_meta.get('divergent_length_source'))),
+            }
+        except Exception:
+            # Fail-closed: kontur üretilemiyorsa ÜRETİLMEZ; viz yerel üretime
+            # düşer ve kaynağı 'kontur: yerel üretim' çipiyle beyan eder.
+            pass
+
+        # --- v2.6.27 (B1): rejeneratif kanal geometrisi -------------------
+        # motor_viz3d.js coolingChannelSpec sözleşmesi: {n_channels,
+        # channel_width_m, channel_height_m, land_width_m, _basis}. Kaynak
+        # calculate_cooling_requirements'ın kanal geometrisidir (sayı kullanıcı
+        # girdisi ya da boğaz çevresi/hatvesinden; kesit tek doğruluk
+        # kaynağından, derinlik hız hedefine göre büyütülmüş olabilir —
+        # channel_count_source/channel_height_basis aynı sözlükte). Soğutma
+        # REJENERATİF DEĞİLSE blok yayımlanmaz: frezeli soğutma kanalı ancak
+        # rejeneratif gömlekte imal edilir; film/ablatif/radyatif cidara
+        # kanal çizdirmek fabrikasyondur (bekçisi: fabrikasyon-yok testi).
+        if self.cooling_type == 'regenerative':
+            n_kanal = int(cooling.get('cooling_channels') or 0)
+            kanal_w_m = float(cooling.get('channel_width_mm') or 0.0) / 1000.0
+            kanal_h_m = float(cooling.get('channel_height_mm') or 0.0) / 1000.0
+            if n_kanal >= 1 and kanal_w_m > 0.0 and kanal_h_m > 0.0:
+                kanal_blok = {
+                    'n_channels': n_kanal,
+                    'channel_width_m': kanal_w_m,
+                    'channel_height_m': kanal_h_m,
+                    '_basis': (
+                        'regenerative cooling channel geometry from '
+                        'calculate_cooling_requirements (cooling_system.'
+                        'cooling_channels / channel_width_mm / '
+                        'channel_height_mm converted to metres). Channel '
+                        'count source: '
+                        + str(cooling.get('channel_count_source'))
+                        + '. land_width_m, when present, is derived at the '
+                        'binding throat section: pi*d_throat/n_channels - '
+                        'channel_width (channels are constant-width, so the '
+                        'land varies along the axis and is narrowest at the '
+                        'throat).'),
+                }
+                # Boğazdaki kirişler arası dolu et (land): sabit genişlikli
+                # kanallarda en dar yerde. Pozitif değilse (kanallar boğaza
+                # sığmıyor — çözücü zaten uyarıyor) alan YAYIMLANMAZ.
+                land_m = (np.pi * float(self.d_t) / n_kanal) - kanal_w_m
+                if np.isfinite(land_m) and land_m > 0.0:
+                    kanal_blok['land_width_m'] = float(land_m)
+                results['cooling_channels'] = kanal_blok
+
+        # --- v2.6.27 (B2): enjektör delik deseni — yalnız GERÇEK çözümden --
+        # motor_viz3d.js readInjectorPattern sözleşmesi: {n_holes,
+        # hole_diameter_m, pattern_type, impingement_angle_deg?, _basis}.
+        # Kaynak devre modelinin başarılı çözümüdür (injector_design_detail);
+        # modül çözemeyip eski Bernoulli tahmini kaldıysa blok YOKTUR — iki
+        # farklı çözücünün sayıları tek desende harmanlanmaz. n_rings hiçbir
+        # yerde hesaplanmadığı için yayımlanmaz (hesaplanmayan alan konmaz).
+        detay = injector.get('injector_design_detail')
+        if isinstance(detay, dict) and detay.get('status') == 'success':
+            oxc = detay.get('ox_circuit') or {}
+            fc = detay.get('fuel_circuit') or None
+            desen_sozcugu = INJECTOR_PATTERN_WORD.get(
+                str(detay.get('injector_type') or '').lower())
+            n_ox = int(oxc.get('n_orifices') or 0)
+            n_fuel = int((fc or {}).get('n_orifices') or 0)
+            if desen_sozcugu and (n_ox + n_fuel) >= 1:
+                desen = {
+                    # Yüzeydeki TOPLAM delik sayısı: oksitleyici + yakıt
+                    # devresi (iki-devreli yüzde her delik gerçektir).
+                    'n_holes': n_ox + n_fuel,
+                    'pattern_type': desen_sozcugu,
+                    '_basis': (
+                        'orifice plan from the injector design model '
+                        '(injector_design_detail): n_holes is the TOTAL face '
+                        f'orifice count, oxidizer circuit {n_ox} + fuel '
+                        f'circuit {n_fuel}. n_rings is not computed by any '
+                        'solver and is therefore not published.'),
+                }
+                # Tek delik çapı ancak tek devre varsa ya da iki devrenin
+                # çapı fiilen aynıysa GERÇEKTİR; farklıysa tek sayı uydurmak
+                # yakıt deliklerini oksitleyici çapında göstermek olur —
+                # alan yayımlanmaz, iki çap _basis'te beyan edilir.
+                d_ox_mm = float(oxc.get('orifice_d_mm') or 0.0)
+                d_fuel_mm = float((fc or {}).get('orifice_d_mm') or 0.0)
+                if n_fuel == 0 and d_ox_mm > 0:
+                    desen['hole_diameter_m'] = d_ox_mm / 1000.0
+                elif (d_ox_mm > 0 and d_fuel_mm > 0
+                        and abs(d_ox_mm - d_fuel_mm)
+                        <= 0.01 * max(d_ox_mm, d_fuel_mm)):
+                    desen['hole_diameter_m'] = d_ox_mm / 1000.0
+                else:
+                    desen['_basis'] += (
+                        ' hole_diameter_m is not published because the two '
+                        f'circuits differ (ox {d_ox_mm:.3f} mm, fuel '
+                        f'{d_fuel_mm:.3f} mm); a single diameter would '
+                        'misrepresent one circuit.')
+                # Açı yalnız GERÇEKTEN çözülen/ilan edilen yerden gelir:
+                #  - çarpışmalı: pattern.impingement.half_angle_deg (SP-8089
+                #    tasarım seçimi; temeli modülün kendi beyanında),
+                #  - swirl: atomization.spray_cone_half_angle_deg (çözülür).
+                # Sözleşme İKİ JET ARASINDAKİ TAM açıyı taşır (viz yarılar).
+                yarim_aci = None
+                if desen_sozcugu == 'impinging':
+                    yarim_aci = ((detay.get('pattern') or {})
+                                 .get('impingement') or {}).get('half_angle_deg')
+                elif desen_sozcugu == 'swirl':
+                    yarim_aci = (detay.get('atomization') or {}).get(
+                        'spray_cone_half_angle_deg')
+                if yarim_aci is not None and np.isfinite(float(yarim_aci)) \
+                        and float(yarim_aci) > 0:
+                    desen['impingement_angle_deg'] = 2.0 * float(yarim_aci)
+                results['injector_pattern'] = desen
+
+        return results
+
     # ------------------------------------------------------------------
     # Tek yoğunluk kaynağı + tek tank boyutlandırma modeli
     # (v2.5.2, Codex bulgusu liquid:2450)

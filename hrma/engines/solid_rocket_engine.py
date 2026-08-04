@@ -7497,7 +7497,7 @@ class SolidRocketEngine:
         # için iki farklı nozul raporu oluşmaz.
         nozzle_design_block = self._design_nozzle_geometry()
 
-        return {
+        results = {
             # Input parameters
             'grain_type': self.grain_type,
             'propellant_type': self.propellant_type,
@@ -7645,3 +7645,57 @@ class SolidRocketEngine:
                     'time step met the tolerance.'),
             },
         }
+
+        # --- v2.6.27 (B3): lüle iç konturu TEK kaynaktan yayımlanır --------
+        # motor_viz3d.js selectNozzleContour bu bloğu okur; blok yoksa sahne
+        # yerel üretime düşer ve bunu çipiyle beyan eder. Örnekleyici, 2B
+        # kesit / STL-STEP dışa aktarımının kullandığı fonksiyonun AYNISIDIR
+        # (nozzle_design.sample_nozzle_inner_contour). Katı sonuç sözlüğü üst
+        # düzeyde MM taşıdığı için örnekleyiciye METRE bazlı ayrı bir sözlük
+        # kurulur; değerler dışa aktarım otoritesinin
+        # (export/motor_geometry.solid_results_to_motor_geometry) okuduğu
+        # kaynakların TA KENDİSİDİR (D_chamber, d_throat, d_exit,
+        # nozzle_angles uzunlukları) — iki yol aynı geometriyi üretir.
+        #
+        # ORİJİN SÖZLEŞMESİ (doğrulandı): örnekleyicinin ilk noktası
+        # konverjan GİRİŞİDİR (kamara-lüle birleşimi) — s=0'da
+        # r = rt + (rc-rt)·(0.5+0.5·cos 0) = rc, z = 0; z çıkışa doğru artar.
+        # viz3d bu varsayımla çizer; boğaz-orijinli seri lüleyi yanlış
+        # konumlandırır. Bekçi: tests/test_motor_geometri_yayimi.py.
+        # Örnekleyici başarısız olursa blok yayımlanmaz (uydurma kontur yok).
+        # Katıda enjektör ve rejeneratif kanal FİZİKSEL OLARAK yoktur;
+        # injector_pattern ve cooling_channels blokları bu yüzden hiçbir
+        # koşulda yayımlanmaz (fabrikasyon yasağı — bekçisi aynı test).
+        try:
+            from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+            md_geo = {
+                'chamber_diameter': float(self.D_chamber),   # m
+                'throat_diameter': float(d_throat),          # m
+                'exit_diameter': float(d_exit),              # m
+                'nozzle_angles': nozzle_angles,
+                'nozzle_convergent_length': float(nozzle_conv_length),  # m
+                'nozzle_divergent_length': float(nozzle_div_length),    # m
+            }
+            pts_mm, kontur_meta = sample_nozzle_inner_contour(md_geo)
+            results['nozzle_contour'] = {
+                'points': [[float(z) / 1000.0, float(r) / 1000.0]
+                           for z, r in pts_mm],
+                '_basis': (
+                    'sampled inner flow-path contour from hrma.engines.'
+                    'nozzle_design.sample_nozzle_inner_contour — the same '
+                    'sampler the 2D cross-section and the STL/STEP exports '
+                    'consume, fed with the solid solver geometry in metres '
+                    '(case inner diameter, thrust-curve throat/exit '
+                    'diameters, nozzle_angles lengths). points are [z_m, '
+                    'r_m] pairs in metres; the FIRST point is the convergent '
+                    'inlet (chamber-nozzle junction, z = 0, r = chamber '
+                    'radius) and z increases toward the nozzle exit. '
+                    'Divergent length source: '
+                    + str(kontur_meta.get('divergent_length_source'))),
+            }
+        except Exception:
+            # Fail-closed: kontur üretilemiyorsa ÜRETİLMEZ; viz yerel üretime
+            # düşer ve kaynağı 'kontur: yerel üretim' çipiyle beyan eder.
+            pass
+
+        return results

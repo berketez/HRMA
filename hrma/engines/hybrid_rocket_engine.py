@@ -2,7 +2,8 @@ import numpy as np
 from typing import Dict
 from scipy.optimize import fminbound, minimize_scalar, brentq
 from hrma.engines.combustion_analysis import CombustionAnalyzer
-from hrma.engines.nozzle_design import NozzleDesigner
+from hrma.engines.nozzle_design import (NozzleDesigner,
+                                        sample_nozzle_inner_contour)
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
 from hrma.analysis.structural_analysis import StructuralAnalyzer
 from hrma.analysis.regression_analysis import RegressionAnalyzer
@@ -277,6 +278,22 @@ NOZZLE_MATERIAL_COOLING = {
 #: boyutlandırılır, yani kullanıcı sonuçsuz kalmaz.
 INJECTOR_TYPE_TO_MODULE = {
     'impingement': 'like_impinging',
+}
+
+#: Devre modeli sözcüğü -> ``injector_pattern.pattern_type`` sözcüğü
+#: (motor_viz3d.js readInjectorPattern sözleşmesi; v2.6.27 B2). viz
+#: sözleşmesi 'imping*' önekini çarpışma çizgileri, 'swirl' sözcüğünü sprey
+#: konisi için özel işler; kalan tipler yalnız veri olarak taşınır.
+#: Eşlenmeyen tip için blok YAYIMLANMAZ — sözlüğe uydurma sözcük girmez.
+INJECTOR_PATTERN_WORD = {
+    'showerhead': 'showerhead',
+    'like_impinging': 'impinging',
+    'impinging_doublet': 'impinging',
+    'impinging_triplet': 'impinging',
+    'pintle': 'pintle',
+    'swirl': 'swirl',
+    'coax_swirl': 'swirl',
+    'gas_gas_coaxial': 'coaxial',
 }
 
 #: Lüle termal profilinde kullanılan istasyon sayısı. Boğaz istasyonunun
@@ -1197,33 +1214,19 @@ class HybridRocketEngine:
         # büyüktür (L = L_grain + ön + art oda); ikisi de raporlanır ki
         # kullanıcı hangi büyüklüğün eşiği aştığını görsün.
         #
-        # UYARI KODU BİLEREK 'hybrid.' ÖNEKİYLE, çeviri sözlüğü öneki İLE
-        # DEĞİL: sözlük hrma/static/js/i18n_common.js içindedir ve o dosya bu
-        # değişikliğin kapsamı dışındadır; sözlükte karşılığı olmayan bir
-        # motor-önekli kod tests/test_engine_warning_i18n.py bekçisini kırar.
-        # Kullanıcıya metin yine ULAŞIR: hem app.js hem analysis_dock.js
-        # uyarı çevirisinde `fallback` alanını destekler (I18N.tf üçüncü
-        # argüman) ve yer tutucuları params'tan doldurur. Sözlüğe EN/TR
-        # kayıtları eklendiğinde kod motor önekine taşınmalı ve fallback
-        # kaldırılmalıdır.
+        # Uyarı kodu 'warn.' önekiyle sözlük sözleşmesine bağlıdır: EN/TR
+        # karşılıkları hrma/static/js/i18n_common.js'te durur (ilk sürümde
+        # sözlük dosyası başka bir değişikliğin kapsamındayken geçici bir
+        # 'fallback' metniyle ve motor önekiyle yayımlanmıştı; 2026-08-04'te
+        # sözlük kayıtları eklendi, kod warn. önekine taşındı, fallback
+        # kaldırıldı).
         grain_ld = (self.L_grain / self.D_ch) if self.D_ch > 0 else 0.0
         chamber_ld = (self.L / self.D_ch) if self.D_ch > 0 else 0.0
         if max(grain_ld, chamber_ld) > GRAIN_LD_WARN_THRESHOLD:
-            ld_uyari = _w('hybrid.grain_slenderness_high', 'warning',
+            ld_uyari = _w('warn.hybrid.grain_slenderness_high', 'warning',
                           grain_ld=round(float(grain_ld), 1),
                           chamber_ld=round(float(chamber_ld), 1),
                           threshold=GRAIN_LD_WARN_THRESHOLD)
-            ld_uyari['fallback'] = (
-                'Grain L/D = {grain_ld} and chamber L/D = {chamber_ld} '
-                'exceed the single-port design-practice threshold of '
-                '{threshold}: the motor is an unusually long, thin tube. '
-                'Increase the port count or enlarge the port diameter '
-                '(lower the design G_ox) to shorten the grain. — '
-                'Grain L/D = {grain_ld} ve kamara L/D = {chamber_ld}, '
-                'tek-port tasarım pratiği eşiği {threshold} değerini aşıyor: '
-                'motor alışılmadık ölçüde uzun ve ince bir boruya dönüşüyor. '
-                'Grain boyunu kısaltmak için port sayısını artırın ya da '
-                'port çapını büyütün (tasarım G_ox değerini düşürün).')
             self.design_warnings.append(ld_uyari)
 
         # Calculate propellant masses
@@ -3063,5 +3066,89 @@ class HybridRocketEngine:
         warnings_list = list(getattr(self, 'design_warnings', []) or [])
         basic_results['design_warnings'] = warnings_list
         basic_results['warnings'] = warnings_list
+
+        # --- v2.6.27 (B3): lüle iç konturu TEK kaynaktan yayımlanır --------
+        # motor_viz3d.js selectNozzleContour bu bloğu okur; blok yoksa sahne
+        # yerel üretime düşer ve bunu çipiyle beyan eder. Örnekleyici, 2B
+        # kesit / 3B sahne / STL-STEP dışa aktarımının kullandığı fonksiyonun
+        # AYNISIDIR (nozzle_design.sample_nozzle_inner_contour) — ekrandaki
+        # kontur ile imalata giden kontur ayrışamaz. Hibrit sonuç sözlüğü üst
+        # düzeyde METRE taşıdığı için örnekleyiciye doğrudan verilir; çağrı,
+        # 'nozzle_contour' (NozzleDesigner) ve 'design_summary.nozzle'
+        # yerleştirildikten SONRA yapılır ki ıraksak boy çözücüden okunsun.
+        #
+        # ORİJİN SÖZLEŞMESİ (doğrulandı): örnekleyicinin ilk noktası
+        # konverjan GİRİŞİDİR (kamara-lüle birleşimi) — s=0'da
+        # r = rt + (rc-rt)·(0.5+0.5·cos 0) = rc, z = 0; z çıkışa doğru artar.
+        # viz3d bu varsayımla çizer; boğaz-orijinli bir seri yayımlamak lüleyi
+        # yanlış konumlandırır. Bekçi: tests/test_motor_geometri_yayimi.py.
+        # Örnekleyici başarısız olursa blok yayımlanmaz (uydurma kontur yok);
+        # NozzleDesigner bloğu points'siz aynen kalır.
+        try:
+            pts_mm, kontur_meta = sample_nozzle_inner_contour(basic_results)
+            onceki_kontur = basic_results.get('nozzle_contour')
+            kontur_blok = (dict(onceki_kontur)
+                           if isinstance(onceki_kontur, dict) else {})
+            kontur_blok['points'] = [
+                [float(z) / 1000.0, float(r) / 1000.0] for z, r in pts_mm]
+            kontur_blok['_basis'] = (
+                'sampled inner flow-path contour from hrma.engines.'
+                'nozzle_design.sample_nozzle_inner_contour — the same sampler '
+                'the 2D cross-section, the 3D scene and the STL/STEP exports '
+                'consume. points are [z_m, r_m] pairs in metres; the FIRST '
+                'point is the convergent inlet (chamber-nozzle junction, '
+                'z = 0, r = chamber radius) and z increases toward the nozzle '
+                'exit. Divergent length source: '
+                + str(kontur_meta.get('divergent_length_source')))
+            basic_results['nozzle_contour'] = kontur_blok
+        except Exception:
+            # Fail-closed: kontur üretilemiyorsa ÜRETİLMEZ; viz yerel üretime
+            # düşer ve kaynağı 'kontur: yerel üretim' çipiyle beyan eder.
+            pass
+
+        # --- v2.6.27 (B2): enjektör delik deseni — yalnız GERÇEK çözümden --
+        # motor_viz3d.js readInjectorPattern sözleşmesi: {n_holes,
+        # hole_diameter_m, pattern_type, impingement_angle_deg?, _basis}.
+        # Kaynak devre modelinin başarılı çözümüdür (injector_design_detail);
+        # 'not_analyzed' yolunda blok YOKTUR — delik planı üretilemeyen
+        # tasarıma desen çizdirilmez. n_rings hiçbir yerde hesaplanmadığı
+        # için hiçbir koşulda yayımlanmaz (hesaplanmayan alan konmaz).
+        detay = basic_results.get('injector_design_detail')
+        if isinstance(detay, dict) and detay.get('status') == 'success':
+            oxc = detay.get('ox_circuit') or {}
+            desen_sozcugu = INJECTOR_PATTERN_WORD.get(
+                str(detay.get('injector_type') or '').lower())
+            n_delik = int(oxc.get('n_orifices') or 0)
+            d_delik_mm = float(oxc.get('orifice_d_mm') or 0.0)
+            if desen_sozcugu and n_delik >= 1:
+                desen = {
+                    'n_holes': n_delik,
+                    'pattern_type': desen_sozcugu,
+                    '_basis': (
+                        'oxidizer-circuit orifice plan from the injector '
+                        'design model (injector_design_detail.ox_circuit): a '
+                        'hybrid injects only the oxidizer, so the face '
+                        'pattern is the single oxidizer circuit. n_rings is '
+                        'not computed by any solver and is therefore not '
+                        'published.'),
+                }
+                if d_delik_mm > 0:
+                    desen['hole_diameter_m'] = d_delik_mm / 1000.0
+                # Açı yalnız GERÇEKTEN çözülen/ilan edilen yerden gelir:
+                #  - çarpışmalı: pattern.impingement.half_angle_deg (SP-8089
+                #    tasarım seçimi; temeli modülün kendi beyanında),
+                #  - swirl: atomization.spray_cone_half_angle_deg (çözülür).
+                # Sözleşme İKİ JET ARASINDAKİ TAM açıyı taşır (viz yarılar).
+                yarim_aci = None
+                if desen_sozcugu == 'impinging':
+                    yarim_aci = ((detay.get('pattern') or {})
+                                 .get('impingement') or {}).get('half_angle_deg')
+                elif desen_sozcugu == 'swirl':
+                    yarim_aci = (detay.get('atomization') or {}).get(
+                        'spray_cone_half_angle_deg')
+                if yarim_aci is not None and np.isfinite(float(yarim_aci)) \
+                        and float(yarim_aci) > 0:
+                    desen['impingement_angle_deg'] = 2.0 * float(yarim_aci)
+                basic_results['injector_pattern'] = desen
 
         return basic_results
