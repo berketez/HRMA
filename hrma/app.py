@@ -6762,6 +6762,305 @@ def analyze_wall_profile():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+# ===========================================================================
+# D5 — YAPISAL FEA UCU (v2.7 analiz modülünün kullanıcı yüzü)
+# ---------------------------------------------------------------------------
+# hrma/fea/ çözücüleri (D1 yapısal + mesh + D4 köprü) depoda hazırdı ama
+# HİÇBİR kullanıcı yüzü yoktu: kullanıcı ne gerilme alanını ne de mesh'i
+# görebiliyordu. Bu uç, köprüyü (bridge.run_structural_from_motor) motor
+# sonuç sözlüğüyle koşturur ve ÇİZİLEBİLİR ham veriyi döner — grafik
+# üretmez, karar vermez (çizim fea_panel.js'in işidir).
+#
+# Sahte veri yasağı: girdi eksikse köprünün NOT_MODELLED sonucu AYNEN
+# (200 ile) geçirilir; uydurma gerilme/SF alanı hiçbir dalda üretilmez.
+# Çözücü çökerse 500 döner — "boş ama başarılı" yanıt üretilmez.
+# ===========================================================================
+
+#: Tek koşuda üretilecek eleman sayısı üst sınırı. Ardışık inceltme her
+#: turda eksenel ve radyal bölümü REFINE_FACTOR ile çarptığı için eleman
+#: sayısı tur başına F² kat artar; sınır aşılacaksa TUR SAYISI kısılır
+#: (mesh sessizce bozulmaz, kısıtlama yanıtta 'limits' ile beyan edilir).
+#: Masaüstü tek-worker sunucuda uzun koşu riskine karşı konmuştur.
+FEA_MAX_ELEMS = 20000
+
+#: Eleman kalite eşikleri — TEK TANIM YERİ. Panel bu değerleri yanıttan
+#: okur (kaynakta ikinci kez yazılmaz, parametre tutarlılığı kuralı).
+#: Kaynak: Verdict / CUBIT dörtgen eleman ölçüt tablosu — 'Aspect Ratio'
+#: kabul aralığı 1..4 (Robinson 1987), 'Scaled Jacobian' kabul aralığı
+#: 0.5..1 (Knupp 2000); C. J. Stimpson, C. D. Ernst, P. Knupp, P. P. Pebay,
+#: D. Thompson, "The Verdict Geometric Quality Library", Sandia National
+#: Laboratories, SAND2007-1751, 2007.
+FEA_QUALITY_ASPECT_MAX = 4.0
+FEA_QUALITY_SCALED_JACOBIAN_MIN = 0.5
+
+
+def _fea_pick_motor_results(data):
+    """İstek gövdesinden FEA'ya verilecek motor sonuç sözlüğünü seçer.
+
+    Hibrit sayfada sonuç ``{'motor': {...}}`` sarmalı içinde, sıvı/katı
+    sayfalarda üst düzey sözlüktedir. Seçim TAHMİNLE değil, köprünün kendi
+    motor-tipi imzasıyla (``detect_engine_layout``) yapılır: imzayı taşıyan
+    ilk aday kullanılır. Hiçbir aday imza taşımıyorsa ilk sözlük adayı
+    döner — köprü onun için dürüst NOT_MODELLED üretir (uydurma yok).
+
+    Dönüş: (motor_results | None, hangi alandan alındığı).
+    """
+    from hrma.fea.bridge import detect_engine_layout
+
+    adaylar = []
+    for alan in ('motor_results', 'motor', 'results'):
+        deger = data.get(alan)
+        if isinstance(deger, dict):
+            adaylar.append((deger, alan))
+            ic = deger.get('motor')
+            if isinstance(ic, dict):
+                adaylar.append((ic, alan + '.motor'))
+    if isinstance(data, dict) and data:
+        adaylar.append((data, 'body'))
+
+    for aday, alan in adaylar:
+        if detect_engine_layout(aday) is not None:
+            return aday, alan
+    for aday, alan in adaylar:
+        if alan != 'body':
+            return aday, alan
+    return (data if isinstance(data, dict) and data else None), 'body'
+
+
+def _fea_quad_quality(nodes, elems):
+    """Dörtgen eleman kalite ölçütleri: en-boy oranı + ölçekli Jacobian.
+
+    En-boy oranı (quad merkezinde): karşılıklı kenarların ortalaması olan
+    iki asal eksen X1 = (P1-P0) + (P2-P3), X2 = (P2-P1) + (P3-P0) alınır ve
+    ``max(|X1|, |X2|) / min(|X1|, |X2|)`` döner (oran olduğu için 1/2
+    normalizasyonu sadeleşir). Kare elemanda 1, uzayan elemanda büyür.
+
+    Ölçekli Jacobian: her köşede köşeye gelen ve köşeden çıkan kenar
+    vektörlerinin çapraz çarpımı kendi boylarının çarpımına bölünür (köşe
+    açısının sinüsü); eleman değeri dört köşenin EN KÜÇÜĞÜDÜR. Kare
+    elemanda 1, dejenere/ters elemanda <= 0. Mesh üreticisinin köşe
+    Jacobian denetimiyle (mesh_axisym._corner_jacobian_check) aynı çapraz
+    çarpımların normalize hâlidir — yani burada ölçülen, mesh'in kabul
+    ölçütünün sürekli karşılığıdır.
+
+    Kaynak: Verdict / CUBIT dörtgen ölçüt tablosu (SAND2007-1751; Aspect
+    Ratio "maximum edge length ratios at quad center", Robinson 1987;
+    Scaled Jacobian "minimum Jacobian divided by the lengths of the 2 edge
+    vectors", Knupp 2000).
+    """
+    P = np.asarray(nodes, dtype=float)[np.asarray(elems, dtype=int)]  # (M,4,2)
+    e_next = np.roll(P, -1, axis=1) - P          # köşeden çıkan kenar
+    e_in = np.roll(e_next, 1, axis=1)            # köşeye gelen kenar
+    l_next = np.hypot(e_next[:, :, 0], e_next[:, :, 1])
+    l_in = np.hypot(e_in[:, :, 0], e_in[:, :, 1])
+    cross = (e_in[:, :, 0] * e_next[:, :, 1]
+             - e_in[:, :, 1] * e_next[:, :, 0])
+    payda = l_in * l_next
+    with np.errstate(divide='ignore', invalid='ignore'):
+        corner_ratio = np.where(payda > 0.0, cross / payda, 0.0)
+    scaled_jacobian = np.min(corner_ratio, axis=1)
+
+    X1 = (P[:, 1] - P[:, 0]) + (P[:, 2] - P[:, 3])
+    X2 = (P[:, 2] - P[:, 1]) + (P[:, 3] - P[:, 0])
+    l1 = np.hypot(X1[:, 0], X1[:, 1])
+    l2 = np.hypot(X2[:, 0], X2[:, 1])
+    buyuk = np.maximum(l1, l2)
+    kucuk = np.minimum(l1, l2)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        aspect = np.where(kucuk > 0.0, buyuk / kucuk, np.inf)
+    return aspect, scaled_jacobian
+
+
+@app.route('/api/fea/structural', methods=['POST'])
+def api_fea_structural():
+    """Motor sonucundan uçtan uca yapısal FEA koşusu (D5 kullanıcı yüzü).
+
+    Girdi (payload): ``motor_results`` / ``motor`` / ``results`` alanlarından
+    biri motor çözücüsünün sonuç sözlüğünü taşır (hibrit sayfada
+    ``{'motor': {...}}``, sıvı/katı sayfalarda üst düzey sözlük). Alan
+    seçimi köprünün motor-tipi imzasıyla yapılır, tahminle değil.
+
+    Çıktı: mesh (düğüm/eleman/indeks ızgarası), von Mises ve emniyet
+    katsayısı düğüm alanları, eleman kalite ölçütleri + eşikleri,
+    yakınsama geçmişi ve köprünün beyan zinciri. GRAFİK ÜRETİLMEZ —
+    çizim istemcinin (fea_panel.js) işidir.
+
+    Dürüstlük sözleşmesi:
+      * Girdi eksik  -> köprünün NOT_MODELLED payloadsi AYNEN, HTTP 200
+        (uydurma alan yok; 'missing' eksikleri adlandırır).
+      * Çözücü hatası -> HTTP 500 (boş ama 'başarılı' yanıt üretilmez).
+      * Uzun koşu riski -> eleman sayısı FEA_MAX_ELEMS ile sınırlanır ve
+        kısıtlamanın kendisi yanıtın 'limits' bloğunda beyan edilir.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    motor_results, kaynak_alan = _fea_pick_motor_results(data)
+    if not isinstance(motor_results, dict) or not motor_results:
+        return jsonify({
+            'status': 'error',
+            'error': ('Structural FEA needs a motor result object in the '
+                      'request body (motor_results / motor / results).'),
+        }), 400
+
+    from hrma.fea import bridge as fea_bridge
+    from hrma.fea.structural_axisym import (
+        DEFAULT_ELEMS_THROUGH_WALL,
+        DEFAULT_MAX_REFINE_ROUNDS,
+        DEFAULT_N_AXIAL0,
+        DEFAULT_REFINE_TOL,
+        REFINE_FACTOR,
+    )
+
+    def _pozitif_int(alan, varsayilan, alt, ust):
+        deger = data.get(alan)
+        try:
+            sayi = int(deger)
+        except (TypeError, ValueError):
+            return int(varsayilan)
+        return int(min(max(sayi, alt), ust))
+
+    n_axial0 = _pozitif_int('n_axial0', DEFAULT_N_AXIAL0, 4, 256)
+    n_radial0 = _pozitif_int('n_radial0', DEFAULT_ELEMS_THROUGH_WALL, 1, 32)
+    rounds_istenen = _pozitif_int('max_rounds', DEFAULT_MAX_REFINE_ROUNDS, 0, 8)
+
+    # Tur kısıtlaması: n_elems(k) = n_axial0 * n_radial0 * F^(2k) <= sınır.
+    rounds_izinli = 0
+    while rounds_izinli < rounds_istenen:
+        sonraki = (n_axial0 * n_radial0
+                   * REFINE_FACTOR ** (2 * (rounds_izinli + 1)))
+        if sonraki > FEA_MAX_ELEMS:
+            break
+        rounds_izinli += 1
+
+    try:
+        sonuc = fea_bridge.run_structural_from_motor(
+            motor_results,
+            tol=DEFAULT_REFINE_TOL,
+            n_axial0=n_axial0,
+            n_radial0=n_radial0,
+            max_rounds=rounds_izinli,
+        )
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': 'Structural FEA solver failed.',
+            'detail': str(e),
+        }), 500
+
+    limits = {
+        'max_elems': FEA_MAX_ELEMS,
+        'rounds_requested': rounds_istenen,
+        'rounds_allowed': rounds_izinli,
+        'refine_factor': REFINE_FACTOR,
+        'n_axial0': n_axial0,
+        'n_radial0': n_radial0,
+        'clamped': rounds_izinli < rounds_istenen,
+        '_basis': ('refinement rounds are capped so that the final element '
+                   'count stays within max_elems; the mesh is never silently '
+                   'degraded, the cap itself is reported here'),
+    }
+
+    if sonuc.get('status') != fea_bridge.BRIDGE_STATUS_OK:
+        # Köprünün redli sonucu AYNEN geçer (missing / reason / notes /
+        # warning). Hiçbir alan eklenmez, hiçbir sayı uydurulmaz.
+        payload = sanitize_json_values(sonuc)
+        payload['input_field'] = kaynak_alan
+        payload['limits'] = limits
+        return jsonify({'status': 'success', 'fea': payload}), 200
+
+    mesh = sonuc['mesh']
+    ref = sonuc['refinement']
+    inputs = sonuc['inputs']
+    malzeme = inputs.get('material')
+
+    aspect, scaled_jacobian = _fea_quad_quality(mesh['nodes'], mesh['elems'])
+    aspect_bayrak = ~(aspect <= FEA_QUALITY_ASPECT_MAX)
+    jacobian_bayrak = ~(scaled_jacobian >= FEA_QUALITY_SCALED_JACOBIAN_MIN)
+
+    quality = {
+        '_source': 'hrma.app._fea_quad_quality',
+        '_basis': ('Verdict / CUBIT quadrilateral metric definitions: aspect '
+                   'ratio from the two principal axes at the quad centre '
+                   '(acceptable range 1..4, Robinson 1987) and scaled '
+                   'Jacobian as the minimum corner cross product normalised '
+                   'by the two adjacent edge lengths (acceptable range '
+                   '0.5..1, Knupp 2000); C. J. Stimpson et al., "The Verdict '
+                   'Geometric Quality Library", Sandia SAND2007-1751, 2007. '
+                   'Elements outside these ranges are flagged for review; '
+                   'the flag is a mesh-quality warning, not a failed result. '
+                   'A thin wall swept along a long contour produces elongated '
+                   'elements by construction, so a high aspect-ratio count is '
+                   'expected here; the scaled Jacobian is the metric that '
+                   'reports actual element distortion, and the convergence '
+                   'history is what decides whether the mesh is fine enough.'),
+        'aspect_ratio': aspect,
+        'scaled_jacobian': scaled_jacobian,
+        'thresholds': {
+            'aspect_ratio_max': FEA_QUALITY_ASPECT_MAX,
+            'scaled_jacobian_min': FEA_QUALITY_SCALED_JACOBIAN_MIN,
+        },
+        'counts': {
+            'n_elems': int(mesh['n_elems']),
+            'aspect_ratio_flagged': int(np.count_nonzero(aspect_bayrak)),
+            'scaled_jacobian_flagged': int(np.count_nonzero(jacobian_bayrak)),
+            'flagged': int(np.count_nonzero(aspect_bayrak | jacobian_bayrak)),
+        },
+        'worst': {
+            'aspect_ratio_max': float(np.max(aspect)) if aspect.size else None,
+            'scaled_jacobian_min': (float(np.min(scaled_jacobian))
+                                    if scaled_jacobian.size else None),
+        },
+    }
+
+    fea = {
+        'status': fea_bridge.BRIDGE_STATUS_OK,
+        'engine_layout': sonuc.get('engine_layout'),
+        'input_field': kaynak_alan,
+        'mesh': {
+            'nodes': mesh['nodes'],
+            'elems': mesh['elems'],
+            # Yapısal ızgara haritası çözücüden AYNEN gelir; istemci düğüm
+            # sırasını kendi varsayımıyla yeniden kurmaz.
+            'node_index_grid': ref.mesh.node_index_grid,
+            'n_nodes': int(mesh['n_nodes']),
+            'n_elems': int(mesh['n_elems']),
+            'n_axial': int(mesh['n_axial']),
+            'n_radial': int(mesh['n_radial']),
+            'meta': mesh.get('meta'),
+            'coordinate_units': 'm',
+            'node_order': ('node index = node_index_grid[i][j]; i is the '
+                           'axial station (0..n_axial), j is the through-wall '
+                           'layer (0 inner surface, n_radial outer surface)'),
+        },
+        'fields': {
+            'von_mises_pa': sonuc['von_mises_nodal'],
+            'safety_factor': sonuc['safety_factor_nodal'],
+            '_basis': ('nodal fields come from the solver as returned '
+                       '(stress recovery method is declared in meta.cozucu); '
+                       'safety factor is null when the material record '
+                       'carries no yield strength - no substitute value is '
+                       'invented'),
+        },
+        'scalars': {
+            'von_mises_gauss_max_pa': sonuc['von_mises_gauss_max'],
+            'min_safety_factor': sonuc['min_safety_factor'],
+            'yield_strength_pa': getattr(malzeme, 'yield_strength', None),
+            'material_key': inputs.get('material_key'),
+            'wall_thickness_m': inputs.get('thickness_m'),
+            'inner_pressure_pa': inputs.get('inner_pressure_pa'),
+        },
+        'quality': quality,
+        'convergence': sonuc['convergence'],
+        'limits': limits,
+        'meta': sonuc['meta'],
+    }
+    return jsonify({'status': 'success', 'fea': sanitize_json_values(fea)})
+
 @app.route('/api/chemical-database', methods=['GET'])
 def get_chemical_database():
     """Get chemical species database information"""

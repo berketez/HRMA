@@ -216,6 +216,541 @@
     }
 
     // ==================================================================
+    // E3 — DEĞER KAYNAĞI RENKLENDİRMESİ  (kaynak beyanının pano karşılığı)
+    // ------------------------------------------------------------------
+    // Renk tablosu motor_viz3d.js'in SOURCE_COLORS'ıyla BİREBİR aynıdır:
+    // 3B sahnedeki durum çipi ile panodaki rozet aynı rengi aynı anlamda
+    // kullanır (tek tasarım dili — B4'ün grafik/pano karşılığı E3).
+    //
+    // RENK TEK BAŞINA TAŞIYICI DEĞİLDİR. Her rozet renkle BİRLİKTE bir
+    // GEOMETRİK SİMGE ve bir METİN ETİKETİ taşır; simgeler Plotly'nin
+    // marker sembolleriyle bire bir eşlenir (circle/square/diamond/x), yani
+    // grafikteki nokta ile panodaki çip aynı şekli gösterir. Böylece renk
+    // körlüğünde ve gri basımda da ayırt edilir (WCAG 1.4.1 "renge
+    // dayanmama" ilkesi).
+    //
+    // Sınıflandırma kaynağın KENDİ beyanından okunur — uydurulmaz. Depoda
+    // ölçülen beyan biçimleri (2026-08-04, grep ile):
+    //   <alan>_basis   : serbest metin gerekçe
+    //                    ör. 'thermal_protection module default 293,15 K'
+    //   <alan>_source  : üretici etiketi
+    //                    ör. 'user_override', 'user input (tank_temperature)',
+    //                        'l_star_derived', 'grain_limited'
+    //   status / model : 'modelled' | 'not_modelled' | 'not_computed' |
+    //                    'not_analyzed' | 'not_sized' | 'fallback' | 'clamped'
+    // Beyan HİÇ yoksa `declared:false` döner ve ipucu metni bunu açıkça
+    // söyler — "hesaplandı" iddiası beyansız değere yazılmaz.
+    // ==================================================================
+    const SOURCE_COLORS = {           // motor_viz3d.js ile birebir aynı
+        computed: '#39d6ec',
+        user: '#e8edf2',
+        assumed: '#ffb347',
+        missing: '#8a93a0',
+    };
+    // Simge + Plotly marker eşlemesi (renk körlüğü: şekil ayırt eder)
+    const SOURCE_SYMBOLS = {
+        computed: '●',           // ● dolu daire  -> plotly 'circle'
+        user: '■',               // ■ dolu kare   -> plotly 'square'
+        assumed: '◆',            // ◆ eşkenar     -> plotly 'diamond'
+        missing: '×',            // × çarpı       -> plotly 'x'
+    };
+    const SOURCE_PLOT_SYMBOLS = {
+        computed: 'circle', user: 'square', assumed: 'diamond', missing: 'x',
+    };
+    const SOURCE_LABEL_KEYS = {
+        computed: 'dock.src.computed',
+        user: 'dock.src.user',
+        assumed: 'dock.src.assumed',
+        missing: 'dock.src.missing',
+    };
+    const SOURCE_LABEL_FALLBACK = {
+        computed: 'COMPUTED', user: 'USER', assumed: 'ASSUMED',
+        missing: 'NOT MODELLED',
+    };
+    const SOURCE_TIP_KEYS = {
+        computed: 'dock.src.tipComputed',
+        user: 'dock.src.tipUser',
+        assumed: 'dock.src.tipAssumed',
+        missing: 'dock.src.tipMissing',
+    };
+    const SOURCE_TIP_FALLBACK = {
+        computed: 'Produced by the solver for this design.',
+        user: 'Entered by you; the solver used it as given.',
+        assumed: 'Not solved here — a default, literature or clamped value.',
+        missing: 'Not modelled: no value was computed for this quantity.',
+    };
+    const SOURCE_KINDS = ['computed', 'user', 'assumed', 'missing'];
+
+    // status / model / *_source etiketlerinin dört duruma eşlemesi.
+    const SOURCE_STATUS_MAP = {
+        modelled: 'computed', modeled: 'computed', computed: 'computed',
+        solved: 'computed', analyzed: 'computed', analysed: 'computed',
+        sized: 'computed', success: 'computed', ok: 'computed',
+        tabulated: 'computed',
+        user: 'user', user_input: 'user', user_override: 'user',
+        user_supplied: 'user', override: 'user',
+        assumed: 'assumed', assumption: 'assumed', 'default': 'assumed',
+        fallback: 'assumed', clamped: 'assumed', estimated: 'assumed',
+        literature: 'assumed', nominal: 'assumed', typical: 'assumed',
+        not_modelled: 'missing', not_modeled: 'missing', not_computed: 'missing',
+        not_analyzed: 'missing', not_analysed: 'missing', not_sized: 'missing',
+        not_applicable: 'missing', unavailable: 'missing', missing: 'missing',
+        error: 'missing', skipped: 'missing', none: 'missing',
+    };
+
+    // Serbest metin beyanları (İngilizce + Türkçe). Öncelik: modellenmedi >
+    // kullanıcı > varsayım; hiçbiri eşleşmezse metin bir hesap gerekçesidir.
+    const SRC_MISSING_RE = new RegExp(
+        'not[_ ](?:modell?ed|computed|analy[sz]ed|sized|available|applicable)'
+        + '|modellenme|hesaplanma(?:dı|di|mış|mis)|veri yok|değer yok', 'i');
+    const SRC_USER_RE = new RegExp(
+        '\\buser\\b|user[_ ]?(?:input|override|supplied|given|value)'
+        + '|\\bkullanıcı|kullanici|\\bgirdi\\b|override', 'i');
+    const SRC_ASSUMED_RE = new RegExp(
+        '\\bassum|\\bdefault|fallback|typical|nominal|literature|handbook'
+        + '|rule[- ]of[- ]thumb|estimat|approxim|placeholder|clamp'
+        + '|varsay|öngör|tahmin|kabul edil|yerel üret|sınırlan|kırpıl', 'i');
+
+    function sourceColor(kind) {
+        return SOURCE_COLORS[kind] || SOURCE_COLORS.missing;
+    }
+    function sourceSymbol(kind) {
+        return SOURCE_SYMBOLS[kind] || SOURCE_SYMBOLS.missing;
+    }
+    function sourcePlotSymbol(kind) {
+        return SOURCE_PLOT_SYMBOLS[kind] || SOURCE_PLOT_SYMBOLS.missing;
+    }
+    function sourceLabel(kind) {
+        const k = SOURCE_KINDS.indexOf(kind) === -1 ? 'missing' : kind;
+        return T(SOURCE_LABEL_KEYS[k], SOURCE_LABEL_FALLBACK[k]);
+    }
+
+    // Tek bir beyan metnini/etiketini dört durumdan birine çevirir.
+    // Eşleşme yoksa null döner (çağıran bir sonraki beyana bakar).
+    function sourceKindOfText(text) {
+        if (text == null) return null;
+        const s = String(text).trim();
+        if (!s) return null;
+        const direct = SOURCE_STATUS_MAP[s.toLowerCase()];
+        if (direct) return direct;
+        if (SRC_MISSING_RE.test(s)) return 'missing';
+        if (SRC_USER_RE.test(s)) return 'user';
+        if (SRC_ASSUMED_RE.test(s)) return 'assumed';
+        return null;
+    }
+
+    // Bir sözlükteki alanın kaynağını çözer.
+    //   obj   : değeri ve beyanlarını taşıyan blok
+    //   field : alan adı ('wall_thickness' gibi)
+    // Dönen: {kind, declared, value, basis, source, status}
+    function sourceOf(obj, field, opts) {
+        const o = obj || {};
+        const value = (field == null) ? (opts && opts.value) : o[field];
+        const basis = (field == null) ? (o.basis || null) : o[field + '_basis'];
+        const source = (field == null) ? (o.source || null) : o[field + '_source'];
+        const status = (field == null)
+            ? (o.status || o.model || null)
+            : (o[field + '_status'] || o[field + '_model'] || null);
+        const declared = !!(basis || source || status);
+        const numeric = typeof value === 'number';
+        // Sayı yok ya da sonlu değilse: hesaplanmış bir değer YOKTUR.
+        if (value == null || (numeric && !Number.isFinite(value))) {
+            return { kind: 'missing', declared: declared, value: null,
+                     basis: basis || null, source: source || null,
+                     status: status || null };
+        }
+        const kind = sourceKindOfText(status)
+            || sourceKindOfText(source)
+            || sourceKindOfText(basis)
+            || 'computed';
+        return { kind: kind, declared: declared, value: value,
+                 basis: basis || null, source: source || null,
+                 status: status || null };
+    }
+
+    // Rozet sayacı: lejant YALNIZCA ekranda en az bir kaynak çipi varken
+    // gösterilir (kullanılmayan renk anahtarı kullanıcıyı yanıltır).
+    let sourceChipCount = 0;
+
+    function escAttr(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // Kaynak çipi: renk + simge + metin etiketi (üçü birden).
+    // info: sourceOf() çıktısı ya da doğrudan durum adı.
+    function sourceChip(info, extraTitle) {
+        const data = (typeof info === 'string') ? { kind: info, declared: false } : (info || {});
+        const kind = SOURCE_KINDS.indexOf(data.kind) === -1 ? 'missing' : data.kind;
+        const col = sourceColor(kind);
+        const tip = [T(SOURCE_TIP_KEYS[kind], SOURCE_TIP_FALLBACK[kind])];
+        if (data.basis) tip.push(SRV(String(data.basis)));
+        else if (data.source) tip.push(SRV(String(data.source)));
+        else if (data.declared && data.status) tip.push(SRV(String(data.status)));
+        else if (!data.declared) {
+            tip.push(T('dock.src.undeclared',
+                'No basis/source declaration accompanies this field.'));
+        }
+        if (extraTitle) tip.push(String(extraTitle));
+        sourceChipCount += 1;
+        maybeShowSourceLegend();
+        return `<span class="ad-src-chip" data-src-kind="${kind}"
+            title="${escAttr(tip.join(' — '))}"
+            style="border:1px solid ${col}; color:${col}; border-radius:6px;
+            padding:1px 7px; margin-left:6px; font-family:var(--hd-mono, monospace);
+            font-size:0.66rem; letter-spacing:0.06em; white-space:nowrap;
+            display:inline-block;"><span aria-hidden="true"
+            >${sourceSymbol(kind)}</span> <span${i18nAttr(SOURCE_LABEL_KEYS[kind])}
+            >${sourceLabel(kind)}</span></span>`;
+    }
+
+    // Değer + kaynak çipi (tablo hücresi kalıbı). Değer yoksa em-dash basılır
+    // — sahte sayı yazılmaz.
+    function sourceCell(obj, field, opts) {
+        const o = opts || {};
+        const info = sourceOf(obj, field, o);
+        let txt = '—';
+        if (typeof info.value === 'number') {
+            txt = (o.digits == null) ? String(dockSigFig(info.value, o.sig))
+                                     : fmt(info.value, o.digits);
+        } else if (info.value != null) {
+            txt = String(info.value);
+        }
+        const unit = (info.value != null && o.unit) ? ' ' + o.unit : '';
+        return `<span data-src-value="${escAttr(field || '')}">${txt}${unit}</span>`
+            + sourceChip(info);
+    }
+
+    // Dört durumu birden gösteren anahtar (lejant).
+    function sourceLegend() {
+        const items = SOURCE_KINDS.map(function (k) {
+            const col = sourceColor(k);
+            return `<span data-src-legend="${k}" style="color:${col};
+                font-family:var(--hd-mono, monospace); font-size:0.66rem;
+                letter-spacing:0.06em; white-space:nowrap;"><span aria-hidden="true"
+                >${sourceSymbol(k)}</span> <span${i18nAttr(SOURCE_LABEL_KEYS[k])}
+                >${sourceLabel(k)}</span></span>`;
+        }).join('');
+        return `<span id="ad_src_legend_body" style="display:inline-flex; gap:12px;
+            flex-wrap:wrap; align-items:center;"><span
+            style="color:var(--hd-ink-dim, #7d97a5); font-family:var(--hd-mono, monospace);
+            font-size:0.66rem; letter-spacing:0.08em;"
+            data-i18n="dock.src.legend">${T('dock.src.legend', 'VALUE SOURCE')}</span>
+            ${items}</span>`;
+    }
+
+    function maybeShowSourceLegend() {
+        const host = document.getElementById('ad_src_legend');
+        if (!host || sourceChipCount < 1) return;
+        if (host.getAttribute('data-filled') === '1') return;
+        host.innerHTML = sourceLegend();
+        host.setAttribute('data-filled', '1');
+        host.style.display = 'inline-flex';
+        if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(host);
+    }
+
+    // Plotly izleri için: aynı dört durum, aynı renk, aynı şekil.
+    // Panel bir iz çizerken marker'ı bununla kurarsa grafik ile pano
+    // aynı dili konuşur.
+    function sourceMarker(kind) {
+        const k = SOURCE_KINDS.indexOf(kind) === -1 ? 'missing' : kind;
+        return { color: sourceColor(k), symbol: sourcePlotSymbol(k), size: 7 };
+    }
+
+    // ==================================================================
+    // E2 — "NE DEĞİŞTİ" FARKI
+    // ------------------------------------------------------------------
+    // Yeni sonuç geldiğinde bir önceki sonuçla SAYISAL farkı çıkarır ve
+    // değişen büyüklükleri eski → yeni rozetiyle işaretler.
+    //
+    // EŞİK NEDEN 1e-5 (tek yerde tanımlı, beyanlı):
+    // Güverte form alanları çözücü değerini 6 anlamlı basamağa yuvarlayarak
+    // ön-doldurur (DOCK_SIGFIG). Bu dosyanın üst bölümünde ÖLÇÜLEN sonuç:
+    // 6 basamağa yuvarlanmış girdiyle koşulan üç uçtaki en büyük bağıl
+    // çıktı sapması 5,1e-06. Yani 1e-5'in ALTINDAKİ bağıl değişim, tasarım
+    // hiç değişmeden yalnız ön-dolum/yuvarlama zincirinden doğabilir —
+    // kullanıcıya "şu değişti" diye gösterilmesi yanıltıcı olur. Eşik bu
+    // ölçülen gürültü tabanının hemen üstüne konur.
+    //
+    // MUTLAK eşik YOKTUR ve konmaz: bu katman alanların birimini bilmez
+    // (metre mi, kelvin mi, newton mu), dolayısıyla "0,001'den küçük fark
+    // önemsizdir" diyemez. Bağıl ölçü paydası max(|eski|,|yeni|) olduğundan
+    // sıfıra bölme de oluşmaz; iki değer de tam 0 ise fark 0'dır.
+    // ==================================================================
+    // MALİYET ÖLÇÜLDÜ (2026-08-04, gerçek veri): /calculate_solid'in
+    // 146 KB'lik yanıtı ile aynı yanıtın tek girdisi %2 değiştirilmiş hâli
+    // karşılaştırıldı — 1557 sayı, çağrı başına 0,4 ms (node, 10 tekrar
+    // ortalaması). Aynı yanıt kendisiyle karşılaştırıldığında 0 değişim
+    // bildirildi (gerçek veride yanlış pozitif yok). %2'lik tek girdi
+    // değişimi 200'ün üzerinde alanı oynattığı için rapor tavanı 2000'e
+    // konuldu: tavana çarpılırsa `truncated` ile açıkça beyan edilir.
+    const DIFF_REL_EPS = 1e-5;      // TEK tanım — başka yerde sayı yazılmaz
+    const DIFF_MAX_DEPTH = 8;       // döngüsel/derin veri koruması
+    const DIFF_SERIES_LIMIT = 8;    // bundan uzun sayı dizileri seri sayılır
+    const DIFF_MAX_ENTRIES = 2000;  // rapor boyu tavanı (truncated ile beyanlı)
+    const DIFF_TOP_N = 8;           // şeritte gösterilen en büyük değişim sayısı
+
+    function isPlainObject(v) {
+        return v !== null && typeof v === 'object' && !Array.isArray(v);
+    }
+
+    function relChange(a, b) {
+        const scale = Math.max(Math.abs(a), Math.abs(b));
+        if (scale === 0) return 0;
+        return Math.abs(b - a) / scale;
+    }
+
+    function joinPath(base, key) {
+        return base ? (base + '.' + key) : String(key);
+    }
+
+    // İki sonuç sözlüğünün sayısal farkı. YALNIZ sayı karşılaştırılır;
+    // metin/boolean alanlar bu katmanın konusu değildir.
+    function diffCompute(prev, next, opts) {
+        const eps = (opts && Number.isFinite(opts.eps)) ? opts.eps : DIFF_REL_EPS;
+        const out = {
+            changes: [], series: [], added: [], removed: [],
+            threshold: eps, compared: 0, truncated: false, hasBaseline: true,
+        };
+        if (!isPlainObject(prev) || !isPlainObject(next)) {
+            out.hasBaseline = false;
+            return out;
+        }
+
+        function pushChange(entry) {
+            if (out.changes.length >= DIFF_MAX_ENTRIES) { out.truncated = true; return; }
+            out.changes.push(entry);
+        }
+
+        function compareNumbers(path, a, b) {
+            out.compared += 1;
+            const aFin = Number.isFinite(a);
+            const bFin = Number.isFinite(b);
+            if (aFin && bFin) {
+                const rel = relChange(a, b);
+                if (rel > eps) {
+                    pushChange({ path: path, old: a, 'new': b, rel: rel,
+                                 finite: true, dir: (b > a ? 'up' : 'down') });
+                }
+                return;
+            }
+            if (aFin !== bFin || a !== b) {
+                // Sonlu olmayan bir değerin belirmesi/kaybolması gerçek bir
+                // değişimdir; bağıl ölçüsü tanımsızdır (rel: null).
+                pushChange({ path: path, old: aFin ? a : null, 'new': bFin ? b : null,
+                             rel: null, finite: false, dir: null });
+            }
+        }
+
+        function compareSeries(path, a, b) {
+            const n = Math.min(a.length, b.length);
+            let changed = 0;
+            let maxRel = 0;
+            for (let i = 0; i < n; i++) {
+                const x = a[i], y = b[i];
+                if (typeof x !== 'number' || typeof y !== 'number') continue;
+                if (!Number.isFinite(x) || !Number.isFinite(y)) {
+                    if (x !== y) changed += 1;
+                    continue;
+                }
+                const rel = relChange(x, y);
+                if (rel > eps) { changed += 1; if (rel > maxRel) maxRel = rel; }
+            }
+            out.compared += n;
+            if (changed > 0 || a.length !== b.length) {
+                out.series.push({ path: path, points: b.length, changed: changed,
+                                  maxRel: maxRel,
+                                  lengthChanged: a.length !== b.length,
+                                  oldPoints: a.length });
+            }
+        }
+
+        function walk(a, b, path, depth) {
+            if (depth > DIFF_MAX_DEPTH) return;
+            if (Array.isArray(a) && Array.isArray(b)) {
+                const numeric = a.every(function (v) { return typeof v === 'number'; })
+                    && b.every(function (v) { return typeof v === 'number'; });
+                if (numeric && Math.max(a.length, b.length) > DIFF_SERIES_LIMIT) {
+                    compareSeries(path, a, b);
+                    return;
+                }
+                const n = Math.max(a.length, b.length);
+                for (let i = 0; i < n; i++) {
+                    walk(a[i], b[i], path + '[' + i + ']', depth + 1);
+                }
+                return;
+            }
+            if (isPlainObject(a) && isPlainObject(b)) {
+                const seen = {};
+                Object.keys(a).forEach(function (k) { seen[k] = true; });
+                Object.keys(b).forEach(function (k) { seen[k] = true; });
+                Object.keys(seen).forEach(function (k) {
+                    walk(a[k], b[k], joinPath(path, k), depth + 1);
+                });
+                return;
+            }
+            const aNum = typeof a === 'number';
+            const bNum = typeof b === 'number';
+            if (aNum && bNum) { compareNumbers(path, a, b); return; }
+            if (aNum && b === undefined) { out.removed.push(path); return; }
+            if (bNum && a === undefined) { out.added.push(path); return; }
+            // metin/boolean/nesne-tip değişimi: sayısal fark katmanının
+            // konusu değil, sessizce geçilir.
+        }
+
+        walk(prev, next, '', 0);
+        out.changes.sort(function (x, y) { return (y.rel || 0) - (x.rel || 0); });
+        return out;
+    }
+
+    // Değişim rozeti: eski → yeni (+ bağıl değişim yüzdesi).
+    // Renk NÖTRDÜR: artış "iyi", azalış "kötü" değildir; yön yalnız
+    // ▲/▼ simgesiyle bildirilir.
+    function diffBadge(change) {
+        if (!change) return '';
+        const oldTxt = (change.old == null) ? '—' : String(dockSigFig(change.old, 5));
+        const newTxt = (change['new'] == null) ? '—' : String(dockSigFig(change['new'], 5));
+        const arrow = change.dir === 'up' ? '▲'
+            : (change.dir === 'down' ? '▼' : '•');
+        const pct = (change.rel == null) ? T('common.unknown', 'unknown')
+            : (dockSigFig(change.rel * 100, 3) + ' %');
+        const tip = TF('dock.diff.badgeTip', { pct: pct },
+            'Changed vs the previous result — relative change {pct}.');
+        return `<span class="ad-diff-badge" data-diff-badge="${escAttr(change.path || '')}"
+            title="${escAttr(tip)}"
+            style="border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));
+            color:var(--hd-ink, #cfe8f2); border-radius:6px; padding:1px 7px;
+            margin-left:6px; font-family:var(--hd-mono, monospace); font-size:0.66rem;
+            white-space:nowrap; display:inline-block;"><span
+            style="color:var(--hd-ink-dim, #7d97a5);">${oldTxt}</span> → ${newTxt}
+            <span style="color:var(--hd-ink-dim, #7d97a5);">${arrow} ${pct}</span></span>`;
+    }
+
+    // Panel çıktısındaki `data-diff-path="yol"` taşıyan elemanlara rozet
+    // ekler. Yol değişmediyse hiçbir şey eklenmez (eşik altı gürültü
+    // işaretlenmez — kural E2).
+    function diffAnnotate(rootEl, result) {
+        if (!rootEl || !result || !result.changes || !rootEl.querySelectorAll) return 0;
+        const index = {};
+        result.changes.forEach(function (c) { index[c.path] = c; });
+        let marked = 0;
+        const nodes = rootEl.querySelectorAll('[data-diff-path]');
+        Array.prototype.forEach.call(nodes, function (el) {
+            const path = el.getAttribute('data-diff-path');
+            const change = index[path];
+            if (!change) return;
+            if (el.getAttribute('data-diff-marked') === '1') return;
+            el.insertAdjacentHTML
+                ? el.insertAdjacentHTML('beforeend', diffBadge(change))
+                : (el.innerHTML += diffBadge(change));
+            el.setAttribute('data-diff-marked', '1');
+            marked += 1;
+        });
+        return marked;
+    }
+
+    // "Ne değişti" şeridi — eşik AÇIKÇA yazılır, gizli kural bırakılmaz.
+    function diffStripHtml(result) {
+        const head = `<strong data-i18n="dock.diff.title">${
+            T('dock.diff.title', 'What changed')}</strong>`;
+        if (!result || !result.hasBaseline) {
+            return head + ` <span style="color:var(--hd-ink-dim, #7d97a5);"
+                data-i18n="dock.diff.first">${T('dock.diff.first',
+                'First result stored as the reference — nothing to compare yet.')}</span>`;
+        }
+        const epsPct = dockSigFig(result.threshold * 100, 3);
+        const basis = `<div style="color:var(--hd-ink-faint, #46606d); margin-top:4px;">${
+            TF('dock.diff.basis', { pct: epsPct },
+               'Only relative changes above {pct} % are marked; smaller '
+               + 'differences are within the 6-significant-digit pre-fill noise '
+               + 'of the input fields.')}</div>`;
+        if (!result.changes.length && !result.series.length
+            && !result.added.length && !result.removed.length) {
+            return head + ` <span style="color:var(--hd-ink-dim, #7d97a5);"
+                data-i18n="dock.diff.none">${T('dock.diff.none',
+                'No numeric change above the threshold.')}</span>` + basis;
+        }
+        const rows = result.changes.slice(0, DIFF_TOP_N).map(function (c) {
+            return `<div style="margin:3px 0;"><span
+                style="font-family:var(--hd-mono, monospace);
+                color:var(--hd-ink, #cfe8f2);">${escAttr(c.path)}</span>${diffBadge(c)}</div>`;
+        }).join('');
+        const seriesRows = result.series.slice(0, DIFF_TOP_N).map(function (s) {
+            return `<div style="margin:3px 0; font-family:var(--hd-mono, monospace);
+                color:var(--hd-ink-dim, #7d97a5);">${TF('dock.diff.series',
+                { path: escAttr(s.path), changed: s.changed, points: s.points },
+                '{path}: {changed} of {points} series points changed')}</div>`;
+        }).join('');
+        const extra = [];
+        if (result.changes.length > DIFF_TOP_N) {
+            extra.push(TF('dock.diff.more', { count: result.changes.length - DIFF_TOP_N },
+                          '+{count} more changed values'));
+        }
+        if (result.added.length) {
+            extra.push(TF('dock.diff.added', { count: result.added.length },
+                          '{count} new numeric fields appeared'));
+        }
+        if (result.removed.length) {
+            extra.push(TF('dock.diff.removed', { count: result.removed.length },
+                          '{count} numeric fields disappeared'));
+        }
+        if (result.truncated) {
+            extra.push(T('dock.diff.truncated',
+                'The change list was truncated at the reporting cap.'));
+        }
+        const extraHtml = extra.length
+            ? `<div style="color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">${
+                extra.join(' · ')}</div>` : '';
+        return head + `<span style="color:var(--hd-ink-dim, #7d97a5);"> ${
+            TF('dock.diff.count', { count: result.changes.length },
+               '{count} values changed')}</span>`
+            + `<div style="margin-top:6px;">${rows}${seriesRows}</div>`
+            + extraHtml + basis;
+    }
+
+    // Derin kopya: sonuç sözlüğü sonradan yerinde değiştirilse bile
+    // referans anlık görüntüsü bozulmasın (JSON turu Infinity'yi null'a
+    // çevirdiği için elle kopyalanır).
+    function snapshotClone(value, depth) {
+        const d = depth || 0;
+        if (d > DIFF_MAX_DEPTH) return null;
+        if (Array.isArray(value)) {
+            return value.map(function (v) { return snapshotClone(v, d + 1); });
+        }
+        if (isPlainObject(value)) {
+            const out = {};
+            Object.keys(value).forEach(function (k) {
+                out[k] = snapshotClone(value[k], d + 1);
+            });
+            return out;
+        }
+        return value;
+    }
+
+    let prevSnapshot = null;      // bir önceki sonucun kopyası
+    let lastDiff = null;          // son hesaplanan fark (dil değişiminde yeniden çizilir)
+
+    function renderDiffBand() {
+        const band = document.getElementById('ad_diff_band');
+        if (!band) return;
+        if (!lastDiff) { band.style.display = 'none'; return; }
+        band.innerHTML = diffStripHtml(lastDiff);
+        band.style.display = 'block';
+        if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(band);
+    }
+
+    // Yeni sonuç geldiğinde çağrılır (refreshSuggestions üzerinden — entegrasyon
+    // katmanı zaten her hesap sonrası onu çağırıyor, yeni kapı açmaya gerek yok).
+    function noteResults(results) {
+        if (!isPlainObject(results)) return null;
+        lastDiff = diffCompute(prevSnapshot, results);
+        prevSnapshot = snapshotClone(results, 0);
+        renderDiffBand();
+        return lastDiff;
+    }
+
+    // ==================================================================
     // ÇÖZÜCÜ SONUCU OKUMA — merkezi birim çözümlemesi (v2.6.26)
     // ------------------------------------------------------------------
     // Neden burada: hesap uçlarının sözlüğünde uzunluk birimleri TÜRDEŞ
@@ -429,10 +964,20 @@
     // Alan tanımı: [id, etiket, varsayılan, adım, etiketAnahtarı?]
     // 5. eleman verilirse etiket data-i18n taşır; dil değişince kendiliğinden çevrilir.
     // Seçenek listesi öğeleri de [değer, etiket, etiketAnahtarı?] olabilir.
+    // Alanın kaynak çipi kabı (E3) — içeriği applySuggestions doldurur.
+    function fieldSourceSlotId(panelId, fieldId) {
+        return 'ad_src_' + panelId + '_' + fieldId;
+    }
+
     function fieldHtml(panelId, f) {
         const fid = f[0], label = f[1], defVal = f[2], step = f[3], labelKey = f[4];
         const domId = fieldDomId(panelId, fid);
-        const lab = `<label${i18nAttr(labelKey)}>${T(labelKey, label)}</label>`;
+        // Etiket ve kaynak çipi TEK satırda dursun diye küçük bir başlık
+        // satırı: şablonlarda `.form-group label` display:block, çip
+        // sarmalayıcısız alt satıra düşerdi.
+        const lab = `<div class="ad-field-head"><label${i18nAttr(labelKey)}>${
+            T(labelKey, label)}</label><span class="ad-src-slot"
+            id="${fieldSourceSlotId(panelId, fid)}"></span></div>`;
         if (Array.isArray(step)) {
             // step bir seçenek listesi: [[value, label, labelKey?], ...] → <select>
             const opts = step.map(o =>
@@ -490,9 +1035,156 @@
                     + 'calculation results — you can override any value before running. '
                     + 'The request is always built from the form fields shown.')}</span>
             </div>
+            <div id="ad_toolbar" style="display:flex; gap:14px; align-items:center;
+                 flex-wrap:wrap; margin:12px 0 0; font-family:var(--hd-mono, monospace);
+                 font-size:0.7rem;">
+                <span style="color:var(--hd-ink-dim, #7d97a5); letter-spacing:0.08em;"
+                    data-i18n="dock.layout.label">${T('dock.layout.label', 'LAYOUT')}</span>
+                ${layoutButtonHtml('tabs', 'dock.layout.tabs', 'Tabs')}
+                ${layoutButtonHtml('grid', 'dock.layout.grid', 'Grid')}
+                <span id="ad_src_legend" style="display:none;"></span>
+            </div>
+            <div id="ad_diff_band" style="display:none; margin:10px 0 0; padding:8px 12px;
+                 border:1px solid var(--hd-line, rgba(0,229,255,0.14));
+                 border-radius:var(--hd-radius-sm, 8px);
+                 background:var(--hd-inset, rgba(6,14,26,0.85));
+                 font-family:var(--hd-mono, monospace); font-size:0.72rem;
+                 color:var(--hd-ink, #cfe8f2); overflow-x:auto;
+                 overflow-wrap:anywhere;"></div>
             <div id="ad_tabs" style="display:flex; gap:6px; margin:14px 0 0; flex-wrap:wrap;"></div>
             <div id="ad_panes" style="border-top:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));"></div>
         </div>`;
+    }
+
+    // ==================================================================
+    // E1 — SEKME / IZGARA YERLEŞİMİ
+    // ------------------------------------------------------------------
+    // Güvertede 14 panel var ve hepsi kategori sekmelerinin ARKASINDA:
+    // kullanıcı aynı anda yalnız bir kategoriyi görebiliyordu. Izgara
+    // kipinde bütün kategoriler tek akışta yan yana dizilir (CSS grid,
+    // `auto-fit` — sütun sayısı pencere genişliğinden gelir).
+    //
+    // GERİ DÜŞÜŞ SÖZLEŞMESİ: tercih okunamazsa (localStorage yok, gizli
+    // kip, bozuk değer) kip 'tabs'tır — yani bugünkü davranış. Izgara
+    // kipi sekme mekaniğini SÖKMEZ: sekme düğmeleri durur, tıklanınca
+    // ilgili bölüme kaydırır; kip 'tabs'a dönünce eski görünüm birebir
+    // geri gelir.
+    // ==================================================================
+    const LAYOUT_KEY = 'hrma.dock.layout';
+    const LAYOUTS = ['tabs', 'grid'];
+    const LAYOUT_FALLBACK = 'tabs';
+    let layoutMode = null;          // ilk okumada tembel doldurulur
+
+    function layoutStore() {
+        try { return window.localStorage || null; } catch (e) { return null; }
+    }
+
+    function readLayoutPref() {
+        const store = layoutStore();
+        if (!store) return LAYOUT_FALLBACK;
+        let raw = null;
+        try { raw = store.getItem(LAYOUT_KEY); } catch (e) { return LAYOUT_FALLBACK; }
+        return (LAYOUTS.indexOf(raw) === -1) ? LAYOUT_FALLBACK : raw;
+    }
+
+    function writeLayoutPref(mode) {
+        const store = layoutStore();
+        if (!store) return false;
+        try { store.setItem(LAYOUT_KEY, mode); return true; } catch (e) { return false; }
+    }
+
+    // classList taklidi eksik olabilen ortamlara (test koşum düzenekleri)
+    // dayanıklı sınıf yardımcıları
+    function addClass(el, name) {
+        if (el && el.classList && typeof el.classList.add === 'function') el.classList.add(name);
+    }
+    function removeClass(el, name) {
+        if (el && el.classList && typeof el.classList.remove === 'function') {
+            el.classList.remove(name);
+        }
+    }
+
+    function getLayout() {
+        if (layoutMode === null) layoutMode = readLayoutPref();
+        return layoutMode;
+    }
+
+    function layoutButtonHtml(mode, key, fallback) {
+        return `<button type="button" class="ad-layout-btn" data-layout="${mode}"
+            style="font-family:var(--hd-mono, monospace); font-size:0.7rem;
+            letter-spacing:0.06em; padding:3px 12px; cursor:pointer; border-radius:6px;
+            border:1px solid var(--hd-line, rgba(0,229,255,0.14));
+            background:transparent; color:var(--hd-ink-dim, #7d97a5);"
+            data-i18n="${key}">${T(key, fallback)}</button>`;
+    }
+
+    function paintLayoutButtons() {
+        const mode = getLayout();
+        const btns = document.querySelectorAll
+            ? document.querySelectorAll('#ad_toolbar .ad-layout-btn') : [];
+        Array.prototype.forEach.call(btns || [], function (b) {
+            const on = b.getAttribute('data-layout') === mode;
+            b.style.background = on ? 'rgba(0, 229, 255, 0.10)' : 'transparent';
+            b.style.color = on ? 'var(--hd-cyan, #00e5ff)' : 'var(--hd-ink-dim, #7d97a5)';
+            b.style.borderColor = on ? 'var(--hd-line-strong, rgba(0,229,255,0.42))'
+                                     : 'var(--hd-line, rgba(0,229,255,0.14))';
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    // Kip ne olursa olsun panelleri görünür kılan tek yer burasıdır.
+    function applyLayout() {
+        const panes = document.getElementById('ad_panes');
+        const mode = getLayout();
+        paintLayoutButtons();
+        if (!panes) return mode;
+        if (mode === 'grid') {
+            addClass(panes, 'ad-layout-grid');
+            // `display:contents` bölüm kutularını doğrudan ızgara hücresi
+            // yapar; kategori sarmalayıcısı yerleşimi bölmez.
+            Array.prototype.forEach.call(panes.children || [], function (p) {
+                p.style.display = 'contents';
+            });
+        } else {
+            removeClass(panes, 'ad-layout-grid');
+            Array.prototype.forEach.call(panes.children || [], function (p) {
+                p.style.display = (p.id === 'ad_pane_' + activeCategory) ? 'block' : 'none';
+            });
+        }
+        resizeVisiblePlots();
+        return mode;
+    }
+
+    function setLayout(mode) {
+        const next = (LAYOUTS.indexOf(mode) === -1) ? LAYOUT_FALLBACK : mode;
+        layoutMode = next;
+        writeLayoutPref(next);      // yazılamazsa (gizli kip) kip yine uygulanır
+        return applyLayout();
+    }
+
+    // Gizli sekmedeyken çizilen Plotly grafikleri 700 px varsayılanında
+    // kalır; görünür olunca gerçek genişliğe getirilir.
+    // YALNIZ GÖRÜNÜR bölmeler taranır: plotly.js 1.58.5'te
+    // `Plots.resize()` görüntülenmeyen bir div için sözü REDDEDER
+    // ("Resize must be passed a displayed plot div element") — gizli
+    // bölmeyi de taramak konsolu yakalanmamış red uyarısıyla doldururdu.
+    function resizeVisiblePlots() {
+        if (!window.Plotly || typeof Plotly.Plots === 'undefined') return;
+        const host = document.getElementById('ad_panes');
+        if (!host || !host.children) return;
+        Array.prototype.forEach.call(host.children, function (pane) {
+            if (!pane || !pane.querySelectorAll) return;
+            if (pane.style && pane.style.display === 'none') return;
+            Array.prototype.forEach.call(pane.querySelectorAll('.js-plotly-plot'),
+                function (p) {
+                    try {
+                        const done = Plotly.Plots.resize(p);
+                        if (done && typeof done.catch === 'function') {
+                            done.catch(function () { /* bölme henüz ölçülemiyor */ });
+                        }
+                    } catch (e) { /* boş bölme */ }
+                });
+        });
     }
 
     // ------------------------------------------------------------------
@@ -519,6 +1211,9 @@
             font-family:var(--hd-mono); font-size:0.8rem; margin:12px 0;">${
             T('dock.empty', 'No analyses registered in this category yet.')}</p>`;
         panes.appendChild(pane);
+        // Kurulumdan SONRA kaydedilen paneller yeni kategori açabilir; yeni
+        // bölme yürürlükteki yerleşime uydurulur (ızgara kipinde gizli kalmaz).
+        applyLayout();
         return pane;
     }
 
@@ -534,17 +1229,14 @@
         });
         const panes = document.getElementById('ad_panes');
         if (!panes) return;
-        Array.prototype.forEach.call(panes.children, function (p) {
-            p.style.display = (p.id === 'ad_pane_' + cat) ? 'block' : 'none';
-        });
-        // Gizli sekmedeyken render edilen Plotly grafikleri 700px
-        // varsayılanında kalır; pane görünür olunca gerçek genişliğe getir.
-        if (window.Plotly && typeof Plotly.Plots !== 'undefined') {
-            const shown = document.getElementById('ad_pane_' + cat);
-            if (shown) {
-                shown.querySelectorAll('.js-plotly-plot').forEach(function (p) {
-                    try { Plotly.Plots.resize(p); } catch (e) { /* boş pane */ }
-                });
+        // Görünürlük kararı TEK yerden verilir (E1): sekme kipinde yalnız
+        // seçili kategori, ızgara kipinde hepsi görünür. Izgara kipinde
+        // sekmeye tıklamak ilgili bölüme kaydırır.
+        applyLayout();
+        if (getLayout() === 'grid') {
+            const target = document.getElementById('ad_pane_' + cat);
+            if (target && typeof target.scrollIntoView === 'function') {
+                try { target.scrollIntoView({ block: 'nearest' }); } catch (e) { /* eski motor */ }
             }
         }
     }
@@ -598,13 +1290,16 @@
     // alanlar (data-dirty) EZİLMEZ; POST her zaman formdan okunur.
     // ------------------------------------------------------------------
     function applySuggestions(spec) {
-        if (!cfg.resultsProvider || !spec.fromResults) return;
+        // `applied`: ÖNERİSİ gerçekten alana yazılan alanlar. Kaynak çipi
+        // (E3) buradan beslenir — tahmin değil, yapılan işin kaydı.
+        const applied = {};
+        if (!cfg.resultsProvider || !spec.fromResults) { paintFieldSources(spec, applied); return; }
         let r = null;
         try { r = cfg.resultsProvider(); } catch (e) { r = null; }
-        if (!r) return;
+        if (!r) { paintFieldSources(spec, applied); return; }
         let sug = null;
         try { sug = spec.fromResults(r); } catch (e) { sug = null; }
-        if (!sug) return;
+        if (!sug) { paintFieldSources(spec, applied); return; }
         Object.keys(sug).forEach(function (k) {
             const el = document.getElementById(fieldDomId(spec.id, k));
             if (!el || el.dataset.dirty === '1') return;
@@ -626,6 +1321,7 @@
                 }
                 if (found) {
                     el.value = want;
+                    applied[k] = true;
                 } else if (window.console && console.warn) {
                     console.warn('[AnalysisDock] ' + spec.id + '.' + k
                         + ': çözücünün verdiği "' + want + '" seçeneği listede yok;'
@@ -636,8 +1332,70 @@
             // Anlamlı basamak: ham float değil (T66 + T45, gerekçe yukarıda)
             if (typeof v === 'number' && Number.isFinite(v)) {
                 el.value = dockSigFig(v);
+                applied[k] = true;
             }
         });
+        paintFieldSources(spec, applied);
+    }
+
+    // ------------------------------------------------------------------
+    // E3'ün GÜVERTEDEKİ KAPISI: form alanının kaynağı
+    // ------------------------------------------------------------------
+    // Kaynak dört durumdan biridir ve üçü KESİN olarak bilinir; dördüncüsü
+    // (computed) "bu sayı en son hesabın sonucundan, panelin fromResults
+    // eşlemesiyle dolduruldu" demektir — ipucu metni bunu birebir söyler,
+    // fazlasını iddia etmez:
+    //   user     : kullanıcı alanı elle değiştirdi (data-dirty)
+    //   computed : değer son hesap sonucundan geldi (applied)
+    //   assumed  : panel varsayılanı kaldı (hesaptan değer gelmedi)
+    //   missing  : alan boş — gönderilecek bir değer yok
+    function fieldSourceKind(el, fieldId, applied) {
+        if (!el) return 'missing';
+        if (el.dataset && el.dataset.dirty === '1') return 'user';
+        const val = (el.value == null) ? '' : String(el.value).trim();
+        if (val === '') return 'missing';
+        if (applied && applied[fieldId]) return 'computed';
+        return 'assumed';
+    }
+
+    const FIELD_SRC_NOTE_KEYS = {
+        computed: 'dock.src.fieldComputed',
+        user: 'dock.src.fieldUser',
+        assumed: 'dock.src.fieldAssumed',
+        missing: 'dock.src.fieldMissing',
+    };
+    const FIELD_SRC_NOTE_FALLBACK = {
+        computed: 'Pre-filled from the latest calculation result through this '
+            + 'panel\'s field mapping.',
+        user: 'You edited this field; suggestions no longer overwrite it.',
+        assumed: 'The calculation result carried no value for this field, so the '
+            + 'panel default is still in the box.',
+        missing: 'The field is empty — the request will not be sent until you '
+            + 'enter a value.',
+    };
+
+    function paintFieldSources(spec, applied) {
+        (spec.fields || []).forEach(function (f) {
+            const fid = f[0];
+            const slot = document.getElementById(fieldSourceSlotId(spec.id, fid));
+            if (!slot) return;
+            const el = document.getElementById(fieldDomId(spec.id, fid));
+            const kind = fieldSourceKind(el, fid, applied);
+            slot.innerHTML = sourceChip({ kind: kind, declared: true },
+                T(FIELD_SRC_NOTE_KEYS[kind], FIELD_SRC_NOTE_FALLBACK[kind]));
+            if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(slot);
+        });
+    }
+
+    // Alan elle değiştirilince o alanın çipi anında 'user'a döner.
+    function repaintFieldSource(spec, fieldId) {
+        const slot = document.getElementById(fieldSourceSlotId(spec.id, fieldId));
+        if (!slot) return;
+        const el = document.getElementById(fieldDomId(spec.id, fieldId));
+        const kind = fieldSourceKind(el, fieldId, null);
+        slot.innerHTML = sourceChip({ kind: kind, declared: true },
+            T(FIELD_SRC_NOTE_KEYS[kind], FIELD_SRC_NOTE_FALLBACK[kind]));
+        if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(slot);
     }
 
     // ==================================================================
@@ -801,6 +1559,13 @@
                 if (window.console) console.warn('AnalysisDock rerender:', spec.id, e);
             }
         });
+        // "Ne değişti" şeridi ve kaynak lejantı da yeni dile döner
+        renderDiffBand();
+        const legendHost = document.getElementById('ad_src_legend');
+        if (legendHost && legendHost.getAttribute('data-filled') === '1') {
+            legendHost.innerHTML = sourceLegend();
+            if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(legendHost);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -824,8 +1589,15 @@
         // Kullanıcı bir alanı elle değiştirirse öneriler onu bir daha ezmez
         const sec = document.getElementById('ad_sec_' + spec.id);
         sec.querySelectorAll('[data-field]').forEach(function (el) {
-            el.addEventListener('input', function () { el.dataset.dirty = '1'; });
-            el.addEventListener('change', function () { el.dataset.dirty = '1'; });
+            const fid = el.getAttribute('data-field');
+            el.addEventListener('input', function () {
+                el.dataset.dirty = '1';
+                repaintFieldSource(spec, fid);      // çip anında 'user'a döner
+            });
+            el.addEventListener('change', function () {
+                el.dataset.dirty = '1';
+                repaintFieldSource(spec, fid);
+            });
         });
         // İlk montajda sonuçtan önerileri doldur (varsa)
         applySuggestions(spec);
@@ -835,6 +1607,32 @@
     // ------------------------------------------------------------------
     // Genel API
     // ------------------------------------------------------------------
+    // E2/E3 katmanlarının tek nesnesi: hem AnalysisDock.diff/source hem de
+    // AnalysisDock.ui.diff/ui.source aynı nesneyi gösterir (kopya değil).
+    const DIFF_API = {
+        compute: diffCompute,
+        badge: diffBadge,
+        annotate: diffAnnotate,
+        strip: diffStripHtml,
+        note: noteResults,
+        last: function () { return lastDiff; },
+        THRESHOLD: DIFF_REL_EPS,
+    };
+    const SOURCE_API = {
+        of: sourceOf,
+        kindOfText: sourceKindOfText,
+        chip: sourceChip,
+        cell: sourceCell,
+        legend: sourceLegend,
+        color: sourceColor,
+        symbol: sourceSymbol,
+        label: sourceLabel,
+        marker: sourceMarker,
+        plotSymbol: sourcePlotSymbol,
+        KINDS: SOURCE_KINDS.slice(),
+        COLORS: SOURCE_COLORS,
+    };
+
     function register(spec) {
         if (!spec || !spec.id || !spec.category || !spec.endpoint
             || typeof spec.render !== 'function') {
@@ -868,10 +1666,27 @@
         }
         inited = true;
 
+        // Yerleşim düğmeleri (E1) — tercih localStorage'da yaşar
+        const toolbar = document.getElementById('ad_toolbar');
+        if (toolbar && toolbar.querySelectorAll) {
+            Array.prototype.forEach.call(toolbar.querySelectorAll('.ad-layout-btn'),
+                function (b) {
+                    b.addEventListener('click', function () {
+                        setLayout(b.getAttribute('data-layout'));
+                    });
+                });
+        }
+
         // Temel sekmeler her zaman kurulur; yeni kategoriler talep üzerine eklenir
         BASE_CATEGORIES.forEach(ensureCategory);
         registry.filter(panelApplies).forEach(mountPanel);
         selectCategory(activeCategory || BASE_CATEGORIES[0]);
+        applyLayout();              // kaydedilmiş tercihi uygula (yoksa 'tabs')
+        // Güverte kurulmadan önce hesap yapılmışsa referans anlık görüntüsü
+        // ilk sonuçtan alınır (fark bir SONRAKİ hesapta çıkar).
+        if (typeof cfg.resultsProvider === 'function') {
+            try { noteResults(cfg.resultsProvider()); } catch (e) { /* sonuç yok */ }
+        }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(dock);
         if (window.I18N && window.I18N.onChange) window.I18N.onChange(rerenderAll);
     }
@@ -880,11 +1695,17 @@
         return cfg.motorType || 'hybrid';
     }
 
-    // Sonuç değiştiğinde entegrasyon katmanı çağırabilir: dirty olmayan
-    // alanları en güncel sonuçla tazeler (opsiyonel kolaylık).
+    // Sonuç değiştiğinde entegrasyon katmanı çağırır (app.js:335,
+    // solid.html:3559, liquid.html:2171): dirty olmayan alanları en güncel
+    // sonuçla tazeler VE "ne değişti" farkını (E2) çıkarır. Fark kapısı
+    // bilerek buraya bağlandı — her hesap sonrası zaten çağrılan tek ortak
+    // nokta burası; yeni bir kanal açıp kapısını unutmamak için (Faz 5 dersi).
     function refreshSuggestions() {
         if (!inited) return;
         registry.filter(panelApplies).forEach(applySuggestions);
+        if (typeof cfg.resultsProvider === 'function') {
+            try { noteResults(cfg.resultsProvider()); } catch (e) { /* sonuç yok */ }
+        }
     }
 
     window.AnalysisDock = {
@@ -893,7 +1714,19 @@
         getMotorType: getMotorType,
         refreshSuggestions: refreshSuggestions,
         selectCategory: selectCategory,
+        // --- E1: yerleşim (sekme / ızgara) ---
+        getLayout: getLayout,
+        setLayout: setLayout,
+        LAYOUTS: LAYOUTS.slice(),
+        // --- E2: "ne değişti" farkı ---
+        diff: DIFF_API,
+        // --- E3: değer kaynağı renklendirmesi ---
+        source: SOURCE_API,
         ui: {
+            // Paneller yalnız `ui`yi yakalıyor; iki yeni katman oradan da
+            // erişilebilir olmalı (aynı nesne, kopya değil).
+            source: SOURCE_API,
+            diff: DIFF_API,
             t: T,
             tf: TF,
             badge: badge,

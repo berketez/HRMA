@@ -45,6 +45,9 @@ MODULE_FILES = [
     STATIC_JS / 'update_check.js',
     STATIC_JS / 'chart_captions.js',
     STATIC_JS / 'motor_viz3d.js',
+    # 2026-08-05: FEA paneli eklendi — sözlük kapsamı dışında kalırsa
+    # panelin i18n sızıntısı hiçbir bekçi tarafından görülmez.
+    STATIC_JS / 'fea_panel.js',
     STATIC_JS / 'motor_viz_deck.js',
     STATIC_JS / 'hud.js',
     STATIC_JS / 'materials_catalog.js',

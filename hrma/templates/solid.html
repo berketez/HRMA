@@ -14,6 +14,10 @@
     <script src="/static/js/i18n_shell.js"></script>
     <script src="/static/js/release_notes.js"></script>
     <script src="/static/js/user_guide.js"></script>
+    <!-- Hata bildir: gövde derleyici + GitHub bağlantısı üretici.
+         settings_panel.js'ten ÖNCE yüklenir; yüklenmezse ayarlar
+         panelinde "Hata bildir" bölümü hiç çizilmez. -->
+    <script src="/static/js/bug_report.js"></script>
     <script src="/static/js/settings_panel.js"></script>
     <title data-i18n="solid.ui.solid_motor_analysis_motor_analysis_tool">Solid Motor Analysis - Motor Analysis Tool</title>
     <style>

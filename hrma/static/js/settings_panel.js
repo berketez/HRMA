@@ -12,7 +12,13 @@
  *                                  sürüm varsa update_check.js'in modal akışı
  *                                  (window.hrmaCheckForUpdates köprüsü).
  *   4. Atlanan sürümü sıfırla  → localStorage.hrma_update_skip silinir.
- *   5. Uygulama bilgisi        → sürüm ({{ app_version }} → window.HRMA_APP_VERSION)
+ *   5. Hata bildir             → bug_report.js (yüklüyse; yoksa bölüm HİÇ
+ *                                  çizilmez — ölü düğme yasak). Gömülü GitHub
+ *                                  belirteci YOKTUR: form doldurulur, ZORUNLU
+ *                                  önizlemeden sonra ön-doldurulmuş issue
+ *                                  bağlantısı yeni sekmede açılır, kaydı
+ *                                  kullanıcı kendi hesabıyla gönderir.
+ *   6. Uygulama bilgisi        → sürüm ({{ app_version }} → window.HRMA_APP_VERSION)
  *                                  + GitHub bağlantısı.
  */
 (function () {
@@ -99,6 +105,314 @@
         'border-radius:var(--hd-radius-sm, 8px);' +
         'font-family:var(--hd-sans, sans-serif);transition:opacity 0.15s;';
 
+    var INPUT_STYLE =
+        'width:100%;box-sizing:border-box;padding:8px 10px;font-size:13px;' +
+        'background:var(--hd-inset, rgba(6,14,26,0.85));' +
+        'color:var(--hd-ink-strong, #eaf7fb);' +
+        'border:1px solid var(--hd-line, rgba(0,229,255,0.22));' +
+        'border-radius:var(--hd-radius-sm, 8px);' +
+        'font-family:var(--hd-sans, sans-serif);';
+
+    var AREA_STYLE = INPUT_STYLE +
+        'min-height:62px;resize:vertical;line-height:1.45;';
+
+    var MONO_AREA_STYLE = INPUT_STYLE +
+        'min-height:210px;resize:vertical;line-height:1.45;font-size:12px;' +
+        'font-family:var(--hd-mono, monospace);white-space:pre;';
+
+    /* Alan etiketi (data-i18n taşır; dil değişince I18N.apply tazeler) */
+    function fieldLabel(key, fallback) {
+        var node = el('div',
+            'font-size:12px;font-weight:600;margin:12px 0 4px;' +
+            'color:var(--hd-ink, #cfe8f2);',
+            escapeHtml(T(key, fallback)));
+        node.setAttribute('data-i18n', key);
+        return node;
+    }
+
+    function setPlaceholder(node, key, fallback) {
+        node.setAttribute('placeholder', T(key, fallback));
+        node.setAttribute('data-i18n-placeholder', key);
+    }
+
+    function makeArea(key, fallback) {
+        var area = document.createElement('textarea');
+        area.style.cssText = AREA_STYLE;
+        setPlaceholder(area, key, fallback);
+        return area;
+    }
+
+    /* Kullanıcı uyarısı sözleşmesi: {code, params}. Sözlükte anahtar yoksa
+       aşağıdaki yedek metin basılır (kod ekrana ham dökülmez). */
+    var WARN_FALLBACK = {
+        'warn.bugreport.body_truncated':
+            'The diagnostic log was shortened to fit the issue link length ' +
+            'limit ({chars} characters removed).',
+        'warn.bugreport.title_truncated':
+            'The title was shortened to the {limit}-character GitHub limit.',
+        'warn.bugreport.preview_required':
+            'The report can only be opened after it has been previewed.'
+    };
+
+    function warnChip(w) {
+        var code = String((w && w.code) || '');
+        var node = el('span',
+            'display:inline-block;margin:8px 8px 0 0;padding:4px 10px;' +
+            'font-size:11px;border-radius:999px;' +
+            'border:1px solid var(--hd-orange, #ffb454);' +
+            'color:var(--hd-orange, #ffb454);' +
+            'background:rgba(255,180,84,0.10);' +
+            'font-family:var(--hd-mono, monospace);',
+            escapeHtml(TF(code, (w && w.params) || {},
+                          WARN_FALLBACK[code] || code)));
+        node.setAttribute('data-warn-code', code);
+        return node;
+    }
+
+    /* "Hata bildir" bölümü.
+     *
+     * bug_report.js yüklü DEĞİLSE bölüm hiç çizilmez — çalışmayan düğme
+     * koymayız. Akış iki adımlıdır ve ikinci adım ZORUNLUDUR:
+     *
+     *   form  →  [Önizle]  →  gönderilecek TAM metin (düzenlenebilir)
+     *         →  [GitHub'da aç]  →  ön-doldurulmuş issue yeni sekmede.
+     *
+     * Gönderme düğmesine GitHub'ın kendi sayfasında kullanıcı basar; HRMA
+     * kimsenin adına kayıt açmaz (gömülü belirteç yok). openIssue() önizlemede
+     * GÖRÜLMEMİŞ bir gövdeyi açmaz (bug_report.js önizleme kilidi).
+     */
+    function appendBugSection(box) {
+        var BR = window.HRMABugReport;
+        if (!BR) return;
+
+        box.appendChild(sectionTitle('shell.bug.section', 'Report a bug'));
+        box.appendChild(descLine('shell.bug.intro',
+            'Fill this in and HRMA opens a pre-filled issue on GitHub in a new '
+            + 'tab. Nothing is sent automatically — you review the text and '
+            + 'submit it with your own GitHub account.'));
+
+        var form = el('div', 'margin-top:8px;');
+        var preview = el('div', 'margin-top:8px;display:none;');
+        box.appendChild(form);
+        box.appendChild(preview);
+
+        // ---- adım 1: form ----
+        form.appendChild(fieldLabel('shell.bug.titleLabel', 'Title'));
+        var titleIn = document.createElement('input');
+        titleIn.type = 'text';
+        titleIn.id = 'hrma-bug-title';
+        titleIn.style.cssText = INPUT_STYLE;
+        titleIn.maxLength = BR.MAX_TITLE_CHARS;
+        setPlaceholder(titleIn, 'shell.bug.titlePlaceholder',
+                       'Short summary of the problem');
+        form.appendChild(titleIn);
+
+        form.appendChild(fieldLabel('shell.bug.whatLabel', 'What happened?'));
+        var whatIn = makeArea('shell.bug.whatPlaceholder',
+            'Describe what went wrong.');
+        whatIn.id = 'hrma-bug-what';
+        form.appendChild(whatIn);
+
+        form.appendChild(fieldLabel('shell.bug.expectedLabel',
+                                    'What did you expect?'));
+        var expectedIn = makeArea('shell.bug.expectedPlaceholder',
+            'What should have happened instead?');
+        expectedIn.id = 'hrma-bug-expected';
+        form.appendChild(expectedIn);
+
+        form.appendChild(fieldLabel('shell.bug.stepsLabel',
+                                    'Steps to reproduce'));
+        var stepsIn = makeArea('shell.bug.stepsPlaceholder',
+            '1. Open the hybrid page\n2. Enter …\n3. Press Analyze');
+        stepsIn.id = 'hrma-bug-steps';
+        form.appendChild(stepsIn);
+
+        // Tanılama onay kutusu — VARSAYILAN KAPALI (kullanıcı bilerek açar)
+        var diagRow = el('label',
+            'display:flex;align-items:flex-start;gap:10px;cursor:pointer;'
+            + 'font-size:13px;margin-top:14px;');
+        var diagBox = document.createElement('input');
+        diagBox.type = 'checkbox';
+        diagBox.id = 'hrma-bug-diagnostics';
+        diagBox.checked = false;
+        diagBox.style.cssText =
+            'accent-color:var(--hd-cyan, #00e5ff);cursor:pointer;margin-top:2px;';
+        var diagLabel = el('span', '',
+            escapeHtml(T('shell.bug.diagnostics',
+                         'Attach diagnostic information')));
+        diagLabel.setAttribute('data-i18n', 'shell.bug.diagnostics');
+        diagRow.appendChild(diagBox);
+        diagRow.appendChild(diagLabel);
+        form.appendChild(diagRow);
+        form.appendChild(descLine('shell.bug.diagnosticsDesc',
+            'Adds the numeric inputs on this page and the console errors '
+            + 'captured after it loaded. File paths, user names and e-mail '
+            + 'addresses are removed. Off unless you turn it on.'));
+
+        var formRow = el('div',
+            'display:flex;align-items:center;gap:12px;margin-top:14px;'
+            + 'flex-wrap:wrap;');
+        var previewBtn = el('button', BTN_STYLE,
+            escapeHtml(T('shell.bug.preview', 'Preview')));
+        previewBtn.setAttribute('data-i18n', 'shell.bug.preview');
+        previewBtn.id = 'hrma-bug-preview-btn';
+        var formStatus = el('div',
+            'font-size:12px;color:var(--hd-ink-dim, #7d97a5);flex:1;'
+            + 'min-width:160px;', '');
+        formStatus.id = 'hrma-bug-form-status';
+        formRow.appendChild(previewBtn);
+        formRow.appendChild(formStatus);
+        form.appendChild(formRow);
+
+        // ---- adım 2: önizleme ----
+        preview.appendChild(fieldLabel('shell.bug.previewTitle',
+            'This exact text will be sent'));
+        preview.appendChild(descLine('shell.bug.previewHint',
+            'You can still edit it. HRMA opens GitHub with this text '
+            + 'pre-filled; you press "Submit new issue" there.'));
+
+        preview.appendChild(fieldLabel('shell.bug.titleLabel', 'Title'));
+        var pTitleIn = document.createElement('input');
+        pTitleIn.type = 'text';
+        pTitleIn.id = 'hrma-bug-preview-title';
+        pTitleIn.style.cssText = INPUT_STYLE;
+        pTitleIn.maxLength = BR.MAX_TITLE_CHARS;
+        preview.appendChild(pTitleIn);
+
+        var bodyArea = document.createElement('textarea');
+        bodyArea.id = 'hrma-bug-body';
+        bodyArea.style.cssText = MONO_AREA_STYLE + 'margin-top:10px;';
+        preview.appendChild(bodyArea);
+
+        var chipRow = el('div', 'display:block;');
+        preview.appendChild(chipRow);
+
+        var counter = el('div',
+            'font-size:11px;margin-top:8px;color:var(--hd-ink-faint, #46606d);'
+            + 'font-family:var(--hd-mono, monospace);', '');
+        preview.appendChild(counter);
+
+        var sendRow = el('div',
+            'display:flex;align-items:center;gap:12px;margin-top:12px;'
+            + 'flex-wrap:wrap;');
+        var sendBtn = el('button', BTN_STYLE,
+            escapeHtml(T('shell.bug.openGithub', 'Open on GitHub')));
+        sendBtn.setAttribute('data-i18n', 'shell.bug.openGithub');
+        sendBtn.id = 'hrma-bug-send-btn';
+        var backBtn = el('button', BTN_STYLE,
+            escapeHtml(T('shell.bug.back', 'Back')));
+        backBtn.setAttribute('data-i18n', 'shell.bug.back');
+        backBtn.id = 'hrma-bug-back-btn';
+        sendRow.appendChild(sendBtn);
+        sendRow.appendChild(backBtn);
+        preview.appendChild(sendRow);
+
+        var sendStatus = el('div',
+            'font-size:12px;margin-top:8px;color:var(--hd-ink-dim, #7d97a5);',
+            '');
+        sendStatus.id = 'hrma-bug-send-status';
+        preview.appendChild(sendStatus);
+
+        // Yeni sekme engellendiyse bağlantı elle kopyalanabilsin
+        var urlBox = el('div', 'display:none;margin-top:8px;');
+        urlBox.appendChild(fieldLabel('shell.bug.urlLabel', 'Issue link'));
+        var urlIn = document.createElement('input');
+        urlIn.type = 'text';
+        urlIn.id = 'hrma-bug-url';
+        urlIn.readOnly = true;
+        urlIn.style.cssText = INPUT_STYLE +
+            'font-family:var(--hd-mono, monospace);font-size:11px;';
+        urlBox.appendChild(urlIn);
+        preview.appendChild(urlBox);
+
+        function showChips(list) {
+            chipRow.innerHTML = '';
+            for (var i = 0; i < (list || []).length; i++) {
+                chipRow.appendChild(warnChip(list[i]));
+            }
+        }
+
+        /* Önizlemedeki metin her değiştiğinde kilit tazelenir: openIssue yalnız
+           EKRANDA DURAN metni açabilir. */
+        function syncPreview() {
+            BR.markPreviewed(pTitleIn.value, bodyArea.value);
+            var built = BR.buildIssueUrl(pTitleIn.value, bodyArea.value);
+            counter.textContent = TF('shell.bug.charCount',
+                { chars: bodyArea.value.length, url: built.url_chars,
+                  limit: built.limit },
+                '{chars} characters — issue link {url} / {limit}');
+        }
+
+        previewBtn.addEventListener('click', function () {
+            if (!titleIn.value.trim()) {
+                formStatus.textContent =
+                    T('shell.bug.needTitle', 'Please write a title.');
+                return;
+            }
+            if (!whatIn.value.trim()) {
+                formStatus.textContent = T('shell.bug.needWhat',
+                    'Please describe what happened.');
+                return;
+            }
+            formStatus.textContent = '';
+            var body = BR.buildBody(
+                { what: whatIn.value, expected: expectedIn.value,
+                  steps: stepsIn.value },
+                { diagnostics: diagBox.checked });
+            // Kırpma BURADA yapılır: kullanıcı gönderilecek metnin aynısını
+            // görür (gövde uzunsa kısaltılmış hâli + beyanı ile).
+            var built = BR.buildIssueUrl(titleIn.value.trim(), body);
+            pTitleIn.value = built.title;
+            bodyArea.value = built.body;
+            showChips(built.warnings);
+            sendStatus.textContent = '';
+            urlBox.style.display = 'none';
+            syncPreview();
+            form.style.display = 'none';
+            preview.style.display = 'block';
+        });
+
+        pTitleIn.addEventListener('input', syncPreview);
+        bodyArea.addEventListener('input', syncPreview);
+
+        backBtn.addEventListener('click', function () {
+            BR.resetPreview();
+            preview.style.display = 'none';
+            form.style.display = 'block';
+        });
+
+        sendBtn.addEventListener('click', function () {
+            var res = BR.openIssue(pTitleIn.value, bodyArea.value);
+            showChips(res.warnings);
+            if (res.needs_preview) {
+                if (res.body) {
+                    // Kırpılan metin henüz görülmedi -> ekrana bas, açma
+                    bodyArea.value = res.body;
+                    syncPreview();
+                    sendStatus.textContent = T('shell.bug.reviewAgain',
+                        'The text was shortened to fit the link limit — '
+                        + 'check it and press the button again.');
+                } else {
+                    sendStatus.textContent = T('shell.bug.previewRequired',
+                        'Preview the report before opening it.');
+                }
+                return;
+            }
+            if (res.opened) {
+                sendStatus.textContent = T('shell.bug.opened',
+                    'GitHub opened in a new tab — check the text there and '
+                    + 'press "Submit new issue".');
+                urlBox.style.display = 'none';
+            } else {
+                sendStatus.textContent = T('shell.bug.openFailed',
+                    'The browser did not open a new tab. Copy the link below '
+                    + 'and open it yourself.');
+                urlIn.value = res.url || '';
+                urlBox.style.display = 'block';
+            }
+        });
+    }
+
     function openModal() {
         if (document.getElementById('hrma-settings-modal')) return;
 
@@ -111,6 +425,11 @@
 
         function closeModal() {
             if (unsubscribe) unsubscribe();
+            // Önizleme kilidi bir sonraki açılışa taşınmaz: kapatılan pencerede
+            // görülen metin, yeniden açılan formda "görülmüş" sayılmamalı.
+            if (window.HRMABugReport && window.HRMABugReport.resetPreview) {
+                window.HRMABugReport.resetPreview();
+            }
             wrap.remove();
         }
 
@@ -268,7 +587,10 @@
                 'Skipped version cleared — it will be offered again.');
         });
 
-        /* ---- 3. Uygulama bilgisi ---- */
+        /* ---- 3. Hata bildir ---- */
+        appendBugSection(box);
+
+        /* ---- 4. Uygulama bilgisi ---- */
         box.appendChild(sectionTitle('shell.settings.app', 'Application'));
 
         var infoRow = el('div',

@@ -326,6 +326,11 @@ SAME_IN_BOTH = {
     'ok', 'no', 'min', 'max', 'total', 'normal', 'standart', 'standard',
     'lineer', 'oksit', 'parafin', 'paraffin', 'hibrit', 'ideal', 'kritik',
     'kombinasyon', 'optimum', 'profil', 'panel', 'rapor', 'analiz', 'export',
+    # Özel adlar: kişi adından gelen ölçüt adları iki dilde de aynı yazılır
+    # ('von Mises gerilmesi' / 'von Mises stress'). Yalnız ADIN kendisi
+    # muaftır; 'gerilme/stress' gibi çevrilebilir sözcükler taranmaya devam
+    # eder, yani 'von Mises stress' TR'de kopya kalırsa yine yakalanır.
+    'von', 'mises', 'jacobian', 'gauss',
 }
 
 # ASCII'ye kaçış avcısı: doğru yazımında MUTLAKA Türkçe harf içeren kökler.
@@ -363,8 +368,26 @@ ASCII_SLIP = re.compile(
 WORD_RE = re.compile(r'[0-9A-Za-zÇĞİÖŞÜçğıöşü]+')
 
 
+# Ünlü harfler — ünsüz yumuşaması denetimi için (aşağıya bakınız).
+UNLULER = set('aeıioöuü')
+
+# ÜNSÜZ YUMUŞAMASI İSTİSNASI (2026-08-05): yalnız doğru yazımı son harf
+# DIŞINDA tamamen ASCII olan kökler. 'sonuç' + 'u' = 'sonucu' baştan sona
+# ASCII'dir ve DOĞRU yazımdır ('sonuçu' yanlıştır) — kök taraması onu kaçış
+# sanıyordu. Buna karşılık 'basınç' + 'ı' = 'basıncı' iki 'ı' taşır, yani
+# doğru yazım hiçbir zaman tümü-ASCII olmaz: 'basinci' GERÇEK kaçıştır ve
+# istisnaya girmez. Bu yüzden liste dar tutulur, kural genelleştirilmez.
+YUMUSAYAN_ASCII_KOKLER = {'sonuc'}
+
+
 def ascii_slip(text):
-    """Türkçe karakteri kaybolmuş görünen ilk kelimeyi döndürür (yoksa None)."""
+    """Türkçe karakteri kaybolmuş görünen ilk kelimeyi döndürür (yoksa None).
+
+    Yumuşama istisnası için bkz. YUMUSAYAN_ASCII_KOKLER: o köklerden biri
+    ünlüden ÖNCE geliyorsa kaçış sayılmaz ('sonucu' doğru). Ünsüzden önce
+    ('sonucta') ve yalın hâlde ('sonuc') denetim aynen sürer — 'sonuçta' ve
+    'sonuç' doğru yazımlardır.
+    """
     for token in TECH_TOKENS:
         text = text.replace(token, ' ')
     for word in WORD_RE.findall(text):
@@ -372,8 +395,14 @@ def ascii_slip(text):
             continue                      # 'YAKIT' meşru büyük harf yazımı
         # 'İ'.lower() 'i' + birleşen nokta (U+0307) üretir; kökle eşleşsin diye silinir.
         plain = word.lower().replace('̇', '')
-        if ASCII_SLIP.match(plain):
-            return word
+        eslesme = ASCII_SLIP.match(plain)
+        if not eslesme:
+            continue
+        kok = eslesme.group(1)
+        sonraki = plain[len(kok):len(kok) + 1]
+        if kok in YUMUSAYAN_ASCII_KOKLER and sonraki and sonraki in UNLULER:
+            continue                      # meşru yumuşama: sonuç -> sonucu
+        return word
     return None
 
 

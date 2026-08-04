@@ -14,6 +14,10 @@
     <script src="/static/js/i18n_shell.js"></script>
     <script src="/static/js/release_notes.js"></script>
     <script src="/static/js/user_guide.js"></script>
+    <!-- Hata bildir: gövde derleyici + GitHub bağlantısı üretici.
+         settings_panel.js'ten ÖNCE yüklenir; yüklenmezse ayarlar
+         panelinde "Hata bildir" bölümü hiç çizilmez. -->
+    <script src="/static/js/bug_report.js"></script>
     <script src="/static/js/settings_panel.js"></script>
     <title data-i18n="adv.page.title">Hybrid Motor Analysis - Motor Analysis Tool</title>
     <style>
@@ -675,6 +679,12 @@
          ayrı bir uç noktayı elle koşturur, bu panel ana hesapla kendiliğinden
          dolar (bekçi: tests/test_blowdown_panel.py). -->
     <script src="/static/js/blowdown_panel.js"></script>
+    <!-- D5 yapısal FEA yüzü: POST /api/fea/structural sonucundan von Mises /
+         emniyet katsayısı kontur haritası, MESH tel-kafesi, eleman kalite
+         haritası ve yakınsama eğrisi. hrma/fea/ çözücüleri bu etiket
+         konmadan önce kullanıcıya HİÇ görünmüyordu
+         (bekçi: tests/test_fea_panel.py). -->
+    <script src="/static/js/fea_panel.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
     <!-- Enjektör kesit şemaları: injector_panel.js window.InjectorSchematics
          yoksa şema kutusunu SESSİZCE gizliyordu (denetim bulgusu 2026-07-22)
@@ -777,6 +787,14 @@
             if (window.BlowdownPanel) {
                 BlowdownPanel.init({ anchorId: 'trajectoryPanel',
                                      declAnchorId: 'notModelledStrip' });
+            }
+            // D5 yapısal FEA paneli: hesap SONUCUNU kendiliğinden ALMAZ,
+            // kullanıcı "Run structural analysis" düğmesine basınca koşar
+            // (FEA saniyeler sürebilir, her hesapta zorla koşturulmaz).
+            // Yeni hesap gelince panel eski FEA çıktısını SİLER — bayat
+            // gerilme alanı yeni motorunmuş gibi durmaz.
+            if (window.FeaPanel) {
+                FeaPanel.init({ anchorId: 'trajectoryPanel' });
             }
             SixDofPanel.init({
                 anchorId: 'trajectoryPanel',

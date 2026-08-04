@@ -106,7 +106,216 @@
                 data-i18n="panel.comparative.intro">${T('panel.comparative.intro',
                 'Snapshots live for this page session only. At least 2 are '
                 + 'required for a comparison.')}</p>
+            ${overlayFormHtml()}
         </div>`;
+    }
+
+    // ------------------------------------------------------------------
+    // E4 — İKİ TASARIMI ÜST ÜSTE KARŞILAŞTIRMA (yerel, sunucusuz)
+    // ------------------------------------------------------------------
+    // "Compare" düğmesi bütün snapshot'ları backend'e gönderip bir grafik
+    // getirir; bu blok ise İKİ tasarımı yan yana, ortak metrik tablosu +
+    // fark sütunuyla gösterir. Sayıların hepsi snapshot'ların KENDİ
+    // metriklerinden gelir — burada hiçbir şey yeniden hesaplanmaz,
+    // türetilmez ya da varsayılmaz. Yalnız birinde bulunan metrik ortak
+    // tabloya girmez; "yalnız X'te var" satırında açıkça beyan edilir.
+    //
+    // Anlamlılık eşiği TEK YERDE tanımlıdır: AnalysisDock.diff.THRESHOLD
+    // (E2 ile aynı ölçülen gürültü tabanı). Burada ikinci bir sayı yazmayız.
+    // ------------------------------------------------------------------
+    const METRIC_ORDER = ['thrust', 'isp', 'total_impulse', 'total_mass'];
+    const METRIC_META = {
+        thrust: { key: 'out.thrust', fallback: 'Thrust', unit: 'N', digits: 1 },
+        isp: { key: 'out.isp', fallback: 'Isp', unit: 's', digits: 2 },
+        total_impulse: { key: 'out.totalImpulse', fallback: 'Total impulse',
+                         unit: 'N·s', digits: 1 },
+        total_mass: { key: 'app.rep.totalMass', fallback: 'Total mass',
+                      unit: 'kg', digits: 3 },
+    };
+
+    function diffApi() {
+        return (window.AnalysisDock && window.AnalysisDock.diff) || null;
+    }
+
+    // Eşik: E2'nin tek tanımından okunur. API yoksa (eski güverte) ikinci
+    // bir eşik UYDURULMAZ — sıfırdan farklı her fark değişim sayılır.
+    function overlayThreshold() {
+        const api = diffApi();
+        const eps = api ? api.THRESHOLD : null;
+        return (typeof eps === 'number' && isFinite(eps)) ? eps : null;
+    }
+
+    function relChange(a, b) {
+        const scale = Math.max(Math.abs(a), Math.abs(b));
+        return scale === 0 ? 0 : Math.abs(b - a) / scale;
+    }
+
+    // İki snapshot'ın metrik satırları. Saf fonksiyon — bekçi testi bunu
+    // doğrudan çağırır.
+    function overlayRows(a, b) {
+        if (!a || !b || !a.metrics || !b.metrics) return [];
+        const eps = overlayThreshold();
+        const keys = METRIC_ORDER.slice();
+        Object.keys(a.metrics).concat(Object.keys(b.metrics)).forEach(function (k) {
+            if (keys.indexOf(k) === -1) keys.push(k);
+        });
+        const rows = [];
+        keys.forEach(function (k) {
+            const va = num(a.metrics[k]);
+            const vb = num(b.metrics[k]);
+            if (va == null && vb == null) return;
+            if (va == null || vb == null) {
+                rows.push({ metric: k, a: va, b: vb, delta: null, rel: null,
+                            changed: false, onlyIn: (va == null ? 'b' : 'a') });
+                return;
+            }
+            const delta = vb - va;
+            const rel = relChange(va, vb);
+            rows.push({ metric: k, a: va, b: vb, delta: delta, rel: rel,
+                        changed: (eps == null) ? (delta !== 0) : (rel > eps),
+                        onlyIn: null });
+        });
+        return rows;
+    }
+
+    function overlayFormHtml() {
+        return `<div id="cmp_overlay" style="margin-top:14px; padding-top:10px;
+            border-top:1px solid var(--hd-line, rgba(0,229,255,0.14));">
+            <h4 style="margin:0 0 6px; color:var(--hd-ink-strong, #eaf7fb);"
+                data-i18n="panel.comparative.secOverlay">${
+                T('panel.comparative.secOverlay', 'Overlay two designs')}</h4>
+            <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+                <div class="form-group">
+                    <label data-i18n="panel.comparative.overlayA">${
+                        T('panel.comparative.overlayA', 'Design A')}</label>
+                    <select id="cmp_ov_a"></select>
+                </div>
+                <div class="form-group">
+                    <label data-i18n="panel.comparative.overlayB">${
+                        T('panel.comparative.overlayB', 'Design B')}</label>
+                    <select id="cmp_ov_b"></select>
+                </div>
+                <div class="form-group">
+                    <button class="btn" type="button" id="cmp_ov_run" disabled
+                        data-i18n="panel.comparative.btnOverlay">${
+                        T('panel.comparative.btnOverlay', 'Overlay')}</button>
+                </div>
+            </div>
+            <div id="cmp_ov_status" style="font-family:var(--hd-mono, monospace);
+                font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5); margin:6px 0;"></div>
+            <div id="cmp_ov_out"></div>
+        </div>`;
+    }
+
+    function metricLabel(key) {
+        const meta = METRIC_META[key];
+        return meta ? T(meta.key, meta.fallback) : key;
+    }
+
+    function metricUnit(key) {
+        const meta = METRIC_META[key];
+        return meta ? meta.unit : '';
+    }
+
+    function metricDigits(key) {
+        const meta = METRIC_META[key];
+        return meta ? meta.digits : 3;
+    }
+
+    function overlayTableHtml(a, b) {
+        const rows = overlayRows(a, b);
+        if (!rows.length) {
+            return `<p style="color:var(--hd-ink-dim, #7d97a5);"
+                data-i18n="panel.comparative.overlayNoCommon">${
+                T('panel.comparative.overlayNoCommon',
+                  'These two snapshots carry no numeric metric to compare.')}</p>`;
+        }
+        const eps = overlayThreshold();
+        const epsTip = (eps == null) ? '' : T('panel.comparative.overlayBelow',
+            'Difference is below the change threshold shared with the '
+            + '"What changed" band.');
+        const head = `<tr>
+            <th style="${U.TD}" data-i18n="panel.comparative.colMetric">${
+                T('panel.comparative.colMetric', 'Metric')}</th>
+            <th style="${U.TD}">${escapeHtml(a.name)}</th>
+            <th style="${U.TD}">${escapeHtml(b.name)}</th>
+            <th style="${U.TD}" data-i18n="panel.comparative.colDelta">${
+                T('panel.comparative.colDelta', 'B − A')}</th>
+            <th style="${U.TD}" data-i18n="panel.comparative.colDeltaPct">${
+                T('panel.comparative.colDeltaPct', 'Relative')}</th></tr>`;
+        const body = rows.map(function (r) {
+            const unit = metricUnit(r.metric);
+            const d = metricDigits(r.metric);
+            const label = metricLabel(r.metric);
+            if (r.onlyIn) {
+                const only = (r.onlyIn === 'a') ? a.name : b.name;
+                const val = (r.onlyIn === 'a') ? r.a : r.b;
+                return `<tr><td style="${U.TD}"><strong>${escapeHtml(label)}</strong></td>
+                    <td style="${U.TD}">${r.a == null ? '—' : U.fmt(r.a, d) + ' ' + unit}</td>
+                    <td style="${U.TD}">${r.b == null ? '—' : U.fmt(r.b, d) + ' ' + unit}</td>
+                    <td style="${U.TD}" colspan="2">${U.tf('panel.comparative.onlyIn',
+                        { name: escapeHtml(only), value: U.fmt(val, d) + ' ' + unit },
+                        'Only reported by {name}')}</td></tr>`;
+            }
+            const arrow = r.delta > 0 ? '▲' : (r.delta < 0 ? '▼' : '=');
+            const relTxt = r.changed
+                ? (arrow + ' ' + U.fmt(r.rel * 100, 3) + ' %')
+                : '—';
+            const relStyle = r.changed
+                ? 'color:var(--hd-ink-strong, #eaf7fb);'
+                : 'color:var(--hd-ink-faint, #46606d);';
+            const relTitle = r.changed ? '' : ' title="' + escapeHtml(epsTip) + '"';
+            return `<tr data-cmp-metric="${escapeHtml(r.metric)}"
+                data-cmp-changed="${r.changed ? '1' : '0'}">
+                <td style="${U.TD}"><strong>${escapeHtml(label)}</strong></td>
+                <td style="${U.TD}">${U.fmt(r.a, d)} ${unit}</td>
+                <td style="${U.TD}">${U.fmt(r.b, d)} ${unit}</td>
+                <td style="${U.TD}">${U.fmt(r.delta, d)} ${unit}</td>
+                <td style="${U.TD} ${relStyle}"${relTitle}>${relTxt}</td></tr>`;
+        }).join('');
+        return `<table style="${U.TBL}">${head}${body}</table>`;
+    }
+
+    function refreshOverlayChoices() {
+        const selA = document.getElementById('cmp_ov_a');
+        const selB = document.getElementById('cmp_ov_b');
+        const btn = document.getElementById('cmp_ov_run');
+        if (!selA || !selB || !btn) return;
+        const opts = snapshots.map(function (s, i) {
+            return '<option value="' + i + '">' + escapeHtml(s.name) + '</option>';
+        }).join('');
+        const keepA = selA.value, keepB = selB.value;
+        selA.innerHTML = opts;
+        selB.innerHTML = opts;
+        if (keepA && snapshots[parseInt(keepA, 10)]) selA.value = keepA;
+        if (keepB && snapshots[parseInt(keepB, 10)]) selB.value = keepB;
+        else if (snapshots.length > 1 && !keepB) selB.value = '1';
+        btn.disabled = snapshots.length < 2;
+    }
+
+    function runOverlay() {
+        const out = document.getElementById('cmp_ov_out');
+        const status = document.getElementById('cmp_ov_status');
+        const selA = document.getElementById('cmp_ov_a');
+        const selB = document.getElementById('cmp_ov_b');
+        if (!out || !selA || !selB) return;
+        const a = snapshots[parseInt(selA.value, 10)];
+        const b = snapshots[parseInt(selB.value, 10)];
+        if (!a || !b) {
+            if (status) status.textContent = T('panel.comparative.needTwoOverlay',
+                'Take at least two snapshots to overlay two designs.');
+            out.innerHTML = '';
+            return;
+        }
+        if (a === b) {
+            if (status) status.textContent = T('panel.comparative.overlaySame',
+                'Design A and Design B are the same snapshot — pick two different ones.');
+            out.innerHTML = '';
+            return;
+        }
+        if (status) status.textContent = '';
+        out.innerHTML = overlayTableHtml(a, b);
+        if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(out);
     }
 
     function snapshotRow(snap, idx) {
@@ -150,6 +359,7 @@
                 refreshList();
             });
         });
+        refreshOverlayChoices();      // E4 seçim kutuları listeyle aynı kalsın
     }
 
     function takeSnapshot() {
@@ -200,6 +410,8 @@
             .addEventListener('click', takeSnapshot);
         document.getElementById('cmp_run')
             .addEventListener('click', runComparison);
+        const ovBtn = document.getElementById('cmp_ov_run');
+        if (ovBtn) ovBtn.addEventListener('click', runOverlay);
         refreshList();
         return true;
     }
@@ -347,7 +559,12 @@
         _parseFigure: parseFigure,
         _snapshots: snapshots,
         _augmentSection: augmentSection,
+        // E4 — üst üste karşılaştırma (saf: iki snapshot → satırlar / tablo)
+        _overlayRows: overlayRows,
+        _overlayTableHtml: overlayTableHtml,
+        _overlayThreshold: overlayThreshold,
         snapshot: takeSnapshot,
         run: runComparison,
+        overlay: runOverlay,
     };
 })();

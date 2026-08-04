@@ -695,3 +695,62 @@ pre, code { color: #9fe8d8; }
 }
 .viz-heatlegend .lbl { display: flex; justify-content: space-between; color: #7d97a5; }
 .viz-heatlegend .tw { margin-top: 5px; color: #ffd9a8; }
+
+/* ==========================================================================
+   Analiz güvertesi — E1 ızgara yerleşimi, E2 değişim rozeti, E3 kaynak çipi
+   --------------------------------------------------------------------------
+   Izgara kipinde kategori bölmeleri `display:contents` ile saydamlaşır ve
+   panel kutuları DOĞRUDAN ızgara hücresi olur; böylece 14 panel sekme
+   arkasında saklanmak yerine tek akışta yan yana durur. Sütun sayısı
+   `auto-fit` ile pencere genişliğinden gelir — sabit sütun sayısı yoktur.
+   Sekme kipi (varsayılan ve geri düşüş) bu sınıf olmadan çalışır.
+   ========================================================================== */
+#ad_panes.ad-layout-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 14px;
+    align-items: start;
+    padding-top: 12px;
+}
+#ad_panes.ad-layout-grid > div { display: contents; }
+#ad_panes.ad-layout-grid .ad-empty { display: none; }
+#ad_panes.ad-layout-grid > div > div[id^="ad_sec_"] { margin: 0; min-width: 0; }
+
+@media (max-width: 620px) {
+    /* Dar ekranda minmax(420px, …) taşma yapar: tek sütuna in */
+    #ad_panes.ad-layout-grid { grid-template-columns: 1fr; }
+}
+
+.ad-layout-btn { line-height: 1.6; }
+.ad-layout-btn:hover { color: var(--hd-cyan-soft); }
+
+/* Kaynak çipi (E3) ve değişim rozeti (E2): renk TEK BAŞINA taşıyıcı
+   değildir — çipte simge (● ■ ◆ ×) ve metin etiketi de vardır, rozette
+   eski → yeni sayısı okunur. Yüksek kontrast kipinde ve baskıda çerçeve
+   korunur ki şekil/etiket ayrımı kaybolmasın. */
+.ad-src-chip, .ad-diff-badge { vertical-align: middle; }
+.ad-diff-badge { background: rgba(0, 229, 255, 0.06); }
+
+@media (forced-colors: active) {
+    .ad-src-chip, .ad-diff-badge { border: 1px solid currentColor; }
+}
+
+@media print {
+    #ad_panes.ad-layout-grid { grid-template-columns: 1fr 1fr; }
+    .ad-src-chip, .ad-diff-badge {
+        border: 1px solid #444 !important;
+        color: #111 !important;
+        background: transparent !important;
+    }
+    .ad-layout-btn { display: none; }
+}
+
+/* Güverte form alanı başlığı: etiket + kaynak çipi aynı satırda
+   (şablonlarda `.form-group label` display:block olduğu için sarmalayıcı
+   flex satırı gerekiyor). */
+.ad-field-head {
+    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+    margin-bottom: 5px;
+}
+.ad-field-head label { margin-bottom: 0; }
+.ad-src-slot { display: inline-flex; align-items: center; }
