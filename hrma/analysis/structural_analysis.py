@@ -331,6 +331,33 @@ class StructuralAnalyzer:
 
         return T_inner, T_outer
 
+    @staticmethod
+    def _wall_temperature_source(motor_data: Dict) -> str:
+        """Cidar sicakliklarinin NEREDEN geldigini adlandirir (v2.6.27, A3).
+
+        ``_estimate_wall_delta_T`` uc farkli yoldan cikabiliyor ama ciktisi
+        her uc durumda da iki sayidan ibaret; disaridan bakan hicbir katman
+        "bu sicaklik hesaplandi mi yoksa termal model kapali miydi?" sorusunu
+        cevaplayamiyordu. Olculdu: sicaklik girdisi verilmeyen bir istekte
+        ic ve dis cidar 300,0 K donuyor ve bu deger yanitta HESAPLANMIS bir
+        tepe cidar sicakligi gibi duruyordu (bkz. app.py
+        ``_withhold_unearned_structural_verdict`` B3 gerekcesi).
+
+        Doner:
+            ``'heat_transfer_module'``  — cagiran gercek cidar sicakliklarini
+                (wall_temperature_hot/cold) verdi; termal yol KOSTU.
+            ``'chamber_temperature_estimate'`` — yalniz gaz sicakligi verildi;
+                cidar radyasyon-denge TAHMINI ile bulundu.
+            ``'not_evaluated'`` — hicbir sicaklik girdisi yok; termal etki
+                kapali, iki cidar da ortam sicakligina esit.
+        """
+        if (motor_data.get('wall_temperature_hot') is not None
+                and motor_data.get('wall_temperature_cold') is not None):
+            return 'heat_transfer_module'
+        if motor_data.get('chamber_temperature') is not None:
+            return 'chamber_temperature_estimate'
+        return 'not_evaluated'
+
     def _check_buckling(self, pressure: float, radius: float, thickness: float,
                         length: float, mat_props: Dict,
                         axial_compression_force: float = 0.0) -> Dict:
@@ -692,6 +719,15 @@ class StructuralAnalyzer:
                 'service_temperature_basis': (
                     'peak (inner-wall) metal temperature; strength derating '
                     'uses the section-average temperature'),
+                # v2.6.27 (A3) — SICAKLIGIN KAYNAGI. 'not_evaluated' iken
+                # yukaridaki iki sicaklik HESAPLANMIS DEGILDIR: ikisi de
+                # ortam sicakligidir ve termal etki kapalidir. Cagiran katman
+                # bu alani okuyup hesaplanmamis sayiyi yayimlamamalidir.
+                'wall_temperature_source':
+                    self._wall_temperature_source(motor_data),
+                'thermal_model_ran': bool(
+                    self._wall_temperature_source(motor_data)
+                    != 'not_evaluated'),
             },
             'buckling_analysis': buckling_analysis,
             # v2.6.26 — AD CAKISMASI BEYAN EDILIYOR.
@@ -930,9 +966,17 @@ class StructuralAnalyzer:
                 'general tube/plate manufacturing practice (ASME BPVC VIII-1 '
                 'UG-25 corrosion-allowance pattern).'),
             'safety_factor_is_tautological': bool(design_mode == 'size'),
+            # v2.6.27 (A3) — DEĞERLENDİRİLEN CİDARIN KAYNAĞI ADIYLA YAZILIR.
+            # ``design_mode`` bu bilgiyi zaten taşıyordu ama okuyucunun onu
+            # "kim verdi" sorusuna çevirmesi gerekiyordu; çağıran katmanın
+            # (app.py) hüküm kapısı bu alanı doğrudan okur.
+            'wall_thickness_source': ('user_supplied' if design_mode == 'verify'
+                                      else 'sized_by_hrma'),
             'safety_factor_basis': (
-                'sized to allowable: SF = target_SF x manufacturing allowance '
-                '(input read back, NOT an independent verification)'
+                'no wall thickness was supplied by the user, so HRMA sized '
+                'the wall to the allowable stress: SF = target_SF x '
+                'manufacturing allowance (input read back, NOT an '
+                'independent verification)'
                 if design_mode == 'size' else
                 'verified against user-supplied wall thickness'),
             # F026: ASME birincil / birincil+ikincil sınıflandırması

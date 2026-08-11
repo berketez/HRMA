@@ -104,8 +104,6 @@ DECLARED_UNMODELLED = {
                         'olarak alinsa cozumle celisirdi'),
         'skip_distance': ('pintle skip mesafesi - yayimlanmis korelasyon yok; '
                           'uydurma katsayi yasak (BORC)'),
-        'secondary_holes': ('ikincil delik duzeni - yayimlanmis model yok '
-                            '(BORC)'),
         'hole_pattern': ('delik deseni (dairesel/altigen/kare) - deseni '
                          'performansa baglayan model yok; yalniz CAD yerlesimi '
                          'icin anlamli (BORC)'),

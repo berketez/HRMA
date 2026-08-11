@@ -387,15 +387,35 @@ class TestOverridesActuallyApply:
         indirir (yalnız F024 etkisi). Aşağıdaki ikinci ve üçüncü iddia bu
         ayrıştırmanın bekçisidir — çapa kayarsa hangi düzeltmenin kaydırdığı
         doğrudan okunur.
+
+        ÇAPA ÜÇÜNCÜ KEZ ÖLÇÜLDÜ (v2.6.27, A1-2 sonrası). Eski CF, aşırı
+        genişlemede negatife giden basınç-itki terimini ``max(CF, 0)`` ile
+        KIRPIYORDU: çalışmaya devam eden motor eğride 0 N görünüyordu. A1-2
+        bu kırpmayı kesilmiş-lüle (ayrılma alan oranında) modeliyle
+        değiştirdi, dolayısıyla ayrılmış kuyruk artık gerçek (pozitif) itki
+        taşıyor ve ORTALAMA itki bir miktar yükseliyor. Ölçüm (bu HEAD):
+
+            varsayılan a : ayrılmış örnek oranı %18,5 -> 3063,68 => 3064,88 N
+            a = 0.005    : ayrılmış örnek oranı %22,7 -> 6704,94 => 6739,13 N
+            a = 0.005 tepe itki: 10811,99 N — DEĞİŞMEDİ (tasarım noktasında
+            akış eklidir, ayrılma yoktur; kayma yalnız kuyruktadır)
+
+        Kayma yönü modelle tutarlıdır: kırpılan (sıfırlanan) kuyruk geri
+        gelince impuls ancak ARTAR. B2 seyreltmesinin bu sayılara etkisi
+        YOKTUR ve bu ayrıca ölçüldü: türetilmiş büyüklükler tam
+        çözünürlüklü diziden hesaplanır (a = 0.005 koşusu 220 örnektir, yani
+        seyreltme eşiğinin altında kalır ve hiç seyreltilmez, buna rağmen
+        çapası kayar — kaymanın sebebi A1-2'dir).
         """
         res = solid()
         # v2.5.2 (Codex bulgusu): impuls hesabi son adimi atliyordu; terminal
         # tukenis ornegi eklenince ortalama itki %0.18 kaymisti. O kapanis
-        # davranisi hâlâ yerinde; asagidaki deger onun F024+F068 sonrasi hâli.
-        assert res['average_thrust'] == pytest.approx(3063.68, abs=0.5)
+        # davranisi hâlâ yerinde; asagidaki deger onun F024+F068+A1-2 hâli.
+        assert res['average_thrust'] == pytest.approx(3064.88, abs=0.5)
         legacy_a = solid(burn_rate_a=0.005)
-        assert legacy_a['average_thrust'] == pytest.approx(6704.94, abs=0.5)
-        # F068 tepe itkiye dokunmaz (tasarim basincinda CF ayni)
+        assert legacy_a['average_thrust'] == pytest.approx(6739.13, abs=0.5)
+        # F068 ve A1-2 tepe itkiye dokunmaz (tasarim basincinda CF ayni,
+        # akis ekli): bu deger uc surumdur degismedi.
         assert legacy_a['max_thrust'] == pytest.approx(10811.99, abs=1.0)
 
 

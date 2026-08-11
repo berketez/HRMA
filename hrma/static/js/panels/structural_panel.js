@@ -126,6 +126,50 @@
         return U.kvTable(rows);
     }
 
+    // ------------------------------------------------------------------
+    // HÜKMÜN DAYANAĞI  (`design_basis`)
+    // ------------------------------------------------------------------
+    // Uç bu bloğu ZATEN gönderiyordu (app.py `/analyze_structural_safety`
+    // → 'design_basis'), panel HİÇ okumuyordu. İçinde tam olarak şu yazıyor:
+    // cidarı kullanıcı mı verdi yoksa HRMA mı boyutlandırdı, hüküm verildi
+    // mi yoksa geri mi çekildi, hangi değerlendirme hiç koşmadı.
+    // Bu blok basılmadığı için kullanıcı, HRMA'nın kendi boyutlandırdığı
+    // cidara verdiği "SAFE"i, kendi cidarının doğrulanmış hükmü sanıyordu.
+    function designBasisBlock(db) {
+        if (!db || typeof db !== 'object') return '';
+        const withheld = String(db.verdict || '') === 'withheld';
+        const sized = String(db.wall_thickness_source || '') === 'sized_by_hrma';
+        let html = U.sectionTitle(T('panel.structural.secDesignBasis',
+                                    'Basis of this verdict'));
+        html += `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;">`
+            + U.badge(withheld
+                    ? T('panel.structural.verdictWithheld', 'VERDICT WITHHELD')
+                    : T('panel.structural.verdictIssued', 'VERDICT ISSUED'),
+                withheld ? 'warn' : 'ok')
+            + U.badge(sized
+                    ? T('panel.structural.wallSized', 'WALL: SIZED BY HRMA')
+                    : T('panel.structural.wallUser', 'WALL: AS SUPPLIED'),
+                sized ? 'warn' : 'ok')
+            + '</div>';
+        // Sunucunun kendi gerekçe metni ham basılır (buck.source, fast.warning
+        // ile aynı desen) — panel onu yeniden yazmaz, çarpıtamaz.
+        if (db.message) {
+            html += `<p style="font-size:0.8rem; color:${U.kindColor(
+                withheld ? 'warn' : 'info')};">${db.message}</p>`;
+        }
+        const reasons = db.verdict_withheld_reasons;
+        if (reasons && reasons.length) {
+            html += U.listBlock(T('panel.structural.withheldReasons',
+                                  'Why no acceptance was issued'), reasons, 'warn');
+        }
+        const notEval = db.not_evaluated;
+        if (notEval && notEval.length) {
+            html += U.listBlock(T('panel.structural.notEvaluated',
+                                  'Not evaluated'), notEval, 'warn');
+        }
+        return html;
+    }
+
     function render(data, root) {
         const sa = data.structural_analysis || {};
         const ca = sa.chamber_analysis || {};
@@ -168,6 +212,10 @@
         }
 
         let html = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`;
+
+        // ---- Hükmün dayanağı (rozetlerin HEMEN ardında: kullanıcı sayıları
+        // okumadan önce bunun doğrulama mı öneri mi olduğunu görmeli) ----
+        html += designBasisBlock(data.design_basis);
 
         // ---- Gerilmeler ----
         html += U.sectionTitle(T('panel.structural.secStresses', 'Wall Stresses'));
@@ -294,6 +342,25 @@
             // data.get('thrust')`), yani eski davranış korunur; sonuç
             // varsa fromResults gerçek itkiyi doldurur.
             ['thrust', 'Thrust (N)', 0, 50, 'common.f.thrustN'],
+            // CİDAR KALINLIĞI (2026-08-09 ölçümü): bu alan listede YOKTU.
+            // Panel /analyze_structural_safety'yi cidar bilgisi OLMADAN
+            // çağırıyordu; uç da bu durumda cidarı KENDİ boyutlandırıp
+            // sonucu döndürüyor (app.py: `wall_thickness_source =
+            // 'sized_by_hrma'`). Sonuç: aynı sayfada, aynı motor için,
+            // kullanıcının kendi cidarıyla hesaplanmış yapısal hüküm ile
+            // HRMA'nın kendi boyutlandırdığı cidarın hükmü yan yana
+            // duruyordu — ve hangisinin hangisi olduğu hiçbir yerde
+            // yazmıyordu. Kardeş paneller (safety_panel, thermal_panel)
+            // bu alanı zaten gönderiyor; tek kopuk olan bu paneldi.
+            //
+            // Varsayılan 0 = "cidarı ben vermiyorum, sen boyutlandır"
+            // (aynı paneldeki `thrust` 0 = "eksenel yükü atla" sözleşmesi;
+            // uç tarafında app.py `actual_wall_thickness <= 0` → None).
+            // 5 mm gibi bir varsayılan ENJEKTE EDİLMEZ: o, kullanıcının
+            // vermediği bir cidarı vermiş gibi göstermek olurdu ve uç
+            // sonucu "doğrulama" diye damgalardı.
+            ['wall_thickness', 'Wall Thickness (m)', 0, 0.001,
+             'common.f.wallThicknessM'],
             ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
         ],
         fromResults: function (r) {
@@ -320,6 +387,12 @@
                 // burkulmayı gerçek basma yüküyle hesaplıyor; verilmezse
                 // eksenel kuvvet 0 kalıyor ve burkulma kontrolü ölü kalıyordu.
                 thrust: U.readThrust(r),
+                // CİDAR: çözücünün kullandığı kalınlık (METRE). Merkezi
+                // okuyucu motor tipine göre mm→m çevirir; safety_panel ve
+                // thermal_panel de aynı yardımcıyı kullanıyor, böylece üç
+                // panel aynı cidarla hesaplar. Sonuç yoksa öneri boş kalır
+                // ve alan 0'da (= "sen boyutlandır") durur.
+                wall_thickness: U.readWallThicknessM(r),
             };
         },
         render: render,

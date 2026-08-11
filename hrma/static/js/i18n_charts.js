@@ -525,6 +525,7 @@
             'stainless steel': 'stainless steel',
             'steel': 'steel',
             'titanium': 'titanium',
+            'turbine pitch speed capped below the optimum velocity ratio; stage count estimate is at its validity limit.': 'turbine pitch speed capped below the optimum velocity ratio; stage count estimate is at its validity limit.',
             'α [deg]': 'α [deg]',
 
             /* 2026-08-04 — app.py'nin son Türkçe hata/uyarı borcu EN'e
@@ -993,6 +994,7 @@
             'stainless steel': 'paslanmaz çelik',
             'steel': 'çelik',
             'titanium': 'titanyum',
+            'turbine pitch speed capped below the optimum velocity ratio; stage count estimate is at its validity limit.': 'Türbin çevresel hızı en uygun hız oranının altında sınırlandı; kademe sayısı tahmini geçerlilik sınırındadır.',
             'α [deg]': 'α [derece]',
 
             /* 2026-08-04 — app.py'nin son Türkçe hata/uyarı borcu EN'e
@@ -1108,6 +1110,15 @@
     /* Sunucu mesajı desenleri (uyarı / doğrulama / hata metinleri).
        Yakalanan gruplar (sayı, malzeme adı, birim) korunur. */
     var MSG_PATTERNS = [
+        // v2.6.27 — turbopompa (C1) ve basincli kap boyutlandirma uyarilari.
+        // Ucu de sayi tasidigi icin birebir sozluge degil desene giriyor
+        // (dosya kurali: sabit metin -> sozluk, sayili metin -> PATTERNS).
+        [/^NPSH margin is non-positive \(available (.+) m, required (.+) m at Nss capability (.+)\); reduce shaft speed or raise tank pressure\.$/,
+         'NPSH marjı pozitif değil (mevcut $1 m, gereken $2 m; Nss kapasitesi $3); mil hızını düşürün ya da tank basıncını yükseltin.'],
+        [/^supplied shaft speed (.+) rpm exceeds the suction-limited maximum (.+) rpm for the target suction capability Nss (.+); NPSH margin will be negative\.$/,
+         'Verilen mil hızı $1 rpm, hedef emme kapasitesi Nss $3 için emme sınırlı en yüksek hız olan $2 rpm değerini aşıyor; NPSH marjı negatif olacak.'],
+        [/^Wall thickness not supplied — sized to satisfy both the code minimum \((.+) mm\) and a burst margin of (.+) against the required burst pressure \((.+) mm\); using (.+) mm\.$/,
+         'Cidar kalınlığı verilmedi — hem yönetmelik alt sınırını ($1 mm) hem de gereken patlama basıncına karşı $2 katlık patlama marjını ($3 mm) sağlayacak biçimde boyutlandırıldı; kullanılan değer $4 mm.'],
         // Geçici-rejim (blowdown) kararlılık uyarıları — dinamik değerli
         [/^t=(.+)s: ΔP\/Pc=(.+) < (.+) — combustion instability limit, simulation stopped$/,
          't=$1 s: ΔP/Pc=$2 < $3 — yanma kararsızlığı sınırı, simülasyon durduruldu'],

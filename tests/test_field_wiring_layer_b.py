@@ -71,6 +71,15 @@ HYBRID_CONTEXTS = {
                        'outer_diameter': 50},
     'pintle_diameter': {'injector_type': 'pintle', 'pintle_diameter': 25,
                         'outer_diameter': 50},
+    # v2.6.27: 'secondary_holes' YALNIZ pintle dalında anlamlıdır. Varsayılan
+    # yükte injector_type='showerhead' olduğu için alanı tek başına sarsmak
+    # hiçbir şeyi oynatmaz ve alan YALANCI 'ölü girdi' görünür — outer_diameter
+    # / pintle_diameter ile aynı sınıf. Dal kurulunca gerçekten canlı:
+    # ölçüldü, none -> 0 delik (TMR tanımsız), radial -> 182 delik,
+    # tangential -> aynı geometri + teğetsel momentumun modellenmediği beyanı;
+    # üç seçimin enjektör bloğu birbirinden farklı.
+    'secondary_holes': {'injector_type': 'pintle', 'pintle_diameter': 25,
+                        'outer_diameter': 50, 'secondary_holes': 'radial'},
     'n_slots': {'injector_type': 'swirl', 'n_slots': 6},
     'slot_width': {'injector_type': 'swirl', 'n_slots': 6,
                    'slot_width': 1.0, 'slot_height': 2.0},
@@ -186,6 +195,23 @@ LEGITIMATE_CONSTANTS = (
     'schema_version', 'version',
     # Fiziksel sabitler ve birim çarpanları.
     'g0', 'standard_gravity',
+    # v2.6.27 (Dalga 6, akustik modların bağlanması): mod ETİKETLERİ.
+    # 'indices.longitudinal_q/radial_n/tangential_m' bir hesabın sonucu
+    # değil, modu ADLANDIRAN tam sayılardır (1L, 1T, 2R...); girdiye göre
+    # değişmemeleri doğru davranıştır. Aynı şekilde 'alpha' Bessel
+    # denkleminin köküdür — matematiksel bir sabit, motor çıktısı değil.
+    # Bu iki aile işaretlenmezse bekçi, uydurma sabit ile mod numarasını
+    # ayırt edemez ve gerçek uydurmaları listenin dibine gömer.
+    'acoustic_modes.modes',
+    'acoustic_modes.inputs.n_modes',
+    # v2.6.27: modülün BEYAN ETTİĞİ ölçüt eşikleri. Bunlar hesabın sonucu
+    # değil, hesabın hangi literatür ölçütüne göre hüküm verdiğinin
+    # yayımıdır (Summerfield ayrılma oranı, chug alt sınırları, screech
+    # bandı). Şeffaflık için basılıyorlar; girdiye göre değişmemeleri
+    # tanımları gereğidir. Eşiğin KENDİSİ değişirse bu satırlar değişir,
+    # yani bekçi hâlâ gerçek bir sözleşmeyi koruyor.
+    'hard_min_ratio', 'recommended_min_ratio', 'screech_band_min_hz',
+    'pressure_ratio_threshold',
 )
 
 

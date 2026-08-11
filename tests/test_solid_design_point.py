@@ -373,14 +373,23 @@ def test_no_target_means_no_sizing():
     assert eng.L_grain == pytest.approx(0.500)
     assert eng.D_core == pytest.approx(0.030)
     stats = _curve_stats(eng)
-    # 2026-07-25 ölçümü (F024 sonrası katalog yanma hızı) — sabit referans
-    assert stats['peak'] == pytest.approx(5008.16, rel=1e-3)
+    # 2026-08-11 ölçümü (A1-1: boğaz artık maks Kn'de boyutlandırılıyor).
+    # Çapa 5008.16 -> 4999.52 N kaydı (-%0.17), yanma süresi 4.487814 ->
+    # 4.493747 s (+%0.13). Sebep ölçüldü: boğaz t=0 yanma alanı yerine
+    # yanmanın gerektirdiği EN BÜYÜK alana göre açılıyor (bates'te
+    # Ab_max/Ab0 = 1.0236), bu yüzden tepe kamara basıncı tasarımın hemen
+    # üstünden (50.3 bar) tam tasarıma (50.000 bar) indi; büyüyen boğaz ve
+    # düşen tepe basınç birlikte tepe itkiyi biraz düşürüp süreyi biraz
+    # uzattı. Kayma progresif taneciklerde çok daha büyüktür (star %-63'e
+    # kadar); bates'te küçük olması alan oranının 1'e yakınlığındandır.
+    assert stats['peak'] == pytest.approx(4999.52, rel=1e-3)
     # v2.5.2 (Codex bulgusu): yanma suresi ve impuls son integrasyon adimini
     # atliyordu — ornekler t ilerlemeden once saklaniyor, son web artisindan
     # sonraki araligi trapz disarida birakiyordu. Terminal tukenis ornegi
     # eklendikten sonra sure yarim adim uzadi. Bu kapanis davranisi hâlâ
     # yerinde; asagidaki deger onun F024 sonrasi karsiligidir.
-    assert stats['burn_time'] == pytest.approx(4.487814, abs=1e-5)
+    # 2026-08-11 (A1-1) yeniden ölçüm: 4.487814 -> 4.493747 s (+%0.13).
+    assert stats['burn_time'] == pytest.approx(4.493747, abs=1e-5)
 
     # F024'un tek suclu oldugunun bekcisi: eski (hatali) katsayiyla eski
     # sayilar geri gelmeli (docstring'deki olcume bak).

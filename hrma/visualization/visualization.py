@@ -149,6 +149,71 @@ def _legend_below(y=-0.12):
                 bgcolor=DARK_LEGEND_BG, bordercolor=DARK_LEGEND_BORDER)
 
 
+#: Açısal gösterge (``go.Indicator`` + ``gauge``) skala etiketleri YAYIN
+#: DIŞINA çizilir; paketli plotly 1.58.5 bunun için hücrede yer AYIRMAZ.
+#: Sonuç: yayın tepesindeki etiketler hücre kutusunun üstüne, yani
+#: ``subplot_titles``ten gelen panel başlığının üstüne taşar. Tarayıcıda
+#: ölçüldü (2026-08-09, 1468 px kap): hibrit performans panosunda "40"/"60"
+#: ile "Oxidizer Injection Velocity" 5 px, yanma panosunda "94"/"96" ile
+#: "Combustion / Kinetic Efficiency" 7 px örtüşüyordu.
+#:
+#: Başlığı yukarı itmek DEĞİL, göstergenin hücresini üstten daraltmak
+#: seçildi: başlık yukarı gidince satır arası boşluğu paylaştığı üst
+#: satırın x ekseni başlığına giriyor — kusur yer değiştirmiş olurdu.
+#: Değer, ölçülen en büyük taşmanın (7 px) üstüne etiket yüksekliği kadar
+#: pay bırakır.
+GAUGE_TOP_HEADROOM_PX = 22
+#: Daraltma hücrenin bu oranını AŞAMAZ — kısa hücrede gösterge yassılmasın.
+GAUGE_HEADROOM_MAX_CELL_FRACTION = 0.22
+#: Plotly'nin marj varsayılanları (px). Figür marjı vermediyse piksel ->
+#: kâğıt oranı çevriminde bunlar kullanılır.
+_PLOTLY_DEFAULT_MARGIN = {'t': 100, 'b': 80}
+
+
+def _reserve_gauge_headroom(fig, headroom_px=None):
+    """Gösterge hücrelerini ÜSTTEN daraltır; skala etiketlerine yer açar.
+
+    ``add_trace(row=, col=)`` domain tipli izlerin ``domain``ini ızgaradan
+    gelen hücreyle EZER (ölçüldü: trace'e verilen ``{'y': [0, 1]}`` çağrı
+    sonrası ``[0.0, 0.4]`` oluyor). Bu yüzden daraltma ancak bütün izler
+    eklendikten SONRA yapılabilir; ``make_subplots`` çağrısında yapılamaz.
+
+    Figürün yüksekliği bilinmiyorsa (``height`` verilmemiş) piksel -> oran
+    çevrimi yapılamaz ve HİÇBİR ŞEY değiştirilmez: uydurma bir oran
+    uygulamak sessizce yanlış yerleşim üretirdi.
+
+    ``headroom_px`` verilmezse modül sabiti ÇAĞRI ANINDA okunur; varsayılan
+    argümana bağlanırsa sabit erken bağlanır ve tek kaynak olmaktan çıkardı.
+    """
+    if headroom_px is None:
+        headroom_px = GAUGE_TOP_HEADROOM_PX
+    height = fig.layout.height
+    if not height:
+        return fig
+    margin = fig.layout.margin
+    ust = margin.t if margin is not None and margin.t is not None \
+        else _PLOTLY_DEFAULT_MARGIN['t']
+    alt = margin.b if margin is not None and margin.b is not None \
+        else _PLOTLY_DEFAULT_MARGIN['b']
+    cizim_h = float(height) - float(ust) - float(alt)
+    if cizim_h <= 0:
+        return fig
+    oran = float(headroom_px) / cizim_h
+    for iz in fig.data:
+        if iz.type != 'indicator' or not iz.gauge:
+            continue
+        alan = iz.domain
+        if alan is None or alan.y is None or len(alan.y) != 2:
+            continue
+        y0, y1 = float(alan.y[0]), float(alan.y[1])
+        yukseklik = y1 - y0
+        if yukseklik <= 0:
+            continue
+        pay = min(oran, yukseklik * GAUGE_HEADROOM_MAX_CELL_FRACTION)
+        iz.domain.y = (y0, y1 - pay)
+    return fig
+
+
 def _match_time_axes(fig, cells):
     """Aynı zaman eksenini paylaşan alt grafiklerde senkron zoom kurar.
 
@@ -1013,6 +1078,52 @@ def _perf_grid(n_panels):
     return rows, cols, slots
 
 
+#: Kategori ekseninde bu kadar (ve daha çok) çubuk varsa dilim daralır ve
+#: uzun adlar plotly tarafından otomatik EĞİLİR; eğik kutular birbirine
+#: girer. Ölçüldü (2026-08-09, sıvı panosu 1306 px): "Tank Outlet" ile
+#: "Main Valve" 45 px, "Feed Lines" ile "Injector" 39 px örtüşüyordu.
+PERF_CAT_WRAP_MIN_COUNT = 4
+#: Bu uzunluğu aşan (ve içinde boşluk olan) etiket iki satıra sarılır.
+PERF_CAT_WRAP_MAX_CHARS = 7
+#: Sarma devredeyken tik yazı boyutu. Ölçüldü (2026-08-09, sıvı panosu):
+#: figür 700 px genişlikte çiziliyor (kap 1306 px olmasına rağmen — ayrı
+#: kusur, bkz. rapor), 5 kategorili eksende dilim 39 px kalıyor. 11 px'te
+#: en uzun etiket ("Injector") 53 px yer kaplayıp komşusuna 4 px giriyordu;
+#: 9 px'te en geniş komşu çifti ortalama 35 px eder, dilime sığar.
+PERF_CAT_CROWDED_TICKFONT = 9
+
+
+def _wrap_category_label(label):
+    """Uzun kategori adını boşluktan iki satıra böler — KISALTMAZ.
+
+    Bölme noktası, iki satırdan uzun olanını en küçük yapan boşluktur.
+    Boşluksuz ad (ör. "Injector") olduğu gibi kalır.
+    """
+    if len(label) <= PERF_CAT_WRAP_MAX_CHARS or ' ' not in label:
+        return label
+    kelimeler = label.split(' ')
+    en_iyi, en_iyi_maks = None, None
+    for i in range(1, len(kelimeler)):
+        sol, sag = ' '.join(kelimeler[:i]), ' '.join(kelimeler[i:])
+        maks = max(len(sol), len(sag))
+        if en_iyi_maks is None or maks < en_iyi_maks:
+            en_iyi, en_iyi_maks = (sol, sag), maks
+    return '<br>'.join(en_iyi)
+
+
+def _category_ticktext(labels):
+    """Kalabalık kategori ekseni için sarılmış GÖRÜNÜM metnini üretir.
+
+    Veri (``trace.x``) DEĞİŞMEZ: sarma yalnız eksen gösterimindedir, bu
+    yüzden ipucunda (hover) adın tam hâli okunur ve ``trace.x`` üzerinden
+    hüküm veren testler/tüketiciler etkilenmez. Sarmaya gerek yoksa None.
+    """
+    if len(labels) < PERF_CAT_WRAP_MIN_COUNT:
+        return None
+    sarili = [_wrap_category_label(l) for l in labels]
+    return sarili if sarili != list(labels) else None
+
+
 def _perf_bar_panel(title, labels, values, colors, value_fmt,
                     x_title, y_title, trace_name=None):
     """Sonlu değeri olan çubukları bir panel sözlüğüne çevirir (yoksa None)."""
@@ -1025,6 +1136,7 @@ def _perf_bar_panel(title, labels, values, colors, value_fmt,
     ys = [k[1] for k in keep]
     cs = [k[2] for k in keep]
     texts = [value_fmt.format(v) for v in ys]
+    ticktext = _category_ticktext(xs)
 
     def draw(fig, row, col):
         fig.add_trace(
@@ -1042,6 +1154,16 @@ def _perf_bar_panel(title, labels, values, colors, value_fmt,
 
     def axes(fig, row, col):
         fig.update_xaxes(title_text=x_title, row=row, col=col)
+        if ticktext is not None:
+            # Kategori ekseninde tik konumları 0..n-1'dir; etiket metnini
+            # AYRI vererek çubuğun kendi x değerini (tam ad) bozmadan iki
+            # satıra sarıyoruz. tickangle=0 açıkça verilir, aksi hâlde
+            # plotly kısalmış etiketleri yine eğebilir.
+            fig.update_xaxes(tickmode='array',
+                             tickvals=list(range(len(xs))),
+                             ticktext=ticktext, tickangle=0,
+                             tickfont=dict(size=PERF_CAT_CROWDED_TICKFONT),
+                             row=row, col=col)
         fig.update_yaxes(title_text=y_title, row=row, col=col)
 
     return {'title': title, 'spec': {'type': 'bar'}, 'draw': draw, 'axes': axes}
@@ -1692,6 +1814,11 @@ def create_performance_plots(motor_data, injector_data=None):
     _match_time_axes(fig, [(r, c) for panel, (r, c, _s) in zip(panels, slots)
                            if panel.get('time_axis')])
 
+    # Enjeksiyon hızı göstergesinin skala etiketleri panel başlığına
+    # biniyordu (hibrit panosu) — hücreyi üstten daralt. Paylaşılan
+    # üretici olduğu için düzeltme üç sayfaya birden gider.
+    _reserve_gauge_headroom(fig)
+
     return _fig_json(fig)
 
 def create_heat_transfer_plots(heat_data):
@@ -2132,6 +2259,10 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
     fig.update_yaxes(title_text="Temperature (K)", row=1, col=2)
     fig.update_xaxes(title_text="O/F Ratio", row=2, col=2)
     fig.update_yaxes(title_text="Specific Impulse (s)", row=2, col=2)
+
+    # Verim göstergesinin skala etiketleri (94/96) panel başlığına
+    # biniyordu — hücreyi üstten daralt (gerekçe: _reserve_gauge_headroom).
+    _reserve_gauge_headroom(fig)
 
     return _fig_json(fig)
 
@@ -3668,6 +3799,12 @@ def _cross_section_final_port(motor_data, r_pf_mm, r_go_mm):
     return r_pf_mm, f'Final port Ø{2 * r_pf_mm:.1f} mm', None
 
 
+#: L_toplam ölçü etiketinin ölçü çizgisi üzerindeki konumu (0 = sol uç).
+#: Aynı yatay şeritte, lülenin altında duran diverjan açı etiketi var;
+#: etiket ortada kalırsa ikisi çakışıyor (gerekçe çağrı yerinde).
+CROSS_SECTION_TOTAL_LABEL_AT = 0.25
+
+
 def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     """Çözücü geometrisinden mühendislik eksenel kesit çizimi.
 
@@ -3931,7 +4068,10 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     # ---------------- Ölçü çizgileri ----------------
     r_out = rc + wall_case
 
-    def dim_h(x0, x1, y, label, above=True):
+    def dim_h(x0, x1, y, label, above=True, label_at=0.5):
+        """Yatay ölçü çizgisi. ``label_at`` etiketin çizgi üzerindeki
+        konumudur (0 = sol uç, 1 = sağ uç). Varsayılan orta; başka bir
+        yazının satırını paylaşan ölçülerde kaydırılır."""
         fig.add_trace(go.Scatter(
             x=[x0, x1], y=[y, y], mode='lines',
             line=dict(color=DIM, width=1), showlegend=False, hoverinfo='skip'))
@@ -3944,7 +4084,8 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
             fig.add_annotation(x=xe, y=y, ax=xm, ay=y, axref='x', ayref='y',
                                text='', showarrow=True, arrowhead=2,
                                arrowsize=1, arrowwidth=1.2, arrowcolor=DIM)
-        fig.add_annotation(x=xm, y=y + (9 if above else -9), text=label,
+        fig.add_annotation(x=x0 + label_at * (x1 - x0),
+                           y=y + (9 if above else -9), text=label,
                            showarrow=False, font=dict(size=11, color=DIM))
 
     def dim_v(x, y0, y1, label, side=1):
@@ -3974,8 +4115,17 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
         else:
             _grain_lbl = f'Grain = {L_g:.0f} mm'
         dim_h(zg0, zg1, r_out + 42, _grain_lbl)
+    # L_toplam etiketi ÇİZGİNİN ORTASINDA DEĞİL, sol çeyreğindedir: aynı
+    # yatay şeridi diverjan açı etiketi paylaşıyor ve açı etiketi lülenin
+    # altında (çizginin sağ yarısında) duruyor. Ortada bırakıldığında ikisi
+    # üst üste biniyordu — ölçüldü (2026-08-09, sıvı sayfası 1306 px):
+    # "L_total = 685 mm" ile "Conical divergent: α = 15°" 10 px dikey,
+    # 30 px yatay örtüşme; "5 mm" kısmı okunmuyordu. Ayrım PİKSELDE değil
+    # ORANDA verildiği için kap genişliği değişince de korunur: iki yazı
+    # arasındaki açıklık her zaman çizim genişliğinin ~%40'ıdır.
     dim_h(-cap_t, z_exit, -(max(r_out, re + wall_noz) + 30),
-          f'L<sub>total</sub> = {z_exit + cap_t:.0f} mm', above=False)
+          f'L<sub>total</sub> = {z_exit + cap_t:.0f} mm', above=False,
+          label_at=CROSS_SECTION_TOTAL_LABEL_AT)
     dim_v(-cap_t - 18, -rc, rc, f'Ø<sub>c</sub> = {D_ch:.1f} mm', side=-1)
     dim_v(z_throat, -rt, rt, f'Ø<sub>t</sub> = {d_t:.1f} mm', side=1)
     dim_v(z_exit + 12, -re, re, f'Ø<sub>e</sub> = {d_e:.1f} mm', side=1)
@@ -4135,6 +4285,77 @@ def _injector_plate_diameter(injector_data, pattern_reach_mm):
     return max(2.0 * pattern_reach_mm / INJ_PLATE_PATTERN_FILL, 20.0), False
 
 
+#: Arayüzün 'Hole Pattern' seçenekleri -> yüz yerleşimi. Bu bir FİZİK modeli
+#: değildir, GEOMETRİK yerleşimdir: hangi desende delinirse delinsin toplam
+#: akış alanı (dolayısıyla debi, hız, ΔP) aynıdır. v2.6.27'ye kadar alan arka
+#: uçta HİÇBİR koda sahip değildi (ölçüldü: circular -> square, /calculate
+#: yanıtı bit bit aynı) ve yüz çizimi her koşuda altıgen halka çiziyordu.
+SHOWERHEAD_PATTERNS = ('circular', 'hexagonal', 'square')
+
+
+def _showerhead_unit_layout(n_holes, pattern):
+    """Delik merkezlerinin BİRİM yerleşimi: en dış delik yarıçapı 1.0.
+
+    Döner: ``[(x, y, etiket), ...]`` (uzunluk = n_holes).
+
+    * ``circular``   : eş merkezli halkalar, k. halkada 6k delik (mevcut
+      davranış — halka başına delik sayısı çevre uzunluğuyla orantılıdır).
+    * ``hexagonal``  : üçgen/altıgen sıkı paket kafes; kafes noktaları
+      yarıçapa göre sıralanır, ilk n tanesi alınır.
+    * ``square``     : kare kafes; aynı sıralama.
+
+    Yerleşim birim ölçekte üretilir ve çağıran onu plaka yarıçapına oturtur;
+    böylece desen ne olursa olsun çizim plakanın içinde kalır.
+    """
+    pattern = str(pattern or 'circular').lower()
+    if pattern not in SHOWERHEAD_PATTERNS:
+        pattern = 'circular'
+
+    if n_holes <= 1:
+        return [(0.0, 0.0, 'Center hole')]
+
+    pts = []
+    if pattern == 'circular':
+        pts.append((0.0, 0.0, 'Center'))
+        if n_holes <= 7:
+            n_outer = min(6, n_holes - 1)
+            for i in range(n_outer):
+                a = i * 2 * np.pi / n_outer
+                pts.append((np.cos(a), np.sin(a), f'Outer ring #{i + 1}'))
+        else:
+            placed, ring = 1, 1
+            while placed < n_holes:
+                in_ring = min(6 * ring, n_holes - placed)
+                for i in range(in_ring):
+                    a = i * 2 * np.pi / in_ring
+                    pts.append((ring * np.cos(a), ring * np.sin(a),
+                                f'Ring {ring}, hole {i + 1}'))
+                    placed += 1
+                ring += 1
+    else:
+        # Kafes noktaları: yarıçapa göre sıralanıp ilk n tanesi alınır.
+        span = int(np.ceil(np.sqrt(n_holes))) + 2
+        raw = []
+        for j in range(-span, span + 1):
+            for i in range(-span, span + 1):
+                if pattern == 'hexagonal':
+                    x = i + 0.5 * j
+                    y = j * np.sqrt(3.0) / 2.0
+                else:                       # square
+                    x, y = float(i), float(j)
+                raw.append((x * x + y * y, x, y))
+        raw.sort(key=lambda t: (t[0], np.arctan2(t[2], t[1])))
+        label = 'Hex lattice' if pattern == 'hexagonal' else 'Square grid'
+        for k, (_, x, y) in enumerate(raw[:n_holes]):
+            pts.append((x, y, 'Center' if (x == 0.0 and y == 0.0)
+                        else f'{label} #{k + 1}'))
+
+    reach = max((np.hypot(x, y) for x, y, _ in pts), default=0.0)
+    if reach <= 0:
+        return [(0.0, 0.0, 'Center hole')]
+    return [(x / reach, y / reach, name) for x, y, name in pts]
+
+
 def create_showerhead_with_tooltips(injector_data):
     """Showerhead injector face view with a detailed tooltip per hole.
 
@@ -4169,34 +4390,21 @@ def create_showerhead_with_tooltips(injector_data):
     plate_diameter, plate_is_real = _injector_plate_diameter(
         injector_data, pattern_reach)
     r_plate = plate_diameter / 2.0
-    ring_step = (r_plate * INJ_PLATE_PATTERN_FILL / max(n_rings, 1)) \
-        if n_rings else 0.0
 
+    # v2.6.27 (B3): yüz yerleşimi artık kullanıcının seçtiği 'Hole Pattern'
+    # alanından gelir. Alan v2.6.27'ye kadar arka uçta hiç okunmuyordu ve
+    # desen her koşuda altıgen halkaydı. Desen FİZİĞİ değiştirmez (toplam
+    # alan aynı) — yalnız deliklerin plaka üzerindeki yerleşimidir; sonuç
+    # bloğunda da böyle beyan edilir.
+    pattern_name = str(injector_data.get('hole_pattern') or 'circular').lower()
+    if pattern_name not in SHOWERHEAD_PATTERNS:
+        pattern_name = 'circular'
+    r_pattern = r_plate * INJ_PLATE_PATTERN_FILL
     holes_x, holes_y, hole_info = [], [], []
-    if n_holes == 1:
-        holes_x, holes_y, hole_info = [0.0], [0.0], ['Center hole']
-    elif n_holes <= 7:
-        holes_x, holes_y, hole_info = [0.0], [0.0], ['Center']
-        n_outer = min(6, n_holes - 1)
-        for i in range(n_outer):
-            angle = i * 2 * np.pi / n_outer
-            holes_x.append(ring_step * np.cos(angle))
-            holes_y.append(ring_step * np.sin(angle))
-            hole_info.append(f'Outer ring #{i+1}')
-    else:
-        holes_x, holes_y, hole_info = [0.0], [0.0], ['Center']
-        placed = 1
-        ring_num = 1
-        while placed < n_holes:
-            ring_radius = ring_num * ring_step
-            holes_in_ring = min(6 * ring_num, n_holes - placed)
-            for i in range(holes_in_ring):
-                angle = i * 2 * np.pi / holes_in_ring
-                holes_x.append(ring_radius * np.cos(angle))
-                holes_y.append(ring_radius * np.sin(angle))
-                hole_info.append(f'Ring {ring_num}, hole {i+1}')
-                placed += 1
-            ring_num += 1
+    for xu, yu, name in _showerhead_unit_layout(n_holes, pattern_name):
+        holes_x.append(r_pattern * xu)
+        holes_y.append(r_pattern * yu)
+        hole_info.append(name)
 
     if mdot_total is not None:
         flow_row = (f'Mass flow: {mdot_total / n_holes * 1000:.2f} g/s'
@@ -4299,8 +4507,12 @@ def create_showerhead_with_tooltips(injector_data):
         )
 
     total_area = n_holes * np.pi * (hole_diameter/2)**2
+    pattern_label = {'circular': 'circular rings', 'hexagonal': 'hex lattice',
+                     'square': 'square grid'}[pattern_name]
     summary = (f'<b>SHOWERHEAD INJECTOR</b><br>'
                f'{n_holes} Holes x dia {hole_diameter:.2f} mm<br>'
+               f'Face pattern: {pattern_label} (layout only, '
+               f'total area unchanged)<br>'
                f'Total Area: {total_area:.1f} mm2<br>'
                f'Pressure Drop: {_num_safe(injector_data.get("pressure_drop"), 5):.1f} bar')
     if mdot_total is not None:
@@ -4342,12 +4554,55 @@ def create_showerhead_with_tooltips(injector_data):
     return _fig_json(fig)
 
 
+#: Eksenel kesitte okunaklı biçimde çizilebilecek en fazla radyal delik oku.
+#: Sayı bunu aşarsa çizim KISITLANIR ve gerçek sayı künyeye yazılır — çizim
+#: hiçbir zaman "delik sayısı budur" iddiasında bulunmaz. Aynı sözleşme
+#: istemci tarafında da geçerlidir (injector_schematics.js::MAX_DRAWN).
+PINTLE_MAX_DRAWN_HOLES = 12
+
+
 def create_pintle_cross_section(injector_data):
-    """Pintle injector cross-section (axial: x = axis, y = radius)."""
+    """Pintle injector cross-section (axial: x = axis, y = radius).
+
+    v2.6.27 (B3): the drawing now reads the solver's real tip geometry
+    (``pintle_geometry``): the radial hole row is drawn from
+    ``n_radial_holes`` instead of two hard-coded arrows, the spray sheet is
+    drawn at the computed cone half angle instead of a literal '~45 deg', and
+    the radial jets are labelled with the fluid that actually flows through
+    them (oxidizer for a single-fluid hybrid pintle, fuel for the liquid
+    fuel-centred layout). Before this change the picture said 'fuel injected
+    radially' on the hybrid page, where the injector carries oxidizer only.
+    """
+
+    geom = injector_data.get('pintle_geometry') or {}
+
+    def _g(key):
+        """Çözücüden gelen sonlu sayı; yoksa None (uydurma değer yok)."""
+        return _perf_num(geom.get(key))
 
     outer_diameter = injector_data.get('outer_diameter', 50)  # mm
     pintle_diameter = injector_data.get('pintle_diameter', 25)  # mm
     gap = injector_data.get('gap', 1.5)  # mm
+
+    # Radyal delik dizisi ve sprey konisi — YALNIZ çözücü bildirdiyse.
+    n_radial = _g('n_radial_holes')
+    n_radial = int(n_radial) if (n_radial is not None and n_radial >= 1) else None
+    d_radial = _g('radial_hole_d_mm')
+    spray_half = _g('spray_half_angle_deg')
+    bf = _g('bf')
+    skip_mm = _g('skip_distance_mm')
+    # Tek akışkanlı (hibrit, oksitleyici-merkezli) pintle mi? Hibritte yakıt
+    # grain'den gelir, enjektörden YALNIZ oksitleyici geçer.
+    single_fluid = bool(geom.get('single_fluid'))
+    radial_fluid = 'Oxidizer' if single_fluid else 'Fuel'
+    # Bu kesit koaksiyel elemanı da çizer (eş merkezli geometri aynıdır); ama
+    # koaksiyel elemanda UÇTA RADYAL DELİK YOKTUR — iç jet eksenel akar. Bu
+    # yüzden radyal delik sırası yalnız pintle çözümlerinde çizilir; eski
+    # sürüm koaksiyelde de iki 'radyal yakıt' oku basıyordu.
+    is_coaxial = str(injector_data.get('type', '')).lower() == 'coaxial'
+    draw_radial_row = not is_coaxial
+    if is_coaxial:
+        radial_fluid = 'Oxidizer'   # tek akışkan hibrit koaksiyel: iç jet ox
 
     fig = go.Figure()
 
@@ -4405,11 +4660,17 @@ def create_pintle_cross_section(injector_data):
     pintle_x = [-body_len, tip_len - taper_len, tip_len, tip_len,
                 tip_len - taper_len, -body_len, -body_len]
     pintle_y = [r_p, r_p, r_tip, -r_tip, -r_p, -r_p, r_p]
+    # Etiket akışkanı ÇÖZÜCÜDEN gelir: hibritte enjektörden yalnız oksitleyici
+    # geçer (yakıt grain'dedir), sıvı yakıt-merkezli düzende radyal jetler
+    # yakıttır. Eski metin her iki hâlde de 'fuel injected radially' diyordu.
     pintle_hover = (
         f'<b>Pintle Post</b><br>'
         f'D_pintle: {pintle_diameter:.1f} mm<br>'
         f'Tip protrusion: {tip_len:.1f} mm<br>'
-        f'Function: central post; fuel injected radially at the tip'
+        + (f'Function: central inner jet; {radial_fluid.lower()} injected '
+           f'axially' if is_coaxial else
+           f'Function: central post; {radial_fluid.lower()} injected '
+           f'radially at the tip')
     )
     fig.add_trace(go.Scatter(
         x=pintle_x, y=pintle_y, mode='lines', fill='toself',
@@ -4438,30 +4699,69 @@ def create_pintle_cross_section(injector_data):
                 showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
                 arrowcolor=PALETTE[0], opacity=0.85
             )
-    # Radyal yakıt okları (pintle ucu yakınında, dışa doğru)
-    x_rad = 0.45 * tip_len
-    for sgn in (1, -1):
+    # ---------------- Radyal delik dizisi ----------------
+    # v2.6.27 (B3): burada SABİT İKİ ok vardı — çözücü 49 delik hesaplarken de
+    # resimde 2 ok kalıyordu, çünkü bu çizim radyal delik modelini hiç
+    # görmüyordu. Artık ok sayısı çözücünün delik sayısından gelir; okunaklılık
+    # sınırı (PINTLE_MAX_DRAWN_HOLES) bağlarsa çizilen sayı künyede AÇIKÇA
+    # söylenir, yani resim delik sayısı iddiasında bulunmaz.
+    n_draw = min(n_radial, PINTLE_MAX_DRAWN_HOLES) if n_radial else 2
+    x_rad_end = 0.75 * tip_len
+    x_rad_start = max(0.12 * tip_len, x_rad_end - 0.06 * tip_len * n_draw)
+    if draw_radial_row:
+        for i in range(n_draw):
+            x_rad = (x_rad_end if n_draw == 1
+                     else x_rad_start
+                     + (x_rad_end - x_rad_start) * i / (n_draw - 1))
+            for sgn in (1, -1):
+                fig.add_annotation(
+                    x=x_rad, y=sgn * (r_p + 0.55 * gap + 4.0),
+                    ax=x_rad, ay=sgn * (0.55 * r_p),
+                    xref='x', yref='y', axref='x', ayref='y',
+                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                    arrowcolor=PALETTE[1], opacity=0.9
+                )
+        if n_radial is not None:
+            radial_tag = f'{radial_fluid}: {n_radial} radial holes'
+            if d_radial is not None:
+                radial_tag += f' x dia {d_radial:.2f} mm'
+            if n_draw < n_radial:
+                radial_tag += f' ({n_draw} drawn)'
+        else:
+            radial_tag = (f'{radial_fluid} radial holes: count not reported '
+                          f'by the solver')
         fig.add_annotation(
-            x=x_rad, y=sgn * (r_p + 0.55 * gap + 4.0),
-            ax=x_rad, ay=sgn * (0.55 * r_p),
-            xref='x', yref='y', axref='x', ayref='y',
-            showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
-            arrowcolor=PALETTE[1], opacity=0.9
+            x=x_rad_start, y=-(r_p + 0.55 * gap + 8.0),
+            text=radial_tag, showarrow=False, xanchor='left', yanchor='top',
+            font=dict(size=10, color=PALETTE[1])
         )
-    # Sonuç sprey okları (~45 derece konik levha)
-    x_spr = 0.7 * tip_len
+
+    # ---------------- Sonuç sprey konisi ----------------
+    # Eski sürüm elle yazılmış '~45 deg' basıyordu; açı hiçbir girdiden
+    # gelmiyordu. Artık koni ÇÖZÜCÜNÜN sprey yarı açısıyla çizilir
+    # (theta = arccos(1/(1+TMR)), Cheng 2017). Açı bildirilmemişse ok yine
+    # çizilir ama açı İDDİA EDİLMEZ.
+    x_spr = 0.85 * tip_len
     d_spr = 0.35 * outer_diameter
+    if spray_half is not None:
+        th = np.radians(float(spray_half))
+        dx_spr, dy_spr = d_spr * np.cos(th), d_spr * np.sin(th)
+        spray_label = (f'Spray sheet: half angle {spray_half:.0f} deg '
+                       f'(2θ = {2 * spray_half:.0f} deg)')
+    else:
+        dx_spr, dy_spr = d_spr * 0.707, d_spr * 0.707
+        spray_label = 'Spray sheet (cone angle not reported by the solver)'
     for sgn in (1, -1):
         fig.add_annotation(
-            x=x_spr + d_spr, y=sgn * (r_ann + d_spr),
+            x=x_spr + dx_spr, y=sgn * (r_ann + dy_spr),
             ax=x_spr, ay=sgn * r_ann,
             xref='x', yref='y', axref='x', ayref='y',
             showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
             arrowcolor=PALETTE[6], opacity=0.8
         )
     fig.add_annotation(
-        x=x_spr + d_spr + 2, y=r_ann + d_spr + 4,
-        text='Spray sheet (~45 deg)', showarrow=False,
+        x=x_spr + dx_spr + 2, y=r_ann + dy_spr + 4,
+        text=spray_label, showarrow=False,
         font=dict(size=10, color=PALETTE[6])
     )
 
@@ -4498,21 +4798,31 @@ def create_pintle_cross_section(injector_data):
     )
 
     # ---------------- Özet bloğu ----------------
+    summary_rows = [
+        '<b>PINTLE INJECTOR - AXIAL CROSS-SECTION</b>',
+        f'D_outer {outer_diameter:.1f} mm | D_pintle {pintle_diameter:.1f} mm '
+        f'| gap {gap:.2f} mm',
+        f'Annulus Flow Area: {ann_area:.1f} mm2',
+    ]
+    if n_radial is not None:
+        row = f'Radial Holes: {n_radial}'
+        if d_radial is not None:
+            row += f' x dia {d_radial:.2f} mm'
+        if bf is not None:
+            row += f' | BF {bf:.3f}'
+        summary_rows.append(row)
+    if skip_mm is not None:
+        summary_rows.append(f'Skip Distance L_s: {skip_mm:.1f} mm')
     fig.add_annotation(
         x=(-body_len + tip_len) / 2.0, y=r_out + 18,
-        text=(
-            f'<b>PINTLE INJECTOR - AXIAL CROSS-SECTION</b><br>'
-            f'D_outer {outer_diameter:.1f} mm | D_pintle {pintle_diameter:.1f} mm '
-            f'| gap {gap:.2f} mm<br>'
-            f'Annulus Flow Area: {ann_area:.1f} mm2'
-        ),
+        text='<br>'.join(summary_rows),
         showarrow=False, font=dict(size=11), align='center'
     )
 
     # ---------------- Yerleşim ----------------
     x_min = -body_len - 22
-    x_max = tip_len + d_spr + 26
-    y_lim = r_out + 28
+    x_max = x_spr + dx_spr + 26
+    y_lim = max(r_out, r_ann + dy_spr) + 28
     fig.update_layout(
         title='Pintle Injector - Cross Section',
         xaxis=dict(

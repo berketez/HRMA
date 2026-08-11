@@ -318,9 +318,19 @@ def test_curuyen_beyanlar_sonucta_yok(saha_motor):
     assert 'thermal_protection_liner' not in beyanlar
     assert 'oxidizer_tank_structure_slosh' not in beyanlar
     # Daralan beyan yerinde: tank YAPISI hâlâ modellenmiyor (A3 işi)
-    assert 'oxidizer_tank_structure' in beyanlar
-    assert 'slosh IS now modelled' in sonuc['not_modelled'][
-        'oxidizer_tank_structure']
+    # v2.6.27 Dalga 6: beyan DARALDI — tankın yapısal KÜTLESİ hâlâ
+    # modellenmiyor ama basınçlı kap boyutlandırması artık
+    # oxidizer_tank_pressure_vessel bloğunda GERÇEKTEN hesaplanıyor,
+    # bu yüzden eski geniş 'oxidizer_tank_structure' adı çürüdü.
+    assert 'oxidizer_tank_structural_mass' in beyanlar
+    # Beyan, artık modellenen parçaları GERÇEKTEN modelleyen bloğa atıf
+    # yapmalı — yoksa "modellenmiyor" derken yalan söylemiş olur. Metnin
+    # kendisine değil ATIFA bakıyoruz: prosa değişebilir, sözleşme değişmez.
+    metin = sonuc['not_modelled']['oxidizer_tank_structural_mass']
+    assert 'oxidizer_tank_slosh' in metin, (
+        'beyan, çalkalanmanın nerede modellendiğini söylemiyor')
+    assert 'oxidizer_tank_pressure_vessel' in metin, (
+        'beyan, cidar boyutlandırmasının nerede modellendiğini söylemiyor')
 
 
 def test_yeni_bloklar_json_serilestirilebilir(saha_motor, sahasiz_motor):

@@ -188,7 +188,31 @@
             color: #6c757d;
             margin-top: 3px;
         }
-        
+
+        /* Çözücüye ULAŞMAYAN girdiler (v2.6.27, A6 kalem 3).
+           Sıvı sayfasındaki mekanizmanın (liquid.html .not-wired-note)
+           hibrit karşılığı. Alanlar düzenlenebilir kalır — yalnız sonuca
+           girmedikleri açıkça yazılır. Kaynak liste ve gerekçeler:
+           tests/test_field_wiring_layer_a.py -> DECLARED_UNMODELLED['hybrid']. */
+        .not-wired-note {
+            display: block;
+            margin-top: 4px;
+            font-size: 11px;
+            line-height: 1.35;
+            color: var(--hd-orange, #ff8c33);
+            font-weight: 600;
+        }
+        /* Çözücünün kendisinin HESAPLADIĞI büyüklükler: girdi kutusu sonuca
+           girmez ama karşılığı sonuçta raporlanır. */
+        .not-wired-note.not-wired-derived {
+            color: var(--hd-cyan, #00e5ff);
+        }
+        .form-group.not-wired input,
+        .form-group.not-wired select {
+            opacity: 0.55;
+        }
+
+
         .btn { 
             background: linear-gradient(135deg, #2a5298 0%, #1e3c72 100%); 
             color: white; 
@@ -1041,22 +1065,9 @@
                     <strong data-i18n="adv.txt.mode">Mode:</strong> <span data-i18n="adv.txt.specifyTotalImpulseNS">Specify total impulse (N⋅s) and optionally thrust or burn time. The system will calculate the missing parameter.</span>
                 </div>
             </div>
-                <div class="form-group">
-                    <label>
-                        <span data-i18n="adv.label.oFRatio">O/F Ratio</span> <span class="unit" data-i18n="adv.unit.oxidizerFuel">oxidizer/fuel</span>
-                        <div class="tooltip">
-                            <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.oFRatio">The mass ratio of oxidizer to fuel. This critical parameter affects combustion efficiency, chamber temperature, and specific impulse. Typical values: 2-6 for N2O/HTPB systems.</span>
-                        </div>
-                    </label>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="number" id="of_ratio" value="2.5" step="0.1" min="0.1" style="flex: 1;">
-                        <button class="btn btn-small" onclick="findOptimumOF()" style="background: #28a745; color: white;" data-i18n="adv.btn.findOptimum">
-                            Find Optimum
-                        </button>
-                    </div>
-                    <div id="optimum_of_result" style="margin-top: 5px; font-size: 12px; color: #666;"></div>
-                </div>
+                <!-- v2.6.27 (A6, Ayberk madde 1): O/F Ratio alanı BURADAYDI.
+                     "Karışım Oranı" paneline, yakıt ve oksitleyici panellerinin
+                     ARDINA taşındı — gerekçe orada yazılı. -->
                 <div class="form-group">
                     <label>
                         <span data-i18n="adv.label.chamberPressureBar">Chamber Pressure (bar)</span> <span class="unit" data-i18n="adv.unit.absolute">absolute</span>
@@ -1401,6 +1412,60 @@
                     <div class="help-text" data-i18n="adv.help.temperatureAffectsDensityViscosity">Temperature affects density and viscosity</div>
                 </div>
             </div>
+        </div>
+
+        <!-- Karışım Oranı Paneli — v2.6.27 (A6, Ayberk madde 1).
+             ÖNCE: alan "Basic Parameters" panelindeydi, yani sayfada yakıt
+             (Fuel Configuration) ve oksitleyici (Oxidizer Configuration)
+             panellerinden ÖNCE geliyordu. Yanındaki "Find Optimum" düğmesi ise
+             findOptimumOF() içinde fuel_type ve oxidizer_type alanlarını okur:
+             sayfada panel sınırını AŞAN tek denetim budur. Kullanıcı yakıt/
+             oksitleyici seçmeden düğmeye bastığında select varsayılanları
+             sessizce kullanılıyor, sonradan seçtiği çiftle İLGİSİZ bir optimum
+             of_ratio alanına yazılıyordu.
+             ŞİMDİ: panel sırası bağımlılık sırasıyla aynı. id'ler (of_ratio,
+             optimum_of_result) DEĞİŞMEDİ; toplayıcı, .hrma kaydet/yükle ve
+             parametrik tarama seçeneği id ile bağlı olduğu için JS/CSS
+             değişikliği gerekmiyor. -->
+        <div class="panel">
+            <h2 data-i18n="adv.sec.mixtureRatio">Mixture Ratio</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="adv.label.oFRatio">O/F Ratio</span> <span class="unit" data-i18n="adv.unit.oxidizerFuel">oxidizer/fuel</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="adv.tip.oFRatio">The mass ratio of oxidizer to fuel. This critical parameter affects combustion efficiency, chamber temperature, and specific impulse. Typical values: 2-6 for N2O/HTPB systems.</span>
+                        </div>
+                    </label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <!-- Varsayılan 7,5: sayfanın KENDİ varsayılan itici çifti
+                             için (yakıt = HTPB, oksitleyici = N2O — her iki
+                             select'in ilk seçeneği) deponun kanonik teorik
+                             optimum tablosundaki değer:
+                             hrma/utils/optimum_of_ratio.py -> ('n2o','htpb'): 7.5.
+                             Eski varsayılan 2,5 aynı tablodaki ('lox','htpb'):
+                             2.3 değerine yakındı, yani sayfanın seçili
+                             oksitleyicisiyle uyuşmuyordu; ölçülen Isp farkı
+                             O/F 2,5'te 185,4 s, 6,0'da 230,3 s idi.
+                             DİKKAT: bu yalnız BAŞLANGIÇ değeridir, hüküm değil —
+                             başka bir çift seçilince aşağıdaki uyarı görünür ve
+                             gerçek optimum yalnız "Find Optimum" ile (sunucu
+                             hesabı) belirlenir. -->
+                        <input type="number" id="of_ratio" value="7.5" step="0.1" min="0.1" style="flex: 1;"
+                               data-default-pair="n2o+htpb">
+                        <button class="btn btn-small" onclick="findOptimumOF()" style="background: #28a745; color: white;" data-i18n="adv.btn.findOptimum">
+                            Find Optimum
+                        </button>
+                    </div>
+                    <div id="optimum_of_result" style="margin-top: 5px; font-size: 12px; color: #666;"></div>
+                    <!-- Bu not GERÇEK duruma bakar (of_ratio dokunulmuş mu,
+                         seçili çift varsayılan çift mi); uydurma bir "optimumdan
+                         uzaklık" sayısı BASILMAZ. -->
+                    <div id="of_default_notice" class="help-text" style="display: none; color: #ff8c33; font-weight: 600;"></div>
+                </div>
+            </div>
+            <div class="help-text" style="margin-top: 10px;" data-i18n="adv.help.ofDependsOnPropellants">Optimum O/F depends on the fuel and oxidizer selected above. Pick both first, then use Find Optimum - the value is computed on the server for that pair.</div>
         </div>
 
         <!-- Injector Panel -->
@@ -3248,6 +3313,74 @@
             }
         }
 
+        // >>> HYBRID_UNWIRED_MARKERS_START
+        // ==================================================================
+        // ÇÖZÜCÜYE ULAŞMAYAN ALANLARIN DÜRÜST İŞARETLENMESİ (v2.6.27, A6)
+        // Sıvı sayfasında bu mekanizma vardı (liquid.html markUnwiredInputs),
+        // hibritte YOKTU: kullanıcı bu alanları doldurup sonucu değiştirdiğini
+        // sanıyordu. Aşağıdaki liste UYDURULMADI; deponun kendi ölçülmüş
+        // beyanından gelir:
+        //     tests/test_field_wiring_layer_a.py -> DECLARED_UNMODELLED['hybrid']
+        // Alanlar SİLİNMEZ (enjektör modülleri birleştirilince bir kısmı
+        // bağlanacak); yalnız bugünkü gerçek yazılır. Bir alan bağlandığında
+        // hem oradaki beyaz listeden hem buradan çıkarılmalıdır.
+        //
+        // Kategoriler:
+        //   'derived'  -> çözücü bu büyüklüğü KENDİSİ hesaplar; girdi kutusu
+        //                 sonuca girmez, karşılığı sonuçta raporlanır.
+        //   'no_model' -> bağlayan yayımlanmış model yok; değer tasarımla
+        //                 birlikte saklanır ama hesaba girmez.
+        // ==================================================================
+        var HYBRID_UNWIRED_INPUTS = {
+            // Çözücü anulus aralığını iç/dış çaptan türetir (D_avg + hedef alan)
+            annular_gap: 'derived',
+            // Çözücü sprey açısını toplam momentum oranından hesaplar
+            pintle_spray_angle: 'derived',
+            // Yayımlanmış korelasyon yok
+            skip_distance: 'no_model',
+            // Deseni performansa bağlayan model yok; yalnız CAD yerleşimi için
+            hole_pattern: 'no_model'
+        };
+
+        function unwiredNoteText(category) {
+            if (category === 'derived') {
+                return i18nText('adv.js.unwiredDerived',
+                    'Computed by the solver: your entry does not change the result');
+            }
+            if (category === 'no_model') {
+                return i18nText('adv.js.unwiredNoModel',
+                    'Not wired to the solver yet: saved with the design, not used in the result');
+            }
+            // Bilinmeyen kategori sessizce yutulmaz.
+            return i18nFmt('adv.js.unwiredOther', { category: category },
+                'Declared as not used in the calculation (category: {category})');
+        }
+
+        // scope: yalnız verilen kökün altını işaretler (enjektör alanları
+        // updateInjectorParams tarafından sonradan basılıyor).
+        function markUnwiredInputs(scope) {
+            var root = scope || document;
+            Object.keys(HYBRID_UNWIRED_INPUTS).forEach(function (id) {
+                var el = root.querySelector ? root.querySelector('#' + id) : null;
+                if (!el) return;
+                var group = el.closest('.form-group');
+                if (!group || group.querySelector('.not-wired-note')) return;
+                var category = HYBRID_UNWIRED_INPUTS[id];
+                var text = unwiredNoteText(category);
+                group.classList.add('not-wired');
+                el.setAttribute('title', text);
+                var note = document.createElement('small');
+                note.className = 'not-wired-note'
+                    + (category === 'derived' ? ' not-wired-derived' : '');
+                note.setAttribute('data-unwired-category', category);
+                note.setAttribute('data-i18n', category === 'derived'
+                    ? 'adv.js.unwiredDerived' : 'adv.js.unwiredNoModel');
+                note.textContent = text;
+                group.appendChild(note);
+            });
+        }
+        // <<< HYBRID_UNWIRED_MARKERS_END
+
         function updateInjectorParams() {
             const type = document.getElementById('injector_type').value;
             const paramsDiv = document.getElementById('dynamic_params');
@@ -3431,6 +3564,9 @@
             paramsDiv.innerHTML = html;
             // Yeni basılan alan etiketlerini aktif dile çevir
             if (typeof window.I18N !== 'undefined' && I18N.applyTo) I18N.applyTo(paramsDiv);
+            // Enjektör alanları BURADA doğuyor; işaretleme de burada yapılmalı,
+            // yoksa dinamik alanlar rozetsiz kalır (v2.6.27, A6).
+            try { markUnwiredInputs(paramsDiv); } catch (e) { /* yok say */ }
         }
 
         /* v2.6.26 — Motor adı yanıtta TEK bir yerde yok: hibritte
@@ -3496,7 +3632,11 @@
                 atmospheric_pressure: ambientPressure,
                 
                 // Basic parameters - handle total impulse vs thrust/time modes
-                of_ratio: parseFloat(document.getElementById('of_ratio').value || 2.5),
+                // Yedek değer alanın KENDİ varsayılanıyla aynı olmak zorunda
+                // (v2.6.27, A6): burada 2,5 yazıyordu, alanda ise başka bir
+                // değer duruyordu — aynı alan için sayfada iki farklı varsayılan
+                // vardı. Kaynak: hrma/utils/optimum_of_ratio.py ('n2o','htpb').
+                of_ratio: parseFloat(document.getElementById('of_ratio').value || 7.5),
                 chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value || 20),
                 tank_pressure: parseFloat(document.getElementById('tank_pressure').value || 50),
                 
@@ -3619,6 +3759,15 @@
             } else if (injectorType === 'pintle') {
                 data.outer_diameter = parseFloat(document.getElementById('outer_diameter')?.value || 50);
                 data.pintle_diameter = parseFloat(document.getElementById('pintle_diameter')?.value || 25);
+                // v2.6.27: 'Secondary Holes' seçimi ARTIK çözücüye gidiyor.
+                // Ayberk'in 2. maddesi buydu: alan sayfada duruyordu ama
+                // toplayıcı okumuyordu ve arka uçta tek satır karşılığı yoktu
+                // (ölçüldü: none/radial/tangential için injector bloğu bayt
+                // bayt aynıydı). 'none' seçimi gerçek bir geometri değişikliği
+                // yapar (uçta delik kalmaz, saf anülüs); 'tangential' aynı
+                // delik geometrisini kullanır ve teğetsel momentum bileşeninin
+                // MODELLENMEDİĞİNİ beyan eder — uydurma yasağı.
+                data.secondary_holes = document.getElementById('secondary_holes')?.value || 'radial';
             } else if (injectorType === 'swirl') {
                 data.n_slots = parseInt(document.getElementById('n_slots')?.value || 6);
                 data.slot_width = parseFloat(document.getElementById('slot_width')?.value || 0);
@@ -3988,6 +4137,10 @@
             }
             // Motor sonucu henüz yokken de not görünsün.
             try { trajAraciEsitle(); } catch (e) { /* yok say */ }
+            // v2.6.27 (A6): statik şablondaki bağlanmamış alanlar + O/F
+            // varsayılanının köken notu.
+            try { markUnwiredInputs(document); } catch (e) { /* yok say */ }
+            try { bindOFDefaultNotice(); } catch (e) { /* yok say */ }
         });
 
         // Toggle parametric parameters visibility
@@ -4105,6 +4258,81 @@
             }
         }
 
+        // ==================================================================
+        // O/F VARSAYILANININ KÖKENİ (v2.6.27, A6 kalem 2)
+        // of_ratio alanının sayfadaki başlangıç değeri (7,5) yalnız TEK bir
+        // itici çifti için savunulabilir: N2O + HTPB (her iki select'in ilk
+        // seçeneği), kaynak hrma/utils/optimum_of_ratio.py theoretical_optimums.
+        // Kullanıcı başka bir çift seçtiğinde bu değer artık o çiftin optimumu
+        // DEĞİLDİR ve sessizce hesaba girerse "kullanıcı böyle istedi" gibi
+        // davranmış oluruz.
+        // Bu not UYDURMA bir "optimumdan uzaklık" sayısı basmaz; yalnız iki
+        // GERÇEK duruma bakar: (a) alan hâlâ dokunulmamış varsayılan mı,
+        // (b) seçili çift varsayılanın ait olduğu çift mi. Gerçek optimum
+        // yalnız "Find Optimum" ile sunucudan gelir.
+        // ==================================================================
+        // >>> HYBRID_OF_DEFAULT_NOTICE_START
+        // (tests/test_form_alan_sirasi.py bu bloğu ayıklayıp node'da koşturur;
+        //  blok kendi kendine yeter: yalnız i18nText / i18nFmt / document kullanır.)
+        var ofRatioTouched = false;
+
+        function ofDefaultPair() {
+            var el = document.getElementById('of_ratio');
+            var pair = (el && el.getAttribute('data-default-pair')) || '';
+            var parts = pair.split('+');
+            return { oxidizer: (parts[0] || '').trim(), fuel: (parts[1] || '').trim() };
+        }
+
+        function updateOFDefaultNotice() {
+            var notice = document.getElementById('of_default_notice');
+            var field = document.getElementById('of_ratio');
+            if (!notice || !field) return;
+
+            if (ofRatioTouched) {          // kullanıcı girdi ya da optimum bulundu
+                notice.style.display = 'none';
+                notice.textContent = '';
+                return;
+            }
+
+            var want = ofDefaultPair();
+            var fuelSel = document.getElementById('fuel_type');
+            var oxSel = document.getElementById('oxidizer_type');
+            var fuel = (fuelSel && fuelSel.value) || '';
+            var ox = (oxSel && oxSel.value) || '';
+
+            if (fuel === want.fuel && ox === want.oxidizer) {
+                notice.textContent = i18nFmt('adv.js.ofDefaultUntouched',
+                    { oxidizer: want.oxidizer.toUpperCase(), fuel: want.fuel.toUpperCase() },
+                    'Starting value for {oxidizer} + {fuel}; not a computed optimum. Use Find Optimum.');
+            } else {
+                notice.textContent = i18nFmt('adv.js.ofDefaultOtherPair',
+                    {
+                        defaultOxidizer: want.oxidizer.toUpperCase(),
+                        defaultFuel: want.fuel.toUpperCase(),
+                        oxidizer: ox.toUpperCase(),
+                        fuel: fuel.toUpperCase()
+                    },
+                    'This default belongs to {defaultOxidizer} + {defaultFuel}, but {oxidizer} + {fuel} is selected. Use Find Optimum.');
+            }
+            notice.style.display = 'block';
+        }
+
+        function bindOFDefaultNotice() {
+            var field = document.getElementById('of_ratio');
+            if (field) {
+                field.addEventListener('input', function () {
+                    ofRatioTouched = true;
+                    updateOFDefaultNotice();
+                });
+            }
+            ['fuel_type', 'oxidizer_type'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) el.addEventListener('change', updateOFDefaultNotice);
+            });
+            updateOFDefaultNotice();
+        }
+        // <<< HYBRID_OF_DEFAULT_NOTICE_END
+
         // Find optimum O/F ratio
         async function findOptimumOF() {
             showMessage(i18nText('adv.msg.findingOptimumOF', 'Finding optimum O/F ratio for maximum Isp...'), 'info');
@@ -4158,7 +4386,10 @@
                         { optimum: optimumOF.toFixed(2), isp: maxIsp.toFixed(1) },
                         'Optimum: {optimum} (Max Isp: {isp} s)');
                     document.getElementById('optimum_of_result').style.color = '#28a745';
-                    
+                    // Değer artık sunucudan gelen GERÇEK optimum; köken notu düşer.
+                    ofRatioTouched = true;
+                    updateOFDefaultNotice();
+
                     // Show recommendation if available
                     if (result.recommendation) {
                         showMessage(result.recommendation, 'success');

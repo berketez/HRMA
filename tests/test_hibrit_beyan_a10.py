@@ -77,12 +77,26 @@ def kompakt_motor():
 #     slosh artık oxidizer_tank_slosh bloğunda modelleniyor; beyanda yalnız
 #     tank YAPISI (basınçlı kap boyutlandırması, pressure_vessel bağlaması
 #     A3) kaldı.
+#
+# v2.6.27 Dalga 6 bağlaması iki beyanı DAHA gerçeğe göre değiştirdi:
+#   * 'combustion_stability_acoustics' KALKTI — kamara akustik modları ve
+#     chug marjı artık acoustic_modes bloğunda GERÇEKTEN hesaplanıyor
+#     (modülün giriş sözleşmesi zaten hibrit şemasına göre yazılmıştı).
+#     Yerine hibride ÖZGÜ ve gerçekten modellenmeyen kalem geldi:
+#     'hybrid_boundary_layer_instability' (yakıt sınır tabakası yanma
+#     tepki fonksiyonu hiçbir yerde çözülmüyor). Bu bir yeniden adlandırma
+#     DEĞİL: eski beyan modellenen bir şeyi "yok" ilan ettiği için yalan
+#     hâline gelmişti, yenisi ölçülmüş bir yokluktur.
+#   * 'oxidizer_tank_structure' DARALDI -> 'oxidizer_tank_structural_mass':
+#     cidar boyutlandırması artık oxidizer_tank_pressure_vessel bloğunda
+#     (A3) GERÇEKTEN hesaplanıyor; beyanda yalnız tank KÜTLESİ ve bağlantı
+#     donanımı kaldı.
 BEKLENEN_BEYANLAR = {
     'feed_system',
     'ignition_startup_transient',
     'shutdown_transient',
-    'combustion_stability_acoustics',
-    'oxidizer_tank_structure',
+    'hybrid_boundary_layer_instability',
+    'oxidizer_tank_structural_mass',
     'throttle_response_restart',
 }
 
@@ -97,10 +111,17 @@ CELISKI_ANAHTARLARI = {
     'ignition_startup_transient': {'ignition_delay', 'startup_sequence',
                                    'startup_time', 'igniter_design'},
     'shutdown_transient': {'shutdown_time', 'shutdown_sequence'},
-    'combustion_stability_acoustics': {'acoustic_analysis', 'acoustic_modes',
-                                       'instability_frequency'},
-    'oxidizer_tank_structure': {'tank_wall_thickness',
-                                'tank_structural_mass'},
+    # Dikkat: 'combustion_response' YASAKLI DEĞİLDİR — acoustic_modes bloğu
+    # o adı KENDİ not_modelled sözlüğünde bir BEYAN olarak taşır (tek kaynak
+    # ilkesi). Burada aranan, gerçekten çözülmüş bir tepki fonksiyonu /
+    # büyüme oranı çıktısıdır.
+    'hybrid_boundary_layer_instability': {'combustion_response_function',
+                                          'instability_growth_rate',
+                                          'rayleigh_index'},
+    # 'tank_wall_thickness' ARTIK YASAKLI DEĞİL: cidar boyutlandırması A3
+    # bağlamasıyla modellendi. Beyanda kalan yokluk KÜTLEDİR.
+    'oxidizer_tank_structural_mass': {'tank_structural_mass',
+                                      'tank_dry_mass_kg', 'tank_mass_kg'},
     'throttle_response_restart': {'throttle_response', 'min_throttle_pct',
                                   'restart_capability'},
 }

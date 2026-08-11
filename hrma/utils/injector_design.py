@@ -6,7 +6,14 @@ from hrma.analysis.tank_blowdown import N2OSaturation
 # alınır ki iki modül AYNI katsayı ve aynı zarfı kullansın (F017/F043).
 from hrma.engines.injector_design import (
     swirl_solve, swirl_K_from_theta, _SWIRL_K_MIN, _SWIRL_K_MAX,
-    _SWIRL_THETA_MIN_DEG, _SWIRL_THETA_MAX_DEG)
+    _SWIRL_THETA_MIN_DEG, _SWIRL_THETA_MAX_DEG,
+    # v2.6.27 (B3): pintle ucu sentezi TEK kaynaktan — radyal delik dizisi
+    # yalnız kardeş modülde modellenmişti, bu modül pintle'ı çıplak anülüs
+    # sanıyordu. Artık iki modül de aynı fonksiyonu çağırır.
+    pintle_tip_geometry, pintle_spray_angle,
+    PINTLE_HYBRID_RADIAL_FRACTION, PINTLE_BF_TARGET_DEFAULT, PINTLE_BF_BAND,
+    # Akıştan boyutlandırılan karşılaştırma çapı için (künye metninde geçiyor).
+    PINTLE_ANNULUS_T_OVER_DP)
 import warnings
 
 # ---------------------------------------------------------------------------
@@ -218,10 +225,33 @@ class InjectorDesign:
             't_plate': plate_thickness / 1000
         }
 
-    def set_pintle_params(self, outer_diameter=50, pintle_diameter=25):
+    def set_pintle_params(self, outer_diameter=50, pintle_diameter=25,
+                          secondary_holes='radial'):
+        """Pintle parametreleri.
+
+        ``secondary_holes`` (v2.6.27) uçtaki ikincil delik dizisini seçer ve
+        ARTIK sonuca girer. Arayüzde v2.6.2'den beri duruyordu ama toplayıcı
+        okumuyordu ve arka uçta tek satır karşılığı yoktu; ölçüldü ki
+        none/radial/tangential için yayımlanan enjektör bloğu bayt bayt
+        aynıydı (Ayberk madde 2).
+
+        * ``none``       — uçta delik yok, tüm oksitleyici anülüsten geçer.
+          Bu GERÇEK bir geometri değişikliğidir: pintle bir anüler enjektöre
+          dejenere olur, TMR tanımsızlaşır ve sprey konisi radyal jetlerden
+          değil yalnız eksenel akıştan gelir.
+        * ``radial``     — klasik radyal delik dizisi (varsayılan; TRW mirası).
+        * ``tangential`` — delikler teğetsel açıyla delinir. Delik SAYISI ve
+          ÇAPI radyal durumla aynı kalır (aynı toplam alan, aynı ΔP), ama
+          momentumun bir bileşeni teğete gider. HRMA bu bileşeni ve doğurduğu
+          girdabı MODELLEMEZ; sayı uydurmak yerine beyan eder.
+        """
+        secim = str(secondary_holes or 'radial').strip().lower()
+        if secim not in ('none', 'radial', 'tangential'):
+            secim = 'radial'
         self.pintle_params = {
             'D_outer': outer_diameter / 1000,  # Convert mm to m
-            'D_pintle': pintle_diameter / 1000
+            'D_pintle': pintle_diameter / 1000,
+            'secondary_holes': secim,
         }
 
     def set_swirl_params(self, n_slots=6, slot_width=0, slot_height=0,
@@ -409,78 +439,235 @@ class InjectorDesign:
         return result
 
     def _calculate_pintle(self):
-        # Get parameters
+        """Pintle enjektör — radyal delik dizisi + anülüs (tek akışkan).
+
+        v2.6.27 (B3) — BU DAL PINTLE'I ÇIPLAK BİR ANÜLÜS SANIYORDU.
+        Depoda iki bağımsız enjektör modülü vardı ve radyal delik modeli
+        YALNIZ kardeş modüldeydi (``engines/injector_design.py``). Ekrana
+        çizilen ve tabloya basılan model buydu; dolayısıyla hibrit sayfası
+        pintle'ın tanımlayıcı unsurunu — uçtaki radyal delik dizisini — HİÇ
+        göstermiyordu. Ölçüldü (ṁ_ox 1.80 kg/s, Pc 30 bar): bu blok
+        ``number_of_orifices``/radyal delik alanı taşımazken AYNI yanıttaki
+        ``injector_design_detail.pintle_geometry`` 17 × 1.43 mm radyal delik
+        + 0.63 mm anülüs raporluyordu. Kullanıcı "radyal delik üretilmiyor"
+        derken haklıydı.
+
+        Sentez artık TEK kaynaktan gelir: ``engines/injector_design.py::
+        pintle_tip_geometry`` (aynı fonksiyonu ``design_injector``'ın iki
+        pintle dalı da çağırır), yani tablo, 2B kesit ve şema aynı geometriyi
+        anlatır.
+
+        GEOMETRİK TUTARSIZLIK DÜZELTMESİ: eski kod ``D_outer``'ı anülüsün DIŞ
+        duvarı sayıp ``D_avg = (D_o+D_p)/2`` ile boşluğu çözüyordu. Sonuç
+        kendi içinde çelişiyordu — aynı sözlükte D_o = 50.0 mm, D_p = 25.0 mm
+        ve gap = 0.57 mm yan yana duruyordu; oysa 50 ile 25 arasındaki gerçek
+        radyal boşluk 12.5 mm'dir. ``outer_diameter`` gerçekte GÖVDE (housing)
+        dış çapıdır — arayüzün kendi kullanımı da budur (``app.js``: gövde
+        çapı oda çapının %90'ını aşarsa uyarır) ve kesit çizimi de onu gövde
+        duvarı olarak çizer. Anülüs artık pintle miline oturur:
+        A_ann = π·(D_p+t)·t, kılıf deliği D_bore = D_p + 2t; gövde duvarı
+        (D_outer − D_bore)/2 olarak ayrıca raporlanır.
+        """
         params = self.pintle_params
-        D_outer = params['D_outer']
-        D_pintle = params['D_pintle']
+        D_body = params['D_outer']       # gövde (housing) dış çapı [m]
+        D_pintle = params['D_pintle']    # merkez pintle mili çapı [m]
 
-        # Calculate required gap
+        # Toplam oksitleyici akış alanı (orifis denklemi)
         delta_P_Pa = self.delta_P_inj * 1e5
-        A_ann_required = self.mdot_ox / (self.C_d * np.sqrt(2 * self.rho_ox * delta_P_Pa))
-
-        # Anüler akış alanı — ince anülüs bağıntısı A = π·D_avg·gap,
-        # π(D_o²−D_i²)/4 ile özdeştir (D_avg=(D_o+D_i)/2, gap=(D_o−D_i)/2)
-        D_avg = (D_outer + D_pintle) / 2
-        gap = A_ann_required / (np.pi * D_avg)
+        A_total = self.mdot_ox / (self.C_d * np.sqrt(2 * self.rho_ox * delta_P_Pa))
 
         extra_warnings = []
-        # v2.6.2 DÜZELTMESİ (fizik denetimi F016): eski kod boşluğu imalat
-        # bandına (0.3-3.0 mm) kırptıktan sonra alanı kırpılmış boşlukla
-        # yeniden hesaplıyor ama D_outer/D_pintle'ı SABİT bırakıyordu →
-        # süreklilik (ṁ = Cd·A·√(2ρΔP)) bozuluyor ve teslim debisi sessizce
-        # hedeften sapıyordu (ölçüldü: ṁ=12 kg/s, D_o=50/D_p=25 mm → gap
-        # 4.85→3.00 mm kırpması alanı 571.4→353.4 mm² yapıyor, teslim debisi
-        # 7.42 kg/s = hedefin %38 altında, hiçbir uyarı yok). Aynı modülün
-        # showerhead/impingement dalları bu sorunu delik SAYISINI yeniden
-        # çözerek düzeltmişti; pintle dalında ortalama çap (→ D_outer)
-        # yeniden çözülür. Kaynak: süreklilik/orifis denklemi (Sutton &
-        # Biblarz Böl. 8); modül içi tutarlılık (denetim bulgusu #118).
-        gap_clamped = min(max(gap, PINTLE_GAP_MIN_M), PINTLE_GAP_MAX_M)
-        if not np.isclose(gap_clamped, gap, rtol=1e-9):
-            D_avg_new = A_ann_required / (np.pi * gap_clamped)
-            D_outer_new = 2 * D_avg_new - D_pintle
-            if D_outer_new > D_pintle:
-                D_outer = D_outer_new
-                D_avg = D_avg_new
-                extra_warnings.append(
-                    f"Annulus gap clamped to manufacturing band "
-                    f"({PINTLE_GAP_MIN_M * 1e3:.1f}-{PINTLE_GAP_MAX_M * 1e3:.1f} mm); "
-                    f"outer diameter re-solved to {D_outer * 1e3:.1f} mm to "
-                    f"preserve the target flow rate.")
-            else:
-                # Kırpılmış boşlukta gerekli alan verilen pintle çapıyla
-                # eşleşmiyor (gerekli D_avg < D_pintle) — geometri korunur,
-                # debi sapması aşağıda SAYIYLA bildirilir (sessiz kalınmaz).
-                extra_warnings.append(
-                    f"Annulus gap clamped to the manufacturing minimum "
-                    f"({PINTLE_GAP_MIN_M * 1e3:.1f} mm); the required flow area "
-                    f"cannot be matched with the given diameters.")
-        gap = gap_clamped
 
-        # Actual area and delivered flow
-        A_ann = np.pi * D_avg * gap
-        # Teslim edilebilir debi — alan hedef alandan sapıyorsa açıkça raporla
-        mdot_delivered = self.C_d * A_ann * np.sqrt(2 * self.rho_ox * delta_P_Pa)
+        # Akış payı: radyal delikler / anülüs. Aynı akışkan ve aynı ΔP olduğu
+        # için hızlar eşittir, dolayısıyla TMR = f/(1−f) ve sprey konisi
+        # doğrudan bu paydan gelir (Cheng 2017).
+        # v2.6.27 — 'Secondary Holes' seçimi burada sonuca giriyor.
+        secim = params.get('secondary_holes', 'radial')
+        if secim == 'none':
+            # Uçta delik yok: tüm akış anülüsten. Pintle bir anüler enjektöre
+            # dejenere olur; radyal jet olmadığı için TMR ve ondan türeyen
+            # sprey konisi TANIMSIZDIR (uydurulmaz, None yayımlanır).
+            f_rad = 0.0
+        else:
+            f_rad = float(PINTLE_HYBRID_RADIAL_FRACTION)
+        a_ann = (1.0 - f_rad) * A_total
+
+        # Anülüs boşluğu TAM ifadeden: A = π(D_p+t)·t
+        gap = (np.sqrt(D_pintle ** 2 + 4.0 * a_ann / np.pi) - D_pintle) / 2.0
+
+        # v2.6.2'den devralınan imalat bandı koruması (F016). Eski sürüm bandı
+        # bağladığında D_outer'ı yeniden çözüyordu; artık kullanıcının verdiği
+        # çaplar KORUNUR ve akış payı kaydırılarak TOPLAM alan (yani teslim
+        # debisi) korunur — f_rad modelin kendi büyüklüğüdür ve raporlanır.
+        gap_clamped = float(min(max(gap, PINTLE_GAP_MIN_M), PINTLE_GAP_MAX_M))
+        if not np.isclose(gap_clamped, gap, rtol=1e-9):
+            a_ann_clamped = np.pi * (D_pintle + gap_clamped) * gap_clamped
+            f_rad_new = 1.0 - a_ann_clamped / A_total
+            f_rad_lim = float(np.clip(f_rad_new, 0.1, 0.9))
+            if np.isclose(f_rad_lim, f_rad_new, rtol=1e-9):
+                f_rad = f_rad_lim
+                a_ann = a_ann_clamped
+                gap = gap_clamped
+                extra_warnings.append(
+                    f"Annulus gap clamped to the manufacturing band "
+                    f"({PINTLE_GAP_MIN_M * 1e3:.1f}-{PINTLE_GAP_MAX_M * 1e3:.1f} mm); "
+                    f"the radial/annular flow split was re-solved to "
+                    f"{f_rad * 100:.0f}% radial so the total injection area "
+                    f"(and therefore the target flow rate) is preserved.")
+            else:
+                # Payı bandına kırpmak toplam alanı bozar; geometri korunur ve
+                # boşluğun imalat sınırının dışında kaldığı SAYIYLA bildirilir.
+                extra_warnings.append(
+                    f"Annulus gap ({gap * 1e3:.2f} mm) falls outside the "
+                    f"manufacturing band "
+                    f"({PINTLE_GAP_MIN_M * 1e3:.1f}-{PINTLE_GAP_MAX_M * 1e3:.1f} mm) "
+                    f"and cannot be corrected by shifting the flow split; "
+                    f"resize D_pintle.")
+
+        a_rad = A_total - a_ann
+
+        # --- TEK KAYNAK: uç geometrisi kardeş modülden --------------------
+        tip = pintle_tip_geometry(a_rad, a_ann, d_pintle_m=D_pintle,
+                                  bf_target=PINTLE_BF_TARGET_DEFAULT)
+        if secim == 'none':
+            # Delik yok: sentez fonksiyonu alan sıfırken taban delik sayısı
+            # döndürür (n >= 4), o sayı burada YANLIŞ olur. Delik alanları
+            # sıfırlanır, BF tanımsızdır.
+            tip = dict(tip)
+            tip['n_radial_holes'] = 0
+            tip['radial_hole_d_mm'] = 0.0
+            tip['bf'] = 0.0
+        gap = tip['annulus_gap_mm'] / 1000.0
+        if secim == 'none':
+            tmr = None
+            spray_half_angle = None
+        else:
+            tmr = f_rad / max(1.0 - f_rad, 1e-9)
+            spray_half_angle = pintle_spray_angle(tmr)
+
+        pintle_geometry = dict(tip)
+        pintle_geometry['secondary_holes'] = secim
+        pintle_geometry['radial_flow_fraction'] = f_rad
+        pintle_geometry['single_fluid'] = True
+        pintle_geometry['spray_half_angle_deg'] = spray_half_angle
+        pintle_geometry['tmr'] = None if tmr is None else float(tmr)
+
+        if secim == 'none':
+            pintle_geometry['tmr_basis'] = (
+                'NOT_APPLICABLE: no secondary holes, so there is no radial jet '
+                'and the radial-to-annular momentum ratio is undefined. The '
+                'injector degenerates to a plain annular element; the spray '
+                'cone is set by the annular sheet, not by a pintle jet.')
+            extra_warnings.append(
+                "Secondary holes set to 'none': the pintle tip has no radial "
+                "jets, so this is an annular injector, not a pintle. TMR and "
+                "the pintle spray-cone correlation do not apply and are not "
+                "reported.")
+        elif secim == 'tangential':
+            pintle_geometry['tangential_momentum_modelled'] = False
+            pintle_geometry['tangential_basis'] = (
+                'NOT_MODELLED: the holes are drilled tangentially, so part of '
+                'the jet momentum goes into swirl. Hole count, hole diameter '
+                'and total area are the same as the radial case (same area, '
+                'same pressure drop), but the swirl component and the wider '
+                'spray cone it produces are NOT modelled. The reported spray '
+                'half-angle is the RADIAL-injection value and is therefore a '
+                'lower bound.')
+            extra_warnings.append(
+                "Secondary holes set to 'tangential': HRMA sizes the holes "
+                "(count, diameter, area) but does not model the tangential "
+                "momentum component or the swirl it induces. The reported "
+                "spray half-angle is the radial-injection value, i.e. a lower "
+                "bound for the real cone.")
+        pintle_geometry['radial_hole_area_mm2'] = float(a_rad * 1e6)
+        pintle_geometry['annulus_area_mm2'] = float(a_ann * 1e6)
+
+        # --- İKİ BLOĞUN ÇELİŞMESİNİ ÖNLEYEN KÜNYE (B3 devamı, ana model) ---
+        # Aynı yanıtta iki pintle geometrisi yayımlanıyor: bu blok (ekran) ve
+        # ``injector_design_detail`` (motorun devre çözümü). İkisi AYNI
+        # ``pintle_tip_geometry`` fonksiyonunu çağırıyor ama FARKLI pintle
+        # çapıyla besleniyor: burada kullanıcının form değeri, orada akıştan
+        # kendinden tutarlı çözülen değer. ÖLÇÜLDÜ (1 kN, Pc 20 bar, HTPB/N2O):
+        # 25,0 mm -> 182 x 0,250 mm delik ; 5,74 mm -> 17 x 0,623 mm.
+        # Sayılar farklı olabilir — yanlış olan, hangisinin ne olduğunun
+        # yazmamasıydı. Künye artık ikisini de taşır, böylece kullanıcı iki
+        # bloğu karşılaştırabilir ve farkın SEBEBİNİ görür.
+        pintle_geometry['d_pintle_source'] = 'user input (pintle_diameter)'
+        akis_capi = pintle_tip_geometry(a_rad, a_ann, d_pintle_m=None,
+                                        bf_target=PINTLE_BF_TARGET_DEFAULT)
+        pintle_geometry['flow_sized_d_pintle_mm'] = akis_capi['d_pintle_mm']
+        pintle_geometry['flow_sized_n_radial_holes'] = akis_capi['n_radial_holes']
+        pintle_geometry['flow_sized_radial_hole_d_mm'] = akis_capi['radial_hole_d_mm']
+        pintle_geometry['flow_sizing_basis'] = (
+            'annulus gap/diameter rule t = %.3f * D_p (Dressler & Bauer, '
+            'AIAA 2000-3871); reported for comparison only, the geometry '
+            'above uses the supplied pintle diameter.'
+            % PINTLE_ANNULUS_T_OVER_DP)
+
+        # Radyal delik çapı imalat bandının ALTINA düşerse SESSİZ KALMA.
+        # Modül pintle özellikleri için 0,3 mm alt sınırını zaten beyan ediyor
+        # (PINTLE_GAP_MIN_M); aynı gerekçe delikler için de geçerlidir.
+        if tip['radial_hole_d_mm'] < PINTLE_GAP_MIN_M * 1e3:
+            extra_warnings.append(
+                f"Pintle radial holes come out at "
+                f"{tip['radial_hole_d_mm']:.3f} mm across "
+                f"{tip['n_radial_holes']} holes, below the "
+                f"{PINTLE_GAP_MIN_M * 1e3:.2f} mm feature limit this module "
+                f"declares for pintle geometry: the tip is not manufacturable "
+                f"as drawn. The supplied pintle diameter "
+                f"({D_pintle * 1e3:.1f} mm) is the driver; the flow-sized "
+                f"diameter for this mass flow is "
+                f"{akis_capi['d_pintle_mm']:.2f} mm "
+                f"({akis_capi['n_radial_holes']} x "
+                f"{akis_capi['radial_hole_d_mm']:.3f} mm).")
+
+        if not (PINTLE_BF_BAND[0] <= tip['bf'] <= PINTLE_BF_BAND[1]):
+            extra_warnings.append(
+                f"Pintle blockage factor BF = {tip['bf']:.3f} is outside the "
+                f"TRW heritage band {PINTLE_BF_BAND[0]:.2f}-"
+                f"{PINTLE_BF_BAND[1]:.2f} (Dressler & Bauer, AIAA 2000-3871).")
+
+        # Kılıf deliği ve gövde duvarı — 'outer_diameter' GÖVDE çapıdır.
+        D_bore = D_pintle + 2.0 * gap
+        body_wall = (D_body - D_bore) / 2.0
+        if body_wall <= 0:
+            extra_warnings.append(
+                f"Injector body outer diameter ({D_body * 1e3:.1f} mm) does "
+                f"not enclose the annulus bore ({D_bore * 1e3:.2f} mm); the "
+                f"housing wall would be negative. Increase the outer diameter.")
+
+        # Teslim edilebilir debi — toplam alan hedeften saparsa açıkça raporla
+        A_inj = a_rad + a_ann
+        mdot_delivered = self.C_d * A_inj * np.sqrt(2 * self.rho_ox * delta_P_Pa)
         if abs(mdot_delivered - self.mdot_ox) > 0.01 * self.mdot_ox:
             extra_warnings.append(
                 f"Delivered flow rate ({mdot_delivered:.3f} kg/s) deviates "
                 f"{(mdot_delivered / self.mdot_ox - 1) * 100:+.1f}% from the "
                 f"target ({self.mdot_ox:.3f} kg/s) because the annulus gap hit "
-                f"its manufacturing limit; resize D_outer/D_pintle.")
+                f"its manufacturing limit; resize D_pintle.")
 
         # Süreklilikten hız (F042): v = ṁ_teslim/(ρ·A) = Cd·√(2ΔP/ρ) —
         # ideal Bernoulli hızı DEĞİL (showerhead ile aynı tanım)
-        v_exit = self._exit_velocity(mdot_delivered, self.rho_ox, A_ann)
+        v_exit = self._exit_velocity(mdot_delivered, self.rho_ox, A_inj)
 
-        # Reynolds number
+        # Reynolds number — karakteristik boyut anülüs boşluğu
         Re = self.rho_ox * v_exit * gap / self.mu_ox
 
         result = {
             'type': 'pintle',
-            'outer_diameter': D_outer * 1000,  # mm
-            'pintle_diameter': D_pintle * 1000,  # mm
-            'gap': gap * 1000,  # mm
-            'annular_area': A_ann * 1e6,  # mm² (eski ad — korunur)
+            'outer_diameter': D_body * 1000,       # mm (GÖVDE dış çapı)
+            'pintle_diameter': D_pintle * 1000,    # mm
+            'gap': gap * 1000,                     # mm (anülüs boşluğu)
+            'annulus_bore_diameter': D_bore * 1000,   # mm (kılıf deliği)
+            'body_wall_thickness': body_wall * 1000,  # mm (gövde et kalınlığı)
+            'annular_area': a_ann * 1e6,           # mm² (eski ad — korunur)
+            # Uç geometrisi TEK sözlükte durur: radyal delik sayısı/çapı, BF,
+            # skip distance, akış payı, TMR ve sprey açısı. Aynı sayıları bir
+            # de düz anahtar olarak kopyalamıyoruz — bu modülün TAMİR ETTİĞİ
+            # kusur zaten "aynı büyüklüğün iki yerde iki gerçeği olması"ydı.
+            # Sözleşme kardeş modülün 'pintle_geometry' sözleşmesiyle aynıdır
+            # (injector_schematics.js ve injector_panel.js onu okur).
+            'pintle_geometry': pintle_geometry,
             'delivered_mdot': mdot_delivered,  # kg/s (F016 şeffaflık alanı)
             'exit_velocity': v_exit,
             'reynolds_number': Re,
@@ -488,7 +675,7 @@ class InjectorDesign:
         }
         # L/D anüler geçit için tanımsız (plaka kalınlığı modeli yok) → None;
         # Weber karakteristik boyutu = anülüs boşluğu (sıvı tabaka kalınlığı)
-        result.update(self._common_outputs(A_ann, v_exit, gap, None))
+        result.update(self._common_outputs(A_inj, v_exit, gap, None))
         return result
 
     def _calculate_swirl(self):

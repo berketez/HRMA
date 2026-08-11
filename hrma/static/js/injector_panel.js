@@ -27,6 +27,10 @@
 
     let cfg = {};
     let lastDesign = null;          // dil değişiminde yeniden çizmek için
+    // lastDesign HANGİ tip için hesaplandı? Kullanıcı tipi değiştirip
+    // yeniden koşmadıysa eski geometriyi yeni tipin çizimine BASMAK
+    // yanlış bilgi olurdu (pintle sayılarıyla swirl çizmek gibi).
+    let lastDesignType = null;
 
     // i18n köprüsü — i18n.js yoksa İngilizce yedek metin döner
     function T(key, fallback) {
@@ -99,6 +103,20 @@
         inj_tmr: ['inj.helpTmr',
             'Pintle total momentum ratio target. TMR = 1 gives a 60 deg '
             + 'spray half angle (Cheng 2017); usual band 0.5-2.'],
+        // HİBRİT PİNTLE'IN GERÇEK KOLU (2026-08-09 ölçümü).
+        // Kullanıcıya 'Pintle TMR target' gösteriliyordu ama hibritte TMR
+        // BİR ÇIKTIDIR: aynı akışkan + aynı dP olduğu için hızlar eşittir ve
+        // TMR = f/(1-f) bağıntısıyla YALNIZ radyal paydan doğar
+        // (hrma/engines/injector_design.py:1660). Çözücünün okuduğu alan
+        // `pintle.radial_fraction` idi ve arayüzde HİÇ açılmamıştı, 0,5'te
+        // gömülü kalıyordu. Dolayısıyla TMR kutusunu çevirmek sonucu
+        // değiştirmiyordu — atıl bir düğmeydi.
+        inj_radial_fraction: ['inj.helpRadialFraction',
+            'Share of the oxidizer flow sent through the radial tip holes '
+            + '(the rest goes through the annulus). This is the real control '
+            + 'for a single-fluid hybrid pintle: TMR = f/(1-f) follows from '
+            + 'it, and the spray cone angle follows from TMR. Usual band '
+            + '0.3-0.7.'],
         inj_bf: ['inj.helpBf',
             'Pintle blockage factor: fraction of the pintle circumference '
             + 'occupied by radial holes. TRW heritage band 0.3-0.74.'],
@@ -173,7 +191,14 @@
                     </label>
                 </div>
                 ${fieldHtml('inj_tox', 'inj.fTox', 'N2O tank temperature (K)', 293, 1)}` : ''}
-                ${fieldHtml('inj_tmr', 'inj.fTmr', 'Pintle TMR target', 1.0, 0.05, 'id="inj_tmr_group"')}
+                ${isHybrid
+                    // Hibritte kullanıcının çevirebileceği GERÇEK kol radyal
+                    // paydır; TMR onun çıktısıdır (yukarıdaki nota bakın).
+                    ? fieldHtml('inj_radial_fraction', 'inj.fRadialFraction',
+                                'Radial flow fraction (0-1)', 0.5, 0.05,
+                                'id="inj_radial_fraction_group"')
+                    : fieldHtml('inj_tmr', 'inj.fTmr', 'Pintle TMR target', 1.0, 0.05,
+                                'id="inj_tmr_group"')}
                 ${fieldHtml('inj_bf', 'inj.fBf', 'Pintle BF target', 0.58, 0.02, 'id="inj_bf_group"')}
                 ${fieldHtml('inj_theta', 'inj.fTheta', 'Swirl cone half angle target (deg)', 45, 1,
                             'id="inj_theta_group"')}
@@ -183,6 +208,8 @@
                 </div>
             </div>
             <div id="inj_dp_note" style="font-size:0.78rem; color:var(--hd-ink-dim);
+                 margin:-4px 0 8px;"></div>
+            <div id="inj_tmr_note" style="font-size:0.78rem; color:var(--hd-orange, #ff8c33);
                  margin:-4px 0 8px;"></div>
             <div id="inj_schematic" style="margin:10px 0; padding:8px;
                  border:1px solid var(--hd-line, rgba(0,229,255,0.14));
@@ -450,8 +477,19 @@
         if (cfg._tc != null) spec.T_c_K = cfg._tc;
         if (cfg._mw != null) spec.mw_gas = cfg._mw;
         if (type === 'pintle') {
-            spec.pintle = { tmr_target: num('inj_tmr', 1.0),
-                            bf_target: num('inj_bf', 0.58) };
+            spec.pintle = { bf_target: num('inj_bf', 0.58) };
+            if (isHybrid) {
+                // Tek akışkanlı hibrit pintle: çözücünün GERÇEKTEN okuduğu
+                // alan bu (injector_design.py:1637 `pin.get('radial_fraction')`).
+                // Daha önce hiç gönderilmiyordu, çözücü 0,5 sabitinde kalıyordu.
+                spec.pintle.radial_fraction = num('inj_radial_fraction', 0.5);
+            } else {
+                // Sıvı yakıt-merkezli pintle: TMR debilerden ve hızlardan
+                // hesaplanır; tmr_target YALNIZ karşılaştırma hedefidir
+                // (momentum.target). Geometriyi değiştirmez — bu durum
+                // kullanıcıya aşağıda açıkça bildirilir.
+                spec.pintle.tmr_target = num('inj_tmr', 1.0);
+            }
         }
         if (type === 'swirl' || type === 'coax_swirl') {
             spec.swirl = { theta_target_deg: num('inj_theta', 45) };
@@ -464,6 +502,7 @@
         const badges = document.getElementById('inj_badges');
         const results = document.getElementById('inj_results');
         const btn = document.getElementById('inj_run');
+        const typeEl = document.getElementById('inj_type');
         btn.disabled = true;
         badges.innerHTML = '';
         results.style.display = 'none';
@@ -481,9 +520,15 @@
             const dz = data.design || {};
             if (dz.status === 'error') throw new Error(dz.error || 'design error');
             lastDesign = dz;
+            lastDesignType = typeEl ? typeEl.value : null;
             badges.innerHTML = badgesHtml(dz);
             results.innerHTML = resultsHtml(dz);
             results.style.display = 'block';
+            // Hesap bitti: çizim ARTIK bu hesabın geometrisini gösterir
+            // (delik sayısı, delik çapı, D_p, sprey açısı...).
+            if (lastDesignType) {
+                renderSchematic(lastDesignType, schematicGeometry(dz));
+            }
             status.textContent = '';
         } catch (err) {
             status.textContent = TF('common.errorPrefix', { message: err.message },
@@ -493,11 +538,70 @@
         }
     }
 
-    function renderSchematic(type) {
+    // ------------------------------------------------------------------
+    // ÇİZİM ARTIK HESABI GÖRÜYOR (2026-08-09)
+    // ------------------------------------------------------------------
+    // Şema çizimi ile panelin hesabı arasında hiç veri yolu yoktu: panel
+    // 17 radyal delik hesaplayıp tabloya bastığında bile çizimde SABİT
+    // 2 ok kalıyordu. Bu işlev /api/injector-design yanıtını çizimin
+    // anladığı sözlüğe indirger. Bir alan yanıtta yoksa buraya da
+    // KONULMAZ; çizim o künyeyi hiç basmaz (uydurma değer yok).
+    function schematicGeometry(dz) {
+        if (!dz) return null;
+        const g = {};
+        const put = (key, value) => {
+            if (typeof value === 'number' && isFinite(value)) g[key] = value;
+        };
+        const p = dz.pintle_geometry;
+        if (p) {
+            put('n_radial_holes', p.n_radial_holes);
+            put('radial_hole_d_mm', p.radial_hole_d_mm);
+            put('d_pintle_mm', p.d_pintle_mm);
+            put('annulus_gap_mm', p.annulus_gap_mm);
+            put('skip_distance_mm', p.skip_distance_mm);
+            put('bf', p.bf);
+            put('radial_flow_fraction', p.radial_flow_fraction);
+            // single_fluid YALNIZ hibrit ox-merkezli pintle'da gelir; sıvı
+            // yakıt-merkezli düzende hiç yoktur (iki akışkan).
+            if (p.single_fluid) g.single_fluid = true;
+        }
+        const s = dz.swirl_geometry;
+        if (s) {
+            put('tangential_inlets', s.tangential_inlets);
+            put('inlet_d_mm', s.inlet_d_mm);
+            put('film_thickness_mm', s.film_thickness_mm);
+            put('K', s.K);
+        }
+        const ox = dz.ox_circuit;
+        if (ox) {
+            put('n_orifices', ox.n_orifices);
+            put('orifice_d_mm', ox.orifice_d_mm);
+        }
+        const pat = dz.pattern || {};
+        put('n_elements', pat.n_elements);
+        if (pat.impingement) put('half_angle_deg', pat.impingement.half_angle_deg);
+        if (dz.atomization) {
+            put('spray_half_angle_deg', dz.atomization.spray_cone_half_angle_deg);
+        }
+        // Tek akışkan bilgisi coax/showerhead için de anlamlı: hibritte
+        // yakıt devresi YOKTUR.
+        if (!dz.fuel_circuit) g.single_fluid = true;
+        return g;
+    }
+
+    function renderSchematic(type, geom) {
         const host = document.getElementById('inj_schematic');
         if (!host) return;
         if (window.InjectorSchematics) {
-            window.InjectorSchematics.render(type, host);
+            // geom verilmezse son tasarımdan türetilir; o da yoksa çizim
+            // sayısal künyesiz genel hâliyle basılır.
+            const same = window.InjectorSchematics.resolve
+                ? (window.InjectorSchematics.resolve(lastDesignType)
+                   === window.InjectorSchematics.resolve(type))
+                : (lastDesignType === type);
+            const g = (geom !== undefined) ? geom
+                : (lastDesignType && same ? schematicGeometry(lastDesign) : null);
+            window.InjectorSchematics.render(type, host, g);
         } else {
             host.style.display = 'none';
         }
@@ -510,8 +614,28 @@
             if (el) el.style.display = on ? '' : 'none';
         };
         show('inj_tmr_group', type === 'pintle');
+        show('inj_radial_fraction_group', type === 'pintle');
         show('inj_bf_group', type === 'pintle');
         show('inj_theta_group', type === 'swirl' || type === 'coax_swirl');
+
+        // TMR HEDEFİ SALT KARŞILAŞTIRMADIR (sıvı pintle).
+        // ÖLÇÜLDÜ (2026-08-09, /api/injector-design): tmr_target 0,5 ->
+        // achieved 0,4747; tmr_target 2,0 -> achieved 0,4747. Yani alanın
+        // sonuca hiçbir etkisi yok, yalnız rozetteki "TARGET" sayısını
+        // değiştiriyor. Sessizce bırakmak kullanıcıyı bu kolu çevirdiğinde
+        // motorun değiştiğine inandırıyordu.
+        const tmrNote = document.getElementById('inj_tmr_note');
+        if (tmrNote) {
+            tmrNote.textContent = (type === 'pintle'
+                    && document.getElementById('inj_tmr'))
+                ? T('inj.tmrEchoNote',
+                    'This target does not change the geometry: for a '
+                    + 'fuel-centred pintle the achieved TMR follows from the '
+                    + 'mass flows and injection velocities. The value you '
+                    + 'enter is only the band the achieved TMR is compared '
+                    + 'against.')
+                : '';
+        }
         const tox = document.getElementById('inj_tox');
         const n2o = document.getElementById('inj_n2o');
         if (tox && n2o) tox.parentElement.style.display = n2o.checked ? '' : 'none';
@@ -583,5 +707,10 @@
         init, run, renderSchematic,
         // Test amaçlı saf render (dry-run): B.2 şemalı design → HTML
         _renderHtml: function (dz) { return badgesHtml(dz) + resultsHtml(dz); },
+        // Test amaçlı saf dönüşüm: /api/injector-design yanıtı → çizim
+        // geometrisi (panel ile şema arasındaki veri yolu).
+        _schematicGeometry: schematicGeometry,
+        // Test amaçlı saf yük kurucu (DOM gerektirir; tarayıcı testinde).
+        _buildSpec: buildSpec,
     };
 })();

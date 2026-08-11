@@ -32,6 +32,20 @@ def _w(code: str, severity: str = "warning", **params) -> Dict:
     return {"code": code, "params": params, "severity": severity}
 
 
+def _hrma_version():
+    """Paket sürümü — bağlanan analiz bloklarının künyesine girer.
+
+    Bağlama beyanı "hangi modül, hangi girdiler, hangi sürümde" sorusunu
+    cevaplamak zorundadır; sürüm burada TEK yerden okunur (hrma/__init__.py).
+    Paket meta verisi okunamazsa sayı UYDURULMAZ, 'unknown' beyan edilir.
+    """
+    try:
+        from hrma import __version__ as _v
+        return str(_v)
+    except Exception:  # pragma: no cover - paket meta verisi okunamazsa
+        return 'unknown'
+
+
 # ---------------------------------------------------------------------------
 # Sabit shapely geometrilerinin önbelleği (v2.5.5 performans, davranış AYNI).
 #
@@ -561,6 +575,120 @@ BURN_RATE_NUMERIC_CEILING_MPS = 0.1
 # tek boyutlu CF bağıntısı geçerliliğini yitirir.
 # Kaynak: Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 3 ve 5.
 SUMMERFIELD_SEPARATION_RATIO = 0.4
+
+# ---------------------------------------------------------------------------
+# Boğaz boyutlandırma taraması (v2.6.27, A1-1)
+# ---------------------------------------------------------------------------
+# Boğaz alanı ARTIK t=0 yanma alanına göre açılmaz; yanma boyunca ULAŞILAN
+# en büyük gereksinime göre açılır (bkz. _design_throat_area). Tarama
+# örneklem sayısı, web aralığını grain tiplerinin tepe genişliğine göre
+# ayırt edecek kadar sık, geometri taramasının maliyetini de sınırda tutacak
+# şekilde seçildi. Tarama grain geometrisiyle anahtarlanıp örnek içinde
+# memoize edildiği için tek bir performans koşusunda (13 _design_throat_area
+# çağrısı) bir kez ödenir.
+#
+# YAKINSAMA ÖLÇÜMÜ (D_kamara=100 mm, D_çekirdek=30 mm, L=500 mm, APCP,
+# 40 bar; boyutlandırılan boğaz alanının N=800 örnekli değere göre sapması):
+#   N =  60  ->  bates %0,002  star %0,022  finocyl %0,020  wagon %0,068
+#   N = 100  ->  bates %0,001  star %0,014  finocyl %0,023  wagon %0,038
+#   N = 200  ->  bates %0,000  star %0,007  finocyl %0,000  wagon %0,016
+# Yani yerel keskinleştirmeyle birlikte N = 100 bile basınç tavanı
+# toleransının (%2) iki mertebe altında kalıyor; N = 100 seçildi çünkü
+# shapely'li tiplerde tarama maliyeti örnek sayısıyla doğrusaldır (ölçüldü:
+# 200 örnek star 44 ms, wagon_wheel 82 ms, slotted 83 ms, finocyl 94 ms).
+SOLID_KN_SCAN_SAMPLES = 100
+
+# Kaba taramanın en büyük örneğinin çevresinde yapılan yerel keskinleştirme:
+# tepe iki komşu örnek arasında kalırsa kaba adım tepeyi birkaç yüzde
+# ıskalayabilir. Her tur aralığı örnek sayısı kadar böler, üç tur sonunda
+# web çözünürlüğü kaba adımın ~1/1700'üne iner (yukarıdaki yakınsama
+# ölçümünün kaba adımdan neredeyse bağımsız çıkmasının sebebi budur).
+SOLID_KN_REFINE_SAMPLES = 12
+SOLID_KN_REFINE_ROUNDS = 3
+
+# Tasarım basıncı aşım toleransı [bağıl]. Boğaz maksimum gereksinime göre
+# açıldığında denge basıncı tasarım değerini SAYISAL artıklar dışında
+# aşamaz; bu eşik aşılırsa kullanıcı uyarılır (warn.solid.pressure_exceeds_
+# design). Eşik, basınç sabit-nokta çözücüsünün varsayılan toleransından
+# (1e-6) ve tarama çözünürlüğünden kaynaklanan artığı kapsayacak kadar
+# gevşek, gerçek bir tasarım aşımını (ölçülen %32-116) yakalayacak kadar
+# dardır.
+SOLID_DESIGN_PRESSURE_TOLERANCE = 0.02
+
+# ---------------------------------------------------------------------------
+# İtki eğrisi BİÇİM sınıflandırması (v2.6.27, B2-1)
+# ---------------------------------------------------------------------------
+# Eski sınıflandırma yalnız İLK 10 ve SON 10 örneğin ortalamasını
+# karşılaştırıyordu; aradaki tepe hesaba HİÇ girmiyordu. ÖLÇÜLDÜ (APCP,
+# D_kamara = 100 mm, D_çekirdek = 30 mm, L = 500 mm, 40 bar; eski kod):
+#
+#   star         'Regressive'  ama itki 3252 N -> 5812 N (x1,79) çıkıp
+#                              sonra düşüyor (tepe yanmanın %70'inde)
+#   wagon_wheel  'Regressive'  ama 4161 N -> 10458 N (x2,51), tepe %19'da
+#   finocyl      'Progressive' ama 2147 N -> 4423 N -> 2690 N (tepe %41'de)
+#
+# Yani üç grain tipinde de kullanıcıya bildirilen biçim, eğrinin gerçek
+# biçimi DEĞİLDİ; tepeyi gören bir sınıf hiç yoktu.
+#
+# YENİ ÖLÇÜT (Sutton & Biblarz, Rocket Propulsion Elements 9. baskı, Böl. 12
+# taksonomisi: progressive / neutral / regressive; bileşik biçimler aynı
+# bölümde "progressive-regressive" olarak anılır):
+#
+#   Pencere : itkinin tepe değerinin TAIL_FRACTION katının üstünde kaldığı
+#             ilk ve son örnek arası. Ateşleme yükselişi ve tükeniş kuyruğu
+#             biçim kararına karışmasın diye kesilir.
+#   Ortalama: ZAMAN AĞIRLIKLI (I_t/t_b) — örnek yerleşimine ve çözücü
+#             adımına duyarsız (aynı gerekçe: calculate_performance'ın
+#             avg_thrust tanımı).
+#   Nötr    : tepe ve dip ortalamadan NEUTRAL_BAND'dan fazla ayrılmıyor
+#             (Sutton'ın "yaklaşık sabit" tanımının sayısallaştırılması).
+#   Tepeli  : tepe, pencere BAŞLANGIÇ platosunun NEUTRAL_BAND üstündeyse ve
+#             tepe pencerenin sonunda değilse -> 'Progressive-Regressive'.
+#   Aksi    : uç platolarının karşılaştırması (progressive / regressive).
+#
+# Eşikler: NEUTRAL_BAND, "nötr grain" için yaygın olarak kullanılan
+# ortalamadan ±%10 bandıdır. TAIL_FRACTION, tepe itkinin %5'idir — katı
+# motor sertifikasyonunda yanma süresi uçlarının okunduğu eşiğin aynısı
+# (NFPA 1125 sınıfı statik ateşleme veri indirgemesi). PEAK_INTERIOR_MAX,
+# tepenin "içeride" sayılması için pencerenin en fazla bu kesrinde olması
+# gerektiğini söyler; daha geç bir tepe hâlâ TIRMANIYOR demektir ve o eğri
+# progresiftir.
+SOLID_THRUST_SHAPE_TAIL_FRACTION = 0.05
+SOLID_THRUST_SHAPE_NEUTRAL_BAND = 0.10
+SOLID_THRUST_SHAPE_EDGE_FRACTION = 0.10
+SOLID_THRUST_SHAPE_PEAK_INTERIOR_MAX = 0.85
+
+#: Sınıf adları — TEK tanım noktası (arayüz bu dizeleri metin olarak basar).
+SOLID_THRUST_SHAPE_PROGRESSIVE = 'Progressive'
+SOLID_THRUST_SHAPE_REGRESSIVE = 'Regressive'
+SOLID_THRUST_SHAPE_NEUTRAL = 'Neutral'
+SOLID_THRUST_SHAPE_PROGRESSIVE_REGRESSIVE = 'Progressive-Regressive'
+#: Örnek sayısı biçim kararına yetmiyorsa sınıf UYDURULMAZ.
+SOLID_THRUST_SHAPE_UNDETERMINED = 'Undetermined'
+
+# ---------------------------------------------------------------------------
+# Yayımlanan itki eğrisinin örnek tavanı (v2.6.27, B2-3)
+# ---------------------------------------------------------------------------
+# Çözücü adımı dt = 0.01 s SABİTTİR, yani yayımlanan dizi saniyede 100 nokta
+# taşır ve yanma süresiyle sınırsız büyür. ÖLÇÜLDÜ (APCP, D_kamara = 100 mm,
+# D_çekirdek = 30 mm, 40 bar; JSON gövdesi):
+#
+#   bates      L = 500 mm   t_b =  4,86 s ->   487 nokta,   47,2 KB (yanıtın %37)
+#   bates      L = 1200 mm  t_b =  6,23 s ->   624 nokta,   59,9 KB (%43)
+#   end_burner L = 500 mm   t_b = 61,56 s ->  6157 nokta,  519,4 KB (%87)
+#
+# ÇÖZÜCÜ ADIMINA DOKUNULMAZ: dt'nin yakınsama gerekçesi kodda yazılı değil ve
+# adımı büyütmenin çözümü bozup bozmayacağı SINANMADI. Seyreltme yalnız
+# YAYIMLANAN diziye uygulanır; bütün türetilmiş büyüklükler (impuls, ortalama
+# itki, kararlılık, biçim, uyarılar) tam çözünürlüklü diziden hesaplanmaya
+# devam eder. Aynı desen depoda üç yerde kurulu: WALL_HISTORY_MAX_POINTS,
+# port_history, TPS_WALL_HISTORY_MAX_POINTS.
+#
+# SABİT ADIMLI seyreltme TEPEYİ IŞKALAYABİLİR. Bu yüzden seyreltme kova
+# uçlarını (her kovanın en büyük ve en küçük itkisi) korur ve ayrıca kritik
+# örnekleri (tepe itki, tepe basınç, ayrılmanın ilk anı, boğulmanın kesildiği
+# ilk an, tükeniş) ZORUNLU olarak taşır — bkz. _decimate_curve_indices.
+SOLID_THRUST_CURVE_MAX_POINTS = 400
 
 # ---------------------------------------------------------------------------
 # Boğaz erozyonu (F071, 2026-07-25)
@@ -2030,50 +2158,150 @@ class SolidRocketEngine:
         (bkz. _estimate_expansion_ratio) basınç-itki terimi SIFIRLANIR ve
         sonuç eski formülle BİREBİR aynı kalır — tasarım noktası
         boyutlandırması bozulmaz, yalnız tasarım-dışı kuyruk düzelir.
+
+        Akış ayrılması, kırpma yerine kesilmiş-lüle modeliyle çözülür; tam
+        gerekçe ``_thrust_coefficient_state`` docstring'indedir.
         """
-        gamma = self.gamma
-        p_amb = getattr(self, 'ambient_pressure_bar', SEA_LEVEL_PRESSURE_BAR)
-        if P_c_bar <= 0:
-            return 0.0
+        return self._thrust_coefficient_state(P_c_bar)['cf']
 
-        epsilon = self._estimate_expansion_ratio()
-        pe_ratio = self._exit_pressure_ratio(epsilon)
+    def _thrust_coefficient_state(self, P_c_bar):
+        """CF(P_c) ve akış AYRILMASI durumu — TEK hesap, tek tanım noktası.
 
-        # Momentum terimi (Sutton Denk. 3-30, basınç-itki terimi hariç)
+        AYRILMA ARTIK SIFIRA KIRPILMIYOR (v2.6.27, A1-2)
+        ------------------------------------------------
+        Eski kod, aşırı genişlemede negatife giden basınç-itki terimini
+        ``CF = max(CF, 0)`` ile kırpıyordu. Bu, çalışmaya DEVAM EDEN bir
+        motoru eğride 0 N gösteriyordu: kamara basıncı ve kütle debisi
+        pozitifken itki sıfır. ÖLÇÜLDÜ (APCP, D_kamara=100 mm,
+        D_çekirdek=30 mm, L=500 mm, 40 bar, deniz seviyesi; eski davranış):
+
+            slotted      örneklerin %31,0'inde F = 0 iken Pc > 0
+            wagon_wheel  %21,0        (ilk sıfır t = 1,31 s, Pc = 3,26 bar)
+            star         %17,0        (ilk sıfır t = 1,48 s, Pc = 3,22 bar)
+
+        Toplam impuls kaybı küçüktü (~%2) ama eğri kullanıcıya YALAN
+        söylüyordu. Aynı fiziği üç motor üç farklı şekilde ele alıyordu:
+        sıvı modül ayrılmayı UYARIYOR, katı sessizce sıfıra kırpıyor, hibrit
+        hiç kırpmıyordu.
+
+        KULLANILAN MODEL: KESİLMİŞ (TRUNCATED) LÜLE
+        -------------------------------------------
+        Aşırı genişlemiş sabit geometrili lülede akış, cidar basıncı ortam
+        basıncının belirli bir kesrinin altına düştüğü istasyonda ayrılır;
+        ayrılma noktasının ARDINDAKİ koni artık akışı taşımaz ve cidarı
+        yaklaşık ortam basıncını görür. Dolayısıyla motor, ayrılma alan
+        oranında KESİLMİŞ bir lüle gibi davranır:
+
+            P_ayr/P_c = k·P_a/P_c        (k = SUMMERFIELD_SEPARATION_RATIO)
+            ε_ayr     = ε(P_ayr/P_c)     (izentropik alan-oranı bağıntısı)
+            CF        = CF_momentum(P_ayr/P_c) + ε_ayr·(P_ayr − P_a)/P_c
+
+        Bu, ekli akış bağıntısının ayrılma istasyonuna uygulanmış hâlidir;
+        ayrılma sonrası koninin negatif basınç-itki katkısı toplanmaz. Sonuç
+        fiziksel bir ALT SINIR üretir: ayrılma boğaza doğru ilerledikçe
+        ε_ayr → 1 ve CF → sonik lülenin katsayısına (deniz seviyesinde
+        Pc = 5 bar, γ = 1,2 için CF ≈ 1,04) iner, yani itki F ≈ mdot·c*
+        mertebesinde kalır — sıfıra çakılmaz.
+        Kaynak: Sutton & Biblarz, Rocket Propulsion Elements 9. baskı,
+        Böl. 3 (Denk. 3-30/3-31) ve Böl. 5 (ayrılma ve kesilmiş lüle);
+        Summerfield ayrılma ölçütü için aynı bölümler.
+
+        BOĞULMA SINIRI: bütün bağıntılar boğazın sonik olduğunu varsayar
+        (çözücünün mdot = Pc·A_t/c* modeli de öyle). Pc, P_a/((γ+1)/2)^(γ/(γ−1))
+        değerinin altına düşerse lüle boğulmaz; orada sayı UYDURULMAZ,
+        durum 'not_choked' olarak beyan edilir ve CF sıfır döner.
+
+        Dönüş alanları: cf, cf_ideal, cf_attached_ideal, separated,
+        separation_area_ratio, pe_bar, pe_over_pa, choked, status, criterion.
+        """
+        gamma = float(self.gamma)
+        p_amb = float(getattr(self, 'ambient_pressure_bar',
+                              SEA_LEVEL_PRESSURE_BAR))
+        durum = {
+            'cf': 0.0, 'cf_ideal': 0.0, 'cf_attached_ideal': 0.0,
+            'separated': False, 'separation_area_ratio': None,
+            'pe_bar': 0.0, 'pe_over_pa': 0.0, 'choked': False,
+            'status': 'no_flow',
+            'criterion': (f'Summerfield: separation expected below '
+                          f'Pe/Pa = {SUMMERFIELD_SEPARATION_RATIO:g}'),
+        }
+        if P_c_bar <= 0 or p_amb <= 0:
+            return durum
+
+        epsilon = float(self._estimate_expansion_ratio())
+        pe_ratio = float(self._exit_pressure_ratio(epsilon))
+        pe_bar = pe_ratio * P_c_bar
+        durum['pe_bar'] = float(pe_bar)
+        durum['pe_over_pa'] = float(pe_bar / p_amb)
+
         gamma_term = 2 * gamma ** 2 / (gamma - 1)
         stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
-        expansion_term = max(0.0, 1 - pe_ratio ** ((gamma - 1) / gamma))
-        cf_momentum = np.sqrt(gamma_term * stagnation_term * expansion_term)
 
-        # Basınç-itki terimi: tasarım basıncında sıfır, tasarım-dışında işaretli
-        cf_pressure = epsilon * (pe_ratio - p_amb / P_c_bar)
+        def _cf_momentum(oran):
+            """Sutton Denk. 3-30'un momentum terimi, verilen P_e/P_c için."""
+            genisleme = max(0.0, 1 - oran ** ((gamma - 1) / gamma))
+            return float(np.sqrt(gamma_term * stagnation_term * genisleme))
 
-        CF_ideal = cf_momentum + cf_pressure
-        # Akış AYRILDIKTAN sonra tek boyutlu bağıntı geçerli değildir; ayrılmış
-        # nozul negatif basınç-itki terimini tam olarak toplamaz. Sayısal
-        # güvenlik: CF momentum teriminin altına düşse bile negatife inmez.
-        CF_ideal = max(CF_ideal, 0.0)
-        return float(CF_ideal * self._total_nozzle_efficiency())
+        # Boğulma: P* = Pc·(2/(γ+1))^(γ/(γ−1)) ≥ P_a olmalı.
+        sonik_oran = (2 / (gamma + 1)) ** (gamma / (gamma - 1))
+        durum['choked'] = bool(P_c_bar * sonik_oran >= p_amb)
+
+        # Ekli (tek boyutlu) çözüm — teşhis için her hâlde raporlanır.
+        cf_ekli = _cf_momentum(pe_ratio) + epsilon * (pe_ratio
+                                                      - p_amb / P_c_bar)
+        durum['cf_attached_ideal'] = float(cf_ekli)
+
+        if not durum['choked']:
+            durum['status'] = 'not_choked'
+            return durum
+
+        ayrilma_oran = SUMMERFIELD_SEPARATION_RATIO * p_amb / P_c_bar
+        durum['separated'] = bool(pe_ratio < ayrilma_oran)
+
+        if durum['separated']:
+            # Ayrılma yalnız süpersonik (ıraksak) bölümde olabilir: ayrılma
+            # basınç oranı sonik oranın üstüne çıkamaz.
+            oran_ayr = float(min(ayrilma_oran, sonik_oran))
+            eps_ayr = float(self._expansion_ratio_from_pressure_ratio(oran_ayr))
+            eps_ayr = float(min(max(eps_ayr, 1.0), epsilon))
+            cf_ideal = (_cf_momentum(oran_ayr)
+                        + eps_ayr * (oran_ayr - p_amb / P_c_bar))
+            durum['separation_area_ratio'] = eps_ayr
+            durum['status'] = 'separated'
+        else:
+            cf_ideal = cf_ekli
+            durum['status'] = 'attached'
+
+        # Sayısal taban. Kesilmiş-lüle modeli boğulmuş akışta pozitif CF verir
+        # (ölçüldü: bu deponun bütün grain tiplerinde ve 1-40 bar aralığında
+        # min CF ≈ 1,0); bu satır fiziksel bir kırpma DEĞİL, yalnız sayısal
+        # bir taşma korumasıdır ve devreye girerse SESSİZ kalmaz.
+        if cf_ideal < 0.0:
+            durum['cf_floor_applied'] = True
+            durum['cf_ideal_raw'] = float(cf_ideal)
+            cf_ideal = 0.0
+
+        durum['cf_ideal'] = float(cf_ideal)
+        durum['cf'] = float(cf_ideal * self._total_nozzle_efficiency())
+        return durum
 
     def _flow_separation_state(self, P_c_bar):
         """Summerfield ayrılma ölçütü durumu (rapor + uyarı için).
 
         P_e ≲ 0.4·P_a olduğunda aşırı genişlemiş konik nozulda akış ayrılması
-        beklenir; ayrılma sonrası itki eski (tek boyutlu, ekli akış) CF ile
-        hesaplanamaz. Kaynak: Sutton & Biblarz 9. baskı, Böl. 3 ve 5.
+        beklenir. v2.6.27 (A1-2): ayrılma artık yalnız RAPORLANMAZ, itki
+        katsayısını da kesilmiş-lüle modeliyle DEĞİŞTİRİR; bu yüzden durum
+        ayrı bir yerde yeniden hesaplanmaz, CF'in hesabından okunur (tek
+        tanım noktası). Kaynak: Sutton & Biblarz 9. baskı, Böl. 3 ve 5.
         """
-        p_amb = getattr(self, 'ambient_pressure_bar', SEA_LEVEL_PRESSURE_BAR)
-        if P_c_bar <= 0 or p_amb <= 0:
-            return {'separated': False, 'pe_bar': 0.0, 'pe_over_pa': 0.0}
-        pe_ratio = self._exit_pressure_ratio(self._estimate_expansion_ratio())
-        pe_bar = pe_ratio * P_c_bar
+        durum = self._thrust_coefficient_state(P_c_bar)
         return {
-            'separated': bool(pe_bar
-                              < SUMMERFIELD_SEPARATION_RATIO * p_amb),
-            'pe_bar': float(pe_bar),
-            'pe_over_pa': float(pe_bar / p_amb),
-            'criterion': (f'Summerfield: separation expected below '
-                          f'Pe/Pa = {SUMMERFIELD_SEPARATION_RATIO:g}'),
+            'separated': bool(durum['separated']),
+            'pe_bar': float(durum['pe_bar']),
+            'pe_over_pa': float(durum['pe_over_pa']),
+            'separation_area_ratio': durum['separation_area_ratio'],
+            'choked': bool(durum['choked']),
+            'criterion': durum['criterion'],
         }
 
     def _design_burn_rate(self):
@@ -2460,6 +2688,56 @@ class SolidRocketEngine:
         if curve.get('termination_reason') == 'safety_limit':
             notes.append(_w(
                 'warn.solid.safety_limit_termination', 'critical'))
+
+        # --- Tasarım basıncı aşımı (A1-1, v2.6.27) -------------------------
+        # Boğaz artık maksimum Kn'de boyutlandırıldığı için tepe basınç
+        # tasarım değerini aşamaz; aşarsa bu bir SAPMADIR (sabitlenmiş boğaz,
+        # boyutlandırılamayan geometri ya da tarama çözünürlüğünün yetmediği
+        # bir tepe) ve sessiz kalmaz.
+        basinclar = np.asarray(curve.get('pressure', []), dtype=float)
+        if basinclar.size and self.P_c > 0:
+            tepe = float(np.nanmax(basinclar))
+            if tepe > self.P_c * (1.0 + SOLID_DESIGN_PRESSURE_TOLERANCE):
+                notes.append(_w(
+                    'warn.solid.pressure_exceeds_design', 'warning',
+                    peak_bar=round(tepe, 2),
+                    design_bar=round(float(self.P_c), 2),
+                    exceed_percent=round(
+                        (tepe / float(self.P_c) - 1.0) * 100.0, 1),
+                    tolerance_percent=round(
+                        SOLID_DESIGN_PRESSURE_TOLERANCE * 100.0, 1)))
+
+        # --- Akış ayrılması (A1-2, v2.6.27) --------------------------------
+        # Sıvı modül ayrılmayı uyarıyordu, katı sessizce itkiyi sıfıra
+        # kırpıyordu. Artık ayrılma hem itkiye kesilmiş-lüle modeliyle girer
+        # hem de kullanıcıya bildirilir: ayrılmış rejimde tek boyutlu ekli
+        # akış bağıntısı geçerli değildir ve eğrinin o bölümü bir MODEL
+        # tahminidir.
+        sep = np.asarray(curve.get('separated', []), dtype=bool)
+        if sep.size and bool(sep.any()):
+            pe = np.asarray(curve.get('exit_pressure_bar', []), dtype=float)
+            pe_min = float(np.nanmin(pe[sep])) if pe.size == sep.size else 0.0
+            notes.append(_w(
+                'warn.solid.flow_separation', 'warning',
+                from_t_s=round(float(curve.get('separated_from_t') or 0.0), 3),
+                fraction_percent=round(float(sep.mean()) * 100.0, 1),
+                exit_pressure_min_bar=round(pe_min, 3),
+                ambient_bar=round(float(getattr(
+                    self, 'ambient_pressure_bar', SEA_LEVEL_PRESSURE_BAR)), 3),
+                criterion_ratio=SUMMERFIELD_SEPARATION_RATIO))
+
+        # --- Boğulma sınırının altına düşen kuyruk (A1-2) ------------------
+        # Eğrinin bu bölümünde çözücünün boşalma yasası da CF bağıntısı da
+        # geçerli değildir. Eskiden burası sessizce F = 0 görünüyordu; artık
+        # sıfırın SEBEBİ söyleniyor (uydurma bir itki sayısı üretmek yerine).
+        if float(curve.get('unchoked_fraction', 0.0) or 0.0) > 0.0:
+            notes.append(_w(
+                'warn.solid.nozzle_unchoked', 'warning',
+                from_t_s=round(float(curve.get('unchoked_from_t') or 0.0), 3),
+                fraction_percent=round(
+                    float(curve.get('unchoked_fraction', 0.0)) * 100.0, 1),
+                ambient_bar=round(float(getattr(
+                    self, 'ambient_pressure_bar', SEA_LEVEL_PRESSURE_BAR)), 3)))
 
         notes.extend(self._throat_erosion_warnings(curve))
 
@@ -3382,10 +3660,57 @@ class SolidRocketEngine:
         else:
             c_star_efficiency = 100.0  # veri yok → ideal varsayım (kayıpsız sim)
         
+        # --- İtki profili (B2-1, B2-2) ------------------------------------
+        # Biçim sınıfı ARTIK tepeyi görüyor; ölçüler kararın yanında
+        # yayımlanır ki etiket doğrulanabilsin.
+        shape = self._thrust_shape_report(curve['thrust'], curve['time'])
+        # Kararlılık: değişim katsayısı (CV = std/ortalama). ESKİ KUSUR
+        # (B2-2): alan '100 - CV*100' idi ve alt sınırı YOKTU; CV 1'i aşınca
+        # NEGATİFE geçiyordu. ÖLÇÜLDÜ (APCP, D_kamara = 100 mm,
+        # D_çekirdek = 30 mm, L = 500 mm, 40 bar): slotted grainde
+        # thrust_stability = -1,44 (%), wagon_wheel = 5,45, star = 28,12.
+        # Kullanıcı yüzde birimli bir panelde "-1,4 %" görüyordu.
+        #
+        # KARAR: alanın adı ve birimi KORUNUR (arayüz onu yüzde olarak
+        # basıyor), tanımı [0, 100] aralığına KIRPILIR ve kırpmanın olduğu
+        # SÖYLENİR. Kırpma bilgi kaybetmez, çünkü kırpılmamış büyüklüğün
+        # kendisi ('thrust_variation_coefficient_percent') aynı sözlükte
+        # adıyla yayımlanır: 0 değeri "CV >= 1" demektir ve gerçek genliği
+        # okuyucu oradan görür.
+        thrust_arr = np.asarray(curve['thrust'], dtype=float)
+        thrust_mean = float(np.mean(thrust_arr)) if thrust_arr.size else 0.0
+        if thrust_mean > 0.0:
+            cv_percent = float(np.std(thrust_arr) / thrust_mean * 100.0)
+            stability = float(min(100.0, max(0.0, 100.0 - cv_percent)))
+            stability_clamped = bool(cv_percent > 100.0 or cv_percent < 0.0)
+        else:
+            # Ortalama itki sıfır/negatif: CV tanımsızdır, sayı uydurulmaz.
+            cv_percent = None
+            stability = None
+            stability_clamped = False
+        # Sınıf KARARLAŞTIRILAMADIYSA arayüze İngilizce bir sözcük ('Undetermined')
+        # gönderilmez: alan None döner ve solid.html'in dürüst biçimlendiricisi
+        # (fmtTextField -> 'not classified', gerekçeyi <key>_basis'ten okur)
+        # yerelleştirilmiş metni kendisi kurar. Makine okuyucusu için sınıf
+        # 'thrust_curve_shape.shape' altında adıyla durur.
+        belirlendi = shape['shape'] != SOLID_THRUST_SHAPE_UNDETERMINED
         return {
             'thrust_profile_analysis': {
-                'thrust_curve_type': self._classify_thrust_curve(curve['thrust']),
-                'thrust_stability': 100 - (np.std(curve['thrust']) / np.mean(curve['thrust']) * 100),
+                'thrust_curve_type': shape['shape'] if belirlendi else None,
+                'thrust_curve_type_basis': shape['basis'],
+                'thrust_curve_shape': shape,
+                'thrust_stability': stability,
+                'thrust_variation_coefficient_percent': cv_percent,
+                'thrust_stability_was_clamped': stability_clamped,
+                'thrust_stability_basis': (
+                    'thrust_stability = 100 - CV[%] clamped to [0, 100], '
+                    'where CV is the coefficient of variation (standard '
+                    'deviation / mean) of the full-resolution thrust samples. '
+                    'A reported 0 means CV >= 100%, i.e. the spread is at '
+                    'least as large as the mean - read '
+                    "'thrust_variation_coefficient_percent' for the unclamped "
+                    'magnitude. Null means the mean thrust is not positive, '
+                    'so the ratio is undefined and no number is invented.'),
                 'pressure_oscillations_percent': pressure_oscillations,
                 'combustion_smoothness': 100 - pressure_oscillations
             },
@@ -3491,6 +3816,526 @@ class SolidRocketEngine:
             'nozzle_efficiency_applied': float(self._total_nozzle_efficiency()),
         }
 
+    # =====================================================================
+    # v2.6.27 — DOĞRULANMIŞ ANALİZ MODÜLLERİNİN KATI MOTORA BAĞLANMASI
+    #
+    # Aşağıdaki bloklar hrma/analysis ve hrma/flow altındaki, kendi
+    # doğrulama testleriyle gelen modülleri katı motorun GERÇEK çözüm
+    # durumuna bağlar. Ortak kurallar:
+    #
+    #   1. Modüle giden her girdi çözücünün hesabından gelir. Bir girdi
+    #      yoksa modül ÇAĞRILMAZ ve blok, eksik girdiyi ADIYLA anan bir
+    #      NOT_MODELLED beyanıyla döner — literatür/varsayılan değer
+    #      uydurulup modül "çalışır" gösterilmez.
+    #   2. Her blok kendi künyesini taşır: hangi modül, hangi girdiler,
+    #      hangi sürüm (_basis).
+    #   3. Hiçbiri Isp'ye, itki katsayısına ya da geometriye GERİ
+    #      BESLENMEZ — bloklar teşhis amaçlıdır ve bunu açıkça söyler.
+    #      (Mevcut verim çarpanlarıyla çift sayım yasağı.)
+    # =====================================================================
+
+    def _chamber_gas_residence_time_ms(self):
+        """Ortalama kamara gazı kalış süresi [ms] — ÇÖZÜCÜNÜN kendi bağıntısı.
+
+        Kalış süresi tanım gereği tau = m_gaz / mdot'tir. Çözücü boğulmuş
+        akışı mdot = Pc·A_t/c* ile (calculate_thrust_curve ve
+        _design_throat_area aynı bağıntıyı kullanır), kamara gazını ideal
+        gazla rho_c = Pc/(R·T_c) ile kurar (nozul çıkış durumu ve Bartz ısı
+        akışı da aynı R = R_evrensel/MW_egzoz değerini kullanır). İkisi
+        birleştiğinde Pc sadeleşir:
+
+            tau = rho_c · V_serbest / mdot = V_serbest · c* / (R · T_c · A_t)
+
+        Bu YENİ bir fizik ya da yeni bir sayı değildir: dört çarpanın da
+        kaynağı çözücünün hâlihazırda ürettiği büyüklüklerdir
+        (_case_free_volume, self.c_star, self.T_c + self.mw_exhaust,
+        _design_throat_area). Hermsen (1981) tanecik çapı bağıntısının
+        istediği "ortalama kamara kalış süresi" tam olarak budur
+        (AIAA 96-2779'daki yeniden basımda tau, milisaniye).
+
+        Çarpanlardan biri üretilemiyorsa None döner — varsayılan uydurulmaz.
+        """
+        try:
+            v_free = float(self._case_free_volume())
+            a_t = float(self._design_throat_area()[0])
+            c_star = float(self.c_star)
+            t_c = float(self.T_c)
+            mw = float(getattr(self, 'mw_exhaust', 0.0) or 0.0)
+        except Exception:
+            return None
+        if min(v_free, a_t, c_star, t_c, mw) <= 0.0:
+            return None
+        r_gas = R_UNIVERSAL / mw                      # J/(kg·K)
+        tau_s = v_free * c_star / (r_gas * t_c * a_t)
+        if not np.isfinite(tau_s) or tau_s <= 0.0:
+            return None
+        return float(tau_s * 1000.0)
+
+    def _two_phase_loss_report(self, throat_diameter_m):
+        """İki-fazlı (tanecik gecikmesi) Isp kaybı — hrma.analysis.two_phase_loss.
+
+        KATI MOTORUN KENDİ FİZİĞİ. Alüminyumlu APCP'de yanma ürünlerinin
+        önemli bir kısmı yoğuşmuş faz (sıvı Al2O3) olarak lüleden geçer;
+        tanecikler gazın hem hızına hem sıcaklığına yetişemediği için teslim
+        edilen Isp düşer. Modül bu kaybı yayımlanmış bağıntılarla kestirir ve
+        girdileri yayımlanmış veri penceresinin dışına çıkarsa SAYI ÜRETMEZ.
+
+        GİRDİLERİN TAMAMI ÇÖZÜCÜDEN GELİR
+        ---------------------------------
+          * beta (yoğuşmuş faz kütle kesri): SOLID_CONDENSED_MASS_FRACTION —
+            _isp_loss_breakdown ile AYNI kaynak, aynı aile devralma kuralı
+            (_family_lookup). Yakıt için kayıt yoksa modül çağrılmaz.
+          * Dt: itki eğrisinin boyutlandırdığı GEOMETRİK boğaz çapı (imal
+            edilen çap; boğaz akış katsayısı verildiyse A_etkin/Cd).
+          * Pc: tasarım kamara basıncı (self.P_c) — ateşleyici
+            boyutlandırması ve _design_throat_area ile aynı değer.
+          * tau: _chamber_gas_residence_time_ms (yukarıdaki türetme).
+          * gamma, MW: yakıt kaydından — itki katsayısı ve nozul çıkış
+            durumu çözümünün kullandığı DEĞERLERİN AYNISI.
+
+        ÇİFTE SAYIM YASAĞI (uygulama yeri beyanı)
+        -----------------------------------------
+        Bu blok Isp'ye, c*'a ya da itki katsayısına UYGULANMAZ
+        (``applied_to_isp: False``). Gerekçe ölçülebilir: katı motorda
+        _total_nozzle_efficiency zaten iki ayrı iki-fazlı çarpan taşıyabilir —
+        yakıt kaydının taban nozul verimi ve kullanıcının 'two_phase_loss'
+        girdisinden gelen ``two_phase_efficiency``. Modülün kaybını bunların
+        üstüne uygulamak kaybı ikinci (kullanıcı çarpanı da varsa üçüncü) kez
+        düşürürdü. Blok bu çakışmayı ``overlap_declaration`` alanında adıyla
+        raporlar.
+
+        _isp_loss_breakdown'daki ``two_phase_losses`` ile İLİŞKİ: o alan
+        doğrusal çapa (eta = 1 - k·X_p) dayanır ve tanecik boyutu/motor
+        boyutu düzeltmesi TAŞIMAZ; modül aynı k merkez katsayısını kullanır
+        ama üstüne Stokes oranı boyut çarpanını uygular, bu yüzden iki sayı
+        genel olarak FARKLIDIR ve ikisi de aynı anda raporlanır. Hangisinin
+        neyi ölçtüğü ``relation_to_isp_loss_breakdown`` alanında yazılıdır.
+        """
+        surum = _hrma_version()
+        kunye = ('hrma.analysis.two_phase_loss.TwoPhaseLoss.evaluate '
+                 f'(HRMA {surum})')
+
+        beta, beta_source = _family_lookup(self.propellant_type,
+                                           SOLID_CONDENSED_MASS_FRACTION)
+        eksik = []
+        if beta is None:
+            eksik.append('condensed_mass_fraction')
+        d_t = None
+        try:
+            d_t = float(throat_diameter_m)
+        except (TypeError, ValueError):
+            d_t = None
+        if d_t is None or not np.isfinite(d_t) or d_t <= 0.0:
+            eksik.append('throat_diameter')
+        p_c = float(self.P_c) if np.isfinite(self.P_c) else None
+        if not p_c or p_c <= 0.0:
+            eksik.append('chamber_pressure')
+        tau_ms = self._chamber_gas_residence_time_ms()
+        if tau_ms is None:
+            eksik.append('residence_time_ms')
+
+        if eksik:
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': eksik,
+                'applied_to_isp': False,
+                'basis': (
+                    'The two-phase (particle-lag) Isp loss is NOT evaluated: '
+                    f'the solver does not produce {eksik}. No literature or '
+                    'default value is substituted, so no loss number is '
+                    'reported. ' + kunye),
+            }
+
+        from hrma.analysis.two_phase_loss import two_phase_loss as _tpl
+        try:
+            sonuc = _tpl.evaluate(
+                condensed_mass_fraction=float(beta),
+                throat_diameter=float(d_t),
+                chamber_pressure=float(p_c),
+                residence_time_ms=float(tau_ms),
+                gamma_gas=float(self.gamma),
+                molecular_weight_gas=float(self.mw_exhaust))
+        except Exception as exc:
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': [],
+                'applied_to_isp': False,
+                'basis': ('The two-phase loss module rejected the solver '
+                          f'state: {exc}. No loss number is reported. '
+                          + kunye),
+            }
+
+        devralma = ('' if beta_source == str(self.propellant_type or ''
+                                             ).strip().lower()
+                    else f" (inherited from '{beta_source}' of the same "
+                         "propellant family)")
+        blok = dict(sonuc)
+        modul_basis = blok.pop('_basis', None)
+        blok.update({
+            'status': ('computed' if sonuc.get('valid')
+                       else 'OUT_OF_PUBLISHED_RANGE'),
+            'applied_to_isp': False,
+            'inputs_used': {
+                'condensed_mass_fraction': float(beta),
+                'condensed_mass_fraction_source':
+                    f'SOLID_CONDENSED_MASS_FRACTION[{beta_source}]'
+                    + devralma,
+                'throat_diameter_m': float(d_t),
+                'throat_diameter_source': (
+                    'geometric throat diameter sized by the thrust-curve '
+                    'solver (_design_throat_area, divided by the throat '
+                    'discharge coefficient when one was supplied)'),
+                'chamber_pressure_bar': float(p_c),
+                'chamber_pressure_source': (
+                    'design chamber pressure self.P_c — the same value '
+                    '_design_throat_area and the igniter sizing use'),
+                'residence_time_ms': float(tau_ms),
+                'residence_time_source': (
+                    'tau = V_free*c*/(R*T_c*A_t), derived from the solver '
+                    'quantities only (see _chamber_gas_residence_time_ms)'),
+                'gamma': float(self.gamma),
+                'molecular_weight_g_mol': float(self.mw_exhaust),
+                'gas_property_source': (
+                    'propellant record — the same gamma and exhaust '
+                    'molecular weight the thrust coefficient and the nozzle '
+                    'exit state use'),
+            },
+            'overlap_declaration': (
+                'This loss is NOT applied to Isp, c* or the thrust '
+                'coefficient. The solid solver already carries a nozzle '
+                'efficiency from the propellant record and, when the user '
+                "supplies 'two_phase_loss', a separate two_phase_efficiency "
+                'multiplier (_total_nozzle_efficiency). Applying the module '
+                'loss on top would count the same physics a second time. '
+                'Applied user multiplier at this run: '
+                f'{float(getattr(self, "two_phase_efficiency", 1.0)):.4f}.'),
+            'relation_to_isp_loss_breakdown': (
+                "detailed_analysis.theoretical_vs_actual_isp.two_phase_losses "
+                'is the LINEAR anchor 100*k*X_p with no particle-size or '
+                'motor-size correction; the number here comes from the same '
+                'k anchor multiplied by the Stokes-ratio size factor of the '
+                'module, so the two generally differ. Both are reported and '
+                'neither is applied.'),
+            'module_basis': modul_basis,
+            '_basis': (
+                f'{kunye}; inputs taken from the solver state listed in '
+                'inputs_used. Diagnostic only — not fed back into any '
+                'performance, geometry or CAD quantity.'),
+        })
+        return blok
+
+    def _acoustic_mode_report(self):
+        """Kamara akustik modları — hrma.analysis.acoustic_modes.
+
+        Katı motorun gaz kavitesi rijit cidarlı bir rezonatördür; modül bu
+        kavitenin öz-frekanslarını (boyuna/teğetsel/radyal) verir. Sonuç bir
+        REZONANS ADAYI listesidir: yanmanın bu modları sürükleyip
+        sürüklemeyeceği modellenmez (modülün kendi
+        ``not_modelled.combustion_response`` beyanı).
+
+        EŞDEĞER KAVİTE (beyanlı idealleştirme)
+        --------------------------------------
+        Modül düz silindir ister; katı motorun gerçek kavitesi kademelidir
+        (grain portu + ön/arka kapak hacimleri). Eşdeğer silindir GERÇEK
+        KAVİTE BOYUNU (kasa iç boyu, _case_inner_length) ve GERÇEK SERBEST
+        GAZ HACMİNİ (_case_free_volume) korur; kesit alanı bu ikisinden
+        türetilir (D_eş = 2·sqrt(V/(pi·L))), yani eşdeğer silindirin hacmi
+        gerçek serbest hacme TAM EŞİTTİR. Sonuç olarak boyuna (L) modlar
+        gerçek kavite boyuna dayanır — katı motorda baskın kararsızlık
+        sınıfı budur; enine (T/R) modlar ise ortalama kesitin göstergesidir
+        ve gerçek kademeli kesitte kayar.
+
+        CHUG YOK: katıda enjektör ve besleme sistemi FİZİKSEL OLARAK yoktur,
+        dolayısıyla klasik chug marjının (enjektör basınç düşümü oranıyla
+        besleme dekuplajı) katı motorda bir karşılığı yoktur. Modüle hiçbir
+        enjektör girdisi geçilmez; chug raporu bu yüzden veri eksikliğinden
+        DEĞİL, yapısal olarak NOT_EVALUATED kalır ve bu ayrım
+        ``chug_applicability`` alanında beyan edilir.
+
+        ATEŞLEME DURUMU: kavite grain geriledikçe büyür; burada yalnız t=0
+        (ateşleme) kavitesi çözülür, çünkü serbest hacim ve kasa iç boyu
+        çözücüde yalnız bu durum için doğrudan bilinir.
+        """
+        surum = _hrma_version()
+        kunye = ('hrma.analysis.acoustic_modes.AcousticModeAnalyzer.analyze '
+                 f'(HRMA {surum})')
+
+        eksik = []
+        try:
+            t_c = float(self.T_c)
+            gam = float(self.gamma)
+            mw = float(getattr(self, 'mw_exhaust', 0.0) or 0.0)
+            v_free = float(self._case_free_volume())
+            l_cav = float(self._case_inner_length())
+        except Exception:
+            t_c = gam = mw = v_free = l_cav = 0.0
+        if not (t_c > 0):
+            eksik.append('chamber_temperature')
+        if not (gam > 1.0):
+            eksik.append('gamma')
+        if not (mw > 0):
+            eksik.append('molecular_weight')
+        if not (v_free > 0):
+            eksik.append('case_free_volume')
+        if not (l_cav > 0):
+            eksik.append('case_inner_length')
+
+        if eksik:
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': eksik,
+                'basis': ('The chamber acoustic mode table is NOT evaluated: '
+                          f'the solver does not produce {eksik}. No cavity '
+                          'geometry or gas state is assumed. ' + kunye),
+            }
+
+        r_gas = R_UNIVERSAL / mw                      # J/(kg·K)
+        d_eq = 2.0 * np.sqrt(v_free / (np.pi * l_cav))
+
+        from hrma.analysis.acoustic_modes import AcousticModeAnalyzer
+        try:
+            sonuc = AcousticModeAnalyzer().analyze(
+                chamber_temperature=t_c,
+                gamma=gam,
+                gas_constant=float(r_gas),
+                chamber_diameter=float(d_eq),
+                chamber_length=l_cav,
+                chamber_pressure=float(self.P_c),
+                # Enjektör girdisi YOK: katıda enjektör yoktur.
+                n_modes=10)
+        except Exception as exc:
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': [],
+                'basis': ('The acoustic mode module rejected the solver '
+                          f'state: {exc}. No mode table is reported. '
+                          + kunye),
+            }
+
+        blok = dict(sonuc)
+        blok.update({
+            'status': 'computed',
+            'cavity_state': 'ignition',
+            'equivalent_cavity': {
+                'length_m': float(l_cav),
+                'diameter_m': float(d_eq),
+                'free_gas_volume_m3': float(v_free),
+                'basis': (
+                    'Equivalent right cylinder that preserves BOTH the real '
+                    'cavity length (case inner length: grain stack + segment '
+                    'gaps + closure allowance) and the real free gas volume '
+                    '(case interior minus propellant): D_eq = '
+                    '2*sqrt(V_free/(pi*L)). The real cavity is stepped (grain '
+                    'port plus fore/aft closure volumes), so the longitudinal '
+                    'mode frequencies rest on the true length while the '
+                    'transverse (tangential/radial) frequencies represent a '
+                    'mean cross-section and shift in the real stepped '
+                    'cavity.'),
+            },
+            'cavity_state_basis': (
+                'Only the t = 0 (ignition) cavity is analysed. The gas cavity '
+                'grows as the grain regresses, so the mode frequencies move '
+                'during the burn; the solver publishes the free volume and '
+                'the case inner length for this state only, and no burnout '
+                'cavity is assumed.'),
+            'chug_applicability': {
+                'applicable': False,
+                'reason': (
+                    'A solid motor has no injector and no feed system, so the '
+                    'classical chug criterion (injector pressure drop ratio '
+                    'decoupling the feed from the chamber) has no counterpart '
+                    'here. No injector input is passed to the module: its '
+                    'chug report is NOT_EVALUATED by construction, not '
+                    'because data is missing. The solid-motor low-frequency '
+                    'counterpart (L* / bulk-mode instability) is NOT '
+                    'modelled.'),
+            },
+            'inputs_used': {
+                'chamber_temperature_K': t_c,
+                'gamma': gam,
+                'molecular_weight_g_mol': mw,
+                'gas_constant_J_kgK': float(r_gas),
+                'chamber_pressure_bar': float(self.P_c),
+                'gas_property_source': (
+                    'propellant record — the same chamber temperature, gamma '
+                    'and exhaust molecular weight the thrust solution uses'),
+                'cavity_source': (
+                    '_case_inner_length() and _case_free_volume(), the same '
+                    'two quantities the reported case length and '
+                    'grain_design.case_free_volume_l come from'),
+            },
+            '_basis': (
+                f'{kunye}; cavity idealisation and gas state as listed in '
+                'equivalent_cavity and inputs_used. Diagnostic only: the '
+                'mode table is a list of CANDIDATE resonances and is not fed '
+                'back into any performance or structural result.'),
+        })
+        return blok
+
+    def _nozzle_flow_field_report(self, contour_points_m):
+        """Lüle iç akışı (yarı-1B) + ayrılma — hrma.flow.quasi1d / separation.
+
+        Girdi, sonuç sözlüğünde YAYIMLANAN lüle iç konturudur
+        (``nozzle_contour.points``, [z_m, r_m] çiftleri): 2B kesitin,
+        STL/STEP dışa aktarımının ve 3B sahnenin okuduğu AYNI örneklem.
+        Alan profili A(x) = pi·r² ile bu konturdan kurulur — ikinci bir
+        geometri tanımı üretilmez.
+
+        Akış durumu çözücünün kendi büyüklüklerinden gelir: durma basıncı
+        P0 = tasarım kamara basıncı, T0 = kamara sıcaklığı, gamma ve
+        R = R_evrensel/MW_egzoz yakıt kaydından (nozul çıkış durumunun
+        kullandığı değerlerin aynısı), geri basınç ise motorun ortam
+        basıncıdır (ambient_pressure_bar; kullanıcı vermediyse deniz
+        seviyesi).
+
+        Ayrılma değerlendirmesi eşiğini motorun KENDİ sabitinden alır
+        (SUMMERFIELD_SEPARATION_RATIO) — aynı sayı iki yerde ayrı ayrı
+        tanımlanmaz.
+
+        Dönüş: (yarı-1B akış bloğu, ayrılma bloğu). Kontur yoksa ya da modül
+        profili reddederse iki blok da eksik girdiyi ADIYLA anan NOT_MODELLED
+        beyanıyla döner (uydurma profil kurulmaz).
+        """
+        surum = _hrma_version()
+        kunye_akis = f'hrma.flow.quasi1d.solve_nozzle (HRMA {surum})'
+        kunye_ayr = f'hrma.flow.separation.assess_separation (HRMA {surum})'
+
+        def _yok(eksik, gerekce):
+            return ({'status': 'NOT_MODELLED', 'missing_inputs': list(eksik),
+                     'basis': (f'{gerekce} No flow field is reported. '
+                               + kunye_akis)},
+                    {'status': 'NOT_MODELLED', 'missing_inputs': list(eksik),
+                     'basis': (f'{gerekce} No separation assessment is '
+                               'reported. ' + kunye_ayr)})
+
+        if not contour_points_m:
+            return _yok(['nozzle_contour'],
+                        'The nozzle inner contour was not published, so the '
+                        'area profile A(x) cannot be built from the solver '
+                        'geometry.')
+
+        eksik = []
+        try:
+            t_c = float(self.T_c)
+            gam = float(self.gamma)
+            mw = float(getattr(self, 'mw_exhaust', 0.0) or 0.0)
+            p_c = float(self.P_c)
+        except Exception:
+            t_c = gam = mw = p_c = 0.0
+        if not (p_c > 0):
+            eksik.append('chamber_pressure')
+        if not (t_c > 0):
+            eksik.append('chamber_temperature')
+        if not (gam > 1.0):
+            eksik.append('gamma')
+        if not (mw > 0):
+            eksik.append('molecular_weight')
+        if eksik:
+            return _yok(eksik, 'The solver does not produce the reservoir '
+                               f'state {eksik}.')
+
+        try:
+            dizi = np.asarray(contour_points_m, dtype=float)
+            x_m = dizi[:, 0]
+            area_m2 = np.pi * dizi[:, 1] ** 2
+        except Exception:
+            return _yok(['nozzle_contour'],
+                        'The published nozzle contour could not be read as '
+                        '[z_m, r_m] pairs.')
+
+        p0_pa = p_c * 1e5
+        pa_bar = float(getattr(self, 'ambient_pressure_bar',
+                               SEA_LEVEL_PRESSURE_BAR))
+        pb_pa = pa_bar * 1e5
+        r_gas = R_UNIVERSAL / mw
+
+        girdi_kunyesi = {
+            'P0_Pa': float(p0_pa),
+            'P0_source': ('design chamber pressure self.P_c — the same '
+                          'stagnation pressure the throat sizing uses'),
+            'T0_K': t_c,
+            'gamma': gam,
+            'gas_constant_J_kgK': float(r_gas),
+            'gas_property_source': (
+                'propellant record — the same gamma and exhaust molecular '
+                'weight the nozzle exit state and thrust coefficient use'),
+            'Pb_Pa': float(pb_pa),
+            'Pb_source': (
+                'motor ambient pressure (ambient_pressure_bar input; sea '
+                'level when the user supplied none)'),
+            'area_profile_source': (
+                'A(x) = pi*r^2 from the published nozzle_contour points, the '
+                'same sampled inner flow-path the 2D cross-section and the '
+                'STL/STEP exports consume'),
+        }
+
+        from hrma.flow import quasi1d as _q1d
+        from hrma.flow import separation as _sep
+
+        try:
+            akis = _q1d.solve_nozzle(x=x_m, area=area_m2, P0=p0_pa, T0=t_c,
+                                     gamma=gam, R=float(r_gas), Pb=pb_pa)
+        except Exception as exc:
+            akis_blok = {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': [],
+                'basis': ('The quasi-1D solver rejected the published nozzle '
+                          f'geometry or the reservoir state: {exc}. No flow '
+                          'field is reported. ' + kunye_akis),
+            }
+        else:
+            akis_blok = dict(akis)
+            # JSON-güvenli: modül istasyon dizilerini numpy olarak döndürür.
+            for anahtar in ('x_m', 'area_m2', 'mach', 'pressure_Pa',
+                            'temperature_K'):
+                if anahtar in akis_blok:
+                    akis_blok[anahtar] = [float(v) for v
+                                          in np.asarray(akis_blok[anahtar])]
+            akis_blok.update({
+                'status': 'computed',
+                'inputs_used': dict(girdi_kunyesi),
+                '_basis': (
+                    f'{kunye_akis}; area profile and reservoir state as '
+                    'listed in inputs_used. Diagnostic only: the regime, the '
+                    'shock position and the station profiles are NOT fed '
+                    'back into the thrust curve, which keeps using the '
+                    'thrust-coefficient formulation.'),
+            })
+
+        try:
+            ayrilma = _sep.assess_separation(
+                P0=p0_pa, Pa=pb_pa, gamma=gam, x=x_m, area=area_m2,
+                summerfield_factor=SUMMERFIELD_SEPARATION_RATIO)
+        except Exception as exc:
+            ayrilma_blok = {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': [],
+                'basis': ('The separation module rejected the published '
+                          f'nozzle geometry or the flow state: {exc}. No '
+                          'separation assessment is reported. ' + kunye_ayr),
+            }
+        else:
+            ayrilma_blok = dict(ayrilma)
+            modul_basis = ayrilma_blok.pop('_basis', None)
+            ayrilma_blok.update({
+                'status': 'computed',
+                'inputs_used': dict(girdi_kunyesi),
+                'summerfield_factor_source': (
+                    'SUMMERFIELD_SEPARATION_RATIO of this engine module — '
+                    'the same constant the legacy Summerfield check uses, so '
+                    'the threshold has a single definition point'),
+                'module_basis': modul_basis,
+                '_basis': (
+                    f'{kunye_ayr}; wall pressure from the full-flowing '
+                    'isentropic core of the published contour, ambient '
+                    'pressure and gas state as listed in inputs_used. '
+                    'Diagnostic only: a predicted separation does NOT alter '
+                    'the reported thrust, which is computed from the '
+                    'attached-flow thrust coefficient.'),
+            })
+
+        return akis_blok, ayrilma_blok
+
     def _web_utilization_percent(self, curve):
         """Tüketilen web / mevcut web [%] — gerçek gerilemeden.
 
@@ -3514,6 +4359,19 @@ class SolidRocketEngine:
             return 0.0
         return float(max(0.0, min(100.0, 100.0 * consumed / max_web)))
     
+    #: Kasa cidarı KULLANICIDAN geldi mi? Yapısal hüküm, kap onayı ve kuru
+    #: kütle beyanı bu TEK ayrımı kullanır (iki yerde iki farklı cevap
+    #: verilmesi yasak).
+    def _case_thickness_is_user_supplied(self):
+        """Kullanıcı ``case_thickness`` verdi mi (ve o değer mi kullanıldı)?
+
+        v2.6.27 (B2-4). ``_case_design()`` cidarı ya kullanıcıdan alır ya
+        Barlow ile KENDİ boyutlandırır; ikisi arasındaki fark, yayımlanan
+        emniyet katsayısının bir DOĞRULAMA mı yoksa girdinin geri okunması
+        mı olduğunu belirler.
+        """
+        return getattr(self, 'user_case_thickness', None) is not None
+
     def _calculate_structural_analysis(self):
         """Structural analysis like other systems"""
         # Case stress analysis — cidar kalınlığı ve dayanım TEK kaynaktan
@@ -3525,6 +4383,31 @@ class SolidRocketEngine:
         r_inner = self._case_inner_diameter() / 2
         hoop_stress = self.P_c * 1e5 * r_inner / t_wall
         safety_factor = sigma_y / hoop_stress
+
+        # --- YAPISAL TOTOLOJİ BEYANI (B2-4, v2.6.27) ----------------------
+        # Kullanıcı bir cidar VERMEDİYSE _case_design cidarı
+        #     t = P*r / (sigma_y / SF_hedef)
+        # ile boyutlandırır. Buradaki hoop gerilmesi ise
+        #     sigma = P*r / t
+        # olduğundan SF = sigma_y/sigma cebirsel olarak SF_hedef'in
+        # KENDİSİDİR: hesap değil, girdinin eko'su. ÖLÇÜLDÜ (APCP,
+        # D_kamara = 100 mm, D_çekirdek = 30 mm, L = 500 mm, SF_hedef = 3,0):
+        #     Pc =  40 bar -> t = 2,400 mm, SF = 3,000000
+        #     Pc =  80 bar -> t = 4,800 mm, SF = 3,000000
+        #     Pc = 150 bar -> t = 9,000 mm, SF = 3,000000
+        # yani dört mertebe basınç değişiminde 6 basamak aynı sayı.
+        # (Pc = 20 bar'da SF = 5,0 çıkar; orada da bir doğrulama yoktur —
+        # asgari cidar kelepçesi devrededir ve okunan sayı O kelepçedir.)
+        #
+        # Hibrit yolda bu ayrım ZATEN vardı (structural_analysis.py
+        # 'design_mode' + 'safety_factor_is_tautological'); katı motorda
+        # YOKTU. Aynı adlar burada da kullanılır ki uç katmanının dürüstlük
+        # kapısı (app.py _withhold_unearned_structural_verdict / _withhold_
+        # unearned_vessel_verdict) iki motorda tek sözleşme okusun.
+        user_wall = self._case_thickness_is_user_supplied()
+        design_mode = 'verify' if user_wall else 'size'
+        clamped = (not user_wall) and t_wall > (
+            self.P_c * 1e5 * r_inner / (sigma_y / SF_design)) * (1.0 + 1e-9)
 
         # Grain structural integrity — gerçek elastisite çözümü
         grain = self._calculate_grain_structural()
@@ -3542,6 +4425,22 @@ class SolidRocketEngine:
                 'yield_strength_mpa': sigma_y / 1e6,
                 'design_safety_factor': SF_design,
                 'wall_thickness_mm': t_wall * 1000,
+                # --- B2-4 beyanı (hibritle AYNI alan adları) -------------
+                'design_mode': design_mode,          # 'size' | 'verify'
+                'wall_thickness_source': ('user_supplied' if user_wall
+                                          else 'sized_by_hrma'),
+                'safety_factor_is_tautological': bool(not user_wall),
+                'wall_thickness_at_minimum_clamp': bool(clamped),
+                'safety_factor_basis': (
+                    'verified against the user-supplied case wall thickness'
+                    if user_wall else
+                    'NOT a verification: no case thickness was supplied, so '
+                    'HRMA sized the wall from the hoop stress to meet the '
+                    'design safety factor (t = P*r/(sigma_y/SF)). Dividing '
+                    'the yield strength by the resulting hoop stress returns '
+                    'that same design safety factor - it is the INPUT read '
+                    'back. Supply case_thickness (mm) to obtain an '
+                    'independent verification.'),
             },
             'grain_structural': grain,
             'assembly_integrity': {
@@ -5032,7 +5931,9 @@ class SolidRocketEngine:
             'material': (rec or {}).get('name', charge_key),
             'charge_record': charge_key,
         }
-        if not rec or x_condensed is None or v_free <= 0 or p_ign_bar <= 0:
+        _x_gecerli = (x_condensed is not None
+                      and 0.0 <= float(x_condensed) < 1.0)
+        if not rec or not _x_gecerli or v_free <= 0 or p_ign_bar <= 0:
             grain.update({
                 'mass': None,
                 'mass_status': 'NOT_MODELLED',
@@ -5041,27 +5942,44 @@ class SolidRocketEngine:
                           'record is missing. No number is reported.'),
             })
         else:
-            gas_fraction = max(1.0 - float(x_condensed), 1e-6)
-            r_gas = R_UNIVERSAL / float(rec['molecular_weight'])  # J/(kg*K)
+            # v2.6.27: serbest hacim basınçlandırma ölçütü artık burada elle
+            # YAZILMAZ, doğrulanmış modülden çağrılır — aynı bağıntının iki
+            # ayrı yerde durması tek tanım noktası kuralını çiğniyordu.
+            # Bağıntı, birimler ve girdiler birebir aynı olduğundan sayılar
+            # değişmez (bekçi testi bunu kilitler).
+            from hrma.analysis.igniter_sizing import pyrotechnic_charge_mass
             t_gas = float(rec['flame_temperature'])               # K
-            m_gas = p_ign_bar * 1e5 * v_free / (r_gas * t_gas)    # kg
-            m_charge = m_gas / gas_fraction                       # kg
+            _sarj = pyrotechnic_charge_mass(
+                ignition_pressure_Pa=p_ign_bar * 1e5,
+                free_volume_m3=float(v_free),
+                gas_molecular_weight_g_mol=float(rec['molecular_weight']),
+                gas_temperature_K=t_gas,
+                condensed_mass_fraction=float(x_condensed))
+            m_charge = float(_sarj['charge_mass_kg'])             # kg
+            m_gas = float(_sarj['gas_mass_kg'])                   # kg
+            gas_fraction = float(_sarj['gas_mass_fraction'])
             grain.update({
                 'mass': float(m_charge * 1000.0),                 # gram
                 'mass_status': 'sized',
                 'gas_mass_g': float(m_gas * 1000.0),
                 'flame_temperature_k': t_gas,
                 'gas_molecular_weight_g_mol': float(rec['molecular_weight']),
-                'gas_mass_fraction': float(gas_fraction),
+                'gas_mass_fraction': gas_fraction,
                 'ignition_pressure_bar': p_ign_bar,
                 'ignition_pressure_fraction_of_pc': float(fraction),
                 'ignition_pressure_source': fraction_source,
                 'free_volume_l': float(v_free * 1000.0),
                 'charge_volume_cm3': float(m_charge / float(rec['density'])
                                            * 1e6),
+                'sizing_module': (
+                    'hrma.analysis.igniter_sizing.pyrotechnic_charge_mass '
+                    f'(HRMA {_hrma_version()})'),
+                'module_basis': _sarj.get('_basis'),
                 'basis': (
-                    'Free-volume pressurisation criterion (NASA SP-8051): '
-                    'm_charge = P_ign*V_free/(R*T) / (1 - X_condensed). '
+                    'Free-volume pressurisation criterion (NASA SP-8051), '
+                    'evaluated by hrma.analysis.igniter_sizing.'
+                    'pyrotechnic_charge_mass: m_charge = '
+                    'P_ign*V_free/(R*T) / (1 - X_condensed). '
                     'P_ign is a DESIGN CHOICE ('
                     f'{fraction:.0%} of the chamber pressure, '
                     f'{fraction_source}), not a computed quantity. The charge '
@@ -5092,6 +6010,63 @@ class SolidRocketEngine:
         return {
             'igniter_type': 'Pyrotechnic',
             'igniter_grain': grain,
+            # v2.6.27: ateşleyici modülünün ŞARJ KÜTLESİ yolu yukarıda
+            # bağlandı; modülün DİĞER iki yolunun katı motorda neden
+            # değerlendirilmediği burada adıyla beyan edilir (sessiz eksiklik
+            # yerine açık beyan).
+            'ignition_energy_and_window': {
+                'status': 'NOT_MODELLED',
+                'ignition_energy': {
+                    'status': 'NOT_MODELLED',
+                    'missing_inputs': ['propellant_specific_heat_J_kg_K',
+                                       'propellant_ignition_temperature_K'],
+                    'basis': (
+                        'The required ignition energy '
+                        '(hrma.analysis.igniter_sizing.'
+                        'ignition_energy_required) needs the propellant '
+                        'specific heat and its ignition temperature. Neither '
+                        'is carried by the HRMA propellant records, which '
+                        'hold density, burn-rate law, c*, flame temperature, '
+                        'gamma and exhaust molecular weight only, and no '
+                        'literature value is substituted. No ignition energy '
+                        'is reported.'),
+                },
+                'torch_path': {
+                    'status': 'NOT_APPLICABLE',
+                    'basis': (
+                        'The torch-igniter path of the module sizes a '
+                        'continuously burning pre-burner fed from a '
+                        'propellant feed system. A solid motor is ignited by '
+                        'a pyrotechnic charge and has no feed system, so the '
+                        'torch path has no counterpart here and is not '
+                        'evaluated.'),
+                },
+                'safe_ignition_window': {
+                    'status': 'NOT_APPLICABLE',
+                    'basis': (
+                        'The hard-start window of the module bounds the '
+                        'ignition delay during which UNBURNT propellant '
+                        'accumulates in the chamber from a feed system and '
+                        'could then burn at constant volume all at once. A '
+                        'solid grain does not accumulate: its propellant is '
+                        'already in the chamber as a solid and only the '
+                        'burning surface produces gas, so that mechanism has '
+                        'no counterpart here and the criterion is not '
+                        'evaluated. The solid-motor ignition overpressure '
+                        'transient (igniter mass flow versus free volume '
+                        'filling and flame spreading over the grain) is a '
+                        'different problem and is NOT modelled - see '
+                        'igniter_grain.burn_time_basis.'),
+                },
+                'basis': (
+                    'Declaration of which parts of '
+                    f'hrma.analysis.igniter_sizing (HRMA {_hrma_version()}) '
+                    'are wired into the solid path: the pyrotechnic '
+                    'free-volume charge sizing is (see '
+                    'igniter_grain.sizing_module); the ignition energy '
+                    'balance and the hard-start window are not, for the '
+                    'reasons given above.'),
+            },
             'igniter_case': {
                 'material': 'NOT_DEFINED',
                 'diameter': None,
@@ -5346,19 +6321,178 @@ class SolidRocketEngine:
                 'pressure_test': 'No leakage or deformation'
             }
         }
-    
+
+    def _max_web_thickness(self):
+        """Yanmanın kesilebileceği web ÜST SINIRI [m] — TEK tanım noktası.
+
+        v2.6.27 (A1-1): bu kural ``calculate_thrust_curve`` içinde gömülüydü;
+        boğaz boyutlandırması aynı aralığı taramak zorunda olduğu için buraya
+        alındı ve çözücü artık buradan okur — iki yerde iki farklı web
+        aralığı tanımlanamaz.
+
+          * end_burner: yanma EKSENELDİR, tükenme grain boyunda olur.
+          * shapely'li tipler (star/wagon_wheel/finocyl/slotted): ofset modeli
+            tükenmeyi geometrik bilir (A_burn → 0); buradaki sınır yalnız
+            güvenlik ağıdır, bu yüzden kasa yarıçapı kadar geniş tutulur.
+          * bates (ve shapely'siz yedekler): radyal web (D_kamara − D_çekirdek)/2.
+        """
+        if self.grain_type == 'end_burner':
+            return float(self.L_grain)
+        if (self.grain_type in ('star', 'wagon_wheel', 'finocyl', 'slotted')
+                and SHAPELY_AVAILABLE):
+            return float(self.D_chamber / 2)
+        return float((self.D_chamber - self.D_core) / 2)
+
+    def _grain_geometry_key(self):
+        """Ab(w) ve A_port(w) fonksiyonlarını TAM belirleyen anahtar.
+
+        ``_burn_area_scan`` memo katmanı bunu kullanır. Anahtar,
+        ``calculate_burn_area``/``_port_flow_area``'nın okuduğu HER alanı
+        içerir; biri eksik kalırsa memo bayat sonuç döndürürdü.
+        """
+        key = (self.grain_type, self.D_chamber, self.D_core, self.L_grain)
+        if self.grain_type == 'bates':
+            key += (self._bates_segment_count(),
+                    bool(getattr(self, 'inhibit_outer', True)),
+                    bool(getattr(self, 'inhibit_front', False)),
+                    bool(getattr(self, 'inhibit_rear', False)))
+        elif self.grain_type == 'star':
+            key += tuple(self._star_params())
+        elif self.grain_type == 'finocyl':
+            key += tuple(self._finocyl_params()[:4])
+        elif self.grain_type == 'slotted':
+            key += tuple(self._slotted_params()[:3])
+        return key
+
+    def _burn_area_scan(self):
+        """Web aralığı boyunca (w, Ab(w), A_port(w), port_oranı) örneklemi.
+
+        Boğaz boyutlandırması yanma boyunca ULAŞILAN en büyük gereksinimi
+        aradığı için (bkz. _design_throat_area) Ab(w)'nin analitik kapalı
+        formu değil, ÇÖZÜCÜNÜN KENDİ ``calculate_burn_area`` fonksiyonu
+        örneklenir — ikinci bir yanma alanı tanımı üretilmez (star/finocyl/
+        slotted/wagon_wheel'de zaten kapalı form yoktur, alan shapely ofseti
+        ile bulunur).
+
+        ÖRNEKLEME ADIMI VE GEREKÇESİ
+        ----------------------------
+        Kaba tarama web aralığını ``SOLID_KN_SCAN_SAMPLES`` eşit parçaya
+        böler. Bu adım, ölçülen tepe konumlarını (D=100 mm gövdede
+        wagon_wheel w≈4,8 mm, star w≈19,8 mm, finocyl w≈14,6 mm) rahatça
+        ayırt eder. Tepe iki komşu örneğin arasına düşerse kaba adım tepeyi
+        birkaç yüzde ıskalayabileceği için en büyük örneğin İKİ KOMŞUSU
+        arasında ``SOLID_KN_REFINE_ROUNDS`` tur yerel keskinleştirme yapılır;
+        her tur aralığı ``SOLID_KN_REFINE_SAMPLES`` parçaya böler, yani
+        toplam çözünürlük kaba adımın ~1/100'üne iner.
+
+        Keskinleştirme çapası Ab'nin tepesidir. Boğaz gereksinimi
+        A_gerek(w) ∝ Ab(w)·r(Pc, w) olduğundan ve r yalnız erozif geometri
+        çarpanıyla (port_oranı^-0.2) web'e bağlı olduğundan iki tepe
+        pratikte çakışır; yine de A_gerek'in maksimumu keskinleştirilmiş
+        örneklemin TAMAMI üzerinden alınır, dolayısıyla başka bir yerde
+        oluşabilecek yapı kaba çözünürlükte de görülür.
+
+        Örneklem GEOMETRİYE bağlıdır (yakıt/basınç değil), bu yüzden
+        ``_grain_geometry_key`` ile anahtarlanıp örnek içinde memoize edilir:
+        tek bir performans koşusunda ``_design_throat_area`` 13 kez çağrılır
+        ve shapely'li tiplerde tarama 40-95 ms sürer.
+
+        Dönüş: (web[m], burn_area[m²], port_area[m²], port_ratio) — hepsi
+        artan web sırasında numpy dizileri.
+        """
+        key = self._grain_geometry_key()
+        memo = getattr(self, '_burn_area_scan_memo', None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+
+        w_max = self._max_web_thickness()
+        if not np.isfinite(w_max) or w_max <= 0:
+            bos = (np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0))
+            self._burn_area_scan_memo = (key, bos)
+            return bos
+
+        webs = list(np.linspace(0.0, w_max, int(SOLID_KN_SCAN_SAMPLES)))
+
+        def _ornekle(w_list):
+            out = []
+            for w in w_list:
+                # Alan ve port AYNI web ile arka arkaya okunur: slotted
+                # ofset poligonunun tek girdilik memo'su böyle tutar.
+                out.append((float(w), float(self.calculate_burn_area(w)),
+                            float(self._port_flow_area(w))))
+            return out
+
+        ornekler = _ornekle(webs)
+        for _ in range(int(SOLID_KN_REFINE_ROUNDS)):
+            alanlar = [o[1] for o in ornekler]
+            i = int(np.argmax(alanlar))
+            lo = ornekler[max(i - 1, 0)][0]
+            hi = ornekler[min(i + 1, len(ornekler) - 1)][0]
+            if hi <= lo:
+                break
+            ek = [w for w in np.linspace(lo, hi,
+                                         int(SOLID_KN_REFINE_SAMPLES) + 1)]
+            ornekler = sorted(ornekler + _ornekle(ek), key=lambda o: o[0])
+
+        w_arr = np.array([o[0] for o in ornekler], dtype=float)
+        ab_arr = np.array([o[1] for o in ornekler], dtype=float)
+        ap_arr = np.array([o[2] for o in ornekler], dtype=float)
+        # Port çapı oranı: erozif düzeltmenin geometri çarpanı bunu okur ve
+        # itki eğrisinde AYNI ifadeyle kurulur ((D_core + 2w)/D_chamber).
+        pr_arr = ((self.D_core + 2.0 * w_arr) / self.D_chamber
+                  if self.D_chamber > 0 else np.ones_like(w_arr))
+        sonuc = (w_arr, ab_arr, ap_arr, pr_arr)
+        self._burn_area_scan_memo = (key, sonuc)
+        return sonuc
+
     def _design_throat_area(self):
         """Tasarım noktası ETKİN boğaz alanı [m²] — TEK tanım noktası.
 
-        Boğulmuş akış: mdot = Pc·A_t/c*  ;  kütle üretimi: mdot = rho_p·Ab0·r
-        => A_t = rho_p · Ab(0) · r(Pc_tasarım) · c* / (Pc_tasarım · 1e5)
+        Boğulmuş akış: mdot = Pc·A_t/c*  ;  kütle üretimi: mdot = rho_p·Ab·r
+        => A_gerek(w) = rho_p · Ab(w) · r(Pc_tasarım, w) · c* / (Pc_tasarım·1e5)
         Kaynak: Sutton & Biblarz 9. baskı Böl. 12; NASA SP-8089.
+
+        BOĞAZ MAKSİMUM Kn'DE BOYUTLANDIRILIR (v2.6.27, A1-1)
+        ----------------------------------------------------
+        Eskiden A_t yalnız t=0 yanma alanına göre açılıyordu
+        (``A_burn_0 = calculate_burn_area(0.0)``). Progresif taneciklerde
+        Kn = Ab/At yanma boyunca BÜYÜDÜĞÜ için denge basıncı
+        Pc = (Kn·a·rho_p·c*)^(1/(1-n)) kullanıcının girdiği tasarım
+        basıncının çok üstüne tırmanıyordu. ÖLÇÜLDÜ (APCP, D_kamara=100 mm,
+        D_çekirdek=30 mm, L=500 mm, girilen Pc = 40 bar; eski davranış):
+
+            bates        Pc_tepe 40,2 bar (+%0,6)   F_tepe/F(0) = 1,01
+            slotted      Pc_tepe 43,0 bar (+%7,6)   F_tepe/F(0) = 1,08
+            star         Pc_tepe 66,1 bar (+%65)    F_tepe/F(0) = 1,72
+            finocyl      Pc_tepe 74,9 bar (+%87)    F_tepe/F(0) = 1,96
+            wagon_wheel  Pc_tepe 88,4 bar (+%121)   F_tepe/F(0) = 2,33
+
+        Yani kasa, yalıtım ve boğaz "40 bar" için boyutlandırılırken motor
+        88 bara çıkıyordu. Artık boğaz, yanma boyunca ULAŞILAN EN BÜYÜK
+        gereksinime göre açılır:
+
+            A_t = maks_w  A_gerek(w)
+
+        Bu, kullanıcının girdiği kamara basıncını eğrinin TAVANI yapar ve
+        bunu tarama çözünürlüğünden bağımsız olarak GARANTİ EDER: verilen
+        bir webte denge basıncı Pc = rho_p·Ab·r(Pc)·c*/(A_t·1e5) sabit
+        noktasıdır; r ∝ Pc^n ve n < 1 olduğundan sağ taraf Pc'de içbükey
+        artandır, dolayısıyla A_t ≥ A_gerek(w) ise o webin sabit noktası
+        tasarım basıncının ALTINDA kalır. (Boğaz erozyonu açıkken A_t koşu
+        boyunca yalnız BÜYÜR, yani tavan yine korunur.)
+
+        BEDELİ AÇIKÇA SÖYLENİR: boğaz büyüdüğü için itki düşer. Bu bir kayıp
+        değil, motorun gerçekten hangi basınçta çalıştığının düzeltilmesidir;
+        sonuç sözlüğü boyutlandırmanın hangi ölçüte göre yapıldığını
+        ``throat_sizing`` bloğunda beyan eder.
 
         Yanma hızı r, ÇÖZÜCÜNÜN kullandığı ``burn_rate`` ile hesaplanır: bu
         parçalı (plateau/mesa) yasayı, başlangıç sıcaklığı düzeltmesini ve
         erozif yanma katkısını içerir. Erozif düzeltme port kütle akısına, akı
-        ise yanma hızına bağlı olduğu için küçük bir sabit-nokta iterasyonu
-        gerekir (öz-tutarlı tasarım noktası).
+        ise yanma hızına bağlı olduğu için her örnekte küçük bir sabit-nokta
+        iterasyonu koşulur (öz-tutarlı tasarım noktası). Erozyon web'e bağlı
+        olduğundan (küçük portta güçlü) tepe, salt Ab tepesinden kayabilir;
+        maksimum bu yüzden Ab üzerinden değil A_gerek üzerinden alınır.
 
         v2.6.26 (Y1): bu blok ``calculate_thrust_curve`` içinde gömülüydü ve
         ``_estimate_throat_diameter`` İKİNCİ, erozif-düzeltmesiz bir boğaz
@@ -5379,41 +6513,160 @@ class SolidRocketEngine:
 
         Dönüş: (A_t_etkin [m²], tasarım noktası port kütle akısı [kg/m²s]).
         """
-        A_burn_0 = self.calculate_burn_area(0.0)
-        if A_burn_0 <= 0:
-            return 0.0, 0.0
+        detay = self._design_throat_detail()
+        return detay['throat_area_m2'], detay['design_mass_flux']
+
+    def _design_throat_detail(self):
+        """``_design_throat_area``ın tam çıktısı (boyutlandırma künyesiyle).
+
+        Alanlar: throat_area_m2, design_mass_flux, design_web_m,
+        design_burn_area_m2, initial_burn_area_m2, burn_area_ratio,
+        pinned, samples.
+
+        MEMO: tek bir ``calculate_performance`` koşusunda bu metot 13 kez
+        çağrılır ve her çağrı web aralığını baştan tarar (ölçüldü: taramasız
+        koşu 0,10 s → taramalı 0,18 s bates, 0,18 s → 0,34 s wagon_wheel).
+        Sonuç, hesabın OKUDUĞU her girdiyle anahtarlanır — geometri
+        (_grain_geometry_key), tasarım basıncı, yakıt yoğunluğu/c*, yanma
+        hızı yasasının bütün alanları ve boğaz sabitlemesi. Monte Carlo bu
+        alanları örneklem başına değiştirdiği için anahtar orada zaten
+        ıskalar; bayat sonuç dönmez.
+        """
+        memo_key = self._grain_geometry_key() + (
+            float(self.P_c), float(self.rho_p), float(self.c_star),
+            float(self.a), float(self.n), float(self.temp_ref),
+            float(self.burn_rate_temp_coeff),
+            float(getattr(self, 'initial_grain_temperature', self.temp_ref)),
+            float(getattr(self, 'erosive_burning_coeff', 0.0)),
+            float(getattr(self, 'erosive_exponent', 0.8)),
+            getattr(self, 'burn_rate_law_key', None),
+            getattr(self, '_pinned_throat_area_m2', None),
+        )
+        memo = getattr(self, '_design_throat_memo', None)
+        if memo is not None and memo[0] == memo_key:
+            return memo[1]
+
+        detay = self._design_throat_detail_uncached()
+        self._design_throat_memo = (memo_key, detay)
+        return detay
+
+    def _design_throat_detail_uncached(self):
+        """``_design_throat_detail``ın gerçek hesabı (memo katmanı olmadan)."""
+        webs, areas, ports, ratios = self._burn_area_scan()
+        bos = {
+            'throat_area_m2': 0.0, 'design_mass_flux': 0.0,
+            'design_web_m': 0.0, 'design_burn_area_m2': 0.0,
+            'initial_burn_area_m2': 0.0, 'burn_area_ratio': 0.0,
+            'pinned': False, 'samples': int(len(webs)),
+        }
+        if webs.size == 0 or float(np.max(areas)) <= 0.0:
+            return bos
+
         # Sıcaklık referansı çözücüyle AYNI: burn_rate'in temperature argümanı
         # exp(sigma*(T - temp_ref)) çarpanıdır ve başlangıç sıcaklığı
         # düzeltmesi self.a içinde ZATEN uygulanmıştır (çifte sayım yasak).
         temp = self.temp_ref
         flux_saved = getattr(self, 'mass_flux', 0.0)
+        en_iyi_alan = -1.0
+        en_iyi_flux = 0.0
+        en_iyi_i = 0
         try:
-            self.mass_flux = 0.0
-            port_ratio_0 = self.D_core / self.D_chamber
-            A_port_0 = self._port_flow_area(0.0)
-            r_design = self.burn_rate(self.P_c, temp, port_ratio_0)
-            mass_flux_design = 0.0
-            for _ in range(25):
-                m_dot_design = self.rho_p * A_burn_0 * r_design
-                mass_flux_design = (m_dot_design / A_port_0
-                                    if A_port_0 > 0 else 0.0)
-                self.mass_flux = mass_flux_design
-                r_new = self.burn_rate(self.P_c, temp, port_ratio_0)
-                if abs(r_new - r_design) < 1e-12:
+            for i in range(webs.size):
+                A_burn = float(areas[i])
+                if A_burn <= 0.0:
+                    continue
+                A_port = float(ports[i])
+                port_ratio = float(ratios[i])
+                self.mass_flux = 0.0
+                r_design = self.burn_rate(self.P_c, temp, port_ratio)
+                flux_i = 0.0
+                for _ in range(25):
+                    m_dot_i = self.rho_p * A_burn * r_design
+                    flux_i = m_dot_i / A_port if A_port > 0 else 0.0
+                    self.mass_flux = flux_i
+                    r_new = self.burn_rate(self.P_c, temp, port_ratio)
+                    if abs(r_new - r_design) < 1e-12:
+                        r_design = r_new
+                        break
                     r_design = r_new
-                    break
-                r_design = r_new
-            m_dot_design = self.rho_p * A_burn_0 * r_design
-            pinned = getattr(self, '_pinned_throat_area_m2', None)
-            if pinned is not None:
-                # Donanım sabit: boğaz yakıt partisine göre yeniden açılmaz.
-                A_t = float(pinned)
-            else:
-                A_t = m_dot_design * self.c_star / (self.P_c * 1e5)  # m², t=0
+                m_dot_i = self.rho_p * A_burn * r_design
+                A_gerek = m_dot_i * self.c_star / (self.P_c * 1e5)  # m²
+                if A_gerek > en_iyi_alan:
+                    en_iyi_alan = A_gerek
+                    en_iyi_flux = flux_i
+                    en_iyi_i = i
         finally:
             # Yan etki bırakma: akı, çağıran neredeyse orada kalır.
             self.mass_flux = flux_saved
-        return float(A_t), float(mass_flux_design)
+
+        if en_iyi_alan <= 0.0:
+            return bos
+
+        pinned = getattr(self, '_pinned_throat_area_m2', None)
+        # Donanım sabit: boğaz yakıt partisine göre yeniden açılmaz.
+        A_t = float(pinned) if pinned is not None else float(en_iyi_alan)
+        ab0 = float(areas[0])
+        return {
+            'throat_area_m2': float(A_t),
+            'design_mass_flux': float(en_iyi_flux),
+            'design_web_m': float(webs[en_iyi_i]),
+            'design_burn_area_m2': float(areas[en_iyi_i]),
+            'initial_burn_area_m2': ab0,
+            'burn_area_ratio': (float(areas[en_iyi_i]) / ab0
+                                if ab0 > 0 else 0.0),
+            'pinned': pinned is not None,
+            'samples': int(webs.size),
+        }
+
+    def _throat_sizing_report(self, curve=None):
+        """Boğazın HANGİ ölçüte göre açıldığının beyanı (sonuç sözlüğü).
+
+        v2.6.27 (A1-1): boyutlandırma ölçütü değiştiği için kullanıcı
+        değişikliği GÖREBİLMELİDİR — itki, aynı geometride eskisinden düşük
+        çıkar ve bunun sebebi burada yazılıdır. Ölçülen tepe basıncı verilen
+        eğriden okunur; eğri verilmezse basınç alanları None kalır (sayı
+        uydurulmaz).
+        """
+        detay = self._design_throat_detail()
+        rapor = {
+            'basis': 'max burn area (Kn_max)',
+            'design_web_m': detay['design_web_m'],
+            'design_burn_area_m2': detay['design_burn_area_m2'],
+            'initial_burn_area_m2': detay['initial_burn_area_m2'],
+            'burn_area_ratio_max_over_initial': detay['burn_area_ratio'],
+            'scan_samples': detay['samples'],
+            'throat_area_pinned': detay['pinned'],
+            'design_chamber_pressure_bar': float(self.P_c),
+            'peak_chamber_pressure_bar': None,
+            'peak_over_design': None,
+            'basis_text': (
+                'The throat is sized at the LARGEST throat area the burn ever '
+                'requires, A_t = max_w rho_p*Ab(w)*r(Pc,w)*c*/(Pc*1e5), not at '
+                'the t = 0 burning surface. The burning surface of a '
+                'progressive grain grows during the burn, so sizing on Ab(0) '
+                'let the equilibrium pressure climb above the chamber '
+                'pressure the user entered (measured on this repo for a '
+                '100 mm chamber, 30 mm core, 500 mm APCP grain at 40 bar: '
+                '+32% for '
+                'BATES, +65% star, +87% finocyl, +121% wagon wheel; those '
+                'four numbers describe THAT reference case, not your motor - '
+                "your motor's own peak is the peak_over_design field beside "
+                'this text). With the '
+                'peak-Kn criterion the entered chamber pressure is the '
+                'CEILING of the pressure curve. The throat is therefore '
+                'larger and the thrust lower than the previous release '
+                'reported for the same geometry; that is the correction, not '
+                'a loss. Sources: Sutton & Biblarz, Rocket Propulsion '
+                'Elements 9th ed., Ch. 12; NASA SP-8089.'),
+        }
+        if curve is not None:
+            basinc = np.asarray(curve.get('pressure', []), dtype=float)
+            if basinc.size:
+                tepe = float(np.nanmax(basinc))
+                rapor['peak_chamber_pressure_bar'] = tepe
+                rapor['peak_over_design'] = (float(tepe / self.P_c)
+                                             if self.P_c > 0 else None)
+        return rapor
 
     def pin_throat_area(self, area_m2):
         """Boğaz alanını SABİTLE — donanım tektir, yakıt partisi değişkendir.
@@ -5829,6 +7082,36 @@ class SolidRocketEngine:
             vessel_warnings.append(
                 f'Burst pressure fell back to the thin-wall yield estimate: {exc}')
 
+        # --- KAZANILMAMIŞ KAP ONAYI (B2-4, v2.6.27) -----------------------
+        # ÖLÇÜLDÜ (cidar GÖNDERİLMEDEN, dört hazne basıncında): 'vessel_status'
+        # dördünde de 'PASS'. Kap, geçmek ÜZERE boyutlandırılmıştır
+        # (_case_design Barlow ile SF_hedef'i sağlayan cidarı üretir), sonra
+        # aynı cidar sınanıp "geçti" denir — doğrulama değil, hedefin geri
+        # okunması. ONAY geri çekilir, UYARI çekilmez: 'MARGINAL'/'FAIL'
+        # gerçek bir tehlike bildirimidir ve susturulması kazanılmamış bir
+        # onaydan daha kötüdür. Sayılar (kopma basıncı, marj, kalınlık)
+        # SİLİNMEZ — gerçekten hesaplandılar.
+        #
+        # Uç katmanında A3'ün AYNI kapısı var (app.py
+        # _withhold_unearned_vessel_verdict). Buradaki kapı motoru doğrudan
+        # kullanan yolları da (dışa aktarım, UQ, testler) kapsar ve iki kapı
+        # aynı sonucu verdiği için üst üste çalışması davranışı değiştirmez.
+        vessel_user_wall = self._case_thickness_is_user_supplied()
+        vessel_tautological = bool(not vessel_user_wall)
+        if vessel_tautological and str(vessel_status or '').upper() in (
+                'PASS', 'SAFE', 'ACCEPTABLE', 'OK'):
+            vessel_status = 'NOT_EVALUATED'
+        vessel_status_basis = (
+            'The case wall thickness was supplied by the user, so the burst '
+            'margin and the vessel status are an evaluation of that wall.'
+            if vessel_user_wall else
+            'No acceptance is issued: no case thickness was supplied, so HRMA '
+            'sized the wall itself from the hoop stress to meet the design '
+            'safety factor. Checking that wall and reporting a pass is the '
+            'design target read back, not an independent verification. Supply '
+            "'case_thickness' (mm) to obtain one. A remaining MARGINAL/FAIL "
+            'status is a warning and is never suppressed.')
+
         relief_setting_bar = (design_pressure_bar
                               * SOLID_CASE_DESIGN['relief_fraction_of_design'])
 
@@ -5853,6 +7136,11 @@ class SolidRocketEngine:
                     ' vessel capability'),
                 'vessel_status': vessel_status,
                 'vessel_warnings': vessel_warnings,
+                # B2-4: hükmün KAZANILIP kazanılmadığı adıyla yazılır.
+                'wall_thickness_source': ('user_supplied' if vessel_user_wall
+                                          else 'sized_by_hrma'),
+                'vessel_status_is_tautological': vessel_tautological,
+                'vessel_status_basis': vessel_status_basis,
             },
             'ignition_safety': {
                 'ignition_system': 'Electric match',
@@ -6023,18 +7311,170 @@ class SolidRocketEngine:
         }
     
     # Helper methods for calculations
-    def _classify_thrust_curve(self, thrust_data):
-        """Classify thrust curve type"""
-        start_thrust = np.mean(thrust_data[:10])
-        end_thrust = np.mean(thrust_data[-10:])
-        
-        if end_thrust > start_thrust * 1.1:
-            return 'Progressive'
-        elif end_thrust < start_thrust * 0.9:
-            return 'Regressive'
+    def _thrust_shape_report(self, thrust_data, time_data=None):
+        """İtki eğrisinin BİÇİMİ — sınıf + kararı doğuran ölçüler.
+
+        v2.6.27 (B2-1). Eski sınıflandırma yalnız ilk 10 ve son 10 örneğin
+        ortalamasını karşılaştırıyordu; ARADAKİ TEPE hesaba girmiyordu ve
+        tepeli (progresif-sonra-regresif) biçimler için bir sınıf yoktu.
+        Ölçülen yanlış etiketler ve yeni ölçüt SOLID_THRUST_SHAPE_* sabit
+        bloğunda yazılıdır.
+
+        Kararın DAYANAĞI da döner (tepe/ortalama, dip/ortalama, tepenin
+        normalize zamanı, uç platoları): sınıf bir etikettir, kullanıcı onu
+        doğrulayabilmelidir.
+
+        Args:
+            thrust_data: itki örnekleri [N] (çözücünün TAM çözünürlüklü
+                dizisi; yayımlanan seyreltilmiş dizi DEĞİL).
+            time_data: aynı uzunlukta zaman [s]. Verilmezse zaman ağırlıklı
+                ortalama alınamaz ve eşit aralık VARSAYILIR — bu varsayım
+                çıktıda ``time_basis`` ile beyan edilir.
+
+        Returns:
+            'shape' sınıfı ve ölçüleri taşıyan sözlük. Örnek sayısı ya da
+            pencere genişliği karar vermeye yetmiyorsa sınıf
+            ``SOLID_THRUST_SHAPE_UNDETERMINED`` olur ve ölçüler None kalır —
+            sayı da sınıf da UYDURULMAZ.
+        """
+        F = np.asarray(thrust_data, dtype=float)
+        gecerli = np.isfinite(F)
+        F = F[gecerli] if gecerli.size else F
+        bos = {
+            'shape': SOLID_THRUST_SHAPE_UNDETERMINED,
+            'peak_over_mean': None,
+            'min_over_mean': None,
+            'peak_time_fraction': None,
+            'start_plateau_N': None,
+            'end_plateau_N': None,
+            'window_mean_thrust_N': None,
+            'window_duration_s': None,
+            'window_samples': int(F.size),
+            'time_basis': None,
+            'basis': (
+                'The curve does not contain enough usable samples (or has no '
+                'positive thrust) to determine a shape; no class is invented.'),
+            'criterion': self._thrust_shape_criterion_text(),
+        }
+        if F.size < 3 or not np.any(F > 0.0):
+            return bos
+
+        if time_data is None:
+            t = np.arange(F.size, dtype=float)
+            zaman_temeli = 'uniform_sample_index_assumed'
         else:
-            return 'Neutral'
-    
+            t = np.asarray(time_data, dtype=float)
+            if gecerli.size == t.size:
+                t = t[gecerli]
+            if t.size != F.size or not np.all(np.isfinite(t)):
+                t = np.arange(F.size, dtype=float)
+                zaman_temeli = 'uniform_sample_index_assumed'
+            else:
+                zaman_temeli = 'solver_time_samples'
+
+        tepe = float(np.max(F))
+        if tepe <= 0.0:
+            return bos
+
+        # --- Analiz penceresi: tepe itkinin TAIL_FRACTION katının üstü -----
+        esik = SOLID_THRUST_SHAPE_TAIL_FRACTION * tepe
+        icinde = F >= esik
+        i0 = int(np.argmax(icinde))
+        i1 = int(icinde.size - 1 - np.argmax(icinde[::-1]))
+        if i1 - i0 < 2:
+            return bos
+        Fw = F[i0:i1 + 1]
+        tw = t[i0:i1 + 1]
+        sure = float(tw[-1] - tw[0])
+        if not np.isfinite(sure) or sure <= 0.0:
+            return bos
+
+        # Zaman ağırlıklı ortalama: örnek yerleşimine duyarsız (avg_thrust
+        # ile AYNI tanım — I_t/t_b).
+        ort = float(np.trapz(Fw, tw) / sure)
+        if not np.isfinite(ort) or ort <= 0.0:
+            return bos
+
+        def _plato(baslangicta):
+            """Pencerenin uç kesrindeki zaman ağırlıklı ortalama."""
+            genislik = SOLID_THRUST_SHAPE_EDGE_FRACTION * sure
+            if baslangicta:
+                maske = tw <= tw[0] + genislik
+            else:
+                maske = tw >= tw[-1] - genislik
+            if int(np.count_nonzero(maske)) < 2:
+                return float(Fw[0] if baslangicta else Fw[-1])
+            tt, ff = tw[maske], Fw[maske]
+            araligi = float(tt[-1] - tt[0])
+            if araligi <= 0.0:
+                return float(np.mean(ff))
+            return float(np.trapz(ff, tt) / araligi)
+
+        plato_bas = _plato(True)
+        plato_son = _plato(False)
+        i_tepe = int(np.argmax(Fw))
+        tau_tepe = float((tw[i_tepe] - tw[0]) / sure)
+        tepe_oran = float(tepe / ort)
+        dip_oran = float(np.min(Fw) / ort)
+        band = SOLID_THRUST_SHAPE_NEUTRAL_BAND
+
+        if tepe_oran <= 1.0 + band and dip_oran >= 1.0 - band:
+            sinif = SOLID_THRUST_SHAPE_NEUTRAL
+        elif (plato_bas > 0.0 and tepe > plato_bas * (1.0 + band)
+              and tau_tepe <= SOLID_THRUST_SHAPE_PEAK_INTERIOR_MAX):
+            # Tepe pencerenin İÇİNDE ve başlangıç platosunun belirgin
+            # üstünde: eğri önce tırmanıp sonra düşüyor.
+            sinif = SOLID_THRUST_SHAPE_PROGRESSIVE_REGRESSIVE
+        elif plato_son > plato_bas * (1.0 + band):
+            sinif = SOLID_THRUST_SHAPE_PROGRESSIVE
+        elif plato_son < plato_bas * (1.0 - band):
+            sinif = SOLID_THRUST_SHAPE_REGRESSIVE
+        else:
+            sinif = SOLID_THRUST_SHAPE_NEUTRAL
+
+        return {
+            'shape': sinif,
+            'peak_over_mean': tepe_oran,
+            'min_over_mean': dip_oran,
+            'peak_time_fraction': tau_tepe,
+            'start_plateau_N': plato_bas,
+            'end_plateau_N': plato_son,
+            'window_mean_thrust_N': ort,
+            'window_duration_s': sure,
+            'window_samples': int(Fw.size),
+            'time_basis': zaman_temeli,
+            'basis': (
+                'Shape is decided on the burning window (thrust above '
+                f'{SOLID_THRUST_SHAPE_TAIL_FRACTION:.0%} of peak), using the '
+                'time-weighted mean and the interior peak, not the first and '
+                'last samples.'),
+            'criterion': self._thrust_shape_criterion_text(),
+        }
+
+    @staticmethod
+    def _thrust_shape_criterion_text():
+        """Sınıflandırma ölçütünün kullanıcıya açık beyanı (TEK metin)."""
+        return (
+            'Window: samples where thrust >= '
+            f'{SOLID_THRUST_SHAPE_TAIL_FRACTION:.0%} of peak thrust (ignition '
+            'rise and burnout tail excluded). Mean: time-weighted '
+            '(impulse/duration), so the class does not depend on the solver '
+            'time step. NEUTRAL when both peak/mean and min/mean stay within '
+            f'+-{SOLID_THRUST_SHAPE_NEUTRAL_BAND:.0%} of the mean. '
+            'PROGRESSIVE-REGRESSIVE when the peak exceeds the opening plateau '
+            f'by more than {SOLID_THRUST_SHAPE_NEUTRAL_BAND:.0%} and occurs '
+            f'before {SOLID_THRUST_SHAPE_PEAK_INTERIOR_MAX:.0%} of the window '
+            '(a later peak means the curve is still climbing, i.e. '
+            'PROGRESSIVE). Otherwise the opening and closing plateaus (first '
+            f'and last {SOLID_THRUST_SHAPE_EDGE_FRACTION:.0%} of the window) '
+            'decide PROGRESSIVE vs REGRESSIVE. Taxonomy: Sutton & Biblarz, '
+            'Rocket Propulsion Elements 9th ed., Ch. 12.')
+
+    def _classify_thrust_curve(self, thrust_data, time_data=None):
+        """İtki eğrisi biçim SINIFI (dize) — ayrıntısı _thrust_shape_report."""
+        return self._thrust_shape_report(thrust_data, time_data)['shape']
+
+
     def _calculate_theoretical_isp(self, chamber_pressure_bar=None):
         """Calculate theoretical specific impulse.
 
@@ -6606,18 +8046,12 @@ class SolidRocketEngine:
         """
         # Initial conditions
         web_thickness = 0
-        if self.grain_type == 'end_burner':
-            # Eksenel yanma: tükenme koşulu grain BOYU üzerinden
-            # (radyal web anlamsız — eski koşul yakıtın %7'sinde kesiyordu)
-            max_web = self.L_grain
-        elif self.grain_type in ('star', 'wagon_wheel', 'finocyl',
-                                 'slotted') and SHAPELY_AVAILABLE:
-            # Ofset modeli tükenmeyi geometrik bilir (A_burn → 0);
-            # üst sınır yalnız güvenlik ağı
-            max_web = self.D_chamber / 2
-        else:
-            max_web = (self.D_chamber - self.D_core) / 2
-        
+        # Web üst sınırı TEK tanım noktasından okunur (_max_web_thickness):
+        # boğaz boyutlandırması (v2.6.27, A1-1) aynı aralığı tarar, iki yerde
+        # iki farklı tükenme kuralı duramaz.
+        max_web = self._max_web_thickness()
+
+
         time = []
         thrust = []
         pressure = []
@@ -6629,6 +8063,17 @@ class SolidRocketEngine:
         port_area_series = []
         mass_flux_series = []
         erosive_factor_series = []
+        # A1-2: akış ayrılması artık itkiyi DEĞİŞTİRDİĞİ için hangi örneklerin
+        # ayrılmış rejimde olduğu eğriyle birlikte yayımlanır (arayüz o bölgeyi
+        # işaretleyebilsin, kullanıcı "burada tek boyutlu ekli akış geçerli
+        # değil" bilgisini görsün).
+        separation_series = []
+        exit_pressure_series = []
+        # Boğulma bayrağı: çözücünün mdot = Pc·A_t/c* boşalma yasası da, CF
+        # bağıntıları da boğazın SONİK olmasını varsayar. Kuyrukta Pc,
+        # P_a/((γ+1)/2)^(γ/(γ−1)) sınırının altına düşerse iki varsayım da
+        # geçersizdir; bu bölge işaretlenir ve uyarıyla bildirilir.
+        choked_series = []
 
         t = 0
         current_temp = self.temp_ref  # Başlangıç sıcaklığı = yanma-hızı referansı (K)
@@ -6733,9 +8178,11 @@ class SolidRocketEngine:
             m_dot_gen = self.rho_p * A_burn * r_burn_actual
             
             # High-precision thrust coefficient with all corrections
-            # (TEK tanım noktası: _thrust_coefficient — tasarım noktası
-            #  boyutlandırması da aynı CF'i kullanır)
-            CF_actual = self._thrust_coefficient(P_c_actual)
+            # (TEK tanım noktası: _thrust_coefficient_state — tasarım noktası
+            #  boyutlandırması da aynı CF'i kullanır). Ayrılma durumu aynı
+            #  hesaptan okunur, ikinci kez çözülmez.
+            cf_state = self._thrust_coefficient_state(P_c_actual)
+            CF_actual = cf_state['cf']
 
             # Thrust calculation
             F = CF_actual * P_c_actual * 1e5 * A_t
@@ -6767,6 +8214,9 @@ class SolidRocketEngine:
             mass_flux_series.append(self.mass_flux)
             erosive_factor_series.append(
                 self._erosive_factor(self.mass_flux, port_ratio))
+            separation_series.append(bool(cf_state['separated']))
+            exit_pressure_series.append(float(cf_state['pe_bar']))
+            choked_series.append(bool(cf_state['choked']))
 
             # Boğaz erozyonu: yarıçap ampirik hızla geriler, A_t büyür
             # (F071; model transient_ballistics.ThroatErosionModel).
@@ -6831,6 +8281,9 @@ class SolidRocketEngine:
                     port_area_series.append(port_area_series[-1])
                     mass_flux_series.append(mass_flux_series[-1])
                     erosive_factor_series.append(erosive_factor_series[-1])
+                    separation_series.append(separation_series[-1])
+                    exit_pressure_series.append(exit_pressure_series[-1])
+                    choked_series.append(choked_series[-1])
         if (burnout_time is None and time
                 and termination in ('pressure_collapse', 'burn_rate_zero')
                 and t > time[-1]):
@@ -6845,6 +8298,27 @@ class SolidRocketEngine:
             port_area_series.append(port_area_series[-1])
             mass_flux_series.append(0.0)
             erosive_factor_series.append(1.0)
+            # Basınç söndü: akış yok, ayrılma rejimi de yok.
+            separation_series.append(False)
+            exit_pressure_series.append(0.0)
+            choked_series.append(False)
+
+        zaman_arr = np.asarray(time, dtype=float)
+        sep_arr = np.array(separation_series, dtype=bool)
+        separated_from_t = None
+        if sep_arr.size and bool(sep_arr.any()):
+            separated_from_t = float(zaman_arr[int(np.argmax(sep_arr))])
+
+        choked_arr = np.array(choked_series, dtype=bool)
+        unchoked_from_t = None
+        # Yalnız AKIŞ OLAN örnekler sayılır: sönüş kapanışı (Pc = 0) zaten
+        # boğulmamıştır ve bir model geçersizliği değil, yanmanın bitişidir.
+        basinc_arr = np.asarray(pressure, dtype=float)
+        akan = basinc_arr > 0.0 if basinc_arr.size else np.zeros(0, bool)
+        unchoked_mask = (~choked_arr) & akan if choked_arr.size else np.zeros(
+            0, bool)
+        if unchoked_mask.size and bool(unchoked_mask.any()):
+            unchoked_from_t = float(zaman_arr[int(np.argmax(unchoked_mask))])
 
         return {
             'time': np.array(time),
@@ -6864,6 +8338,35 @@ class SolidRocketEngine:
             'port_area': np.array(port_area_series),
             'mass_flux': np.array(mass_flux_series),
             'erosive_factor': np.array(erosive_factor_series),
+            # A1-2: akış ayrılması. 'separated' örnek başına bayraktır,
+            # 'separated_from_t' ayrılmanın İLK görüldüğü andır (hiç
+            # ayrılmıyorsa None — sayı uydurulmaz). Ayrılmış bölgede itki
+            # kesilmiş-lüle modelinden gelir (bkz. _thrust_coefficient_state).
+            'separated': sep_arr,
+            'separated_from_t': separated_from_t,
+            'separated_fraction': (float(sep_arr.mean())
+                                   if sep_arr.size else 0.0),
+            'exit_pressure_bar': np.array(exit_pressure_series),
+            # Boğulma: modelin geçerlilik sınırı. False olan örneklerde hem
+            # boşalma yasası hem CF bağıntısı geçersizdir; itki UYDURULMAZ,
+            # sıfır raporlanır ve durum bildirilir.
+            'choked': choked_arr,
+            'unchoked_from_t': unchoked_from_t,
+            'unchoked_fraction': (float(unchoked_mask.mean())
+                                  if unchoked_mask.size else 0.0),
+            'choking_criterion': (
+                'Choked-throat limit: Pc >= Pa*((gamma+1)/2)^(gamma/(gamma-1)). '
+                'Below it the solver mass-flow law mdot = Pc*A_t/c* and the '
+                'thrust-coefficient relations do not apply; thrust is '
+                'reported as zero there and the samples are flagged rather '
+                'than filled with a number the model cannot produce.'),
+            'separation_criterion': (
+                'Summerfield: flow separation expected below Pe/Pa = '
+                f'{SUMMERFIELD_SEPARATION_RATIO:g}; in the separated region '
+                'the thrust coefficient is evaluated as a nozzle TRUNCATED '
+                'at the separation area ratio, not as the attached 1-D '
+                'nozzle. Source: Sutton & Biblarz, Rocket Propulsion '
+                'Elements 9th ed., Ch. 3 and Ch. 5.'),
             # Basınç sabit-nokta çözümünün GERÇEK durumu (eskiden sabit True)
             'convergence_achieved': bool(solver_failed_steps == 0),
             'pressure_solver_steps': int(solver_steps),
@@ -6876,6 +8379,149 @@ class SolidRocketEngine:
             'time_step_s': float(dt),
         }
     
+    @staticmethod
+    def _decimate_curve_indices(thrust, pressure=None, keep=(),
+                                max_points=SOLID_THRUST_CURVE_MAX_POINTS):
+        """Yayımlanacak eğri için TEPEYİ KORUYAN örnek indeksleri.
+
+        v2.6.27 (B2-3). Çözücü adımı dt = 0.01 s sabit olduğu için
+        yayımlanan dizi saniyede 100 nokta taşır ve yanma süresiyle
+        sınırsız büyür (ölçüm SOLID_THRUST_CURVE_MAX_POINTS bloğunda).
+        Çözücü adımı DEĞİŞMEZ; seyreltilen yalnız yayımlanan dizidir.
+
+        SABİT ADIMLI seyreltme tepeyi ıskalayabilir, o yüzden burada iki
+        koruma birlikte çalışır:
+
+        1. **Kova uçları.** Örnekler eşit sayıda kovaya bölünür ve her
+           kovadan itkinin EN BÜYÜK ve EN KÜÇÜK olduğu örnek alınır. Bu,
+           küresel tepeyi tanım gereği taşır ve eğrinin zarfını (salınım
+           genliğini) korur; düz stride ise zarfı rastgele kırpar.
+        2. **Zorunlu örnekler.** ``keep`` ile verilen indeksler (tepe
+           basınç, ayrılmanın ilk anı, boğulmanın kesildiği ilk an, tükeniş)
+           kovalardan bağımsız olarak eklenir.
+
+        İlk ve son örnek her hâlde korunur (yanma süresi ve kapanış
+        noktası eğriden okunabilmelidir).
+
+        Args:
+            thrust: itki örnekleri (zarfı belirleyen birincil dizi).
+            pressure: verilirse tepe basınç örneği de zorunlu tutulur.
+            keep: ek zorunlu indeksler (None/aralık dışı olanlar atılır).
+            max_points: yaklaşık üst sınır. Dizi bundan kısaysa HİÇBİR
+                seyreltme yapılmaz ve bütün indeksler döner.
+
+        Returns:
+            Artan sırada, tekrarsız indeks dizisi (numpy int dizisi).
+        """
+        F = np.asarray(thrust, dtype=float)
+        n = int(F.size)
+        if n == 0:
+            return np.zeros(0, dtype=int)
+        if n <= int(max_points):
+            return np.arange(n, dtype=int)
+
+        zorunlu = {0, n - 1}
+        sonlu = np.isfinite(F)
+        if bool(sonlu.any()):
+            zorunlu.add(int(np.nanargmax(np.where(sonlu, F, -np.inf))))
+        if pressure is not None:
+            P = np.asarray(pressure, dtype=float)
+            if P.size == n and bool(np.isfinite(P).any()):
+                zorunlu.add(int(np.nanargmax(
+                    np.where(np.isfinite(P), P, -np.inf))))
+        for idx in keep:
+            if idx is None:
+                continue
+            i = int(idx)
+            if 0 <= i < n:
+                zorunlu.add(i)
+
+        # Kova sayısı: her kovadan iki örnek (min + maks) alındığı için
+        # tavanın yarısı kadar kova açılır.
+        kova = max(1, int(max_points) // 2)
+        sinirlar = np.linspace(0, n, kova + 1).astype(int)
+        secilen = set(zorunlu)
+        for bas, son in zip(sinirlar[:-1], sinirlar[1:]):
+            if son <= bas:
+                continue
+            dilim = F[bas:son]
+            gecerli = np.isfinite(dilim)
+            if not bool(gecerli.any()):
+                secilen.add(int(bas))
+                continue
+            secilen.add(int(bas + np.nanargmax(np.where(gecerli, dilim,
+                                                        -np.inf))))
+            secilen.add(int(bas + np.nanargmin(np.where(gecerli, dilim,
+                                                        np.inf))))
+        return np.array(sorted(secilen), dtype=int)
+
+    def _published_thrust_curve(self, curve):
+        """Yayımlanan itki eğrisi bloğu — seyreltilmiş ve BEYANLI.
+
+        Türetilmiş büyüklüklerin (toplam impuls, ortalama itki, biçim
+        sınıfı, kararlılık, uyarılar) hepsi TAM ÇÖZÜNÜRLÜKLÜ diziden
+        hesaplanır; burada seyreltilen yalnız istemciye giden dizidir ve
+        bu, blokta adıyla söylenir.
+        """
+        n = int(np.asarray(curve['time']).size)
+        # Zorunlu tutulacak kritik anlar: kullanıcıya bildirilen her olayın
+        # eğride bir karşılığı OLMALIDIR, yoksa uyarı ile grafik çelişir.
+        zaman = np.asarray(curve['time'], dtype=float)
+
+        def _ilk_indeks(t_deger):
+            if t_deger is None or not zaman.size:
+                return None
+            return int(np.argmin(np.abs(zaman - float(t_deger))))
+
+        zorunlu = [
+            _ilk_indeks(curve.get('separated_from_t')),
+            _ilk_indeks(curve.get('unchoked_from_t')),
+            _ilk_indeks(curve.get('burnout_time_s')),
+        ]
+        idx = self._decimate_curve_indices(
+            curve['thrust'], curve.get('pressure'), keep=zorunlu)
+
+        def _al(ad):
+            dizi = np.asarray(curve[ad])
+            return dizi[idx].tolist() if dizi.size == n else dizi.tolist()
+
+        return {
+            'time': _al('time'),
+            'thrust': _al('thrust'),
+            'pressure': _al('pressure'),
+            'burn_area': _al('burn_area'),
+            'mass_flow': _al('mass_flow'),
+            # Eğri kendi temelini BEYAN eder; dışa aktarım (.eng) bunu
+            # dosyaya yazar. v2.6.26 öncesinde beyan yoktu ve dışa
+            # aktarım etiketi "solid grain burn-back solver" diye SABİT
+            # yazılıydı — hibrit motor da eğri üretmeye başlayınca hibrit
+            # dosyalar KATI çözücüsüyle üretilmiş gibi etiketleniyordu.
+            'basis': ('solid grain burn-back solver (time-marched): burn '
+                      'area from grain regression, chamber pressure from '
+                      'the iterative pressure-burn rate fixed point '
+                      '(r = a*Pc^n)'),
+            # v2.6.27 (B2-3): dizinin ÇÖZÜM çözünürlüğü değil YAYIN
+            # çözünürlüğü olduğu, ve neyin korunduğu açıkça yazılır.
+            'sampling': {
+                'points_published': int(idx.size),
+                'points_computed': n,
+                'decimated': bool(idx.size < n),
+                'solver_time_step_s': curve.get('time_step_s'),
+                'max_points': int(SOLID_THRUST_CURVE_MAX_POINTS),
+                'basis': (
+                    'The solver time step is UNCHANGED; only the published '
+                    'array is thinned. Thinning keeps, in every bucket, the '
+                    'samples of largest and smallest thrust (so the peak and '
+                    'the envelope survive) plus the first and last sample, '
+                    'the peak-pressure sample, and the first samples of flow '
+                    'separation, of loss of choking and of burnout. Every '
+                    'derived quantity in this response (total impulse, '
+                    'average thrust, curve shape, stability, warnings) is '
+                    'computed from the FULL-resolution solution, not from '
+                    'this array.'),
+            },
+        }
+
     def calculate_performance(self):
         """Calculate overall motor performance with comprehensive analysis"""
         # Get thrust curve
@@ -7556,23 +9202,8 @@ class SolidRocketEngine:
             'chamber_temperature': self.T_c,
             'chamber_pressure': self.P_c,
             
-            # Thrust curve data
-            'thrust_curve': {
-                'time': curve['time'].tolist(),
-                'thrust': curve['thrust'].tolist(),
-                'pressure': curve['pressure'].tolist(),
-                'burn_area': curve['burn_area'].tolist(),
-                'mass_flow': curve['mass_flow'].tolist(),
-                # Eğri kendi temelini BEYAN eder; dışa aktarım (.eng) bunu
-                # dosyaya yazar. v2.6.26 öncesinde beyan yoktu ve dışa
-                # aktarım etiketi "solid grain burn-back solver" diye SABİT
-                # yazılıydı — hibrit motor da eğri üretmeye başlayınca hibrit
-                # dosyalar KATI çözücüsüyle üretilmiş gibi etiketleniyordu.
-                'basis': ('solid grain burn-back solver (time-marched): burn '
-                          'area from grain regression, chamber pressure from '
-                          'the iterative pressure-burn rate fixed point '
-                          '(r = a*Pc^n)'),
-            },
+            # Thrust curve data (yayın çözünürlüğü — bkz. _published_thrust_curve)
+            'thrust_curve': self._published_thrust_curve(curve),
             
             # Altitude performance
             'altitude_performance': altitude_performance,
@@ -7697,5 +9328,60 @@ class SolidRocketEngine:
             # Fail-closed: kontur üretilemiyorsa ÜRETİLMEZ; viz yerel üretime
             # düşer ve kaynağı 'kontur: yerel üretim' çipiyle beyan eder.
             pass
+
+        # --- v2.6.27: doğrulanmış analiz modüllerinin bağlanması -----------
+        # Üçü de çözücünün GERÇEK durumundan beslenir; girdi eksikse blok
+        # NOT_MODELLED beyanıyla döner (bkz. ilgili metotların docstring'i).
+        # Hiçbiri Isp / itki / geometri sonucuna geri beslenmez.
+
+        # 1) İki-fazlı (tanecik gecikmesi) Isp kaybı — katı motorun kendi
+        #    fiziği (alüminyumlu APCP'de yoğuşmuş Al2O3). Boğaz çapı olarak
+        #    yukarıda raporlanan GEOMETRİK çap verilir (aynı sayı).
+        results['two_phase_loss'] = self._two_phase_loss_report(d_throat)
+
+        # 2) Kamara akustik modları. Katıda enjektör yok: chug marjı yerine
+        #    yalnız mod tablosu + tehlike bandı, uygulanabilirlik beyanıyla.
+        results['acoustic_modes'] = self._acoustic_mode_report()
+
+        # 3) Lüle iç akışı (rejim, şok konumu) + ayrılma. Alan profili, bir
+        #    satır yukarıda YAYIMLANAN konturdan kurulur — kontur
+        #    üretilemediyse iki blok da NOT_MODELLED döner.
+        _akis_blok, _ayrilma_blok = self._nozzle_flow_field_report(
+            (results.get('nozzle_contour') or {}).get('points'))
+        results['nozzle_flow_quasi1d'] = _akis_blok
+        results['nozzle_flow_separation'] = _ayrilma_blok
+
+        # --- v2.6.27 (A1-1): boğaz boyutlandırma ölçütünün beyanı ----------
+        # Boğaz artık t=0 yanma alanına değil, yanma boyunca ulaşılan EN
+        # BÜYÜK gereksinime göre açılıyor. Aynı geometride itki eskisinden
+        # düşük çıkar; kullanıcı değişikliği burada görür ve ölçülen tepe
+        # basıncının tasarım basıncına oranı da burada yazılıdır.
+        results['throat_sizing'] = self._throat_sizing_report(curve)
+
+        # --- v2.6.27 (A1-2): itki eğrisindeki ayrılma bölgesinin beyanı ----
+        # Bu blok, teşhis amaçlı nozzle_flow_separation bloğundan FARKLIDIR:
+        # oradaki modül tek bir (tasarım) çalışma noktasını inceler ve itkiye
+        # geri beslenmez; buradaki alanlar itki eğrisinin GERÇEKTEN kesilmiş
+        # lüle modeliyle hesaplandığı örnekleri gösterir.
+        _sep = np.asarray(curve.get('separated', []), dtype=bool)
+        results['thrust_curve_separation'] = {
+            'separated_from_t': curve.get('separated_from_t'),
+            'separated_fraction': float(curve.get('separated_fraction', 0.0)),
+            'separated_samples': int(_sep.sum()) if _sep.size else 0,
+            'total_samples': int(_sep.size),
+            'criterion': curve.get('separation_criterion'),
+            'applied_to_thrust': True,
+            'basis': (
+                'Samples flagged here are computed with the TRUNCATED-nozzle '
+                'thrust coefficient (separation area ratio from the '
+                'Summerfield criterion), not with the attached 1-D relation. '
+                'Before v2.6.27 the attached relation was clipped with '
+                'max(CF, 0), which reported 0 N thrust while the chamber '
+                'pressure and the mass flow were still positive (measured on '
+                'this repo: 31% of the slotted curve, 21% wagon wheel, 17% '
+                'star). The separated part of the curve is a MODEL estimate: '
+                'the one-dimensional attached-flow relation does not hold '
+                'there.'),
+        }
 
         return results

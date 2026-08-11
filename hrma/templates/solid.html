@@ -3345,64 +3345,234 @@
             }
         }
 
+        // ==================================================================
+        // GRAIN ÖNİZLEMESİ (v2.6.27, A6 kalem 4)
+        // ÖNCE: her tip için ELDE YAZILMIŞ, sabit bir SVG basılıyordu. Yıldız
+        // önizlemesi her zaman 5 uçlu sabit bir path'ti; oysa "Number of
+        // Points" alanının varsayılanı 6 ve alt sınırı 3'tür. Kullanıcı 8 uç
+        // girip 5 uçlu şekil görüyordu — çözücü ise 8 uçla hesaplıyordu.
+        // ŞİMDİ: kesitler form alanlarından üretilir ve ÇÖZÜCÜNÜN kendi
+        // geometri tanımını izler:
+        //   star  -> solid_rocket_engine.py _star_port_polygon / _star_params
+        //            (2N köşe; vadiler Ri, uçlar Ri+derinlik; derinlik
+        //             0,8·web ile kırpılır)
+        //   wagon -> _wagon_port_polygon (r_delik = D_core/4,
+        //            çevre delikleri R_pitch = D_dis/4 dairesinde)
+        //   fino/slot -> _cached_slot_quads (merkez port + n radyal yuva,
+        //            genişlik w, uç yarıçapı r_port + derinlik)
+        // Değer okunamıyorsa YANLIŞ şekil çizilmez: önizleme "yok" durumuna
+        // düşer ve nedeni yazılır.
+        // ==================================================================
+        // >>> SOLID_GRAIN_PREVIEW_START
+        // (tests/test_form_alan_sirasi.py bu bloğu ayıklayıp node'da koşturur;
+        //  blok kendi kendine yeter: yalnız T / TF / document kullanır.)
+        const GRAIN_PREVIEW_SIZE = 180;      // px, viewBox kenarı
+        const GRAIN_PREVIEW_R = 80;          // px, dış yarıçapın karşılığı
+
+        function grainPreviewNum(id) {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            const v = parseFloat(el.value);
+            return Number.isFinite(v) ? v : null;
+        }
+
+        function grainPreviewShell() {
+            // Dış çap ve çekirdek çapı okunmadan hiçbir kesit çizilemez.
+            const Do = grainPreviewNum('outer_diameter');
+            const Di = grainPreviewNum('core_diameter');
+            if (Do === null || Do <= 0) return null;
+            if (Di === null || Di < 0) return null;
+            if (Di >= Do) return null;            // port dış çapı aşamaz
+            return {
+                Do: Do, Di: Di,
+                scale: GRAIN_PREVIEW_R / (Do / 2),   // px / mm
+                c: GRAIN_PREVIEW_SIZE / 2
+            };
+        }
+
+        function grainPreviewUnavailable(reason) {
+            const c = GRAIN_PREVIEW_SIZE / 2;
+            return '<svg width="' + GRAIN_PREVIEW_SIZE + '" height="' + GRAIN_PREVIEW_SIZE
+                + '" viewBox="0 0 ' + GRAIN_PREVIEW_SIZE + ' ' + GRAIN_PREVIEW_SIZE + '">'
+                + '<circle cx="' + c + '" cy="' + c + '" r="' + GRAIN_PREVIEW_R
+                + '" fill="none" stroke="#7d97a5" stroke-width="2" stroke-dasharray="6 5"/>'
+                + '<text x="' + c + '" y="' + (c - 4) + '" text-anchor="middle" font-size="12" fill="#ff7a85">'
+                + grainPreviewEscape(T('solid.ui.preview_unavailable', 'Preview unavailable'))
+                + '</text>'
+                + '<text x="' + c + '" y="' + (c + 14) + '" text-anchor="middle" font-size="10" fill="#7d97a5">'
+                + grainPreviewEscape(reason) + '</text>'
+                + '</svg>';
+        }
+
+        function grainPreviewEscape(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;');
+        }
+
+        function grainPreviewOpen(label, note) {
+            const s = GRAIN_PREVIEW_SIZE;
+            let svg = '<svg width="' + s + '" height="' + s + '" viewBox="0 0 ' + s + ' ' + s + '">'
+                + '<circle cx="' + (s / 2) + '" cy="' + (s / 2) + '" r="' + GRAIN_PREVIEW_R
+                + '" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>';
+            svg += '@BODY@';
+            svg += '<text x="' + (s / 2) + '" y="' + (s - 20) + '" text-anchor="middle" font-size="12" fill="#7d97a5">'
+                + grainPreviewEscape(label) + '</text>';
+            if (note) {
+                svg += '<text x="' + (s / 2) + '" y="' + (s - 6) + '" text-anchor="middle" font-size="9" fill="#ff8c33">'
+                    + grainPreviewEscape(note) + '</text>';
+            }
+            return svg + '</svg>';
+        }
+
+        // Merkezden geçen radyal yuva (finocyl/slotted): çözücüdeki quad ile
+        // aynı kurulum — teğetsel yarı genişlik ±w/2, uç yarıçapı r_tip.
+        function grainSlotPath(sh, k, n, widthMm, tipMm) {
+            const ang = 2 * Math.PI * k / n;
+            const ux = Math.cos(ang), uy = Math.sin(ang);
+            const vx = -uy, vy = ux;
+            const half = (widthMm / 2) * sh.scale;
+            const rt = tipMm * sh.scale;
+            const pts = [
+                [half * vx, half * vy],
+                [rt * ux + half * vx, rt * uy + half * vy],
+                [rt * ux - half * vx, rt * uy - half * vy],
+                [-half * vx, -half * vy]
+            ];
+            return 'M' + pts.map(function (p) {
+                return (sh.c + p[0]).toFixed(2) + ',' + (sh.c + p[1]).toFixed(2);
+            }).join(' L') + ' Z';
+        }
+
         function updateGrainPreview() {
             const grainType = document.getElementById('grain_type').value;
             const preview = document.getElementById('grain_preview');
-            
+
             // Show/hide configuration sections
             document.getElementById('star_config').style.display = (grainType === 'star') ? 'block' : 'none';
             document.getElementById('finocyl_config').style.display = (grainType === 'finocyl') ? 'block' : 'none';
             const slottedCfg = document.getElementById('slotted_config');
             if (slottedCfg) slottedCfg.style.display = (grainType === 'slotted') ? 'block' : 'none';
-            
-            const svgs = {
-                'bates': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="25" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">${T('solid.js.bates', 'BATES')}</text>
-                </svg>`,
-                'star': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
-                    <path d="M90,30 l15,45 h40 l-30,25 l10,40 l-35,-25 l-35,25 l10,-40 l-30,-25 h40 z" 
-                          fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">${T('solid.ui.star', 'Star')}</text>
-                </svg>`,
-                'finocyl': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="25" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <rect x="70" y="25" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
-                    <rect x="102" y="25" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
-                    <rect x="70" y="115" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
-                    <rect x="102" y="115" width="8" height="40" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">${T('solid.ui.finocyl', 'Finocyl')}</text>
-                </svg>`,
-                'slotted': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="25" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <rect x="85" y="10" width="10" height="30" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
-                    <rect x="85" y="140" width="10" height="30" fill="#0a1322" stroke="#9fdcec" stroke-width="1"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">${T('solid.ui.slotted', 'Slotted')}</text>
-                </svg>`,
-                'wagon_wheel': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="90" cy="90" r="15" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="90" cy="50" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="120" cy="70" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="120" cy="110" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="90" cy="130" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="60" cy="110" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <circle cx="60" cy="70" r="10" fill="#0a1322" stroke="#9fdcec" stroke-width="2"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">${T('solid.ui.wagon_wheel', 'Wagon Wheel')}</text>
-                </svg>`,
-                'end_burner': `<svg width="180" height="180" viewBox="0 0 180 180">
-                    <circle cx="90" cy="90" r="80" fill="rgba(148,163,180,0.4)" stroke="#9fdcec" stroke-width="2"/>
-                    <line x1="90" y1="10" x2="90" y2="90" stroke="#f093fb" stroke-width="4"/>
-                    <text x="90" y="160" text-anchor="middle" font-size="12" fill="#7d97a5">${T('solid.ui.end_burner', 'End Burner')}</text>
-                </svg>`
-            };
-            
-            preview.innerHTML = svgs[grainType] || svgs['bates'];
+
+            const sh = grainPreviewShell();
+            if (!sh) {
+                preview.innerHTML = grainPreviewUnavailable(
+                    T('solid.ui.preview_needs_diameters',
+                      'Enter outer and core diameter (core < outer)'));
+                return;
+            }
+            const PORT = 'fill="#0a1322" stroke="#9fdcec" stroke-width="2"';
+            const rOuter = GRAIN_PREVIEW_R;
+            const rCore = (sh.Di / 2) * sh.scale;
+            const webMm = (sh.Do - sh.Di) / 2;
+            let body = '';
+            let label = '';
+            let note = '';
+
+            if (grainType === 'bates') {
+                label = T('solid.js.bates', 'BATES');
+                body = '<circle cx="' + sh.c + '" cy="' + sh.c + '" r="' + rCore.toFixed(2) + '" ' + PORT + '/>';
+
+            } else if (grainType === 'end_burner') {
+                // Çekirdeksiz tam silindir; yanma yüzeyi eksene diktir.
+                label = T('solid.ui.end_burner', 'End Burner');
+                body = '<line x1="' + sh.c + '" y1="' + (sh.c - rOuter) + '" x2="' + sh.c
+                     + '" y2="' + sh.c + '" stroke="#f093fb" stroke-width="4"/>';
+
+            } else if (grainType === 'star') {
+                const nRaw = grainPreviewNum('star_points');
+                const depthRaw = grainPreviewNum('star_radius');
+                if (nRaw === null || depthRaw === null) {
+                    preview.innerHTML = grainPreviewUnavailable(
+                        T('solid.ui.preview_needs_star_params',
+                          'Enter number of points and point radius'));
+                    return;
+                }
+                const n = Math.round(nRaw);
+                if (!(n >= 3)) {
+                    preview.innerHTML = grainPreviewUnavailable(
+                        T('solid.ui.preview_star_min_points', 'A star needs at least 3 points'));
+                    return;
+                }
+                // Çözücüdeki kırpma (_star_params) birebir uygulanır ki
+                // önizleme HESAPLANACAK şekli göstersin.
+                const maxDepth = 0.8 * Math.max(webMm, 2.0);
+                const depth = Math.min(depthRaw, maxDepth);
+                if (depthRaw > maxDepth + 1e-9) {
+                    note = TF('solid.ui.preview_star_depth_clipped',
+                              { depth: depth.toFixed(1) },
+                              'Point radius clipped to {depth} mm by the web');
+                }
+                const rTip = (sh.Di / 2 + depth) * sh.scale;
+                const pts = [];
+                for (let k = 0; k < n; k++) {
+                    const aTip = 2 * Math.PI * k / n - Math.PI / 2;      // uç yukarı
+                    const aVal = 2 * Math.PI * (k + 0.5) / n - Math.PI / 2;
+                    pts.push([sh.c + rTip * Math.cos(aTip), sh.c + rTip * Math.sin(aTip)]);
+                    pts.push([sh.c + rCore * Math.cos(aVal), sh.c + rCore * Math.sin(aVal)]);
+                }
+                label = TF('solid.ui.preview_star_label', { points: n }, 'Star ({points} points)');
+                body = '<path d="M' + pts.map(function (p) {
+                    return p[0].toFixed(2) + ',' + p[1].toFixed(2);
+                }).join(' L') + ' Z" ' + PORT + '/>';
+
+            } else if (grainType === 'wagon_wheel') {
+                // r_delik = D_core/4, çevre delikleri R_pitch = D_dis/4.
+                const rHole = (sh.Di / 4) * sh.scale;
+                const rPitch = (sh.Do / 4) * sh.scale;
+                label = T('solid.ui.wagon_wheel', 'Wagon Wheel');
+                body = '<circle cx="' + sh.c + '" cy="' + sh.c + '" r="' + rHole.toFixed(2) + '" ' + PORT + '/>';
+                for (let k = 0; k < 6; k++) {
+                    const a = 2 * Math.PI * k / 6 - Math.PI / 2;
+                    body += '<circle cx="' + (sh.c + rPitch * Math.cos(a)).toFixed(2)
+                          + '" cy="' + (sh.c + rPitch * Math.sin(a)).toFixed(2)
+                          + '" r="' + rHole.toFixed(2) + '" ' + PORT + '/>';
+                }
+
+            } else if (grainType === 'finocyl' || grainType === 'slotted') {
+                const isFin = (grainType === 'finocyl');
+                const nRaw = grainPreviewNum(isFin ? 'fin_count' : 'slot_count');
+                const wRaw = grainPreviewNum(isFin ? 'fin_width' : 'slot_width');
+                const dRaw = grainPreviewNum(isFin ? 'fin_length' : 'slot_depth');
+                if (nRaw === null || wRaw === null || dRaw === null) {
+                    preview.innerHTML = grainPreviewUnavailable(
+                        T('solid.ui.preview_needs_slot_params',
+                          'Enter slot count, width and depth'));
+                    return;
+                }
+                const n = Math.round(nRaw);
+                if (!(n >= 2) || !(wRaw > 0) || !(dRaw > 0)) {
+                    preview.innerHTML = grainPreviewUnavailable(
+                        T('solid.ui.preview_slot_params_invalid',
+                          'Slot count must be 2 or more, width and depth positive'));
+                    return;
+                }
+                const tipMm = sh.Di / 2 + dRaw;
+                if (tipMm > sh.Do / 2) {
+                    // Yuva dış çapı deler: bu geometri üretilemez, uydurma bir
+                    // kırpılmış şekil çizilmez.
+                    preview.innerHTML = grainPreviewUnavailable(
+                        T('solid.ui.preview_slot_exceeds_web',
+                          'Slot depth exceeds the web: geometry not producible'));
+                    return;
+                }
+                label = isFin
+                    ? TF('solid.ui.preview_finocyl_label', { count: n }, 'Finocyl ({count} fins)')
+                    : TF('solid.ui.preview_slotted_label', { count: n }, 'Slotted ({count} slots)');
+                body = '<circle cx="' + sh.c + '" cy="' + sh.c + '" r="' + rCore.toFixed(2) + '" ' + PORT + '/>';
+                for (let k = 0; k < n; k++) {
+                    body += '<path d="' + grainSlotPath(sh, k, n, wRaw, tipMm) + '" ' + PORT + '/>';
+                }
+
+            } else {
+                preview.innerHTML = grainPreviewUnavailable(
+                    TF('solid.ui.preview_unknown_grain', { type: grainType },
+                       'No preview for grain type "{type}"'));
+                return;
+            }
+
+            preview.innerHTML = grainPreviewOpen(label, note).replace('@BODY@', body);
         }
+        // <<< SOLID_GRAIN_PREVIEW_END
 
         function collectAllParameters() {
             return {
@@ -3650,6 +3820,32 @@
             return why
                 ? `<span class="hrma-na" title="${why.replace(/"/g, '&quot;')}">${label}</span>`
                 : `<span class="hrma-na">${label}</span>`;
+        }
+        // İtki eğrisi sınıfı ÇEVRİLİR. Çözücü sabit bir İngilizce etiket
+        // döndürür ('Progressive', 'Neutral', 'Regressive' ve v2.6.27'den
+        // beri 'Progressive-Regressive'); bu bir kod, kullanıcı metni değil.
+        // fmtTextField onu ham basıyordu, yani TR modda İngilizce kalıyordu.
+        // Bilinmeyen bir sınıf gelirse UYDURMA yapılmaz: ham değer, sınıfın
+        // çevrilmediği görülebilsin diye olduğu gibi gösterilir.
+        // Anahtarlar BİRLEŞTİRİLMEZ, tek tek yazılır: sözlük bekçisi şablonu
+        // statik tarıyor, dinamik ön ek hem sahte bir anahtar üretir hem de
+        // gerçek dördünü 'kullanılmıyor' gösterir.
+        function fmtThrustCurveType(obj) {
+            const v = (obj || {}).thrust_curve_type;
+            if (typeof v !== 'string' || !v.trim()) {
+                return fmtTextField(obj, 'thrust_curve_type');
+            }
+            const ham = v.trim();
+            const harita = {
+                'progressive': T('solid.js.thrust_curve_type.progressive', 'Progressive'),
+                'neutral': T('solid.js.thrust_curve_type.neutral', 'Neutral'),
+                'regressive': T('solid.js.thrust_curve_type.regressive', 'Regressive'),
+                'progressive-regressive': T('solid.js.thrust_curve_type.progressive_regressive',
+                                            'Progressive-Regressive'),
+            };
+            // Bilinmeyen sınıfta UYDURMA yok: ham değer olduğu gibi gösterilir,
+            // böylece çevrilmemiş bir sınıf eklendiği gözle görülür.
+            return harita[ham.toLowerCase()] || ham;
         }
         // >>> HRMA-HONEST-FORMATTERS-END <<<
 
@@ -4448,7 +4644,7 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.thrust_profile_analysis', 'Thrust Profile Analysis')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thrust_profile_type', 'Thrust Profile Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(thrustProfile, 'thrust_curve_type')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thrust_profile_type', 'Thrust Profile Type:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtThrustCurveType(thrustProfile)}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.thrust_stability', 'Thrust Stability:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(thrustProfile, 'thrust_stability', 1, '%')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.pressure_oscillations', 'Pressure Oscillations:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(thrustProfile, 'pressure_oscillations_percent', 1, '%')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.combustion_smoothness', 'Combustion Smoothness:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(thrustProfile, 'combustion_smoothness', 1, '%')}</td></tr>
@@ -5460,6 +5656,19 @@ Please provide:
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', function () {
                     el.dataset.userOverride = 'true';
+                });
+            });
+
+            // Önizleme artık form alanlarından üretiliyor (v2.6.27, A6):
+            // o alanlar değişince yeniden çizilmezse ekrandaki kesit
+            // kullanıcının girdiğinden BAŞKA bir geometriyi gösterir.
+            ['outer_diameter', 'core_diameter',
+             'star_points', 'star_radius',
+             'fin_count', 'fin_width', 'fin_length',
+             'slot_count', 'slot_width', 'slot_depth'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('input', function () {
+                    try { updateGrainPreview(); } catch (e) { /* yok say */ }
                 });
             });
 

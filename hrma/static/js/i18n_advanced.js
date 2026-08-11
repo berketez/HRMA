@@ -31,6 +31,12 @@
     var DICT = {
         en: {
             /* Sayfa başlığı */
+            'adv.js.unwiredOther': 'Declared as not used in the calculation (category: {category})',
+            'adv.js.unwiredNoModel': 'Not wired to the solver yet: saved with the design, not used in the result',
+            'adv.js.unwiredDerived': 'Computed by the solver: your entry does not change the result',
+            'adv.js.ofDefaultUntouched': 'Starting value for {oxidizer} + {fuel}; not a computed optimum. Use Find Optimum.',
+            'adv.js.ofDefaultOtherPair': 'This default belongs to {defaultOxidizer} + {defaultFuel}, but {oxidizer} + {fuel} is selected. Use Find Optimum.',
+            'adv.help.ofDependsOnPropellants': 'Optimum O/F depends on the fuel and oxidizer selected above. Pick both first, then use Find Optimum - the value is computed on the server for that pair.',
             'adv.label.launchAltitudeM': 'Launch Altitude (m)',
             'adv.label.windDirectionDeg': 'Wind Direction (degrees)',
             'adv.page.title': 'Hybrid Motor Analysis - Motor Analysis Tool',
@@ -56,6 +62,7 @@
             'adv.sec.fuelConfiguration': 'Fuel Configuration',
             'adv.sec.injectorConfiguration': 'Injector Configuration',
             'adv.sec.injectorDesign': 'Injector Design',
+            'adv.sec.mixtureRatio': 'Mixture Ratio',
                         'adv.sec.thrustCurve': 'Thrust and Chamber Pressure vs Time',
             'adv.tip.launchAltitudeM': 'Elevation of the launch site above sea level. Sets the starting altitude and the ambient conditions the trajectory begins from.',
             'adv.tip.windDirectionDeg': 'Compass direction the wind blows towards, measured clockwise from the launch azimuth. 0° = tailwind along the launch heading.',
@@ -695,6 +702,12 @@
         },
         tr: {
             /* Sayfa başlığı */
+            'adv.js.unwiredOther': 'Hesapta kullanılmadığı beyan edildi (kategori: {category})',
+            'adv.js.unwiredNoModel': 'Henüz çözücüye bağlı değil: tasarımla birlikte saklanır, sonuçta kullanılmaz',
+            'adv.js.unwiredDerived': 'Çözücü kendisi hesaplıyor: girdiğiniz değer sonucu değiştirmez',
+            'adv.js.ofDefaultUntouched': '{oxidizer} + {fuel} için başlangıç değeri; hesaplanmış bir optimum değildir. Find Optimum\'u kullanın.',
+            'adv.js.ofDefaultOtherPair': 'Bu varsayılan {defaultOxidizer} + {defaultFuel} çiftine aittir, oysa {oxidizer} + {fuel} seçili. Find Optimum\'u kullanın.',
+            'adv.help.ofDependsOnPropellants': 'Optimum O/F, yukarıda seçilen yakıt ve oksitleyiciye bağlıdır. Önce ikisini seçin, sonra Find Optimum\'u kullanın — değer o çift için sunucuda hesaplanır.',
             'adv.label.launchAltitudeM': 'Fırlatma Rakımı (m)',
             'adv.label.windDirectionDeg': 'Rüzgâr Yönü (derece)',
             'adv.page.title': 'Hibrit Motor Analizi - Motor Analiz Aracı',
@@ -720,6 +733,7 @@
             'adv.sec.fuelConfiguration': 'Yakıt Ayarları',
             'adv.sec.injectorConfiguration': 'Enjektör Ayarları',
             'adv.sec.injectorDesign': 'Enjektör Tasarımı',
+            'adv.sec.mixtureRatio': 'Karışım Oranı',
                         'adv.sec.thrustCurve': 'Zamana Göre İtki ve Yanma Odası Basıncı',
             'adv.tip.launchAltitudeM': 'Fırlatma sahasının deniz seviyesinden yüksekliği. Yörüngenin başlangıç irtifasını ve başladığı ortam koşullarını belirler.',
             'adv.tip.windDirectionDeg': 'Rüzgârın estiği yön; fırlatma azimutundan saat yönünde ölçülür. 0 derece = fırlatma yönünde arkadan rüzgâr.',

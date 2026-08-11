@@ -37,6 +37,9 @@ import numpy as np
 from hrma.analysis.regression_analysis import RegressionAnalyzer
 from hrma.analysis.tank_blowdown import N2OTankBlowdown
 from hrma.data.materials_db import get_material
+# Ayrılma eşiği TEK tanım noktasından okunur (sayı kopyalanmaz); aynı sabiti
+# hibrit motor da bu addan alır.
+from hrma.flow.separation import SUMMERFIELD_FACTOR_DEFAULT
 
 # SP-8089 enjektör kararlılık eşikleri (ΔP/P_c)
 DP_RATIO_WARN = 0.15      # bunun altında chugging riski uyarısı
@@ -304,6 +307,13 @@ class TransientBallistics:
         elif erosion_enabled:
             self.erosion = ThroatErosionModel.for_material(throat_material)
 
+        # Kaç adımda C_F ayrılma tabanına oturdu (kalem 3). Sıfırdan büyükse
+        # eğrinin bir bölümü ekli-akış modelinin GEÇERLİLİK ARALIĞI DIŞINDA
+        # geçmiştir ve bu sonuçta beyan edilir.
+        self._separation_limited_steps = 0
+        # Ekli-akış ifadesi negatife düşüp sıfıra kırpılan adım sayısı.
+        self._negative_cf_steps = 0
+
     # ---------------- nozul yardımcıları ----------------
 
     @staticmethod
@@ -333,6 +343,55 @@ class TransientBallistics:
                        * (2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (gamma - 1.0))
                        * (1.0 - pe_ratio ** ((gamma - 1.0) / gamma)))
 
+    @staticmethod
+    def _mach_from_pressure_ratio(p_over_p0, gamma):
+        """İzentropik p/p0 → Mach (kapalı form). Aralık dışıysa None."""
+        if not (p_over_p0 > 0.0) or p_over_p0 > 1.0:
+            return None
+        return float(np.sqrt(2.0 / (gamma - 1.0)
+                             * ((1.0 / p_over_p0) ** ((gamma - 1.0) / gamma)
+                                - 1.0)))
+
+    @staticmethod
+    def _area_ratio_from_mach(M, gamma):
+        """Süpersonik dal alan oranı A/A* (kapalı form)."""
+        if M is None or not (M > 0.0):
+            return None
+        return float((1.0 / M)
+                     * ((2.0 / (gamma + 1.0))
+                        * (1.0 + 0.5 * (gamma - 1.0) * M * M))
+                     ** ((gamma + 1.0) / (2.0 * (gamma - 1.0))))
+
+    def _separation_limited_cf(self, Pc_pa, gamma, Pa_pa):
+        """Ayrılma istasyonunda kesilmiş lülenin C_F'i — fiziksel ALT SINIR.
+
+        Aşırı genişlemiş lülede sınır tabaka P_e < k·P_a olduğunda ayrılır
+        (Summerfield, k = 0,40; sabit hrma/flow/separation.py'de tanımlı).
+        Ayrılma istasyonundan sonrası itkiye katkı vermediği için gerçek C_F,
+        aynı lülenin O İSTASYONDA kesilmiş hâlinin C_F'inden aşağı inemez.
+        Çözülemezse None döner ve taban UYGULANMAZ (sayı uydurulmaz).
+        """
+        if not (Pa_pa > 0.0 and Pc_pa > 0.0):
+            return None
+        M_sep = self._mach_from_pressure_ratio(
+            SUMMERFIELD_FACTOR_DEFAULT * Pa_pa / Pc_pa, gamma)
+        # Ayrılma istasyonu ancak SÜPERSONİK dalda anlamlıdır. M_sep <= 1
+        # ise ayrılma noktası boğazın gerisine düşer, yani lüle o basınçta
+        # zaten süpersonik akmıyordur — taban uydurulmaz, None döner.
+        if M_sep is None or M_sep <= 1.0:
+            return None
+        eps_sep = self._area_ratio_from_mach(M_sep, gamma)
+        if eps_sep is None or not np.isfinite(eps_sep) or eps_sep <= 1.0:
+            return None
+        try:
+            pe_sep = self._exit_pressure_ratio(gamma, eps_sep)
+            cfm_sep = self._momentum_cf(gamma, pe_sep)
+        except (ValueError, FloatingPointError):
+            return None
+        cf = (self._lambda * cfm_sep + eps_sep * pe_sep
+              - eps_sep * Pa_pa / Pc_pa)
+        return float(cf) if np.isfinite(cf) else None
+
     def _thrust_coefficient(self, Pc_pa, eps=None, pe_ratio=None,
                             cf_momentum=None):
         """C_F(P_c): sabit ε'da yalnız basınç-itki terimi değişir.
@@ -340,14 +399,49 @@ class TransientBallistics:
         Erozyon açıkken boğaz büyür → ε = A_e/A_t küçülür; çağıran güncel
         (eps, pe_ratio, cf_momentum) üçlüsünü geçirir. None → tasarım
         değerleri (eski davranış; erozyon kapalıyken bit-özdeş yol).
+
+        v2.6.27 B1 (kalem 3) — AYRILMA TABANI. Eski ifadenin hiçbir alt
+        sınırı yoktu ve Pc düştükçe ``− ε·P_a/P_c`` terimi sınırsız büyüyordu.
+        ÖLÇÜLDÜ (ε = 25, P_a = 1 bar):
+            Pc = 20 bar -> C_F = +0,5304
+            Pc = 10 bar -> C_F = −0,7196
+            Pc =  5 bar -> C_F = −3,2196
+            Pc =  1 bar -> C_F = −23,2196
+        Yani model, basınç düştükçe lülenin motoru GERİYE ittiğini söylüyordu.
+        Gerçekte o rejimde akış çoktan ayrılmıştır ve C_F, ayrılma
+        istasyonundaki değerin altına inemez. Taban yalnız ayrılma
+        öngörüldüğünde devreye girer; ekli akışta sonuç bit-özdeştir.
         """
         if eps is None:
             eps = float(self.e.epsilon)
             pe_ratio = self._pe_ratio
             cf_momentum = self._cf_momentum
         Pa_pa = float(self.e.P_a) * 1e5
-        return (self._lambda * cf_momentum
-                + eps * pe_ratio - eps * Pa_pa / Pc_pa)
+        if not (Pc_pa and np.isfinite(Pc_pa) and Pc_pa > 0.0):
+            # Basınç sıfır/negatif/NaN ise C_F tanımsızdır. Eskiden burada
+            # sessizce ±inf ya da NaN üretilip itki dizisine akıyordu.
+            return 0.0
+        cf_ekli = (self._lambda * cf_momentum
+                   + eps * pe_ratio - eps * Pa_pa / Pc_pa)
+        Pe_pa = pe_ratio * Pc_pa
+        if Pa_pa > 0.0 and Pe_pa < SUMMERFIELD_FACTOR_DEFAULT * Pa_pa:
+            cf_sep = self._separation_limited_cf(
+                Pc_pa, float(self.e.gamma), Pa_pa)
+            if cf_sep is not None and cf_sep > cf_ekli:
+                self._separation_limited_steps += 1
+                return float(max(cf_sep, 0.0))
+        if not np.isfinite(cf_ekli):
+            return 0.0
+        if cf_ekli < 0.0:
+            # SON DURAK. Bir roket lülesi aracı GERİYE itemez: negatif C_F
+            # her zaman ekli-akış modelinin geçerlilik aralığı dışında
+            # uygulanmasının bir eseridir. Sıfıra kırpmak sessiz kalmak
+            # DEĞİLDİR: adım sayılır ve sonuçta beyan edilir. Pratikte bu dal
+            # yalnız P_c ortam basıncının altına düştüğünde görülür ve solve()
+            # o durumda zaten 'chamber_below_ambient' olayıyla durur.
+            self._negative_cf_steps += 1
+            return 0.0
+        return float(cf_ekli)
 
     # ---------------- ana çözüm ----------------
 
@@ -416,6 +510,21 @@ class TransientBallistics:
 
             if mdot_ox <= 0.0:
                 event = 'feed_pressure_lost'
+                break
+
+            # Hazne basıncı ortamın altına düştüyse lüle artık dışarı akış
+            # süremez: yarı-kararlı süpersonik lüle modeli GEÇERSİZDİR.
+            # Eskiden burada durak yoktu ve model, basınç düştükçe giderek
+            # daha negatif bir C_F (ölçüldü: Pc=1 bar'da −23,2) üretmeye
+            # devam ediyordu. Sayı uydurmak yerine çözüm durur.
+            Pa_pa_stop = float(self.e.P_a) * 1e5
+            if Pa_pa_stop > 0.0 and Pc_pa <= Pa_pa_stop:
+                event = 'chamber_below_ambient'
+                warnings_list.append(
+                    f"t={t:.2f}s: Pc={Pc_pa/1e5:.2f} bar fell to or below the "
+                    f"ambient pressure ({Pa_pa_stop/1e5:.2f} bar); the nozzle "
+                    f"can no longer sustain supersonic outflow, simulation "
+                    f"stopped")
                 break
 
             # SP-8089 enjektör kararlılığı (yalnız blowdown'da anlamlı)
@@ -493,6 +602,16 @@ class TransientBallistics:
         Pc_arr = np.array(Pc_arr)
         total_impulse = float(np.trapz(F_arr, t_arr)) if len(t_arr) > 1 else 0.0
 
+        # Ayrılma tabanı devreye girdiyse SESSİZ KALINMAZ: eğrinin o bölümü
+        # ekli-akış modelinin geçerlilik aralığı dışında geçmiştir.
+        if self._separation_limited_steps:
+            warnings_list.append(
+                f"{self._separation_limited_steps} of {len(t_arr)} steps ran "
+                f"over-expanded past the Summerfield separation limit "
+                f"(P_e < {SUMMERFIELD_FACTOR_DEFAULT}*P_a); the attached-flow "
+                f"thrust coefficient is invalid there and C_F was floored at "
+                f"its separation-station value")
+
         return {
             'time': t_arr,
             'chamber_pressure': Pc_arr,            # Pa
@@ -517,6 +636,26 @@ class TransientBallistics:
             'tank_pressure': np.array(tankP_arr),  # Pa (blowdown)
             'tank_temperature': np.array(tankT_arr),
             'feed_mode': self.feed_mode,
+            'flow_separation': {
+                'criterion': 'summerfield',
+                'factor': float(SUMMERFIELD_FACTOR_DEFAULT),
+                'steps_floored': int(self._separation_limited_steps),
+                'steps_zero_clamped': int(self._negative_cf_steps),
+                'steps_total': int(len(t_arr)),
+                'basis': (
+                    'the attached-flow thrust coefficient is only valid while '
+                    'the nozzle flows full. Where P_e falls below '
+                    'factor*P_a the flow separates and C_F is floored at the '
+                    'value of the same nozzle truncated at the separation '
+                    'station, because the divergent section downstream of it '
+                    'no longer produces thrust. steps_floored = 0 means the '
+                    'whole curve stayed inside the attached-flow range and '
+                    'the result is bit-identical to the unfloored model. '
+                    'steps_zero_clamped counts the steps where even the '
+                    'separation floor was unavailable and a negative '
+                    'attached-flow C_F was clamped to zero — a rocket nozzle '
+                    'cannot push the vehicle backwards.'),
+            },
             'end_event': event,
             'burn_duration': float(t_arr[-1]) if len(t_arr) else 0.0,
             'total_impulse': total_impulse,

@@ -208,6 +208,16 @@
             // 2026-08-03 (Faz 6, T31): bu üç anahtar HİÇ yoktu; ekranda
             // 'VALIDATION STATUS: [OBJECT OBJECT]' çıkıyordu, sonra da
             // ham 'warning'/'critical' sözcükleri. Artık cümle kuruyor.
+            'panel.structural.withheldReasons': 'Why no acceptance was issued',
+            'panel.structural.wallUser': 'WALL: AS SUPPLIED',
+            'panel.structural.wallSized': 'WALL: SIZED BY HRMA',
+            'panel.structural.verdictWithheld': 'VERDICT WITHHELD',
+            'panel.structural.verdictIssued': 'VERDICT ISSUED',
+            'panel.structural.secDesignBasis': 'Basis of this verdict',
+            'panel.structural.notEvaluated': 'Not evaluated',
+            'inj.tmrEchoNote': 'This target does not change the geometry: for a fuel-centred pintle the achieved TMR follows from the mass flows and injection velocities. The value you enter is only the band the achieved TMR is compared against.',
+            'inj.helpRadialFraction': 'Share of the oxidizer flow sent through the radial tip holes (the rest goes through the annulus). This is the real control for a single-fluid hybrid pintle: TMR = f/(1-f) follows from it, and the spray cone angle follows from TMR. Usual band 0.3-0.7.',
+            'inj.fRadialFraction': 'Radial flow fraction (0-1)',
             'status.critical': 'critical findings present',
             'status.warnings': 'warnings present',
             'status.normal': 'no findings',
@@ -350,6 +360,11 @@
             // Backend dilsiz {code, params, severity} döndürür; metin burada
             // kurulur. Anahtar eksikse panelde ham kod görünür — bu yüzden
             // tests/ altındaki parite bekçisi backend kodlarıyla karşılaştırır.
+            'warn.fea.thermal_wall_over_allowable': 'Thermal FEA: peak wall temperature {peak_wall_T_K} K exceeds the allowable {allowable_K} K for {material} (melting point {melting_K} K).',
+            'warn.hybrid.regression_coeff_user_override': 'You overrode the built-in {fuel} regression coefficients: a differs from the catalogue value by {a_pct}% and n by {n_pct}%. Your own static-fire data may well be better than the catalogue, so nothing is corrected — the deviation is reported only so the source of the regression rate stays visible.',
+            'warn.hybrid.nozzle_flow_separation': 'The nozzle is over-expanded at the design ambient: at an expansion ratio of {eps} the exit pressure is {pe_bar} bar against {pa_bar} bar ambient, below the Summerfield separation threshold ({factor} x ambient). The boundary layer is expected to separate near an area ratio of {eps_separation_limit}; the divergent section beyond that station adds mass but no thrust. The thrust coefficient is floored at its separation-station value, because the attached-flow number would be below what the hardware can physically deliver.',
+            'warn.hybrid.burn_time_overridden_by_impulse': 'You supplied thrust, burn time and total impulse together, but I = F x t_b lets only two of them be independent. The burn time of {submitted_s} s was overridden: at {thrust_N} N of thrust a total impulse of {total_impulse_Ns} N.s lasts {used_s} s. Leave one of the three inputs empty if you want to set the burn time directly.',
+            'warn.liquid.input_field_not_read': 'Input field \'{field}\' was supplied as {submitted} but the liquid solver does not read it; the analysis uses the solved value {used}. Use \'{use_instead}\' to set this quantity.',
             'warn.nozzle.flow_separation': 'Flow separates inside the nozzle at this operating point: with expansion ratio {expansion_ratio} the exit pressure {exit_pressure_bar} bar is far below the ambient {ambient_pressure_bar} bar. Thrust is reported on the separated (effective) expansion ratio, not the geometric one.',
             'warn.safety.fire_distance_basis_unverified': 'Fire standoff uses generic cube-root scaling; it is not an NFPA 495/1123 siting calculation. Verify with your authority having jurisdiction.',
             'warn.safety.guidance_not_authoritative': 'This guidance is a general checklist, not an authoritative EHS source. Confirm every item against the propellant safety data sheet and your local requirements.',
@@ -453,6 +468,9 @@
             'warn.liquid.tank_vessel_fail': 'The {tank} pressure vessel analysis FAILED: the burst margin {burst_margin} is below 1 (AIAA S-080 chain) — increase the wall thickness or reduce the tank pressure.',
             'warn.liquid.water_hammer_unsafe': 'Water-hammer transient on the {line}: the design peak pressure {peak_bar} bar exceeds the pipe hoop yield pressure {yield_bar} bar — risk of permanent deformation or rupture; slow the valve closure or upgrade the line.',
             'warn.solid.case_bore_too_small': 'Declared case bore {entered_mm} mm cannot contain a {grain_mm} mm grain plus its insulation: at least {required_mm} mm is needed. The solver used the geometric minimum for the case, the grain outer diameter is unchanged.',
+            'warn.solid.pressure_exceeds_design': 'Peak chamber pressure {peak_bar} bar exceeds the design pressure {design_bar} bar by {exceed_percent}% (tolerance {tolerance_percent}%). The throat is sized at the largest area the burn requires, so this should not normally happen: check the grain geometry or report it.',
+            'warn.solid.nozzle_unchoked': 'The throat is no longer choked from t = {from_t_s} s ({fraction_percent}% of the burn, ambient {ambient_bar} bar). Below the choking limit neither the discharge law mdot = Pc*A_t/c* nor the thrust-coefficient relations apply; thrust is reported as zero there rather than filled with a number the model cannot produce.',
+            'warn.solid.flow_separation': 'Flow separation from t = {from_t_s} s: the nozzle is over-expanded for {fraction_percent}% of the burn (minimum exit pressure {exit_pressure_min_bar} bar against {ambient_bar} bar ambient, Summerfield criterion Pe/Pa < {criterion_ratio}). In that region the thrust coefficient is evaluated as a nozzle truncated at the separation area ratio, not as attached one-dimensional flow, so that part of the curve is a model estimate.',
             'warn.solid.propellant_type_derived': 'The solid motor page has no explicit propellant selector, so the propellant identity was derived from \'{field}\' = \'{value}\' and resolved to \'{propellant}\'. Grain mechanics, two-phase loss and the published mixture come from that record.',
             'warn.solid.propellant_type_unresolved': 'Propellant \'{name}\' does not match any catalogue record, so the solver fell back to \'{used}\'. Grain mechanics, two-phase loss and the published mixture describe \'{used}\', NOT your formulation - pick a catalogue row or enter the properties explicitly.',
             'warn.structural.fastener_preload_not_modeled': 'Fastener preload, embedment and thermal mismatch are not modelled by the {module} screening; joint separation and slip are therefore not verified.',
@@ -1733,9 +1751,24 @@
             'vessel.weldSpot': '0.85 — spot radiography'
         },
         tr: {
+            'inj.tmrEchoNote': 'Bu hedef geometriyi değiştirmez: yakıt merkezli pintle\'da ulaşılan TMR, kütle debilerinden ve püskürtme hızlarından çıkar. Girdiğiniz değer yalnızca ulaşılan TMR\'nin karşılaştırıldığı banttır.',
+            'inj.helpRadialFraction': 'Oksitleyici debisinin uç kısmındaki radyal deliklerden geçen payı (kalanı anülüsten gider). Tek akışkanlı hibrit pintle\'da gerçek kumanda budur: TMR = f/(1-f) buradan çıkar, sprey konisi açısı da TMR\'den. Alışılmış bant 0,3-0,7.',
+            'inj.fRadialFraction': 'Radyal akış payı (0-1)',
             'panel.safety.complianceNotEvaluated': 'Bu yazılım mevzuat uygunluğunu değerlendirmez. NFPA, OSHA, DOT ve yerel gereklilikler; sahanıza, iticinize ve yapacağınız işleme özgü olarak yetkili bir İSG / proses güvenliği uzmanınca değerlendirilmelidir.',
             'panel.safety.secCompliance': 'Mevzuat uygunluğu',
             // --- D-track uyarı/öneri kodları (v2.6.2) -------------------
+            'warn.fea.thermal_wall_over_allowable': 'Termal FEA: en yüksek cidar sıcaklığı {peak_wall_T_K} K, {material} malzemesi için izin verilen {allowable_K} K değerini aşıyor (erime noktası {melting_K} K).',
+            'panel.structural.withheldReasons': 'Onay neden verilmedi',
+            'panel.structural.wallUser': 'CİDAR: SİZİN VERDİĞİNİZ',
+            'panel.structural.wallSized': 'CİDAR: HRMA BOYUTLANDIRDI',
+            'panel.structural.verdictWithheld': 'HÜKÜM GERİ ÇEKİLDİ',
+            'panel.structural.verdictIssued': 'HÜKÜM VERİLDİ',
+            'panel.structural.secDesignBasis': 'Bu hükmün dayanağı',
+            'panel.structural.notEvaluated': 'Değerlendirilmedi',
+            'warn.hybrid.regression_coeff_user_override': 'Yerleşik {fuel} regresyon katsayılarını ezdiniz: a katalog değerinden %{a_pct}, n ise %{n_pct} farklı. Kendi static-fire verinizin katalogdan iyi olması beklenir, bu yüzden hiçbir düzeltme yapılmaz — sapma yalnızca regresyon hızının kaynağı görünür kalsın diye bildirilir.',
+            'warn.hybrid.nozzle_flow_separation': 'Lüle tasarım ortam basıncında aşırı genişlemiş: {eps} genişleme oranında çıkış basıncı {pe_bar} bar, ortam basıncı {pa_bar} bar — Summerfield ayrılma eşiğinin (ortamın {factor} katı) altında. Sınır tabakanın yaklaşık {eps_separation_limit} alan oranında ayrılması beklenir; bu istasyondan sonraki genişleyen kısım itki üretmez, yalnızca ağırlık ekler. İtki katsayısı ayrılma istasyonundaki değerine tabanlanmıştır; ekli akış değeri donanımın fiilen verebileceğinin altında kalırdı.',
+            'warn.hybrid.burn_time_overridden_by_impulse': 'İtki, yanma süresi ve toplam impulsu birlikte girdiniz; oysa I = F · t_b bağıntısında bunların yalnız ikisi bağımsız olabilir. Girdiğiniz {submitted_s} s\'lik yanma süresi ezildi: {thrust_N} N itkide {total_impulse_Ns} N·s toplam impuls {used_s} s sürer. Yanma süresini doğrudan siz belirlemek istiyorsanız üç girdiden birini boş bırakın.',
+            'warn.liquid.input_field_not_read': '\'{field}\' alanına {submitted} girildi ancak sıvı çözücü bu alanı okumuyor; analiz çözülen {used} değerini kullanıyor. Bu büyüklüğü belirlemek için \'{use_instead}\' alanını kullanın.',
             'warn.nozzle.flow_separation': 'Bu çalışma noktasında akış nozul içinde ayrılıyor: {expansion_ratio} genişleme oranında çıkış basıncı {exit_pressure_bar} bar, ortam basıncı {ambient_pressure_bar} bar değerinin çok altında. İtki, geometrik genişleme oranıyla değil, ayrılmış (etkin) oranla raporlanıyor.',
             'warn.safety.fire_distance_basis_unverified': 'Yangın emniyet mesafesi genel küp-kök ölçeklemesiyle bulunur; NFPA 495/1123 yerleşim hesabı değildir. Yetkili merciye doğrulatın.',
             'warn.safety.guidance_not_authoritative': 'Bu yönlendirme genel bir kontrol listesidir, yetkili bir İSG kaynağı değildir. Her maddeyi itergaç güvenlik bilgi formuna ve yerel mevzuata karşı doğrulayın.',
@@ -1839,6 +1872,9 @@
             'warn.liquid.tank_vessel_fail': '{tank} basınçlı kap analizi KALDI: patlama emniyet payı {burst_margin}, 1 değerinin altında (AIAA S-080 zinciri) — cidar kalınlığını artırın ya da tank basıncını düşürün.',
             'warn.liquid.water_hammer_unsafe': '{line} hattında su koçu geçici rejimi: tasarım tepe basıncı {peak_bar} bar, borunun çember akma basıncı {yield_bar} bar değerini aşıyor — kalıcı şekil değiştirme veya patlama riski; vana kapanmasını yavaşlatın ya da hattı güçlendirin.',
             'warn.solid.case_bore_too_small': 'Beyan edilen kasa iç çapı {entered_mm} mm, {grain_mm} mm grain ile yalıtımını alamaz: en az {required_mm} mm gerekir. Çözücü kasa için geometrik en küçük değeri kullandı, grain dış çapı değişmedi.',
+            'warn.solid.pressure_exceeds_design': 'Tepe kamara basıncı {peak_bar} bar, tasarım basıncı {design_bar} bar değerini %{exceed_percent} aşıyor (tolerans %{tolerance_percent}). Boğaz, yanmanın gerektirdiği en büyük alana göre boyutlandırıldığı için bu normalde olmamalıdır: tanecik geometrisini gözden geçirin ya da durumu bildirin.',
+            'warn.solid.nozzle_unchoked': 't = {from_t_s} s\'den itibaren boğaz artık boğulmuş değil (yanmanın %{fraction_percent}\'i, ortam {ambient_bar} bar). Boğulma sınırının altında ne mdot = Pc*A_t/c* boşalma yasası ne de itki katsayısı bağıntıları geçerlidir; itki orada modelin üretemeyeceği bir sayıyla doldurulmak yerine sıfır olarak raporlanır.',
+            'warn.solid.flow_separation': 't = {from_t_s} s\'den itibaren akış ayrılması: lüle yanmanın %{fraction_percent}\'inde aşırı genişlemiş durumda (en düşük çıkış basıncı {exit_pressure_min_bar} bar, ortam {ambient_bar} bar; Summerfield ölçütü Pe/Pa < {criterion_ratio}). O bölgede itki katsayısı, ekli tek boyutlu akış yerine ayrılma alan oranında KESİLMİŞ lüle olarak değerlendirilir; yani eğrinin o kısmı bir model tahminidir.',
             'warn.solid.propellant_type_derived': 'Katı motor sayfasında açık bir yakıt seçici yok; bu yüzden yakıt kimliği \'{field}\' = \'{value}\' alanından türetildi ve \'{propellant}\' olarak çözüldü. Grain mekaniği, iki fazlı kayıp ve yayımlanan karışım o kayıttan gelir.',
             'warn.solid.propellant_type_unresolved': '\'{name}\' yakıtı hiçbir katalog kaydına oturmadı; çözücü \'{used}\' kaydına düştü. Grain mekaniği, iki fazlı kayıp ve yayımlanan karışım sizin formülasyonunuzu değil \'{used}\' kaydını anlatır - katalogdan bir satır seçin ya da özellikleri açıkça girin.',
             'warn.structural.fastener_preload_not_modeled': 'Bağlantı elemanı ön yüklemesi, gömülme ve termal uyumsuzluk {module} ön elemesinde modellenmez; birleşim ayrılması ve kayma bu nedenle doğrulanmamıştır.',

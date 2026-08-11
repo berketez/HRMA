@@ -31,6 +31,30 @@
         });
     }
 
+    // ------------------------------------------------------------------
+    // BASINÇ BİRİMİ — TEK KAYNAK
+    // ------------------------------------------------------------------
+    // /api/transient-analysis basınç dizilerini PASCAL döner
+    // (hrma/analysis/transient_ballistics.py:498 `'chamber_pressure': Pc_arr,
+    // # Pa` ve :517 `'tank_pressure': ... # Pa`).
+    //
+    // ÖLÇÜLDÜ (2026-08-09): çizim bunu bar'a çeviriyordu ama DIŞA AKTARIM
+    // ÇEVİRMİYORDU. Sütun başlığı 'Chamber pressure (bar)' yazarken hücreye
+    // ham Pascal konuyordu; 20 bar'lık bir motorun CSV/XLSX çıktısında
+    // 2000000 görünüyordu — 100000 kat. Aynı hata tank basıncı sütununda da
+    // vardı. Kullanıcı ekranda doğru, dosyada yanlış sayı görüyordu.
+    //
+    // Çevrim artık TEK yerde: hem grafik hem dışa aktarım bu yardımcıyı
+    // çağırır, bir daha birbirinden ayrışamazlar.
+    const PA_PER_BAR = 1e5;
+
+    function toBar(values) {
+        return (values || []).map(function (p) {
+            return (p === null || p === undefined || !isFinite(p))
+                ? p : p / PA_PER_BAR;
+        });
+    }
+
     // advanced.html form alanlarından motor parametrelerini topla
     // (calculate() payload'ıyla aynı ID'ler; yalnız transient'in ihtiyacı olanlar)
     function collectMotorParams() {
@@ -215,7 +239,7 @@
         Plotly.react(plotDiv, [
             { x: tr.time, y: tr.thrust, name: T('transient.sThrust', 'Thrust [N]'),
               mode: 'lines', line: { width: 3 } },
-            { x: tr.time, y: tr.chamber_pressure.map(p => p / 1e5),
+            { x: tr.time, y: toBar(tr.chamber_pressure),
               name: T('transient.sPc', 'Chamber Pressure [bar]'), mode: 'lines', yaxis: 'y2',
               line: { width: 2, dash: 'dot' } },
         ], {
@@ -234,7 +258,7 @@
             tankDiv.style.display = 'block';
             // react: aynı div'e tekrar çizim (bkz. tp_plot notu)
             Plotly.react(tankDiv, [
-                { x: tr.time, y: tr.tank_pressure.map(p => p / 1e5),
+                { x: tr.time, y: toBar(tr.tank_pressure),
                   name: T('transient.sTankP', 'Tank Pressure [bar]'), mode: 'lines',
                   line: { width: 3 } },
                 { x: tr.time, y: tr.tank_temperature,
@@ -286,13 +310,17 @@
     // Zaman-cozumlu egrileri Excel olarak indir (sunucu openpyxl ile uretir;
     // uretemezse CSV'ye duser). Berke istegi: transient sonuclari bilgisayara
     // inebilsin.
-    async function exportCurves() {
-        if (!lastResult || !lastResult.transient) return;
-        const t = lastResult.transient;
+    // Dışa aktarım tablosu — SAF (DOM'a dokunmaz), böylece birim sözleşmesi
+    // testten doğrudan ölçülebilir: her sütun başlığının yazdığı birim ile
+    // hücrenin taşıdığı sayı aynı olmak zorunda.
+    // {headers, rows} döner.
+    function buildExportTable(t) {
+        t = t || {};
         const headers = [T('transient.colTime', 'Time (s)'),
                          T('transient.colThrust', 'Thrust (N)'),
                          T('transient.colPc', 'Chamber pressure (bar)')];
-        const cols = [t.time || [], t.thrust || [], t.chamber_pressure || []];
+        // Başlık 'bar' diyor -> hücre de bar olmak ZORUNDA (API Pascal verir).
+        const cols = [t.time || [], t.thrust || [], toBar(t.chamber_pressure)];
         if (t.of_ratio && t.of_ratio.length) {
             headers.push(T('transient.colOf', 'O/F ratio')); cols.push(t.of_ratio);
         }
@@ -302,19 +330,30 @@
         }
         if (t.tank_pressure && t.tank_pressure.length) {
             headers.push(T('transient.colTankP', 'Tank pressure (bar)'));
-            cols.push(t.tank_pressure);
+            // Aynı gerekçe: tank basıncı da Pascal gelir.
+            cols.push(toBar(t.tank_pressure));
         }
         if (t.tank_temperature && t.tank_temperature.length) {
             headers.push(T('transient.colTankT', 'Tank temperature (K)'));
             cols.push(t.tank_temperature);
         }
-        const n = Math.max.apply(null, cols.map(function (c) { return c.length; }));
+        // reduce: `Math.max.apply(null, [])` -Infinity döndürüyordu (boş
+        // sonuçta sonsuz döngü riski).
+        const n = cols.reduce(function (m, c) { return Math.max(m, c.length); }, 0);
         const rows = [];
         for (let i = 0; i < n; i++) {
             rows.push(cols.map(function (c) {
                 return (c[i] === undefined || c[i] === null) ? '' : c[i];
             }));
         }
+        return { headers: headers, rows: rows };
+    }
+
+    async function exportCurves() {
+        if (!lastResult || !lastResult.transient) return;
+        const table = buildExportTable(lastResult.transient);
+        const headers = table.headers;
+        const rows = table.rows;
 
         const motor = (window.currentResults && window.currentResults.motor) || {};
         const name = motor.motor_name || 'HRMA_Motor';
@@ -359,5 +398,9 @@
     }
 
     window.TransientPanel = { init, run, lastResult: null,
+        // Test / hata ayıklama: saf dışa aktarım tablosu (DOM'suz).
+        // injector_panel._renderHtml ile aynı desen.
+        _buildExportTable: buildExportTable,
+        _toBar: toBar,
         get result() { return lastResult; } };
 })();

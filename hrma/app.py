@@ -1307,7 +1307,17 @@ def _declare_overridden_inputs(data, motor_results, fields):
 #: girdiler. Hibrit motorda hazne sıcaklığı yanma çözümünün SONUCUDUR
 #: (``hybrid_rocket_engine.py`` içinde ``self.T_c`` denge/ampirik çözümle
 #: yeniden atanır), girdisi değil.
-_CALCULATE_SOLVER_OWNED_FIELDS = ('chamber_temperature',)
+#:
+#: v2.6.27 (A3, Ayberk madde 2) — ``burn_time`` eklendi. ÖLÇÜLDÜ (bu dosya
+#: değişmeden önce): ``{thrust: 500, burn_time: 20, total_impulse: 7500}``
+#: gönderildiğinde yanıtta ``burn_time = 15,0 s`` dönüyordu, hiçbir uyarı
+#: yoktu ve ``defaults_used`` boştu. Sebep ``hybrid_rocket_engine.py``
+#: kurucusunda: toplam impuls VE itki verilmişse süre
+#: ``t_b = I_total / F`` ile ÇÖZÜLÜR, kullanıcının girdiği süre hiç
+#: okunmaz. Sayı doğru, sunum sessizdi: kullanıcının 20 s'i yok oluyordu.
+#: Alan buraya girince mevcut ``_declare_overridden_inputs`` beyanı üretir;
+#: süre gerçekten kullanıldığında (çakışma yoksa) hiçbir şey yazılmaz.
+_CALCULATE_SOLVER_OWNED_FIELDS = ('chamber_temperature', 'burn_time')
 
 
 @app.route('/calculate', methods=['POST'])
@@ -1342,6 +1352,27 @@ def calculate():
         # okumadığı ağır alanları düşürür — sonuç sözlüğü kurulduktan sonra,
         # aşağıda uygulanır. Varsayılan (slim'siz) davranış değişmez.
         slim = request.args.get('slim') == '1'
+
+        # --- v2.6.27 (A3 / Ayberk madde 3): EKSİK GİRDİ ≠ VARSAYILAN GİRDİ --
+        # Ölçülen kırık zincir (bu satırlar değişmeden önce): uçtan gelen HER
+        # istekte ``_mm_to_m`` varsayılanlı biçimiyle çağrılıp bir sayı
+        # döndürüyordu (o fonksiyonun sözleşmesi gereği ASLA None dönmez), bu
+        # yüzden motorda ``wall_thickness_user_supplied`` DAİMA True oluyor,
+        # yapısal modül DOĞRULAMA moduna geçiyor ve rapor
+        # "verified against user-supplied wall thickness" diyordu. Kullanıcı
+        # hiçbir yapısal bilgi vermemişken sistem onun cidarına karşı
+        # doğrulandığını söylüyordu — kazanılmamış hüküm.
+        # Motorun kendi yorumu (hybrid_rocket_engine.py:450-458) zaten doğru
+        # sözleşmeyi yazıyordu: "değer verilmediyse termal model yine 5 mm ile
+        # çalışır ama yapısal modüle None geçilir". Eksik olan tek şey, uç
+        # katmanının bu None'ı üretmesiydi.
+        #
+        # Malzemede de aynı desen vardı: ``or 'steel_4130'`` seçim yapılmamış
+        # bir isteği sessizce çeliğe çeviriyordu. Motorun
+        # ``_resolve_chamber_material`` işlevi None girdide zaten çeliğe düşer;
+        # fark, artık bunun BEYAN EDİLMESİ (aşağıda structural_design_basis).
+        chamber_material_input = data.get('chamber_material') or None
+        wall_thickness_input_m = _mm_to_m_optional(data.get('wall_thickness'))
 
         # Create engine instance with support for total impulse
         # Only pass user-provided values, let the engine use fuel-specific defaults
@@ -1392,8 +1423,10 @@ def calculate():
             # transferi cagrisi malzeme/kalinlik/sogutmayi SABIT yaziyordu
             # (gerekce: hybrid_rocket_engine.py analyze_heat_transfer yorumu).
             # wall_thickness arayuzde mm, motorda m.
-            chamber_material=data.get('chamber_material') or 'steel_4130',
-            wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
+            # v2.6.27 (A3): ikisi de artik VERILMEDIYSE None gider — gerekce
+            # yukarida, engine cagrisindan once.
+            chamber_material=chamber_material_input,
+            wall_thickness=wall_thickness_input_m,
             cooling_type=data.get('cooling_channels') or 'none',
             # v2.6.26: Katman A ile bulunan üç ölü girdi. Motorun
             # gövdesi ve çözücüleri 30 Temmuz'da yazılmıştı; imza ve
@@ -1434,6 +1467,15 @@ def calculate():
             except (TypeError, ValueError):
                 pass  # geçersiz girdi: alan hiç konmaz, çubuk dürüst etikete düşer
 
+        # --- v2.6.27 (A3): kazanılmamış yapısal hüküm bu yola da bağlandı ---
+        # Kapı BURADA çağrılır, yanıt sözlüğü kurulurken değil: aşağıdaki CAD,
+        # ihracat ve PDF dalları motor_results'ı bu noktadan SONRA okuyor;
+        # geri çekilen hüküm onlara da gitsin. (Kapı yalnız hüküm/gösterge
+        # alanlarını değiştirir — SF, gerilme ve kalınlık sayıları yerinde
+        # kalır, o yüzden çizim/kütle zinciri etkilenmez.)
+        structural_design_basis = _motor_structural_design_basis(
+            motor_results, wall_thickness_input_m, chamber_material_input)
+
         # Design injector
         injector = InjectorDesign(
             mdot_ox=motor_results['mdot_ox'],
@@ -1461,7 +1503,9 @@ def calculate():
         elif data.get('injector_type', 'showerhead') == 'pintle':
             injector.set_pintle_params(
                 outer_diameter=data.get('outer_diameter', 50),
-                pintle_diameter=data.get('pintle_diameter', 25)
+                pintle_diameter=data.get('pintle_diameter', 25),
+                # v2.6.27: 'Secondary Holes' seçimi çözücüye bağlandı.
+                secondary_holes=data.get('secondary_holes', 'radial')
             )
         elif data.get('injector_type', 'showerhead') == 'swirl':
             # v2.6.26: 'swirl_chamber_diameter' ve 'swirl_angle' arayuzde
@@ -1847,6 +1891,12 @@ def calculate():
         if validation_report is not None:
             results['validation'] = validation_report
 
+        # v2.6.27 (A3): yapısal hükmün DAYANAĞI. Alan adı ve içeriği
+        # /analyze_structural_safety'nin 'design_basis' bloğuyla aynı
+        # sözleşmededir; iki yol aynı soruyu aynı dille cevaplasın diye.
+        if structural_design_basis is not None:
+            results['structural_design_basis'] = structural_design_basis
+
         # Faz 5B / B10 — sessizce yok sayılan girdi olmaz. Gönderilen değer
         # ile sonuçta fiilen duran değer karşılaştırılır; farklıysa alanın
         # KULLANILMADIĞI beyan edilir (bkz. _declare_overridden_inputs).
@@ -2029,8 +2079,12 @@ def quick_geometry():
             # transferi cagrisi malzeme/kalinlik/sogutmayi SABIT yaziyordu
             # (gerekce: hybrid_rocket_engine.py analyze_heat_transfer yorumu).
             # wall_thickness arayuzde mm, motorda m.
-            chamber_material=data.get('chamber_material') or 'steel_4130',
-            wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
+            # v2.6.27 (A3): eksik girdi ≠ varsayılan girdi. Gerekçe
+            # /calculate içindeki aynı ikilinin üstündeki yorumda; buradaki
+            # kopya da aynı kırık zinciri besliyordu (uçtan gelen her istek
+            # yapısal modülü DOĞRULAMA moduna sokuyordu).
+            chamber_material=(data.get('chamber_material') or None),
+            wall_thickness=_mm_to_m_optional(data.get('wall_thickness')),
             cooling_type=data.get('cooling_channels') or 'none',
             # v2.6.26: uc olu girdi daha baglandi. Ucu de sayfada VARDI ve
             # (chamber_length_override haric) sunucuya bile geliyordu, ama
@@ -2049,17 +2103,29 @@ def quick_geometry():
         )
         motor_results = engine.calculate()
 
+        # v2.6.27 (A3): bu uç de motor sözlüğünün TAMAMINI döndürüyor, yani
+        # yapısal hüküm de içinde. Aynı kapı buraya da bağlanır; aksi hâlde
+        # kullanıcı aynı kazanılmamış "doğrulandı" cümlesini interaktif
+        # tasarım modunda görürdü.
+        quick_design_basis = _motor_structural_design_basis(
+            motor_results,
+            _mm_to_m_optional(data.get('wall_thickness')),
+            data.get('chamber_material') or None)
+
         try:
             motor_plot = create_improved_motor_cross_section(motor_results)
         except Exception as plot_err:
             print(f"Quick geometry cross-section error: {plot_err}")
             motor_plot = None
 
-        return jsonify(sanitize_json_values({
+        payload = {
             'status': 'success',
             'motor': motor_results,
             'plots': {'motor': motor_plot}
-        }))
+        }
+        if quick_design_basis is not None:
+            payload['structural_design_basis'] = quick_design_basis
+        return jsonify(sanitize_json_values(payload))
     except Exception as e:
         print(f"Quick geometry error: {e}")
         return jsonify({'status': 'error', 'error': str(e)}), 400
@@ -2126,8 +2192,12 @@ def transient_analysis():
             # transferi cagrisi malzeme/kalinlik/sogutmayi SABIT yaziyordu
             # (gerekce: hybrid_rocket_engine.py analyze_heat_transfer yorumu).
             # wall_thickness arayuzde mm, motorda m.
-            chamber_material=data.get('chamber_material') or 'steel_4130',
-            wall_thickness=_mm_to_m(data.get('wall_thickness'), 0.005),
+            # v2.6.27 (A3): eksik girdi ≠ varsayılan girdi. Gerekçe
+            # /calculate içindeki aynı ikilinin üstündeki yorumda; buradaki
+            # kopya da aynı kırık zinciri besliyordu (uçtan gelen her istek
+            # yapısal modülü DOĞRULAMA moduna sokuyordu).
+            chamber_material=(data.get('chamber_material') or None),
+            wall_thickness=_mm_to_m_optional(data.get('wall_thickness')),
             cooling_type=data.get('cooling_channels') or 'none',
             # v2.6.26: bkz. /calculate icindeki ayni ucluye dair yorum.
             safety_factor=data.get('safety_factor'),
@@ -3045,6 +3115,97 @@ def _require_dict_result(results, engine_name, route_name):
     return results
 
 
+def _build_solid_engine(data, **base_kwargs):
+    """Katı motoru kurar ve yanma hızı katsayılarının KAYNAĞINI beyan eder.
+
+    v2.6.27 (A3, Ayberk madde 3) — ÖLÇÜLEN KUSUR: uç katmanı
+    ``burn_rate_a`` için 0,005, ``burn_rate_n`` için 0,35 varsayılanı
+    enjekte ediyordu. Bu çift, merkezî katalogun apcp kaydından
+    (a = 0,0022334, n = 0,35) 2,24 KAT sapar — referans basınçta
+    18,18 mm/s'ye karşı 8,12 mm/s. Motor bunu KULLANICI girdisi sanıyor ve
+    ``warn.solid.burn_rate_off_catalog`` uyarısını ateşliyordu; yani
+    kullanıcı, kendi girmediği bir sayı yüzünden uyarı alıyordu. Sapmanın
+    bedeli gözle görünmez: toplam impuls doğru kalır, yanma süresi yarılanır,
+    ortalama itki iki katına çıkar.
+
+    Sözleşme:
+      * Alan geldiyse motora AYNEN geçer, kaynağı ``'request'``.
+      * Gelmediyse motora HİÇ geçmez ve değer SEÇİLEN yakıtın merkezî
+        katalog kaydından çözülür (CLAUDE.md kural 11: sayı tek kaynaktan).
+        Kaynak ``'central_catalog:<yakıt>'`` diye yazılır.
+      * Yakıt katalogda yoksa motorun kurucu varsayılanı kalır — ama o
+        varsayılan APCP'nin katsayısıdır ve seçilen yakıtın DEĞİLDİR, bu
+        yüzden ``'engine_constructor_default:apcp_catalog'`` diye adıyla
+        beyan edilir.
+
+    Yakıt kimliğini uç katmanı yeniden çözmez: motorun kendi
+    ``_resolve_propellant_type`` işlevi (öncelik: ``propellant_type`` >
+    kurucu argümanı > ``burn_rate_preset`` > ``propellant_name``) zaten
+    koşmuştur, sonucu ``motor.propellant_type``. Katsayı değişmesi
+    gerekiyorsa motor o kimlikle YENİDEN kurulur; kurulum maliyeti ölçüldü
+    (0,09 ms) ve bu, motorun iç durumunu dışarıdan elle değiştirmekten
+    güvenlidir.
+
+    Args:
+        data: İstek gövdesi (``overrides`` olarak da motora geçer).
+        **base_kwargs: ``SolidRocketEngine`` kurucusunun katsayı DIŞINDAKİ
+            argümanları.
+
+    Returns:
+        ``(motor, burn_rate_sources)`` — ikinci öğe yanıta konacak beyan.
+    """
+    burn_rate_a = data.get('burn_rate_a')
+    burn_rate_n = data.get('burn_rate_n')
+    motor_kwargs = dict(base_kwargs)
+    motor_kwargs['overrides'] = data
+    if burn_rate_a not in (None, ''):
+        motor_kwargs['burn_rate_a'] = float(burn_rate_a)
+    if burn_rate_n not in (None, ''):
+        motor_kwargs['burn_rate_n'] = float(burn_rate_n)
+    motor = SolidRocketEngine(**motor_kwargs)
+
+    sources = {
+        'burn_rate_a_source': ('request' if burn_rate_a not in (None, '')
+                               else None),
+        'burn_rate_n_source': ('request' if burn_rate_n not in (None, '')
+                               else None),
+    }
+    if None in sources.values():
+        from hrma.engines.solid_rocket_engine import _catalog_burn_rate
+        a_cat, n_cat = _catalog_burn_rate(motor.propellant_type)
+        katalog_etiketi = f'central_catalog:{motor.propellant_type}'
+        yedek_etiket = 'engine_constructor_default:apcp_catalog'
+        degisti = False
+        if sources['burn_rate_a_source'] is None:
+            if a_cat is not None:
+                motor_kwargs['burn_rate_a'] = float(a_cat)
+                sources['burn_rate_a_source'] = katalog_etiketi
+                degisti = True
+            else:
+                sources['burn_rate_a_source'] = yedek_etiket
+        if sources['burn_rate_n_source'] is None:
+            if n_cat is not None:
+                motor_kwargs['burn_rate_n'] = float(n_cat)
+                sources['burn_rate_n_source'] = katalog_etiketi
+                degisti = True
+            else:
+                sources['burn_rate_n_source'] = yedek_etiket
+        if degisti:
+            motor = SolidRocketEngine(**motor_kwargs)
+
+    sources['burn_rate_a_used'] = float(motor.a)
+    sources['burn_rate_n_used'] = float(motor.n)
+    sources['_basis'] = (
+        'Saint-Robert coefficients are never invented by the API layer. '
+        "A value marked 'request' came from the request body; "
+        "'central_catalog:<propellant>' means the field was not supplied and "
+        'the value was resolved from the central propellant catalog for the '
+        'propellant the solver resolved. Whether the solver actually uses '
+        "this pair is a separate question - see 'burn_rate_basis' (a "
+        'piecewise regime table overrides it).')
+    return motor, sources
+
+
 @app.route('/calculate_solid', methods=['POST'])
 def calculate_solid():
     trace_id = _request_trace_id()
@@ -3144,31 +3305,52 @@ def calculate_solid():
         chamber_pressure = data.get('chamber_pressure', 40)
         validate_input_range(chamber_pressure, 5, 200, "Chamber pressure (bar)")
         
-        burn_rate_a = data.get('burn_rate_a', 0.005)
-        validate_input_range(burn_rate_a, 0.0001, 0.1, "Burn rate coefficient")
+        # --- v2.6.27 (A3 / Ayberk madde 3): a ve n ARTIK UÇTA UYDURULMUYOR --
+        # ÖLÇÜLDÜ (bu blok değişmeden önce): a/n GÖNDERİLMEDEN yapılan
+        # ``POST /calculate_solid`` (apcp) çağrısında uç katmanı
+        # ``a = 0,005`` ve ``n = 0,35`` enjekte ediyordu. Bu çift, merkezî
+        # katalogun apcp kaydından (a = 0,0022334, n = 0,35) 2,24 KAT sapar:
+        # referans basınçta 18,18 mm/s'ye karşı 8,12 mm/s. Motor bu değeri
+        # KULLANICI GİRDİSİ sanıp ``warn.solid.burn_rate_off_catalog``
+        # uyarısını ateşliyordu — yani kullanıcı, kendi girmediği bir sayı
+        # yüzünden "kataloğun dışındasın" uyarısı alıyordu.
+        # Sapmanın bedeli gözle görünmez: toplam impuls doğru kalır, yanma
+        # süresi yarılanır, ortalama itki iki katına çıkar
+        # (solid_rocket_engine.py ``_check_burn_rate_coefficients``).
+        #
+        # Yeni sözleşme: alan gelmediyse motora HİÇ geçilmez; değer SEÇİLEN
+        # yakıtın merkezî katalog kaydından çözülür (CLAUDE.md kural 11 —
+        # sayı tek kaynaktan gelir) ve kaynağı yanıtta beyan edilir.
+        # NOT: motorun kurucu varsayılanı ``DEFAULT_BURN_RATE_A/N``
+        # APCP'nin katsayısıdır ve SEÇİLEN yakıttan bağımsızdır; KNDX seçen
+        # kullanıcıya APCP'nin yanma hızını vermemek için katalog çözümü
+        # yakıt çözüldükten SONRA yapılır (aşağıda).
+        burn_rate_a = data.get('burn_rate_a')
+        burn_rate_n = data.get('burn_rate_n')
+        if burn_rate_a not in (None, ''):
+            validate_input_range(burn_rate_a, 0.0001, 0.1,
+                                 "Burn rate coefficient")
 
         # Alt sınır -0.5: KN-şeker plateau/mesa rejimlerinde n NEGATİFTİR
         # (Nakka 1999 KNDX n=-0.148, KNSB n=-0.314 — bkz. burn_rate_db).
         # Eski [0.1, 1.0] aralığı merkezi db preset'lerini reddediyordu.
-        burn_rate_n = data.get('burn_rate_n', 0.35)
-        validate_input_range(burn_rate_n, -0.5, 1.0, "Burn rate exponent")
-        
+        if burn_rate_n not in (None, ''):
+            validate_input_range(burn_rate_n, -0.5, 1.0, "Burn rate exponent")
+
         # Create solid motor instance
         # overrides=data: formun yoğunluk/C*/gama/segman/star/sıcaklık gibi
         # alanları motora işlensin (2026-07-13 — girdi-backend kopukluğu fixi;
         # motor yalnız tanıdığı ve fiziksel aralıktaki anahtarları uygular)
-        motor = SolidRocketEngine(
+        motor, burn_rate_sources = _build_solid_engine(
+            data,
             grain_type=data.get('grain_type', 'bates'),
             propellant_type=data.get('propellant_type', 'apcp'),
             chamber_diameter=chamber_diameter,
             grain_length=grain_length,
             core_diameter=core_diameter,
             chamber_pressure=chamber_pressure,
-            burn_rate_a=burn_rate_a,
-            burn_rate_n=burn_rate_n,
-            overrides=data
         )
-        
+
         # Calculate motor performance
         results = motor.calculate_performance()
 
@@ -3181,6 +3363,20 @@ def calculate_solid():
 
         # Sanitize results
         sanitized_results = sanitize_json_values(results)
+
+        # v2.6.27 (A3): yanma hızı katsayılarının KAYNAĞI yanıtta durur.
+        sanitized_results['burn_rate_inputs'] = burn_rate_sources
+
+        # v2.6.27 (A3): kazanılmamış kap onayı geri çekilir. Ölçüldü:
+        # kullanıcı hiç kasa kalınlığı vermediği hâlde dört ayrı hazne
+        # basıncında (20/40/70/100 bar) ``pressure_safety.vessel_status``
+        # 'PASS' dönüyordu. Sebep totoloji: cidarı HRMA'nın kendisi
+        # ``_case_design()`` içinde Barlow ile SF'yi sağlayacak şekilde
+        # boyutlandırıyor, sonra aynı cidarı sınayıp geçtiğini söylüyor.
+        _withhold_unearned_vessel_verdict(
+            sanitized_results,
+            case_thickness_supplied=(data.get('case_thickness')
+                                     not in (None, '')))
 
         # Hibrit paritesi: motor kesiti + ortak geometri (2026-07-13)
         # v2.6.27: geometri dönüşümü try DIŞINA alındı — geniş kapsam,
@@ -3486,21 +3682,25 @@ def solid_monte_carlo():
     """
     try:
         data = request.json or {}
-        motor = SolidRocketEngine(
+        # v2.6.27 (A3): katsayı enjeksiyonu burada da vardı ve etkisi daha
+        # büyüktü — Monte Carlo, sapmalı bir NOMİNAL etrafında saçılım
+        # üretiyordu (a katalogtan 2,24 kat uzakken tüm dağılım kayar).
+        # Kurulum /calculate_solid ile AYNI yoldan yapılır.
+        motor, burn_rate_sources = _build_solid_engine(
+            data,
             grain_type=data.get('grain_type', 'bates'),
             propellant_type=data.get('propellant_type', 'apcp'),
             chamber_diameter=data.get('chamber_diameter', 100),
             grain_length=data.get('grain_length', 500),
             core_diameter=data.get('core_diameter', 30),
             chamber_pressure=data.get('chamber_pressure', 40),
-            burn_rate_a=data.get('burn_rate_a', 0.005),
-            burn_rate_n=data.get('burn_rate_n', 0.35),
-            overrides=data
         )
         mc = motor.run_monte_carlo(n_samples=int(data.get('n_samples', 300)))
         if mc.get('error'):
             return jsonify({'status': 'error', 'error': mc['error']}), 400
-        return jsonify({'status': 'success', **sanitize_json_values(mc)})
+        return jsonify({'status': 'success',
+                        'burn_rate_inputs': burn_rate_sources,
+                        **sanitize_json_values(mc)})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'status': 'error', 'error': str(e)}), 500
@@ -6345,6 +6545,173 @@ def _withhold_unearned_structural_verdict(structural_results,
     return declaration
 
 
+#: ``vessel_status`` alanında ONAY sayılan değerler. Yalnız bunlar geri
+#: çekilir; 'FAIL' / 'MARGINAL' bir TEHLİKE BİLDİRİMİDİR ve asla susturulmaz
+#: (aynı ayrım ``_withhold_unearned_structural_verdict`` içinde de var).
+_VESSEL_APPROVAL_VERDICTS = ('PASS', 'SAFE', 'ACCEPTABLE', 'OK')
+
+
+def _withhold_unearned_vessel_verdict(solid_results, case_thickness_supplied):
+    """Katı motorda kazanılmamış basınçlı kap onayını geri çeker.
+
+    v2.6.27 (A3, Ayberk madde 3 sınıfı) — ÖLÇÜLDÜ: kullanıcı hiçbir kasa
+    kalınlığı vermeden ``POST /calculate_solid`` çağırdığında yanıtta
+    ``safety_analysis.pressure_safety.vessel_status = 'PASS'`` dönüyordu ve
+    bu, denenen dört hazne basıncının hepsinde aynıydı. Sebep totolojidir:
+    ``solid_rocket_engine._case_design()`` cidarı verilmediğinde Barlow ile
+    ``t = P*r/(sigma_y/SF)`` diye BOYUTLANDIRIR; sonra
+    ``_calculate_safety_analysis`` aynı cidarı ``PressureVesselAnalyzer``a
+    verip "geçti" der. Kap, geçmek üzere tasarlanmıştır — bu bir doğrulama
+    değil, hedefin geri okunmasıdır.
+
+    Sözleşme, hibrit yapısal kapıyla aynı: ONAY geri çekilir, UYARI
+    çekilmez; sayılar (kopma basıncı, marj, kalınlık) SİLİNMEZ — gerçekten
+    hesaplandılar — ama ne oldukları yazılır.
+
+    Args:
+        solid_results: ``/calculate_solid`` sonuç sözlüğü (yerinde güncellenir).
+        case_thickness_supplied: Kullanıcı ``case_thickness`` verdi mi?
+
+    Returns:
+        Uygulanan beyan sözlüğü ya da kap bloğu yoksa None.
+    """
+    if not isinstance(solid_results, dict):
+        return None
+    safety = solid_results.get('safety_analysis')
+    if not isinstance(safety, dict):
+        return None
+    press = safety.get('pressure_safety')
+    if not isinstance(press, dict):
+        return None
+
+    press['wall_thickness_source'] = ('user_supplied' if case_thickness_supplied
+                                      else 'sized_by_hrma')
+    press['vessel_status_is_tautological'] = bool(not case_thickness_supplied)
+    if case_thickness_supplied:
+        press['vessel_status_basis'] = (
+            'The case wall thickness was supplied by the user, so the burst '
+            'margin and the vessel status are an evaluation of that wall.')
+        return press
+
+    if str(press.get('vessel_status', '')).upper() in _VESSEL_APPROVAL_VERDICTS:
+        press['vessel_status'] = STRUCTURAL_VERDICT_NOT_EVALUATED
+    press['vessel_status_basis'] = (
+        'No acceptance is issued: no case thickness was supplied, so HRMA '
+        'sized the wall itself from the hoop stress to meet the design '
+        'safety factor. Checking that wall and reporting a pass is the '
+        'design target read back, not an independent verification. Supply '
+        "'case_thickness' (mm) to obtain one. A remaining MARGINAL/FAIL "
+        'status is a warning and is never suppressed.')
+    return press
+
+
+def _motor_structural_design_basis(motor_results, wall_thickness_m,
+                                   chamber_material):
+    """Motor çözücüsünün yapısal hükmüne aynı dürüstlük kapısını uygular.
+
+    v2.6.27 (A3, Ayberk madde 3) — ``_withhold_unearned_structural_verdict``
+    yalnız ``/analyze_structural_safety`` ucuna bağlıydı. Oysa kullanıcının
+    fiilen kullandığı yol ``/calculate``: hibrit sayfası hesabı oradan alır
+    ve yapısal hüküm ``motor.structural_analysis`` içinde döner. ÖLÇÜLDÜ
+    (bu işlev yazılmadan önce, cidar ve malzeme GÖNDERİLMEDEN):
+
+        design_mode          : verify
+        safety_factor_basis  : verified against user-supplied wall thickness
+        wall_thickness_used  : 5,0 mm
+
+    Yani uç katmanının kendi enjekte ettiği 5 mm, kullanıcının cidarı gibi
+    "doğrulanmış" sayılıyordu. Girdi tarafı yukarıda (motor kurulumunda)
+    düzeltildi; bu işlev de aynı kapının hüküm tarafını bu yola bağlar.
+
+    Args:
+        motor_results: Motor çözücüsünün sonuç sözlüğü (yerinde güncellenir).
+        wall_thickness_m: İSTEKTEN gelen cidar [m] ya da None.
+        chamber_material: İSTEKTEN gelen malzeme adı ya da None.
+
+    Returns:
+        Yanıtın üst seviyesine konacak beyan sözlüğü; yapısal sonuç yoksa
+        None (uydurma bir beyan üretilmez).
+    """
+    if not isinstance(motor_results, dict):
+        return None
+    structural_results = motor_results.get('structural_analysis')
+    if not isinstance(structural_results, dict):
+        return None
+
+    # Termal yol GERÇEKTEN koştu mu? Tahmin edilmez, yapısal modülün kendi
+    # beyanından (v2.6.27'de eklenen ``wall_temperature_source``) okunur.
+    thermal = structural_results.get('thermal_analysis')
+    wall_temp_source = None
+    if isinstance(thermal, dict):
+        wall_temp_source = thermal.get('wall_temperature_source')
+    thermal_input_supplied = bool(
+        wall_temp_source not in (None, 'not_evaluated'))
+
+    basis = _withhold_unearned_structural_verdict(
+        structural_results, thermal_input_supplied)
+    basis['wall_temperature_source'] = wall_temp_source
+    # Malzeme seçilmediyse çelik VARSAYILDIĞI yazılır; sessiz enjeksiyon yok.
+    basis['chamber_material_source'] = ('user_supplied' if chamber_material
+                                        else 'default:steel_4130')
+
+    # --- Kullanıcının cidarı GERÇEKTEN değerlendirildi mi? ---------------
+    # ÖLÇÜLDÜ: aralık dışı bir kalınlık (0,05 mm ya da 500 mm) gönderilince
+    # motor uyarıp 5 mm'ye düşüyor, ama "kullanıcı verdi" bayrağını
+    # düşüşten ÖNCE hesapladığı için rapor yine "verified against
+    # user-supplied wall thickness" diyor ve değerlendirilen 5 mm'yi
+    # kullanıcının cidarı gibi gösteriyordu. Sayı doğru, İDDİA yanlış.
+    # Karşılaştırma DEĞERLENDİRİLEN kalınlıkla yapılır: iddia ancak
+    # istekteki cidar gerçekten hesaba girdiyse kurulur.
+    chamber = structural_results.get('chamber_analysis') or {}
+    try:
+        evaluated_m = float(chamber.get('wall_thickness_used_mm')) / 1000.0
+    except (TypeError, ValueError):
+        evaluated_m = None
+    istek_uygulandi = (
+        wall_thickness_m is not None and evaluated_m is not None
+        and math.isclose(wall_thickness_m, evaluated_m,
+                         rel_tol=1e-6, abs_tol=1e-12))
+
+    if wall_thickness_m is None:
+        basis['wall_thickness_source'] = 'sized_by_hrma'
+        basis['message'] = (
+            'No wall thickness was supplied, so HRMA sized the wall itself. '
+            'This result is a DESIGN PROPOSAL, not a verification of a wall '
+            'you built.')
+    elif istek_uygulandi:
+        basis['wall_thickness_source'] = 'user_supplied'
+        basis['message'] = (
+            'The supplied wall thickness was evaluated against the design '
+            'pressure; this result is a verification.')
+    else:
+        # Girdi geldi ama hesaba GİRMEDİ (aralık dışı ya da okunamadı).
+        basis['wall_thickness_source'] = 'user_value_not_applied'
+        basis['is_verification'] = False
+        basis['submitted_wall_thickness_mm'] = wall_thickness_m * 1000.0
+        basis['evaluated_wall_thickness_mm'] = (
+            evaluated_m * 1000.0 if evaluated_m is not None else None)
+        if basis['verdict'] != 'withheld':
+            basis['verdict'] = 'withheld'
+        if 'user_wall_thickness_not_applied' not in basis[
+                'verdict_withheld_reasons']:
+            basis['verdict_withheld_reasons'].append(
+                'user_wall_thickness_not_applied')
+        basis['message'] = (
+            'The wall thickness you submitted was NOT the one evaluated: '
+            'the solver rejected it (out of range or unreadable) and fell '
+            'back to its own value. The numbers below describe that other '
+            'wall, so they are not a verification of your design.')
+        # Kazanılmamış ONAY geri çekilir; UYARI dokunulmaz (aynı ayrım
+        # _withhold_unearned_structural_verdict içinde de uygulanıyor).
+        safety = structural_results.get('safety_analysis')
+        if isinstance(safety, dict) and str(
+                safety.get('status', '')).upper() in ('SAFE', 'ACCEPTABLE'):
+            safety['status'] = STRUCTURAL_VERDICT_NOT_EVALUATED
+            safety['risk_level'] = STRUCTURAL_VERDICT_NOT_EVALUATED
+            safety['verdict_basis'] = basis['message']
+    return basis
+
+
 @app.route('/analyze_structural_safety', methods=['POST'])
 def analyze_structural_safety():
     """Detailed structural safety analysis endpoint.
@@ -7060,6 +7427,263 @@ def api_fea_structural():
         'meta': sonuc['meta'],
     }
     return jsonify({'status': 'success', 'fea': sanitize_json_values(fea)})
+
+
+# ===========================================================================
+# D2 — TERMAL FEA UCU (geçici ısı iletimi çözücüsünün kullanıcı yüzü)
+# ---------------------------------------------------------------------------
+# hrma/fea/thermal_axisym.py (D2) doğrulanmış hâlde depodaydı ama hiçbir
+# çağıranı yoktu: köprünün termal yolu "girdiler hazır, çözücü çağrılmadı"
+# durumunda duruyordu. Bu uç zinciri kapatır — köprü mesh'i kurar, sınır
+# koşullarını bağlar ve çözücüyü sürer; uç yalnız SINIRLARI koyar ve ham
+# veriyi döner (grafik üretmez, karar vermez).
+#
+# GAZ TARAFI PROFİLİ İSTEK GÖVDESİNDEN GELİR. Motor sonuç sözlükleri
+# Bartz h(z) dizisini YAYIMLAMAZ (kod okundu: hibrit motor
+# HeatTransferAnalyzer.analyze_axial_profile'i içeride çağırır ama yalnız
+# boğaz skalerlerini nozzle_material_analysis.throat_thermal'a koyar; sıvı
+# ve katı eksenel profili hiç üretmez). Diziyi üreten uç zaten vardır:
+# POST /api/analysis/wall-profile → {'x_mm', 'h_g', 'T_recovery', ...}.
+# Beklenen çağrı sırası bu yüzden: /calculate* → /api/analysis/wall-profile
+# → /api/fea/thermal. Motor sözlüğünden profil TÜRETİLMEZ; eksikse köprünün
+# NOT_MODELLED yanıtı aynen geçer.
+# ===========================================================================
+
+#: Zaman adımı bütçesi. D2 sürücüsü adım sayısını ikiye katlayarak yakınsar;
+#: üst sınır aşılacaksa TUR SAYISI kısılır (adım sessizce bozulmaz, kısıtlama
+#: yanıtta 'limits' ile beyan edilir ve yakınsamama D2 beyanında görünür).
+FEA_THERMAL_MAX_STEPS = 4096
+
+#: Sıcaklık geçmişi bellek tavanı: (n_steps + 1) * n_nodes değer. 8 bayt/değer
+#: üzerinden 2e6 değer ≈ 16 MB'lık tek koşu; otomatik sürücü aynı anda iki
+#: koşu tuttuğu için tepe ≈ 32 MB. Masaüstü tek-worker sunucuda bellek
+#: patlamasını önler; eleman bütçesiyle birlikte zaman yakınsamasının ne
+#: kadar derine inebileceğini belirler.
+FEA_THERMAL_MAX_HISTORY_VALUES = 2_000_000
+
+
+def _fea_thermal_int(data, alan, varsayilan, alt, ust):
+    """İstek gövdesinden tam sayı parametre okur ve [alt, ust] aralığına çeker.
+
+    (Yapısal ucun kendi içindeki eşdeğeri ayrı durur; iki uç birbirinin
+    gövdesini değiştirmesin diye burada bağımsız tanımlıdır.)
+    """
+    try:
+        sayi = int(data.get(alan))
+    except (TypeError, ValueError):
+        return int(varsayilan)
+    return int(min(max(sayi, alt), ust))
+
+
+@app.route('/api/fea/thermal', methods=['POST'])
+def api_fea_thermal():
+    """Motor sonucu + eksenel gaz profilinden geçici termal FEA koşusu.
+
+    Girdi (payload):
+      * ``motor_results`` / ``motor`` / ``results`` — motor çözücüsünün
+        sonuç sözlüğü (alan seçimi köprünün motor-tipi imzasıyla yapılır).
+      * ``axial_profile`` — ``{'x_mm', 'h_g', 'T_recovery'}``;
+        ``/api/analysis/wall-profile`` yanıtının ``wall_profile`` bloğu
+        doğrudan verilebilir. ZORUNLUDUR: motor sözlüğünde h(z) yoktur ve
+        boğaz skalerinden türetilmez.
+      * ``ambient_temperature_K`` — başlangıç (tekdüze) ortam sıcaklığı.
+        ZORUNLUDUR: hiçbir motor çözücüsü yayımlamaz, uydurulmaz.
+      * ``outer_ambient`` (isteğe bağlı) — ``{'h_W_m2K', 'T_ambient_K',
+        'emissivity'}``. Verilmezse dış yüzey ADYABATİK alınır: uydurma
+        katsayı konmaz, ısı kaçışı sıfır sayılır (tepe cidar sıcaklığı için
+        konservatif üst sınır) ve bu beyan edilir.
+      * ``n_axial`` / ``n_radial`` (isteğe bağlı) — uzamsal bölüm sayıları.
+
+    Çıktı: mesh, son andaki düğüm sıcaklık alanı, iç yüzey sıcaklık dizisi,
+    tepe cidar sıcaklığı geçmişi, enerji bütçesi, zaman adımı beyanı,
+    malzeme sıcaklık sınırı karşılaştırması ve köprünün beyan zinciri.
+    Tüm zaman adımlarının alan geçmişi (T_history) yanıta KONMAZ — boyutu
+    adım sayısı × düğüm sayısıdır; yanıt son alan + tepe geçmişiyle sınırlı
+    tutulur ve bu 'limits' içinde beyan edilir.
+
+    Dürüstlük sözleşmesi:
+      * Girdi eksik  -> köprünün NOT_MODELLED payloadsi AYNEN, HTTP 200
+        ('missing' eksiği adlandırır; hiçbir sıcaklık alanı üretilmez).
+      * Çözücü modülü yok/API eksik -> köprünün NOT_AVAILABLE /
+        INPUTS_READY payloadsi, HTTP 200.
+      * Mesh veya çözücü hatası -> HTTP 500 (boş ama 'başarılı' yanıt yok).
+      * Uzun koşu/bellek riski -> eleman ve zaman adımı bütçeleri
+        uygulanır ve kısıtlamanın kendisi 'limits' içinde beyan edilir.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    motor_results, kaynak_alan = _fea_pick_motor_results(data)
+    if not isinstance(motor_results, dict) or not motor_results:
+        return jsonify({
+            'status': 'error',
+            'error': ('Thermal FEA needs a motor result object in the '
+                      'request body (motor_results / motor / results).'),
+        }), 400
+
+    from hrma.fea import bridge as fea_bridge
+    from hrma.fea.mesh_axisym import (
+        DEFAULT_ELEMS_THROUGH_WALL,
+        MIN_ELEMS_THROUGH_WALL,
+    )
+    from hrma.fea.structural_axisym import DEFAULT_N_AXIAL0
+
+    n_radial = _fea_thermal_int(data, 'n_radial', DEFAULT_ELEMS_THROUGH_WALL,
+                                MIN_ELEMS_THROUGH_WALL, 32)
+    n_axial_istenen = _fea_thermal_int(data, 'n_axial', DEFAULT_N_AXIAL0,
+                                       4, 512)
+    # Eleman bütçesi: mesh üreticisi katman sayısını alt sınıra ÇEKEBİLİR,
+    # o yüzden bütçe fiilen kullanılacak katman sayısıyla hesaplanır.
+    n_radial_fiili = max(n_radial, MIN_ELEMS_THROUGH_WALL)
+    n_axial = min(n_axial_istenen,
+                  max(4, FEA_MAX_ELEMS // max(n_radial_fiili, 1)))
+    n_nodes_tahmin = (n_axial + 1) * (n_radial_fiili + 1)
+
+    # Zaman adımı bütçesi: D2 sürücüsü n_steps0 * 2^k adım kullanır.
+    # D2 depoda yoksa bütçe hesaplanamaz — ve hesaplanmasına gerek de yoktur:
+    # köprü çözücüyü çağıramadan NOT_AVAILABLE döner. Import hatası burada
+    # yutulup 500'e dönüşmez; kullanıcı açıklayıcı yanıtı alır.
+    try:
+        from hrma.fea.thermal_axisym import (
+            DEFAULT_MAX_DT_HALVINGS,
+            DEFAULT_N_STEPS0,
+        )
+    except ImportError:
+        n_steps0 = halvings_istenen = halvings_izinli = None
+    else:
+        n_steps0 = DEFAULT_N_STEPS0
+        halvings_istenen = _fea_thermal_int(data, 'max_halvings',
+                                            DEFAULT_MAX_DT_HALVINGS, 0, 12)
+        halvings_izinli = 0
+        while halvings_izinli < halvings_istenen:
+            adim = DEFAULT_N_STEPS0 * 2 ** (halvings_izinli + 1)
+            if adim > FEA_THERMAL_MAX_STEPS:
+                break
+            if (adim + 1) * n_nodes_tahmin > FEA_THERMAL_MAX_HISTORY_VALUES:
+                break
+            halvings_izinli += 1
+
+    limits = {
+        'max_elems': FEA_MAX_ELEMS,
+        'max_steps': FEA_THERMAL_MAX_STEPS,
+        'max_history_values': FEA_THERMAL_MAX_HISTORY_VALUES,
+        'n_axial_requested': n_axial_istenen,
+        'n_axial': n_axial,
+        'n_radial_requested': n_radial,
+        'n_radial_effective': n_radial_fiili,
+        'halvings_requested': halvings_istenen,
+        'halvings_allowed': halvings_izinli,
+        'n_steps0': n_steps0,
+        'clamped': (n_axial < n_axial_istenen
+                    or (halvings_izinli is not None
+                        and halvings_izinli < halvings_istenen)),
+        'temperature_history_in_payload': False,
+        '_basis': ('two budgets are enforced: the element count (max_elems) '
+                   'and the temperature-history size ((n_steps + 1) * '
+                   'n_nodes <= max_history_values). Time-step halvings are '
+                   'capped so both hold; the mesh is never silently degraded '
+                   'and a capped run reports it here, while the solver own '
+                   'declaration (time_step.beyan) says whether the time step '
+                   'actually converged. The full T(t) field history is not '
+                   'serialised - the payload carries the final field and the '
+                   'peak-wall-temperature history.'),
+    }
+
+    try:
+        sonuc = fea_bridge.run_thermal_from_motor(
+            motor_results,
+            axial_profile=data.get('axial_profile'),
+            ambient_temperature_K=data.get('ambient_temperature_K'),
+            outer_ambient=data.get('outer_ambient'),
+            include_chamber=bool(data.get('include_chamber', False)),
+            n_axial=n_axial,
+            n_radial=n_radial,
+            max_halvings=halvings_izinli,
+        )
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': 'Thermal FEA solver failed.',
+            'detail': str(e),
+        }), 500
+
+    if sonuc.get('status') != fea_bridge.BRIDGE_STATUS_OK:
+        # Köprünün redli sonucu AYNEN geçer. 'inputs' bloğu çözücü nesneleri
+        # (Material vb.) taşıyabildiği için yalnız beyan zinciri alınır;
+        # hiçbir sayı eklenmez, hiçbir alan uydurulmaz.
+        payload = {k: v for k, v in sonuc.items() if k != 'inputs'}
+        if isinstance(sonuc.get('inputs'), dict):
+            payload['inputs_basis'] = sonuc['inputs'].get('_basis')
+        payload = sanitize_json_values(payload)
+        payload['input_field'] = kaynak_alan
+        payload['limits'] = limits
+        return jsonify({'status': 'success', 'fea': payload}), 200
+
+    mesh = sonuc['mesh']
+    inputs = sonuc['inputs']
+    tm = inputs['thermal_material']
+
+    fea = {
+        'status': fea_bridge.BRIDGE_STATUS_OK,
+        'engine_layout': sonuc.get('engine_layout'),
+        'input_field': kaynak_alan,
+        'mesh': {
+            'nodes': mesh['nodes'],
+            'elems': mesh['elems'],
+            'node_index_grid': mesh['node_index_grid'],
+            'n_nodes': int(mesh['n_nodes']),
+            'n_elems': int(mesh['n_elems']),
+            'n_axial': int(mesh['n_axial']),
+            'n_radial': int(mesh['n_radial']),
+            'meta': mesh.get('meta'),
+            'coordinate_units': 'm',
+            'node_order': ('node index = node_index_grid[i][j]; i is the '
+                           'axial station (0..n_axial), j is the through-wall '
+                           'layer (0 inner/gas side, n_radial outer surface)'),
+        },
+        'fields': {
+            'temperature_final_K': sonuc['T_final_K'],
+            'inner_surface_z_m': sonuc['inner_surface']['z_m'],
+            'inner_surface_T_final_K': sonuc['inner_surface']['T_final_K'],
+            '_basis': ('nodal temperature field as returned by the solver at '
+                       'the end of the burn; the inner-surface arrays are the '
+                       'j = 0 nodes of the same field (gas side), read out, '
+                       'not recomputed'),
+        },
+        'history': {
+            'times_s': sonuc['times_s'],
+            'peak_wall_T_history_K': sonuc['peak_wall_T_history_K'],
+            '_basis': ('peak nodal temperature at each time point; this is '
+                       'the quantity the solver time-step convergence is '
+                       'measured on'),
+        },
+        'scalars': {
+            'peak_wall_T_K': sonuc['peak_wall_T_K'],
+            'peak_time_s': sonuc['peak_time_s'],
+            'peak_node': sonuc['peak_node'],
+            'inner_surface_peak_T_K': sonuc['inner_surface']['peak_T_K'],
+            'inner_surface_peak_z_m': sonuc['inner_surface']['peak_z_m'],
+            'burn_time_s': inputs['burn_time_s'],
+            'ambient_temperature_K': data.get('ambient_temperature_K'),
+            'material_key': inputs.get('material_key'),
+            'wall_thickness_m': inputs.get('thickness_m'),
+            'thermal_conductivity_W_mK': tm.get('thermal_conductivity_W_mK'),
+            'specific_heat_J_kgK': tm.get('specific_heat_J_kgK'),
+            'density_kg_m3': tm.get('density_kg_m3'),
+        },
+        'energy': sonuc['energy'],
+        'time_step': sonuc['time_step'],
+        'material_limits': sonuc['material_limits'],
+        'warnings': sonuc['warnings'],
+        'limits': limits,
+        'meta': sonuc['meta'],
+    }
+    return jsonify({'status': 'success', 'fea': sanitize_json_values(fea)})
+
 
 @app.route('/api/chemical-database', methods=['GET'])
 def get_chemical_database():

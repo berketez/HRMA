@@ -87,16 +87,45 @@ kaydıyla döner ve İÇİNDE hiçbir gerilme/SF alanı bulunmaz. Modellenmeyen
 fizik (termal gerilme, P(x) dağılımı, lüle için ayrı malzeme/kalınlık)
 başarılı sonucun ``meta['not_modelled']`` beyanındadır.
 
-Termal köprü (D2 ile eşleşme) bu dalgada İSKELETTİR: girdi çıkarımı
-tamdır ama motorlar Bartz h(z) profilini SONUÇ SÖZLÜĞÜNE YAYIMLAMAZ
-(kod tarandı: hibrit yalnız boğaz skalerlerini
-``nozzle_material_analysis.throat_thermal`` içine koyar; h(z) dizisi
-yalnız HeatTransferAnalyzer.analyze_axial_profile çağrısıyla üretilir ve
-app katmanı bunu ayrı uç noktada hesaplar). Profil çağıran tarafından
-``axial_profile`` argümanıyla verilmek zorundadır; verilmezse red.
-D2 çözücüsü (thermal_axisym) paralel dalgada yazılmaktadır — import
-korumalıdır: modül yoksa açıklayıcı NOT_AVAILABLE, varsa INPUTS_READY
-(çıkarılmış girdiler) döner; UYDURMA termal alan hiçbir koşulda üretilmez.
+Termal köprü (D2 ``thermal_axisym`` ile eşleşme) BAĞLIDIR:
+``run_thermal_from_motor`` mesh'i kurar, sınır koşullarını bağlar ve
+geçici ısı iletimi çözücüsünü uçtan uca sürer. Bağlamanın girdi
+kaynakları (kod okunarak doğrulandı, 2026-08-05):
+
+  Gaz tarafı Bartz h(z), T_recovery(z):
+    Motor SONUÇ SÖZLÜĞÜNDE YOKTUR. Hibrit motor
+    ``HeatTransferAnalyzer.analyze_axial_profile``'i içeride çağırır ama
+    yalnız BOĞAZ SKALERLERİNİ ``nozzle_material_analysis.throat_thermal``
+    içine koyar (hybrid_rocket_engine.py ~1055-1100); sıvı ve katı
+    eksenel profili hiç üretmez. Diziyi yayımlayan tek yer
+    ``/api/analysis/wall-profile`` ucudur. Bu yüzden profil ÇAĞIRAN
+    tarafından ``axial_profile`` argümanıyla verilir (sözleşme:
+    ``x_mm``, ``h_g`` [W/m²K], ``T_recovery`` [K]); verilmezse red —
+    boğaz skalerinden profil UYDURULMAZ.
+    Profilin eksen orijini konturunkiyle AYNI olmalıdır (ikisi de
+    ``sample_nozzle_inner_contour`` çıktısıdır); uyuşmazlık
+    ``THERMAL_PROFILE_DOMAIN_TOL`` ile denetlenir, başka geometriden
+    gelen profil sessizce bu mesh'e taşınmaz.
+
+  Yanma süresi (çözüm penceresi t_end):
+    ``results['burn_time']`` [s] — üç motor da üst düzeyde yayımlar
+    (hibrit self.t_b; sıvı burn_time + burn_time_source; katı hesaplanan
+    süre). Alan yoksa red, süre uydurulmaz.
+
+  Ortam sıcaklığı (başlangıç koşulu) ve dış yüzey koşulu:
+    HİÇBİR motor çözücüsü yayımlamaz — çözümün ortam verisidir ve
+    ÇAĞIRANDAN alınır. Verilmezse red. Dış yüzey için ortam verisi
+    gelmezse yüzey ADYABATİK alınır: bu uydurma bir sayı değil, ısıyı
+    dışarı kaçırmayan (tepe cidar sıcaklığı için KONSERVATİF) açık bir
+    model seçimidir ve ``meta`` içinde beyan edilir.
+
+  Malzemenin ısıl özellikleri (ρ, c_p, k):
+    ``materials_db`` kaydından (heat_transfer_analysis ile aynı kayıt
+    ailesi). Kayıtta alan eksikse red.
+
+D2 modülü import korumalıdır: modül yoksa açıklayıcı NOT_AVAILABLE,
+modül var ama beklenen API yoksa INPUTS_READY (çıkarılmış girdiler)
+döner; UYDURMA termal alan hiçbir koşulda üretilmez.
 
 Kaynaklar
 ---------
@@ -111,12 +140,13 @@ Kaynaklar
 
 from __future__ import annotations
 
+import importlib
 from typing import Optional
 
 import numpy as np
 
 from hrma.constants import PA_PER_BAR
-from hrma.fea.mesh_axisym import DEFAULT_ELEMS_THROUGH_WALL
+from hrma.fea.mesh_axisym import DEFAULT_ELEMS_THROUGH_WALL, build_wall_mesh
 from hrma.fea.structural_axisym import (
     DEFAULT_MAX_REFINE_ROUNDS,
     DEFAULT_N_AXIAL0,
@@ -130,17 +160,31 @@ from hrma.fea.structural_axisym import (
 # ---------------------------------------------------------------------------
 BRIDGE_STATUS_OK = "ok"
 BRIDGE_STATUS_NOT_MODELLED = "NOT_MODELLED"      # girdi eksik → uydurma yok, red
-BRIDGE_STATUS_NOT_AVAILABLE = "NOT_AVAILABLE"    # D2 çözücüsü henüz depoda yok
-BRIDGE_STATUS_INPUTS_READY = "INPUTS_READY"      # D2 var; girdiler hazır, çağrı
-                                          # bağlantısı D2 API'siyle yazılacak
+BRIDGE_STATUS_NOT_AVAILABLE = "NOT_AVAILABLE"    # D2 çözücü modülü depoda yok
+BRIDGE_STATUS_INPUTS_READY = "INPUTS_READY"      # D2 modülü var ama beklenen
+                                          # API'yi taşımıyor: girdiler hazır,
+                                          # çözücü çağrılamaz (körlemesine
+                                          # çağırıp dönen şeyi "termal sonuç"
+                                          # diye yayımlamak yasak)
 
 ENGINE_LAYOUTS = ("hybrid", "liquid", "solid")
+
+#: Bartz profilinin eksen orijini/uzunluğu ile konturunki arasında kabul
+#: edilen en büyük sapma (kontur boyunun oranı). İkisi de AYNI örnekleyiciden
+#: (``sample_nozzle_inner_contour``) geldiği için fark yalnızca istasyon
+#: yeniden örneklemesinden doğar ve binde birler mertebesindedir; bundan
+#: büyük fark profilin BAŞKA bir geometri için hesaplandığı anlamına gelir
+#: (ölçüldü: aynı motorun geometrisi eksik verilerek çağrılan profil 171 mm,
+#: konturu 124 mm çıkıyor). Sapma tolerans içindeyse uçlarda sabit
+#: ekstrapolasyon (np.interp kırpması) yapılır ve beyan edilir.
+THERMAL_PROFILE_DOMAIN_TOL = 0.05
 
 # Uyarı kodları — {code, params} sözleşmesi (i18n_common.js kaydı ayrı
 # kalemdir; kod üreten tek yer burasıdır).
 WARN_INPUTS_MISSING = "warn.fea.bridge_inputs_missing"
 WARN_THERMAL_PROFILE_MISSING = "warn.fea.bridge_thermal_profile_missing"
 WARN_THERMAL_SOLVER_UNAVAILABLE = "warn.fea.bridge_thermal_solver_unavailable"
+WARN_THERMAL_WALL_OVER_ALLOWABLE = "warn.fea.thermal_wall_over_allowable"
 
 
 def _warning(code: str, **params) -> dict:
@@ -155,6 +199,21 @@ def _finite_positive(value) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     if not np.isfinite(v) or v <= 0.0:
+        return None
+    return v
+
+
+def _finite_nonnegative(value) -> Optional[float]:
+    """Değeri float'a çevirir; sonlu ve >= 0 değilse None döner.
+
+    Sıfırın meşru olduğu alanlar için (dış yüzey taşınım katsayısı h = 0
+    "yalnız ışıma" demektir; yayıcılık ε = 0 "ışıma yok" demektir).
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(v) or v < 0.0:
         return None
     return v
 
@@ -602,96 +661,209 @@ def run_structural_from_motor(motor_results: dict,
 
 
 # ---------------------------------------------------------------------------
-# Termal köprü İSKELETİ (D2 thermal_axisym paralel dalgada yazılıyor)
+# Termal köprü — D2 (hrma.fea.thermal_axisym) geçici ısı iletimi çözücüsüne
+# uçtan uca bağlıdır. Girdi kaynakları ve red kuralları modül docstring'inde.
 # ---------------------------------------------------------------------------
+def _extract_burn_time_s(motor_results: dict):
+    """Yanma süresi [s] — çözüm penceresi (t_end).
+
+    Üç motor da ``results['burn_time']`` alanını üst düzeyde saniye olarak
+    yayımlar (hibrit self.t_b; sıvı burn_time + burn_time_source; katı
+    hesaplanan süre). Dönüş: (süre_s | None, beyan | eksik-metni).
+    """
+    v = _finite_positive(motor_results.get("burn_time"))
+    if v is None:
+        return None, ("results['burn_time'] yok/geçersiz — yanma süresi "
+                      "uydurulmaz (geçici çözümün penceresi bu alandır)")
+    beyan = {
+        "kaynak": "results['burn_time'] [s]",
+        "t_end_s": v,
+        "kaynak_beyani": motor_results.get("burn_time_source"),
+        "zaman_penceresi": (
+            "t = 0 ateşleme anı, t = burn_time yanma sonu; sınır koşulları "
+            "bu pencerede SABİT alınır (kararlı çalışma varsayımı — throttle "
+            "ve kapama geçişi D2 çözücüsünün NOT_MODELLED beyanındadır)"),
+    }
+    return v, beyan
+
+
+def _extract_thermal_material(material_key: str):
+    """materials_db kaydından ρ, c_p, k [SI] — eksikse red.
+
+    Dönüş: (özellik-sözlüğü | None, beyan | eksik-metni).
+    """
+    from hrma.data.materials_db import get_material
+    try:
+        rec = get_material(material_key)
+    except (KeyError, ValueError):
+        return None, (f"malzeme '{material_key}' materials_db'de yok — ısıl "
+                      "özellik kaynağı olmadan termal FEA kurulamaz")
+    alanlar = {
+        "thermal_conductivity_W_mK": _finite_positive(
+            rec.get("thermal_conductivity")),
+        "specific_heat_J_kgK": _finite_positive(rec.get("specific_heat")),
+        "density_kg_m3": _finite_positive(rec.get("density")),
+    }
+    eksik = [ad for ad, deger in alanlar.items() if deger is None]
+    if eksik:
+        return None, (f"materials_db['{material_key}'] kaydında geçerli "
+                      + ", ".join(eksik) + " yok — uydurma ısıl özellik konmaz")
+    alanlar["kaynak"] = (
+        f"materials_db['{material_key}'] (thermal_conductivity, "
+        "specific_heat, density) — heat_transfer_analysis ile aynı kayıt "
+        "ailesi; değerler ODA SICAKLIĞI kaydıdır ve sıcaklıkla değişimi "
+        "modellenmez (sabit ρ, c_p, k)")
+    # Malzeme sıcaklık sınırı: motor çözücüleriyle AYNI okuma sırası
+    # (allowable_temperature, yoksa max_service_temp — hibrit
+    # analyze_nozzle_material bu sırayı kullanır).
+    allowable = rec.get("allowable_temperature")
+    if allowable is None:
+        allowable = rec.get("max_service_temp")
+    alanlar["allowable_temperature_K"] = _finite_positive(allowable)
+    alanlar["melting_point_K"] = _finite_positive(rec.get("melting_point"))
+    return alanlar, alanlar["kaynak"]
+
+
 def extract_thermal_inputs(motor_results: dict,
                            axial_profile: Optional[dict] = None,
-                           include_chamber: bool = True) -> dict:
-    """Termal FEA girdi çıkarımı — geometri + malzeme + Bartz h(z) sınırı.
+                           include_chamber: bool = False) -> dict:
+    """Termal FEA girdi çıkarımı — geometri + malzeme + Bartz h(z) + süre.
 
-    Bartz h(z) profili motor SONUÇ SÖZLÜĞÜNDE YOKTUR (kod tarandı,
-    2026-08-04): hibrit yalnız boğaz skalerlerini
-    ``nozzle_material_analysis.throat_thermal`` içine koyar; h(z) dizisi
-    ``HeatTransferAnalyzer.analyze_axial_profile`` çıktısıdır ve app
-    katmanı onu ayrı uç noktada hesaplar, motor sözlüğüne koymaz. Bu
-    yüzden profil çağıran tarafından ``axial_profile`` argümanıyla
-    (analyze_axial_profile sözleşmesi: ``x_mm``, ``h_g`` [W/m²K],
-    ``T_recovery`` [K]) verilmek zorundadır; verilmezse red —
-    boğaz skalerinden h(z) UYDURULMAZ.
+    Geometri/malzeme yapısal çıkarımdan (``extract_structural_inputs``)
+    gelir; üzerine ısıl özellikler, yanma süresi ve ÇAĞIRANIN verdiği
+    eksenel gaz-tarafı profili eklenir.
 
-    Malzemenin termal alanları (k, cp, ρ) materials_db kaydından okunur
-    (heat_transfer_analysis ile aynı kayıt ailesi).
+    ``axial_profile`` neden argüman: Bartz h(z) motor SONUÇ SÖZLÜĞÜNDE
+    YOKTUR (modül docstring'i, kod okunarak doğrulandı). Diziyi üreten tek
+    yer ``HeatTransferAnalyzer.analyze_axial_profile`` / ona bakan
+    ``/api/analysis/wall-profile`` ucudur. Sözleşme: ``x_mm`` [mm],
+    ``h_g`` [W/m²K], ``T_recovery`` [K]; üçü eş uzunlukta, x kesin artan.
+
+    ``include_chamber`` VARSAYILAN OLARAK KAPALIDIR (yapısal yoldan farklı):
+    h(z) profili yalnız lüle konturu boyunca tanımlıdır; kamara silindiri
+    eklenirse o bölgede gaz-tarafı katsayısı BİLİNMEZ ve uydurulması
+    gerekirdi. Termal alan bu yüzden profilin tanımlı olduğu bölgedir;
+    eksik bölge ``meta['not_modelled']`` içinde beyan edilir.
     """
     yapisal = extract_structural_inputs(motor_results,
                                         include_chamber=include_chamber)
     if yapisal["status"] != BRIDGE_STATUS_OK:
         return yapisal
 
-    if not isinstance(axial_profile, dict):
+    def _red(missing, reason, code=WARN_THERMAL_PROFILE_MISSING, **params):
         return {
             "status": BRIDGE_STATUS_NOT_MODELLED,
             "engine_layout": yapisal["engine_layout"],
-            "missing": ["Bartz h(z) profili (axial_profile)"],
-            "reason": (
-                "Motor sonuç sözlüğü Bartz h(z) profilini YAYIMLAMAZ — "
-                "hibrit yalnız boğaz skalerini "
-                "nozzle_material_analysis.throat_thermal'da verir, katı ve "
-                "sıvı hiç vermez. Profil "
-                "HeatTransferAnalyzer.analyze_axial_profile ile hesaplanıp "
-                "axial_profile argümanıyla verilmelidir; boğaz skalerinden "
-                "profil uydurulmaz (sahte veri yasağı)."),
-            "warning": _warning(WARN_THERMAL_PROFILE_MISSING),
+            "missing": list(missing),
+            "reason": reason,
+            "warning": _warning(code, **params),
         }
+
+    if not isinstance(axial_profile, dict):
+        return _red(
+            ["Bartz h(z) profili (axial_profile)"],
+            "Motor sonuç sözlüğü Bartz h(z) profilini YAYIMLAMAZ — hibrit "
+            "yalnız boğaz skalerini nozzle_material_analysis.throat_thermal'da "
+            "verir, katı ve sıvı hiç vermez. Profil "
+            "HeatTransferAnalyzer.analyze_axial_profile ile (ya da "
+            "/api/analysis/wall-profile ucuyla) hesaplanıp axial_profile "
+            "argümanıyla verilmelidir; boğaz skalerinden profil uydurulmaz "
+            "(sahte veri yasağı).")
 
     eksik_alan = [k for k in ("x_mm", "h_g", "T_recovery")
                   if axial_profile.get(k) is None]
     if eksik_alan:
-        return {
-            "status": BRIDGE_STATUS_NOT_MODELLED,
-            "engine_layout": yapisal["engine_layout"],
-            "missing": [f"axial_profile.{k}" for k in eksik_alan],
-            "reason": ("axial_profile analyze_axial_profile sözleşmesine "
-                       "uymuyor (x_mm, h_g, T_recovery zorunlu)"),
-            "warning": _warning(WARN_THERMAL_PROFILE_MISSING),
-        }
-    x_m = np.asarray(axial_profile["x_mm"], dtype=float) / 1000.0
-    h_g = np.asarray(axial_profile["h_g"], dtype=float)
-    t_rec = np.asarray(axial_profile["T_recovery"], dtype=float)
-    if not (x_m.shape == h_g.shape == t_rec.shape) or x_m.size < 2:
-        return {
-            "status": BRIDGE_STATUS_NOT_MODELLED,
-            "engine_layout": yapisal["engine_layout"],
-            "missing": ["axial_profile dizileri"],
-            "reason": ("axial_profile dizileri eş uzunlukta (>= 2) değil"),
-            "warning": _warning(WARN_THERMAL_PROFILE_MISSING),
-        }
+        return _red([f"axial_profile.{k}" for k in eksik_alan],
+                    "axial_profile analyze_axial_profile sözleşmesine uymuyor "
+                    "(x_mm, h_g, T_recovery zorunlu)")
+
+    try:
+        x_m = np.asarray(axial_profile["x_mm"], dtype=float) / 1000.0
+        h_g = np.asarray(axial_profile["h_g"], dtype=float)
+        t_rec = np.asarray(axial_profile["T_recovery"], dtype=float)
+    except (TypeError, ValueError):
+        return _red(["axial_profile dizileri"],
+                    "axial_profile dizileri sayısal diziye çevrilemedi")
+    if x_m.ndim != 1 or not (x_m.shape == h_g.shape == t_rec.shape) \
+            or x_m.size < 2:
+        return _red(["axial_profile dizileri"],
+                    "axial_profile dizileri eş uzunlukta 1B (>= 2) değil")
     if (not np.all(np.isfinite(x_m)) or not np.all(np.isfinite(h_g))
             or not np.all(np.isfinite(t_rec)) or np.any(h_g <= 0.0)
             or np.any(t_rec <= 0.0)):
-        return {
-            "status": BRIDGE_STATUS_NOT_MODELLED,
-            "engine_layout": yapisal["engine_layout"],
-            "missing": ["axial_profile değerleri"],
-            "reason": ("axial_profile sonlu olmayan / pozitif olmayan değer "
-                       "içeriyor"),
-            "warning": _warning(WARN_THERMAL_PROFILE_MISSING),
-        }
+        return _red(["axial_profile değerleri"],
+                    "axial_profile sonlu olmayan / pozitif olmayan değer "
+                    "içeriyor")
+    if not np.all(np.diff(x_m) > 0.0):
+        return _red(["axial_profile.x_mm"],
+                    "axial_profile.x_mm kesin artan değil — sınır koşulu "
+                    "enterpolasyonu tanımsız olur")
 
-    from hrma.data.materials_db import get_material
-    rec = get_material(yapisal["material_key"])  # yapısal çıkarım doğruladı
-    termal_malzeme = {
-        "thermal_conductivity_W_mK": float(rec["thermal_conductivity"]),
-        "specific_heat_J_kgK": float(rec["specific_heat"]),
-        "density_kg_m3": float(rec["density"]),
-        "kaynak": (f"materials_db['{yapisal['material_key']}'] — "
-                   "heat_transfer_analysis ile aynı kayıt ailesi"),
-    }
+    # --- Eksen uyuşması: profil ile kontur AYNI geometriden mi? ------------
+    # İkisi de sample_nozzle_inner_contour çıktısıdır ve orijin sözleşmesi
+    # aynıdır (ilk nokta konverjan girişi, z = 0). Uyuşmazlık, profilin
+    # BAŞKA bir geometri için hesaplandığını gösterir; o profili bu mesh'e
+    # taşımak sahte veri üretmektir.
+    z_kontur = np.asarray(yapisal["contour"], dtype=float)[:, 0]
+    z0, z1 = float(np.min(z_kontur)), float(np.max(z_kontur))
+    L = z1 - z0
+    sapma = max(abs(float(x_m[0]) - z0), abs(float(x_m[-1]) - z1))
+    if L <= 0.0 or sapma > THERMAL_PROFILE_DOMAIN_TOL * L:
+        return _red(
+            ["axial_profile ekseni (kontur ile uyuşmuyor)"],
+            "axial_profile ekseni konturla uyuşmuyor: profil "
+            f"[{x_m[0] * 1000.0:.3f}, {x_m[-1] * 1000.0:.3f}] mm, kontur "
+            f"[{z0 * 1000.0:.3f}, {z1 * 1000.0:.3f}] mm, sapma "
+            f"{sapma * 1000.0:.3f} mm > tolerans "
+            f"{THERMAL_PROFILE_DOMAIN_TOL * L * 1000.0:.3f} mm "
+            f"(kontur boyunun %{100.0 * THERMAL_PROFILE_DOMAIN_TOL:g}'i). "
+            "Profil bu geometri için hesaplanmamış görünüyor; başka "
+            "geometrinin h(z)'si bu mesh'e taşınmaz. "
+            + ("include_chamber=True verildiyse mesh kamara silindirini de "
+               "kapsar ama profil yalnız lüle konturunda tanımlıdır."
+               if include_chamber else ""))
 
+    termal_malzeme, m_beyan = _extract_thermal_material(
+        yapisal["material_key"])
+    if termal_malzeme is None:
+        return _red(["malzeme ısıl özellikleri (ρ, c_p, k)"], m_beyan,
+                    code=WARN_INPUTS_MISSING,
+                    missing="malzeme ısıl özellikleri")
+
+    t_end, t_beyan = _extract_burn_time_s(motor_results)
+    if t_end is None:
+        return _red(["burn_time"], t_beyan, code=WARN_INPUTS_MISSING,
+                    missing="burn_time")
+
+    kirpma = (float(x_m[0]) > z0 + 1e-12) or (float(x_m[-1]) < z1 - 1e-12)
     basis = dict(yapisal["_basis"])
     basis["_source"] = "hrma.fea.bridge.extract_thermal_inputs"
-    basis["h_profili"] = (
-        "çağıranın verdiği HeatTransferAnalyzer.analyze_axial_profile "
-        "çıktısı (x_mm→m dönüşümü burada); motor sözlüğünde h(z) alanı yok")
+    basis["h_profili"] = {
+        "kaynak": ("çağıranın verdiği "
+                   "HeatTransferAnalyzer.analyze_axial_profile çıktısı "
+                   "(x_mm → m dönüşümü burada); motor sonuç sözlüğünde h(z) "
+                   "alanı YOKTUR"),
+        "nokta_sayisi": int(x_m.size),
+        "x_araligi_m": [float(x_m[0]), float(x_m[-1])],
+        "kontur_araligi_m": [z0, z1],
+        "uc_ekstrapolasyon": (
+            "profil konturun tamamını kapsamıyor; kapsanmayan uçta h ve "
+            "T_recovery SABİT (en yakın istasyon değeri) alınır — np.interp "
+            "kırpması, tolerans içinde beyanlı yaklaşım"
+            if kirpma else
+            "profil konturu uçtan uca kapsıyor; ekstrapolasyon yapılmadı"),
+        "ara_deger": ("kenar orta noktalarında lineer enterpolasyon "
+                      "(np.interp); istasyon arası h(z) için başka model "
+                      "varsayılmaz"),
+    }
+    basis["isil_malzeme"] = m_beyan
+    basis["yanma_suresi"] = t_beyan
+    basis["kamara_uzantisi_termal"] = (
+        "kamara silindiri termal alana EKLENMEDİ — gaz tarafı h(z) yalnız "
+        "lüle konturu boyunca tanımlı; silindir bölgesinde katsayı "
+        "uydurulmaz" if not include_chamber else
+        "kamara silindiri istendi (include_chamber=True) — profilin o bölgeyi "
+        "de kapsaması gerekir")
 
     out = dict(yapisal)
     out["_basis"] = basis
@@ -699,53 +871,301 @@ def extract_thermal_inputs(motor_results: dict,
     out["h_g_W_m2K"] = h_g
     out["t_recovery_K"] = t_rec
     out["thermal_material"] = termal_malzeme
+    out["burn_time_s"] = t_end
+    out["profile_clamped"] = bool(kirpma)
     return out
+
+
+#: D2 çözücüsünden köprünün ihtiyaç duyduğu API adları. Modül var ama bu
+#: adlar yoksa çözücü ÇAĞRILMAZ (körlemesine çağırıp dönen şeyi "termal
+#: sonuç" diye yayımlamak sahte veri yasağını deler).
+_THERMAL_SOLVER_API = (
+    "solve_transient_auto", "ThermalMaterial", "ConvectionBC", "AmbientBC",
+    "AdiabaticBC", "DEFAULT_DT_TOL", "DEFAULT_N_STEPS0",
+    "DEFAULT_MAX_DT_HALVINGS",
+)
 
 
 def run_thermal_from_motor(motor_results: dict,
                            axial_profile: Optional[dict] = None,
-                           include_chamber: bool = True) -> dict:
-    """Termal köprü İSKELETİ — girdi çıkarımı + import-korumalı D2 kapısı.
+                           ambient_temperature_K: Optional[float] = None,
+                           outer_ambient: Optional[dict] = None,
+                           include_chamber: bool = False,
+                           n_axial: int = DEFAULT_N_AXIAL0,
+                           n_radial: int = DEFAULT_ELEMS_THROUGH_WALL,
+                           offset_mode: str = "normal",
+                           dt_tol: Optional[float] = None,
+                           n_steps0: Optional[int] = None,
+                           max_halvings: Optional[int] = None) -> dict:
+    """Motor sonucundan uçtan uca GEÇİCİ TERMAL FEA koşusu (D2 bağlantısı).
 
-    D2 çözücüsü (hrma.fea.thermal_axisym) paralel dalgada yazılmaktadır:
+    Zincir: girdi çıkarımı (``extract_thermal_inputs``) → mesh
+    (``mesh_axisym.build_wall_mesh``) → sınır koşulları → D2
+    ``thermal_axisym.solve_transient_auto`` (zaman adımını kendi seçer ve
+    beyan eder).
 
-      * girdiler eksik → extract_thermal_inputs'un redli sonucu (uydurma
-        h(z) / malzeme yok),
-      * modül henüz depoda yok → ``status='NOT_AVAILABLE'`` + açıklayıcı
-        neden (import hatası yutulup sessiz kalınmaz),
-      * modül var → ``status='INPUTS_READY'`` + çıkarılmış girdi paketi.
-        Çözücü ÇAĞRILMAZ: D2'nin giriş API'si bu iskelet yazılırken
-        kesinleşmemişti; API'ye körlemesine parametre geçip dönen her ne
-        ise "termal sonuç" diye yayımlamak sahte veri yasağını deler.
-        Bağlantı, D2 API'si sabitlenince tek noktadan (burada) yazılacak.
+    Sınır koşulları:
+      * iç yüzey — ``ConvectionBC``: h(z) ve T_recovery(z) çağıranın verdiği
+        Bartz profilinden, kenar orta noktalarında lineer enterpolasyonla.
+      * dış yüzey — ``outer_ambient`` verilmemişse ``AdiabaticBC``. Bu bir
+        uydurma sayı değil, ısı kaçışını sıfır sayan AÇIK model seçimidir:
+        tepe cidar sıcaklığı için üst sınır (konservatif) verir ve beyan
+        edilir. ``{'h_W_m2K', 'T_ambient_K', 'emissivity'}`` verilirse
+        ``AmbientBC`` (doğal taşınım + lineerleştirilmiş ışıma) kurulur.
+      * uç kesitler — adyabatik (D2'nin doğal sınır koşulu).
+
+    ``ambient_temperature_K`` ZORUNLUDUR: başlangıç koşulu tekdüze ortam
+    sıcaklığıdır ve bunu HİÇBİR motor çözücüsü yayımlamaz; verilmezse
+    NOT_MODELLED döner (varsayılan oda sıcaklığı uydurulmaz).
+
+    Dönüşler:
+      * girdi eksik → ``extract_thermal_inputs``in redli sonucu,
+      * D2 modülü yok → ``NOT_AVAILABLE`` + açıklayıcı neden,
+      * D2 modülü var ama API eksik → ``INPUTS_READY`` (çözücü çağrılmaz),
+      * ortam girdisi eksik → ``NOT_MODELLED`` + eksik alan adı,
+      * hepsi tamam → ``ok`` + sıcaklık alanı, tepe cidar sıcaklığı geçmişi,
+        enerji bütçesi, zaman adımı beyanı ve NOT_MODELLED listesi.
 
     Hiçbir dalda uydurma sıcaklık/ısı akısı alanı üretilmez.
     """
-    inputs = extract_thermal_inputs(motor_results, axial_profile=axial_profile,
+    inputs = extract_thermal_inputs(motor_results,
+                                    axial_profile=axial_profile,
                                     include_chamber=include_chamber)
     if inputs["status"] != BRIDGE_STATUS_OK:
         return inputs
 
     try:
-        import hrma.fea.thermal_axisym  # noqa: F401 — varlık denetimi
+        ta = importlib.import_module("hrma.fea.thermal_axisym")
     except ImportError as exc:
         return {
             "status": BRIDGE_STATUS_NOT_AVAILABLE,
             "engine_layout": inputs["engine_layout"],
             "reason": (
-                "hrma.fea.thermal_axisym henüz depoda yok (D2, V2.7 Aşama A "
-                "— paralel dalgada yazılıyor). Köprü girdileri çıkarıldı ama "
-                f"çözücü çağrılamaz. Import hatası: {exc}"),
+                "hrma.fea.thermal_axisym içe aktarılamadı (D2 geçici ısı "
+                "iletimi çözücüsü). Köprü girdileri çıkarıldı ama çözücü "
+                f"çağrılamaz. Import hatası: {exc}"),
             "warning": _warning(WARN_THERMAL_SOLVER_UNAVAILABLE),
             "inputs": inputs,
         }
 
+    eksik_api = [ad for ad in _THERMAL_SOLVER_API if not hasattr(ta, ad)]
+    if eksik_api:
+        return {
+            "status": BRIDGE_STATUS_INPUTS_READY,
+            "engine_layout": inputs["engine_layout"],
+            "reason": (
+                "hrma.fea.thermal_axisym mevcut ama köprünün beklediği API "
+                "eksik: " + ", ".join(eksik_api) + ". Girdiler hazır; çözücü "
+                "ÇAĞRILMADI — API bilinmeden çağrı uydurulmaz, sahte termal "
+                "alan üretilmez."),
+            "missing_api": eksik_api,
+            "warning": _warning(WARN_THERMAL_SOLVER_UNAVAILABLE),
+            "inputs": inputs,
+        }
+
+    # --- Ortam (çözüm) girdileri: motor yayımlamaz, çağıran verir ---------
+    T0 = _finite_positive(ambient_temperature_K)
+    if T0 is None:
+        return {
+            "status": BRIDGE_STATUS_NOT_MODELLED,
+            "engine_layout": inputs["engine_layout"],
+            "missing": ["ambient_temperature_K"],
+            "reason": (
+                "Başlangıç koşulu tekdüze ORTAM SICAKLIĞIDIR ve hiçbir motor "
+                "çözücüsü bu değeri yayımlamaz (kod tarandı). Çağıran "
+                "ambient_temperature_K [K] vermelidir; varsayılan oda "
+                "sıcaklığı uydurulup çözücü 'çalışır' gösterilmez."),
+            "warning": _warning(WARN_INPUTS_MISSING,
+                                missing="ambient_temperature_K"),
+            "inputs": inputs,
+        }
+
+    if outer_ambient is None:
+        outer_bc = ta.AdiabaticBC()
+        dis_beyan = (
+            "ADYABATİK — çağıran dış ortam verisi vermedi. Uydurma bir "
+            "taşınım katsayısı/ortam sıcaklığı konmadı; ısı kaçışı sıfır "
+            "sayıldı. Bu KONSERVATİF bir üst sınırdır: gerçek dış yüzey "
+            "ısı kaybettiği için tepe cidar sıcaklığı bu koşudakinden "
+            "düşük olur. Gerçek dış koşul için outer_ambient "
+            "{'h_W_m2K', 'T_ambient_K', 'emissivity'} verilmelidir.")
+    else:
+        if not isinstance(outer_ambient, dict):
+            outer_ambient = {}
+        h_out = _finite_nonnegative(outer_ambient.get("h_W_m2K"))
+        T_out = _finite_positive(outer_ambient.get("T_ambient_K"))
+        eps = _finite_nonnegative(outer_ambient.get("emissivity", 0.0))
+        eksik_dis = []
+        if h_out is None:
+            eksik_dis.append("outer_ambient.h_W_m2K")
+        if T_out is None:
+            eksik_dis.append("outer_ambient.T_ambient_K")
+        if eps is None or eps > 1.0:
+            eksik_dis.append("outer_ambient.emissivity ([0, 1])")
+        if eksik_dis:
+            return {
+                "status": BRIDGE_STATUS_NOT_MODELLED,
+                "engine_layout": inputs["engine_layout"],
+                "missing": eksik_dis,
+                "reason": ("outer_ambient verildi ama alanları geçerli değil; "
+                           "eksik/geçersiz: " + ", ".join(eksik_dis)
+                           + ". Eksik alan varsayılanla doldurulmaz."),
+                "warning": _warning(WARN_INPUTS_MISSING,
+                                    missing=", ".join(eksik_dis)),
+                "inputs": inputs,
+            }
+        outer_bc = ta.AmbientBC(h=h_out, T_ambient=T_out, emissivity=eps)
+        dis_beyan = (
+            f"çağıranın verdiği dış ortam: doğal taşınım h = {h_out:g} "
+            f"W/(m²K), T_ort = {T_out:g} K, yayıcılık ε = {eps:g} "
+            "(ışıma D2 içinde lineerleştirilir, hatası D2 meta'sında)")
+
+    # --- Mesh + sınır koşulları + çözüm -----------------------------------
+    mesh = build_wall_mesh(inputs["contour"], inputs["thickness_m"],
+                           int(n_axial), int(n_radial),
+                           offset_mode=offset_mode)
+
+    tm = inputs["thermal_material"]
+    material = ta.ThermalMaterial(
+        rho=tm["density_kg_m3"],
+        cp=tm["specific_heat_J_kgK"],
+        k=tm["thermal_conductivity_W_mK"],
+        name=inputs["material_key"],
+    )
+
+    x_m = inputs["h_x_m"]
+    h_g = inputs["h_g_W_m2K"]
+    t_rec = inputs["t_recovery_K"]
+    inner_bc = ta.ConvectionBC(
+        h=lambda z, _x=x_m, _h=h_g: np.interp(z, _x, _h),
+        T_inf=lambda z, _x=x_m, _t=t_rec: np.interp(z, _x, _t),
+    )
+
+    res = ta.solve_transient_auto(
+        mesh, material,
+        t_end=inputs["burn_time_s"],
+        inner_bc=inner_bc,
+        outer_bc=outer_bc,
+        T_initial=T0,
+        tol=ta.DEFAULT_DT_TOL if dt_tol is None else float(dt_tol),
+        n_steps0=ta.DEFAULT_N_STEPS0 if n_steps0 is None else int(n_steps0),
+        max_halvings=(ta.DEFAULT_MAX_DT_HALVINGS if max_halvings is None
+                      else int(max_halvings)),
+    )
+
+    # --- İç (gaz tarafı) yüzey özeti — çözücü çıktısından türetilir -------
+    ic_dugumler = mesh.inner_nodes
+    T_ic = res.T_final[ic_dugumler]
+    z_ic = mesh.nodes[ic_dugumler, 0]
+    i_ic = int(np.argmax(T_ic))
+    inner_surface = {
+        "_basis": ("iç yüzey (j = 0) düğümlerinin SON andaki sıcaklığı; "
+                   "çözücü alanından okundu, ayrıca hesap yapılmadı"),
+        "node_ids": ic_dugumler,
+        "z_m": z_ic,
+        "T_final_K": T_ic,
+        "peak_T_K": float(T_ic[i_ic]),
+        "peak_z_m": float(z_ic[i_ic]),
+    }
+
+    # --- Malzeme sıcaklık sınırı: D2 bunu bilerek çağırana bırakır --------
+    uyarilar = []
+    sinir = {
+        "_basis": ("materials_db kaydından okunan sınırlar; D2 çözücüsü faz "
+                   "değişimini modellemez ve sınır denetimini AÇIKÇA çağıran "
+                   "katmana bırakır (thermal_axisym meta.not_modelled). "
+                   "Karşılaştırma tüm alanın tepe sıcaklığıyla yapılır."),
+        "allowable_temperature_K": tm.get("allowable_temperature_K"),
+        "melting_point_K": tm.get("melting_point_K"),
+        "peak_wall_T_K": float(res.peak_wall_T),
+        "exceeds_allowable": None,
+        "exceeds_melting": None,
+    }
+    allow = tm.get("allowable_temperature_K")
+    melt = tm.get("melting_point_K")
+    if allow is not None:
+        sinir["exceeds_allowable"] = bool(res.peak_wall_T > allow)
+    if melt is not None:
+        sinir["exceeds_melting"] = bool(res.peak_wall_T > melt)
+    if sinir["exceeds_allowable"] or sinir["exceeds_melting"]:
+        uyarilar.append(_warning(
+            WARN_THERMAL_WALL_OVER_ALLOWABLE,
+            material=inputs["material_key"],
+            peak_wall_T_K=round(float(res.peak_wall_T), 1),
+            allowable_K=allow,
+            melting_K=melt))
+
+    meta = {
+        "_source": "hrma.fea.bridge.run_thermal_from_motor",
+        "_basis": ("motor sonucu + çağıranın verdiği eksenel profil ve ortam "
+                   "koşulu → girdi çıkarımı (aşağıdaki 'girdiler') → "
+                   "hrma.fea.mesh_axisym.build_wall_mesh → "
+                   "hrma.fea.thermal_axisym.solve_transient_auto"),
+        "girdiler": inputs["_basis"],
+        "cozucu": res.meta,
+        "sinir_kosullari_koprusu": {
+            "ic_yuzey": ("ConvectionBC — h(z) ve T_recovery(z) çağıranın "
+                         "verdiği Bartz profilinden (kenar orta noktasında "
+                         "lineer enterpolasyon)"),
+            "dis_yuzey": dis_beyan,
+            "baslangic_kosulu": (f"tekdüze T = {T0:g} K (çağıranın verdiği "
+                                 "ortam sıcaklığı; motor yayımlamaz)"),
+            "zaman_penceresi": (f"t ∈ [0, {inputs['burn_time_s']:g}] s "
+                                "(results['burn_time'])"),
+        },
+        "mesh_politikasi": {
+            "n_axial": int(mesh.n_axial),
+            "n_radial": int(mesh.n_radial),
+            "n_elems": int(mesh.n_elems),
+            "beyan": ("termal yolda MESH yakınsaması otomatik DENETLENMEZ — "
+                      "D2 sürücüsü zaman ekseninde yakınsar (adım ikiye "
+                      "bölme). Uzamsal ayrıklık yapısal yoldaki merkezî "
+                      "başlangıç bölümleridir (DEFAULT_N_AXIAL0, "
+                      "DEFAULT_ELEMS_THROUGH_WALL); mesh yakınsaması "
+                      "yapılmadığı için sonuç bu beyanla okunmalıdır"),
+        },
+        "not_modelled": [
+            ("termal gerilme / yapısal eşleşme — bu koşu SICAKLIK ALANIDIR; "
+             "sıcaklık kaynaklı gerilme ve dayanım deratingi D1 yapısal "
+             "koşusuna bağlanmamıştır"),
+            ("kamara silindiri — gaz tarafı h(z) yalnız lüle konturunda "
+             "tanımlı; termal alan profilin tanımlı olduğu bölgedir"
+             if not include_chamber else
+             "kamara silindiri istendi; profil o bölgeyi de kapsamalıdır"),
+            ("mesh (uzamsal) yakınsaması — yalnız zaman adımı yakınsaması "
+             "denetleniyor"),
+            ("ρ, c_p, k sıcaklıkla değişimi — materials_db oda sıcaklığı "
+             "kaydı sabit alındı"),
+        ] + list(res.meta.get("not_modelled", [])),
+    }
+
     return {
-        "status": BRIDGE_STATUS_INPUTS_READY,
+        "status": BRIDGE_STATUS_OK,
         "engine_layout": inputs["engine_layout"],
-        "reason": (
-            "hrma.fea.thermal_axisym mevcut; girdiler hazır. Çözücü çağrısı "
-            "D2 API'si sabitlenince buraya bağlanacak — API bilinmeden "
-            "çağrı uydurulmaz, sahte termal alan üretilmez."),
         "inputs": inputs,
+        "mesh": {
+            "nodes": mesh.nodes,
+            "elems": mesh.elems,
+            "node_index_grid": mesh.node_index_grid,
+            "n_nodes": mesh.n_nodes,
+            "n_elems": mesh.n_elems,
+            "n_axial": mesh.n_axial,
+            "n_radial": mesh.n_radial,
+            "meta": mesh.meta,
+        },
+        "ambient_temperature_K": T0,
+        "times_s": res.times,
+        "T_final_K": res.T_final,
+        "peak_wall_T_history_K": res.peak_wall_T_history,
+        "peak_wall_T_K": float(res.peak_wall_T),
+        "peak_time_s": float(res.peak_time_s),
+        "peak_node": int(res.peak_node),
+        "inner_surface": inner_surface,
+        "energy": res.energy,
+        "time_step": res.meta.get("zaman_adimi"),
+        "material_limits": sinir,
+        "warnings": uyarilar,
+        "result": res,          # ThermalResult — tam alan geçmişi burada
+        "mesh_object": mesh,    # AxisymMesh — ileri işleme için
+        "meta": meta,
     }

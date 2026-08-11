@@ -1708,7 +1708,17 @@
                 <!-- Single Point Analysis Tab -->
                 <div id="single_point_tab" class="analysis-tab-content active">
                     <div class="analysis-subtabs">
-                        <button class="subtab-button active" onclick="showSubTab('thrust_time')" data-i18n="liq.ui.thrust_time">Thrust & Time</button>
+                        <!-- v2.6.27 (A6, kalem 5): sekmenin adı 'Thrust & Time'
+                             idi ama içeriğinde ZAMAN eksenli hiçbir şey yok —
+                             yalnız Performance Summary ve Engine Specifications
+                             var (aşağıya bakınız). Sıvı motorda zaman-çözümlü
+                             eğri hiç üretilmiyor; çözücü bunu zaten açıkça
+                             beyan ediyor (liquid_rocket_engine.py:
+                             'transient_response': 'not_modelled'). Ad, var
+                             olmayan bir çıktıyı vaat etmesin diye içeriğiyle
+                             hizalandı. showSubTab('thrust_time') ve
+                             #thrust_time_content KİMLİKLERİ değişmedi. -->
+                        <button class="subtab-button active" onclick="showSubTab('thrust_time')" data-i18n="liq.ui.performance_and_specs">Performance &amp; Specifications</button>
                         <!-- T62: sekmenin içeriği motor alt sistemleridir (aşağıdaki
                              bölüm başlığı da öyle diyor); adı da onu söylemeli.
                              Toplam impuls artık "Thrust & Time" sekmesindeki motor

@@ -288,13 +288,30 @@ def test_b2_basinc_cokusu_yildiz_grainde_normal_burnout_sayilir():
 
 
 def test_b2_tavana_takilan_ama_normal_biten_cozum_calculated_diyemiyor():
-    """2. kademe: n = 0.9 -> 122/204 adım başarısız ama term='web_exhausted'.
+    """2. kademe: NORMAL biten (web tükenen) ama tavana takılan çözüm.
 
     Sonuç yayımlanır (tolerans 1e-6'dan 1e-2'ye gevşetildiğinde toplam impuls
     ölçülebilir ölçüde oynamıyor), fakat etiket artık uyarıyla aynı şeyi
     söyler: 'CALCULATED' YASAK.
+
+    SENARYO ÇAPASI YENİDEN ÖLÇÜLDÜ (v2.6.27, B2-6.4). Bu testin ayırt ettiği
+    durum "term = web_exhausted İKEN yakınsama yok"tur; kardeş test
+    (``test_b2_basinc_cokusu_yildiz_grainde_normal_burnout_sayilir``) zaten
+    ``pressure_collapse`` yolunu tutuyor, yani iki testin AYNI sona düşmesi
+    kapsamı daraltır. n = 0.9 eskiden bu senaryoyu üretiyordu; A1-1 boğazı
+    maksimum Kn'de boyutlandırmaya geçince (boğaz büyüdü, basınç düştü)
+    n = 0.9'un kuyruğu artık sönüyor ve son 'pressure_collapse' oluyor.
+    Ölçüm (KATI_TABAN, bu HEAD):
+
+        n = 0.65 -> web_exhausted,     2/182 adım başarısız, NOT_CONVERGED
+        n = 0.80 -> web_exhausted,    15/192,                NOT_CONVERGED
+        n = 0.88 -> web_exhausted,    96/223,                NOT_CONVERGED
+        n = 0.90 -> pressure_collapse, 126/213,              NOT_CONVERGED
+
+    Senaryo n = 0.88'e çekildi; iddiaların hiçbiri gevşetilmedi (aynı dört
+    alan, aynı değerler) — yalnız senaryoyu HÂLÂ üreten girdi seçildi.
     """
-    motor = SolidRocketEngine(burn_rate_n=0.9, **KATI_TABAN)
+    motor = SolidRocketEngine(burn_rate_n=0.88, **KATI_TABAN)
     sonuc = _sessiz(motor.calculate_performance)
 
     assert not sonuc.get('error')

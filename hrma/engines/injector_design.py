@@ -71,6 +71,11 @@ ELEMENT_SPACING_D = 3.0        # eleman merkez aralığı ≥ 3·d
 MR_BAND = (0.7, 1.3)           # doublet momentum oranı / Rupe pratik bandı
 C_IMP_SMD = 2.6                # impinging SMD sabiti (band 2-4; Ingebo TN 3265 eğilimi)
 PINTLE_BF_BAND = (0.3, 0.74)   # TRW mirası (Dressler & Bauer AIAA 2000-3871)
+# Hedef tıkama katsayısı (blockage factor) varsayılanı — bandın ortasına yakın.
+# v2.6.27 (B3): bu değer 0.58 literali olarak İKİ pintle dalında ayrı ayrı
+# yazılıydı; arayüz (injector_panel.js `num('inj_bf', 0.58)`) da aynı sayıyı
+# üçüncü kez taşıyor. Tek yerde tanımlanır ki dallar ayrışamasın.
+PINTLE_BF_TARGET_DEFAULT = 0.58
 PINTLE_SKIP_LS_DP = 1.0        # skip distance kuralı L_s/D_p ≈ 1
 # Hibrit (tek akışkan, ox-merkezli) pintle: oksitleyici alanının radyal
 # deliklere giden payı; kalanı anülüsten eksenel tabaka olarak akar.
@@ -587,6 +592,67 @@ def pintle_spray_angle(tmr):
     if tmr < 0:
         raise ValueError('TMR negatif olamaz')
     return float(np.degrees(np.arccos(1.0 / (1.0 + tmr))))
+
+
+def pintle_tip_geometry(a_radial_m2, a_annulus_m2, d_pintle_m=None,
+                        bf_target=PINTLE_BF_TARGET_DEFAULT):
+    """Pintle ucu geometrisinin TEK KAYNAĞI: radyal delik dizisi + anülüs.
+
+    v2.6.27 (B3) — depoda İKİ bağımsız enjektör modülü vardı ve radyal delik
+    modeli YALNIZ bu modüldeydi. Ekrana çizilen model (``utils/injector_
+    design.py::_calculate_pintle``) pintle'ı çıplak bir anülüs sanıyordu:
+    kullanıcı "radyal delik üretilmiyor" derken haklıydı, ama sebep
+    "Secondary Holes seçimi işlemiyor" değil, SAYFANIN RADYAL DELİĞİ OLAN
+    MODELİ HİÇ GÖRMEMESİYDİ. Sentez burada tek yere alındı; her iki modül de
+    (ve ``design_injector``'ın iki pintle dalı da) bu fonksiyonu çağırır, yani
+    tabloda, 2B kesitte ve şema çiziminde AYNI geometri görünür.
+
+    Girdi:
+        a_radial_m2  : radyal deliklere ayrılan toplam akış alanı [m²]
+        a_annulus_m2 : pintle gövdesi çevresindeki anülüs alanı [m²]
+        d_pintle_m   : pintle mili çapı [m]; None ise anülüs boşluk/çap
+                       kuralından (t ≈ 0.05·D_p) kendinden tutarlı çözülür
+        bf_target    : hedef tıkama katsayısı (blockage factor)
+
+    Bağıntılar (Dressler & Bauer, AIAA 2000-3871; Casiano/Hulka/Yang,
+    JPP 26(5) 2010):
+        BF = n·d/(π·D_p)  ve  A_rad = n·(π/4)·d²  → d ve n birlikte çözülür
+        A_ann = π·(D_p+t)·t  → t = (√(D_p² + 4·A_ann/π) − D_p)/2  (TAM ifade,
+        ince-anülüs yaklaşımı değil)
+        L_s/D_p ≈ 1 (skip distance kuralı)
+
+    Döner: ``pintle_geometry`` sözleşmesinin geometrik alanları.
+    """
+    a_rad = max(float(a_radial_m2), 0.0)
+    a_ann = max(float(a_annulus_m2), 0.0)
+    bf_target = float(bf_target)
+    if not (0.0 < bf_target < 1.0):
+        raise ValueError('bf_target 0 ile 1 arasında olmalı')
+
+    if d_pintle_m is None:
+        # Anülüs boşluğu t ≈ 0.05·D_p kuralıyla kendinden tutarlı D_p
+        d_p_m = float(np.sqrt(a_ann / (np.pi * PINTLE_ANNULUS_T_OVER_DP)))
+    else:
+        d_p_m = float(d_pintle_m)
+    if d_p_m <= 0:
+        raise ValueError('pintle çapı pozitif olmalı')
+
+    # BF hedefi: n·d = BF·π·D_p ve n·(π/4)d² = A_rad → d, n çöz
+    d_hole = (4.0 * a_rad / np.pi) / max(bf_target * np.pi * d_p_m, 1e-9)
+    n_holes = max(4, int(round(bf_target * np.pi * d_p_m / max(d_hole, 1e-9))))
+    d_hole = float(np.sqrt(4.0 * a_rad / (np.pi * n_holes)))
+    bf = n_holes * d_hole / (np.pi * d_p_m)
+    t_ann = float((np.sqrt(d_p_m ** 2 + 4.0 * a_ann / np.pi) - d_p_m) / 2.0)
+
+    return {
+        'd_pintle_mm': float(d_p_m * 1e3),
+        'skip_distance_mm': float(PINTLE_SKIP_LS_DP * d_p_m * 1e3),
+        'ls_over_dp': float(PINTLE_SKIP_LS_DP),
+        'bf': float(bf),
+        'annulus_gap_mm': float(t_ann * 1e3),
+        'n_radial_holes': int(n_holes),
+        'radial_hole_d_mm': float(d_hole * 1e3),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1633,7 +1699,7 @@ def design_injector(spec):
         # bağıntısı) gelir; aynı akışkan + aynı ΔP olduğu için hız eşittir,
         # dolayısıyla TMR = f/(1−f) (f = radyal pay).
         pin = spec.get('pintle') or {}
-        bf_target = pin.get('bf_target', 0.58)
+        bf_target = pin.get('bf_target', PINTLE_BF_TARGET_DEFAULT)
         f_rad = float(pin.get('radial_fraction', PINTLE_HYBRID_RADIAL_FRACTION))
         f_rad = float(np.clip(f_rad, 0.1, 0.9))
 
@@ -1641,18 +1707,18 @@ def design_injector(spec):
         a_rad = f_rad * a_total          # radyal delikler
         a_ann = a_total - a_rad          # anülüs
 
-        d_p = pin.get('d_pintle_mm')
-        if d_p is None:
-            # Anülüs boşluğu t ≈ 0.05·D_p kuralıyla kendinden tutarlı D_p
-            d_p_m = np.sqrt(a_ann / (np.pi * PINTLE_ANNULUS_T_OVER_DP))
-        else:
-            d_p_m = d_p * 1e-3
-        # BF hedefi: n·d = BF·π·D_p ve n·(π/4)d² = A_rad → d, n çöz
-        d_hole = (4.0 * a_rad / np.pi) / max(bf_target * np.pi * d_p_m, 1e-9)
-        n_holes = max(4, int(round(bf_target * np.pi * d_p_m / max(d_hole, 1e-9))))
-        d_hole = np.sqrt(4.0 * a_rad / (np.pi * n_holes))
-        bf = n_holes * d_hole / (np.pi * d_p_m)
-        t_ann = (np.sqrt(d_p_m ** 2 + 4.0 * a_ann / np.pi) - d_p_m) / 2.0
+        # Uç geometrisi TEK kaynaktan (bkz. pintle_tip_geometry): aynı sentez
+        # utils/injector_design.py'nin pintle dalında da kullanılır.
+        tip = pintle_tip_geometry(a_rad, a_ann,
+                                  d_pintle_m=(pin['d_pintle_mm'] * 1e-3
+                                              if pin.get('d_pintle_mm')
+                                              is not None else None),
+                                  bf_target=bf_target)
+        d_p_m = tip['d_pintle_mm'] * 1e-3
+        d_hole = tip['radial_hole_d_mm'] * 1e-3
+        n_holes = tip['n_radial_holes']
+        bf = tip['bf']
+        t_ann = tip['annulus_gap_mm'] * 1e-3
         if t_ann * 1e3 < ANNULUS_GAP_MIN_MM:
             warnings.append(_w(
                 'warn.injector.pintle_annulus_below_min', 'warning',
@@ -1667,17 +1733,9 @@ def design_injector(spec):
                         'unless the caller supplies tmr_target); the achieved '
                         'value is reported separately as tmr and it sets the '
                         'spray cone angle')}
-        pintle_geometry = {
-            'd_pintle_mm': float(d_p_m * 1e3),
-            'skip_distance_mm': float(PINTLE_SKIP_LS_DP * d_p_m * 1e3),
-            'ls_over_dp': float(PINTLE_SKIP_LS_DP),
-            'bf': float(bf),
-            'annulus_gap_mm': float(t_ann * 1e3),
-            'n_radial_holes': int(n_holes),
-            'radial_hole_d_mm': float(d_hole * 1e3),
-            'radial_flow_fraction': f_rad,
-            'single_fluid': True,
-        }
+        pintle_geometry = dict(tip)
+        pintle_geometry['radial_flow_fraction'] = f_rad
+        pintle_geometry['single_fluid'] = True
         if not (PINTLE_BF_BAND[0] <= bf <= PINTLE_BF_BAND[1]):
             warnings.append(_w(
                 'warn.injector.pintle_bf_out_of_band', 'warning',
@@ -1697,25 +1755,24 @@ def design_injector(spec):
         # Yakıt merkezli TRW/Merlin düzeni: radyal iç jetler = yakıt,
         # anülüs dış akış = oksitleyici
         pin = spec.get('pintle') or {}
-        bf_target = pin.get('bf_target', 0.58)
+        bf_target = pin.get('bf_target', PINTLE_BF_TARGET_DEFAULT)
         d_f_m = fuel['orifice_d_mm'] * 1e-3
         v_f = fuel['velocity_m_s']
         rho_f_l = fuel['_rho']
         a_ann = ox['total_area_mm2'] * 1e-6      # anülüs = oks. toplam alanı
         a_rad = fuel['total_area_mm2'] * 1e-6    # radyal delikler = yakıt
 
-        d_p = pin.get('d_pintle_mm')
-        if d_p is None:
-            # Anülüs boşluğu t ≈ 0.05·D_p kuralıyla kendinden tutarlı D_p
-            d_p_m = np.sqrt(a_ann / (np.pi * 0.05))
-        else:
-            d_p_m = d_p * 1e-3
-        # BF hedefi: n·d = BF·π·D_p ve n·(π/4)d² = A_rad → d, n çöz
-        d_hole = (4.0 * a_rad / np.pi) / max(bf_target * np.pi * d_p_m, 1e-9)
-        n_holes = max(4, int(round(bf_target * np.pi * d_p_m / max(d_hole, 1e-9))))
-        d_hole = np.sqrt(4.0 * a_rad / (np.pi * n_holes))
-        bf = n_holes * d_hole / (np.pi * d_p_m)
-        t_ann = (np.sqrt(d_p_m ** 2 + 4.0 * a_ann / np.pi) - d_p_m) / 2.0
+        # Uç geometrisi TEK kaynaktan (hibrit dalıyla aynı fonksiyon).
+        tip = pintle_tip_geometry(a_rad, a_ann,
+                                  d_pintle_m=(pin['d_pintle_mm'] * 1e-3
+                                              if pin.get('d_pintle_mm')
+                                              is not None else None),
+                                  bf_target=bf_target)
+        d_p_m = tip['d_pintle_mm'] * 1e-3
+        d_hole = tip['radial_hole_d_mm'] * 1e-3
+        n_holes = tip['n_radial_holes']
+        bf = tip['bf']
+        t_ann = tip['annulus_gap_mm'] * 1e-3
         if t_ann * 1e3 < ANNULUS_GAP_MIN_MM:
             warnings.append(_w(
                 'warn.injector.pintle_annulus_below_min', 'warning',
@@ -1730,15 +1787,7 @@ def design_injector(spec):
                         'unless the caller supplies tmr_target); the achieved '
                         'value is reported separately as tmr and it sets the '
                         'spray cone angle')}
-        pintle_geometry = {
-            'd_pintle_mm': float(d_p_m * 1e3),
-            'skip_distance_mm': float(PINTLE_SKIP_LS_DP * d_p_m * 1e3),
-            'ls_over_dp': float(PINTLE_SKIP_LS_DP),
-            'bf': float(bf),
-            'annulus_gap_mm': float(t_ann * 1e3),
-            'n_radial_holes': int(n_holes),
-            'radial_hole_d_mm': float(d_hole * 1e3),
-        }
+        pintle_geometry = dict(tip)
         if not (PINTLE_BF_BAND[0] <= bf <= PINTLE_BF_BAND[1]):
             warnings.append(_w(
                 'warn.injector.pintle_bf_out_of_band', 'warning',

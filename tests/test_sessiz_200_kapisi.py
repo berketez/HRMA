@@ -36,9 +36,29 @@ def client():
 
 
 def _sozlesmeyi_bozan_motor(donen):
-    """``calculate_performance()`` sözlük dışı değer döndüren sahte motor."""
+    """``calculate_performance()`` sözlük dışı değer döndüren sahte motor.
+
+    Sahte, motorun uç noktanın OKUDUĞU yüzeyini taşımak zorundadır; aksi
+    hâlde kapı denenmeden başka bir hata yolu tetiklenir. v2.6.27'de
+    ``/calculate_solid``, katsayı kaynağını beyan edebilmek için motorun
+    çözdüğü yakıt kimliğini ve fiilen kullandığı Saint-Robert çiftini
+    okumaya başladı (``app._build_solid_engine``: ``motor.propellant_type``,
+    ``motor.a``, ``motor.n``). Bu alanlar sahtede yokken uç, sonucun tipine
+    HİÇ bakamadan ``AttributeError`` ile 400 dönüyordu — yani test yeşil/
+    kırmızı olmasından bağımsız olarak artık sessiz-200 kapısını
+    SINAMIYORDU. Alanlar eklendi; kapının iddiası (sözlük dışı sonuç ->
+    500) aynen korundu, gevşetilmedi.
+
+    Değerler gerçek çözümden gelmez ve kullanıcıya gösterilmez — bu bir
+    pytest sahtesidir (test altyapısı).
+    """
 
     class _Motor:
+        #: Uç noktanın katsayı-kaynağı beyanı için okuduğu yüzey.
+        propellant_type = 'apcp'
+        a = 0.0022334
+        n = 0.35
+
         def __init__(self, *args, **kwargs):
             pass
 

@@ -615,6 +615,27 @@ GAS_GENERATOR_PRESSURE_RATIO = 1.3   # GG oda basıncı / ana oda basıncı
 SAFETY_FACTOR_DEFAULT = 2.5          # form varsayılanı ile aynı
 SAFETY_FACTOR_MIN, SAFETY_FACTOR_MAX = 1.1, 10.0
 CHAMBER_MATERIAL_DEFAULT = 'inconel_718'
+# --- B4 (v2.6.27 6. dalga): emniyet katsayısı / malzeme KAYNAK beyanı ------
+# Tank bloğu kendi emniyet katsayısının kaynağını zaten beyan ediyordu
+# ('user input (safety factor)' / 'not supplied -> ... default'); HAZNE
+# tarafında aynı beyan YOKTU: _structural_design sessizce
+# SAFETY_FACTOR_DEFAULT ve CHAMBER_MATERIAL_DEFAULT kullanıyor, çıktıdaki
+# 'safety_factor: 2.5' ve 'material: Inconel 718 (aged)' kullanıcı seçimiyle
+# varsayılanı ayırt ettirmiyordu. Aynı desen (YENİ mekanizma değil) hazneye
+# de uygulanır; metinler TEK tanım noktasından üretilir ki tank ile hazne
+# aynı durumu iki farklı cümleyle anlatmasın.
+SAFETY_FACTOR_SOURCE_USER = 'user input (safety factor)'
+SAFETY_FACTOR_SOURCE_DEFAULT = (
+    f'not supplied -> {SAFETY_FACTOR_DEFAULT:g} default')
+SAFETY_FACTOR_SOURCE_REJECTED = (
+    f'supplied value not usable (see input_warnings) -> '
+    f'{SAFETY_FACTOR_DEFAULT:g} default')
+CHAMBER_MATERIAL_SOURCE_USER = 'user input (chamber material)'
+CHAMBER_MATERIAL_SOURCE_DEFAULT = (
+    f"not supplied -> '{CHAMBER_MATERIAL_DEFAULT}' default")
+CHAMBER_MATERIAL_SOURCE_REJECTED = (
+    f'supplied value not recognised (see input_warnings) -> '
+    f"'{CHAMBER_MATERIAL_DEFAULT}' default")
 # Hesaplanan cidar kalınlığının altına inemeyeceği İMALAT tabanı [m].
 # Hibritteki WALL_THICKNESS_INPUT_MIN_M ile karıştırılmamalı: o,
 # kullanıcının elle girebileceği en ince değerdir (0.5 mm).
@@ -781,6 +802,36 @@ WATER_HAMMER_FLUID_KEY = {'lox': 'lox', 'rp1': 'rp1'}
 # 'feed_line_material' vermezse su koçu modülünün kendi paslanmaz varsayılanı
 # kullanılır ve kaynağı çıktıda beyan edilir.
 WATER_HAMMER_DEFAULT_PIPE_MATERIAL = 'ss_304'
+
+# --- C1/C2 (v2.6.27 6. dalga): besleme akışkanı BUHAR BASINCI -------------
+# Buhar basıncı motorun hiçbir yerinde ÇÖZÜLMEZ (itici sıcaklığı bir durum
+# değişkeni değil). Hem turbopompa NPSH'ı (Eş. 1) hem vana kavitasyon
+# taraması onsuz kurulamaz. Uydurmak yerine deponun KENDİ kaynak künyeli
+# tablosu kullanılır: hrma.analysis.water_hammer.FLUID_PROPERTIES, yani
+# A6 su koçu bağlamasının AYNI itici kaydı (tek kaynak — iki modül iki
+# farklı buhar basıncı varsayamaz). Referans sıcaklık ve kaynak metni
+# çıktıya aynen taşınır. Tabloda olmayan itici için ilgili blok
+# NOT_MODELLED döner ve eksik girdiyi ADIYLA söyler.
+FEED_FLUID_PROPERTY_KEY = WATER_HAMMER_FLUID_KEY
+# Ana kesme vanası stili: hattın K=0.15 kalemi TAM AÇIK küresel/kelebek
+# vanadır (FEED_K_MAIN_VALVE yorumuyla aynı), dolayısıyla ISA-75.01.01
+# basınç geri kazanım faktörü tablosundaki karşılığı tam geçişli küresel
+# vanadır. Vana STİLİ bir HRMA girdisi değildir; beyan edilir.
+FEED_MAIN_VALVE_STYLE = 'ball_full_bore'
+# Viskozite kullanıcı girdisi yoksa Darcy-Weisbach zincirinin düştüğü
+# değerler (_calculate_feed_system_pressure_drops ile TEK tanım). Vana/hat
+# bütçesi de AYNI değeri kullanır ki iki hat hesabı ayrışmasın.
+FEED_VISCOSITY_FALLBACK_PA_S = {'oxidizer': 2.0e-4, 'fuel': 1.2e-3}
+
+# --- A5 (v2.6.27 6. dalga): pasif ısıl koruma bağlaması --------------------
+# Ablatif astar varsayılan malzemesi. thermal_protection modülünün tanıdığı
+# ablatiflerden biri; hibrit motorun LINER_MATERIAL_DEFAULT'u ile AYNI
+# değerdir (iki motor aynı modüle iki farklı varsayılanla gitmez).
+# TASARIM SEÇİMİDİR, çözüm değildir — çıktıda adıyla beyan edilir.
+TPS_LINER_MATERIAL_DEFAULT = 'silica_phenolic'
+# Cidar sıcaklık geçmişi örnekleme tavanı (hibritteki WALL_HISTORY_MAX_POINTS
+# ile aynı gerekçe: yanıt boyutu sınırlanır, son nokta daima korunur).
+TPS_WALL_HISTORY_MAX_POINTS = 200
 # API RP 520 Part I sertifikalı emniyet vanası boşaltma katsayısı.
 RELIEF_VALVE_DISCHARGE_COEFF = 0.975
 # Emniyet vanası ayar basıncı / tank işletme basıncı (ASME VIII Div.1 UG-134:
@@ -817,6 +868,42 @@ COOLANT_DP_FRACTION_LIMIT = 0.30         # soğutucu ΔP / Pc üst sınırı
 # Akış ayrılması ölçütü (Summerfield): P_e < SEPARATION_RATIO · P_a olduğunda
 # aşırı genişlemiş lülede sınır tabaka ayrılır ve ideal CF kaybı abartır.
 NOZZLE_SEPARATION_PRESSURE_RATIO = 0.40
+
+# --- B4 (v2.6.27 6. dalga): OKUNMAYAN gövde alanları -----------------------
+# ÖLÇÜLDÜ (11 Ağustos 2026, bu blok yazılmadan önce): /calculate_liquid
+# gövdesine `expansion_ratio` 4 / 20 / 60 / 150 / 400 gönderildi; BEŞİNDE DE
+# yanıt `expansion_ratio = 13,223420430204907` ve `isp_sea_level = 298,37`
+# döndü. Sebep ad uyuşmazlığı: sıvı çözücünün genişleme oranı girdisi
+# `nozzle_expansion_ratio`'dur (liquid.html o adı gönderir, _apply_overrides
+# o adı okur). `expansion_ratio` ise çözücünün ÜRETTİĞİ bir çıktı adıdır.
+# Yani kullanıcının 400'ü sessizce yok oluyor ve yanıtta aynı ada sahip
+# BAŞKA bir sayı duruyordu — okuyan bunu "girdim kabul edildi, 13,22'ye
+# yuvarlandı" diye okuyabilirdi.
+#
+# NEDEN TAKMA AD YAPILMADI: `expansion_ratio` aynı yanıtın ÇIKTI adıdır.
+# Girdi olarak da kabul edilseydi, sonucu geri gönderen her istemci (proje
+# kaydı, dışa aktarım turu, API zinciri) lüleyi farkında olmadan
+# SABİTLERDİ — tasarım "ortam-eşlenik optimum"dan "kullanıcı verdi"ye
+# sessizce düşerdi. Bu, düzeltilen kusurun aynısını ters yönde kurardı.
+# Bunun yerine depodaki mevcut beyan deseni (app.py
+# `_declare_overridden_inputs` -> `inputs_not_used`, alanlar birebir aynı)
+# motor tarafında da uygulanır ve DOĞRU alan adı kullanıcıya söylenir.
+#
+# Beyan VARSAYIMLA değil ÖLÇÜMLE üretilir: gönderilen sayı ile sonuçta
+# fiilen duran sayı karşılaştırılır; eşitlerse hiçbir şey yazılmaz.
+LIQUID_UNREAD_INPUT_FIELDS = {
+    'expansion_ratio': {
+        # sonuçtaki hangi alan bu büyüklüğün FİİLEN kullanılan değerini taşır
+        'result_key': 'expansion_ratio',
+        # kullanıcının bunun yerine göndermesi gereken GERÇEK girdi adı
+        'use_instead': 'nozzle_expansion_ratio',
+        'reason': 'field_not_read',
+    },
+}
+#: Gönderilen ile kullanılan değerin "aynı" sayıldığı bağıl tolerans.
+#: app.py `_INPUT_ECHO_REL_TOL` ile aynı değer — iki yol aynı soruyu aynı
+#: eşikle cevaplasın diye.
+LIQUID_INPUT_ECHO_REL_TOL = 1e-6
 
 
 class LiquidRocketEngine:
@@ -1113,12 +1200,35 @@ class LiquidRocketEngine:
                                     if v is None else v * 1e-6)
 
         # --- yapı -----------------------------------------------------------
-        self.safety_factor = self._override_val(
+        # B4 (v2.6.27): KARAR burada verilir, KAYNAK da burada yazılır.
+        # Üç durum ayrı ayrı beyan edilir çünkü kullanıcı açısından üçü ayrı
+        # şeydir: (a) girdim kullanıldı, (b) hiç girmedim, varsayılan kullanıldı,
+        # (c) girdim reddedildi (aralık dışı / tanınmayan seçenek) ve yerine
+        # varsayılan kullanıldı. (c) durumunda 'kullanıcı girdi' demek YALAN
+        # olurdu; eski davranış ikisini de sessizce aynı sayıya düşürüyordu.
+        sf_raw = self.overrides.get('safety_factor')
+        sf_val = self._override_val(
             'safety_factor', SAFETY_FACTOR_MIN, SAFETY_FACTOR_MAX,
-            'Safety factor') or SAFETY_FACTOR_DEFAULT
-        self.chamber_material = (self._override_choice(
+            'Safety factor')
+        if sf_val is not None:
+            self.safety_factor = sf_val
+            self.safety_factor_source = SAFETY_FACTOR_SOURCE_USER
+        else:
+            self.safety_factor = SAFETY_FACTOR_DEFAULT
+            self.safety_factor_source = (
+                SAFETY_FACTOR_SOURCE_REJECTED if sf_raw not in (None, '')
+                else SAFETY_FACTOR_SOURCE_DEFAULT)
+        mat_raw = self.overrides.get('chamber_material')
+        mat_val = self._override_choice(
             'chamber_material', set(CHAMBER_MATERIAL_MAP), 'Chamber material')
-            or CHAMBER_MATERIAL_DEFAULT)
+        if mat_val is not None:
+            self.chamber_material = mat_val
+            self.chamber_material_source = CHAMBER_MATERIAL_SOURCE_USER
+        else:
+            self.chamber_material = CHAMBER_MATERIAL_DEFAULT
+            self.chamber_material_source = (
+                CHAMBER_MATERIAL_SOURCE_REJECTED if mat_raw not in (None, '')
+                else CHAMBER_MATERIAL_SOURCE_DEFAULT)
         v = self._override_val('chamber_wall_thickness', 0.2, 500.0,
                                'Chamber wall thickness', ' mm')
         self.wall_thickness_input_m = None if v is None else v / 1000.0
@@ -1299,6 +1409,67 @@ class LiquidRocketEngine:
             'reported_for_comparison': comparison,
         }
 
+    def _declare_unread_inputs(self, results):
+        """Gönderilmiş ama çözücünün OKUMADIĞI gövde alanlarını beyan eder.
+
+        Yol haritası B4 (v2.6.27). ``unwired_inputs()`` ARAYÜZ alanlarının
+        listesidir ve koşudan bağımsızdır; bu ise BU KOŞUDA fiilen gönderilmiş
+        bir değerin yok sayıldığını ÖLÇEREK söyler. İkisi karışmasın diye ayrı
+        adreslerde durur.
+
+        Şema, hibrit rotasının ``inputs_not_used`` beyanıyla birebir aynıdır
+        (``field``, ``submitted``, ``used_by_model``, ``reason``, ``message``);
+        ek olarak ``use_instead`` alanı kullanıcının GERÇEK girdi adını söyler
+        — "girdiniz kullanılmadı" demek, doğrusunu söylemeden yarım kalır.
+
+        Ölçüm kuralı: gönderilen sayı ile sonuçta fiilen duran sayı
+        karşılaştırılır. Eşitlerse hiçbir şey beyan edilmez (yanlış alarm da
+        bir yalandır). Sayıya çevrilemeyen ya da sonuçta karşılığı bulunmayan
+        alan için de sessiz kalınır: ölçemediğimiz şey hakkında hüküm
+        vermeyiz.
+
+        Returns:
+            Beyan listesi (koşullar sağlanmadıysa boş liste).
+        """
+        beyanlar = []
+        overrides = getattr(self, 'overrides', None) or {}
+        for field, spec in LIQUID_UNREAD_INPUT_FIELDS.items():
+            raw = overrides.get(field)
+            if raw is None or raw == '':
+                continue
+            try:
+                submitted = float(raw)
+            except (TypeError, ValueError):
+                continue
+            used = results.get(spec['result_key'])
+            try:
+                used_value = float(used)
+            except (TypeError, ValueError):
+                continue
+            if not (np.isfinite(submitted) and np.isfinite(used_value)):
+                continue
+            if abs(submitted - used_value) <= (
+                    LIQUID_INPUT_ECHO_REL_TOL * abs(used_value)):
+                continue
+            use_instead = spec['use_instead']
+            beyanlar.append({
+                'field': field,
+                'submitted': submitted,
+                'used_by_model': used_value,
+                'reason': spec['reason'],
+                'use_instead': use_instead,
+                'message': (
+                    f"'{field}' was supplied as {submitted:g} but the liquid "
+                    f'solver does not read that field; the analysis and every '
+                    f'echo of this name in the response carry the solved '
+                    f"value {used_value:g}. The input field for this quantity "
+                    f"is '{use_instead}'."),
+            })
+            self._warn('warn.liquid.input_field_not_read', 'warning',
+                       field=field, use_instead=use_instead,
+                       submitted=float(submitted), used=float(used_value))
+        return beyanlar
+
     # ------------------------------------------------------------------
     # Geometri / malzeme yardımcıları (tek doğruluk kaynağı)
     # ------------------------------------------------------------------
@@ -1363,6 +1534,27 @@ class LiquidRocketEngine:
             return self.burn_time_input, 'user input (max burn duration)'
         return BURN_TIME_DEFAULT_S, f'assumed {BURN_TIME_DEFAULT_S:.0f} s burn'
 
+    def _safety_factor_source(self):
+        """Hazne emniyet katsayısının KAYNAK künyesi (tek tanım noktası).
+
+        Karar ``_apply_overrides`` içinde verilir; burada yalnız okunur.
+        Öznitelik yoksa (kurucu dışı bir yoldan gelen nesne) beyan yine de
+        varsayılanı söyler — sessiz kalmaz.
+        """
+        return getattr(self, 'safety_factor_source',
+                       SAFETY_FACTOR_SOURCE_DEFAULT)
+
+    def _chamber_material_source(self):
+        """Hazne MALZEME SEÇİMİNİN kaynak künyesi (tek tanım noktası).
+
+        DİKKAT: ``materials_db`` kaydındaki ``source`` alanıyla karıştırılmaz.
+        O, malzeme ÖZELLİKLERİNİN literatür künyesidir (hangi el kitabından
+        geldiği); bu ise malzemeyi KİMİN seçtiğidir (kullanıcı mı, varsayılan
+        mı). İkisi ayrı sorudur ve çıktıda ayrı adlarla durur.
+        """
+        return getattr(self, 'chamber_material_source',
+                       CHAMBER_MATERIAL_SOURCE_DEFAULT)
+
     def _material_record(self):
         """(malzeme kaydı, kanonik ad) — merkezi materials_db'den."""
         from hrma.data.materials_db import get_material_safe
@@ -1375,6 +1567,9 @@ class LiquidRocketEngine:
             self._warn('warn.liquid.chamber_material_unknown', 'warning',
                        material=str(key),
                        fallback=str(CHAMBER_MATERIAL_DEFAULT))
+            # Kullanılan malzeme kullanıcınınki DEĞİL: künye de öyle demeli
+            # (kaynak, kararın verildiği yerde güncellenir).
+            self.chamber_material_source = CHAMBER_MATERIAL_SOURCE_REJECTED
             return get_material_safe(CHAMBER_MATERIAL_DEFAULT)
 
     def _wall_temperatures(self):
@@ -5091,6 +5286,16 @@ class LiquidRocketEngine:
                     desen['impingement_angle_deg'] = 2.0 * float(yarim_aci)
                 results['injector_pattern'] = desen
 
+        # --- B4 (v2.6.27): sessizce yok sayılan gövde alanı olmaz ----------
+        # Beyan EN SONDA üretilir: karşılaştırılacak "fiilen kullanılan değer"
+        # ancak sonuç sözlüğü tamamlandığında bellidir. Uyarı listesi de
+        # yeniden anlık görüntülenir — 'input_warnings' yukarıda kopyalandığı
+        # için burada üretilen uyarı aksi hâlde kullanıcıya ulaşmazdı.
+        okunmayanlar = self._declare_unread_inputs(results)
+        if okunmayanlar:
+            results['inputs_not_used'] = okunmayanlar
+            results['input_warnings'] = list(self.design_warnings)
+
         return results
 
     # ------------------------------------------------------------------
@@ -5410,8 +5615,13 @@ class LiquidRocketEngine:
             mdot_ox = mdot_total * self.MR / (1 + self.MR)
             mdot_fuel = mdot_total / (1 + self.MR)
 
-        mu_ox = getattr(self, 'mu_ox', None) or 2.0e-4   # LOX ~0.19 mPa.s
-        mu_fuel = getattr(self, 'mu_fuel', None) or 1.2e-3  # RP-1 ~1.2 mPa.s
+        # Viskozite: kullanıcı girdisi > tablo tabanı. Taban değerler TEK
+        # tanım yerinden gelir (FEED_VISCOSITY_FALLBACK_PA_S); C2 vana/hat
+        # bütçesi de aynı sözlüğü okur, iki hat hesabı ayrışamaz.
+        mu_ox = (getattr(self, 'mu_ox', None)
+                 or FEED_VISCOSITY_FALLBACK_PA_S['oxidizer'])
+        mu_fuel = (getattr(self, 'mu_fuel', None)
+                   or FEED_VISCOSITY_FALLBACK_PA_S['fuel'])
 
         ox = self._line_pressure_drops(mdot_ox, self.rho_ox, mu_ox, dp_inj_ox)
         fuel = self._line_pressure_drops(mdot_fuel, self.rho_fuel, mu_fuel,
@@ -5774,10 +5984,12 @@ class LiquidRocketEngine:
         else:
             safety_factor = float(getattr(self, 'safety_factor',
                                           SAFETY_FACTOR_DEFAULT))
-            safety_factor_source = (
-                'user input (safety factor)'
-                if 'safety_factor' in self.overrides
-                else f'not supplied -> {SAFETY_FACTOR_DEFAULT:g} default')
+            # B4 (v2.6.27): künye artık KARARIN verildiği yerden okunur.
+            # Eski satır yalnız anahtarın gövdede BULUNMASINA bakıyordu:
+            # aralık dışı bir katsayı (ör. 99) gönderildiğinde değer
+            # reddedilip 2.5 kullanılıyor ama beyan hâlâ "user input (safety
+            # factor)" diyordu — kullanılmayan girdiye sahip çıkan bir künye.
+            safety_factor_source = self._safety_factor_source()
         allowable_stress = material_strength / safety_factor
 
         # Yakıt tankı AYRI malzeme kullanabilir. Kriyojenik hidrojen alüminyum
@@ -6779,6 +6991,392 @@ class LiquidRocketEngine:
                       'the main valve'),
         }
 
+    @staticmethod
+    def _feed_fluid_record(propellant):
+        """(anahtar, kayıt) — besleme akışkanının kaynak künyeli özellikleri.
+
+        Tek kaynak: A6 su koçu bağlamasının kullandığı AYNI tablo
+        (hrma.analysis.water_hammer.FLUID_PROPERTIES). Tabloda yoksa
+        (None, None) döner ve çağıran NOT_MODELLED beyanı üretir — buhar
+        basıncı UYDURULMAZ.
+        """
+        key = FEED_FLUID_PROPERTY_KEY.get(str(propellant).lower())
+        if key is None:
+            return None, None
+        try:
+            from hrma.analysis.water_hammer import FLUID_PROPERTIES
+        except Exception:                                  # pragma: no cover
+            return None, None
+        return key, FLUID_PROPERTIES.get(key)
+
+    def _turbopump_sizing_block(self, drops, tank_bar, pressure_fed,
+                                ox_pump, fuel_pump, turbine_card,
+                                cycle_solution):
+        """Turbopompa boyutlandırma zinciri — hrma.analysis.turbopump_sizing.
+
+        Yol haritası C1 (v2.6.27). Çevrim güç dengesi ṁ, ΔP, verim ve mil
+        gücünü zaten veriyordu; bu modül eksik kalan boyutlandırma zincirini
+        kapatır: NPSH_mevcut -> emme özgül devri -> ÖZGÜL DEVİR Ns ->
+        KADEME SAYISI -> çark çapı (baş katsayısı) -> indüser gereksinimi ->
+        NPSH_gerekli ve MARJ; türbinde ortalama çap + kademe sayısı.
+
+        TEK KAYNAK KARARLARI (iki farklı doğru üretmemek için)
+        ------------------------------------------------------
+        * MİL DEVRİ modüle SEÇTİRİLMEZ, motorun kendi pompa zincirinden
+          (``_design_pump``: Euler baş + Stodola kayma, devir emme özgül
+          hızından) GEÇİLİR. Aksi hâlde aynı yanıtta iki farklı devir
+          bulunurdu. Modülün emme sınırlı üst devri yalnız KARŞILAŞTIRMA
+          olarak yayımlanır.
+        * ÇARK ÇAPI iki modelde de çıkar (motorda Euler/Stodola, modülde
+          baş katsayısından). İkisi de raporlanır ve oranı verilir; hangisinin
+          hangi modelden geldiği alan adında yazılıdır. Sessizce birinin
+          diğerinin yerine geçmesi yasak.
+        * TÜRBİN bir kez boyutlandırılır (ortak mil): pompa başına ikinci bir
+          türbin raporlanmaz.
+
+        GİRDİ ENVANTERİ (kod okunarak):
+          - ṁ, ΔP, yoğunluk, hat kaybı: HESAPLANIYOR (çevrim çözümü +
+            Darcy-Weisbach hat zinciri),
+          - tank basıncı: turbopompada NPSH tankı varsayımı
+            (PUMP_TANK_PRESSURE_DEFAULT_BAR), basınç beslemelide kullanıcı
+            girdisi — ikisi de beyanlı,
+          - buhar basıncı: HESAPLANMIYOR -> water_hammer FLUID_PROPERTIES
+            kaynak künyeli tablosu (A6 ile tek kaynak); tablosuz itici
+            NOT_MODELLED,
+          - türbin gücü/debisi/verimi: çevrim çözümünden (kapanmadıysa
+            motorun izentropik türbin kartından).
+        """
+        basis = (
+            'pump and turbine sizing chain from hrma/analysis/'
+            'turbopump_sizing.py (Huzel & Huang, NASA SP-125 Ch. 6; Sutton & '
+            'Biblarz 9th ed. Ch. 10): NPSH_available -> suction specific '
+            'speed -> specific speed Ns -> stage count -> impeller diameter '
+            'from the head coefficient -> inducer requirement -> NPSH '
+            'required and margin; turbine mean diameter and stage count from '
+            'the equal-work impulse relations. Every driving input is THIS '
+            "run's solver value; the shaft speed is NOT re-selected by the "
+            'module but taken from the engine pump design chain (single '
+            'source).')
+        if pressure_fed or getattr(self, 'feed_system_type',
+                                   'turbopump') != 'turbopump':
+            return {
+                'status': 'NOT_APPLICABLE',
+                '_basis': basis,
+                'reason': ('pressure-fed feed system: there is no pump and no '
+                           'turbine to size in this engine.'),
+            }
+        try:
+            from hrma.analysis.turbopump_sizing import (
+                size_pump, size_turbine)
+        except Exception as exc:                           # pragma: no cover
+            return {'status': 'NOT_MODELLED', '_basis': basis,
+                    'reason': f'turbopump_sizing module unavailable: {exc}'}
+
+        # Hat kaybı: enjektör kalemi HARİÇ (pompa GİRİŞİNE kadar olan kayıp).
+        line_keys = ('tank_outlet', 'main_valve', 'filters', 'feed_lines')
+
+        def _pump_block(label, propellant, line, pump, discharge_bar, rho):
+            fluid_key, record = self._feed_fluid_record(propellant)
+            if record is None or record.get('vapor_pressure_Pa') is None:
+                return {
+                    'status': 'NOT_MODELLED',
+                    'required_inputs': ['vapor_pressure'],
+                    'basis': (
+                        'the NPSH chain needs the propellant vapour '
+                        f"pressure and HRMA does not solve it for "
+                        f"'{propellant}'; the tabulated feed-fluid record "
+                        f'covers {sorted(FEED_FLUID_PROPERTY_KEY)} only. No '
+                        'vapour pressure is invented in its place.'),
+                }
+            dp_line_bar = float(sum(line[k] for k in line_keys))
+            pressure_rise_pa = (float(discharge_bar) - float(tank_bar)) \
+                * PA_PER_BAR
+            if pressure_rise_pa <= 0.0:
+                return {
+                    'status': 'not_computed',
+                    'basis': ('pump pressure rise is not positive '
+                              f'({pressure_rise_pa:.0f} Pa): the tank already '
+                              'delivers the required discharge pressure, so '
+                              'no pump is sized.'),
+                }
+            try:
+                res = size_pump(
+                    mass_flow_kg_s=float(pump['design_flow_rate']),
+                    pressure_rise_Pa=pressure_rise_pa,
+                    density_kg_m3=float(rho),
+                    vapor_pressure_Pa=float(record['vapor_pressure_Pa']),
+                    tank_pressure_Pa=float(tank_bar) * PA_PER_BAR,
+                    line_pressure_drop_Pa=dp_line_bar * PA_PER_BAR,
+                    shaft_speed_rpm=float(pump['rotational_speed']))
+            except Exception as exc:
+                return {'status': 'not_computed',
+                        'basis': ('turbopump_sizing rejected the inputs: '
+                                  f'{exc}')}
+            res = dict(res)
+            d2_module = (res.get('pump') or {}).get('impeller_diameter_m')
+            d2_engine = float(pump['impeller_diameter'])
+            res.update({
+                'pump_label': label,
+                'shaft_speed_source': (
+                    'the engine pump design chain (_design_pump: Euler head '
+                    'with Stodola slip, speed set by the suction specific '
+                    'speed and capped at the practical limit). The module '
+                    'did NOT re-select it, so this answer carries a single '
+                    'shaft speed.'),
+                'vapor_pressure_Pa': float(record['vapor_pressure_Pa']),
+                'vapor_pressure_reference_K': record.get(
+                    'vapor_pressure_ref_K'),
+                'vapor_pressure_source': record.get('vapor_pressure_source'),
+                'tank_pressure_bar': float(tank_bar),
+                'tank_pressure_source': (
+                    'NPSH tank pressurisation assumption '
+                    f'({PUMP_TANK_PRESSURE_DEFAULT_BAR:g} bar, '
+                    'PUMP_TANK_PRESSURE_DEFAULT_BAR) - the SAME value the '
+                    'engine pump chain uses for its own NPSH; HRMA has no '
+                    'pressurisation schedule model'),
+                'line_pressure_drop_bar': dp_line_bar,
+                'line_pressure_drop_basis': (
+                    'tank outlet + main valve + filter + straight-line '
+                    'Darcy-Weisbach items of THIS engine (the injector drop '
+                    'is downstream of the pump and is excluded)'),
+                'impeller_diameter_head_coefficient_m': d2_module,
+                'impeller_diameter_euler_stodola_m': d2_engine,
+                'impeller_diameter_note': (
+                    'TWO INDEPENDENT ESTIMATES, deliberately both reported: '
+                    'the head-coefficient estimate (psi = g*H_stage/u2^2, '
+                    'Huzel & Huang Ch. 6) and the engine chain Euler head '
+                    'with Stodola slip. They are different models of the '
+                    'same impeller and neither silently replaces the other; '
+                    'their ratio is a design-maturity indicator.'),
+                'impeller_diameter_ratio': (
+                    float(d2_module) / d2_engine
+                    if (d2_module and d2_engine > 0) else None),
+                'status': 'modelled',
+            })
+            return res
+
+        ox = _pump_block('oxidizer_pump', self.oxidizer_type,
+                         drops['oxidizer_line'], ox_pump,
+                         drops['pump_discharge_pressure_ox'], self.rho_ox)
+        fuel = _pump_block('fuel_pump', self.fuel_type,
+                           drops['fuel_line'], fuel_pump,
+                           drops['pump_discharge_pressure_fuel'],
+                           self.rho_fuel)
+
+        # --- Türbin: ortak mil, TEK kez boyutlandırılır -------------------
+        turbine = None
+        eta_turb = TURBINE_EFFICIENCY_DEFAULT
+        eta_source = (f'engine default turbine efficiency '
+                      f'({TURBINE_EFFICIENCY_DEFAULT:g})')
+        shafts = (cycle_solution or {}).get('shafts') or []
+        if (cycle_solution or {}).get('status') == 'converged' and shafts:
+            eta_cyc = (shafts[0].get('turbine') or {}).get('efficiency')
+            if isinstance(eta_cyc, (int, float)) and 0.0 < eta_cyc <= 1.0:
+                eta_turb = float(eta_cyc)
+                eta_source = ('cycle power balance solution (the efficiency '
+                              'the converged shaft turbine actually used)')
+        p_turb_w = float(turbine_card.get('power_output') or 0.0) * 1000.0
+        mdot_turb = float(turbine_card.get('mass_flow_rate') or 0.0)
+        if p_turb_w > 0.0 and mdot_turb > 0.0:
+            try:
+                turbine = size_turbine(
+                    shaft_speed_rpm=float(ox_pump['rotational_speed']),
+                    power_W=p_turb_w,
+                    mass_flow_kg_s=mdot_turb,
+                    efficiency=eta_turb,
+                    pump_tip_speed_m_s=float(ox_pump['impeller_tip_speed']))
+                turbine = dict(turbine)
+                turbine.update({
+                    'status': 'modelled',
+                    'shaft_speed_rpm': float(ox_pump['rotational_speed']),
+                    'turbine_efficiency': eta_turb,
+                    'turbine_efficiency_source': eta_source,
+                    'power_source': turbine_card.get('model'),
+                    'shaft_assumption': (
+                        'single shaft: the turbine is sized at the OXIDIZER '
+                        'pump speed with that pump\'s impeller tip speed as '
+                        'the pitch-speed envelope. Multi-shaft architectures '
+                        'are reported by the cycle power balance, not here.'),
+                })
+            except Exception as exc:
+                turbine = {'status': 'not_computed',
+                           'basis': f'turbine sizing rejected the inputs: '
+                                    f'{exc}'}
+        else:
+            turbine = {
+                'status': 'NOT_MODELLED',
+                'required_inputs': ['turbine_power', 'turbine_mass_flow'],
+                'basis': ('the turbine power and mass flow of this run are '
+                          'not both positive, so no turbine geometry is '
+                          'estimated (nothing is invented in their place).'),
+            }
+        return {
+            'status': 'modelled',
+            '_basis': basis,
+            'oxidizer_pump': ox,
+            'fuel_pump': fuel,
+            'turbine': turbine,
+        }
+
+    def _valve_feedline_block(self, drops, tank_bar, pressure_fed):
+        """Besleme hattı bütçesi + ana vana Cv — hrma.analysis.valve_feedline.
+
+        Yol haritası C2 (v2.6.27). Hat geometrisi motorun kendisinindir
+        (A6 su koçu bağlamasıyla AYNI kaynak): çap akış hızı hedefinden
+        boyutlanır, uzunluk FEED_LINE_LENGTH_DEFAULT_M beyanlı yerleşim
+        varsayımıdır, yerel kayıp katsayıları motorun kendi Crane TP-410
+        kalemleridir ve buraya ``extra_loss_coefficient`` olarak AYNEN
+        geçirilir (çift sayma yok, ikinci bir hat modeli kurulmaz).
+
+        Vana hattın SONUNDADIR: giriş basıncı hat çıkış basıncıdır. Vana
+        basınç düşümü motorun kendi ana vana kalemidir (K = 0.15 x dinamik
+        basınç). Kavitasyon taraması iticinin KRİTİK basıncını da ister;
+        HRMA onu hesaplamaz, bu yüzden modül taramayı yapmaz ve bunu kendi
+        beyanıyla söyler — sessiz 'güvenli' verilmez.
+        """
+        basis = (
+            'steady feed-line pressure budget and main-valve Cv/Kv sizing '
+            'from hrma/analysis/valve_feedline.py (Darcy-Weisbach with the '
+            'Haaland friction factor, Crane TP-410 equivalent-length local '
+            'losses, ISA-75.01.01 / IEC 60534-2-1 liquid valve sizing). Line '
+            'diameter, velocity, roughness, length and the local loss '
+            "coefficients are THIS engine's own feed chain values, so this "
+            'budget cannot disagree with the pressure drops reported '
+            'elsewhere in the same answer.')
+        try:
+            from hrma.analysis.valve_feedline import analyze_valve_feedline
+        except Exception as exc:                           # pragma: no cover
+            return {'status': 'NOT_MODELLED', '_basis': basis,
+                    'reason': f'valve_feedline module unavailable: {exc}'}
+
+        wall_mm = self._override_val('feed_line_wall_thickness', 0.1, 50.0,
+                                     'Feed line wall thickness', ' mm')
+        closure_ms = self._override_val('valve_closure_time_ms', 0.1, 6e5,
+                                        'Valve closure time', ' ms')
+        # Motorun kendi yerel kayıpları (ana vana HARİÇ — o vananın kendisi).
+        k_extra = (FEED_K_TANK_OUTLET + FEED_K_FILTER
+                   + FEED_ELBOW_COUNT * FEED_K_ELBOW)
+
+        def _line_block(label, propellant, line, mdot, rho, mu, mu_user,
+                        working_bar):
+            fluid_key, record = self._feed_fluid_record(propellant)
+            vapor_pa = (None if record is None
+                        else record.get('vapor_pressure_Pa'))
+            try:
+                res = analyze_valve_feedline(
+                    mass_flow_kg_s=float(mdot),
+                    density_kg_m3=float(rho),
+                    viscosity_Pa_s=float(mu),
+                    line_id_m=float(line['line_diameter_mm']) / 1000.0,
+                    line_length_m=FEED_LINE_LENGTH_DEFAULT_M,
+                    inlet_pressure_Pa=float(working_bar) * PA_PER_BAR,
+                    valve_pressure_drop_Pa=float(line['main_valve'])
+                    * PA_PER_BAR,
+                    wall_thickness_m=(None if wall_mm is None
+                                      else float(wall_mm) / 1000.0),
+                    fluid=(fluid_key or 'water'),
+                    roughness_m=FEED_LINE_ROUGHNESS_M,
+                    extra_loss_coefficient=k_extra,
+                    vapor_pressure_Pa=vapor_pa,
+                    valve_style=FEED_MAIN_VALVE_STYLE,
+                    valve_closure_time_s=(None if closure_ms is None
+                                          else float(closure_ms) / 1000.0))
+            except Exception as exc:
+                return {'status': 'not_computed',
+                        'basis': ('valve/feed-line analysis rejected the '
+                                  f'inputs: {exc}')}
+            res = dict(res)
+            res.update({
+                'status': 'modelled',
+                # B4 (v2.6.27) DÜZELTMESİ: etiket 'line' adıyla yazılıyordu ve
+                # modülün 'line' ALT SÖZLÜĞÜNÜ (giriş çapı/uzunluğu/pürüzü,
+                # hız, Reynolds, sürtünme faktörü, kayıp dökümü) bir metinle
+                # EZİYORDU. Blok "hat çapı, hızı ve pürüzü bu motorun kendi
+                # değerleridir" diye beyan ederken o değerlerin hiçbiri
+                # çıktıda kalmıyordu. Etiket, turbopompa bloğundaki
+                # 'pump_label' deseniyle aynı biçimde ayrı adla taşınır.
+                'line_label': label,
+                'line_length_basis': FEED_LINE_LENGTH_BASIS,
+                'line_diameter_basis': (
+                    'the SAME standard-rounded line diameter the engine feed '
+                    'pressure-drop chain uses (sized for the '
+                    f'{FEED_LINE_TARGET_VELOCITY_MS:g} m/s target velocity)'),
+                'roughness_basis': (
+                    'commercial steel absolute roughness '
+                    f'{FEED_LINE_ROUGHNESS_M * 1e3:g} mm '
+                    '(FEED_LINE_ROUGHNESS_M) - the single value the engine '
+                    'Darcy-Weisbach chain also uses'),
+                'extra_loss_coefficient': k_extra,
+                'extra_loss_basis': (
+                    'the local-loss coefficients of this engine carried over '
+                    f'unchanged: sharp tank outlet K={FEED_K_TANK_OUTLET:g}, '
+                    f'line filter K={FEED_K_FILTER:g}, '
+                    f'{FEED_ELBOW_COUNT:d} long-radius elbows at '
+                    f'K={FEED_K_ELBOW:g} each. The main valve is NOT in this '
+                    'sum: it is the valve being sized.'),
+                'valve_pressure_drop_basis': (
+                    'the engine main-valve loss item '
+                    f'(K={FEED_K_MAIN_VALVE:g} x dynamic pressure at the '
+                    'line velocity)'),
+                'valve_style_source': (
+                    f"declared design choice '{FEED_MAIN_VALVE_STYLE}': HRMA "
+                    'has no valve-style input, and the engine loss item is '
+                    'written for a full-open ball/butterfly main valve'),
+                'viscosity_Pa_s': float(mu),
+                'viscosity_source': (
+                    'user input (propellant viscosity)' if mu_user
+                    else 'not supplied -> the same tabulated fallback the '
+                         'engine Darcy-Weisbach feed chain uses'),
+                'inlet_pressure_bar': float(working_bar),
+                'inlet_pressure_basis': (
+                    'tank pressure (pressure-fed cycle)' if pressure_fed
+                    else 'pump discharge pressure of this line - the same '
+                         'working pressure the water-hammer block uses'),
+                'vapor_pressure_Pa': vapor_pa,
+                'vapor_pressure_source': (
+                    None if record is None
+                    else record.get('vapor_pressure_source')),
+                'water_hammer_coupling_source': (
+                    'user input (feed line wall thickness)' if wall_mm
+                    is not None else
+                    'not produced: feed_line_wall_thickness [mm] is not '
+                    'supplied and HRMA computes no line wall thickness, so '
+                    'the elastic wave speed is undefined'),
+            })
+            if vapor_pa is None:
+                res['cavitation_screening_source'] = (
+                    'no tabulated vapour pressure for '
+                    f"'{propellant}' -> the module performed no cavitation "
+                    'screening and says so in its own validity list')
+            return res
+
+        mdot_ox = getattr(self, 'mdot_ox', None)
+        mdot_fuel = getattr(self, 'mdot_fuel', None)
+        if not mdot_ox or not mdot_fuel:
+            return {'status': 'NOT_MODELLED', '_basis': basis,
+                    'reason': ('propellant mass flows are not solved in this '
+                               'run; no feed-line budget is produced.')}
+        mu_ox_user = getattr(self, 'mu_ox', None)
+        mu_fuel_user = getattr(self, 'mu_fuel', None)
+        ox_working = (tank_bar if pressure_fed
+                      else drops['pump_discharge_pressure_ox'])
+        fuel_working = (tank_bar if pressure_fed
+                        else drops['pump_discharge_pressure_fuel'])
+        return {
+            'status': 'modelled',
+            '_basis': basis,
+            'oxidizer_line': _line_block(
+                'oxidizer_line', self.oxidizer_type, drops['oxidizer_line'],
+                mdot_ox, self.rho_ox,
+                mu_ox_user or FEED_VISCOSITY_FALLBACK_PA_S['oxidizer'],
+                mu_ox_user is not None, ox_working),
+            'fuel_line': _line_block(
+                'fuel_line', self.fuel_type, drops['fuel_line'],
+                mdot_fuel, self.rho_fuel,
+                mu_fuel_user or FEED_VISCOSITY_FALLBACK_PA_S['fuel'],
+                mu_fuel_user is not None, fuel_working),
+        }
+
     def _analyze_detailed_feed_system(self):
         """Comprehensive feed system analysis with turbopump performance maps
 
@@ -7013,6 +7611,16 @@ class LiquidRocketEngine:
             # verisiyle (çap/hız/basınç), eksik girdiler beyanla.
             'water_hammer': self._feed_water_hammer_analysis(
                 drops, tank_bar, pressure_fed),
+            # C2 (v2.6.27): hat basınç bütçesi + ana vana Cv/Kv — AYNI hat
+            # verisiyle (su koçu bloğuyla tek kaynak).
+            'valve_feedline': self._valve_feedline_block(
+                drops, tank_bar, pressure_fed),
+            # C1 (v2.6.27): turbopompa boyutlandırma zinciri (Ns, kademe,
+            # çark çapı, NPSH marjı, türbin ortalama çapı). Basınç
+            # beslemelide NOT_APPLICABLE.
+            'turbopump_sizing': self._turbopump_sizing_block(
+                drops, tank_bar, pressure_fed, ox_pump, fuel_pump,
+                turbine_card, cycle_solution),
         }
     
     def _turbine_exhaust_pressure_bar(self):
@@ -8137,6 +8745,13 @@ class LiquidRocketEngine:
         """
         material, mat_key = self._material_record()
         sf = float(getattr(self, 'safety_factor', SAFETY_FACTOR_DEFAULT))
+        # B4 (v2.6.27): iki karar da BEYANLI çıkar. Emniyet katsayısı ve
+        # malzeme tasarımın en belirleyici iki girdisidir (kalınlık, marj,
+        # kütle); hangisinin kullanıcıdan hangisinin varsayılandan geldiği
+        # sayının yanında durmazsa okuyan ikisini ayıramaz. Kaynak metni
+        # _apply_overrides'ın yazdığı TEK künyeden okunur.
+        sf_source = self._safety_factor_source()
+        mat_source = self._chamber_material_source()
         t_hot, _ = self._wall_temperatures()
         sigma_y, derate = self._derated_yield(material, t_hot)
         allowable = sigma_y / sf
@@ -8170,7 +8785,9 @@ class LiquidRocketEngine:
         return {
             'material': material,
             'material_key': mat_key,
+            'material_selection_source': mat_source,
             'safety_factor': sf,
+            'safety_factor_source': sf_source,
             'yield_strength_pa': float(material['yield_strength']),
             'derated_yield_pa': sigma_y,
             'derating_factor': derate,
@@ -8298,8 +8915,14 @@ class LiquidRocketEngine:
                 'allowable_stress': s['allowable_pa'] / 1e6,  # MPa
                 'stress_margin': s['stress_margin_pct'],  # %
                 'safety_factor': s['safety_factor'],
+                # B4 (v2.6.27): katsayı ve malzeme künyeleri sayının YANINDA.
+                # 'material_source' (aşağıda) malzeme ÖZELLİKLERİNİN literatür
+                # künyesidir; 'material_selection_source' malzemeyi KİMİN
+                # seçtiğini söyler. İki ayrı soru, iki ayrı alan.
+                'safety_factor_source': s['safety_factor_source'],
                 'material': material.get('name', s['material_key']),
                 'material_key': s['material_key'],
+                'material_selection_source': s['material_selection_source'],
                 'yield_strength': s['yield_strength_pa'] / 1e6,  # MPa (20 C)
                 'yield_strength_at_wall_temp': s['derated_yield_pa'] / 1e6,  # MPa
                 'derating_factor': s['derating_factor'],
@@ -8435,8 +9058,294 @@ class LiquidRocketEngine:
                 '1D station march available for RP-1 regenerative cooling '
                 'only; the values above come from the Bartz chamber/nozzle '
                 'integration.')
+
+        # --- A5 (v2.6.27): ablatif/radyatif ısıl koruma boyutlandırması ----
+        result.update(self._passive_thermal_protection(cooling))
         return result
-    
+
+    def _passive_thermal_protection(self, cooling):
+        """Pasif ısıl koruma — hrma.analysis.thermal_protection (yol har. A5).
+
+        KAPSAM AYRIMI (bilinçli, çakıştırma değil)
+        ------------------------------------------
+        Rejeneratif/film/dump soğutmada cidarı AKTİF bir soğutucu taşır ve
+        onu ``regen_cooling`` + Bartz zinciri zaten çözüyor; oraya bir de
+        ablasyon çekilmesi eklemek aynı cidar için İKİ ısıl koruma iddiası
+        üretirdi. Bu blok yalnız PASİF soğutulan tasarımlarda çalışır:
+
+          * ``ablative``  -> Seviye-1 Q* ablasyon boyutlandırması (astar
+            kalınlığı) + çıplak cidar ısı-yutucu sıcaklık geçmişi,
+          * ``radiative`` -> ışınım denge cidar sıcaklığı + ısı-yutucu
+            geçmişi (ilk saniyelerde denge henüz kurulmamıştır).
+
+        Şema, hibrit motorun ``_thermal_protection_block`` bağlamasıyla
+        birebir aynı alan adlarını kullanır (chamber_liner,
+        nozzle_entry_liner, wall_temperature_history) — iki motor aynı
+        modülü iki ayrı isimle raporlamaz.
+
+        GİRDİLER MOTORUN KENDİ ZİNCİRİNDEN: Bartz kamara/boğaz tasarım
+        akıları ve sıcak cidar sıcaklığı ``calculate_cooling_requirements``
+        sonucundan, yanma süresi ``_burn_time``dan, cidar kalınlığı/malzemesi
+        yapısal tasarımdan. Girdi eksikse blok SAYI İÇERMEZ.
+        """
+        basis = (
+            'passive thermal protection from hrma/analysis/'
+            'thermal_protection.py: Level-1 Q* ablation sizing (NASA '
+            'SP-8091-class band; Sutton & Biblarz 9th ed. Ch. 8.5), a 1-D '
+            'explicit-FD bare-wall heat-sink history (Incropera & DeWitt 6th '
+            'ed. Sec. 5.10) and, for a radiatively cooled wall, the '
+            'radiation equilibrium balance (Sutton & Biblarz Ch. 8.6). All '
+            "driving inputs are THIS run's values: the Bartz chamber and "
+            'throat design fluxes, the hot-wall design temperature, the burn '
+            'time and the structural wall thickness/material.')
+        if self.cooling_type not in ('ablative', 'radiative'):
+            return {
+                'passive_thermal_protection': {
+                    'status': 'NOT_APPLICABLE',
+                    '_basis': basis,
+                    'reason': (
+                        f"the wall is actively cooled ('{self.cooling_type}'): "
+                        'the Bartz + channel-hydraulics chain above (and the '
+                        'regen_cooling station march where it applies) IS '
+                        'the thermal protection solution for this design. '
+                        'Adding an ablation or heat-sink sizing on the same '
+                        'wall would put two competing thermal protection '
+                        'claims in one answer.'),
+                },
+            }
+
+        q_chamber_kw = cooling.get('chamber_heat_flux')     # kW/m^2
+        q_throat_kw = cooling.get('peak_heat_flux')         # kW/m^2
+        t_hot = cooling.get('wall_temperature_hot')         # K
+        burn_time, burn_time_source = self._burn_time()
+        eksik = [ad for ad, deger in (
+            ('chamber_heat_flux', q_chamber_kw),
+            ('peak_heat_flux', q_throat_kw),
+            ('wall_temperature_hot', t_hot)) if not (
+                deger is not None and np.isfinite(float(deger))
+                and float(deger) > 0)]
+        if eksik or not burn_time or burn_time <= 0:
+            return {
+                'passive_thermal_protection': {
+                    'status': 'NOT_MODELLED',
+                    '_basis': basis,
+                    'reason': (
+                        'the passive thermal protection sizing needs the '
+                        'Bartz heat fluxes, the hot-wall temperature and a '
+                        'positive burn time; missing or non-physical in this '
+                        'run: ' + ', '.join(eksik + (
+                            [] if burn_time and burn_time > 0
+                            else ['burn_time']))),
+                },
+            }
+        q_chamber = float(q_chamber_kw) * 1000.0            # W/m^2
+        q_throat = float(q_throat_kw) * 1000.0              # W/m^2
+        t_hot = float(t_hot)
+        t_c = float(self.T_c)
+        try:
+            from hrma.analysis.thermal_protection import (
+                ThermalProtectionAnalyzer)
+            analyzer = ThermalProtectionAnalyzer()
+        except Exception as exc:                           # pragma: no cover
+            return {'passive_thermal_protection': {
+                'status': 'NOT_MODELLED', '_basis': basis,
+                'reason': f'thermal protection module unavailable: {exc}'}}
+
+        material, mat_key = self._material_record()
+        out = {
+            'status': 'modelled',
+            '_basis': basis,
+            'cooling_type': self.cooling_type,
+            'burn_time_s': float(burn_time),
+            'burn_time_source': burn_time_source,
+        }
+
+        def _liner(station, function, q_w_m2, station_note):
+            """Tek istasyon astar boyutu — hibrit/katı ile AYNI alan adları."""
+            try:
+                sizing = analyzer.ablative_thickness(
+                    q_net_W_m2=q_w_m2,
+                    burn_time_s=float(burn_time),
+                    material=TPS_LINER_MATERIAL_DEFAULT)
+            except Exception as exc:
+                return {
+                    'material': TPS_LINER_MATERIAL_DEFAULT,
+                    'thickness': None,
+                    'thickness_status': 'NOT_MODELLED',
+                    'function': function,
+                    'basis': f'Ablative sizing failed at the {station}: {exc}',
+                }
+            return {
+                'material': sizing['material_name'],
+                'thickness': float(sizing['required_thickness_mm']),   # mm
+                'thickness_status': 'sized',
+                'function': function,
+                'total_recession_mm': float(sizing['total_recession_mm']),
+                'recession_rate_mm_s': float(sizing['recession_rate_mm_s']),
+                'design_margin': float(sizing['design_margin']),
+                'q_star_mj_kg': float(sizing['q_star_MJ_kg']),
+                'heat_flux_kw_m2': q_w_m2 / 1e3,
+                'burn_time_s': float(burn_time),
+                'basis': (
+                    f'Level-1 Q* ablation sizing at the {station}: required '
+                    f'thickness = total recession x design margin '
+                    f"{sizing['design_margin']:g}. Heat flux "
+                    f'({q_w_m2 / 1e3:.0f} kW/m2) and burn time '
+                    f'({float(burn_time):.2f} s) are this run\'s solver '
+                    f"values. Liner material "
+                    f"'{TPS_LINER_MATERIAL_DEFAULT}' is a declared design "
+                    f'choice, not a solved selection. ' + station_note),
+                'model_note': sizing['model_note'],
+                'source': sizing['source'],
+            }
+
+        if self.cooling_type == 'ablative':
+            out['chamber_liner'] = _liner(
+                'combustion chamber wall',
+                'Protect the chamber wall, which sees combustion gas '
+                'directly for the whole burn',
+                q_chamber,
+                'Flux is the Bartz CHAMBER-station design flux of this run.')
+            out['nozzle_entry_liner'] = _liner(
+                'throat / nozzle entry',
+                'Protect the convergent entry and the throat, the highest '
+                'flux station of the engine',
+                q_throat,
+                'Flux is the Bartz THROAT design flux, so the same thickness '
+                'is a conservative UPPER bound for the convergent section '
+                '(the same declaration the solid and hybrid engines make).')
+
+        # --- Çıplak (korumasız) cidar ısı-yutucu geçmişi ------------------
+        # Sürücü katsayı motorun KENDİ kamara tasarım akısından geri çözülür:
+        # h_eff = q_kamara/(T_c − T_cidar). Bu, Bartz zincirinin kamara
+        # istasyonundaki h_g'sinin ta kendisidir (q = h_g·(T_aw − T_w) ve
+        # haznede T_aw ≈ T_c); ikinci bir Bartz hesabı YAPILMAZ.
+        if t_c - t_hot <= 0:
+            out['wall_temperature_history'] = {
+                'status': 'NOT_MODELLED',
+                'reason': ('the chamber temperature does not exceed the '
+                           'hot-wall design temperature; there is no '
+                           'positive driving potential to reconstruct the '
+                           'gas-side coefficient from.'),
+            }
+            h_eff = None
+        else:
+            h_eff = q_chamber / (t_c - t_hot)
+            try:
+                hs = analyzer.heat_sink_transient(
+                    h_gas_W_m2K=h_eff,
+                    T_recovery_K=t_c,
+                    burn_time_s=float(burn_time),
+                    wall_thickness_m=self._chamber_wall_thickness_m(),
+                    wall_material=mat_key,
+                    store_history=True)
+            except Exception as exc:
+                out['wall_temperature_history'] = {
+                    'status': 'NOT_MODELLED',
+                    'reason': f'heat-sink transient could not run: {exc}'}
+            else:
+                hist = hs.get('history') or {}
+                t_list = list(hist.get('t_s') or [])
+                tw_list = list(hist.get('T_inner_K') or [])
+                idx = []
+                if t_list:
+                    stride = max(1, len(t_list) // TPS_WALL_HISTORY_MAX_POINTS)
+                    idx = list(range(0, len(t_list), stride))
+                    if idx[-1] != len(t_list) - 1:
+                        idx.append(len(t_list) - 1)
+                out['wall_temperature_history'] = {
+                    'status': 'modelled',
+                    'wall_material': hs['wall_material'],
+                    'material_name': hs['material_name'],
+                    'wall_thickness_m': hs['wall_thickness_m'],
+                    'h_eff_W_m2K': float(h_eff),
+                    'h_eff_basis': (
+                        'effective gas-side coefficient recovered from the '
+                        'cooling solution of this run: h_eff = chamber '
+                        'design flux / (T_c - T_wall_hot). In the chamber '
+                        'the recovery temperature is the chamber '
+                        'temperature (M ~ 0), so this IS the Bartz chamber '
+                        'coefficient - no second Bartz evaluation is made.'),
+                    'T_recovery_K': hs['T_recovery_K'],
+                    'T_initial_K': hs['T_initial_K'],
+                    'time_s': [float(t_list[i]) for i in idx],
+                    'wall_inner_temperature_K': [float(tw_list[i])
+                                                 for i in idx],
+                    'T_inner_final_K': hs['T_inner_K'],
+                    'T_outer_final_K': hs['T_outer_K'],
+                    'max_service_temp_K': hs['max_service_temp_K'],
+                    'exceeds_limit': hs['exceeds_limit'],
+                    'time_to_limit_s': hs['time_to_limit_s'],
+                    'melting_point_K': hs['melting_point_K'],
+                    'exceeds_melting': hs['exceeds_melting'],
+                    'time_to_melting_s': hs['time_to_melting_s'],
+                    'model_valid': hs['model_valid'],
+                    'validity_note': hs['validity_note'],
+                    'model_note': hs['model_note'],
+                    'basis': (
+                        'UNPROTECTED (bare) structural wall heat-sink '
+                        'history: no liner credit, gas side directly on the '
+                        'wall. For the ablative design it bounds the '
+                        'no-liner case and shows why the liner sized above '
+                        'is needed; for the radiative design it shows the '
+                        'transient before the radiation equilibrium below '
+                        'is reached. Liner ablation and wall conduction are '
+                        'NOT coupled.'),
+                }
+
+        if self.cooling_type == 'radiative':
+            if h_eff is None:
+                out['radiation_equilibrium'] = {
+                    'status': 'NOT_MODELLED',
+                    'reason': ('the gas-side coefficient could not be '
+                               'recovered (see wall_temperature_history), so '
+                               'the radiation balance has no driving '
+                               'coefficient.'),
+                }
+            else:
+                try:
+                    rad = analyzer.radiation_equilibrium(
+                        h_gas_W_m2K=h_eff,
+                        T_recovery_K=t_c,
+                        material=mat_key)
+                except Exception as exc:
+                    out['radiation_equilibrium'] = {
+                        'status': 'NOT_MODELLED',
+                        'reason': ('radiation equilibrium could not be '
+                                   f'solved: {exc}')}
+                else:
+                    rad = dict(rad)
+                    rad['status'] = 'modelled'
+                    rad['station'] = 'chamber'
+                    rad['basis'] = (
+                        'steady radiation balance h_g*(T_recovery - T_w) = '
+                        'F*eps*sigma*T_w^4 at the CHAMBER station, with the '
+                        'gas-side coefficient recovered from this run\'s '
+                        'Bartz chamber flux. View factor 1 and zero incident '
+                        'gas radiation are the module defaults: HRMA models '
+                        'neither the extension half-angle nor a Leckner gas '
+                        'radiation flux for the liquid engine, and the '
+                        'module declares that this makes the wall '
+                        'temperature UNCONSERVATIVE (see the '
+                        'unconservative flag).')
+                    out['radiation_equilibrium'] = rad
+        # B4 (v2.6.27) DÜZELTMESİ — blok KENDİ adresinde yayımlanır.
+        # ÖLÇÜLDÜ (11 Ağustos 2026): bu dal ``out``u ÇIPLAK döndürüyordu ve
+        # çağıran ``result.update(...)`` ile onu ısıl koruma sözlüğünün
+        # köküne serpiyordu. Üç sonucu vardı:
+        #   1. Rejeneratifte ``passive_thermal_protection`` (NOT_APPLICABLE)
+        #      varken, sizing'in GERÇEKTEN yapıldığı ablatif/radyatif koşuda
+        #      o adres HİÇ yoktu — arayan tam da bulması gereken yerde
+        #      bulamıyordu.
+        #   2. ``cooling_type`` eziliyordu: sunum değeri 'Ablative' yerine
+        #      ham 'ablative' yazılıyordu.
+        #   3. Astar boyutlandırmasına ait ``status: modelled`` ve ``_basis``
+        #      ısıl koruma bloğunun KÖKÜNE çıkıyordu; oradaki bir hüküm
+        #      soğutma çözümünün tamamına aitmiş gibi okunurdu.
+        # Diğer iki dal (NOT_APPLICABLE / NOT_MODELLED) zaten sarmalıydı;
+        # doğru sözleşme onlarınkidir.
+        return {'passive_thermal_protection': out}
+
     def _analyze_manufacturing_requirements(self, cooling=None, injector=None):
         """İmalat gereksinimleri — yalnız türetilmiş ya da etiketli bilgi.
 

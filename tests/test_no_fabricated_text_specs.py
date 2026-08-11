@@ -100,10 +100,19 @@ _PATTERNS = (
 #: anlatan düzyazı tam olarak bu kusurun ilacıdır. Bu alanların yanındaki
 #: ASIL alan zaten taranıyor: 'cure_time' taranır, 'cure_time_basis' taranmaz.
 _EXPLANATORY_EXACT = frozenset({
-    'basis', 'note', 'source', 'status', 'model', 'model_note',
+    'basis', 'basis_text', 'note', 'source', 'status', 'model', 'model_note',
     'model_limitation', 'model_applied', 'reason', 'warning', 'docstring',
     'description', 'definition', 'caution', 'limitation',
 })
+# NEDEN 'basis_text' (v2.6.27, B2-6.1): bu bekçi bir kalemi ADIYLA ayırıyor,
+# içeriğiyle değil; ve kendi sözleşmesi (yukarıdaki paragraf) gerekçe
+# düzyazısını AÇIKÇA muaf tutuyor. 'basis' zaten muaftı, 'basis_text' aynı
+# alanın uzun (kullanıcıya okunan) biçimidir ve ad listesinde YOKTU — bu bir
+# ölçüt hatası değil, ad listesinde bir BOŞLUKTU. Muafiyet dar tutuldu:
+# '_text' diye genel bir SONEK EKLENMEDİ, çünkü 'tolerance_text' gibi bir alan
+# gerçek bir şartname olurdu ve taranmaya devam etmelidir. Boşluğu kapatan
+# değişikliğin kaçamağa dönüşmediği test_scanner_finds_the_old_code_shape ile
+# kilitlendi: aynı sözlükte 'basis_text' geçmezken şartname alanları geçmiyor.
 _EXPLANATORY_SUFFIXES = (
     '_basis', '_note', '_source', '_status', '_definition', '_limitation',
     '_meaning', '_convention', '_assumption', '_model', '_reason',
@@ -242,6 +251,7 @@ def eski():
         'performance': {'operating_temperature': '2800°C'},
         'checks': ['Visual inspection', 'Torque to 150 Nm'],
         'basis': 'the previous fixed +/-0.01 mm value was not derived',
+        'basis_text': 'sizing on Ab(0) let the pressure climb +32% on BATES',
         'source': 'ISO 898-1:2013 Table 3',
     }
 '''
@@ -262,12 +272,35 @@ def test_detector_does_not_flag_data_records(text):
 
 
 def test_scanner_finds_the_old_code_shape():
-    """Tarama eski kodda 5 uydurmayı bulmalı, beyanı/künyeyi bulmamalı."""
+    """Tarama eski kodda 5 uydurmayı bulmalı, beyanı/künyeyi bulmamalı.
+
+    Örnekteki 'basis' ve 'basis_text' alanlarının ikisi de sayı taşır ve
+    ikisi de GEREKÇE düzyazısıdır; muafiyetin doğru yerde çalıştığı (ve
+    şartname alanlarını kurtarmadığı) burada kilitlenir.
+    """
     findings = scan_source(_OLD_CODE_SAMPLE, '<negatif-kontrol>')
     flagged_keys = sorted(key for _line, key, _value, _hit in findings)
     assert flagged_keys == ['checks', 'manufacturing_tolerance',
                            'minimum_web_thickness', 'operating_temperature',
                            'surface_finish'], flagged_keys
+
+
+def test_explanatory_exemption_is_narrow():
+    """Muafiyet ADA bağlıdır ve '_text' soneki GENEL olarak muaf DEĞİLDİR.
+
+    B2-6.1'de 'basis_text' listeye eklendi. Aynı hamleyle '_text' soneki
+    muaf edilseydi, gerçek bir şartname ('tolerance_text') de kurtulurdu.
+    """
+    ornek = '''
+def x():
+    return {
+        'basis_text': 'the removed constant said 15mm at star valleys',
+        'tolerance_text': '±0.05mm on star geometry',
+        'temperature_text': '2800°C',
+    }
+'''
+    flagged = sorted(key for _l, key, _v, _h in scan_source(ornek, '<dar>'))
+    assert flagged == ['temperature_text', 'tolerance_text'], flagged
 
 
 # ---------------------------------------------------------------------------

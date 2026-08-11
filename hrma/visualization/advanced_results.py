@@ -330,6 +330,16 @@ def create_cea_style_results(motor_results: Dict) -> str:
     
     return "\n".join(results_text)
 
+# İrtifa panosu yerleşim sabitleri — değerlerin gerekçesi
+# create_altitude_performance_plot içindeki açıklamadadır. Tek yerde
+# tutulur ki testler de aynı kaynaktan okusun.
+#: 2x2 ızgarada satırlar arası boşluk (çizim alanı yüksekliğinin oranı).
+ALTITUDE_PLOT_V_SPACING = 0.18
+#: Figür yüksekliği (px). Kap `min-height: 600px` ile tanımlı, bu bir alt
+#: sınırdır; 700 px onu aşar, kırpılma yaratmaz.
+ALTITUDE_PLOT_HEIGHT = 700
+
+
 def create_altitude_performance_plot(altitude_data: List[Dict]) -> str:
     """Create altitude performance visualization"""
     
@@ -348,7 +358,16 @@ def create_altitude_performance_plot(altitude_data: List[Dict]) -> str:
         rows=2, cols=2,
         subplot_titles=('Specific Impulse vs Altitude', 'Thrust vs Altitude',
                        'Thrust Coefficient vs Altitude', 'Atmospheric Pressure vs Altitude'),
-        vertical_spacing=0.12
+        # Satır arası boşluk ÖLÇÜLEREK belirlendi (2026-08-09). Bu 50 px'lik
+        # şeride sırayla girmesi gerekenler: üst satırın x tik etiketleri
+        # (11 px, plotly_dark.js), üst satırın x ekseni başlığı (12 px +
+        # standoff 8) ve alt satırın panel başlığı annotation'ı. Eski değer
+        # 0.12 idi: 600-100-80 = 420 px çizim alanında 0,12*420 = 50,4 px
+        # ediyordu ve "Altitude (km)" ekseni başlığı alt satırın başlığının
+        # ÜSTÜNE basılıyordu (iki sütunda da 8 px örtüşme, tarayıcıda
+        # ölçüldü). Yükseklik 700'e çıkınca çizim alanı 520 px, 0,18 aralık
+        # 93,6 px olur — gereken ~55 px'i rahat karşılar.
+        vertical_spacing=ALTITUDE_PLOT_V_SPACING
     )
     
     # Isp vs altitude
@@ -383,7 +402,7 @@ def create_altitude_performance_plot(altitude_data: List[Dict]) -> str:
     fig.update_layout(
         title='Altitude Performance Analysis',
         showlegend=False,
-        height=600,
+        height=ALTITUDE_PLOT_HEIGHT,
         width=1000
     )
     
