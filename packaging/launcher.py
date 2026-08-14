@@ -42,6 +42,26 @@ APP_COPYRIGHT = "© 2026 Berke Tezgöçen — UZAYTEK"
 GITHUB_URL = "https://github.com/berketez/HRMA"
 PENCERE_BASLIK = "HRMA — UZAYTEK Rocket Motor Analysis"
 
+# Windows görev çubuğu kimliği — TEK KAYNAK. Süreç pythonw.exe olduğu için
+# kabuk pencereyi varsayılan olarak "Python" altında gruplar.
+WIN_APP_USER_MODEL_ID = "UZAYTEK.HRMA"
+
+# Windows menü şeridinin koyu paleti (R, G, B) — TEK KAYNAK; renk değerleri
+# başka hiçbir yerde tekrarlanmaz. Değerler arayüz temasından alındı
+# (hrma/static/css/hd_doc.css + splash):
+#   serit_zemin  #101a28 : --hd-bg0 (#04070d) ile --hd-bg1 (#0a1322) arası ton
+#   acilir_zemin #0a1322 : --hd-bg1 birebir
+#   metin        #cfe8f2 : splash/arayüz metin rengi
+#   secili       #1e3046 : üzerine gelinen ögede hafif açılan ton
+#   kenar        #2a3e56 : çerçeve ve ayraç
+WIN_MENU_RENK = {
+    "serit_zemin": (16, 26, 40),
+    "acilir_zemin": (10, 19, 34),
+    "metin": (207, 232, 242),
+    "secili": (30, 48, 70),
+    "kenar": (42, 62, 86),
+}
+
 
 def _hrma_version():
     """Sürümü tek kaynaktan (hrma/__init__.py) okur; _setup_paths sonrası çağrılmalı."""
@@ -332,6 +352,447 @@ def _macos_app_identity(version):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Windows pencere kimliği: görev çubuğu/başlık simgesi + koyu menü şeridi
+#
+# İki kusur fotoğrafla doğrulandı (2026-08-14, Berke'nin ekran görüntüsü):
+#   1) Pencere başlığında ve görev çubuğunda PYTHON logosu. Kaynağı okundu:
+#      pywebview'in winforms arka ucu, kendisine ikon VERİLMEZSE simgeyi
+#      sys.executable'dan (yani pythonw.exe'den) ExtractIconW ile çıkarıyor
+#      (site-packages/webview/platforms/winforms.py, "Application icon" bloğu).
+#      Kısayoldaki hrma.ico pencereye değil kısayola aittir.
+#   2) Koyu uygulamanın üstünde BEMBEYAZ WinForms MenuStrip. Kaynağı: aynı
+#      dosyada menü ``WinForms.MenuStrip()`` olarak kuruluyor, hiçbir renk/
+#      çizici ayarı yapılmadan ``self.Controls.Add`` ediliyor; varsayılan
+#      "Professional" çizici de BackColor'ı yok sayıp açık gri gradyan çizer.
+#
+# Bu bölümün TAMAMI Windows'ta ÇALIŞTIRILAMADI (macOS'ta yazıldı, hedef
+# makineye erişim yoktu). Bu yüzden her adım KENDİ try/except'inde: kısmi
+# başarı kabul, çökme yasak. Hiçbir adım pencerenin açılmasını engelleyemez;
+# başarısızlıkta davranış eskisine (Python simgesi / açık menü) düşer.
+# ---------------------------------------------------------------------------
+
+def _windows_log(mesaj):
+    """Windows rötuşlarının günlüğü.
+
+    Dosyanın günlükleme deseni ayrı bir soyutlama değil, doğrudan ``print``;
+    pythonw altında konsol olmadığından _setup_console çıktıyı
+    Documents/HRMA/hrma_log.txt'ye yönlendirir. Yani bu satırlar kullanıcının
+    destek dosyasında görünür.
+    """
+    print("  windows: %s" % mesaj)
+
+
+def _windows_app_identity():
+    """Görev çubuğu kimliği (AppUserModelID) — PENCERE KURULMADAN ÖNCE.
+
+    Kabuk, bir pencere ilk kez oluşturulduğunda sürecin kimliğini önbelleğe
+    alır; kimlik verilmezse pythonw.exe'nin kimliği kullanılır ve HRMA görev
+    çubuğunda "Python" ile aynı kutuda gruplanır. Windows'ta DOĞRULANMADI
+    (2026-08-14).
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            WIN_APP_USER_MODEL_ID)
+    except Exception as exc:
+        _windows_log("AppUserModelID ayarlanamadı (%s) — görev çubuğunda "
+                     "Python altında gruplanabilir" % exc)
+
+
+def _windows_icon_path():
+    """hrma.ico'nun yolu; iki düzen SIRAYLA denenir, ilk VAR OLAN döner.
+
+    1) Kurulum düzeni (packaging/hrma.nsi): launcher $INSTDIR\\app\\launcher.py,
+       ikon $INSTDIR\\hrma.ico  ->  parent.parent
+    2) Depo/geliştirme düzeni: packaging/launcher.py ve packaging/hrma.ico
+       yan yana  ->  parent
+
+    Bulunamazsa None; çağıranlar simgeyi sessizce atlar (pencere yine açılır).
+    """
+    try:
+        from pathlib import Path
+        kok = Path(__file__).resolve()
+        for aday in (kok.parent.parent / "hrma.ico", kok.parent / "hrma.ico"):
+            if aday.is_file():
+                return str(aday)
+    except Exception as exc:
+        _windows_log("ikon yolu çözülemedi (%s)" % exc)
+    return None
+
+
+def _windows_forms():
+    """pythonnet köprüsü: System.Windows.Forms modülü (kurulamazsa None).
+
+    İçe aktarma ÇALIŞMA ANINDA yapılır. Modül düzeyinde ``import clr``
+    yazılsaydı launcher macOS'ta import anında çökerdi — yani bu satırların
+    yeri bilinçli bir kısıt, üşengeçlik değil.
+    """
+    try:
+        import clr
+        clr.AddReference("System.Windows.Forms")
+        clr.AddReference("System.Drawing")
+        import System.Windows.Forms as WinForms
+        return WinForms
+    except Exception as exc:
+        _windows_log(".NET köprüsü (pythonnet) kurulamadı (%s) — simge/menü "
+                     "rötuşu atlandı" % exc)
+        return None
+
+
+def _windows_ana_form(WinForms):
+    """Uygulamanın açık .NET formu (pywebview tek pencere açar)."""
+    try:
+        formlar = [f for f in WinForms.Application.OpenForms]
+    except Exception as exc:
+        _windows_log("Application.OpenForms okunamadı (%s)" % exc)
+        return None
+    if not formlar:
+        _windows_log("Application.OpenForms boş — pencere henüz kurulmamış, "
+                     "rötuş atlandı")
+        return None
+    return formlar[0]
+
+
+def _windows_form_ikonu(form):
+    """Pencere/görev çubuğu simgesini hrma.ico yapar (arayüz iş parçacığında).
+
+    webview.start(icon=...) yolu form KURULURKEN aynı dosyayı veriyor; burası
+    o parametreyi tanımayan pywebview sürümleri için güvence katmanıdır.
+    """
+    yol = _windows_icon_path()
+    if not yol:
+        _windows_log("hrma.ico bulunamadı — pencere simgesi pythonw.exe'den "
+                     "kalır (Python logosu)")
+        return
+    try:
+        import System.Drawing as Drawing
+        form.Icon = Drawing.Icon(yol)
+        form.ShowIcon = True
+    except Exception as exc:
+        _windows_log("pencere simgesi ayarlanamadı (%s)" % exc)
+
+
+def _windows_menu_serit_bul(form):
+    """Formdaki MenuStrip'i tip ADIYLA arar.
+
+    pywebview şeridi ``self.Controls.Add(top_level_menu)`` ile ekliyor ve
+    MainMenuStrip'e ATAMIYOR; yine de önce MainMenuStrip denenir (başka bir
+    sürüm atayabilir). Tip adı kullanılıyor çünkü pythonnet tiplerini Python
+    ``isinstance``'ıyla eşleştirmek sürümden sürüme değişebiliyor.
+    """
+    try:
+        serit = getattr(form, "MainMenuStrip", None)
+        if serit is not None:
+            return serit
+    except Exception:
+        pass
+    try:
+        for ctrl in form.Controls:
+            try:
+                if ctrl.GetType().Name == "MenuStrip":
+                    return ctrl
+            except Exception:
+                continue
+    except Exception as exc:
+        _windows_log("form.Controls gezilemedi (%s)" % exc)
+    return None
+
+
+def _windows_menu_ogeleri_boya(ogeler, zemin, acilir_zemin, metin, derinlik=0):
+    """Üst ögeleri ve açılır menülerini aynı palete boyar (sığ özyineleme).
+
+    Üst şerit ögeleri şerit zeminini, açılır menüler ve alt ögeleri açılır
+    zemini alır. Tek bir ögenin boyanamaması diğerlerini durdurmaz.
+    """
+    if derinlik > 5:
+        return
+    for oge in ogeler:
+        try:
+            oge.BackColor = zemin
+            oge.ForeColor = metin
+        except Exception:
+            pass
+        try:
+            acilir = getattr(oge, "DropDown", None)
+        except Exception:
+            acilir = None
+        if acilir is None:
+            continue
+        try:
+            acilir.BackColor = acilir_zemin
+            acilir.ForeColor = metin
+        except Exception:
+            pass
+        try:
+            alt_ogeler = [o for o in oge.DropDownItems]
+        except Exception:
+            continue
+        _windows_menu_ogeleri_boya(alt_ogeler, acilir_zemin, acilir_zemin,
+                                   metin, derinlik + 1)
+
+
+def _windows_koyu_cizici(WinForms, renk):
+    """ProfessionalColorTable alt sınıfı + ToolStripProfessionalRenderer.
+
+    NEDEN sanal ÖZELLİK (@property) değil de get_X YÖNTEMLERİ: pythonnet
+    sürümleri sanal özellik geçersiz kılmayı farklı ele alıyor. Python
+    tarafında ``@property MenuStripGradientBegin`` tanımlanırsa Python'dan
+    okurken doğru renk görünür ama .NET tarafındaki sanal çağrı hâlâ TABAN
+    sınıfa gidebilir — yani beyaz gradyan geri gelir ve biz bunu ölçemeyiz
+    (Python özelliği ölçümü gölgeler). get_X yöntemi Python tarafında aynı
+    adla bir gölge bırakmadığı için nesneden ``.MenuStripGradientBegin``
+    okumak GERÇEK .NET sanal çağrısını tetikler.
+
+    Bu yüzden çizici KANITLANMADAN kurulmaz: sınama tutmazsa None döner ve
+    çağıran katman 1-2'de (düz koyu şerit) kalır. Aksi hâlde geçersiz kılması
+    tutmamış bir Professional çizici, sistem çizicisinin yerine geçip beyaz
+    gradyanı GERİ getirirdi — yani düzeltmeyi bozardı.
+
+    Windows'ta DOĞRULANMADI (2026-08-14).
+    """
+    try:
+        class _KoyuRenkTablosu(WinForms.ProfessionalColorTable):
+            """MenuStrip gradyanlarının koyu karşılıkları."""
+
+            def get_MenuStripGradientBegin(self):
+                return renk["serit_zemin"]
+
+            def get_MenuStripGradientEnd(self):
+                return renk["serit_zemin"]
+
+            def get_ToolStripDropDownBackground(self):
+                return renk["acilir_zemin"]
+
+            def get_MenuItemSelected(self):
+                return renk["secili"]
+
+            def get_MenuItemSelectedGradientBegin(self):
+                return renk["secili"]
+
+            def get_MenuItemSelectedGradientEnd(self):
+                return renk["secili"]
+
+            def get_MenuItemPressedGradientBegin(self):
+                return renk["serit_zemin"]
+
+            def get_MenuItemPressedGradientMiddle(self):
+                return renk["acilir_zemin"]
+
+            def get_MenuItemPressedGradientEnd(self):
+                return renk["acilir_zemin"]
+
+            def get_MenuBorder(self):
+                return renk["kenar"]
+
+            def get_MenuItemBorder(self):
+                return renk["kenar"]
+
+            def get_ImageMarginGradientBegin(self):
+                return renk["acilir_zemin"]
+
+            def get_ImageMarginGradientMiddle(self):
+                return renk["acilir_zemin"]
+
+            def get_ImageMarginGradientEnd(self):
+                return renk["acilir_zemin"]
+
+            def get_SeparatorDark(self):
+                return renk["kenar"]
+
+            def get_SeparatorLight(self):
+                return renk["kenar"]
+
+        tablo = _KoyuRenkTablosu()
+    except Exception as exc:
+        _windows_log("koyu renk tablosu kurulamadı (%s) — pythonnet bu "
+                     "alt sınıflamayı desteklemiyor olabilir" % exc)
+        return None
+
+    # KANIT adımı: .NET sanal çağrısı gerçekten bize mi geliyor?
+    try:
+        olculen = tablo.MenuStripGradientBegin
+        okunan = (int(olculen.R), int(olculen.G), int(olculen.B))
+        if okunan != tuple(WIN_MENU_RENK["serit_zemin"]):
+            _windows_log("çizici sınaması tutmadı (okunan %s, beklenen %s) — "
+                         "özel çizici KURULMUYOR, düz koyu şerit korunuyor"
+                         % (okunan, tuple(WIN_MENU_RENK["serit_zemin"])))
+            return None
+    except Exception as exc:
+        _windows_log("çizici sınanamadı (%s) — özel çizici kurulmuyor" % exc)
+        return None
+
+    try:
+        return WinForms.ToolStripProfessionalRenderer(tablo)
+    except Exception as exc:
+        _windows_log("Professional çizici kurulamadı (%s)" % exc)
+        return None
+
+
+def _windows_menu_temasi(form, WinForms):
+    """Beyaz MenuStrip'i koyu temaya çeker — üç katman, her biri AYRI denenir.
+
+    Katmanlar bilerek artan kırılganlıkta: 1. katman tutmazsa hiçbiri
+    tutmaz, 3. katman tutmazsa 1-2 ayakta kalır (menü yine koyu olur, yalnız
+    vurgu rengi sistemden gelir). Windows'ta DOĞRULANMADI (2026-08-14).
+    """
+    serit = _windows_menu_serit_bul(form)
+    if serit is None:
+        _windows_log("MenuStrip bulunamadı — menü teması atlandı "
+                     "(menü hiç kurulmamış olabilir)")
+        return
+    try:
+        import System.Drawing as Drawing
+        renk = {ad: Drawing.Color.FromArgb(int(r), int(g), int(b))
+                for ad, (r, g, b) in WIN_MENU_RENK.items()}
+    except Exception as exc:
+        _windows_log("renkler kurulamadı (%s) — menü teması atlandı" % exc)
+        return
+
+    # Katman 1 — düz renk. Varsayılan "Professional" çizici BackColor'ı YOK
+    # SAYIP açık gri gradyan çizer; fotoğraftaki beyaz şerit tam olarak budur.
+    # Sistem çizicisi BackColor'a saygı duyduğu için render kipi de
+    # değiştirilir: 3. katman (özel çizici) tutmasa bile şerit koyu kalır.
+    try:
+        serit.BackColor = renk["serit_zemin"]
+        serit.ForeColor = renk["metin"]
+    except Exception as exc:
+        _windows_log("şerit rengi verilemedi (%s)" % exc)
+    try:
+        serit.RenderMode = WinForms.ToolStripRenderMode.System
+    except Exception as exc:
+        _windows_log("render kipi Sistem'e alınamadı (%s)" % exc)
+    try:
+        # Görsel stiller açıkken sistem çizicisi menüyü yine tema renkleriyle
+        # boyayabiliyor. Bu bayrak yalnız bu sürecin ToolStrip'lerini etkiler.
+        WinForms.ToolStripManager.VisualStylesEnabled = False
+    except Exception as exc:
+        _windows_log("VisualStylesEnabled kapatılamadı (%s)" % exc)
+
+    # Katman 2 — üst ögeler ve açılır menüler
+    try:
+        ust_ogeler = [o for o in serit.Items]
+    except Exception as exc:
+        _windows_log("menü ögeleri okunamadı (%s)" % exc)
+        ust_ogeler = []
+    try:
+        _windows_menu_ogeleri_boya(ust_ogeler, renk["serit_zemin"],
+                                   renk["acilir_zemin"], renk["metin"])
+    except Exception as exc:
+        _windows_log("menü ögeleri boyanamadı (%s)" % exc)
+
+    # Katman 3 — özel çizici (yalnız KANITLANIRSA kurulur, bkz. _windows_koyu_cizici)
+    cizici = _windows_koyu_cizici(WinForms, renk)
+    if cizici is None:
+        _windows_log("özel çizici doğrulanamadı — katman 1-2 ile yetinildi "
+                     "(şerit koyu, vurgu rengi sistemden)")
+        return
+    try:
+        serit.Renderer = cizici
+    except Exception as exc:
+        _windows_log("çizici şeride verilemedi (%s)" % exc)
+        return
+    try:
+        # Açılır menüler çizicilerini yöneticiden alabiliyor; aynı çizici
+        # verilmezse şerit koyu, açılır menü açık kalabilir.
+        WinForms.ToolStripManager.Renderer = cizici
+    except Exception as exc:
+        _windows_log("çizici yöneticiye verilemedi (%s)" % exc)
+
+
+def _windows_chrome_fix():
+    """Pencere ikonu + menü şeridinin koyu teması (pythonnet/.NET).
+
+    Windows'ta DOĞRULANMADI (2026-08-14): hedef makineye erişim yok; her adım
+    kendi try/except'inde — kısmi başarı kabul, çökme yasak. Pencere
+    GÖRÜNDÜKTEN sonra çağrılır (events.shown), bu yüzden .NET formu
+    Application.OpenForms içinde hazırdır.
+    """
+    if os.name != "nt":
+        return
+    WinForms = _windows_forms()
+    if WinForms is None:
+        return
+    form = _windows_ana_form(WinForms)
+    if form is None:
+        return
+
+    def _uygula():
+        _windows_form_ikonu(form)
+        _windows_menu_temasi(form, WinForms)
+
+    # pywebview 'shown' işleyicilerini AYRI bir iş parçacığında çalıştırıyor
+    # (webview/event.py: Event(window) -> should_lock=False -> threading.Thread).
+    # WinForms denetimleri kendi iş parçacığından değiştirilmelidir; yoksa
+    # cross-thread istisnası ya da sessiz bozulma olur. BeginInvoke seçildi
+    # (Invoke değil): geri dönüşü beklemediğimiz için kilitlenme riski yok.
+    try:
+        if form.InvokeRequired:
+            from System import Action
+            form.BeginInvoke(Action(_uygula))
+            return
+    except Exception as exc:
+        _windows_log("arayüz iş parçacığına geçilemedi (%s) — doğrudan "
+                     "deneniyor" % exc)
+    try:
+        _uygula()
+    except Exception:
+        traceback.print_exc()  # kozmetik — pencereyi ASLA engelleme
+
+
+def _windows_chrome_fix_gecikmeli():
+    """Yedek kanca (webview.start(func=...)) için gecikmeli rötuş.
+
+    start(func=...) pencere kurulmadan ÖNCE de tetiklenebildiğinden form
+    listesi dolana kadar kısa süre beklenir; dolmazsa _windows_chrome_fix
+    zaten "OpenForms boş" diyip sessizce çıkar.
+    """
+    if os.name != "nt":
+        return
+    for _ in range(50):  # ~10 s
+        WinForms = _windows_forms()
+        if WinForms is None:
+            return
+        try:
+            if len(WinForms.Application.OpenForms) > 0:
+                break
+        except Exception:
+            pass
+        time.sleep(0.2)
+    _windows_chrome_fix()
+
+
+def _windows_chrome_kancasi(pencere):
+    """Rötuşu pencerenin 'shown' olayına bağlar; başarıda True.
+
+    'shown' tercih ediliyor çünkü TAM olarak form gösterildikten sonra
+    tetikleniyor — o anda Application.OpenForms dolu. webview.start(func=...)
+    ise pencere kurulmadan da çalışabildiği için (yarış) yalnız yedek.
+    """
+    try:
+        pencere.events.shown += _windows_chrome_fix
+        return True
+    except Exception as exc:
+        _windows_log("'shown' kancasına bağlanılamadı (%s) — start(func=...) "
+                     "yedeğine düşülüyor" % exc)
+        return False
+
+
+def _webview_start_ikonu_destekliyor(webview):
+    """Bu pywebview sürümü start(icon=...) parametresini tanıyor mu?
+
+    6.2.1 tanıyor (paketleme bu sürümü sabitliyor); eski sürümlerde bilinmeyen
+    anahtar TypeError verip yerel pencere açılışını komple düşürürdü.
+    """
+    try:
+        import inspect
+        return "icon" in inspect.signature(webview.start).parameters
+    except Exception:
+        return False
+
+
 def _menu_check_updates():
     """macOS menüsü 'Check for Updates…' — arayüzdeki denetimi zorla tetikler."""
     try:
@@ -484,7 +945,7 @@ def _try_native_window(url):
             webview.settings["ALLOW_DOWNLOADS"] = True
         except Exception:
             pass
-        webview.create_window(
+        pencere = webview.create_window(
             _pencere_baslik(version), url,
             width=1440, height=900, min_size=(1100, 700),
             # Yerel pencerenin zemini: içerik yüklenmeden önceki an ve
@@ -495,6 +956,19 @@ def _try_native_window(url):
         if os.name == "nt":
             # WebView2 dışındaki eski motorlara (mshtml vb.) düşülmesin
             kwargs["gui"] = "edgechromium"
+            # Pencere simgesi — DESTEKLENEN yol: pywebview'in winforms arka ucu
+            # kendisine ikon verilmezse simgeyi sys.executable'dan (pythonw.exe)
+            # çıkarıyor; başlıktaki Python logosunun kaynağı bu. Parametreyle
+            # verildiğinde simge form KURULURKEN, yani pencere görünmeden önce
+            # yerine oturur. _windows_chrome_fix ayrıca pencere göründükten
+            # sonra da basar (parametreyi tanımayan sürümler için güvence).
+            ico = _windows_icon_path()
+            if ico and _webview_start_ikonu_destekliyor(webview):
+                kwargs["icon"] = ico
+            # Koyu menü + simge güvencesi: pencere göründükten SONRA .NET rötuşu.
+            # 'shown' kancası kurulamazsa start(func=...) yedeğine düşülür.
+            if not _windows_chrome_kancasi(pencere):
+                kwargs["func"] = _windows_chrome_fix_gecikmeli
         menu = _native_menu()
         if menu:
             kwargs["menu"] = menu
@@ -545,6 +1019,12 @@ def _show_window_blocking(url):
     Tarayıcı sekmesine düşüldüyse pencere ömrü izlenemez; sunucu, kullanıcı
     süreci kapatana kadar çalışır durumda bırakılır.
     """
+    # Windows görev çubuğu kimliği HİÇBİR pencere kurulmadan önce verilmeli
+    # (kabuk kimliği ilk pencerede önbelleğe alıyor). Bu işlev tüm pencere
+    # yollarının TEK geçidi olduğu için çağrı buranın en başında duruyor;
+    # macOS/Linux'ta işlevin kendisi ilk satırda çıkar.
+    _windows_app_identity()
+
     if os.environ.get("HRMA_NO_WINDOW"):
         # Otomatik test modu: pencere açma, sunucuyu ayakta tut
         print("  HRMA_NO_WINDOW=1 — window suppressed, server: %s" % url)
