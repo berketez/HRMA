@@ -97,6 +97,7 @@
             'site.events': 'Events (derived from the solution)',
             'site.liftoff': 'Liftoff',
             'site.burnout': 'Burnout',
+            'site.burnoutFromInput': 'from input burn time',
             'site.apogee': 'Apogee (solver ends here)',
             'site.impact': 'Impact (ground)',
             'site.end': 'End of solution',
@@ -110,6 +111,8 @@
 
             'site.textureNote': 'At close zoom the global texture/DEM (~9 km cells) holds no local terrain detail — no fake terrain is drawn.',
             'site.earthRotNote': 'Earth rotation and Coriolis are not modelled in v1; the ground track is a flat-Earth projection.',
+            'site.skyEpoch': 'Sky orientation (browser clock, UTC)',
+            'site.skyAttribution': 'Sky: ESO/S. Brunier Milky Way panorama (CC BY 4.0) · Yale Bright Star Catalogue',
             'site.mode': 'View mode',
             'site.modeLocal': 'Local (near site)',
             'site.modeGlobal': 'Global (whole Earth)',
@@ -206,6 +209,7 @@
             'site.events': 'Olaylar (çözümden türetildi)',
             'site.liftoff': 'Kalkış',
             'site.burnout': 'Yanma sonu',
+            'site.burnoutFromInput': 'girdi yanma süresinden',
             'site.apogee': 'Apoje (çözücü burada biter)',
             'site.impact': 'Yere iniş',
             'site.end': 'Çözüm sonu',
@@ -219,6 +223,8 @@
 
             'site.textureNote': 'Yakın ölçekte küresel doku/DEM (~9 km hücre) yerel arazi detayı içermez — sahte arazi çizilmez.',
             'site.earthRotNote': 'Dünya dönüşü ve Coriolis v1\'de modellenmiyor; yer izi düz-Dünya izdüşümüdür.',
+            'site.skyEpoch': 'Gökyüzü yönelimi (tarayıcı saati, UTC)',
+            'site.skyAttribution': 'Gökyüzü: ESO/S. Brunier Samanyolu panoraması (CC BY 4.0) · Yale Parlak Yıldız Katalogu',
             'site.mode': 'Görünüm kipi',
             'site.modeLocal': 'Yerel (sahaya yakın)',
             'site.modeGlobal': 'Küresel (tüm Dünya)',

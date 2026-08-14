@@ -46,7 +46,12 @@
         }
         .ls-link:hover { border-color: var(--hd-line-strong, rgba(0,229,255,0.42)); }
 
-        #ls-stage { position: relative; flex: 1; min-height: 0; }
+        /* SAHNE ZEMİNİ KOYU VE OPAK. theme.css'in genel `body` süsü prosedürel
+           yıldız/nebula gradyanları basar (uydurma, kamerayla dönmez); bu sayfada
+           gökyüzü YALNIZ sahne içi gerçek varlıklardan gelmelidir. Tuval zaten
+           opak temizleniyor (launch_site_globe.js: setClearColor(0x000000, 1)),
+           bu kural WebGL hiç başlamadığı (tuval yok) durumu kapatır. */
+        #ls-stage { position: relative; flex: 1; min-height: 0; background: var(--hd-bg0, #04070d); }
         #ls-globe { position: absolute; inset: 0; cursor: crosshair; }
 
         .ls-panel {
@@ -392,6 +397,18 @@
                         data-i18n="site.clearTileCache">Clear map cache</button>
                 <span class="ls-hint" id="ls-tile-usage"></span>
             </div>
+            <!-- Gök küresi beyanı. Yıldızlar ve Samanyolu SAHNENİN İÇİNDEDİR
+                 (kamerayla döner), ama yönelim sayfa açılış anına SABİTTİR ve
+                 zaman kaynağı tarayıcı saatidir. İkisi de yazılmazsa kullanıcı
+                 canlı/doğrulanmış bir gökyüzü sanabilir.
+                 İKİSİ DE BAŞTA GİZLİ: doku/katalog yüklenmeden "gökyüzü ESO
+                 panoraması + Yale katalogudur" demek yanlış beyandır (çevrimdışı
+                 kurulumda ya da varlık eksikse gökyüzü hiç çizilmez). Aşağıdaki
+                 updateSkyNote() gerçek sahne durumuna bakıp açar. -->
+            <div id="ls-skynote" style="margin-top:5px; display:none">
+                <span data-i18n="site.skyEpoch">Sky orientation (browser clock, UTC)</span>: <b id="ls-sky-time">--</b>
+            </div>
+            <div id="ls-sky-attr" style="margin-top:3px; display:none" data-i18n="site.skyAttribution">Sky: ESO/S. Brunier Milky Way panorama (CC BY 4.0) · Yale Bright Star Catalogue</div>
         </div>
     </div>
 </div>
@@ -430,6 +447,36 @@
     globe.viewGlobe();
     // Hata ayıklama / otomatik test için küre örneğini aç (zararsız tutamak)
     window.launchGlobe = globe;
+
+    // Gök küresinin hangi ana sabitlendiğini BEYAN ET. Yönelim bir kez
+    // hesaplanır (GMST), sonra donar; saat metni dilden bağımsız olduğu için
+    // dil değişiminde yeniden basılmasına gerek yoktur (etiket + atıf data-i18n
+    // ile çevrilir). Zaman kaynağı tarayıcı saatidir; sunucu saati sorulmaz.
+    //
+    // BEYAN SAHNEYE BAĞLI: epoch satırı ve ESO/Yale atfı ancak gerçekten çizilmiş
+    // bir gökyüzü varsa görünür (Samanyolu mesh'i YA DA en az bir yıldız). Doku
+    // ve katalog zaman uyumsuz yüklenir, ikisi de başarısız olabilir; koşulsuz
+    // basılan atıf "ekranda gördüğün gökyüzü ESO panoramasıdır" demek olurdu ve
+    // varlıklar gelmediğinde bu YANLIŞ BEYANDIR (ekran o durumda siyah kalır).
+    // 150 ms'lik döngüden çağrılır; bir kez açıldıktan sonra iş yapmaz.
+    var skyNoteShown = false;
+    function updateSkyNote() {
+        if (skyNoteShown) return;
+        var sky = (globe && globe.getSkyInfo) ? globe.getSkyInfo() : null;
+        // WebGL başlatılamadıysa sahne hiç kurulmaz -> epoch da yoktur;
+        // o durumda '--' KALIR, uydurma bir zaman yazılmaz.
+        if (!sky || !isFinite(sky.epochMs)) return;
+        if (!sky.milkyWay && !(sky.starCount > 0)) return;   // gökyüzü henüz/hiç yok
+        var out = el('ls-sky-time');
+        if (out) {
+            out.textContent = new Date(sky.epochMs).toISOString()
+                .slice(0, 16).replace('T', ' ');
+        }
+        el('ls-skynote').style.display = 'block';
+        el('ls-sky-attr').style.display = 'block';
+        skyNoteShown = true;
+    }
+    updateSkyNote();
 
     function setStatus(m) { el('ls-status').textContent = m || ''; }
     function fmtLat(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'N' : 'S'); }
@@ -906,7 +953,13 @@
             var dot = document.createElement('span'); dot.className = 'dot';
             dot.style.background = '#' + e.color.toString(16).padStart(6, '0');
             var name = document.createElement('span');
-            name.textContent = t(labels[e.key] || e.key, e.key);
+            // DÜRÜSTLÜK: yanma sonu işaretçisi ÇÖZÜCÜ çıktısı değil, kullanıcının
+            // girdiği yanma süresinden (globe.opts.burnTime = body.burn_time)
+            // türetiliyor. Etiket bunu söyler, aksi hâlde ölçülmüş bir olay sanılır.
+            name.textContent = t(labels[e.key] || e.key, e.key)
+                + (e.key === 'burnout'
+                    ? ' · ' + t('site.burnoutFromInput', 'from input burn time')
+                    : '');
             var tm = document.createElement('span'); tm.className = 't';
             tm.textContent = e.t.toFixed(1) + ' s · ' + fmtKmM(e.alt);
             row.appendChild(dot); row.appendChild(name); row.appendChild(tm);
@@ -916,10 +969,12 @@
 
     // ---- Ölçek göstergesi (her ~150 ms) ----
     setInterval(function () {
-        // T53/T54: bu iki iş getScaleInfo() null dönse de yapılmalı — bu yüzden
-        // erken çıkıştan ÖNCE çağrılıyorlar.
+        // T53/T54: bu üç iş getScaleInfo() null dönse de yapılmalı — bu yüzden
+        // erken çıkıştan ÖNCE çağrılıyorlar. updateSkyNote gökyüzü varlıkları
+        // (zaman uyumsuz) yüklendiğinde beyanı açar; yüklenmezse hiç açmaz.
         layoutBottomReserve();
         watchTiles();
+        updateSkyNote();
         var info = globe.getScaleInfo();
         if (!info) return;
         var lenM = info.metersPerPixel * 100;   // 100 px'lik bar

@@ -52,9 +52,34 @@
     var CTRL_MIN_TARGET = GLOBE_R * 0.004;   // hedefe ~2.5 km'ye kadar yaklaş
     var CTRL_MAX_TARGET = GLOBE_R * 6.0;     // en fazla uzaklaşma
     var SURFACE_MIN_LEN = GLOBE_R * 1.003;   // kamera merkezden en az bu kadar (yüzey kilidi)
-    var GLOBAL_DIST = GLOBE_R * 2.6;         // "tüm Dünya" görünümü
-    // Yakın zoomda "doku detayı yok" notunun tetiklendiği kamera yüksekliği [m]
+    // Yakın zoomda "doku detayı yok" notunun tetiklendiği kamera yüksekliği [m].
+    // DİKKAT: bu YALNIZ uyarı notunun eşiğidir; karo yamalarının açıldığı eşik
+    // ayrıdır (TILE_ACTIVE_ALT_M) ve ikisi bilerek farklı büyüklüktedir.
     var TEXTURE_NOTE_ALT_M = 400000.0;
+    // Karo yamalarının (GIBS patch) etkinleştiği kamera yüksekliği [m].
+    // Uyarı notu eşiğiyle AYNI SAYI DEĞİL: "Fly this site" kamerayı ~466 km'ye
+    // koyuyor; kapı 400 km olduğunda hiçbir karo istenmiyordu (ölçüldü, istek
+    // sayısı 0). Kapı 1500 km'ye çekildi -> tipik saha görünümünde yama açılır.
+    var TILE_ACTIVE_ALT_M = 1500000.0;
+
+    // "Tüm Dünya" mesafesi: küre en dar eksene sığmalı. Dikey yarı-FOV sabit,
+    // yatay yarı-FOV en-boy oranından türetilir; dar olan hangisiyse küre ona
+    // göre çerçevelenir (1.25 = nefes payı). Eski sabit 2.6R dikeyde %19 kırpıyordu
+    // (asin(100/260)=22.62° > 19.00° dikey yarı-FOV).
+    function globalViewDist(camera) {
+        var v = deg2rad(camera.fov) / 2;
+        var h = Math.atan(Math.tan(v) * camera.aspect);
+        var m = Math.min(v, h);
+        var d = GLOBE_R / Math.sin(m) * 1.25;
+        // Çok dar/uzun pencerede mesafe OrbitControls üst sınırını aşmasın.
+        // BİLİNÇLİ SINIR: tavan CTRL_MAX_TARGET*0.98 = 588 birim. Kürenin oraya
+        // sığması için asin(100/588) = 9,79° < yarı-FOV gerekir; yatay yarı-FOV
+        // atan(tan19°·en-boy) olduğundan koşul en-boy > 0,501'dir. Yani en-boy
+        // ~0,50'nin altındaki (boyu eninin iki katından fazla) pencerelerde küre
+        // yine kırpılır — masaüstünde pratikte görülmeyen bir durum, kamerayı
+        // OrbitControls sınırının dışına taşımaya yeğlendi.
+        return Math.min(d, CTRL_MAX_TARGET * 0.98);
+    }
 
     // ---- GIBS uydu karo yaması (patch mesh) sabitleri ----
     // Yakın zoomda taban Blue Marble (~9 km) yerine NASA GIBS karoları (~500 m)
@@ -78,6 +103,17 @@
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
     function deg2rad(d) { return d * Math.PI / 180.0; }
+    // ---- Düz (dokusuz) malzeme rengi: sRGB hex -> LİNEER --------------------
+    // ÖLÇÜLEN KUSUR: çıkış sRGB kodlanıyor (renderer.outputEncoding =
+    // sRGBEncoding, aşağıda). Shader'dan çıkan LİNEER değer ekrana yazılırken
+    // sRGB'ye çevrildiği için, malzemeye verilen HAM hex lineer sayı sayılıyor
+    // ve ekranda AÇILIYOR: 0xff8c33 -> #ffc47c, 0x2dd4a8 -> #75ebd4. Lejant
+    // (launch_site.html .ls-chip .sw ve olay noktaları) AYNI hex'i CSS ile
+    // basıyor; CSS değeri zaten sRGB olduğundan iki taraf tutmuyordu. Rengi
+    // burada lineere çevirince ekrandaki piksel tam olarak lejanttaki hex olur.
+    // DOKULARA UYGULANMAZ: onlar tex.encoding = sRGBEncoding ile işaretli, yani
+    // dönüşümü GPU zaten yapıyor — elle çevirmek çift dönüşüm olurdu.
+    function srgb(hex) { return new global.THREE.Color(hex).convertSRGBToLinear(); }
     function rad2deg(r) { return r * 180.0 / Math.PI; }
     function normLon(lon) { return ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0; }
 
@@ -99,6 +135,36 @@
         var lat = rad2deg(Math.asin(clamp(v.y / r, -1, 1)));
         var lon = rad2deg(Math.atan2(-v.z, v.x));
         return { lat: lat, lon: normLon(lon) };
+    }
+
+    // ---- Gök küresi (SAHNE İÇİ) ---------------------------------------------
+    // Gökyüzü CSS arka planı DEĞİL, sahnenin parçasıdır. Ölçülen kusur: CSS
+    // katmanı kamerayla dönmüyordu — kamera 90° döndürüldüğünde gökyüzü
+    // dikdörtgeninde 56.000 pikselin 56.000'i özdeş kaldı, yani "yıldızlar"
+    // Dünya'ya göre çivili duruyordu. Sahne içi küre bu yanılsamayı bitirir.
+    var R_SKY = GLOBE_R * 50;        // 5000 birim — kamera far düzlemi (100000) içinde
+    var R_STAR = R_SKY * 0.98;       // yıldızlar dokunun ÖNÜNDE (aynı yarıçapta z-savaşı olurdu)
+
+    // Kadir kovaları. r128'in PointsMaterial'ı nokta-BAŞINA boyut desteklemez
+    // (gl_PointSize tek uniform'dan gelir), bu yüzden parlaklık ayrımı ancak
+    // AYRI Points nesneleriyle yapılabilir — kova sayısı estetik değil,
+    // kütüphane sürümünün dayattığı bir kısıttır.
+    var STAR_BUCKETS = [
+        { vmax: 1.0, size: 3.0, opacity: 1.0 },
+        { vmax: 2.5, size: 2.2, opacity: 0.95 },
+        { vmax: 4.0, size: 1.6, opacity: 0.85 },
+        { vmax: 5.5, size: 1.1, opacity: 0.7 },
+        { vmax: Infinity, size: 0.8, opacity: 0.5 }
+    ];
+
+    // Greenwich ortalama yıldız zamanı [derece] — IAU 1982 basitleştirmesi;
+    // hata on yıllar boyunca ≲0,1° (bir yıldızın ekrandaki yerinde gözle
+    // görülmez). J2000 kontrolü: ms = 946728000000 (2000-01-01 12:00 UTC)
+    // -> d = 0 -> 280,46061837°.
+    function gmstDeg(ms) {
+        var d = ms / 86400000.0 - 10957.5;   // J2000.0'dan gün (Unix epoch farkı 10957,5 gün)
+        var g = 280.46061837 + 360.98564736629 * d;
+        return ((g % 360) + 360) % 360;
     }
 
     // ---- ENU (Kuzey,Doğu,Yukarı) -> jeodezik (launch_site.py ile birebir) ----
@@ -157,7 +223,22 @@
         }
         renderer.setPixelRatio(Math.min(global.devicePixelRatio || 1, 2));
         renderer.setSize(w, h);
-        renderer.setClearColor(0x000000, 0);   // saydam -> sayfa yıldız zemini görünür
+        // Dokular sRGB işaretleniyor (_loadTexture ve _buildTilePatch: tex.encoding
+        // = sRGBEncoding) -> shader girişinde lineere ÇÖZÜLÜYORLAR. Çıkışın da sRGB
+        // kodlanması ŞART, yoksa kare lineer kalır ve ekranda gamma kadar karanlık
+        // görünür. motor_viz3d.js:1625 ile aynı biçim/aynı davranış.
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        // OPAK zemin (alpha = 1). ÖLÇÜLEN KUSUR: tuval saydamken (alpha = 0)
+        // arkasındaki sayfa gövdesi görünüyordu ve theme.css'in genel body süsü
+        // oraya 16 UYDURMA yıldız + 3 nebula basıyor (prosedürel gradyanlar,
+        // hiçbir katalogla ilgisi yok). O katman kamerayla dönmediği hâlde
+        // gökyüzü sanılıyordu; üstelik Samanyolu dokusu (1,5 MB) yüklenene kadar
+        // — ve hiç yüklenemezse SÜREKLİ — ekrandaki tek "gökyüzü" o sahte
+        // katmandı. Tuval opak olunca bu sayfada gökyüzü YALNIZ sahne içi gerçek
+        // varlıklardan gelir (_buildSky: ESO panoraması + Yale katalogu, ikisi de
+        // kamerayla döner); hiçbiri yüklenemezse ekran SİYAH kalır — dürüst olan
+        // budur, boşluk sahte yıldızla doldurulmaz.
+        renderer.setClearColor(0x000000, 1);
         this.container.appendChild(renderer.domElement);
         this.renderer = renderer;
 
@@ -165,8 +246,11 @@
         this.scene = scene;
 
         var camera = new THREE.PerspectiveCamera(38, w / h, 0.01, 100000);
-        camera.position.set(0, GLOBE_R * 0.55, GLOBAL_DIST);
+        // aspect zaten kuruldu (w/h) -> mesafe ilk karede de doğru çerçeveler.
+        camera.position.set(0, GLOBE_R * 0.55, globalViewDist(camera));
         this.camera = camera;
+        // Açılış çerçevesi "tüm Dünya"dır; _resize bunu bilerek yeniden çerçeveler.
+        this._mode = 'global';
 
         var controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
@@ -184,6 +268,22 @@
         this._headlight = head;
         scene.add(head);
 
+        // --- Gök küresi (Samanyolu dokusu + gerçek yıldızlar) ---
+        // DÜRÜSTLÜK: tek zaman kaynağı TARAYICI SAATİDİR (sunucu/NTP değil) ve
+        // yönelim SAYFA AÇILIŞ ANINA sabitlenir — canlı döndürme YOK, çünkü
+        // canlı dönen bir gökyüzü "gerçek zamanlı astronomi" iddiası üretirdi.
+        // Hangi ana sabitlendiği arayüzde yazılır (#ls-sky-time).
+        this._skyEpochMs = Date.now();
+        this._skyGmstDeg = gmstDeg(this._skyEpochMs);
+        this._skyGroup = new THREE.Group();
+        // Yıldız sahne boylamı = RA olarak yerleştirilir; grup y ekseninde
+        // -GMST kadar döndürülünce nihai boylam RA - GMST olur = yıldızın
+        // altındaki gerçek boylam (LST = GMST + boylam = RA kuralı).
+        // y-dönüşü θ, boylama +θ ekler (küre parametrizasyonundan türetildi).
+        this._skyGroup.rotation.y = -deg2rad(this._skyGmstDeg);
+        scene.add(this._skyGroup);
+        this._buildSky();
+
         // --- Küre (Blue Marble) ---
         var geo = new THREE.SphereGeometry(GLOBE_R, 96, 64);
         var mat = new THREE.MeshPhongMaterial({
@@ -195,7 +295,7 @@
         // İnce atmosfer halkası (yalnız görsel; fiziğe bağlı değil)
         var atmGeo = new THREE.SphereGeometry(GLOBE_R * 1.018, 96, 64);
         var atmMat = new THREE.MeshBasicMaterial({
-            color: 0x2f6fb0, transparent: true, opacity: 0.10,
+            color: srgb(0x2f6fb0), transparent: true, opacity: 0.10,
             side: THREE.BackSide, depthWrite: false
         });
         scene.add(new THREE.Mesh(atmGeo, atmMat));
@@ -237,6 +337,160 @@
             // Doku yüklenemezse küre yine görünür (koyu düz), sahte doku üretilmez.
             if (self._onError) self._onError('texture_failed');
         });
+    };
+
+    // ---- Gök küresi --------------------------------------------------------
+    // İki bağımsız katman: (1) Samanyolu panoraması, (2) Yale Parlak Yıldız
+    // Katalogu'ndan gerçek yıldızlar. Biri yüklenemezse diğeri yine çizilir;
+    // ikisi de yüklenemezse gökyüzü BOŞ kalır — prosedürel/sahte yıldız alanı
+    // ÜRETİLMEZ.
+    LaunchSiteGlobe.prototype._buildSky = function () {
+        this._buildMilkyWay();
+        this._buildStars();
+    };
+
+    // (1) Samanyolu: ESO/S. Brunier panoraması (4096x2048 equirectangular),
+    // GALAKTİK koordinatlarda. Doku BackSide bir küreye içeriden giydirilir.
+    LaunchSiteGlobe.prototype._buildMilkyWay = function () {
+        var THREE = global.THREE, self = this;
+        var url = (this.opts.milkyWayUrl || '/static/img/milky_way_eso0932a_4096.webp');
+        new THREE.TextureLoader().load(url, function (tex) {
+            if (self._disposed || !self._skyGroup) { tex.dispose(); return; }
+            tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
+            tex.encoding = THREE.sRGBEncoding || tex.encoding;
+            // U-AYNALAMA — ÖLÇÜLMÜŞ GEREKÇE: bu panoramada galaktik boylam
+            // görüntüde SOLA doğru artıyor (LMC/SMC lekeleri "sola-artar"
+            // konumda parlak: 29,0 / 16,0; "sağa-artar" konumda yalnız fon
+            // seviyesi: 11,8). SphereGeometry UV'si ise boylamın u ile ARTTIĞINI
+            // varsayar. Aynalanmazsa gökyüzü ayna görüntüsü olurdu.
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.repeat.x = -1;
+            tex.offset.x = 1;      // u' = 1 - u : yatay ayna
+            var geo = new THREE.SphereGeometry(R_SKY, 48, 32);
+            var mat = new THREE.MeshBasicMaterial({
+                map: tex, side: THREE.BackSide, depthWrite: false });
+            var mw = new THREE.Mesh(geo, mat);
+            mw.renderOrder = -2;                 // her şeyin arkasına çizilir
+            // GALAKTİK -> EKVATORAL yönelim. J2000 çapaları: kuzey galaktik
+            // kutup (RA 192,85948 / Dec +27,12825) ve galaktik merkez yönü
+            // (RA 266,404988 / Dec -28,936175). Sayısal doğrulandı:
+            // l=90,b=0 -> RA 318,004 Dec +48,330; LMC -> RA 80,887 Dec -69,760.
+            var GAL_POLE = latLonToVec3(27.12825, 192.85948, 1);
+            var GAL_CENTER = latLonToVec3(-28.936175, 266.404988, 1);
+            var gz = new THREE.Vector3().crossVectors(GAL_CENTER, GAL_POLE);
+            // makeBasis SÜTUN vektörleri alır: yerel x = galaktik merkez yönü,
+            // yerel y = galaktik kutup. latLonToVec3(0,0) = (1,0,0) olduğundan
+            // dokunun l=0,b=0 içeriği tam galaktik merkeze oturur.
+            var m = new THREE.Matrix4().makeBasis(GAL_CENTER, GAL_POLE, gz);
+            mw.quaternion.setFromRotationMatrix(m);
+            self._milkyWayMesh = mw;
+            self._skyGroup.add(mw);              // GMST dönüşü gruptan gelir
+        }, undefined, function () {
+            // Doku yüklenemedi: mesh sahneye HİÇ eklenmez. Kozmetik katman
+            // olduğu için kullanıcıya hata basılmaz; yıldızlar bağımsız yüklenir.
+            if (global.console) console.warn('LaunchSiteGlobe: Samanyolu dokusu yüklenemedi: ' + url);
+        });
+    };
+
+    // (2) Yıldızlar: bsc5p_stars.bin (Yale BSC5, J2000 EKVATORAL). Konumlar
+    // doğrudan ekvatoral çerçevededir — galaktik quaternion YALNIZ Samanyolu
+    // mesh'ine uygulanır, yıldızlara UYGULANMAZ (ikisi farklı çerçevede gelir).
+    LaunchSiteGlobe.prototype._buildStars = function () {
+        var THREE = global.THREE, self = this;
+        var url = (this.opts.starsUrl || '/static/data/bsc5p_stars.bin');
+        fetch(url).then(function (r) {
+            // HTTP durumu ÖNCE denetlenir: fetch 404'te de reddetmez, gövdeyi
+            // (sunucunun HTML hata sayfasını) döndürür. Denetimsizken o HTML
+            // ikilik olarak ayrıştırılıp "imza <!DO" gibi yanıltıcı bir uyarıya
+            // dönüşüyordu — asıl sorun dosyanın bozuk olması değil, YOK olmasıdır.
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.arrayBuffer();
+        }).then(function (buf) {
+            if (self._disposed || !self._skyGroup) return;
+            var dv = new DataView(buf);
+            // Biçim: 4 bayt 'BSC1' + uint32 N + N x (float32 ra, dec, vmag),
+            // little-endian. İmza tutmazsa YILDIZ ÇİZİLMEZ (uydurma yıldız yok).
+            if (buf.byteLength < 8) { self._warnStars(url, 'dosya başlığı bile yok'); return; }
+            var magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1),
+                dv.getUint8(2), dv.getUint8(3));
+            if (magic !== 'BSC1') { self._warnStars(url, 'imza ' + magic); return; }
+            var n = dv.getUint32(4, true);
+            if (buf.byteLength < 8 + 12 * n) {
+                self._warnStars(url, 'dosya kesik (' + buf.byteLength + ' bayt, ' + n + ' kayıt)');
+                return;
+            }
+            var groups = [], i;
+            for (i = 0; i < STAR_BUCKETS.length; i++) groups.push([]);
+            var count = 0;
+            for (i = 0; i < n; i++) {
+                var o = 8 + 12 * i;
+                var ra = dv.getFloat32(o, true);
+                var dec = dv.getFloat32(o + 4, true);
+                var vmag = dv.getFloat32(o + 8, true);
+                if (!isFinite(ra) || !isFinite(dec) || !isFinite(vmag)) continue;
+                // RA -> sahne boylamı, Dec -> sahne enlemi (aynı dönüşüm,
+                // yüzey işaretçileriyle iç tutarlı).
+                var p = latLonToVec3(dec, ra, R_STAR);
+                var b = STAR_BUCKETS.length - 1;
+                for (var k = 0; k < STAR_BUCKETS.length; k++) {
+                    if (vmag < STAR_BUCKETS[k].vmax) { b = k; break; }
+                }
+                groups[b].push(p.x, p.y, p.z);
+                count++;
+            }
+            self._starPoints = [];
+            for (i = 0; i < STAR_BUCKETS.length; i++) {
+                if (!groups[i].length) continue;
+                var g = new THREE.BufferGeometry();
+                g.setAttribute('position', new THREE.Float32BufferAttribute(groups[i], 3));
+                var mat = new THREE.PointsMaterial({
+                    color: 0xffffff, size: STAR_BUCKETS[i].size,
+                    sizeAttenuation: false,          // ekran-sabit piksel boyutu
+                    transparent: true, opacity: STAR_BUCKETS[i].opacity,
+                    depthWrite: false });
+                var pts = new THREE.Points(g, mat);
+                pts.renderOrder = -1;                // Samanyolu dokusunun önünde
+                self._starPoints.push(pts);
+                self._skyGroup.add(pts);
+            }
+            self._skyStarCount = count;
+        }).catch(function (e) {
+            self._warnStars(url, e && e.message ? e.message : 'okunamadı');
+        });
+    };
+
+    LaunchSiteGlobe.prototype._warnStars = function (url, why) {
+        if (global.console) console.warn('LaunchSiteGlobe: yıldız katalogu kullanılamadı (' + url + '): ' + why);
+    };
+
+    // Gökyüzü durumu (arayüz epoch beyanı + otomatik test kancası).
+    LaunchSiteGlobe.prototype.getSkyInfo = function () {
+        return {
+            epochMs: this._skyEpochMs,
+            gmstDeg: this._skyGmstDeg,
+            starCount: this._skyStarCount || 0,
+            milkyWay: !!this._milkyWayMesh
+        };
+    };
+
+    LaunchSiteGlobe.prototype._disposeSky = function () {
+        var kill = function (obj) {
+            if (!obj) return;
+            if (obj.parent) obj.parent.remove(obj);
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) {
+                if (obj.material.map) obj.material.map.dispose();
+                obj.material.dispose();
+            }
+        };
+        kill(this._milkyWayMesh);
+        this._milkyWayMesh = null;
+        if (this._starPoints) {
+            for (var i = 0; i < this._starPoints.length; i++) kill(this._starPoints[i]);
+            this._starPoints = null;
+        }
+        if (this._skyGroup && this._skyGroup.parent)
+            this._skyGroup.parent.remove(this._skyGroup);
     };
 
     LaunchSiteGlobe.prototype._buildBorders = function () {
@@ -291,12 +545,12 @@
         var THREE = global.THREE;
         var grp = new THREE.Group();
         // Birim boyutta dikey iğne + taban halkası (her karede ölçeklenir)
-        var pinMat = new THREE.MeshBasicMaterial({ color: 0xff8c33 });
+        var pinMat = new THREE.MeshBasicMaterial({ color: srgb(0xff8c33) });
         var pin = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.0, 16), pinMat);
         pin.position.y = 0.5;
         grp.add(pin);
         var ringMat = new THREE.MeshBasicMaterial({
-            color: 0xff8c33, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+            color: srgb(0xff8c33), transparent: true, opacity: 0.85, side: THREE.DoubleSide });
         var ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.66, 24), ringMat);
         ring.rotation.x = -Math.PI / 2;
         grp.add(ring);
@@ -341,6 +595,18 @@
             var hit = self._hitLatLon(e);
             if (hit) self.selectSite(hit.lat, hit.lon);
         });
+        // KULLANICI KAMERAYI ELİNE ALDIĞI AN kip 'free' olur. ÖLÇÜLEN KUSUR:
+        // _mode yalnız viewGlobe/viewSite içinde değişiyordu, yani açılıştaki
+        // 'global' kipte kullanıcı tekerlekle yakınlaşsa bile kip 'global'
+        // KALIYORDU; sonraki herhangi bir _resize (pencere boyutlama, tarayıcı
+        // zoom'u, panel açılışı) kamerayı tüm-Dünya mesafesine geri fırlatıyordu
+        // ve kullanıcının yakınlaşması siliniyordu. (_resize eskiden kameraya hiç
+        // dokunmuyordu; bu bir regresyondu.) OrbitControls r128 'start' olayını
+        // fare/dokunma/TEKERLEK etkileşimi başlarken yayımlar — vendor
+        // OrbitControls-0.128.0.js: onMouseDown/onMouseWheel/onTouchStart ->
+        // dispatchEvent(_startEvent). Düğme akışı etkilenmez: viewGlobe ve
+        // viewSite _mode'u zaten yeniden kurar.
+        this.controls.addEventListener('start', function () { self._mode = 'free'; });
         global.addEventListener('resize', function () { self._resize(); });
     };
 
@@ -370,7 +636,8 @@
         var dirHint = this._sitePoint
             ? this._sitePoint.clone().normalize()
             : new global.THREE.Vector3(0, 0.4, 1);
-        this._flyCamera(new global.THREE.Vector3(0, 0, 0), dirHint, GLOBAL_DIST);
+        this._flyCamera(new global.THREE.Vector3(0, 0, 0), dirHint,
+            globalViewDist(this.camera));
         this._mode = 'global';
     };
 
@@ -386,14 +653,27 @@
         var need = this._pathBoundingRadius();
         var fov = deg2rad(this.camera.fov);
         var dist = need > 0 ? (need / Math.sin(fov / 2)) * 2.2 : GLOBE_R * 0.1;
-        // Hedef mesafesi (yüzeye çapalı). Alt sınır ~10 birim (~630 km): sondaj
-        // roketinde kamera sahaya yaklaşır ama sahanın COĞRAFYASI (kıyı/yarımada)
-        // tanınacak kadar geride kalır — bulanık tek-doku yamasına dalınmaz.
-        // Gerçek-ölçekte 14 km'lik sondaj arkı bu mesafede küçük bir işaretçi
-        // kümesidir (DÜRÜST); dramatik yükselen ark için 'Rakımı abart' anahtarı
-        // (varsayılan kapalı) kullanılır ve o zaman görünüm otomatik genişler.
-        // Üst sınır uzaya çıkan büyük apojeleri sığdırır.
-        dist = clamp(dist, GLOBE_R * 0.1, GLOBE_R * 2.5);
+        // Hedef mesafesi (yüzeye çapalı). Alt sınır UÇUŞ VARLIĞINA bağlıdır:
+        //
+        // (a) ÖLÇÜLEN KUSUR — gerçek ölçekte 15,7 km'lik sondaj yayı sahne
+        //     birimiyle 0,247 birimdir (1 birim = 63,71 km). Eski taban 10 birim
+        //     (= 637 km) iken yay ekran yüksekliğinin ancak
+        //     0,247 / (2·10·tan19°) = 0,247/6,887 = %3,6'sını kaplıyordu; kalkış,
+        //     yanma sonu ve apoje işaretçileri ~10 piksellik tek bir kümede üst
+        //     üste biniyordu. Yeni taban 3 birim (= 191 km):
+        //     0,247 / (2·3·tan19°) = 0,247/2,066 = %12,0 -> yay 3,3 kat büyür ve
+        //     işaretçiler ayrışır. ÖLÇEK BOZULMADI, abartma da yapılmadı; yalnız
+        //     kamera yaya göre çerçeveleniyor.
+        // (b) Eski gerekçe ("bulanık tek-doku yamasına dalınmaz") ARTIK ZAYIF:
+        //     karo kapısı kendi sabitine taşındı (TILE_ACTIVE_ALT_M = 1500 km),
+        //     bu çerçevede GIBS karoları (~500 m/px) yükleniyor — bakılan şey
+        //     tek bir 4096 doku değil.
+        // Uçuş YOKKEN eski 0,1R tabanı aynen kalır: saha seçiminde amaç coğrafi
+        // bağlamdır (kıyı/yarımada tanınsın), çerçevelenecek bir yay yoktur.
+        // 'Rakımı abart' anahtarı (varsayılan kapalı) hâlâ ayrı bir seçenektir;
+        // bu taban onun yerini almaz. Üst sınır uzaya çıkan apojeleri sığdırır.
+        var floor = (this._flight ? GLOBE_R * 0.03 : GLOBE_R * 0.1);
+        dist = clamp(dist, floor, GLOBE_R * 2.5);
         var tilt = deg2rad(46);   // oblik bakış: bölge + hafif eğrilik
         var camDir = normal.clone().multiplyScalar(Math.cos(tilt))
             .add(tangent.clone().multiplyScalar(Math.sin(tilt))).normalize();
@@ -514,16 +794,36 @@
         var ap = this._pathPoints[f.apogeeIdx];
         this._pathMid = this._pathPoints[0].clone().add(ap).multiplyScalar(0.5);
 
+        // Nokta bazlı teğetler — roketin BURUN yönü buradan gelir. (_pathTangent
+        // yolun BÜTÜNÜ için tek bir teğet verir; o kamera çerçevelemesinde kalır,
+        // araç yönelimi için kullanılamaz: kalkışta dik duran roket uç-uç teğetle
+        // yan yatardı.) Merkezi fark P[i+1]-P[i-1], uçlarda tek yanlı fark.
+        this._pathTangents = new Array(n);
+        var prevTan = null;
+        for (var ti = 0; ti < n; ti++) {
+            var pa = this._pathPoints[Math.max(ti - 1, 0)];
+            var pb = this._pathPoints[Math.min(ti + 1, n - 1)];
+            var tan = pb.clone().sub(pa);
+            // Ardışık özdeş nokta (çözücü duraklaması) -> sıfır uzunluk. Bir
+            // önceki teğet taşınır; ilk noktada o da yoksa yüzey normali alınır
+            // (kalkışta roket dik durur — doğru davranış, uydurma değil).
+            if (tan.length() > 1e-9) tan.normalize();
+            else if (prevTan) tan.copy(prevTan);
+            else tan.copy(this._pathPoints[ti]).normalize();
+            this._pathTangents[ti] = tan;
+            prevTan = tan;
+        }
+
         // Uçuş yolu — TAM rota her zaman soluk turuncu çizilir ("roketin
         // izleyeceği yol"); animasyonda ÜSTÜNE parlak bir iz (trail) katedilen
         // kısmı doldurur. İkisi de yalnız çözücü noktalarından gelir.
         var g1 = new THREE.BufferGeometry().setFromPoints(this._pathPoints);
         this._pathLine = new THREE.Line(g1, new THREE.LineBasicMaterial({
-            color: 0xff8c33, transparent: true, opacity: 0.34 }));
+            color: srgb(0xff8c33), transparent: true, opacity: 0.34 }));
         this.flightGroup.add(this._pathLine);
         var g1b = new THREE.BufferGeometry().setFromPoints(this._pathPoints);
         this._trailLine = new THREE.Line(g1b, new THREE.LineBasicMaterial({
-            color: 0xffb066, transparent: true, opacity: 0.98 }));
+            color: srgb(0xffb066), transparent: true, opacity: 0.98 }));
         this._trailLine.geometry.setDrawRange(0, 2);
         this.flightGroup.add(this._trailLine);
 
@@ -531,7 +831,7 @@
         // jeodezik izdüşümü; Dünya dönüşü/Coriolis beyanı launch_site.NOT_MODELLED'de
         var g2 = new THREE.BufferGeometry().setFromPoints(this._groundPoints);
         this._groundLine = new THREE.Line(g2, new THREE.LineDashedMaterial({
-            color: 0x4fd0e0, transparent: true, opacity: 0.55,
+            color: srgb(0x4fd0e0), transparent: true, opacity: 0.55,
             dashSize: GLOBE_R * 0.004, gapSize: GLOBE_R * 0.004 }));
         this._groundLine.computeLineDistances();
         this.flightGroup.add(this._groundLine);
@@ -539,13 +839,55 @@
         // Olay işaretçileri (kalkış/yanma sonu/apoje/bitiş) — çözümden türetildi
         this._buildEventMarkers();
 
-        // Roket işaretçisi (animasyon boyunca ilerler) — birim küre, ekran-sabit
-        var rk = new THREE.Mesh(
-            new THREE.SphereGeometry(1, 12, 12),
-            new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        // Roket işaretçisi (animasyon boyunca ilerler) — ÖNCEDEN 12x12 segmentli
+        // beyaz bir küreydi: hareket eden şey "roket" değil, ayırt edilemez bir
+        // benekti. Artık tanınabilir bir araç silueti: burun konisi + gövde +
+        // dört kanat, dikey uzanım 0,87 birim (kanat dibi -0,37 ... burun tepesi
+        // +0,50), en 0,44 ve burun +Y'de.
+        //
+        // ROKET EKRAN-SABİT BİR SEMBOLDÜR — fiziksel ölçek iddiası TAŞIMAZ.
+        // Saha iğnesi (k = 0,013) ve olay noktaları (k = 0,0075) ile aynı sınıfta,
+        // _updateScalables her karede kamera mesafesiyle çarpar. Ekran oranı
+        // MESAFEDEN BAĞIMSIZDIR: uzanım·k / (2·tan(FOV/2)), FOV = 38°.
+        // ÖLÇÜLEN (800 px yükseklikli tuval):
+        //   eski beyaz küre : 2,00 · 0,006 -> %1,74 -> 13,9 px (benek)
+        //   yeni siluet, k = 0,006 : 0,87 · 0,006 -> %0,76 -> 6,1 x 3,1 px
+        //   yeni siluet, k = 0,020 : 0,87 · 0,020 -> %2,53 -> 20,2 x 10,2 px
+        // Yani k KORUNSAYDI düzeltilmek istenen kusur KÖTÜLEŞİRDİ (13,9 -> 6,1 px);
+        // eski yorumun "piksel boyutu değişmez" iddiası ölçülmemişti ve yanlıştı.
+        // k bu yüzden bilinçli büyütüldü: 20,2 px, olay noktasının (17,4 px) ve
+        // saha iğnesinin (15,1 px) sınıfında — koni ve kanatlar ayırt edilebilir.
+        // Bu bir "ölçek yalanı" DEĞİLDİR: rakım abartması (_exaggerate) hâlâ
+        // varsayılan 1,0 ve yolun/işaretçilerin KONUMU birebir çözümden gelir;
+        // büyüyen tek şey sembolün kendisidir.
+        // Sahte egzoz/alev/duman EKLENMEZ: çözücü egzoz akısı üretmiyor,
+        // çizilen her şey veriden gelmek zorunda.
+        var rk = new THREE.Group();
+        var body = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.10, 0.10, 0.70, 12),
+            new THREE.MeshBasicMaterial({ color: srgb(0xd8dde2) }));
+        body.position.y = 0.0;                 // gövde [-0,35 , +0,35]
+        rk.add(body);
+        var nose = new THREE.Mesh(
+            new THREE.ConeGeometry(0.10, 0.30, 12),
+            new THREE.MeshBasicMaterial({ color: srgb(0xff8c33) }));
+        nose.position.y = 0.35;                // koni merkezi -> tepe +0,50'de
+        rk.add(nose);
+        // Dört kanat 90°'lik adımlarla DÖNGÜYLE kurulur (dört kopya blok değil);
+        // geometri/malzeme paylaşılır. Konum yarıçapta 0,14 dışa kaydırılır,
+        // rotation.y ile kanat düzlemi radyal doğrultuya çevrilir.
+        var finGeo = new THREE.BoxGeometry(0.016, 0.22, 0.16);
+        var finMat = new THREE.MeshBasicMaterial({ color: srgb(0x9fb3c0) });
+        for (var fi = 0; fi < 4; fi++) {
+            var fang = fi * Math.PI / 2;
+            var fin = new THREE.Mesh(finGeo, finMat);
+            fin.position.set(Math.sin(fang) * 0.14, -0.26, Math.cos(fang) * 0.14);
+            fin.rotation.y = fang;
+            rk.add(fin);
+        }
         this._rocket = rk;
         this.flightGroup.add(rk);
-        this._registerScalable(rk, 0.006);
+        this._registerScalable(rk, 0.020);   // ekran-sabit roket sembolü (yukarıdaki ölçüm)
         this._seekFraction(0);
     };
 
@@ -557,7 +899,10 @@
             var p = self._pathPoints[idx];
             var m = new THREE.Mesh(
                 new THREE.SphereGeometry(1, 14, 14),
-                new THREE.MeshBasicMaterial({ color: color }));
+                // srgb(): ham hex sRGB çıkışında açılırdı; lejant noktası
+                // (launch_site.html renderEvents -> dot.style.background) AYNI
+                // hex'i CSS ile bastığı için eşleşme lineere çevirince tutar.
+                new THREE.MeshBasicMaterial({ color: srgb(color) }));
             m.position.copy(p);
             self.flightGroup.add(m);
             self._registerScalable(m, 0.0075);   // ekran-sabit olay noktası
@@ -588,12 +933,21 @@
     LaunchSiteGlobe.prototype.clearFlightPath = function () {
         if (!this.flightGroup) return;
         while (this.flightGroup.children.length) {
-            var c = this.flightGroup.children.pop();
-            if (c.geometry) c.geometry.dispose();
-            if (c.material) c.material.dispose();
+            var c = this.flightGroup.children[0];
+            // Roket artık bir Group (koni + gövde + dört kanat): geometri ve
+            // malzeme ALT ÖGELERDE duruyor. traverse olmadan her yeniden kurulan
+            // uçuşta (rakım abartması değiştikçe) GPU tamponu sızardı.
+            c.traverse(function (o) {
+                if (o.geometry) o.geometry.dispose();
+                if (o.material) o.material.dispose();
+            });
+            // children[0] + remove: önce pop edilirse remove() ögeyi listede
+            // bulamaz ve parent'ı BOŞALTMAZ; aşağıdaki _scalables süzgeci de
+            // parent'a baktığı için ölü kayıtlar listede birikirdi.
             this.flightGroup.remove(c);
         }
         this._flight = null; this._pathPoints = null; this._groundPoints = null;
+        this._pathTangents = null;
         this._events = null; this._rocket = null; this._pathLine = null;
         this._trailLine = null; this._groundLine = null; this._pathMid = null;
         this._playing = false; this._playT = 0;
@@ -664,6 +1018,7 @@
     };
 
     LaunchSiteGlobe.prototype._seekTime = function (tSec) {
+        var THREE = global.THREE;
         var f = this._flight; if (!f || !this._rocket) return;
         var n = f.t.length;
         var T = f.t[n - 1];
@@ -676,6 +1031,24 @@
         var a = clamp((tSec - f.t[i]) / span, 0, 1);
         var p = this._pathPoints[i].clone().lerp(this._pathPoints[j], a);
         this._rocket.position.copy(p);
+        // Burun yol teğetine bakar: aynı i/j çiftinin teğetleri a ile karıştırılır.
+        // Geçici nesneler ÖRNEK BAŞINA bir kez kurulur (_orient) — bu yol her
+        // karede geçildiği için burada new Vector3/Quaternion çöp üretirdi.
+        if (this._pathTangents) {
+            var or = this._orient || (this._orient = {
+                up: new THREE.Vector3(0, 1, 0),
+                tan: new THREE.Vector3(),
+                q: new THREE.Quaternion()
+            });
+            or.tan.copy(this._pathTangents[i]).lerp(this._pathTangents[j], a);
+            // Karışım sıfıra düşerse (ters yönlü iki teğet) yönelim korunur:
+            // uydurma bir yön atamaktansa son geçerli yönde kalınır.
+            if (or.tan.length() > 1e-9) {
+                or.tan.normalize();
+                or.q.setFromUnitVectors(or.up, or.tan);
+                this._rocket.quaternion.copy(or.q);
+            }
+        }
         this._curIdx = i;
         // Parlak iz: kat edilen kısmı doldur (tam rota soluk olarak zaten görünür)
         if (this._trailLine) {
@@ -740,8 +1113,8 @@
     };
 
     // Kameranın baktığı bölgeye gereken karo bloğunu belirle, eksikleri yükle,
-    // uzaktakileri LRU ile buda. Yalnız yakın zoomda (kamera < 400 km) çalışır;
-    // her karede DEĞİL, TILE_UPDATE_MS kısmasıyla.
+    // uzaktakileri LRU ile buda. Yalnız yakın zoomda (kamera < 1500 km,
+    // TILE_ACTIVE_ALT_M) çalışır; her karede DEĞİL, TILE_UPDATE_MS kısmasıyla.
     LaunchSiteGlobe.prototype._updateTilePatch = function () {
         var now = performance.now();
         if (now < this._tileNextT) return;
@@ -750,7 +1123,7 @@
         var info = this.getScaleInfo();
         if (!info) return;
         // Uzaktaysak yeni karo yükleme; mevcutlar LRU ile budanır (aşağıda).
-        if (!(info.camAltitudeM < TEXTURE_NOTE_ALT_M)) { this._pruneTiles(); return; }
+        if (!(info.camAltitudeM < TILE_ACTIVE_ALT_M)) { this._pruneTiles(); return; }
         var mpx = info.metersPerPixel;
         if (!(mpx > 0)) return;
 
@@ -926,6 +1299,11 @@
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h);
+        // "Tüm Dünya" görünümünde çerçeveleme en-boy oranına bağlıdır: pencere
+        // daralınca yatay yarı-FOV küçülür ve eski mesafe küreyi kırpardı.
+        // Hedef merkez olduğundan mesafeyi yeniden ölçeklemek yeter (tween yok).
+        if (this._mode === 'global')
+            this.camera.position.setLength(globalViewDist(this.camera));
     };
 
     LaunchSiteGlobe.prototype.dispose = function () {
@@ -933,6 +1311,7 @@
         if (this._raf) cancelAnimationFrame(this._raf);
         this.clearFlightPath();
         this._clearTilePatches();        // GIBS karo mesh/doku GPU belleğini boşalt
+        this._disposeSky();              // gök küresi + yıldız kovaları
         if (this.renderer) {
             this.renderer.dispose();
             if (this.renderer.domElement && this.renderer.domElement.parentNode)
@@ -944,6 +1323,7 @@
     LaunchSiteGlobe.latLonToVec3 = latLonToVec3;
     LaunchSiteGlobe.vec3ToLatLon = vec3ToLatLon;
     LaunchSiteGlobe.enuToGeodetic = enuToGeodetic;
+    LaunchSiteGlobe.gmstDeg = gmstDeg;
     LaunchSiteGlobe.R_EARTH_M = R_EARTH_M;
     global.LaunchSiteGlobe = LaunchSiteGlobe;
 
