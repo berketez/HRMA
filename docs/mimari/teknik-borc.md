@@ -1,6 +1,6 @@
 # Teknik borç — ne borçlu, nerede, neden bekliyor
 
-**Son güncelleme:** 2026-08-14
+**Son güncelleme:** 2026-08-15
 **Kapsam:** Bilinen ve **ölçülmüş** teknik borçlar. Her madde: borcun ne
 olduğu, kodda nerede durduğu, hangi ölçümle bulunduğu, neden bekletildiği ve
 kapatma ölçütü. Gelecek işlerin sıralaması [yol-haritasi.md](yol-haritasi.md)'de.
@@ -82,12 +82,15 @@ testleri API katmanını sınadığı için yeşil kaldı. Kusur, tam olarak bu
 deponun en pahalı sınıfı: **iki parça tek başına doğru, aradaki dikiş
 yanlış.**
 
-### Kapatma ölçütü
+### KAPANDI (15 Ağustos 2026, onuncu parti `d36624e`)
 
-`solid.html` yanma hızı alanları boş açılır (ya da seçilen yakıtın katalog
-değeriyle açılır ve kaynağı ekranda yazar); toplayıcıdaki `|| 0.005`
-kalkar; bir bekçi, sayfanın ürettiği yükte `burn_rate_a` yokken yanıtın
-`burn_rate_a_source == 'central_catalog:apcp'` döndüğünü doğrular.
+`solid.html` yanma hızı alanları boş açılıyor (placeholder "boş bırakılırsa
+katalogdan çözülür", i18n'li); toplayıcıdaki `|| 0.005` / `? 0.35` düşüşleri
+kalktı — boş alan `undefined` üretir ve `JSON.stringify` anahtarı düşürür;
+`resetForm()` da boş yazar. Bekçi: `tests/test_solid_yanma_hizi_varsayilani.py`
+(4 test) — şablonda sabit değer yasağı + "alan yokluğu = katalog çözümü"
+API sözleşmesi + mutasyon denetimi (0,005 dayatması sonucu gerçekten
+değiştiriyor: oran > 1,5 kilitli). Yukarıdaki ölçüm tarihî kayıttır.
 
 ---
 
@@ -112,13 +115,12 @@ Altısı da **aynı** CODATA 2018 değerini taşıyor; bugün bir sapma yok. Bor
 sayının yanlışlığı değil, **tek kaynak kuralının çiğnenmesi**: `hrma/constants.py`
 15 sabit tanımlıyor ama fiziksel sabitler için ortak bir yer değil.
 
-**Neden bekliyor:** `thermal_protection.py` içinde gerekçesi yazılı — import
-zinciri açmamak için modül kendi tanımını koruyor. Ayrıca altı dosya altı
-farklı ajan kulvarına ait; eşzamanlı dokunmak çakışma riski taşıyor.
-
-**Kapatma ölçütü:** `hrma/constants.py`'ye (ya da yeni bir
-`hrma/physical_constants.py`'ye) tek tanım; altı yer oradan import eder; bir
-bekçi testi aynı sayının ikinci kez tanımlanmasını yakalar.
+**KAPANDI (15 Ağustos 2026, commit `01d0c9d`):** tek tanım
+`hrma/constants.py::STEFAN_BOLTZMANN`; altı yer oradan import eder (fea'nın
+birimli adı `STEFAN_BOLTZMANN_W_M2K4` API uyumu için korunur, değeri merkeze
+bağlıdır). Bekçi: `tests/test_sabit_tek_kaynak.py` — literalin merkez dışında
+YAZILAMAYACAĞINI `git grep` ile, tüketicilerin merkezle aynı nesneyi
+gördüğünü import düzeyinde kilitler. Yukarıdaki tablo tarihî kayıttır.
 
 ---
 
@@ -325,7 +327,7 @@ listelenmelerinin sebebi yol haritasında karşılıklarının olması.
 |---|---|---|---|
 | Lüle boyunca P(x) motor sonucunda yayımlanmıyor → FEA iç yüzeye **sabit** Pc uyguluyor | `fea/bridge.py` | M | `nozzle_flow_1d` bu profili üretebiliyor ama motor sözlüğüne konmuyor |
 | Katı tanesi için **2B düzlemsel** FEA kipi yok | `fea/__init__.py` — "[V2.7 Aşama C — henüz yok]" | L | Star/finocyl/slotted eksenel simetrik değil |
-| `pressurant_sizing` blowdown dalında **gerçek-gaz düzeltmesi yok** (C5) | kampanya kaydı | M | 300 bar'da %5+ hata ölçüldü, kod yazılmadı |
+| ~~`pressurant_sizing` blowdown gerçek-gaz (C5)~~ **KAPANDI** (15 Ağu, commit `9e1410b`) | kampanya kaydı | M | Ölçülen gerçek hata 300 bar'da ~%14'tü (not %5+ diyordu); Z regüle dalın deseniyle uygulandı, 8 mutasyon-denetimli bekçi (`test_pressurant.py::TestBlowdownRealGas`) |
 | **A11 tank tek-geometri** | kampanya kaydı | L | En büyük tekil borç; 2.7 kapı ölçütü |
 | Kavitasyon dinamiği, off-design pompa/türbin haritası, rotordinamik | `turbopump_sizing.NOT_MODELLED` | XL | NPSH marjı bir *tasarım kuralı karşılaştırmasıdır*, kararlılık hükmü değil |
 | Ateşleme kimyası, alev yayılımı, sert ateşleme dinamiği, elektriksel ateşleme zinciri | `igniter_sizing.NOT_MODELLED` (9 madde) | XL | Güvenli pencere sabit-hacim ideal-gaz **sınırıdır**, hüküm değil |

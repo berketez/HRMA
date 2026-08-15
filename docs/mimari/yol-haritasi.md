@@ -1,6 +1,6 @@
 # Yol haritası — ölçülmüş bugün, planlanan yarın
 
-**Son güncelleme:** 2026-08-14
+**Son güncelleme:** 2026-08-15
 **Kapsam:** Nerede olduğumuz (ölçülerek), nereye gittiğimiz (plan
 dosyalarından derlenerek), neyin açık borç kaldığı. Bu belge mevcut plan
 dosyalarının **yerine geçmez**, onları birleştirir ve güncel ölçümle
@@ -74,7 +74,7 @@ aynıdır. **Durum sütunu o belgeden değil, bugünkü koddan ölçülmüştür
 | C2 | Vana ve besleme hattı | **Modül + bağlama var** (`valve_feedline`, sıvıda 2 çağrı) |
 | C3 | Gimbal ve itki montajı | **Modül var, HİÇBİR YERE BAĞLI DEĞİL** — `analyze_gimbal_mount` yalnız `tests/test_c_kulvari_bilesenler.py` içinden çağrılıyor. Tek gerçek yetim modül |
 | C4 | Ateşleyici | **Modül + bağlama var** (`igniter_sizing`; katıda 5, hibritte 1 çağrı) |
-| C5 | Tank basınçlandırma | Bağlı (`pressurant_sizing`, sıvıda 2 çağrı). **Açık borç:** blowdown dalında gerçek-gaz düzeltmesi yok; 300 bar'da %5+ hata ölçüldü, kod yazılmadı |
+| C5 | Tank basınçlandırma | Bağlı (`pressurant_sizing`, sıvıda 2 çağrı). Gerçek-gaz borcu KAPANDI (15 Ağu, `9e1410b`): ölçülen hata 300 bar'da ~%14'tü, Z düzeltmesi mutasyon-denetimli bekçilerle girdi |
 
 ### Kulvar D — v2.7 analiz modülü (mesh + termal + yapısal)
 
@@ -170,7 +170,7 @@ dosyalarında/kampanya kaydında açıkça yazılı olanlar:
 |---|---|---|
 | **A11** tank tek-geometri | L | En büyük tekil borç; 2.7 kapı ölçütü |
 | **C3** gimbal bağlaması | S | Modül ve testleri hazır, yalnız bağlanacak |
-| **C5** gerçek-gaz düzeltmesi | M | `pressurant_sizing` blowdown dalı, 300 bar'da %5+ hata ölçüldü |
+| ~~**C5** gerçek-gaz düzeltmesi~~ KAPANDI (15 Ağu, `9e1410b`) | M | ölçülen gerçek hata ~%14'tü; Z uygulandı, mutasyon-denetimli bekçili |
 | **F3** korelasyon döngüsünün kapanması | L | Dış kullanıcı verisi gerekiyor |
 | Katı tanesi için **2B düzlemsel FEA kipi** | L | V2.7 Aşama C; `fea/__init__.py`'de "henüz yok" diye yazılı |
 | **Gerçek CFD** | XL | v3/v3.5; performans kulvarıyla birlikte |
@@ -178,7 +178,7 @@ dosyalarında/kampanya kaydında açıkça yazılı olanlar:
 | Windows arayüz kalemleri | S | Windows'ta doğrulanmadı, fotoğrafla teyit bekliyor |
 | Isp / ısı-akısı adlandırma tutarlılığı | S | |
 | Sıvı arayüz form alanları (cıvata / vana / hat girdileri) | M | API'de var, formda yok — Katman A kusuru sınıfı |
-| `STEFAN_BOLTZMANN` merkezîleştirme | S | 6 ayrı tanım ölçüldü |
+| ~~`STEFAN_BOLTZMANN` merkezîleştirme~~ KAPANDI (15 Ağu, `01d0c9d`) | S | tek tanım `hrma/constants.py`; literal bekçisi `test_sabit_tek_kaynak.py` |
 | B5 tam yanma animasyonu, B7 fotogerçekçi render, E5 duyarlılık taraması | M | |
 
 Teknik borçların ayrıntısı ve **neden bekletildiği**
