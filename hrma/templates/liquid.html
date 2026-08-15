@@ -931,9 +931,70 @@
                     </label>
                     <input type="number" id="turbine_expansion_ratio" value="4" step="0.1">
                 </div>
+                <!-- A5 (v2.6.27) — "kanal var kapı yok" kapanışı: aşağıdaki
+                     dört alan motorda ZATEN okunuyordu (su koçu + vana/hat
+                     bütçesi: feed_line_wall_thickness, valve_closure_time_ms,
+                     feed_line_material; emniyet vanası gaz kimliği:
+                     pressurization_type) ama formda kapıları yoktu. Sayfa
+                     varsayılan sayı DAYATMAZ: boş alan payload'a girmez,
+                     varsayılan kararı ve beyanı çözücünündür (NOT_MODELLED /
+                     'ss_304 assumed' / 'auto'). Bekçi:
+                     tests/test_sivi_form_alanlari.py -->
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.feed_line_wall_thickness">Feed Line Wall Thickness</span> <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.feed_line_wall_thickness_tip">Feed-line pipe wall thickness. HRMA sizes the line diameter for flow velocity but computes no wall thickness anywhere, so this is a user input. Leave empty if unknown - the water-hammer transient is then reported as NOT MODELLED instead of guessed. Needed for the elastic-pipe wave speed and the pipe pressure-rating check.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="feed_line_wall_thickness" value="" step="0.1" min="0.1" max="50" placeholder="—">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.valve_closure_time">Valve Closure Time</span> <span class="unit">(ms)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.valve_closure_time_tip">Main valve closure time for the water-hammer transient. Leave empty - the analysis then assumes instantaneous closure (full Joukowsky surge, the conservative upper bound) and declares that assumption. Closure slower than the pipe period reduces the surge (Michaud).</span>
+                        </div>
+                    </label>
+                    <input type="number" id="valve_closure_time_ms" value="" step="1" min="0.1" max="600000" placeholder="—">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.feed_line_material">Feed Line Material</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.feed_line_material_tip">Pipe material of the feed lines: sets the elastic modulus for the water-hammer wave speed and the strength for the pipe pressure-rating check. Leave on default - stainless 304 is then assumed and the assumption is declared in the output.</span>
+                        </div>
+                    </label>
+                    <select id="feed_line_material">
+                        <option value="" selected data-i18n="liq.ui.feed_line_material_default">Default — SS 304 assumed</option>
+                        <option value="ss_304" data-i18n="liq.ui.stainless_steel_304">Stainless Steel 304</option>
+                        <option value="ss_316" data-i18n="liq.ui.stainless_steel_316">Stainless Steel 316</option>
+                        <option value="aluminum_6061" data-i18n="liq.ui.aluminum_6061">Aluminum 6061</option>
+                        <option value="titanium_6al4v" data-i18n="liq.ui.titanium_6al4v">Titanium Ti-6Al-4V</option>
+                        <option value="inconel_718" data-i18n="liq.ui.inconel_718">Inconel 718</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.pressurization_type">Tank Pressurization Gas</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.pressurization_type_tip">Tank pressurization gas choice. Sets the relieving-gas identity of the tank relief-valve sizing (helium unless nitrogen is chosen). Autogenous pressurization is sized numerically only for methane/LOX and LH2/LOX turbopump configurations; elsewhere the choice is echoed with its declared limits. Leave on auto for the standard stored-helium assumption.</span>
+                        </div>
+                    </label>
+                    <select id="pressurization_type">
+                        <option value="" selected data-i18n="liq.ui.pressurization_auto_default">Auto (default)</option>
+                        <option value="helium" data-i18n="liq.ui.pressurization_helium">Helium</option>
+                        <option value="nitrogen" data-i18n="liq.ui.pressurization_nitrogen">Nitrogen</option>
+                        <option value="autogenous" data-i18n="liq.ui.pressurization_autogenous">Autogenous (propellant vapor)</option>
+                    </select>
+                </div>
             </div>
         </div>
-        
+
         <!-- 4. Injector System Parameters -->
         <div class="panel">
             <h2 data-i18n="liq.ui.4_injector_system_parameters">4. Injector System Parameters</h2>
@@ -1375,6 +1436,58 @@
                         </div>
                     </label>
                     <input type="number" id="safety_factor" value="2.5" step="0.1" min="1.1" max="10">
+                </div>
+                <!-- A5 (v2.6.27) — kapak/enjektör flanşı cıvata birleşimi:
+                     motor _closure_joint_analysis() bu üç anahtarı ZATEN
+                     okuyordu (katı sayfasındaki desenin birebir sıvı
+                     karşılığı), formda alanı yoktu. Cıvata sayısı boş
+                     bırakılırsa birleşim boyutlandırılmaz - sayı uydurulmaz
+                     (solid.html closure_bolt_* deseniyle aynı). -->
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.closure_bolt_count">Closure Bolt Count</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.closure_bolt_count_tip">Number of bolts holding the injector/closure flange against chamber pressure. Leave empty if unknown - the joint is then reported as "not sized" instead of guessed. Drives the separation and proof safety factors of the closure joint.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="closure_bolt_count" value="" step="1" min="1" max="200" placeholder="—">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.closure_bolt_size">Closure Bolt Size</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.closure_bolt_size_tip">Metric coarse thread size of the closure bolts (ISO 898-1 stress areas). Only used when a bolt count is given.</span>
+                        </div>
+                    </label>
+                    <select id="closure_bolt_size">
+                        <option value="M4">M4</option>
+                        <option value="M5">M5</option>
+                        <option value="M6">M6</option>
+                        <option value="M8" selected>M8</option>
+                        <option value="M10">M10</option>
+                        <option value="M12">M12</option>
+                        <option value="M14">M14</option>
+                        <option value="M16">M16</option>
+                        <option value="M20">M20</option>
+                        <option value="M24">M24</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.closure_bolt_class">Closure Bolt Class</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.closure_bolt_class_tip">Bolt property class: 8.8 / 10.9 / 12.9 (ISO 898-1) or A2-70 stainless (ISO 3506-1). Sets proof strength and therefore the preload. Only used when a bolt count is given.</span>
+                        </div>
+                    </label>
+                    <select id="closure_bolt_class">
+                        <option value="8.8" selected>8.8</option>
+                        <option value="10.9">10.9</option>
+                        <option value="12.9">12.9</option>
+                        <option value="A2-70">A2-70</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label>
@@ -2222,7 +2335,8 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(collectAllParameters())
+                    body: JSON.stringify(Object.assign(collectAllParameters(),
+                                                       collectClosureAndFeedLineParams()))
                 });
                 
                 const results = await response.json();
@@ -2730,14 +2844,18 @@
                 y: mrData.isp_vs_mr,
                 type: 'scatter',
                 mode: 'lines+markers',
-                name: T('liq.msg.specific_impulse', 'Specific Impulse'),
+                // Isp adlandırma borcu kapanışı: bu eğri isp_vs_mr = isp_vac
+                // (performance_maps MR taraması), yani VAKUM Isp'sidir —
+                // irtifa eğrileriyle aynı 'Specific Impulse' etiketini
+                // taşıması iki farklı tanımı tek ada sıkıştırıyordu.
+                name: T('liq.msg.vacuum_isp', 'Vacuum Isp'),
                 line: { color: '#00e5ff', width: 3 }
             };
-            
+
             const layout = {
                 title: T('liq.msg.performance_vs_mixture_ratio', 'Performance vs Mixture Ratio'),
                 xaxis: { title: T('liq.msg.mixture_ratio_o_f', 'Mixture Ratio (O/F)') },
-                yaxis: { title: T('liq.msg.specific_impulse_s', 'Specific Impulse (s)') },
+                yaxis: { title: T('liq.msg.vacuum_isp_s', 'Vacuum Isp (s)') },
                 showlegend: true
             };
             
@@ -2776,7 +2894,7 @@
                 y: isp,
                 type: 'scatter',
                 mode: 'lines+markers',
-                name: T('liq.msg.specific_impulse', 'Specific Impulse'),
+                name: T('liq.msg.specific_impulse', 'Isp (delivered, at altitude)'),
                 line: { color: '#00e5ff', width: 3 }
             };
 
@@ -2785,7 +2903,7 @@
                 // taşıyıp farklı şey göstermesin.
                 title: T('liq.msg.altitude_performance_map', 'Altitude Performance Map'),
                 xaxis: { title: T('liq.msg.altitude_km', 'Altitude (km)') },
-                yaxis: { title: T('liq.msg.specific_impulse_s', 'Specific Impulse (s)') },
+                yaxis: { title: T('liq.msg.specific_impulse_s', 'Isp (delivered) (s)') },
                 showlegend: true
             };
 
@@ -4001,7 +4119,56 @@
             }
             return params;
         }
-        
+
+        // A5 (v2.6.27) — motorun OKUDUĞU ama formda kapısı OLMAYAN yedi
+        // girdi ("kanal var kapı yok" sınıfı): kapak cıvataları
+        // (closure_bolt_count/size/class), besleme hattı cidarı
+        // (feed_line_wall_thickness), vana kapanma süresi
+        // (valve_closure_time_ms), hat malzemesi (feed_line_material),
+        // basınçlandırma gazı (pressurization_type).
+        //
+        // Bu alanlar BİLEREK collectAllParameters() DIŞINDA toplanır:
+        // tests/test_liquid_input_wiring.py'nin sarsım tablosu o fonksiyonun
+        // gövdesine kilitlidir ve bu iş kaleminde düzenlenemez kapsam
+        // dışındadır; bu yedi alanın kendi uçtan uca bekçisi
+        // tests/test_sivi_form_alanlari.py'dedir (boş -> payload'da yok,
+        // dolu -> çözücü çıktısını değiştiriyor).
+        //
+        // SÖZLEŞME (2,3x dersi): boş alan payload'a GİRMEZ (undefined ->
+        // JSON.stringify anahtarı düşürür); sayfa hiçbir varsayılan sayı
+        // DAYATMAZ. Varsayılan kararı ve BEYANI çözücünündür: birleşim
+        // 'not sized', su koçu 'NOT_MODELLED', hat malzemesi
+        // "'ss_304' assumed", basınçlandırma 'auto'.
+        function collectClosureAndFeedLineParams() {
+            const num = (id) => {
+                const raw = (document.getElementById(id)?.value ?? '').trim();
+                const v = parseFloat(raw);
+                return (raw !== '' && Number.isFinite(v)) ? v : undefined;
+            };
+            const choice = (id) => {
+                const v = document.getElementById(id)?.value ?? '';
+                return v === '' ? undefined : v;
+            };
+            const out = {
+                closure_bolt_count: (function () {
+                    const v = parseInt(document.getElementById('closure_bolt_count')?.value ?? '', 10);
+                    return (Number.isFinite(v) && v >= 1) ? v : undefined;
+                })(),
+                feed_line_wall_thickness: num('feed_line_wall_thickness'),
+                valve_closure_time_ms: num('valve_closure_time_ms'),
+                feed_line_material: choice('feed_line_material'),
+                pressurization_type: choice('pressurization_type')
+            };
+            // Cıvata boyutu/sınıfı yalnız sayı girildiyse gönderilir: çözücü
+            // de ancak o zaman okur; sayı yokken "not sized" beyanının yanında
+            // kullanılmamış seçim yankısı taşınmasın.
+            if (out.closure_bolt_count !== undefined) {
+                out.closure_bolt_size = document.getElementById('closure_bolt_size').value;
+                out.closure_bolt_class = document.getElementById('closure_bolt_class').value;
+            }
+            return out;
+        }
+
         // Ask AI Analysis
         function askAI() {
             if (!currentResults) {
@@ -4545,7 +4712,7 @@ Please provide:
                 title: T('liq.msg.engine_performance_vs_altitude', 'Engine Performance vs Altitude'),
                 xaxis: { title: T('liq.msg.altitude_km', 'Altitude (km)') },
                 yaxis: {
-                    title: T('liq.msg.specific_impulse_s', 'Specific Impulse (s)'),
+                    title: T('liq.msg.specific_impulse_s', 'Isp (delivered) (s)'),
                     titlefont: { color: '#00e5ff' }, tickfont: { color: '#00e5ff' }
                 },
                 yaxis2: {
@@ -4629,7 +4796,7 @@ Please provide:
                 return;
             }
             const fig = _buildAltitudeFigure(results, ap, {
-                ispName: T('liq.msg.specific_impulse_isp', 'Specific Impulse (Isp)')
+                ispName: T('liq.msg.specific_impulse_isp', 'Isp (delivered, at altitude)')
             });
             liquidPlot(div, fig.traces, fig.layout);
             _liquidPlotNote(div, 'altitude_analysis_plot_note', fig.note);
@@ -4871,7 +5038,11 @@ Please provide:
                     row(T('liq.msg.channel_size', 'Channel Size'), tprot.channel_dimensions || '—') +
                     row(T('liq.msg.channel_count', 'Channel Count'), hrmaFmt(tprot.cooling_channels, 0)) +
                     row(T('liq.msg.coolant_velocity', 'Coolant Velocity'), hrmaFmt(tprot.coolant_velocity, 1, 'm/s')) +
-                    row(T('liq.msg.heat_flux', 'Heat Flux'), hrmaFmt(tprot.heat_flux, 1, 'MW/m²')) +
+                    // Isı akısı adlandırma borcu kapanışı: bu sayı
+                    // peak_heat_flux = h_g_boğaz·(T_c − T_cidar_tasarım),
+                    // yani TASARIM cidar sıcaklığında değerlendirilen boğaz
+                    // yüküdür; denge cidarındaki akıyla karıştırılmasın.
+                    row(T('liq.msg.heat_flux', 'Throat Heat Flux (at design wall temperature)'), hrmaFmt(tprot.heat_flux, 1, 'MW/m²')) +
                     row(T('liq.msg.wall_temperature', 'Wall Temperature'), hrmaFmt(tprot.wall_temperature, 0, 'K')) +
                     row(T('liq.msg.temperature_rise', 'Temperature Rise'), hrmaFmt(tprot.temperature_rise, 0, 'K')) +
                     row(T('liq.msg.pressure_drop', 'Pressure Drop'), hrmaFmt(tprot.pressure_drop, 1, 'bar')));

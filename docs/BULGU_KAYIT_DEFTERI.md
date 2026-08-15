@@ -147,6 +147,9 @@ kıracağı**.
 | Egzoz görselinin uydurma sabitlerle çizilmesi | `test_plume_physics.py` |
 | Arşiv girdi adı enjeksiyonu ve formül enjeksiyonu | `test_export_injection_guard.py` |
 | Kimyasal veritabanının import anında diske yazması | `test_chemical_db_no_write.py` |
+| Farklı Isp tanımlarının şablonlarda çıplak "Isp"/"Specific Impulse" etiketiyle sunulması (tasarım noktası, vakum, deniz seviyesi, irtifada teslim edilen, anlık, ima edilen — hepsi tek ada sıkışıyordu) | `test_sivi_form_alanlari.py::test_ciplak_isp_etiketi_kalmadi` |
+| Boğaz ısı akısının cidar referansı söylenmeden basılması (referans soğutulmuş cidar tasarım yükü ile denge cidarındaki akı — 2,5 kat fark — aynı adı taşıyordu) | `test_sivi_form_alanlari.py::test_ciplak_isi_akisi_etiketi_kalmadi` |
+| Sıvı motorda okunan ama formda kapısı olmayan girdiler (kapak cıvataları, hat cidarı, vana kapanma süresi, hat malzemesi, basınçlandırma gazı) | `test_sivi_form_alanlari.py::test_motorda_okunan_her_anahtarin_formda_kapisi_var` |
 
 ## Açık borç
 
@@ -162,8 +165,7 @@ kısaltılmak içindir; uzuyorsa bir şey yanlış gidiyordur.
 | `skip_distance`, `secondary_holes` (hibrit enjektör) | Yayımlanmış korelasyon yok; katsayı uydurmak yasak | `test_field_wiring_layer_a.py::DECLARED_UNMODELLED` |
 | Lüle kütlesinin "kamara kütlesinin %30'u" olması | Geometri hesabı değil başparmak kuralı; çıktıda `nozzle_weight_basis` ile beyan ediliyor | `structural_analysis.py::_calculate_weight` |
 | Güvenlik panelinin `defaults_applied` alanını okumaması | Uç nokta hangi sayının kullanıcıdan gelmediğini bildiriyor, panel göstermiyor; kullanıcı kendi verisi olmayan sayıyı ayırt edemiyor | Bekçisi yok — açık |
-| Dört ayrı "Isp" alanının aynı adla sunulması | `isp` (tasarım), `sea_level_isp`, `nozzle_design...specific_impulse`, `isp_time_avg` — her birinin ayrı ve savunulabilir tanımı var, ama arayüz hepsini "Isp" diye gösteriyor; en büyük fark %5 | Bekçisi yok — açık |
-| İki ayrı "boğaz ısı akısı"nın aynı adla sunulması | Biri referans soğutulmuş cidara, diğeri denge cidar sıcaklığına göre; 2,5 kat fark | Bekçisi yok — açık |
+| Ortak sözlükteki (`i18n_common.js`) son çıplak Isp/akı etiketleri | Isp/akı adlandırma borcunun şablon ve sayfa-sözlüğü ayağı kapandı (yukarıdaki iki bekçi); ortak sözlükte üç etiket kaldı: `app.metric.isp`/`app.rep.ispLong` (hibrit metrik kartı, tasarım Isp'sini "Specific Impulse" diye basar), `panel.thermal.cardQThroat` + `panel.thermal.heatFluxSeries` (AYNI panelde referans-cidar tasarım akısı ile denge-cidar akısı), `panel.regen.cardPeakFlux`. `i18n_common.js` bu iş kaleminde dokunulamaz kapsam dışıydı (çok sayfalı ortak sözlük, kendi çift yönlü bekçisi var) | Bekçisi yok — açık |
 
 ## Kural
 

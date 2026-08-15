@@ -2232,7 +2232,13 @@
                     <div class="viz-corner bl"></div><div class="viz-corner br"></div>
                     <div class="viz-status" id="viz_status" data-i18n="adv.txt.standby">STANDBY</div>
                     <div class="viz-heatlegend" id="viz_heat_legend" style="display: none;">
-                        <div><span data-i18n="adv.txt.wallHeatFluxBartz">WALL HEAT FLUX — BARTZ</span> (A<sub>t</sub>/A)<sup>0.9</sup></div>
+                        <!-- Isı akısı adlandırma borcu kapanışı: lejanttaki
+                             min/maks değerler REFERANS SOĞUTULMUŞ CİDARDA
+                             değerlendirilen tasarım yükleridir
+                             (gas_side_analysis.chamber/throat_heat_flux);
+                             denge cidar sıcaklığındaki akı (eksenel profil)
+                             bundan ~2,5 kat düşük çıkabilir. -->
+                        <div><span data-i18n="adv.txt.wallHeatFluxBartz">WALL HEAT FLUX — BARTZ (reference cooled wall)</span> (A<sub>t</sub>/A)<sup>0.9</sup></div>
                         <div class="bar"></div>
                         <div class="lbl"><span id="viz_hl_min">—</span><span id="viz_hl_max">—</span></div>
                         <div class="tw" id="viz_hl_wall">—</div>
@@ -2266,7 +2272,12 @@
                     <div class="viz-chip" id="viz_chip_port"><div class="k" data-i18n="adv.txt.port">Port Ø</div><div class="v" id="viz_v_port">—</div></div>
                     <div class="viz-chip" id="viz_chip_web"><div class="k" data-i18n="adv.txt.webRemaining">Web Remaining</div><div class="v" id="viz_v_web">—</div></div>
                     <div class="viz-chip" id="viz_chip_of"><div class="k" data-i18n="adv.label.oFRatio">O/F Ratio</div><div class="v" id="viz_v_of">—</div></div>
-                    <div class="viz-chip" id="viz_chip_isp"><div class="k" data-i18n="adv.txt.isp">Isp</div><div class="v" id="viz_v_isp">—</div></div>
+                    <!-- Isp adlandırma borcu kapanışı: bu çip yanma
+                         animasyonunun ANLIK Isp(t) değerini gösterir
+                         (of_shift serisinden örneklenir) — tasarım Isp'siyle
+                         karışmasın diye Pc(t) çipiyle aynı gösterim
+                         kullanılır; Isp(t) dilden bağımsızdır. -->
+                    <div class="viz-chip" id="viz_chip_isp"><div class="k">Isp(t)</div><div class="v" id="viz_v_isp">—</div></div>
                     <div class="viz-chip" id="viz_chip_thrust"><div class="k" data-i18n="adv.txt.thrust">Thrust</div><div class="v" id="viz_v_thrust">—</div></div>
                     <div class="viz-chip" id="viz_chip_pc" style="display:none;"><div class="k">P<sub>c</sub>(t)</div><div class="v" id="viz_v_pc">—</div></div>
                 </div>
@@ -4044,13 +4055,16 @@
                     / ((ozet.itici_kg / ozet.burn_time_s) * TRAJ_G0);
             }
             if (not) {
-                // Dile bağlı olmayan künye:  m_kuru + m_itici = m_0 kg · Isp x s
-                // 'Isp' hem İngilizcede hem Türkçede aynı simgedir ve zaten
-                // sözlükte kayıtlıdır (adv.txt.isp).
+                // Künye:  m_kuru + m_itici = m_0 kg · Isp (implied) x s
+                // Isp adlandırma borcu kapanışı: buradaki sayı kütle
+                // bütçesinin İMA ETTİĞİ Isp'dir (F/(ṁ·g0), ṁ = m_itici/t_b)
+                // ve motorun ilan ettiği tasarım Isp'sinden FARKLI olabilir
+                // (ölçülen örnek: 66 s'ye karşı 199,1 s). Aynı 'Isp' etiketi
+                // iki farklı tanımı tek ada sıkıştırıyordu.
                 var satir = i18nNumber(kuru, 3) + ' + ' + i18nNumber(ozet.itici_kg, 3)
                     + ' = ' + i18nNumber(kalkis, 3) + ' kg';
                 if (ima_isp !== null) {
-                    satir += '  ·  ' + i18nText('adv.txt.isp', 'Isp') + ' '
+                    satir += '  ·  ' + i18nText('adv.txt.ispImplied', 'Isp (implied)') + ' '
                         + i18nNumber(ima_isp, 1) + ' s';
                 }
                 not.textContent = satir;
@@ -4424,7 +4438,7 @@
                         const layout = {
                             title: i18nText('adv.js.ofOptimization', 'O/F Ratio Optimization'),
                             xaxis: { title: i18nText('adv.js.ofAxis', 'O/F Ratio') },
-                            yaxis: { title: i18nText('adv.js.ispAxis', 'Specific Impulse (s)') },
+                            yaxis: { title: i18nText('adv.js.ispAxis', 'Isp (theoretical, O/F scan) (s)') },
                             autosize: true,
                             height: 300
                         };
@@ -4574,7 +4588,7 @@
                 <div>${fmtVal(m.thrust, 0, 'N')}</div>
             </div>
             <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.isp', 'Specific Impulse')}</div>
+                <div class="spec-label">${i18nText('adv.pop.isp', 'Isp (design point, at design-altitude ambient)')}</div>
                 <div>${fmtVal(m.isp, 1, 's')}</div>
             </div>
             <div class="spec-item">
@@ -5284,7 +5298,12 @@
                 ['Thrust (N)', num(m.thrust, 1)],
                 ['Burn time (s)', num(m.burn_time, 2)],
                 ['Total impulse (N.s)', num(m.total_impulse, 1)],
-                ['Specific impulse (s)', num(m.isp, 2)],
+                // Isp adlandırma borcu kapanışı: m.isp tasarım noktasının
+                // Isp'sidir (CF·c*/g0, tasarım irtifasının ortam basıncında);
+                // sea_level_isp / isp_time_avg / nozzle_design.specific_impulse
+                // aynı yanıttaki DİĞER tanımlardır, tek 'Specific impulse'
+                // etiketi hepsini birbirine karıştırıyordu.
+                ['Isp (design point, at design-altitude ambient) (s)', num(m.isp, 2)],
                 ['c* (m/s)', num(m.c_star, 1)],
                 // v2.6.26: yanıttaki alan adı 'cf'; 'thrust_coefficient'
                 // diye bir anahtar yok. Satır ekranda dolu, Excel'de boştu.

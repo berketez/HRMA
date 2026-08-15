@@ -4114,7 +4114,7 @@
             const statsGrid =
                 '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; margin-bottom:16px;">' +
                 mcStatCard('Thrust', mc.thrust, 'N', 0) +
-                mcStatCard('Isp', mc.isp, 's', 1) +
+                mcStatCard(T('solid.msg.isp_sea_level_mc', 'Isp (sea level)'), mc.isp, 's', 1) +
                 mcStatCard(T('solid.msg.burn_time', 'Burn Time'), mc.burn_time, 's', 2) +
                 mcStatCard(T('solid.msg.peak_pressure', 'Peak Pressure'), mc.max_pressure, 'bar', 1) +
                 '</div>';
@@ -4167,9 +4167,9 @@
                     type: 'histogram',
                     marker: { color: 'rgba(255,140,51,0.35)', line: { color: '#ff8c33', width: 1 } }
                 }], {
-                    title: T('solid.msg.isp_distribution', 'Isp Distribution'),
+                    title: T('solid.msg.isp_distribution', 'Isp (sea level) Distribution'),
                     autosize: true,
-                    xaxis: { title: T('solid.msg.isp_s', 'Isp (s)') },
+                    xaxis: { title: T('solid.msg.isp_s', 'Isp (sea level) (s)') },
                     yaxis: { title: 'Frequency' },
                     shapes: nominalLine(mc.isp && mc.isp.nominal, '#00e5ff'),
                     showlegend: false,
@@ -4308,7 +4308,7 @@
                 const altitudeLayout = hrmaPlotLayout({
                     title: T('solid.msg.specific_impulse_vs_altitude', 'Specific Impulse vs Altitude'),
                     xaxis: { title: T('solid.msg.altitude_km', 'Altitude (km)') },
-                    yaxis: { title: T('solid.msg.specific_impulse_s', 'Specific Impulse (s)') },
+                    yaxis: { title: T('solid.msg.specific_impulse_s', 'Isp (delivered) (s)') },
                     showlegend: false
                 }, altitudeTrace.y);
 
