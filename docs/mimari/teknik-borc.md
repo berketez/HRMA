@@ -334,7 +334,7 @@ listelenmelerinin sebebi yol haritasında karşılıklarının olması.
 | Borç | Nerede beyanlı | Ölçek | Not |
 |---|---|---|---|
 | Lüle boyunca P(x) motor sonucunda yayımlanmıyor → FEA iç yüzeye **sabit** Pc uyguluyor | `fea/bridge.py` | M | `nozzle_flow_1d` bu profili üretebiliyor ama motor sözlüğüne konmuyor |
-| Katı tanesi için **2B düzlemsel** FEA kipi yok | `fea/__init__.py` — "[V2.7 Aşama C — henüz yok]" | L | Star/finocyl/slotted eksenel simetrik değil |
+| ~~Katı tanesi için 2B düzlemsel FEA kipi~~ **KAPANDI** (15 Ağu, `fb55034`) | `fea/mesh_planar.py` + `planar_grain.py` | L | B-bar Q4, Lamé %0,85 + yakınsama + kalıcı mutasyon bekçileri; `/api/fea/planar-grain` + katı sayfası paneli |
 | ~~`pressurant_sizing` blowdown gerçek-gaz (C5)~~ **KAPANDI** (15 Ağu, commit `9e1410b`) | kampanya kaydı | M | Ölçülen gerçek hata 300 bar'da ~%14'tü (not %5+ diyordu); Z regüle dalın deseniyle uygulandı, 8 mutasyon-denetimli bekçi (`test_pressurant.py::TestBlowdownRealGas`) |
 | ~~**A11 tank tek-geometri**~~ **KAPANDI** (15 Ağu, `b2796ed`) | kampanya kaydı | L | gerçek çift değer basınç beslemelideydi (kart 90 vs zincir 105 bar); tek kaynak `_tank_pressure_bar()`, bekçi `test_sivi_tank_tek_geometri.py` |
 | Kavitasyon dinamiği, off-design pompa/türbin haritası, rotordinamik | `turbopump_sizing.NOT_MODELLED` | XL | NPSH marjı bir *tasarım kuralı karşılaştırmasıdır*, kararlılık hükmü değil |

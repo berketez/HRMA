@@ -172,7 +172,7 @@ dosyalarında/kampanya kaydında açıkça yazılı olanlar:
 | ~~**C3** gimbal bağlaması~~ KAPANDI (15 Ağu, on üçüncü parti) | S | uç deseniyle bağlandı, 17 bekçi |
 | ~~**C5** gerçek-gaz düzeltmesi~~ KAPANDI (15 Ağu, `9e1410b`) | M | ölçülen gerçek hata ~%14'tü; Z uygulandı, mutasyon-denetimli bekçili |
 | **F3** korelasyon döngüsünün kapanması | L | Dış kullanıcı verisi gerekiyor |
-| Katı tanesi için **2B düzlemsel FEA kipi** | L | V2.7 Aşama C; `fea/__init__.py`'de "henüz yok" diye yazılı |
+| ~~Katı tanesi için 2B düzlemsel FEA kipi~~ KAPANDI (15 Ağu, `fb55034`) | L | V2.7 Aşama C tamam: Lamé doğrulamalı düzlem şekil değiştirme çözücüsü + uç + panel |
 | **Gerçek CFD** | XL | v3/v3.5; performans kulvarıyla birlikte |
 | Yanma tepkisi modeli (F2 tamamlanması) | XL | Akustik modlar hazır, tepki fonksiyonu yok |
 | Windows arayüz kalemleri | S | Windows'ta doğrulanmadı, fotoğrafla teyit bekliyor |
