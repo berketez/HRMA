@@ -146,10 +146,14 @@ başına yük. Kendi `NOT_MODELLED` sözlüğü de var.
 sonraki dalgaya bırakıldı; bağlama dalgası C1, C2 ve C4'ü kapattı, C3'e
 sıra gelmeden durdu.
 
-**Kapatma ölçütü:** sıvı (ve gerekiyorsa katı) motorda bir `_gimbal_block`
-üreticisi; sonuç sözlüğüne bağlama; arayüzdeki gimbal seçeneğinin bu bloğu
-göstermesi. Bu, [yol-haritasi.md](yol-haritasi.md) § 3'teki **2. kapı
-ölçütünü** (çekirdek-yetim modül sıfır) doğrudan engelleyen tek kalemdir.
+**KAPANDI (15 Ağustos 2026, on üçüncü parti):** bağlama motor gövdesine
+değil `/api/gimbal-mount` ucuna yapıldı (termal-koruma uç deseni; motor
+dosyası o sırada NPSH düzeltmesindeydi — dosya sahipliği çakışmasın diye
+uç deseni seçildi ve FEA/TP uçlarıyla tutarlı). Sayfada gimbal paneli:
+seçilmiş mount + çözülmüş itki + boş-varsayılanlı yeni geometri alanları;
+eksik girdi beyan edilir, sayı dayatılmaz. Bekçi:
+`tests/test_gimbal_baglama.py` (17 test — sözleşme, 400/422, imza-beyaz
+liste eşitliği). 2.7 kapı ölçütü #2 (çekirdek-yetim sıfır) SAĞLANDI.
 
 ---
 

@@ -123,7 +123,7 @@ belgeye yazılmıştır.
 | # | Ölçüt | Bugünkü durum |
 |---|---|---|
 | 1 | D2-D5 kullanıcıya görünür: mesh üstünde gerilme **ve** sıcaklık konturu ekranda | Yapısal ve termal uçlar + `fea_panel.js` var. Uçtan uca ürün turu ile teyit edilmeli |
-| 2 | Çekirdek-yetim modül **sıfır** (F1/F2/F4/C1/blowdown hepsi panele bağlı) | **C3 gimbal yetim.** Diğerleri bağlı |
+| 2 | Çekirdek-yetim modül **sıfır** (F1/F2/F4/C1/blowdown hepsi panele bağlı) | **SAĞLANDI (15 Ağu):** C3 gimbal `/api/gimbal-mount` + sayfa paneliyle bağlandı; yetim modül kalmadı |
 | 3 | En az bir dış kullanıcının **gerçek test verisiyle** kapanmış korelasyon döngüsü (F3) | Açık. Ayberk'in toplu testine bağlanmış durumda |
 | 4 | Yayın kapısı 8/8 + iskele görsel turu yeşil + tank tek-geometri (A11) kapalı | Kapı ve tur yeşil ölçüldü (4 Ağustos: 3/3 sayfa); **A11 açık** |
 
@@ -169,7 +169,7 @@ dosyalarında/kampanya kaydında açıkça yazılı olanlar:
 | Kalem | Ölçek | Not |
 |---|---|---|
 | **A11** tank tek-geometri | L | En büyük tekil borç; 2.7 kapı ölçütü |
-| **C3** gimbal bağlaması | S | Modül ve testleri hazır, yalnız bağlanacak |
+| ~~**C3** gimbal bağlaması~~ KAPANDI (15 Ağu, on üçüncü parti) | S | uç deseniyle bağlandı, 17 bekçi |
 | ~~**C5** gerçek-gaz düzeltmesi~~ KAPANDI (15 Ağu, `9e1410b`) | M | ölçülen gerçek hata ~%14'tü; Z uygulandı, mutasyon-denetimli bekçili |
 | **F3** korelasyon döngüsünün kapanması | L | Dış kullanıcı verisi gerekiyor |
 | Katı tanesi için **2B düzlemsel FEA kipi** | L | V2.7 Aşama C; `fea/__init__.py`'de "henüz yok" diye yazılı |
