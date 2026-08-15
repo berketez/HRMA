@@ -11,9 +11,24 @@ Bağlama üç halka:
   1. app.py -> POST /api/gimbal-mount (termal-koruma ucunun deseni:
      beyaz liste + zorunlu alan kapısı + 422/400 sözleşmesi),
   2. liquid.html -> sonuç bölümünde gimbal paneli; boş form alanı payload'a
-     KONMAZ, eksik zorunlu girdi 422 sözleşmesiyle BEYAN edilir (sayı
-     uydurulmaz), sabit montajda NOT_APPLICABLE beyanı,
+     KONMAZ, eksik zorunlu girdi BEYAN edilir (sayı uydurulmaz), sabit
+     montajda NOT_APPLICABLE beyanı,
   3. i18n_pages.js -> panel metinleri EN+TR.
+
+SÖZLEŞME GÜNCELLEMESİ (15 Ağustos 2026) — boş aktüatör kolunda istek atılmaz
+Ölçülen kusur: aktüatör kolu alanı BOŞ DOĞAR ("blank: not analysed"), bu yüzden
+her hesap sonunda panel uca kesin 422 dönecek bir istek atıyordu
+({"thrust_N":10000,"gimbal_angle_deg":8,"yaw_angle_deg":8}). İşlev doğruydu
+(beyan basılıyordu) ama tarayıcı konsoluna her hesapta kırmızı "Failed to load
+resource: 422" düşüyordu; görsel tur iskelesinin konsol-hata denetimi ve
+dev-tools açan kullanıcı bunu ürün hatası sanıyordu. Yeni sözleşme:
+  * kol BOŞ (arm === null) -> fetch HİÇ atılmaz, aynı beyan (aynı i18n
+    anahtarı, ucun ``missing_fields`` sırasıyla aynı alan adları) YEREL basılır,
+  * kol DOLU ama başka zorunlu alan eksik -> 422 yolu emniyet ağı olarak
+    AYNEN korunur; sunucu sözleşmesi tek doğru kaynak olarak kalır.
+Bu dosyadaki eski bekçilerin hiçbiri "boş kolda da istek atılır" davranışını
+kilitlemiyordu (yalnız boş alanın payload'a konmadığını kilitliyorlardı), bu
+yüzden gevşetme değil EKLEME yapıldı: §8 yeni bekçileri.
 
 Desen ölçümü (aynı oturum): /api/thermal-protection beyaz liste dışı
 fazladan anahtarı 200 ile SESSİZCE düşürüyor (modüle ulaşmaz, TypeError
@@ -30,10 +45,16 @@ MUTASYON DÜŞÜNCESİ — bağlama geri alınırsa hangi test kırılır:
     test_yetim_kapanisi_sayfa_ucu_cagiriyor.
   * Boş-alan-gönderme koruması gevşer de sayfa boş alana sayı dayatırsa ->
     test_bos_alan_payloada_konmaz_yapisal (gimbalFieldValue null yolu).
+  * Boş koldaki yerel kapı kalkar da fetch koşulsuz atılırsa (konsol
+    gürültüsü geri gelir) -> test_bos_kolda_istek_atilmaz (davranış, node) VE
+    test_bos_kol_kapisi_fetchten_once (kaynak sırası).
 """
 
 import inspect
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -41,6 +62,9 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 LIQUID = ROOT / 'hrma' / 'templates' / 'liquid.html'
 APP_PY = ROOT / 'hrma' / 'app.py'
+
+NODE = shutil.which('node')
+needs_node = pytest.mark.skipif(NODE is None, reason='node kurulu değil')
 
 
 @pytest.fixture(scope='module')
@@ -294,3 +318,276 @@ def test_liquid_sayfasi_200(client):
     r = client.get('/liquid')
     assert r.status_code == 200
     assert 'gimbalPanel' in r.get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------------
+# 8) Boş aktüatör kolunda istek atılmaz — konsol gürültüsü kapanışı
+#
+# Panel kodu GERÇEK node altında, küçük bir DOM + fetch taklidiyle koşturulur
+# (kalıp: tests/test_liquid_unwired_ui.py ve tests/test_blowdown_panel.py).
+# Kaynak taraması tek başına yetmez: "fetch atılmıyor" bir DAVRANIŞTIR, dizge
+# değil — koşum bunu ölçer, yapısal testler yalnız sırayı/ortak gövdeyi kilitler.
+# ---------------------------------------------------------------------------
+
+#: Panelin gimbal işlevleri liquid.html'in satır içi script'inden bütün olarak
+#: alınır (gimbalEsc -> displayGimbalMount arası). Sınırlar kayarsa test
+#: sessizce zayıflamaz, ayıklama iddiasında patlar.
+_BLOK_BAS = '        function gimbalEsc('
+_BLOK_SON = '        // Initialize'
+
+
+def _gimbal_blok():
+    html = LIQUID.read_text(encoding='utf-8')
+    bas = html.index(_BLOK_BAS)
+    son = html.index(_BLOK_SON, bas)
+    blok = html[bas:son]
+    for ad in ('function gimbalFieldValue(', 'function gimbalMissingHtml(',
+               'async function displayGimbalMount('):
+        assert ad in blok, 'gimbal bloğu ayıklanamadı: %r yok' % ad
+    return blok
+
+
+HARNESS = r"""
+'use strict';
+const SPEC = __SPEC__;
+const fetchCalls = [];
+const usedKeys = [];
+
+function makeNode(id) {
+    return { id: id, value: '', innerHTML: '', style: {},
+             addEventListener: function () {} };
+}
+const nodes = {};
+Object.keys(SPEC.fields).forEach(function (id) {
+    nodes[id] = makeNode(id);
+    nodes[id].value = SPEC.fields[id];
+});
+['gimbalPanel', 'gimbalPanelBody'].forEach(function (id) {
+    nodes[id] = makeNode(id);
+});
+const document = {
+    getElementById: function (id) { return (id in nodes) ? nodes[id] : null; }
+};
+// Çeviri taklidi anahtarı GÖRÜNÜR kılar: beyanın hangi i18n anahtarıyla
+// basıldığı ve alan adları çıktıdan doğrudan okunur (dil bağımsız ölçüm).
+function T(key, fallback) { usedKeys.push(key); return '[[' + key + ']]'; }
+function TF(key, params, fallback) { usedKeys.push(key); return '[[' + key + ']]'; }
+function hrmaFmt(v, digits, unit) { return String(v) + ' ' + unit; }
+global.fetch = function (url, opts) {
+    fetchCalls.push({ url: url, payload: JSON.parse(opts.body) });
+    const r = SPEC.response;
+    return Promise.resolve({
+        status: r.status,
+        ok: r.status >= 200 && r.status < 300,
+        json: function () { return Promise.resolve(r.body); }
+    });
+};
+
+__BLOCK__
+
+(async function () {
+    await displayGimbalMount(SPEC.results);
+    process.stdout.write(JSON.stringify({
+        fetchCalls: fetchCalls,
+        usedKeys: usedKeys,
+        body: nodes.gimbalPanelBody.innerHTML,
+        panelDisplay: nodes.gimbalPanel.style.display
+    }));
+})();
+"""
+
+
+def _alanlar(**degisiklik):
+    """Sayfanın DOĞDUĞU hâl: gimbal seçili, açı 8, diğer dört alan BOŞ."""
+    alanlar = {
+        'engine_mount': 'gimbal_2axis',
+        'gimbal_range': '8',
+        'gimbal_actuator_arm': '',
+        'gimbal_ring_offset': '',
+        'gimbal_bolt_circle': '',
+        'gimbal_bolt_count': '',
+    }
+    alanlar.update(degisiklik)
+    return alanlar
+
+
+def _panel_kos(tmp_path, alanlar, sonuclar, yanit=None, mutasyon=None):
+    """Paneli node'da koşturur; fetch çağrıları + basılan gövde döner."""
+    blok = _gimbal_blok()
+    if mutasyon is not None:
+        eski, yeni = mutasyon
+        assert eski in blok, 'mutasyon dayanağı kaynakta yok: %r' % eski
+        blok = blok.replace(eski, yeni, 1)
+    spec = {'fields': alanlar, 'results': sonuclar,
+            'response': yanit or {'status': 200, 'body': {}}}
+    script = tmp_path / 'gimbal_kos.js'
+    script.write_text(
+        HARNESS.replace('__SPEC__', json.dumps(spec)).replace('__BLOCK__', blok),
+        encoding='utf-8')
+    proc = subprocess.run([NODE, str(script)], capture_output=True,
+                          text=True, timeout=120)
+    assert proc.returncode == 0, 'gimbal paneli node altında çöktü:\n' + proc.stderr
+    return json.loads(proc.stdout)
+
+
+def _beyan_alanlari(govde):
+    """Basılan eksik-girdi beyanından alan adları listesi."""
+    m = re.search(r'\[\[liq\.js\.gimbal_missing_inputs\]\]\s*([^<]*)</p>', govde)
+    assert m, 'eksik-girdi beyanı basılmamış; basılan gövde: %r' % govde[:300]
+    return [p.strip() for p in m.group(1).split(',') if p.strip()]
+
+
+#: Yerel kapıyı devre dışı bırakan mutasyon — "fetch koşulsuz atılsın".
+#: Hem kusuru kilitleyen bekçinin dayanağı hem de köprü testinde ucun ne
+#: göreceğini panelin KENDİ payload'ıyla ölçmenin aracı.
+_KAPIYI_KALDIR = ('if (arm === null) {', 'if (false) {')
+
+
+@needs_node
+def test_bos_kolda_istek_atilmaz(tmp_path):
+    """Kol boşken /api/gimbal-mount'a istek ATILMAZ; beyan yerel basılır.
+
+    Ölçülen kusur buydu: istek atılıyor, uç doğru şekilde 422 dönüyor ve
+    konsola her hesapta kırmızı satır düşüyordu. Beyanın İÇERİĞİ değişmedi
+    (aynı anahtar, aynı alan adı) — değişen, gürültünün kaynağı.
+    """
+    kosum = _panel_kos(tmp_path, _alanlar(), {'thrust': 10000.0})
+    assert kosum['fetchCalls'] == [], (
+        'boş kolda hâlâ istek atılıyor (konsol gürültüsü geri geldi): %s'
+        % kosum['fetchCalls'])
+    assert _beyan_alanlari(kosum['body']) == ['actuator_arm_m']
+    assert 'liq.js.gimbal_missing_inputs' in kosum['usedKeys']
+    # "Hesaplanıyor…" ara metni bile basılmaz: hesap hiç başlamadı.
+    assert 'liq.js.gimbal_computing' not in kosum['usedKeys']
+    # Panel yine de görünür ve NEDENİ söyler (sessiz boş kutu değil).
+    assert kosum['panelDisplay'] == 'block'
+
+
+@needs_node
+def test_bos_kolda_istek_atilmamasi_mutasyonla_kilitli(tmp_path):
+    """Kusuru kilitleyen bekçi: kapı kaldırılırsa koşum KIRMIZI olmalı.
+
+    Mutasyon ``if (arm === null)`` -> ``if (false)``; yani panel eski
+    davranışına (koşulsuz fetch) döner. Bu testin ölçtüğü şey, yukarıdaki
+    bekçinin gerçekten davranışa bağlı olduğudur.
+    """
+    mutant = _panel_kos(tmp_path, _alanlar(), {'thrust': 10000.0},
+                        yanit={'status': 422,
+                               'body': {'missing_fields': ['actuator_arm_m']}},
+                        mutasyon=_KAPIYI_KALDIR)
+    assert len(mutant['fetchCalls']) == 1, (
+        'mutasyon istek attırmadı — bekçi kaynağı yanlış yere bağlanmış')
+    assert mutant['fetchCalls'][0]['url'] == '/api/gimbal-mount'
+
+
+@needs_node
+@pytest.mark.parametrize('alanlar, sonuclar', [
+    (_alanlar(), {'thrust': 10000.0}),                    # yalnız kol eksik
+    (_alanlar(), {}),                                     # itki + kol eksik
+    (_alanlar(gimbal_range=''), {}),                      # üç zorunlu da eksik
+    (_alanlar(engine_mount='gimbal_1axis'), {'thrust': 5.0e5}),  # tek eksen
+])
+def test_yerel_beyan_sunucu_422_listesiyle_birebir(tmp_path, client, alanlar,
+                                                   sonuclar):
+    """Yerel beyan, ucun döneceği ``missing_fields`` ile BİREBİR aynı.
+
+    Köprü ölçümü: payload testte yeniden kurulmaz (kopya mantık yalan
+    söyleyebilir) — panelin KENDİ gövdesi, kapı mutasyonla açılarak fetch
+    taklidinden yakalanır ve GERÇEK uca gönderilir. Ucun listesi ile yerel
+    kapının bastığı liste ayrışırsa (ör. sıra değişir, alan adı kayar)
+    kullanıcı iki farklı beyan görürdü; bu test onu engeller.
+    """
+    yerel = _panel_kos(tmp_path, alanlar, sonuclar)
+    assert yerel['fetchCalls'] == []
+    yerel_alanlar = _beyan_alanlari(yerel['body'])
+
+    mutant = _panel_kos(tmp_path, alanlar, sonuclar, mutasyon=_KAPIYI_KALDIR)
+    assert len(mutant['fetchCalls']) == 1
+    gercek = _gonder(client, mutant['fetchCalls'][0]['payload'])
+    assert gercek.status_code == 422
+    assert yerel_alanlar == gercek.get_json()['missing_fields'], (
+        'yerel beyan ile uç sözleşmesi ayrıştı')
+    assert 'actuator_arm_m' in yerel_alanlar
+
+
+@needs_node
+def test_dolu_kolda_422_emniyet_agi_korunur(tmp_path, client):
+    """Kol DOLU ama itki yoksa: istek atılır, ucun 422 beyanı basılır.
+
+    Yerel kapı yalnız boş kol içindir; sunucu sözleşmesi tek doğru kaynak
+    olarak kalır. Yanıt uydurulmaz — gerçek uçtan alınıp panele verilir.
+    """
+    alanlar = _alanlar(gimbal_actuator_arm='0.5')
+    ilk = _panel_kos(tmp_path, alanlar, {})
+    assert len(ilk['fetchCalls']) == 1, 'dolu kolda istek atılmadı'
+    payload = ilk['fetchCalls'][0]['payload']
+    assert payload['actuator_arm_m'] == 0.5
+    assert 'thrust_N' not in payload
+
+    gercek = _gonder(client, payload)
+    assert gercek.status_code == 422
+    ikinci = _panel_kos(tmp_path, alanlar, {},
+                        yanit={'status': 422, 'body': gercek.get_json()})
+    assert _beyan_alanlari(ikinci['body']) == gercek.get_json()['missing_fields']
+
+
+@needs_node
+def test_dolu_kolda_gecerli_hesap_gostergeleri_basilir(tmp_path, client):
+    """Başarı yolu bozulmadı: gerçek 200 yanıtı tabloya dönüşür.
+
+    Ortak beyan gövdesine (gimbalMissingHtml) geçiş, hesap yolunu
+    etkilemez; bu test onu uçtan uca ölçer.
+    """
+    alanlar = _alanlar(gimbal_actuator_arm='0.5', gimbal_ring_offset='0.4',
+                       gimbal_bolt_circle='600', gimbal_bolt_count='12')
+    ilk = _panel_kos(tmp_path, alanlar, {'thrust': 1.0e6})
+    payload = ilk['fetchCalls'][0]['payload']
+    assert payload['bolt_circle_diameter_m'] == pytest.approx(0.6)  # mm -> m
+
+    gercek = _gonder(client, payload)
+    assert gercek.status_code == 200, gercek.get_data(as_text=True)[:300]
+    kosum = _panel_kos(tmp_path, alanlar, {'thrust': 1.0e6},
+                       yanit={'status': 200, 'body': gercek.get_json()})
+    assert 'spec-table' in kosum['body']
+    assert 'liq.js.gimbal_missing_inputs' not in kosum['usedKeys']
+    assert 'liq.js.gimbal_axial_thrust' in kosum['usedKeys']
+
+
+def test_bos_kol_kapisi_fetchten_once():
+    """Yapısal sıra: yerel kapı fetch'ten ÖNCE ve ``return`` ile biter."""
+    blok = _gimbal_blok()
+    kapi = blok.index('if (arm === null) {')
+    istek = blok.index("fetch('/api/gimbal-mount'")
+    assert kapi < istek, 'yerel kapı fetch çağrısından sonra kalmış'
+    ara = blok[kapi:istek]
+    assert 'gimbalMissingHtml(' in ara and 'return;' in ara, (
+        'kapı beyan basmadan/erken dönmeden geçiyor')
+
+
+def test_yerel_ve_422_beyani_ortak_govdeyi_kullanir():
+    """Tek gövde: iki yol da gimbalMissingHtml çağırır, metin bir yerde durur.
+
+    Beyan metni iki yere kopyalanırsa biri güncellenip diğeri kalır ve
+    kullanıcı aynı durumu iki farklı cümleyle görür.
+    """
+    blok = _gimbal_blok()
+    assert blok.count('gimbalMissingHtml(') >= 3, (
+        'tanım + iki çağrı yerinden azı var — beyan yolları ayrışmış')
+    assert blok.count("'liq.js.gimbal_missing_inputs'") == 1, (
+        'eksik-girdi metni birden fazla yerde kurulmuş')
+
+
+def test_yerel_zorunlu_alan_listesi_uc_ile_ayni():
+    """Parametre tutarlılığı: sayfadaki liste == app.py'deki _GIMBAL_REQUIRED.
+
+    Sıra dahil aynı olmalı; uçta yeni bir zorunlu alan doğar da sayfadaki
+    kopya kalırsa yerel beyan eksik alan gizler.
+    """
+    from hrma.app import _GIMBAL_REQUIRED
+    blok = _gimbal_blok()
+    m = re.search(r'const GIMBAL_REQUIRED_FIELDS = \[(.*?)\];', blok, re.S)
+    assert m, 'liquid.html içinde GIMBAL_REQUIRED_FIELDS listesi yok'
+    sayfa = re.findall(r"'([A-Za-z_0-9]+)'", m.group(1))
+    assert sayfa == list(_GIMBAL_REQUIRED), (
+        'sayfa listesi %s ile uç listesi %s ayrıştı' % (sayfa,
+                                                       list(_GIMBAL_REQUIRED)))

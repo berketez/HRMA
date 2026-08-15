@@ -48,6 +48,10 @@ MODULE_FILES = [
     # 2026-08-05: FEA paneli eklendi — sözlük kapsamı dışında kalırsa
     # panelin i18n sızıntısı hiçbir bekçi tarafından görülmez.
     STATIC_JS / 'fea_panel.js',
+    # 2026-08-15 (2.6.27 yirminci parti): D2 termal FEA paneli — feaT.*
+    # ailesi bu dosyada yaşar; listeye girmezse ölü-çeviri bekçisi 48
+    # anahtarı "kullanılmıyor" sanır (ölçüldü).
+    STATIC_JS / 'thermal_fea_panel.js',
     STATIC_JS / 'motor_viz_deck.js',
     STATIC_JS / 'hud.js',
     STATIC_JS / 'materials_catalog.js',

@@ -160,7 +160,20 @@ class PlanarGrainResult:
 
 @dataclass
 class GrainRefinementResult:
-    """Ardışık inceltme sürücüsünün sonucu (structural_axisym deseni)."""
+    """Ardışık inceltme sürücüsünün sonucu (structural_axisym deseni).
+
+    converged / final_rel_change : inceltme DÖNGÜSÜNÜN hedefi olan maks
+        düğüm von Mises'inin durumu (görsel kontur çözünürlüğü; geriye
+        uyum için anlamı DEĞİŞMEZ).
+    acceptance : KABUL ÖLÇÜTÜNÜN (port lif gerinimi, NASA SP-8073) ayrı
+        yakınsama beyanı: {quantity: 'max_bore_strain', rel_change:
+        float|None, converged: bool, tol: float}. ν → 0.5 düzlem şekil
+        değiştirmede tepe vM yavaş yakınsarken port gerinimi çok önce
+        oturur (ölçüldü — bates varsayılanında vM %2,02 değişmeye devam
+        ederken gerinim %0,0008'de); kabul kararı bu bloktan okunur.
+        history girdilerindeki ``rel_change_bore`` tur tur aynı büyüklüğün
+        bağıl değişimidir. Aynı blok meta['acceptance'] olarak da taşınır.
+    """
     result: PlanarGrainResult
     mesh: PlanarSectionMesh
     converged: bool
@@ -168,6 +181,7 @@ class GrainRefinementResult:
     final_rel_change: Optional[float]
     tol: float
     meta: dict = field(default_factory=dict)
+    acceptance: dict = field(default_factory=dict)
 
 
 def elasticity_matrix_plane_strain(E: float, nu: float) -> np.ndarray:
@@ -671,6 +685,17 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
     SPR sınır değeri ise O(h²) yakınsar. Gauss maksimumu yine hesaplanır ve
     geçmişte raporlanır; hedef seçimi beyanlıdır.
 
+    KABUL ÖLÇÜTÜ AYRI İZLENİR: tane kabul ölçütü gerilme değil PORT LİF
+    GERİNİMİDİR (NASA SP-8073). ν → 0.5 yakın-sıkıştırılamaz düzlem şekil
+    değiştirmede tepe vM yavaş yakınsar; port gerinimi (doğrudan yer
+    değiştirmeden) çok önce oturur (ölçüldü — bates varsayılanında
+    max_rounds=3'te vM son değişimi %2,02 iken gerinim değişimi %0,0008).
+    Bu yüzden her turda ``rel_change_bore`` (max_bore_strain bağıl değişimi,
+    vM ile aynı ölçek kuralı) geçmişe yazılır ve sonuçta ``acceptance``
+    bloğu {quantity, rel_change, converged, tol} döner. İnceltme DÖNGÜSÜNÜN
+    programı ve ``converged`` alanının vM anlamı DEĞİŞMEZ (geriye uyum +
+    kontur çözünürlüğü); kabul kararı acceptance bloğundan okunur.
+
     DİKKAT (beyan): keskin iç köşeli kesitlerde (star ucu kökü gibi) tepe
     gerilme mesh inceldikçe BÜYÜMEYE devam edebilir — keskin köşe lineer
     elastisitede tekildir ve modelde fileto yarıçapı yoktur (motorun kendi
@@ -684,7 +709,9 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
 
     history = []
     prev_vm = None
+    prev_bore = None
     rel_change = None
+    rel_change_bore = None
     converged = False
     result = None
     mesh = None
@@ -702,6 +729,12 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
         if prev_vm is not None:
             scale = max(abs(vm), abs(prev_vm), 1e-300)
             rel_change = abs(vm - prev_vm) / scale
+        # Kabul ölçütü (port lif gerinimi) bağıl değişimi — vM ile aynı
+        # ölçek kuralı; döngü kararını ETKİLEMEZ, yalnız beyan/kabul için.
+        bore = result.max_bore_strain
+        if prev_bore is not None:
+            scale_b = max(abs(bore), abs(prev_bore), 1e-300)
+            rel_change_bore = abs(bore - prev_bore) / scale_b
         history.append({
             "n_elems": mesh.n_elems,
             "n_theta": mesh.n_theta,
@@ -710,26 +743,61 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
             "max_von_mises_gauss": result.max_von_mises,
             "max_bore_strain": result.max_bore_strain,
             "rel_change": rel_change,
+            "rel_change_bore": rel_change_bore,
         })
         if rel_change is not None and rel_change < tol:
             converged = True
             break
         prev_vm = vm
+        prev_bore = bore
 
-    if converged:
-        beyan = (f"Mesh yakınsadı: {mesh.n_elems} eleman; son iki inceltme "
-                 f"turu arasında maks von Mises (SPR düğüm alanı) farkı "
-                 f"%{100.0 * rel_change:.2f} (tolerans %{100.0 * tol:.2f}).")
-    elif rel_change is None:
+    # KABUL ÖLÇÜTÜ bloğu: port lif gerinimi (NASA SP-8073) — döngü hedefi
+    # olan vM'den AYRI beyan edilir; aynı tolerans kullanılır.
+    acceptance = {
+        "quantity": "max_bore_strain",
+        "rel_change": rel_change_bore,
+        "converged": (rel_change_bore is not None
+                      and rel_change_bore <= tol),
+        "tol": tol,
+    }
+
+    def _yuzde(x):
+        # Bağıl değişim yüzdesi; küçük değer %0,00'a EZİLMEZ (bore gerinimi
+        # değişimi ~%0,0008 mertebesinde ölçülür — dürüst basamak şart).
+        return f"{100.0 * x:.4g}"
+
+    # Beyan İKİ metriklidir ve KABUL ÖLÇÜTÜ ÖNCE gelir: kullanıcı kabul
+    # kararını gerinimden okur, vM yalnız kontur çözünürlüğünün durumudur.
+    if rel_change is None:
         beyan = (f"YAKINSAMA DENETLENEMEDİ: tek tur koşuldu "
-                 f"({mesh.n_elems} eleman); karşılaştırılacak ikinci tur yok.")
+                 f"({mesh.n_elems} eleman); karşılaştırılacak ikinci tur yok "
+                 "— ne kabul ölçütü (port lif gerinimi) ne tepe von Mises "
+                 "için değişim ölçülebilir.")
     else:
-        beyan = (f"YAKINSAMADI: {max_rounds + 1} turda son fark "
-                 f"%{100.0 * rel_change:.2f} tolerans %{100.0 * tol:.2f} "
-                 f"altına inmedi ({mesh.n_elems} eleman). Keskin iç köşeli "
-                 "kesitte (star ucu kökü) tepe gerilme lineer elastisitede "
-                 "TEKİLDİR ve mesh ile büyümeye devam eder; sonuç bu beyanla "
-                 "birlikte değerlendirilmelidir.")
+        if acceptance["converged"]:
+            kabul = (f"KABUL ÖLÇÜTÜ YAKINSADI: port lif gerinimi "
+                     f"(NASA SP-8073) son iki tur arasında "
+                     f"%{_yuzde(rel_change_bore)} değişti (tolerans "
+                     f"%{_yuzde(tol)}).")
+        else:
+            kabul = (f"KABUL ÖLÇÜTÜ YAKINSAMADI: port lif gerinimi "
+                     f"(NASA SP-8073) son iki tur arasında "
+                     f"%{_yuzde(rel_change_bore)} değişti, tolerans "
+                     f"%{_yuzde(tol)} altına inmedi.")
+        if converged:
+            vm_metni = (f"Kontur alanı da oturdu: maks von Mises (SPR düğüm "
+                        f"alanı) son farkı %{_yuzde(rel_change)} "
+                        f"({mesh.n_elems} eleman).")
+        else:
+            vm_metni = (f"Tepe von Mises YAKINSAMADI: {max_rounds + 1} "
+                        f"turda son fark %{_yuzde(rel_change)} tolerans "
+                        f"%{_yuzde(tol)} altına inmedi ({mesh.n_elems} "
+                        "eleman) — kabul ölçütü BU DEĞİL, yalnız kontur "
+                        "tepe değeri bu beyanla okunmalıdır. Keskin iç "
+                        "köşeli kesitte (star ucu kökü) tepe gerilme lineer "
+                        "elastisitede TEKİLDİR ve mesh ile büyümeye devam "
+                        "eder.")
+        beyan = f"{kabul} {vm_metni}"
 
     meta = {
         "_source": "hrma.fea.planar_grain.solve_grain_with_refinement",
@@ -737,12 +805,15 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
                    "(SPR DÜĞÜM alanı — tepe port sınırında, Gauss maksimumu "
                    "sınıra O(h) yaklaştığı için hedef olamaz; ölçüm modül "
                    f"docstring'inde), tolerans {tol} bağıl değişim, çarpan "
-                   f"{REFINE_FACTOR} (structural_axisym ile ortak politika)"),
+                   f"{REFINE_FACTOR} (structural_axisym ile ortak politika); "
+                   "KABUL ÖLÇÜTÜ (port lif gerinimi, NASA SP-8073) ayrı "
+                   "izlenir ve acceptance bloğunda beyan edilir"),
         "beyan": beyan,
         "converged": converged,
         "n_elems_final": mesh.n_elems,
         "final_rel_change": rel_change,
         "tol": tol,
+        "acceptance": acceptance,
     }
 
     return GrainRefinementResult(
@@ -753,4 +824,5 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
         final_rel_change=rel_change,
         tol=tol,
         meta=meta,
+        acceptance=acceptance,
     )

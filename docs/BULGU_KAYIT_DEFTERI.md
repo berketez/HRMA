@@ -134,6 +134,9 @@ kıracağı**.
 | TM-107041 ölçüm bandının 10× yanlış okunması (0,082 — tablo sütunu ×10⁻² çarpanlıydı, gerçek üst uç 0,00822 mm/s; yanlış bant doğrulama testinin ölçütüydü) | `test_thermal_protection.py` bandı modül sabitlerinden (`TM107041_TABLE2_*`) import eder — tek tanım noktası |
 | Yanlış monograf künyesi: "SP-8091 Solid Rocket Motor Internal Insulation" (SP-8091 = "The Planet Saturn"; doğrusu SP-8093, nozul için SP-8115) | künye düzeltme notu `thermal_protection.py` modül başlığında; kod içi atıflar taranarak düzeltildi |
 | `solid.html` sayfa varsayılanının katalog yanma hızını ezmesi (`value="0.005"` + toplama `\|\| 0.005` düşüşü; ölçülen etki: aynı APCP motoru yanma 2,67→1,17 s ≈ 2,3×, kullanıcı kendi yazmadığı sayı için katalog-dışı uyarısı görüyordu) | `test_solid_yanma_hizi_varsayilani.py` — şablon tarafı (sabit değer + sessiz düşüş yasağı) ve API sözleşmesi (alan yokluğu = katalog çözümü) + mutasyon denetimi |
+| Sürüm dizesi `2.6.26` kalması (`.hrma` dosyaları kendini yanlış künyeliyordu) — parti 10'da (`d36624e`) 2.6.27'ye eşitlendi | Yayın kapısı 1/8 (paket sürümü = changelog en üst girdi = sürüm notu dosyası, mekanik) |
+| `gimbal_mount` (742 satır) hiçbir üründen çağrılmaması — parti 13'te (`76cf8ca`) `/api/gimbal-mount` + sıvı sayfası paneli bağlandı | `test_gimbal_baglama.py` (17 test: uç sözleşmesi, 422 eksik-girdi beyanı, panel bağlaması) |
+| EN `fea.intro` sözlük girdisinin cümle ortasında kesik olması ("…wall of " — birleştirmenin yalnız ilk dizesi sözlüğe kopyalanmış; TR tamdı, EN kullanıcı yarım cümle görüyordu; FEA ürün turu ölçümü, 15 Ağu) | `i18n_common.js` çift yönlü sözlük bekçileri + bu oturumda eklenen tam metin (kalıcı bekçisi: parça-dizge sözlük kopyası taraması bir sonraki i18n turunda değerlendirilecek — şimdilik kapanış kanıtı üründe tam cümle) |
 
 ### Önceki sürümlerden devralınan bekçiler
 
@@ -158,8 +161,8 @@ kısaltılmak içindir; uzuyorsa bir şey yanlış gidiyordur.
 
 | Kalem | Neden açık | Nerede kayıtlı |
 |---|---|---|
-| Sürüm dizesi `2.6.26` kalmış (2.6.27'nin 9 partisi işlenmiş; kaydedilen `.hrma` dosyaları kendini yanlış künyeliyor) | Sürüm numaralama + CITATION.cff eşitlemesi yayın kapısına bağlı — Berke kararı | Bekçisi yok — açık |
-| `gimbal_mount` (742 satır) hiçbir üründen çağrılmıyor; sayfada gimbal seçeneği var, arkasında hesap yok | C3 kulvarı bağlaması ayrı iş kalemi | `docs/mimari/teknik-borc.md` |
+| Sıvı cidar FEA'sı üründe yok + varsayılan sıvı örneğinde köşe tekilliği (FEA ürün turu ölçümü, 15 Ağu: köprü sıvı sonucundan girdileri temiz çıkarıyor ama kamara-lüle birleşim kırığında tepe vM tur başına ~%16 BÜYÜYOR — 16384 elemanda 1742 MPa / SF 0,12, yakınsamıyor; bu mesh-bağımlı köşe değeri, cidar fiziği değil) | Paneli sıvıya açmadan önce mühendislik kararı gerekiyor: tepe metriğinden köşe komşuluğunu beyanla dışlamak (hot-spot/ASME doğrultusunda) ya da birleşime fiziksel file yarıçapı — uydurma yarıçap yasak, kaynağı kararlaştırılmalı. Uç yakınsamamayı bugün de dürüstçe beyan ediyor | bu defter; ölçüm bu oturumun günlüğünde |
+| Termal FEA (D2) varsayılan mesh'i 16×4 = 64 eleman — kontur ekrana ilk kez bağlanırken çözünürlük kararı (n_axial/n_radial uç parametresi var, UI hangi değerle çağıracak?) | D2 UI bağlaması bu oturumda iniyor; çözünürlük/süre dengesi ürün turunda gözle doğrulanacak | bu defter |
 | `no_net_heating` durumunda iletim/char kalınlık payının hesaplanmaması (astar iletim ölçütü) | Ablatif malzemelerin k/cp verisi tabloda yok; uydurmak yasak — `heat_sink_transient`'a malzeme verisi eklenince kapanabilir | `thermal_protection.py::ablative_thickness` no_net validity_note |
 | Sıvı/hibrit ablatif blokajında c_p bağlandı ama ölçülü uçtan uca tur yapılmadı (yalnız bekçiler yeşil) | Tam süit + görsel tur onuncu parti kapanışında | bu defter |
 | `skip_distance`, `secondary_holes` (hibrit enjektör) | Yayımlanmış korelasyon yok; katsayı uydurmak yasak | `test_field_wiring_layer_a.py::DECLARED_UNMODELLED` |

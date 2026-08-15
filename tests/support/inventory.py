@@ -54,6 +54,12 @@ _READ_PATTERNS = (
     # açısından numById ile aynıdır: alanı id'siyle okur, dolayısıyla o
     # alanlar "hiçbir yerde okunmuyor" sayılmamalıdır.
     re.compile(r"\boptNum\(\s*['\"]([\w-]+)['\"]"),
+    # optChoice: optNum'un <select> karşılığı (2.6.27 yirminci parti,
+    # liquid.html collectClosureAndFeedLineParams). Boş seçimde anahtar
+    # gönderilmez; varsayılan kararı ve beyanı çözücünündür. Yerel takma
+    # adla (choice) yazıldığında bu alanlar Katman A'da "hiçbir yerde
+    # okunmuyor" görünmüştü — desen adı şablonla sözleşmelidir.
+    re.compile(r"\boptChoice\(\s*['\"]([\w-]+)['\"]"),
 )
 
 

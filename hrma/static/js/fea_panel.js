@@ -200,6 +200,16 @@
     // Kalite bayrakları — eşikler SUNUCUDAN gelir (panelde eşik sabiti
     // yoktur). Sonlu olmayan/eksik ölçüt de bayraklanır: ölçülemeyen
     // eleman "iyi" sayılmaz.
+    //
+    // İKİ ÖLÇÜT AYRI TUTULUR (2026-08-15): en-boy oranı ile ölçekli
+    // Jacobian aynı çuvala konursa (eski `any` rozeti) ince cidarda
+    // "1024/1024 eleman kabul aralığı dışında" gibi bir alarm çıkıyor —
+    // oysa ölçüm şuydu: aspect 27-38 (hepsi bayraklı) ama scaled Jacobian
+    // 0,96-1,0 (SIFIR bayrak), yani gerçek bozulma yok. Sunucunun kendi
+    // quality._basis cümlesi de bunu söyler: uzun kontur boyunca süpürülen
+    // ince cidar uzamış eleman üretir, gerçek bozulmayı ölçekli Jacobian
+    // raporlar. `any` alanı KORUNUR (harita katmanı onu kullanır), ama
+    // rozet hükmü artık yalnız Jacobian sayımından sürülür.
     function qualityFlags(quality) {
         if (!quality || typeof quality !== 'object') return null;
         const th = quality.thresholds || {};
@@ -209,18 +219,23 @@
         const n = (ar || sj).length;
         const arMax = isNum(th.aspect_ratio_max) ? th.aspect_ratio_max : null;
         const sjMin = isNum(th.scaled_jacobian_min) ? th.scaled_jacobian_min : null;
+        // ÖLÇÜLDÜ MÜ: ölçüt dizisi VE eşiği yayımlanmışsa değerlendirme
+        // gerçekten yapılmıştır. Ölçülmemiş ölçütün bayrak sayısı sıfırdır
+        // ama bu "temiz" DEMEK DEĞİLDİR — rozet onu yeşil hüküm gibi
+        // basmasın diye ölçülebilirlik ayrıca taşınır.
+        const arOlculdu = !!ar && arMax !== null;
+        const sjOlculdu = !!sj && sjMin !== null;
         const aspect = new Array(n), jac = new Array(n), any = new Array(n);
         for (let e = 0; e < n; e++) {
             const av = ar ? ar[e] : null;
             const sv = sj ? sj[e] : null;
-            aspect[e] = (arMax === null || !ar) ? false
-                : (!isNum(av) || av > arMax);
-            jac[e] = (sjMin === null || !sj) ? false
-                : (!isNum(sv) || sv < sjMin);
+            aspect[e] = !arOlculdu ? false : (!isNum(av) || av > arMax);
+            jac[e] = !sjOlculdu ? false : (!isNum(sv) || sv < sjMin);
             any[e] = aspect[e] || jac[e];
         }
         return {
             aspect: aspect, jacobian: jac, any: any,
+            measured: { aspect: arOlculdu, jacobian: sjOlculdu },
             thresholds: { aspect_ratio_max: arMax, scaled_jacobian_min: sjMin },
             counts: {
                 aspect: aspect.filter(Boolean).length,
@@ -243,6 +258,25 @@
             vmMPa.push(h.max_von_mises / PA_PER_MPA);
             relPct.push(isNum(h.rel_change) ? 100 * h.rel_change : null);
         });
+        // KABUL ÖLÇÜTÜ BLOĞU — sunucu sözleşmesinde İSTEĞE BAĞLI alan.
+        // Yakınsama sürücüsü tepe von Mises'tir, ama panelin HÜKMÜ o
+        // olmayabilir: katı tanede kabul ölçütü port lif gerinimidir
+        // (NASA SP-8073). Sunucu bunu yayımlarsa hüküm oradan verilir, vM
+        // ayrı ve nötr bilgi olarak kalır. Blok YOKSA alan null'dır ve
+        // panel bugünkü davranışını birebir sürdürür (geriye uyum).
+        // Birim: rel_change ve tol, bloğun kendisiyle AYNI sözleşmede
+        // (oransal değişim) gelir; panel yalnız 100 ile çarpar.
+        let acc = null;
+        const a = conv.acceptance;
+        if (a && typeof a === 'object') {
+            acc = {
+                quantity: (typeof a.quantity === 'string' && a.quantity)
+                    ? a.quantity : null,
+                converged: a.converged === true,
+                rel_change_pct: isNum(a.rel_change) ? 100 * a.rel_change : null,
+                tol_pct: isNum(a.tol) ? 100 * a.tol : null,
+            };
+        }
         return {
             n_elems: nElems,
             von_mises_mpa: vmMPa,
@@ -253,6 +287,7 @@
             final_rel_change_pct: isNum(conv.final_rel_change)
                 ? 100 * conv.final_rel_change : null,
             beyan: (typeof conv.beyan === 'string') ? conv.beyan : null,
+            acceptance: acc,
         };
     }
 
@@ -354,6 +389,37 @@
             font-size:0.75rem;">${text}</span>`;
     }
 
+    // Kalite rozetleri — İKİ AYRI ROZET, tek çuval DEĞİL:
+    //   (1) ALARM yalnız ölçekli Jacobian bayrağından gelir (gerçek eleman
+    //       bozulması); ölçüt yayımlanmadıysa yeşil hüküm basmak yerine
+    //       "yayımlanmadı" denir — ölçülmemiş ölçüt "temiz" değildir.
+    //   (2) UZAMA nötr bilgi rozetidir: sayı gizlenmez ama alarm rengi
+    //       almaz, çünkü ince cidar/ince ağ süpürmesinde uzamış eleman
+    //       yapısal olarak beklenir (sunucunun quality._basis beyanı).
+    // Burada YALNIZ POLİTİKA vardır (hangi sayım alarm rengini sürer);
+    // METİN çağıranındır: metin(ad, params) FeaPanel'de fea.* anahtarlarına,
+    // GrainFeaPanel'de solid.fea.* etiketlerine bağlanır ve her panel kendi
+    // geometrisini kendi cümlesiyle anlatır. Politika tek yerde durduğu için
+    // iki panelde ayrışma da tek bekçiyle kilitlenir.
+    function qualityBadges(flags, metin) {
+        const c = flags.counts, th = flags.thresholds;
+        let html = '';
+        if (flags.measured.jacobian) {
+            html += badge(metin('badgeDistortion',
+                { bad: c.jacobian, total: c.total,
+                  sjMin: th.scaled_jacobian_min }),
+                c.jacobian ? 'warn' : 'ok');
+        } else {
+            html += badge(metin('badgeDistortionMissing', {}), 'dim');
+        }
+        if (flags.measured.aspect) {
+            html += badge(metin('badgeElongated',
+                { bad: c.aspect, total: c.total,
+                  arMax: th.aspect_ratio_max }), 'info');
+        }
+        return html;
+    }
+
     function chipHtml(label, reason) {
         let html = `<span data-chip="not-modelled" style="border:1px solid ${MISSING_COLOR};
             color:${MISSING_COLOR}; border-radius:6px; padding:4px 10px;
@@ -368,6 +434,15 @@
 
     function fmt(v, digits) {
         return isNum(v) ? v.toFixed(digits === undefined ? 2 : digits) : '—';
+    }
+
+    // Bağıl değişim yüzdeleri çok küçük olabilir: ölçüldü, port lif gerinimi
+    // son tur değişimi %0,003 mertebesinde geliyor. Sabit iki basamak bunu
+    // "%0,00" diye basar ve YAYIMLANMIŞ bir değişimi sıfır gibi gösterir.
+    // Sunucunun beyan metniyle aynı kural kullanılır (4 anlamlı basamak,
+    // planar_grain._yuzde → '%.4g'); sondaki sıfırlar atılır.
+    function fmtSig(v, digits) {
+        return isNum(v) ? String(Number(v.toPrecision(digits || 4))) : '—';
     }
 
     // ------------------------------------------------------------------
@@ -639,10 +714,29 @@
                 conv.converged ? 'ok' : 'warn');
         }
         if (vm.flags) {
-            html += badge(TF('fea.badgeQuality',
-                { bad: vm.flags.counts.any, total: vm.flags.counts.total },
-                'MESH QUALITY {bad}/{total} elements outside the acceptable range'),
-                vm.flags.counts.any ? 'warn' : 'ok');
+            // Eski tek rozet ("MESH QUALITY {bad}/{total} ... outside the
+            // acceptable range") KALDIRILDI: uzama ile bozulmayı birleştirip
+            // alarm rengiyle basıyordu ve ince cidarda bozulma sıfırken
+            // "1024/1024" korkutuyordu. Ayrışma qualityBadges() içinde.
+            // Anahtarlar LİTERAL yazılır (birleştirilmiş anahtar sözlük
+            // taramasında görünmez, ölü-çeviri bekçisini yanıltır).
+            html += qualityBadges(vm.flags, function (ad, p) {
+                if (ad === 'badgeDistortion') {
+                    return TF('fea.badgeDistortion', p,
+                        'MESH DISTORTION (scaled Jacobian < {sjMin}): '
+                        + '{bad}/{total} flagged');
+                }
+                if (ad === 'badgeDistortionMissing') {
+                    return TF('fea.badgeDistortionMissing', p,
+                        'MESH DISTORTION NOT PUBLISHED (the response carries '
+                        + 'no scaled Jacobian, so no distortion verdict is '
+                        + 'issued)');
+                }
+                return TF('fea.badgeElongated', p,
+                    'ELONGATED ELEMENTS (aspect ratio > {arMax}): '
+                    + '{bad}/{total} — expected where a thin wall is swept '
+                    + 'along a long contour, not a distortion alarm');
+            });
         }
         if (carpetFallback) {
             html += badge(T('fea.badgeFallback',
@@ -831,6 +925,15 @@
                     + 'Jacobian >= {sjMin}; {bad} of {total} elements are '
                     + 'outside it. Thresholds and metric definitions come from '
                     + 'the server; see the basis note below.');
+                // Rozetlerdeki ayrışmanın aynısı harita altında da yazar:
+                // birleşik sayı tek başına hangi ölçütün bayrak çektiğini
+                // söylemiyordu.
+                qn += ' ' + TF('fea.qualityBreakdown',
+                    { aspect: c.aspect, jac: c.jacobian },
+                    'Of that count {aspect} are flagged by the aspect-ratio '
+                    + '(elongation) rule and {jac} by scaled-Jacobian '
+                    + 'distortion; only the distortion count is a quality '
+                    + 'alarm.');
                 if (c.any === c.total && c.total > 0) {
                     qn += ' ' + T('fea.qualityAllFlagged',
                         'Every element is outside the range, so the red overlay '
@@ -1360,19 +1463,72 @@
         }
         const conv = vm.convergence;
         if (conv) {
-            html += badge(conv.converged
-                ? gFmtTpl(GL('badgeConverged', 'CONVERGED in {n} rounds to {pct}%'),
-                          { n: conv.rounds, pct: fmt(conv.final_rel_change_pct, 2) })
-                : gFmtTpl(GL('badgeNotConverged',
-                    'NOT CONVERGED after {n} rounds (last change {pct}%)'),
-                          { n: conv.rounds, pct: fmt(conv.final_rel_change_pct, 2) }),
-                conv.converged ? 'ok' : 'warn');
+            const acc = conv.acceptance;
+            if (acc) {
+                // HÜKÜM KABUL ÖLÇÜTÜNÜNDÜR. Tane kesitinde kabul, tepe von
+                // Mises değil port lif GERİNİMİDİR (NASA SP-8073); vM
+                // yalnızca mesh inceltme sürücüsüdür. Sunucu kabul bloğunu
+                // yayımladığında yakınsama hükmü oradan verilir.
+                const qEtiket = (acc.quantity === 'max_bore_strain')
+                    ? GL('accQuantityBoreStrain', 'bore strain')
+                    : (acc.quantity || '—');
+                const accPct = isNum(acc.rel_change_pct)
+                    ? fmtSig(acc.rel_change_pct, 4) + '%'
+                    : GL('accPctMissing', 'not published');
+                html += badge(gFmtTpl(acc.converged
+                    ? GL('badgeAcceptanceConverged',
+                         'ACCEPTANCE METRIC ({q}) CONVERGED — last change '
+                         + '{pct} (tolerance {tol}%)')
+                    : GL('badgeAcceptanceNotConverged',
+                         'ACCEPTANCE METRIC ({q}) NOT CONVERGED — last change '
+                         + '{pct} (tolerance {tol}%)'),
+                    { q: esc(qEtiket), pct: esc(accPct),
+                      tol: fmtSig(acc.tol_pct, 4) }),
+                    acc.converged ? 'ok' : 'warn');
+                // vM AYRI ve NÖTR: hâlâ inceliyor olması bir alarm değildir,
+                // çünkü kabul dayanağı o değil.
+                html += badge(gFmtTpl(conv.converged
+                    ? GL('badgeVmSettled',
+                         'PEAK vM settled at {pct}% — refinement driver, not '
+                         + 'the acceptance basis')
+                    : GL('badgeVmRefining',
+                         'PEAK vM still refining {pct}% — not the acceptance '
+                         + 'basis'),
+                    { pct: fmtSig(conv.final_rel_change_pct, 4) }), 'info');
+            } else {
+                // GERİYE UYUM: sunucu kabul bloğunu yayımlamıyorsa (bugünkü
+                // uç) davranış birebir eskisi gibidir.
+                html += badge(conv.converged
+                    ? gFmtTpl(GL('badgeConverged', 'CONVERGED in {n} rounds to {pct}%'),
+                              { n: conv.rounds, pct: fmt(conv.final_rel_change_pct, 2) })
+                    : gFmtTpl(GL('badgeNotConverged',
+                        'NOT CONVERGED after {n} rounds (last change {pct}%)'),
+                              { n: conv.rounds, pct: fmt(conv.final_rel_change_pct, 2) }),
+                    conv.converged ? 'ok' : 'warn');
+            }
         }
         if (vm.flags) {
-            html += badge(gFmtTpl(GL('badgeQuality',
-                'MESH QUALITY {bad}/{total} elements outside the acceptable range'),
-                { bad: vm.flags.counts.any, total: vm.flags.counts.total }),
-                vm.flags.counts.any ? 'warn' : 'ok');
+            // Cidar paneliyle AYNI ayrışma (alarm = yalnız ölçekli Jacobian,
+            // uzama nötr bilgi); metinler sayfanın solid.fea.* etiketlerinden
+            // gelir ve kesit geometrisini anlatır (cidar cümlesi değil).
+            html += qualityBadges(vm.flags, function (ad, p) {
+                if (ad === 'badgeDistortion') {
+                    return gFmtTpl(GL('badgeDistortion',
+                        'MESH DISTORTION (scaled Jacobian < {sjMin}): '
+                        + '{bad}/{total} flagged'), p);
+                }
+                if (ad === 'badgeDistortionMissing') {
+                    return GL('badgeDistortionMissing',
+                        'MESH DISTORTION NOT PUBLISHED (the response carries '
+                        + 'no scaled Jacobian, so no distortion verdict is '
+                        + 'issued)');
+                }
+                return gFmtTpl(GL('badgeElongated',
+                    'ELONGATED ELEMENTS (aspect ratio > {arMax}): '
+                    + '{bad}/{total} — expected for a thin web meshed in '
+                    + 'layers around the port contour, not a distortion '
+                    + 'alarm'), p);
+            });
         }
         el.innerHTML = html;
     }

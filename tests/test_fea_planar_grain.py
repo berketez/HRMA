@@ -27,6 +27,15 @@ bekçiler şunları kilitler:
   6. MUTASYON BEKÇİSİ — B matrisinin bir terimi bozulunca Lamé bekçisi
      KIRILMALI: doğrulama testinin çözücünün formülasyonunu gerçekten
      duyduğunun kanıtı (bekçinin bekçisi).
+  7. KABUL ÖLÇÜTÜ BEYANI (2.6.27, canlı üründe ölçüldü) — sürücü tepe von
+     Mises'i izler ama tane KABUL ÖLÇÜTÜ port lif gerinimidir (SP-8073).
+     ν=0.4995 yakın-sıkıştırılamaz rejimde bates varsayılanı "yakınsamadı
+     (%2,02)" beyan ederken gerinim 2. turda oturmuştu (~%0,0008): kırmızı
+     beyan kabul ölçütünü gölgeliyordu. convergence.acceptance bloğu +
+     history[i].rel_change_bore + iki metrikli beyan bunu kapatır; alan
+     anlamları korunur (converged = vM, geriye uyum). §9'daki bekçiler
+     ölçülü kusur vakasını (acceptance.converged=True ∧ converged=False)
+     kilitler.
 
 Analitik değerler testin İÇİNDE formülden türetilir; hardcode "beklenen"
 sayı yoktur (bekçi kusuru kilitlemez, sözleşmeyi kilitler).
@@ -199,7 +208,12 @@ class TestLameDogrulama:
         assert res.max_bore_strain > 0.0
 
     def test_yakinsama_surucusu_bates_yakinsar(self):
-        """Düzgün (tekilliksiz) kesitte sürücü yakınsamayı BEYAN eder."""
+        """Düzgün (tekilliksiz) kesitte sürücü yakınsamayı BEYAN eder.
+
+        2.6.27 kabul-ölçütü sözleşmesine genişletildi (§7): beyan artık
+        İKİ metrikli (kabul ölçütü = port gerinimi ÖNCE, vM ikincil) ve
+        yakınsayan koşuda da acceptance bloğu dolu/tutarlı olmalı.
+        """
         ref = solve_grain_with_refinement(
             GRAIN_RING_A, GRAIN_RING_B, Material(E=6.0e6, nu=0.4995, name='htpb'),
             GRAIN_RING_P, symmetry_fraction=GRAIN_RING_SYM, outer_bc='bonded_rigid')
@@ -209,6 +223,12 @@ class TestLameDogrulama:
         elemanlar = [h['n_elems'] for h in ref.history]
         assert elemanlar == sorted(elemanlar)
         assert ref.history[0]['rel_change'] is None
+        assert ref.history[0]['rel_change_bore'] is None
+        # vM oturduysa gerinim çoktan oturmuştur (ölçüldü: tur tur ~10x
+        # daha küçük değişim); beyan iki metriği de adlandırır.
+        assert ref.acceptance['converged'] is True
+        assert 'port lif gerinimi' in ref.meta['beyan']
+        assert 'von Mises' in ref.meta['beyan']
 
 
 # ---------------------------------------------------------------------------
@@ -509,12 +529,36 @@ class TestUcSozlesmesi:
         conv = bates_fea['convergence']
         assert len(conv['history']) >= 2
         assert conv['beyan']
+        # 2.6.27 kabul-ölçütü sözleşmesi (§7): kabul ölçütünün (port lif
+        # gerinimi) tur tur bağıl değişimi uca AYNEN akar (history köprüden
+        # referansla geçer); ilk turda karşılaştırma yoktur.
+        assert all('rel_change_bore' in h for h in conv['history'])
+        assert conv['history'][0]['rel_change_bore'] is None
+        assert all(h['rel_change_bore'] >= 0.0
+                   for h in conv['history'][1:])
         meta = bates_fea['meta']
         assert meta['girdiler']['_source'].endswith('run_planar_grain_fea')
         assert isinstance(meta['not_modelled'], list) and meta['not_modelled']
         # Viskoelastisite beyanı zorunlu (lineer elastik ön boyutlandırma).
         assert any('VİSKOELAST' in str(m).upper()
                    for m in meta['not_modelled'])
+
+    def test_kabul_hukmu_uca_akar(self, bates_fea):
+        """convergence.acceptance bloğu UÇTA yaşar (kanal var kapı yok dersi:
+        çözücü bloğu üretiyordu ama köprünün convergence sözlüğü sabit
+        anahtarlıydı — 'acceptance' kablolanmadan API'ye hiç çıkmıyordu;
+        2.6.27 yirminci partide ölçülüp bağlandı, bu bekçi kablonun kendisini
+        kilitler)."""
+        acc = bates_fea['convergence'].get('acceptance')
+        assert isinstance(acc, dict), (
+            'convergence.acceptance uçta yok — bridge.py planar convergence '
+            'sözlüğündeki "acceptance": ref.acceptance kablosu kopmuş')
+        assert acc['quantity'] == 'max_bore_strain'
+        assert set(acc) == {'quantity', 'rel_change', 'converged', 'tol'}
+        # Canlı bates varsayılanında ölçülen kusur vakası uçtan görünür:
+        # kabul ölçütü oturmuş, vM oturmamış.
+        assert acc['converged'] is True
+        assert bates_fea['convergence']['converged'] is False
 
     def test_kalite_olcutleri_sinirlarda(self, bates_fea):
         q = bates_fea['quality']
@@ -644,3 +688,123 @@ class TestMeshUreticisi:
         mesh = build_grain_section_mesh(GRAIN_RING_A, GRAIN_RING_B, 1, 4,
                                         symmetry_fraction=8)
         assert mesh.n_theta >= MIN_THETA_DIVISIONS_WEDGE
+
+
+# ---------------------------------------------------------------------------
+# 9. KABUL ÖLÇÜTÜ BEYANI — convergence.acceptance (port gerinimi, SP-8073)
+# ---------------------------------------------------------------------------
+class TestKabulOlcutuBeyani:
+    """convergence.acceptance sözleşmesi (modül docstring'i §7).
+
+    Şema (uç/arayüz sözleşmesi — alan adları değişirse arayüz kablosu da
+    değişmeli): acceptance = {quantity: 'max_bore_strain', rel_change:
+    float|None, converged: bool, tol: float}; history[i].rel_change_bore.
+    """
+
+    @pytest.fixture(scope='class')
+    def hizli_ref(self):
+        """Ucuz koşu (3 mesh, <= 1536 eleman): şema ve formül bekçileri."""
+        return solve_grain_with_refinement(
+            GRAIN_RING_A, GRAIN_RING_B,
+            Material(E=6.0e6, nu=0.4995, name='htpb'),
+            GRAIN_RING_P, symmetry_fraction=GRAIN_RING_SYM,
+            outer_bc='bonded_rigid', max_rounds=2)
+
+    @pytest.fixture(scope='class')
+    def bates_varsayilan_ref(self):
+        """Canlı /api/fea/planar-grain bates varsayılanının çözücü-düzeyi
+        birebir kopyası (KUSURUN ölçüldüğü koşu).
+
+        GRAIN_RING_A/B ve GRAIN_RING_P zaten canlı varsayılanın kendisidir
+        (100/30 mm, 40 bar); malzeme SOLID_GRAIN_MECHANICS['apcp'], simetri
+        PLANAR_GRAIN_BATES_SYMMETRY, tur sayısı app.py'nin eleman bütçesi
+        kırpmasıyla AYNI döngüden hesaplanır (FEA_MAX_ELEMS değişirse canlı
+        varsayılan da değişir — bu ölçülü-vaka bekçisi o zaman bilerek
+        kırılır ve yeniden ölçülmelidir).
+        """
+        from hrma.app import FEA_MAX_ELEMS
+        from hrma.fea.bridge import PLANAR_GRAIN_BATES_SYMMETRY
+        from hrma.fea.mesh_axisym import DEFAULT_ELEMS_THROUGH_WALL
+        from hrma.fea.planar_grain import DEFAULT_N_THETA0
+        from hrma.fea.structural_axisym import REFINE_FACTOR
+        from hrma.engines.solid_rocket_engine import SOLID_GRAIN_MECHANICS
+        mech = SOLID_GRAIN_MECHANICS['apcp']
+        rounds = 0
+        while (DEFAULT_N_THETA0 * DEFAULT_ELEMS_THROUGH_WALL
+               * REFINE_FACTOR ** (2 * (rounds + 1))) <= FEA_MAX_ELEMS:
+            rounds += 1
+        return solve_grain_with_refinement(
+            GRAIN_RING_A, GRAIN_RING_B,
+            Material(E=float(mech['elastic_modulus_pa']),
+                     nu=float(mech['poisson_ratio']), name='apcp'),
+            GRAIN_RING_P,
+            symmetry_fraction=PLANAR_GRAIN_BATES_SYMMETRY,
+            outer_bc='bonded_rigid',
+            strain_capability=float(mech['strain_capability']),
+            max_rounds=rounds)
+
+    def test_acceptance_semasi(self, hizli_ref):
+        ref = hizli_ref
+        assert set(ref.acceptance) == {'quantity', 'rel_change',
+                                       'converged', 'tol'}
+        assert ref.acceptance['quantity'] == 'max_bore_strain'
+        assert ref.acceptance['tol'] == ref.tol
+        assert isinstance(ref.acceptance['converged'], bool)
+        # Köprü/uç kablolaması için aynı blok meta'da da taşınır.
+        assert ref.meta['acceptance'] == ref.acceptance
+        # İlk turda karşılaştırma yok: bore bağıl değişimi de None.
+        assert ref.history[0]['rel_change_bore'] is None
+        assert all(np.isfinite(h['rel_change_bore'])
+                   and h['rel_change_bore'] >= 0.0
+                   for h in ref.history[1:])
+
+    def test_rel_change_bore_turdan_tura_hesaplanir(self, hizli_ref):
+        """rel_change_bore GERÇEKTEN tur tur max_bore_strain'den türer —
+        vM ile aynı ölçek kuralı (formül bekçisi: kopyala-yapıştır vM
+        değeri ya da sabit sayı buradan geçemez)."""
+        h = hizli_ref.history
+        assert len(h) >= 2
+        for onceki, simdiki in zip(h, h[1:]):
+            b0 = onceki['max_bore_strain']
+            b1 = simdiki['max_bore_strain']
+            beklenen = abs(b1 - b0) / max(abs(b1), abs(b0), 1e-300)
+            assert simdiki['rel_change_bore'] == pytest.approx(
+                beklenen, rel=1e-12, abs=1e-300)
+        # acceptance.rel_change = SON turun bore bağıl değişimi.
+        assert hizli_ref.acceptance['rel_change'] == h[-1]['rel_change_bore']
+
+    def test_bates_varsayilaninda_kabul_oturur_vm_oturmaz(
+            self, bates_varsayilan_ref):
+        """KUSURUN TA KENDİSİ (canlıda ölçüldü, 15 Ağu 2026): vM sürücüsü
+        oturmaz (son fark ~%2,02) ama KABUL ÖLÇÜTÜ 2. turda oturmuştur
+        (~%0,0008). Eski beyan bu koşuyu yalın 'YAKINSAMADI' diye sunuyordu;
+        yeni sözleşme kabul kararını acceptance'tan okutur."""
+        ref = bates_varsayilan_ref
+        assert ref.converged is False          # vM anlamı korunur (geriye uyum)
+        assert ref.final_rel_change > ref.tol
+        assert ref.acceptance['converged'] is True
+        # Sınırda değil, KESİN oturmuş olmalı (ölçülen ~8e-6, tol 1e-2).
+        assert ref.acceptance['rel_change'] < ref.tol / 10.0
+
+    def test_beyan_iki_metrikli_ve_kabul_once(self, bates_varsayilan_ref):
+        """Beyan iki metriği de ADLANDIRIR ve kabul ölçütü ÖNCE gelir:
+        kullanıcı kabul kararını gerinimden okur, vM kontur çözünürlüğüdür."""
+        beyan = bates_varsayilan_ref.meta['beyan']
+        assert 'port lif gerinimi' in beyan
+        assert 'von Mises' in beyan
+        assert beyan.index('KABUL ÖLÇÜTÜ') < beyan.index('von Mises')
+        assert 'KABUL ÖLÇÜTÜ YAKINSADI' in beyan
+        assert 'YAKINSAMADI' in beyan          # vM tarafı dürüstçe söylenir
+
+    def test_tek_tur_denetlenemedi(self):
+        """max_rounds=0: karşılaştırılacak tur yok — iki metrik de None/False,
+        beyan DENETLENEMEDİ der (yakınsamış gibi sunulmaz)."""
+        ref = solve_grain_with_refinement(
+            GRAIN_RING_A, GRAIN_RING_B,
+            Material(E=6.0e6, nu=0.4995, name='htpb'),
+            GRAIN_RING_P, symmetry_fraction=GRAIN_RING_SYM,
+            outer_bc='bonded_rigid', max_rounds=0)
+        assert ref.converged is False
+        assert ref.acceptance['rel_change'] is None
+        assert ref.acceptance['converged'] is False
+        assert 'DENETLENEMEDİ' in ref.meta['beyan']

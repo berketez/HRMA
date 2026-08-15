@@ -4140,12 +4140,19 @@
         // 'not sized', su koçu 'NOT_MODELLED', hat malzemesi
         // "'ss_304' assumed", basınçlandırma 'auto'.
         function collectClosureAndFeedLineParams() {
-            const num = (id) => {
+            // Yardımcı adları tests/support/inventory.py okuma desenleriyle
+            // sözleşmelidir: optNum, depodaki "boş bırakılırsa anahtar
+            // GÖNDERİLMEZ" okuyucusunun adıdır; optChoice onun <select>
+            // karşılığıdır. Yerel takma ad (num/choice) kullanılırsa Katman A
+            // envanteri bu alanları "hiçbir yerde okunmuyor" sayar
+            // (2.6.27 yirminci partide ölçüldü: dört alan tam bu yüzden
+            // Katman A'da kırmızıya düştü).
+            const optNum = (id) => {
                 const raw = (document.getElementById(id)?.value ?? '').trim();
                 const v = parseFloat(raw);
                 return (raw !== '' && Number.isFinite(v)) ? v : undefined;
             };
-            const choice = (id) => {
+            const optChoice = (id) => {
                 const v = document.getElementById(id)?.value ?? '';
                 return v === '' ? undefined : v;
             };
@@ -4154,10 +4161,10 @@
                     const v = parseInt(document.getElementById('closure_bolt_count')?.value ?? '', 10);
                     return (Number.isFinite(v) && v >= 1) ? v : undefined;
                 })(),
-                feed_line_wall_thickness: num('feed_line_wall_thickness'),
-                valve_closure_time_ms: num('valve_closure_time_ms'),
-                feed_line_material: choice('feed_line_material'),
-                pressurization_type: choice('pressurization_type')
+                feed_line_wall_thickness: optNum('feed_line_wall_thickness'),
+                valve_closure_time_ms: optNum('valve_closure_time_ms'),
+                feed_line_material: optChoice('feed_line_material'),
+                pressurization_type: optChoice('pressurization_type')
             };
             // Cıvata boyutu/sınıfı yalnız sayı girildiyse gönderilir: çözücü
             // de ancak o zaman okur; sayı yokken "not sized" beyanının yanında
@@ -6404,6 +6411,23 @@ Please provide:
                 + '<td style="text-align:right;">' + value + '</td></tr>';
         }
 
+        //: Uçtaki _GIMBAL_REQUIRED listesinin BİREBİR kopyası ve AYNI
+        //: sırası (app.py: thrust_N, gimbal_angle_deg, actuator_arm_m).
+        //: Yerel kapı bu sırayı kullandığı için beyan, ucun missing_fields
+        //: çıktısıyla aynı görünür; sıra ayrışırsa bekçi (yerel liste ==
+        //: sunucu listesi karşılaştırması) kırılır.
+        const GIMBAL_REQUIRED_FIELDS = ['thrust_N', 'gimbal_angle_deg',
+                                        'actuator_arm_m'];
+
+        // Eksik girdi BEYANI — gösterge yok, uydurma sayı yok. Tek gövde:
+        // hem yerel kapı hem ucun 422 yanıtı aynı görünümü basar.
+        function gimbalMissingHtml(fields) {
+            return '<p style="font-size:13px; color:#ff8c33;">'
+                + T('liq.js.gimbal_missing_inputs',
+                    'Gimbal loads were not computed - these inputs are missing and no default is assumed:')
+                + ' ' + (fields || []).map(gimbalEsc).join(', ') + '</p>';
+        }
+
         function renderGimbalResult(d, ringOffsetGiven) {
             const kN = function (v) { return hrmaFmt(v / 1000, 2, 'kN'); };
             let rows = '';
@@ -6525,6 +6549,24 @@ Please provide:
                 payload.yaw_angle_deg = angle;
             }
 
+            // YEREL EKSİK-GİRDİ KAPISI (aktüatör kolu boşken istek atılmaz).
+            // Kol alanı boş DOĞAR ve placeholder'ı "blank: not analysed"
+            // vaat eder; yani her hesapta uca kesin 422 dönecek bir istek
+            // atmak işlevsel olarak doğru ama tarayıcı konsoluna kırmızı
+            // "Failed to load resource: 422" düşürür — kullanıcı ve konsol
+            // hata denetimi bunu ürün hatası sanar. Kol boşsa istek HİÇ
+            // atılmaz; aynı beyan aynı i18n anahtarı ve aynı alan adlarıyla
+            // YEREL basılır. Kol DOLUYKEN bu kapı kapalıdır: eksik başka
+            // zorunlu alan varsa 422 yolu emniyet ağı olarak aynen çalışır
+            // (sunucu sözleşmesi tek doğru kaynak olarak kalır).
+            if (arm === null) {
+                body.innerHTML = gimbalMissingHtml(
+                    GIMBAL_REQUIRED_FIELDS.filter(function (k) {
+                        return !(k in payload);
+                    }));
+                return;
+            }
+
             body.innerHTML = '<p style="font-size:13px; color:#7d97a5;">'
                 + T('liq.js.gimbal_computing', 'Computing gimbal mount loads…') + '</p>';
             try {
@@ -6535,11 +6577,9 @@ Please provide:
                 });
                 const d = await resp.json();
                 if (resp.status === 422 && Array.isArray(d.missing_fields)) {
-                    // Eksik girdi BEYANI — gösterge yok, uydurma sayı yok.
-                    body.innerHTML = '<p style="font-size:13px; color:#ff8c33;">'
-                        + T('liq.js.gimbal_missing_inputs',
-                            'Gimbal loads were not computed - these inputs are missing and no default is assumed:')
-                        + ' ' + d.missing_fields.map(gimbalEsc).join(', ') + '</p>';
+                    // Emniyet ağı: kol dolu ama başka zorunlu alan eksik.
+                    // Beyan gövdesi yerel kapıyla ORTAK (gimbalMissingHtml).
+                    body.innerHTML = gimbalMissingHtml(d.missing_fields);
                     return;
                 }
                 if (!resp.ok || d.error) {

@@ -1500,6 +1500,11 @@ def run_planar_grain_fea(grain_type,
             "final_rel_change": ref.final_rel_change,
             "tol": ref.tol,
             "history": ref.history,
+            # Kabul ölçütü (port lif gerinimi, SP-8073) hükmü — vM tepe
+            # değeri ν=0,4995 yakın-sıkıştırılamazlıkta yavaş yakınsar ve
+            # kabul ölçütü DEĞİLDİR; hüküm bu bloktan okunur
+            # (planar_grain.GrainRefinementResult.acceptance).
+            "acceptance": ref.acceptance,
             "beyan": ref.meta.get("beyan"),
         },
         "warnings": uyarilar,

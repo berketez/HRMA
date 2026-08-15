@@ -709,6 +709,12 @@
          konmadan önce kullanıcıya HİÇ görünmüyordu
          (bekçi: tests/test_fea_panel.py). -->
     <script src="/static/js/fea_panel.js"></script>
+    <!-- D2 termal FEA yüzü: /api/analysis/wall-profile → /api/fea/thermal
+         zinciri (ölçülmüş çağrı sırası). /api/fea/thermal ucu bu etiket
+         konana kadar HİÇBİR kullanıcı yüzünden çağrılmıyordu — 2.7 kapı
+         ölçütü #1 "mesh üstünde sıcaklık konturu EKRANDA"
+         (bekçi: tests/test_thermal_fea_panel.py). -->
+    <script src="/static/js/thermal_fea_panel.js"></script>
     <script src="/static/js/sixdof_panel.js"></script>
     <!-- Enjektör kesit şemaları: injector_panel.js window.InjectorSchematics
          yoksa şema kutusunu SESSİZCE gizliyordu (denetim bulgusu 2026-07-22)
@@ -819,6 +825,19 @@
             // gerilme alanı yeni motorunmuş gibi durmaz.
             if (window.FeaPanel) {
                 FeaPanel.init({ anchorId: 'trajectoryPanel' });
+            }
+            // D2 termal FEA paneli: yapısal panelin HEMEN ALTINA yerleşir
+            // (anchorId 'feaPanel' — üstteki init az önce kurdu). Zincir:
+            // wall-profile → /api/fea/thermal; ambient alanı 293,15 K
+            // ön-dolu, dış yüzey adyabatikliği sunucu beyanından basılır.
+            // Hesap köprüsü displayCalculationResults'ı sarar; yeni motor
+            // sonucu eski sıcaklık alanını SİLER (bayat alan kalmaz).
+            if (window.ThermalFeaPanel) {
+                ThermalFeaPanel.init({
+                    anchorId: 'feaPanel',
+                    fallbackAnchorId: 'trajectoryPanel',
+                    hookName: 'displayCalculationResults',
+                });
             }
             SixDofPanel.init({
                 anchorId: 'trajectoryPanel',
