@@ -32,6 +32,12 @@ gizlenmez ama hüküm de verilmez (FEA yakınsama beyanı deseni).
 - **Zaman:** kararlı hâl için yerel zaman adımı + CFL rampası (0,5 → 0,9); yakınsama ölçütü
   yoğunluk kalıntısının L2 normu, tepe-değer bekçisiyle (FEA kabul-ölçütü dersinin izdüşümü:
   hüküm metriği = kullanıcının okuduğu büyüklükler — itki/Isp/şok konumu — kalıntı ikincil).
+- **Sınırlayıcı dondurma (Aşama 1A'da ölçülüp eklendi):** minmod salınımı kararlı-hâl
+  kalıntısını ~1e-2 bağılda platoda bırakır (ölçüldü; birinci mertebe 6 basamak inerken).
+  Plato tespitinde eğimler dondurulup çözüm derin yakınsamaya sürülür (Venkatakrishnan,
+  AIAA J. 33(5), 1995 gerekçesi); an, `limiter_frozen_at_iter` + `convergence_basis`
+  alanlarıyla BEYANLIDIR. Bu olmadan korunum bütçesi sözleşmesi (1e-10 sınıfı) fiziksel
+  olarak ulaşılmaz.
 - **Gaz modeli:** kalorik mükemmel; γ ve R motor çözücüsünün yayımladığı değerlerden
   (`chamber_temperature`, `gamma`, `molecular_weight`) — sabit uydurulmaz, eksikse red (köprü deseni).
 - **Sınır koşulları:** giriş = rezervuar (P0, T0, subsonik karakteristik); duvar = kayma (Euler);
