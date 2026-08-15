@@ -62,8 +62,8 @@ from hrma.analysis.launch_site import resolve_launch_site
 from hrma.analysis.safety_analysis import SafetyAnalyzer
 from hrma.analysis.structural_analysis import StructuralAnalyzer
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
-from hrma.analysis.cfd_analysis import cfd_analyzer
-from hrma.analysis.kinetic_analysis import kinetic_analyzer
+# v2.6.27: emekli cozuculerin (cfd_analysis, kinetic_analysis) acilis
+# importlari kaldirildi — uclari 501 donuyor, govdeleri sokuldu (asagida).
 from hrma.analysis.trajectory_analysis import TrajectoryAnalyzer
 
 # Dalga 4A — hızlı gerçekçi modeller (sahte CFD/kinetik yerine):
@@ -7856,48 +7856,8 @@ def perform_cfd_analysis():
         'status': 'unavailable',
         'successor': '/api/flow-analysis'
     }), 501
-    try:
-        data = request.json
-        motor_type = data.get('motor_type', 'hybrid')
-        
-        # Motor geometry
-        motor_geometry = {
-            'chamber_length': data.get('chamber_length', 0.5),
-            'chamber_radius': data.get('chamber_radius', 0.05),
-            'throat_radius': data.get('throat_radius', 0.01),
-            'exit_radius': data.get('exit_radius', 0.025),
-            'nozzle_length': data.get('nozzle_length', 0.1)
-        }
-        
-        # Boundary conditions
-        from hrma.analysis.cfd_analysis import BoundaryConditions
-        boundary_conditions = BoundaryConditions(
-            inlet_pressure=data.get('chamber_pressure', 2e6),
-            inlet_temperature=data.get('chamber_temperature', 3000),
-            outlet_pressure=data.get('outlet_pressure', 101325),
-            wall_temperature=data.get('wall_temperature', 500),
-            mass_flow_rate=data.get('mass_flow_rate', 1.0)
-        )
-        
-        # Perform CFD analysis
-        cfd_results = cfd_analyzer.analyze_motor_flow(
-            motor_geometry, boundary_conditions, motor_type
-        )
-        
-        # Validate solution
-        validation = cfd_analyzer.validate_cfd_solution(cfd_results)
-        
-        return jsonify({
-            'status': 'success',
-            'cfd_results': {
-                'performance_metrics': sanitize_json_values(cfd_results['performance_metrics']),
-                'visualizations': cfd_results['visualizations'],
-                'convergence_info': cfd_results['convergence_info'],
-                'validation': validation
-            }
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+    # v2.6.27: 501 sonrasi erisilemez eski govde SOKULDU (teknik borc §4;
+    # gecmisi git'te: d36624e oncesi surumler). Halef uclar yasiyor.
 
 @app.route('/api/kinetic-analysis', methods=['POST'])
 def perform_kinetic_analysis():
@@ -7914,47 +7874,8 @@ def perform_kinetic_analysis():
         'status': 'unavailable',
         'successor': '/api/kinetic-efficiency'
     }), 501
-    try:
-        data = request.json
-        motor_type = data.get('motor_type', 'hybrid')
-        
-        # Nozzle geometry
-        nozzle_geometry = {
-            'throat_radius': data.get('throat_radius', 0.01),
-            'exit_radius': data.get('exit_radius', 0.025),
-            'nozzle_length': data.get('nozzle_length', 0.1),
-            'chamber_radius': data.get('chamber_radius', 0.05)
-        }
-        
-        # Chamber conditions
-        chamber_conditions = {
-            'pressure': data.get('chamber_pressure', 2e6),
-            'temperature': data.get('chamber_temperature', 3000)
-        }
-        
-        # Propellant composition
-        propellant_composition = {
-            'propellant_type': data.get('propellant_combination', 'N2O/HTPB'),
-            'of_ratio': data.get('of_ratio', 1.0)
-        }
-        
-        # Perform kinetic analysis
-        kinetic_results = kinetic_analyzer.analyze_nozzle_kinetics(
-            nozzle_geometry, chamber_conditions, propellant_composition, motor_type
-        )
-        
-        return jsonify({
-            'status': 'success',
-            'kinetic_results': {
-                'performance_losses': sanitize_json_values(kinetic_results['performance_losses']),
-                'equilibrium_comparison': sanitize_json_values(kinetic_results['equilibrium_comparison']),
-                'detailed_analysis': kinetic_results['detailed_analysis'],
-                'species_profiles': sanitize_json_values(kinetic_results['species_profiles']),
-                'temperature_profile': sanitize_json_values(kinetic_results['temperature_profile'])
-            }
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+    # v2.6.27: 501 sonrasi erisilemez eski govde SOKULDU (teknik borc §4;
+    # gecmisi git'te: d36624e oncesi surumler). Halef uclar yasiyor.
 
 @app.route('/api/professional-analysis', methods=['POST'])
 def perform_complete_professional_analysis():
@@ -7973,107 +7894,8 @@ def perform_complete_professional_analysis():
         'successor': ['/api/flow-analysis', '/api/kinetic-efficiency',
                       'Analysis Deck panels (structural/thermal/safety/flow/validation)']
     }), 501
-    try:
-        data = request.json
-        motor_type = data.get('motor_type', 'hybrid')
-        
-        # Common parameters
-        motor_geometry = {
-            'chamber_length': data.get('chamber_length', 0.5),
-            'chamber_radius': data.get('chamber_radius', 0.05),
-            'throat_radius': data.get('throat_radius', 0.01),
-            'exit_radius': data.get('exit_radius', 0.025),
-            'nozzle_length': data.get('nozzle_length', 0.1)
-        }
-        
-        chamber_conditions = {
-            'pressure': data.get('chamber_pressure', 2e6),
-            'temperature': data.get('chamber_temperature', 3000)
-        }
-        
-        propellant_combination = data.get('propellant_combination', 'N2O/HTPB')
-        
-        # 1. Chemical Database Analysis
-        database_info = chemical_db.validate_database()
-        
-        # 2. Experimental Validation — v2.5.0 G1: sentetik experimental_validator
-        # emekli (bu blok zaten yukaridaki 501 nedeniyle erisilemez; korunan
-        # olu kodun tutarliligi icin bos sonuc birakildi). Halef: experiment_db
-        # + G2 korelasyon koducusu.
-        validation_results = {}
-        
-        # 3. CFD Analysis
-        from hrma.analysis.cfd_analysis import BoundaryConditions
-        boundary_conditions = BoundaryConditions(
-            inlet_pressure=chamber_conditions['pressure'],
-            inlet_temperature=chamber_conditions['temperature'],
-            outlet_pressure=101325,
-            wall_temperature=500,
-            mass_flow_rate=data.get('mass_flow_rate', 1.0)
-        )
-        
-        cfd_results = cfd_analyzer.analyze_motor_flow(
-            motor_geometry, boundary_conditions, motor_type
-        )
-        
-        # 4. Kinetic Analysis
-        propellant_composition = {
-            'propellant_type': propellant_combination,
-            'of_ratio': data.get('of_ratio', 1.0)
-        }
-        
-        kinetic_results = kinetic_analyzer.analyze_nozzle_kinetics(
-            motor_geometry, chamber_conditions, propellant_composition, motor_type
-        )
-        
-        # Compile comprehensive report
-        professional_analysis = {
-            'analysis_summary': {
-                'motor_type': motor_type,
-                'propellant_combination': propellant_combination,
-                'analysis_timestamp': datetime.now().isoformat(),
-                'professional_grade': True
-            },
-            'chemical_database': {
-                'total_species': database_info['total_species'],
-                'nasa_cea_compatible': True,
-                'thermodynamic_accuracy': 'HIGH'
-            },
-            'experimental_validation': {
-                'status': 'retired',
-                'note': ('Synthetic experimental-validation layer removed in '
-                         'v2.5.0; real-experiment correlation lives in '
-                         'hrma/validation/experiment_db.py (runner in G2).')
-            },
-            'cfd_analysis': {
-                'convergence_achieved': cfd_results['convergence_info']['converged'],
-                'solution_quality': cfd_analyzer.validate_cfd_solution(cfd_results)['solution_quality'],
-                'performance_metrics': cfd_results['performance_metrics']
-            },
-            'kinetic_analysis': {
-                'kinetic_efficiency': kinetic_results['performance_losses']['kinetic_efficiency'],
-                'loss_severity': kinetic_results['performance_losses']['performance_summary']['kinetic_loss_severity'],
-                'isp_loss_percent': kinetic_results['performance_losses']['isp_loss_fraction'] * 100
-            },
-            'overall_assessment': {
-                'professional_readiness': 'READY_FOR_PRODUCTION',
-                'industry_standard_compliance': 'NASA_CEA_COMPATIBLE',
-                'confidence_rating': 'HIGH'
-            }
-        }
-        
-        return jsonify({
-            'status': 'success',
-            'professional_analysis': sanitize_json_values(professional_analysis),
-            'detailed_results': {
-                'validation': sanitize_json_values(validation_results),
-                'cfd': sanitize_json_values(cfd_results['performance_metrics']),
-                'kinetic': sanitize_json_values(kinetic_results['performance_losses'])
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+    # v2.6.27: 501 sonrasi erisilemez eski govde SOKULDU (teknik borc §4;
+    # gecmisi git'te: d36624e oncesi surumler). Halef uclar yasiyor.
 
 @app.route('/api/get-fuel-properties', methods=['POST'])
 def get_fuel_properties():
