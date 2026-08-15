@@ -72,6 +72,50 @@ def differing_paths(before: Dict[str, Any], after: Dict[str, Any],
     return changed
 
 
+#: Yankı önek -> kanonik önek eşlemesi (v2.6.27 tekilleştirme).
+#:
+#: /calculate yanıtı üst seviye ``motor`` bloğunu iki yerde daha taşır:
+#: ``trajectory.motor_data`` ve ``openrocket.flight_profile.motor_data``.
+#: ÖLÇÜLDÜ (P-5 denetiminin "bit-aynı kopya" beyanı, canlı test_client):
+#: trajectory.motor_data 1604/1604 yaprakta motor ile eşit; Pc 20→35
+#: sarsımında ikisi de AYNI 1286 yaprakta birlikte değişti. Kopya sayım
+#: birimini üçe katlıyordu: 372 "sabit yaprak" bayrağının 228'i aynı 114
+#: sabitin yankısıydı. Tekilleştirme sayım birimini SABİT başına bire indirir;
+#: kopya sözleşmesinin kendisi ayrıca ölçülür (bkz. ``yanki_ayristi``).
+ECHO_CANONICAL_PREFIXES = (
+    ('.trajectory.motor_data', '.motor'),
+    ('.openrocket.flight_profile.motor_data', '.motor'),
+)
+
+
+def canonical_echo_path(path: str) -> Optional[str]:
+    """Yaprak bir yankı öneki altındaysa kanonik karşılığını döndürür.
+
+    Önek eşleşmesi alan SINIRINDA yapılır: '.trajectory.motor_data.X' ve
+    '.trajectory.motor_data[...]' indirgenir ama '.trajectory.motor_database'
+    gibi bir ad indirgenMEZ (yanlış tekilleştirme sabit saklardı).
+    """
+    for prefix, canonical in ECHO_CANONICAL_PREFIXES:
+        if path.startswith(prefix):
+            rest = path[len(prefix):]
+            if rest == '' or rest[0] in '.[':
+                return canonical + rest
+    return None
+
+
+def _bit_identical(a: Any, b: Any) -> bool:
+    """Bit-aynılık: tip AYNI ve değer eşit (NaN çifti eşit sayılır).
+
+    ``==`` yetmez: True == 1 ve 1 == 1.0 doğrudur ama bunlar kopya değil
+    tip kaymasıdır — bayat/yeniden-üretilmiş kopyanın tam da bırakacağı iz.
+    """
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, float) and math.isnan(a) and math.isnan(b):
+        return True
+    return a == b
+
+
 def is_echo(path: str, field_name: str) -> bool:
     """Bu yaprak, alanın kendi YANKISI mı?
 
@@ -173,6 +217,18 @@ class ShakeReport:
     unmeasurable: Dict[str, str] = field(default_factory=dict)
     constant_outputs: List[str] = field(default_factory=list)
     declared_but_live: List[str] = field(default_factory=list)
+    #: v2.6.27 — sabit-çıktı sayımında kanonik yola İNDİRGENEN yankı yaprağı
+    #: sayısı (her biri motor.* kanonik yaprağıyla bit-aynı olduğu için
+    #: ikinci kez sayılmadı). Sayı rapora yazılır ki tekilleştirmenin ne
+    #: kadar iş yaptığı görünür kalsın.
+    echo_constant_dedup: int = 0
+    #: v2.6.27 — KOPYA SÖZLEŞMESİ İHLALLERİ. Yankı yaprağı kanonik yaprakla
+    #: ya tabanda bit-aynı değil, ya kanonik karşılığı hiç yok, ya da sarsım
+    #: altında biri değişirken öteki dondu. P-5 denetimi kopyayı "bit-aynı"
+    #: diye belgelemişti; bu liste o beyanı ölçüme çevirir. Bekçi testte
+    #: SIFIR olmak zorundadır — bayat/varsayılan kopya sınıfını (uçuş
+    #: simülasyonunun eski motor verisiyle beslenmesi) sonsuza dek yakalar.
+    yanki_ayristi: List[str] = field(default_factory=list)
     #: Taban koşunun DÜZ yaprak sözlüğü (yol -> değer).
     #: v2.6.26 — sabit çıktı yapraklarının SINIFLANDIRILMASI için gerekli:
     #: bir yaprağın "ızgara mı, standart mı, beyanlı mı" olduğuna karar vermek
@@ -192,7 +248,9 @@ class ShakeReport:
             f'{len(self.dead_inputs)} olu, '
             f'{len(self.echo_only_inputs)} yalniz-yanki, '
             f'{len(self.unmeasurable)} olculemedi, '
-            f'{len(self.constant_outputs)} sabit cikti yapragi')
+            f'{len(self.constant_outputs)} sabit cikti yapragi '
+            f'({self.echo_constant_dedup} yanki tekillestirildi, '
+            f'{len(self.yanki_ayristi)} yanki ayristi)')
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +329,27 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
             if spec.name not in declared:
                 report.dead_inputs.append(spec.name)
 
+    # --- Kopya sözleşmesi geçişi (v2.6.27) --------------------------------
+    # Yankı öneki altındaki HER yaprak (sayı/metin fark etmez) kanonik
+    # karşılığıyla karşılaştırılır. İhlal üç biçimde olabilir:
+    #   1. kanonik yaprak yok (kopyada fazladan/artık alan),
+    #   2. taban değeri bit-aynı değil (bayat ya da başka kaynaktan kopya),
+    #   3. sarsım altında biri değişirken öteki dondu (canlı görünüp
+    #      donmuş kopya — değişim kümeleri simetrik olmak zorundadır).
+    # Sağlam sözleşme, aşağıdaki sabit sayımında tekilleştirmenin ÖN KOŞULU:
+    # ayrışan yaprak indirgenmez, sabitse sabit listesinde ADIYLA kalır.
+    _MISSING = object()
+    for path, value in baseline.items():
+        canon = canonical_echo_path(path)
+        if canon is None:
+            continue
+        canon_value = baseline.get(canon, _MISSING)
+        if canon_value is _MISSING or not _bit_identical(value, canon_value):
+            report.yanki_ayristi.append(path)
+        elif (path in ever_changed) != (canon in ever_changed):
+            report.yanki_ayristi.append(path)
+    ayrisan = set(report.yanki_ayristi)
+
     # Sütun tarafı: hiçbir sarsımda değişmeyen SAYISAL çıktı yaprakları.
     # Metin/etiket alanları doğal olarak sabittir; yalnız sayılar aranır.
     for path, value in baseline.items():
@@ -279,6 +358,13 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
         if any(path.startswith(prefix) or prefix in path for prefix in ignore):
+            continue
+        # Yankı tekilleştirme: sözleşmesi SAĞLAM kopya ikinci kez sayılmaz —
+        # kanonik motor.* yaprağı bu döngüde zaten sayılıyor (sözleşme
+        # sağlamsa kopya sabitken kanonik de sabittir). Ayrışan kopya
+        # İNDİRGENMEZ: hem yanki_ayristi'da hem sabit listesinde görünür.
+        if canonical_echo_path(path) is not None and path not in ayrisan:
+            report.echo_constant_dedup += 1
             continue
         report.constant_outputs.append(path)
 

@@ -249,6 +249,134 @@ LEGITIMATE_CONSTANTS = (
     'wall_temperature_history.T_initial_K',
     'wall_temperature_history.time_s[0]',
     'wall_temperature_history.wall_inner_temperature_K[0]',
+    # ------------------------------------------------------------------
+    # v2.6.27 (sabit-çıktı borç kapanışı). Aşağıdaki imlerin TAMAMI DARDIR:
+    # her im tek bir yaprağı ya da tek tip bir ızgara ailesini işaretler.
+    # Blok geneli im ('oxidizer_tank_slosh' gibi) YASAKTIR — bloğa sonradan
+    # eklenecek uydurmayı da örter; dar-im disiplini ayrıca ölçülür
+    # (test_whitelist_markers_stay_narrow).
+    # ------------------------------------------------------------------
+    # Çalkantı süpürme IZGARASININ EKSENİ: sweep_heights = linspace(0.02,
+    # 1.0, 25) x fill_height (slosh_analysis.py:363-364) -> fill_ratio =
+    # beyanlı kesirler x (h_doluluk/R). h/R = 2 x doluluk x (L/D) olup iki
+    # çarpan da beyanlı sabittir (hybrid_rocket_engine.py:132
+    # TANK_FILL_FRACTION_DEFAULT, :146 OX_TANK_LD_RATIO; ikisi de _basis
+    # alanlarıyla yanıtta beyan edilir). Izgara ekseninin girdiyle
+    # değişmemesi tanımı gereğidir; aynı satırların f1_hz / omega1 /
+    # pendulum_length / slosh_mass_kg sütunları CANLIDIR ve bekçi onları
+    # korumaya devam eder.
+    'oxidizer_tank_slosh.slosh.fill_sweep.fill_ratio[',
+    # Çalkantı MOD ETİKETLERİ: SP-106 anti-simetrik mod numarası 1..4
+    # (slosh_analysis.py:359-361, 'mode': m) — bir hesabın sonucu değil,
+    # modu ADLANDIRAN tam sayı. 'acoustic_modes.modes' imiyle aynı gerekçe;
+    # kardeş omega / f_hz alanları CANLI kalır.
+    'oxidizer_tank_slosh.slosh.modes[0].mode',
+    'oxidizer_tank_slosh.slosh.modes[1].mode',
+    'oxidizer_tank_slosh.slosh.modes[2].mode',
+    'oxidizer_tank_slosh.slosh.modes[3].mode',
+    # Miles/SP-8009 perde (baffle) TASARIM HEDEFLERİ — beşi de beyanlı
+    # varsayılanların salt fonksiyonudur, tank geometrisi HİÇ girmez:
+    # target_damping_ratio = 0.01 hedef (slosh_analysis.py:235 imza, :259),
+    # depth_ratio = 0.10 çağrı varsayılanı (:335, :262),
+    # amplitude_ratio = _MILES_DEFAULT_AMPLITUDE_RATIO = 0.05 (:100, :263),
+    # blocked_area_ratio = (hedef / (C·e^{-4.6·d}·sqrt(eta)))^(2/3) — yalnız
+    # bu üç beyandan türer (:254-255),
+    # recommended_width_ratio = 1 - sqrt(1 - alan_oranı) (:256).
+    # Boyutlu kardeş recommended_width_m = (w/R)·R CANLIDIR (tank
+    # yarıçapıyla değişir) ve bekçi onu korumaya devam eder.
+    'oxidizer_tank_slosh.slosh.baffle.target_damping_ratio',
+    'oxidizer_tank_slosh.slosh.baffle.depth_ratio',
+    'oxidizer_tank_slosh.slosh.baffle.amplitude_ratio',
+    'oxidizer_tank_slosh.slosh.baffle.blocked_area_ratio',
+    'oxidizer_tank_slosh.slosh.baffle.recommended_width_ratio',
+    # 1 g BEYANI: g_eff sabit standart yerçekimidir ve öyle BEYAN edilir
+    # (hybrid_rocket_engine.py:4132-4140 g_eff_basis: uçuş ivmesi bağlaşımı
+    # NOT_MODELLED). Çözücüye g_eff=self.g0 geçirilir (:4107-4108) ve sonuç
+    # sözlüğü aynı değeri yankılar (slosh_analysis.py:390).
+    'oxidizer_tank_slosh.g_eff_m_s2',
+    'oxidizer_tank_slosh.slosh.g_eff',
+    # Beyanlı tank L/D tasarım oranı: OX_TANK_LD_RATIO = 2.5
+    # (hybrid_rocket_engine.py:146; :4125-4126'da _basis ile yayımlanır).
+    'oxidizer_tank_slosh.tank_ld_ratio',
+    # t = 0 BAŞLANGIÇ ÖRNEĞİ: zaman-adımlı çözücü t_now = i·dt ile başlar
+    # (hybrid_rocket_engine.py:2642-2644, :2669) ve yayın seyreltmesi ilk
+    # örneği HER ZAMAN korur (curve_sampling.py::decimate_curve_indices,
+    # zorunlu = {0, n-1}) -> time[0] = 0.0 tanımı gereği.
+    # 'wall_temperature_history.time_s[0]' emsali.
+    'of_shift_performance.time[0]',
+    'port_history.time[0]',
+    'thrust_curve.time[0]',
+    # Yayın örnekleme TAVANI: THRUST_CURVE_MAX_POINTS = 400
+    # (curve_sampling.py:40; sampling_block :157'de yayımlar) — iki motorun
+    # ortak, beyanlı yayın sözleşmesi. Kardeş points_published /
+    # points_computed alanları CANLIDIR.
+    'of_shift_performance.sampling.max_points',
+    'thrust_curve.sampling.max_points',
+    # Kontur/istasyon ORİJİNİ: örnekleyicinin İLK noktası konverjan girişi
+    # z = 0'dır (ORİJİN SÖZLEŞMESİ, hybrid_rocket_engine.py:5675-5677;
+    # bekçisi tests/test_motor_geometri_yayimi.py). Quasi-1D istasyon
+    # ızgarası AYNI örnekleyiciden alınır (hybrid_rocket_engine.py:
+    # 4573-4575) -> x_m[0] = 0.0 tanımı gereği. Konturun geri kalan
+    # noktaları ve istasyonların basınç/sıcaklık sütunları CANLIDIR.
+    'nozzle_contour.points[0][0]',
+    'nozzle_flow_quasi1d.stations.x_m[0]',
+    # O/F interpolasyon BEYANI: ızgara adımı ve hata sınırı modül
+    # sabitleridir (hybrid_rocket_engine.py:88 OF_PERF_GRID_STEP, :94
+    # OF_PERF_INTERP_ERROR_BOUND_PCT; :1979-1980 ve :2031-2037'de
+    # yayımlanır) — 'hard_min_ratio' ölçüt-eşiği ailesiyle aynı doğa:
+    # modelin hangi çözünürlük/hata sözleşmesiyle konuştuğunun yayımı.
+    'of_shift.interpolation.grid_step_of',
+    'of_shift.interpolation.error_bound_pct',
+    # Yapısal BEYAN sabitleri (dördü de kendi _basis alanıyla yayımlanır):
+    # design_pressure_factor = çağıran motorun geçtiği 1.5 çarpanı
+    # (structural_analysis.py:531 imza; :745-756 beyan),
+    # manufacturing_allowance_factor = modül sabiti
+    # (structural_analysis.py:959-969),
+    # stress_ratio_R = 0.0 ÇEVRİM MODELİ GEREĞİ — her ateşleme 0->P->0
+    # tam basınç çevrimi sayılır (structural_analysis.py:1538-1547),
+    # design_cycles = beyanlı tasarım hedefi 25 (structural_analysis.py:
+    # 1459-1461; :1551) — hesap değil, tasarım girdisinin yayımı.
+    'structural_analysis.design_parameters.design_pressure_factor',
+    'structural_analysis.chamber_analysis.manufacturing_allowance_factor',
+    'structural_analysis.fatigue_analysis.stress_ratio_R',
+    'structural_analysis.fatigue_analysis.design_cycles',
+    # Lüle AYRIK KAYIP MODELİ beyanları (nozzle_design.py:161-164 imza;
+    # :665+ _basis alanlarıyla yayımlanır): friction_efficiency model
+    # sabitidir (Sutton & Biblarz sınır-tabaka bandına kalibre, bu
+    # tasarımdan HESAPLANMAZ); hibritte metal partikül yok ->
+    # particle_mass_fraction = 0 ve two_phase_efficiency = 1 - k·0 = TAM 1
+    # (tanımı gereği, basis alanı açıkça söylüyor); two_phase_loss_coeff =
+    # k = 0.12 birinci-derece model sabiti. Kardeş divergence_efficiency /
+    # kinetic_efficiency / nozzle_efficiency CANLIDIR.
+    'nozzle_design.performance.friction_efficiency',
+    'nozzle_design.performance.particle_mass_fraction',
+    'nozzle_design.performance.two_phase_efficiency',
+    'nozzle_design.performance.two_phase_loss_coeff',
+) + tuple(
+    # İtki-irtifa TARAMA IZGARASI ve standart atmosfer sütunları:
+    # altitudes_thrust = [0, 1000, 5000, 10000, 15000, 20000] m SABİT
+    # ızgaradır (hybrid_rocket_engine.py:1657); pressure/temperature o
+    # irtifadaki ISA değerleridir (combustion_analysis.py:1708-1710,
+    # isa_temperature/isa_pressure) — motordan değil atmosfer standardından
+    # gelir; mevcut 'altitude_performance' imiyle aynı gerekçe. İm ALAN
+    # DÜZEYİNDE dardır: aynı satırların thrust / isp / exit_velocity /
+    # effective_total_impulse / impulse_efficiency sütunları CANLIDIR.
+    # Izgara 6 noktadır ve im 6 noktaya sabitlenmiştir: ızgara büyürse yeni
+    # satır imlenmemiş kalır ve bekçi ızgara değişikliğini GÖRÜR.
+    'thrust_altitude_analysis.thrust_altitude_data[%d].%s' % (i, alan)
+    for i in range(6) for alan in ('altitude', 'pressure', 'temperature')
+) + (
+    # Deniz seviyesi kazancı ÖZDEŞLİĞİ: tarama teslim edilen deniz-seviyesi
+    # itkisine KENETLİDİR (combustion_analysis.py:2141-2143,
+    # thrust_sea_level=base_thrust) ve kazanç = etkin/toplam impuls
+    # (:2165-2167) -> 0 m satırında TAM 1.0, kenetin kendisi. Diğer
+    # satırların kazançları CANLIDIR.
+    'thrust_altitude_analysis.thrust_altitude_data[0].impulse_gain_vs_sea_level',
+    # Beyanlı IZGARA UCU: sabit geometrili lülede itki irtifayla monoton
+    # arttığı için argmax daima son ızgara noktasıdır; alanın kendi _basis'i
+    # bunu "top of the altitude sweep grid, not an optimum" diye yazar
+    # (combustion_analysis.py:2181-2189). Kardeş max_thrust CANLIDIR.
+    'thrust_altitude_analysis.max_thrust_altitude',
 )
 
 
@@ -377,10 +505,69 @@ def test_no_fabricated_constant_outputs(hybrid_report):
             f.write('\n'.join(suspicious))
     # Ölçüm kapsamı tam olmadığı sürece bu liste boşalmaz; eşik, kapsam
     # büyüdükçe DÜŞÜRÜLMELİDİR. Yükseltmek uydurmayı gizlemektir.
-    assert len(suspicious) <= 330, (
+    #
+    # v2.6.27 borç kapanışı — eşik 330 -> 70 (ÖLÇÜLDÜ):
+    #   * Yankı tekilleştirme: 372 bayrağın 372 kopyası (trajectory.
+    #     motor_data + openrocket.flight_profile.motor_data, sayısal sabit
+    #     olsun olmasın) kanonik motor.* yoluna indirgendi — aynı sabit üç
+    #     kez sayılıyordu (bkz. shake.ECHO_CANONICAL_PREFIXES).
+    #   * Kod kanıtlı dar imler (yukarıdaki v2.6.27 bloğu) beyanlı ızgara/
+    #     etiket/model-sabiti ailelerini düşürdü.
+    #   * Kalan 70 kalemin dökümü ve tek tek hükümleri parti kaydında;
+    #     çoğunluğu 'beyanlı sabit — ime taşınabilir' (fill_sweep.
+    #     slosh_mass_ratio evrensel SP-106 eğrisi, kenetli-sıfır özdeşlikleri,
+    #     t=0 başlangıç koşulları, ISO tablo basamakları) + paraşüt üçlüsü
+    #     GERÇEK form borcu (hibrit sayfasında alan yok; API bağlı).
+    assert len(suspicious) <= 70, (
         'Sabit sayisal cikti yapragi beklenenden fazla (%d). Yeni uydurma '
         'sabit eklenmis olabilir. Ilk 25:\n  %s'
         % (len(suspicious), '\n  '.join(suspicious[:25])))
+
+
+def test_motor_echo_copies_never_diverge(hybrid_report):
+    """motor bloğunun yankı kopyaları BİT-AYNI kalmak zorundadır.
+
+    /calculate yanıtı motor.* bloğunu iki yerde daha taşır:
+    trajectory.motor_data ve openrocket.flight_profile.motor_data.
+    P-5 denetimi bunları "bit-aynı kopya" diye belgelemişti; bu bekçi o
+    sözleşmeyi ÖLÇER (shake.run kopya geçişi): tabanda bit-aynılık + sarsım
+    altında birlikte değişme. Ayrışan kopya, uçuş simülasyonunun BAYAT ya da
+    VARSAYILAN motor verisiyle beslenmesi demektir — sahte-roket sınıfı.
+    Ayrışma varsa tekilleştirme de o yaprak için iptal edilir (sabit sayımı
+    kopyayı adıyla göstermeye devam eder), yani bu bekçi kırmızıyken sabit
+    bekçisi sessiz kalamaz.
+    """
+    assert not hybrid_report.yanki_ayristi, (
+        'Su yanki yapraklari kanonik motor.* yapragindan AYRISTI '
+        '(bayat/varsayilan kopya suphesi):\n  '
+        + '\n  '.join(hybrid_report.yanki_ayristi[:40]))
+    # Tekilleştirmenin gerçekten iş yaptığı da ölçülür: kopya sözleşmesi
+    # sağlamken sayaç sıfırsa ya kopyalar kayboldu ya indirgeme koptu.
+    assert hybrid_report.echo_constant_dedup > 0, hybrid_report.summary()
+
+
+def test_whitelist_markers_stay_narrow(hybrid_report):
+    """Tek im, sabit listeden en çok 30 yaprak yutabilir.
+
+    Geniş im ('oxidizer_tank_slosh' gibi blok adı) bloğa SONRADAN eklenecek
+    uydurma sabiti de örter — beyaz listeyi genişletmek uydurmayı gizlemenin
+    en kolay yoludur ve bunu talimat değil ölçüm durdurur.
+
+    Tavan tautoloji değildir, ÖLÇÜMDEN türedi: bu koşuda en geniş MEŞRU
+    imin yuttuğu yaprak sayısı 25 (fill_sweep.fill_ratio[ — 25 noktalı
+    beyanlı süpürme ızgarası), ardından acoustic_modes.modes 22 ve
+    altitude_performance 18; gerisi <= 6. Tavan 30 = en büyük meşru aile
+    + küçük pay. Karşı-ölçüm: kasıtlı geniş im 'oxidizer_tank_slosh' aynı
+    koşuda 65 yaprak yutuyor ve burada KIRMIZI verir (mutasyonla kanıtlandı).
+    Yeni bir ızgara ailesi imlenecekse ya alan düzeyinde imlenir ya da bu
+    tavan ölçümüyle birlikte güncellenir — sessizce genişletilemez.
+    """
+    emilim = {m: sum(1 for p in hybrid_report.constant_outputs if m in p)
+              for m in LEGITIMATE_CONSTANTS}
+    genis = {m: n for m, n in emilim.items() if n > 30}
+    assert not genis, (
+        'Su imler tek baslarina 30\'dan fazla sabit yapragi yutuyor '
+        '(blok-genel im suphesi, dar imlere bolun): %s' % genis)
 
 
 # ---------------------------------------------------------------------------

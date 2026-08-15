@@ -52,7 +52,7 @@ aynıdır. **Durum sütunu o belgeden değil, bugünkü koddan ölçülmüştür
 | A8 | `launch_site` → hibrit | **Bağlı** (2 çağrı) |
 | A9 | Hibritte O/F kayması | **Bağlı** (`11c5715`); ölçülen blowdown etkisi O/F 2,50 → 2,32 (%7,2), zaman ortalamalı Isp tasarımdan %0,27 sapıyor |
 | A10 | Hibritte beyan taraması | **Bitti.** Ölçülen: hibrit `NOT_MODELLED` geçen satır sayısı **81** (3 Ağustos'ta 4 idi) |
-| A11 | Tank tek-geometri | **AÇIK** — en büyük tekil borç (L ölçeği) |
+| A11 | Tank tek-geometri | **Bitti (15 Ağu, `b2796ed`)** — basınç merkezi `_tank_pressure_bar()` (NPSH zinciriyle aynı kaynak); kart 90 bar uydurması kalktı, cidar 33→38,5 mm düzeldi; 18 bekçi |
 
 ### Kulvar B — CAD ve görselleştirme
 
@@ -72,7 +72,7 @@ aynıdır. **Durum sütunu o belgeden değil, bugünkü koddan ölçülmüştür
 |---|---|---|
 | C1 | Turbopompa boyutlandırma | **Modül + bağlama var** (`turbopump_sizing`, sıvıda 2 çağrı). Yalnız turbopompalı çevrimde bağlanır; RL10 + F-1'e karşı 44 test |
 | C2 | Vana ve besleme hattı | **Modül + bağlama var** (`valve_feedline`, sıvıda 2 çağrı) |
-| C3 | Gimbal ve itki montajı | **Modül var, HİÇBİR YERE BAĞLI DEĞİL** — `analyze_gimbal_mount` yalnız `tests/test_c_kulvari_bilesenler.py` içinden çağrılıyor. Tek gerçek yetim modül |
+| C3 | Gimbal ve itki montajı | **Bağlı (15 Ağu, `76cf8ca`)** — `/api/gimbal-mount` + sıvı sayfası paneli; eksik girdide 422+beyan sözleşmesi (kol boşken istemci fetch atmaz, parti 20); `test_gimbal_baglama.py` 28 test. Yetim modül kalmadı — 2.7 kapı #2 bununla kapandı |
 | C4 | Ateşleyici | **Modül + bağlama var** (`igniter_sizing`; katıda 5, hibritte 1 çağrı) |
 | C5 | Tank basınçlandırma | Bağlı (`pressurant_sizing`, sıvıda 2 çağrı). Gerçek-gaz borcu KAPANDI (15 Ağu, `9e1410b`): ölçülen hata 300 bar'da ~%14'tü, Z düzeltmesi mutasyon-denetimli bekçilerle girdi |
 
@@ -84,8 +84,8 @@ aynıdır. **Durum sütunu o belgeden değil, bugünkü koddan ölçülmüştür
 | D2 | Eksenel simetrik ısı çözücü | **Var** — `fea/thermal_axisym.py` (833 satır), geri Euler geçici iletim, Bartz + ışıma sınır koşulu; erfc / sabit-akı analitik vakalarına ≤ %0,22, enerji bütçesi 1e-13 |
 | D3 | Doğrulama kümesi | **Var** (D1 + D2 doğrulama vakaları yukarıda) |
 | D4 | CAD → mesh köprüsü | **Var** — `fea/bridge.py` (1 171 satır). Fiziksel sağlama: maks von Mises 31,2 MPa ≈ hoop 30,3 MPa |
-| D5 | Sonuç görselleştirme | **Var** — `/api/fea/structural`, `/api/fea/thermal` + `fea_panel.js` (1 023 satır): kontur haritası, tel kafes, eleman kalite haritası (en-boy oranı + ölçekli Jacobian), yakınsama geçmişi |
-| — | Katı tane için 2B **düzlemsel** kip (V2.7 Aşama C) | **Yok** — `fea/__init__.py` içinde "[V2.7 Aşama C — henüz yok]" diye yazılı |
+| D5 | Sonuç görselleştirme | **Var** — `/api/fea/structural` + `fea_panel.js` (kontur, tel kafes, kalite haritası — alarm yalnız Jacobian bozulması, parti 20 — yakınsama geçmişi) ve `/api/fea/thermal` + `thermal_fea_panel.js` (parti 20 `f9445c7`: T(z,r) konturu mesh üstünde, iç yüzey T(z), tepe T(t), malzeme sınırı hükmü). Görsel tur iskelesi 9 FEA denetimiyle bunları her turda ölçüyor (parti 21) |
+| — | Katı tane için 2B **düzlemsel** kip (V2.7 Aşama C) | **Var (15 Ağu, `fb55034`)** — `mesh_planar.py` + `planar_grain.py` (B-bar Q4, Lamé %0,85, ν=0,4995 kilitlenme kanıtı, ZZ-SPR, SP-8073 port gerinimi); `/api/fea/planar-grain` + katı sayfası GrainFeaPanel; yakınsama hükmü kabul ölçütünden (`convergence.acceptance`, parti 20) |
 
 ### Kulvar E — arayüz ve pano
 
@@ -106,11 +106,15 @@ aynıdır. **Durum sütunu o belgeden değil, bugünkü koddan ölçülmüştür
 | F3 | Test verisi korelasyonu | Altyapı var (`validation/correlation_runner.py`, `experiment_db.py`, `validation_records/`, `correlation_panel.js`). **Dış kullanıcı verisiyle kapanmış döngü YOK** |
 | F4 | Çok fazlı akış / tanecik yükü | **İki-faz kaybı var** (`two_phase_loss.py`, katıda 3 çağrı, 37 test) |
 
-**Toplu okuma:** 3 Ağustos yol haritasının v2.7 / v2.8 / v3'e dağıttığı
-işlerin büyük bölümü **2.6.27 kampanyasında** yapıldı. Kalan boşluklar
-dağınık değil, adı konabilir durumda: C3 bağlaması, C5 gerçek gaz, A11 tank
-geometrisi, katı tanesi için düzlemsel FEA kipi, gerçek CFD, F3 korelasyon
-döngüsünün kapanması.
+**Toplu okuma (15 Ağustos akşamı güncellendi):** 3 Ağustos yol haritasının
+v2.7 / v2.8 / v3'e dağıttığı işlerin büyük bölümü **2.6.27 kampanyasında**
+yapıldı; 15 Ağustos partileriyle C3, C5, A11, düzlemsel FEA ve D2'nin
+kullanıcı yüzü de kapandı. Kalan boşluklar adı konabilir durumda:
+**gerçek CFD (v3'ün kendisi — başlamadı)**, **F2 yanma tepkisi modeli**,
+**F3 korelasyon döngüsünün dış veriyle kapanması** (Ayberk), E5 ayrı
+duyarlılık taraması, B5 tam yanma animasyonu + B7 render, sıvı cidar
+FEA'sının ürünleşmesi (dış yüzey eğrilik tabanı — parti 22'de sahada) ve
+`test_no_fabricated_constant_outputs` borcu (parti 22'de sahada).
 
 ---
 
