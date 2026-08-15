@@ -182,9 +182,12 @@ yorumunda "bu blok zaten yukarıdaki 501 nedeniyle erişilemez" diyor.
 halef modellerin (`nozzle_flow_1d`, `kinetic_efficiency`) tam olgunlaşması
 beklenmiş. Bugün ikisi de bağlı ve testli.
 
-**Kapatma ölçütü:** iki modül `hrma/analysis/` altından kaldırılır ya da
-`legacy/` altına taşınır; `app.py` içe aktarımları ve erişilemez bloklar
-silinir; 501 yanıtı yönlendirme alanıyla kalır.
+**BÜYÜK ÖLÇÜDE KAPANDI (15 Ağustos 2026, on dördüncü parti):** açılış
+importları (`app.py` + `analysis/__init__.py`) ve 501 sonrası erişilemez
+gövdeler (187 satır) söküldü; uç sözleşmesi korunuyor (501 + `successor`),
+bekçisi `tests/test_emekli_uclar.py` (emekli modül `sys.modules`'a girerse
+kırılır). AÇIK KALAN TEK PARÇA: dosyaların kendisinin kaldırılması ya da
+`legacy/` altına taşınması — dosya silme kararı Berke'nindir.
 
 ---
 
