@@ -185,6 +185,8 @@ WARN_INPUTS_MISSING = "warn.fea.bridge_inputs_missing"
 WARN_THERMAL_PROFILE_MISSING = "warn.fea.bridge_thermal_profile_missing"
 WARN_THERMAL_SOLVER_UNAVAILABLE = "warn.fea.bridge_thermal_solver_unavailable"
 WARN_THERMAL_WALL_OVER_ALLOWABLE = "warn.fea.thermal_wall_over_allowable"
+WARN_PLANAR_GRAIN_UNSUPPORTED = "warn.fea.planar_grain_unsupported_type"
+WARN_PLANAR_GRAIN_SHAPELY = "warn.fea.planar_grain_shapely_missing"
 
 
 def _warning(code: str, **params) -> dict:
@@ -1167,5 +1169,341 @@ def run_thermal_from_motor(motor_results: dict,
         "warnings": uyarilar,
         "result": res,          # ThermalResult — tam alan geçmişi burada
         "mesh_object": mesh,    # AxisymMesh — ileri işleme için
+        "meta": meta,
+    }
+
+
+# ===========================================================================
+# V2.7 Aşama C — Katı yakıt tanesi kesiti düzlemsel FEA köprüsü
+# ---------------------------------------------------------------------------
+# Kamara/lüle cidarı eksenel simetriktir ve yukarıdaki yapısal/termal yol onu
+# görür; ama tane kesitleri (star/finocyl/slotted) eksenel simetrik DEĞİLDİR
+# (docs/mimari/yol-haritasi.md §5). Bu bölüm, kesit geometrisini MOTORUN
+# KENDİ fonksiyonlarından alır (geometri yeniden türetilmez — tek kaynak
+# solid_rocket_engine port poligon üreticileridir), tane mekaniğini
+# SOLID_GRAIN_MECHANICS kaydından okur ve planar_grain çözücüsünü sürer.
+# ===========================================================================
+
+#: Düzlemsel tane FEA'sının desteklediği kesitler. wagon_wheel ayrık delikli
+#: olduğu için orijine göre yıldız-şekilli DEĞİLDİR (r(θ) tek değerli
+#: değil), end_burner'da merkez port yoktur — ikisi de beyanla reddedilir.
+PLANAR_GRAIN_SUPPORTED_TYPES = ("bates", "star", "finocyl", "slotted")
+
+#: Bates halkası eksenel simetriktir; dilim genişliği sonuca etki etmez.
+#: Yine de dilim çözülür (tam halka gereksiz yere pahalı) ve seçim beyan
+#: edilir. 8 = tekillik kapılarından uzak, makul en-boy oranlı dilim.
+PLANAR_GRAIN_BATES_SYMMETRY = 8
+
+#: Motor arayüzünün kesit geometrisi alan adları (engine overrides
+#: sözlüğünün KENDİ anahtarları — çeviri katmanı yok; birimler arayüzle
+#: aynı: sayılar mm, adetler tam sayı, oran birimsiz).
+PLANAR_GRAIN_GEOMETRY_KEYS = (
+    "star_points", "star_radius",
+    "fin_count", "fin_width", "fin_length", "finned_length_fraction",
+    "slot_count", "slot_width", "slot_depth",
+)
+
+
+def _planar_grain_reject(grain_type, reason, code, **params):
+    """Beyanlı red — uydurma alan içermeyen NOT_MODELLED paketi."""
+    return {
+        "status": BRIDGE_STATUS_NOT_MODELLED,
+        "grain_type": grain_type,
+        "missing": [],
+        "reason": reason,
+        "warning": _warning(code, grain_type=grain_type, **params),
+    }
+
+
+def run_planar_grain_fea(grain_type,
+                         propellant_type,
+                         outer_diameter_mm,
+                         core_diameter_mm,
+                         chamber_pressure_bar,
+                         grain_length_mm=None,
+                         geometry_overrides=None,
+                         outer_bc="bonded_rigid",
+                         tol=DEFAULT_REFINE_TOL,
+                         n_theta0=None,
+                         n_radial0=DEFAULT_ELEMS_THROUGH_WALL,
+                         max_rounds=DEFAULT_MAX_REFINE_ROUNDS) -> dict:
+    """Tane kesiti için uçtan uca 2B düzlemsel FEA koşusu (V2.7 Aşama C).
+
+    Zincir: SolidRocketEngine kurulumu (kesit parametre çözümü + kırpma +
+    varsayılan beyanı MOTORUN KENDİ koduyla) → port kesiti (motor poligon
+    fonksiyonları) → mesh_planar (1/N simetri dilimi) → planar_grain
+    (düzlem şekil değiştirme, B-bar) → yakınsama sürücüsü.
+
+    Parametreler
+    ------------
+    grain_type : 'bates' | 'star' | 'finocyl' | 'slotted' (desteklenen);
+        'wagon_wheel' / 'end_burner' beyanla reddedilir; tanınmayan tip
+        motorun kendi ValueError'ını üretir.
+    propellant_type : SOLID_GRAIN_MECHANICS anahtarı (motorun aile
+        devralma/HTPB düşme kuralları AYNEN geçerli ve beyanlıdır).
+    outer_diameter_mm / core_diameter_mm : tane dış çapı / port çapı [mm].
+    chamber_pressure_bar : port yüzeyine uygulanan oda basıncı [bar].
+    grain_length_mm : yalnız beyan içindir — düzlem şekil değiştirme kesiti
+        tane boyundan bağımsızdır; verilmezse motor varsayılanı kullanılır
+        ve kesit sonucunu ETKİLEMEZ.
+    geometry_overrides : arayüz alan adlarıyla kesit parametreleri
+        (PLANAR_GRAIN_GEOMETRY_KEYS); aralık dışı değerleri motorun kendisi
+        reddedip design_warnings ile beyan eder.
+    outer_bc / tol / n_theta0 / n_radial0 / max_rounds : planar_grain
+        çözücüsüne aynen geçer (merkezî varsayılanlar; sayı tekrarlanmaz).
+
+    Dönüş: status='ok' paketi (mesh + alanlar + port gerinimi + yakınsama +
+    beyan zinciri) ya da beyanlı NOT_MODELLED. Geçersiz sayısal girdi
+    (negatif web, port >= dış çap, geçersiz basınç) ValueError fırlatır.
+    """
+    from hrma.engines.solid_rocket_engine import (
+        SHAPELY_AVAILABLE,
+        SUPPORTED_GRAIN_TYPES,
+        SolidRocketEngine,
+    )
+    from hrma.fea.planar_grain import (
+        DEFAULT_N_THETA0,
+        solve_grain_with_refinement,
+    )
+
+    grain_type = str(grain_type)
+    if grain_type not in SUPPORTED_GRAIN_TYPES:
+        raise ValueError(
+            f"Unsupported grain type '{grain_type}'. Supported grain "
+            f"types: {', '.join(SUPPORTED_GRAIN_TYPES)}.")
+    if grain_type not in PLANAR_GRAIN_SUPPORTED_TYPES:
+        nedenler = {
+            "wagon_wheel": (
+                "wagon_wheel kesiti ayrık deliklerden oluşur; port sınırı "
+                "orijine göre tek değerli r(θ) DEĞİLDİR ve 1/N dilim modeli "
+                "kurulamaz. Bu kesit için düzlemsel tane FEA'sı "
+                "modellenmemiştir — uydurma alan üretilmez."),
+            "end_burner": (
+                "end_burner taneli motorda merkez port yoktur (sigara "
+                "yanması); iç basınçlı halka kesit modeli bu tipe uymaz. "
+                "Düzlemsel tane FEA'sı bu tip için modellenmemiştir."),
+        }
+        return _planar_grain_reject(
+            grain_type,
+            nedenler.get(grain_type,
+                         f"'{grain_type}' düzlemsel tane FEA'sında "
+                         "desteklenmiyor."),
+            WARN_PLANAR_GRAIN_UNSUPPORTED)
+
+    d_out = _finite_positive(outer_diameter_mm)
+    d_core = _finite_positive(core_diameter_mm)
+    p_bar = _finite_positive(chamber_pressure_bar)
+    if d_out is None or d_core is None:
+        raise ValueError("outer_diameter_mm ve core_diameter_mm sonlu ve "
+                         "kesin pozitif olmalı.")
+    if p_bar is None:
+        raise ValueError("chamber_pressure_bar sonlu ve kesin pozitif "
+                         "olmalı.")
+    if d_core >= d_out:
+        raise ValueError(
+            f"Port çapı ({d_core:g} mm) tane dış çapını ({d_out:g} mm) "
+            "aşıyor ya da ona eşit: web negatif/sıfır, geometri fiziksel "
+            "değil.")
+
+    if grain_type != "bates" and not SHAPELY_AVAILABLE:
+        return _planar_grain_reject(
+            grain_type,
+            "Kesit poligonunun TEK kaynağı motorun shapely tabanlı port "
+            "üreticileridir ve shapely kurulu değil. Geometri yeniden "
+            "türetilmez (tek-kaynak kuralı); shapely kurulmalı ya da "
+            "bates seçilmelidir.",
+            WARN_PLANAR_GRAIN_SHAPELY)
+
+    overrides = {k: v for k, v in dict(geometry_overrides or {}).items()
+                 if k in PLANAR_GRAIN_GEOMETRY_KEYS and v not in (None, "")}
+    l_mm = _finite_positive(grain_length_mm)
+    ctor = dict(grain_type=grain_type, propellant_type=str(propellant_type),
+                chamber_diameter=d_out, core_diameter=d_core,
+                chamber_pressure=p_bar, overrides=overrides)
+    if l_mm is not None:
+        ctor["grain_length"] = l_mm
+    engine = SolidRocketEngine(**ctor)
+
+    # --- Kesit geometrisi: motorun KENDİ fonksiyonlarından ----------------
+    r_outer = engine.D_chamber / 2.0
+    varsayilanlar, kirpilanlar = [], []
+    if grain_type == "bates":
+        r_inner = engine.D_core / 2.0
+        n_sym = PLANAR_GRAIN_BATES_SYMMETRY
+        geom_beyan = {
+            "kaynak": "engine.D_core / 2 (dairesel port; poligon gerekmez)",
+            "kesit": "halka (bates)",
+            "simetri_dilimi": (
+                f"1/{n_sym} — bates eksenel simetriktir, dilim genişliği "
+                "sonuca etki etmez (PLANAR_GRAIN_BATES_SYMMETRY)"),
+        }
+    else:
+        if grain_type == "star":
+            n_sym, depth = engine._star_params()
+            poly = engine._star_port_polygon()
+            varsayilanlar = [k for k in ("star_points", "star_radius")
+                            if k not in overrides]
+            geom_beyan = {
+                "kaynak": ("engine._star_port_polygon() — zikzak star, "
+                           "uçlar θ = 2πk/N (ilk uç θ = 0 ayna düzlemi)"),
+                "kesit": f"star ({n_sym} uç, uç derinliği {depth * 1000:.3f} mm"
+                         " — motorun kırptığı değer)",
+                "simetri_dilimi": f"1/{n_sym} (uç sayısı)",
+            }
+        elif grain_type == "slotted":
+            n_sym, width, depth, varsayilanlar, kirpilanlar = \
+                engine._slotted_params()
+            poly = engine._slotted_port_polygon()
+            geom_beyan = {
+                "kaynak": ("engine._slotted_port_polygon() — merkez daire ∪ "
+                           "radyal yuvalar, yuva merkezleri θ = 2πk/N "
+                           "(ilk yuva θ = 0 ayna düzlemi)"),
+                "kesit": (f"slotted ({n_sym} yuva, genişlik "
+                          f"{width * 1000:.3f} mm, derinlik "
+                          f"{depth * 1000:.3f} mm — motorun çözdüğü "
+                          "değerler)"),
+                "simetri_dilimi": f"1/{n_sym} (yuva sayısı)",
+            }
+        else:  # finocyl
+            n_sym, width, depth, frac, varsayilanlar, kirpilanlar = \
+                engine._finocyl_params()
+            poly = engine._finocyl_port_polygon()
+            geom_beyan = {
+                "kaynak": ("engine._finocyl_port_polygon() — KANATÇIKLI "
+                           "kesit (en geniş port, gerilme yoğunlaşmasını "
+                           "taşıyan kesit). Finocyl eksenel olarak iki "
+                           "kesitlidir; düz silindirik bölüm bates halkası "
+                           "problemidir ve bu koşuda ÇÖZÜLMEZ (beyan)."),
+                "kesit": (f"finocyl kanatçıklı bölüm ({n_sym} kanatçık, "
+                          f"genişlik {width * 1000:.3f} mm, derinlik "
+                          f"{depth * 1000:.3f} mm, kanatçıklı boy oranı "
+                          f"{frac:g})"),
+                "simetri_dilimi": f"1/{n_sym} (kanatçık sayısı)",
+            }
+        from hrma.fea.mesh_planar import port_radius_sampler_from_polygon
+        r_inner = port_radius_sampler_from_polygon(
+            np.asarray(poly.exterior.coords, dtype=float))
+
+    # --- Tane mekaniği: SOLID_GRAIN_MECHANICS kaydından (motor kuralları) --
+    mech = engine._grain_mechanics()
+    material = Material(E=float(mech["elastic_modulus_pa"]),
+                        nu=float(mech["poisson_ratio"]),
+                        yield_strength=None,
+                        name=str(propellant_type))
+    strain_capability = float(mech["strain_capability"])
+
+    ref = solve_grain_with_refinement(
+        r_inner, r_outer, material,
+        bore_pressure_pa=p_bar * PA_PER_BAR,
+        symmetry_fraction=int(n_sym),
+        outer_bc=outer_bc,
+        strain_capability=strain_capability,
+        tol=tol,
+        n_theta0=DEFAULT_N_THETA0 if n_theta0 is None else int(n_theta0),
+        n_radial0=int(n_radial0),
+        max_rounds=int(max_rounds),
+    )
+    res = ref.result
+
+    basis = {
+        "_source": "hrma.fea.bridge.run_planar_grain_fea",
+        "_basis": ("kesit geometrisi motorun KENDİ port fonksiyonlarından "
+                   "(tek-kaynak kuralı: geometri yeniden türetilmez), tane "
+                   "mekaniği SOLID_GRAIN_MECHANICS kaydından, çözüm "
+                   "hrma.fea.planar_grain (düzlem şekil değiştirme + B-bar)"),
+        "geometri": dict(geom_beyan,
+                         outer_diameter_mm=d_out,
+                         core_diameter_mm=d_core,
+                         varsayilan_kullanilan_alanlar=list(varsayilanlar),
+                         kirpilan_alanlar=list(kirpilanlar)),
+        "tane_boyu": (
+            f"grain_length_mm = {l_mm:g} — yalnız beyan; düzlem şekil "
+            "değiştirme kesiti tane boyundan bağımsızdır" if l_mm is not None
+            else "verilmedi — kesit çözümü tane boyundan bağımsızdır "
+                 "(düzlem şekil değiştirme), sonuç etkilenmez"),
+        "malzeme": {
+            "kaynak": ("SOLID_GRAIN_MECHANICS['" + str(propellant_type)
+                       + "'] (engine._grain_mechanics çözümü — aile "
+                       "devralma/HTPB düşme kuralları motorunkiyle AYNI)"),
+            "kayit_kunyesi": mech.get("source"),
+            "devralinan": mech.get("inherited_from"),
+            "E_Pa": material.E,
+            "nu": material.nu,
+            "strain_capability": strain_capability,
+        },
+        "yuk": {
+            "kaynak": "chamber_pressure_bar * PA_PER_BAR",
+            "Pc_bar": p_bar,
+            "Pc_Pa": p_bar * PA_PER_BAR,
+            "dagilim": ("port yüzeyine SABİT Pc — kesit düzleminde basınç "
+                        "değişimi modellenmez"),
+        },
+        "analitik_blok_iliskisi": (
+            "Motor sonucundaki grain_structural bloğu (Timoshenko silindir + "
+            "nominal Kt) KALIR ve bu kiple ÇELİŞMEZ: analitik blok kasa "
+            "esnemesi + kürleme soğumasını içerir ama kesit şeklini Kt "
+            "katsayısıyla temsil eder; bu kip kesit şeklinin gerilme "
+            "yoğunlaşmasını mesh ile çözer ama viskoelastisite/termal "
+            "büzülme/kasa esnemesi modellemez. İkisi birlikte okunmalıdır."),
+    }
+    if mech.get("inherited_from"):
+        basis["malzeme"]["devralma_beyani"] = (
+            "kayıt bu yakıtın kendisine ait değil; '"
+            + str(mech["inherited_from"]) + "' kaydından devralındı "
+            "(motorun beyan kuralı)")
+
+    meta = {
+        "_source": "hrma.fea.bridge.run_planar_grain_fea",
+        "girdiler": basis,
+        "cozucu": res.meta,
+        "yakinsama": ref.meta,
+        "not_modelled": list(res.meta.get("not_modelled", [])),
+    }
+
+    # Motorun kendi girdi uyarıları (aralık dışı red, mekanik kayıt düşmesi)
+    # AYNEN taşınır — sessiz varsayım yok.
+    uyarilar = [w for w in getattr(engine, "design_warnings", [])
+                if isinstance(w, dict)]
+
+    return {
+        "status": BRIDGE_STATUS_OK,
+        "grain_type": grain_type,
+        "propellant_type": str(propellant_type),
+        "symmetry_fraction": int(n_sym),
+        "inputs": basis,
+        "von_mises_nodal": res.von_mises_nodal,
+        "von_mises_gauss_max": res.max_von_mises,
+        "max_principal_nodal": res.max_principal_nodal,
+        "displacement": res.displacement,
+        "stress_nodal": res.stress_nodal,
+        "bore": {
+            "node_ids": res.bore_node_ids,
+            "strain_nodal": res.bore_strain_nodal,
+            "strain_edges": res.bore_strain_edges,
+            "max_strain": res.max_bore_strain,
+            "strain_capability": strain_capability,
+            "strain_margin": res.strain_margin,
+            "_basis": res.meta.get("bore_strain_kaynagi"),
+        },
+        "mesh": {
+            "nodes": ref.mesh.nodes,
+            "elems": ref.mesh.elems,
+            "node_index_grid": ref.mesh.node_index_grid,
+            "n_nodes": ref.mesh.n_nodes,
+            "n_elems": ref.mesh.n_elems,
+            "n_theta": ref.mesh.n_theta,
+            "n_radial": ref.mesh.n_radial,
+            "meta": ref.mesh.meta,
+        },
+        "convergence": {
+            "converged": ref.converged,
+            "final_rel_change": ref.final_rel_change,
+            "tol": ref.tol,
+            "history": ref.history,
+            "beyan": ref.meta.get("beyan"),
+        },
+        "warnings": uyarilar,
+        "result": res,          # PlanarGrainResult — ileri işleme için
+        "refinement": ref,      # GrainRefinementResult
         "meta": meta,
     }

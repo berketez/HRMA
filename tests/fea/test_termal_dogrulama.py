@@ -653,8 +653,9 @@ class TestPaketVeSonucBeyani:
     def test_module_status_thermal_implemented(self):
         import hrma.fea as fea
         assert fea.MODULE_STATUS["thermal_axisym"] == "IMPLEMENTED"
-        # planar_grain hâlâ yok ve öyle beyan edilmeli.
-        assert fea.MODULE_STATUS["planar_grain"] == "NOT_IMPLEMENTED"
+        # V2.7 Aşama C ile planar_grain gerçek kayda geçti; beyanın
+        # kendi bekçileri tests/test_fea_planar_grain.py içindedir.
+        assert fea.MODULE_STATUS["planar_grain"] == "IMPLEMENTED"
 
     def test_sonuc_meta_beyanlari(self):
         mesh = build_wall_mesh([(0.0, 0.05), (0.1, 0.05)], 0.01,

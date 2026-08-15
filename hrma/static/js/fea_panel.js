@@ -1020,4 +1020,639 @@
         },
         get payload() { return lastPayload; },
     };
+
+    // ==================================================================
+    // GrainFeaPanel — KATI TANE KESİTİ düzlemsel FEA paneli (V2.7 Aşama C)
+    // ------------------------------------------------------------------
+    // Katı sayfasında (solid.html) yaşar; POST /api/fea/planar-grain
+    // yanıtını çizer. Kamara cidarı panelinden (FeaPanel) farkları:
+    //   * kesit (x, y) düzlemidir, eksenler EŞİT ölçeklenir (fiziksel
+    //     kesit çarpıtılmaz);
+    //   * emniyet katsayısı alanı YOKTUR — katı tane kabul ölçütü
+    //     GERİNİMDİR (NASA SP-8073): port lif gerinimi kopma uzamasıyla
+    //     oranlanır ve ayrı grafikte basılır;
+    //   * kesit parametreleri sayfanın SON HESAP SONUCUNDAN okunur
+    //     (paramsProvider) — panel geometri üretmez, uydurma değer yok.
+    // Metinler init({labelsProvider}) üzerinden i18n_pages.js'ten gelir
+    // (solid.* anahtarları); sağlayıcı yoksa İngilizce yedekler kullanılır.
+    // Sahte veri yasağı FeaPanel ile aynı: NOT_MODELLED'da çizim yok,
+    // yeni hesap eski alanı siler, belirsiz süreli koşuda yüzde yok.
+    // ==================================================================
+
+    let gCfg = {};
+    let gLastPayload = null;
+    let gLastError = null;
+    let gBusy = false;
+    let gShowMesh = true;
+    let gLabels = {};
+
+    const GRAIN_ENDPOINT = '/api/fea/planar-grain';
+
+    function GL(name, fallback) {
+        const v = gLabels && gLabels[name];
+        return (typeof v === 'string' && v) ? v : fallback;
+    }
+
+    function gFmtTpl(tpl, params) {
+        return String(tpl).replace(/\{(\w+)\}/g, function (whole, key) {
+            return (params && key in params) ? String(params[key]) : whole;
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // >>> GRAIN_FEA_VIEWMODEL_START
+    // Saf görünüm modeli — DOM/Plotly YOK; tek dönüşümler Pa→MPa bölmesi
+    // ve gerinim→% çarpımı, ikisi de beyanlıdır.
+    // ------------------------------------------------------------------
+    function buildGrainViewModel(fea, errorText) {
+        if (errorText) return { mode: 'error', error: String(errorText) };
+        if (!fea || typeof fea !== 'object') return { mode: 'idle' };
+        if (fea.status !== 'ok') {
+            return {
+                mode: 'not_modelled',
+                status: fea.status || null,
+                reason: (typeof fea.reason === 'string') ? fea.reason : '',
+                warning: fea.warning || null,
+                grain_type: fea.grain_type || null,
+            };
+        }
+        const mesh = fea.mesh || {};
+        const grid = buildCarpetGrid(mesh);
+        if (!grid) return { mode: 'invalid', reason: 'mesh grid missing' };
+        const fields = fea.fields || {};
+        const scalars = fea.scalars || {};
+        const bore = fea.bore || {};
+
+        // Port gerinim eğrisi: istasyon açısı düğüm koordinatından (derece),
+        // gerinim % — başka işlem yok.
+        let boreCurve = null;
+        if (Array.isArray(bore.node_ids) && Array.isArray(bore.strain_nodal)
+                && bore.node_ids.length === bore.strain_nodal.length
+                && Array.isArray(mesh.nodes)) {
+            const thetaDeg = [], strainPct = [];
+            for (let k = 0; k < bore.node_ids.length; k++) {
+                const n = mesh.nodes[bore.node_ids[k]];
+                if (!Array.isArray(n)) { boreCurve = null; break; }
+                thetaDeg.push(Math.atan2(n[1], n[0]) * 180.0 / Math.PI);
+                strainPct.push(isNum(bore.strain_nodal[k])
+                    ? 100.0 * bore.strain_nodal[k] : null);
+                boreCurve = { theta_deg: thetaDeg, strain_pct: strainPct };
+            }
+        }
+
+        const vm = {
+            mode: 'ok',
+            grain_type: fea.grain_type || null,
+            symmetry_fraction: isNum(fea.symmetry_fraction)
+                ? fea.symmetry_fraction : null,
+            grid: grid,
+            von_mises_mpa: fieldToGrid(mesh, fields.von_mises_pa, PA_PER_MPA),
+            wireframe: buildWireframe(mesh),
+            centres: elementCentres(mesh),
+            quality: fea.quality || null,
+            flags: qualityFlags(fea.quality),
+            convergence: buildConvergence(fea.convergence),
+            bore_curve: boreCurve,
+            mesh_info: {
+                n_nodes: mesh.n_nodes, n_elems: mesh.n_elems,
+                n_theta: mesh.n_theta, n_radial: mesh.n_radial,
+                units: mesh.coordinate_units || null,
+            },
+            scalars: {
+                von_mises_gauss_max_mpa: isNum(scalars.von_mises_gauss_max_pa)
+                    ? scalars.von_mises_gauss_max_pa / PA_PER_MPA : null,
+                von_mises_nodal_max_mpa: isNum(scalars.von_mises_nodal_max_pa)
+                    ? scalars.von_mises_nodal_max_pa / PA_PER_MPA : null,
+                max_bore_strain_pct: isNum(bore.max_strain)
+                    ? 100.0 * bore.max_strain : null,
+                strain_capability_pct: isNum(bore.strain_capability)
+                    ? 100.0 * bore.strain_capability : null,
+                strain_margin: isNum(bore.strain_margin)
+                    ? bore.strain_margin : null,
+            },
+            warnings: Array.isArray(fea.warnings) ? fea.warnings : [],
+            limits: fea.limits || null,
+            not_modelled: (fea.meta && Array.isArray(fea.meta.not_modelled))
+                ? fea.meta.not_modelled : [],
+            basis: {
+                fields: (fields && fields._basis) || null,
+                bore: (bore && bore._basis) || null,
+                inputs: (fea.meta && fea.meta.girdiler) || null,
+                quality: (fea.quality && fea.quality._basis) || null,
+            },
+        };
+        vm.grid_consistent = (grid.ni * grid.nj === mesh.n_nodes);
+        return vm;
+    }
+    // <<< GRAIN_FEA_VIEWMODEL_END
+    // ------------------------------------------------------------------
+
+    function grainPanelHtml() {
+        return `
+        <div class="panel" id="grainFeaPanel" style="width:100%; grid-column: 1 / -1;">
+            <h2>▣ ${esc(GL('title',
+                'Grain Section FEA — Plane-Strain Stress and Bore Strain'))}</h2>
+            <div class="chart-explanation">
+                <span>${esc(GL('intro',
+                    'A 2D plane-strain finite element run on the propellant grain '
+                    + 'cross-section of THIS design (star, finocyl and slotted ports '
+                    + 'are not axisymmetric, so the wall solver cannot see them). '
+                    + 'The section polygon is built on the server from the motor '
+                    + 'solver itself; the acceptance quantity is the bore surface '
+                    + 'STRAIN against the propellant strain capability. If an input '
+                    + 'is missing, nothing is drawn and the reason is named.'))}</span>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:10px 0;">
+                <button id="grainfea_run" class="btn" type="button">${esc(GL('run',
+                    'Run grain section FEA'))}</button>
+                <span id="grainfea_busy" style="display:none; font-family:var(--hd-mono);
+                    font-size:0.78rem; color:var(--hd-cyan, #00e5ff);"></span>
+                <label style="font-family:var(--hd-mono); font-size:0.75rem;
+                    color:var(--hd-ink-dim, #7d97a5); display:flex; gap:6px; align-items:center;">
+                    <input type="checkbox" id="grainfea_show_mesh" checked>
+                    <span>${esc(GL('showMesh', 'Show mesh wireframe'))}</span>
+                </label>
+            </div>
+            <div id="grainfea_badges" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;"></div>
+            <div id="grainfea_chip" style="margin:8px 0;"></div>
+            <div id="grainfea_plot_vm" class="plot-container" style="min-height:380px; display:none;"></div>
+            <div id="grainfea_plot_bore" class="plot-container" style="min-height:300px; display:none;"></div>
+            <div id="grainfea_plot_conv" class="plot-container" style="min-height:300px; display:none;"></div>
+            <div id="grainfea_conv_note" style="font-family:var(--hd-mono); font-size:0.75rem;
+                color:var(--hd-ink-dim, #7d97a5); margin:6px 0;"></div>
+            <details id="grainfea_basis" style="display:none; margin-top:8px;">
+                <summary style="cursor:pointer; font-family:var(--hd-mono);
+                    font-size:0.75rem; color:var(--hd-ink-dim, #7d97a5);">${esc(GL(
+                    'basisTitle',
+                    'Method / basis and what is NOT modelled (as declared by the solver)'))}</summary>
+                <div id="grainfea_basis_text" style="font-family:var(--hd-mono);
+                    font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);
+                    margin:6px 0 0; white-space:pre-wrap;"></div>
+            </details>
+        </div>`;
+    }
+
+    function grainWireTrace(vm) {
+        const w = vm.wireframe;
+        return {
+            x: w.x, y: w.y, mode: 'lines', type: 'scatter',
+            line: { color: MESH_COLOR, width: 1 },
+            name: gFmtTpl(GL('meshTrace', 'Mesh ({n} elements)'),
+                          { n: vm.mesh_info.n_elems }),
+            hoverinfo: 'skip',
+        };
+    }
+
+    function grainFieldFigure(vm) {
+        const g = vm.grid;
+        const cbar = GL('cbarVm', 'von Mises [MPa]');
+        const traces = [{
+            type: 'carpet', carpet: 'grainCarpetVm',
+            a: g.a, b: g.b, x: g.x, y: g.y,
+            aaxis: { showgrid: false, showticklabels: 'none', showticksuffix: 'none',
+                     smoothing: 0, title: '' },
+            baxis: { showgrid: false, showticklabels: 'none', showticksuffix: 'none',
+                     smoothing: 0, title: '' },
+        }, {
+            type: 'contourcarpet', carpet: 'grainCarpetVm',
+            a: g.a, b: g.b, z: vm.von_mises_mpa,
+            contours: { coloring: 'fill', showlines: false },
+            colorscale: VM_COLORSCALE,
+            colorbar: { title: cbar, titleside: 'right' },
+            name: cbar,
+        }];
+        if (gShowMesh && vm.wireframe) traces.push(grainWireTrace(vm));
+        return {
+            traces: traces,
+            layout: {
+                title: GL('chartVm',
+                    'von Mises stress on the grain cross-section [MPa]'),
+                xaxis: { title: GL('axisX', 'x [m]') },
+                // Fiziksel kesit: eksenler EŞİT ölçekli (çarpıtma yok).
+                yaxis: { title: GL('axisY', 'y [m]'),
+                         scaleanchor: 'x', scaleratio: 1 },
+                height: 380,
+                showlegend: false,
+            },
+        };
+    }
+
+    // Carpet yedeği (eski Plotly): düğüm nokta haritası — FeaPanel deseni.
+    function grainFieldFallbackFigure(vm) {
+        const g = vm.grid;
+        const cbar = GL('cbarVm', 'von Mises [MPa]');
+        const x = [], y = [], c = [];
+        for (let j = 0; j < g.nj; j++) {
+            for (let i = 0; i < g.ni; i++) {
+                x.push(g.x[j][i]); y.push(g.y[j][i]);
+                c.push(vm.von_mises_mpa[j][i]);
+            }
+        }
+        const traces = [{
+            x: x, y: y, mode: 'markers', type: 'scatter',
+            marker: { color: c, colorscale: VM_COLORSCALE, size: 6,
+                      colorbar: { title: cbar, titleside: 'right' } },
+            name: cbar,
+        }];
+        if (gShowMesh && vm.wireframe) traces.push(grainWireTrace(vm));
+        return {
+            traces: traces,
+            layout: {
+                title: GL('chartVm',
+                    'von Mises stress on the grain cross-section [MPa]'),
+                xaxis: { title: GL('axisX', 'x [m]') },
+                yaxis: { title: GL('axisY', 'y [m]'),
+                         scaleanchor: 'x', scaleratio: 1 },
+                height: 380,
+                showlegend: false,
+            },
+        };
+    }
+
+    function grainBoreFigure(vm) {
+        const bc = vm.bore_curve;
+        const traces = [{
+            x: bc.theta_deg, y: bc.strain_pct,
+            mode: 'lines+markers', type: 'scatter',
+            marker: { size: 6 }, line: { width: 2 },
+            name: GL('boreTrace', 'Bore fibre strain [%]'),
+        }];
+        const cap = vm.scalars.strain_capability_pct;
+        if (isNum(cap)) {
+            traces.push({
+                x: [Math.min.apply(null, bc.theta_deg),
+                    Math.max.apply(null, bc.theta_deg)],
+                y: [cap, cap],
+                mode: 'lines', type: 'scatter',
+                line: { color: BAD_COLOR, width: 2, dash: 'dash' },
+                name: GL('capTrace', 'Strain capability [%]'),
+            });
+        }
+        return {
+            traces: traces,
+            layout: {
+                title: GL('chartBore',
+                    'Bore surface strain along the port (acceptance quantity)'),
+                xaxis: { title: GL('axisTheta', 'Station angle [deg]') },
+                yaxis: { title: GL('axisStrain', 'Strain [%]') },
+                height: 300,
+                legend: { orientation: 'h', y: 1.16 },
+            },
+        };
+    }
+
+    function grainConvergenceFigure(conv) {
+        return {
+            traces: [{
+                x: conv.n_elems, y: conv.von_mises_mpa,
+                mode: 'lines+markers', type: 'scatter',
+                marker: { size: 9 }, line: { width: 2 },
+                name: GL('convTrace', 'Peak von Mises (SPR nodal) [MPa]'),
+            }],
+            layout: {
+                title: GL('chartConv',
+                    'Mesh convergence — peak von Mises vs element count'),
+                xaxis: { title: GL('axisElems', 'Elements in mesh [-]'),
+                         type: 'log' },
+                yaxis: { title: GL('axisVmConv',
+                    'Peak von Mises (SPR nodal) [MPa]') },
+                height: 300,
+                showlegend: false,
+            },
+        };
+    }
+
+    function grainRenderBadges(el, vm) {
+        let html = '';
+        if (vm.grain_type) {
+            let etiket = GL('badgeType', 'SECTION') + ': '
+                + esc(String(vm.grain_type).toUpperCase());
+            if (vm.symmetry_fraction) {
+                etiket += ' · ' + gFmtTpl(GL('badgeSlice', '1/{n} slice'),
+                                          { n: vm.symmetry_fraction });
+            }
+            html += badge(etiket, 'info');
+        }
+        html += badge(gFmtTpl(GL('badgeMesh',
+            'MESH {elems} elements / {nodes} nodes'),
+            { elems: vm.mesh_info.n_elems, nodes: vm.mesh_info.n_nodes }),
+            'info');
+        html += badge(gFmtTpl(GL('badgeVm',
+            'PEAK von MISES {v} MPa (Gauss points)'),
+            { v: fmt(vm.scalars.von_mises_gauss_max_mpa, 3) }), 'info');
+        html += badge(gFmtTpl(GL('badgeStrain',
+            'MAX BORE STRAIN {v}% of {cap}% capability'),
+            { v: fmt(vm.scalars.max_bore_strain_pct, 2),
+              cap: fmt(vm.scalars.strain_capability_pct, 1) }), 'info');
+        if (vm.scalars.strain_margin !== null) {
+            // Eşikler motorun kendi risk sınıflamasıyla aynı
+            // (solid_rocket_engine._calculate_grain_structural: >=2 Low,
+            // >=1 Medium, <1 High).
+            const m = vm.scalars.strain_margin;
+            const kind = m < 1 ? 'err' : (m < 2 ? 'warn' : 'ok');
+            html += badge(gFmtTpl(GL('badgeMargin',
+                'STRAIN MARGIN {v} (capability / peak strain)'),
+                { v: fmt(m, 2) }), kind);
+        } else {
+            html += badge(GL('badgeMarginMissing',
+                'STRAIN MARGIN NOT PUBLISHED (no strain capability record)'),
+                'dim');
+        }
+        const conv = vm.convergence;
+        if (conv) {
+            html += badge(conv.converged
+                ? gFmtTpl(GL('badgeConverged', 'CONVERGED in {n} rounds to {pct}%'),
+                          { n: conv.rounds, pct: fmt(conv.final_rel_change_pct, 2) })
+                : gFmtTpl(GL('badgeNotConverged',
+                    'NOT CONVERGED after {n} rounds (last change {pct}%)'),
+                          { n: conv.rounds, pct: fmt(conv.final_rel_change_pct, 2) }),
+                conv.converged ? 'ok' : 'warn');
+        }
+        if (vm.flags) {
+            html += badge(gFmtTpl(GL('badgeQuality',
+                'MESH QUALITY {bad}/{total} elements outside the acceptable range'),
+                { bad: vm.flags.counts.any, total: vm.flags.counts.total }),
+                vm.flags.counts.any ? 'warn' : 'ok');
+        }
+        el.innerHTML = html;
+    }
+
+    function grainRenderBasis(els, vm) {
+        if (!els.basis || !els.basisText) return;
+        const parts = [];
+        const g = vm.basis.inputs || {};
+        if (g.geometri && g.geometri.kaynak) parts.push(SRV(g.geometri.kaynak));
+        if (g.geometri && g.geometri.kesit) parts.push(SRV(g.geometri.kesit));
+        if (g.malzeme && g.malzeme.kaynak) parts.push(SRV(g.malzeme.kaynak));
+        if (g.analitik_blok_iliskisi) parts.push(SRV(g.analitik_blok_iliskisi));
+        if (vm.basis.bore) parts.push(SRV(vm.basis.bore));
+        if (vm.basis.quality) parts.push(SRV(vm.basis.quality));
+        parts.push(GL('unitNote', 'Units: the solver returns Pa and unit '
+            + 'strain; the panel only divides by 1e6 to plot MPa and '
+            + 'multiplies strain by 100 to plot percent. No smoothing, no '
+            + 'resampling, no rescaling of any field is applied. The section '
+            + 'axes are drawn to equal scale.'));
+        if (vm.limits && vm.limits.clamped) {
+            parts.push(gFmtTpl(GL('limitNote',
+                'Refinement was capped at {allowed} of {requested} rounds to '
+                + 'keep the mesh within {max} elements.'),
+                { max: vm.limits.max_elems,
+                  allowed: vm.limits.rounds_allowed,
+                  requested: vm.limits.rounds_requested }));
+        }
+        let html = parts.map(function (p) {
+            return `<p style="margin:0 0 8px;">${esc(p)}</p>`;
+        }).join('');
+        if (vm.warnings && vm.warnings.length) {
+            html += `<p style="margin:8px 0 4px; color:${MISSING_COLOR};">`
+                + esc(gFmtTpl(GL('inputWarnCount',
+                    '{n} input warnings were declared by the motor solver:'),
+                    { n: vm.warnings.length })) + '</p>';
+            html += '<ul style="margin:0 0 0 18px;">'
+                + vm.warnings.map(function (w) {
+                    const kod = (w && w.code) ? w.code : '';
+                    const metin = (window.I18N && window.I18N.tf && kod)
+                        ? window.I18N.tf(kod, (w && w.params) || {}, kod)
+                        : kod;
+                    return `<li style="margin:4px 0;">${esc(metin)}</li>`;
+                }).join('') + '</ul>';
+        }
+        if (vm.not_modelled && vm.not_modelled.length) {
+            html += `<p style="margin:8px 0 4px; color:${MISSING_COLOR};"
+                data-decl-count="${vm.not_modelled.length}">${esc(gFmtTpl(GL(
+                'notModelledCount',
+                '{n} physics items are NOT modelled in this grain run:'),
+                { n: vm.not_modelled.length }))}</p>`;
+            html += '<ul style="margin:0 0 0 18px;">'
+                + vm.not_modelled.map(function (t) {
+                    return `<li style="margin:4px 0;">${esc(SRV(t))}</li>`;
+                }).join('') + '</ul>';
+        }
+        els.basisText.innerHTML = html;
+        els.basis.style.display = '';
+    }
+
+    function grainRender() {
+        gLabels = (typeof gCfg.labelsProvider === 'function')
+            ? (gCfg.labelsProvider() || {}) : {};
+        const vm = buildGrainViewModel(gLastPayload, gLastError);
+        const els = {
+            badges: document.getElementById('grainfea_badges'),
+            chip: document.getElementById('grainfea_chip'),
+            busy: document.getElementById('grainfea_busy'),
+            vm: document.getElementById('grainfea_plot_vm'),
+            bore: document.getElementById('grainfea_plot_bore'),
+            conv: document.getElementById('grainfea_plot_conv'),
+            convNote: document.getElementById('grainfea_conv_note'),
+            basis: document.getElementById('grainfea_basis'),
+            basisText: document.getElementById('grainfea_basis_text'),
+        };
+        if (!els.badges || !els.chip) return;   // panel kurulmamış
+
+        if (els.busy) {
+            // Belirsiz süreli iş: yüzde YOK, nabız var (sahte gösterge yasak).
+            els.busy.style.display = gBusy ? '' : 'none';
+            els.busy.textContent = gBusy
+                ? GL('busy', 'Running — the solver refines the section mesh '
+                    + 'until the peak stress stops changing; the duration is '
+                    + 'not known in advance.') : '';
+            if (gBusy) els.busy.setAttribute('data-indeterminate', 'true');
+        }
+
+        function gizle() {
+            ['vm', 'bore', 'conv'].forEach(function (k) {
+                if (els[k]) els[k].style.display = 'none';
+            });
+            if (els.convNote) els.convNote.innerHTML = '';
+        }
+
+        if (vm.mode !== 'ok') {
+            gizle();
+            els.badges.innerHTML = '';
+            if (els.basis) els.basis.style.display = 'none';
+            if (vm.mode === 'idle') {
+                els.chip.innerHTML = gBusy ? '' : chipHtml(
+                    GL('chipIdle', 'NOT RUN YET — press "Run grain section '
+                        + 'FEA" to solve the grain cross-section of the '
+                        + 'current result'), '');
+            } else if (vm.mode === 'not_modelled') {
+                els.chip.innerHTML = chipHtml(
+                    GL('chipNotModelled', 'NOT MODELLED — this grain section '
+                        + 'is not covered by the planar solver; nothing is '
+                        + 'drawn'),
+                    vm.reason);
+            } else if (vm.mode === 'error') {
+                els.chip.innerHTML = chipHtml(
+                    GL('chipError', 'RUN FAILED — no field is drawn'),
+                    vm.error);
+            } else {
+                els.chip.innerHTML = chipHtml(
+                    GL('chipInvalid', 'DATA INCONSISTENT — the response '
+                        + 'carries no usable mesh grid; nothing is plotted'),
+                    '');
+            }
+            return;
+        }
+
+        if (!vm.grid_consistent) {
+            gizle();
+            els.badges.innerHTML = '';
+            els.chip.innerHTML = chipHtml(
+                GL('chipGridMismatch', 'MESH INCONSISTENT — the node grid '
+                    + 'does not match the declared node count; nothing is '
+                    + 'plotted'), '');
+            return;
+        }
+
+        els.chip.innerHTML = '';
+        grainRenderBadges(els.badges, vm);
+        grainRenderBasis(els, vm);
+
+        if (vm.von_mises_mpa) {
+            els.vm.style.display = 'block';
+            try {
+                drawFigure(els.vm, grainFieldFigure(vm));
+            } catch (e) {
+                drawFigure(els.vm, grainFieldFallbackFigure(vm));
+            }
+        } else {
+            els.vm.style.display = 'none';
+        }
+
+        if (vm.bore_curve) {
+            els.bore.style.display = 'block';
+            drawFigure(els.bore, grainBoreFigure(vm));
+        } else {
+            els.bore.style.display = 'none';
+        }
+
+        const conv = vm.convergence;
+        if (conv && conv.n_elems.length >= 2) {
+            els.conv.style.display = 'block';
+            drawFigure(els.conv, grainConvergenceFigure(conv));
+        } else {
+            els.conv.style.display = 'none';
+        }
+        if (els.convNote && conv && conv.beyan) {
+            els.convNote.innerHTML = esc(SRV(conv.beyan));
+        }
+    }
+
+    function grainRun() {
+        if (gBusy) return Promise.resolve(null);
+        const params = (typeof gCfg.paramsProvider === 'function')
+            ? gCfg.paramsProvider() : null;
+        if (!params || typeof params !== 'object') {
+            gLastPayload = null;
+            gLastError = GL('noResult', 'No motor result on this page yet — '
+                + 'run the motor calculation first.');
+            grainRender();
+            return Promise.resolve(null);
+        }
+        gBusy = true;
+        gLastError = null;
+        grainRender();
+        return fetch(GRAIN_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+        }).then(function (resp) {
+            return resp.json().then(function (body) {
+                return { ok: resp.ok, body: body };
+            });
+        }).then(function (r) {
+            gBusy = false;
+            if (!r.ok || !r.body || r.body.status !== 'success') {
+                gLastPayload = null;
+                gLastError = (r.body && (r.body.detail || r.body.message
+                    || r.body.error))
+                    || GL('httpError',
+                          'The grain FEA endpoint returned an error.');
+            } else {
+                gLastPayload = r.body.fea || null;
+                gLastError = null;
+            }
+            grainRender();
+            return gLastPayload;
+        }).catch(function (e) {
+            gBusy = false;
+            gLastPayload = null;
+            gLastError = String((e && e.message) || e);
+            grainRender();
+            return null;
+        });
+    }
+
+    // Yeni motor sonucu geldi: eski kesit FEA çıktısı BAYATTIR, silinir.
+    function grainUpdate() {
+        if (gLastPayload || gLastError) {
+            gLastPayload = null;
+            gLastError = null;
+        }
+        grainRender();
+    }
+
+    function grainInit(opts) {
+        gCfg = opts || {};
+        gLabels = (typeof gCfg.labelsProvider === 'function')
+            ? (gCfg.labelsProvider() || {}) : {};
+        const anchor = document.getElementById(gCfg.anchorId || 'trajectoryPanel');
+        const host = document.createElement('div');
+        host.innerHTML = grainPanelHtml();
+        const panel = host.firstElementChild;
+        if (anchor && anchor.parentNode) {
+            anchor.parentNode.insertBefore(panel, anchor);
+        } else {
+            (document.querySelector('.results-grid') || document.body).appendChild(panel);
+        }
+
+        const runBtn = document.getElementById('grainfea_run');
+        if (runBtn) runBtn.addEventListener('click', function () { grainRun(); });
+        const meshBox = document.getElementById('grainfea_show_mesh');
+        if (meshBox) {
+            meshBox.addEventListener('change', function () {
+                gShowMesh = !!meshBox.checked;
+                grainRender();
+            });
+        }
+
+        // Hesap köprüsü: sayfanın sonuç basım işlevi sarılır (katı sayfada
+        // 'displayResults'); özgün işlev her koşulda çalışır.
+        (function () {
+            const ad = gCfg.hookName || 'displayCalculationResults';
+            const original = window[ad];
+            if (typeof original !== 'function') return;
+            window[ad] = function () {
+                const out = original.apply(this, arguments);
+                try {
+                    grainUpdate();
+                } catch (e) {
+                    console.error('Grain FEA panel update failed:', e);
+                }
+                return out;
+            };
+        })();
+
+        if (window.I18N && window.I18N.onChange) {
+            window.I18N.onChange(function () {
+                try { grainRender(); } catch (e) { /* çizim yoksa sessiz */ }
+            });
+        }
+        grainRender();
+    }
+
+    window.GrainFeaPanel = {
+        init: grainInit,
+        update: grainUpdate,
+        run: grainRun,
+        buildViewModel: buildGrainViewModel,
+        setShowMesh: function (v) { gShowMesh = !!v; grainRender(); },
+        applyPayload: function (fea, error) {
+            gLastPayload = fea || null;
+            gLastError = error || null;
+            gBusy = false;
+            grainRender();
+        },
+        get payload() { return gLastPayload; },
+    };
 })();

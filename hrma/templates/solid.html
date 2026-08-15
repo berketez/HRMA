@@ -5906,6 +5906,105 @@ Please provide:
             if (window.currentResults) prefillSixDofInputs(window.currentResults);
         });
     </script>
+    <!-- V2.7 Aşama C — Tane kesiti düzlemsel FEA paneli (GrainFeaPanel).
+         Kesit parametreleri SON HESAP SONUCUNDAN (grain_design) okunur:
+         panel formdan değil çözücünün yayımladığı değerlerden beslenir,
+         böylece FEA gerçekten hesaplanan taneyi çözer (sahte veri yasağı). -->
+    <script src="/static/js/fea_panel.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            function grainFeaParams() {
+                const r = window.currentResults;
+                if (!r || typeof r !== 'object') return null;
+                const gd = (r.grain_design && typeof r.grain_design === 'object')
+                    ? r.grain_design : {};
+                const tip = gd.grain_type || r.grain_type;
+                if (!tip) return null;
+                const p = {
+                    grain_type: tip,
+                    propellant_type: r.propellant_type,
+                    outer_diameter_mm: (gd.outer_diameter_mm != null)
+                        ? gd.outer_diameter_mm : r.chamber_diameter,
+                    core_diameter_mm: (gd.inner_diameter_mm != null)
+                        ? gd.inner_diameter_mm : r.core_diameter,
+                    chamber_pressure_bar: r.chamber_pressure,
+                    grain_length_mm: (gd.grain_length_mm != null)
+                        ? gd.grain_length_mm : r.grain_length,
+                };
+                // Kesit parametreleri: uç, motor arayüzünün KENDİ alan
+                // adlarını bekler (star_radius = uç derinliği mm).
+                if (tip === 'star') {
+                    p.star_points = gd.star_points;
+                    p.star_radius = gd.point_depth;
+                } else if (tip === 'finocyl') {
+                    p.fin_count = gd.fin_count;
+                    p.fin_width = gd.fin_width_mm;
+                    p.fin_length = gd.fin_depth_mm;
+                    p.finned_length_fraction = gd.finned_length_fraction;
+                } else if (tip === 'slotted') {
+                    p.slot_count = gd.slot_count;
+                    p.slot_width = gd.slot_width_mm;
+                    p.slot_depth = gd.slot_depth_mm;
+                }
+                Object.keys(p).forEach(function (k) {
+                    if (p[k] === null || p[k] === undefined || p[k] === '') {
+                        delete p[k];
+                    }
+                });
+                return p;
+            }
+            GrainFeaPanel.init({
+                anchorId: 'trajectoryPanel',
+                hookName: 'displayResults',
+                paramsProvider: grainFeaParams,
+                labelsProvider: function () {
+                    return {
+                        title: T('solid.fea.title', 'Grain Section FEA — Plane-Strain Stress and Bore Strain'),
+                        intro: T('solid.fea.intro', 'A 2D plane-strain finite element run on the propellant grain cross-section of THIS design.'),
+                        run: T('solid.fea.run', 'Run grain section FEA'),
+                        busy: T('solid.fea.busy', 'Running — the solver refines the section mesh until the peak stress stops changing; the duration is not known in advance.'),
+                        showMesh: T('solid.fea.show_mesh', 'Show mesh wireframe'),
+                        meshTrace: T('solid.fea.mesh_trace', 'Mesh ({n} elements)'),
+                        chartVm: T('solid.fea.chart_vm', 'von Mises stress on the grain cross-section [MPa]'),
+                        cbarVm: T('solid.fea.cbar_vm', 'von Mises [MPa]'),
+                        axisX: T('solid.fea.axis_x', 'x [m]'),
+                        axisY: T('solid.fea.axis_y', 'y [m]'),
+                        chartBore: T('solid.fea.chart_bore', 'Bore surface strain along the port (acceptance quantity)'),
+                        boreTrace: T('solid.fea.bore_trace', 'Bore fibre strain [%]'),
+                        capTrace: T('solid.fea.cap_trace', 'Strain capability [%]'),
+                        axisTheta: T('solid.fea.axis_theta', 'Station angle [deg]'),
+                        axisStrain: T('solid.fea.axis_strain', 'Strain [%]'),
+                        chartConv: T('solid.fea.chart_conv', 'Mesh convergence — peak von Mises vs element count'),
+                        convTrace: T('solid.fea.conv_trace', 'Peak von Mises (SPR nodal) [MPa]'),
+                        axisElems: T('solid.fea.axis_elems', 'Elements in mesh [-]'),
+                        axisVmConv: T('solid.fea.axis_vm_conv', 'Peak von Mises (SPR nodal) [MPa]'),
+                        badgeType: T('solid.fea.badge_type', 'SECTION'),
+                        badgeSlice: T('solid.fea.badge_slice', '1/{n} slice'),
+                        badgeMesh: T('solid.fea.badge_mesh', 'MESH {elems} elements / {nodes} nodes'),
+                        badgeVm: T('solid.fea.badge_vm', 'PEAK von MISES {v} MPa (Gauss points)'),
+                        badgeStrain: T('solid.fea.badge_strain', 'MAX BORE STRAIN {v}% of {cap}% capability'),
+                        badgeMargin: T('solid.fea.badge_margin', 'STRAIN MARGIN {v} (capability / peak strain)'),
+                        badgeMarginMissing: T('solid.fea.badge_margin_missing', 'STRAIN MARGIN NOT PUBLISHED (no strain capability record)'),
+                        badgeConverged: T('solid.fea.badge_converged', 'CONVERGED in {n} rounds to {pct}%'),
+                        badgeNotConverged: T('solid.fea.badge_not_converged', 'NOT CONVERGED after {n} rounds (last change {pct}%)'),
+                        badgeQuality: T('solid.fea.badge_quality', 'MESH QUALITY {bad}/{total} elements outside the acceptable range'),
+                        unitNote: T('solid.fea.unit_note', 'Units: the solver returns Pa and unit strain; the panel only divides by 1e6 to plot MPa and multiplies strain by 100 to plot percent.'),
+                        limitNote: T('solid.fea.limit_note', 'Refinement was capped at {allowed} of {requested} rounds to keep the mesh within {max} elements.'),
+                        inputWarnCount: T('solid.fea.input_warn_count', '{n} input warnings were declared by the motor solver:'),
+                        notModelledCount: T('solid.fea.not_modelled_count', '{n} physics items are NOT modelled in this grain run:'),
+                        chipIdle: T('solid.fea.chip_idle', 'NOT RUN YET — press "Run grain section FEA" to solve the grain cross-section of the current result'),
+                        chipNotModelled: T('solid.fea.chip_not_modelled', 'NOT MODELLED — this grain section is not covered by the planar solver; nothing is drawn'),
+                        chipError: T('solid.fea.chip_error', 'RUN FAILED — no field is drawn'),
+                        chipInvalid: T('solid.fea.chip_invalid', 'DATA INCONSISTENT — the response carries no usable mesh grid; nothing is plotted'),
+                        chipGridMismatch: T('solid.fea.chip_grid_mismatch', 'MESH INCONSISTENT — the node grid does not match the declared node count; nothing is plotted'),
+                        noResult: T('solid.fea.no_result', 'No motor result on this page yet — run the motor calculation first.'),
+                        httpError: T('solid.fea.http_error', 'The grain FEA endpoint returned an error.'),
+                        basisTitle: T('solid.fea.basis_title', 'Method / basis and what is NOT modelled (as declared by the solver)'),
+                    };
+                },
+            });
+        });
+    </script>
     <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->
     <script src="/static/js/analysis_dock.js"></script>
     <script src="/static/js/panels/structural_panel.js"></script>

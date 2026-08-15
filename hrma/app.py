@@ -7783,6 +7783,262 @@ def api_fea_thermal():
     return jsonify({'status': 'success', 'fea': sanitize_json_values(fea)})
 
 
+# ===========================================================================
+# V2.7 Aşama C — KATI TANE KESİTİ DÜZLEMSEL FEA UCU
+# ---------------------------------------------------------------------------
+# Kamara/lüle cidarı eksenel simetriktir ve /api/fea/structural onu görür;
+# katı yakıt tanesi kesitleri (star/finocyl/slotted) eksenel simetrik
+# DEĞİLDİR (docs/mimari/yol-haritasi.md §5). Bu uç, kesit geometrisini
+# MOTORUN KENDİ port fonksiyonlarından kuran köprüyü
+# (hrma.fea.bridge.run_planar_grain_fea) sürer ve ÇİZİLEBİLİR ham veriyi
+# döner (grafik üretmez, karar vermez). Girdi beyaz listesi + eksik zorunlu
+# alanda 422 (gimbal/termal-koruma ucu sözleşmesi); Host kapısı tüm
+# rotalarda olduğu gibi before_request'te çalışır.
+# ===========================================================================
+
+#: İstek gövdesi beyaz listesi. Geometri alan adları motor arayüzünün
+#: KENDİ override anahtarlarıdır (bridge.PLANAR_GRAIN_GEOMETRY_KEYS —
+#: çeviri katmanı yok; sayılar mm, adetler tam sayı, oran birimsiz).
+#: Beyaz liste dışı anahtarlar termal-koruma ucundaki desenle SESSİZCE
+#: düşer (TypeError 500'e düşmesin).
+_PLANAR_GRAIN_KEYS = (
+    'grain_type', 'propellant_type', 'outer_diameter_mm', 'core_diameter_mm',
+    'chamber_pressure_bar', 'grain_length_mm',
+    'star_points', 'star_radius',
+    'fin_count', 'fin_width', 'fin_length', 'finned_length_fraction',
+    'slot_count', 'slot_width', 'slot_depth',
+)
+
+#: ZORUNLU alanlar — ``run_planar_grain_fea`` imzasındaki varsayılansız
+#: argümanların birebir karşılığı (kesit + malzeme + yük; hiçbirinin
+#: uydurulabilir varsayılanı yoktur).
+_PLANAR_GRAIN_REQUIRED = (
+    'grain_type', 'propellant_type', 'outer_diameter_mm', 'core_diameter_mm',
+    'chamber_pressure_bar',
+)
+
+
+@app.route('/api/fea/planar-grain', methods=['POST'])
+def api_fea_planar_grain():
+    """Katı tane kesiti için uçtan uca 2B düzlemsel FEA koşusu.
+
+    Girdi (JSON): ``_PLANAR_GRAIN_KEYS`` beyaz listesi. Kesit çokgeni
+    SUNUCUDA motorun kendi port fonksiyonlarıyla kurulur (tek-kaynak
+    kuralı); istemci geometri üretmez.
+
+    Çıktı: mesh (düğüm/eleman/indeks ızgarası), von Mises ve maks asal
+    gerilme düğüm alanları, port yüzeyi lif gerinimi + kopma uzaması
+    karşılaştırması (kabul ölçütü NASA SP-8073 gereği GERİNİM), eleman
+    kalite ölçütleri, yakınsama geçmişi ve beyan zinciri.
+
+    Dürüstlük sözleşmesi:
+      * Eksik zorunlu alan   -> 422 + ``missing_fields`` (makine-okur).
+      * Geçersiz sayı/geometri (negatif web, port >= dış çap, tanınmayan
+        tip) -> 400 + modülün kendi gerekçesi (metin yumuşatılmaz).
+      * Desteklenmeyen ama meşru tip (wagon_wheel, end_burner) -> HTTP 200
+        + köprünün beyanlı NOT_MODELLED paketi (uydurma alan yok).
+      * Çözücü hatası -> 500 (boş ama 'başarılı' yanıt üretilmez).
+      * Uzun koşu riski -> eleman sayısı FEA_MAX_ELEMS ile sınırlanır ve
+        kısıtlama 'limits' bloğunda beyan edilir.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    params = {k: data[k] for k in _PLANAR_GRAIN_KEYS
+              if data.get(k) not in (None, '')}
+
+    # --- ZORUNLU ALAN KAPISI (gimbal/termal-koruma deseni) ----------------
+    missing = [k for k in _PLANAR_GRAIN_REQUIRED if k not in params]
+    if missing:
+        return jsonify({
+            'status': 'error',
+            'error': 'incomplete_planar_grain_input',
+            'message': ('Planar grain FEA cannot run without these inputs; '
+                        'they have no default.'),
+            'missing_fields': missing,
+        }), 422
+
+    from hrma.fea import bridge as fea_bridge
+    from hrma.fea.mesh_axisym import (
+        DEFAULT_ELEMS_THROUGH_WALL,
+        MIN_ELEMS_THROUGH_WALL,
+    )
+    from hrma.fea.planar_grain import DEFAULT_N_THETA0
+    from hrma.fea.structural_axisym import (
+        DEFAULT_MAX_REFINE_ROUNDS,
+        DEFAULT_REFINE_TOL,
+        REFINE_FACTOR,
+    )
+
+    def _pozitif_int(alan, varsayilan, alt, ust):
+        try:
+            sayi = int(data.get(alan))
+        except (TypeError, ValueError):
+            return int(varsayilan)
+        return int(min(max(sayi, alt), ust))
+
+    n_theta0 = _pozitif_int('n_theta0', DEFAULT_N_THETA0, 4, 256)
+    n_radial0 = _pozitif_int('n_radial0', DEFAULT_ELEMS_THROUGH_WALL,
+                             MIN_ELEMS_THROUGH_WALL, 32)
+    rounds_istenen = _pozitif_int('max_rounds', DEFAULT_MAX_REFINE_ROUNDS,
+                                  0, 8)
+
+    # Tur kısıtlaması: n_elems(k) = n_theta0 * n_radial0 * F^(2k) <= sınır
+    # (yapısal ucun kendi bütçe deseni; mesh sessizce bozulmaz, beyan edilir).
+    rounds_izinli = 0
+    while rounds_izinli < rounds_istenen:
+        sonraki = (n_theta0 * n_radial0
+                   * REFINE_FACTOR ** (2 * (rounds_izinli + 1)))
+        if sonraki > FEA_MAX_ELEMS:
+            break
+        rounds_izinli += 1
+
+    limits = {
+        'max_elems': FEA_MAX_ELEMS,
+        'rounds_requested': rounds_istenen,
+        'rounds_allowed': rounds_izinli,
+        'refine_factor': REFINE_FACTOR,
+        'n_theta0': n_theta0,
+        'n_radial0': n_radial0,
+        'clamped': rounds_izinli < rounds_istenen,
+        '_basis': ('refinement rounds are capped so that the final element '
+                   'count stays within max_elems; the mesh is never silently '
+                   'degraded, the cap itself is reported here'),
+    }
+
+    geometri = {k: params[k]
+                for k in fea_bridge.PLANAR_GRAIN_GEOMETRY_KEYS
+                if k in params}
+    try:
+        sonuc = fea_bridge.run_planar_grain_fea(
+            grain_type=params['grain_type'],
+            propellant_type=params['propellant_type'],
+            outer_diameter_mm=params['outer_diameter_mm'],
+            core_diameter_mm=params['core_diameter_mm'],
+            chamber_pressure_bar=params['chamber_pressure_bar'],
+            grain_length_mm=params.get('grain_length_mm'),
+            geometry_overrides=geometri,
+            tol=DEFAULT_REFINE_TOL,
+            n_theta0=n_theta0,
+            n_radial0=n_radial0,
+            max_rounds=rounds_izinli,
+        )
+    except ValueError as e:
+        # Modülün geçerlilik beyanı (negatif web, tanınmayan tip, geçersiz
+        # sayı) — istemci hatasıdır, metin aynen iletilir.
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'error': 'Planar grain FEA solver failed.',
+            'detail': str(e),
+        }), 500
+
+    if sonuc.get('status') != fea_bridge.BRIDGE_STATUS_OK:
+        # Köprünün beyanlı reddi AYNEN geçer (reason / warning); hiçbir
+        # alan eklenmez, hiçbir sayı uydurulmaz.
+        payload = sanitize_json_values(sonuc)
+        payload['limits'] = limits
+        return jsonify({'status': 'success', 'fea': payload}), 200
+
+    mesh = sonuc['mesh']
+    ref = sonuc['refinement']
+    res = sonuc['result']
+    bore = sonuc['bore']
+
+    aspect, scaled_jacobian = _fea_quad_quality(mesh['nodes'], mesh['elems'])
+    aspect_bayrak = ~(aspect <= FEA_QUALITY_ASPECT_MAX)
+    jacobian_bayrak = ~(scaled_jacobian >= FEA_QUALITY_SCALED_JACOBIAN_MIN)
+
+    quality = {
+        '_source': 'hrma.app._fea_quad_quality',
+        '_basis': ('Verdict / CUBIT quadrilateral metric definitions (see '
+                   '/api/fea/structural for the citation, SAND2007-1751); '
+                   'elements outside the ranges are flagged for review, the '
+                   'flag is a mesh-quality warning, not a failed result. '
+                   'Sharp port corners (star tips, slot roots) concentrate '
+                   'distorted elements by construction; the convergence '
+                   'declaration is what decides how to read the peak value.'),
+        'aspect_ratio': aspect,
+        'scaled_jacobian': scaled_jacobian,
+        'thresholds': {
+            'aspect_ratio_max': FEA_QUALITY_ASPECT_MAX,
+            'scaled_jacobian_min': FEA_QUALITY_SCALED_JACOBIAN_MIN,
+        },
+        'counts': {
+            'n_elems': int(mesh['n_elems']),
+            'aspect_ratio_flagged': int(np.count_nonzero(aspect_bayrak)),
+            'scaled_jacobian_flagged': int(np.count_nonzero(jacobian_bayrak)),
+            'flagged': int(np.count_nonzero(aspect_bayrak | jacobian_bayrak)),
+        },
+        'worst': {
+            'aspect_ratio_max': float(np.max(aspect)) if aspect.size else None,
+            'scaled_jacobian_min': (float(np.min(scaled_jacobian))
+                                    if scaled_jacobian.size else None),
+        },
+    }
+
+    fea = {
+        'status': fea_bridge.BRIDGE_STATUS_OK,
+        'grain_type': sonuc.get('grain_type'),
+        'propellant_type': sonuc.get('propellant_type'),
+        'symmetry_fraction': sonuc.get('symmetry_fraction'),
+        'mesh': {
+            'nodes': mesh['nodes'],
+            'elems': mesh['elems'],
+            'node_index_grid': mesh['node_index_grid'],
+            'n_nodes': int(mesh['n_nodes']),
+            'n_elems': int(mesh['n_elems']),
+            'n_theta': int(mesh['n_theta']),
+            'n_radial': int(mesh['n_radial']),
+            'meta': mesh.get('meta'),
+            'coordinate_units': 'm',
+            'node_order': ('node index = node_index_grid[i][j]; i is the '
+                           'circumferential station (0..n_theta, increasing '
+                           'angle), j is the through-web layer (0 port '
+                           'surface, n_radial outer/case surface)'),
+        },
+        'fields': {
+            'von_mises_pa': sonuc['von_mises_nodal'],
+            'max_principal_pa': sonuc['max_principal_nodal'],
+            '_basis': ('nodal fields as returned by the solver (stress '
+                       'recovery method declared in meta.cozucu); no safety '
+                       'factor from yield is published - the solid grain '
+                       'acceptance criterion is STRAIN (NASA SP-8073), see '
+                       'the bore block'),
+        },
+        'bore': {
+            'node_ids': bore['node_ids'],
+            'strain_nodal': bore['strain_nodal'],
+            'max_strain': bore['max_strain'],
+            'strain_capability': bore['strain_capability'],
+            'strain_margin': bore['strain_margin'],
+            '_basis': bore.get('_basis'),
+        },
+        'scalars': {
+            'von_mises_gauss_max_pa': sonuc['von_mises_gauss_max'],
+            'von_mises_nodal_max_pa': res.max_von_mises_nodal,
+            'max_bore_strain': bore['max_strain'],
+            'strain_capability': bore['strain_capability'],
+            'strain_margin': bore['strain_margin'],
+            'bore_pressure_pa': sonuc['inputs']['yuk']['Pc_Pa'],
+            'grain_modulus_pa': sonuc['inputs']['malzeme']['E_Pa'],
+            'grain_poisson_ratio': sonuc['inputs']['malzeme']['nu'],
+        },
+        'quality': quality,
+        'convergence': sonuc['convergence'],
+        'warnings': sonuc.get('warnings', []),
+        'limits': limits,
+        'meta': sonuc['meta'],
+    }
+    return jsonify({'status': 'success', 'fea': sanitize_json_values(fea)})
+
+
 @app.route('/api/chemical-database', methods=['GET'])
 def get_chemical_database():
     """Get chemical species database information"""

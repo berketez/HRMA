@@ -13,10 +13,17 @@ Planlanan modül yerleşimi (yol haritasıyla birebir):
                           sürücüsü [mevcut]
     thermal_axisym.py     Eksenel simetrik GEÇİCİ ısı iletimi çözücüsü
                           (geri Euler, Bartz konveksiyon BC, otomatik zaman
-                          adımı) [BU DALGA — mevcut; V2.7 Aşama A]
-    planar_grain.py       Katı yakıt tanesi kesiti için 2B düzlemsel kip
-                          (star/finocyl eksenel simetrik değildir)
-                          [V2.7 Aşama C — henüz yok]
+                          adımı) [mevcut; V2.7 Aşama A]
+    mesh_planar.py        Tane kesiti (port → dış yarıçap) 2B düzlemsel
+                          yapısal quad mesh + poligon r(θ) örnekleyicisi
+                          [mevcut; V2.7 Aşama C]
+    planar_grain.py       Katı yakıt tanesi kesiti için 2B DÜZLEM ŞEKİL
+                          DEĞİŞTİRME çözücüsü + yakınsama sürücüsü
+                          (star/finocyl/slotted eksenel simetrik değildir;
+                          B-bar ile ν→0.5 kilitlenme önlemi)
+                          [BU DALGA — mevcut; V2.7 Aşama C; doğrulama:
+                          tests/test_fea_planar_grain.py — Lamé + simetri
+                          + yoğunlaşma yönü bekçileri]
 
 MODULE_STATUS sözlüğü bu beyanın makine tarafından okunur halidir; UI veya
 köprü katmanı "termal sonuç" göstermeye kalkmadan önce buradan durumu
@@ -58,15 +65,31 @@ from hrma.fea.thermal_axisym import (
     solve_transient,
     solve_transient_auto,
 )
+from hrma.fea.mesh_planar import (
+    PlanarSectionMesh,
+    build_grain_section_mesh,
+    port_radius_sampler_from_polygon,
+)
+from hrma.fea.planar_grain import (
+    DEFAULT_N_THETA0,
+    GrainRefinementResult,
+    PlanarGrainResult,
+    elasticity_matrix_plane_strain,
+    max_principal_plane_strain,
+    solve_grain_with_refinement,
+    solve_plane_strain_section,
+    von_mises_plane_strain,
+)
 
 # Çözücü kiplerinin dürüst durum beyanı (bkz. modül docstring'i).
 MODULE_STATUS = {
     "mesh_axisym": "IMPLEMENTED",
     "structural_axisym": "IMPLEMENTED",
-    "thermal_axisym": "IMPLEMENTED",       # bu dalga (V2.7 Aşama A) —
-                                           # doğrulama: tests/fea/
-                                           # test_termal_dogrulama.py
-    "planar_grain": "NOT_IMPLEMENTED",     # V2.7 Aşama C
+    "thermal_axisym": "IMPLEMENTED",       # V2.7 Aşama A — doğrulama:
+                                           # tests/fea/test_termal_dogrulama.py
+    "planar_grain": "IMPLEMENTED",         # bu dalga (V2.7 Aşama C) —
+                                           # doğrulama: tests/
+                                           # test_fea_planar_grain.py
 }
 
 __all__ = [
@@ -98,5 +121,16 @@ __all__ = [
     "STEFAN_BOLTZMANN_W_M2K4",
     "solve_transient",
     "solve_transient_auto",
+    "PlanarSectionMesh",
+    "build_grain_section_mesh",
+    "port_radius_sampler_from_polygon",
+    "DEFAULT_N_THETA0",
+    "GrainRefinementResult",
+    "PlanarGrainResult",
+    "elasticity_matrix_plane_strain",
+    "max_principal_plane_strain",
+    "solve_grain_with_refinement",
+    "solve_plane_strain_section",
+    "von_mises_plane_strain",
     "MODULE_STATUS",
 ]
