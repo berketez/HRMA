@@ -421,7 +421,16 @@ class TestPressurantContract:
 
     def test_blowdown_hand_calc(self, press_bd):
         """P_final = P0·(V_u0/(V_u0+V_p))^n; B = P0/P_final;
-        T_final = T0·(P_final/P0)^((n−1)/n); trapped m = P0·V_u0/(R·T0)."""
+        T_final = T0·(P_final/P0)^((n−1)/n); trapped m = P0·V_u0/(Z0·R·T0).
+
+        GÜNCELLEME (15 Ağu 2026, C5 `9e1410b`): hapsolmuş kütle el hesabına
+        Z0 (gerçek gaz sıkıştırılabilirliği) girdi — blowdown dalı ideal
+        gazdı ve 300 bar sınıfında kütleyi %14 fazla sayıyordu. Z0 yanıtın
+        kendi beyan alanından okunur ve el hesabı m = P0·V_u0/(Z0·R·T0)
+        ÖZDEŞLİĞİNİ doğrular; Z0'ın fiziksel bandı ve mutasyon denetimi
+        `test_pressurant.py::TestBlowdownRealGas`'ta ayrıca kilitli
+        (CoolProp yoksa Z0 = 1 beyanla döner, özdeşlik yine tutar).
+        """
         p0 = PRESS_BLOWDOWN_INPUT['initial_pressure'] * 1e5
         vu0 = PRESS_BLOWDOWN_INPUT['initial_ullage_volume']
         vp = PRESS_BLOWDOWN_INPUT['propellant_volume']
@@ -435,8 +444,13 @@ class TestPressurantContract:
         assert press_bd['final_temperature_K'] == pytest.approx(tf_hand,
                                                                 rel=1e-9)
         R = press_bd['R_specific']
+        z0 = press_bd['compressibility_factor_initial']
+        assert 0.9 <= z0 <= 1.25, 'Z0 fiziksel bandın dışında'
         assert press_bd['gas_mass_kg'] == pytest.approx(
-            p0 * vu0 / (R * t0), rel=1e-9)
+            p0 * vu0 / (z0 * R * t0), rel=1e-9)
+        # İdeal-gaz kütlesi ayrı adla beyan edilir; ikisi Z0 ile bağlıdır.
+        assert press_bd['gas_mass_ideal_gas_kg'] == pytest.approx(
+            press_bd['gas_mass_kg'] * z0, rel=1e-9)
 
     def test_bad_mode_400(self, client):
         r = client.post('/api/pressurant-sizing',
