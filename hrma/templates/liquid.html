@@ -1411,6 +1411,52 @@
                     </label>
                     <input type="number" id="actuator_response" value="50" step="10" min="1" max="1000">
                 </div>
+                <!-- Gimbal montaj yükü girdileri (C3 bağlaması, v2.6.27).
+                     Bu dört alan /calculate_liquid'e GİTMEZ; sonuç bölümündeki
+                     gimbal panelinin /api/gimbal-mount çağrısını besler.
+                     BİLEREK boş varsayılanlı: sayfa sayı DAYATMAZ (2,3x
+                     kusurunun dersi) — boş alan payload'a konmaz ve panel
+                     eksik girdiyi BEYAN eder. -->
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.gimbal_actuator_arm">Gimbal Actuator Arm</span> <span class="unit">(m)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.perpendicular_distance_from_the_gimbal_pivot">Perpendicular distance from the gimbal pivot axis to the actuator line of action (moment arm). Sets the actuator stroke and the force needed to react a given moment. Leave blank if unknown - no default is assumed and the load chain is not computed.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="gimbal_actuator_arm" step="0.05" min="0" placeholder="e.g. 0.5 - blank: not analysed" data-i18n-placeholder="liq.attr.gimbal_blank_not_analysed">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.mount_ring_offset">Mount Ring Offset</span> <span class="unit">(m)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.axial_distance_from_the_gimbal_pivot">Axial distance from the gimbal pivot to the mount ring plane. The side force acting over this arm bends the ring. Leave blank for a ring in the pivot plane (h = 0), where the bending moment is zero by construction.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="gimbal_ring_offset" step="0.05" min="0" placeholder="e.g. 0.3 - blank: ring at pivot (h = 0)" data-i18n-placeholder="liq.attr.gimbal_blank_pivot_plane">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.mount_bolt_circle_diameter">Mount Bolt Circle Diameter</span> <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.diameter_of_the_bolt_circle_carrying">Diameter of the bolt circle carrying the engine on the mount ring. Together with the bolt count it converts the ring moment into a per-bolt load. Leave blank to skip the per-bolt loads.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="gimbal_bolt_circle" step="10" min="0" placeholder="e.g. 600 - blank: bolt loads skipped" data-i18n-placeholder="liq.attr.gimbal_blank_no_bolt_loads">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.mount_bolt_count">Mount Bolt Count</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.number_of_equally_spaced_bolts_on">Number of equally spaced bolts on the bolt circle. The bolt-circle formula needs at least 3; fewer are rejected rather than extrapolated. Leave blank to skip the per-bolt loads.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="gimbal_bolt_count" step="1" min="3" placeholder="e.g. 12 - min 3, blank: bolt loads skipped" data-i18n-placeholder="liq.attr.gimbal_blank_min_3">
+                </div>
                 <div class="form-group">
                     <label>
                         <span data-i18n="liq.ui.expected_engine_life">Expected Engine Life</span> <span class="unit" data-i18n="liq.ui.unit_cycles">(cycles)</span>
@@ -1616,6 +1662,17 @@
             <div id="warningsPanel" class="panel" style="display: none;">
                 <h2 data-i18n="liq.ui.warnings">Warnings</h2>
                 <div id="warningsList"></div>
+            </div>
+
+            <!-- Gimbal montaj yükleri (C3 bağlaması, v2.6.27). Kaynak:
+                 /api/gimbal-mount (hrma/analysis/gimbal_mount.py). Kullanıcı
+                 gimbal montaj seçtiyse mevcut çözüm itkisi + form
+                 girdileriyle yük zinciri hesaplanır; sabit montajda
+                 NOT_APPLICABLE beyanı basılır. Eksik girdide sayı
+                 UYDURULMAZ, eksikler beyan edilir (422 sözleşmesi). -->
+            <div id="gimbalPanel" class="panel" style="display: none;">
+                <h2 data-i18n="liq.ui.gimbal_mount_loads">Gimbal Mount Loads</h2>
+                <div id="gimbalPanelBody"></div>
             </div>
 
             <!-- Motor Tasarımı (hibrit sayfası paritesi) -->
@@ -2201,6 +2258,10 @@
             // Uyarı paneli (backend uyarı üretirse görünür, üretmezse gizli)
             displayLiquidWarnings(results);
 
+            // Gimbal montaj yükleri (C3 bağlaması) — /api/gimbal-mount
+            // paneli. Async: sonuç geldiğinde kendi gövdesini doldurur.
+            displayGimbalMount(results);
+
             // Performans metrikleri — hd-metric HUD kartları
             // (app.js displayPerformanceMetrics deseni; HRMAHud yoksa düz metin)
             const metricsDiv = document.getElementById('performanceMetrics');
@@ -2588,6 +2649,11 @@
             document.getElementById('safety_factor').value = '2.5';
             document.getElementById('engine_mount').value = 'gimbal_2axis';
             document.getElementById('gimbal_range').value = '8';
+            // Gimbal yük girdileri BİLEREK boşa döner (varsayılan dayatılmaz)
+            document.getElementById('gimbal_actuator_arm').value = '';
+            document.getElementById('gimbal_ring_offset').value = '';
+            document.getElementById('gimbal_bolt_circle').value = '';
+            document.getElementById('gimbal_bolt_count').value = '';
             document.getElementById('actuator_response').value = '50';
             document.getElementById('engine_life_cycles').value = '10';
             document.getElementById('vibration_environment').value = 'launch_high';
@@ -6135,11 +6201,205 @@ Please provide:
                 : head;
         }
 
+        // ==================================================================
+        // GİMBAL MONTAJ YÜKLERİ PANELİ (C3 bağlaması, v2.6.27)
+        // /api/gimbal-mount ucunu mevcut çözüm itkisi + form girdileriyle
+        // çağırır (hrma/analysis/gimbal_mount.py). İlkeler:
+        //   1) SAYI UYDURULMAZ — boş alan payload'a hiç konmaz; eksik
+        //      zorunlu girdi ucun 422 sözleşmesiyle BEYAN edilir.
+        //   2) Sabit montajda model uygulanmaz: NOT_APPLICABLE beyanı.
+        //   3) Modülün validity/warnings beyanları AYNEN basılır (model
+        //      çıktısıdır); sıfır moment bütçesinde "0 N aktüatör" satırı
+        //      basılmaz, modülün "bu bir tasarım yükü değil" beyanı basılır.
+        // ==================================================================
+        function gimbalEsc(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Boş/sayı-olmayan alan null döner — payload'a hiç konmaz
+        // (sayfa varsayılan dayatmaz; 2,3x kusurunun dersi).
+        function gimbalFieldValue(id) {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            const raw = String(el.value).trim();
+            if (raw === '') return null;
+            const v = parseFloat(raw);
+            return Number.isFinite(v) ? v : null;
+        }
+
+        function gimbalRow(label, value) {
+            return '<tr><td>' + label + '</td>'
+                + '<td style="text-align:right;">' + value + '</td></tr>';
+        }
+
+        function renderGimbalResult(d, ringOffsetGiven) {
+            const kN = function (v) { return hrmaFmt(v / 1000, 2, 'kN'); };
+            let rows = '';
+            const th = d.thrust || {};
+            rows += gimbalRow(T('liq.js.gimbal_axial_thrust', 'Axial Thrust:'), kN(th.axial_N));
+            rows += gimbalRow(T('liq.js.gimbal_side_force', 'Side Force:'), kN(th.side_N));
+            rows += gimbalRow(T('liq.js.gimbal_thrust_loss', 'Thrust Loss:'),
+                kN(th.thrust_loss_N) + ' (' + hrmaFmt(th.thrust_loss_fraction * 100, 2, '%') + ')');
+            if (d.two_axis) {
+                rows += gimbalRow(T('liq.js.gimbal_two_axis_resultant', 'Two-Axis Resultant Angle:'),
+                    hrmaFmt(d.two_axis.resultant_angle_deg, 2, 'deg'));
+            }
+            const act = d.actuator || {};
+            rows += gimbalRow(T('liq.js.gimbal_stroke', 'Actuator Stroke (one-sided, chord-arc):'),
+                hrmaFmt(act.stroke_chord_m * 1000, 1) + ' - '
+                + hrmaFmt(act.stroke_arc_m * 1000, 1, 'mm'));
+            rows += gimbalRow(T('liq.js.gimbal_full_travel', 'Actuator Full Travel (chord-arc):'),
+                hrmaFmt(act.stroke_full_travel_chord_m * 1000, 1) + ' - '
+                + hrmaFmt(act.stroke_full_travel_arc_m * 1000, 1, 'mm'));
+            const mb = d.moment_budget || {};
+            // Kuvvet satırı yalnız GERÇEK bir moment bütçesi varsa basılır.
+            // Bütçe sıfırken modül "ideal sonuç, tasarım yükü DEĞİL" beyanı
+            // üretir; o beyan aşağıda basılır — sıfırı gösterge yapmak yasak.
+            if (typeof mb.total_N_m === 'number' && mb.total_N_m > 0) {
+                rows += gimbalRow(T('liq.js.gimbal_moment_total', 'Moment Budget Total:'),
+                    hrmaFmt(mb.total_N_m / 1000, 2, 'kN·m'));
+                rows += gimbalRow(T('liq.js.gimbal_actuator_force', 'Actuator Force (quasi-static):'),
+                    kN(act.force_total_N));
+            }
+            const ring = d.mount_ring || {};
+            rows += gimbalRow(T('liq.js.gimbal_ring_axial', 'Mount Ring Axial Load:'), kN(ring.axial_N));
+            rows += gimbalRow(T('liq.js.gimbal_ring_shear', 'Mount Ring Shear Load:'), kN(ring.shear_N));
+            // Eğilme momenti yalnız kullanıcı halka mesafesi VERDİYSE
+            // satır olur; verilmediyse h=0 kabulü aşağıda beyan edilir.
+            if (ringOffsetGiven) {
+                rows += gimbalRow(T('liq.js.gimbal_ring_moment', 'Mount Ring Bending Moment:'),
+                    hrmaFmt(ring.bending_moment_N_m / 1000, 2, 'kN·m'));
+            }
+            if (d.bolts) {
+                rows += gimbalRow(T('liq.js.gimbal_bolt_moment_max', 'Max Bolt Load (from moment):'),
+                    kN(d.bolts.moment_induced_max_N));
+                rows += gimbalRow(T('liq.js.gimbal_bolt_axial_share', 'Axial Share per Bolt:'),
+                    kN(d.bolts.axial_share_per_bolt_N));
+                rows += gimbalRow(T('liq.js.gimbal_bolt_shear', 'Shear per Bolt:'),
+                    kN(d.bolts.shear_per_bolt_N));
+                rows += gimbalRow(T('liq.js.gimbal_bolt_tension_tensile', 'Max Bolt Tension (axial tensile):'),
+                    kN(d.bolts.max_tension_if_axial_is_tensile_N));
+                rows += gimbalRow(T('liq.js.gimbal_bolt_tension_compressive', 'Max Bolt Tension (axial compressive):'),
+                    kN(d.bolts.max_tension_if_axial_is_compressive_N));
+            }
+            let html = '<table class="spec-table" style="width:100%;">' + rows + '</table>';
+
+            // Beyanlar: modülün validity/warnings listeleri aynen basılır
+            // (model çıktısı, çevrilmez) + halka düzlemi (h = 0) notu.
+            let dec = '';
+            if (!ringOffsetGiven) {
+                dec += '<li>' + T('liq.js.gimbal_ring_h0_note',
+                    'Mount Ring Offset was left blank, so the ring section is '
+                    + 'taken in the gimbal pivot plane (h = 0) and the ring '
+                    + 'bending moment is zero by construction - supply the '
+                    + 'offset to evaluate it.') + '</li>';
+            }
+            (d.validity || []).forEach(function (v) {
+                if (v && v.message) { dec += '<li>' + gimbalEsc(v.message) + '</li>'; }
+            });
+            (d.warnings || []).forEach(function (w) {
+                dec += '<li>' + gimbalEsc(w) + '</li>';
+            });
+            if (dec) {
+                html += '<h3 style="margin-top:14px; font-size:14px;">'
+                    + T('liq.js.gimbal_declarations', 'Declarations') + '</h3>'
+                    + '<ul style="font-size:12px; color:#7d97a5; line-height:1.5; padding-left:18px;">'
+                    + dec + '</ul>';
+            }
+            return html;
+        }
+
+        async function displayGimbalMount(results) {
+            const panel = document.getElementById('gimbalPanel');
+            const body = document.getElementById('gimbalPanelBody');
+            if (!panel || !body) return;
+            const mountEl = document.getElementById('engine_mount');
+            const mount = mountEl ? mountEl.value : '';
+            panel.style.display = 'block';
+
+            // Sabit montaj / esnek mafsal: gimbal pivotu yok — model
+            // UYGULANMAZ; hesap yapılmadığı açıkça beyan edilir.
+            if (mount !== 'gimbal_2axis' && mount !== 'gimbal_1axis') {
+                body.innerHTML = '<p style="font-size:13px; color:#7d97a5;">'
+                    + TF('liq.js.gimbal_not_applicable', { mount: mount },
+                        'NOT_APPLICABLE: engine mount "{mount}" has no gimbal pivot, so the gimbal mount load model is not applied.')
+                    + '</p>';
+                return;
+            }
+
+            const cr = results || {};
+            const payload = {};
+            // Çözülmüş motor itkisi [N] — UYDURULMAZ; yoksa alan payload'a
+            // konmaz ve ucun 422 sözleşmesi eksikliği beyan eder.
+            if (typeof cr.thrust === 'number' && isFinite(cr.thrust) && cr.thrust > 0) {
+                payload.thrust_N = cr.thrust;
+            }
+            const angle = gimbalFieldValue('gimbal_range');
+            if (angle !== null) { payload.gimbal_angle_deg = angle; }
+            const arm = gimbalFieldValue('gimbal_actuator_arm');
+            if (arm !== null) { payload.actuator_arm_m = arm; }
+            const ringOffset = gimbalFieldValue('gimbal_ring_offset');
+            if (ringOffset !== null) { payload.ring_offset_m = ringOffset; }
+            const boltCircleMm = gimbalFieldValue('gimbal_bolt_circle');
+            if (boltCircleMm !== null && boltCircleMm > 0) {
+                payload.bolt_circle_diameter_m = boltCircleMm / 1000;
+            }
+            const boltCount = gimbalFieldValue('gimbal_bolt_count');
+            if (boltCount !== null) { payload.bolt_count = boltCount; }
+            // İki eksenli gimbalde kullanıcının ± aralığı iki eksene birden
+            // komuta edilir; modül bileşke köşe açısını hesaplar ve yüklerin
+            // TEK eksen üzerinden olduğunu kendi beyanıyla söyler.
+            if (mount === 'gimbal_2axis' && angle !== null) {
+                payload.yaw_angle_deg = angle;
+            }
+
+            body.innerHTML = '<p style="font-size:13px; color:#7d97a5;">'
+                + T('liq.js.gimbal_computing', 'Computing gimbal mount loads…') + '</p>';
+            try {
+                const resp = await fetch('/api/gimbal-mount', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const d = await resp.json();
+                if (resp.status === 422 && Array.isArray(d.missing_fields)) {
+                    // Eksik girdi BEYANI — gösterge yok, uydurma sayı yok.
+                    body.innerHTML = '<p style="font-size:13px; color:#ff8c33;">'
+                        + T('liq.js.gimbal_missing_inputs',
+                            'Gimbal loads were not computed - these inputs are missing and no default is assumed:')
+                        + ' ' + d.missing_fields.map(gimbalEsc).join(', ') + '</p>';
+                    return;
+                }
+                if (!resp.ok || d.error) {
+                    throw new Error(d.message || d.error || ('HTTP ' + resp.status));
+                }
+                body.innerHTML = renderGimbalResult(d, ringOffset !== null);
+            } catch (e) {
+                body.innerHTML = '<p style="font-size:13px; color:#ff7a85;">'
+                    + T('liq.js.gimbal_error', 'Gimbal mount analysis failed:')
+                    + ' ' + gimbalEsc(e.message) + '</p>';
+            }
+        }
+
         // Initialize
         updatePropellantPreview();
         markUnwiredInputs();
         markExportOnlyInputs();
         checkDatabaseStatus();
+
+        // Gimbal girdileri değişince panel tazelenir — ama yalnız bir hesap
+        // sonucu VARSA (çözülmüş itki olmadan panel sayı basmaz).
+        ['engine_mount', 'gimbal_range', 'gimbal_actuator_arm',
+         'gimbal_ring_offset', 'gimbal_bolt_circle', 'gimbal_bolt_count'
+        ].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('change', function () {
+                    if (window.currentResults) { displayGimbalMount(window.currentResults); }
+                });
+            }
+        });
     </script>
     
     <!-- Include Plotly for 3D visualization -->

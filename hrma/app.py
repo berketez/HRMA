@@ -2731,6 +2731,74 @@ def thermal_protection_analysis():
         return jsonify({'error': str(e)}), 500
 
 
+# Gimbal montajı — parametre beyaz listesi (C3 bağlaması, v2.6.27).
+# Anahtar adları ``analyze_gimbal_mount`` imzasıyla BİREBİR aynıdır
+# (hrma/analysis/gimbal_mount.py; tests/test_gimbal_baglama.py imzayla
+# eşitliği inspect ile kilitler). Beyaz liste dışı anahtarlar termal-koruma
+# ucundaki desenle SESSİZCE düşer (ölçüldü: /api/thermal-protection fazladan
+# anahtarı 200 ile yok sayar; TypeError 500'e düşmesin diye).
+_GIMBAL_KEYS = (
+    'thrust_N', 'gimbal_angle_deg', 'actuator_arm_m', 'ring_offset_m',
+    'thrust_offset_m', 'duct_torsional_stiffness_N_m_rad',
+    'bearing_friction_moment_N_m', 'engine_inertia_kg_m2',
+    'slew_acceleration_deg_s2', 'slew_rate_deg_s', 'slew_reversal_time_s',
+    'actuators_per_axis', 'bolt_circle_diameter_m', 'bolt_count',
+    'yaw_angle_deg',
+)
+
+#: ZORUNLU alanlar — ``analyze_gimbal_mount`` imzasındaki varsayılansız
+#: argümanların birebir karşılığı. Ölçüldü (``inspect.signature`` ile):
+#:   analyze_gimbal_mount -> ['thrust_N', 'gimbal_angle_deg',
+#:                            'actuator_arm_m']
+_GIMBAL_REQUIRED = ('thrust_N', 'gimbal_angle_deg', 'actuator_arm_m')
+
+
+@app.route('/api/gimbal-mount', methods=['POST'])
+def gimbal_mount_analysis():
+    """Gimbal montaj yük zinciri: itki bileşenleri + aktüatör + halka + cıvata.
+
+    Girdi (JSON): ``_GIMBAL_KEYS`` beyaz listesindeki alanlar — şema için
+    hrma/analysis/gimbal_mount.py docstring'lerine bakınız. Boş dize ve
+    None gönderilen alan YOK sayılır (panel boş alanı payload'a koymaz;
+    burada ikinci savunma hattı).
+
+    Yanıt 200: ``analyze_gimbal_mount`` sözlüğü (validity/warnings/
+    not_modelled beyanları aynen taşınır — panel bunları basar, sayı
+    uydurmaz). Eksik zorunlu alanda 422 + ``missing_fields`` (termal-koruma
+    ucunun sözleşmesi). Modülün ValueError'ı (ör. 45 derece üstü açı,
+    3'ten az cıvata) 400 + makine-okur mesajla döner; geçerlilik beyanının
+    İÇERİĞİ korunur (metin aynen iletilir, yumuşatılmaz).
+    """
+    try:
+        data = request.json or {}
+        params = {k: data[k] for k in _GIMBAL_KEYS
+                  if data.get(k) not in (None, '')}
+
+        # --- ZORUNLU ALAN KAPISI (termal-koruma deseni) -------------------
+        # Eksik zorunlu argüman ham TypeError olarak 500'e sızmasın; bu bir
+        # istemci hatasıdır (422) ve makine-okur olmalıdır.
+        missing = [key for key in _GIMBAL_REQUIRED if key not in params]
+        if missing:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_gimbal_mount_input',
+                'message': ('Gimbal mount loads cannot be analysed without '
+                            'these inputs; they have no default.'),
+                'missing_fields': missing,
+            }), 422
+
+        from hrma.analysis.gimbal_mount import analyze_gimbal_mount
+        result = analyze_gimbal_mount(**params)
+        return jsonify(sanitize_json_values(result))
+    except ValueError as e:
+        # Modülün geçerlilik beyanı (açı bandı, cıvata sayısı, işaret) —
+        # metin aynen iletilir ki kullanıcı NEDENİ görsün.
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/bolted-joint', methods=['POST'])
 def bolted_joint_analysis():
     """Cıvatalı bağlantı (flanş/kapak) analizi — Shigley yöntemi.
