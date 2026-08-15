@@ -13,6 +13,13 @@ from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, LAMBDA_BELL,
                             NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT,
                             lambda_conical,
                             ISA_TABLE_TOP_M, isa_temperature, isa_pressure)
+# B5 (v2.6.27): NPSH zinciri TEK KAYNAK — mevcut NPSH tanımı, devir düşürme
+# çarpanı ve birim çevrimleri turbopompa boyutlandırma modülünden İTHAL
+# edilir; motor kendi kopyalarını TANIMLAMAZ (parametre tutarlılığı kuralı).
+# turbopump_sizing yalnız hrma.constants'a bağımlıdır, döngüsel import yoktur.
+from hrma.analysis.turbopump_sizing import (SPEED_DERATE_DEFAULT,
+                                            m3s_to_gpm, m_to_ft,
+                                            npsh_available_m)
 # v2.6.2: buradaki ``warnings.filterwarnings('ignore')`` KALDIRILDI.
 # Argümansız çağrı SÜREÇ GENELİNDE catch-all filtre kurar — kapsam bu modül
 # değil, tüm Python süreci. Yani sıvı motor modülünü içe aktarmak (app.py her
@@ -532,6 +539,28 @@ FEED_K_MAIN_VALVE = 0.15             # tam açık küresel/kelebek ana vana
 FEED_K_FILTER = 10.0                 # hat süzgeci (temiz eleman, tahmin)
 FEED_K_ELBOW = 0.30                  # 90 derece uzun yarıçaplı dirsek
 FEED_ELBOW_COUNT = 4
+# --- B5 (v2.6.27): EMME / BASMA ayrımı -------------------------------------
+# NPSH'tan yalnız pompa GİRİŞİNE kadarki (emme tarafı) kayıp düşülür. Emme
+# kalemleri: tank çıkışı (K) + hat süzgeci (K, pompayı korumak için emmede)
+# + kısa düz emme borusu. ANA VANA pompanın BASMASINDADIR (tam açık ana
+# kesme vanası enjektör öncesi hat üstünde; C2 vana bloğu onu hat SONUNDA
+# boyutlandırıyor) ve dirsekli uzun koşu da basma tarafına aittir: emme
+# borusu kavitasyonu beslememek için kısa ve DÜZ tutulur (Huzel & Huang,
+# NASA SP-125 Böl. 8 itici boruları: tank-pompa emme hattı olabildiğince
+# kısa/doğrudan; Böl. 6 pompa emme performansı). Emme boyu, toplam
+# FEED_LINE_LENGTH_DEFAULT_M = 2,5 m koşusunun bir PAYI olarak beyan edilir
+# — yerleşim varsayımıdır, araç geometrisinden ÇÖZÜLMEZ. Eski kod hattın
+# TAMAMINI (ana vana + 2,5 m + 4 dirsek) emmeden düşüyordu; ölçülen sonuç
+# 25 kN örneğinde yakıt pompası NPSH_a = -14,4 m idi (2026-08-14 teşhisi).
+FEED_SUCTION_LINE_LENGTH_M = 0.5     # tank çıkışı -> pompa girişi düz boru
+FEED_SUCTION_LINE_BASIS = (
+    'suction line length: an assumed short straight tank-to-pump run '
+    f'({FEED_SUCTION_LINE_LENGTH_M:g} m share of the '
+    f'{FEED_LINE_LENGTH_DEFAULT_M:g} m engine-to-tank layout run) - pump '
+    'suction ducts are kept short and straight to protect NPSH (Huzel & '
+    'Huang, NASA SP-125, Ch. 8 propellant ducting). The main valve and the '
+    'elbowed remainder of the run are DISCHARGE-side items and are not '
+    'charged against NPSH.')
 FEED_LINE_TARGET_VELOCITY_MS = 5.0   # hat çapı boyutlandırma hedefi (3-8 m/s)
 # Sıvı besleme hattı için tavsiye edilen ÜST hız [m/s] (Huzel & Huang Böl. 7;
 # NASA SP-125). Hat çapı standart boru ölçüsüne yuvarlandığı için gerçek hız
@@ -586,12 +615,36 @@ FEED_INSTRUMENTATION_BASIS = (
 # of Liquid-Propellant Rocket Engines", Ch. 6; Stepanoff, "Centrifugal and
 # Axial Flow Pumps" 2nd ed.).
 PUMP_SUCTION_SPECIFIC_SPEED = 8.0    # boyutsuz w_ss, indüserli roket pompası
+# --- B5 (v2.6.27): boyutsuz Ω_ss <-> ABD birim geleneği Nss köprüsü --------
+# Modülün emme bantları ABD birimleriyle (rpm, gpm, ft) tanımlı; motorun
+# emme kabiliyeti ise boyutsuz Ω_ss = 8.0. İKİNCİ bir emme-hızı literali
+# yazmamak için çevrim katsayısı modülün KESİN birim tanımlarından türetilir
+# (Nss_US = Ω_ss · (60/2π) · g^0.75 · √(gpm/(m³/s)) / (ft/m)^0.75 ≈ 2733·Ω_ss;
+# turbopump_sizing modül başlığındaki aynı bağıntı). Sonuç ≈ 21 861 US —
+# modül bantlarına göre İNDÜSERLİ sınıf (indüsersiz tavan 11 000 US'in
+# üstünde, indüserli tasarım varsayılanı 30 000 US'in altında).
+NSS_US_PER_OMEGA_SS = ((60.0 / (2.0 * np.pi)) * G_0 ** 0.75
+                       * m3s_to_gpm(1.0) ** 0.5 / m_to_ft(1.0) ** 0.75)
+PUMP_SUCTION_SPECIFIC_SPEED_US = (PUMP_SUCTION_SPECIFIC_SPEED
+                                  * NSS_US_PER_OMEGA_SS)
 PUMP_BLADE_COUNT = 6                 # çark kanat sayısı (tipik 5-8)
 PUMP_BLADE_EXIT_ANGLE_DEG = 25.0     # geriye eğik kanat çıkış açısı
 PUMP_HYDRAULIC_EFFICIENCY = 0.88     # hidrolik verim (Euler head -> gerçek)
 PUMP_EFFICIENCY_DEFAULT = 0.75       # toplam pompa verimi (BEP)
 PUMP_EXIT_WIDTH_RATIO = 0.06         # b2/D2 çark çıkış genişlik oranı
-PUMP_NPSH_VAPOR_PRESSURE_BAR = 1.01325  # depolama doyma basıncı varsayımı (NBP)
+# B5 (v2.6.27): bu sabit artık YALNIZ YEDEK değerdir. NPSH buhar basıncı
+# önce _feed_fluid_record kaydından (su koçu tablosuyla TEK kaynak) gelir;
+# kayıt yoksa NBP depolama doygunluğu (1 atm) varsayılır ve bu düşüş SESSİZ
+# DEĞİLDİR: warn.liquid.npsh_vapor_pressure_assumed uyarısı + basis beyanı
+# üretilir. Eski davranış her iticiye 1,013 bar dayatıyordu — RP-1'in gerçek
+# buhar basıncı ~0,007 bar iken NPSH ~12,7 m eksik sayılıyordu (ölçüm:
+# 25 kN LOX/RP-1 örneği, 2026-08-15).
+PUMP_NPSH_VAPOR_PRESSURE_BAR = 1.01325  # YEDEK: NBP depolama doygunluğu
+# NPSH_a <= 0 çıktığında emme sınırı devir TANIMLAMAZ; donanım yine de
+# boyutlansın diye devir seçiminde kullanılan nominal giriş yükü tabanı.
+# Tasarım bu durumda GERÇEKLENEMEZ ve critical uyarı + speed_source beyanı
+# üretilir (eski kod aynı 1e3 Pa tabanını satır içi ve SESSİZ uyguluyordu).
+PUMP_NPSH_SPEED_FLOOR_PA = 1.0e3
 # Pratik mil hızı tavanı [rpm]: emme özgül hızı tek başına küçük debilerde
 # fiziksel olmayan devirler verir; roket turbopompaları ~1.2e5 rpm altındadır
 # (Huzel & Huang Ch. 6 tablo aralığı). Tavan uygulanırsa kullanıcı uyarılır.
@@ -5446,9 +5499,13 @@ class LiquidRocketEngine:
             disch_ox = float(cyc['pump_discharge_ox_bar'])
             disch_fuel = float(cyc['pump_discharge_fuel_bar'])
         ox = self._design_pump(mdot_ox, self.rho_ox, disch_ox, tank_bar,
-                               shaft_power_kw=p_ox_kw)
+                               shaft_power_kw=p_ox_kw,
+                               propellant=self.oxidizer_type,
+                               line=drops['oxidizer_line'])
         fuel = self._design_pump(mdot_fuel, self.rho_fuel, disch_fuel,
-                                 tank_bar, shaft_power_kw=p_fuel_kw)
+                                 tank_bar, shaft_power_kw=p_fuel_kw,
+                                 propellant=self.fuel_type,
+                                 line=drops['fuel_line'])
         total_pump_power = (ox['design_power'] + fuel['design_power']) * 1000.0
         eta_turbine = TURBINE_EFFICIENCY_DEFAULT
         turbine_power_required = total_pump_power / eta_turbine  # W
@@ -5492,6 +5549,9 @@ class LiquidRocketEngine:
                 'rpm': ox['rotational_speed'],
                 'material': 'Inconel 713C'
             },
+            # B5 (v2.6.27): pompa devirleri ayrı emme sınırlarından gelir;
+            # farklıysa bu bir dişli/çift-mil varsayımıdır ve BEYAN edilir.
+            'shaft_architecture_note': self._shaft_architecture_note(ox, fuel),
             'gas_generator': {
                 'flow_fraction': GAS_GENERATOR_FLOW_FRACTION,
                 'mixture_ratio': self.MR * 0.7,  # fuel-rich for cooling
@@ -6720,8 +6780,36 @@ class LiquidRocketEngine:
         })
         return out
 
+    @staticmethod
+    def _suction_line_dp(line, density):
+        """Emme tarafı (tank -> pompa girişi) kayıp dökümü [bar].
+
+        B5 (v2.6.27): NPSH'tan düşülecek kayıp YALNIZ emme kalemleridir —
+        tank çıkışı (K) + hat süzgeci (K) + kısa düz emme borusu
+        (FEED_SUCTION_LINE_LENGTH_M üzerinden Darcy-Weisbach). Ana vana ve
+        dirsekli koşu basma tarafındadır (FEED_SUCTION_LINE_BASIS). Sürtünme
+        katsayısı, çap ve hız hattın KENDİ Darcy zincirinden okunur
+        (_line_pressure_drops sözlüğü) — ikinci bir hat modeli kurulmaz;
+        K sabitleri de aynı tek tanım noktasından gelir. Hem motorun kendi
+        pompa tasarımı (_design_pump) hem C1 modül bağlaması (_pump_block)
+        BU yardımcıyı çağırır: iki yer tek emme kümesini okur.
+        """
+        v = float(line['line_velocity_m_s'])
+        d = float(line['line_diameter_mm']) / 1000.0
+        f = float(line['friction_factor'])
+        dyn = 0.5 * float(density) * v * v               # Pa
+        items = {
+            'tank_outlet': FEED_K_TANK_OUTLET * dyn / PA_PER_BAR,
+            'filters': FEED_K_FILTER * dyn / PA_PER_BAR,
+            'suction_line': (f * (FEED_SUCTION_LINE_LENGTH_M / d) * dyn
+                             / PA_PER_BAR),
+        }
+        items['total'] = sum(items.values())
+        return items
+
     def _design_pump(self, mdot, density, discharge_pressure_bar,
-                     tank_pressure_bar, shaft_power_kw=None):
+                     tank_pressure_bar, shaft_power_kw=None,
+                     propellant=None, line=None):
         """Tek pompanın benzerlik tabanlı tasarımı (sabit eğri YOK).
 
         2026-07-19 denetimi: H-Q ve verim eğrileri uydurma parabollerden
@@ -6729,8 +6817,18 @@ class LiquidRocketEngine:
         rpm ve uç hızı 400 m/s her motorda aynıydı. Yeni zincir:
 
         * Basma yüksekliği H = ΔP/(ρ·g) — gerçek basınç yükselmesinden.
-        * NPSH_a = (P_tank − P_buhar)/(ρ·g); devir emme özgül hızından:
-          ω = ω_ss·(g·NPSH_a)^0.75/√Q (Huzel & Huang Ch. 6).
+        * NPSH_a: turbopump_sizing.npsh_available_m (Eş. 1, TEK kaynak) —
+          (P_tank − ΔP_emme − P_buhar)/(ρ·g). Buhar basıncı iticinin GERÇEK
+          kaydından (_feed_fluid_record); kayıt yoksa NBP varsayımı YÜKSEK
+          sesle beyan edilir. Hat kaybı yalnız EMME kalemleridir
+          (_suction_line_dp).
+        * Devir emme özgül hızı SINIRININ derate katıdır:
+          ω = derate · ω_ss·(g·NPSH_a)^0.75/√Q (Huzel & Huang Ch. 6;
+          derate = SPEED_DERATE_DEFAULT, modülden ithal — ikinci 0.9 yok).
+          Böylece NPSH_gerekli/NPSH_mevcut = derate^(4/3) olur ve marj
+          totolojik sıfır DEĞİLDİR (B5 düzeltmesi: eski kod devri tam
+          kavitasyon sınırından seçiyordu, npsh_margin ≡ 0 idi ve
+          npsh_insufficient uyarısı cebirsel olarak ulaşılamazdı).
         * Çark uç hızı U2, kanat çıkış açısı β2 ve Stodola kayma faktörü ile
           Euler denkleminden ÇÖZÜLÜR: H = η_h·(σ·U2² − U2·Q/(A2·tanβ2))/g.
         * H-Q eğrisi aynı Euler bağıntısının Q'ya göre değerlendirilmesidir
@@ -6743,12 +6841,68 @@ class LiquidRocketEngine:
         dp = max((discharge_pressure_bar - tank_pressure_bar), 1.0) * PA_PER_BAR
         head = dp / (density * g0)                        # m
 
-        npsh_avail = max((tank_pressure_bar - PUMP_NPSH_VAPOR_PRESSURE_BAR)
-                         * PA_PER_BAR, 1e3) / (density * g0)  # m
-        omega = (PUMP_SUCTION_SPECIFIC_SPEED * (g0 * npsh_avail) ** 0.75
+        # --- B5: buhar basıncı — gerçek kayıt > beyanlı NBP yedeği ---------
+        record = None
+        if propellant is not None:
+            _, record = self._feed_fluid_record(propellant)
+        if record is not None and record.get('vapor_pressure_Pa') is not None:
+            vapor_pa = float(record['vapor_pressure_Pa'])
+            vapor_source = str(record.get('vapor_pressure_source'))
+        else:
+            vapor_pa = PUMP_NPSH_VAPOR_PRESSURE_BAR * PA_PER_BAR
+            vapor_source = (
+                'vapor pressure record missing for '
+                f"'{propellant}': normal-boiling-point storage saturation "
+                f'({PUMP_NPSH_VAPOR_PRESSURE_BAR:g} bar, '
+                'PUMP_NPSH_VAPOR_PRESSURE_BAR) assumed - a declared '
+                'fallback, NOT a computed property')
+            self._warn('warn.liquid.npsh_vapor_pressure_assumed', 'warning',
+                       propellant=str(propellant),
+                       assumed_bar=PUMP_NPSH_VAPOR_PRESSURE_BAR)
+
+        # --- B5: emme tarafı hat kaybı (ana vana/basma kalemleri HARİÇ) ----
+        if line is not None:
+            suction = self._suction_line_dp(line, density)
+            suction_dp_bar = suction['total']
+        else:
+            suction = None
+            suction_dp_bar = 0.0
+
+        # --- B5: NPSH_a TEK kaynaktan (turbopump_sizing.npsh_available_m) --
+        tank_pa = float(tank_pressure_bar) * PA_PER_BAR
+        suction_dp_pa = suction_dp_bar * PA_PER_BAR
+        try:
+            npsh_avail = npsh_available_m(tank_pa, vapor_pa, density,
+                                          suction_dp_pa)
+            suction_feasible = True
+        except ValueError:
+            # Gerçek (<= 0) değer RAPORLANIR; pozitif değer uydurulmaz.
+            npsh_avail = (tank_pa - suction_dp_pa - vapor_pa) / (density * g0)
+            suction_feasible = False
+            self._warn('warn.liquid.npsh_pressurization_insufficient',
+                       'critical',
+                       npsh_available_m=round(float(npsh_avail), 1),
+                       tank_bar=round(float(tank_pressure_bar), 2),
+                       suction_dp_bar=round(float(suction_dp_bar), 2))
+
+        # --- B5: devir = derate x emme sınırı (modül disipliniyle) ---------
+        npsh_for_speed = (npsh_avail if suction_feasible
+                          else PUMP_NPSH_SPEED_FLOOR_PA / (density * g0))
+        omega = (SPEED_DERATE_DEFAULT * PUMP_SUCTION_SPECIFIC_SPEED
+                 * (g0 * npsh_for_speed) ** 0.75
                  / max(np.sqrt(q), 1e-9))                 # rad/s
         rpm = omega * 60.0 / (2.0 * np.pi)
-        speed_source = 'cavitation limit (suction specific speed)'
+        if suction_feasible:
+            speed_source = (
+                'suction specific speed limit derated by '
+                f'{SPEED_DERATE_DEFAULT:g} (SPEED_DERATE_DEFAULT) for NPSH '
+                'margin')
+        else:
+            speed_source = (
+                'suction limit undefined (NPSH_available <= 0): a nominal '
+                f'{PUMP_NPSH_SPEED_FLOOR_PA:g} Pa inlet-head floor sizes the '
+                'hardware; the design is NOT feasible at this tank pressure '
+                '(see warnings)')
         if rpm > PUMP_MAX_SPEED_RPM:
             rpm = PUMP_MAX_SPEED_RPM
             omega = rpm * 2.0 * np.pi / 60.0
@@ -6818,12 +6972,31 @@ class LiquidRocketEngine:
             power_curve = [p * scale for p in power_curve]
             power_source = ('cycle power balance shaft power (multi-stage '
                             'architecture accounted for)')
+        # B5: NPSH_gerekli emme özgül hızı tanımının TERSİDİR ve devir
+        # derate'li seçildiği için NPSH_mevcut'tan FARKLIDIR: tavansız
+        # tasarım noktasında oran derate^(4/3) (~0.869), yani ~%15 marj.
+        # rpm tavana takıldıysa marj bu satırda otomatik yeniden hesaplanır
+        # (düşük devir -> düşük NPSH_req -> daha büyük marj). Uyarı artık
+        # ULAŞILABİLİR: NPSH_a <= 0 vakasında npsh_req > npsh_avail olur.
         npsh_req = ((omega * np.sqrt(max(q, 1e-12))
                      / PUMP_SUCTION_SPECIFIC_SPEED) ** (4.0 / 3.0)) / g0
         if npsh_req > npsh_avail:
             self._warn('warn.liquid.npsh_insufficient', 'critical',
                        npsh_required_m=round(float(npsh_req), 1),
                        npsh_available_m=round(float(npsh_avail), 1))
+        if suction is not None and suction_dp_bar > 0:
+            filter_share = suction['filters'] / suction_dp_bar * 100.0
+            suction_basis = (
+                'suction-side losses only: tank outlet '
+                f'K={FEED_K_TANK_OUTLET:g} + line filter K={FEED_K_FILTER:g} '
+                f'(an assumed clean-element estimate, {filter_share:.0f}% of '
+                'the suction loss) + Darcy-Weisbach over the '
+                f'{FEED_SUCTION_LINE_LENGTH_M:g} m suction run. '
+                + FEED_SUCTION_LINE_BASIS)
+        else:
+            suction_basis = ('no feed-line data supplied to the pump design: '
+                             'suction line loss taken as zero (declared, not '
+                             'computed)')
         return {
             'design_flow_rate': mdot,                     # kg/s
             'volumetric_flow_m3_s': q,
@@ -6840,17 +7013,76 @@ class LiquidRocketEngine:
             'impeller_diameter': d2,                      # m
             'slip_factor': slip,
             'npsh_available': npsh_avail,                 # m
+            'npsh_available_basis': (
+                'NPSH_a = (p_tank - dp_suction - p_vapor)/(rho*g) via '
+                'hrma.analysis.turbopump_sizing.npsh_available_m (Eq. 1, '
+                'single source with the C1 sizing chain). ' + suction_basis),
+            'vapor_pressure_Pa': vapor_pa,
+            'vapor_pressure_source': vapor_source,
+            'suction_line_dp_bar': suction_dp_bar,
+            'suction_loss_breakdown_bar': suction,
             'npsh_required': npsh_req,                    # m
+            'npsh_required_basis': (
+                'inverse of the suction specific speed definition at the '
+                'selected shaft speed: NPSH_req = '
+                '(omega*sqrt(Q)/omega_ss)^(4/3)/g. The speed is derated by '
+                f'{SPEED_DERATE_DEFAULT:g} (SPEED_DERATE_DEFAULT, imported '
+                'from turbopump_sizing) below the suction limit, so at the '
+                'uncapped design point NPSH_req/NPSH_avail = '
+                f'{SPEED_DERATE_DEFAULT:g}^(4/3) ~= '
+                f'{SPEED_DERATE_DEFAULT ** (4.0 / 3.0):.3f} (~15% margin) - '
+                'no longer equal by construction'),
+            'suction_specific_speed_dimensionless': PUMP_SUCTION_SPECIFIC_SPEED,
+            'suction_specific_speed_us': PUMP_SUCTION_SPECIFIC_SPEED_US,
+            'suction_specific_speed_basis': (
+                'dimensionless omega_ss '
+                f'{PUMP_SUCTION_SPECIFIC_SPEED:g} (inducer-class rocket '
+                'pump; Huzel & Huang Ch. 6) = '
+                f'{PUMP_SUCTION_SPECIFIC_SPEED_US:.0f} US units '
+                '(rpm*gpm^0.5/ft^0.75), derived through the exact unit '
+                'bridge NSS_US_PER_OMEGA_SS (no second suction-capability '
+                'literal). Against the turbopump_sizing bands this sits in '
+                'the WITH-INDUCER class: above the no-inducer ceiling '
+                '(~11000 US), below the inducer design default (30000 US)'),
             'flow_range': flow_range,
             'head_curve': head_curve,
             'efficiency_curve': eff_curve,
             'power_curve': power_curve,
             'npsh_curve': npsh_curve,
-            'model': ('Euler head with Stodola slip, speed set by the suction '
-                      'specific speed; efficiency curve is an incidence-loss '
+            'model': ('Euler head with Stodola slip; shaft speed set at '
+                      f'{SPEED_DERATE_DEFAULT:g} x the suction specific '
+                      'speed limit (real vapor pressure, suction-side line '
+                      'losses); efficiency curve is an incidence-loss '
                       'model anchored at the BEP efficiency '
                       '(similarity-scaled estimate)'),
         }
+
+    @staticmethod
+    def _shaft_architecture_note(ox_pump, fuel_pump):
+        """Mil mimarisi beyanı — B5 (v2.6.27).
+
+        Yakıt ve oksitleyici pompa devirleri kendi emme sınırlarından ayrı
+        ayrı seçilir ve genelde FARKLIDIR. Bu bir dişli kutusu / çift mil
+        VARSAYIMIDIR ve eskiden hiçbir yerde beyan edilmiyordu: türbin
+        sessizce oksitleyici pompa devrinde boyutlanırken yakıt pompası
+        türbin milinden farklı hızda dönüyordu. Yeniden TASARLANMAZ; yalnız
+        söylenir (yanlış beyan beyansızlıktan kötü, beyansızlık da yalandan
+        yalnız bir adım geride).
+        """
+        rpm_ox = float(ox_pump['rotational_speed'])
+        rpm_fuel = float(fuel_pump['rotational_speed'])
+        if abs(rpm_ox - rpm_fuel) / max(rpm_ox, rpm_fuel, 1e-9) < 0.01:
+            return (
+                'single-shaft assumption: both pumps run at practically the '
+                f'same suction-limited speed ({rpm_ox:.0f} rpm) and the '
+                'turbine is sized on that shaft.')
+        return (
+            f'geared / dual-shaft assumption: the oxidizer pump runs at '
+            f'{rpm_ox:.0f} rpm and the fuel pump at {rpm_fuel:.0f} rpm, each '
+            'set by its own suction limit. The turbine is sized on the '
+            'OXIDIZER pump shaft; the fuel pump is assumed to be driven '
+            'through a gearbox or a separate shaft, and HRMA does not size '
+            'that gearing.')
 
     def _feed_water_hammer_analysis(self, drops, tank_bar, pressure_fed):
         """Besleme hattı su koçu analizi — hrma.analysis.water_hammer ile.
@@ -7024,9 +7256,14 @@ class LiquidRocketEngine:
         ------------------------------------------------------
         * MİL DEVRİ modüle SEÇTİRİLMEZ, motorun kendi pompa zincirinden
           (``_design_pump``: Euler baş + Stodola kayma, devir emme özgül
-          hızından) GEÇİLİR. Aksi hâlde aynı yanıtta iki farklı devir
-          bulunurdu. Modülün emme sınırlı üst devri yalnız KARŞILAŞTIRMA
-          olarak yayımlanır.
+          hızı sınırının SPEED_DERATE_DEFAULT katından — B5) GEÇİLİR. Aksi
+          hâlde aynı yanıtta iki farklı devir bulunurdu. Modülün emme
+          sınırlı üst devri yalnız KARŞILAŞTIRMA olarak yayımlanır; motor
+          devri artık o üst devrin derate katı olduğu için ikisi tutarlıdır
+          (bekçi: test_devir_emme_sinirinin_derate_katidir). Emme kabiliyeti
+          hedefi de motorun TEK tanımından geçirilir
+          (PUMP_SUCTION_SPECIFIC_SPEED_US) — modül 30000 US varsayılanıyla
+          ikinci bir NPSH_gerekli üretemez.
         * ÇARK ÇAPI iki modelde de çıkar (motorda Euler/Stodola, modülde
           baş katsayısından). İkisi de raporlanır ve oranı verilir; hangisinin
           hangi modelden geldiği alan adında yazılıdır. Sessizce birinin
@@ -7072,8 +7309,12 @@ class LiquidRocketEngine:
             return {'status': 'NOT_MODELLED', '_basis': basis,
                     'reason': f'turbopump_sizing module unavailable: {exc}'}
 
-        # Hat kaybı: enjektör kalemi HARİÇ (pompa GİRİŞİNE kadar olan kayıp).
-        line_keys = ('tank_outlet', 'main_valve', 'filters', 'feed_lines')
+        # B5 (v2.6.27): hat kaybı yalnız EMME tarafıdır — motorun kendi pompa
+        # zinciriyle (_design_pump) AYNI _suction_line_dp yardımcısı okunur;
+        # iki yer tek emme kümesini görür. Eskiden buradan hattın TAMAMI
+        # (ana vana + 2,5 m dirsekli koşu dahil) düşülüyordu ve 25 kN
+        # örneğinde yakıt pompası NPSH_a = -14,4 m çıkıyordu; ana vana ve
+        # dirsekli koşu pompanın BASMASINDADIR.
 
         def _pump_block(label, propellant, line, pump, discharge_bar, rho):
             fluid_key, record = self._feed_fluid_record(propellant)
@@ -7088,7 +7329,7 @@ class LiquidRocketEngine:
                         f'covers {sorted(FEED_FLUID_PROPERTY_KEY)} only. No '
                         'vapour pressure is invented in its place.'),
                 }
-            dp_line_bar = float(sum(line[k] for k in line_keys))
+            dp_line_bar = float(self._suction_line_dp(line, rho)['total'])
             pressure_rise_pa = (float(discharge_bar) - float(tank_bar)) \
                 * PA_PER_BAR
             if pressure_rise_pa <= 0.0:
@@ -7107,7 +7348,13 @@ class LiquidRocketEngine:
                     vapor_pressure_Pa=float(record['vapor_pressure_Pa']),
                     tank_pressure_Pa=float(tank_bar) * PA_PER_BAR,
                     line_pressure_drop_Pa=dp_line_bar * PA_PER_BAR,
-                    shaft_speed_rpm=float(pump['rotational_speed']))
+                    shaft_speed_rpm=float(pump['rotational_speed']),
+                    # B5: emme kabiliyeti motorun TEK tanımından (boyutsuz
+                    # Ω_ss=8'in kesin birim köprüsüyle US karşılığı). Aksi
+                    # hâlde modül 30000 US varsayılanıyla İKİNCİ bir NPSH_req
+                    # üretirdi (aynı yanıtta iki farklı gerçek).
+                    target_suction_specific_speed_us=(
+                        PUMP_SUCTION_SPECIFIC_SPEED_US))
             except Exception as exc:
                 return {'status': 'not_computed',
                         'basis': ('turbopump_sizing rejected the inputs: '
@@ -7119,10 +7366,13 @@ class LiquidRocketEngine:
                 'pump_label': label,
                 'shaft_speed_source': (
                     'the engine pump design chain (_design_pump: Euler head '
-                    'with Stodola slip, speed set by the suction specific '
-                    'speed and capped at the practical limit). The module '
-                    'did NOT re-select it, so this answer carries a single '
-                    'shaft speed.'),
+                    'with Stodola slip, speed set at SPEED_DERATE_DEFAULT x '
+                    'the suction specific speed limit and capped at the '
+                    'practical rpm limit). The module did NOT re-select it, '
+                    'so this answer carries a single shaft speed; the '
+                    'suction capability target below is the SAME engine '
+                    'omega_ss=8 through the exact unit bridge, so NPSH_req '
+                    'is also single-source.'),
                 'vapor_pressure_Pa': float(record['vapor_pressure_Pa']),
                 'vapor_pressure_reference_K': record.get(
                     'vapor_pressure_ref_K'),
@@ -7136,9 +7386,15 @@ class LiquidRocketEngine:
                     'pressurisation schedule model'),
                 'line_pressure_drop_bar': dp_line_bar,
                 'line_pressure_drop_basis': (
-                    'tank outlet + main valve + filter + straight-line '
-                    'Darcy-Weisbach items of THIS engine (the injector drop '
-                    'is downstream of the pump and is excluded)'),
+                    'SUCTION-side items of THIS engine only (single source '
+                    'with the engine pump chain, _suction_line_dp): tank '
+                    f'outlet K={FEED_K_TANK_OUTLET:g} + line filter '
+                    f'K={FEED_K_FILTER:g} (assumed clean-element estimate) '
+                    '+ Darcy-Weisbach over the '
+                    f'{FEED_SUCTION_LINE_LENGTH_M:g} m suction run. The '
+                    'main valve, the elbowed discharge run and the injector '
+                    'drop are downstream of the pump and are excluded. '
+                    + FEED_SUCTION_LINE_BASIS),
                 'impeller_diameter_head_coefficient_m': d2_module,
                 'impeller_diameter_euler_stodola_m': d2_engine,
                 'impeller_diameter_note': (
@@ -7437,10 +7693,14 @@ class LiquidRocketEngine:
             mdot_ox, mdot_fuel, p_ox_kw, p_fuel_kw = duty
         ox_pump = self._design_pump(mdot_ox, self.rho_ox,
                                     drops['pump_discharge_pressure_ox'],
-                                    tank_bar, shaft_power_kw=p_ox_kw)
+                                    tank_bar, shaft_power_kw=p_ox_kw,
+                                    propellant=self.oxidizer_type,
+                                    line=drops['oxidizer_line'])
         fuel_pump = self._design_pump(mdot_fuel, self.rho_fuel,
                                       drops['pump_discharge_pressure_fuel'],
-                                      tank_bar, shaft_power_kw=p_fuel_kw)
+                                      tank_bar, shaft_power_kw=p_fuel_kw,
+                                      propellant=self.fuel_type,
+                                      line=drops['fuel_line'])
 
         # Türbin: gerekli güç pompalardan; uç hızı gerçek özgül işten.
         eta_turbine = TURBINE_EFFICIENCY_DEFAULT
@@ -7598,6 +7858,11 @@ class LiquidRocketEngine:
                 'fuel_pump': None if pressure_fed else fuel_pump,
                 'turbine': None if pressure_fed else turbine_card,
                 'gas_generator': None if pressure_fed else gg_card,
+                # B5 (v2.6.27): yakıt/oks pompaları farklı devirdeyse bu bir
+                # dişli/çift-mil varsayımıdır; türbin oks miline boyutlanır.
+                'shaft_architecture_note': (
+                    None if pressure_fed
+                    else self._shaft_architecture_note(ox_pump, fuel_pump)),
             },
             'turbopump_required': not pressure_fed,
             'tank_pressure_bar': tank_bar,
@@ -7675,12 +7940,14 @@ class LiquidRocketEngine:
         kalan pay gerçek bir tasarım marjıdır ve debi/yoğunluk/çap ile
         değişir. İki hattın DARBOĞAZI raporlanır.
 
-        POMPANIN KENDİSİ bu modelde tanım gereği marjsızdır: ``_design_pump``
+        POMPANIN DEBİ marjı bu modelde tanım gereği sıfırdır: ``_design_pump``
         çarkı tam gerekli debi ve basma yüksekliğinde çözer (H(Q_gerekli) =
-        H_gerekli) ve mil hızını doğrudan kavitasyon sınırından alır
-        (NPSH_gerekli = NPSH_mevcut). Bu yüzden hem H-Q eğrisinden hem NPSH
-        eğrisinden çıkacak pompa debi marjı SIFIRDIR — bunu %50 diye
-        raporlamak yanlıştı. Gerçek sıfır ``npsh_margin`` ile zaten görünür.
+        H_gerekli) — bunu %50 diye raporlamak yanlıştı. NPSH marjı ise
+        B5 (v2.6.27) düzeltmesiyle GERÇEK bir marjdır: devir kavitasyon
+        sınırının SPEED_DERATE_DEFAULT katına indirildiği için tavansız
+        tasarım noktasında NPSH_mevcut/NPSH_gerekli = derate^(-4/3) ≈ 1,15
+        (~%15). Eski kod devri tam sınırdan seçiyor, marj her motorda ~1e-14
+        çıkıyor ve basis metni bunu 'by construction' diye itiraf ediyordu.
 
         ``power_margin`` — türbinin ÖZGÜL İŞ payı. Tek kademeli impuls
         türbinde P = ṁ·Δh·η ve Δh = (U/(U/C₀))²/2 olduğundan, kanat uç hızı
@@ -7692,17 +7959,39 @@ class LiquidRocketEngine:
         sıfırdır; o yüzden marj gaz tarafından değil TÜRBİNİN sınırından
         okunur.
         """
+        # B5 (v2.6.27): npsh_margin artık GERÇEK bir marj. Eskiden devir tam
+        # kavitasyon sınırından seçildiği için NPSH_req ≡ NPSH_avail idi ve
+        # buradaki değer her motorda ~1e-14 çıkıyordu (totolojik ölü metrik;
+        # kendi basis metni bunu itiraf ediyordu). Devir artık derate'li
+        # seçilir (SPEED_DERATE_DEFAULT); marj tavansız noktada
+        # derate^(-4/3)-1 ~= %15'tir, rpm tavanı bağlarsa büyür, tank
+        # basınçlandırması yetersizse NEGATİF olur ve görünür. İki pompanın
+        # KÖTÜSÜ raporlanır — eski kod yalnız oksitleyiciye bakarken yakıt
+        # pompası -14 m NPSH ile sessizce geçiyordu.
+        npsh_worst = None
+        npsh_worst_pump = None
+        for name, pump in (('oxidizer_pump', ox_pump),
+                           ('fuel_pump', fuel_pump)):
+            m = ((pump['npsh_available'] - pump['npsh_required'])
+                 / max(abs(pump['npsh_required']), 1e-9) * 100.0)
+            if npsh_worst is None or m < npsh_worst:
+                npsh_worst, npsh_worst_pump = m, name
         margins = {
             'pressure_margin': (
                 (drops['pump_discharge_pressure_ox'] - self.P_c)
                 / max(self.P_c, 1e-9) * 100.0),
-            'npsh_margin': (
-                (ox_pump['npsh_available'] - ox_pump['npsh_required'])
-                / max(ox_pump['npsh_required'], 1e-9) * 100.0),
+            'npsh_margin': npsh_worst,
             'npsh_margin_basis': (
-                'the pump speed is set directly by the suction specific speed, '
-                'so NPSH_required equals NPSH_available by construction unless '
-                'the speed hits the practical rpm cap'),
+                '(NPSH_available - NPSH_required)/NPSH_required of the '
+                f'binding (worst) pump: {npsh_worst_pump}. The shaft speed '
+                'is derated below the suction-limited maximum '
+                f'(SPEED_DERATE_DEFAULT {SPEED_DERATE_DEFAULT:g}), so the '
+                'uncapped design-point margin is '
+                f'{(SPEED_DERATE_DEFAULT ** (-4.0 / 3.0) - 1.0) * 100.0:.1f}'
+                '% rather than zero-by-construction; it grows when the '
+                'practical rpm cap binds and goes negative when tank '
+                'pressurization is insufficient (see '
+                'warn.liquid.npsh_pressurization_insufficient)'),
         }
 
         # --- Hat debi marjı -------------------------------------------------
@@ -7721,8 +8010,9 @@ class LiquidRocketEngine:
             'feed-line flow headroom to the recommended upper velocity '
             f'({FEED_LINE_MAX_VELOCITY_MS:g} m/s); binding line: '
             f'{worst_line}. The pumps themselves are sized exactly at the '
-            'required duty and therefore carry no flow margin by '
-            'construction (see npsh_margin).'
+            'required duty and therefore carry no FLOW margin by '
+            'construction; their NPSH headroom is the separate, real '
+            'npsh_margin above.'
             if worst is not None else
             'not_modelled (feed line velocities unavailable)')
 

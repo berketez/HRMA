@@ -189,6 +189,17 @@ class TestBeslemeAkiskaniKaydi:
 class TestTurbopompaBoyutlandirmaBaglamasi:
 
     def test_turbopompali_cevrimde_zincir_gercekten_kosuyor(self, taban):
+        """B5 (v2.6.27) GÜNCELLEMESİ — eski sözleşme yeni sözleşmeye çevrildi.
+
+        Eski hâli yalnız ``'margin_m' in pompa['npsh']`` diyordu: marjın
+        VARLIĞINI kilitliyordu, İŞARETİNİ değil. Ölçülen kusur (B5 teşhisi,
+        2026-08-14): motor devri şişkin NPSH'tan seçilip modüle dayatılınca
+        yakıt pompası marjı -14,4 m çıkıyordu ve bu test yine YEŞİLDİ —
+        kusuru koruyan bekçi. Yeni sözleşmede devir derate'li emme
+        sınırından gelir; tasarım noktasında marj POZİTİFTİR ve modül
+        'supplied shaft speed exceeds the suction-limited maximum' uyarısı
+        ÜRETMEZ. İkisi de artık kilitlidir.
+        """
         blok = taban['detailed_feed_system']['turbopump_sizing']
         assert blok['status'] == 'modelled'
         for ad in ('oxidizer_pump', 'fuel_pump'):
@@ -197,7 +208,14 @@ class TestTurbopompaBoyutlandirmaBaglamasi:
             # NPSH zinciri gerçekten çözülmüş olmalı (marj dahil).
             assert pompa['npsh']['available_m'] > 0
             assert pompa['npsh']['required_m'] > 0
-            assert 'margin_m' in pompa['npsh']
+            assert pompa['npsh']['margin_m'] > 0, (
+                f'{ad}: tasarım noktasında NPSH marjı pozitif olmalı — '
+                'negatif marj, motorun modüle yanlış devir dayattığı eski '
+                'kusurun izidir')
+            assert not any('suction-limited maximum' in u
+                           for u in pompa.get('warnings', [])), (
+                f'{ad}: motor devri emme sınırını aşıyorsa tek-kaynak '
+                'zinciri bozulmuş demektir (B5 öncesi yakıt pompası vakası)')
             assert pompa['pump']['specific_speed_overall_us'] > 0
             assert pompa['pump']['stage_count'] >= 1
             assert pompa['vapor_pressure_source'], (
@@ -219,7 +237,15 @@ class TestTurbopompaBoyutlandirmaBaglamasi:
         assert 'TWO INDEPENDENT ESTIMATES' in pompa['impeller_diameter_note']
 
     def test_mil_devri_modulce_yeniden_secilmez(self, taban):
-        """Aynı yanıtta iki farklı mil devri bulunamaz."""
+        """Aynı yanıtta iki farklı mil devri bulunamaz.
+
+        B5 (v2.6.27) GÜNCELLEMESİ: devir hâlâ motordan GEÇİRİLİR (mode
+        'user_specified'), ama artık motorun kendisi de o devri modülün
+        disipliniyle seçer (derate x emme sınırı, gerçek buhar basıncı,
+        yalnız emme kaybı). Kaynak beyanı bunu söylemek zorundadır —
+        eski metin 'speed set by the suction specific speed' diyordu ve
+        derate'siz tam-sınır seçimini (totolojik marj) tarif ediyordu.
+        """
         besleme = taban['detailed_feed_system']
         boyut = besleme['turbopump_sizing']['oxidizer_pump']
         motor_devri = besleme['turbopump_analysis']['oxidizer_pump'][
@@ -229,6 +255,8 @@ class TestTurbopompaBoyutlandirmaBaglamasi:
         assert boyut['shaft_speed']['mode'] == 'user_specified', (
             'Devir modüle seçtirilmemeli; motorun zincirinden geçirilmeli')
         assert 'engine pump design chain' in boyut['shaft_speed_source']
+        assert 'SPEED_DERATE_DEFAULT' in boyut['shaft_speed_source'], (
+            'Kaynak beyanı derate disiplinini söylemeli (B5)')
 
     def test_basinc_beslemelide_beyan_var_sayi_yok(self, basincli):
         """Pompa yoksa pompa boyutu da olmaz — gerekçesiyle."""
