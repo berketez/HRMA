@@ -182,12 +182,13 @@ yorumunda "bu blok zaten yukarıdaki 501 nedeniyle erişilemez" diyor.
 halef modellerin (`nozzle_flow_1d`, `kinetic_efficiency`) tam olgunlaşması
 beklenmiş. Bugün ikisi de bağlı ve testli.
 
-**BÜYÜK ÖLÇÜDE KAPANDI (15 Ağustos 2026, on dördüncü parti):** açılış
-importları (`app.py` + `analysis/__init__.py`) ve 501 sonrası erişilemez
-gövdeler (187 satır) söküldü; uç sözleşmesi korunuyor (501 + `successor`),
-bekçisi `tests/test_emekli_uclar.py` (emekli modül `sys.modules`'a girerse
-kırılır). AÇIK KALAN TEK PARÇA: dosyaların kendisinin kaldırılması ya da
-`legacy/` altına taşınması — dosya silme kararı Berke'nindir.
+**TAMAMEN KAPANDI (15 Ağustos 2026, on dördüncü + on altıncı parti):**
+önce açılış importları ve 501 sonrası erişilemez gövdeler (187 satır)
+söküldü; sonra Berke kararıyla dosyaların kendisi silindi (`7958e12`,
+−1817 satır; geçmiş git'te). Yetim kalan 5 alan-Mach bekçisi ve 30
+`warn.kinetic.*` i18n satırı birlikte kaldırıldı. Uç sözleşmesi yaşıyor
+(501 + `successor`), bekçileri `tests/test_emekli_uclar.py` +
+`test_wave4a_contract.py`.
 
 ---
 
