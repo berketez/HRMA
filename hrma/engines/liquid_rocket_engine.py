@@ -783,6 +783,49 @@ TANK_LD_RATIO_BASIS = (
     'for a cylindrical tank; NOT optimised against buckling or vehicle '
     'packaging - neither is modelled here. The tank diameter and length '
     'follow from this ratio and the required volume')
+# --- A11 (v2.6.27): tank tek-geometri beyanları ----------------------------
+# Cidar alt sınırı [m]: imalat/kaynak edilebilirlik tabanı. Eskiden gövdede
+# iki kez satır içi 0.003 yazılıydı ve hangi hükmün (basınç boyutlandırması
+# mı, taban mı) cidarı yönettiği çıktıda beyan edilmiyordu.
+TANK_WALL_MIN_THICKNESS_M = 0.003
+TANK_WALL_THICKNESS_BASIS = (
+    'thin-wall hoop sizing t = P*r / (yield/SF) at the tank operating '
+    'pressure, floored at the 3 mm minimum manufacturing gauge '
+    '(TANK_WALL_MIN_THICKNESS_M). wall_thickness_governed_by names which of '
+    'the two ruled; the pressure-sized value is kept apart under its own '
+    'name (wall_thickness_pressure_sized_mm) so the two numbers cannot be '
+    'read as one concept. The pressure_vessel.required_thickness_mm leaf is '
+    'a DIFFERENT requirement (ultimate strength x burst factor), '
+    'deliberately reported under its own name.')
+# Yüklenen itici kütlesi beyanı: tank kartındaki kütle REZERV DAHİLDİR ve
+# design_summary'deki nominal yanma kütlesinden %15 büyüktür. İki sayı aynı
+# kavram DEĞİLDİR; ikisi de kendi adıyla ve oranı beyan edilerek raporlanır
+# (turbopompa çark çapı deseni: iki büyüklük bilerek ayrı adla yayımlanır).
+TANK_LOADED_MASS_BASIS = (
+    'loaded propellant mass = nominal burned mass (mass flow x burn time, '
+    'the design_summary.masses.propellant_mass_kg concept, reported here as '
+    f'mass_nominal) x {TANK_PROPELLANT_RESERVE_FACTOR:g} reserve '
+    '(TANK_PROPELLANT_RESERVE_FACTOR). The two masses are deliberately '
+    'reported under separate names with the reserve declared, so the 15% '
+    'gap cannot be read as a contradiction')
+# Tank işletme basıncı kaynak künyeleri (bkz. _tank_pressure_bar) — metin
+# TEK tanım noktasından üretilir ki besleme kartı ile tank kartı aynı
+# durumu iki farklı cümleyle anlatmasın.
+TANK_PRESSURE_SOURCE_PRESSURE_FED_USER = (
+    'user feed pressure input (pressure-fed cycle: the tank IS the feed '
+    'pressure source, so the tank operating pressure is the same input the '
+    'feed chain uses)')
+TANK_PRESSURE_SOURCE_PRESSURE_FED_DEFAULT = (
+    'no feed pressure supplied -> '
+    f'{PUMP_TANK_PRESSURE_DEFAULT_BAR:g} bar '
+    'PUMP_TANK_PRESSURE_DEFAULT_BAR fallback, the SAME fallback the feed '
+    'chain reports; almost certainly too low to feed the chamber - see '
+    'tank_pressure_margin_bar / required_ox_tank_pressure for the shortfall')
+TANK_PRESSURE_SOURCE_TURBOPUMP = (
+    'NPSH tank pressurisation assumption '
+    f'({PUMP_TANK_PRESSURE_DEFAULT_BAR:g} bar, '
+    'PUMP_TANK_PRESSURE_DEFAULT_BAR) - the SAME value the pump NPSH chain '
+    'uses; HRMA has no pressurisation schedule model')
 # --- Tank iç yapıları (bkz. _design_tank_internals) ------------------------
 # Bu blok GEOMETRİK ORANLAMA kurallarıdır, fiziksel yasa değildir; her biri
 # çıktıda kendi 'basis' etiketiyle bildirilir. Değerler eskiden fonksiyonun
@@ -1964,15 +2007,14 @@ class LiquidRocketEngine:
 
         # Tank basıncı: basınç beslemeli çevrimde kullanıcının feed_pressure
         # girdisi, turbopompalı çevrimde NPSH tankı (sabit 2.5 bar değil).
-        if getattr(self, 'engine_cycle', '') == 'pressure_fed':
-            tank_pressure_bar = (getattr(self, 'feed_pressure_input_bar', None)
-                                 or PUMP_TANK_PRESSURE_DEFAULT_BAR)
-        else:
-            tank_pressure_bar = PUMP_TANK_PRESSURE_DEFAULT_BAR
+        # A11: mantık artık _tank_pressure_bar'da TEK kopya — ayrıntılı tank
+        # kartı da aynı fonksiyondan okur, iki kart çelişemez.
+        tank_pressure_bar, tank_pressure_source = self._tank_pressure_bar()
 
         feed_system = {
             'type': self.feed_system_type,
             'tank_pressure_bar': tank_pressure_bar,
+            'tank_pressure_source': tank_pressure_source,
             'mass_flow_rates': {
                 'oxidizer': mdot_ox,  # kg/s
                 'fuel': mdot_fuel,    # kg/s
@@ -5156,6 +5198,14 @@ class LiquidRocketEngine:
                         'component shell geometry x material density '
                         '(component_sizing.total_dry_mass)'),
                     'propellant_mass_kg': self.mdot_total * burn_time,
+                    # A11: tank kartındaki kütle bu sayının 1.15 katıdır ve
+                    # bunu KENDİ beyan eder — iki sayı aynı kavram değildir.
+                    'propellant_mass_basis': (
+                        'nominal burned mass = total mass flow x burn time; '
+                        'the tank card loads this x '
+                        f'{TANK_PROPELLANT_RESERVE_FACTOR:g} reserve and '
+                        'declares it (propellant_tanks.system_summary.'
+                        'total_propellant_mass_basis)'),
                     'burn_time_s': burn_time,
                     'burn_time_source': burn_time_source,
                     'thrust_to_weight': thrust_to_weight,
@@ -5409,6 +5459,38 @@ class LiquidRocketEngine:
         tank_volume, _, _, _ = self._size_tank(propellant_mass, propellant_type)
         return tank_volume
 
+    def _tank_pressure_bar(self):
+        """Tank işletme basıncı [bar] — TEK tanım noktası (A11, 2.7 kapı #4).
+
+        Eski durum: aynı yanıtta DÖRT ayrı tanım noktası vardı ve basınç
+        beslemeli çevrimde ikisi ÇELİŞİYORDU:
+
+        * besleme kartı / pompa zinciri / çevrim çözücüsü: kullanıcının
+          feed_pressure girdisi (25 kN örneğinde 105 bar),
+        * ayrıntılı tank kartı (_design_propellant_tanks): (P_c + 5 bar)
+          çarpı 1.2 türetilmiş tahmini (aynı örnekte 90 bar) — kullanıcının
+          GERÇEK girdisini yok sayıyordu; cidar, tank kütlesi, MEOP ve
+          emniyet vanası ayarı hep bu ikinci sayıdan türüyordu,
+        * turbopompalı dalda tank kartı 3e5 Pa satır içi literali,
+          autogenous bloğu da aynı literali kullanıyordu — bugün
+          PUMP_TANK_PRESSURE_DEFAULT_BAR ile aynı sayı, ama sabit değişse
+          sessizce ayrışırlardı.
+
+        Artık NPSH zincirinin (B5, v2.6.27) kullandığı mantığın TEK kopyası
+        buradadır; besleme kartı, pompa boyutlandırması, çevrim çözücüsü,
+        ayrıntılı tank kartı ve autogenous bloğu hepsi buradan okur.
+
+        Returns:
+            (bar, kaynak_metni)
+        """
+        if getattr(self, 'engine_cycle', '') == 'pressure_fed':
+            user = getattr(self, 'feed_pressure_input_bar', None)
+            if user:
+                return float(user), TANK_PRESSURE_SOURCE_PRESSURE_FED_USER
+            return (PUMP_TANK_PRESSURE_DEFAULT_BAR,
+                    TANK_PRESSURE_SOURCE_PRESSURE_FED_DEFAULT)
+        return PUMP_TANK_PRESSURE_DEFAULT_BAR, TANK_PRESSURE_SOURCE_TURBOPUMP
+
     def _calculate_line_diameter(self, mass_flow_rate: float, propellant_type: str) -> float:
         """Calculate optimal feed line diameter"""
         # Hedef hız TEK YERDE tanımlıdır (CLAUDE.md kural 11): burada satır içi
@@ -5477,9 +5559,8 @@ class LiquidRocketEngine:
         """
         drops = self._calculate_feed_system_pressure_drops()
         pressure_fed = getattr(self, 'engine_cycle', '') == 'pressure_fed'
-        tank_bar = ((getattr(self, 'feed_pressure_input_bar', None)
-                     or PUMP_TANK_PRESSURE_DEFAULT_BAR) if pressure_fed
-                    else PUMP_TANK_PRESSURE_DEFAULT_BAR)
+        # A11: tank basıncı TEK tanım noktasından (bkz. _tank_pressure_bar).
+        tank_bar, _ = self._tank_pressure_bar()
         # Y4: pompaların GERÇEKTEN bastığı debi ve mil gücü çevrim
         # çözümünden gelir (gaz jeneratörü / ön yakıcı payı dahil). Ana oda
         # debisiyle boyutlandırmak çevrim güç dengesinden farklı bir pompa
@@ -5829,9 +5910,8 @@ class LiquidRocketEngine:
                 kwargs['turbine_pr'] = pr_from_inlet
                 self.turbine_pressure_ratio = pr_from_inlet
         if self.engine_cycle == 'pressure_fed':
-            kwargs['tank_pressure_bar'] = float(
-                getattr(self, 'feed_pressure_input_bar', None)
-                or PUMP_TANK_PRESSURE_DEFAULT_BAR)
+            # A11: tank basıncı TEK tanım noktasından (_tank_pressure_bar).
+            kwargs['tank_pressure_bar'] = float(self._tank_pressure_bar()[0])
         if self.engine_cycle == 'expander':
             kwargs['fuel_inlet_temp_K'] = CRYO_COOLANT_INLET_DEFAULT_K.get(
                 self.fuel_type)
@@ -5995,12 +6075,14 @@ class LiquidRocketEngine:
         fuel_tank_diameter = (4 * fuel_tank_volume / (np.pi * ld_ratio))**(1/3)
         fuel_tank_length = fuel_tank_diameter * ld_ratio
         
-        # Pressure requirements
-        feed_pressure = self.P_c * 1e5 + 500000  # Pa (5 bar margin above chamber pressure)
-        if self.feed_system_type == 'pressure_fed':
-            tank_pressure = feed_pressure * 1.2  # 20% margin
-        else:  # turbopump
-            tank_pressure = 300000  # 3 bar for NPSH
+        # Tank işletme basıncı — NPSH/besleme zinciriyle AYNI kaynaktan
+        # (A11): eskiden burada basınç beslemeli dal için (P_c + 5 bar) çarpı
+        # 1.2 türetilmiş tahmini, turbopompa dalı için 3e5 Pa satır içi
+        # literali vardı. Aynı yanıtta besleme kartı kullanıcının girdisiyle
+        # 105 bar derken bu kart 90 bar diyor; cidar, tank kütlesi, MEOP ve
+        # emniyet vanası ayarı o ikinci sayıdan türüyordu.
+        tank_pressure_bar_val, tank_pressure_source = self._tank_pressure_bar()
+        tank_pressure = tank_pressure_bar_val * PA_PER_BAR  # Pa
         
         # Cidar kalınlığı (ince cidarlı basınçlı kap).
         #
@@ -6070,12 +6152,24 @@ class LiquidRocketEngine:
         fuel_material_density = float(_fmat['density'])
         fuel_allowable_stress = fuel_material_strength / safety_factor
 
-        ox_wall_thickness = (tank_pressure * ox_tank_diameter/2) / allowable_stress
-        fuel_wall_thickness = (tank_pressure * fuel_tank_diameter/2) / fuel_allowable_stress
-        
-        # Minimum practical thickness
-        ox_wall_thickness = max(ox_wall_thickness, 0.003)  # 3mm minimum
-        fuel_wall_thickness = max(fuel_wall_thickness, 0.003)  # 3mm minimum
+        # İnce cidar çember gerilmesi boyutlandırması; basınçtan gelen değer
+        # AYRI adla saklanır ki imalat tabanı hükmü sessizce yutmasın (A11).
+        ox_wall_pressure_sized = (tank_pressure * ox_tank_diameter/2) / allowable_stress
+        fuel_wall_pressure_sized = (tank_pressure * fuel_tank_diameter/2) / fuel_allowable_stress
+
+        # İmalat tabanı — TEK tanım noktası (eskiden iki satır içi 0.003)
+        ox_wall_thickness = max(ox_wall_pressure_sized,
+                                TANK_WALL_MIN_THICKNESS_M)
+        fuel_wall_thickness = max(fuel_wall_pressure_sized,
+                                  TANK_WALL_MIN_THICKNESS_M)
+        ox_wall_governed_by = ('pressure sizing'
+                               if ox_wall_pressure_sized
+                               > TANK_WALL_MIN_THICKNESS_M
+                               else 'minimum manufacturing gauge')
+        fuel_wall_governed_by = ('pressure sizing'
+                                 if fuel_wall_pressure_sized
+                                 > TANK_WALL_MIN_THICKNESS_M
+                                 else 'minimum manufacturing gauge')
         
         # Internal structures design — ağız çapları ve iç yapı kütleleri artık
         # DEBİDEN ve GEOMETRİDEN hesaplanıyor; tank basıncı emniyet vanası
@@ -6131,15 +6225,22 @@ class LiquidRocketEngine:
                     'length': ox_tank_length * 1000,  # mm
                     'volume': ox_tank_volume * 1000,  # liters
                     'wall_thickness': ox_wall_thickness * 1000,  # mm
+                    'wall_thickness_pressure_sized_mm':
+                        ox_wall_pressure_sized * 1000,
+                    'wall_thickness_governed_by': ox_wall_governed_by,
+                    'wall_thickness_basis': TANK_WALL_THICKNESS_BASIS,
                     'ld_ratio': ld_ratio,
                     'ld_ratio_basis': TANK_LD_RATIO_BASIS
                 },
                 'propellant_data': {
-                    'mass': ox_mass,  # kg
+                    'mass': ox_mass,  # kg (rezerv DAHİL — bkz. mass_basis)
+                    'mass_nominal': ox_mass_nominal,  # kg (yanan nominal)
+                    'mass_basis': TANK_LOADED_MASS_BASIS,
                     'density': rho_ox,  # kg/m³
                     'density_source': rho_ox_source,
                     'volume_required': ox_volume_req * 1000,  # liters
-                    'ullage_volume': (ox_tank_volume - ox_volume_req) * 1000  # liters
+                    'ullage_volume': (ox_tank_volume - ox_volume_req) * 1000,  # liters
+                    'ullage_fraction_basis': TANK_ULLAGE_BASIS,
                 },
                 'structural': {
                     # Etiket, dayanım ve yoğunluk AYNI materials_db kaydından.
@@ -6151,6 +6252,7 @@ class LiquidRocketEngine:
                     'yield_strength_mpa': material_strength / 1e6,
                     'density_kg_m3': material_density,
                     'pressure_rating': tank_pressure / 1e5,  # bar
+                    'pressure_rating_source': tank_pressure_source,
                     'safety_factor': safety_factor,
                     'safety_factor_source': safety_factor_source,
                     'tank_mass': ox_tank_mass,  # kg
@@ -6168,15 +6270,22 @@ class LiquidRocketEngine:
                     'length': fuel_tank_length * 1000,  # mm
                     'volume': fuel_tank_volume * 1000,  # liters
                     'wall_thickness': fuel_wall_thickness * 1000,  # mm
+                    'wall_thickness_pressure_sized_mm':
+                        fuel_wall_pressure_sized * 1000,
+                    'wall_thickness_governed_by': fuel_wall_governed_by,
+                    'wall_thickness_basis': TANK_WALL_THICKNESS_BASIS,
                     'ld_ratio': ld_ratio,
                     'ld_ratio_basis': TANK_LD_RATIO_BASIS
                 },
                 'propellant_data': {
-                    'mass': fuel_mass,  # kg
+                    'mass': fuel_mass,  # kg (rezerv DAHİL — bkz. mass_basis)
+                    'mass_nominal': fuel_mass_nominal,  # kg (yanan nominal)
+                    'mass_basis': TANK_LOADED_MASS_BASIS,
                     'density': rho_fuel,  # kg/m³
                     'density_source': rho_fuel_source,
                     'volume_required': fuel_volume_req * 1000,  # liters
-                    'ullage_volume': (fuel_tank_volume - fuel_volume_req) * 1000  # liters
+                    'ullage_volume': (fuel_tank_volume - fuel_volume_req) * 1000,  # liters
+                    'ullage_fraction_basis': TANK_ULLAGE_BASIS,
                 },
                 'structural': {
                     # Etiket ile hesap tek kaynaktan (bkz. oksitleyici tankı notu).
@@ -6185,6 +6294,7 @@ class LiquidRocketEngine:
                     'yield_strength_mpa': fuel_material_strength / 1e6,
                     'density_kg_m3': fuel_material_density,
                     'pressure_rating': tank_pressure / 1e5,  # bar
+                    'pressure_rating_source': tank_pressure_source,
                     'safety_factor': safety_factor,
                     'safety_factor_source': safety_factor_source,
                     'tank_mass': fuel_tank_mass,  # kg
@@ -6197,7 +6307,10 @@ class LiquidRocketEngine:
                 'pressure_vessel': fuel_vessel,
             },
             'system_summary': {
-                'total_propellant_mass': ox_mass + fuel_mass,  # kg
+                'total_propellant_mass': ox_mass + fuel_mass,  # kg (rezervli)
+                'total_propellant_mass_nominal':
+                    ox_mass_nominal + fuel_mass_nominal,  # kg
+                'total_propellant_mass_basis': TANK_LOADED_MASS_BASIS,
                 'total_tank_mass': ox_tank_mass + fuel_tank_mass,  # kg
                 'total_volume': (ox_tank_volume + fuel_tank_volume) * 1000,  # liters
                 'overall_mass_fraction': (ox_tank_mass + fuel_tank_mass) / (ox_mass + fuel_mass),
@@ -7671,8 +7784,10 @@ class LiquidRocketEngine:
         # için basınçlandırılır ve feed_pressure pompa ÇIKIŞ hedefidir.
         feed_input = getattr(self, 'feed_pressure_input_bar', None)
         pressure_fed = getattr(self, 'engine_cycle', '') == 'pressure_fed'
+        # A11: değer TEK tanım noktasından (_tank_pressure_bar); uyarı
+        # eşikleri değişmedi.
+        tank_bar, _ = self._tank_pressure_bar()
         if pressure_fed:
-            tank_bar = feed_input or PUMP_TANK_PRESSURE_DEFAULT_BAR
             if tank_bar < drops['pump_discharge_pressure_ox']:
                 self._warn('warn.liquid.pressure_fed_tank_too_low', 'critical',
                            tank_bar=float(tank_bar),
@@ -7680,7 +7795,6 @@ class LiquidRocketEngine:
                                drops['pump_discharge_pressure_ox']), 1),
                            chamber_bar=float(self.P_c))
         else:
-            tank_bar = PUMP_TANK_PRESSURE_DEFAULT_BAR
             if feed_input is not None and feed_input < drops[
                     'pump_discharge_pressure_ox']:
                 self._warn('warn.liquid.feed_pressure_below_pump_discharge', 'warning',
@@ -8612,8 +8726,9 @@ class LiquidRocketEngine:
             _, ox_vol, _, _ = self._size_tank(mdot_ox * burn_time, 'oxidizer')
             _, fuel_vol, _, _ = self._size_tank(mdot_fuel * burn_time, 'fuel')
             # Turbopompalı tanklarda basınç NPSH için düşüktür (~3 bar);
-            # tank tasarımıyla aynı değer kullanılır.
-            tank_pressure_pa = 3.0e5
+            # A11: değer artık tank kartı ve NPSH zinciriyle AYNI tanım
+            # noktasından okunur (eskiden 3e5 Pa satır içi literaldi).
+            tank_pressure_pa = self._tank_pressure_bar()[0] * PA_PER_BAR
             ox_gas = autogenous_pressurant(ox_vol, tank_pressure_pa, 'oxygen')
             fuel_gas = autogenous_pressurant(fuel_vol, tank_pressure_pa, fuel)
             total_kg = 0.0
