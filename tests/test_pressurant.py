@@ -20,8 +20,11 @@ import pytest
 
 from hrma.analysis.pressurant_sizing import (
     regulated_pressurant, blowdown_pressurant, analyze_pressurant,
-    gas_properties, GAS_PROPERTIES, R_UNIVERSAL,
+    gas_properties, compressibility_factor, GAS_PROPERTIES, R_UNIVERSAL,
 )
+
+# CoolProp kuruluysa gerçek gaz yolu aktif; değilse Z=1 + beyan (skip nedeni).
+HAS_COOLPROP = compressibility_factor('helium', 300e5, 293.15)[1]
 
 
 class TestGasConstants:
@@ -186,11 +189,20 @@ class TestBlowdown:
         assert b['final_temperature_K'] == pytest.approx(expected, rel=1e-12)
 
     def test_gas_mass_is_trapped_inventory(self):
+        # C5 (2026-08-15): hapsolmuş kütle artık gerçek gazla,
+        # m = P0*V_u0/(Z0*R*T0); ideal karşılığı ayrı alanda raporlanır.
         b = blowdown_pressurant(0.05, 0.05, 50e5, gas='nitrogen',
                                 initial_temperature=293.15)
         R = GAS_PROPERTIES['nitrogen']['R']
+        Z0 = b['compressibility_factor_initial']
         assert b['gas_mass_kg'] == pytest.approx(
+            50e5 * 0.05 / (Z0 * R * 293.15), rel=1e-9)
+        assert b['gas_mass_ideal_gas_kg'] == pytest.approx(
             50e5 * 0.05 / (R * 293.15), rel=1e-9)
+        # İç tutarlılık: m_ideal = Z0 * m_gerçek (durum denkleminin doğrudan
+        # sonucu — alanlar birbirinden bağımsız uydurulmuş olamaz).
+        assert b['gas_mass_ideal_gas_kg'] == pytest.approx(
+            Z0 * b['gas_mass_kg'], rel=1e-9)
 
     def test_final_pressure_monotonic_decreasing_in_n(self):
         """Fixed geometry: higher polytropic n -> lower final pressure."""
@@ -219,6 +231,93 @@ class TestBlowdown:
     def test_blowdown_validation(self):
         with pytest.raises(ValueError):
             blowdown_pressurant(-0.05, 0.05, 50e5, gas='nitrogen')
+
+
+class TestBlowdownRealGas:
+    """C5 bekçileri — blowdown dalında gerçek gaz (Z) düzeltmesi.
+
+    ÖLÇÜLDÜ (2026-08-15, CoolProp 6.8.0 = NIST REFPROP tabanlı;
+    Helium: Ortiz-Vega 2013 EOS, Nitrogen: Span 2000 EOS; T0 = 293.15 K):
+        He 300 bar: Z0 = 1.1413 -> ideal hapsolmuş kütle %14.13 FAZLA
+        N2 300 bar: Z0 = 1.1401 -> ideal hapsolmuş kütle %14.01 FAZLA
+        He  20 bar: Z0 = 1.0097 -> fark %0.97 (ihmal edilir)
+        N2  20 bar: Z0 = 0.9961 -> fark %0.39 (ihmal edilir)
+        Z_final (n=1.2, V_u0=10 L, V_p=40 L, 300 bar): He 1.0298, N2 0.9337
+    m_ideal / m_gerçek = Z0 olduğundan bağıl fark tam olarak Z0 - 1'dir;
+    tolerans bantları bu ölçümlerin etrafına konuldu.
+    """
+
+    #: 300 bar sınıfı blowdown örneği: V_p=40 L, V_u0=10 L, T0=293.15 K.
+    KW_300BAR = dict(propellant_volume=0.040, initial_ullage_volume=0.010,
+                     initial_pressure=300e5, initial_temperature=293.15)
+
+    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    def test_300bar_helium_ideal_vs_real_measurable(self):
+        b = blowdown_pressurant(gas='helium', **self.KW_300BAR)
+        rel = (b['gas_mass_ideal_gas_kg'] - b['gas_mass_kg']) / b['gas_mass_kg']
+        assert 0.10 < rel < 0.18  # ölçülen: 0.1413
+
+    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    def test_300bar_nitrogen_ideal_vs_real_measurable(self):
+        b = blowdown_pressurant(gas='nitrogen', **self.KW_300BAR)
+        rel = (b['gas_mass_ideal_gas_kg'] - b['gas_mass_kg']) / b['gas_mass_kg']
+        assert 0.10 < rel < 0.18  # ölçülen: 0.1401
+
+    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    def test_z_fields_present_and_physical(self):
+        b = blowdown_pressurant(gas='helium', **self.KW_300BAR)
+        assert b['real_gas'] is True
+        assert 1.05 < b['compressibility_factor_initial'] < 1.25  # ölçülen 1.1413
+        assert 0.90 < b['compressibility_factor_final'] < 1.20    # ölçülen 1.0298
+        assert 'CoolProp' in b['real_gas_model']
+        assert 'Z=' in b['model_note']
+
+    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    def test_z_final_physical_for_nitrogen(self):
+        b = blowdown_pressurant(gas='nitrogen', **self.KW_300BAR)
+        assert 0.90 < b['compressibility_factor_final'] < 1.20    # ölçülen 0.9337
+
+    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    def test_low_pressure_ideal_and_real_agree(self):
+        # 20 bar'da ideal ile gerçek gaz farkı küçük olmalı.
+        kw = dict(self.KW_300BAR, initial_pressure=20e5)
+        he = blowdown_pressurant(gas='helium', **kw)
+        rel_he = abs(he['gas_mass_ideal_gas_kg'] - he['gas_mass_kg']) / he['gas_mass_kg']
+        assert rel_he < 0.015  # ölçülen: 0.0097
+        n2 = blowdown_pressurant(gas='nitrogen', **kw)
+        rel_n2 = abs(n2['gas_mass_ideal_gas_kg'] - n2['gas_mass_kg']) / n2['gas_mass_kg']
+        assert rel_n2 < 0.010  # ölçülen: 0.0039
+
+    def test_mutation_fixed_z_would_break_guard(self, monkeypatch):
+        """MUTASYON DENETİMİ: Z'yi 1.0'a sabitleyen mutant, 300 bar
+        bekçisinin dayandığı farkı sıfırlar — yani o bekçi bu mutantı KIRAR.
+        (Mutantı burada bilerek kurup bekçi koşulunun artık sağlanmadığını
+        gösteriyoruz; bekçinin kendisi mutantsız üstteki testlerde koşuyor.)
+        """
+        import hrma.analysis.pressurant_sizing as ps
+        monkeypatch.setattr(ps, 'compressibility_factor',
+                            lambda *a, **k: (1.0, True))
+        b = ps.blowdown_pressurant(gas='helium', **self.KW_300BAR)
+        rel = (b['gas_mass_ideal_gas_kg'] - b['gas_mass_kg']) / b['gas_mass_kg']
+        # Mutant altında gerçek-gaz farkı yok olur...
+        assert rel == pytest.approx(0.0, abs=1e-12)
+        # ...ve 300 bar bekçisinin koşulu (0.10 < rel < 0.18) sağlanamaz.
+        assert not (0.10 < rel < 0.18)
+        assert b['compressibility_factor_initial'] == 1.0
+
+    def test_no_coolprop_declares_ideal_gas(self, monkeypatch):
+        """CoolProp yok senaryosu: sessiz düşüş yasak — Z=1, real_gas=False
+        ve model notunda açık beyan (regüle dalla aynı disiplin)."""
+        import hrma.analysis.pressurant_sizing as ps
+        monkeypatch.setattr(ps, '_COOLPROP', False)
+        b = ps.blowdown_pressurant(gas='helium', **self.KW_300BAR)
+        assert b['real_gas'] is False
+        assert b['compressibility_factor_initial'] == 1.0
+        assert b['compressibility_factor_final'] == 1.0
+        assert b['gas_mass_kg'] == pytest.approx(
+            b['gas_mass_ideal_gas_kg'], rel=1e-12)
+        assert 'ideal gas' in b['real_gas_model']
+        assert 'CoolProp unavailable' in b['model_note']
 
 
 class TestDispatch:

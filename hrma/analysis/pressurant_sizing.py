@@ -315,6 +315,10 @@ def blowdown_pressurant(propellant_volume, initial_ullage_volume,
     Returns
     -------
     dict with final pressure/temperature, blowdown ratio and trapped gas mass.
+    Hapsolmuş kütle gerçek gazla (Z0 = Z(P0, T0), CoolProp kuruluysa)
+    hesaplanır; ideal karşılığı ``gas_mass_ideal_gas_kg`` alanında, başlangıç
+    ve son durum Z'leri ``compressibility_factor_initial/final`` alanlarında
+    raporlanır. CoolProp yoksa Z=1 (ideal gaz) + beyan, sessiz düşüş yok.
     """
     V_p = float(propellant_volume)
     V_u0 = float(initial_ullage_volume)
@@ -333,7 +337,39 @@ def blowdown_pressurant(propellant_volume, initial_ullage_volume,
     P_final = P0 * (V_u0 / V_uf) ** n                       # Eq. (2)
     T_final = T0 * (P_final / P0) ** ((n - 1.0) / n)        # Eq. (3)
     blowdown_ratio = P0 / P_final
-    gas_mass = P0 * V_u0 / (R * T0)                         # fixed trapped mass
+
+    # ------------------------------------------------------------------
+    # Gerçek gaz düzeltmesi (C5, 2026-08-15): regüle dal Z faktörünü zaten
+    # uyguluyordu, blowdown dalı ideal gazla kalmıştı. Oysa blowdown tankı
+    # tam da yüksek basınçtan başlar ve hapsolmuş kütle m = P0·V_u0/(Z0·R·T0)
+    # ile hesaplanır. ÖLÇÜLEN (CoolProp 6.8.0 = NIST REFPROP tabanlı;
+    # Helium: Ortiz-Vega 2013 EOS, Nitrogen: Span 2000 EOS, T0 = 293.15 K):
+    #     He 300 bar -> Z0 = 1.1413  (ideal kütle %14.1 FAZLA)
+    #     N2 300 bar -> Z0 = 1.1401  (ideal kütle %14.0 FAZLA)
+    #     He  20 bar -> Z0 = 1.0097  (fark %1.0 — düşük basınçta ihmal edilir)
+    # Polytropik süreç bağıntıları Eş. (2)-(3) süreç MODELİDİR ve aynen
+    # kalır; Z yalnızca durum denklemi üzerinden gaz ENVANTERİNİ düzeltir.
+    # Son durum Z'si tanısal olarak raporlanır (ölçülen band 0.93-1.14).
+    # ------------------------------------------------------------------
+    Z0, real_gas = compressibility_factor(name, P0, T0)
+    Z_final, _ = compressibility_factor(name, P_final, T_final)
+    gas_mass_ideal = P0 * V_u0 / (R * T0)       # ideal gaz hapsolmuş kütle
+    gas_mass = P0 * V_u0 / (Z0 * R * T0)        # gerçek gaz hapsolmuş kütle
+
+    note = (
+        "Blowdown pressurization (Huzel & Huang Ch. 5): trapped gas expands "
+        "polytropically (n=1 isothermal, n=gamma adiabatic); tank pressure "
+        "falls by the blowdown ratio. Engine must tolerate the P range.")
+    if real_gas:
+        note += (f" Real-gas compressibility applied to the trapped-gas "
+                 f"inventory: Z={Z0:.3f} at {P0 / 1e5:.0f} bar "
+                 f"(CoolProp/NIST); the ideal-gas trapped mass would be "
+                 f"{Z0:.3f}x off. Polytropic P/T relations are a process "
+                 f"model and are kept as-is.")
+    else:
+        note += (" CoolProp unavailable -> ideal gas (Z=1) assumed; at "
+                 "200-400 bar this MIS-estimates the trapped gas mass by "
+                 "5-28%.")
 
     return {
         'gas': name,
@@ -348,10 +384,13 @@ def blowdown_pressurant(propellant_volume, initial_ullage_volume,
         'final_ullage_volume': float(V_uf),
         'expelled_volume': V_p,
         'gas_mass_kg': float(gas_mass),
-        'model_note': (
-            "Blowdown pressurization (Huzel & Huang Ch. 5): trapped gas expands "
-            "polytropically (n=1 isothermal, n=gamma adiabatic); tank pressure "
-            "falls by the blowdown ratio. Engine must tolerate the P range."),
+        'gas_mass_ideal_gas_kg': float(gas_mass_ideal),
+        'compressibility_factor_initial': float(Z0),
+        'compressibility_factor_final': float(Z_final),
+        'real_gas': bool(real_gas),
+        'real_gas_model': ('CoolProp (NIST REFPROP-based)' if real_gas
+                           else 'ideal gas (CoolProp unavailable)'),
+        'model_note': note,
         'confidence': 'medium',
     }
 
