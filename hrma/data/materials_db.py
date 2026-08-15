@@ -426,7 +426,7 @@ MATERIALS: Dict[str, Dict] = {
         'max_service_temperature': 3500,
         'source': ('Mechanical: typical virgin silica-phenolic (MX-2600 '
                    'class) values, approximate — liner/insulator only, not '
-                   'primary structure (NASA SP-8091 ablative class). '
+                   'primary structure (NASA SP-8093 ablative class). '
                    'Thermal: prior heat_transfer_analysis table (charred '
                    'phenolic).'),
         'tags': ['ablative', 'liner'],

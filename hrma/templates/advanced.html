@@ -3337,9 +3337,12 @@
             // Çözücü sprey açısını toplam momentum oranından hesaplar
             pintle_spray_angle: 'derived',
             // Yayımlanmış korelasyon yok
-            skip_distance: 'no_model',
-            // Deseni performansa bağlayan model yok; yalnız CAD yerleşimi için
-            hole_pattern: 'no_model'
+            skip_distance: 'no_model'
+            // 'hole_pattern' 14 Ağu 2026'da BAĞLANDI (form -> istek -> 400
+            // doğrulama -> yanıt; test_hole_pattern_baglama.py) ve bu
+            // listeden çıkarıldı: rozet "girdin sonucu değiştirmez" derken
+            // girdi artık yanıtı değiştiriyordu — rozetin kendisi yanlış
+            // bilgi olmuştu (rot bekçisi yakaladı, 15 Ağu).
         };
 
         function unwiredNoteText(category) {
@@ -3706,6 +3709,13 @@
             // Opsiyonel başlangıç port çapı (mm girilir, backend metre bekler)
             const portDiaMm = parseFloat(document.getElementById('initial_port_diameter')?.value || 0);
             if (portDiaMm > 0) data.initial_port_diameter = portDiaMm / 1000;
+
+            // 2.6.27 — hole_pattern toplayıcıya HİÇ konmuyordu ("kanal var
+            // kapı yok"): seçim ne sunucuya gidiyor ne çizime yansıyordu.
+            // Desen yalnız plaka/CAD yerleşimini etkiler; performans modeli
+            // yok — UNWIRED_INPUTS'taki 'no_model' beyanı doğru kalır.
+            const holePattern = document.getElementById('hole_pattern')?.value;
+            if (holePattern) data.hole_pattern = holePattern;
 
             // v2.6.26 — v2.6.25'İN YARIM KALAN DÜZELTMESİ:
             // 2.6.25'te backend'in bu üç anahtarı okuması sağlanmıştı

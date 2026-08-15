@@ -7,6 +7,13 @@ from hrma.engines.nozzle_design import (NozzleDesigner,
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
 from hrma.analysis.structural_analysis import StructuralAnalyzer
 from hrma.analysis.regression_analysis import RegressionAnalyzer
+# Yayımlanan eğrilerin tepeyi koruyan seyreltmesi — katı ile AYNI algoritma,
+# TEK tanım noktası (bkz. hrma/analysis/curve_sampling.py: ölçülen kusur
+# port 5 mm + t_b 50 s -> 17 317 nokta / 1,29 MB idi).
+from hrma.analysis.curve_sampling import (
+    decimate_curve_indices as _ortak_seyreltme_indeksleri,
+    sampling_block as _ornekleme_blogu,
+)
 from hrma.data.external_data_fetcher import data_fetcher
 from hrma.data.propellant_database import (
     HYBRID_REGRESSION_COEFFICIENTS,
@@ -145,7 +152,7 @@ OX_TANK_LD_RATIO_BASIS = (
     'this ratio and the required volume')
 # Hibrit kamara yalıtım astarı varsayılan malzemesi. thermal_protection
 # modülünün tanıdığı üç ablatiften biri; silika-fenolik, hibrit/katı kamara
-# yalıtımında yaygın seçimdir (NASA SP-8091 sınıfı bant, modül tablosu).
+# yalıtımında yaygın seçimdir (NASA SP-8093 sınıfı bant, modül tablosu).
 # TASARIM SEÇİMİDİR, çözüm değildir — çıktıda adıyla beyan edilir.
 LINER_MATERIAL_DEFAULT = 'silica_phenolic'
 # Cidar sıcaklık geçmişi örnekleme tavanı: port_history'deki ~200 nokta
@@ -3435,7 +3442,7 @@ class HybridRocketEngine:
         -------------
         * Astar boyutlandırma: Seviye-1 Q* (ablasyon ısısı) modeli,
           ṡ = q_net/(ρ·Q*), gereken kalınlık = toplam çekilme × tasarım payı
-          (NASA SP-8091 sınıfı; Sutton & Biblarz 9. baskı Böl. 8.5) —
+          (NASA SP-8093 sınıfı; Sutton & Biblarz 9. baskı Böl. 8.5) —
           hrma.analysis.thermal_protection.ThermalProtectionAnalyzer.
           ablative_thickness. Katı motorun kapak yalıtımı bağlanma deseniyle
           AYNI şema (alan adları solid _ablative_liner_sizing ile birebir).
@@ -3453,7 +3460,7 @@ class HybridRocketEngine:
         """
         basis = (
             'chamber insulation liner sized with the Level-1 Q* ablation '
-            'model (hrma/analysis/thermal_protection.py, NASA SP-8091-class '
+            'model (hrma/analysis/thermal_protection.py, NASA SP-8093-class '
             'band; Sutton & Biblarz 9th ed. Ch. 8.5) and a bare-wall 1-D '
             'explicit-FD heat-sink temperature history (same module, '
             'Incropera & DeWitt 6th ed. Sec. 5.10). All driving inputs are '
@@ -3512,13 +3519,65 @@ class HybridRocketEngine:
                 'reason': f'thermal protection module unavailable: {exc}',
             }
 
-        def _liner(station, function, q_W_m2, station_note):
-            """Tek istasyon astar boyutu — katı motorla AYNI alan adları."""
+        # --- İSTASYON GİRDİLERİ: gaz tarafı katsayısı + yarıçap ------------
+        # (v2.6.27 ablasyon teşhisi — sıvı motorla AYNI şema.) Astar artık
+        # çağıranın soğuk-cidar akısıyla değil YÜZEY ENERJİ DENGESİYLE
+        # boyutlandırılır. Katsayılar bu koşunun kendi akılarından CEBİRSEL
+        # geri çözümdür (ikinci bir Bartz hesabı yapılmaz; ısı-yutucu geçmişi
+        # de aynı kamara katsayısını kullanır — tek istasyon, tek h_g):
+        #   h_kamara = q_kamara/(T_aw − T_cidar_ref)
+        #   h_boğaz  = q_boğaz /(T_aw − T_cidar_ref)
+        # Sürücü sıcaklık: T_aw (ısı analizinin kendi kurtarma sıcaklığı).
+        # Yarıçaplar geometrik kapı içindir: kamara için hazne iç yarıçapı,
+        # lüle girişi için boğaz yarıçapı — giriş kesiti boğazdan geniştir,
+        # yani kapı MUHAFAZAKÂR alt sınırla denetler (akı beyanıyla tutarlı:
+        # o da boğaz akısıyla ÜST sınırdan boyutlar). Sürücü fark pozitif
+        # değilse parametreler HİÇ geçilmez (çekirdek yarım çifti kabul
+        # etmez) ve eski yol beyanlı biçimde korunur.
+        def _pozitif(deger, olcek=1.0):
+            try:
+                v = float(deger)
+            except (TypeError, ValueError):
+                return None
+            return v * olcek if np.isfinite(v) and v > 0 else None
+
+        _fark = taw - tw_ref
+        h_kamara = _pozitif(q_chamber / _fark) if _fark > 0 else None
+        h_bogaz = _pozitif(q_throat / _fark) if _fark > 0 else None
+        r_kamara = _pozitif(getattr(self, 'D_ch', None), 0.5)
+        r_bogaz = _pozitif(getattr(self, 'd_t', None), 0.5)
+        # v2.6.27 blokaj denetimi: kenar gazı c_p'si, akıları üreten AYNI
+        # ısı transferi analizinin kendi gaz özelliklerinden gelir (B'yi
+        # bölen c_p ile h_g'yi üreten c_p aynı olmak zorunda — parametre
+        # tutarlılığı). Yoksa çekirdek psi = 1 (blokajsız, konservatif)
+        # kullanır ve blockage_basis'te beyan eder.
+        cp_gaz = _pozitif(((heat_transfer_results or {})
+                           .get('heat_transfer_coefficients') or {})
+                          .get('gas_cp'))
+
+        def _liner(station, function, q_W_m2, station_note,
+                   h_gas, h_gas_source, radius_m, radius_source):
+            """Tek istasyon astar boyutu — sıvı/katı ile AYNI alan adları.
+
+            ``h_gas`` verilirse çekirdek yüzey enerji dengesini çözer ve
+            geçerlilik kapısı bağlayıcıdır (NOT_MODELLED hükmü AYNEN taşınır,
+            sayı uydurulmaz); verilmezse eski yol birebir korunur.
+            """
+            ek = {}
+            if h_gas is not None:
+                # Çift HALİNDE geçilir: yarım geçiş çekirdekte ValueError.
+                ek['h_gas_W_m2K'] = h_gas
+                ek['T_recovery_K'] = taw
+                if cp_gaz is not None:
+                    ek['gas_cp_J_kgK'] = cp_gaz
+            if radius_m is not None:
+                ek['station_radius_m'] = radius_m
             try:
                 sizing = analyzer.ablative_thickness(
                     q_net_W_m2=q_W_m2,
                     burn_time_s=t_burn,
-                    material=LINER_MATERIAL_DEFAULT)
+                    material=LINER_MATERIAL_DEFAULT,
+                    **ek)
             except Exception as exc:
                 return {
                     'material': LINER_MATERIAL_DEFAULT,
@@ -3527,28 +3586,98 @@ class HybridRocketEngine:
                     'function': function,
                     'basis': f'Ablative sizing failed at the {station}: {exc}',
                 }
-            liner_basis = (
-                f"Level-1 Q* ablation sizing at the {station}: required "
-                f"thickness = total recession x design margin "
-                f"{sizing['design_margin']:g}. Heat flux "
-                f"({q_W_m2 / 1e3:.0f} kW/m2) and burn time "
-                f"({t_burn:.2f} s) are this run's solver values. "
-                f"Liner material '{LINER_MATERIAL_DEFAULT}' is a declared "
-                f"design choice, not a solved selection. " + station_note)
+            enerji_dengesi = (
+                sizing['flux_basis'] == 'surface_energy_balance')
+            kalinlik_mm = sizing['required_thickness_mm']
+            if kalinlik_mm is None:
+                # Çekirdeğin kapısı kalınlığı kesti: hüküm 'sized'a
+                # çevrilmez, gerekçe kullanıcıya aynen taşınır.
+                yaricap_ifadesi = (
+                    'no station radius was available, so only the recession '
+                    'rate ceiling was checked' if radius_m is None else
+                    f'station radius {radius_m * 1e3:.1f} mm '
+                    f'({radius_source})')
+                liner_basis = (
+                    f'Level-1 Q* ablation sizing was RUN at the {station} '
+                    f'but published NO thickness. '
+                    f"{sizing['validity_note']} "
+                    f'Inputs are this run\'s solver values: gas-side '
+                    f'coefficient {h_gas:.0f} W/m2K ({h_gas_source}), '
+                    f'recovery temperature {taw:.0f} K (the heat transfer '
+                    f'analysis of this run), burn time {t_burn:.2f} s, '
+                    f'{yaricap_ifadesi}. ' + station_note)
+            else:
+                liner_basis = (
+                    f"Level-1 Q* ablation sizing at the {station}: required "
+                    f"thickness = total recession x design margin "
+                    f"{sizing['design_margin']:g}. "
+                    + ((
+                        f'The net surface flux is SOLVED here from an energy '
+                        f'balance at the {sizing["T_surface_K"]:.0f} K steady '
+                        f'ablation temperature (blowing blockage '
+                        f'{sizing["blowing_blockage"]:g} x convection minus '
+                        f're-radiation at emissivity '
+                        f'{sizing["emissivity"]:g}), driven by this run\'s '
+                        f'gas-side coefficient {h_gas:.0f} W/m2K '
+                        f'({h_gas_source}) and recovery temperature '
+                        f'{taw:.0f} K. The cold-wall design flux '
+                        f'({q_W_m2 / 1e3:.0f} kW/m2) is reported for '
+                        f'COMPARISON only, it is not what sized this liner. ')
+                       if enerji_dengesi else (
+                        f'Heat flux ({q_W_m2 / 1e3:.0f} kW/m2) is this run\'s '
+                        f'solver value and is used AS GIVEN: no surface '
+                        f'energy balance was solved for this station. '))
+                    + f'Burn time ({t_burn:.2f} s) is this run\'s effective '
+                    f"time-marching value. Liner material "
+                    f"'{LINER_MATERIAL_DEFAULT}' is a declared design "
+                    f'choice, not a solved selection. ' + station_note)
             return {
                 'material': sizing['material_name'],
-                'thickness': float(sizing['required_thickness_mm']),  # mm
-                'thickness_status': 'sized',
+                'thickness': (None if kalinlik_mm is None
+                              else float(kalinlik_mm)),           # mm
+                'thickness_status': sizing['thickness_status'],
                 'function': function,
                 'total_recession_mm': float(sizing['total_recession_mm']),
                 'recession_rate_mm_s': float(sizing['recession_rate_mm_s']),
                 'design_margin': float(sizing['design_margin']),
                 'q_star_mj_kg': float(sizing['q_star_MJ_kg']),
+                # Çağıranın (soğuk cidar) akısı — yeni yolda karşılaştırma
+                # değeridir, boyutlandıran değer değildir.
                 'heat_flux_kw_m2': q_W_m2 / 1e3,
                 'burn_time_s': t_burn,
+                'flux_basis': sizing['flux_basis'],
+                'recession_regime': sizing['recession_regime'],
+                'q_net_kw_m2': float(sizing['q_mean_W_m2']) / 1e3,
+                'q_conv_blocked_kw_m2': (
+                    None if sizing['q_conv_blocked_W_m2'] is None
+                    else float(sizing['q_conv_blocked_W_m2']) / 1e3),
+                'q_reradiated_kw_m2': (
+                    None if sizing['q_reradiated_W_m2'] is None
+                    else float(sizing['q_reradiated_W_m2']) / 1e3),
+                'h_gas_W_m2K': sizing['h_gas_W_m2K'],
+                'h_gas_source': h_gas_source if h_gas is not None else None,
+                'T_recovery_K': sizing['T_recovery_K'],
+                'T_surface_K': sizing['T_surface_K'],
+                'emissivity': sizing['emissivity'],
+                'emissivity_source': sizing['emissivity_source'],
+                # v2.6.27 blokaj denetimi: psi artık sabit değil, B'den
+                # çözülür; c_p bu bağlamada henüz geçilmediği için çekirdek
+                # psi = 1 (blokajsız, konservatif) kullanır ve bunu
+                # blockage_basis'te beyan eder.
+                'blowing_blockage': sizing['blowing_blockage'],
+                'b_prime': sizing['b_prime'],
+                'blowing_lambda': sizing['blowing_lambda'],
+                'blowing_gas_fraction': sizing['blowing_gas_fraction'],
+                'blockage_basis': sizing['blockage_basis'],
+                'station_radius_m': sizing['station_radius_m'],
+                'station_radius_source': (None if radius_m is None
+                                          else radius_source),
+                'model_valid': bool(sizing['model_valid']),
+                'validity_note': sizing['validity_note'],
                 'basis': liner_basis,
                 'model_note': sizing['model_note'],
                 'source': sizing['source'],
+                'surface_source': sizing['surface_source'],
             }
 
         chamber_liner = _liner(
@@ -3558,7 +3687,12 @@ class HybridRocketEngine:
             q_chamber,
             'Over the grain itself the FUEL is the ablator; this liner '
             'covers the chamber sections not shielded by fuel. Flux is the '
-            'Bartz CHAMBER-station design flux of this run.')
+            'Bartz CHAMBER-station design flux of this run.',
+            h_kamara,
+            'chamber coefficient of this run, recovered from the chamber '
+            'design flux: h_g = q_chamber/(T_aw - T_wall_ref)',
+            r_kamara,
+            'chamber inner radius of this run')
         nozzle_entry_liner = _liner(
             'aft mixing chamber / nozzle entry',
             'Protect the convergent entry region ahead of the throat',
@@ -3566,7 +3700,14 @@ class HybridRocketEngine:
             'Flux is the Bartz THROAT design flux: the nozzle-entry flux is '
             'below the throat value, so this thickness is a conservative '
             'UPPER bound, not a station-resolved value (same declaration '
-            'the solid engine makes for its closures).')
+            'the solid engine makes for its closures). The geometric gate '
+            'uses the THROAT radius, a conservative lower bound of the '
+            'entry passage.',
+            h_bogaz,
+            'throat coefficient of this run, recovered from the throat '
+            'design flux: h_g = q_throat/(T_aw - T_wall_ref)',
+            r_bogaz,
+            'throat radius solved by this run')
 
         # --- Çıplak cidar ısı-yutucu sıcaklık geçmişi ----------------------
         # Sürücü katsayı, ısı modülünün KENDİ kamara tasarım akısından geri
@@ -4980,20 +5121,66 @@ class HybridRocketEngine:
             basic_results['c_star_theoretical'] = getattr(
                 self, 'C_star_theoretical', self.C_star)
 
+        # --- Yayın seyreltmesi (B2-4) --------------------------------------
+        # Ölçülen kusur: port 5 mm + t_b 50 s -> thrust_curve 17 317 nokta /
+        # 1,29 MB + of_shift_performance 17 317 nokta / 1,28 MB (yanıtın
+        # %94'ü). Çözücü adımı DEĞİŞMEZ; yalnız yayımlanan diziler inceltilir
+        # ve TEK indeks kümesi iki seriye birden uygulanır — thrust_curve ile
+        # of_shift_performance aynı zaman tabanında kalır (seri tutarsızlığı
+        # kusuru 8. partide kapatılmıştı, yeniden açılamaz). Zorunlu taşınan
+        # örnekler: itki tepesi + tepe basınç (ortak modül) ve O/F ile Isp'nin
+        # uç değerleri (aşağıda) — kaymanın zarfı grafikte kaybolmaz.
+        # Ortalamalar ve türetilmiş sayılar TAM çözünürlükten hesaplanır.
+        _yayin_idx = None
+        _yayin_n = 0
+        _cozucu_adim_s = None
+        if getattr(self, '_thrust_history', None):
+            _yayin_n = len(self._thrust_history)
+            _zaman_dizisi = np.asarray(self._time_history, dtype=float)
+            if _zaman_dizisi.size > 1:
+                # Adım beyanı seriden ÖLÇÜLÜR (ayrı bir sabitten kopyalanmaz).
+                _cozucu_adim_s = float(np.median(np.diff(_zaman_dizisi)))
+            _zorunlu = []
+            if self.track_performance and getattr(self, '_of_history', None):
+                for _dizi in (self._of_history, self._isp_history):
+                    _d = np.asarray(_dizi, dtype=float)
+                    if _d.size == _yayin_n and bool(np.isfinite(_d).any()):
+                        _m = np.isfinite(_d)
+                        _zorunlu.append(int(np.nanargmax(
+                            np.where(_m, _d, -np.inf))))
+                        _zorunlu.append(int(np.nanargmin(
+                            np.where(_m, _d, np.inf))))
+            _yayin_idx = _ortak_seyreltme_indeksleri(
+                self._thrust_history, pressure=self._pc_history,
+                keep=_zorunlu)
+
+        def _seyrelt(dizi):
+            # Yalnız itki dizisiyle AYNI uzunluktaki seriler seyreltilir;
+            # farklı uzunluk = farklı taban, dokunulmaz (hizalama uydurulmaz).
+            if _yayin_idx is None or len(dizi) != _yayin_n:
+                return [float(x) for x in dizi]
+            return [float(dizi[i]) for i in _yayin_idx]
+
         # O/F kaymasının performansa etkisi (denetim bulgusu #2): time-marching
         # boyunca anlık O/F'den hesaplanan c*/Isp dizileri ve zaman-ortalamaları.
         if self.track_performance and getattr(self, '_cstar_history', None):
             cstar_hist = self._cstar_history
             isp_hist = self._isp_history
             basic_results['of_shift_performance'] = {
-                'time': list(self._time_history),
-                'of_ratio': list(self._of_history),
-                'c_star': list(cstar_hist),
-                'isp': list(isp_hist),
+                'time': _seyrelt(self._time_history),
+                'of_ratio': _seyrelt(self._of_history),
+                'c_star': _seyrelt(cstar_hist),
+                'isp': _seyrelt(isp_hist),
+                # Ortalamalar TAM çözünürlüklü geçmişten — seyreltmeden ÖNCE.
                 'c_star_time_avg': float(np.mean(cstar_hist)) if cstar_hist else self.C_star,
                 'isp_time_avg': float(np.mean(isp_hist)) if isp_hist else self.Isp,
                 'c_star_design_of': self.C_star,
                 'isp_design_of': self.Isp,
+                'sampling': _ornekleme_blogu(
+                    len(_seyrelt(self._time_history)), _yayin_n or
+                    len(self._time_history), _cozucu_adim_s,
+                    'the O/F-ratio extremes and the specific-impulse extremes',
+                    'time-averaged c*, time-averaged Isp, O/F shift statistics'),
             }
 
         # İtki-zaman eğrisi (v2.6.26). Katı motorla AYNI sözleşme
@@ -5002,13 +5189,19 @@ class HybridRocketEngine:
         # çözücünün kendi durumundan gelir; şekil verilmez.
         if getattr(self, '_thrust_history', None):
             basic_results['thrust_curve'] = {
-                'time': [float(x) for x in self._time_history],
-                'thrust': [float(x) for x in self._thrust_history],
-                'pressure': [float(x) for x in self._pc_history],
-                'mass_flow': [float(x) for x in self._mdot_total_history],
+                'time': _seyrelt(self._time_history),
+                'thrust': _seyrelt(self._thrust_history),
+                'pressure': _seyrelt(self._pc_history),
+                'mass_flow': _seyrelt(self._mdot_total_history),
                 'basis': ('time-marching solution: F = mdot_total(t)*Isp(t)*g0, '
                           'Pc = mdot_total(t)*c_star(t)/At; oxidiser flow is '
                           'constant, fuel flow follows the regressing port'),
+                'sampling': _ornekleme_blogu(
+                    len(_seyrelt(self._time_history)), _yayin_n,
+                    _cozucu_adim_s,
+                    'the O/F-ratio extremes and the specific-impulse extremes',
+                    'total impulse, burn time, average thrust, O/F shift '
+                    'statistics, warnings'),
             }
 
         # Port çapı zaman serisi (3D yanma animasyonu için, metre + saniye).

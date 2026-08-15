@@ -58,6 +58,17 @@ _OPTIMUM_OF_CACHE_MAX = 16
 # (visualization._isp_surface_solve); bu sınır onun altı katından fazlasıdır.
 EQUILIBRIUM_CACHE_MAX = 4096
 
+# Cantera mekanizma zinciri: sırayla denenir, ilk YÜKLENEN kullanılır.
+# Zincirin her basamağı gerçekten yüklenebilir bir mekanizma dosyasıdır ve
+# başarısız her deneme loglanır (sessiz düşüş yok — bkz. __init__).
+MECHANISM_CHAIN = ('gri30.yaml', 'h2o2.yaml')
+
+# Adyabatik alev sıcaklığı kök aramasının parantezi [K].
+# Alt uç: gri30 termo verisinin alt sınırı 200-300 K; 250 K altı hiçbir yanma
+# probleminde anlamlı değildir. Üst uç: 5500 K, bilinen kimyasal itici
+# çiftlerinin (H2/F2 dahil) adyabatik alev sıcaklıklarının üstündedir.
+FLAME_T_BRACKET_K = (250.0, 5500.0)
+
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
 
@@ -83,32 +94,43 @@ class CombustionAnalyzer:
         self._equilibrium_cache = {}
         self._equilibrium_cache_max = EQUILIBRIUM_CACHE_MAX
 
-        # Cantera gaz objesi - NASA-CEA veritabanı kullanarak
-        # _mechanism_id: yüklenen mekanizmanın kimliği — optimum O/F
-        # önbellek anahtarına girer (farklı mekanizma = farklı sonuç uzayı).
+        # Cantera gaz objesi.
+        # _mechanism_id: yüklenen mekanizmanın kimliği — optimum O/F önbellek
+        # anahtarına girer (farklı mekanizma = farklı sonuç uzayı) ve analiz
+        # sonucunda kullanıcıya BEYAN edilir ('mechanism').
+        #
+        # v2.6.27 — ÖLÜ DAL KALDIRILDI. Zincirin ilk basamağı Cantera'nın NASA
+        # tür veritabanı YAML'ını ct.Solution ile açmayı deniyordu (dosya adı
+        # bilerek yazılmıyor: bekçi testi o dizgenin bu dosyada kalmadığını
+        # denetler). O dosya bir TÜR veritabanıdır — 'phases:' bölümü yoktur,
+        # dolayısıyla Solution olarak HİÇBİR koşulda yüklenemez; ölçüldü,
+        # CanteraError ile düşüyor. Dal SESSİZ bir except'in ardında
+        # gizlendiğinden kod "önce NASA-CEA veritabanını dene" diyordu ama
+        # gerçekte HER ZAMAN gri30 kullanılıyordu. Aynı eleme kinetik modülde
+        # zaten bilinçliydi (hrma/analysis/kinetic_efficiency.py reaksiyonsuz
+        # termo dosyalarını eler). Kalan her düşüş artık loglanır.
         self.gas = None
         self.cantera_available = False
         self._mechanism_id = 'empirical'
+        self._mechanism_T_ceiling_K = None
         if CANTERA_AVAILABLE:
-            try:
-                # Önce NASA-CEA veritabanını dene
-                self.gas = ct.Solution('nasa_gas.yaml')
-                self.cantera_available = True
-                self._mechanism_id = 'nasa_gas'
-            except Exception:
+            for mech_file in MECHANISM_CHAIN:
                 try:
-                    # GRI-Mech 3.0 detaylı kimya
-                    self.gas = ct.Solution('gri30.yaml')
+                    self.gas = ct.Solution(mech_file)
                     self.cantera_available = True
-                    self._mechanism_id = 'gri30'
-                except Exception:
-                    try:
-                        # H2/O2 basit mekanizma
-                        self.gas = ct.Solution('h2o2.yaml')
-                        self.cantera_available = True
-                        self._mechanism_id = 'h2o2'
-                    except Exception:
-                        self.cantera_available = False
+                    self._mechanism_id = mech_file.split('.')[0]
+                    break
+                except Exception as exc:
+                    logger.warning(
+                        "Cantera mekanizması '%s' yüklenemedi (%s); zincirdeki "
+                        "sıradaki mekanizma denenecek.", mech_file, exc)
+            if self.cantera_available:
+                self._mechanism_T_ceiling_K = self._mechanism_temperature_ceiling()
+            else:
+                logger.warning(
+                    "Zincirdeki hiçbir Cantera mekanizması yüklenemedi (%s); "
+                    "CombustionAnalyzer ampirik modellerle çalışacak.",
+                    ", ".join(MECHANISM_CHAIN))
         else:
             logger.warning("Cantera kurulu değil; CombustionAnalyzer ampirik modellerle çalışacak.")
         
@@ -197,7 +219,28 @@ class CombustionAnalyzer:
             'AL': {'Hf': 0.0, 'MW': 26.98, 'phase': 'solid'},
             'HTPB': {'Hf': 2.7, 'MW': 54.0, 'phase': 'solid'},  # CEA R-45 kartı (C4H6 birimi)
         }
-    
+
+    def _mechanism_temperature_ceiling(self) -> Optional[float]:
+        """Yüklü mekanizmanın termo verisinin güvenli üst sıcaklığı [K].
+
+        NASA polinomları TÜR BAŞINA bir geçerlilik aralığıyla gelir; karışımın
+        tamamı için güvenli tavan, türler arasındaki EN DÜŞÜK üst sınırdır.
+        Ölçüldü (Cantera 3.1.0): gri30 -> 3000 K (tavanı belirleyen tür CH3O),
+        h2o2 -> 3500 K. Oda sıcaklığı bu tavanın üstüne çıktığında denge
+        çözümü NASA polinomlarını EKSTRAPOLE eder (Cantera "outside valid
+        range" uyarısı basar; çözüm yine yakınsar, sapma küçüktür — bkz.
+        _calculate_equilibrium_composition içindeki SP pertürbasyon notu).
+        Bu bilinçli kabul kullanıcıdan gizlenmez: değer analiz sonucunda
+        'mechanism_T_ceiling_K' alanıyla BEYAN edilir.
+        """
+        try:
+            return float(min(sp.thermo.max_temp for sp in self.gas.species()))
+        except Exception as exc:
+            logger.warning(
+                "Mekanizma sıcaklık tavanı okunamadı (%s); beyan boş kalacak.",
+                exc)
+            return None
+
     def analyze_combustion(self, fuel_composition: Dict, oxidizer_type: str,
                           of_ratio: float, chamber_pressure: float,
                           chamber_temperature: float = None,
@@ -320,12 +363,17 @@ class CombustionAnalyzer:
         
         # Calculate chemical equilibrium
         if chamber_temperature is None:
-            chamber_temperature = self._estimate_flame_temperature(
+            chamber_temperature, temperature_meta = self._estimate_flame_temperature(
                 elements, chamber_pressure,
                 fuel_composition=fuel_composition,
                 oxidizer_type=oxidizer_type,
                 of_ratio=of_ratio
             )
+        else:
+            # Oda sıcaklığını ÇAĞIRAN dayattı; burada hiçbir alev sıcaklığı
+            # çözümü yapılmadı. Kaynağı 'equilibrium' saymak yanıltıcı olurdu.
+            temperature_meta = {'temperature_source': 'user_specified',
+                                'warning': None}
 
         # Calculate species concentrations at different stations using Cantera
         chamber_composition = self._calculate_equilibrium_composition(
@@ -418,6 +466,25 @@ class CombustionAnalyzer:
         else:
             performance['c_star_delivered'] = performance['c_star']
 
+        # --- Oda sıcaklığının kaynağı (v2.6.27 dürüstlük alanı) -------------
+        # _estimate_flame_temperature (T_ad, beyan) çifti döndürür; beyan
+        # BURADA sonuca bağlanır. Bağlanmazsa ampirik zarfa düşen koşum
+        # panelde denge çözümünden gelmiş gibi görünür — düzeltilen kusur
+        # tam olarak buydu (yol düzeltildi ama beyan kanalı kopuktu).
+        # DİKKAT: chamber_temperature yukarıda Cantera oda bileşiminin
+        # 'temperature' alanıyla güncellenmiş olabilir; bu sözlük o YÜZDEN
+        # burada, güncellemeden SONRA kurulur.
+        chamber_conditions = {
+            'P': chamber_pressure,
+            'T': chamber_temperature,
+            'temperature_source': temperature_meta['temperature_source'],
+        }
+        if temperature_meta.get('warning'):
+            # Uyarı YALNIZCA gerçekten düşüş olduğunda konur (compositions
+            # [station] ile aynı sözleşme: denge yolunda 'warning' anahtarı
+            # hiç bulunmaz, boş/None bir uyarı taşınmaz).
+            chamber_conditions['warning'] = temperature_meta['warning']
+
         result = {
             'stoichiometric_of': of_stoich,
             'equivalence_ratio': of_stoich / of_ratio,
@@ -435,8 +502,37 @@ class CombustionAnalyzer:
                 'throat': throat_composition,
                 'exit': exit_composition
             },
+            # --- Denge arka ucunun kimliği (v2.6.27 beyanı) ----------------
+            # 'mechanism': bu koşumdaki denge çözümlerinin geldiği Cantera
+            # mekanizması ('gri30' / 'h2o2'), Cantera yoksa 'empirical'.
+            # Sonuçlar mekanizmaya BAĞLIDIR (tür listesi farklı = denge
+            # farklı), bu yüzden hangi mekanizmanın kullanıldığı çıktının
+            # parçasıdır — nitekim optimum O/F önbellek anahtarına da girer.
+            #
+            # 'mechanism_T_ceiling_K': mekanizmanın termo verisinin güvenli
+            # üst sıcaklığı (türler arasındaki en düşük max_temp; gri30 ->
+            # 3000 K). Oda sıcaklığı bunun ÜSTÜNDEYSE NASA polinomları
+            # ekstrapole edilmiştir; bilinçli kabul kullanıcıdan gizlenmez.
+            # Cantera yokken None (uydurma bir tavan konmaz).
+            #
+            # cantera_available, kurulumdan SONRA da kapatılabildiği için
+            # (testler ve /calculate'in Cantera'sız yolu) beyan _mechanism_id
+            # yerine ANLIK duruma bakar: kapalıysa gerçekten ampirik yol
+            # çalışır, 'gri30' demek yalan olurdu.
+            'mechanism': (self._mechanism_id if self.cantera_available
+                          else 'empirical'),
+            'mechanism_T_ceiling_K': (self._mechanism_T_ceiling_K
+                                      if self.cantera_available else None),
             'conditions': {
-                'chamber': {'P': chamber_pressure, 'T': chamber_temperature},
+                # 'temperature_source': oda sıcaklığının NEREDEN geldiği.
+                #   'equilibrium'        -> entalpi hedefli denge kök araması
+                #                           (_estimate_flame_temperature),
+                #   'empirical_envelope' -> denge çözülemedi, ampirik zarf
+                #                           (yanında 'warning' alanı olur),
+                #   'user_specified'     -> çağıran chamber_temperature dayattı.
+                # Aynı dürüstlük deseni bu sözlükte zaten iki yerde var:
+                # conditions['exit']['basis'] ve compositions[station]['source'].
+                'chamber': dict(chamber_conditions),
                 'throat': {'P': throat_pressure, 'T': throat_temperature},
                 # 'basis': çıkış basıncının nereden geldiği (F034 dürüstlük
                 # alanı). 'expansion_ratio' = motorun gerçek ε'sından
@@ -611,20 +707,51 @@ class CombustionAnalyzer:
     def _estimate_flame_temperature(self, elements: Dict, pressure: float,
                                     fuel_composition: Optional[Dict] = None,
                                     oxidizer_type: Optional[str] = None,
-                                    of_ratio: Optional[float] = None) -> float:
+                                    of_ratio: Optional[float] = None
+                                    ) -> Tuple[float, Dict]:
         """Adyabatik alev sıcaklığını hesaplar (NASA CEA yaklaşımı).
 
-        Gerçek reaktan karışımının (yakıt + oksitleyici, doğru oranlarla)
-        oluşum entalpisi sabit tutularak equilibrate('HP') ile çözülür.
-        Eski kod serbest atomlardan (devasa oluşum entalpileri) HP dengesi
-        kuruyordu — termodinamik olarak yanlış referans durumu; Cantera
-        yakınsamıyor ve bare except hep 3000 K döndürüyordu.
+        (T_ad [K], beyan) çifti döndürür. 'beyan' sözlüğü sonucun HANGİ YOLDAN
+        geldiğini taşır: {'temperature_source': ..., 'warning': ...|None}.
+        Çağıran (analyze_combustion) bunu sonuç sözlüğüne aktarır — sıcaklığın
+        denge çözümünden mi ampirik zarftan mı geldiği kullanıcıdan GİZLENMEZ.
 
-        Cantera yoksa veya çözüm başarısız olursa ampirik modele düşülür
-        ve durum loglanır.
+        YÖNTEM (v2.6.27'de değişti) — entalpi hedefli sıcaklık kök araması:
+            T_ad, şu kalıntının kökü olarak çözülür
+                g(T) = h_denge(T, p) - h_reaktan
+            burada h_denge(T, p) karışımın T'de TP dengesindeki kütlesel
+            entalpisidir. Kök brentq ile FLAME_T_BRACKET_K parantezinde
+            aranır. Bu, adyabatik alev sıcaklığının tanımının kendisidir
+            (Gordon & McBride, NASA RP-1311 Part I) ve HP dengesiyle aynı
+            denklemi çözer — ama bileşimi her T denemesinde YENİDEN dengeler.
+
+        NEDEN DEĞİŞTİ (ölçülmüş kök neden):
+            Eski kod önce 3000 K'de TP dengesi kurup ardından
+            ``self.gas.HP = h_reactants, p`` ile HP dengesini çözüyordu.
+            Cantera'nın HP setter'ı BİLEŞİMİ DONDURUP yalnız T için Newton
+            iterasyonu yapar; 3000 K dengesinden gelen AYRIŞMIŞ karışımın
+            (yakıt-zengin uçta kütlece ~%44'ü C2H2+HCN) donmuş entalpisi
+            hiçbir T'de hedefe inemez (ölçüldü: htpb/n2o O/F=1'de erişilebilir
+            en düşük 1.85 MJ/kg, hedef 0.96 MJ/kg) -> setter CanteraError
+            fırlatır ve ``equilibrate('HP')`` satırına HİÇ ULAŞILAMAZ.
+            312 noktalık haritada 36 nokta (%11.5) böyle düşüyordu, hepsi
+            O/F <= 1.0'da; sessizce ampirik zarfa geçiliyor ve O/F=1'de Isp
+            +10.6 s şişik raporlanıyordu.
+            Kök araması bileşimi dondurmadığı için bu sorun yapısal olarak
+            ortadan kalkar: ölçüldü, htpb/n2o O/F=1.0 / 30 bar'da doğru denge
+            sıcaklığı 1137.45 K'dir.
+
+        BİT-AYNILIK: HP'nin BUGÜN yakınsadığı noktalarda yeni yol aynı kökü
+        bulur (ölçüldü: 176 noktada |ΔT| < 1e-4 K). tests/test_combustion.py
+        içindeki bekçi bu eşdeğerliği kilitler; CEA çapaları kımıldamaz.
+
+        Kök yoksa (parantez uçlarında g aynı işaretli — ör. çok yakıt-zengin
+        uçta gri30'da katı karbon C(gr) bulunmadığı için denge eğrisi hedefe
+        inemez) İSTİSNA FIRLATILMAZ: ampirik zarfa düşülür, ama artık BEYANLI.
         """
         if not self.cantera_available:
-            return self._empirical_flame_temperature(elements, pressure)
+            return self._empirical_flame_temperature_declared(
+                elements, pressure, of_ratio, 'cantera_unavailable')
 
         h_reactants = self._calculate_reactant_enthalpy(
             fuel_composition, oxidizer_type, of_ratio
@@ -634,30 +761,109 @@ class CombustionAnalyzer:
                 "Reaktan oluşum entalpisi hesaplanamadı (eksik Hf verisi); "
                 "ampirik alev sıcaklığı modeli kullanılıyor."
             )
-            return self._empirical_flame_temperature(elements, pressure)
+            return self._empirical_flame_temperature_declared(
+                elements, pressure, of_ratio, 'missing_formation_enthalpy')
 
+        p_pa = pressure * 1e5
+        T_lo, T_hi = FLAME_T_BRACKET_K
         try:
+            # Elemental KÜTLE kesirleri atomik türlerin kütle kesri olarak
+            # atanır (TPY; TPX mol kesri ister — bkz. yardımcının docstring'i)
+            # ve her T denemesinde TP dengesiyle moleküler ürün karışımına
+            # getirilir.
             comp_str = self._elements_to_cantera_composition(elements)
-            # 1) Elemental KÜTLE kesirleri atomik türlerin kütle kesri olarak
-            #    atanır (TPY) ve TP dengesiyle moleküler ürün karışımına
-            #    getirilir (HP çözümü için iyi bir başlangıç durumu).
-            self.gas.TPY = 3000.0, pressure * 1e5, comp_str
-            self.gas.equilibrate('TP')
-            # 2) Karışım entalpisi, reaktanların 298.15 K'deki oluşum
-            #    entalpisine sabitlenir ve HP dengesi çözülür (NASA CEA
-            #    adyabatik alev sıcaklığı tanımı).
-            self.gas.HP = h_reactants, pressure * 1e5
-            self.gas.equilibrate('HP')
-            T_ad = float(self.gas.T)
+
+            def _kalan(T: float) -> float:
+                """g(T) = h_denge(T, p) - h_reaktan  [J/kg]"""
+                self.gas.TPY = float(T), p_pa, comp_str
+                self.gas.equilibrate('TP')
+                return self.gas.enthalpy_mass - h_reactants
+
+            # Parantezin üst ucu mekanizmanın termo tavanının (gri30: 3000 K)
+            # üstündedir; Cantera orada "outside valid range" uyarısı basar.
+            # Ekstrapolasyon bilinçli kabuldür ve kullanıcıya sonuçtaki
+            # 'mechanism_T_ceiling_K' alanıyla bildirilir, bu yüzden uyarı
+            # burada test/konsol gürültüsü yaratmasın diye filtrelenir
+            # (_calculate_equilibrium_composition'daki SP bloğuyla aynı desen).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    'ignore',
+                    message=r'.*outside valid range.*',
+                    category=UserWarning,
+                )
+                try:
+                    T_ad = float(brentq(_kalan, T_lo, T_hi,
+                                        xtol=1e-4, rtol=1e-10))
+                except (ValueError, RuntimeError) as exc:
+                    # Kök yok mu, gerçek çözücü hatası mı? Uçları ölçüp ayır
+                    # (yalnız BAŞARISIZLIK yolunda ödenen iki denge çözümü).
+                    reason = 'solver_error'
+                    try:
+                        if _kalan(T_lo) * _kalan(T_hi) > 0.0:
+                            reason = 'no_enthalpy_root'
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "Adyabatik alev sıcaklığı kök araması başarısız "
+                        "(%s: %s; O/F=%s, p=%.3f bar); ampirik alev sıcaklığı "
+                        "modeli kullanılıyor.", reason, exc, of_ratio, pressure)
+                    return self._empirical_flame_temperature_declared(
+                        elements, pressure, of_ratio, reason)
+
+                # Gaz durumunu kökte DENGEDE bırak: brentq'ün son deneme
+                # noktası kök olmak zorunda değildir ve akış aşağısındaki
+                # gamma/MW okumaları bu durumdan devam eder.
+                self.gas.TPY = T_ad, p_pa, comp_str
+                self.gas.equilibrate('TP')
+
             if not (200.0 < T_ad < 6000.0):
-                raise ValueError(f"Fiziksel olmayan alev sıcaklığı: {T_ad:.1f} K")
-            return T_ad
+                # Parantez zaten [250, 5500] olduğu için buraya ancak sayısal
+                # bir patoloji düşürebilir; sessiz kabul etmek yerine beyanlı
+                # ampirik yola gidilir.
+                logger.warning(
+                    "Fiziksel olmayan alev sıcaklığı: %.1f K (O/F=%s); "
+                    "ampirik alev sıcaklığı modeli kullanılıyor.",
+                    T_ad, of_ratio)
+                return self._empirical_flame_temperature_declared(
+                    elements, pressure, of_ratio, 'nonphysical_temperature')
+
+            return T_ad, {'temperature_source': 'equilibrium', 'warning': None}
         except Exception as exc:
+            # Denge kurulamayan girdi (ör. mekanizmada bulunmayan element:
+            # gri30'da AL yoktur) ve beklenmeyen Cantera hataları.
             logger.warning(
-                "Cantera HP denge çözümü başarısız (%s); "
+                "Cantera denge çözümü kurulamadı (%s); "
                 "ampirik alev sıcaklığı modeli kullanılıyor.", exc
             )
-            return self._empirical_flame_temperature(elements, pressure)
+            return self._empirical_flame_temperature_declared(
+                elements, pressure, of_ratio, 'solver_error')
+
+    def _empirical_flame_temperature_declared(
+            self, elements: Dict, pressure: float,
+            of_ratio: Optional[float], reason: str) -> Tuple[float, Dict]:
+        """Ampirik zarfa düşer ve bunu KULLANICIYA GÖRÜNÜR biçimde beyan eder.
+
+        v2.6.27 öncesi bu düşüş yalnız sunucu günlüğüne yazılıyordu: sonuç
+        sözlüğüne hiçbir iz sızmıyordu, dolayısıyla panelde ±%10 bandındaki
+        kaba zarf değeri denge çözümünden gelmiş gibi görünüyordu. Beyan
+        deseni aynı dosyadaki _fallback_equilibrium_composition ile birebir
+        aynıdır ({'code', 'params', 'severity'}).
+
+        reason ∈ {'cantera_unavailable', 'missing_formation_enthalpy',
+                  'no_enthalpy_root', 'solver_error', 'nonphysical_temperature'}
+        """
+        T = self._empirical_flame_temperature(elements, pressure)
+        return T, {
+            'temperature_source': 'empirical_envelope',
+            'warning': {
+                'code': 'warn.combustion.flame_temperature_empirical',
+                'params': {
+                    'reason': reason,
+                    'of_ratio': None if of_ratio is None else float(of_ratio),
+                },
+                'severity': 'warning',
+            },
+        }
 
     def _empirical_flame_temperature(self, elements: Dict, pressure: float) -> float:
         """Ampirik alev sıcaklığı modeli (Cantera yokken / başarısızken).

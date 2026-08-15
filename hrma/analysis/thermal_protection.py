@@ -6,8 +6,13 @@ Thermal Protection Analysis Module (Dalga 3 — docs/ANALIZ_PLATFORM_PLANI.md).
 1) Ablasyon Seviye 1 (Q* modeli)
    ṡ = q_net / (rho * Q*)   →   gereken ablatif kalınlık = ṡ·t_b · tasarım payı
    Kaynaklar:
-     - NASA SP-8091 "Solid Rocket Motor Internal Insulation" (1976) —
-       ablatif yalıtım boyutlandırma sınıfı ve malzeme aileleri.
+     - NASA SP-8093 "Solid Rocket Motor Internal Insulation" (Aralık 1976,
+       NTRS 19770023227) — iç yalıtım boyutlandırma sınıfı ve malzeme
+       aileleri (elastomerler: NBR, SBR, butil, EPDM, silikon, üretan).
+       KÜNYE DÜZELTMESİ (v2.6.27): bu modül boyunca "SP-8091" yazılıydı;
+       SP-8091 aslında "The Planet Saturn" (Haziran 1972) monografıdır.
+       Ablatif NOZUL astarları ayrı monografın konusudur: SP-8115 "Solid
+       Rocket Motor Nozzles" (1975).
      - Sutton & Biblarz, "Rocket Propulsion Elements" 9th ed., Ch. 8.5 ve
        Ch. 15 (ablatif termal koruma, etkin ablasyon ısısı kavramı).
    Q* ("effective heat of ablation") değerleri literatür BANDI olarak verilir
@@ -55,14 +60,114 @@ from hrma.data.materials_db import get_material
 
 # CODATA 2018 — heat_transfer_analysis.py ile aynı değer (parametre
 # tutarlılığı; oradaki self.stefan_boltzmann ile bire bir eşit).
+# MERKEZİLEŞTİRME BORCU: depoda tek bir fizik-sabitleri modülü YOK (ölçüldü:
+# aynı sayı structural_analysis.py:318, safety_analysis.py:31,
+# heat_transfer_analysis.py:121, fea/thermal_axisym.py:103 ve
+# engines/solid_rocket_engine.py:287 içinde ayrı ayrı tanımlı). Bu modül
+# kendi tanımını KORUR (import zinciri açmamak için) ama borç kayıtlıdır:
+# sabitler merkezîleştirilirse buradaki tanım oradan çekilmelidir.
 STEFAN_BOLTZMANN = 5.670374419e-8  # W/(m^2*K^4)
 
 # ---------------------------------------------------------------------------
-# Ablatif malzeme Q* tablosu — LİTERATÜR BANDI (NASA SP-8091 sınıfı;
+# Yüzey enerji dengesi sabitleri (v2.6.27 ablasyon düzeltmesi)
+# ---------------------------------------------------------------------------
+# Piroliz gazı ÜFLEME BLOKAJI: ablatif yüzeyden çıkan gaz sınır tabakayı
+# kalınlaştırır ve konvektif akıyı tıkar.
+#
+# DÜZELTME (v2.6.27 blokaj denetimi) — SABİT 0.5 KALDIRILDI
+# --------------------------------------------------------
+# Blokaj burada SABİT 0.5 idi ve bandı (0.3-0.7) diye beyan ediliyordu. Bu
+# YANLIŞ REJİMİN katsayısıdır: psi = 0.5, üfleme parametresi B' ~= 1.3-2.5
+# demektir (atmosferik giriş TPS'i, MW/m^2 mertebesinde süblimleşme). Roket
+# astarı çalışma noktalarında öz-tutarlı B' 0.02-0.25 bandındadır ve blokaj
+# 0.90-1.00'e oturur. Ölçülen kanıt (SRM boğazı, alüminyumlu yakıt):
+#   psi = 0.5 -> q_net < 0 -> "ısınma yok" -> 0.000 mm/s
+#   psi = 1.0 -> q_net = +3633 kW/m^2      -> 0.100 mm/s
+#   ÖLÇÜM: 0.124-0.139 mm/s (Geisler BATES motoru; Thakre & Yang, JPP 2008/
+#          2009 grafit boğaz kimyasal erozyon modeli ve doğrulaması)
+# Yani sabit 0.5 akının İŞARETİNİ ters çeviriyordu.
+#
+# Artık blokaj ÇÖZÜLÜR (Aerotherm/CMA indirgeme bağıntısı, NASA CR-1061
+# soyu; Chen & Milos FIAT aynı formu taşır):
+#       psi(B') = 2*lambda*B' / (exp(2*lambda*B') - 1)
+#       B'      = f_gas * sdot * rho_ablator * c_p,gaz / h_g
+# lambda türbülanslı sınır tabaka için 0.4'tür (laminerde 0.5; Cross & Boyd,
+# konjuge ablasyon raporu; NASA TFAWS ders notu türbülansta 0.2-0.4 verir).
+# Bartz h_g'si türbülanslı bir korelasyon olduğu için 0.4 tutarlı seçimdir.
+# B' -> 0 iken psi -> 1 (üfleme yoksa blokaj yok) — bu limit, aşağıdaki
+# "no_net_heating" dalında ZORUNLU olarak kullanılır.
+BLOWING_LAMBDA = 0.4
+BLOWING_LAMBDA_BAND = (0.2, 0.5)   # türbülanslı bant (laminer uç 0.5)
+
+# B' payına yalnız GAZLAŞAN kütle girer: piroliz gazı + yüzey tepkimeleriyle
+# gazlaşan char. Ergiyik akışı (silikada) ve mekanik kopma sınır tabakaya
+# üflemez (CMA yüzey kütle dengesi, NASA CR-1060/1061). Konservatif yön KÜÇÜK
+# fraksiyondur: az gaz -> az blokaj -> çok akı -> KALIN astar.
+# Sınıf değerleri: fenolik reçine char verimi ~%50-60, MX-4926/MX-2600 reçine
+# oranı ~%33-35 -> karbon-fenolikte gaz payı ~0.3; silika-fenolikte silika
+# (~%67) ergiyik olarak akar, gazlaşan pay reçine + kısmi SiO -> ~0.5; dolgulu
+# EPDM char verimi ~%30-40 -> ~0.7.
+# Duyarlılık ÖLÇÜLDÜ: bu zarfta f_gas'ı 0.3 <-> 0.7 oynatmak kalınlığı %8'den
+# az değiştirir; kritik olan sabit 0.5 blokajından kurtulmaktır.
+BLOWING_GAS_FRACTION_BAND = (0.3, 0.7)
+
+# Kömürleşmiş (char) ablatif yüzey yayıcılığı — malzeme tablosunda ve merkezi
+# materials_db kaydında yayıcılık BULUNMAYAN malzemeler için varsayılan.
+# Literatür bandı 0.8-0.9 (kömürleşmiş fenolik/karbon yüzeyler); orta değer.
+DEFAULT_CHAR_EMISSIVITY = 0.85
+
+# Seviye-1 Q* modelinin GEÇERLİLİK TAVANI [mm/s].
+#
+# KÜNYE DÜZELTMESİ (v2.6.27): burada "silika-fenolik 0.0045-0.082 mm/s
+# (TM-107041 Tablo 2)" yazıyordu. Rapor okundu (NTRS 19960007443, Richter &
+# Smith 1995) — Tablo 2'nin gerileme sütunu 10^-2 mm/s ÇARPANLIDIR ve üst
+# uç 0.082 DEĞİL 0.00822'dir (MX2600-3; mil/s sütunu 0.323 ile çapraz
+# doğrulandı: 0.323 x 0.0254 = 0.0082 mm/s). Yani eski üst uç 10 KAT fazlaydı.
+# Tablo 2'nin gerçek aralığı (tüm örnekler):
+#     U.R. SIL/PHEN 2 : 0.00017 mm/s (0.007 mil/s)  — en yavaş
+#     MX2600-2        : 0.00452 mm/s (0.178 mil/s)
+#     MX2600-3        : 0.00822 mm/s (0.323 mil/s)  — uçuş sınıfı üst uç
+#     MX2600-LDC 1    : 0.0601  mm/s (2.368 mil/s)  — düşük yoğunluklu, en hızlı
+# Test koşulu (raporun kendisi): boğaz çapı 2.54 cm, Pc = 1138 kPa (165 psia),
+# GH2/GOX, boğaz gaz sıcaklığı ~2386 K (tüm koşuların ortalaması ~2456 K),
+# birikimli süre 164 s. Bu bir DÜŞÜK BASINÇLI SIVI motor testidir.
+#
+# Katı motor boğazları (ayrı sınıf, çok daha hızlı): grafit/karbon-karbon
+# 0.04-0.25 mm/s (Geisler BATES ölçümü 0.139; Thakre & Yang JPP 2008/2009
+# hesap 0.124; Evans PSU tezi ölçüm ortalaması 0.117).
+#
+# 0.35 mm/s bunların HEPSİNİN üstünde bir tavandır. DİKKAT: bu bir MODEL ZARFI
+# sınırıdır, fiziksel bir üst sınır DEĞİLDİR — gerileme hızı basınçla lineer
+# artar ve 20+ MPa sınıfı motorlarda gerçek hızlar bu tavanı aşar (Evans,
+# 7-34.5 MPa). Tavanın üstünde çıkan bir sonuç, ölçülmüş çalışma noktalarına
+# değil modelin varsayım zarfının (yarı-kararlı Q*, sabit yüzey sıcaklığı)
+# dışına işaret eder — sayı üretmek yerine NOT_MODELLED demek dürüst olandır.
+RECESSION_VALID_MAX_MM_S = 0.35
+
+#: NASA TM-107041 Tablo 2 ölçüm bandı [mm/s] — YUKARIDA künyesi verilen
+#: rapordan BİREBİR okunmuş değerler. Doğrulama testleri bu bandı kullanır;
+#: bir daha elle türetilmesin diye tek tanım noktası burasıdır.
+TM107041_TABLE2_ALL_MM_S = (0.00017, 0.0601)      # tüm örnekler
+TM107041_TABLE2_MX2600_MM_S = (0.00452, 0.00822)  # yüksek yoğunluklu uçuş sınıfı
+
+# ---------------------------------------------------------------------------
+# Ablatif malzeme Q* tablosu — LİTERATÜR BANDI (NASA SP-8093 sınıfı;
 # Sutton & Biblarz 9th ed. Ch. 8.5/15). Q* merkezi materials_db'de olmayan,
 # ablasyona özgü bir özelliktir. Varsayılan Q* = bandın DÜŞÜK (konservatif)
 # ucu. Yoğunluklar: silika-fenolik merkezi DB 'ablative' kaydından okunur
 # (çalışma zamanında); diğerleri literatür tipik değeri ('approximate').
+#
+# v2.6.27 EKİ — yüzey enerji dengesi alanları (yalnız yeni yolda kullanılır):
+#   T_ablation_K       : yarı-kararlı ablasyon yüzey sıcaklığı [K]. Q* modeli
+#                        yüzeyin bu sıcaklıkta SABİTLENDİĞİNİ varsayar; net
+#                        akı bu sıcaklıkta hesaplanmalıdır. Konservatif yön:
+#                        DÜŞÜK T_s (hem konvektif fark büyür hem yeniden
+#                        ışıma azalır) — aşağıdaki değerler bandın ORTASIDIR,
+#                        konservatif ucu değildir, bu açıkça beyan edilir.
+#   blowing_blockage   : piroliz gazı üfleme blokajı (bkz. modül sabiti).
+#   surface_source     : yukarıdaki iki alanın künyesi. Q* künyesi olan
+#                        'source' alanına DOKUNULMAZ (motorlar onu kullanıcıya
+#                        aynen yayımlıyor; karıştırılırsa mevcut beyan bozulur).
 # ---------------------------------------------------------------------------
 ABLATIVE_MATERIALS: Dict[str, Dict] = {
     'silica_phenolic': {
@@ -71,10 +176,28 @@ ABLATIVE_MATERIALS: Dict[str, Dict] = {
         'q_star_default_MJ_kg': 8.0,        # konservatif uç
         'density_kg_m3': None,              # merkezi DB 'ablative' kaydından
         'db_record': 'ablative',            # materials_db anahtarı
-        'source': ('Q* 8-12 MJ/kg literature band, NASA SP-8091 class '
+        # Ablasyon yüzey sıcaklığı: erimiş silika filmi + buharlaşma platosu.
+        # v2.6.27: 1900 K ölçüm bandının ALTINDAYDI; 2050 K'ye taşındı.
+        'T_ablation_K': 2050.0,
+        'T_ablation_band_K': (1900.0, 2300.0),
+        'blowing_gas_fraction': 0.5,
+        'source': ('Q* 8-12 MJ/kg literature band, NASA SP-8093 class '
                    'silica-phenolic ablatives; Sutton & Biblarz 9th ed. '
                    'Ch. 8.5. Density from central materials_db record '
                    "'ablative' (silica-phenolic class)."),
+        'surface_source': (
+            'Surface ablation temperature 2050 K (band 1900-2300 K): molten '
+            'silica film above the cristobalite melting point (1996 K). '
+            'CORRECTED in v2.6.27: the previous 1900 K sat BELOW the measured '
+            'range — conjugate silica-phenolic ablation analyses report '
+            'thermocouple readings above 2000 K with the surface approaching '
+            '~2200 K (AIAA JPP 2021, doi 10.2514/1.B37839; Chinnaraj 2023, '
+            'surface >2000 K at 11.5 MW/m2). The CONSERVATIVE end is the LOW '
+            'one (lower T_s raises both the convective difference and the net '
+            'flux). Blowing blockage is SOLVED from B-prime, not assumed — '
+            'see BLOWING_LAMBDA; gas fraction 0.5 because the silica (~67% by '
+            'mass) leaves as a molten film and does not blow into the '
+            'boundary layer.'),
     },
     'carbon_phenolic': {
         'name': 'Carbon-phenolic (MX-4926 / FM 5055 class)',
@@ -82,9 +205,31 @@ ABLATIVE_MATERIALS: Dict[str, Dict] = {
         'q_star_default_MJ_kg': 25.0,       # konservatif uç
         'density_kg_m3': 1450.0,            # approximate, MX-4926 class
         'db_record': None,
+        # Ablasyon yüzey sıcaklığı: SRM boğaz koşullarında ETKİN char yüzey
+        # sıcaklığı (süblimleşme platosu DEĞİL — bkz. surface_source).
+        'T_ablation_K': 3000.0,
+        'T_ablation_band_K': (2900.0, 3300.0),
+        'blowing_gas_fraction': 0.3,
         'source': ('Q* 25-30 MJ/kg literature band (high heat-flux '
-                   'carbon-phenolic, NASA SP-8091 class / CPIA data); '
-                   'density ~1450 kg/m3 typical MX-4926 (approximate).'),
+                   'carbon-phenolic, NASA SP-8115 class nozzle liners / CPIA '
+                   'data); density ~1450 kg/m3 typical MX-4926 (approximate).'),
+        'surface_source': (
+            'Effective surface temperature 3000 K (band 2900-3300 K), '
+            'CALIBRATED together with Q* = 25 MJ/kg. v2.6.27 correction: this '
+            'was labelled the "carbon sublimation plateau", which is wrong — '
+            'graphite reaches 1 atm vapour pressure near 3915 K and higher '
+            'under chamber pressure. The pair is instead validated against '
+            'measured solid-motor throat recession: with the blowing blockage '
+            'solved from B-prime this model gives 0.100 mm/s where the '
+            'measurement is 0.124-0.139 mm/s (Geisler BATES motor; Thakre & '
+            'Yang, JPP 2008/2009), i.e. it UNDER-predicts by 20-28%. The 1.5 '
+            'design margin absorbs that deviation — it is not spare margin on '
+            'top of it. VALIDITY: this pair only bites where the recovery '
+            'temperature is above roughly 3300 K. Below that the model '
+            'reports no net heating, whereas the real mechanism (C + H2O/CO2 '
+            'heterogeneous corrosion, diffusion limited) keeps running from '
+            'about 1900 K surface temperature upward and is NOT modelled '
+            'here.'),
     },
     'epdm': {
         'name': 'EPDM rubber insulation (filled)',
@@ -92,9 +237,30 @@ ABLATIVE_MATERIALS: Dict[str, Dict] = {
         'q_star_default_MJ_kg': 4.0,        # konservatif uç
         'density_kg_m3': 1100.0,            # approximate, filled EPDM
         'db_record': None,
+        # Char YÜZEY sıcaklığı (v2.6.27'de düzeltildi — eskiden 800 K yazan
+        # değer piroliz BAŞLANGICIydı, yüzey sıcaklığı değildi).
+        'T_ablation_K': 2300.0,
+        'T_ablation_band_K': (2200.0, 2500.0),
+        'blowing_gas_fraction': 0.7,
         'source': ('Q* 4-6 MJ/kg literature band (filled EPDM internal '
-                   'insulation, NASA SP-8091 class); density ~1100 kg/m3 '
+                   'insulation, NASA SP-8093 class); density ~1100 kg/m3 '
                    'typical aramid/silica-filled EPDM (approximate).'),
+        'surface_source': (
+            'Char surface temperature 2300 K (band 2200-2500 K). CORRECTED '
+            'in v2.6.27: the previous 800 K was the DECOMPOSITION ONSET of '
+            'filled EPDM (~550 C; Koo 2009, DTIC ADA564427), not a surface '
+            'temperature. Using it as T_s inflated the convective difference '
+            'and removed the re-radiation term, producing recession rates '
+            '(1.6 mm/s class) that no measurement supports. In a solid-motor '
+            'environment the char surface exceeds 2200 K (Long et al. 2025, '
+            'Composites Part A, S1359835X25003732). WARNING — KNIFE EDGE: for '
+            'EPDM the convective and re-radiation terms are of the same '
+            'order, so the result swings hard across this band (roughly 0.22 '
+            'mm/s at 2200 K, 0.07 at 2400 K, zero at 2500 K). Treat the Q* '
+            'recession as an ADDITIVE allowance, not as the thickness itself: '
+            'for closures the governing criterion is the case/bond-line '
+            'temperature limit (NASA SP-8093 practice), which this module '
+            'does NOT size.'),
     },
 }
 
@@ -150,6 +316,175 @@ def _resolve_ablative(material: str) -> str:
     return key
 
 
+def _resolve_ablative_emissivity(rec: Dict) -> tuple:
+    """Ablatif yüzey yayıcılığı + nereden geldiği (kaynak metni).
+
+    Öncelik, bu modülün YOĞUNLUK politikasıyla AYNI sırayı izler (aynı
+    kavram iki yerde iki farklı sayı olamaz — parametre tutarlılığı):
+      1. Ablatif tablodaki 'emissivity' (künyeli bir değer eklenmişse),
+      2. Merkezi materials_db kaydı ('ablative' → 0.9, kömürleşmiş fenolik),
+      3. DEFAULT_CHAR_EMISSIVITY (0.85, band 0.8-0.9).
+    Yoğunluk merkezi DB'den okunurken yayıcılığın elle 0.85 yazılması, aynı
+    malzemenin iki farklı yüzey tanımına sahip olması demek olurdu.
+    """
+    eps = rec.get('emissivity')
+    if eps is not None:
+        return float(eps), 'ablative material table (sourced entry)'
+    db_key = rec.get('db_record')
+    if db_key:
+        try:
+            eps_db = get_material(db_key).get('emissivity')
+        except KeyError:                                   # pragma: no cover
+            eps_db = None
+        if eps_db is not None:
+            return (float(eps_db),
+                    f"central materials_db record '{db_key}'")
+    return (DEFAULT_CHAR_EMISSIVITY,
+            'default charred-ablative emissivity (literature band 0.8-0.9)')
+
+
+def _blowing_reduction(b_prime: float, lam: float = BLOWING_LAMBDA) -> float:
+    """Aerotherm/CMA üfleme indirgeme çarpanı psi(B') — birimsiz, (0, 1].
+
+        psi = 2*lam*B' / (exp(2*lam*B') - 1)
+
+    B' -> 0 iken psi -> 1 (üfleme yok, blokaj yok); B' büyüdükçe psi düşer.
+    `expm1` küçük argümanda taşma/yuvarlama kaybı vermez (x/expm1(x) doğrudan
+    hesaplanır, 0/0 belirsizliğine düşülmez).
+
+    Kaynak: Moyer & Rindal, NASA CR-1061 (Aerotherm CMA) soyu; lam = 0.4
+    türbülanslı sınır tabaka (laminerde 0.5).
+    """
+    x = 2.0 * float(lam) * float(b_prime)
+    if x <= 1e-12:
+        return 1.0
+    return x / math.expm1(x)
+
+
+def _solve_blown_surface_balance(h_gas_W_m2K: float,
+                                 T_recovery_K: float,
+                                 T_surface_K: float,
+                                 emissivity: float,
+                                 rho_qstar: float,
+                                 density_kg_m3: float,
+                                 gas_cp_J_kgK: Optional[float],
+                                 gas_fraction: float,
+                                 lam: float = BLOWING_LAMBDA) -> Dict:
+    """Üfleme blokajıyla ÖZ-TUTARLI yüzey enerji dengesini çözer.
+
+    Çözülen denklem (bilinmeyen: gerileme hızı sdot):
+
+        q_net(sdot) = psi(B'(sdot)) * h_g * (T_recovery - T_s)
+                      - eps * sigma * T_s^4
+        sdot        = q_net(sdot) / (rho * Q*)
+        B'(sdot)    = f_gas * sdot * rho / (h_g / c_p)
+
+    Neden öz-tutarlı: blokaj gerilemeye, gerileme blokaja bağlıdır. Sabit bir
+    blokaj katsayısı seçmek (eski hâl: 0.5) bu bağı koparıyor ve YANLIŞ
+    REJİMİN katsayısını dayatıyordu — bkz. BLOWING_LAMBDA yorumu.
+
+    Yöntem: g(sdot) = sdot - q_net(sdot)/(rho*Q*) fonksiyonu sdot'ta KESİN
+    MONOTON ARTANdır (psi monoton azalan -> q_net monoton azalan), dolayısıyla
+    kök tektir ve [0, sdot_max] aralığındadır; sdot_max blokajsız (psi = 1)
+    çözümdür ve fiziksel üst sınırdır. Bölme araması (bisection) 80 adımda
+    makine hassasiyetine iner; scipy bağımlılığı EKLENMEZ.
+
+    Args:
+        gas_cp_J_kgK: Kenar (hazne) gazının özgül ısısı [J/(kg*K)]. B'
+            tanımı rho_e*u_e*C_H = h_g/c_p üzerinden kurulduğu için bu, h_g'yi
+            üreten Bartz zincirinin c_p'si OLMALIDIR. None/<=0 ise blokaj
+            ÇÖZÜLMEZ ve psi = 1 alınır (üflemesiz, KONSERVATİF: daha çok akı,
+            daha kalın astar) — sessizce bir katsayı uydurulmaz.
+        gas_fraction: Gazlaşan kütle payı f_gas (bkz. BLOWING_GAS_FRACTION_BAND).
+
+    Returns:
+        {'recession_rate_m_s', 'blowing_blockage', 'b_prime',
+         'q_conv_blocked_W_m2', 'q_reradiated_W_m2', 'q_net_W_m2',
+         'blockage_basis', 'iterations'}
+    """
+    dT = float(T_recovery_K) - float(T_surface_K)
+    q_rerad = float(emissivity) * STEFAN_BOLTZMANN * float(T_surface_K) ** 4
+    q_unblown = float(h_gas_W_m2K) * dT          # psi = 1 hâli
+    q_max = q_unblown - q_rerad
+
+    if q_max <= 0.0:
+        # psi = 1'de BİLE net ısınma yok: yüzey geldiği kadarını geri ışıyor
+        # ya da gaz zaten yüzey sıcaklığının altında. Yarı-kararlı ablasyon
+        # BAŞLAMAZ. Negatif gerileme fiziksel değildir. Bu dalda blokaj
+        # uygulanamaz (üfleme yoksa blokaj da yoktur): psi = 1.
+        return {
+            'recession_rate_m_s': 0.0,
+            'blowing_blockage': 1.0,
+            'b_prime': 0.0,
+            'q_conv_blocked_W_m2': max(q_unblown, 0.0),
+            'q_reradiated_W_m2': q_rerad,
+            'q_net_W_m2': 0.0,
+            'blockage_basis': ('no blowing: the surface is not ablating, so '
+                               'no pyrolysis gas is injected (psi = 1)'),
+            'iterations': 0,
+        }
+
+    if (gas_cp_J_kgK is None or float(gas_cp_J_kgK) <= 0.0
+            or float(h_gas_W_m2K) <= 0.0):
+        return {
+            'recession_rate_m_s': q_max / rho_qstar,
+            'blowing_blockage': 1.0,
+            'b_prime': None,
+            'q_conv_blocked_W_m2': q_unblown,
+            'q_reradiated_W_m2': q_rerad,
+            'q_net_W_m2': q_max,
+            'blockage_basis': (
+                'blowing blockage NOT solved: the edge-gas specific heat '
+                '(gas_cp_J_kgK) was not supplied, so B-prime cannot be '
+                'formed. psi = 1 is used, i.e. no blockage credit — this '
+                'OVER-predicts the flux and therefore the thickness '
+                '(conservative), and no coefficient is invented.'),
+            'iterations': 0,
+        }
+
+    cp = float(gas_cp_J_kgK)
+    h = float(h_gas_W_m2K)
+    f_gas = float(gas_fraction)
+    sdot_max = q_max / rho_qstar
+
+    def _b_prime(sdot: float) -> float:
+        return f_gas * sdot * float(density_kg_m3) * cp / h
+
+    def g(sdot: float) -> float:
+        psi = _blowing_reduction(_b_prime(sdot), lam)
+        return sdot - (psi * q_unblown - q_rerad) / rho_qstar
+
+    lo, hi = 0.0, sdot_max
+    # g(0) = -q_max/rho_qstar < 0 ; g(sdot_max) >= 0 (psi <= 1)
+    iterations = 0
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if g(mid) < 0.0:
+            lo = mid
+        else:
+            hi = mid
+        iterations += 1
+        if hi - lo <= 1e-15 * max(1.0, hi):
+            break
+    sdot = 0.5 * (lo + hi)
+    b_prime = _b_prime(sdot)
+    psi = _blowing_reduction(b_prime, lam)
+    return {
+        'recession_rate_m_s': sdot,
+        'blowing_blockage': psi,
+        'b_prime': b_prime,
+        'q_conv_blocked_W_m2': psi * q_unblown,
+        'q_reradiated_W_m2': q_rerad,
+        'q_net_W_m2': psi * q_unblown - q_rerad,
+        'blockage_basis': (
+            f'blowing blockage SOLVED self-consistently: psi = '
+            f'2*lambda*B/(exp(2*lambda*B)-1) with lambda = {lam:g} '
+            f'(turbulent, Aerotherm/CMA form, NASA CR-1061 lineage) and '
+            f"B' = f_gas*sdot*rho/(h_g/c_p) with f_gas = {f_gas:g}"),
+        'iterations': iterations,
+    }
+
+
 class ThermalProtectionAnalyzer:
     """Ablasyon + heat-sink + radyasyon-soğutma termal koruma analizleri.
 
@@ -167,22 +502,62 @@ class ThermalProtectionAnalyzer:
                            design_margin: float = 1.5,
                            q_star_J_kg: Optional[float] = None,
                            density_kg_m3: Optional[float] = None,
-                           time_s: Optional[Sequence[float]] = None) -> Dict:
+                           time_s: Optional[Sequence[float]] = None,
+                           h_gas_W_m2K: Optional[float] = None,
+                           T_recovery_K: Optional[float] = None,
+                           station_radius_m: Optional[float] = None,
+                           gas_cp_J_kgK: Optional[float] = None) -> Dict:
         """Seviye 1 Q* ablasyon boyutlandırması.
 
         Model: ṡ = q_net / (rho * Q*)  (steady heat-of-ablation modeli)
         Gereken kalınlık = (yanma boyunca toplam gerileme) * design_margin.
 
-        Kaynak: NASA SP-8091 sınıfı ablatif yalıtım boyutlandırması;
+        Kaynak: NASA SP-8093 sınıfı ablatif yalıtım boyutlandırması;
         Sutton & Biblarz 9th ed. Ch. 8.5 (etkin ablasyon ısısı Q*).
         Q* bantları literatür bandıdır; varsayılan bandın konservatif
         (düşük) ucudur. Derinlemesine piroliz/char enerji dengesi (CMA
         sınıfı kodlar) YOKTUR — panelde 'simplified model' etiketiyle
         sunulur (model_note alanı).
 
+        DÜZELTME (v2.6.27, ablasyon teşhisi) — İKİ YOL, OPT-IN
+        ------------------------------------------------------
+        Teşhis (NASA TM-107041 sınıfı ölçümle karşılaştırma): bu bağıntıya
+        SOĞUK-CİDAR Bartz akısı besleniyordu (1200 K tasarım cidarı), oysa
+        ablatif yüzey yarı-kararlı ablasyon sıcaklığındadır (silika-fenolik
+        ~1900 K) ve iki fiziksel terim eksikti:
+          (a) yüzeyin YENİDEN IŞIMASI (eps*sigma*T_s^4),
+          (b) piroliz gazı ÜFLEME BLOKAJI (konvektif akıyı 0.3-0.7 kata
+              düşürür — ölçülen ablasyonun tanımının merkezinde bu vardır).
+        Bu üç etki birlikte boğazda ~10^2 mertebesinde fazla tahmine yol
+        açıyordu; üstelik GEOMETRİK denetim yoktu (varsayılan sıvı koşuda
+        boğaz astarı boğaz yarıçapının 184 katı çıkıp 'sized' yayımlanıyordu).
+
+        YENİ YOL (opt-in): ``h_gas_W_m2K`` ve ``T_recovery_K`` İKİSİ DE
+        verilirse net akı burada ÇÖZÜLÜR:
+
+            q_net = blowing_blockage * h_g * (T_recovery - T_s)
+                    - eps * sigma * T_s^4
+
+        (T_s = malzemenin ``T_ablation_K`` değeri). Ayrıca geçerlilik kapısı
+        BAĞLAYICIDIR: ihlalde kalınlık yayımlanmaz (None),
+        ``thickness_status='NOT_MODELLED'``, ``model_valid=False``.
+
+        ESKİ YOL (varsayılan): ``h_gas_W_m2K``/``T_recovery_K`` verilmezse
+        hesap BİREBİR eskisi gibidir — çağıranın verdiği akı doğrudan
+        kullanılır, sayısal çıktı DEĞİŞMEZ. Kapı yalnız BİLGİ olarak
+        raporlanır: ``model_valid``/``validity_note`` doldurulur ama
+        ``thickness_status`` 'sized' kalır ve kalınlık yayımlanmaya devam
+        eder. Bu GEÇİCİ İKİLİK bilinçlidir: üç motor (sıvı/hibrit/katı)
+        bugünkü sayısal davranışı korumak zorundadır; her motor kendi
+        bağlama adımında yeni yola geçirilirken statüsünü de devralacaktır.
+        İkilik, motorların tamamı yeni yola geçtiğinde kaldırılmalıdır.
+
         Args:
             q_net_W_m2: Net yüzey ısı akısı [W/m^2]. Skaler (sabit akı)
-                veya time_s ile aynı boyda dizi (zamana bağlı akı).
+                veya time_s ile aynı boyda dizi (zamana bağlı akı). YENİ
+                YOLDA bu değer YERİNE geçilir (enerji dengesi çözülür) ama
+                yine de girdi olarak zorunludur ve karşılaştırma için
+                ``q_caller_W_m2`` alanında yayımlanır.
             burn_time_s: Yanma süresi [s]. Skaler akı için zorunlu; dizi
                 verilirse time_s aralığından alınır (verilirse tutarlılık
                 için yine raporlanır).
@@ -194,17 +569,60 @@ class ThermalProtectionAnalyzer:
             density_kg_m3: Yoğunluk override [kg/m^3]. None → merkezi DB
                 (silika-fenolik) veya tablo değeri.
             time_s: Zamana bağlı akı için zaman dizisi [s] (artan).
+            h_gas_W_m2K: Gaz tarafı ısı taşınım katsayısı [W/(m^2*K)] —
+                Bartz'tan GİRDİ (bu modül Bartz hesaplamaz). YENİ YOLU
+                açar; ``T_recovery_K`` ile BİRLİKTE verilmelidir.
+            T_recovery_K: Adyabatik cidar (recovery) sıcaklığı [K] —
+                konvektif akının SÜRÜCÜ sıcaklığı, durgunluk sıcaklığı
+                DEĞİL. YENİ YOLU açar; ``h_gas_W_m2K`` ile BİRLİKTE
+                verilmelidir. İkisinden yalnız biri verilirse ValueError
+                yükselir (verilen parametreyi sessizce yok saymak yalandır).
+            station_radius_m: İstasyonun (boğaz/kanal) yarıçapı [m].
+                Verilirse GEOMETRİK denetim yapılır: astar, astarladığı
+                geçitten kalın olamaz ve istasyon yanma bitmeden delinemez.
+                None → geometrik denetim yapılmaz (yalnız hız tavanı).
 
         Returns:
             Sözlük: recession_rate_mm_s, total_recession_mm,
             required_thickness_mm, q_star_MJ_kg, q_star_band_MJ_kg,
             density_kg_m3, design_margin, model_note, source, ...
+            + v2.6.27 alanları (HER İKİ yolda da mevcut):
+              flux_basis          : 'surface_energy_balance' |
+                                    'caller_supplied_no_energy_balance'
+              recession_regime    : 'steady_ablation' | 'no_net_heating' |
+                                    'caller_supplied_flux'
+              model_valid         : geçerlilik kapısı sonucu (bool)
+              validity_note       : ihlal gerekçesi (yoksa None)
+              thickness_status    : 'sized' | 'NOT_MODELLED'
+              q_caller_W_m2       : çağıranın verdiği ortalama akı
+              q_conv_blocked_W_m2 / q_reradiated_W_m2 / T_surface_K /
+              emissivity / emissivity_source / blowing_blockage :
+                  yalnız YENİ yolda dolu, eski yolda None (uydurulmaz).
+            ``thickness_status='NOT_MODELLED'`` iken required_thickness_m /
+            required_thickness_mm None'dır; gerileme alanları KALIR çünkü
+            ihlalin gerekçesini onlar taşır (validity_note bunu söyler).
         """
         key = _resolve_ablative(material)
         rec = ABLATIVE_MATERIALS[key]
 
         if design_margin < 1.0:
             raise ValueError("design_margin must be >= 1.0")
+
+        # --- YOL SEÇİMİ (v2.6.27) ---------------------------------------
+        # Enerji dengesi OPT-IN'dir ama YARIM açılamaz: yalnız h_g veya
+        # yalnız T_recovery verilirse o parametre sessizce YOK SAYILIRDI —
+        # çağıran fizik istediğini sanıp eski sayıyı alırdı. Sessiz yok
+        # sayma yerine açık hata.
+        given = sum(v is not None for v in (h_gas_W_m2K, T_recovery_K))
+        if given == 1:
+            raise ValueError(
+                "h_gas_W_m2K and T_recovery_K must be supplied TOGETHER "
+                "(surface energy balance path) or both omitted (caller-"
+                "supplied flux path). Supplying only one would silently "
+                "ignore it.")
+        use_energy_balance = (given == 2)
+        if station_radius_m is not None and float(station_radius_m) <= 0:
+            raise ValueError("station_radius_m must be positive [m]")
 
         # Yoğunluk: override > merkezi DB kaydı > tablo literatür değeri
         if density_kg_m3 is None:
@@ -247,9 +665,146 @@ class ThermalProtectionAnalyzer:
             q_mean = float(q_arr[0])
             total_heat_J_m2 = q_mean * duration
 
+        # --- AKI TABANI (v2.6.27) ---------------------------------------
+        # Çağıranın verdiği akı her iki yolda da raporlanır: yeni yolda
+        # KARŞILAŞTIRMA için (soğuk-cidar akısıyla enerji dengesi arasındaki
+        # fark teşhisin kendisidir), eski yolda kullanılan değer olarak.
+        q_caller_W_m2 = q_mean
+        T_surface_K = None
+        emissivity = None
+        emissivity_source = None
+        blockage = None
+        b_prime = None
+        blockage_basis = None
+        blockage_iterations = None
+        q_conv_blocked = None
+        q_reradiated = None
+
+        if use_energy_balance:
+            if float(h_gas_W_m2K) < 0:
+                raise ValueError("h_gas_W_m2K must be non-negative")
+            if float(T_recovery_K) <= 0:
+                raise ValueError("T_recovery_K must be positive [K]")
+
+            # Yüzey yarı-kararlı ablasyon sıcaklığında SABİTLENİR (Q*
+            # modelinin kendi varsayımı); net akı bu sıcaklıkta çözülür.
+            T_surface_K = float(rec['T_ablation_K'])
+            emissivity, emissivity_source = _resolve_ablative_emissivity(rec)
+
+            # v2.6.27: blokaj artık SABİT DEĞİL — gerilemeyle birlikte
+            # öz-tutarlı çözülür (bkz. _solve_blown_surface_balance).
+            solved = _solve_blown_surface_balance(
+                h_gas_W_m2K=float(h_gas_W_m2K),
+                T_recovery_K=float(T_recovery_K),
+                T_surface_K=T_surface_K,
+                emissivity=emissivity,
+                rho_qstar=rho_qstar,
+                density_kg_m3=density_kg_m3,
+                gas_cp_J_kgK=gas_cp_J_kgK,
+                gas_fraction=float(rec['blowing_gas_fraction']))
+
+            blockage = solved['blowing_blockage']
+            b_prime = solved['b_prime']
+            blockage_basis = solved['blockage_basis']
+            blockage_iterations = solved['iterations']
+            q_conv_blocked = solved['q_conv_blocked_W_m2']
+            q_reradiated = solved['q_reradiated_W_m2']
+            q_balance = solved['q_net_W_m2']
+
+            if q_balance <= 0.0:
+                # Yüzey, geldiği kadar ısıyı geri ışıyor (ya da gaz zaten
+                # ablasyon sıcaklığının altında): yarı-kararlı ablasyon
+                # BAŞLAMAZ. Negatif gerileme fiziksel değildir — sıfırlanır.
+                q_balance = 0.0
+                recession_regime = 'no_net_heating'
+            else:
+                recession_regime = 'steady_ablation'
+
+            q_mean = q_balance
+            total_heat_J_m2 = q_mean * duration
+            flux_basis = 'surface_energy_balance'
+        else:
+            flux_basis = 'caller_supplied_no_energy_balance'
+            recession_regime = 'caller_supplied_flux'
+
         recession_rate_m_s = q_mean / rho_qstar          # ortalama ṡ
         total_recession_m = total_heat_J_m2 / rho_qstar  # ∫ṡ dt
         required_m = total_recession_m * design_margin
+        recession_rate_mm_s = recession_rate_m_s * 1e3
+
+        # --- GEÇERLİLİK KAPISI (v2.6.27) --------------------------------
+        # Üslup: heat_sink_transient F078 erime hükmüyle aynı — model
+        # varsayım zarfının dışına çıktığında sayı üretmeye devam etmek
+        # yerine bunu açıkça bildirir.
+        reasons: List[str] = []
+        if recession_rate_mm_s > RECESSION_VALID_MAX_MM_S:
+            reasons.append(
+                f"the computed recession rate {recession_rate_mm_s:.3f} mm/s "
+                f"is above the {RECESSION_VALID_MAX_MM_S:g} mm/s validity "
+                f"ceiling of this Level-1 steady Q* model (measured ablative "
+                f"rates stay below it; see RECESSION_VALID_MAX_MM_S)")
+        if station_radius_m is not None:
+            radius = float(station_radius_m)
+            if required_m > radius:
+                reasons.append(
+                    f"the required liner thickness {required_m * 1e3:.1f} mm "
+                    f"is larger than the station radius {radius * 1e3:.1f} mm "
+                    f"— a liner cannot be thicker than the passage it lines, "
+                    f"so this is not a design, it is the model leaving its "
+                    f"envelope")
+            if total_recession_m > radius:
+                reasons.append(
+                    f"the total recession {total_recession_m * 1e3:.1f} mm "
+                    f"exceeds the station radius {radius * 1e3:.1f} mm — the "
+                    f"station would burn through before the end of burn")
+
+        model_valid = not reasons
+        # Kapı yalnız YENİ yolda statü düşürür (bkz. docstring'deki GEÇİCİ
+        # İKİLİK notu): eski yolda üç motorun bugünkü sayısal davranışı
+        # korunur, ihlal BİLGİ olarak raporlanır.
+        #
+        # v2.6.27 blokaj denetimi EK HÜKMÜ — no_net_heating'de kalınlık
+        # YAYIMLANMAZ. Eskiden bu rejim required_thickness = 0.0 ile 'sized'
+        # dönüyordu; 0.0 mm bir tasarım değildir. Gerileme sıfır olsa bile
+        # astar kalınlığını KASA/BOND HATTI SICAKLIK SINIRI belirler (NASA
+        # SP-8093 pratiği: kalınlık = gerileme payı + iletim/char payı +
+        # emniyet) ve bu modül o iletim boyutlandırmasını YAPMIYOR (ablatif
+        # malzemelerin k/cp verisi tabloda yok; uydurulmaz). Gerileme payının
+        # sıfır olduğu bilgisi total_recession_mm = 0 alanında durur.
+        no_net = (use_energy_balance
+                  and recession_regime == 'no_net_heating')
+        gated_out = (bool(reasons) and use_energy_balance) or no_net
+        thickness_status = 'NOT_MODELLED' if gated_out else 'sized'
+
+        if reasons:
+            validity_note = (
+                "MODEL OUT OF ENVELOPE: " + "; ".join(reasons) + ". "
+                + ("No thickness is published for this station: a Level-1 "
+                   "steady Q* model cannot size it. Use an in-depth "
+                   "pyrolysis/char (CMA-class) analysis, or change the "
+                   "design point (flux, burn time, material)."
+                   if use_energy_balance else
+                   "The flux came from the caller (no surface energy balance "
+                   "was solved here), so this is reported FOR INFORMATION "
+                   "ONLY and the legacy thickness is still published — see "
+                   "the two-path note in the method docstring."))
+        elif no_net:
+            validity_note = (
+                "NO NET HEATING: at the steady ablation temperature "
+                f"{T_surface_K:.0f} K the surface re-radiates as much as the "
+                "unblocked convection delivers, so the steady-ablation "
+                "recession is ~0 (total_recession_mm = 0). NO thickness is "
+                "published: with zero recession the liner is sized by the "
+                "case/bond-line temperature limit (NASA SP-8093 practice), "
+                "i.e. by transient conduction and char depth, which this "
+                "Level-1 Q* module does not model. A zero thickness would "
+                "not be a design, it would be a silent hazard. CAUTION: if "
+                "the recovery temperature is within ~a few hundred K of the "
+                "surface temperature, this verdict also sits on the model's "
+                "own T_s band edge — check T_ablation_band_K before trusting "
+                "the zero-recession claim.")
+        else:
+            validity_note = None
 
         return {
             'material': key,
@@ -260,19 +815,64 @@ class ThermalProtectionAnalyzer:
             'density_kg_m3': density_kg_m3,
             'q_star_MJ_kg': q_star_J_kg / 1e6,
             'q_star_band_MJ_kg': list(rec['q_star_band_MJ_kg']),
-            'recession_rate_mm_s': recession_rate_m_s * 1e3,
+            'recession_rate_mm_s': recession_rate_mm_s,
             'total_recession_m': total_recession_m,
             'total_recession_mm': total_recession_m * 1e3,
             'design_margin': design_margin,
-            'required_thickness_m': required_m,
-            'required_thickness_mm': required_m * 1e3,
+            'required_thickness_m': None if gated_out else required_m,
+            'required_thickness_mm': None if gated_out else required_m * 1e3,
+            # --- v2.6.27: akı tabanı (HER İKİ yolda da mevcut) ---
+            'flux_basis': flux_basis,
+            'recession_regime': recession_regime,
+            'q_caller_W_m2': q_caller_W_m2,
+            'h_gas_W_m2K': (None if h_gas_W_m2K is None
+                            else float(h_gas_W_m2K)),
+            'T_recovery_K': (None if T_recovery_K is None
+                             else float(T_recovery_K)),
+            'T_surface_K': T_surface_K,
+            'emissivity': emissivity,
+            'emissivity_source': emissivity_source,
+            # v2.6.27 blokaj denetimi: 'blowing_blockage' artık sabit bir
+            # katsayı değil, B'den ÇÖZÜLMÜŞ psi değeridir; yanında türetimi
+            # (b_prime, lambda, gerekçe) yayımlanır. Eski
+            # 'blowing_blockage_band' alanı KALDIRILDI — sabit-katsayı bandı
+            # (0.3-0.7) yanlış rejimin bandıydı, beyanı sürdürmek yalan olur.
+            'blowing_blockage': blockage,
+            'b_prime': b_prime,
+            'blowing_lambda': (BLOWING_LAMBDA if use_energy_balance else None),
+            'blowing_gas_fraction': (float(rec['blowing_gas_fraction'])
+                                     if use_energy_balance else None),
+            'blockage_basis': blockage_basis,
+            'blockage_iterations': blockage_iterations,
+            'gas_cp_J_kgK': (None if gas_cp_J_kgK is None
+                             else float(gas_cp_J_kgK)),
+            'q_conv_blocked_W_m2': q_conv_blocked,
+            'q_reradiated_W_m2': q_reradiated,
+            # --- v2.6.27: geçerlilik kapısı ---
+            'station_radius_m': (None if station_radius_m is None
+                                 else float(station_radius_m)),
+            'recession_validity_max_mm_s': RECESSION_VALID_MAX_MM_S,
+            'model_valid': model_valid,
+            'validity_note': validity_note,
+            'thickness_status': thickness_status,
             'model_note': (
                 "Simplified model: Level-1 steady Q* (heat of ablation) "
-                "sizing. Q* values are a literature band (NASA SP-8091 "
+                "sizing. Q* values are a literature band (NASA SP-8093 "
                 "class); the conservative low end is used by default. No "
                 "in-depth pyrolysis/char energy balance (CMA-class codes) "
-                "— preliminary thickness selection only."),
+                "— preliminary thickness selection only."
+                + (" Net flux solved here from a surface energy balance at "
+                   "the steady ablation temperature (blocked convection minus "
+                   "re-radiation); the caller-supplied flux is reported as "
+                   "q_caller_W_m2 for comparison only."
+                   if use_energy_balance else
+                   " Net flux is the CALLER-SUPPLIED value: no surface energy "
+                   "balance, no blowing blockage and no re-radiation are "
+                   "applied here, so a cold-wall flux will over-predict "
+                   "recession (see flux_basis).")),
             'source': rec['source'],
+            'surface_source': (rec.get('surface_source')
+                               if use_energy_balance else None),
         }
 
     # ------------------------------------------------------------------

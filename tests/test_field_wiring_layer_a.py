@@ -104,9 +104,9 @@ DECLARED_UNMODELLED = {
                         'olarak alinsa cozumle celisirdi'),
         'skip_distance': ('pintle skip mesafesi - yayimlanmis korelasyon yok; '
                           'uydurma katsayi yasak (BORC)'),
-        'hole_pattern': ('delik deseni (dairesel/altigen/kare) - deseni '
-                         'performansa baglayan model yok; yalniz CAD yerlesimi '
-                         'icin anlamli (BORC)'),
+        # 'hole_pattern' 14 Agu 2026'da BAGLANDI (form->istek->400
+        # dogrulama->yanit; test_hole_pattern_baglama.py) ve bu listeden
+        # cikarildi - bekci tam da bunu yakaladi (rot testi, 15 Agu).
         'pintle_spray_angle': ('pintle sprey acisi - cozucu bunu toplam '
                                'momentum oranindan HESAPLAR; sonuctaki degere '
                                'bakiniz'),

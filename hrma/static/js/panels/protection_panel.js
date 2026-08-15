@@ -12,7 +12,7 @@
    - Her modda 'SIMPLIFIED MODEL' rozeti (backend model_note alanı)
    Alan etiketleri [A]/[H]/[R] önekiyle hangi moda ait olduğunu söyler;
    backend beyaz listesi (app.py) hedef modun kullanmadığı alanları düşürür.
-   Backend: hrma/analysis/thermal_protection.py (NASA SP-8091 sınıfı Q*,
+   Backend: hrma/analysis/thermal_protection.py (NASA SP-8093 sınıfı Q*,
    Incropera explicit FD, Sutton & Biblarz Ch. 8).
    ==================================================================== */
 

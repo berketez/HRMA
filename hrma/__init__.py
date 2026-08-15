@@ -5,7 +5,7 @@ HRMA - UZAYTEK Rocket Motor Analysis
 import os
 import sys
 
-__version__ = "2.6.26"
+__version__ = "2.6.27"
 __author__ = "Berke Tezgöçen"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

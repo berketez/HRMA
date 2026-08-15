@@ -83,27 +83,71 @@ def test_a5_astar_boyutlari_gercek_akidan(saha_motor):
     q_kamara_kw = float(gs['chamber_heat_flux']) / 1e3
     q_bogaz_kw = float(gs['throat_heat_flux']) / 1e3
 
+    # B6 sözleşmesi (14 Ağu 2026): astar YÜZEY ENERJİ DENGESİYLE sürülür
+    # (soğuk-cidar akısı yalnız karşılaştırma değeri) ve geçerlilik kapısını
+    # geçemeyen istasyona sayı YAYIMLANMAZ. Eski bekçi 'thickness > 0' diyerek
+    # kusuru koruyordu (NASA TM-107041'e karşı ~109x fazla tahmin).
+    def _sozlesme(blok):
+        """Enerji dengesi sözleşmesi: hüküm hangisiyse TUTARLI olmalı.
+
+        Üç meşru hüküm vardır ve hangisinin çıkacağı GÖREVE bağlıdır
+        (fikstür motoru değişirse hüküm değişebilir; bekçi sonucu değil
+        sözleşmeyi kilitler):
+        1. zarf dışı      -> NOT_MODELLED + kalınlık None + model_valid False,
+        2. net ısınma yok -> NOT_MODELLED + kalınlık None + model_valid True
+           (GÜNCELLEME 15 Ağu 2026: eskiden 'sized + 0,0 mm' idi. 0,0 mm bir
+           tasarım değildir — gerileme sıfırken kalınlığı kasa/bond sıcaklık
+           sınırı (iletim/char, SP-8093 pratiği) belirler ve modül onu
+           modellemez; çekirdek artık bu rejimde kalınlık YAYIMLAMAZ),
+        3. ablasyon       -> sized + bant içi hız + kalınlık özdeşliği.
+        """
+        assert blok['flux_basis'] == 'surface_energy_balance'
+        assert blok['h_gas_W_m2K'] > 0 and blok['T_surface_K'] > 0
+        assert blok['model_note'] and blok['source']
+        # v2.6.27 blokaj denetimi: psi sabit değil ÇÖZÜLMÜŞ değerdir ve
+        # türetimi beyan edilir.
+        assert 0.0 < blok['blowing_blockage'] <= 1.0
+        assert blok['blockage_basis']
+        if blok['thickness_status'] == 'NOT_MODELLED':
+            assert blok['thickness'] is None
+            assert blok['validity_note']
+            if blok['recession_regime'] == 'no_net_heating':
+                # Hüküm 2: model zarfın İÇİNDE, kalınlık dürüstçe yok.
+                assert blok['model_valid'] is True
+                assert 'NO NET HEATING' in blok['validity_note']
+                assert blok['recession_rate_mm_s'] == 0.0
+                assert blok['total_recession_mm'] == 0.0
+                # Üfleme yoksa blokaj da yoktur (psi = 1 zorunlu).
+                assert blok['blowing_blockage'] == 1.0
+            else:
+                # Hüküm 1: zarf dışı.
+                assert blok['model_valid'] is False
+            return
+        assert blok['thickness_status'] == 'sized'
+        assert blok['recession_regime'] == 'steady_ablation', (
+            'no_net_heating artık sized olamaz — çekirdek kalınlık '
+            'yayımlamaz (15 Ağu 2026 sözleşmesi)')
+        assert 'design choice' in blok['basis'], (
+            'astar malzemesi bir tasarım seçimidir ve öyle beyan edilmeli')
+        # Kalınlık = çekilme x tasarım payı özdeşliği (Q* modelinin tanımı)
+        assert blok['thickness'] == pytest.approx(
+            blok['total_recession_mm'] * blok['design_margin'], rel=1e-9)
+        # Fiziksel aralık + kapı sözleşmesi: 'sized' hüküm ancak
+        # ölçülmüş geçerlilik tavanının altında verilebilir.
+        assert 0.05 < blok['thickness'] < 200.0   # mm
+        assert 0 < blok['recession_rate_mm_s'] <= 0.35
+
     astar = tp['chamber_liner']
-    assert astar['thickness_status'] == 'sized'
-    # Değer motorun KENDİ kamara akısından gelir, kopya/uydurma değil
+    # Karşılaştırma akısı motorun KENDİ kamara akısıdır, kopya/uydurma değil
     assert astar['heat_flux_kw_m2'] == pytest.approx(q_kamara_kw, rel=1e-9)
-    # Fiziksel aralık: amatör-orta ölçek hibritte mm mertebesi astar
-    assert 0.05 < astar['thickness'] < 200.0          # mm
-    assert astar['total_recession_mm'] > 0
-    assert astar['recession_rate_mm_s'] > 0
-    # Kalınlık = çekilme x tasarım payı özdeşliği (Q* modelinin tanımı)
-    assert astar['thickness'] == pytest.approx(
-        astar['total_recession_mm'] * astar['design_margin'], rel=1e-9)
-    assert 'design choice' in astar['basis'], (
-        'astar malzemesi bir tasarım seçimidir ve öyle beyan edilmeli')
-    assert astar['model_note'] and astar['source']
+    _sozlesme(astar)
 
     giris = tp['nozzle_entry_liner']
-    assert giris['thickness_status'] == 'sized'
     assert giris['heat_flux_kw_m2'] == pytest.approx(q_bogaz_kw, rel=1e-9)
-    # Boğaz akısı kamara akısından büyüktür -> giriş astarı daha kalın
+    # Boğaz akısı kamara akısından büyük -> gerileme hızı ondan küçük olamaz
     assert giris['heat_flux_kw_m2'] > astar['heat_flux_kw_m2']
-    assert giris['thickness'] > astar['thickness']
+    assert giris['recession_rate_mm_s'] >= astar['recession_rate_mm_s']
+    _sozlesme(giris)
     assert 'UPPER bound' in giris['basis'], (
         'boğaz akısıyla boyutlama konservatif üst sınırdır; beyan şart')
 

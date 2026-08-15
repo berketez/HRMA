@@ -236,14 +236,62 @@ class TestNozzlePanel:
 # ---------------------------------------------------------------------------
 class TestInsulationSystem:
 
-    def test_ablative_thickness_follows_heat_load(self, client, base_payload):
-        path = 'cad_design.insulation_system.aft_insulation.thickness'
-        low = leaf(run(client, base_payload, chamber_pressure=30), path)
-        high = leaf(run(client, base_payload, chamber_pressure=90), path)
-        assert low != high, 'ablatif kalınlık ısı yüküne bağlı değil'
-        assert high > low, 'yüksek basınçta daha fazla gerileme beklenir'
-        for value in (low, high):
-            assert value != pytest.approx(4.0), 'eski sabit geri geldi'
+    def test_ablative_liner_declares_no_net_heating_contract(
+            self, client, base_payload):
+        """KNDX kapak astarı: kalınlık YOK, rejim + gerekçe ZORUNLU.
+
+        DEĞİŞİKLİK GEREKÇESİ (v2.6.27 blokaj denetimi): testin eski hâli
+        'high > low' diye kalınlığın basınçla artmasını istiyordu. O
+        kalınlıklar sabit-0.5 blokaj + soğuk-cidar akısıyla üretilmiş,
+        gerileme hızı (0.36-0.92 mm/s) modelin kendi 0.35 mm/s geçerlilik
+        tavanını İHLAL EDEN zarf-dışı sayılardı — 'sized' diye basılmaları
+        kusurun kendisiydi. Yüzey enerji dengesi çözülünce KNDX çalışma
+        noktasında (T_recovery, yüzey ablasyon sıcaklığına yakın) her iki
+        kapak da 'no_net_heating' rejimine düşer: yarı-kararlı gerileme ~0,
+        kalınlığı ise kasa/bond hattı iletim sınırı belirler ve bu modül
+        onu MODELLEMİYOR. Dolayısıyla kusuru 'high > low' ile korumak artık
+        imkânsız; bekçi SÖZLEŞMEYİ kilitler: sayı uydurulmaz (None), statü
+        ve rejim beyan edilir, gerekçe validity_note'ta durur. (Kalınlığın
+        gerçekten ısı yüküne bağlandığı 'sized' yol, APCP noktasında
+        tests/test_kati_ablatif_baglama.py bekçileriyle kilitlidir.)
+        """
+        for pc in (30, 90):
+            body = run(client, base_payload, chamber_pressure=pc)
+            for station in ('forward_insulation', 'aft_insulation'):
+                blok = leaf(body, f'cad_design.insulation_system.{station}')
+                assert blok['thickness'] is None, (
+                    f'Pc={pc} {station}: no_net_heating rejiminde kalınlık '
+                    f'yayımlanmış — 0.0/4.0 mm sınıfı sessiz tehlike geri '
+                    f'gelmiş olabilir')
+                assert blok['thickness_status'] == 'NOT_MODELLED'
+                assert blok['recession_regime'] == 'no_net_heating'
+                assert blok['total_recession_mm'] == pytest.approx(0.0)
+                # Üfleme yokken blokaj da yok: psi=1 limiti beyan edilmeli.
+                assert blok['blowing_blockage'] == pytest.approx(1.0)
+                assert blok['b_prime'] == pytest.approx(0.0)
+                note = blok['validity_note']
+                assert note and 'NO NET HEATING' in note
+                assert 'case/bond-line' in note, (
+                    'gerekçe iletim/bond sınırına işaret etmeli')
+
+    def test_forward_and_aft_stations_are_distinct(self, client,
+                                                   base_payload):
+        """İki kapak aynı istasyon değil: malzeme VE gaz katsayısı farklı.
+
+        v2.6.27 (B6-4) düzeltmesinin kilidi: v2.6.26'da iki kapak da boğaz
+        akısıyla boyutlanıyor ve aynı sayıyı yayımlıyordu. Artık ön kapak
+        hazne istasyonu + elastomer (EPDM, SP-8093 kubbe pratiği), lüle
+        girişi boğaz istasyonu + silika-fenolik (SP-8115) olmalı.
+        """
+        ins = leaf(run(client, base_payload), 'cad_design.insulation_system')
+        fwd, aft = ins['forward_insulation'], ins['aft_insulation']
+        assert fwd['material'] != aft['material']
+        assert 'EPDM' in fwd['material']
+        assert 'Silica-phenolic' in aft['material']
+        # Hazne ve boğaz Bartz katsayıları aynı sayı olamaz (boğaz kat kat
+        # büyüktür — daralan kesitte kütle akısı artar).
+        assert fwd['h_gas_W_m2K'] != aft['h_gas_W_m2K']
+        assert aft['h_gas_W_m2K'] > fwd['h_gas_W_m2K']
 
     def test_forward_insulation_declares_its_conservative_basis(
             self, client, base_payload):

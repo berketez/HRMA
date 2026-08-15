@@ -123,6 +123,18 @@ kıracağı**.
 | Sürüm notlarının dil eşleşmemesi | `test_release_notes_language.py` |
 | macOS paketinin imzasız çıkması | `test_packaging_signature.py` + yayın kapısı 6/6 |
 
+### v2.6.27 (geliştirme sürüyor)
+
+| Kusur | Bekçi |
+|---|---|
+| Soğuk-cidar Bartz akısının Q\* modeline doğrudan beslenmesi (ablatif ~109× fazla tahmin, 278,8 mm astar) | `test_hibrit_baglama_a5a8a2.py::test_a5_astar_boyutlari_gercek_akidan` + `test_sivi_baglama_beyan.py` enerji dengesi sözleşmesi |
+| Üfleme blokajının sabit 0,5 alınması (yanlış rejim: ψ=0,5 ⇒ B′≈1,6-2,5 atmosferik giriş; APCP boğazında akının İŞARETİNİ ters çevirip ölçülen 0,124-0,139 mm/s yerine 0 üretiyordu) | `test_kati_ablatif_baglama.py` mutasyon denetimi (sabit-ψ yaması bekçiyi kırar) + `test_thermal_protection.py` öz-tutarlılık testleri |
+| `no_net_heating` rejiminde 0,0 mm'nin `sized` diye yayımlanması (gerileme sıfırken kalınlığı iletim/bond sınırı belirler — 0,0 mm sessiz tehlike) | `test_hibrit_baglama_a5a8a2.py::_sozlesme` hüküm 2 + `test_thermal_protection.py` no_net testleri |
+| Katı kapak astarının boğaz akısıyla ve tek malzemeyle boyutlanması (ön/arka aynı sayı; KNDX'te ṡ=0,36-0,92 mm/s zarf-dışı sayı `sized` basılıyordu; kapakta karbon-fenolik yanlış malzeme ailesi — SP-8093 kubbe yalıtımı elastomerdir) | `test_solid_wiring_v2626.py::TestInsulationSystem` (istasyon/malzeme ayrımı) + `test_kati_ablatif_baglama.py` |
+| TM-107041 ölçüm bandının 10× yanlış okunması (0,082 — tablo sütunu ×10⁻² çarpanlıydı, gerçek üst uç 0,00822 mm/s; yanlış bant doğrulama testinin ölçütüydü) | `test_thermal_protection.py` bandı modül sabitlerinden (`TM107041_TABLE2_*`) import eder — tek tanım noktası |
+| Yanlış monograf künyesi: "SP-8091 Solid Rocket Motor Internal Insulation" (SP-8091 = "The Planet Saturn"; doğrusu SP-8093, nozul için SP-8115) | künye düzeltme notu `thermal_protection.py` modül başlığında; kod içi atıflar taranarak düzeltildi |
+| `solid.html` sayfa varsayılanının katalog yanma hızını ezmesi (`value="0.005"` + toplama `\|\| 0.005` düşüşü; ölçülen etki: aynı APCP motoru yanma 2,67→1,17 s ≈ 2,3×, kullanıcı kendi yazmadığı sayı için katalog-dışı uyarısı görüyordu) | `test_solid_yanma_hizi_varsayilani.py` — şablon tarafı (sabit değer + sessiz düşüş yasağı) ve API sözleşmesi (alan yokluğu = katalog çözümü) + mutasyon denetimi |
+
 ### Önceki sürümlerden devralınan bekçiler
 
 | Kusur | Bekçi |
@@ -143,7 +155,11 @@ kısaltılmak içindir; uzuyorsa bir şey yanlış gidiyordur.
 
 | Kalem | Neden açık | Nerede kayıtlı |
 |---|---|---|
-| `skip_distance`, `secondary_holes`, `hole_pattern` (hibrit enjektör) | Yayımlanmış korelasyon yok; katsayı uydurmak yasak | `test_field_wiring_layer_a.py::DECLARED_UNMODELLED` |
+| Sürüm dizesi `2.6.26` kalmış (2.6.27'nin 9 partisi işlenmiş; kaydedilen `.hrma` dosyaları kendini yanlış künyeliyor) | Sürüm numaralama + CITATION.cff eşitlemesi yayın kapısına bağlı — Berke kararı | Bekçisi yok — açık |
+| `gimbal_mount` (742 satır) hiçbir üründen çağrılmıyor; sayfada gimbal seçeneği var, arkasında hesap yok | C3 kulvarı bağlaması ayrı iş kalemi | `docs/mimari/teknik-borc.md` |
+| `no_net_heating` durumunda iletim/char kalınlık payının hesaplanmaması (astar iletim ölçütü) | Ablatif malzemelerin k/cp verisi tabloda yok; uydurmak yasak — `heat_sink_transient`'a malzeme verisi eklenince kapanabilir | `thermal_protection.py::ablative_thickness` no_net validity_note |
+| Sıvı/hibrit ablatif blokajında c_p bağlandı ama ölçülü uçtan uca tur yapılmadı (yalnız bekçiler yeşil) | Tam süit + görsel tur onuncu parti kapanışında | bu defter |
+| `skip_distance`, `secondary_holes` (hibrit enjektör) | Yayımlanmış korelasyon yok; katsayı uydurmak yasak | `test_field_wiring_layer_a.py::DECLARED_UNMODELLED` |
 | Lüle kütlesinin "kamara kütlesinin %30'u" olması | Geometri hesabı değil başparmak kuralı; çıktıda `nozzle_weight_basis` ile beyan ediliyor | `structural_analysis.py::_calculate_weight` |
 | Güvenlik panelinin `defaults_applied` alanını okumaması | Uç nokta hangi sayının kullanıcıdan gelmediğini bildiriyor, panel göstermiyor; kullanıcı kendi verisi olmayan sayıyı ayırt edemiyor | Bekçisi yok — açık |
 | Dört ayrı "Isp" alanının aynı adla sunulması | `isp` (tasarım), `sea_level_isp`, `nozzle_design...specific_impulse`, `isp_time_avg` — her birinin ayrı ve savunulabilir tanımı var, ama arayüz hepsini "Isp" diye gösteriyor; en büyük fark %5 | Bekçisi yok — açık |

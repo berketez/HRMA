@@ -317,17 +317,34 @@ class TestVanaBeslemeHattiBaglamasi:
 # ---------------------------------------------------------------------------
 class TestPasifIsilKorumaBaglamasi:
 
-    def test_ablatifte_astar_gercekten_boyutlanir(self, ablatif):
+    def test_ablatifte_astar_durustce_boyutlanir_veya_reddedilir(self, ablatif):
+        """B6 sözleşmesi (14 Ağu 2026): astar YÜZEY ENERJİ DENGESİYLE sürülür
+        ve geçerlilik kapısından geçemeyen sayı YAYIMLANMAZ.
+
+        Eski bekçi burada 'thickness > 0' diyordu ve 278,8 mm'lik fizikdışı
+        astarı KORUYORDU (NASA TM-107041'e karşı ~109x fazla tahmin; boğaz
+        astarı boğaz yarıçapının 184 katı). Yeni sözleşme: soğuk-cidar Bartz
+        akısı doğrudan Q* modeline verilmez (flux_basis bunu beyan eder);
+        gereken kalınlık istasyon yarıçapını aşarsa hüküm 'sized' değil
+        NOT_MODELLED'dır ve kalınlık alanı basılmaz.
+        """
         blok = ablatif['thermal_protection']['passive_thermal_protection']
         assert blok['status'] == 'modelled'
         for istasyon in ('chamber_liner', 'nozzle_entry_liner'):
             astar = blok[istasyon]
-            assert astar['thickness_status'] == 'sized'
-            assert astar['thickness'] > 0
-            assert astar['total_recession_mm'] > 0
-            assert astar['q_star_mj_kg'] > 0
-            # Sürücü akı ve süre BU koşunun değerleri olmalı.
+            # Yeni yol: akı, yüzey enerji dengesinden (üfleme + ışıma düşülür).
+            assert astar['flux_basis'] == 'surface_energy_balance'
+            assert astar['h_gas_W_m2K'] > 0
+            assert astar['T_surface_K'] > 0
             assert astar['burn_time_s'] == pytest.approx(blok['burn_time_s'])
+            # Bu senaryo (100 bar + 300 s) ablatifin zarfının DIŞINDADIR —
+            # ölçüldü: kamara astarı 73,7 mm > yarıçap 49,6 mm. Dürüst hüküm:
+            assert astar['thickness_status'] == 'NOT_MODELLED'
+            assert astar['model_valid'] is False
+            assert 'OUT OF ENVELOPE' in astar['basis']
+            # Sayı yayımlanmaz — uydurma kalınlık ekrana çıkamaz.
+            assert astar.get('thickness') in (None, 0) or \
+                'thickness' not in astar
         assert blok['wall_temperature_history']['status'] == 'modelled'
 
     def test_astar_akisi_cozucunun_kendi_akisidir(self, ablatif):
@@ -377,8 +394,13 @@ class TestPasifIsilKorumaBaglamasi:
                 'tamamına aitmiş gibi köke çıkmamalı')
             assert 'chamber_liner' not in isil
 
-    def test_astar_boyutu_uc_yanitina_kadar_gelir(self, client):
-        """Bağlama motorda kalmamalı: kullanıcı sayıyı yanıtta görmeli."""
+    def test_astar_hukmu_uc_yanitina_kadar_gelir(self, client):
+        """Bağlama motorda kalmamalı: kullanıcı HÜKMÜ yanıtta görmeli.
+
+        B6 sözleşmesi: bu senaryoda dürüst hüküm bir sayı değil, gerekçeli
+        bir NOT_MODELLED'dır (bkz. üstteki bekçinin açıklaması) — ve o hüküm
+        gerekçesiyle birlikte HTTP yanıtına kadar taşınmalıdır.
+        """
         yanit = client.post('/calculate_liquid', json={
             'thrust': 10000, 'chamber_pressure': 100, 'mixture_ratio': 2.5,
             'fuel_type': 'rp1', 'oxidizer_type': 'lox',
@@ -388,8 +410,10 @@ class TestPasifIsilKorumaBaglamasi:
         blok = yanit.get_json()['thermal_protection'][
             'passive_thermal_protection']
         assert blok['status'] == 'modelled'
-        assert blok['chamber_liner']['thickness'] > 0
-        assert blok['chamber_liner']['thickness_status'] == 'sized'
+        astar = blok['chamber_liner']
+        assert astar['thickness_status'] == 'NOT_MODELLED'
+        assert astar['flux_basis'] == 'surface_energy_balance'
+        assert 'OUT OF ENVELOPE' in astar['basis']
 
 
 # ---------------------------------------------------------------------------

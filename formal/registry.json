@@ -1,0 +1,217 @@
+{
+  "version": 1,
+  "updated": "2026-08-14",
+  "description": "HRMA biçimsel doğrulama kayıt defteri: her Lean teoremini koruduğu Python satırına bağlar. Denetim: python3 formal/check.py",
+  "note": "python_line, anchor metninin geçtiği satırdır; check.py satır içeriğini anchor ile doğrular. Satır kayarsa check.py hata verir ve yeni satırı önerir.",
+  "entries": [
+    {
+      "theorem": "HRMA.areaRatio_strictMonoOn",
+      "lean_file": "formal/LeanLab/HRMA.lean",
+      "lean_line": 122,
+      "python_file": "hrma/analysis/transient_ballistics.py",
+      "python_line": 336,
+      "anchor": "Me = brentq(area_ratio, 1.0001, 50.0)",
+      "claim_tr": "Alan oranı fonksiyonu γ>1 için M∈[1,∞) üzerinde kesin monoton artandır; brentq aralığında en fazla bir kök olabilir.",
+      "claim_en": "For γ>1 the area-ratio function is strictly increasing on M∈[1,∞), so the brentq bracket contains at most one root.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.areaRatio_root_unique",
+      "lean_file": "formal/LeanLab/HRMA.lean",
+      "lean_line": 135,
+      "python_file": "hrma/analysis/transient_ballistics.py",
+      "python_line": 336,
+      "anchor": "Me = brentq(area_ratio, 1.0001, 50.0)",
+      "claim_tr": "Süpersonik dalda iki kök varsa eşittirler — tekliğin doğrudan ifadesi.",
+      "claim_en": "Any two supersonic-branch roots coincide — the direct uniqueness statement.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.areaRatio_strictAntiOn",
+      "lean_file": "formal/LeanLab/HRMANozzleBranch.lean",
+      "lean_line": 68,
+      "python_file": "hrma/analysis/transient_ballistics.py",
+      "python_line": 336,
+      "anchor": "Me = brentq(area_ratio, 1.0001, 50.0)",
+      "claim_tr": "Aynı fonksiyon (0,1] üzerinde kesin monoton azalandır — M=1 dönüm noktasıdır, tipik ε>1 için denklemin iki kökü vardır.",
+      "claim_en": "The same function is strictly decreasing on (0,1]; M=1 is the turning point, so a typical ε>1 admits two roots.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.areaRatio_subsonic_root_unique",
+      "lean_file": "formal/LeanLab/HRMANozzleBranch.lean",
+      "lean_line": 80,
+      "python_file": "hrma/analysis/transient_ballistics.py",
+      "python_line": 336,
+      "anchor": "Me = brentq(area_ratio, 1.0001, 50.0)",
+      "claim_tr": "Subsonik kök de tektir.",
+      "claim_en": "The subsonic root is also unique.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.branches_disjoint",
+      "lean_file": "formal/LeanLab/HRMANozzleBranch.lean",
+      "lean_line": 94,
+      "python_file": "hrma/analysis/transient_ballistics.py",
+      "python_line": 336,
+      "anchor": "Me = brentq(area_ratio, 1.0001, 50.0)",
+      "claim_tr": "Subsonik kök ile süpersonik kök asla aynı sayı değildir.",
+      "claim_en": "A subsonic root and a supersonic root are never the same number.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.bracket_excludes_subsonic",
+      "lean_file": "formal/LeanLab/HRMANozzleBranch.lean",
+      "lean_line": 105,
+      "python_file": "hrma/analysis/transient_ballistics.py",
+      "python_line": 336,
+      "anchor": "Me = brentq(area_ratio, 1.0001, 50.0)",
+      "claim_tr": "Alt sınırı 1'in kesin üstünde seçilen [a,b] aralığı subsonik dalın hiçbir noktasını içermez — 1.0001 sihirli sayı değildir.",
+      "claim_en": "A bracket [a,b] with a>1 contains no point of the subsonic branch — 1.0001 is not a magic number.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.frustumAnnulusVolume_eq_integral",
+      "lean_file": "formal/LeanLab/HRMAGeometry.lean",
+      "lean_line": 93,
+      "python_file": "hrma/engines/nozzle_design.py",
+      "python_line": 846,
+      "anchor": "vol_div = np.pi * (2.0 * t_w * (rt + re) / 2.0 + t_w ** 2) * L_div",
+      "claim_tr": "V = π·(2·t·r_ort + t²)·L kapalı biçimi disk integraliyle birebir aynıdır; yaklaşım değil kesin değerdir.",
+      "claim_en": "The closed form V = π·(2·t·r_mean + t²)·L equals the disk integral exactly; it is not an approximation.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.frustum_minus_thinShell",
+      "lean_file": "formal/LeanLab/HRMAGeometry.lean",
+      "lean_line": 111,
+      "python_file": "hrma/engines/nozzle_design.py",
+      "python_line": 846,
+      "anchor": "vol_div = np.pi * (2.0 * t_w * (rt + re) / 2.0 + t_w ** 2) * L_div",
+      "claim_tr": "İnce kabuk yaklaşımının hatası tam olarak π·t²·L'dir — ne fazla ne eksik.",
+      "claim_en": "The thin-shell approximation is off by exactly π·t²·L — no more, no less.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.thinShell_lt_frustum",
+      "lean_file": "formal/LeanLab/HRMAGeometry.lean",
+      "lean_line": 122,
+      "python_file": "hrma/engines/nozzle_design.py",
+      "python_line": 846,
+      "anchor": "vol_div = np.pi * (2.0 * t_w * (rt + re) / 2.0 + t_w ** 2) * L_div",
+      "claim_tr": "Hata tek yönlüdür: ince kabuk hacmi her zaman eksik tahmin eder (t>0, L>0).",
+      "claim_en": "The error is one-sided: the thin shell always underestimates the volume (t>0, L>0).",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.thinShell_relative_error",
+      "lean_file": "formal/LeanLab/HRMAGeometry.lean",
+      "lean_line": 134,
+      "python_file": "hrma/engines/nozzle_design.py",
+      "python_line": 846,
+      "anchor": "vol_div = np.pi * (2.0 * t_w * (rt + re) / 2.0 + t_w ** 2) * L_div",
+      "claim_tr": "Bağıl hata t²/(2·t·r_ort + t²) — cidar/yarıçap oranıyla büyür; 'ikinci mertebe, ihmal edilebilir' savunmasının kapalı biçimli çürütmesi.",
+      "claim_en": "Relative error is t²/(2·t·r_mean + t²), growing with the wall/radius ratio — a closed-form rebuttal of the 'second order, negligible' defense.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.isaLayers_all_continuous",
+      "lean_file": "formal/LeanLab/HRMAAtmosphere.lean",
+      "lean_line": 101,
+      "python_file": "hrma/constants.py",
+      "python_line": 49,
+      "anchor": "ISA_LAYERS = [",
+      "claim_tr": "ISA tablosunun altı katman sınırının tamamı süreklidir (0/11/20/32/47/51/71 km); isa_temperature katman sınırında sıçramaz.",
+      "claim_en": "All six ISA layer boundaries are continuous (0/11/20/32/47/51/71 km); isa_temperature has no jump at a layer boundary.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.isaTopTemperature",
+      "lean_file": "formal/LeanLab/HRMAAtmosphere.lean",
+      "lean_line": 117,
+      "python_file": "hrma/constants.py",
+      "python_line": 62,
+      "anchor": "ISA_TABLE_TOP_M = 84852.0",
+      "claim_tr": "Tablo tepesi (84 852 m) sıcaklığı son katmanın ekstrapolasyonuyla tam 186,946 K'dir.",
+      "claim_en": "The table-top (84 852 m) temperature is exactly 186.946 K by extrapolating the last layer.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.isaTop_not_1000",
+      "lean_file": "formal/LeanLab/HRMAAtmosphere.lean",
+      "lean_line": 126,
+      "python_file": "hrma/constants.py",
+      "python_line": 90,
+      "anchor": "return T_base + lapse * (ISA_TABLE_TOP_M - h_base)",
+      "claim_tr": "Elle yazılmış 1000 K değeri yanlıştı: doğru değerin (186,946 K) 5 katından fazlası. Ses hızı √T ile ölçeklendiği için Mach ve sürükleme hesabını kökten bozuyordu.",
+      "claim_en": "The hand-written 1000 K value was wrong: more than 5 times the correct 186.946 K. Since the speed of sound scales with √T this corrupted Mach and drag at that altitude.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.boundary_choice_irrelevant",
+      "lean_file": "formal/LeanLab/HRMAAtmosphere.lean",
+      "lean_line": 140,
+      "python_file": "hrma/constants.py",
+      "python_line": 72,
+      "anchor": "if altitude_m >= candidate[0]:",
+      "claim_tr": "Sınır irtifasında _isa_layer'ın hangi katmanı seçtiği sonucu değiştirmez — sürekliliğin doğrudan sonucu.",
+      "claim_en": "Which layer _isa_layer picks at a boundary altitude does not change the result — a direct consequence of continuity.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.cavitationNumber_strictAnti",
+      "lean_file": "formal/LeanLab/HRMAInjector.lean",
+      "lean_line": 52,
+      "python_file": "hrma/utils/injector_design.py",
+      "python_line": 1096,
+      "anchor": "k_c = (self.P_tank - self.p_vapor_bar) /",
+      "claim_tr": "Nurick kavitasyon sayısı K_c, P_v'nin kesin azalan fonksiyonudur (P₂<P₁ iken).",
+      "claim_en": "The Nurick cavitation number K_c is strictly decreasing in P_v (given P₂<P₁).",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.underestimate_inflates_kc",
+      "lean_file": "formal/LeanLab/HRMAInjector.lean",
+      "lean_line": 63,
+      "python_file": "hrma/utils/injector_design.py",
+      "python_line": 1096,
+      "anchor": "k_c = (self.P_tank - self.p_vapor_bar) /",
+      "claim_tr": "P_v küçük tahmin edilirse hesaplanan K_c gerçeğinden büyük çıkar.",
+      "claim_en": "Underestimating P_v inflates the computed K_c above its true value.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.conservative_when_overestimated",
+      "lean_file": "formal/LeanLab/HRMAInjector.lean",
+      "lean_line": 73,
+      "python_file": "hrma/utils/injector_design.py",
+      "python_line": 1096,
+      "anchor": "k_c = (self.P_tank - self.p_vapor_bar) /",
+      "claim_tr": "P_v'yi büyük alıp eşiği yine de geçmek güvenlidir: gerçek K_c de eşiğin üstündedir.",
+      "claim_en": "Overestimating P_v and still passing the threshold is safe: the true K_c is also above it.",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.underestimate_can_miss_warning",
+      "lean_file": "formal/LeanLab/HRMAInjector.lean",
+      "lean_line": 95,
+      "python_file": "hrma/utils/injector_design.py",
+      "python_line": 1098,
+      "anchor": "if k_c < NURICK_KC_LIMIT:",
+      "claim_tr": "P_v'yi küçük alıp eşiği geçmek hiçbir şey kanıtlamaz: uyarının kaçırıldığı somut karşı örnek kuruludur (P₁=50, P₂=20, P_v 4→10 bar).",
+      "claim_en": "Underestimating P_v and passing the threshold proves nothing: a concrete counterexample misses the warning (P₁=50, P₂=20, P_v 4→10 bar).",
+      "status": "proved"
+    },
+    {
+      "theorem": "HRMA.kc_below_limit_iff",
+      "lean_file": "formal/LeanLab/HRMAInjector.lean",
+      "lean_line": 108,
+      "python_file": "hrma/utils/injector_design.py",
+      "python_line": 58,
+      "anchor": "NURICK_KC_LIMIT = 1.5",
+      "claim_tr": "K_c < 1,5 ⟺ P_v > P₁ − 1,5·(P₁ − P₂): eşiğin buhar basıncı cinsinden kapalı biçimi.",
+      "claim_en": "K_c < 1.5 ⟺ P_v > P₁ − 1.5·(P₁ − P₂): the threshold in closed form over vapor pressure.",
+      "status": "proved"
+    }
+  ]
+}

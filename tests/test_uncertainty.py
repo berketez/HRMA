@@ -326,7 +326,26 @@ def test_dotted_output_key_extraction():
 # Hibrit motor: uq_mode nominal eşdeğerliği + FAST bütçesi
 # ---------------------------------------------------------------------------
 
-HYBRID_BASE = dict(thrust=1000.0, burn_time=10.0, of_ratio=7.0,
+# Hibrit motorun KURUCU girdileri — HTTP yükü DEĞİL.
+#
+# Katman B bekçisinin taban YÜKÜ ile (test_field_wiring_layer_b içindeki
+# HYBRID_BASE) aynı adı taşıyordu; ikisi AYRI kavram olduğu için ad
+# ayrıştırıldı (v2.6.27) — depodaki ``BASE_CTOR`` (sıvı süitleri) ile aynı
+# adlandırma: kurucuya doğrudan giden sözlük ``_CTOR`` son ekini alır.
+# Fark ölçüldü, üslup meselesi değil:
+#   * Oradaki sözlük 35 anahtarlı bir HTTP gövdesidir ve ``/calculate``e POST
+#     edilir; 12 anahtarı (motor_type, tank_pressure, oxidizer_density,
+#     hole_diameter_min/max, target_velocity, ...) kurucuda HİÇ YOKTUR —
+#     ``HybridRocketEngine(**o_sozluk)`` doğrudan TypeError verir. O yükü
+#     app.py normalleştirir (mm -> m, faz/malzeme çözümü) ve kurucuya ancak
+#     dönüştürülmüş hâli ulaşır.
+#   * Buradaki sözlük kurucuya doğrudan gider ve UQ bölümünün ÇALIŞMA
+#     NOKTASINI sabitler: N2O/HTPB için tipik O/F=7. Katman B'nin O/F=2,5'i
+#     ise sarsım matrisinin kendi noktasıdır; ortak 6 anahtarın 3'ü zaten
+#     bilerek farklıdır (itki 1 kN / 5 kN, oda basıncı 30 / 20 bar).
+# Yani teklenemez: tek kaynağa indirmek iki süitin de çalışma noktasını
+# kaydırır, ölçtükleri şey değişir.
+HYBRID_CTOR = dict(thrust=1000.0, burn_time=10.0, of_ratio=7.0,
                    chamber_pressure=30.0, fuel_type='htpb',
                    oxidizer_type='n2o')
 # Ana çıktı sözleşmesi: uq_mode bu anahtarları DEĞİŞTİREMEZ
@@ -351,17 +370,17 @@ def _make_hybrid_factory(shared_analyzer):
 
     def factory(sample):
         eng = HybridRocketEngine(
-            thrust=HYBRID_BASE['thrust'],
-            burn_time=HYBRID_BASE['burn_time'],
-            of_ratio=HYBRID_BASE['of_ratio'],
-            chamber_pressure=(HYBRID_BASE['chamber_pressure']
+            thrust=HYBRID_CTOR['thrust'],
+            burn_time=HYBRID_CTOR['burn_time'],
+            of_ratio=HYBRID_CTOR['of_ratio'],
+            chamber_pressure=(HYBRID_CTOR['chamber_pressure']
                               * sample.get('chamber_pressure', 1.0)),
             regression_a=a_nom * sample.get('regression_lambda', 1.0),
             regression_n=float(np.clip(
                 n_nom + sample.get('regression_n_delta', 0.0), 0.3, 0.85)),
             fuel_density=rho_nom * sample.get('fuel_density', 1.0),
-            fuel_type=HYBRID_BASE['fuel_type'],
-            oxidizer_type=HYBRID_BASE['oxidizer_type'],
+            fuel_type=HYBRID_CTOR['fuel_type'],
+            oxidizer_type=HYBRID_CTOR['oxidizer_type'],
             track_performance=False,
             uq_mode=True,
             combustion_analyzer=shared_analyzer,
@@ -375,9 +394,9 @@ def _make_hybrid_factory(shared_analyzer):
 def test_hybrid_uq_mode_nominal_equivalence():
     from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
     full = HybridRocketEngine(track_performance=False,
-                              **HYBRID_BASE).calculate()
+                              **HYBRID_CTOR).calculate()
     uq_res = HybridRocketEngine(track_performance=False, uq_mode=True,
-                                **HYBRID_BASE).calculate()
+                                **HYBRID_CTOR).calculate()
     for key in HYBRID_MAIN_KEYS:
         assert uq_res[key] == pytest.approx(full[key], rel=1e-6), key
     # uq_mode danışma bloklarını atlar ve bunu dürüstçe işaretler
@@ -396,7 +415,7 @@ def test_hybrid_optimum_of_injection():
     injected = {'optimum_of_ratio': 7.2, 'maximum_isp': 240.0}
     res = HybridRocketEngine(track_performance=False, uq_mode=True,
                              precomputed_optimum_of=injected,
-                             **HYBRID_BASE).calculate()
+                             **HYBRID_CTOR).calculate()
     assert res['optimum_of_ratio'] == pytest.approx(7.2)
     assert res['maximum_isp'] == pytest.approx(240.0)
     assert 'optimum_of_note' not in res
@@ -405,10 +424,10 @@ def test_hybrid_optimum_of_injection():
 def test_hybrid_eta_c_star_scaling():
     from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
     base = HybridRocketEngine(track_performance=False, uq_mode=True,
-                              **HYBRID_BASE).calculate()
+                              **HYBRID_CTOR).calculate()
     eta = 0.90
     scaled = HybridRocketEngine(track_performance=False, uq_mode=True,
-                                eta_c_star=eta, **HYBRID_BASE).calculate()
+                                eta_c_star=eta, **HYBRID_CTOR).calculate()
     # Teslim edilen c* = eta * teorik; Isp aynı oranda ölçeklenir (Isp=CF·c*/g0)
     assert scaled['c_star'] == pytest.approx(eta * base['c_star'], rel=1e-9)
     assert scaled['isp'] == pytest.approx(eta * base['isp'], rel=1e-6)
@@ -499,7 +518,7 @@ def test_hybrid_fast_budget_end_to_end():
     # ikisini birbirine kilitler — bu test o kilidin bekçisidir.
     from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
     det = HybridRocketEngine(track_performance=False, uq_mode=True,
-                             eta_c_star=1.0, **HYBRID_BASE).calculate()
+                             eta_c_star=1.0, **HYBRID_CTOR).calculate()
     assert res['nominal']['isp'] == pytest.approx(det['isp'], rel=1e-9)
 
     # Rapor için örnek başına süreyi görünür kıl (pytest -s ile)

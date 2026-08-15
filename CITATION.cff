@@ -34,5 +34,5 @@ keywords:
 # packaging/release_notes_v*.md file (see CONTRIBUTING.md §5). Do not put an
 # unreleased version here: a citation must point at something a reader can
 # actually download.
-version: 2.6.25
-date-released: "2026-07-27"
+version: 2.6.26
+date-released: "2026-08-03"

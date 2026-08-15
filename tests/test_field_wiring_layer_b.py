@@ -39,6 +39,18 @@ from tests.support import inventory, shake
 
 # ---------------------------------------------------------------------------
 # Taban motor — geçerli, tipik bir hibrit tasarım
+#
+# Bu sözlük bir HTTP YÜKÜDÜR: ``/calculate``e POST edilir ve app.py tarafından
+# normalleştirilir (mm -> m, faz/malzeme çözümü). Motor kurucusuna doğrudan
+# verilemez — 12 anahtarı (motor_type, tank_pressure, oxidizer_density,
+# hole_diameter_min/max, target_velocity, ...) ``HybridRocketEngine.__init__``
+# imzasında yoktur, ``HybridRocketEngine(**HYBRID_BASE)`` TypeError verir.
+# Kurucuya doğrudan giden hibrit girdileri için ``test_uncertainty.HYBRID_CTOR``
+# ayrı bir kavramdır (v2.6.27'de ad ayrıştırıldı); ikisi teklenemez, çalışma
+# noktaları da bilerek farklıdır.
+#
+# TEK KAYNAK: buradaki tanımı dört test dosyası ve ``tools/wiring_map.py``
+# içe aktarır. Kopyalanmaz, buradan import edilir.
 # ---------------------------------------------------------------------------
 HYBRID_BASE = {
     'motor_type': 'hybrid', 'motor_name': 'LAYER-B', 'motor_description': '',
@@ -212,6 +224,31 @@ LEGITIMATE_CONSTANTS = (
     # yani bekçi hâlâ gerçek bir sözleşmeyi koruyor.
     'hard_min_ratio', 'recommended_min_ratio', 'screech_band_min_hz',
     'pressure_ratio_threshold',
+    # v2.6.27 (Cantera beyanı): mekanizmanın termo verisi geçerlilik tavanı
+    # (gri30 için min(species.max_temp) = 3000 K — ÖLÇÜLÜYOR, uydurulmuyor).
+    # Yukarıdaki ölçüt-eşiği ailesiyle aynı doğa: modelin hangi sınıra kadar
+    # konuştuğunun beyanı; girdiye göre değişmemesi tanımı gereği, mekanizma
+    # değişirse değer de değişir (bekçi gerçek sözleşmeyi korumaya devam eder).
+    'mechanism_T_ceiling_K',
+    # v2.6.27 (ablasyon blokaj denetimi): astar bloğunun MALZEME TABLOSU ve
+    # BEYAN sabitleri. Bunlar hesabın sonucu değil, hesabın hangi malzeme
+    # kaydı ve hangi model sabitiyle yapıldığının yayımıdır (silika-fenolik
+    # T_s = 2050 K, char yayıcılığı, Q* bandı ucu, Aerotherm lambda = 0.4,
+    # gazlaşan kütle payı, 1.5 tasarım payı; q_reradiated = eps*sigma*T_s^4
+    # yalnız bu tablo sabitlerinden türer). Girdiye göre değişmemeleri
+    # tanımları gereğidir; malzeme kaydı değişirse değerler de değişir.
+    # DİKKAT: '_liner.' önekiyle DAR tutuldu — başka blokların aynı adlı
+    # alanları bu muafiyetten YARARLANAMAZ. Çözülen alanlar (blowing_blockage,
+    # b_prime, q_net, gerileme) BİLEREK işaretlenmedi: onlar girdiyle
+    # değişmek zorundadır ve bekçi onları korumaya devam eder.
+    '_liner.T_surface_K', '_liner.emissivity', '_liner.q_star_mj_kg',
+    '_liner.design_margin', '_liner.q_reradiated_kw_m2',
+    '_liner.blowing_lambda', '_liner.blowing_gas_fraction',
+    # Çıplak cidar geçmişinin BAŞLANGIÇ KOŞULU: t = 0 anı, T(0) = ortam.
+    # Başlangıç koşulunun girdiden bağımsızlığı tanımı gereğidir.
+    'wall_temperature_history.T_initial_K',
+    'wall_temperature_history.time_s[0]',
+    'wall_temperature_history.wall_inner_temperature_K[0]',
 )
 
 
@@ -286,6 +323,13 @@ def test_no_echo_only_inputs_in_hybrid(hybrid_report):
         # oxidizer_phase 'gas' secilince cozucu ayni yolu kullanir; faz
         # yalniz yogunluk/Cd gerekcesini etkiler ve o da girdi yankisidir.
         'oxidizer_phase',
+        # hole_pattern (14 Agu 2026 baglamasi): /calculate yanitinda deseni
+        # TASIYAN tek alan injector_design.hole_pattern'dir ve bu bir
+        # yankidir — TASARIMI GEREGI. Desenin yanki disi etkisi ayri uctadir:
+        # cizici (visualization.py, SHOWERHEAD_PATTERNS) plaka yerlesimini
+        # bu alandan okur. Performans modeli yoktur ve uydurulmaz
+        # (test_hole_pattern_baglama.py bu zinciri ayrica kilitler).
+        'hole_pattern',
     }
     unexpected = sorted(set(hybrid_report.echo_only_inputs) - allowed)
     assert not unexpected, (
@@ -324,6 +368,13 @@ def test_no_fabricated_constant_outputs(hybrid_report):
     """
     suspicious = [p for p in hybrid_report.constant_outputs
                   if not any(marker in p for marker in LEGITIMATE_CONSTANTS)]
+    # Teşhis kancası (davranış değiştirmez): borç ayıklama turlarında tam
+    # listeye ihtiyaç var, assert mesajı yalnız ilk 25'i basıyor.
+    import os
+    dump = os.environ.get('HRMA_DUMP_CONSTANTS')
+    if dump:
+        with open(dump, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(suspicious))
     # Ölçüm kapsamı tam olmadığı sürece bu liste boşalmaz; eşik, kapsam
     # büyüdükçe DÜŞÜRÜLMELİDİR. Yükseltmek uydurmayı gizlemektir.
     assert len(suspicious) <= 330, (

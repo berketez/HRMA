@@ -120,6 +120,14 @@ def _cached_slot_quads(r_port, n_slots, width, depth):
 from hrma.constants import (G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR,
                             R_STAR_ICAO, R_UNIVERSAL,
                             ISA_TABLE_TOP_M, isa_temperature, isa_pressure)
+# Yayımlanan eğrinin seyreltmesi: katı ve hibrit AYNI algoritmayı kullanır,
+# tanımı ortak modüldedir (bkz. SOLID_THRUST_CURVE_MAX_POINTS yorumu).
+from hrma.analysis.curve_sampling import (
+    THRUST_CURVE_MAX_POINTS,
+    decimate_curve_indices as _ortak_seyreltme_indeksleri,
+    nearest_sample_index as _en_yakin_ornek,
+    sampling_block as _ornekleme_blogu,
+)
 
 # Parametrik maliyet modeli birim fiyatları (2026 tahmini, USD) — TEK tanım
 # noktası. _calculate_cost_analysis bunlardan ölçekler; kesin fiyat değildir.
@@ -278,6 +286,19 @@ SOLID_INSULATION = {
     'thermal_conductivity_w_mk': 0.30,  # W/m·K (EPDM/fenolik bandı)
     'specific_heat_j_kgk': 1500.0,      # J/kg·K
 }
+
+#: Kapak astarı malzemeleri — TEK tanım noktası, İSTASYONA GÖRE AYRI.
+#: Beyan edilmiş TASARIM SEÇİMİdir, çözülmüş seçim değildir; motor malzemeyi
+#: optimize etmez. thermal_protection.ABLATIVE_MATERIALS anahtarı olmalıdır.
+#:
+#: Neden iki ayrı malzeme (v2.6.27 fizik denetimi): gerçek katı motorda
+#: kubbe/kapak yalıtımı ELASTOMERdir (NASA SP-8093 "Solid Rocket Motor
+#: Internal Insulation": NBR, SBR, butil, EPDM, silikon, üretan aileleri);
+#: karbon/silika-fenolik ise NOZUL astarı malzemesidir (SP-8115 "Solid
+#: Rocket Motor Nozzles" kapsamı). Eski tek sabit 'carbon_phenolic' kapakta
+#: yanlış malzeme ailesiydi.
+SOLID_FWD_CLOSURE_LINER_MATERIAL = 'epdm'
+SOLID_NOZZLE_ENTRY_LINER_MATERIAL = 'silica_phenolic'
 
 # Dış yüzey ısı kaybı (soğutmasız kasa) — lumped kasa sıcaklığı çözümünde.
 SOLID_THERMAL = {
@@ -688,7 +709,14 @@ SOLID_THRUST_SHAPE_UNDETERMINED = 'Undetermined'
 # uçlarını (her kovanın en büyük ve en küçük itkisi) korur ve ayrıca kritik
 # örnekleri (tepe itki, tepe basınç, ayrılmanın ilk anı, boğulmanın kesildiği
 # ilk an, tükeniş) ZORUNLU olarak taşır — bkz. _decimate_curve_indices.
-SOLID_THRUST_CURVE_MAX_POINTS = 400
+#
+# v2.6.27 (B2-4): tavan da algoritma da ARTIK BURADA DEĞİL. Hibrit motorda
+# aynı kusur ölçülünce (port 5 mm, t_b = 50 s -> 17 317 nokta / 1,29 MB) iki
+# motorun aynı algoritmayı ayrı ayrı yazması gerekecekti; ikisi
+# hrma.analysis.curve_sampling'den okur (CLAUDE.md kural 11). Bu ad geriye
+# dönük yüzey olarak duruyor: testler ve dış tüketiciler onu okuyor.
+# DEĞİŞTİRİLECEKSE ortak modülde değiştirilir, iki motoru birden etkiler.
+SOLID_THRUST_CURVE_MAX_POINTS = THRUST_CURVE_MAX_POINTS
 
 # ---------------------------------------------------------------------------
 # Boğaz erozyonu (F071, 2026-07-25)
@@ -5743,6 +5771,34 @@ class SolidRocketEngine:
         t_ins_mm = float(getattr(self, 'insulation_thickness_m', 0.0)) * 1000.0
         t_liner_mm = float(getattr(self, 'liner_thickness',
                                    SOLID_INSULATION['thickness_m'])) * 1000.0
+
+        # --- Kapak astarı istasyon girdileri (v2.6.27, B6-4) --------------
+        # İki istasyonun h_g / T_aw / c_p / yarıçapı motorun KENDİ Bartz
+        # zincirinden gelir (_chamber_gas_side / _throat_gas_side — ikinci
+        # bir Bartz hesabı YOKTUR; boğaz çifti, boğaz ısı akısını üreten
+        # çağrının ta kendisidir). Soğuk-cidar tasarım akısı yalnız
+        # KARŞILAŞTIRMA için hesaplanır; astarı artık yüzey enerji dengesi
+        # boyutlandırır. Zincir kurulamazsa (ör. performans koşusu öncesi)
+        # sayı UYDURULMAZ: her iki kapak NOT_MODELLED döner ve gerekçe
+        # istasyon bloklarında adıyla durur.
+        gas_side_error = None
+        h_chamber = taw_chamber = cp_chamber = None
+        h_throat = taw_throat = cp_throat = None
+        q_chamber_W_m2 = q_throat_W_m2 = None
+        r_chamber = r_throat = None
+        try:
+            h_chamber, taw_chamber, cp_chamber = self._chamber_gas_side()
+            h_throat, taw_throat, cp_throat = self._throat_gas_side()
+            t_wall_ref = SOLID_THERMAL['bartz_reference_wall_temp_k']
+            q_chamber_W_m2 = h_chamber * (taw_chamber - t_wall_ref)
+            q_throat_W_m2 = h_throat * (taw_throat - t_wall_ref)
+            r_chamber = float(self.D_chamber) / 2.0
+            r_throat = float(self._estimate_throat_diameter()) / 2.0
+        except Exception as exc:
+            gas_side_error = (
+                f'the Bartz gas-side chain of this run could not be '
+                f'evaluated: {exc}')
+
         return {
             'thermal_barrier': {
                 'material': 'EPDM/phenolic insulation band (SOLID_INSULATION)',
@@ -5778,38 +5834,89 @@ class SolidRocketEngine:
                           'masked and has no coating recession model.'),
             },
             'forward_insulation': self._ablative_liner_sizing(
-                'forward closure',
-                'Protect forward closure',
-                # Ön kapak akısı boğaz akısından KÜÇÜKTÜR (durgun bölge,
-                # düşük hız); boğaz akısıyla boyutlandırmak konservatif ÜST
-                # sınırdır ve 'basis' alanında böyle beyan edilir.
-                conservative=True),
+                station='forward closure',
+                function='Protect forward closure',
+                q_W_m2=q_chamber_W_m2,
+                station_note=(
+                    'The forward closure sits in the low-velocity stagnant '
+                    'region at the head end, so its driving flux and '
+                    'gas-side coefficient are the CHAMBER station values of '
+                    'this run — the closure sees LESS than the chamber wall, '
+                    'so this is a conservative upper bound. Until v2.6.27 '
+                    'both closures were sized with the THROAT flux and '
+                    'therefore published the same number; the difference '
+                    'was only claimed in this text.'),
+                h_gas=h_chamber,
+                h_gas_source=('chamber-station Bartz coefficient of this '
+                              'run (_chamber_gas_side)'),
+                T_aw=taw_chamber,
+                gas_cp=cp_chamber,
+                radius_m=r_chamber,
+                radius_source='chamber inner radius of this run',
+                gas_side_error=gas_side_error,
+                material=SOLID_FWD_CLOSURE_LINER_MATERIAL),
             'aft_insulation': self._ablative_liner_sizing(
-                'aft closure / nozzle entry',
-                'Nozzle throat protection',
-                conservative=False),
+                station='aft closure / nozzle entry',
+                function='Nozzle throat protection',
+                q_W_m2=q_throat_W_m2,
+                station_note=(
+                    'Flux and gas-side coefficient are the Bartz THROAT '
+                    'values of this run. The geometric gate uses the THROAT '
+                    'radius, a conservative lower bound of the entry '
+                    'passage.'),
+                h_gas=h_throat,
+                h_gas_source=('throat-station Bartz coefficient of this run '
+                              '(_throat_gas_side, the same call that '
+                              'produces the throat heat flux)'),
+                T_aw=taw_throat,
+                gas_cp=cp_throat,
+                radius_m=r_throat,
+                radius_source='throat radius solved by this run',
+                gas_side_error=gas_side_error,
+                particle_laden=self._condensed_fraction_info(),
+                material=SOLID_NOZZLE_ENTRY_LINER_MATERIAL),
         }
 
-    def _ablative_liner_sizing(self, station, function, conservative):
-        """Ablatif kapak yalıtımı kalınlığı — Seviye-1 Q* modeliyle.
-
-        Kalem 18-19 (P3). Eskiden ön kapak 5.0 mm, arka kapak 4.0 mm SABİT
-        yazılıydı: 75 mm'lik bir amatör motorla 500 mm'lik bir motora aynı
-        kalınlık veriliyordu ve sayının hiçbir ısı yüküyle ilgisi yoktu.
-
-        Projede boyutlandırmayı yapan çözüm ZATEN VAR ama katı motordan hiç
-        çağrılmıyordu: ``hrma.analysis.thermal_protection.
-        ThermalProtectionAnalyzer.ablative_thickness`` (Seviye-1 Q* /
-        ablasyon ısısı modeli, NASA SP-8091 sınıfı; /api/thermal-protection
-        uç noktası onu kullanıyor). Girdiler motorun kendi zincirinden
-        gelir: Bartz boğaz ısı akısı (_calculate_heat_flux) ve çözülen
-        yanma süresi.
-
-        Yanma süresi bilinmiyorsa (itki eğrisi henüz koşmadıysa) sayı
-        ÜRETİLMEZ: alan NOT_MODELLED döner.
+    def _condensed_fraction_info(self):
+        """(X_p, kaynak) — yoğuşmuş faz kütle kesri, iki-fazlı zincirle AYNI
+        tablodan (SOLID_CONDENSED_MASS_FRACTION + aile devralması). Ablatif
+        beyanı bu veriye bağlanır: X_p > 0 ise akış parçacıklıdır (APCP'de
+        Al2O3, KN-şekerde K2CO3) ve mekanik/parçacık erozyonu MODELLENMEZ.
+        Yakıt ADI üstünden koşullamak yerine tek veri kaynağı kullanılır.
         """
+        return _family_lookup(self.propellant_type,
+                              SOLID_CONDENSED_MASS_FRACTION)
+
+    def _ablative_liner_sizing(self, station, function, q_W_m2, station_note,
+                               h_gas, h_gas_source, T_aw, gas_cp,
+                               radius_m, radius_source,
+                               gas_side_error=None, particle_laden=None,
+                               material=None):
+        """Ablatif kapak yalıtımı — yüzey enerji dengesiyle (v2.6.27, B6-4).
+
+        Kalem 18-19 (P3) tarihçesi: ön kapak 5.0 mm, arka kapak 4.0 mm SABİT
+        yazılıydı. v2.6.26'da Seviye-1 Q* modeline bağlandı ama SOĞUK-CİDAR
+        boğaz akısıyla: iki kapak aynı sayıyı yayımlıyordu ve KNDX örnek
+        koşusunda gerileme hızı (0.36-0.92 mm/s) modelin kendi 0.35 mm/s
+        geçerlilik tavanının ÜSTÜNDEydi — zarf dışı sayı 'sized' diye
+        basılıyordu.
+
+        Yeni yol hibrit/sıvı bağlamasıyla AYNI sözleşme (alan adları birebir):
+        çekirdek ``ablative_thickness`` h_g + T_aw + c_p + istasyon yarıçapı
+        ile çağrılır; net akı yüzey enerji dengesinden, üfleme blokajı B'
+        üzerinden ÖZ-TUTARLI çözülür; geçerlilik kapısı BAĞLAYICIDIR
+        (NOT_MODELLED hükmü aynen taşınır, sayı uydurulmaz). Malzemeler
+        istasyona göre ayrıdır ve beyan edilmiş TASARIM SEÇİMİdir:
+        ön kapak elastomer (SOLID_FWD_CLOSURE_LINER_MATERIAL — NASA SP-8093
+        kubbe yalıtımı elastomerdir: NBR/EPDM ailesi), lüle girişi fenolik
+        (SOLID_NOZZLE_ENTRY_LINER_MATERIAL — SP-8115 nozul astarı sınıfı).
+
+        Girdi ELDE EDİLEMEZSE (yanma süresi yok, Bartz zinciri kurulamadı)
+        sayı ÜRETİLMEZ: NOT_MODELLED + eksik girdinin adı.
+        """
+        if material is None:
+            material = SOLID_FWD_CLOSURE_LINER_MATERIAL
         burn_time = getattr(self, '_last_burn_time', None)
-        material = 'carbon_phenolic'
         if not burn_time or burn_time <= 0:
             return {
                 'material': material,
@@ -5820,46 +5927,147 @@ class SolidRocketEngine:
                           'no thrust curve has been computed for this '
                           'motor instance.'),
             }
-        q_throat_kw_m2 = float(self._calculate_heat_flux())
+        eksikler = [ad for ad, deger in (
+            ('h_gas', h_gas), ('T_recovery', T_aw), ('gas_cp', gas_cp),
+            ('station_radius', radius_m), ('q_design_flux', q_W_m2)) if not (
+                deger is not None and np.isfinite(float(deger))
+                and float(deger) > 0)]
+        if gas_side_error or eksikler:
+            return {
+                'material': material,
+                'thickness': None,
+                'thickness_status': 'NOT_MODELLED',
+                'function': function,
+                'basis': (
+                    f'Ablative sizing at the {station} needs the gas-side '
+                    f'station inputs of this run and could not get them: '
+                    + (gas_side_error if gas_side_error
+                       else 'missing or non-physical: ' + ', '.join(eksikler))
+                    + '. No number is invented.'),
+            }
         try:
-            from hrma.analysis.thermal_protection import ThermalProtectionAnalyzer
+            from hrma.analysis.thermal_protection import (
+                ThermalProtectionAnalyzer)
             sizing = ThermalProtectionAnalyzer().ablative_thickness(
-                q_net_W_m2=q_throat_kw_m2 * 1e3,
+                q_net_W_m2=float(q_W_m2),
                 burn_time_s=float(burn_time),
-                material=material)
+                material=material,
+                h_gas_W_m2K=float(h_gas),
+                T_recovery_K=float(T_aw),
+                gas_cp_J_kgK=float(gas_cp),
+                station_radius_m=float(radius_m))
         except Exception as exc:                       # pragma: no cover
             return {
                 'material': material,
                 'thickness': None,
                 'thickness_status': 'NOT_MODELLED',
                 'function': function,
-                'basis': f'Ablative sizing failed: {exc}',
+                'basis': f'Ablative sizing failed at the {station}: {exc}',
             }
-        basis = (
-            f"Level-1 Q* ablation sizing at the {station}: required "
-            f"thickness = total recession x design margin "
-            f"{sizing['design_margin']:g}. Heat flux is the Bartz THROAT "
-            f"flux ({q_throat_kw_m2:.0f} kW/m2) and the burn time is the "
-            f"solved value ({float(burn_time):.2f} s).")
-        if conservative:
-            basis += (' The forward closure sits in a low-velocity stagnant '
-                      'region and sees a LOWER flux than the throat, so this '
-                      'thickness is a conservative upper bound, not a '
-                      'station-resolved value.')
+
+        # Parçacıklı akış beyanı: X_p > 0 ise mekanik/parçacık erozyonu bu
+        # modelde YOK ve lüle girişinde ölçülen hızlar boğazı aşabildiği
+        # için (Cortopassi 2012; Thakre & Yang 2013) sonuç bir ÜST SINIR
+        # DEĞİL, tahmindir — beyan zorunlu.
+        particle_note = ''
+        if particle_laden is not None:
+            x_p, x_src = particle_laden
+            if x_p is not None and x_p > 0:
+                particle_note = (
+                    f' PARTICLE-LADEN FLOW: the condensed-phase mass '
+                    f'fraction of this propellant is {x_p:.2f} (from the '
+                    f'two-phase loss table, source key \'{x_src}\'). '
+                    f'Particle-impingement / mechanical erosion is NOT '
+                    f'modelled here, and measured convergent-entry rates '
+                    f'can EXCEED throat rates (Cortopassi 2012; Thakre & '
+                    f'Yang, JPP 2013), so for this propellant the result '
+                    f'is an ESTIMATE, not an upper bound.')
+
+        enerji_dengesi = (
+            sizing['flux_basis'] == 'surface_energy_balance')
+        kalinlik_mm = sizing['required_thickness_mm']
+        if kalinlik_mm is None:
+            liner_basis = (
+                f'Level-1 Q* ablation sizing was RUN at the {station} '
+                f'but published NO thickness. '
+                f"{sizing['validity_note']} "
+                f'Inputs are this run\'s solver values: gas-side '
+                f'coefficient {float(h_gas):.0f} W/m2K ({h_gas_source}), '
+                f'recovery temperature {float(T_aw):.0f} K, edge-gas cp '
+                f'{float(gas_cp):.0f} J/kgK (the same Bartz gas properties '
+                f'that produced h_g), burn time {float(burn_time):.2f} s, '
+                f'station radius {float(radius_m) * 1e3:.1f} mm '
+                f'({radius_source}). ' + station_note + particle_note)
+        else:
+            liner_basis = (
+                f"Level-1 Q* ablation sizing at the {station}: required "
+                f"thickness = total recession x design margin "
+                f"{sizing['design_margin']:g}. "
+                + ((
+                    f'The net surface flux is SOLVED here from an energy '
+                    f'balance at the {sizing["T_surface_K"]:.0f} K steady '
+                    f'ablation temperature (self-consistent blowing '
+                    f'blockage {sizing["blowing_blockage"]:.3f} x '
+                    f'convection minus re-radiation at emissivity '
+                    f'{sizing["emissivity"]:g}), driven by this run\'s '
+                    f'gas-side coefficient {float(h_gas):.0f} W/m2K '
+                    f'({h_gas_source}) and recovery temperature '
+                    f'{float(T_aw):.0f} K. The cold-wall design flux '
+                    f'({float(q_W_m2) / 1e3:.0f} kW/m2) is reported for '
+                    f'COMPARISON only, it is not what sized this liner. ')
+                   if enerji_dengesi else (
+                    f'Heat flux ({float(q_W_m2) / 1e3:.0f} kW/m2) is this '
+                    f'run\'s solver value and is used AS GIVEN: no surface '
+                    f'energy balance was solved for this station. '))
+                + f'Burn time ({float(burn_time):.2f} s) is the solved '
+                f"value of this run. Liner material '{material}' is a "
+                f'declared design choice, not a solved selection. '
+                + station_note + particle_note)
         return {
             'material': sizing['material_name'],
-            'thickness': float(sizing['required_thickness_mm']),  # mm
-            'thickness_status': 'sized',
+            'thickness': (None if kalinlik_mm is None
+                          else float(kalinlik_mm)),           # mm
+            'thickness_status': sizing['thickness_status'],
             'function': function,
             'total_recession_mm': float(sizing['total_recession_mm']),
             'recession_rate_mm_s': float(sizing['recession_rate_mm_s']),
             'design_margin': float(sizing['design_margin']),
             'q_star_mj_kg': float(sizing['q_star_MJ_kg']),
-            'heat_flux_kw_m2': q_throat_kw_m2,
+            # Çağıranın (soğuk cidar) akısı — karşılaştırma değeridir,
+            # boyutlandıran değer değildir.
+            'heat_flux_kw_m2': float(q_W_m2) / 1e3,
             'burn_time_s': float(burn_time),
-            'basis': basis,
+            'flux_basis': sizing['flux_basis'],
+            'recession_regime': sizing['recession_regime'],
+            'q_net_kw_m2': float(sizing['q_mean_W_m2']) / 1e3,
+            'q_conv_blocked_kw_m2': (
+                None if sizing['q_conv_blocked_W_m2'] is None
+                else float(sizing['q_conv_blocked_W_m2']) / 1e3),
+            'q_reradiated_kw_m2': (
+                None if sizing['q_reradiated_W_m2'] is None
+                else float(sizing['q_reradiated_W_m2']) / 1e3),
+            'h_gas_W_m2K': sizing['h_gas_W_m2K'],
+            'h_gas_source': h_gas_source,
+            'T_recovery_K': sizing['T_recovery_K'],
+            'T_surface_K': sizing['T_surface_K'],
+            'emissivity': sizing['emissivity'],
+            'emissivity_source': sizing['emissivity_source'],
+            # v2.6.27 blokaj denetimi: psi çözülmüş değerdir, türetimiyle
+            # birlikte yayımlanır.
+            'blowing_blockage': sizing['blowing_blockage'],
+            'b_prime': sizing['b_prime'],
+            'blowing_lambda': sizing['blowing_lambda'],
+            'blowing_gas_fraction': sizing['blowing_gas_fraction'],
+            'blockage_basis': sizing['blockage_basis'],
+            'gas_cp_J_kgK': sizing['gas_cp_J_kgK'],
+            'station_radius_m': sizing['station_radius_m'],
+            'station_radius_source': radius_source,
+            'model_valid': bool(sizing['model_valid']),
+            'validity_note': sizing['validity_note'],
+            'basis': liner_basis,
             'model_note': sizing['model_note'],
             'source': sizing['source'],
+            'surface_source': sizing['surface_source'],
         }
     
     def _case_free_volume(self):
@@ -7823,6 +8031,35 @@ class SolidRocketEngine:
         seçimine zayıf duyarlıdır — 300↔1000 K arası fark ~%15).
         Boğaz eğrilik yarıçapı R_c = 1.5·r_t (Bartz'ın standart varsayımı,
         analyzer._resolve_throat_conditions ile aynı).
+
+        v2.6.27 (B6-4): h_g ve T_aw burada hesaplanıp SADECE çarpımları
+        döndürülüyordu; ablatif astar boyutlandırması ikisini de istediği
+        için (yüzey enerji dengesi) hesap ``_throat_gas_side``a taşındı.
+        Bu metot artık o TEK kaynağın türevidir — aynı istasyon için iki
+        ayrı Bartz çağrısı yapılmaz.
+        """
+        h_g, T_aw, _cp = self._throat_gas_side()
+        T_wall = SOLID_THERMAL['bartz_reference_wall_temp_k']
+        q = h_g * (T_aw - T_wall)  # W/m²
+        return q / 1000.0  # kW/m²
+
+    def _throat_gas_side(self):
+        """(h_g [W/m²K], T_aw [K], cp [J/kg·K]) BOĞAZ istasyonunda — Bartz.
+
+        ``_chamber_gas_side``ın boğaz eşleniği. İkisi de aynı doğrulanmış
+        HeatTransferAnalyzer implementasyonunu çağırır; fark istasyondur
+        (boğazda M=1 ve A_t/A=1, haznede alan oranı ve düşük Mach).
+
+        Neden ayrı metot: ısı akısı (``_calculate_heat_flux``) ile ablatif
+        astar boyutlandırması AYNI iki sayıya ihtiyaç duyuyor. Akı zaten
+        h_g·(T_aw−T_w) çarpımıydı; astarın yüzey enerji dengesi ise h_g ve
+        T_aw'yi AYRI AYRI ister (q_net = blokaj·h_g·(T_aw−T_s) − ışıma).
+        Çarpımdan geriye bölerek h_g kurtarmak yerine kaynak tek yerde
+        tutulur — bir istasyonun iki farklı h_g'si olamaz.
+
+        cp, Bartz zincirinin KENDİ gaz özelliklerinden gelir (üfleme
+        parametresi B' = f·ṡ·ρ·c_p/h_g bu c_p ile kurulmalıdır: h'yi üreten
+        c_p ile B'yi bölen c_p farklı olursa ρₑuₑC_H tanımı bozulur).
         """
         from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
         analyzer = HeatTransferAnalyzer()
@@ -7832,7 +8069,9 @@ class SolidRocketEngine:
         )
         d_throat = self._estimate_throat_diameter()  # m
         rc_over_dt = max((1.5 * d_throat / 2.0) / d_throat, 0.25)  # = 0.75
-        T_wall = 700.0  # K, temsili soğutmasız çelik duvar (bkz. docstring)
+        # Temsili soğutmasız çelik duvar — hazne istasyonuyla AYNI referans
+        # (bkz. _calculate_heat_flux docstring: q, T_w seçimine zayıf duyarlı).
+        T_wall = SOLID_THERMAL['bartz_reference_wall_temp_k']
         h_g = analyzer._bartz_coefficient(
             throat_diameter=d_throat,
             chamber_pressure=self.P_c * 1e5,   # bar → Pa
@@ -7845,16 +8084,16 @@ class SolidRocketEngine:
             mach_local=1.0,
         )  # W/(m²·K)
         T_aw = analyzer._adiabatic_wall_temperature(self.T_c, gas, mach_local=1.0)
-        q = h_g * (T_aw - T_wall)  # W/m²
-        return q / 1000.0  # kW/m²
-    
+        return float(h_g), float(T_aw), float(gas['gas_cp'])
+
     def _chamber_gas_side(self):
-        """(h_g [W/m²K], T_aw [K]) hazne cidarında — Bartz korelasyonu.
+        """(h_g [W/m²K], T_aw [K], cp [J/kg·K]) hazne cidarında — Bartz.
 
         _calculate_heat_flux boğaz istasyonunu kullanır; kasa ısınması hazne
         cidarındaki (çok daha düşük) akıyla belirlenir. Aynı doğrulanmış
         HeatTransferAnalyzer implementasyonu, hazne alan oranı ve düşük Mach
-        ile çağrılır — yeni fizik yazılmaz.
+        ile çağrılır — yeni fizik yazılmaz. cp için bkz. _throat_gas_side
+        docstring'i (B' aynı c_p ile kurulmak zorunda).
         """
         from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
         analyzer = HeatTransferAnalyzer()
@@ -7883,7 +8122,7 @@ class SolidRocketEngine:
         )
         T_aw = analyzer._adiabatic_wall_temperature(
             self.T_c, gas, mach_local=mach_chamber)
-        return float(h_g), float(T_aw)
+        return float(h_g), float(T_aw), float(gas['gas_cp'])
 
     def _thermal_barrier_thickness(self):
         """Gaz ile kasa arasındaki TOPLAM yalıtım kalınlığı [m].
@@ -7917,7 +8156,7 @@ class SolidRocketEngine:
         Yalıtımsız (t=0) motorda 0 döner — sabit 94.8 değil.
         """
         try:
-            h_g, _ = self._chamber_gas_side()
+            h_g, _, _ = self._chamber_gas_side()
         except Exception:
             return 0.0
         if h_g <= 0:
@@ -7950,7 +8189,7 @@ class SolidRocketEngine:
             return T_amb
 
         try:
-            h_g, T_aw = self._chamber_gas_side()
+            h_g, T_aw, _cp = self._chamber_gas_side()
         except Exception:
             return T_amb
 
@@ -8384,76 +8623,15 @@ class SolidRocketEngine:
                                 max_points=SOLID_THRUST_CURVE_MAX_POINTS):
         """Yayımlanacak eğri için TEPEYİ KORUYAN örnek indeksleri.
 
-        v2.6.27 (B2-3). Çözücü adımı dt = 0.01 s sabit olduğu için
-        yayımlanan dizi saniyede 100 nokta taşır ve yanma süresiyle
-        sınırsız büyür (ölçüm SOLID_THRUST_CURVE_MAX_POINTS bloğunda).
-        Çözücü adımı DEĞİŞMEZ; seyreltilen yalnız yayımlanan dizidir.
-
-        SABİT ADIMLI seyreltme tepeyi ıskalayabilir, o yüzden burada iki
-        koruma birlikte çalışır:
-
-        1. **Kova uçları.** Örnekler eşit sayıda kovaya bölünür ve her
-           kovadan itkinin EN BÜYÜK ve EN KÜÇÜK olduğu örnek alınır. Bu,
-           küresel tepeyi tanım gereği taşır ve eğrinin zarfını (salınım
-           genliğini) korur; düz stride ise zarfı rastgele kırpar.
-        2. **Zorunlu örnekler.** ``keep`` ile verilen indeksler (tepe
-           basınç, ayrılmanın ilk anı, boğulmanın kesildiği ilk an, tükeniş)
-           kovalardan bağımsız olarak eklenir.
-
-        İlk ve son örnek her hâlde korunur (yanma süresi ve kapanış
-        noktası eğriden okunabilmelidir).
-
-        Args:
-            thrust: itki örnekleri (zarfı belirleyen birincil dizi).
-            pressure: verilirse tepe basınç örneği de zorunlu tutulur.
-            keep: ek zorunlu indeksler (None/aralık dışı olanlar atılır).
-            max_points: yaklaşık üst sınır. Dizi bundan kısaysa HİÇBİR
-                seyreltme yapılmaz ve bütün indeksler döner.
-
-        Returns:
-            Artan sırada, tekrarsız indeks dizisi (numpy int dizisi).
+        v2.6.27 (B2-3'te burada yazıldı, B2-4'te ortak modüle taşındı):
+        algoritmanın TEK tanımı artık hrma.analysis.curve_sampling —
+        hibrit aynı kusuru (port 5 mm -> 17 317 nokta) aynı koddan çözer,
+        iki kopyanın sessizce ayrışması imkânsızlaşır. Bu metot geriye
+        dönük yüzey olarak duruyor (testler ve olası dış çağıranlar için);
+        davranış bit-aynıdır (taşıma sırasında ölçüldü).
         """
-        F = np.asarray(thrust, dtype=float)
-        n = int(F.size)
-        if n == 0:
-            return np.zeros(0, dtype=int)
-        if n <= int(max_points):
-            return np.arange(n, dtype=int)
-
-        zorunlu = {0, n - 1}
-        sonlu = np.isfinite(F)
-        if bool(sonlu.any()):
-            zorunlu.add(int(np.nanargmax(np.where(sonlu, F, -np.inf))))
-        if pressure is not None:
-            P = np.asarray(pressure, dtype=float)
-            if P.size == n and bool(np.isfinite(P).any()):
-                zorunlu.add(int(np.nanargmax(
-                    np.where(np.isfinite(P), P, -np.inf))))
-        for idx in keep:
-            if idx is None:
-                continue
-            i = int(idx)
-            if 0 <= i < n:
-                zorunlu.add(i)
-
-        # Kova sayısı: her kovadan iki örnek (min + maks) alındığı için
-        # tavanın yarısı kadar kova açılır.
-        kova = max(1, int(max_points) // 2)
-        sinirlar = np.linspace(0, n, kova + 1).astype(int)
-        secilen = set(zorunlu)
-        for bas, son in zip(sinirlar[:-1], sinirlar[1:]):
-            if son <= bas:
-                continue
-            dilim = F[bas:son]
-            gecerli = np.isfinite(dilim)
-            if not bool(gecerli.any()):
-                secilen.add(int(bas))
-                continue
-            secilen.add(int(bas + np.nanargmax(np.where(gecerli, dilim,
-                                                        -np.inf))))
-            secilen.add(int(bas + np.nanargmin(np.where(gecerli, dilim,
-                                                        np.inf))))
-        return np.array(sorted(secilen), dtype=int)
+        return _ortak_seyreltme_indeksleri(
+            thrust, pressure=pressure, keep=keep, max_points=max_points)
 
     def _published_thrust_curve(self, curve):
         """Yayımlanan itki eğrisi bloğu — seyreltilmiş ve BEYANLI.
@@ -8466,17 +8644,12 @@ class SolidRocketEngine:
         n = int(np.asarray(curve['time']).size)
         # Zorunlu tutulacak kritik anlar: kullanıcıya bildirilen her olayın
         # eğride bir karşılığı OLMALIDIR, yoksa uyarı ile grafik çelişir.
+        # (B2-4: en-yakın-örnek araması ortak modülden; hibritle aynı kod.)
         zaman = np.asarray(curve['time'], dtype=float)
-
-        def _ilk_indeks(t_deger):
-            if t_deger is None or not zaman.size:
-                return None
-            return int(np.argmin(np.abs(zaman - float(t_deger))))
-
         zorunlu = [
-            _ilk_indeks(curve.get('separated_from_t')),
-            _ilk_indeks(curve.get('unchoked_from_t')),
-            _ilk_indeks(curve.get('burnout_time_s')),
+            _en_yakin_ornek(zaman, curve.get('separated_from_t')),
+            _en_yakin_ornek(zaman, curve.get('unchoked_from_t')),
+            _en_yakin_ornek(zaman, curve.get('burnout_time_s')),
         ]
         idx = self._decimate_curve_indices(
             curve['thrust'], curve.get('pressure'), keep=zorunlu)
@@ -8500,26 +8673,18 @@ class SolidRocketEngine:
                       'area from grain regression, chamber pressure from '
                       'the iterative pressure-burn rate fixed point '
                       '(r = a*Pc^n)'),
-            # v2.6.27 (B2-3): dizinin ÇÖZÜM çözünürlüğü değil YAYIN
-            # çözünürlüğü olduğu, ve neyin korunduğu açıkça yazılır.
-            'sampling': {
-                'points_published': int(idx.size),
-                'points_computed': n,
-                'decimated': bool(idx.size < n),
-                'solver_time_step_s': curve.get('time_step_s'),
-                'max_points': int(SOLID_THRUST_CURVE_MAX_POINTS),
-                'basis': (
-                    'The solver time step is UNCHANGED; only the published '
-                    'array is thinned. Thinning keeps, in every bucket, the '
-                    'samples of largest and smallest thrust (so the peak and '
-                    'the envelope survive) plus the first and last sample, '
-                    'the peak-pressure sample, and the first samples of flow '
-                    'separation, of loss of choking and of burnout. Every '
-                    'derived quantity in this response (total impulse, '
-                    'average thrust, curve shape, stability, warnings) is '
-                    'computed from the FULL-resolution solution, not from '
-                    'this array.'),
-            },
+            # v2.6.27 (B2-3, B2-4'te ortak üreticiye taşındı): dizinin ÇÖZÜM
+            # çözünürlüğü değil YAYIN çözünürlüğü olduğu, ve neyin korunduğu
+            # açıkça yazılır. Metin şablonu curve_sampling.sampling_block'ta
+            # TEK yerde durur; buradaki iki dizge katıya özgü boşlukları
+            # doldurur ve önceki elle yazılmış metinle bit-aynıdır (ölçüldü).
+            'sampling': _ornekleme_blogu(
+                int(idx.size), n, curve.get('time_step_s'),
+                'the first samples of flow separation, of loss of choking '
+                'and of burnout',
+                'total impulse, average thrust, curve shape, stability, '
+                'warnings',
+                max_points=SOLID_THRUST_CURVE_MAX_POINTS),
         }
 
     def calculate_performance(self):

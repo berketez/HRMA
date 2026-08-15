@@ -1239,7 +1239,12 @@
                             <span class="tooltip-text" data-i18n="solid.ui.material_specific_coefficient_in_burn_rate">Material-specific coefficient in burn rate law r[m/s]=a×P[bar]^n. APCP: 0.003-0.008. Higher values mean faster burning propellant. Obtained from strand burner tests or the central database preset above.</span>
                         </div>
                     </label>
-                    <input type="number" id="burn_rate_a" value="0.005" step="0.0001">
+                    <!-- (v2.6.27, parametre tutarlılığı) value="0.005" KALDIRILDI:
+                         sayfanın kendi varsayılanı arka ucun katalog çözümünü
+                         (APCP a=0.0022334) eziyordu — aynı motor 2,3 kat farklı
+                         itki eğrisi alıyordu. Boş alan payload'a hiç girmez;
+                         arka uç katalogdan çözer ve kaynağını beyan eder. -->
+                    <input type="number" id="burn_rate_a" value="" step="0.0001" placeholder="catalog value unless set" data-i18n-placeholder="solid.attr.catalog_value_unless_set">
                 </div>
                 <div class="form-group">
                     <label>
@@ -1249,7 +1254,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.pressure_sensitivity_exponent_in_burn_rate">Pressure sensitivity exponent in burn rate law r=a×P^n. Values 0.2-0.8 typical. Low n (0.2-0.4) gives stable combustion. High n (0.6+) can cause pressure instability. KN-sugar plateau/mesa regimes can have NEGATIVE n (burn rate drops with pressure) — this is physical, from published fits.</span>
                         </div>
                     </label>
-                    <input type="number" id="burn_rate_n" value="0.35" step="0.01" min="-0.5" max="1">
+                    <input type="number" id="burn_rate_n" value="" step="0.01" min="-0.5" max="1" placeholder="catalog value unless set" data-i18n-placeholder="solid.attr.catalog_value_unless_set">
                 </div>
                 <div class="form-group">
                     <label>
@@ -3653,12 +3658,23 @@
                 chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value) || 40,
                 
                 // Burn rate parameters
+                // (v2.6.27, parametre tutarlılığı) Dokunulmamış alan payload'a
+                // KONMAZ: eski `|| 0.005` / `? 0.35` düşüşleri sayfanın kendi
+                // varsayılanını arka ucun katalog çözümünün üstüne yazıyordu
+                // (ölçüldü: aynı APCP motoru, yanma 2,67 sn -> 1,17 sn).
+                // Boş alan -> undefined -> JSON.stringify anahtarı düşürür ->
+                // arka uç katalogdan çözer ve kaynağını beyan eder.
                 // DİKKAT: n negatif olabilir (KN-şeker plateau/mesa) — `|| 0.35`
-                // kalıbı 0 girdisini ezerdi; isNaN denetimiyle korunur.
-                burn_rate_a: parseFloat(document.getElementById('burn_rate_a').value) || 0.005,
+                // kalıbı 0 girdisini de ezerdi; isNaN denetimiyle korunur.
+                burn_rate_a: (function () {
+                    const el = document.getElementById('burn_rate_a');
+                    const v = parseFloat(el.value);
+                    return (el.value.trim() === '' || isNaN(v)) ? undefined : v;
+                })(),
                 burn_rate_n: (function () {
-                    const v = parseFloat(document.getElementById('burn_rate_n').value);
-                    return isNaN(v) ? 0.35 : v;
+                    const el = document.getElementById('burn_rate_n');
+                    const v = parseFloat(el.value);
+                    return (el.value.trim() === '' || isNaN(v)) ? undefined : v;
                 })(),
                 burn_rate_preset: (document.getElementById('burn_rate_preset') || {}).value || 'custom',
                 
@@ -4440,8 +4456,10 @@
             document.getElementById('grain_length').value = '500';
             document.getElementById('core_diameter').value = '30';
             document.getElementById('chamber_pressure').value = '40';
-            document.getElementById('burn_rate_a').value = '0.005';
-            document.getElementById('burn_rate_n').value = '0.35';
+            // (v2.6.27) Reset yanma hızını BOŞ bırakır: sayı yazmak sayfa
+            // varsayılanı ile katalog çözümünü yeniden yarıştırmak olurdu.
+            document.getElementById('burn_rate_a').value = '';
+            document.getElementById('burn_rate_n').value = '';
             const brp = document.getElementById('burn_rate_preset');
             if (brp) { brp.value = 'custom'; }
             const brNote = document.getElementById('burn_rate_preset_note');
@@ -4862,6 +4880,75 @@ Please provide:
                 return (typeof v === 'number' && isFinite(v))
                     ? v.toFixed(2) + ' mm' : notSized;
             };
+            // v2.6.27 (B6-4): kapak astarı hüküm-duyarlı basılır. Hüküm
+            // İNGİLİZCE sözleşme alanlarından okunur (thickness_status +
+            // recession_regime); 'basis' metninde arama YAPILMAZ (kırılgan).
+            // Sayı yoksa sayı BASILMAZ: no_net_heating'de kalınlığı iletim
+            // (kasa/bond sıcaklık sınırı) ölçütü belirler ve bu modül onu
+            // modellemiyor; zarf dışında Seviye-1 model boyutlandıramaz.
+            // Uzun gerekçe (validity_note/basis) title/tooltip'te taşınır.
+            // Girdi eksikse recession_regime alanı HİÇ olmayabilir — o
+            // durumda mevcut notSized davranışı korunur.
+            const escAttr = function (s) {
+                return String(s == null ? '' : s)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            };
+            const insBadge = 'font-size: 12px; padding: 2px 8px; '
+                + 'border-radius: 4px; border: 1px solid ';
+            const insulationCell = function (ins) {
+                const note = escAttr(ins.validity_note || ins.basis || '');
+                if (ins.thickness_status === 'sized'
+                        && typeof ins.thickness === 'number'
+                        && isFinite(ins.thickness)) {
+                    const detay = [];
+                    if (typeof ins.blowing_blockage === 'number'
+                            && isFinite(ins.blowing_blockage)) {
+                        detay.push('ψ = ' + ins.blowing_blockage.toFixed(3));
+                    }
+                    if (typeof ins.q_net_kw_m2 === 'number'
+                            && isFinite(ins.q_net_kw_m2)) {
+                        detay.push('q_net = '
+                            + ins.q_net_kw_m2.toFixed(0) + ' kW/m²');
+                    }
+                    if (typeof ins.T_surface_K === 'number'
+                            && isFinite(ins.T_surface_K)) {
+                        detay.push('T_s = ' + ins.T_surface_K.toFixed(0) + ' K');
+                    }
+                    return '<span title="' + escAttr(ins.basis || '') + '">'
+                        + ins.thickness.toFixed(2) + ' mm'
+                        + (ins.material ? ' — ' + escAttr(ins.material) : '')
+                        + '</span>'
+                        + (detay.length
+                            ? '<div style="font-size: 12px; opacity: 0.75;">'
+                              + detay.join(' · ') + '</div>'
+                            : '');
+                }
+                if (ins.thickness_status === 'NOT_MODELLED'
+                        && ins.recession_regime === 'no_net_heating') {
+                    return '<span style="' + insBadge
+                        + 'var(--hd-line, rgba(0,229,255,0.14)); '
+                        + 'background: var(--hd-inset, rgba(6,14,26,0.85));" '
+                        + 'title="' + note + '">'
+                        + T('solid.js.insulation_no_net_heating',
+                            'Recession ≈ 0 — thickness is set by the case/bond-line temperature limit (not modelled here)')
+                        + '</span>';
+                }
+                if (ins.thickness_status === 'NOT_MODELLED'
+                        && ins.recession_regime) {
+                    return '<span style="' + insBadge
+                        + 'var(--hd-orange, #ff8c33); '
+                        + 'color: var(--hd-orange, #ff8c33);" '
+                        + 'title="' + note + '">'
+                        + T('solid.js.insulation_out_of_envelope',
+                            'Out of model envelope — the Level-1 steady model cannot size this liner')
+                        + '</span>';
+                }
+                // Alan hiç yok ya da girdi eksik: mevcut davranış — sayı
+                // uydurulmaz, kısa gerekçe (basis) tooltip'te durur.
+                return '<span title="' + note + '">'
+                    + mmOrNA(ins.thickness) + '</span>';
+            };
 
             return `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
@@ -4912,9 +4999,8 @@ Please provide:
                     <div>
                         <h4 style="color: #495057; margin-bottom: 10px;">${T('solid.js.ablative_insulation', 'Ablative Closure Insulation')}</h4>
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                            <tr><td style="padding: 6px;"><strong>${T('solid.js.forward_insulation', 'Forward closure:')}</strong></td><td style="padding: 6px;">${mmOrNA(fwdIns.thickness)}</td></tr>
-                            <tr><td style="padding: 6px;"><strong>${T('solid.js.aft_insulation', 'Aft closure / nozzle entry:')}</strong></td><td style="padding: 6px;">${mmOrNA(aftIns.thickness)}</td></tr>
-                            <tr><td style="padding: 6px;"><strong>${T('solid.js.material', 'Material:')}</strong></td><td style="padding: 6px;">${aftIns.material || '—'}</td></tr>
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.forward_insulation', 'Forward closure:')}</strong></td><td style="padding: 6px;">${insulationCell(fwdIns)}</td></tr>
+                            <tr><td style="padding: 6px;"><strong>${T('solid.js.aft_insulation', 'Aft closure / nozzle entry:')}</strong></td><td style="padding: 6px;">${insulationCell(aftIns)}</td></tr>
                         </table>
                         <div style="font-size: 12px; opacity: 0.8; margin-top: 6px;">${aftIns.basis || ''}</div>
                     </div>

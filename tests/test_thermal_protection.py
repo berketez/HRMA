@@ -15,6 +15,13 @@ Kapsam:
   3) Radyatif denge: el hesabı (tam çözümlü vaka), enerji dengesi artığı,
      malzeme limit kıyası, monotonluk
   4) Kenar durumlar ve sözlük şeması (endpoint kontratı)
+  5) v2.6.27 — ablasyon yüzey enerji dengesi (opt-in ikinci yol) ve
+     geçerlilik kapısı:
+     - eski yol BİREBİR korunuyor mu (üç motorun bağlaması buna dayanıyor)
+     - yeni yol ölçülmüş ablasyon mertebesini tutturuyor mu (NASA TM-107041
+       sınıfı silika-fenolik ölçüm bandı)
+     - kapı: modelin varsayım zarfı dışında sayı üretmek yerine
+       NOT_MODELLED diyor mu
 """
 
 import math
@@ -24,9 +31,16 @@ import pytest
 
 from hrma.analysis.thermal_protection import (
     ABLATIVE_MATERIALS,
+    BLOWING_GAS_FRACTION_BAND,
+    BLOWING_LAMBDA,
     RADIATION_EXTENSION_MATERIALS,
+    RECESSION_VALID_MAX_MM_S,
     STEFAN_BOLTZMANN,
+    TM107041_TABLE2_ALL_MM_S,
+    TM107041_TABLE2_MX2600_MM_S,
     ThermalProtectionAnalyzer,
+    _blowing_reduction,
+    _solve_blown_surface_balance,
     list_ablative_materials,
 )
 from hrma.data.materials_db import get_material
@@ -460,8 +474,21 @@ class TestContract:
                     'total_recession_mm', 'required_thickness_mm',
                     'required_thickness_m', 'q_star_MJ_kg',
                     'q_star_band_MJ_kg', 'density_kg_m3', 'design_margin',
-                    'model_note', 'source'):
+                    'model_note', 'source',
+                    # v2.6.27 — akı tabanı ve geçerlilik hükmü ESKİ yolda da
+                    # yayımlanmak ZORUNDA: panel/endpoint hangi fizikle
+                    # hesaplandığını okuyabilmeli.
+                    'flux_basis', 'recession_regime', 'model_valid',
+                    'validity_note', 'thickness_status',
+                    # v2.6.27 blokaj denetimi — çözülmüş psi türetimiyle
+                    # birlikte yayımlanır ('blowing_blockage_band' alanı
+                    # sözleşmeden KALKTI, geri gelmemeli).
+                    'blowing_blockage', 'b_prime', 'blowing_lambda',
+                    'blowing_gas_fraction', 'blockage_basis',
+                    'blockage_iterations', 'gas_cp_J_kgK'):
             assert key in out, key
+        assert 'blowing_blockage_band' not in out, (
+            'sabit blokaj bandı alanı sözleşmeye geri gelmiş')
 
     def test_heat_sink_result_schema(self, tp):
         out = tp.heat_sink_transient(1000.0, 2000.0, 1.0, 0.005)
@@ -498,3 +525,453 @@ class TestContract:
         view['silica_phenolic']['q_star_default_MJ_kg'] = 999.0
         assert ABLATIVE_MATERIALS['silica_phenolic'][
             'q_star_default_MJ_kg'] == pytest.approx(8.0)
+
+
+# =========================================================================
+# 5) v2.6.27 — YÜZEY ENERJİ DENGESİ (opt-in) + GEÇERLİLİK KAPISI
+# =========================================================================
+# Teşhis: Q* bağıntısına SOĞUK-CİDAR Bartz akısı besleniyordu, yüzeyin
+# yeniden ışıması ve piroliz gazı üfleme blokajı yoktu, geometrik denetim
+# yoktu. Düzeltme İKİ YOLLUDUR (bkz. ablative_thickness docstring):
+#   ESKİ YOL  (h_gas/T_recovery verilmez) → sayısal çıktı BİREBİR korunur;
+#             üç motorun (sıvı/hibrit/katı) bugünkü bağlaması buna dayanır.
+#   YENİ YOL  (h_gas + T_recovery verilir) → net akı burada çözülür ve
+#             geçerlilik kapısı BAĞLAYICIDIR.
+# Aşağıdaki testler bu iki yolun ikisini de kilitler.
+# =========================================================================
+
+# NASA TM-107041 Tablo 2 ölçüm bandları artık MODÜLDEN import edilir
+# (TM107041_TABLE2_ALL_MM_S / TM107041_TABLE2_MX2600_MM_S) — tek tanım
+# noktası. Buradaki eski yerel sabit TM107041_RECESSION_BAND_MM_S=(0.0045,
+# 0.082) SİLİNDİ: 0.082 üst ucu raporun Tablo 2 sütunundaki x10^-2
+# çarpanının atlanmasıyla oluşmuş 10 KAT yanlış bir okumaydı (gerçek üst uç
+# 0.00822 mm/s = 0.323 mil/s; tüm örnekler bandı 0.00017-0.0601 mm/s).
+
+# Mertebe kilidi toleransı: ölçülen bandın (tüm örnekler) ÜST ucunun kaç
+# katına kadar kabul edilir. ESKİ değer 5.0'dı ve 10x şişik banda göre
+# kurulmuştu (fiilî tavan 0.41 mm/s). Band düzeltilince kilit yeniden
+# ÖLÇÜLDÜ: raporun gerçek koşulunda (aşağıdaki test) model 0.0779 mm/s
+# veriyor = bandın üst ucunun 1.30 katı. 2.0, ölçülen 1.30'a pay bırakan
+# ama eski kilidin 3.4 katı sıkı bir mertebe kilididir — nokta doğrulaması
+# hâlâ DEĞİLDİR (T_c bir varsayımdır, bkz. test docstring'i).
+TM107041_ORDER_TOLERANCE = 2.0
+
+
+class TestAblationSurfaceEnergyBalance:
+
+    # ------------------------------------------------------------------
+    # (a) GERİ UYUMLULUK — eski yol kılı kıpırdamamalı
+    # ------------------------------------------------------------------
+    def test_legacy_path_is_bit_identical(self, tp):
+        """Eski imza → eski sayı (278.773 mm sınıfı), BİLİNEREK korunuyor.
+
+        Bu, "doğru sonuç" testi DEĞİLDİR: 278 mm'lik bir boğaz astarı
+        fiziksel değildir (v2.6.27 teşhisinin konusu tam da budur). Bu test
+        eski yolun DEĞİŞMEDİĞİNİ kilitler, çünkü üç motorun termal koruma
+        bağlaması ve onların beyan testleri bugün bu sayıyı yayımlıyor.
+        Yeni yola geçiş motor motor yapılacaktır; o gün bu test, yerini
+        yeni yolun beklentisine bırakmalıdır.
+
+        Akı, teşhiste ölçülen gerilemeden geri çözülür (uydurma sabit
+        değil): ṡ = q/(rho*Q*)  →  q = ṡ*rho*Q*.
+        """
+        rho = get_material('ablative')['density']          # 1400 kg/m^3
+        q_star = 8.0e6                                     # konservatif uç
+        sdot_measured_m_s = 0.6195e-3                      # teşhis ölçümü
+        q = sdot_measured_m_s * rho * q_star               # ~6.94 MW/m^2
+        burn_s = 300.0
+
+        out = tp.ablative_thickness(q, burn_time_s=burn_s,
+                                    material='silica_phenolic')
+
+        assert out['recession_rate_mm_s'] == pytest.approx(0.6195, abs=1e-4)
+        assert out['required_thickness_mm'] == pytest.approx(278.773, abs=0.1)
+        assert out['flux_basis'] == 'caller_supplied_no_energy_balance'
+        assert out['recession_regime'] == 'caller_supplied_flux'
+        # Enerji dengesi alanları eski yolda UYDURULMAZ.
+        assert out['T_surface_K'] is None
+        assert out['q_conv_blocked_W_m2'] is None
+        assert out['q_reradiated_W_m2'] is None
+        assert out['q_caller_W_m2'] == pytest.approx(q, rel=1e-12)
+
+    def test_legacy_path_keeps_sized_status_even_when_gate_trips(self, tp):
+        """GEÇİCİ İKİLİK: eski yolda kapı statü DÜŞÜRMEZ, bilgi verir.
+
+        Motor bağlama testleri (sıvı/hibrit/katı beyan testleri) bugün
+        thickness_status='sized' ve sayısal bir kalınlık bekliyor. Kapı bu
+        yolda yalnız model_valid/validity_note ile konuşur. Bu ikilik
+        BİLİNÇLİDİR ve motorların tamamı yeni yola geçtiğinde kalkmalıdır —
+        bu test o günü fark etmemizi sağlar (kalktığında kırılır).
+        """
+        rho = get_material('ablative')['density']
+        q = 0.6195e-3 * rho * 8.0e6
+        out = tp.ablative_thickness(q, burn_time_s=300.0,
+                                    station_radius_m=0.0496)
+
+        assert out['recession_rate_mm_s'] > RECESSION_VALID_MAX_MM_S
+        assert out['model_valid'] is False
+        assert out['validity_note'] is not None
+        assert 'FOR INFORMATION ONLY' in out['validity_note']
+        # ... ama kalınlık HÂLÂ yayımlanıyor:
+        assert out['thickness_status'] == 'sized'
+        assert out['required_thickness_mm'] == pytest.approx(278.773, abs=0.1)
+
+    # ------------------------------------------------------------------
+    # (b) YENİ YOL — ölçülmüş ablasyon mertebesi
+    # ------------------------------------------------------------------
+    def test_new_path_matches_measured_recession_order(self, tp):
+        """NASA TM-107041 GERÇEK koşulunda gerileme ÖLÇÜLEN mertebede.
+
+        DEĞİŞİKLİK GEREKÇESİ (v2.6.27 blokaj denetimi): testin eski hâli
+        (a) 0.082 mm/s bandını kullanıyordu — raporun Tablo 2'sinin x10^-2
+        çarpanı atlanmış 10 KAT yanlış okumasıydı (gerçek üst uç 0.00822;
+        tüm örnekler 0.00017-0.0601); (b) boğazı 50 mm ve T_c'yi 3000 K
+        VARSAYIYORDU — rapor okununca ikisi de rapordan geldi: boğaz çapı
+        25.4 mm, Pc = 11.38 bar (165 psia), GH2/GOX, birikimli süre 164 s.
+
+        Girdi türetimi (belgeli, uydurma yok):
+          - Boğaz 25.4 mm, Pc 11.38 bar, 164 s: raporun kendi test koşulu.
+          - T_c = 2450 K: raporun boğaz gaz sıcaklığı ölçümlerinden
+            (tüm koşuların ortalaması ~2456 K; tekil değer ~2386 K) —
+            rapor T_c'yi ayrıca vermez, bu hâlâ bir VARSAYIMDIR ama artık
+            ölçüme dayalıdır. Bu yüzden hüküm nokta doğrulaması değil
+            MERTEBE KİLİDİDİR.
+          - h_g, T_recovery ve c_p EL İLE yazılmaz: deponun kendi Bartz
+            zinciri (HeatTransferAnalyzer) hesaplar — motorların bağlamada
+            izlediği zincirin aynısı. c_p artık geçirilir ki blokaj B'
+            üzerinden ÖZ-TUTARLI çözülsün (yeni sözleşme).
+
+        Hüküm (kilit yazılırken ÖLÇÜLDÜ: 0.0779 mm/s = üst ucun 1.30 katı):
+        gerileme, tüm-örnekler bandının üst ucunun (0.0601 mm/s) 2 katını
+        AŞMAZ ve uçuş sınıfı bandın alt ucunun (0.00452) ALTINA İNMEZ —
+        alt kilit, eski sabit-0.5 blokaj kusuru geri gelirse (bu noktada
+        q_net'i negatife çevirip 0 mm/s verirdi) yakalar.
+        """
+        from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
+
+        motor = {
+            'chamber_pressure': 11.38,      # bar — 165 psia, raporun koşulu
+            'chamber_temperature': 2450.0,  # K  — rapor ölçüm ort. ~2456 K
+            'throat_diameter': 0.0254,      # m  — raporun boğaz çapı
+            'burn_time': 164.0,             # s  — raporun birikimli süresi
+            'mdot_total': 0.3,              # kg/s (h_g'ye girmez)
+        }
+        ht = HeatTransferAnalyzer().analyze_heat_transfer(
+            motor, material='ablative', wall_thickness=0.010)
+        h_g = float(ht['heat_transfer_coefficients']['gas_side'])
+        gas_cp = float(ht['heat_transfer_coefficients']['gas_cp'])
+        T_aw = float(ht['gas_side_analysis']['adiabatic_wall_temperature'])
+        q_bartz = float(ht['gas_side_analysis']['throat_heat_flux'])
+
+        # Zincir sağlığı: Bartz mertebesi bu çalışma noktasında beklenen
+        # aralıkta mı (kilit kırılırsa suçlu kim, ayırt edilebilsin).
+        # Ölçülen: h_g = 4637 W/m2K, T_aw = 2436 K, cp = 2079 J/kgK.
+        assert 1.0e3 < h_g < 1.0e4, h_g
+        assert 2200.0 < T_aw < 2450.0, T_aw
+        assert 1.0e3 < gas_cp < 4.0e3, gas_cp
+
+        out = tp.ablative_thickness(
+            q_net_W_m2=q_bartz,
+            burn_time_s=motor['burn_time'],
+            material='silica_phenolic',
+            h_gas_W_m2K=h_g,
+            T_recovery_K=T_aw,
+            gas_cp_J_kgK=gas_cp)
+
+        assert out['flux_basis'] == 'surface_energy_balance'
+        assert out['recession_regime'] == 'steady_ablation'
+        assert out['model_valid'] is True
+        assert out['thickness_status'] == 'sized'
+
+        band_hi = TM107041_TABLE2_ALL_MM_S[1]
+        assert out['recession_rate_mm_s'] <= band_hi * TM107041_ORDER_TOLERANCE, (
+            f"new path recession {out['recession_rate_mm_s']:.4f} mm/s is more "
+            f"than {TM107041_ORDER_TOLERANCE:g}x the measured band top "
+            f"{band_hi} mm/s")
+        # Alt mertebe kilidi: uçuş sınıfı (MX2600) bandın alt ucu. Sabit
+        # psi=0.5 kusuru bu noktada no_net_heating/0 mm/s verirdi — ölçülen
+        # 0.0779 mm/s bu alt ucun 17 katı, kırılırsa fizik değişmiş demektir.
+        assert out['recession_rate_mm_s'] >= TM107041_TABLE2_MX2600_MM_S[0], (
+            f"new path recession {out['recession_rate_mm_s']:.5f} mm/s fell "
+            f"below the flight-class measured band floor "
+            f"{TM107041_TABLE2_MX2600_MM_S[0]} mm/s")
+
+        # Yeni yol, aynı Bartz akısını HAM besleyen eski yoldan DAHA AZ
+        # gerileme verir: üfleme blokajı + yeniden ışıma net akıyı düşürür.
+        # (Ölçülen: 0.0779 mm/s yeni yol, 0.2104 mm/s eski yol.)
+        legacy = tp.ablative_thickness(q_net_W_m2=q_bartz,
+                                       burn_time_s=motor['burn_time'],
+                                       material='silica_phenolic')
+        assert out['recession_rate_mm_s'] < legacy['recession_rate_mm_s']
+
+    def test_new_path_energy_balance_is_self_consistent(self, tp):
+        """Dönen değerler yüzey enerji dengesi denklemini SAĞLAMALI.
+
+        DEĞİŞİKLİK GEREKÇESİ: testin eski hâli sabit blokaj katsayısıyla
+        (rec['blowing_blockage'] = 0.5) el hesabıydı. Sabit 0.5 yanlış
+        rejimin katsayısıydı (psi=0.5 ⇒ B'≈1.6-2.5 atmosferik giriş; roket
+        noktalarında B'≈0.02-0.25 ⇒ psi 0.90-1.0) ve v2.6.27'de KALDIRILDI;
+        'blowing_blockage_band' alanı ve BLOWING_BLOCKAGE_BAND sabiti de
+        sözleşmeden çıktı. Blokaj artık ÇÖZÜLDÜĞÜ için el hesabı yerine
+        öz-tutarlılık denetlenir:
+
+            sdot == (psi*h_g*(T_aw - T_s) - eps*sigma*T_s^4) / (rho*Q*)
+            psi  == _blowing_reduction(b_prime)
+            b'   == f_gas * sdot * rho * c_p / h_g
+        """
+        h_g, T_r, cp = 4000.0, 3300.0, 2000.0
+        out = tp.ablative_thickness(1.0e6, burn_time_s=20.0,
+                                    material='silica_phenolic',
+                                    h_gas_W_m2K=h_g, T_recovery_K=T_r,
+                                    gas_cp_J_kgK=cp)
+        assert out['recession_regime'] == 'steady_ablation'
+        psi = out['blowing_blockage']
+        b_prime = out['b_prime']
+        T_s = out['T_surface_K']
+        eps = out['emissivity']
+        rho = out['density_kg_m3']
+        rho_qstar = rho * out['q_star_MJ_kg'] * 1e6
+        sdot_m_s = out['recession_rate_mm_s'] / 1e3
+
+        # (1) Enerji dengesi: sdot = q_net / (rho*Q*), 1e-6 bağıl hassasiyet.
+        q_conv = psi * h_g * (T_r - T_s)
+        q_rad = eps * STEFAN_BOLTZMANN * T_s ** 4
+        assert sdot_m_s == pytest.approx((q_conv - q_rad) / rho_qstar,
+                                         rel=1e-6)
+        # (2) psi, yayımlanan B'nin Aerotherm indirgemesi olmalı.
+        assert psi == pytest.approx(_blowing_reduction(b_prime), rel=1e-6)
+        # (3) B' tanımı: f_gas * sdot * rho * c_p / h_g.
+        f_gas = out['blowing_gas_fraction']
+        assert b_prime == pytest.approx(f_gas * sdot_m_s * rho * cp / h_g,
+                                        rel=1e-6)
+        # (4) Yayımlanan akı bileşenleri aynı denklemin parçaları olmalı.
+        assert out['q_conv_blocked_W_m2'] == pytest.approx(q_conv, rel=1e-9)
+        assert out['q_reradiated_W_m2'] == pytest.approx(q_rad, rel=1e-9)
+        assert out['q_mean_W_m2'] == pytest.approx(q_conv - q_rad, rel=1e-6)
+        # Çağıranın akısı yeni yolda KULLANILMAZ ama raporlanır.
+        assert out['q_caller_W_m2'] == pytest.approx(1.0e6)
+        assert out['emissivity'] == pytest.approx(
+            get_material('ablative')['emissivity'])
+        assert out['blowing_lambda'] == pytest.approx(BLOWING_LAMBDA)
+        assert out['blockage_iterations'] > 0
+
+    def test_psi_solved_only_when_gas_cp_supplied(self, tp):
+        """gas_cp verilince psi ÇÖZÜLÜR (0<psi<1, B'>0); verilmezse psi=1.
+
+        Yeni sözleşme (v2.6.27 blokaj denetimi): B' tanımı c_p ister;
+        c_p verilmezse katsayı UYDURULMAZ — psi=1 (blokajsız, konservatif)
+        alınır ve blockage_basis bunu 'NOT solved' diye beyan eder.
+        """
+        # h_g = 3500: iki hâl de hız tavanının (0.35 mm/s) ALTINDA kalsın
+        # diye ölçülerek seçildi (çözülmüş 0.292, blokajsız 0.310 mm/s) —
+        # kalınlık karşılaştırması ancak ikisi de 'sized' iken anlamlı.
+        kwargs = dict(burn_time_s=20.0, material='silica_phenolic',
+                      h_gas_W_m2K=3500.0, T_recovery_K=3300.0)
+        solved = tp.ablative_thickness(1.0e6, gas_cp_J_kgK=2000.0, **kwargs)
+        assert solved['thickness_status'] == 'sized'
+        assert 0.0 < solved['blowing_blockage'] < 1.0
+        assert solved['b_prime'] > 0.0
+        assert 'SOLVED' in solved['blockage_basis']
+        assert solved['gas_cp_J_kgK'] == pytest.approx(2000.0)
+
+        unsolved = tp.ablative_thickness(1.0e6, **kwargs)
+        assert unsolved['thickness_status'] == 'sized'
+        assert unsolved['blowing_blockage'] == pytest.approx(1.0)
+        assert unsolved['b_prime'] is None
+        assert 'NOT solved' in unsolved['blockage_basis']
+        assert unsolved['gas_cp_J_kgK'] is None
+        # psi=1 konservatif YÖN demektir: blokajsız akı daha büyük, gerileme
+        # ve kalınlık çözülmüş hâlden AZ OLAMAZ.
+        assert (unsolved['recession_rate_mm_s']
+                >= solved['recession_rate_mm_s'])
+        assert (unsolved['required_thickness_mm']
+                >= solved['required_thickness_mm'])
+
+    def test_physics_direction_h_gas_and_emissivity(self, tp):
+        """Fizik yönü: h_g artınca sdot AZALMAZ; eps=0 sınırı eps=0.9'dan az
+        gerileme veremez (yeniden ışıma tek başına soğutucu terimdir)."""
+        prev = -1.0
+        for h in (1000.0, 2000.0, 4000.0, 8000.0):
+            out = tp.ablative_thickness(1.0e6, burn_time_s=20.0,
+                                        h_gas_W_m2K=h, T_recovery_K=3300.0,
+                                        gas_cp_J_kgK=2000.0)
+            assert out['recession_rate_mm_s'] >= prev, (
+                f'h_g={h}: sdot düştü')
+            prev = out['recession_rate_mm_s']
+
+        # eps yönü çözücü seviyesinde denetlenir (ablative_thickness yüzey
+        # yayıcılığını malzeme kaydından okur, parametreleştirmez).
+        rho = get_material('ablative')['density']
+        kw = dict(h_gas_W_m2K=4000.0, T_recovery_K=3300.0,
+                  T_surface_K=2050.0, rho_qstar=rho * 8.0e6,
+                  density_kg_m3=rho, gas_cp_J_kgK=2000.0, gas_fraction=0.5)
+        s_eps0 = _solve_blown_surface_balance(emissivity=0.0, **kw)
+        s_eps9 = _solve_blown_surface_balance(emissivity=0.9, **kw)
+        assert s_eps0['recession_rate_m_s'] >= s_eps9['recession_rate_m_s']
+        assert s_eps0['q_reradiated_W_m2'] == pytest.approx(0.0)
+
+    # ------------------------------------------------------------------
+    # (c) KAPI + q_net <= 0 dalı + flux_basis her iki yolda
+    # ------------------------------------------------------------------
+    def test_gate_marks_not_modelled_on_extreme_input(self, tp):
+        """Uç girdi: kapı sayı üretmek yerine NOT_MODELLED demeli."""
+        # Çok yüksek h_g: gerileme tavanın (0.35 mm/s) çok üstüne çıkar.
+        out = tp.ablative_thickness(1.0e6, burn_time_s=100.0,
+                                    h_gas_W_m2K=5.0e4, T_recovery_K=3500.0)
+        assert out['recession_rate_mm_s'] > RECESSION_VALID_MAX_MM_S
+        assert out['thickness_status'] == 'NOT_MODELLED'
+        assert out['model_valid'] is False
+        assert out['required_thickness_mm'] is None
+        assert out['required_thickness_m'] is None
+        assert 'MODEL OUT OF ENVELOPE' in out['validity_note']
+        assert 'validity ceiling' in out['validity_note']
+        # Gerekçenin kanıtı (gerileme) yayımlanmaya DEVAM eder.
+        assert out['recession_rate_mm_s'] > 0.0
+
+    def test_gate_catches_liner_thicker_than_passage(self, tp):
+        """Geometrik hüküm: astar, astarladığı geçitten kalın olamaz."""
+        # Kapıyı YALNIZ geometriden tetikle: gerileme hızı tavanın altında
+        # kalsın, ama uzun yanma toplam gerilemeyi yarıçapın üstüne taşısın.
+        out = tp.ablative_thickness(1.0e6, burn_time_s=600.0,
+                                    h_gas_W_m2K=3.0e3, T_recovery_K=3200.0,
+                                    station_radius_m=0.010)
+        assert out['recession_rate_mm_s'] <= RECESSION_VALID_MAX_MM_S
+        assert out['thickness_status'] == 'NOT_MODELLED'
+        assert out['required_thickness_mm'] is None
+        assert 'station radius' in out['validity_note']
+        # Burada İKİ geometrik gerekçe birden geçerli: astar geçitten kalın
+        # (ölçülen 136.5 mm gerileme > 10 mm yarıçap → istasyon delinir;
+        # eski yorumdaki 68.8 mm, sabit 0.5 blokaj + T_s=1900 K dönemine
+        # aitti — v2.6.27'de ikisi de değişti).
+        assert 'burn through' in out['validity_note']
+
+        # AYRI DURUM: yalnız (b) — gereken kalınlık yarıçapı aşıyor ama
+        # toplam gerileme aşmıyor (tasarım payı yüzünden). Kapı yine kapalı,
+        # ama delinme gerekçesi KURULMAMALI (yanlış gerekçe de bir yalandır).
+        # SAYI AYARI (v2.6.27 blokaj denetimi): sabit 0.5 blokaj kalkıp
+        # silika T_s 1900→2050 K olunca bu noktadaki sdot 0.115→0.228 mm/s
+        # değişti; pencereyi (total < r < 1.5*total) korumak için süre
+        # 350→190 s çekildi (ölçülen: total = 43.2 mm, 1.5x = 64.9 mm).
+        only_thickness = tp.ablative_thickness(
+            1.0e6, burn_time_s=190.0, h_gas_W_m2K=3.0e3,
+            T_recovery_K=3200.0, station_radius_m=0.050)
+        assert only_thickness['total_recession_mm'] < 50.0
+        assert only_thickness['total_recession_mm'] * 1.5 > 50.0
+        assert only_thickness['thickness_status'] == 'NOT_MODELLED'
+        assert 'is larger than the station radius' in \
+            only_thickness['validity_note']
+        assert 'burn through' not in only_thickness['validity_note']
+
+        # Aynı koşul, yarıçap VERİLMEZSE geometrik hüküm kurulamaz —
+        # kapı sessizce "geçti" demez, yalnız denetlemediğini bildirir.
+        no_geom = tp.ablative_thickness(1.0e6, burn_time_s=600.0,
+                                        h_gas_W_m2K=3.0e3,
+                                        T_recovery_K=3200.0)
+        assert no_geom['station_radius_m'] is None
+        assert no_geom['thickness_status'] == 'sized'
+
+    def test_no_net_heating_publishes_no_thickness(self, tp):
+        """no_net_heating rejimi artık kalınlık YAYIMLAMAZ.
+
+        DEĞİŞİKLİK GEREKÇESİ: testin eski hâli bu rejimde
+        required_thickness_mm == 0.0 ve (dolaylı) 'sized' bekliyordu.
+        0.0 mm bir tasarım değildir — gerileme sıfır olsa bile astar
+        kalınlığını kasa/bond hattı sıcaklık sınırı (iletim + char payı,
+        NASA SP-8093 pratiği) belirler ve bu Seviye-1 Q* modülü o iletim
+        boyutlandırmasını YAPMIYOR. 0.0 mm'yi 'sized' basmak sessiz
+        tehlikeydi; v2.6.27'de sözleşme NOT_MODELLED + None + gerekçeye
+        çevrildi.
+        """
+        # T_recovery yüzey sıcaklığının (silika T_s = 2050 K) hemen üstünde:
+        # blokajsız konvektif akı bile (1000*50 = 5e4 W/m^2) yeniden ışımayı
+        # (0.9*sigma*2050^4 ≈ 9.0e5 W/m^2) karşılamaz.
+        out = tp.ablative_thickness(9.9e6, burn_time_s=50.0,
+                                    h_gas_W_m2K=1.0e3, T_recovery_K=2100.0,
+                                    gas_cp_J_kgK=2000.0)
+        assert out['q_conv_blocked_W_m2'] < out['q_reradiated_W_m2']
+        assert out['recession_regime'] == 'no_net_heating'
+        assert out['q_mean_W_m2'] == 0.0
+        assert out['recession_rate_mm_s'] == 0.0
+        assert out['total_recession_mm'] == 0.0
+        # Kalınlık YOK — sıfır değil, None + NOT_MODELLED + gerekçe.
+        assert out['required_thickness_mm'] is None
+        assert out['required_thickness_m'] is None
+        assert out['thickness_status'] == 'NOT_MODELLED'
+        assert out['validity_note'].startswith('NO NET HEATING')
+        assert 'case/bond-line' in out['validity_note']
+        # Üfleme yoksa blokaj da yoktur: psi=1, B'=0 (limit davranışı).
+        assert out['blowing_blockage'] == pytest.approx(1.0)
+        assert out['b_prime'] == pytest.approx(0.0)
+        # Hız tavanı ihlal edilmedi: model_valid kapısı ayrı bir hükümdür.
+        assert out['model_valid'] is True
+
+        # Gaz zaten ablasyon sıcaklığının ALTINDA (T_recovery < T_s):
+        # aynı sözleşme.
+        cold = tp.ablative_thickness(9.9e6, burn_time_s=50.0,
+                                     h_gas_W_m2K=5.0e3, T_recovery_K=1500.0,
+                                     gas_cp_J_kgK=2000.0)
+        assert cold['recession_regime'] == 'no_net_heating'
+        assert cold['recession_rate_mm_s'] == 0.0
+        assert cold['total_recession_mm'] == 0.0
+        assert cold['required_thickness_mm'] is None
+        assert cold['thickness_status'] == 'NOT_MODELLED'
+        assert cold['validity_note'].startswith('NO NET HEATING')
+        assert cold['blowing_blockage'] == pytest.approx(1.0)
+
+    def test_flux_basis_present_on_both_paths(self, tp):
+        """flux_basis HER İKİ yolda da bulunmalı ve birbirinden farklı."""
+        legacy = tp.ablative_thickness(1.0e6, burn_time_s=10.0)
+        modern = tp.ablative_thickness(1.0e6, burn_time_s=10.0,
+                                       h_gas_W_m2K=2.0e3,
+                                       T_recovery_K=3000.0)
+        assert legacy['flux_basis'] == 'caller_supplied_no_energy_balance'
+        assert modern['flux_basis'] == 'surface_energy_balance'
+        for out in (legacy, modern):
+            for key in ('flux_basis', 'recession_regime', 'model_valid',
+                        'validity_note', 'thickness_status',
+                        'q_caller_W_m2'):
+                assert key in out, key
+
+    def test_half_given_energy_balance_raises(self, tp):
+        """Yarım verilen enerji dengesi SESSİZCE yok sayılamaz."""
+        with pytest.raises(ValueError, match='TOGETHER'):
+            tp.ablative_thickness(1.0e6, burn_time_s=10.0,
+                                  h_gas_W_m2K=2.0e3)
+        with pytest.raises(ValueError, match='TOGETHER'):
+            tp.ablative_thickness(1.0e6, burn_time_s=10.0,
+                                  T_recovery_K=3000.0)
+        with pytest.raises(ValueError):
+            tp.ablative_thickness(1.0e6, burn_time_s=10.0,
+                                  station_radius_m=0.0)
+
+    def test_surface_table_fields_are_sourced(self):
+        """Yüzey sıcaklığı/gaz payı alanları künyesiz eklenemez.
+
+        DEĞİŞİKLİK GEREKÇESİ (v2.6.27 blokaj denetimi): tablodaki
+        'blowing_blockage' (sabit psi) alanı KALDIRILDI — sabit katsayı
+        yanlış rejimin katsayısıydı, psi artık B' üzerinden çözülüyor.
+        Yerine gazlaşan kütle payı 'blowing_gas_fraction' geldi (karbon
+        0.3 / silika 0.5 / EPDM 0.7, BLOWING_GAS_FRACTION_BAND içinde).
+        Eski sıralama iddiası 'karbon > silika > EPDM' de kalktı: EPDM'nin
+        800 K değeri piroliz BAŞLANGICIydı, yüzey sıcaklığı değil; ölçülen
+        char yüzeyi (2300 K) silika eriyik platosunun (2050 K) ÜSTÜNDEdir.
+        """
+        for key, rec in ABLATIVE_MATERIALS.items():
+            assert rec['T_ablation_K'] > 0, key
+            lo, hi = rec['T_ablation_band_K']
+            assert lo <= rec['T_ablation_K'] <= hi, key
+            f_lo, f_hi = BLOWING_GAS_FRACTION_BAND
+            assert f_lo <= rec['blowing_gas_fraction'] <= f_hi, key
+            assert 'blowing_blockage' not in rec, (
+                f'{key}: sabit blokaj katsayısı tabloya geri gelmiş')
+            assert len(rec['surface_source']) > 80, key
+        # Fizik sırası (v2.6.27): karbon char yüzeyi (3000 K) > EPDM char
+        # yüzeyi (2300 K) > silika eriyik platosu (2050 K).
+        assert (ABLATIVE_MATERIALS['carbon_phenolic']['T_ablation_K']
+                > ABLATIVE_MATERIALS['epdm']['T_ablation_K']
+                > ABLATIVE_MATERIALS['silica_phenolic']['T_ablation_K'])
+        # Gaz payı sırası kaynak zinciriyle tutarlı: karbon-fenolikte gaz
+        # payı en küçük, dolgulu EPDM'de en büyük.
+        assert (ABLATIVE_MATERIALS['carbon_phenolic']['blowing_gas_fraction']
+                < ABLATIVE_MATERIALS['silica_phenolic']['blowing_gas_fraction']
+                < ABLATIVE_MATERIALS['epdm']['blowing_gas_fraction'])

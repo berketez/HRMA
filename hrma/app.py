@@ -100,6 +100,10 @@ from hrma.visualization.visualization import (
     create_wall_heat_flux_waterfall_plot,
     create_improved_motor_cross_section,
     create_improved_injector_design,
+    # SHOWERHEAD_PATTERNS: plaka yüz yerleşiminin TEK doğruluk kaynağı.
+    # Desen adları burada kopyalanmaz — çizen taraf hangi desenleri
+    # tanıyorsa istek sınırı da tam onları kabul eder.
+    SHOWERHEAD_PATTERNS,
     # _fig_json: fig.to_json() yerine TEK JSON kapısı — plotly 6'nın bdata
     # çıktısını vendor plotly.js 1.58.5'in çizebileceği düz listeye açar
     # (boş grafik bugunun kökü). PALETTE: grafik serileri için ortak palet.
@@ -1553,6 +1557,26 @@ def calculate():
 
         injector_results = injector.calculate()
 
+        # 2.6.27 — hole_pattern bağlaması ("kanal var kapı yok" kapanışı).
+        # UI'daki desen seçimi ne sunucuya geliyor ne çizime yansıyordu; çizen
+        # taraf (create_improved_injector_design) injector_data['hole_pattern']
+        # alanını SHOWERHEAD_PATTERNS ile zaten doğrulayıp çiziyor. Desen yalnız
+        # plaka/CAD yerleşimini etkiler — performans modeli YOK, advanced.html'in
+        # 'no_model' beyanı doğru kalır. Tek doğruluk kaynağı çizicinin kayıt
+        # defteri; burada kopya desen listesi tutulmaz.
+        _hole_pattern = data.get('hole_pattern')
+        if _hole_pattern is not None:
+            _hp = str(_hole_pattern).lower()
+            if _hp not in SHOWERHEAD_PATTERNS:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'invalid_hole_pattern',
+                    'message': ('hole_pattern must be one of: '
+                                + ', '.join(SHOWERHEAD_PATTERNS)
+                                + '; received ' + repr(_hole_pattern) + '.'),
+                }), 400
+            injector_results['hole_pattern'] = _hp
+
         # --- Tüketilmeyen enjektör girdileri AÇIKÇA raporlanır -------------
         # Bu projede sessizce yutulan girdi yoktur: modelin kabul etmediği ya
         # da SONUÇ olarak hesapladığı alanlar kullanıcıya gerekçesiyle döner.
@@ -2602,8 +2626,14 @@ def pressure_vessel_analysis():
 # düşer (TypeError 500'e düşmesin). Anahtar adları modül imzalarıyla birebir
 # (hrma/analysis/thermal_protection.py).
 _TP_MODE_KEYS = {
+    # v2.6.27 (B6-4): yeni-yol anahtarları eklendi — h_gas_W_m2K +
+    # T_recovery_K çifti yüzey enerji dengesini açar (çekirdek yarım çifti
+    # ValueError ile reddeder, sessiz yok sayma yok), gas_cp_J_kgK üfleme
+    # blokajının B' çözümünü besler, station_radius_m geometrik kapıyı açar.
     'ablative': ('q_net_W_m2', 'burn_time_s', 'time_s', 'material',
-                 'design_margin', 'density_kg_m3'),
+                 'design_margin', 'density_kg_m3',
+                 'h_gas_W_m2K', 'T_recovery_K', 'gas_cp_J_kgK',
+                 'station_radius_m'),
     'heat_sink': ('h_gas_W_m2K', 'T_recovery_K', 'burn_time_s',
                   'wall_thickness_m', 'wall_material', 'T_initial_K',
                   'n_nodes', 'cfl_safety', 'store_history'),

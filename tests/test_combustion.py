@@ -13,9 +13,22 @@ Kapsam:
     ve [0.8, 1.0] kırpması yüzünden fonksiyon fiilen HER ZAMAN 1.0 döndürüyordu.
   * F034 — `analyze_combustion` çıkış istasyonu: eski kod çıkış basıncını
     SABİT 1.0 bar alıyordu (motorun gerçek genişleme oranından bağımsız).
+  * v2.6.27 alev sıcaklığı — `_estimate_flame_temperature`: eski kod
+    ``self.gas.HP = h_reactants, p`` ile HP dengesi kuruyordu. Cantera'nın HP
+    setter'ı BİLEŞİMİ DONDURUR; 3000 K'de dengelenmiş (ayrışmış) yakıt-zengin
+    karışımın donmuş entalpisi hedefe hiçbir T'de inemediği için setter
+    CanteraError fırlatıyor, kod SESSİZCE ampirik zarfa düşüyordu (ölçüldü:
+    htpb/N2O O/F<=1 noktalarının tamamı). Yeni yol entalpi hedefli kök
+    aramasıdır ve düşüş artık BEYANLIDIR. Bu dosyadaki
+    `TestAlevSicakligiKaynagiBeyanli` sınıfı hem sayıyı hem beyanı kilitler.
 
 Referans denklemler ve kaynaklar ilgili fonksiyonların docstring'lerindedir.
 """
+
+import ast
+import inspect
+import pathlib
+import textwrap
 
 import numpy as np
 import pytest
@@ -328,3 +341,139 @@ class TestIsentropicEfficiency:
         etas = [self._eta(ca, expansion_ratio=float(eps)) for eps in (4, 10, 25, 60)]
         assert all(0.5 < e < 1.0 for e in etas), etas
         assert all(a > b for a, b in zip(etas, etas[1:])), etas
+
+
+# ---------------------------------------------------------------------------
+# v2.6.27 — Adyabatik alev sıcaklığı: hem SAYI hem KAYNAK BEYANI kilitlenir
+# ---------------------------------------------------------------------------
+CA_SOURCE_PATH = pathlib.Path(
+    inspect.getsourcefile(CombustionAnalyzer)).resolve()
+
+
+@pytest.fixture(scope='module')
+def denge():
+    """Gerçek Cantera'lı analizör (denge yolu sınanacak)."""
+    ca = CombustionAnalyzer()
+    if not ca.cantera_available:
+        pytest.skip('Cantera kurulu değil; denge tabanlı sıcaklık testleri '
+                    'atlanıyor.')
+    return ca
+
+
+def _oda(analyzer, of_ratio, pressure=30.0):
+    return analyzer.analyze_combustion(
+        {'htpb': 100.0}, 'n2o', float(of_ratio), float(pressure)
+    )['conditions']['chamber']
+
+
+class TestAlevSicakligiKaynagiBeyanli:
+    """Sıcaklığın nereden geldiği kullanıcıdan gizlenemez."""
+
+    def test_of1_denge_cozumunden_gelir(self, denge):
+        """O/F=1.0 htpb/N2O 30 bar — ESKİ kodun sessizce düştüğü nokta.
+
+        Eski HP yolu burada CanteraError alıp ampirik zarfa (1277.3 K)
+        düşüyordu ve bunu yalnız sunucu günlüğüne yazıyordu. Entalpi hedefli
+        kök araması aynı noktada gerçek denge sıcaklığını buluyor: ölçüldü,
+        1137.45 K (gri30, p=30 bar). Tolerans ±25 K mekanizma/sürüm oynaması
+        içindir; ampirik değere (1277.3 K) 140 K uzaktır, yani bu test
+        düşüşü ayırt eder.
+        """
+        oda = _oda(denge, 1.0)
+        assert oda['temperature_source'] == 'equilibrium'
+        assert oda['T'] == pytest.approx(1137.5, abs=25.0), oda['T']
+        assert 'warning' not in oda, 'denge yolunda uyarı taşınmamalı'
+
+    def test_of03_ampirik_zarf_beyanli(self, denge):
+        """O/F=0.3'te denge kökü YOK (gri30'da katı karbon yok) — düşüş beyanlı.
+
+        Sayının kendisi ampirik olabilir; kabul edilemez olan, ampirik değerin
+        beyansız (denge çözümüymüş gibi) ekrana çıkmasıdır.
+        """
+        oda = _oda(denge, 0.3)
+        assert oda['temperature_source'] == 'empirical_envelope'
+        uyari = oda['warning']
+        assert uyari['code'] == 'warn.combustion.flame_temperature_empirical'
+        assert uyari['severity'] == 'warning'
+        assert uyari['params']['reason'] in {
+            'cantera_unavailable', 'missing_formation_enthalpy',
+            'no_enthalpy_root', 'solver_error', 'nonphysical_temperature'}
+        assert uyari['params']['of_ratio'] == pytest.approx(0.3)
+
+    def test_hp_yolunun_yakinsadigi_nokta_kaymadi(self, denge):
+        """Eşdeğerlik çapası: HP'nin BUGÜN çözdüğü noktada değer kımıldamaz.
+
+        HEAD'in HP yolu O/F=4.0 / 30 bar'da yakınsıyor ve 2821.1299938218 K
+        veriyor (ölçüldü, aynı gri30 sürümüyle). Kök araması aynı denklemi
+        çözdüğü için aynı kökü bulmalıdır: ölçülen fark 2.5e-09 K. Eşik
+        0.5 K — sayısal gürültüye yer bırakır, yöntem değişikliğini yakalar.
+        """
+        oda = _oda(denge, 4.0)
+        assert oda['temperature_source'] == 'equilibrium'
+        assert oda['T'] == pytest.approx(2821.1299938218, abs=0.5), oda['T']
+
+    def test_cagiranin_dayattigi_sicaklik_denge_sayilmaz(self, denge):
+        """chamber_temperature verildiğinde hiçbir alev çözümü yapılmaz."""
+        r = denge.analyze_combustion({'htpb': 100.0}, 'n2o', 6.0, 30.0, 2800.0)
+        assert r['conditions']['chamber']['temperature_source'] == \
+            'user_specified'
+
+    def test_cantera_yokken_de_beyan_var(self, empirical):
+        """Ampirik kurulumda da alan DOLU olmalı (sessiz boşluk yok)."""
+        oda = _oda(empirical, 6.0)
+        assert oda['temperature_source'] == 'empirical_envelope'
+        assert oda['warning']['params']['reason'] == 'cantera_unavailable'
+
+
+class TestMekanizmaBeyani:
+    """Denge arka ucunun kimliği çıktının parçasıdır."""
+
+    def test_mekanizma_alanlari_sonucta(self, denge):
+        r = denge.analyze_combustion({'htpb': 100.0}, 'n2o', 6.0, 30.0)
+        assert r['mechanism'] == denge._mechanism_id
+        assert r['mechanism'] in {'gri30', 'h2o2'}
+        tavan = r['mechanism_T_ceiling_K']
+        # Termo tavanı türlerin EN DÜŞÜK max_temp'idir; ölçüldü: gri30 ->
+        # 3000 K (CH3O), h2o2 -> 3500 K. Bant, mekanizma değişse de anlamlı
+        # kalsın diye geniş tutuldu.
+        assert 2000.0 <= tavan <= 6000.0, tavan
+        assert tavan == pytest.approx(
+            min(sp.thermo.max_temp for sp in denge.gas.species()))
+
+    def test_cantera_yokken_mekanizma_uydurulmaz(self, empirical):
+        r = empirical.analyze_combustion({'htpb': 100.0}, 'n2o', 6.0, 30.0)
+        assert r['mechanism'] == 'empirical'
+        assert r['mechanism_T_ceiling_K'] is None
+
+
+class TestOluDallarGeriGelmemis:
+    """Kaldırılan ölü kodun geri sızmadığını kilitler."""
+
+    def test_nasa_gas_dali_kaynakta_gecmiyor(self):
+        """'nasa_gas.yaml' bir TÜR veritabanıdır ('phases:' yoktur).
+
+        ct.Solution ile HİÇBİR koşulda yüklenemez; zincirin ilk basamağı
+        olarak durduğu sürece "önce NASA-CEA veritabanı denenir" yalanını
+        üretir ve gerçekte her zaman gri30 kullanılır.
+        """
+        kaynak = CA_SOURCE_PATH.read_text(encoding='utf-8')
+        assert 'nasa_gas' not in kaynak, (
+            'ölü NASA tür-veritabanı dalı geri gelmiş: %s' % CA_SOURCE_PATH)
+
+    def test_hp_setter_geri_gelmemis(self):
+        """Bekçinin Cantera'sız CI'da da çalışan yedeği.
+
+        Davranış testleri (yukarıdaki O/F=1.0) Cantera yoksa atlanır; bu
+        denetim atlanmaz. AST üstünde çalışır, yani docstring'deki
+        ``self.gas.HP = ...`` anlatımına ALDANMAZ — yalnız gerçek atama
+        düğümünü arar.
+        """
+        agac = ast.parse(textwrap.dedent(inspect.getsource(
+            CombustionAnalyzer._estimate_flame_temperature)))
+        for dugum in ast.walk(agac):
+            if not isinstance(dugum, ast.Assign):
+                continue
+            for hedef in dugum.targets:
+                assert not (isinstance(hedef, ast.Attribute)
+                            and hedef.attr in {'HP', 'UV'}), (
+                    'donmuş-bileşim HP/UV setter yolu geri gelmiş')

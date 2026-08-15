@@ -51,3 +51,7 @@ tests/fixtures/step/
 
 # Ajan/doğrulama geçici çıktıları (ekran görüntüleri, harness)
 scratchpad/
+
+# Lean 4 biçimsel doğrulama platformu — derleme çıktıları (7+ GB Mathlib önbelleği)
+formal/.lake/
+formal/build/

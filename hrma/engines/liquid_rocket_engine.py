@@ -9091,7 +9091,7 @@ class LiquidRocketEngine:
         basis = (
             'passive thermal protection from hrma/analysis/'
             'thermal_protection.py: Level-1 Q* ablation sizing (NASA '
-            'SP-8091-class band; Sutton & Biblarz 9th ed. Ch. 8.5), a 1-D '
+            'SP-8093-class band; Sutton & Biblarz 9th ed. Ch. 8.5), a 1-D '
             'explicit-FD bare-wall heat-sink history (Incropera & DeWitt 6th '
             'ed. Sec. 5.10) and, for a radiatively cooled wall, the '
             'radiation equilibrium balance (Sutton & Biblarz Ch. 8.6). All '
@@ -9160,13 +9160,79 @@ class LiquidRocketEngine:
             'burn_time_source': burn_time_source,
         }
 
-        def _liner(station, function, q_w_m2, station_note):
-            """Tek istasyon astar boyutu — hibrit/katı ile AYNI alan adları."""
+        # --- İSTASYON GİRDİLERİ: gaz tarafı katsayısı + yarıçap ------------
+        # (v2.6.27 ablasyon teşhisi) Astar artık ÇAĞIRANIN AKISIYLA değil,
+        # yüzey ENERJİ DENGESİYLE boyutlandırılır ve bunun için iki girdi
+        # gerekir: gaz tarafı ısı taşınım katsayısı ve sürücü (recovery)
+        # sıcaklık. İKİSİ DE motorun KENDİ Bartz zincirinden gelir; burada
+        # ikinci bir Bartz hesabı YAPILMAZ:
+        #
+        #   * KAMARA h_g: q_kamara/(T_c − T_cidar). Kamara akısı zaten
+        #     ``h_g_chamber·(T_c − T_wall_hot)`` olarak kuruluyor
+        #     (calculate_cooling_requirements, "q_dot_chamber" satırı), yani
+        #     bu bölme Bartz'ın kamara katsayısını CEBİRSEL olarak geri verir
+        #     (ölçüldü: geri çözüm ile zincirin kendi değeri arasında fark
+        #     yok). AYNI katsayıyı aşağıdaki çıplak cidar ısı-yutucu geçmişi
+        #     de kullanır — tek istasyon için iki farklı h_g olamaz.
+        #   * BOĞAZ h_g: ``bartz_coefficient`` alanı Bartz korelasyonunun
+        #     boğaz katsayısının ta kendisidir (geri çözüme gerek yok;
+        #     ölçüldü: peak_heat_flux/(T_c − T_cidar) ile farkı 0,0).
+        #   * SÜRÜCÜ SICAKLIK: her iki istasyonda da T_c. Kamarada M~0
+        #     olduğu için T_aw ≈ T_c; boğaz/yakınsak istasyonda da zincirin
+        #     KENDİSİ T_c kullanıyor (peak_heat_flux = h_g_throat·(T_c −
+        #     T_wall_hot) ve lüle integralinde boğaz öncesi T_local = T_c
+        #     olduğundan T_aw_local = T_c). Beslenen akıyla enerji dengesi
+        #     böylece AYNI sürücü sıcaklığı üzerinde durur.
+        #   * YARIÇAP: geometrik kapı için — astar, astarladığı geçitten
+        #     kalın olamaz. Kamara için hazne iç yarıçapı (soğutma sonucunun
+        #     kendi chamber_diameter'ı), boğaz için Bartz'ın kullandığı
+        #     boğaz çapının yarısı. İkisi de bu koşunun çözülmüş ölçüleri.
+        #
+        # Girdi ELDE EDİLEMEZSE eski yola düşülür (parametreler hiç
+        # geçilmez): çekirdek h_gas/T_recovery çiftini YARIM kabul etmez,
+        # yalnız biri verilirse ValueError yükseltir.
+        def _pozitif(deger, olcek=1.0):
+            """Sonlu ve pozitifse ölçeklenmiş float, değilse None."""
+            try:
+                v = float(deger)
+            except (TypeError, ValueError):
+                return None
+            return v * olcek if np.isfinite(v) and v > 0 else None
+
+        h_eff = _pozitif(q_chamber / (t_c - t_hot)) if t_c - t_hot > 0 else None
+        h_throat = _pozitif(cooling.get('bartz_coefficient'))
+        r_chamber = _pozitif(cooling.get('chamber_diameter'), 1.0 / 2000.0)
+        r_throat = _pozitif(getattr(self, 'd_t', None), 0.5)
+        # v2.6.27 blokaj denetimi: kenar gazı c_p'si, Bartz katsayılarını
+        # üreten zincirin KENDİ değeridir (calculate_cooling_requirements
+        # "cp_g = self.cp_chamber" satırı) — B'yi bölen c_p ile h_g'yi
+        # üreten c_p aynı olmak zorunda. Yoksa çekirdek psi = 1 (blokajsız,
+        # konservatif) kullanır ve blockage_basis'te beyan eder.
+        cp_gaz = _pozitif(getattr(self, 'cp_chamber', None))
+
+        def _liner(station, function, q_w_m2, station_note,
+                   h_gas, h_gas_source, radius_m, radius_source):
+            """Tek istasyon astar boyutu — hibrit/katı ile AYNI alan adları.
+
+            ``h_gas`` verilirse çekirdek yüzey enerji dengesini ÇÖZER ve
+            geçerlilik kapısı bağlayıcıdır; verilmezse eski (çağıranın
+            akısı) yolu birebir korunur.
+            """
+            ek = {}
+            if h_gas is not None:
+                # Çift HALİNDE geçilir: yarım geçiş çekirdekte ValueError.
+                ek['h_gas_W_m2K'] = h_gas
+                ek['T_recovery_K'] = t_c
+                if cp_gaz is not None:
+                    ek['gas_cp_J_kgK'] = cp_gaz
+            if radius_m is not None:
+                ek['station_radius_m'] = radius_m
             try:
                 sizing = analyzer.ablative_thickness(
                     q_net_W_m2=q_w_m2,
                     burn_time_s=float(burn_time),
-                    material=TPS_LINER_MATERIAL_DEFAULT)
+                    material=TPS_LINER_MATERIAL_DEFAULT,
+                    **ek)
             except Exception as exc:
                 return {
                     'material': TPS_LINER_MATERIAL_DEFAULT,
@@ -9175,28 +9241,105 @@ class LiquidRocketEngine:
                     'function': function,
                     'basis': f'Ablative sizing failed at the {station}: {exc}',
                 }
+            enerji_dengesi = (
+                sizing['flux_basis'] == 'surface_energy_balance')
+            kalinlik_mm = sizing['required_thickness_mm']
+            # Çekirdeğin hükmü AYNEN taşınır: kapı kalınlığı kesmişse burada
+            # 'sized'a çevrilmez ve sayı uydurulmaz (katı motorun kapak
+            # yalıtımıyla aynı NOT_MODELLED sözleşmesi).
+            if kalinlik_mm is None:
+                # Kalınlık YALNIZ enerji dengesi yolunda kesilebilir, yani
+                # burada h_gas her zaman doludur; yarıçap ise olmayabilir
+                # (kapı o zaman hız tavanından düşmüştür).
+                yaricap_ifadesi = (
+                    'no station radius was available, so only the recession '
+                    'rate ceiling was checked' if radius_m is None else
+                    f'station radius {radius_m * 1e3:.1f} mm '
+                    f'({radius_source})')
+                basis = (
+                    f'Level-1 Q* ablation sizing was RUN at the {station} '
+                    f'but published NO thickness. '
+                    f"{sizing['validity_note']} "
+                    f'Inputs are this run\'s solver values: gas-side '
+                    f'coefficient {h_gas:.0f} W/m2K ({h_gas_source}), '
+                    f'recovery temperature {t_c:.0f} K (the same driving '
+                    f'temperature the Bartz flux of this station uses), '
+                    f'burn time {float(burn_time):.2f} s, '
+                    f'{yaricap_ifadesi}. ' + station_note)
+            else:
+                basis = (
+                    f'Level-1 Q* ablation sizing at the {station}: required '
+                    f'thickness = total recession x design margin '
+                    f"{sizing['design_margin']:g}. "
+                    + ((
+                        f'The net surface flux is SOLVED here from an energy '
+                        f'balance at the {sizing["T_surface_K"]:.0f} K steady '
+                        f'ablation temperature (blowing blockage '
+                        f'{sizing["blowing_blockage"]:g} x convection minus '
+                        f're-radiation at emissivity '
+                        f'{sizing["emissivity"]:g}), driven by this run\'s '
+                        f'gas-side coefficient {h_gas:.0f} W/m2K '
+                        f'({h_gas_source}) and recovery temperature '
+                        f'{t_c:.0f} K. The cold-wall Bartz design flux '
+                        f'({q_w_m2 / 1e3:.0f} kW/m2) is reported for '
+                        f'COMPARISON only, it is not what sized this liner. ')
+                       if enerji_dengesi else (
+                        f'Heat flux ({q_w_m2 / 1e3:.0f} kW/m2) is this run\'s '
+                        f'solver value and is used AS GIVEN: no surface '
+                        f'energy balance was solved for this station. '))
+                    + f'Burn time ({float(burn_time):.2f} s) is this run\'s '
+                    f"solved value. Liner material "
+                    f"'{TPS_LINER_MATERIAL_DEFAULT}' is a declared design "
+                    f'choice, not a solved selection. ' + station_note)
             return {
                 'material': sizing['material_name'],
-                'thickness': float(sizing['required_thickness_mm']),   # mm
-                'thickness_status': 'sized',
+                'thickness': (None if kalinlik_mm is None
+                              else float(kalinlik_mm)),           # mm
+                'thickness_status': sizing['thickness_status'],
                 'function': function,
                 'total_recession_mm': float(sizing['total_recession_mm']),
                 'recession_rate_mm_s': float(sizing['recession_rate_mm_s']),
                 'design_margin': float(sizing['design_margin']),
                 'q_star_mj_kg': float(sizing['q_star_MJ_kg']),
+                # Çağıranın (Bartz, soğuk cidar) akısı — YENİ yolda artık
+                # boyutlandıran değer DEĞİL, karşılaştırma değeridir.
                 'heat_flux_kw_m2': q_w_m2 / 1e3,
                 'burn_time_s': float(burn_time),
-                'basis': (
-                    f'Level-1 Q* ablation sizing at the {station}: required '
-                    f'thickness = total recession x design margin '
-                    f"{sizing['design_margin']:g}. Heat flux "
-                    f'({q_w_m2 / 1e3:.0f} kW/m2) and burn time '
-                    f'({float(burn_time):.2f} s) are this run\'s solver '
-                    f"values. Liner material "
-                    f"'{TPS_LINER_MATERIAL_DEFAULT}' is a declared design "
-                    f'choice, not a solved selection. ' + station_note),
+                # --- v2.6.27: akı tabanı ve enerji dengesi dökümü ---
+                'flux_basis': sizing['flux_basis'],
+                'recession_regime': sizing['recession_regime'],
+                'q_net_kw_m2': float(sizing['q_mean_W_m2']) / 1e3,
+                'q_conv_blocked_kw_m2': (
+                    None if sizing['q_conv_blocked_W_m2'] is None
+                    else float(sizing['q_conv_blocked_W_m2']) / 1e3),
+                'q_reradiated_kw_m2': (
+                    None if sizing['q_reradiated_W_m2'] is None
+                    else float(sizing['q_reradiated_W_m2']) / 1e3),
+                'h_gas_W_m2K': sizing['h_gas_W_m2K'],
+                'h_gas_source': h_gas_source if h_gas is not None else None,
+                'T_recovery_K': sizing['T_recovery_K'],
+                'T_surface_K': sizing['T_surface_K'],
+                'emissivity': sizing['emissivity'],
+                'emissivity_source': sizing['emissivity_source'],
+                # v2.6.27 blokaj denetimi: psi artık sabit değil, B'den
+                # çözülür; c_p bu bağlamada henüz geçilmediği için çekirdek
+                # psi = 1 (blokajsız, konservatif) kullanır ve bunu
+                # blockage_basis'te beyan eder.
+                'blowing_blockage': sizing['blowing_blockage'],
+                'b_prime': sizing['b_prime'],
+                'blowing_lambda': sizing['blowing_lambda'],
+                'blowing_gas_fraction': sizing['blowing_gas_fraction'],
+                'blockage_basis': sizing['blockage_basis'],
+                # --- v2.6.27: geçerlilik kapısı (çekirdeğin hükmü) ---
+                'station_radius_m': sizing['station_radius_m'],
+                'station_radius_source': (None if radius_m is None
+                                          else radius_source),
+                'model_valid': bool(sizing['model_valid']),
+                'validity_note': sizing['validity_note'],
+                'basis': basis,
                 'model_note': sizing['model_note'],
                 'source': sizing['source'],
+                'surface_source': sizing['surface_source'],
             }
 
         if self.cooling_type == 'ablative':
@@ -9205,7 +9348,13 @@ class LiquidRocketEngine:
                 'Protect the chamber wall, which sees combustion gas '
                 'directly for the whole burn',
                 q_chamber,
-                'Flux is the Bartz CHAMBER-station design flux of this run.')
+                'Flux is the Bartz CHAMBER-station design flux of this run.',
+                h_eff,
+                'Bartz chamber coefficient of this run, recovered from the '
+                'chamber design flux: h_g = q_chamber/(T_c - T_wall_hot)',
+                r_chamber,
+                'chamber inner radius solved by this run (L* and contraction '
+                'ratio chain)')
             out['nozzle_entry_liner'] = _liner(
                 'throat / nozzle entry',
                 'Protect the convergent entry and the throat, the highest '
@@ -9213,7 +9362,13 @@ class LiquidRocketEngine:
                 q_throat,
                 'Flux is the Bartz THROAT design flux, so the same thickness '
                 'is a conservative UPPER bound for the convergent section '
-                '(the same declaration the solid and hybrid engines make).')
+                '(the same declaration the solid and hybrid engines make).',
+                h_throat,
+                "Bartz throat coefficient of this run "
+                "(cooling result 'bartz_coefficient')",
+                r_throat,
+                'throat radius solved by this run (the same D_t the Bartz '
+                'correlation is evaluated at)')
 
         # --- Çıplak (korumasız) cidar ısı-yutucu geçmişi ------------------
         # Sürücü katsayı motorun KENDİ kamara tasarım akısından geri çözülür:

@@ -588,6 +588,7 @@
             // liquid_rocket_engine, solid_rocket_engine, combustion_analysis.
             // Bekçi: tests/test_engine_warning_i18n.py (kod paritesi + yer tutucu).
             'warn.combustion.equilibrium_fallback': 'Equilibrium solution was not available at the {station} station; properties come from an atom-balance + water-gas-shift approximation (dissociation not modelled, molecular weight about 2% high).',
+            'warn.combustion.flame_temperature_empirical': 'Equilibrium flame temperature could not be solved at O/F {of_ratio} ({reason}); the chamber temperature comes from an empirical envelope model and c*/Isp inherit it.',
             'warn.cycle.coolprop_state_failed': 'CoolProp could not evaluate the coolant state ({error}); the expander power balance is not modelled.',
             'warn.cycle.expander_fuel_unsupported': 'Expander cycle with {fuel} is not supported: no real-gas property source is available for it (CoolProp), and RP-1 expander engines have no flight precedent.',
             'warn.cycle.expander_inlet_pressure_iterated': 'Turbine inlet pressure was iterated together with the pump discharge: {iterations} outer passes, converged inlet {p_in_bar} bar.',
@@ -1989,6 +1990,7 @@
             // --- Motor uyarı/varsayım kodları (v2.6.2, hrma/engines modülleri) ---
             // EN blokla birebir aynı anahtar kümesi; yer tutucular da aynı.
             'warn.combustion.equilibrium_fallback': '{station} istasyonunda denge çözümü elde edilemedi; özellikler atom dengesi + su-gaz kayması yaklaşımından geliyor (ayrışma modellenmiyor, molekül ağırlığı yaklaşık %2 yüksek).',
+            'warn.combustion.flame_temperature_empirical': 'Denge alev sıcaklığı O/F {of_ratio} için çözülemedi ({reason}); kamara sıcaklığı ampirik zarf modelinden geliyor, c*/Isp bunu miras alır.',
             'warn.cycle.coolprop_state_failed': 'CoolProp soğutucu durumunu hesaplayamadı ({error}); expander güç dengesi modellenmedi.',
             'warn.cycle.expander_fuel_unsupported': '{fuel} ile expander çevrimi desteklenmiyor: bu yakıt için gerçek gaz özellik kaynağı (CoolProp) yok ve RP-1 expander motorlarının uçuş örneği bulunmuyor.',
             'warn.cycle.expander_inlet_pressure_iterated': 'Türbin giriş basıncı pompa çıkışıyla birlikte iterasyonla çözüldü: {iterations} dış geçiş, yakınsanan giriş {p_in_bar} bar.',
