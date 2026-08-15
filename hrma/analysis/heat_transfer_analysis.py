@@ -33,6 +33,7 @@ from typing import Dict, List, Tuple, Optional
 
 from scipy.optimize import brentq
 
+from hrma.constants import STEFAN_BOLTZMANN
 from hrma.data.materials_db import build_materials_view
 # Malzeme kaydının YANITA konan biçimi (beyanlarıyla) — yapısal modülle TEK
 # ortak kaynak. İki modül aynı kaydı yayımladığı için metin tek yerde durur.
@@ -118,7 +119,8 @@ class HeatTransferAnalyzer:
     """Heat transfer analysis for hybrid rocket motor chambers"""
 
     def __init__(self):
-        self.stefan_boltzmann = 5.670374419e-8  # W/(m^2*K^4), CODATA 2018
+        # v2.6.27: merkezî tanımdan (hrma/constants.py) — yerel kopya kalktı.
+        self.stefan_boltzmann = STEFAN_BOLTZMANN  # W/(m^2*K^4), CODATA 2018
         self.g0 = 9.80665  # m/s^2 (standard gravity; NOT used in SI Bartz)
 
         # Malzeme veritabanı — MERKEZİ kaynaktan (Dalga 0, 2026-07-14).

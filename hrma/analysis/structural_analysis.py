@@ -7,6 +7,7 @@ import numpy as np
 import json
 from typing import Dict, List, Tuple, Optional
 
+from hrma.constants import STEFAN_BOLTZMANN
 from hrma.data.materials_db import build_materials_view
 # Cıvata mukavemet sınıfı tablosu (ISO 898-1:2013 Table 3) — depodaki TEK
 # kaynak. Aynı tablo /api/bolted-joint ucunu da besler; motor sonucundaki
@@ -315,7 +316,8 @@ class StructuralAnalyzer:
         k_wall = float(mat_props.get('thermal_conductivity', 45.0) or 45.0)
         emissivity = float(mat_props.get('emissivity', 0.3) or 0.3)
         h_conv_out = 10.0        # W/m^2K, dogal konveksiyon (durgun hava)
-        SIGMA_SB = 5.670374419e-8
+        # v2.6.27: merkezî tanımdan (hrma/constants.py) — yerel kopya kalktı.
+        SIGMA_SB = STEFAN_BOLTZMANN
 
         T_amb = float(T_ambient)
         T_outer = T_inner        # baslangic: izotermal

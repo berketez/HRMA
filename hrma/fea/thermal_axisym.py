@@ -87,6 +87,8 @@ import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import splu
 
+from hrma.constants import STEFAN_BOLTZMANN
+
 from hrma.fea.mesh_axisym import AxisymMesh
 
 # ---------------------------------------------------------------------------
@@ -97,10 +99,10 @@ DEFAULT_N_STEPS0 = 16          # otomatik sürücünün başlangıç adım sayı
 DEFAULT_DT_TOL = 0.01          # tepe sıcaklık geçmişi bağıl değişim toleransı
 DEFAULT_MAX_DT_HALVINGS = 8    # en fazla adım yarılama turu (16 → 4096 adım)
 
-# Stefan-Boltzmann sabiti (CODATA 2018). NOT: hrma/constants.py'de merkezî
-# tanımı YOK; hrma/analysis altındaki modüller de aynı değeri yerel tanımlar.
-# Merkezîleştirme ayrı bir kalemdir (bu dosyanın yetki alanı dışında).
-STEFAN_BOLTZMANN_W_M2K4 = 5.670374419e-8
+# Stefan-Boltzmann sabiti — v2.6.27'de merkezîleştirildi: değer artık
+# hrma/constants.py'den gelir (eski not "merkezî tanımı YOK" diyordu, kapandı).
+# Birimli yerel ad korunur (fea API'si bu adı dışa veriyor).
+STEFAN_BOLTZMANN_W_M2K4 = STEFAN_BOLTZMANN
 
 _GAUSS_COORD = 1.0 / np.sqrt(3.0)
 # Köşe işaret sırası mesh_axisym'in CCW köşe dizilişiyle aynıdır:

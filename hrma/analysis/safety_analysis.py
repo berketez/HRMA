@@ -8,6 +8,7 @@ import json
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
+from hrma.constants import STEFAN_BOLTZMANN as _STEFAN_BOLTZMANN
 from hrma.data.materials_db import get_material
 
 
@@ -28,7 +29,8 @@ def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
 SAFETY_MODEL = {
     # Ortam / radyasyon
     'ambient_temperature_k': 293.15,
-    'stefan_boltzmann': 5.670374419e-8,      # W/m²K⁴ (CODATA 2018)
+    # v2.6.27: merkezî tanımdan (hrma/constants.py) — yerel kopya kaldırıldı.
+    'stefan_boltzmann': _STEFAN_BOLTZMANN,   # W/m²K⁴ (CODATA 2018)
     'default_surface_emissivity': 0.80,      # oksitlenmiş metal dış yüzey
     'radiant_pain_threshold_w_m2': 2500.0,   # ISO 13732-1 acı eşiği (~2.5 kW/m²)
     # 2. derece yanık doz eşiği: ~1000 (kW/m²)^(4/3)·s  (Eisenberg probit /

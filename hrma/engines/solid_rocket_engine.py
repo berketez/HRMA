@@ -1,5 +1,7 @@
 import numpy as np
 from functools import lru_cache
+
+from hrma.constants import STEFAN_BOLTZMANN
 from scipy.integrate import odeint
 from scipy.optimize import fsolve, newton
 from scipy.interpolate import interp1d
@@ -305,7 +307,8 @@ SOLID_THERMAL = {
     'ambient_temperature_k': 298.0,
     'external_convection_w_m2k': 10.0,   # durgun hava, doğal konveksiyon
     'external_emissivity': 0.30,         # boyasız/oksitli çelik dış yüzey
-    'stefan_boltzmann': 5.670374419e-8,
+    # v2.6.27: merkezî tanımdan (hrma/constants.py) — yerel kopya kalktı.
+    'stefan_boltzmann': STEFAN_BOLTZMANN,
     # Bartz duvar sıcaklığı referansı (ısı akısı zayıf duyarlı — bkz.
     # _calculate_heat_flux docstring).
     'bartz_reference_wall_temp_k': 700.0,

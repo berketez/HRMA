@@ -58,15 +58,10 @@ import numpy as np
 
 from hrma.data.materials_db import get_material
 
-# CODATA 2018 — heat_transfer_analysis.py ile aynı değer (parametre
-# tutarlılığı; oradaki self.stefan_boltzmann ile bire bir eşit).
-# MERKEZİLEŞTİRME BORCU: depoda tek bir fizik-sabitleri modülü YOK (ölçüldü:
-# aynı sayı structural_analysis.py:318, safety_analysis.py:31,
-# heat_transfer_analysis.py:121, fea/thermal_axisym.py:103 ve
-# engines/solid_rocket_engine.py:287 içinde ayrı ayrı tanımlı). Bu modül
-# kendi tanımını KORUR (import zinciri açmamak için) ama borç kayıtlıdır:
-# sabitler merkezîleştirilirse buradaki tanım oradan çekilmelidir.
-STEFAN_BOLTZMANN = 5.670374419e-8  # W/(m^2*K^4)
+# v2.6.27: MERKEZÎLEŞTİRME BORCU KAPANDI — sabit artık hrma/constants.py'den
+# okunur (6 ayrı yerel tanım vardı; hepsi merkeze bağlandı, değer aynı:
+# CODATA 2018). Ad geriye uyum için modül içinde korunur.
+from hrma.constants import STEFAN_BOLTZMANN
 
 # ---------------------------------------------------------------------------
 # Yüzey enerji dengesi sabitleri (v2.6.27 ablasyon düzeltmesi)

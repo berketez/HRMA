@@ -36,6 +36,16 @@ R_universal = R_UNIVERSAL  # geriye uyum
 R_STAR_ICAO = 8.31432  # J/(mol*K) -- ICAO 1993 tanımı
 
 # -----------------------------------------------------------------------------
+# Stefan-Boltzmann sabiti (CODATA 2018, kesin türetilmiş değer)
+# -----------------------------------------------------------------------------
+# v2.6.27 merkezîleştirmesi: bu sabit 6 ayrı dosyada ayrı ayrı tanımlıydı
+# (thermal_protection, heat_transfer_analysis, solid_rocket_engine
+# SOLID_THERMAL, safety_analysis, structural_analysis, fea/thermal_axisym).
+# Değerler aynıydı ama tek-tanım-noktası kuralı çiğneniyordu; hepsi artık
+# buradan okur. Işınım terimleri: q = eps * sigma * T^4.
+STEFAN_BOLTZMANN = 5.670374419e-8  # W/(m^2*K^4)
+
+# -----------------------------------------------------------------------------
 # ICAO Standart Atmosfer Sabitleri
 # -----------------------------------------------------------------------------
 M_AIR = 0.0289644  # kg/mol -- kuru havanın ortalama molar kütlesi (ICAO)
