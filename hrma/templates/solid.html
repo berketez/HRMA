@@ -5129,12 +5129,13 @@ Please provide:
             var portInitM = firstNum(mm2m(r.core_diameter),
                                      mm2m(grainGeometry.core_diameter),
                                      grainOuterDiaM * 0.3);
-            // Son port çapı (m): sonuçta yok → grain dış çapının %90'ı
-            // (yanma sonunda ince bir grain kabuğu görünsün diye 0.95 değil 0.9)
-            var portFinalM = grainOuterDiaM * 0.9;
-            if (!(portFinalM > portInitM)) {
-                portFinalM = Math.min(grainOuterDiaM * 0.95, portInitM * 1.6);
-            }
+            // SÖKÜLDÜ (v2.6.27, B5) — "son port çapı = 0,9·D_dış": bu sayı
+            // hiçbir hesaptan gelmiyordu ("yanma sonunda ince bir kabuk
+            // görünsün diye" yazılmıştı) ve 3B sahnedeki yanma animasyonunun
+            // BİTİŞ NOKTASIYDI: port, uydurma bir karekök yasasıyla uydurma
+            // bir yarıçapa doğru büyüyordu. Artık gerileme çözücünün gerçek
+            // itki eğrisinden (aşağıdaki thrust_curve + yoğunluk) türetilir;
+            // seri yoksa port DONDURULUR ve sahne bunu çiple beyan eder.
 
             var data = {
                 viz_motor_type: 'solid',            // enjektör + oks. girişini gizler
@@ -5144,7 +5145,6 @@ Please provide:
                 exit_diameter: firstNum(mm2m(r.exit_diameter), 0.08),      // m
                 grain_length: grainLenM,            // m
                 port_diameter_initial: portInitM,   // m
-                port_diameter_final: portFinalM,    // m
                 burn_time: firstNum(r.burn_time, 10),                      // s
                 thrust: firstNum(r.average_thrust, r.max_thrust, 1000),    // N
                 isp: firstNum(r.specific_impulse, r.isp_sea_level, 200),   // s
@@ -5154,7 +5154,17 @@ Please provide:
                 // uyumlu anahtar yoksa güvenle yok sayılır)
                 nozzle_angles: r.nozzle_angles || null,
                 design_summary: r.design_summary || null,
-                grain_design: r.grain_design || null
+                grain_design: r.grain_design || null,
+                // --- Yanma animasyonu veri yolu (v2.6.27, B5) ------------
+                // Katı çözücü web ilerlemesini YAYIMLAMIYOR (thrust_curve
+                // time/thrust/pressure/burn_area/mass_flow taşır; motorun
+                // kendi eğrisindeki port_area dizisi dışarı verilmiyor).
+                // MotorViz3D bu yüzden webi çözücünün kendi kütle üretim
+                // özdeşliğinden geri alır: r_b = mdot/(rho_p·A_b), w = ∫r_b dt.
+                // Üçü de çözücü çıktısıdır; hiçbiri burada üretilmez.
+                // Seri ya da yoğunluk eksikse viz portu dondurur.
+                thrust_curve: r.thrust_curve || null,
+                propellant_density: firstNum(r.density)    // kg/m³
                 // NOT: heat_transfer_analysis bilinçli olarak geçilmiyor —
                 // katı motor thermal_analysis'i viz'in beklediği gas_side/
                 // wall şemasına sahip değil ve ısı akısı basitleştirilmiş

@@ -172,6 +172,17 @@
         const dt = readLen(results, 'throat_diameter');
         if (isNum(dt)) body.throat_diameter = dt;
         if (isNum(m.expansion_ratio)) body.expansion_ratio = m.expansion_ratio;
+        // Parti 25 (bell/parabolik dirilişi): motorun YAYIMLADIĞI lüle
+        // konturu varsa AYNEN geçirilir. Ölçüldü: kontursuz gövdede bell
+        // motorda profil ekseni FEA köprüsünün konturundan 38-97% sapıyor
+        // ve termal uç dürüstçe reddediyordu; kontur geçince sapma 0,000
+        // (tests/test_wall_profile_ekseni.py). Uç, konturu yalnız
+        // {points:[...]} şekliyle kabul eder; panel şekli değiştirmez.
+        const nc = m.nozzle_contour;
+        if (nc && typeof nc === 'object' && Array.isArray(nc.points)
+                && nc.points.length >= 2) {
+            body.nozzle_contour = nc;
+        }
         return { body: body, missing: missing };
     }
     // <<< THERMAL_FEA_PAYLOAD_END

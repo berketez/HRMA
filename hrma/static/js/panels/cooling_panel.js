@@ -155,7 +155,16 @@
         const traces = [];
         if (sameLen(cooling.q_MW_m2)) {
             traces.push({
-                x: x, y: cooling.q_MW_m2, name: T('panel.thermal.heatFluxSeries', 'Heat flux q'),
+                // ADLANDIRMA (v2.6.27, parti 20): bu seri termal panelin
+                // q(x) serisiyle AYNI anahtarı kullanıyordu ama tanımı
+                // farklı — burada akı KUPLE cidar dengesinden çözülür
+                // (regen_cooling.py::_station_wall_balance, q = (T_aw −
+                // T_soğutucu)/(1/h_g + t_c/k_c + 1/h_c)); sıcak cidar
+                // sıcaklığı sonuçtur, sabit bir referans değil. Ölçüldü
+                // (panel varsayılanları, boğaz): 28,50 MW/m², T_wall_hot
+                // 1263 K — termal panelin referans-cidar tasarım yükü aynı
+                // sınıfta 24,1-26,0 MW/m². Tek anahtar iki tanımı taşıyamaz.
+                x: x, y: cooling.q_MW_m2, name: T('panel.regen.heatFluxSeriesBalance', 'Heat flux q (coupled wall balance)'),
                 type: 'scatter', mode: 'lines', line: { color: '#00e5ff', width: 2 },
                 hovertemplate: 'x = %{x:.1f} mm<br>q = %{y:.2f} MW/m²<extra></extra>',
             });
@@ -240,7 +249,12 @@
                 T('panel.regen.cardDeltaTip', 'Total coolant temperature rise (enthalpy balance)'))
             + U.statCard(T('panel.regen.cardDrop', 'PRESSURE DROP'), U.fmt(sm.total_pressure_drop_bar, 2), 'bar', 'info',
                 T('panel.regen.cardDropTip', 'Darcy-Weisbach + Haaland friction across the channels'))
-            + U.statCard(T('panel.regen.cardPeakFlux', 'PEAK HEAT FLUX'), U.fmt(sm.peak_heat_flux_MW_m2, 2), 'MW/m²', 'dim', '')
+            + U.statCard(T('panel.regen.cardPeakFluxBalance', 'PEAK HEAT FLUX (coupled wall balance)'),
+                U.fmt(sm.peak_heat_flux_MW_m2, 2), 'MW/m²', 'dim',
+                T('panel.regen.cardPeakFluxTip',
+                  'Peak of the coupled gas/wall/coolant station balance '
+                  + 'q = (T_aw - T_coolant)/(1/h_g + t_w/k_w + 1/h_c); the '
+                  + 'hot-wall temperature is solved, not a fixed reference'))
             + U.statCard(T('panel.regen.cardMaxV', 'MAX VELOCITY'), U.fmt(sm.max_coolant_velocity_m_s, 1), 'm/s', 'dim', '')
             + U.statCard(T('panel.regen.cardMinRe', 'MIN REYNOLDS'), U.fmt(sm.min_reynolds, 0), '', 'dim',
                 T('panel.regen.cardMinReTip',

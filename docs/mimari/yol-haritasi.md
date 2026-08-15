@@ -133,6 +133,30 @@ belgeye yazılmıştır.
 
 ---
 
+## 3.5 Operasyon Scofield — FINAL öncesi son adım (Berke kararı, 15 Ağu 2026)
+
+FINAL yayınından hemen önce, tüm iş kalemleri bittikten sonra, depo çapında
+**tam kapsamlı hata/bug avı** yapılır. Kod adı: **Scofield** (firar sonrası
+arama düzeni — hiçbir hücre atlanmaz). Sıralamadaki yeri: FEA+CFD+F2 bitti →
+Scofield → yayın kapısı 8/8 → FINAL.
+
+Operasyon düzeni (eldeki silahlarla, taslak — zamanı gelince ayrıntılanır):
+1. **Çok-mercekli bulucu filosu:** doğruluk / birim / sözleşme / dürüstlük /
+   güvenlik / performans / i18n / UI mercekleriyle bağımsız ajan taraması;
+   bulgu-başına-ajan fan-out YASAK (sabit hakem havuzu, kural 26).
+2. **Mekanik süpürmeler:** sarsım (Katman A/B) üç sayfada; parça-kopya ve
+   çıplak-etiket bekçileri; iddia lint; bağlama haritası taze koşum; sabit
+   sınıflandırma; wiring_map ölü/yankı taraması.
+3. **Ürün turları:** görsel tur (tam denetim setiyle) + elle hakem turu üç
+   motor + paketlenmiş uygulamada (kurulu sürümde) duman turu.
+4. **Sınır/fuzz turu:** uç değerli girdiler (min/maks/boş/ters birim) üç
+   motor formunda — sessiz-200/uydurma-sayı avı.
+5. **Çapraz tutarlılık:** aynı fiziksel büyüklük farklı panellerde/uçlarda
+   aynı mı (tutarlılık bekçi katmanının elle genişletilmiş turu).
+6. **Kapanış sözleşmesi:** her bulgu ya kapatılır ya gerekçeli açık borç
+   olarak deftere girer; kapatılan her bulgu KUSURU KİLİTLEYEN bekçiyle
+   bağlanır (defterin değişmez kuralı).
+
 ## 4. Yayın stratejisi
 
 **Karar (Berke, 14 Ağustos 2026):** yapısal (FEA) ve CFD analiz kulvarları

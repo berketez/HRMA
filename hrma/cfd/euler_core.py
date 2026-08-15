@@ -47,15 +47,26 @@ DÜRÜSTLÜK: pozitiflik tabanı/kırpma YOKTUR. Fiziksel olmayan durum (negatif
 
 import numpy as np
 
+from hrma.cfd import kernels as _kernels
 from hrma.cfd.riemann import hllc_flux
 
 __all__ = [
     'prim_to_cons_1d', 'cons_to_prim_1d', 'minmod', 'residual_1d',
     'run_1d_transient', 'prim_to_cons_axisym', 'cons_to_prim_axisym',
     'residual_axisym', 'local_dt_axisym', 'inlet_state_from_stagnation',
+    'precompute_geometry', 'SHOCK_SENSOR_THRESHOLD', 'shock_column_flag',
 ]
 
 _TWO_PI = 2.0 * np.pi
+
+# Şok sensörü eşiği: eksenel yüzdeki bağıl basınç sıçraması |Δp|/min(p).
+# ÖLÇÜLDÜ (bu depo, 2026-08-15, 120×24 izantropik derin çözüm): pürüzsüz
+# akışta hücre-başı maksimum 0,041; iç normal şokta (p2/p1=3,83, ~2 hücre)
+# yüz başına ~0,96. Eşik = pürüzsüz maksimumun ~6 katı, şok sıçramasının
+# ~1/4'ü — iki rejim arasında bir mertebelik boşluğun ortası. Kaba ızgarada
+# pürüzsüz sıçrama büyür (60 hücrede ~0,08) ama eşiğin hâlâ 3 kat altında;
+# ince ızgarada küçülür — eşik çözünürlükle güvenli yönde ayrışır.
+SHOCK_SENSOR_THRESHOLD = 0.25
 
 
 # --------------------------------------------------------------------------
@@ -236,7 +247,67 @@ def _unit_normals(face_vec):
     return n_hat, area
 
 
+def shock_column_flag(p_cells):
+    """Şok sensörü kolon bayrağı: (ni, nj) basınç alanı → (ni,) bool | None.
+
+    Eksenel yüzdeki bağıl sıçrama |Δp|/min(p) > SHOCK_SENSOR_THRESHOLD olan
+    yüzün İKİ komşu kolonu + 1 kolon genişletme (dilatasyon). Hiçbir yüz
+    tetiklenmezse None (pürüzsüz akış — çağıran hiçbir eğime dokunmaz,
+    sonuç sensörsüz yolla bit-özdeş). Kolon-bazlılık ve eşik gerekçeleri
+    residual_axisym docstring + SHOCK_SENSOR_THRESHOLD tanımı yanındadır.
+    steady.py aynı fonksiyonla son alandan beyan sayısını üretir (donmuş
+    eğimli bütçe çağrısında sensör bloğu atlandığından oradan alınamaz).
+    """
+    dp_rel = (np.abs(p_cells[1:] - p_cells[:-1])
+              / np.minimum(p_cells[1:], p_cells[:-1]))      # (ni-1, nj)
+    face_col = np.any(dp_rel > SHOCK_SENSOR_THRESHOLD, axis=1)  # (ni-1,)
+    if not np.any(face_col):
+        return None
+    col = np.zeros(p_cells.shape[0], dtype=bool)
+    col[:-1] |= face_col
+    col[1:] |= face_col
+    grown = col.copy()
+    grown[:-1] |= col[1:]
+    grown[1:] |= col[:-1]
+    return grown
+
+
+def precompute_geometry(grid):
+    """Izgara SABİTİ yüzey geometrisi (birim normaller + alanlar) — bir kez.
+
+    residual_axisym bu büyüklükleri her çağrıda yeniden hesaplıyordu;
+    ızgara koşu boyunca değişmez (ÖLÇÜLDÜ, 1A profili: _unit_normals
+    tottime 9,1 s / 137,2 s — sıcak listede 4. sıra, ilk hoist adayı).
+    Sürücü (steady.py) bunu bir kez hesaplayıp residual_axisym'e geçirir.
+
+    Değerler çağrı-içi hesapla BİT-ÖZDEŞTİR: aynı _unit_normals aynı
+    girdiyle çağrılır, dilimleme (çıkış kolonu, duvar sırası) elementer
+    işlemlerin sırasını değiştirmez (bekçi: tests/cfd/test_performans.py).
+    """
+    n_hat_i, area_i = _unit_normals(grid.face_i)
+    n_hat_j, area_j = _unit_normals(grid.face_j)
+    return {
+        'n_hat_i': n_hat_i, 'area_i': area_i,
+        'n_hat_j': n_hat_j, 'area_j': area_j,
+        'n_out_hat': n_hat_i[-1],          # çıkış yüzü kolonu
+        'wall_n_hat': n_hat_j[:, -1],      # duvar yüzü sırası
+    }
+
+
 def _directional_flux(w_l, w_r, n_hat, area, gamma):
+    """Yönlü akı — arka uç seçici (performans turu, Aşama 1B).
+
+    numba kuruluysa ve HRMA_CFD_DISABLE_NUMBA=1 değilse derlenmiş çekirdek
+    (kernels.directional_hllc; aynı işlem sırası, fastmath kapalı), aksi
+    hâlde saf NumPy yolu. İki yolun eşdeğerliği bekçilidir
+    (tests/cfd/test_performans.py); arka uç steady çıktısında beyanlıdır.
+    """
+    if _kernels.NUMBA_AVAILABLE:
+        return _kernels.directional_hllc(w_l, w_r, n_hat, area, gamma)
+    return _directional_flux_numpy(w_l, w_r, n_hat, area, gamma)
+
+
+def _directional_flux_numpy(w_l, w_r, n_hat, area, gamma):
     """Yüzey-normal çerçevesine döndür, HLLC çağır, geri çevir, alanla çarp.
 
     Döner: (n_face..., 4) — [kütle, z-momentum, r-momentum, enerji] akıları
@@ -261,7 +332,7 @@ def _directional_flux(w_l, w_r, n_hat, area, gamma):
 # --------------------------------------------------------------------------
 
 def residual_axisym(U, grid, gamma, R, P0, T0, Pb=None, second_order=True,
-                    slopes=None, return_slopes=False):
+                    slopes=None, return_slopes=False, geom=None):
     """dU/dt kalıntısı ve akı bütçesi.
 
     Args:
@@ -280,6 +351,9 @@ def residual_axisym(U, grid, gamma, R, P0, T0, Pb=None, second_order=True,
             sürücü çıktısında BEYAN edilir).
         return_slopes: True → (dUdt, aux, (s_i, s_j)) döndürür (dondurma
             anında sürücünün eğimleri alması için).
+        geom: precompute_geometry(grid) çıktısı veya None (None → burada
+            hesaplanır; ızgara sabiti olduğundan sürücü BİR kez hesaplayıp
+            geçirir — performans hoist'i, bit-özdeşlik bekçili).
 
     Returns:
         (dUdt, aux[, slopes]): dUdt (ni, nj, 4) [birim/s]; aux sözlüğü
@@ -297,10 +371,41 @@ def residual_axisym(U, grid, gamma, R, P0, T0, Pb=None, second_order=True,
     g = float(gamma)
     w = cons_to_prim_axisym(U, g)
     s_i_given, s_j_given = slopes if slopes is not None else (None, None)
+    if geom is None:
+        geom = precompute_geometry(grid)
+
+    # ---- şok sensörü (Aşama 1B; ölçülen gerekçe) ----
+    # İç şoklu kararlı-hâl koşusunda MUSCL eğimleri şok hücrelerinde limit
+    # döngüsü sürdürür (ölçüldü, 120×24 arka-basınç vakası: kalıntı 3e-3
+    # bandında stall; eğim DONDURMA dahi yetmedi — donmuş sıfırdan-farklı
+    # şok eğimleri de döngülü). Standart tedavi: basınç-tabanlı sensörle
+    # şok hücrelerinde eğimleri SIFIRLA (yerel birinci mertebe — süreksizlik
+    # üstünde biçimsel ikinci mertebe zaten yoktur, TVD sınırlayıcı
+    # ekstremumda aynı indirgemeyi yapar; birinci mertebe şema aynı vakada
+    # derin yakınsıyor, ölçüldü). Eşik SHOCK_SENSOR_THRESHOLD (ölçümden,
+    # tanımı yanında); bayrak 1 hücre genişletilir ki oturan şok bayraklı
+    # bölge İÇİNDE kalsın ve sensör anahtarlaması kendisi döngü üretmesin.
+    # Pürüzsüz akışta (izantropik vaka, maks 0,041 < eşik) sensör HİÇ
+    # tetiklenmez — sonuç bit-özdeş kalır (bekçi: tests/cfd). Donmuş eğim
+    # verilmişse sensör etkisi eğimlerin içinde zaten vardır (dondurma
+    # anında uygulanmıştı), yeniden uygulanmaz.
+    #
+    # Bayrak KOLON-bazlıdır (ölçülen gerekçe): hücre-bazlı bayrak, hafif
+    # eğri şok cephesinde radyal yönde TİTRER (eşik sınırındaki hücreler
+    # girip çıkar; ölçüldü, 80×16: her ~750 iterde bayrak deseni değişip
+    # kalıntıyı 6,5e-4 bandında döngüye kilitledi). Normal şok cephesi tüm
+    # yarıçapı kestiğinden kolonda TEK hücre tetiklense kolonun tamamı
+    # bayraklanır — küme kararlı hâle gelir ve kalıntı derine iner (ölçüldü:
+    # aynı vaka 1e-6 sınıfına). Aşama 1 beyanı: eğik/lambda şoklarda kolon
+    # bayrağı gerekenden geniş bölge indirger (viskoz aşamada yeniden ele
+    # alınır).
+    shock_flag = None
+    if second_order and (s_i_given is None or s_j_given is None):
+        shock_flag = shock_column_flag(w[..., 3])
 
     # ---- i yönü (eksenel) ----
     w_in = inlet_state_from_stagnation(w[0], g, R, P0, T0)      # (nj, 4)
-    n_out_hat, _ = _unit_normals(grid.face_i[-1])               # (nj, 2)
+    n_out_hat = geom['n_out_hat']                               # (nj, 2)
     w_out = _outlet_state(w[-1], n_out_hat, g, Pb)
     w_ext_i = np.concatenate([w_in[None], w_in[None], w,
                               w_out[None], w_out[None]], axis=0)
@@ -308,12 +413,14 @@ def residual_axisym(U, grid, gamma, R, P0, T0, Pb=None, second_order=True,
         s_i = s_i_given
     else:
         s_i = limited_slopes(w_ext_i) if second_order else None
+        if s_i is not None and shock_flag is not None:
+            s_i[1:-1][shock_flag] = 0.0     # kolon m → s_i[m+1] (2 hayalet)
     w_l, w_r = _edge_states(w_ext_i, s_i)
-    n_hat_i, area_i = _unit_normals(grid.face_i)
+    n_hat_i, area_i = geom['n_hat_i'], geom['area_i']
     flux_i = _directional_flux(w_l, w_r, n_hat_i, area_i, g)    # (ni+1,nj,4)
 
     # ---- j yönü (radyal) ----
-    wall_n_hat, _ = _unit_normals(grid.face_j[:, -1])           # (ni, 2)
+    wall_n_hat = geom['wall_n_hat']                             # (ni, 2)
     w_axis1 = _mirror_axis(w[:, 0])
     w_axis2 = _mirror_axis(w[:, 1])
     w_wall1 = _mirror_wall(w[:, -1], wall_n_hat)
@@ -325,10 +432,12 @@ def residual_axisym(U, grid, gamma, R, P0, T0, Pb=None, second_order=True,
         s_j = s_j_given
     else:
         s_j = limited_slopes(w_ext_j) if second_order else None
+        if s_j is not None and shock_flag is not None:
+            s_j[1:-1][:, shock_flag] = 0.0  # s_j ekseni (j+1, i): kolon i
     w_l_j, w_r_j = _edge_states(w_ext_j, s_j)
     w_l_j = np.moveaxis(w_l_j, 0, 1)
     w_r_j = np.moveaxis(w_r_j, 0, 1)
-    n_hat_j, area_j = _unit_normals(grid.face_j)
+    n_hat_j, area_j = geom['n_hat_j'], geom['area_j']
     flux_j = _directional_flux(w_l_j, w_r_j, n_hat_j, area_j, g)
 
     # ---- kayma duvarı: analitik hava geçirmez akı (docstring beyanı) ----
@@ -357,6 +466,8 @@ def residual_axisym(U, grid, gamma, R, P0, T0, Pb=None, second_order=True,
         'energy_flux_in_W': float(np.sum(flux_i[0, :, 3])),
         'energy_flux_out_W': float(np.sum(flux_i[-1, :, 3])),
         'wall_mass_flux_kg_s': float(np.sum(flux_j[:, -1, 0])),
+        'shock_sensor_columns': (0 if shock_flag is None
+                                 else int(np.sum(shock_flag))),
     }
     if return_slopes:
         return dudt, aux, (s_i, s_j)

@@ -60,7 +60,7 @@ def profil_govdesi(motor):
     (Hibrit düz uzunluk alanları METREDİR — analysis_dock LENGTH_UNITS,
     ölçülmüş; burada dönüşüm yoktur çünkü panel de yapmaz.)
     """
-    return {
+    govde = {
         'chamber_pressure': motor['chamber_pressure'],
         'chamber_temperature': motor['chamber_temperature'],
         'burn_time': motor['burn_time'],
@@ -70,6 +70,13 @@ def profil_govdesi(motor):
         'throat_diameter': motor['throat_diameter'],
         'expansion_ratio': motor['expansion_ratio'],
     }
+    # Parti 25: yayımlanan lüle konturu gövdeye AYNEN girer (bell/parabolik
+    # hibritte eksen ancak böyle örtüşüyor — test_wall_profile_ekseni.py).
+    kontur = motor.get('nozzle_contour')
+    if (isinstance(kontur, dict) and isinstance(kontur.get('points'), list)
+            and len(kontur['points']) >= 2):
+        govde['nozzle_contour'] = kontur
+    return govde
 
 
 # ---------------------------------------------------------------------------
@@ -494,4 +501,9 @@ class TestBirimDonusumu:
         ayna = profil_govdesi(motor)
         assert set(b['body']) == set(ayna)
         for k, v in ayna.items():
-            assert b['body'][k] == pytest.approx(v), k
+            if isinstance(v, (int, float)):
+                assert b['body'][k] == pytest.approx(v), k
+            else:
+                # Parti 25: nozzle_contour gibi yapısal alanlar AYNEN
+                # (bit-değişimsiz JSON gidiş-dönüşü) taşınmalı.
+                assert b['body'][k] == v, k

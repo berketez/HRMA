@@ -54,6 +54,21 @@ def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
     """
     return {'code': code, 'params': params, 'severity': severity}
 
+
+def _positive_length(value):
+    """Sonlu ve pozitifse float döner, değilse ``None``.
+
+    Geometri alanlarında 0 / '' / None hepsi "VERİLMEDİ" demektir; bunları
+    sayı sanmak (örn. ``dict.setdefault`` ile 0'ı geçerli kabul etmek) boğaz
+    yarıçapını sıfırlar. Örnekleyicinin ``_finite_positive``ı ile aynı hüküm.
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if (np.isfinite(f) and f > 0.0) else None
+
+
 # ----------------------------------------------------------------------
 # Gaz radyasyonu (Leckner) sabitleri
 # ----------------------------------------------------------------------
@@ -470,16 +485,22 @@ class HeatTransferAnalyzer:
         gamma = gas['gamma']
         R = gas['gas_constant']
 
+        # ÖLÇÜ SÖZLEŞMESİ (v2.6.27): 0 / '' / sonsuz bir ölçü DEĞİLDİR,
+        # "verilmedi" demektir. Eskiden yalnız ``is not None`` bakılıyordu;
+        # throat_diameter=0 taşıyan bir sözlük A_t=0 üretip birkaç satır
+        # aşağıda ZeroDivisionError'a düşüyordu (eksenel profil bekçisiyle
+        # yakalandı). Sıfırı geçerli sanmak sessiz sıfır yarıçap demektir.
         # characteristic velocity c* [m/s]
-        c_star = motor_data.get('c_star', motor_data.get('cstar', None))
+        c_star = _positive_length(
+            motor_data.get('c_star', motor_data.get('cstar', None)))
         if c_star is None:
             num = np.sqrt(gamma * R * chamber_temperature)
             den = gamma * np.sqrt((2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (gamma - 1.0)))
             c_star = num / den
 
         # throat diameter [m]
-        throat_diameter = motor_data.get('throat_diameter', None)
-        throat_area = motor_data.get('throat_area', None)
+        throat_diameter = _positive_length(motor_data.get('throat_diameter'))
+        throat_area = _positive_length(motor_data.get('throat_area'))
         if throat_diameter is not None:
             throat_area = np.pi * (throat_diameter / 2.0) ** 2
         elif throat_area is not None:
@@ -498,7 +519,9 @@ class HeatTransferAnalyzer:
         # Typical converging-diverging nozzles: Rc ~ 0.5..2 * throat radius.
         # Use Rc = 1.5 * throat_radius if not provided (common Bartz assumption).
         throat_radius = throat_diameter / 2.0
-        rc = motor_data.get('throat_radius_curvature', 1.5 * throat_radius)
+        rc = _positive_length(motor_data.get('throat_radius_curvature'))
+        if rc is None:
+            rc = 1.5 * throat_radius
         rc_over_dt = max(rc / throat_diameter, 0.25)  # keep correction bounded
 
         # static throat temperature (M=1)
@@ -749,6 +772,237 @@ class HeatTransferAnalyzer:
             }
         }
 
+    # ------------------------------------------------------------------
+    # Eksenel istasyonların geometri kaynağı
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _published_contour_mm(motor_data: Dict):
+        """``motor_data['nozzle_contour']['points']`` → (z_mm, r_mm) ya da None.
+
+        Motor çözücülerinin YAYIMLADIĞI iç kontur (metre, ``[z, r]`` çiftleri).
+        Bu dizi ``sample_nozzle_inner_contour`` çıktısının kendisidir (hibrit:
+        hybrid_rocket_engine.py, katı/sıvı: kendi yayım blokları) ve mesh/FEA
+        köprüsü (``hrma.fea.bridge._extract_contour_points``) TAM OLARAK bunu
+        okur. Profil de bunu okuduğunda iki üretici aynı ekseni tesadüfen
+        değil TANIM GEREĞİ üretir.
+
+        Geçersiz/eksik blokta ``None`` döner — çağıran canlı örneklemeye
+        düşer; uydurma kontur üretilmez.
+        """
+        nc = motor_data.get('nozzle_contour')
+        if not isinstance(nc, dict):
+            return None
+        pts = nc.get('points')
+        if pts is None or len(pts) < 3:
+            return None
+        try:
+            arr = np.asarray(pts, dtype=float)
+        except (TypeError, ValueError):
+            return None
+        if arr.ndim != 2 or arr.shape[1] != 2 or not np.all(np.isfinite(arr)):
+            return None
+        z_mm = arr[:, 0] * 1000.0
+        r_mm = arr[:, 1] * 1000.0
+        # Eksen kesin artan olmalı (istasyon enterpolasyonu tanımlı olsun) ve
+        # yarıçap pozitif (eksenel simetrik cidar ekseni kapsamaz).
+        if np.any(r_mm <= 0.0) or not np.all(np.diff(z_mm) > 0.0):
+            return None
+        return z_mm, r_mm
+
+    def _axial_contour(self, motor_data: Dict, throat: Dict) -> Dict:
+        """Eksenel istasyonların dayandığı iç kontur — TEK geometri kaynağı.
+
+        İki yol vardır ve ikisi de AYNI örnekleyicinin çıktısıdır:
+
+          1. Motorun yayımladığı ``nozzle_contour.points`` (varsa). FEA köprüsü
+             bu diziyi okuduğu için profil ekseni ile mesh ekseni tanım gereği
+             çakışır.
+          2. Yayımlanmış kontur yoksa ``sample_nozzle_inner_contour`` canlı
+             çağrılır — çözücünün KENDİ içinden (kontur henüz yayımlanmadan)
+             gelen çağrılarda tek yol budur.
+
+        ÖLÇÜLEN KUSUR (v2.6.27, D2 zinciri): örnekleyici lüle tipini yalnız
+        ``nozzle_angles['nozzle_type']`` ya da ``nozzle_contour['divergent']
+        ['type']`` alanlarından okur. Çağıranların bir bölümü tipi ÜST DÜZEY
+        ``motor_data['nozzle_type']`` anahtarına yazıyordu (hibrit çözücünün
+        lüle malzeme analizi, hybrid_rocket_engine.py) ve o anahtarı hiç kimse
+        okumuyordu: bell/parabolik motorun profili KONİK varsayılıyor, eksen
+        yayımlanan konturdan %96'ya varan farkla ayrışıyordu (2 kN / 30 bar
+        bell: profil 171,85 mm, kontur 87,31 mm). Anahtar burada
+        örnekleyicinin okuduğu yere taşınır.
+
+        NOT — ``throat_radius_curvature`` BİLEREK taşınmaz: üst düzeydeki alan
+        Bartz'ın (D_t/R_c)^0.1 terimine giren boğaz eğrilik yarıçapıdır
+        [metre, tipik 1,5·r_t, boğaz ÖNÜ]; örnekleyicinin
+        ``convergent['throat_radius_curvature']`` alanı ise boğaz ÇIKIŞ yayının
+        Rao yarıçapıdır [mm, varsayılan 0,382·r_t]. Farklı iki büyüklüktür,
+        birini diğerine bağlamak konturu bozar.
+
+        Döner: ``{'z_mm', 'r_mm', 'z_throat', 'z_exit', 'r_throat',
+        'noz_type', 'basis'}``. ``basis`` hangi kaynağın kullanıldığını ve
+        hangi şekil alanının örnekleyicinin GENEL varsayılanına düştüğünü
+        adıyla beyan eder (sessiz varsayım yok).
+        """
+        # Tembel import: hrma.engines.__init__ -> hybrid_rocket_engine ->
+        # heat_transfer_analysis zinciri modül-üstü importta döngü yaratır.
+        from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+
+        nc = motor_data.get('nozzle_contour')
+        nc = nc if isinstance(nc, dict) else {}
+        angles_in = motor_data.get('nozzle_angles')
+        angles_in = angles_in if isinstance(angles_in, dict) else {}
+
+        # --- 1) Yayımlanmış kontur (köprünün okuduğu dizinin ta kendisi) ---
+        yayimlanan = self._published_contour_mm(motor_data)
+        if yayimlanan is not None:
+            z_mm, r_mm = yayimlanan
+            i_t = int(np.argmin(r_mm))
+            # Boğaz uçlarda olamaz: konverjan daralır, ıraksak genişler.
+            if 0 < i_t < z_mm.size - 1:
+                div_in = nc.get('divergent')
+                div_in = div_in if isinstance(div_in, dict) else {}
+                noz_type = (div_in.get('type')
+                            or angles_in.get('nozzle_type')
+                            or motor_data.get('nozzle_type'))
+                return {
+                    'z_mm': z_mm,
+                    'r_mm': r_mm,
+                    'z_throat': float(z_mm[i_t]),
+                    'z_exit': float(z_mm[-1]),
+                    'r_throat': float(r_mm[i_t]),
+                    'noz_type': noz_type,
+                    'basis': {
+                        'source': (
+                            "motor_results['nozzle_contour']['points'] — the "
+                            'inner contour PUBLISHED by the motor solver '
+                            '(metres, [z, r]), which is the very array the '
+                            'FEA bridge meshes. Taking the stations from it '
+                            'makes the gas-side profile and the mesh share '
+                            'one axis by construction, not by coincidence. '
+                            'The published array is itself the output of '
+                            'nozzle_design.sample_nozzle_inner_contour, the '
+                            'single geometry source of the 2D section, the 3D '
+                            'scene and the STL/STEP exports.'),
+                        'contour_points': int(z_mm.size),
+                        'throat_station': (
+                            'minimum radius of the published contour (the '
+                            'convergent ends and the Rao arc begins there); '
+                            'no throat position is assumed'),
+                        'nozzle_type_source': (
+                            "nozzle_contour['divergent']['type']"
+                            if div_in.get('type') else
+                            ("nozzle_angles['nozzle_type']"
+                             if angles_in.get('nozzle_type') else
+                             ('top-level motor_data["nozzle_type"]'
+                              if motor_data.get('nozzle_type') else
+                              'not declared by the motor result'))),
+                        'generic_defaults_used': [],
+                    },
+                }
+            # Boğaz bulunamadı (kontur monoton daralıyor/genişliyor):
+            # sessizce kabul edilmez, canlı örneklemeye düşülür ve beyan edilir.
+            yayimlanan_red = (
+                'the published nozzle_contour.points has no interior minimum '
+                'radius, so no throat station can be located on it; the '
+                'contour was re-sampled from the geometry fields instead')
+        else:
+            yayimlanan_red = (
+                'the motor result carries no usable nozzle_contour.points '
+                'block (absent, wrong shape, non-monotonic z or non-positive '
+                'radius), so the contour is sampled live from the geometry '
+                'fields')
+
+        # --- 2) Canlı örnekleme ------------------------------------------
+        md_geo = dict(motor_data)
+        genel_varsayilan = []
+
+        # Boğaz çapı: verilmediyse bu koşunun Bartz boğazı (jenerik değil,
+        # aynı çözümün kendi boğazı). 0/'' de "verilmedi" sayılır.
+        d_t = _positive_length(md_geo.get('throat_diameter'))
+        if d_t is None:
+            md_geo['throat_diameter'] = throat['throat_diameter']
+            bogaz_kaynak = ('resolved from continuity at the choked throat '
+                            '(A_t = mdot*c*/Pc) — the same throat the Bartz '
+                            'coefficient uses, so area ratios stay consistent')
+        else:
+            bogaz_kaynak = "motor_data['throat_diameter']"
+
+        # Çıkış çapı: alan → genleşme oranı → (ikisi de yoksa) ÖRNEKLEYİCİNİN
+        # GENEL VARSAYILANI. Sonuncusu bu motorun geometrisi DEĞİLDİR ve
+        # beyan edilir; sessizce 80 mm'lik jenerik bir lüle çizilmez.
+        d_e = _positive_length(md_geo.get('exit_diameter'))
+        if d_e is None:
+            md_geo.pop('exit_diameter', None)
+            eps = _positive_length(motor_data.get('expansion_ratio'))
+            if eps is not None and eps > 1.0:
+                md_geo['exit_diameter'] = (
+                    md_geo['throat_diameter'] * np.sqrt(eps))
+                cikis_kaynak = ("derived from motor_data['expansion_ratio'] "
+                                '(d_e = d_t*sqrt(eps))')
+            else:
+                cikis_kaynak = ('NOT GIVEN — neither exit_diameter nor '
+                                'expansion_ratio was supplied; the sampler '
+                                'falls back to its own generic exit diameter, '
+                                'so the divergent extent of this axis is NOT '
+                                "this motor's")
+                genel_varsayilan.append('exit_diameter')
+        else:
+            cikis_kaynak = "motor_data['exit_diameter']"
+
+        # Lüle tipi: örnekleyicinin OKUDUĞU yere taşı (üst düzey anahtar
+        # hiçbir yerde okunmuyordu — ölçülen kusur, docstring'de).
+        div_in = nc.get('divergent')
+        div_in = div_in if isinstance(div_in, dict) else {}
+        if div_in.get('type'):
+            tip_kaynak = "nozzle_contour['divergent']['type']"
+        elif angles_in.get('nozzle_type'):
+            tip_kaynak = "nozzle_angles['nozzle_type']"
+        else:
+            ust_tip = motor_data.get('nozzle_type')
+            ust_tip = str(ust_tip).strip() if isinstance(ust_tip, str) else ''
+            if ust_tip:
+                aci_blok = dict(angles_in)
+                aci_blok['nozzle_type'] = ust_tip
+                md_geo['nozzle_angles'] = aci_blok
+                tip_kaynak = (
+                    'top-level motor_data["nozzle_type"], moved onto '
+                    "nozzle_angles['nozzle_type'] — the only place the "
+                    'contour sampler reads the nozzle type from')
+            else:
+                tip_kaynak = ('NOT GIVEN — the sampler falls back to its own '
+                              'generic nozzle type')
+                genel_varsayilan.append('nozzle_type')
+
+        pts, meta = sample_nozzle_inner_contour(md_geo)
+        z_mm = np.array([p[0] for p in pts], dtype=float)
+        r_mm = np.array([p[1] for p in pts], dtype=float)
+        return {
+            'z_mm': z_mm,
+            'r_mm': r_mm,
+            'z_throat': float(meta['z_throat']),
+            'z_exit': float(meta['z_exit']),
+            'r_throat': float(meta['r_throat']),
+            'noz_type': meta.get('noz_type'),
+            'basis': {
+                'source': (
+                    'sampled live from hrma.engines.nozzle_design.'
+                    'sample_nozzle_inner_contour — the same single geometry '
+                    'source the 2D section, the 3D scene and the STL/STEP '
+                    'exports consume. Reason the published contour was not '
+                    'used: ' + yayimlanan_red),
+                'contour_points': int(z_mm.size),
+                'throat_diameter_source': bogaz_kaynak,
+                'exit_diameter_source': cikis_kaynak,
+                'nozzle_type_source': tip_kaynak,
+                'divergent_length_source': meta.get('divergent_length_source'),
+                # Boş liste = hiçbir şekil alanı jenerik varsayılana düşmedi.
+                # Doluysa bu eksen motorun konturuyla ÖRTÜŞMEK ZORUNDA DEĞİL
+                # ve tüketici (FEA köprüsü) onu reddedebilir — reddetmesi
+                # doğrudur, uydurma geometriye mesh basılmaz.
+                'generic_defaults_used': genel_varsayilan,
+            },
+        }
+
     def analyze_axial_profile(self, motor_data: Dict, n_stations: int = 40,
                               material: str = 'steel',
                               wall_thickness: float = 0.005,
@@ -757,9 +1011,12 @@ class HeatTransferAnalyzer:
         """
         Eksenel ısı yükü profili: hazne çıkışı -> boğaz -> nozul çıkışı.
 
-        Nozul iç konturu TEK ortak geometri kaynağından örneklenir
-        (hrma.engines.nozzle_design.sample_nozzle_inner_contour — 2D/3D/CAD
-        ile aynı kontur; kopya geometri YOK). Her istasyonda:
+        Nozul iç konturu TEK ortak geometri kaynağından gelir (``_axial_contour``:
+        motorun yayımladığı ``nozzle_contour.points``, yoksa aynı dizinin
+        üreticisi olan ``nozzle_design.sample_nozzle_inner_contour`` — 2D/3D/CAD
+        ile aynı kontur; kopya geometri YOK). Eksen konturun KENDİ orijininden
+        başlar ve konturun çıkışında biter; böylece bu profili tüketen FEA
+        köprüsü ile aynı alan üzerinde çalışılır. Her istasyonda:
 
           - A(x)/A_t alan oranı (kontur yarıçapından),
           - izantropik M(x) (konverjanda subsonik, diverjanda süpersonik dal),
@@ -781,13 +1038,12 @@ class HeatTransferAnalyzer:
 
         Returns:
             {'x_mm', 'area_ratio', 'mach', 'h_g', 'q_MW', 'T_wall_eq',
-             'T_recovery', 'x_throat_mm', 'x_exit_mm', 'throat_index', ...}
+             'T_recovery', 'x_throat_mm', 'x_exit_mm', 'throat_index',
+             'contour_basis', ...}
             Tüm diziler eşit uzunluktadır; grafik üretilmez (frontend çizer).
+            ``contour_basis`` ekseni hangi konturdan aldığını ve hangi şekil
+            alanının verilmediğini adıyla beyan eder.
         """
-        # Tembel import: hrma.engines.__init__ -> hybrid_rocket_engine ->
-        # heat_transfer_analysis zinciri modül-üstü importta döngü yaratır.
-        from hrma.engines.nozzle_design import sample_nozzle_inner_contour
-
         n_stations = int(max(5, min(int(n_stations), 400)))
 
         chamber_pressure = motor_data.get('chamber_pressure', 20.0) * 1e5  # Pa
@@ -801,40 +1057,29 @@ class HeatTransferAnalyzer:
         )
         gamma = gas['gamma']
 
-        # --- Kontur: geometri sözlüğünü çözülen boğaz/çıkış çapıyla besle ---
-        # (motor_data'da yoksa sampler'ın jenerik fallback'i yerine Bartz ile
-        # tutarlı gerçek boğaz çapı kullanılır; alan oranları fizikle uyumlu
-        # kalır.)
-        md_geo = dict(motor_data)
-        md_geo.setdefault('throat_diameter', throat['throat_diameter'])
-        if md_geo.get('exit_diameter') in (None, 0, ''):
-            expansion_ratio = motor_data.get('expansion_ratio', None)
-            try:
-                expansion_ratio = float(expansion_ratio)
-            except (TypeError, ValueError):
-                expansion_ratio = 0.0
-            if expansion_ratio and expansion_ratio > 1.0:
-                md_geo['exit_diameter'] = (
-                    md_geo['throat_diameter'] * np.sqrt(expansion_ratio)
-                )
-            else:
-                md_geo.pop('exit_diameter', None)
-
-        contour_pts, contour_meta = sample_nozzle_inner_contour(md_geo)
-        z_pts = np.array([p[0] for p in contour_pts], dtype=float)  # mm
-        r_pts = np.array([p[1] for p in contour_pts], dtype=float)  # mm
-        z_throat = float(contour_meta['z_throat'])
-        z_exit = float(contour_meta['z_exit'])
-        r_throat = float(contour_meta['r_throat'])
+        # --- Kontur: TEK geometri kaynağı (yayımlanan kontur > canlı örnekleme)
+        # Ayrıntı ve ölçülen kusur kaydı _axial_contour docstring'inde.
+        kontur = self._axial_contour(motor_data, throat)
+        z_pts = kontur['z_mm']
+        r_pts = kontur['r_mm']
+        z_throat = kontur['z_throat']
+        z_exit = kontur['z_exit']
+        r_throat = kontur['r_throat']
+        # Eksen konturun KENDİ orijininden başlar (örnekleyicide 0,0; ama
+        # sözleşme "0" değil "konturun ilk noktası"dır — profil ile mesh aynı
+        # alanı kapsasın diye başlangıç varsayılmaz, okunur).
+        z_start = float(z_pts[0])
 
         # --- İstasyon ızgarası: boğaz istasyonu KESİN dahil ---
         # Konverjan/diverjan pay dağılımı uzunlukla orantılı; boğaz noktası
         # iki parçanın ortak ucu (q maks ve M=1 tam boğazda yakalanır).
-        frac_conv = z_throat / z_exit if z_exit > 0 else 0.5
+        toplam_boy = z_exit - z_start
+        frac_conv = ((z_throat - z_start) / toplam_boy
+                     if toplam_boy > 0 else 0.5)
         n_conv_st = int(round(n_stations * frac_conv))
         n_conv_st = min(max(n_conv_st, 2), n_stations - 1)
         n_div_st = n_stations - n_conv_st + 1  # boğaz paylaşılır
-        x_conv = np.linspace(0.0, z_throat, n_conv_st)
+        x_conv = np.linspace(z_start, z_throat, n_conv_st)
         x_div = np.linspace(z_throat, z_exit, n_div_st)[1:]
         x_mm = np.concatenate([x_conv, x_div])
         throat_index = n_conv_st - 1
@@ -959,11 +1204,16 @@ class HeatTransferAnalyzer:
             'x_exit_mm': z_exit,
             'throat_index': throat_index,
             'throat_diameter_m': throat_d,
-            'nozzle_type': contour_meta.get('noz_type'),
+            'nozzle_type': kontur['noz_type'],
             'material': material,
             'cooling_type': cooling_type,
             'wall_thickness_mm': wall_thickness * 1000.0,
             'n_stations': n_stations,
+            # Eksenin geometri künyesi. Tüketici (FEA köprüsü) bu profili
+            # motorun konturuna taşıyacaksa hangi konturdan geldiğini ve
+            # hangi şekil alanının VERİLMEDİĞİNİ buradan okur; eksen
+            # uyuşmazlığı artık sessiz değil, adlı bir bilgidir.
+            'contour_basis': kontur['basis'],
         }
 
     def _calculate_heat_transfer_coefficients(self, motor_data: Dict,
@@ -1312,6 +1562,22 @@ class HeatTransferAnalyzer:
             gas_side['total_heat_rate'] = float(q_barrel + q_nozzle)
             gas_side['wetted_integral_available'] = True
             gas_side['wetted_integral_stations'] = int(x.size)
+            # ISLAK YÜZEYİN GEOMETRİ KÜNYESİ (v2.6.27, D2 zinciri denetimi).
+            # Bu integral konturun TAMAMI üzerinde alınır, yani boğaz
+            # skalerlerinden farklı olarak ıraksak boya DOĞRUDAN duyarlıdır.
+            # Çağıran çıkış çapını / genleşme oranını geçirmezse örnekleyici
+            # kendi JENERİK çıkış çapına düşer ve buradan yayımlanan alan bu
+            # motorun lülesine ait olmaz. Sayı susturulmaz (çağıran katman
+            # düzeltilmeli) ama kaynağı ADIYLA yanına yazılır.
+            kontur_kunye = profile.get('contour_basis') or {}
+            gas_side['wetted_integral_contour_basis'] = {
+                'source': kontur_kunye.get('source'),
+                'exit_diameter_source': kontur_kunye.get(
+                    'exit_diameter_source'),
+                'nozzle_type_source': kontur_kunye.get('nozzle_type_source'),
+                'generic_defaults_used': list(
+                    kontur_kunye.get('generic_defaults_used') or []),
+            }
         except Exception as exc:  # geometri/kontur yoksa dürüst yedek
             gas_side['wetted_integral_available'] = False
             gas_side['wetted_integral_error'] = str(exc)

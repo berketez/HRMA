@@ -38,11 +38,18 @@ gizlenmez ama hüküm de verilmez (FEA yakınsama beyanı deseni).
   AIAA J. 33(5), 1995 gerekçesi); an, `limiter_frozen_at_iter` + `convergence_basis`
   alanlarıyla BEYANLIDIR. Bu olmadan korunum bütçesi sözleşmesi (1e-10 sınıfı) fiziksel
   olarak ulaşılmaz.
+  *Aşama 1B eki:* dondurma TAZELENEBİLİR (plato sürerse eğimler güncel durumdan
+  yeniden alınır) ve basınç-tabanlı KOLON şok sensörü şok kolonlarında eğimleri
+  sıfırlar (eşik `SHOCK_SENSOR_THRESHOLD=0,25`, ölçümden: pürüzsüz 0,041 / şok 0,96;
+  pürüzsüz akışta hiç tetiklenmez, sonuç bit-özdeş) — iç şoklu kararlı hâl ancak bu
+  ikisiyle derin yakınsar (ölçüldü; beyanları `limiter_freeze_count` +
+  `shock_sensor_columns`/`shock_sensor_basis`).
 - **Gaz modeli:** kalorik mükemmel; γ ve R motor çözücüsünün yayımladığı değerlerden
   (`chamber_temperature`, `gamma`, `molecular_weight`) — sabit uydurulmaz, eksikse red (köprü deseni).
 - **Sınır koşulları:** giriş = rezervuar (P0, T0, subsonik karakteristik); duvar = kayma (Euler);
-  eksen = simetri; çıkış = süpersonikte dışdeğerleme, arka-basınçlıda karakteristik (aşırı-genişlemiş
-  vaka için).
+  eksen = simetri; çıkış = süpersonikte dışdeğerleme, arka-basınçlıda ses-altı çıkışa statik
+  basınç dayatması (Aşama 1B ölçümü: çıkış kesit basıncı Pb'ye %0,03 — karakteristik
+  yükseltme GEREKMEDİ, gerekirse Aşama 2).
 
 ## 3. Izgara
 
@@ -83,8 +90,22 @@ UI/uç bağlaması Aşama 1'de YOK — çözücü önce doğrulama merdivenini t
 
 ## 7. Aşamalar
 
-- **1A (bugün başladı):** riemann + euler_core 1B + Sod (basamak 1) → 2B axisym ızgara + çekirdek
-  + izantropik lüle (basamak 2) + korunum bütçesi (basamak 4).
-- **1B:** aşırı-genişlemiş şok vakası (basamak 3) + eksen sağlığı (5) + p_w(x) → separation.py
-  entegrasyonu + `/api/cfd/nozzle` ucu + panel (D5 deseni).
+- **1A (TAMAM, `d4a213e`):** riemann + euler_core 1B + Sod (basamak 1) → 2B axisym ızgara +
+  çekirdek + izantropik lüle (basamak 2) + korunum bütçesi (basamak 4). 18 bekçi.
+- **1B çözücü tarafı (TAMAM, parti 25):** şok vakası (basamak 3: analitiğe 0,33 mm,
+  `tests/cfd/test_normal_sok.py`) + eksen sağlığı (5: `test_eksen.py`) + çözünürlük
+  merdiveni (`test_cozunurluk.py`, debi hatası %0,247→%0,038) + performans
+  (`test_performans.py`: numba 1,98×, bit-özdeş, isteğe bağlı —
+  `HRMA_CFD_DISABLE_NUMBA=1` saf NumPy yolu bekçili) + p_w(x) sözleşmesi
+  (`wall_pressure_Pa` + `wall_pressure_z_m` + `wall_pressure_basis`).
+  Toplam 36 bekçi.
+- **1B ürün tarafı (dalga B, sırada):** p_w → separation.py entegrasyonu +
+  `/api/cfd/nozzle` ucu + Analiz Merkezi'nin ilk kiracısı olarak panel
+  (analiz-merkezi-tasarimi.md).
+- **Lean biçimsel ayak (Berke talimatı, 15 Ağu):** CFD'nin kapalı-form bağıntıları
+  `formal/LeanLab` platformuna eklenir — aday teoremler: izantropik alan-Mach/
+  basınç bağıntıları, normal şok sıçrama bağıntıları (Rankine-Hugoniot tutarlılığı),
+  HLLC ara-durum özdeşlikleri, boğulmuş debi formülü. Sayısal çözücünün kendisi
+  ispatlanmaz (ayrıklaştırma testle doğrulanır); ispat, TESTLERİN karşılaştırdığı
+  analitik referans formüllerin türetimlerini kilitler.
 - **2:** viskoz/türbülans kararı (RANS-SA vs entegral BL) — ayrı tasarım turu, bu belge güncellenir.

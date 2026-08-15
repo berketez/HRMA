@@ -7207,6 +7207,20 @@ def analyze_wall_profile():
             # sample_nozzle_inner_contour konik/bell ayrımını buradan okur
             motor_data['nozzle_angles'] = {'nozzle_type': str(data['nozzle_type'])}
 
+        # Parti 25 (D2 bell/parabolik dirilişi): motorun YAYIMLADIĞI kontur
+        # gövdeyle gelirse aynen geçirilir — analyze_axial_profile artık
+        # yayımlanmış konturu tercih ediyor ve eksen, FEA köprüsünün okuduğu
+        # diziyle TANIM GEREĞİ örtüşüyor. Ölçüldü: yalnız nozzle_type geçirmek
+        # 38,1 mm, tam nozzle_angles bile 9,7 mm sapıyordu; kontur geçirmek
+        # sapmayı 0,000 mm yapıyor (tests/test_wall_profile_ekseni.py).
+        # Şekil denetimi asgari: points listesi taşıyan sözlük; dürüstlük
+        # denetimlerinin kendisi analyze_axial_profile içindedir.
+        kontur = data.get('nozzle_contour')
+        if (isinstance(kontur, dict)
+                and isinstance(kontur.get('points'), list)
+                and len(kontur['points']) >= 2):
+            motor_data['nozzle_contour'] = kontur
+
         n_stations = int(data.get('n_stations', 40))
 
         thermal_analyzer = HeatTransferAnalyzer()
@@ -7249,20 +7263,22 @@ def analyze_wall_profile():
 #:
 #: 2026-08-15 (parti 24) 20000 → 80000: dış yüzey eğrilik tabanı sonrası
 #: sıvı varsayılanında tepe vM SINIRLI ama 16384 elemanda son tur değişimi
-#: %2,37 ölçüldü (eksenel %1,1 + radyal %1,3; radyal kalem tur başına
-#: yarılanıyor: 2,6→1,3→0,65). Bir inceltme turu daha (65536 eleman)
-#: hükmü tolerans altına indiriyor; seyrek doğrudan çözüm bu boyutta
-#: saniyeler mertebesinde. Kalıcı iyileştirme adayı (radyal katlamayı
-#: eksenelden ayrıştıran inceltme politikası) bulgu defterinde.
+#: %2,37 ölçüldü. Parti 25: yön-ayrışık inceltme (structural_axisym
+#: refine_policy="directional") geldi — canlı sıvı hükmü artık 32768
+#: elemanda yeşil (%0,65, 14,8 sn); tavan yine gerekli (bütçe formülü
+#: F^(2·rounds) tavanı aynı biçimde sınırlar) ve 5. tura alan bırakır.
 FEA_MAX_ELEMS = 80000
 
 #: Cidar (yapısal) ucunun varsayılan inceltme turu — çözücünün ortak
-#: DEFAULT_MAX_REFINE_ROUNDS'undan (4) BİLİNÇLİ ayrı: parti 24 ölçümü,
-#: eğrilik tabanı sonrası sıvı varsayılanının hükme 5. turda indiğini
-#: gösterdi (yukarıdaki bütçe yorumu). Tane ucu 4'te kalır — onun kabul
-#: ölçütü (port gerinimi) 2. turda oturuyor ve ölçülü bekçileri 4-tur
-#: davranışına kilitli; erken duran koşular (hibrit, 3. turda toleransta)
-#: bu değişiklikten etkilenmez.
+#: DEFAULT_MAX_REFINE_ROUNDS'undan (4) BİLİNÇLİ ayrı. Parti 25 canlı
+#: ölçümü (yön-ayrışık inceltme politikasıyla, gerçek sıvı motoru):
+#: rounds=4 → YAKINSAMADI (%1,75, 16384 el.); rounds=5 → YAKINSADI
+#: (%0,65, 32768 el., 14,8 sn — birlikte-katlamanın 65536'sının yarısı).
+#: Tane ucu 4'te kalır — kabul ölçütü (port gerinimi) 2. turda oturuyor;
+#: erken duran koşular (hibrit, toleransta durur) etkilenmez. Not: örnekleyici
+#: kaynaklı DETERMİNİSTİK test vakası bu turda da yakınsamaz (poligon köşe
+#: konsantrasyonu, bulgu defterinde ayrı kalem) — o vaka hüküm beyanını
+#: dürüstçe YAKINSAMADI taşır, varsayılanın gerekçesi CANLI vakadır.
 FEA_STRUCTURAL_DEFAULT_ROUNDS = 5
 
 #: Eleman kalite eşikleri — TEK TANIM YERİ. Panel bu değerleri yanıttan

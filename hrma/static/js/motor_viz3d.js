@@ -4,7 +4,9 @@
  * Three.js (r128 UMD) ile /calculate yanıtındaki results.motor sözlüğünden
  * parametrik motor modeli kurar: gövde + kapak + enjektör + grain + Rao
  * konturlu C-D nozul. Kesit (cutaway) görünümü, yanma animasyonu
- * (port regresyonu port_history serisinden), egzoz plume partikül sistemi,
+ * (port regresyonu YALNIZ gerçek çözücü serisinden: hibritte port_history,
+ * katıda itki eğrisinin kütle dengesi; seri yoksa port donuk + beyan),
+ * egzoz plume partikül sistemi,
  * ölçü etiketleri, patlatılmış görünüm ve CAD kipi (ortografik görünüşler,
  * teknik-resim leader ölçüleri, nötr stüdyo) içerir. Soğutma kanalları /
  * enjektör deseni / lüle konturu YALNIZ çözücü verisi varsa çizilir;
@@ -432,6 +434,16 @@
     // ya da bozuk şekilli blok = veri yok sayılır (savunmacı okuma).
     // Bekçi testleri: tests/test_viz3d_cad_kipi.py (node ile izole sınama).
     // ==================================================================
+
+    // --- i18n köprüsü (sahne metinleri) --------------------------------
+    // Sahne çipleri DOM değil canvas sprite'tır; data-i18n uygulanamaz,
+    // metin üretim anında çözülür. Anahtar sözlükte yoksa I18N.t
+    // fallback'i (İNGİLİZCE tam metin) döner — anahtar adı ekrana ASLA
+    // yazılmaz. Dil değişiminde çipler yeniden kurulur ('hrma:langchange'
+    // dinleyicisi, güverte deseniyle aynı).
+    function T(key, fallback) {
+        return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
+    }
 
     // --- Kaynak-renk eşlemesi (tasarım dili) ---------------------------
     // Sahnedeki her çip/rozet rengi verinin GERÇEK kaynağına bağlıdır;
@@ -1045,9 +1057,10 @@
         // yazdığı 1,54 kg ancak 1512,8 mm ile çıkıyor.
         var Lg = num(gd.grain_length_mm, num(md.grain_length, 0.8 * Lch / 1000) * 1000);
         var rPort0 = num(gd.port_diameter_initial_mm, num(md.port_diameter_initial, 0.03) * 1000) / 2;
-        var rPortF = num(gd.port_diameter_final_mm, num(md.port_diameter_final, 0.05) * 1000) / 2;
-        rPortF = Math.min(rPortF, rGrainOut);
         rPort0 = Math.min(rPort0, rGrainOut);
+        // NOT: ``rPortF`` (bitiş port yarıçapı) KALDIRILDI (v2.6.27, B5).
+        // Tek kullanıcısı, seri yokken portu sqrt yasasıyla ilerleten sahte
+        // ara değerlemeydi; animasyon artık yalnız gerçek seriyle sürülür.
 
         // Konverjan uzunluk: GERÇEK kamara yarıçapına dayanan design_summary
         // önceliklidir — nozzle_contour.convergent.length, NozzleDesigner'ın
@@ -1121,7 +1134,7 @@
             casingWall: casingWall, nozzleWall: nozzleWall, liner: liner,
             rcOut: rc + casingWall,
             Lg: Lg, zg0: zg0, zg1: zg1,
-            rPort0: rPort0, rPortF: rPortF, rGrainOut: rGrainOut,
+            rPort0: rPort0, rGrainOut: rGrainOut,
             nozType: nozType, Lc: Lc, Ld: Ld,
             thetaN: thetaN, thetaE: thetaE, halfAngle: halfAngle,
             Rn: Rn, Rconv: Rconv,
@@ -1164,22 +1177,173 @@
             contourBasis: contourSel.basis,
             of0: num(md.of_ratio_initial, num(md.of_ratio, 2)),
             portHist: md.port_history || null,
+            // Katı yolu: web geçmişi çözücünün itki eğrisinden türetilir
+            // (solidWebHistory; veri yoksa null → port donuk kalır).
+            webHist: solidWebHistory(md),
+            grainType: (gd.grain_type || md.grain_type || ''),
+            // Çözücü uç yüzeylerin de yandığını beyan ediyor mu? BATES'te
+            // 'outer_surface' inhibisyonu = dış yüzey kapalı, uçlar yanıyor.
+            endsBurn: (String(gd.inhibitor_config || '').toLowerCase() === 'outer_surface'),
             ofShift: md.of_shift_performance || null,
             heat: heat
         };
     }
 
-    // t anındaki port yarıçapı (mm). Önce backend serisi, yoksa
-    // sabit hacimsel üretim varsayımıyla karekök interpolasyonu.
-    function portRadiusAt(dims, t) {
-        var hist = dims.portHist;
-        if (hist && hist.time && hist.port_diameter && hist.time.length > 1) {
-            var d = sampleSeries(hist.time, hist.port_diameter, t);
-            if (d !== null) return clamp(d * 1000 / 2, dims.rPort0, dims.rGrainOut - 0.5);
+    // ==================================================================
+    // Tane yanma animasyonu — port gerilemesi (v2.6.27, B5)
+    //
+    // SAHTE ANİMASYON YASAĞI: iç yüzey YALNIZ gerçek çözücü serisiyle
+    // gerilir. İki gerçek kaynak vardır, üçüncüsü YOKTUR:
+    //
+    //  1) hibrit — motor sözlüğü ``port_history`` yayımlar
+    //     ({time[s], port_diameter[m]}); doğrudan örneklenir.
+    //
+    //  2) katı — çözücü web ilerlemesini zaman marşında TUTAR ama
+    //     YAYIMLAMAZ. Ölçüldü (2026-08-15, /calculate_solid
+    //     use_tutorial_defaults): yanıttaki thrust_curve yalnız
+    //     time / thrust / pressure / burn_area / mass_flow taşır (402
+    //     nokta); motorun kendi eğri sözlüğündeki ``port_area`` dizisi
+    //     _published_thrust_curve'de dışarı verilmez. Web geçmişi bu
+    //     yüzden çözücünün KENDİ kütle üretim özdeşliğinden geri alınır:
+    //
+    //         ṁ(t) = ρ_p · A_b(t) · r_b(t)   (solid_rocket_engine.py:8420)
+    //      →  r_b(t) = ṁ(t) / (ρ_p · A_b(t))
+    //      →  w(t)   = ∫ r_b dt               (trapez)
+    //
+    //     Üç dizinin üçü de çözücü çıktısıdır ve erozif yanma artışı
+    //     ṁ'nin İÇİNDE zaten vardır. Bu bir regresyon yasası UYDURMASI
+    //     değildir; doğrulanabilir bir özdeşliğin tersidir:
+    //       - w(t_son) = 34,980 mm iken çözücünün beyan ettiği
+    //         web_burnout_mm = 35,0 (%0,057; kalan pay yayımlanan
+    //         dizinin 487→402 seyreltmesi),
+    //       - bu w ile BATES yanma alanı geri kurulunca yayımlanan
+    //         burn_area'ya ort %0,043 / maks %0,29 oturuyor.
+    //
+    // SÖKÜLEN SAHTELİK: burada, seri yokken, port yarıçapını
+    // ``sqrt(lerp(r0², rF², t/t_b))`` ile ilerleten bir ara değerleme
+    // vardı. Ne zaman yasası (sabit hacimsel üretim) ne de bitiş noktası
+    // çözücüden geliyordu — katı sayfası rF'yi 0,9·D_dış diye ÜRETİYORDU
+    // (solid.html, "yanma sonunda ince bir kabuk görünsün diye"). Artık
+    // gerçek seri yoksa port DONDURULUR ve durum çipi bunu beyan eder.
+    // ==================================================================
+
+    // Katı çözücünün itki eğrisinden web ilerlemesi (m). Girdi eksik,
+    // kısa, tutarsız uzunlukta ya da sayısal değilse null döner — yarım
+    // veriden seri UYDURULMAZ.
+    function solidWebHistory(md) {
+        var tc = (md && md.thrust_curve) || null;
+        if (!tc) return null;
+        var t = tc.time, ab = tc.burn_area, mdot = tc.mass_flow;
+        if (!t || !ab || !mdot) return null;
+        var n = t.length;
+        if (n < 3 || ab.length !== n || mdot.length !== n) return null;
+        // Yakıt yoğunluğu (kg/m³) — özdeşliğin üçüncü çarpanı. Yoksa
+        // türetme YAPILMAZ (rho'yu varsaymak sahte seri üretmek olurdu).
+        var rho = num(md.propellant_density, num(md.density, NaN));
+        if (!(rho > 0)) return null;
+        var web = new Array(n);
+        var w = 0, rPrev = 0, tPrev = 0, ilerledi = false;
+        for (var i = 0; i < n; i++) {
+            var ti = num(t[i], NaN), A = num(ab[i], NaN), m = num(mdot[i], NaN);
+            if (!isFinite(ti) || !isFinite(A) || !isFinite(m) || A < 0 || m < 0) return null;
+            var rb = (A > 0) ? m / (rho * A) : 0;
+            if (i > 0) {
+                var dt = ti - tPrev;
+                if (dt < 0) return null;              // sıralı olmayan seri
+                w += 0.5 * (rPrev + rb) * dt;
+                if (w > 0) ilerledi = true;
+            }
+            web[i] = w;
+            rPrev = rb;
+            tPrev = ti;
         }
-        var f = clamp(t / dims.burnTime, 0, 1);
-        var r2 = lerp(dims.rPort0 * dims.rPort0, dims.rPortF * dims.rPortF, f);
-        return Math.sqrt(r2);
+        if (!ilerledi) return null;
+        return { time: t, web: web, webEnd: w, source: 'solid_mass_balance' };
+    }
+
+    // Radyal (dairesel port) gerilemenin ANLAMLI olduğu tane tipleri.
+    // Yıldız/finocyl/çok portlu kesitte web ilerlemesi yüzey normali
+    // boyunca ofsettir (çözücü Huygens/shapely ofseti kullanır), uç
+    // yanmalı tanede ise gerileme EKSENELDİR — ikisini de tek bir
+    // yarıçapı büyüterek göstermek uydurma olur.
+    var RADIAL_REGRESSION_GRAINS = { bates: true, cylindrical: true, circular: true };
+
+    // Port gerilemesinin kipi (tek karar noktası; çip metni de bundan).
+    //   'port_history'        çözücü port çapı geçmişi yayımladı
+    //   'solid_mass_balance'  katı çözücünün kütle dengesinden türetildi
+    //   'not_modelled'        kesit/tane tipi için radyal gerileme geçersiz
+    //   'no_data'             gerçek zaman serisi yok → port donuk
+    function portRegressionMode(spec) {
+        spec = spec || {};
+        if ((spec.portShape || 'circular') !== 'circular') return 'not_modelled';
+        // Çözücü yarıçapı KENDİSİ verdiyse tane tipi tartışması yoktur.
+        if (spec.hasPortHistory) return 'port_history';
+        var gt = String(spec.grainType || '').toLowerCase();
+        if (gt && !RADIAL_REGRESSION_GRAINS[gt]) return 'not_modelled';
+        if (spec.hasWebHistory) return 'solid_mass_balance';
+        return 'no_data';
+    }
+
+    // Kipin durum çipleri. Çip BEYANDIR: animasyonun neyden sürüldüğünü
+    // (ya da sürülmediğini) kullanıcıya söyler.
+    function portRegressionChipDefs(mode, opts) {
+        opts = opts || {};
+        var defs = [];
+        if (mode === 'port_history') {
+            defs.push({ text: T('viz.chip.portRegHistory',
+                'port regression: solver port history'), kind: 'computed' });
+        } else if (mode === 'solid_mass_balance') {
+            defs.push({ text: T('viz.chip.portRegMassBalance',
+                'port regression: solver mass balance'), kind: 'computed' });
+        } else if (mode === 'not_modelled') {
+            defs.push({ text: T('viz.chip.portRegNotModelled',
+                'port regression: not modelled for this grain'), kind: 'missing' });
+        } else {
+            defs.push({ text: T('viz.chip.portRegNoData',
+                'port regression: no solver series'), kind: 'missing' });
+        }
+        // Uç yüzeyler de yanıyorsa (çözücü beyanı) 3B tane bloğu eksenel
+        // kısalmayı GÖSTERMEZ; sessiz kalınmaz, ayrı çiple beyan edilir.
+        if (opts.endsBurn && (mode === 'port_history' || mode === 'solid_mass_balance')) {
+            defs.push({ text: T('viz.chip.endFaceNotModelled',
+                'end-face regression: not modelled'), kind: 'missing' });
+        }
+        return defs;
+    }
+
+    // t anındaki port yarıçapı (mm) — YALNIZ gerçek seriden. Kip
+    // animasyonlu değilse başlangıç yarıçapı döner (donuk tane).
+    function portRadiusAt(dims, t, mode) {
+        if (mode === 'port_history') {
+            var hist = dims.portHist;
+            var d = (hist && hist.time && hist.port_diameter)
+                ? sampleSeries(hist.time, hist.port_diameter, t) : null;
+            if (d !== null) return clamp(d * 1000 / 2, dims.rPort0, dims.rGrainOut - 0.5);
+            return dims.rPort0;
+        }
+        if (mode === 'solid_mass_balance') {
+            var wh = dims.webHist;
+            var w = (wh && wh.time && wh.web) ? sampleSeries(wh.time, wh.web, t) : null;
+            if (w !== null) {
+                return clamp(dims.rPort0 + w * 1000, dims.rPort0, dims.rGrainOut - 0.5);
+            }
+            return dims.rPort0;
+        }
+        return dims.rPort0;
+    }
+
+    // Yanan web kalınlığı (mm) — HUD/etiket için; animasyonlu kip yoksa
+    // null (ekranda sayı uydurulmaz).
+    function burnedWebAt(dims, t, mode) {
+        if (mode === 'solid_mass_balance' && dims.webHist) {
+            var w = sampleSeries(dims.webHist.time, dims.webHist.web, t);
+            return (w === null) ? null : w * 1000;
+        }
+        if (mode === 'port_history') {
+            var r = portRadiusAt(dims, t, mode);
+            return r - dims.rPort0;
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------
@@ -1603,6 +1767,7 @@
         this._buildPlume();
         this._buildLabels();
         this._bindResize();
+        this._bindLangChange();
 
         this._clock = new THREE.Clock();
         this._introT = 0;
@@ -2115,7 +2280,8 @@
         // --- Yakıt grain'i (port yarıçapı animasyonlu — ayrı build) ---
         this.parts.grain = new THREE.Group();
         this._grainMesh = null;
-        this._rebuildGrain(portRadiusAt(d, this.state.time), true);
+        this._resolvePortRegression();
+        this._rebuildGrain(portRadiusAt(d, this.state.time, this._portRegMode), true);
 
         // --- Nozul: metal tutucu gövde + grafit boğaz insert'i + flanş ---
         var np = nozzleProfile(d);
@@ -2154,7 +2320,7 @@
             });
         }
         this._glowMesh = null;
-        this._rebuildGlow(portRadiusAt(d, this.state.time));
+        this._rebuildGlow(portRadiusAt(d, this.state.time, this._portRegMode));
 
         // Boğaz alev diski
         if (!this._throatFlame) {
@@ -2248,15 +2414,71 @@
         // duruma bağlıdır ve rengi SOURCE_COLORS eşlemesinden gelir.
         //  * kontur kaynağı her motorda beyan edilir (çözücü/yerel üretim)
         //  * sıvı motorda soğutma kanalı verisi yoksa 'veri yok' çipi
-        var chipDefs = [];
-        if (this._coolingChip) chipDefs.push(this._coolingChip);
-        chipDefs.push(d.contourSource === 'solver'
-            ? { text: 'kontur: çözücü', kind: 'computed' }
-            : { text: 'kontur: yerel üretim', kind: 'assumed' });
-        this._buildStatusChips(chipDefs, floorY);
+        this._floorY = floorY;
+        this._buildStatusChips(this._statusChipDefs(), floorY);
     };
 
-    // Durum çiplerini zemin köşesine (ızgara rozetinin karşısına) dizer.
+    // Durum çipi tanımları TEK yerde üretilir: hem zemin kurulumunda hem
+    // kip/dil değişiminde aynı liste kullanılır.
+    MotorScene.prototype._statusChipDefs = function () {
+        var d = this.dims;
+        var defs = [];
+        if (this._coolingChip) defs.push(this._coolingChip);
+        defs.push(d.contourSource === 'solver'
+            ? { text: 'kontur: çözücü', kind: 'computed' }
+            : { text: 'kontur: yerel üretim', kind: 'assumed' });
+        // Yanma animasyonunun kaynağı (B5): çip, iç yüzeyin neyden
+        // gerilediğini — ya da gerilemediğini — beyan eder.
+        if (d.motorType !== 'liquid') {
+            defs = defs.concat(portRegressionChipDefs(this._portRegMode,
+                { endsBurn: d.endsBurn }));
+        }
+        return defs;
+    };
+
+    // Çipleri yerinde tazele (kip ya da dil değişti). Zemin henüz
+    // kurulmadıysa sessizce atlanır — kurulumda zaten üretilecekler.
+    MotorScene.prototype._refreshStatusChips = function () {
+        if (this._floorY === undefined) return;
+        this._buildStatusChips(this._statusChipDefs(), this._floorY);
+    };
+
+    // Port gerileme kipini çöz (tek karar noktası). Kesit şekli, tane
+    // tipi ve GERÇEK seri varlığı birlikte değerlendirilir.
+    MotorScene.prototype._resolvePortRegression = function () {
+        var d = this.dims;
+        var hist = d.portHist;
+        this._portRegMode = portRegressionMode({
+            portShape: this.state.portShape,
+            grainType: d.grainType,
+            hasPortHistory: !!(hist && hist.time && hist.port_diameter
+                && hist.time.length > 1),
+            hasWebHistory: !!d.webHist
+        });
+        return this._portRegMode;
+    };
+
+    // Çip yerleşim çapası (mm). ÇİPLER BEYANDIR; okunamayan beyan beyan
+    // değildir. Ölçüldü (2026-08-15, canlı tarayıcı, katı sayfası): çipler
+    // ızgara açıklığının köşesine (±0,42·span, span = 2200 mm) konduğu için
+    // varsayılan kadrajda EKRAN DIŞINDA kalıyordu — üç çipin de izdüşümü
+    // NDC x ≈ −2,05…−2,34 (görünür sınır ±1). Kamera ızgarayı değil MOTORU
+    // çerçeveler (cameraFrameFit motor kutusundan türer), bu yüzden çapa
+    // motor boyudur. 0,42 oranı korunur: çip, model kutusunun hemen
+    // dışında ve zeminde kalır.
+    function chipAnchorMm(totalLen) {
+        return totalLen * 0.42;
+    }
+
+    // Çip yüksekliği ÖLÇÜ ROZETLERİYLE aynı ölçekten türer (labelScaleBase);
+    // eskiden ızgara hücresinden geliyordu ve 732 mm'lik motorda 66 mm'ye
+    // çıkıyordu: uzun metinli çip ~530 mm genişleyip kadrajın solundan
+    // taşıyordu (ölçüldü 2026-08-15, canlı tarayıcı).
+    function chipHeightMm(totalLen, outerDiameter) {
+        return labelScaleBase(totalLen, outerDiameter) * 0.62;
+    }
+
+    // Durum çiplerini zemin üstüne, modelin ön-sol köşesine dizer.
     // Çipler HUD süsü değil BEYANDIR: yalnız gerçek durumlar listelenir.
     MotorScene.prototype._buildStatusChips = function (defs, floorY) {
         if (this._chipGroup) {
@@ -2269,16 +2491,29 @@
             });
         }
         var g = this._chipGroup = new THREE.Group();
-        var span = this._gridSpan || this._totalLen * 3;
-        var bh = this._gridBadgeH || span * 0.03;
-        for (var i = 0; i < defs.length; i++) {
-            var sp = statusChip(defs[i].text, defs[i].kind);
+        var anchor = chipAnchorMm(this._totalLen || 1);
+        var bh = chipHeightMm(this._totalLen || 1,
+            2 * (this.dims.rcOut + this.dims.flangeLip));
+        var i, sp;
+        // Önce sprite'lar kurulur ve EN GENİŞİ ölçülür: bütün çipler AYNI
+        // merkez x'te durur. Çipe göre x kaydırmak, zemin perspektifte
+        // uzaklaştığı için yığını ekranda karıştırıyordu (ölçüldü: dar çip
+        // geniş çipin üstüne biniyordu).
+        var sprites = [], maxW = 0;
+        for (i = 0; i < defs.length; i++) {
+            sp = statusChip(defs[i].text, defs[i].kind);
             sp.material.depthTest = true;   // HUD değil, zemin mobilyası
             sp.renderOrder = 0;
             sp.scale.set(bh * sp.userData.aspect, bh, 1);
-            sp.position.set(-span * 0.42,
-                floorY + bh * (0.8 + 1.25 * i), span * 0.42);
-            g.add(sp);
+            maxW = Math.max(maxW, sp.scale.x);
+            sprites.push(sp);
+        }
+        for (i = 0; i < sprites.length; i++) {
+            // En geniş çipin sol kenarı çapaya oturur; metin İÇERİ uzar,
+            // kadrajın dışına taşmaz.
+            sprites[i].position.set(-anchor + maxW / 2,
+                floorY + bh * (0.8 + 1.35 * i), anchor);
+            g.add(sprites[i]);
         }
         this.scene.add(g);
     };
@@ -2965,6 +3200,18 @@
         this._ro.observe(this.container);
     };
 
+    // Dil değişiminde beyan çipleri yeniden çizilir (canvas sprite metni
+    // DOM değildir; i18n.js'in translateTree'si ona ulaşamaz). Dinleyici
+    // dispose'da bırakılır — sızıntı yok.
+    MotorScene.prototype._bindLangChange = function () {
+        var self = this;
+        this._langHandler = function () {
+            if (self._disposed) return;
+            self._refreshStatusChips();
+        };
+        document.addEventListener('hrma:langchange', this._langHandler);
+    };
+
     // ------------------------------------------------------------------
     // Ana döngü
     // ------------------------------------------------------------------
@@ -3034,8 +3281,9 @@
         }
 
         // Port regresyonu: grain eşikli (GRAIN_REBUILD_*) yeniden kurulur;
-        // yanma sonunda son dilim force ile kapatılır (görev 1)
-        var rP = portRadiusAt(d, st.time);
+        // yanma sonunda son dilim force ile kapatılır (görev 1).
+        // Yarıçap GERÇEK seriden gelir; kip animasyonsuzsa sabit kalır.
+        var rP = portRadiusAt(d, st.time, this._portRegMode);
         this._rebuildGrain(rP, this._grainFinal === true);
         this._grainFinal = false;
         // Parıltı silindiri: her karede geometri kurmak yerine mevcut mesh'e
@@ -3116,6 +3364,10 @@
                 speed: st.speed,
                 portDiameter: rP * 2,
                 webRemaining: clamp((d.rGrainOut - rP) / Math.max(d.rGrainOut - d.rPort0, 1e-6), 0, 1),
+                // Yanan web kalınlığı (mm) ve gerilemenin kaynağı: sayı
+                // yalnız gerçek seri varsa yayınlanır, yoksa null.
+                webBurnedMm: burnedWebAt(d, st.time, this._portRegMode),
+                portRegression: this._portRegMode,
                 of: ofNow !== null ? ofNow : d.of0,
                 isp: ispNow !== null ? ispNow : d.isp,
                 // Transient eğri varsa GERÇEK anlık itki; yoksa tasarım sabiti
@@ -3144,10 +3396,15 @@
     MotorScene.prototype.setPortShape = function (shape) {
         this.state.portShape = shape || 'circular';
         this._lastPortR = -1;
-        this._rebuildGrain(portRadiusAt(this.dims, this.state.time), true);
+        // Kesit değişimi gerileme kipini de değiştirebilir (dairesel
+        // olmayan kesitte radyal gerileme modellenmez) — kip ve beyan
+        // çipleri geometriyle BİRLİKTE tazelenir.
+        this._resolvePortRegression();
+        this._refreshStatusChips();
+        this._rebuildGrain(portRadiusAt(this.dims, this.state.time, this._portRegMode), true);
         // Parıltı da yeni kesitin iç teğet yarıçapına göre tazelenir
         // (cache/ölçek referansı _rebuildGlow içinde sıfırlanır)
-        this._rebuildGlow(portRadiusAt(this.dims, this.state.time));
+        this._rebuildGlow(portRadiusAt(this.dims, this.state.time, this._portRegMode));
         return this.state.portShape;
     };
     MotorScene.prototype.cyclePortShape = function () {
@@ -3533,6 +3790,10 @@
         this._disposed = true;
         if (this._raf) cancelAnimationFrame(this._raf);
         if (this._ro) this._ro.disconnect();
+        if (this._langHandler) {
+            document.removeEventListener('hrma:langchange', this._langHandler);
+            this._langHandler = null;
+        }
         // OrbitControls DOM dinleyicilerini bırak (görev 8 — sızıntı önlemi)
         if (this.controls && this.controls.dispose) this.controls.dispose();
         // Ortam küp dokusu sahne grafiğinde değil scene.environment'ta durur;

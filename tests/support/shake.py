@@ -33,6 +33,7 @@ Kullanım kalıbı testlerde::
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -82,10 +83,46 @@ def differing_paths(before: Dict[str, Any], after: Dict[str, Any],
 #: birimini üçe katlıyordu: 372 "sabit yaprak" bayrağının 228'i aynı 114
 #: sabitin yankısıydı. Tekilleştirme sayım birimini SABİT başına bire indirir;
 #: kopya sözleşmesinin kendisi ayrıca ölçülür (bkz. ``yanki_ayristi``).
+#:
+#: v2.6.27 (yirmi ikinci parti artçısı) — ÜÇÜNCÜ KOPYA: üst seviye
+#: ``.injector_design``. ``app.py`` bu anahtarı ``motor_results
+#: ['injector_design']`` ile AYNI nesneden doldurur (results sözlüğü
+#: kurulurken), yani kopya tanımı gereği bit-aynıdır. ÖLÇÜLDÜ (canlı
+#: test_client, HYBRID_BASE): üst seviye blok 11 yaprak, ``.motor.
+#: injector_design`` 11 yaprak; 11/11 bit-aynı, iki yönde de eksik/fazla
+#: yaprak YOK. Ürün yanıtı DEĞİŞTİRİLMEDİ (ön yüz üst seviye bloğu
+#: okuyabilir) — yalnız sayım birimi tekilleştirildi; bit-aynılık şartı
+#: aşağıdaki kopya sözleşmesi geçişiyle her koşuda yeniden ölçülür,
+#: ayrışırsa indirgeme kendiliğinden iptal olur.
 ECHO_CANONICAL_PREFIXES = (
     ('.trajectory.motor_data', '.motor'),
     ('.openrocket.flight_profile.motor_data', '.motor'),
+    ('.injector_design', '.motor.injector_design'),
 )
+
+#: BEYAN YANKISI: değeri, kullanıcının GÖNDERDİĞİ sayının birebir kendisi
+#: olan yaprak. ``inputs_not_used[i].submitted`` tam olarak budur —
+#: ``app.py::_declare_overridden_inputs`` bu alana ``float(data[field])``
+#: yazar, yani hesabın değil İSTEĞİN kopyasıdır ("şunu gönderdiniz ama
+#: çözücü kendi hesabını kullanıyor" beyanının 'şunu gönderdiniz' yarısı).
+#:
+#: Neden gerekli: sabit-çıktı taraması sayısal yaprakların hiçbir sarsımda
+#: kıpırdamamasını arıyor. Bu yaprak, ilgili alan SARSILMADIĞI sürece
+#: kıpırdamaz ve "uydurma sabit" gibi görünür — oysa uydurma değil,
+#: kullanıcının kendi sayısıdır. Ölçülen vaka: ``chamber_temperature``
+#: hibrit ŞABLONUNDA form alanı olarak yok (yalnız ``HYBRID_BASE`` yükünde
+#: var), bu yüzden hiç sarsılmıyor ve ``.inputs_not_used[0].submitted``
+#: taban değeri 3000,0'da donuyor.
+#:
+#: DAR TUTULDU: kardeş ``used_by_model`` alanı BİLEREK kapsam dışı —
+#: o çözücünün kendi sonucudur ve sabit kalırsa gerçekten şüphelidir;
+#: bekçi onu korumaya devam eder.
+_DECLARATION_ECHO = re.compile(r'\.inputs_not_used\[\d+\]\.submitted$')
+
+
+def is_declaration_echo(path: str) -> bool:
+    """Yaprak, kullanıcının gönderdiği sayının beyan yankısı mı?"""
+    return bool(_DECLARATION_ECHO.search(path))
 
 
 def canonical_echo_path(path: str) -> Optional[str]:
@@ -127,7 +164,15 @@ def is_echo(path: str, field_name: str) -> bool:
     """
     echo_markers = ('input_warnings', 'inputs_used', 'unwired_inputs',
                     'design_warnings', 'warnings', 'defaults_applied',
-                    'entered', 'requested', 'form_value', 'user_')
+                    'entered', 'requested', 'form_value', 'user_',
+                    # v2.6.27: 'inputs_not_used' bloğunun TAMAMI beyandır —
+                    # "bu sayıyı gönderdiniz, çözücü kendi hesabını
+                    # kullanıyor". Bir alanın TEK etkisi bu beyanı üretmekse
+                    # alan modele girmiyor demektir; beyanı 'canlılık' saymak
+                    # ölü alanı canlı gösterirdi (yankı sınıfının tanımı).
+                    # DİKKAT: 'inputs_used' imi bunu KAPSAMAZ (metin farklı),
+                    # bu yüzden ayrıca yazıldı.
+                    'inputs_not_used')
     if any(marker in path for marker in echo_markers):
         return True
     return path.endswith('.' + field_name)
@@ -229,6 +274,11 @@ class ShakeReport:
     #: SIFIR olmak zorundadır — bayat/varsayılan kopya sınıfını (uçuş
     #: simülasyonunun eski motor verisiyle beslenmesi) sonsuza dek yakalar.
     yanki_ayristi: List[str] = field(default_factory=list)
+    #: v2.6.27 — sabit sayımından BEYAN YANKISI olduğu için çıkarılan
+    #: yapraklar (bkz. ``is_declaration_echo``). Sayılmıyor ama SAKLANIYOR:
+    #: sınıflandırmanın ne yuttuğu görünmeden kalırsa, im genişletmenin en
+    #: kolay saklanma yeri olur.
+    beyan_yankilari: List[str] = field(default_factory=list)
     #: Taban koşunun DÜZ yaprak sözlüğü (yol -> değer).
     #: v2.6.26 — sabit çıktı yapraklarının SINIFLANDIRILMASI için gerekli:
     #: bir yaprağın "ızgara mı, standart mı, beyanlı mı" olduğuna karar vermek
@@ -250,6 +300,7 @@ class ShakeReport:
             f'{len(self.unmeasurable)} olculemedi, '
             f'{len(self.constant_outputs)} sabit cikti yapragi '
             f'({self.echo_constant_dedup} yanki tekillestirildi, '
+            f'{len(self.beyan_yankilari)} beyan yankisi, '
             f'{len(self.yanki_ayristi)} yanki ayristi)')
 
 
@@ -358,6 +409,12 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
         if any(path.startswith(prefix) or prefix in path for prefix in ignore):
+            continue
+        # Beyan yankısı: değeri kullanıcının GÖNDERDİĞİ sayının kendisi olan
+        # yaprak uydurma sabit değildir (bkz. is_declaration_echo). Alan
+        # sarsılırsa zaten değişir; sarsılmıyorsa donması tanımı gereğidir.
+        if is_declaration_echo(path):
+            report.beyan_yankilari.append(path)
             continue
         # Yankı tekilleştirme: sözleşmesi SAĞLAM kopya ikinci kez sayılmaz —
         # kanonik motor.* yaprağı bu döngüde zaten sayılıyor (sözleşme

@@ -1777,6 +1777,50 @@
                         </label>
                         <input type="number" id="wind_direction" value="0" min="0" max="360" step="1">
                     </div>
+                    <!-- 2.6.27 (yirmi ikinci parti artçısı) — "kanal var kapı
+                         yok": /calculate ZATEN üç kurtarma anahtarını okuyor
+                         (app.py:1778-1780 launch_params) ve katı sayfasında
+                         bu üç alan Faz 6'da açılmıştı; HİBRİT sayfasında
+                         yoktu. Sonuç: hibritte iniş hızı araçtan bağımsız,
+                         çözücünün varsayımından (2,0 m² / Cd 1,4 / 2,0 s)
+                         türüyordu — assumed=true damgası dürüsttü ama
+                         kullanıcının damgayı düzeltmesinin YOLU yoktu.
+                         ALANLAR BİLEREK BOŞ: boş alan isteğe KONMAZ (bkz.
+                         aşağıdaki optNum), böylece çözücü "verilmedi" ile
+                         "değer geldi" ayrımını yapıp varsayım beyanını
+                         sürdürebiliyor (trajectory_analysis.py:476-526).
+                         Sayı dayatmak, girilmemiş bir paraşütü kullanıcının
+                         girdisi gibi göstermek olurdu. -->
+                    <div class="form-group">
+                        <label>
+                            <span data-i18n="adv.label.parachuteAreaM2">Parachute Area (m2)</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteAreaM2">Projected (canopy) area of the recovery parachute. Descent velocity scales as 1/sqrt(area). Leave empty to keep the solver assumption, which is reported as an assumption in the results.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="parachute_area" min="0" step="0.1" placeholder="—">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <span data-i18n="adv.label.parachuteCd">Parachute Cd</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteCd">Drag coefficient of the parachute referenced to its projected area (1.4 is the classic flat-circular value). Leave empty to keep the solver assumption.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="parachute_cd" min="0" step="0.05" placeholder="—">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <span data-i18n="adv.label.parachuteDeployDelayS">Deploy Delay after Apogee (s)</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteDeployDelayS">Time between apogee and canopy inflation. The vehicle falls ballistically during this delay. Leave empty to keep the solver assumption.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="parachute_deploy_delay" min="0" step="0.5" placeholder="—">
+                    </div>
                 </div>
 
                 <button type="button" class="btn" onclick="calculateTrajectory()" data-i18n="adv.btn.calculateTrajectoryPerformance">Calculate Trajectory Performance</button>
@@ -3841,6 +3885,32 @@
                 data.n_elements = parseInt(document.getElementById('n_elements')?.value || 0);
             }
             
+            // 2.6.27 — KURTARMA GİRDİLERİ (paraşüt üçlüsü).
+            // `numById` KULLANILMAZ: o boş alanda null döndürse de anahtarı
+            // sözlüğe KOYARDI ve çözücü "kullanıcı null gönderdi" ile "hiç
+            // göndermedi" ayrımını yapamazdı. Ayrım anahtarın VARLIĞINDAN
+            // yapılıyor (app.py:1784-1785 boş anahtarı düşürür,
+            // trajectory_analysis.py:518 'anahtar var mı' diye bakar);
+            // boş alan gönderilirse kullanıcının hiç vermediği bir paraşüt
+            // "verildi" sayılır ve dürüstlük bayrağı (assumed) haksız yere
+            // düşer. optNum adı SÖZLEŞMEDİR: envanter bekçisi (Katman A,
+            // tests/support/inventory.py) bu adı tanır; yerel takma ad
+            // verilirse alanlar "hiçbir yerde okunmuyor" görünür.
+            const optNum = function (id) {
+                const el = document.getElementById(id);
+                if (!el || String(el.value).trim() === '') return null;
+                const v = parseFloat(el.value);
+                return (isFinite(v) && v > 0) ? v : null;
+            };
+            const chute = {
+                parachute_area: optNum('parachute_area'),
+                parachute_cd: optNum('parachute_cd'),
+                parachute_deploy_delay: optNum('parachute_deploy_delay')
+            };
+            Object.keys(chute).forEach(function (k) {
+                if (chute[k] !== null) data[k] = chute[k];
+            });
+
             // Ensure all required parameters have values
             data.target_velocity = data.target_velocity || 30;
             

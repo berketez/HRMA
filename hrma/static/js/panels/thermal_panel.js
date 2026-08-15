@@ -218,7 +218,16 @@
         const traces1 = [];
         if (sameLen(p.q_MW)) {
             const qTrace = {
-                x: x, y: p.q_MW, name: T('panel.thermal.heatFluxSeries', 'Heat flux q'),
+                // ADLANDIRMA (v2.6.27, parti 20): `p.q_MW` REFERANS SOĞUTULMUŞ
+                // CİDARDAKİ tasarım yüküdür (heat_transfer_analysis.py,
+                // `q_flux[i] = gas_side_flux(Tw_ref)`; T_w,ref =
+                // min(izin verilen, 0,8*T_aw)) — aynı grafiğin sağ
+                // ekseninde duran DENGE cidar sıcaklığındaki akı DEĞİLDİR.
+                // Ölçüldü (40 bar / 3000 K / çelik / doğal soğutma, boğaz):
+                // referans cidarda 25,98 MW/m², denge cidarında (T_wall_eq =
+                // 2976,8 K) 0,088 MW/m² — 294 kat. Çıplak ad bu iki eğriyi
+                // aynı şey sanmaya davet ediyordu.
+                x: x, y: p.q_MW, name: T('panel.thermal.heatFluxSeriesRefWall', 'Heat flux q (reference cooled wall)'),
                 type: 'scatter', mode: 'lines',
                 line: { color: '#00e5ff', width: 2 },
                 hovertemplate: 'x = %{x:.1f} mm<br>q = %{y:.2f} MW/m²<extra></extra>',
@@ -403,9 +412,21 @@
             + `<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">`
             + U.statCard(T('panel.thermal.cardHg', 'h_g (gas side)'), U.fmt(htc.gas_side, 0),
                 'W/m²·K', null, htc.correlation || '')
-            + U.statCard(T('panel.thermal.cardQThroat', 'q_throat'),
-                U.fmt(gsa.throat_heat_flux / 1e6, 2), 'MW/m²')
-            + U.statCard(T('panel.thermal.cardQChamber', 'q_chamber'),
+            // ADLANDIRMA (v2.6.27, parti 20): iki kart da REFERANS SOĞUTULMUŞ
+            // cidardaki Bartz tasarım yüküdür (heat_transfer_analysis.py,
+            // `throat_heat_flux = gas_side_flux(Tw_ref, h_gas)` ve
+            // `chamber_heat_flux = gas_side_flux(Tw_ref, h_chamber)`;
+            // ölçüldü 40 bar / 3000 K / çelik: 24,12 ve 2,40 MW/m²,
+            // T_w,ref = 1073 K). Rejeneratif panelin
+            // tepe akısı ise KUPLE cidar dengesinden gelir — aynı adı
+            // taşıyamazlar (ölçüm için panel.regen.cardPeakFluxBalance).
+            + U.statCard(T('panel.thermal.cardQThroatRefWall', 'q_throat (reference cooled wall)'),
+                U.fmt(gsa.throat_heat_flux / 1e6, 2), 'MW/m²', null,
+                T('panel.thermal.cardQThroatTip',
+                  'Bartz design load at the reference cooled wall '
+                  + '(T_w,ref = min(allowable, 0.8*T_aw)); not the flux at the '
+                  + 'equilibrium wall temperature'))
+            + U.statCard(T('panel.thermal.cardQChamberRefWall', 'q_chamber (reference cooled wall)'),
                 U.fmt(gsa.chamber_heat_flux / 1e6, 2), 'MW/m²')
             + U.statCard(T('panel.thermal.cardTwallIn', 'T_wall inner'),
                 U.fmt(wa.inner_temperature, 0), 'K', tempKind(wa.inner_temperature))

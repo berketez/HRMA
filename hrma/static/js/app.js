@@ -403,8 +403,15 @@ function displayPerformanceMetrics(motorData) {
     if (!metricsDiv) return;
 
     // Metrik listesi — tüm değerler backend sonucundan; süs/sahte veri yok.
+    // ADLANDIRMA (v2.6.27, parti 20): `motorData.isp` TASARIM NOKTASI Isp'sidir
+    // — hibrit çözücüde CF*C*/g0 (hybrid_rocket_engine.py:1366), CF tasarım
+    // irtifasının ortam basıncında çözülür. AYNI yanıt `vacuum_isp` ve
+    // `sea_level_isp` de taşır (ölçüldü, 1 kN / 20 bar / N2O-HTPB varsayılanı:
+    // isp 230,3 s — vacuum_isp 260,0 s, %12,9 fark). Çıplak "Specific Impulse"
+    // bu üçünden hangisi olduğunu söylemiyordu; ad, aynı sayfadaki yazdırma
+    // penceresinin `adv.pop.isp` künyesiyle birebir aynı tanıma bağlandı.
     const metrics = [
-        { label: T('app.metric.isp', 'Specific Impulse'), value: motorData.isp, decimals: 1, unit: 's' },
+        { label: T('app.metric.ispDesign', 'Isp (design point, at design-altitude ambient)'), value: motorData.isp, decimals: 1, unit: 's' },
         { label: T('app.metric.thrust', 'Thrust'), value: motorData.thrust, decimals: 0, unit: 'N' },
         { label: T('app.metric.pc', 'Chamber Pressure'), value: motorData.chamber_pressure, decimals: 1, unit: 'bar' },
         { label: T('app.metric.mdot', 'Mass Flow Rate'), value: motorData.mdot_total, decimals: 3, unit: 'kg/s' }
@@ -867,7 +874,7 @@ function displayDesignReport(motorData, injectorData) {
             <h6>${T('app.rep.secPerformance', 'Motor Performance')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>${T('app.rep.ispLong', 'Specific Impulse (Isp)')}</td><td>${motorData.isp.toFixed(1)} s</td></tr>
+                    <tr><td>${T('app.rep.ispDesignLong', 'Specific Impulse (Isp, design point at design-altitude ambient)')}</td><td>${motorData.isp.toFixed(1)} s</td></tr>
                     <tr><td>${T('app.rep.cstarLong', 'Characteristic Velocity (C*)')}</td><td>${motorData.c_star.toFixed(0)} m/s</td></tr>
                     <tr><td>${T('app.rep.cfLong', 'Thrust Coefficient (CF)')}</td><td>${motorData.cf.toFixed(3)}</td></tr>
                     <tr><td>${T('app.rep.throatDia', 'Throat Diameter')}</td><td>${(motorData.throat_diameter * 1000).toFixed(1)} mm</td></tr>
@@ -1166,7 +1173,7 @@ async function exportReport() {
     let report = T('app.txt.title', 'HYBRID ROCKET MOTOR ANALYSIS REPORT') + '\n';
     report += '=====================================\n\n';
     report += T('app.txt.performance', 'MOTOR PERFORMANCE') + ':\n';
-    report += `${T('app.metric.isp', 'Specific Impulse')}: ${f(motor.isp, 1)} s\n`;
+    report += `${T('app.metric.ispDesign', 'Isp (design point, at design-altitude ambient)')}: ${f(motor.isp, 1)} s\n`;
     report += `${T('app.metric.thrust', 'Thrust')}: ${f(motor.thrust, 0)} N\n`;
     report += `${T('app.metric.pc', 'Chamber Pressure')}: ${f(motor.chamber_pressure, 1)} bar\n`;
     report += `${T('app.metric.mdot', 'Mass Flow Rate')}: ${f(motor.mdot_total, 3)} kg/s\n\n`;
@@ -2441,7 +2448,7 @@ function displayMotorTable(motorData) {
         [T('app.rep.chamberVolume', 'Chamber Volume'), (chamberVolumeM3(motorData) * 1e6).toFixed(1), 'cm³'],
         [T('app.metric.pc', 'Chamber Pressure'), (motorData.chamber_pressure).toFixed(1), 'bar'],
         [T('app.metric.thrust', 'Thrust'), (motorData.thrust).toFixed(0), 'N'],
-        [T('app.metric.isp', 'Specific Impulse'), motorData.isp.toFixed(1), 's'],
+        [T('app.metric.ispDesign', 'Isp (design point, at design-altitude ambient)'), motorData.isp.toFixed(1), 's'],
         [T('app.rep.cstar', 'Characteristic Velocity'), motorData.c_star.toFixed(0), 'm/s'],
         [T('app.rep.cf', 'Thrust Coefficient'), motorData.cf.toFixed(3), '-'],
         [T('app.metric.mdot', 'Mass Flow Rate'), motorData.mdot_total.toFixed(3), 'kg/s']

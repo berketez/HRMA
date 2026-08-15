@@ -35,11 +35,14 @@ import time
 
 import numpy as np
 
+from hrma.cfd import kernels as _kernels
 from hrma.cfd.euler_core import (
     cons_to_prim_axisym,
     local_dt_axisym,
+    precompute_geometry,
     prim_to_cons_axisym,
     residual_axisym,
+    shock_column_flag,
 )
 from hrma.flow.quasi1d import isentropic_ratios, mach_from_area_ratio
 
@@ -73,18 +76,35 @@ def _column_wall_radius(grid):
     return 0.5 * (r_wall_nodes[:-1] + r_wall_nodes[1:])
 
 
-def _isentropic_initial_state(grid, P0, T0, gamma, R):
-    """Kolon bazlı izantropik başlangıç alanı (yalnız tahmin; beyan üstte)."""
+def _isentropic_initial_state(grid, P0, T0, gamma, R, Pb=None):
+    """Kolon bazlı izantropik başlangıç alanı (yalnız tahmin; beyan üstte).
+
+    IRAKSAK DAL SEÇİMİ (Aşama 1B, ölçülen gerekçe): varsayılan süpersonik
+    dal. Pb verilmişse ve tam-süpersonik çözümün çıkış statik basıncından
+    BÜYÜKSE ıraksak bölge SES-ALTI dalda başlatılır — aksi hâlde çıkış
+    kolonu ses-üstü doğar, çıkış BC'si Pb'yi hiç uygulamaz (ses-üstü çıkış
+    = tam dışdeğerleme) ve tam-süpersonik alan ayrık SABİT NOKTA olarak
+    kalırdı: iç şok hiç oluşmaz (ölçüldü; arka-basınç vakası testinin
+    varlık sebebi). Bu yalnız başlangıç TAHMİNİDİR: şokun yeri/varlığı
+    çözücünün kendi dinamiğiyle oturur ve analitik 1B referansa karşı
+    bağımsız test edilir (tests/cfd/test_normal_sok.py)."""
     g = float(gamma)
     r_w = _column_wall_radius(grid)
     area = np.pi * r_w ** 2
     i_throat = int(np.argmin(area))
     a_star = float(area[i_throat])
     ni, nj = grid.ni, grid.nj
+    divergent_supersonic = True
+    if Pb is not None:
+        ratio_exit = max(float(area[-1] / a_star), 1.0)
+        m_exit_sup = mach_from_area_ratio(ratio_exit, g, supersonic=True)
+        _, p_ratio_exit, _ = isentropic_ratios(m_exit_sup, g)
+        divergent_supersonic = bool(float(Pb) <= float(P0) * p_ratio_exit)
     w = np.empty((ni, nj, 4))
     for i in range(ni):
         ratio = max(float(area[i] / a_star), 1.0)
-        mach = mach_from_area_ratio(ratio, g, supersonic=(i > i_throat))
+        mach = mach_from_area_ratio(
+            ratio, g, supersonic=(divergent_supersonic and i > i_throat))
         t_ratio, p_ratio, _ = isentropic_ratios(mach, g)
         temp = float(T0) * t_ratio
         p = float(P0) * p_ratio
@@ -148,9 +168,12 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
     if not (1.0 < g < 2.0):
         raise ValueError('gamma (1, 2) aralığında olmalı (mükemmel gaz).')
 
-    U, i_throat = _isentropic_initial_state(grid, P0, T0, g, Rs)
-    area_i = np.linalg.norm(grid.face_i, axis=-1)
-    area_j = np.linalg.norm(grid.face_j, axis=-1)
+    U, i_throat = _isentropic_initial_state(grid, P0, T0, g, Rs, Pb=Pb)
+    # Izgara sabiti yüzey geometrisi BİR kez (hoist; bit-özdeşlik bekçili —
+    # tests/cfd/test_performans.py). area_i/area_j aynı diziden dilimlenir.
+    geom = precompute_geometry(grid)
+    area_i = geom['area_i']
+    area_j = geom['area_j']
 
     # Kalıntı ölçeği: ρ₀·a₀/L (boyutsuzlaştırma beyanı — docstring)
     rho0 = P0 / (Rs * T0)
@@ -173,8 +196,20 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
     # sürülür — kararlı-hâl pratiğinde standart (Venkatakrishnan, AIAA J.
     # 33(5), 1995 gerekçesi). Dondurma anı çıktıda beyan edilir; şema minmod
     # kalır (mertebe kanıtı tests/cfd/test_sod.py'de, zaman-doğru koşumda).
+    #
+    # TAZELEME (Aşama 1B, ölçülen gerekçe): iç şoklu vakada plato, şok daha
+    # yerine OTURMADAN tetiklenebilir (ölçüldü, 120×24 arka-basınç vakası:
+    # 1698. iterasyonda donan BAYAT eğimler kalıntıyı 6e-3 bandında salınıma
+    # kilitledi). Donduktan sonra plato SÜRÜYORSA eğimler güncel durumdan
+    # YENİDEN alınır (Picard tarzı tazeleme); durum oturunca tazeleme
+    # kendiliğinden kendi-tutarlı hâle gelir ve kalıntı derine iner
+    # (ölçüldü: aynı vaka 5,4e-11'e indi). İzantropik (şoksuz) vakada donma
+    # sonrası kalıntı inişte olduğundan plato yeniden tetiklenmez — davranış
+    # 1A ile aynı kalır (bekçiler: tests/cfd/test_izantropik_lule.py).
+    # Son dondurma anı + tazeleme sayısı çıktıda beyan edilir.
     frozen_slopes = None
     frozen_at = None
+    freeze_count = 0
     plateau_window = 300
 
     def _settled(hist):
@@ -189,7 +224,7 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
                                                      it / float(ramp_iters))
         r1, aux = residual_axisym(U, grid, g, Rs, P0, T0, Pb=Pb,
                                   second_order=second_order,
-                                  slopes=frozen_slopes)
+                                  slopes=frozen_slopes, geom=geom)
         res_norm = float(np.sqrt(np.sum(r1[..., 0] ** 2 * vol) / vol_sum)
                          / res_scale)
         _, m_sec, _ = _section_averages(U, grid, g)
@@ -210,23 +245,27 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
             break
 
         # Plato tespiti: rampa bitmiş + iki ardışık pencerede kalıntı
-        # anlamlı düşmüyor → eğimleri dondur (bir kez).
-        if (frozen_slopes is None and second_order
-                and it > ramp_iters + 2 * plateau_window):
+        # anlamlı düşmüyor → eğimleri dondur; donmuşken plato SÜRÜYORSA
+        # güncel durumdan TAZELE (beyan yukarıda; şoklu vaka gerekçesi).
+        if (second_order and it > ramp_iters + 2 * plateau_window
+                and (frozen_at is None
+                     or it >= frozen_at + 2 * plateau_window)):
             recent = min(res_hist[-plateau_window:])
             before = min(res_hist[-2 * plateau_window:-plateau_window])
             if recent > 0.9 * before:
                 _, _, frozen_slopes = residual_axisym(
                     U, grid, g, Rs, P0, T0, Pb=Pb,
-                    second_order=second_order, return_slopes=True)
+                    second_order=second_order, return_slopes=True,
+                    geom=geom)
                 frozen_at = it
+                freeze_count += 1
 
         # SSP-RK2 (yerel Δt)
         dt = local_dt_axisym(U, grid, g, cfl, area_i, area_j)
         u1 = U + dt[..., None] * r1
         r2, _ = residual_axisym(u1, grid, g, Rs, P0, T0, Pb=Pb,
                                 second_order=second_order,
-                                slopes=frozen_slopes)
+                                slopes=frozen_slopes, geom=geom)
         U = 0.5 * (U + u1 + dt[..., None] * r2)
         if not np.all(np.isfinite(U)):
             diverged = True
@@ -238,7 +277,7 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
     # Nihai durum bütçesi (son duruma ait akılar — geçmişin son kaydı değil)
     _, aux_final = residual_axisym(U, grid, g, Rs, P0, T0, Pb=Pb,
                                    second_order=second_order,
-                                   slopes=frozen_slopes)
+                                   slopes=frozen_slopes, geom=geom)
     mdot_in = aux_final['mass_flow_in_kg_s']
     mdot_out = aux_final['mass_flow_out_kg_s']
     e_in = aux_final['energy_flux_in_W']
@@ -265,8 +304,9 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
             f'{res_hist[-1]:.3e} '
             f'{"<" if res_ok else ">="} tol {tol_res:g} (ölçek ρ0·a0/L). '
             f'{it} iterasyon.'
-            + (f' Sınırlayıcı {frozen_at}. iterasyonda donduruldu '
-               f'(plato tespiti; şema minmod).' if frozen_at is not None
+            + (f' Sınırlayıcı son olarak {frozen_at}. iterasyonda '
+               f'donduruldu (plato tespiti, {freeze_count} dondurma/'
+               f'tazeleme; şema minmod).' if frozen_at is not None
                else ''))
 
     w = cons_to_prim_axisym(U, g)
@@ -281,6 +321,12 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
     # değeri dışdeğerlenmemiş ham komşu değerdir; beyan).
     wall_pressure = w[:, -1, 3].copy()
 
+    # Sensör beyan sayısı SON alandan doğrudan (donmuş eğimli bütçe
+    # çağrısında sensör bloğu atlanır — aux_final'den alınsa şoklu vakada
+    # yanlış 0 beyan edilirdi).
+    _sensor_flag = shock_column_flag(w[..., 3]) if second_order else None
+    sensor_columns = 0 if _sensor_flag is None else int(np.sum(_sensor_flag))
+
     # NOT_MODELLED tek kaynağı paket köküdür; döngüsel içe aktarmayı önlemek
     # için çağrı anında alınır (fonksiyon çağrılırken paket tam yüklüdür).
     from hrma.cfd import CFD_NOT_MODELLED
@@ -290,6 +336,7 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
         'convergence_basis': basis,
         'iterations': it,
         'limiter_frozen_at_iter': frozen_at,
+        'limiter_freeze_count': freeze_count,
         'residual_history': np.asarray(res_hist),
         'mass_flow_in_kg_s': mdot_in,
         'mass_flow_out_kg_s': mdot_out,
@@ -328,9 +375,27 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
             'mach_section_avg': float(m_sec[i_throat]),
         },
         'wall_pressure_Pa': wall_pressure,
+        'wall_pressure_z_m': grid.z_centers[:, -1].copy(),
         'wall_pressure_basis': (
             'Duvara komşu hücre merkezi basıncı (hücre-merkezli FVM ham '
-            'değeri; Aşama 1B: separation.py girdisi bu beyanla bağlanır).'),
+            'değeri); ekseni wall_pressure_z_m — duvara komşu hücre '
+            'merkezlerinin z koordinatı [m], aynı uzunlukta (ni,). '
+            'Aşama 1B: separation.py girdisi bu beyanla bağlanır.'),
+        'shock_sensor_columns': sensor_columns,
+        'shock_sensor_basis': (
+            'Şok sensörü (euler_core.SHOCK_SENSOR_THRESHOLD, eksenel yüz '
+            '|Δp|/min(p) eşiği, ölçümden): bayraklı kolonlarda MUSCL '
+            'eğimleri sıfırlanır (yerel birinci mertebe — şok stall '
+            'tedavisi, gerekçe residual_axisym docstring). Pürüzsüz akışta '
+            'hiç tetiklenmez (0 kolon = sonuç sensörsüz yolla bit-özdeş); '
+            'sayı son duruma aittir.'),
+        'kernel_backend': ('numba' if _kernels.NUMBA_AVAILABLE
+                           else 'numpy'),
+        'kernel_backend_basis': (
+            'Yönlü HLLC akısının arka ucu (kernels.py): numba isteğe bağlı '
+            'hızlandırmadır, kurulu değilse (ya da HRMA_CFD_DISABLE_NUMBA=1) '
+            'saf NumPy yolu aynı sonucu üretir (eşdeğerlik bekçili; '
+            'tests/cfd/test_performans.py).'),
         'not_modelled': dict(CFD_NOT_MODELLED),
         'assumptions': list(_ASSUMPTIONS),
         'inputs': {

@@ -86,9 +86,26 @@ from hrma.fea.mesh_axisym import (
 # tutarlılığı kuralı gereği başka yerde tekrarlanmaz).
 # ---------------------------------------------------------------------------
 DEFAULT_REFINE_TOL = 0.01        # maks von Mises bağıl değişim toleransı
-REFINE_FACTOR = 2                # her turda eksenel/radyal bölüm çarpanı
+REFINE_FACTOR = 2                # katlama turunda bölüm çarpanı
 DEFAULT_MAX_REFINE_ROUNDS = 4    # başlangıç mesh'i + en fazla bu kadar inceltme
 DEFAULT_N_AXIAL0 = 16            # inceltme sürücüsünün başlangıç eksenel bölümü
+
+#: İnceltme politikaları (solve_with_refinement ``refine_policy``):
+#:
+#: * ``"directional"`` (varsayılan) — YÖN-AYRIŞIK inceltme. Her turda iki
+#:   sonda çözülür (yalnız eksenel katlanmış, yalnız radyal katlanmış);
+#:   maks von Mises'i daha çok değiştiren yön kabul edilir, karar ve iki
+#:   göstergenin değeri history'ye BEYANLA yazılır. Gerekçe (parti 24
+#:   ölçümü, sıvı varsayılanı): yönler farklı hızda yakınsıyor (kalan fark
+#:   %2,37 = eksenel %1,1 + radyal %1,3; radyal tur başına yarılanıyor) —
+#:   birlikte katlama eleman israf ediyor (hüküm 65536 elemana kalıyordu).
+#: * ``"joint"`` — eski birlikte-katlama: eksenel VE radyal aynı turda
+#:   REFINE_FACTOR ile çarpılır (eleman tur başına F² kat). Geriye dönük
+#:   karşılaştırma/regresyon için erişilebilir tutulur.
+REFINE_POLICY_DIRECTIONAL = "directional"
+REFINE_POLICY_JOINT = "joint"
+REFINE_POLICIES = (REFINE_POLICY_DIRECTIONAL, REFINE_POLICY_JOINT)
+DEFAULT_REFINE_POLICY = REFINE_POLICY_DIRECTIONAL
 
 _GAUSS_COORD = 1.0 / np.sqrt(3.0)
 # Gauss noktası ve köşe işaret sırası AYNI dizilişte tutulur (ekstrapolasyon
@@ -156,11 +173,20 @@ class RefinementResult:
     """Ardışık inceltme sürücüsünün sonucu.
 
     result / mesh : son (en ince) turun çözümü ve mesh'i.
-    converged : maks von Mises bağıl değişimi toleransın altına indi mi.
-    history : her tur için {"n_elems", "n_axial", "n_radial",
-        "max_von_mises", "rel_change"} kayıtları (ilk turda rel_change None).
-    final_rel_change : son iki tur arasındaki bağıl değişim (tek tur
-        koşulduysa None).
+    converged : yakınsama ölçütü toleransın altına indi mi.
+    history : her KABUL EDİLEN tur için {"n_elems", "n_axial", "n_radial",
+        "max_von_mises", "rel_change", "yon", "karar"} kayıtları (ilk turda
+        rel_change/yon/karar None). ``rel_change`` her iki politikada da
+        toleransla karşılaştırılan büyüklüktür: joint'te ardışık iki turun
+        maks von Mises bağıl farkı; directional'da iki yön sondasının
+        gösterge TOPLAMI (birlikte-katlama farkının birinci-mertebe
+        karşılığı — panel grafiği tolerans çizgisiyle aynı sözleşmede
+        kalır). ``yon`` katlanan yön ("eksenel"/"radyal"; joint'te
+        "eksenel+radyal"); ``karar`` directional'da yön kararının ölçülü
+        beyanı: d_eksenel, d_radyal, d_secilen, toplam, iki sondanın mesh
+        ve maks von Mises'i, gerekçe metni.
+    final_rel_change : son karardaki yakınsama ölçütü (tek tur koşulduysa
+        None); converged ⟺ final_rel_change < tol.
     meta : kullanıcıya gösterilecek dürüst beyan ("beyan" anahtarı: eleman
         sayısı + son iki tur farkı + yakınsayıp yakınsamadığı).
     """
@@ -593,6 +619,12 @@ def solve_pressure(mesh: AxisymMesh,
     return result
 
 
+def _vm_rel_change(vm_new: float, vm_old: float) -> float:
+    """İki maks von Mises değeri arasındaki bağıl değişim (ölçek korumalı)."""
+    scale = max(abs(vm_new), abs(vm_old), 1e-300)
+    return abs(vm_new - vm_old) / scale
+
+
 def solve_with_refinement(contour,
                           thickness: Union[float, np.ndarray],
                           material: Material,
@@ -603,15 +635,42 @@ def solve_with_refinement(contour,
                           n_axial0: int = DEFAULT_N_AXIAL0,
                           n_radial0: int = DEFAULT_ELEMS_THROUGH_WALL,
                           max_rounds: int = DEFAULT_MAX_REFINE_ROUNDS,
-                          offset_mode: str = "normal") -> RefinementResult:
+                          offset_mode: str = "normal",
+                          refine_policy: str = DEFAULT_REFINE_POLICY
+                          ) -> RefinementResult:
     """"Optimal mesh" sürücüsü: ardışık inceltme + yakınsama denetimi.
 
     Kullanıcıya mesh ayarı gösterilmez; "optimal" iddiasının dürüst karşılığı
-    yakınsama kontrolüdür (V2.7 dokümanı §3): her turda eksenel ve radyal
-    bölüm sayısı ``REFINE_FACTOR`` ile çarpılır, hedef büyüklük (maks von
-    Mises, Gauss alanı) son iki tur arasında bağıl olarak ``tol`` altında
-    değişince durulur. Eleman sayısı ve son fark ``history`` ile
-    ``meta['beyan']`` içinde raporlanır; ``max_rounds`` içinde yakınsamazsa
+    yakınsama kontrolüdür (V2.7 dokümanı §3). İki politika (``refine_policy``,
+    modül sabitleri ``REFINE_POLICIES``):
+
+    * ``"directional"`` (varsayılan) — YÖN-AYRIŞIK: her turda mevcut mesh'ten
+      iki SONDA çözülür: yalnız eksenel bölüm katlanmış (F·na, nr) ve yalnız
+      radyal bölüm katlanmış (na, F·nr). Göstergeler d_eksenel / d_radyal =
+      sondanın maks von Mises'inin mevcut çözüme bağıl değişimi. BÜYÜK
+      gösterge yönü kabul edilir (eşitlikte eksenel); karar iki göstergenin
+      değeriyle birlikte ``history[k]['karar']`` içinde BEYAN edilir.
+      Yakınsama ölçütü göstergelerin TOPLAMIDIR (d_eksenel + d_radyal —
+      birlikte-katlama farkının birinci-mertebe karşılığı; yalnız
+      max(d) kullanmak eski ölçütten GEVŞEK olurdu, toplam korunumlu).
+      Tur bütçesi: ``max_rounds`` eski politikanın eleman tavanını tanımlar
+      (tur başına F² kat); yön-ayrışık politika AYNI tavan içinde en fazla
+      ``2·max_rounds`` tek-yön katlaması yapar (en kötü durumda tek yönde
+      n0·F^(2·max_rounds) — tavan aşılmaz). Her tur 2 sonda çözer; kabul
+      edilen sonda bir sonraki turun mevcut çözümüdür (çözüm israfı yok).
+      Bir yön yakınsadıysa göstergesi küçülür ve eleman o yöne HARCANMAZ —
+      gerekirse yüksek en-boy oranlı (anizotrop) mesh'e gidilir; bu kasıtlı
+      bir sonuçtur (SPR yaması ölçekli koordinatlarla anizotropiye dayanıklı,
+      bkz. ``_nodal_stress_spr``).
+    * ``"joint"`` — eski birlikte-katlama: her turda eksenel VE radyal bölüm
+      ``REFINE_FACTOR`` ile çarpılır; son iki tur arasındaki maks von Mises
+      bağıl farkı ``tol`` altına inince durulur. Sayısal davranışı eski
+      sürümle BİREBİR aynıdır (regresyon/karşılaştırma için tutulur).
+
+    Her iki politikada da ``history`` kayıtlarının ``rel_change`` alanı
+    toleransla karşılaştırılan büyüklüğün kendisidir (panelin yakınsama
+    grafiği tolerans çizgisiyle aynı sözleşmede kalır) ve ``converged ⟺
+    final_rel_change < tol``. ``max_rounds`` içinde yakınsamazsa
     ``converged=False`` döner ve beyan bunu AÇIKÇA söyler — yakınsamamış
     sonuç yakınsamış gibi sunulmaz.
 
@@ -622,63 +681,135 @@ def solve_with_refinement(contour,
         raise ValueError("tol (0, 1) aralığında bağıl değişim olmalı.")
     if max_rounds < 0:
         raise ValueError("max_rounds >= 0 olmalı.")
+    if refine_policy not in REFINE_POLICIES:
+        raise ValueError(
+            f"refine_policy {REFINE_POLICIES} içinden olmalı; verilen: "
+            f"{refine_policy!r}")
+
+    n_solves = 0
+
+    def _coz(n_ax: int, n_rad: int):
+        nonlocal n_solves
+        m = build_wall_mesh(contour, thickness, int(n_ax), int(n_rad),
+                            offset_mode=offset_mode)
+        r = solve_pressure(m, material, inner_pressure,
+                           outer_pressure=outer_pressure, axial_fix=axial_fix)
+        n_solves += 1
+        return m, r
+
+    def _kayit(m, vm, rel, yon, karar):
+        return {"n_elems": m.n_elems, "n_axial": m.n_axial,
+                "n_radial": m.n_radial, "max_von_mises": vm,
+                "rel_change": rel, "yon": yon, "karar": karar}
 
     history = []
-    prev_vm = None
     rel_change = None
     converged = False
-    result = None
-    mesh = None
 
-    for k in range(max_rounds + 1):
-        n_ax = int(n_axial0) * REFINE_FACTOR ** k
-        n_rad = int(n_radial0) * REFINE_FACTOR ** k
-        mesh = build_wall_mesh(contour, thickness, n_ax, n_rad,
-                               offset_mode=offset_mode)
-        result = solve_pressure(mesh, material, inner_pressure,
-                                outer_pressure=outer_pressure,
-                                axial_fix=axial_fix)
+    if refine_policy == REFINE_POLICY_JOINT:
+        prev_vm = None
+        for k in range(max_rounds + 1):
+            mesh, result = _coz(int(n_axial0) * REFINE_FACTOR ** k,
+                                int(n_radial0) * REFINE_FACTOR ** k)
+            vm = result.max_von_mises
+            rel_change = (None if prev_vm is None
+                          else _vm_rel_change(vm, prev_vm))
+            history.append(_kayit(mesh, vm, rel_change,
+                                  None if k == 0 else "eksenel+radyal", None))
+            if rel_change is not None and rel_change < tol:
+                converged = True
+                break
+            prev_vm = vm
+    else:
+        mesh, result = _coz(n_axial0, n_radial0)
         vm = result.max_von_mises
-        if prev_vm is None:
-            rel_change = None
-        else:
-            scale = max(abs(vm), abs(prev_vm), 1e-300)
-            rel_change = abs(vm - prev_vm) / scale
-        history.append({
-            "n_elems": mesh.n_elems,
-            "n_axial": mesh.n_axial,
-            "n_radial": mesh.n_radial,
-            "max_von_mises": vm,
-            "rel_change": rel_change,
-        })
-        if rel_change is not None and rel_change < tol:
-            converged = True
-            break
-        prev_vm = vm
+        history.append(_kayit(mesh, vm, None, None, None))
+        for _ in range(2 * int(max_rounds)):
+            mesh_ax, res_ax = _coz(mesh.n_axial * REFINE_FACTOR,
+                                   mesh.n_radial)
+            mesh_rad, res_rad = _coz(mesh.n_axial,
+                                     mesh.n_radial * REFINE_FACTOR)
+            d_ax = _vm_rel_change(res_ax.max_von_mises, vm)
+            d_rad = _vm_rel_change(res_rad.max_von_mises, vm)
+            toplam = d_ax + d_rad
+            if d_ax >= d_rad:
+                yon, mesh, result, d_secilen = "eksenel", mesh_ax, res_ax, d_ax
+            else:
+                yon, mesh, result, d_secilen = "radyal", mesh_rad, res_rad, d_rad
+            vm = result.max_von_mises
+            rel_change = toplam
+            karar = {
+                "d_eksenel": float(d_ax),
+                "d_radyal": float(d_rad),
+                "d_secilen": float(d_secilen),
+                "toplam": float(toplam),
+                "sonda_eksenel": {"n_axial": mesh_ax.n_axial,
+                                  "n_radial": mesh_ax.n_radial,
+                                  "max_von_mises": float(res_ax.max_von_mises)},
+                "sonda_radyal": {"n_axial": mesh_rad.n_axial,
+                                 "n_radial": mesh_rad.n_radial,
+                                 "max_von_mises": float(res_rad.max_von_mises)},
+                "gerekce": (f"d_eksenel=%{100.0 * d_ax:.3f}, "
+                            f"d_radyal=%{100.0 * d_rad:.3f} → {yon} katlandı "
+                            "(büyük gösterge; eşitlikte eksenel). Yakınsama "
+                            f"ölçütü göstergelerin toplamı %{100.0 * toplam:.3f}"
+                            f" (tolerans %{100.0 * tol:.3f})."),
+            }
+            history.append(_kayit(mesh, vm, rel_change, yon, karar))
+            if toplam < tol:
+                converged = True
+                break
+
+    yon_sayaci = {"eksenel": 0, "radyal": 0, "eksenel+radyal": 0}
+    for h in history:
+        if h["yon"] is not None:
+            yon_sayaci[h["yon"]] += 1
+    if refine_policy == REFINE_POLICY_JOINT:
+        yon_ozeti = (f"{yon_sayaci['eksenel+radyal']} birlikte katlama "
+                     "(eski politika)")
+        olcut_adi = "son iki tur arasında maks von Mises farkı"
+    else:
+        yon_ozeti = (f"{yon_sayaci['eksenel']} eksenel + "
+                     f"{yon_sayaci['radyal']} radyal katlama (yön-ayrışık)")
+        olcut_adi = ("son turda yön göstergelerinin toplamı "
+                     "(d_eksenel + d_radyal)")
 
     if converged:
-        beyan = (f"Mesh yakınsadı: {mesh.n_elems} eleman; son iki inceltme "
-                 f"turu arasında maks von Mises farkı "
-                 f"%{100.0 * rel_change:.2f} (tolerans %{100.0 * tol:.2f}).")
+        beyan = (f"Mesh yakınsadı: {mesh.n_elems} eleman; {yon_ozeti}; "
+                 f"{olcut_adi} %{100.0 * rel_change:.2f} "
+                 f"(tolerans %{100.0 * tol:.2f}).")
     elif rel_change is None:
         beyan = (f"YAKINSAMA DENETLENEMEDİ: tek tur koşuldu "
                  f"({mesh.n_elems} eleman); karşılaştırılacak ikinci tur yok.")
     else:
-        beyan = (f"YAKINSAMADI: {max_rounds + 1} turda son fark "
-                 f"%{100.0 * rel_change:.2f} tolerans %{100.0 * tol:.2f} "
-                 f"altına inmedi ({mesh.n_elems} eleman). Sonuç bu beyanla "
-                 "birlikte değerlendirilmelidir.")
+        beyan = (f"YAKINSAMADI: {len(history)} turda ({yon_ozeti}) "
+                 f"{olcut_adi} %{100.0 * rel_change:.2f} tolerans "
+                 f"%{100.0 * tol:.2f} altına inmedi ({mesh.n_elems} eleman). "
+                 "Sonuç bu beyanla birlikte değerlendirilmelidir.")
+
+    if refine_policy == REFINE_POLICY_JOINT:
+        basis = ("ardışık tekdüze inceltme (birlikte-katlama, eski politika); "
+                 "hedef büyüklük maks von Mises (Gauss), tolerans "
+                 f"{tol} bağıl değişim, çarpan {REFINE_FACTOR}")
+    else:
+        basis = ("yön-ayrışık ardışık inceltme: her turda eksenel-katlanmış ve "
+                 "radyal-katlanmış sonda çözülür, büyük gösterge yönü kabul "
+                 "edilir (karar history[k]['karar'] içinde beyanlı); yakınsama "
+                 "ölçütü gösterge toplamı; hedef büyüklük maks von Mises "
+                 f"(Gauss), tolerans {tol}, çarpan {REFINE_FACTOR}, tur "
+                 f"bütçesi 2·max_rounds (eleman tavanı eski politikayla aynı)")
 
     meta = {
         "_source": "hrma.fea.structural_axisym.solve_with_refinement",
-        "_basis": ("ardışık tekdüze inceltme; hedef büyüklük maks von Mises "
-                   f"(Gauss), tolerans {tol} bağıl değişim, çarpan "
-                   f"{REFINE_FACTOR}"),
+        "_basis": basis,
         "beyan": beyan,
         "converged": converged,
         "n_elems_final": mesh.n_elems,
         "final_rel_change": rel_change,
         "tol": tol,
+        "refine_policy": refine_policy,
+        "n_solves": n_solves,
+        "yon_katlama_sayilari": yon_sayaci,
     }
 
     return RefinementResult(

@@ -122,6 +122,21 @@ HYBRID_CONTEXTS = {
     'initial_port_diameter': {'initial_port_diameter': 0.03},
     'n_holes': {'n_holes': 20},
     'pressure_drop': {'pressure_drop': 4.0},
+    # --- KURTARMA ÜÇLÜSÜ (2.6.27, yirmi ikinci parti artçısı) -------------
+    # Bu üç alanın ŞABLON VARSAYILANI YOKTUR ve bu bilinçlidir: boş alanın
+    # anahtarı isteğe hiç konmaz, çözücü varsayımını 'assumed' damgasıyla
+    # beyan eder (advanced.html/solid.html paraşüt bloğu). Taban yükte de
+    # anahtar bulunmadığı için sarsıcı "mevcut değer" göremez ve alan
+    # ÖLÇÜLEMEDİ görünürdü — chamber_length_override ile aynı sınıf.
+    # Bağlam değeri olarak çözücünün KENDİ belgelenmiş varsayımı verildi
+    # (trajectory_analysis.py DEFAULT_PARACHUTE_*): sarsım böylece
+    # "kullanıcı varsayımın kendisini yazsa bile onu değiştirebiliyor mu"
+    # sorusunu ölçer. Uçtan uca kanıt ayrı dosyada
+    # (tests/test_parasut_alanlari.py): 2,0 m²/Cd 1,4/2,0 s -> iniş
+    # 22,62 m/s, 9,0/0,9/5,0 -> 13,29 m/s.
+    'parachute_area': {'parachute_area': 2.0},
+    'parachute_cd': {'parachute_cd': 1.4},
+    'parachute_deploy_delay': {'parachute_deploy_delay': 2.0},
     # --- KISIT ALANLARI: yalnız KISIT BAĞLADIĞINDA sonucu değiştirirler ---
     # İmalat bandı, çözümün doğal çapını kapsıyorsa bandı değiştirmek hiçbir
     # şeyi değiştirmez ve bu DOĞRUDUR (kısıt bağlamıyor). Alanın canlı
@@ -518,7 +533,36 @@ def test_no_fabricated_constant_outputs(hybrid_report):
     #     slosh_mass_ratio evrensel SP-106 eğrisi, kenetli-sıfır özdeşlikleri,
     #     t=0 başlangıç koşulları, ISO tablo basamakları) + paraşüt üçlüsü
     #     GERÇEK form borcu (hibrit sayfasında alan yok; API bağlı).
-    assert len(suspicious) <= 70, (
+    #
+    # v2.6.27 yirmi beşinci parti artçısı — eşik 70 -> 59 (ÖLÇÜLDÜ, YASTIKSIZ).
+    # O 70'in içindeki "gerçek form borcu" ödendi ve iki sınıflandırma
+    # düzeltmesi girdi; düşüşün 11 kaleminin TAMAMI ayrı ayrı mutasyonla
+    # doğrulandı (her mutasyon bu bekçiyi kırmızı yapıyor):
+    #   * -9 KURTARMA AİLESİ: paraşüt üçlüsü hibrit sayfasına açıldığı ve
+    #     HYBRID_CONTEXTS'e girdiği için kurtarma yaprakları artık sarsım
+    #     altında KIPIRDIYOR. Düşen 9 yaprak ADIYLA (döküm farkı):
+    #     trajectory.recovery.{parachute_area_m2, parachute_cd,
+    #     parachute_deploy_delay_s}, aynı üçlünün trajectory.phases.descent
+    #     kopyası, performance.trajectory_metrics.{parachute_area_m2,
+    #     parachute_cd} ve warnings[1].params.cd. Bu 9 yaprak "uydurma
+    #     sabit" değildi, ÖLÇÜLEMEYEN sabitti: kullanıcının onları
+    #     oynatacak kapısı yoktu.
+    #     Karşı-ölçüm: üç bağlam silinince sayı 68'e çıkar.
+    #     NOT: warnings[1].params.area SABİT KALMAYA DEVAM EDİYOR ve bilerek
+    #     imlenmedi — alan verilince uyarının kendisi kaybolduğu için yaprak
+    #     'değişti' sayılmıyor. Sayımda kalması muhafazakâr yöndedir.
+    #   * -1 BEYAN YANKISI: .inputs_not_used[0].submitted, kullanıcının
+    #     gönderdiği sayının kendisidir (shake.is_declaration_echo).
+    #     Karşı-ölçüm: sınıflandırma kaldırılınca 60.
+    #   * -1 ÜÇÜNCÜ KOPYA: .injector_design, .motor.injector_design'ın
+    #     bit-aynı kopyası (11/11 yaprak ölçüldü); tek SABİT yaprağı
+    #     discharge_coefficient ikinci kez sayılıyordu.
+    #     Karşı-ölçüm: önek kaldırılınca 60.
+    # Kalan 59 kalemin sınıfı değişmedi (yukarıdaki beyanlı sabit aileleri);
+    # eşik ölçülen sayının KENDİSİDİR — yeni bir sabit eklendiği anda kırmızı.
+    # (Sayım HRMA_DUMP_CONSTANTS dökümünden okunacaksa dikkat: döküm son
+    # satırı sonlandırmaz, 'wc -l' bir eksik sayar.)
+    assert len(suspicious) <= 59, (
         'Sabit sayisal cikti yapragi beklenenden fazla (%d). Yeni uydurma '
         'sabit eklenmis olabilir. Ilk 25:\n  %s'
         % (len(suspicious), '\n  '.join(suspicious[:25])))
