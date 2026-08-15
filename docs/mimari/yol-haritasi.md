@@ -122,7 +122,7 @@ belgeye yazılmıştır.
 
 | # | Ölçüt | Bugünkü durum |
 |---|---|---|
-| 1 | D2-D5 kullanıcıya görünür: mesh üstünde gerilme **ve** sıcaklık konturu ekranda | Yapısal ve termal uçlar + `fea_panel.js` var. Uçtan uca ürün turu ile teyit edilmeli |
+| 1 | D2-D5 kullanıcıya görünür: mesh üstünde gerilme **ve** sıcaklık konturu ekranda | **SAĞLANDI (15 Ağu, parti 20 `f9445c7`):** ürün turu canlı tarayıcıda yapıldı — gerilme konturu hibrit cidarında + katı tane kesitinde, sıcaklık konturu yeni `thermal_fea_panel.js` ile hibritte (T(z,r) mesh üstünde, iç yüzey T(z), tepe T(t), malzeme sınırı hükmü). Turun bulduğu 7 kusurun 6'sı aynı partide kapandı; sıvı cidar FEA'sı köşe tekilliği kararına kadar gerekçeli açık (`BULGU_KAYIT_DEFTERI.md`) |
 | 2 | Çekirdek-yetim modül **sıfır** (F1/F2/F4/C1/blowdown hepsi panele bağlı) | **SAĞLANDI (15 Ağu):** C3 gimbal `/api/gimbal-mount` + sayfa paneliyle bağlandı; yetim modül kalmadı |
 | 3 | En az bir dış kullanıcının **gerçek test verisiyle** kapanmış korelasyon döngüsü (F3) | Açık. Ayberk'in toplu testine bağlanmış durumda |
 | 4 | Yayın kapısı 8/8 + iskele görsel turu yeşil + tank tek-geometri (A11) kapalı | Kapı ve tur yeşil ölçüldü (4 Ağustos: 3/3 sayfa); **A11 KAPANDI (15 Ağu)** — kapı+tur yeniden koşulunca ölçüt tamam |

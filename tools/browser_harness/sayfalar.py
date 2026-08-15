@@ -13,6 +13,104 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
+from tools.browser_harness import esikler
+
+
+@dataclass(frozen=True)
+class FeaPaneli:
+    """Bir FEA panelinin gezinti tarifi — koşum düğmesi, çizimler, rozetler.
+
+    Panel elemanları JS ile üretiliyor (``fea_panel.js`` /
+    ``thermal_fea_panel.js``), yani şablonda aranacak bir ``onclick`` yok;
+    kimlikler (``id``) tek dayanaktır ve sözlükten bağımsızdır.
+
+    ``api_adi`` panelin ``window`` üzerine astığı nesnedir
+    (``window.FeaPanel.payload`` vb.). Hüküm ÇİZİMİN ve YÜKÜN varlığına
+    bakar; "düğmeye basıldı" tek başına yeterli sayılmaz.
+    """
+
+    ad: str
+    #: Panelin kabı — sayfada var mı, görünür mü.
+    panel_kimligi: str
+    #: Koşumu başlatan düğme (CSS seçici).
+    kosum_secicisi: str
+    #: Koşum sürerken görünen "meşgul" göstergesi (yüzde YOK, nabız var).
+    mesgul_kimligi: str
+    #: Koşum başarısızsa gerekçenin basıldığı çip kabı.
+    cip_kimligi: str
+    #: Rozetlerin basıldığı kap (``[data-badge]`` kutuları burada).
+    rozet_kimligi: str
+    #: ``window`` üzerindeki panel nesnesinin adı; ``payload`` alanı okunur.
+    api_adi: str
+    #: Koşum başarılıysa EKRANDA olması beklenen çizim kaplarının kimlikleri.
+    cizim_kimlikleri: Tuple[str, ...]
+    #: Rozetlerde aranan imzalar (``esikler.ROZET_IMZALARI`` anahtarları).
+    beklenen_imzalar: Tuple[str, ...] = ()
+    #: Rozetlerde GÖRÜLMEMESİ gereken imzalar (geri gelen kusur bekçisi).
+    yasak_imzalar: Tuple[str, ...] = ()
+    #: Koşumun bitmesi için üst sınır (ms).
+    kosum_zaman_asimi_ms: int = esikler.FEA_KOSUM_ZAMAN_ASIMI_MS
+    notlar: str = ''
+
+
+#: ``/hybrid`` — eksenel simetrik cidar yapısal FEA'sı (fea_panel.js:453).
+#: Dört çizim de koşum başarılıyken çizilir: gerilme alanı, emniyet katsayısı
+#: alanı, eleman kalitesi haritası ve yakınsama geçmişi. Biri çizilmiyorsa
+#: sebebi ya eksik malzeme kaydıdır (emniyet katsayısı) ya da tek turda
+#: bitmiş bir yakınsamadır (geçmiş grafiği ≥2 tur ister) — ikisi de rapora
+#: yazılır, sessizce geçilmez.
+YAPISAL_FEA = FeaPaneli(
+    ad='yapisal',
+    panel_kimligi='feaPanel',
+    kosum_secicisi='#fea_run',
+    mesgul_kimligi='fea_busy',
+    cip_kimligi='fea_chip',
+    rozet_kimligi='fea_badges',
+    api_adi='FeaPanel',
+    cizim_kimlikleri=('fea_plot_vm', 'fea_plot_sf', 'fea_plot_quality',
+                      'fea_plot_conv'),
+    beklenen_imzalar=('mesh_bozulmasi', 'uzamis_elemanlar'),
+    yasak_imzalar=('birlesik_kalite_alarmi',),
+    notlar='advanced.html:827 — FeaPanel.init(anchorId: trajectoryPanel).',
+)
+
+#: ``/hybrid`` — geçici cidar sıcaklık alanı (thermal_fea_panel.js:426).
+#: Panel ``#feaPanel``in hemen ALTINA kurulur. Başlangıç/ortam sıcaklığı
+#: alanı 293,15 K ön-dolu gelir; tur ona DOKUNMAZ — panelin varsayılanıyla
+#: koşmak, kullanıcının gördüğü yolu denetlemektir.
+TERMAL_FEA = FeaPaneli(
+    ad='termal',
+    panel_kimligi='thermalFeaPanel',
+    kosum_secicisi='#fea_t_run',
+    mesgul_kimligi='fea_t_busy',
+    cip_kimligi='fea_t_chip',
+    rozet_kimligi='fea_t_badges',
+    api_adi='ThermalFeaPanel',
+    cizim_kimlikleri=('fea_t_plot_field', 'fea_t_plot_inner',
+                      'fea_t_plot_hist'),
+    beklenen_imzalar=('tepe_cidar_sicakligi',),
+    kosum_zaman_asimi_ms=esikler.FEA_TERMAL_KOSUM_ZAMAN_ASIMI_MS,
+    notlar='advanced.html:837 — ThermalFeaPanel.init(anchorId: feaPanel).',
+)
+
+#: ``/solid`` — tane kesitinin düzlemsel (plane-strain) FEA'sı
+#: (fea_panel.js:1255). Kabul ölçütü tepe von Mises DEĞİL port lif
+#: gerinimidir; rozet imzası bunu ekranda arar.
+TANE_FEA = FeaPaneli(
+    ad='tane',
+    panel_kimligi='grainFeaPanel',
+    kosum_secicisi='#grainfea_run',
+    mesgul_kimligi='grainfea_busy',
+    cip_kimligi='grainfea_chip',
+    rozet_kimligi='grainfea_badges',
+    api_adi='GrainFeaPanel',
+    cizim_kimlikleri=('grainfea_plot_vm', 'grainfea_plot_bore',
+                      'grainfea_plot_conv'),
+    beklenen_imzalar=('kabul_olcutu', 'mesh_bozulmasi'),
+    yasak_imzalar=('birlesik_kalite_alarmi',),
+    notlar='solid.html:5956 — GrainFeaPanel.init(anchorId: trajectoryPanel).',
+)
+
 
 @dataclass(frozen=True)
 class Sayfa:
@@ -36,6 +134,12 @@ class Sayfa:
     #: Bu sayfada ölçülmesi beklenmeyen denetimler (ad kümesi). Şu an boş:
     #: üç sayfanın üçü de 3B sahne ve egzoz gösterdiğini iddia ediyor.
     beklenmeyen_denetimler: Tuple[str, ...] = field(default_factory=tuple)
+    #: Bu sayfada koşturulup denetlenecek FEA panelleri. Sıvı sayfasında
+    #: BOŞTUR ve bu bilinçlidir: sıvı cidar FEA'sı üründe YOK (bulgu
+    #: defterinde gerekçeli açık borç — köşe tekilliği yakınsamıyor).
+    #: Boş bırakmak "denetlenmedi" demek değil, "denetlenecek panel yok"
+    #: demektir; panel eklendiği gün buraya bir satır düşer.
+    fea_panelleri: Tuple[FeaPaneli, ...] = field(default_factory=tuple)
 
 
 #: Sonuç nesnesi üç sayfada da ``currentResults`` adıyla, betiğin en üst
@@ -61,6 +165,7 @@ SAYFALAR: Dict[str, Sayfa] = {
         viz_acma_secicileri=(),
         viz_kap_kimligi='motor_viz3d_viewport',
         notlar='advanced.html — MotorViz3D doğrudan kurulur (güverte yok).',
+        fea_panelleri=(YAPISAL_FEA, TERMAL_FEA),
     ),
     'solid': Sayfa(
         ad='solid',
@@ -72,6 +177,10 @@ SAYFALAR: Dict[str, Sayfa] = {
         viz_acma_secicileri=('button[onclick="show3DVisualization()"]',),
         viz_kap_kimligi='cad_3d_view',
         notlar='solid.html — MotorVizDeck güvertesi, CAD sekmesinin içinde.',
+        # Tane FEA paneli ``#trajectoryPanel``in ÖNÜNE kuruluyor; o panel
+        # sekmelerin DIŞINDA olduğu için CAD sekmesi açılsa da görünür
+        # kalır (solid.html:1785 üst düzey ``.panel``).
+        fea_panelleri=(TANE_FEA,),
     ),
     'liquid': Sayfa(
         ad='liquid',
@@ -83,6 +192,11 @@ SAYFALAR: Dict[str, Sayfa] = {
         viz_acma_secicileri=(),
         viz_kap_kimligi='liquid_3d_view',
         notlar='liquid.html — MotorVizDeck güvertesi, ana sonuç panelinde.',
+        # FEA paneli BİLEREK yok: sıvı cidarında köşe tekilliği yüzünden
+        # koşum yakınsamıyor (1742 MPa, tur başına %16) ve panel ürüne
+        # alınmadı. Buraya boş bir panel listesi koymak, "denetim atlandı"
+        # değil "denetlenecek panel yok" demektir.
+        fea_panelleri=(),
     ),
 }
 

@@ -356,6 +356,226 @@ def sizinti_denetimi(metin: Optional[str]) -> Denetim:
 
 
 # ---------------------------------------------------------------------------
+# FEA panelleri
+# ---------------------------------------------------------------------------
+
+def imza_varyantlari(imza_adi: str) -> Sequence[str]:
+    """İmzanın dil varyantlarını verir; tanımsız ad SESSİZCE geçmez."""
+    tanim = esikler.ROZET_IMZALARI.get(imza_adi)
+    if not tanim:
+        raise KeyError('tanımsız rozet imzası: %s (geçerli: %s)'
+                       % (imza_adi, ', '.join(sorted(esikler.ROZET_IMZALARI))))
+    return tuple(tanim['varyantlar'])
+
+
+def imza_eslesen_rozetler(rozetler: Sequence[Dict[str, Any]],
+                          imza_adi: str) -> List[Dict[str, Any]]:
+    """İmzanın herhangi bir dil varyantını taşıyan rozetleri döner.
+
+    Karşılaştırma büyük/küçük harf DUYARLIDIR: rozet başlıkları ürün
+    tarafında büyük harfle basılıyor ve "acceptance" kelimesinin cümle
+    içinde geçmesi rozetin varlığı anlamına gelmez.
+    """
+    varyantlar = imza_varyantlari(imza_adi)
+    return [r for r in rozetler
+            if any(v in (r.get('metin') or '') for v in varyantlar)]
+
+
+def _panel_ozeti(olcum: Dict[str, Any]) -> str:
+    """Kusur mesajlarının sonuna eklenen kısa durum betimi."""
+    parcalar = []
+    if olcum.get('cip_metni'):
+        parcalar.append('çip: %s' % _kirp(olcum['cip_metni'], 200))
+    if olcum.get('asama'):
+        parcalar.append('aşama: %s' % olcum['asama'])
+    return ' — '.join(parcalar)
+
+
+def _kirp(metin: Any, uzunluk: int) -> str:
+    s = '' if metin is None else str(metin)
+    return s if len(s) <= uzunluk else s[:uzunluk] + '…'
+
+
+def fea_kosum_denetimi(panel_adi: str,
+                       olcum: Optional[Dict[str, Any]]) -> Denetim:
+    """Panel ekranda mı, koşum bitti mi, YÜK yayımlandı mı?
+
+    Hüküm "düğmeye basıldı"ya değil, panelin kendi sonuç nesnesine
+    (``window.<API>.payload``) bakar: düğme basılıp uç hata döndüğünde de
+    ekranda bir şeyler değişir, ama çizilecek alan YOKTUR. Koşum
+    başarısızsa panelin kendi çipi gerekçeyi yazar ve o gerekçe hükmün
+    içine kopyalanır — "FEA kaldı" demek tanı koydurmaz.
+    """
+    ad = 'fea_%s_kosum' % panel_adi
+    dayanak = 'window.<panel>.payload + #<panel>_busy görünürlüğü'
+    if not olcum:
+        return Denetim(ad=ad, gecti=False,
+                       ozet='FEA paneli ölçülemedi: ölçüm sözlüğü yok',
+                       dayanak='yok', olcum={}, esik={})
+    esik = {'baslama_zaman_asimi_ms': esikler.FEA_BASLAMA_ZAMAN_ASIMI_MS,
+            'kosum_zaman_asimi_ms': olcum.get('zaman_asimi_ms')}
+    if not olcum.get('panel_var'):
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FEA paneli sayfada YOK: #%s kurulmamış'
+                             % olcum.get('panel')),
+                       dayanak='document.getElementById', olcum=olcum, esik=esik)
+    if not olcum.get('panel_gorunur'):
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FEA paneli sayfada var ama GÖRÜNMÜYOR (#%s): '
+                             'kullanıcı düğmeye ulaşamaz' % olcum.get('panel')),
+                       dayanak='getComputedStyle + getBoundingClientRect',
+                       olcum=olcum, esik=esik)
+    if olcum.get('asama') == 'dugme_yok':
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('koşum düğmesi bulunamadı: %s'
+                             % olcum.get('kosum_secicisi')),
+                       dayanak='CSS seçici', olcum=olcum, esik=esik)
+    if not olcum.get('yuk_var'):
+        sure = olcum.get('kosum_s')
+        gerekce = _panel_ozeti(olcum)
+        if olcum.get('asama') == 'zaman_asimi':
+            ozet = ('FEA koşumu %s ms içinde BİTMEDİ (meşgul göstergesi hâlâ '
+                    'açık)' % olcum.get('zaman_asimi_ms'))
+        elif not olcum.get('basladi'):
+            ozet = ('FEA koşumu hiç BAŞLAMADI: düğmeye basıldı, meşgul '
+                    'göstergesi %s ms içinde açılmadı ve yük yayımlanmadı'
+                    % esikler.FEA_BASLAMA_ZAMAN_ASIMI_MS)
+        else:
+            ozet = ('FEA koşumu bitti ama YÜK YAYIMLANMADI: %s.payload boş '
+                    '(%.1f s)' % (olcum.get('api'), sure if sure else 0.0))
+        return Denetim(ad=ad, gecti=False,
+                       ozet=(ozet + (' — %s' % gerekce if gerekce else '')),
+                       dayanak=dayanak, olcum=olcum, esik=esik)
+    return Denetim(
+        ad=ad, gecti=True,
+        ozet=('FEA koşumu tamamlandı ve yük yayımlandı: %s.payload dolu '
+              '(%.1f s)' % (olcum.get('api'), olcum.get('kosum_s') or 0.0)),
+        dayanak=dayanak, olcum=olcum, esik=esik)
+
+
+def fea_cizim_denetimi(panel_adi: str, olcum: Optional[Dict[str, Any]],
+                       beklenen: Sequence[str]) -> Denetim:
+    """Beklenen çizimler EKRANDA mı?
+
+    "Çizim var" üç ölçüte birden bağlıdır ve üçü de ölçülür:
+
+    * kap görünür (``display != none`` ve kutusu 0x0 değil),
+    * kap Plotly'nin çizdiği kap (``.js-plotly-plot`` sınıfı),
+    * içinde gerçekten ``svg``/``canvas`` düğümü var.
+
+    Yalnız "kap görünür" demek yetmez: Plotly çizim atarsa kap açık kalır
+    ama boştur. Yalnız "svg var" da yetmez: gizli kaptaki eski çizim
+    ekranda değildir.
+    """
+    ad = 'fea_%s_cizim' % panel_adi
+    esik = {'min_kenar_px': esikler.FEA_CIZIM_MIN_KENAR_PX,
+            'beklenen_cizimler': list(beklenen)}
+    dayanak = ('kap görünürlüğü + .js-plotly-plot sınıfı + kap içindeki '
+               'svg/canvas düğüm sayısı')
+    if not olcum or not olcum.get('panel_var'):
+        return Denetim(ad=ad, gecti=False,
+                       ozet='FEA çizimleri ölçülemedi: panel yok',
+                       dayanak='yok', olcum=olcum or {}, esik=esik)
+    cizimler = olcum.get('cizimler') or {}
+    eksik: List[str] = []
+    for kimlik in beklenen:
+        c = cizimler.get(kimlik) or {}
+        if not c.get('mevcut'):
+            eksik.append('%s (kap sayfada yok)' % kimlik)
+        elif not c.get('gorunur'):
+            # Ölçülen kutu da eşik de yazılır: kusur "kap kapalı" mı yoksa
+            # "eşik yanlış" mı, hükmü okuyan ayırt edebilsin.
+            eksik.append('%s (kap ekranda değil: %sx%s px, eşik %d px)'
+                         % (kimlik, c.get('genislik'), c.get('yukseklik'),
+                            esikler.FEA_CIZIM_MIN_KENAR_PX))
+        elif not (c.get('svg_sayisi') or c.get('canvas_sayisi')):
+            eksik.append('%s (kap açık ama içinde svg/canvas yok)' % kimlik)
+        elif not c.get('plotly_kabi'):
+            eksik.append('%s (kap Plotly ile çizilmemiş)' % kimlik)
+    if eksik:
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('%d/%d FEA çizimi EKRANDA DEĞİL: %s%s'
+                             % (len(eksik), len(beklenen), '; '.join(eksik),
+                                (' — %s' % _panel_ozeti(olcum))
+                                if _panel_ozeti(olcum) else '')),
+                       dayanak=dayanak, olcum=olcum, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('%d FEA çizimi ekranda: %s'
+                         % (len(beklenen), ', '.join(beklenen))),
+                   dayanak=dayanak, olcum=olcum, esik=esik)
+
+
+def fea_rozet_denetimi(panel_adi: str, olcum: Optional[Dict[str, Any]],
+                       beklenen_imzalar: Sequence[str],
+                       yasak_imzalar: Sequence[str] = ()) -> Denetim:
+    """Rozet imzaları: beklenen hüküm basıldı mı, ESKİ kusur geri geldi mi?
+
+    İmzalar ``esikler.ROZET_IMZALARI``da tanımlıdır ve her biri dil
+    varyantları taşır; eşleşme "herhangi bir varyant" ile sağlanır.
+    Rozetin RENGİ (``data-badge``) ölçülür ve özete yazılır ama hükme
+    girmez: renk tasarım noktasının fiziğini anlatır (emniyet katsayısı,
+    yakınsama), arayüz kusurunu değil.
+    """
+    ad = 'fea_%s_rozet' % panel_adi
+    esik = {'beklenen_imzalar': list(beklenen_imzalar),
+            'yasak_imzalar': list(yasak_imzalar),
+            'imza_varyantlari': {
+                i: list(imza_varyantlari(i))
+                for i in list(beklenen_imzalar) + list(yasak_imzalar)}}
+    dayanak = '#<panel>_badges içindeki [data-badge] kutularının metni'
+    if not olcum or not olcum.get('panel_var'):
+        return Denetim(ad=ad, gecti=False,
+                       ozet='FEA rozetleri ölçülemedi: panel yok',
+                       dayanak='yok', olcum=olcum or {}, esik=esik)
+    rozetler = olcum.get('rozetler') or []
+    eksik: List[str] = []
+    bulunanlar: List[str] = []
+    for imza in beklenen_imzalar:
+        eslesen = imza_eslesen_rozetler(rozetler, imza)
+        if not eslesen:
+            eksik.append('%s (aranan: %s)'
+                         % (imza, ' | '.join(imza_varyantlari(imza))))
+        else:
+            bulunanlar.append('%s [%s]' % (imza, eslesen[0].get('tur')))
+    geri_gelenler: List[str] = []
+    for imza in yasak_imzalar:
+        eslesen = imza_eslesen_rozetler(rozetler, imza)
+        if eslesen:
+            geri_gelenler.append('%s → %r'
+                                 % (imza, _kirp(eslesen[0].get('metin'), 160)))
+    if eksik or geri_gelenler:
+        parcalar = []
+        if eksik:
+            parcalar.append('beklenen imza YOK: %s' % '; '.join(eksik))
+        if geri_gelenler:
+            parcalar.append('YASAK imza ekranda: %s' % '; '.join(geri_gelenler))
+        parcalar.append('%d rozet okundu: %s'
+                        % (len(rozetler),
+                           _kirp(' | '.join(r.get('metin', '') for r in rozetler),
+                                 400)))
+        return Denetim(ad=ad, gecti=False, ozet=' — '.join(parcalar),
+                       dayanak=dayanak, olcum=olcum, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('%d rozet basıldı; beklenen imzalar yerinde: %s%s'
+                         % (len(rozetler), ', '.join(bulunanlar) or '—',
+                            ('; yasak imza yok (%s)'
+                             % ', '.join(yasak_imzalar)) if yasak_imzalar else '')),
+                   dayanak=dayanak, olcum=olcum, esik=esik)
+
+
+def fea_denetimleri(panel_tanimi, olcum: Optional[Dict[str, Any]]) -> List[Denetim]:
+    """Tek bir FEA paneli için üç hüküm: koşum, çizim, rozet."""
+    return [
+        fea_kosum_denetimi(panel_tanimi.ad, olcum),
+        fea_cizim_denetimi(panel_tanimi.ad, olcum,
+                           panel_tanimi.cizim_kimlikleri),
+        fea_rozet_denetimi(panel_tanimi.ad, olcum,
+                           panel_tanimi.beklenen_imzalar,
+                           panel_tanimi.yasak_imzalar),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Toplu hüküm
 # ---------------------------------------------------------------------------
 

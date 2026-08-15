@@ -5,12 +5,20 @@ Ne yapar
 --------
 ``/hybrid``, ``/solid`` ve ``/liquid`` sayfalarını gerçek bir tarayıcıda
 açar, örnek girdilerle hesabı tetikler, 3B sahneyi kurdurur, yanmayı
-başlatır ve dört soruyu ölçer:
+başlatır, sayfanın FEA panellerini koşturur ve yedi soruyu ölçer:
 
 1. 3B tuval boş mu?           (doluluk oranı + içerik entropisi)
 2. Egzoz çiziliyor mu?        (``_plume.geometry.drawRange.count``)
 3. Konsolda hata var mı?
 4. Ekrana iç değer sızmış mı? (``[object Object]`` / ``undefined`` / ``NaN``)
+5. FEA koşumu bitti mi?       (panel ``payload``'u dolu, meşgul kapandı)
+6. FEA çizimleri ekranda mı?  (görünür kapta ``svg``/``canvas``)
+7. FEA hükümleri basıldı mı?  (beklenen rozet imzaları EN+TR; eski kusur
+   imzası — birleşik "kabul dışı" rozeti — YASAK listesinde)
+
+FEA panelleri sayfa tanımından gelir (``sayfalar.py``: hibrit 2 panel,
+katı 1, sıvı 0 — sıvı cidar FEA'sı bilinçli olarak üründe yok, bulgu
+defterinde gerekçeli açık borç).
 
 Kullanım
 --------

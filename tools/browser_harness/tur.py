@@ -109,6 +109,97 @@ JS_OYNAT = """
 #: Sahne kuruldu mu?
 JS_SAHNE_KURULDU = "() => !!(window.MotorViz3D && MotorViz3D.get && MotorViz3D.get())"
 
+#: FEA panelinin durumu. Hüküm için gereken HER ŞEY tek okumada alınır:
+#: panelin görünürlüğü, panelin kendi sonuç nesnesi (``payload``), meşgul
+#: göstergesi, çip metni (koşum başarısızsa gerekçe orada), rozet metinleri
+#: ve beklenen çizim kaplarının hâli.
+#:
+#: Seçiciler KİMLİK (``id``) üstündendir, görünen metne bakılmaz: paneller
+#: çevrilebilir arayüzle basılıyor. Çizim ölçütü de dizge değil DÜĞÜM
+#: sayısıdır — "kap açık" ile "içine gerçekten çizilmiş" ayrı sorulardır.
+JS_FEA_PANEL_DURUMU = """
+(c) => {
+  const gizliDegil = (el) => {
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    return s.display !== 'none' && s.visibility !== 'hidden';
+  };
+  const gorunur = (el, minKenar) => {
+    if (!gizliDegil(el)) return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= (minKenar || 1) && r.height >= (minKenar || 1);
+  };
+  const panel = document.getElementById(c.panel);
+  if (!panel) return { panel: c.panel, panel_var: false, panel_gorunur: false };
+  const api = window[c.api] || null;
+  let yuk = null;
+  try { yuk = api ? api.payload : null; } catch (e) { yuk = null; }
+  const rozetKabi = document.getElementById(c.rozet);
+  const rozetler = rozetKabi
+    ? Array.from(rozetKabi.querySelectorAll('[data-badge]')).map(function (b) {
+        return { tur: b.getAttribute('data-badge'),
+                 metin: (b.textContent || '').replace(/\\s+/g, ' ').trim() };
+      })
+    : [];
+  const cizimler = {};
+  (c.cizimler || []).forEach(function (kimlik) {
+    const el = document.getElementById(kimlik);
+    if (!el) { cizimler[kimlik] = { mevcut: false }; return; }
+    const r = el.getBoundingClientRect();
+    cizimler[kimlik] = {
+      mevcut: true,
+      gorunur: gorunur(el, c.min_kenar),
+      plotly_kabi: el.classList.contains('js-plotly-plot'),
+      svg_sayisi: el.querySelectorAll('svg').length,
+      canvas_sayisi: el.querySelectorAll('canvas').length,
+      genislik: Math.round(r.width),
+      yukseklik: Math.round(r.height)
+    };
+  });
+  const cip = document.getElementById(c.cip);
+  return {
+    panel: c.panel,
+    api: c.api,
+    panel_var: true,
+    // Panel için ölçüt yalnız "kutusu var mı": kap tam genişliktir ama
+    // çizim eşiğiyle (``min_kenar``) ölçülmez — o eşik ÇİZİM kaplarınındır.
+    // İkisi aynı sayıya bağlanırsa eşik değiştiğinde hüküm kayar.
+    panel_gorunur: gorunur(panel, 1),
+    api_var: !!api,
+    yuk_var: !!yuk,
+    mesgul: gizliDegil(document.getElementById(c.mesgul)),
+    cip_metni: cip ? (cip.textContent || '').replace(/\\s+/g, ' ').trim() : null,
+    rozetler: rozetler,
+    rozet_sayisi: rozetler.length,
+    cizimler: cizimler,
+    panel_plotly_kap_sayisi: panel.querySelectorAll('.js-plotly-plot').length
+  };
+}
+"""
+
+#: Meşgul göstergesi açık mı? Koşumun BAŞLADIĞINI söyleyen tek sayfa içi
+#: işaret budur: ``run()`` bayrağı fetch'ten önce kaldırır ve basım onu
+#: görünür kılar.
+JS_FEA_MESGUL = """
+(c) => {
+  const el = document.getElementById(c.mesgul);
+  if (!el) return false;
+  const s = getComputedStyle(el);
+  return s.display !== 'none' && s.visibility !== 'hidden';
+}
+"""
+
+#: Koşum bitti mi? Meşgul göstergesi kapandıysa panel ya yükü basmıştır ya
+#: da gerekçeyi çipe yazmıştır; ikisini de sonraki okuma ayırır.
+JS_FEA_BITTI = """
+(c) => {
+  const el = document.getElementById(c.mesgul);
+  if (!el) return true;
+  const s = getComputedStyle(el);
+  return s.display === 'none' || s.visibility === 'hidden';
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Saf yardımcılar (tarayıcısız sınanabilir)
@@ -192,6 +283,7 @@ class SayfaGezgini:
         tuval_ham: Dict[str, Any] = {}
         piksel: Optional[Dict[str, Any]] = None
         metin: Optional[str] = None
+        fea: Dict[str, Any] = {}
         plume_baslatma = 'yok'
         goruntuler: Dict[str, Optional[str]] = {'tam_sayfa': None, 'uc_boyut': None}
 
@@ -235,6 +327,13 @@ class SayfaGezgini:
                 goruntuler['uc_boyut'] = yol
             piksel = denetimler.piksel_olcumu(baytlar)
 
+            # FEA panelleri 3B ölçümden SONRA koşturulur: koşum sayfaya
+            # büyük Plotly kapları ekler ve düzeni değiştirir; tuval
+            # anlık görüntüsü ondan etkilenmesin. Sayfa metni ise FEA'dan
+            # SONRA okunur — böylece sızıntı taraması FEA panellerinin
+            # bastığı metni de kapsar.
+            fea = self._fea_panellerini_kostur()
+
             metin = self.p.evaluate(JS_SAYFA_METNI)
         except Exception as hata:
             self.hatalar.append('%s: %s' % (type(hata).__name__, _kisalt(hata, 600)))
@@ -249,7 +348,7 @@ class SayfaGezgini:
                                     % _kisalt(hata, 200))
 
         return self._rapor(sureler, viz, tuval_ham, piksel, metin,
-                           plume_baslatma, goruntuler)
+                           plume_baslatma, goruntuler, fea)
 
     def _hesabi_tetikle(self, sureler: Dict[str, float]) -> None:
         dugme = self.p.locator(self.tanim.hesapla_secici).first
@@ -323,9 +422,105 @@ class SayfaGezgini:
             self.p.wait_for_timeout(esikler.PLUME_ISINMA_MS)
         return yol
 
+    # -- FEA panelleri ----------------------------------------------------
+    def _fea_yapilandirmasi(self, tanim) -> Dict[str, Any]:
+        """Sayfa içi betiklere geçirilen ayar sözlüğü (tek kaynak)."""
+        return {
+            'panel': tanim.panel_kimligi,
+            'api': tanim.api_adi,
+            'mesgul': tanim.mesgul_kimligi,
+            'cip': tanim.cip_kimligi,
+            'rozet': tanim.rozet_kimligi,
+            'cizimler': list(tanim.cizim_kimlikleri),
+            'min_kenar': esikler.FEA_CIZIM_MIN_KENAR_PX,
+        }
+
+    def _fea_panellerini_kostur(self) -> Dict[str, Any]:
+        """Sayfanın FEA panellerini sırayla koşturur ve ölçer.
+
+        Bir panelin patlaması turu KESMEZ: istisna o panelin ölçümüne
+        yazılır ve hüküm ``denetimler.py``de verilir. Böylece hibritte
+        termal panel çökse bile yapısal panelin ölçümü elde kalır.
+        """
+        sonuc: Dict[str, Any] = {}
+        for tanim in getattr(self.tanim, 'fea_panelleri', ()):
+            try:
+                sonuc[tanim.ad] = self._tek_fea_paneli(tanim)
+            except Exception as hata:
+                sonuc[tanim.ad] = {
+                    'panel': tanim.panel_kimligi, 'api': tanim.api_adi,
+                    'panel_var': None, 'yuk_var': False, 'asama': 'olcum_hatasi',
+                    'ayrinti': '%s: %s' % (type(hata).__name__, _kisalt(hata, 300)),
+                }
+                self.asamalar.append('FEA paneli ölçülemedi (%s): %s'
+                                     % (tanim.ad, _kisalt(hata, 160)))
+        return sonuc
+
+    def _tek_fea_paneli(self, tanim) -> Dict[str, Any]:
+        cfg = self._fea_yapilandirmasi(tanim)
+        olcum = self.p.evaluate(JS_FEA_PANEL_DURUMU, cfg) or {}
+        olcum['ad'] = tanim.ad
+        olcum['kosum_secicisi'] = tanim.kosum_secicisi
+        olcum['zaman_asimi_ms'] = tanim.kosum_zaman_asimi_ms
+        olcum['basladi'] = False
+        olcum['_dayanak'] = {
+            'yuk_var': 'window.%s.payload != null' % tanim.api_adi,
+            'panel_gorunur': ('getComputedStyle(#%s).display + kutunun sıfır '
+                              'olmaması' % tanim.panel_kimligi),
+            'cizimler': ('kap görünürlüğü + .js-plotly-plot sınıfı + kap '
+                         'içindeki svg/canvas düğüm sayısı'),
+            'rozetler': '#%s içindeki [data-badge] kutuları' % tanim.rozet_kimligi,
+            'kosum_s': 'düğmeye basımdan meşgul göstergesinin kapanmasına',
+        }
+        if not olcum.get('panel_var'):
+            olcum['asama'] = 'panel_yok'
+            self.asamalar.append('FEA paneli yok: #%s' % tanim.panel_kimligi)
+            return olcum
+        if not olcum.get('panel_gorunur'):
+            olcum['asama'] = 'panel_gorunmez'
+            self.asamalar.append('FEA paneli görünmüyor: #%s' % tanim.panel_kimligi)
+            return olcum
+
+        dugme = self.p.locator(tanim.kosum_secicisi).first
+        if dugme.count() == 0:
+            olcum['asama'] = 'dugme_yok'
+            self.asamalar.append('FEA koşum düğmesi yok: %s' % tanim.kosum_secicisi)
+            return olcum
+
+        t0 = time.time()
+        dugme.click()
+        self.asamalar.append('FEA koşum düğmesine basıldı (%s): %s'
+                             % (tanim.ad, tanim.kosum_secicisi))
+        try:
+            self.p.wait_for_function(JS_FEA_MESGUL, arg=cfg,
+                                     timeout=esikler.FEA_BASLAMA_ZAMAN_ASIMI_MS)
+            olcum['basladi'] = True
+        except Exception:
+            # Koşum ya hiç başlamadı (ör. sayfada motor sonucu yok) ya da
+            # ölçüm penceresinden hızlı bitti. İkisi de burada AYIRT
+            # EDİLMEZ; hüküm yükün yayımlanmasına bakar.
+            self.asamalar.append('FEA meşgul göstergesi görülmedi (%s)' % tanim.ad)
+        try:
+            self.p.wait_for_function(JS_FEA_BITTI, arg=cfg,
+                                     timeout=tanim.kosum_zaman_asimi_ms)
+            olcum['asama'] = 'tamam'
+        except Exception:
+            olcum['asama'] = 'zaman_asimi'
+            self.asamalar.append('FEA koşumu zaman aşımına uğradı (%s, %d ms)'
+                                 % (tanim.ad, tanim.kosum_zaman_asimi_ms))
+        olcum['kosum_s'] = time.time() - t0
+
+        son = self.p.evaluate(JS_FEA_PANEL_DURUMU, cfg) or {}
+        son.update({k: v for k, v in olcum.items() if k not in son})
+        self.asamalar.append(
+            'FEA koşumu bitti (%s): yük=%s, %d rozet, %.1f s'
+            % (tanim.ad, bool(son.get('yuk_var')), son.get('rozet_sayisi', 0),
+               olcum['kosum_s']))
+        return son
+
     # -- rapor ------------------------------------------------------------
     def _rapor(self, sureler, viz, tuval_ham, piksel, metin, plume_baslatma,
-               goruntuler) -> Dict[str, Any]:
+               goruntuler, fea=None) -> Dict[str, Any]:
         akis_tamam = not self.hatalar
         liste = [
             denetimler.Denetim(
@@ -340,6 +535,9 @@ class SayfaGezgini:
             denetimler.konsol_denetimi(self.kayitlar),
             denetimler.sizinti_denetimi(metin),
         ]
+        fea = fea or {}
+        for tanim in getattr(self.tanim, 'fea_panelleri', ()):
+            liste.extend(denetimler.fea_denetimleri(tanim, fea.get(tanim.ad)))
         return {
             'ad': self.tanim.ad,
             'url': self.temel_url + self.tanim.yol,
@@ -351,6 +549,7 @@ class SayfaGezgini:
                 'tuval_kaynagi': tuval_ham.get('kaynak'),
                 'tuval_hatasi': tuval_ham.get('hata'),
                 'piksel': piksel or {},
+                'fea': fea,
                 'plume_baslatma': plume_baslatma,
                 'http_hatalari': self.http_hatalari[:esikler.RAPOR_ORNEK_UST_SINIRI],
                 'http_hata_sayisi': len(self.http_hatalari),
