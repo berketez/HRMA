@@ -29,11 +29,10 @@ BACKEND_SOURCES = [
     'hrma/analysis/safety_analysis.py',
     'hrma/analysis/structural_analysis.py',
     'hrma/analysis/heat_transfer_analysis.py',
-    # v2.6.25: 'warn.kinetic.' öneki ANALYSIS_PREFIXES içinde sahipleniliyordu
-    # ama onu ÜRETEN dosya bu listede yoktu. Sonuç: kinetik uyarılarının
-    # çevirisi yazıldığı anda hepsi "yetim anahtar" görünüp bu bekçiyi
-    # kırıyordu — sahiplenilen önek ile taranan kaynak kümesi ayrışmıştı.
-    'hrma/analysis/kinetic_analysis.py',
+    # v2.6.27: 'hrma/analysis/kinetic_analysis.py' SİLİNDİ (emekli çözücü,
+    # teknik borç §4 kapanışı) — kaynak listesinden ve 'warn.kinetic.' öneki
+    # sahiplik listesinden çıkarıldı; sözlükteki 30 warn.kinetic.* satırı da
+    # aynı partide kaldırıldı (üreticisi olmayan anahtar yetimdir).
 ]
 
 I18N_FILE = 'hrma/static/js/i18n_common.js'
@@ -49,7 +48,6 @@ ANALYSIS_PREFIXES = (
     'warn.safety.',
     'warn.structural.',
     'warn.thermal.',
-    'warn.kinetic.',
 )
 
 CODE_RE = re.compile(r"'(warn\.[a-z0-9_.]+)'")

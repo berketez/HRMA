@@ -184,54 +184,8 @@ class TestSolverSuccessGate:
 
 
 # ---------------------------------------------------------------------------
-# B5b — alan-Mach kök bulucusunda uydurma yedek değer yok
-# ---------------------------------------------------------------------------
-class TestAreaMachSolverHonesty:
-
-    @staticmethod
-    def _analyzer():
-        from hrma.analysis.kinetic_analysis import NozzleKineticAnalyzer
-        return NozzleKineticAnalyzer()
-
-    def test_supersonic_branch_is_actually_supersonic(self):
-        """Küçük alan oranlarında bile kök M > 1 (eski kod 1.001'e kırpıyordu)."""
-        an = self._analyzer()
-        gamma = 1.25
-        for ratio in np.logspace(0, np.log10(6.25), 50)[1:]:
-            mach = an._estimate_mach_from_area_ratio(float(ratio), gamma)
-            assert mach > 1.0
-            # Sahte 1.001 kırpması artık üretilmiyor
-            assert mach != pytest.approx(1.001, abs=1e-6)
-
-    def test_root_satisfies_area_mach_relation(self):
-        """Dönen kök bağıntıyı gerçekten sağlıyor (uydurma sabit değil)."""
-        an = self._analyzer()
-        gamma = 1.25
-        for ratio in (1.05, 2.0, 6.25, 25.0, 100.0):
-            mach = an._estimate_mach_from_area_ratio(ratio, gamma)
-            lhs = (1.0 / mach) * ((2.0 / (gamma + 1.0)) *
-                                  (1.0 + (gamma - 1.0) / 2.0 * mach ** 2)
-                                  ) ** ((gamma + 1.0) / (2.0 * (gamma - 1.0)))
-            assert lhs == pytest.approx(ratio, rel=1e-8)
-
-    def test_no_fabricated_mach_two_fallback(self, monkeypatch):
-        """Kök bulucu patlarsa Mach 2.0 UYDURULMAZ; ValueError yükselir."""
-        import hrma.analysis.kinetic_analysis as ka
-
-        def _boom(*a, **k):
-            raise ValueError('minpack exploded')
-
-        monkeypatch.setattr(ka, 'fsolve', _boom)
-        with pytest.raises(ValueError) as exc:
-            self._analyzer()._estimate_mach_from_area_ratio(6.25, 1.25)
-        assert 'area ratio' in str(exc.value)
-
-    def test_non_convergence_flag_is_read(self, monkeypatch):
-        """fsolve sessizce kötü kök dönerse (ier != 1) sonuç yayımlanmaz."""
-        import hrma.analysis.kinetic_analysis as ka
-        monkeypatch.setattr(
-            ka, 'fsolve',
-            lambda *a, **k: (np.array([3.0]), {'fvec': np.array([9.9])}, 5,
-                             'The iteration is not making good progress'))
-        with pytest.raises(ValueError, match='did not converge'):
-            self._analyzer()._estimate_mach_from_area_ratio(6.25, 1.25)
+# B5b (TARİHE KARIŞTI, 15 Ağu 2026): alan-Mach kök bulucu bekçileri,
+# korudukları modülle (kinetic_analysis.py — emekli, silindi) birlikte
+# kaldırıldı. Halef kademeli kinetik verim modeli alan-Mach kökü çözmez;
+# eksenel-simetrik zincirin kendi Mach çözücüsü heat_transfer_analysis
+# içindedir ve kendi testleriyle korunur.

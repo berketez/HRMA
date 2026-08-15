@@ -269,7 +269,7 @@ class WindowsCompatibility:
             # tasma, gecersiz islem) surec genelinde susturuluyordu. Bu, yalniz
             # bir gurultu ayari degil: v2.6.2'de motor modullerinden
             # `warnings.filterwarnings('ignore')` cagrilari BILEREK kaldirilmisti
-            # (bkz. liquid_rocket_engine.py, cfd_analysis.py, kinetic_analysis.py
+            # (bkz. liquid_rocket_engine.py (cfd/kinetic_analysis 15 Ağu 2026'da silindi)
             # basindaki notlar) cunku catch-all susturma gercek sayisal hatalari
             # gizliyordu. Windows yolu ayni susturmayi daha guclu bicimde geri
             # getiriyordu ve yayinlanan EXE bu yoldan geciyor: macOS'ta gorunen
