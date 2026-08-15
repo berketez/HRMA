@@ -712,27 +712,24 @@ class TestKabulOlcutuBeyani:
 
     @pytest.fixture(scope='class')
     def bates_varsayilan_ref(self):
-        """Canlı /api/fea/planar-grain bates varsayılanının çözücü-düzeyi
-        birebir kopyası (KUSURUN ölçüldüğü koşu).
+        """KUSURUN ölçüldüğü koşunun çözücü-düzeyi birebir kopyası —
+        AÇIKÇA 3 inceltme turuna sabitlenmiştir.
 
-        GRAIN_RING_A/B ve GRAIN_RING_P zaten canlı varsayılanın kendisidir
-        (100/30 mm, 40 bar); malzeme SOLID_GRAIN_MECHANICS['apcp'], simetri
-        PLANAR_GRAIN_BATES_SYMMETRY, tur sayısı app.py'nin eleman bütçesi
-        kırpmasıyla AYNI döngüden hesaplanır (FEA_MAX_ELEMS değişirse canlı
-        varsayılan da değişir — bu ölçülü-vaka bekçisi o zaman bilerek
-        kırılır ve yeniden ölçülmelidir).
+        Tarihçe: kusur 15 Ağu 2026'da canlı varsayılanda ölçüldüğünde
+        eleman bütçesi (FEA_MAX_ELEMS=20000) bates'i 3 inceltmede (6144
+        eleman) kesiyordu ve vM %2,02 ile OTURMAMIŞ görünürken kabul
+        ölçütü (port gerinimi) 2. turda oturmuştu. Parti 24 bütçe artışı
+        (80000) canlı varsayılana 4. turu verdi ve vM de kendiliğinden
+        oturdu — yani KUSUR DURUMU artık canlı varsayılan değil. Bu bekçi
+        kusur durumunun KENDİSİNİ (acc oturmuş ∧ vM oturmamış) kilitler;
+        o durum ancak açık tur sabitlemesiyle yeniden üretilebilir. Bütçe
+        türetmesi bu yüzden bilinçli KALDIRILDI (fixture'ın eski docstring'i
+        bu kırılmayı öngörmüştü: "FEA_MAX_ELEMS değişirse ... yeniden
+        ölçülmelidir").
         """
-        from hrma.app import FEA_MAX_ELEMS
         from hrma.fea.bridge import PLANAR_GRAIN_BATES_SYMMETRY
-        from hrma.fea.mesh_axisym import DEFAULT_ELEMS_THROUGH_WALL
-        from hrma.fea.planar_grain import DEFAULT_N_THETA0
-        from hrma.fea.structural_axisym import REFINE_FACTOR
         from hrma.engines.solid_rocket_engine import SOLID_GRAIN_MECHANICS
         mech = SOLID_GRAIN_MECHANICS['apcp']
-        rounds = 0
-        while (DEFAULT_N_THETA0 * DEFAULT_ELEMS_THROUGH_WALL
-               * REFINE_FACTOR ** (2 * (rounds + 1))) <= FEA_MAX_ELEMS:
-            rounds += 1
         return solve_grain_with_refinement(
             GRAIN_RING_A, GRAIN_RING_B,
             Material(E=float(mech['elastic_modulus_pa']),
@@ -741,7 +738,7 @@ class TestKabulOlcutuBeyani:
             symmetry_fraction=PLANAR_GRAIN_BATES_SYMMETRY,
             outer_bc='bonded_rigid',
             strain_capability=float(mech['strain_capability']),
-            max_rounds=rounds)
+            max_rounds=3)
 
     def test_acceptance_semasi(self, hizli_ref):
         ref = hizli_ref

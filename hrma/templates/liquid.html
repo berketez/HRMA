@@ -6700,6 +6700,44 @@ Please provide:
             if (window.currentResults) syncInjectorPanelToSolver(window.currentResults);
         });
     </script>
+    <!-- D5 yapısal FEA yüzü (sıvı cidar): POST /api/fea/structural. Sıvı
+         sayfasında panel bugüne dek BİLEREK yoktu — dış yüzeyin normal
+         ötelemesi boğaz vadisinde jilet-çentiğe dejenere oluyor ve koşum
+         yakınsamıyordu. mesh_axisym'e dış yüzey eğrilik tabanı (yuvarlanan
+         top kapaması) girince borç kapandı; bekçi: tests/test_fea_panel.py
+         + tests/test_mesh_disyuzey_egrilik_tabani.py. -->
+    <script src="/static/js/fea_panel.js"></script>
+    <script>
+        // FeaPanel kurulumu. ÇAPA KARARI: #analysis-dock-anchor — sonuç
+        // bölümünün (#results) içindeki tek kararlı kimlik; SixDofPanel,
+        // InjectorPanel ve AnalysisDock da aynı çapayı kullanıyor. Panel
+        // çapanın ÖNÜNE eklendiği için ancak hesap bitip sonuç bölümü
+        // açılınca görünür (2026-07-19 bulgusu: çapasız panel .container'a
+        // düşüp HESAP YAPILMADAN görünür olur). advanced.html'deki
+        // 'trajectoryPanel' kimliği bu sayfada YOK — dosya gerçeği bu.
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!window.FeaPanel) return;
+            FeaPanel.init({ anchorId: 'analysis-dock-anchor' });
+            // Bayat-alan köprüsü: panelin kendi kancası
+            // window.displayCalculationResults'ı sarar; bu sayfanın sonuç
+            // basıcısı ise displayResults (liquid.html:2365, ölçüldü).
+            // Panel koduna dokunulmadan aynı sözleşme burada kurulur:
+            // her yeni hesapta FeaPanel.update(results) eski FEA çıktısını
+            // SİLER — bayat gerilme alanı yeni motorunmuş gibi durmaz.
+            var ozgun = window.displayResults;
+            if (typeof ozgun === 'function') {
+                window.displayResults = function (results) {
+                    var out = ozgun.apply(this, arguments);
+                    try {
+                        FeaPanel.update(results);
+                    } catch (e) {
+                        console.error('FEA panel update failed:', e);
+                    }
+                    return out;
+                };
+            }
+        });
+    </script>
     <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->
     <script src="/static/js/analysis_dock.js"></script>
     <script src="/static/js/panels/structural_panel.js"></script>

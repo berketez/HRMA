@@ -279,6 +279,27 @@ def test_advanced_html_paneli_yukluyor_ve_kuruyor():
     assert 'FeaPanel.init(' in html, 'panel kurulmuyor (init çağrısı yok)'
 
 
+def test_liquid_html_paneli_yukluyor_ve_kuruyor():
+    """Sıvı sayfası bağlaması (2026-08-15 — köşe tekilliği borcu kapandı).
+
+    Üç kilit: (1) panel dosyası yüklü + init var; (2) çapa
+    'analysis-dock-anchor' — sonuç bölümünün içindeki tek kararlı kimlik
+    (advanced'ın 'trajectoryPanel' kimliği bu sayfada YOK; çapasız panel
+    hesap yapılmadan görünür olurdu, 2026-07-19 bulgusu); (3) bayat-alan
+    köprüsü sayfanın GERÇEK sonuç basıcısına (displayResults) sarılı —
+    panelin kendi kancası displayCalculationResults'ı arar, o bu sayfada
+    tanımsızdır.
+    """
+    html = (REPO_ROOT / 'hrma' / 'templates'
+            / 'liquid.html').read_text(encoding='utf-8')
+    assert '/static/js/fea_panel.js' in html, 'panel dosyası sayfaya bağlanmamış'
+    assert "FeaPanel.init({ anchorId: 'analysis-dock-anchor' })" in html
+    assert "id=\"analysis-dock-anchor\"" in html, 'çapa kimliği sayfadan silinmiş'
+    assert 'FeaPanel.update(results)' in html, \
+        'bayat-alan köprüsü yok — eski FEA çıktısı yeni motorunmuş gibi kalır'
+    assert 'window.displayResults' in html
+
+
 # ---------------------------------------------------------------------------
 # 1. Kontur verisi çözücüden BİREBİR
 # ---------------------------------------------------------------------------

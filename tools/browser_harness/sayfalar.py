@@ -53,7 +53,8 @@ class FeaPaneli:
     notlar: str = ''
 
 
-#: ``/hybrid`` — eksenel simetrik cidar yapısal FEA'sı (fea_panel.js:453).
+#: ``/hybrid`` + ``/liquid`` — eksenel simetrik cidar yapısal FEA'sı
+#: (fea_panel.js:453; sıvıya 2026-08-15'te bağlandı).
 #: Dört çizim de koşum başarılıyken çizilir: gerilme alanı, emniyet katsayısı
 #: alanı, eleman kalitesi haritası ve yakınsama geçmişi. Biri çizilmiyorsa
 #: sebebi ya eksik malzeme kaydıdır (emniyet katsayısı) ya da tek turda
@@ -71,7 +72,10 @@ YAPISAL_FEA = FeaPaneli(
                       'fea_plot_conv'),
     beklenen_imzalar=('mesh_bozulmasi', 'uzamis_elemanlar'),
     yasak_imzalar=('birlesik_kalite_alarmi',),
-    notlar='advanced.html:827 — FeaPanel.init(anchorId: trajectoryPanel).',
+    notlar=('advanced.html:827 — FeaPanel.init(anchorId: trajectoryPanel); '
+            'liquid.html — FeaPanel.init(anchorId: analysis-dock-anchor). '
+            'Kimlikler panel JS tarafından üretildiği için iki sayfada da '
+            'aynıdır.'),
 )
 
 #: ``/hybrid`` — geçici cidar sıcaklık alanı (thermal_fea_panel.js:426).
@@ -134,11 +138,11 @@ class Sayfa:
     #: Bu sayfada ölçülmesi beklenmeyen denetimler (ad kümesi). Şu an boş:
     #: üç sayfanın üçü de 3B sahne ve egzoz gösterdiğini iddia ediyor.
     beklenmeyen_denetimler: Tuple[str, ...] = field(default_factory=tuple)
-    #: Bu sayfada koşturulup denetlenecek FEA panelleri. Sıvı sayfasında
-    #: BOŞTUR ve bu bilinçlidir: sıvı cidar FEA'sı üründe YOK (bulgu
-    #: defterinde gerekçeli açık borç — köşe tekilliği yakınsamıyor).
-    #: Boş bırakmak "denetlenmedi" demek değil, "denetlenecek panel yok"
-    #: demektir; panel eklendiği gün buraya bir satır düşer.
+    #: Bu sayfada koşturulup denetlenecek FEA panelleri. Üç sayfanın üçünde
+    #: de en az bir panel var (sıvıdaki yapısal panel 2026-08-15'te bağlandı
+    #: — köşe tekilliği borcu mesh_axisym dış yüzey eğrilik tabanıyla
+    #: kapandı). Boş liste "denetlenmedi" değil "denetlenecek panel yok"
+    #: demek olurdu; bugün öyle bir sayfa kalmadı.
     fea_panelleri: Tuple[FeaPaneli, ...] = field(default_factory=tuple)
 
 
@@ -192,11 +196,13 @@ SAYFALAR: Dict[str, Sayfa] = {
         viz_acma_secicileri=(),
         viz_kap_kimligi='liquid_3d_view',
         notlar='liquid.html — MotorVizDeck güvertesi, ana sonuç panelinde.',
-        # FEA paneli BİLEREK yok: sıvı cidarında köşe tekilliği yüzünden
-        # koşum yakınsamıyor (1742 MPa, tur başına %16) ve panel ürüne
-        # alınmadı. Buraya boş bir panel listesi koymak, "denetim atlandı"
-        # değil "denetlenecek panel yok" demektir.
-        fea_panelleri=(),
+        # Yapısal FEA paneli 2026-08-15'te bağlandı: eski "köşe tekilliği
+        # yakınsamıyor" borcu (1742 MPa, tur başına %16) mesh_axisym'in dış
+        # yüzey eğrilik tabanıyla (yuvarlanan-top kapaması) kapandı; panel
+        # liquid.html'de #analysis-dock-anchor önüne kurulur. Termal ve
+        # tane panelleri sıvıya BİLEREK eklenmedi: termal zincir bu sayfada
+        # yok, tane paneli katıya özgü.
+        fea_panelleri=(YAPISAL_FEA,),
     ),
 }
 

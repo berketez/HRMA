@@ -618,6 +618,10 @@ def run_structural_from_motor(motor_results: dict,
         "girdiler": inputs["_basis"],
         "cozucu": res.meta,
         "yakinsama": ref.meta,
+        # Mesh üreticisinin beyanı AYNEN akar (dış yüzey eğrilik tabanı
+        # ölçümleri dahil — mesh_axisym meta'sı girdiler/cozucu zincirinin
+        # yanında, kaynağı değiştirilmeden taşınır).
+        "mesh_beyani": ref.mesh.meta,
         "not_modelled": [
             "termal gerilme ve dayanım deratingi (D2 termal köprüsüyle "
             "eşleşme sonraki kalem; akma oda sıcaklığı/çözücü değeri)",

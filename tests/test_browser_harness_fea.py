@@ -178,11 +178,20 @@ class TestPanelTanimlari:
     """Kimlikler üründe gerçekten var mı? (tarayıcı açmadan, saniyeler içinde)"""
 
     def test_hangi_sayfada_hangi_panel(self):
-        """Hibritte iki panel, katıda bir, sıvıda SIFIR — sıvı bilinçli."""
+        """Hibritte iki panel, katıda bir, sıvıda BİR (yapısal).
+
+        ESKİ SÖZLEŞME sıvıda sıfırdı (köşe tekilliği borcu — koşum
+        yakınsamıyordu). Borç 2026-08-15'te mesh_axisym'in dış yüzey
+        eğrilik tabanıyla kapandı ve panel liquid.html'e bağlandı; termal
+        ve tane panelleri sıvıya BİLEREK eklenmedi (termal zincir sayfada
+        yok, tane katıya özgü) — bu bekçi o ikisinin hayalet olarak
+        sızmadığını da kilitler.
+        """
         assert [p.ad for p in sayfalar.SAYFALAR['hybrid'].fea_panelleri] == \
             ['yapisal', 'termal']
         assert [p.ad for p in sayfalar.SAYFALAR['solid'].fea_panelleri] == ['tane']
-        assert sayfalar.SAYFALAR['liquid'].fea_panelleri == ()
+        assert [p.ad for p in sayfalar.SAYFALAR['liquid'].fea_panelleri] == \
+            ['yapisal']
 
     @pytest.mark.parametrize('tanim,kaynak', [
         (sayfalar.YAPISAL_FEA, 'hrma/static/js/fea_panel.js'),
@@ -608,11 +617,30 @@ class TestAkisaBaglanma:
         kalanlar = [d['ad'] for d in rapor['denetimler'] if not d['gecti']]
         assert kalanlar == ['fea_tane_kosum']
 
-    def test_sivi_sayfasinda_fea_denetimi_uretilmez(self):
-        """Sıvıda FEA paneli BİLEREK yok; tur oraya hayalet denetim koymaz."""
+    def test_sivi_sayfasinda_yapisal_fea_denetlenir(self):
+        """Sıvı raporu yapısal FEA üçlüsünü taşır; ölçümsüz hüküm KALIR.
+
+        ESKİ SÖZLEŞME: sıvıda panel bilerek yoktu ve tur hayalet denetim
+        üretmezdi. Panel 2026-08-15'te bağlandı (dış yüzey eğrilik tabanı);
+        yeni sözleşme üç şeyi kilitler: (1) fea_yapisal_* üçlüsü sıvı
+        raporunda VAR, (2) ölçüm yokken üçü de KALIR — panel ekrandan
+        düşerse tur sessiz yeşile dönmez, (3) termal/tane hayaleti YOK.
+        """
         rapor = self._tam_rapor('liquid', {})
-        assert not any(d['ad'].startswith('fea_') for d in rapor['denetimler'])
-        assert len(rapor['denetimler']) == 5
+        adlar = [d['ad'] for d in rapor['denetimler']]
+        assert adlar[5:] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
+                             'fea_yapisal_rozet']
+        assert not any(a.startswith(('fea_termal', 'fea_tane'))
+                       for a in adlar)
+        assert rapor['gecti'] is False
+        kalanlar = [d['ad'] for d in rapor['denetimler'] if not d['gecti']]
+        assert kalanlar == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
+                            'fea_yapisal_rozet']
+        # Sağlıklı ölçümle sıvı raporu yeşile döner (ölçüm sözlüğü sentetik
+        # test altyapısıdır; imza denetimleri panel adına değil rozet
+        # metnine bakar, iki sayfada da aynı panel JS'i üretir).
+        saglam = self._tam_rapor('liquid', {'yapisal': yapisal_olcum()})
+        assert saglam['gecti'] is True
 
     def test_fea_olcumu_rapora_yazilir(self):
         rapor = self._tam_rapor('solid', {'tane': tane_olcum()})

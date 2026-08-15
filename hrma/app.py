@@ -7246,7 +7246,24 @@ def analyze_wall_profile():
 #: sayısı tur başına F² kat artar; sınır aşılacaksa TUR SAYISI kısılır
 #: (mesh sessizce bozulmaz, kısıtlama yanıtta 'limits' ile beyan edilir).
 #: Masaüstü tek-worker sunucuda uzun koşu riskine karşı konmuştur.
-FEA_MAX_ELEMS = 20000
+#:
+#: 2026-08-15 (parti 24) 20000 → 80000: dış yüzey eğrilik tabanı sonrası
+#: sıvı varsayılanında tepe vM SINIRLI ama 16384 elemanda son tur değişimi
+#: %2,37 ölçüldü (eksenel %1,1 + radyal %1,3; radyal kalem tur başına
+#: yarılanıyor: 2,6→1,3→0,65). Bir inceltme turu daha (65536 eleman)
+#: hükmü tolerans altına indiriyor; seyrek doğrudan çözüm bu boyutta
+#: saniyeler mertebesinde. Kalıcı iyileştirme adayı (radyal katlamayı
+#: eksenelden ayrıştıran inceltme politikası) bulgu defterinde.
+FEA_MAX_ELEMS = 80000
+
+#: Cidar (yapısal) ucunun varsayılan inceltme turu — çözücünün ortak
+#: DEFAULT_MAX_REFINE_ROUNDS'undan (4) BİLİNÇLİ ayrı: parti 24 ölçümü,
+#: eğrilik tabanı sonrası sıvı varsayılanının hükme 5. turda indiğini
+#: gösterdi (yukarıdaki bütçe yorumu). Tane ucu 4'te kalır — onun kabul
+#: ölçütü (port gerinimi) 2. turda oturuyor ve ölçülü bekçileri 4-tur
+#: davranışına kilitli; erken duran koşular (hibrit, 3. turda toleransta)
+#: bu değişiklikten etkilenmez.
+FEA_STRUCTURAL_DEFAULT_ROUNDS = 5
 
 #: Eleman kalite eşikleri — TEK TANIM YERİ. Panel bu değerleri yanıttan
 #: okur (kaynakta ikinci kez yazılmaz, parametre tutarlılığı kuralı).
@@ -7391,7 +7408,8 @@ def api_fea_structural():
 
     n_axial0 = _pozitif_int('n_axial0', DEFAULT_N_AXIAL0, 4, 256)
     n_radial0 = _pozitif_int('n_radial0', DEFAULT_ELEMS_THROUGH_WALL, 1, 32)
-    rounds_istenen = _pozitif_int('max_rounds', DEFAULT_MAX_REFINE_ROUNDS, 0, 8)
+    rounds_istenen = _pozitif_int('max_rounds', FEA_STRUCTURAL_DEFAULT_ROUNDS,
+                                  0, 8)
 
     # Tur kısıtlaması: n_elems(k) = n_axial0 * n_radial0 * F^(2k) <= sınır.
     rounds_izinli = 0
