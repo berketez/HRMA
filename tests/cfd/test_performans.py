@@ -27,6 +27,7 @@ göre yalancı kırmızı verir; süreler rapora ölçüm olarak girer):
   bit-özdeşliğin koşum düzeyindeki yankısı.
 """
 
+import pathlib
 import subprocess
 import sys
 
@@ -137,9 +138,12 @@ def test_env_degiskeni_numbayi_kapatir():
            'from hrma.cfd import kernels; '
            'assert kernels.NUMBA_DISABLED_BY_ENV is True; '
            'assert kernels.NUMBA_AVAILABLE is False; print("OK")')
+    # cwd depo kökünden türetilir — mutlak makine yolu CI'da yok
+    # (FileNotFoundError, koşum 31908552054).
+    repo_koku = pathlib.Path(__file__).resolve().parents[2]
     sonuc = subprocess.run([sys.executable, '-c', kod],
                            capture_output=True, text=True, timeout=120,
-                           cwd='/Users/apple/HRMA')
+                           cwd=repo_koku)
     assert sonuc.returncode == 0 and 'OK' in sonuc.stdout, (
         f'ortam değişkeni numba yolunu kapatmadı: '
         f'stdout={sonuc.stdout!r} stderr={sonuc.stderr[-400:]!r}')

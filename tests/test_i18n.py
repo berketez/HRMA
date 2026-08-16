@@ -358,7 +358,10 @@ ASCII_SLIP = re.compile(
     r'calistir|tasarim|basari|akis|akiskan|sogutma|yakit|enjektor|lule|bogaz|'
     r'uzerinde|icin|dusuk|yuksek|buyuk|kucuk|gorunum|ozgul|duzeltme|gosterge|'
     r'uyari|ayrinti|ozet|disa|sifirla|varsayilan|seci|degistir|gunluk|'
-    r'baglanti|klasor|ornek|geci|yanlis|artis|degisim|egri|cizim|cizgi|cizel|'
+    # 'geci' kökü BİLEREK açık yazıldı (gecis|gecici|gecit): 'gecikme'
+    # doğru yazımında hiç Türkçe harf taşımaz, ortak önek yanlış alarmdı
+    # (CI 2026-08-16: adv.label.parachuteDeployDelayS).
+    r'baglanti|klasor|ornek|gecis|gecici|gecit|yanlis|artis|degisim|egri|cizim|cizgi|cizel|'
     r'yaricap|hiz|agir|asagi|yukari|kaydir|kisim|kisa|sinir|sart|sekil|sema|'
     r'islem|isaret|cok|tum|hic|acik|kapali|sayi|tasiyici|cevir|kati|sivi'
     r')'
@@ -897,6 +900,7 @@ def test_ascii_slip_detector_catches_known_slips():
         'Guvenlik katsayisi', 'Regresyon hizi', 'Bogaz capi', 'Enjektor tipi',
         'Cikti dosyasi', 'Ozgul itki', 'Yukleniyor', 'Ayarlari degistir',
         'Yogunluk', 'Kalinlik', 'Baslangic degeri', 'Sogutma kanali',
+        'Gecis analizi', 'Gecici dosya',
     ]
     kacan = [metin for metin in kotu if ascii_slip(metin) is None]
     assert not kacan, 'ASCII kaçışı yakalanamadı: %s' % kacan
@@ -911,6 +915,9 @@ def test_ascii_slip_detector_accepts_correct_turkish():
         'BATES grain geometrisi', '6-DOF yörünge analizi', 'Ortalama akış hızı',
         'Toplam yanma süresi', 'Cidar sıcaklığı', 'L* karakteristik uzunluk',
         'O/F oranı', 'CSV olarak dışa aktar', 'Emniyet katsayısı yeterli',
+        # 'gecikme' baştan sona ASCII ve DOĞRU yazımdır ('geci' önek
+        # çarpışması CI'da yanlış alarm vermişti, 2026-08-16):
+        'Tepe Sonrası Açılma Gecikmesi (s)', 'Araç bu gecikme boyunca düşer',
     ]
     yanlis_pozitif = [(metin, ascii_slip(metin)) for metin in iyi if ascii_slip(metin)]
     assert not yanlis_pozitif, 'Doğru yazılmış metne yanlış alarm: %s' % yanlis_pozitif
