@@ -9,6 +9,9 @@ Modüller:
     şok konumu (Anderson, "Modern Compressible Flow", 3. baskı, Böl. 3 ve 5).
   - ``separation``: Summerfield / Schmucker / Kalt-Badal ayrılma kriterleri
     (geçerlilik aralıkları beyanlı).
+  - ``boundary_layer``: momentum-integral sınır tabakası (Thwaites + Head,
+    Eckert referans sıcaklığı; V5, cfd-viskoz-tasarimi.md) — sürtünme itki
+    kaybının ölçülen değeri; RANS geldiğinde çapraz ölçüm aracı.
 """
 
 from hrma.flow.quasi1d import (
@@ -28,6 +31,10 @@ from hrma.flow.quasi1d import (
     mach_from_pressure_ratio,
     normal_shock_relations,
     solve_nozzle,
+)
+from hrma.flow.boundary_layer import (
+    BOUNDARY_LAYER_NOT_MODELLED,
+    solve_boundary_layer,
 )
 from hrma.flow.separation import (
     CRITERION_KALT_BADAL,
@@ -69,4 +76,6 @@ __all__ = [
     'kalt_badal_pressure_ratio',
     'schmucker_pressure_ratio',
     'summerfield_pressure_ratio',
+    'BOUNDARY_LAYER_NOT_MODELLED',
+    'solve_boundary_layer',
 ]

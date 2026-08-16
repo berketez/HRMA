@@ -128,6 +128,17 @@ def _box_corners(half_len, max_r):
             for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
 
 
+def _nokta_dogru_parcasi_uzakligi(nokta, a, b):
+    """(u,v) ekran duzleminde noktanin [a,b] parcasina uzakligi."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    uzunluk2 = dx * dx + dy * dy
+    if uzunluk2 <= 0:
+        return math.hypot(nokta[0] - a[0], nokta[1] - a[1])
+    t = ((nokta[0] - a[0]) * dx + (nokta[1] - a[1]) * dy) / uzunluk2
+    t = max(0.0, min(1.0, t))
+    return math.hypot(nokta[0] - (a[0] + t * dx), nokta[1] - (a[1] + t * dy))
+
+
 # ---------------------------------------------------------------------------
 # Kalem 1 — parçacık boyutu kadraj ölçüsüne duyarlı; sayı/ömür boyla orantılı
 # ---------------------------------------------------------------------------
@@ -413,6 +424,171 @@ class TestIzgara:
 
 
 # ---------------------------------------------------------------------------
+# Kalem 5b — ızgara rozeti GÖRÜNÜR olmalı (okunamayan beyan beyan değildir)
+# ---------------------------------------------------------------------------
+
+class TestIzgaraRozetiGorunurlugu:
+    """Ölçülen kusur (2026-08-16, parti 26; durum çipleriyle AYNI sınıf).
+
+    Rozet ızgara açıklığının köşesine konuyordu (±0,42·span). Izgara ~3
+    motor boyu olduğu için, kamera MOTORU çerçevelerken rozet kadrajın
+    dışında kalıyordu. Katı öğretici motorunda (L = 732,5 mm, R = 54,5 mm,
+    800×520 konteyner) eski konum (924 · −50,7 · 924) mm:
+
+        NDC u = −0,979, v = +11,47, DERİNLİK = −193 mm
+
+    yani rozet kameranın arkasındaydı — hücre boyu beyanı hiçbir varsayılan
+    kadrajda okunamıyordu. Yeni konum motor boyuna bağlıdır (çip çapasıyla
+    aynı gerekçe): (−307,6 · −83,6 · +73,2) mm -> u = −0,505, v = +0,045.
+
+    Bu sınıf düzeltmenin İKİ yanını da kilitler: yeni konum kadrajın içinde
+    (ve gövdenin silüetinden uzakta) durur, eski konum ise ölçülebilir
+    biçimde dışarıdadır.
+    """
+
+    # (L, R) çiftleri: ince gövde (köşegen kompozisyon) ve tıknaz gövde
+    OLCU_KUTULARI = ((732.5, 54.5), (1670.0, 65.0), (200.0, 25.0),
+                     (400.0, 60.0), (3000.0, 40.0), (150.0, 15.0))
+    EN_BOY = (0.8, 1.0, ASPECT_DEFAULT, 2.0, 2.5)
+
+    def _prelude(self):
+        return '\n'.join([
+            _consts('GRID_BADGE_Z_FACTOR', 'GRID_CELL_STEPS_MM'),
+            _extract('gridCellMm'), _extract('gridSpanMm'),
+            _extract('labelScaleBase'), _extract('chipAnchorMm'),
+            _extract('chipHeightMm'), _extract('gridBadgePositionMm'),
+        ])
+
+    def _yerlesim(self, L, R):
+        """Sahnenin kurduğu rozet konumu + yüksekliği (mm)."""
+        floor_y = -R * 1.9          # MotorScene._buildMotor: -(rcOut+lip)*1.9
+        return _emit(self._prelude(),
+                     '(function () { var h = chipHeightMm(%r, %r);'
+                     'return { h: h, p: gridBadgePositionMm(%r, %r, h) }; })()'
+                     % (L, 2 * R, L, floor_y))
+
+    def _eski_yerlesim(self, L, R):
+        """Düzeltme öncesi konum (ızgara köşesi) — kusur vakası."""
+        return _emit(self._prelude(),
+                     '(function () { var c = gridCellMm(%r), s = gridSpanMm(%r, c);'
+                     'var h = Math.max(c * 1.1, s * 0.03);'
+                     'return { h: h, p: { x: s * 0.42, y: %r + h * 0.8,'
+                     ' z: s * 0.42 } }; })()' % (L, L, -R * 1.9))
+
+    def _izdusum(self, nokta, L, R, aspect):
+        fit = _camera_fit(L / 2, R, FOV_DEG, aspect)
+        pt = _project_corners(fit['dir'], fit['dist'],
+                              [(nokta['x'], nokta['y'], nokta['z'])],
+                              FOV_DEG, aspect)[0]
+        pt['fit'] = fit
+        return pt
+
+    def test_rozet_kadrajin_icinde(self):
+        """Her gövde ve her en-boy oranında rozet ekranda kalır."""
+        for L, R in self.OLCU_KUTULARI:
+            yer = self._yerlesim(L, R)
+            for aspect in self.EN_BOY:
+                pt = self._izdusum(yer['p'], L, R, aspect)
+                assert pt['depth'] > 0, (
+                    'L=%s R=%s en-boy=%s: rozet kameranın ARKASINDA '
+                    '(derinlik %.1f mm)' % (L, R, aspect, pt['depth']))
+                assert abs(pt['u']) <= 1.0 and abs(pt['v']) <= 1.0, (
+                    'L=%s R=%s en-boy=%s: rozet kadraj dışında '
+                    '(u=%.3f v=%.3f)' % (L, R, aspect, pt['u'], pt['v']))
+
+    def test_eski_izgara_kosesi_olculebilir_bicimde_disaridaydi(self):
+        """Kusur vakası: düzeltilen konum GERÇEKTEN görünmezdi."""
+        disarida = 0
+        for L, R in self.OLCU_KUTULARI:
+            eski = self._eski_yerlesim(L, R)
+            pt = self._izdusum(eski['p'], L, R, ASPECT_DEFAULT)
+            if pt['depth'] <= 0 or abs(pt['u']) > 1 or abs(pt['v']) > 1:
+                disarida += 1
+        assert disarida == len(self.OLCU_KUTULARI), (
+            'eski ızgara-köşesi konumu bazı gövdelerde görünürmüş; teşhis '
+            'senaryosu geçerliliğini yitirdi (%d/%d dışarıda)'
+            % (disarida, len(self.OLCU_KUTULARI)))
+
+    def test_kati_ogretici_motorunda_olculen_degerler(self):
+        """Rapordaki sayılar bekçide durur: eski v=+11,47 / yeni v=+0,045."""
+        L, R = 732.5, 54.5
+        eski = self._izdusum(self._eski_yerlesim(L, R)['p'], L, R, ASPECT_DEFAULT)
+        yeni = self._izdusum(self._yerlesim(L, R)['p'], L, R, ASPECT_DEFAULT)
+        assert eski['v'] == pytest.approx(11.474, abs=0.01)
+        assert eski['depth'] == pytest.approx(-192.7, abs=1.0)
+        assert yeni['v'] == pytest.approx(0.045, abs=0.01)
+        assert yeni['u'] == pytest.approx(-0.505, abs=0.01)
+
+    def test_rozet_govde_siluetine_binmiyor(self):
+        """Rozet önde durur ama eksenin üstüne çizilmez: ekran uzaklığı
+        gövdenin izdüşüm yarıçapının en az 1,2 katı (ölçülen en dar
+        vaka 1,41 — L=200 mm, R=15 mm, en-boy 2,5)."""
+        for L, R in self.OLCU_KUTULARI:
+            yer = self._yerlesim(L, R)
+            for aspect in self.EN_BOY:
+                pt = self._izdusum(yer['p'], L, R, aspect)
+                fit = pt['fit']
+                uclar = _project_corners(fit['dir'], fit['dist'],
+                                         [(-L / 2, 0, 0), (L / 2, 0, 0)],
+                                         FOV_DEG, aspect)
+                merkez = _project_corners(fit['dir'], fit['dist'],
+                                          [(0, 0, 0), (0, R, 0)],
+                                          FOV_DEG, aspect)
+                yaricap_ndc = abs(merkez[1]['v'] - merkez[0]['v'])
+                d = _nokta_dogru_parcasi_uzakligi(
+                    (pt['u'], pt['v']),
+                    (uclar[0]['u'], uclar[0]['v']),
+                    (uclar[1]['u'], uclar[1]['v']))
+                assert d >= 1.2 * yaricap_ndc, (
+                    'L=%s R=%s en-boy=%s: rozet gövdenin üstünde '
+                    '(uzaklık %.3f, yarıçap %.3f)' % (L, R, aspect, d,
+                                                      yaricap_ndc))
+
+    def test_capa_motor_boyundan_turer(self):
+        """Konum ızgara açıklığına değil MOTOR boyuna bağlıdır: boy iki
+        katına çıkınca konum da iki katına çıkar, ızgara kademesi
+        (10/50/100 mm) değişse bile."""
+        a = self._yerlesim(1000.0, 50.0)['p']
+        b = self._yerlesim(2000.0, 100.0)['p']
+        assert b['x'] == pytest.approx(2 * a['x'])
+        assert b['z'] == pytest.approx(2 * a['z'])
+        # Konum model kutusunun içinde kalır (kadrajın türediği kutu)
+        for L, R in self.OLCU_KUTULARI:
+            p = self._yerlesim(L, R)['p']
+            assert 0 < abs(p['x']) < L / 2 and 0 < p['z'] < L / 2, (L, R, p)
+        src = _source()
+        assert 'gridBadgePositionMm(this._totalLen' in src, (
+            'rozet konumu yine ızgara açıklığından hesaplanıyor')
+        assert not re.search(r'_gridBadge\.position\.set\(this\._gridSpan', src), (
+            'ızgara açıklığına bağlı eski konum geri gelmiş')
+
+    def test_rozet_olcegi_olcu_rozetleriyle_ayni_ailede(self):
+        """Yükseklik labelScaleBase ailesinden gelir (çip düzeltmesinin
+        deseni); eski span·0,03 kuralı 732 mm'lik motorda 66 mm rozet
+        üretiyordu — yenisi 25,0 mm."""
+        yer = self._yerlesim(732.5, 54.5)
+        eski = self._eski_yerlesim(732.5, 54.5)
+        assert eski['h'] == pytest.approx(66.0)
+        assert yer['h'] == pytest.approx(24.99, abs=0.05)
+        src = _source()
+        assert re.search(r'gbH = chipHeightMm\(this\._totalLen', src), (
+            'rozet yüksekliği ölçü rozeti ölçeğinden gelmiyor')
+        assert 'span * 0.03' not in src, (
+            'ızgara açıklığına bağlı eski rozet ölçeği geri gelmiş')
+
+    def test_rozet_her_kurulumda_tazelenir(self):
+        """Rozet yalnız IZGARA değişince yeniden kurulur; motor boyu
+        değişip ızgara kademesi aynı kalabilir. Ölçek ve konum bu yüzden
+        kurulum bloğunun DIŞINDA, her _buildMotor'da atanır."""
+        src = _source()
+        blok = src[src.index('this.scene.add(badge);'):
+                   src.index('this._floorY = floorY;')]
+        assert '_gridBadge.scale.set' in blok, (
+            'rozet ölçeği yalnız ızgara kurulumunda atanıyor — bayatlar')
+        assert '_gridBadge.position.set' in blok
+
+
+# ---------------------------------------------------------------------------
 # Kalem 6 — etiket ölçeği çapla sınırlı; kılavuz ofseti yarıçapa oranlı
 # ---------------------------------------------------------------------------
 
@@ -499,8 +675,8 @@ class TestKablolama:
         'plumeParticleSize', 'plumeLengthMm', 'plumeParticleCount',
         'plumeLifeSeconds', 'plumeColorAt', 'diamondVisibility',
         'cameraFrameFit', 'nozzleRegion', 'gridCellMm', 'gridSpanMm',
-        'gridBadgeText', 'labelScaleBase', 'labelLeaderOffset',
-        'dimensionLabelTexts',
+        'gridBadgeText', 'gridBadgePositionMm', 'labelScaleBase',
+        'labelLeaderOffset', 'dimensionLabelTexts',
     ])
     def test_fonksiyon_tanimli_ve_kullaniliyor(self, name):
         src = _source()

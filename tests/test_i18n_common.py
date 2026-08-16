@@ -59,6 +59,10 @@ MODULE_FILES = [
     STATIC_JS / 'import_ui.js',
     STATIC_JS / 'project_bar.js',
     STATIC_JS / 'step_import_ui.js',
+    # 2026-08-16 (parti 26): Analiz Merkezi çerçevesi — ac.* ailesi bu
+    # dosyada yaşar; listeye girmezse 49 anahtar "ölü çeviri" sayılır
+    # (S3 ajanı ölçtü).
+    STATIC_JS / 'analysis_center.js',
 ]
 PANEL_FILES = sorted(PANELS_DIR.glob('*.js'))
 ALL_FILES = MODULE_FILES + PANEL_FILES
@@ -139,7 +143,7 @@ CALL_RE = re.compile(r"(?:\bT|\bTF|U\.t|U\.tf|window\.I18N\.t|window\.I18N\.tf)"
 ATTR_RE = re.compile(r'data-i18n(?:-title|-placeholder)?="([\w. ]+)"')
 FIELD_RE = re.compile(r"'((?:common|panel|inj|sixdof|sch|out|uq|tps|vessel|joint|"
                       r"nzl|fuel|fluid|gas|coolant|cool|fac|motor|prop|press|mat|"
-                      r"transient|update|app|dock|risk|chartCap)\.[\w.]+)'")
+                      r"transient|update|app|dock|risk|chartCap|ac)\.[\w.]+)'")
 
 
 # FIELD_RE yalnız yardımcı bir tarayıcıdır (alan dizilerindeki çıplak anahtar

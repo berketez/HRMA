@@ -176,6 +176,21 @@ LAMBDA_CONICAL_20DEG = 0.970   # 20 derece yarı açılı konik (1+cos(20°))/2 
 # TEK TANIM YERİ (CLAUDE.md kural 11): hem nozzle_flow_1d.NozzleFlow1D
 # varsayılanı hem sıvı motor teslim-Isp zinciri bu değeri kullanır — daha
 # önce ikisi ayrı ayrı 0.015 yazıyordu.
+#
+# 16 AĞU 2026'DAN BERİ YALNIZ YEDEK (yarı-1B lüle zincirinde).
+# Berke kararı ("doğrusu neyse o olsun"): NozzleFlow1D'nin YAYIMLADIĞI
+# sürtünme kaybı artık ÖLÇÜLEN momentum-integral sınır tabakası değeridir
+# (hrma/flow/boundary_layer.py). Bu sabit orada yalnızca ölçüm
+# yayımlanamadığında devreye girer (lüle içi normal şok, boğulmamış akış,
+# sınır tabakası kapalı/başarısız) ve kullanıldığında
+# losses.friction_loss_fraction_source == 'legacy_constant' diye BEYAN
+# EDİLİR. Göç manifestosu: tests/flow/test_surtunme_gocu.py.
+# DEĞER DEĞİŞMEDİ (0.015) ve DEĞİŞTİRİLMEYECEK: sıvı motor teslim-Isp
+# zinciri (liquid_rocket_engine.py eta_f) hâlâ bu sabiti kullanıyor;
+# oradaki göç ayrı bir karardır (o zincirin kendi sınır tabakası çözümü
+# yok). ÖLÇÜLDÜ (9 vakalık manifest): gerçek sürtünme kaybı 0,0095-0,0173
+# bandında ve boğaz çapına kuvvetle bağlı — bu sabit büyük lülelerde
+# KÖTÜMSER, ~12 mm'nin altındaki boğazlarda İYİMSERDİR.
 NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT = 0.015
 
 

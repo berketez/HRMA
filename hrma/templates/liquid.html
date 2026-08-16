@@ -2069,6 +2069,13 @@
             <!-- Analysis Dock çapası: güverte JS ile bu çapanın ÖNÜNE kurulur
                  (#results içinde olduğundan hesap bitmeden görünmez) -->
             <div id="analysis-dock-anchor"></div>
+
+            <!-- Analiz Merkezi çapası (dalga B çerçevesi): Merkez JS ile bu
+                 çapanın ÖNÜNE kurulur, yani güvertenin HEMEN ALTINA düşer.
+                 Mevcut güverte YERİNDE KALIR — tasarım §4 gereği paneller
+                 tek tek Merkez'e taşınacak, taşıma doğrulanmadan eski yeri
+                 kaldırılmaz. docs/mimari/analiz-merkezi-tasarimi.md -->
+            <div id="analysis-center-anchor"></div>
         </div>
     </div>
     
@@ -6761,6 +6768,12 @@ Please provide:
          + deneysel korelasyon raporu (CORRELATION) -->
     <script src="/static/js/panels/uncertainty_panel.js"></script>
     <script src="/static/js/panels/correlation_panel.js"></script>
+    <!-- Analiz Merkezi (dalga B çerçevesi): önce çekirdek, sonra kiracılar
+         (kayıt sırası sözleşmesi — kiracı register çağırırken
+         window.AnalysisCenter tanımlı olmalı). cfd_panel.js Merkez'in ilk
+         kiracısıdır; parti 26'da dolduruldu (68 bekçi: tests/test_cfd_panel.py). -->
+    <script src="/static/js/analysis_center.js"></script>
+    <script src="/static/js/panels/cfd_panel.js"></script>
     <script>
         // Analiz güvertesi (thermal/structural/safety) — çapa #results içinde
         // olduğundan hesap bitip sonuç bölümü açılınca görünür olur.
@@ -6770,6 +6783,17 @@ Please provide:
                 motorType: 'liquid',
                 resultsProvider: function () { return window.currentResults; },
             });
+            // Analiz Merkezi (dalga B): bileşen ağacı + koşum kartı + sonuç
+            // görüntüleyici. Çapa güvertenin ALTINDA (#analysis-center-anchor).
+            // Merkez sonuç basıcısını kendisi sarar (hookNames varsayılanı);
+            // bu sayfanın basıcısı displayResults (liquid.html:2365, ölçüldü).
+            if (window.AnalysisCenter) {
+                AnalysisCenter.init({
+                    anchorId: 'analysis-center-anchor',
+                    motorType: 'liquid',
+                    resultsProvider: function () { return window.currentResults; },
+                });
+            }
             // Dalga 3: güverte altına kapsam notu (el hesabı sınırları)
             var adDockEl = document.getElementById('analysisDock');
             if (adDockEl && !document.getElementById('ad-scope-note')) {

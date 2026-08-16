@@ -29,11 +29,12 @@ Hücre-merkezli sonlu hacim Euler çekirdeği (v3 CFD, Aşama 1A).
 
 SINIR KOŞULLARI (2B; tasarım belgesi §2)
 ----------------------------------------
-- Giriş: rezervuar (P0, T0) + iç bölgeden statik basınç dışdeğerlemesi
+- Giriş: rezervuar (P0, T0) + iç bölgeden RIEMANN DEĞİŞMEZİ dışdeğerlemesi
   (ses-altı karakteristik sayısı 1: tek bilgi içeriden, gerisi rezervuar
-  izantropiğinden; eksenel akış yönü). Basınç [p_sonik, P0) bandına
-  kırpılır — bu bir fiziksel bant sınırıdır (ses-altı giriş beyanı),
-  uydurma sabit değildir.
+  izantropiğinden; eksenel akış yönü). Dışdeğerlenen büyüklük giden C⁻
+  karakteristiğinin taşıdığı J⁻ = u − 2a/(γ−1)'dir; künye ve kırılan eski
+  seçimin (statik basınç dışdeğerlemesi) ölçülen kusuru
+  inlet_state_from_stagnation docstring'indedir.
 - Duvar: kayma (Euler) — hayalet hücrede hız duvar normaline göre
   yansıtılır; HLLC ayna durumda kütle/enerji akısını TAM sıfır, momentum
   akısını salt basınç verir.
@@ -55,6 +56,7 @@ __all__ = [
     'run_1d_transient', 'prim_to_cons_axisym', 'cons_to_prim_axisym',
     'residual_axisym', 'local_dt_axisym', 'inlet_state_from_stagnation',
     'precompute_geometry', 'SHOCK_SENSOR_THRESHOLD', 'shock_column_flag',
+    'INLET_BC_NAME', 'INLET_BC_BASIS',
 ]
 
 _TWO_PI = 2.0 * np.pi
@@ -181,24 +183,84 @@ def run_1d_transient(U0, dx, gamma, t_end, cfl=0.8, second_order=True):
 # 2B eksenel simetrik sınır durumları
 # --------------------------------------------------------------------------
 
-def inlet_state_from_stagnation(w_int, gamma, R, P0, T0):
-    """Rezervuar giriş hayalet durumu (ses-altı karakteristik, beyan yukarıda).
+#: Giriş sınır koşulunun künyeli yöntem beyanı (sonuç sözlüğüne taşınır).
+INLET_BC_NAME = 'characteristic_reservoir'
+INLET_BC_BASIS = (
+    'Giriş: KARAKTERİSTİK (Riemann-değişmezi) ses-altı rezervuar sınır '
+    'koşulu. Ses-altı girişte üç karakteristikten yalnız biri hesap '
+    'alanından ÇIKAR (C⁻: dz/dt = u − a < 0); taşıdığı değişmez '
+    'J⁻ = u − 2a/(γ−1) iç hücreden dışdeğerlenir, kalan iki koşul '
+    'rezervuardan gelir (durma entalpisi h0 = a0²/(γ−1) ve entropi, yani '
+    'p/ρ^γ = P0/ρ0^γ) — akış yönü eksenel (giriş yüzü z=sabit istasyonu '
+    'olduğundan yüzey normali +z; u_r = 0 dayatılır). Künye: Blazek, '
+    '"Computational Fluid Dynamics: Principles and Applications", 3. baskı '
+    '§8.4 (ses-altı giriş, verilen durma büyüklükleri); özgün türetim '
+    'Whitfield & Janus, AIAA-84-1552 (1984). ESKİ SEÇİMİN ÖLÇÜLEN KUSURU: '
+    'iç hücreden STATİK BASINÇ dışdeğerlenip Mach izantropik p→M '
+    'bağıntısından çözülüyordu; o eşlemenin türevi dM/d(p/P0) = −1/(γM) '
+    'olduğundan M→0\'da dikleşir ve iç basınç gürültüsünü giriş debisine '
+    '1/(γM²) kazancıyla yansıtır (ÖLÇÜLDÜ, γ=1,2 / M=0,061: kazanç −224; '
+    'karakteristik biçimde −77). Sonuç: yüksek daralma oranlı gerçek motor '
+    'konturlarında kalıntının ~%99\'u i=0,1,2 giriş kolonlarında toplanıp '
+    'koşu oturmuyordu (ölçüm tablosu tests/cfd/test_giris_bc.py).')
 
-    w_int: iç ilk hücre primitifleri (nj, 4). Döner: (nj, 4) hayalet
-    primitif — eksenel akış, izantropik (P0, T0) hattı üstünde, statik
-    basınç içeriden.
+#: Riemann değişmezinin FİZİKSEL bandı (uydurma sabit değil): rezervuar
+#: izantropu üstünde J⁻ = u − 2a/(γ−1), gaz DURGUNken (u=0, a=a0)
+#: −2a0/(γ−1) değerini, VAKUMA tam genleşmede (a=0, u=u_maks) ise
+#: +a0·√(2/(γ−1)) değerini alır. Bant dışı bir J⁻, iç durumun rezervuardan
+#: daha yüksek durma entalpisine sahip olması (ya da güçlü geri akış)
+#: demektir; o hâlde ikinci derece denklemin diskriminantı da negatife
+#: geçerdi. Bant, eski biçimdeki [p_sonik, P0) kırpmasının muadilidir ve
+#: aynı ruhla BEYANLIDIR. Yakınsayan koşularda ETKİN OLMADIĞI ölçülür
+#: (bekçi: tests/cfd/test_giris_bc.py::test_riemann_bandi_etkin_degil).
+
+
+def inlet_state_from_stagnation(w_int, gamma, R, P0, T0):
+    """Rezervuar giriş hayalet durumu — karakteristik biçim (INLET_BC_BASIS).
+
+    Ses-altı girişte tek giden karakteristik C⁻'dir; onun değişmezi
+    J⁻ = u − 2a/(γ−1) İÇERİDEN dışdeğerlenir. Rezervuardan gelen iki koşul
+    (durma entalpisi + entropi) ile birleştirilince sınır ses hızı a_b
+    ikinci derece bir denklemin pozitif kökü olur:
+
+        h0 = a_b²/(γ−1) + u_b²/2,   u_b = J⁻ + 2a_b/(γ−1)
+        ⇒ a_b = (γ−1)/(γ+1)·[ −J⁻ + √( (γ+1)/(γ−1)·a0² − (γ−1)/2·J⁻² ) ]
+
+    (Blazek §8.4'ün akış açısı θ=0 hâli; burada giriş yüzü z=sabit
+    istasyonu olduğundan θ=0 geometrik gerçektir, varsayım değildir.)
+    Ardından T_b = a_b²/(γR), p_b = P0·(T_b/T0)^{γ/(γ−1)} (izantrop),
+    ρ_b = p_b/(R·T_b), u_r = 0.
+
+    Args:
+        w_int: iç ilk hücre primitifleri (nj, 4) = [ρ, u_z, u_r, p].
+        gamma, R: kalorik mükemmel gaz sabitleri.
+        P0, T0: rezervuar durma basıncı [Pa] ve sıcaklığı [K].
+
+    Returns:
+        (nj, 4) hayalet primitif — eksenel akış, (P0, T0) izantropu üstünde.
+
+    Not: J⁻ fiziksel banda kırpılır (bandın gerekçesi yukarıdaki blokta;
+    durgun rezervuar ↔ vakuma genleşme uçları). Kırpma yakınsayan koşularda
+    ETKİN DEĞİLDİR ve bu ölçülür; pozitiflik tabanı ya da uydurma yedek
+    DEĞİLDİR (modül docstring'indeki dürüstlük çıtası korunur: sınır
+    durumu her zaman rezervuar izantropu üstünde ve sonludur).
     """
     g = float(gamma)
-    p_sonic = float(P0) * (2.0 / (g + 1.0)) ** (g / (g - 1.0))
-    p = np.clip(w_int[..., 3], p_sonic, float(P0) * (1.0 - 1e-12))
-    mach = np.sqrt(2.0 / (g - 1.0)
-                   * ((float(P0) / p) ** ((g - 1.0) / g) - 1.0))
-    temp = float(T0) / (1.0 + 0.5 * (g - 1.0) * mach * mach)
-    rho = p / (float(R) * temp)
-    uz = mach * np.sqrt(g * float(R) * temp)
+    a0 = np.sqrt(g * float(R) * float(T0))          # rezervuar ses hızı
+    k = 2.0 / (g - 1.0)
+    a_int = np.sqrt(g * w_int[..., 3] / w_int[..., 0])
+    j_minus = w_int[..., 1] - k * a_int             # giden C⁻ değişmezi
+    j_min = -k * a0                                 # durgun rezervuar ucu
+    j_max = a0 * np.sqrt(2.0 / (g - 1.0))           # vakuma genleşme ucu
+    j_minus = np.clip(j_minus, j_min, j_max)
+    disc = (g + 1.0) / (g - 1.0) * a0 * a0 - 0.5 * (g - 1.0) * j_minus ** 2
+    a_b = (g - 1.0) / (g + 1.0) * (-j_minus + np.sqrt(disc))
+    u_b = j_minus + k * a_b
+    temp = a_b * a_b / (g * float(R))
+    p = float(P0) * (temp / float(T0)) ** (g / (g - 1.0))
     out = np.empty_like(w_int)
-    out[..., 0] = rho
-    out[..., 1] = uz
+    out[..., 0] = p / (float(R) * temp)
+    out[..., 1] = u_b
     out[..., 2] = 0.0
     out[..., 3] = p
     return out

@@ -159,3 +159,95 @@ Dürüst olmak gerekirse:
   sorusu değil.
 * Kayan nokta aritmetiği modellenmez; teoremler gerçel sayılarda geçerlidir.
   Yuvarlama davranışı ayrı bir konudur.
+
+---
+
+# Ek — 16 Ağustos 2026: CFD analitik referans kulvarı
+
+**Lean:** 4.32.2 · **Mathlib:** v4.32.2 (pinli) ·
+**Dosya:** `LeanLab/HRMACfdReferans.lean` (20 kayıtlı teorem)
+
+v3 CFD doğrulama merdiveninin (`docs/mimari/cfd-tasarimi.md` §"Lean biçimsel
+ayak", Berke talimatı 15 Ağu) analitik referans formülleri kilitlendi. Sayısal
+çözücünün kendisi İSPATLANMADI — o, testle doğrulanır (ayrıklaştırma bir
+yaklaşımdır, teorem konusu değildir). İspatlanan şey, TESTLERİN karşılaştırdığı
+kapalı-form bağıntıların türetim tutarlılığıdır: referans formül yanlış
+yazılmışsa test o yanlışa karşı doğrular — yeşil kalır, sayı yanlış olur.
+Bu kulvar o sınıfı kapatır.
+
+## 6. İzantropik durma/statik bağıntıları
+
+Koruduğu satırlar: `hrma/flow/quasi1d.py:163-165, 203, 234`
+(`isentropic_ratios`, `mach_from_area_ratio` erken dönüşü,
+`mach_from_pressure_ratio`); test: `tests/cfd/test_izantropik_lule.py`.
+
+| Teorem | Ne diyor |
+|---|---|
+| `isentropic_state_identity` | `P/P0 = (T/T0)·(ρ/ρ0)` — üç oran hâl denklemiyle cebirsel tutarlı; üslerden biri yanlış olsa sağlanmazdı |
+| `isentropic_process_identity` | `P/P0 = (ρ/ρ0)^γ` — `p ∝ ρ^γ` yasası iki üslü ifadenin cebirsel sonucu |
+| `pRatio_strictAntiOn` | `P/P0`, `M ≥ 0` üzerinde kesin azalan — kapalı-biçim terslemenin tekliği |
+| `machFromPressureRatio_recovers` | Terslenmiş formül `M`'yi TAM geri verir — yaklaşıklık değil özdeşlik |
+| `areaRatio_at_sonic` | `M = 1`'de `A/A* = 1` — `return 1.0` erken dönüşünün gerekçesi |
+
+## 7. Normal şok (Rankine-Hugoniot) sıçrama bağıntıları
+
+Koruduğu satırlar: `hrma/flow/quasi1d.py:256-261`
+(`normal_shock_relations`) ve bağımsız kopyası
+`tests/cfd/test_normal_sok.py:87-91` (`_normal_sok`).
+
+| Teorem | Ne diyor |
+|---|---|
+| `shockM2sq_pos` | `M₂² > 0` — `np.sqrt`'e negatif argüman gidemez |
+| `shockM2sq_lt_one` | `M₂² < 1` — şok ardı HER ZAMAN ses-altı |
+| `shockM2_subsonic` | `M₂ = √(M₂²) < 1` — testin ses-altı A2* dalının ön şartı |
+| `shockPRatio_gt_one` | `P₂/P₁ > 1` — genleşme şoku formülden çıkamaz |
+| `shockRhoRatio_gt_one` | `ρ₂/ρ₁ > 1` — yoğunluk şokta artar |
+| `shockTRatio_eq_p_div_rho` | `T₂/T₁ = (P₂/P₁)/(ρ₂/ρ₁)` — üç formül hâl denklemiyle tutarlı |
+| `normalShock_satisfies_conservation` | **Türetim:** sıçrama formülleri kütle+momentum+enerji korunumunun ÜÇÜNÜ birden sağlar — formüller rastgele değil, korunum sisteminin kapalı çözümü |
+| `shockStagLoss_forms_agree` | Testin `P₀₂/P₀₁` biçimi ile quasi1d'nin Anderson Eş. 3.63 biçimi cebirsel ÖZDEŞ — iki bağımsız gerçekleme tanım gereği aynı sayıyı üretir |
+
+## 8. HLLC ara-durum özdeşlikleri (Toro §10.4)
+
+Koruduğu satırlar: `hrma/cfd/riemann.py:93` (`s_star`, Toro Eş. 10.37)
+ve `113-119` (star bölge durumları, Toro Eş. 10.39).
+
+| Teorem | Ne diyor |
+|---|---|
+| `hllcSStar_denom_neg` | Dalga sıralaması altında `dl < 0 < dr` → payda `< 0`: bölme dejenere olamaz |
+| `hllcSStar_pressure_match` | Kodun `S*` formülü `p*_L = p*_R` eşitliğini (Eş. 10.36) cebirsel sağlar |
+| `hllcSStar_unique` | `S*` bu eşitliğin TEK çözümü — varyant formül sessizce farklı fizik veremez |
+| `hllcStar_mass_rh` | `coef` tanımı kütle RH koşulunu sağlar |
+| `hllcStar_momentum_rh` | `coef·s_star` momentum RH koşulunu `p*` ile tam sağlar |
+| `hllcStar_energy_rh` | `u_star_e` ifadesi enerji RH koşulunun çözümü — iç çarpan işareti yanlış olsa bozulurdu |
+
+## 9. Boğulmuş debi (Anderson Eş. 5.23)
+
+Koruduğu satır: `hrma/flow/quasi1d.py:275-277` (`choked_mass_flow`);
+test: `tests/cfd/test_izantropik_lule.py:78-80` (bağımsız kurulum).
+
+| Teorem | Ne diyor |
+|---|---|
+| `chokedMassFlow_derivation` | **Türetim:** kapalı biçim tam olarak `ρ*·a*·A*` çarpımı — üsteki `(γ+1)/(2(γ−1))`, `1/(γ−1)+1/2` birleşiminden; elle sadeleştirme hatası yok |
+
+## Bilinçli daraltmalar (bu kulvarda İSPATLANMAYANLAR)
+
+* **Entropi eşitsizliği** (`P₀₂/P₀₁ < 1`): logaritmalı gerçek bir analiz
+  argümanı gerektirir (Anderson §3.6'nın kalkülüs kısmı); cebirsel kulvarın
+  dışında bırakıldı. Kilitlenen, iki biçimin ÖZDEŞLİĞİ ve sıçramaların yönü.
+* **Alan-Mach süpersonik/subsonik dal monotonlukları** zaten 1-2. bölümlerde
+  (2 Ağustos) ispatlıydı; tekrarlanmadı, `areaRatio_at_sonic` mevcut
+  `areaRatio` tanımının üstüne kuruldu.
+* **Sayısal çözücü** (HLLC akı seçim mantığı, MUSCL, RK2, ayrıklaştırma):
+  ispat konusu değil — test merdiveni doğrular (`tests/cfd/`).
+
+## Güncel toplam (16 Ağustos 2026)
+
+| Dosya | Kayıtlı teorem |
+|---|---:|
+| `HRMA.lean` | 2 |
+| `HRMANozzleBranch.lean` | 4 |
+| `HRMAGeometry.lean` | 4 |
+| `HRMAAtmosphere.lean` | 4 |
+| `HRMAInjector.lean` | 5 |
+| `HRMACfdReferans.lean` | 20 |
+| **Toplam** | **39** |

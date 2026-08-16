@@ -50,9 +50,28 @@ Thrust / CF:
     Ch. 1 bell-nozzle equivalent-cone treatment). Tagged 'approximate'.
   - Friction / boundary-layer thrust loss: typically 0.5-2 % in well
     designed nozzles (Sutton & Biblarz 9th ed. Sec. 3.5 nozzle losses;
-    Huzel & Huang Ch. 1). Modeled as a single user-adjustable fraction
-    (default 1.5 %), tagged 'approximate' — this is NOT a boundary-layer
-    solution, only a bookkeeping estimate.
+    Huzel & Huang Ch. 1).
+    v2.6.27 (V5): a REAL momentum-integral boundary-layer solution is
+    computed by ``hrma.flow.boundary_layer`` (Thwaites / Head /
+    Ludwieg-Tillmann closures with the Eckert reference-temperature
+    compressibility transformation) from THIS module's own edge arrays.
+    MIGRATION, 16 Aug 2026 (Berke's decision "whatever is correct wins";
+    declared-change policy of docs/mimari/f2-yanma-tepkisi-tasarimi.md
+    Sec. 8.1 decision 8): the published ``losses.friction_loss_fraction``
+    is now the MEASURED boundary-layer value whenever it can be published;
+    the 1.5 % bookkeeping constant
+    (``hrma.constants.NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT``) is only a
+    FALLBACK for the cases where no measurement exists (in-nozzle normal
+    shock, unchoked flow, boundary layer switched off or failed). Which
+    one was used is always declared in
+    ``losses.friction_loss_fraction_source`` ('integral_bl_measured' /
+    'user' / 'legacy_constant') and the legacy number stays published
+    next to it (``friction_loss_fraction_legacy_constant``,
+    ``thrust_effective_legacy_constant_N``) so that the migration is
+    auditable leaf by leaf. An explicit ``friction_loss_fraction=...``
+    argument always wins (source 'user'), which is also the way back to
+    the pre-migration numbers. Migration manifest (9 measured cases,
+    changed-leaf radius, mutation proofs): ``tests/flow/test_surtunme_gocu.py``.
 
 Axial heat-transfer coupling:
   - Bartz gas-side coefficient h_g(x) is computed by IMPORTING
@@ -81,6 +100,14 @@ from scipy.optimize import brentq
 # Tek kaynak: Bartz korelasyonu, gaz özellik modeli, alan-Mach çözücü ve
 # evrensel gaz sabiti heat_transfer_analysis'ten İTHAL edilir (kopya yok).
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer, R_UNIVERSAL
+# Sürtünme kaybı kesrinin TEK TANIM YERİ hrma.constants'tır (CLAUDE.md
+# kural 11). v2.6.27'ye kadar bu dosya 0.015'i AYRICA yazıyordu; sabitin
+# künyesindeki "hem nozzle_flow_1d hem sıvı zinciri bu değeri kullanır"
+# beyanı fiilen kırıktı. Değer aynıdır (0.015) — davranış bit-özdeş.
+from hrma.constants import NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT
+# Entegral sınır tabakası (V5): yarı-1B katmanın YANINA ölçülen sürtünme
+# kaybını koyar; varsayılanı DEĞİŞTİRMEZ.
+from hrma.flow import boundary_layer as _bl
 
 __all__ = [
     'NozzleFlow1D',
@@ -88,6 +115,7 @@ __all__ = [
     'area_ratio_from_mach',
     'normal_shock_relations',
     'ideal_thrust_coefficient',
+    'NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT',
 ]
 
 # ---------------------------------------------------------------------------
@@ -104,6 +132,27 @@ SEPARATION_FACTOR_MAX = 0.60
 # "Perfectly expanded" sınıflandırma toleransı: |Pe - Pa| <= tol * Pe.
 # Mühendislik toleransı (tam eşitlik sayısal olarak anlamsız).
 PERFECT_EXPANSION_REL_TOL = 0.01
+
+
+def _json_safe(obj):
+    """numpy dizilerini listeye, sonlu olmayan sayıları None'a çevirir.
+
+    Sınır tabakası bloğu marşın ULAŞMADIĞI istasyonlarda NaN taşır (bu
+    bilinçli bir beyandır: "burada değer yok"). NaN geçerli JSON değildir;
+    uçta ``null`` olarak görünmesi için burada dönüştürülür.
+    """
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return [_json_safe(v) for v in obj.tolist()]
+    if isinstance(obj, (np.floating, float)):
+        value = float(obj)
+        return value if np.isfinite(value) else None
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    return obj
 
 
 # ===========================================================================
@@ -209,9 +258,15 @@ class NozzleFlow1D:
         cooled metallic wall (Huzel & Huang Ch. 4 regenerative designs run
         gas-side wall temperatures of a few hundred to ~900 K). Pass your
         own value for a material-specific flux map.
-    friction_loss_fraction : float
-        Approximate friction / boundary-layer thrust loss fraction
-        (default 0.015 = 1.5 %; typical 0.5-2 %, Sutton 9th ed. Sec. 3.5).
+    friction_loss_fraction : float or None
+        Friction / boundary-layer thrust loss fraction. ``None`` (default)
+        selects the MEASURED momentum-integral boundary-layer value when
+        it can be published, and the 1.5 % bookkeeping constant
+        (``hrma.constants.NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT``, typical
+        band 0.5-2 %, Sutton 9th ed. Sec. 3.5) only as a declared fallback
+        — see the module docstring (migration, 16 Aug 2026). Passing a
+        number pins the fraction to it (source 'user'); passing 0.015
+        explicitly reproduces the pre-migration numbers bit for bit.
     motor_data : dict, optional
         Repo-style motor dictionary; forwarded to the shared contour
         sampler (chamber diameter, nozzle type, bell angles, ...) and to
@@ -237,7 +292,7 @@ class NozzleFlow1D:
                  n_stations: int = 45,
                  separation_factor: float = SEPARATION_FACTOR_DEFAULT,
                  wall_temperature: Optional[float] = 800.0,
-                 friction_loss_fraction: float = 0.015,
+                 friction_loss_fraction: Optional[float] = None,
                  motor_data: Optional[Dict] = None):
         # --- doğrulamalar (İngilizce hata metinleri: kullanıcıya görünür) ---
         if not (chamber_pressure > 0.0):
@@ -259,8 +314,9 @@ class NozzleFlow1D:
                 f"separation_factor must be within "
                 f"[{SEPARATION_FACTOR_MIN}, {SEPARATION_FACTOR_MAX}] "
                 f"(Summerfield literature band is 0.35-0.40).")
-        if not (0.0 <= friction_loss_fraction < 0.2):
-            raise ValueError("friction_loss_fraction must be within [0, 0.2).")
+        if friction_loss_fraction is not None:
+            if not (0.0 <= friction_loss_fraction < 0.2):
+                raise ValueError("friction_loss_fraction must be within [0, 0.2).")
 
         self.motor_data = dict(motor_data or {})
 
@@ -295,7 +351,22 @@ class NozzleFlow1D:
         self.separation_factor = float(separation_factor)
         self.wall_temperature = (None if wall_temperature is None
                                  else float(wall_temperature))
-        self.friction_loss_fraction = float(friction_loss_fraction)
+        # GÖÇ (16 Ağu 2026): tek bir "friction_loss_fraction" alanı artık
+        # yetmiyor — hangi sayının KULLANILDIĞI ile hangi sayının YEDEK
+        # olduğu ayrı tutulur. Eski tek isim BİLEREK kaldırıldı: adı
+        # koruyup anlamını değiştirmek, okuyanı "kullanılan kesir bu"
+        # sanmaya iten sessiz bir tuzak olurdu (kullanılan kesir artık
+        # çözüme, yani sınır tabakası marşına bağlıdır).
+        #: Kullanıcının AÇIKÇA verdiği kesir (None = vermedi).
+        self.friction_loss_fraction_user = (
+            None if friction_loss_fraction is None
+            else float(friction_loss_fraction))
+        #: Ölçüm yayımlanamadığında kullanılacak yedek: kullanıcı değeri
+        #: varsa o, yoksa hrma.constants'taki 1,5 % defter sabiti.
+        self.friction_loss_fraction_fallback = (
+            NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT
+            if self.friction_loss_fraction_user is None
+            else self.friction_loss_fraction_user)
 
         # Isı transferi yardımcıları (Bartz + alan-Mach çözücü) — tek kaynak.
         self._hta = HeatTransferAnalyzer()
@@ -590,9 +661,95 @@ class NozzleFlow1D:
         }
 
     # ------------------------------------------------------------------
+    # Entegral sınır tabakası köprüsü (V5) — ÖLÇÜLEN sürtünme kaybı
+    # ------------------------------------------------------------------
+    def _solve_boundary_layer(self, geo: Dict, gas: Dict,
+                              mach: np.ndarray, pressure: np.ndarray,
+                              temperature: np.ndarray,
+                              separation: Optional[Dict],
+                              shock: Optional[Dict]) -> Dict:
+        """Momentum-integral sınır tabakasını istasyon dizileri üstünde çözer.
+
+        Kenar (edge) koşulları bu modülün YAYIMLADIĞI dizilerdir (M, p, T)
+        — sınır tabakası katmanı ayrı bir akış çözümü kurmaz. Marş, lüle
+        içinde şok ya da ayrılma varsa o istasyonda DURDURULUR: ikisinin
+        de ötesi ``BOUNDARY_LAYER_NOT_MODELLED`` kapsamındadır.
+
+        Cidar sıcaklığı geleneği Bartz bloğuyla AYNIDIR: kullanıcı değeri
+        yoksa 0.8·T_aw, her hâlükârda T_w ≤ T_aw − 1 K.
+        """
+        x_m = np.asarray(geo['x_mm'], dtype=float) / 1000.0
+        r_m = np.asarray(geo['r_mm'], dtype=float) / 1000.0
+
+        # Kurtarma sıcaklığı ve cidar sıcaklığı — tek kaynak (ısı modülü).
+        taw = np.array([self._hta._adiabatic_wall_temperature(
+            self.chamber_temperature, gas, float(m)) for m in mach])
+        if self.wall_temperature is None:
+            t_wall = 0.8 * taw
+        else:
+            t_wall = np.full(x_m.size, float(self.wall_temperature))
+        t_wall = np.minimum(t_wall, taw - 1.0)
+
+        # μ(T): depodaki TEK viskozite kaynağından (Bartz üs yasası ya da
+        # kullanıcı/Cantera override'ı) — sınır tabakası modülü kendi
+        # yasasını yazmaz.
+        md_props = dict(self.motor_data)
+        md_props.update({'gamma': self.gamma,
+                         'molecular_weight': self.molecular_weight,
+                         'throat_diameter': self.throat_diameter})
+
+        def resolve_viscosity(t_kelvin: float) -> float:
+            return float(self._hta._get_gas_properties(
+                md_props, float(t_kelvin))['gas_viscosity'])
+
+        # Sıcaklığa bağlı mı, yoksa çağıranın sabiti mi? ÖLÇÜLÜR, beyan edilir.
+        # Sabitse çözücüye sabit kapanış verilir: aynı sayı, ama binlerce
+        # gereksiz özellik çözümü (Cantera dahil) yapılmaz.
+        mu_low = resolve_viscosity(0.5 * self.chamber_temperature)
+        mu_high = resolve_viscosity(self.chamber_temperature)
+        if abs(mu_high - mu_low) > 1e-12 * max(mu_high, 1e-30):
+            viscosity_fn = resolve_viscosity
+            viscosity_basis = (
+                'μ(T) heat_transfer_analysis._get_gas_properties üzerinden '
+                'sıcaklığa bağlı çözüldü (Bartz 1957 üs yasası: '
+                'μ = 1.184e-7·MW^0.5·T^0.6).')
+        else:
+            viscosity_fn = lambda t_kelvin: mu_high   # noqa: E731 (sabit)
+            viscosity_basis = (
+                'μ çağıranın SABİT değeri (motor_data gas_viscosity/'
+                'cantera_gas override); sıcaklık ölçeklemesi UYGULANMADI.')
+
+        stop_x = None
+        stop_reason = None
+        if separation is not None:
+            stop_x = float(separation['station_x_mm']) / 1000.0
+            stop_reason = ('Summerfield ayrılma istasyonu: ayrılma sonrası '
+                           'sınır tabakası entegral yöntemle modellenmez.')
+        elif shock is not None:
+            stop_x = float(shock['station_x_mm']) / 1000.0
+            stop_reason = ('Lüle içi normal şok istasyonu: şok-sınır tabaka '
+                           'etkileşimi modellenmedi.')
+
+        result = _bl.solve_boundary_layer(
+            x_m, r_m, mach, pressure, temperature,
+            gamma=self.gamma,
+            gas_constant_J_kgK=float(gas['gas_constant']),
+            prandtl=float(gas['prandtl']),
+            viscosity_fn=viscosity_fn,
+            wall_temperature_K=t_wall,
+            specific_heat_J_kgK=float(gas['gas_cp']),
+            transition=_bl.TRANSITION_TURBULENT_FROM_START,
+            stop_x_m=stop_x,
+            stop_reason=stop_reason,
+        )
+        result['viscosity_basis'] = viscosity_basis
+        return result
+
+    # ------------------------------------------------------------------
     # Ana çözüm
     # ------------------------------------------------------------------
-    def solve(self, include_bartz: bool = True) -> Dict:
+    def solve(self, include_bartz: bool = True,
+              include_boundary_layer: bool = True) -> Dict:
         """Run the quasi-1D analysis and return a JSON-safe result dict.
 
         Returns
@@ -770,8 +927,112 @@ class NozzleFlow1D:
         # ÖLÇÜLDÜ (P_c = 70 bar, T_c = 3500 K, γ = 1.2, D_t = 0.10 m, ε = 25,
         # konik 15°): vakumda 98071.2 -> 98237.0 N (+%0.169), deniz
         # seviyesinde (ayrılmış rejim) 82434.8 -> 82160.7 N (−%0.333).
-        thrust_effective = (lambda_div * (1.0 - self.friction_loss_fraction)
+        #
+        # GÖÇ (16 Ağu 2026): thrust_effective ARTIK sabitten değil, ölçülen
+        # sürtünme kesrinden hesaplanır. Bu yüzden sınır tabakası bloğu
+        # thrust_effective'in ÜSTÜNE alındı — sıra değişikliği kasıtlıdır,
+        # aşağıdaki hesap kesri bilmeden yapılamaz.
+
+        # --- V5 + göç: ÖLÇÜLEN sürtünme kaybı (momentum-integral sınır tab.) --
+        bl_result: Optional[Dict] = None
+        bl_error: Optional[str] = None
+        if include_boundary_layer and not unchoked:
+            try:
+                bl_result = self._solve_boundary_layer(
+                    geo, gas, mach, pressure, temperature, separation, shock)
+            except Exception as exc:   # beyanlı başarısızlık, sessiz değil
+                bl_error = f'{type(exc).__name__}: {exc}'
+        # Kesir, ancak sürtünme integraliyle momentum itkisi AYNI yüzeye
+        # ait olduğunda anlamlıdır:
+        #  - ayrılmış rejimde ikisi de ayrılma düzlemine kadardır (tutarlı),
+        #  - lüle içi şok rejiminde marş şokta durur ama momentum itkisi
+        #    şok ARDI ses-altı çıkıştan gelir → kesir yanıltıcı olur
+        #    (ÖLÇÜLDÜ: 6 bar/ε=25 vakasında %27,4 çıkıyor). O yüzden kesir
+        #    yayımlanmaz, kuvvet (N) yayımlanır ve gerekçe beyan edilir.
+        bl_fraction: Optional[float] = None
+        bl_fraction_note: Optional[str] = None
+        if bl_result is not None:
+            if shock is not None:
+                bl_fraction_note = (
+                    "Normal-shock regime: the boundary-layer march stops at "
+                    "the shock while the momentum thrust comes from the "
+                    "post-shock subsonic exit — the two do not share a "
+                    "reference surface, so no loss FRACTION is published. "
+                    "friction_drag_integral_bl_N (up to the shock) is still "
+                    "a measurement.")
+            elif not (momentum_thrust > 0.0):
+                bl_fraction_note = ("Momentum thrust is not positive; the "
+                                    "loss fraction is undefined.")
+            else:
+                bl_fraction = float(bl_result['friction_drag_N']
+                                    / momentum_thrust)
+
+        # --- GÖÇ: hangi kesir YAYIMLANIYOR? (16 Ağu 2026) ------------------
+        # Sıra sabittir ve beyanlıdır:
+        #   1) kullanıcı açıkça verdiyse       -> 'user'
+        #   2) sınır tabakası kesri geçerliyse -> 'integral_bl_measured'
+        #   3) aksi hâlde defter sabiti        -> 'legacy_constant'
+        # (3) yalnız ÖLÇÜM YOKKEN devreye girer: lüle içi normal şok
+        # (kesir tanımsız — iki sayı aynı yüzeye ait değil), boğulmamış
+        # akış, sınır tabakası kapalı ya da marş başarısız.
+        legacy_fraction = NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT
+        if self.friction_loss_fraction_user is not None:
+            friction_fraction = self.friction_loss_fraction_user
+            friction_source = 'user'
+            friction_basis = (
+                "Caller-supplied friction_loss_fraction; the measured "
+                "boundary-layer value is reported alongside but NOT used "
+                "(explicit input always wins). Passing 0.015 here "
+                "reproduces the pre-migration published numbers.")
+        elif bl_fraction is not None:
+            friction_fraction = bl_fraction
+            friction_source = 'integral_bl_measured'
+            friction_basis = (
+                "MEASURED: compressible momentum-integral boundary layer "
+                "(hrma.flow.boundary_layer — Thwaites 1949 / Head 1958 / "
+                "Ludwieg-Tillmann 1950 closures, Eckert 1956 reference "
+                "temperature), f = integral(2*pi*r*tau_w dx)/momentum_thrust "
+                "over the same surface the momentum thrust is taken on. "
+                "Migration 16 Aug 2026: this replaced the 1.5 % bookkeeping "
+                "constant as the published default (Berke's decision; "
+                "declared-change policy of docs/mimari/"
+                "f2-yanma-tepkisi-tasarimi.md Sec. 8.1 decision 8; manifest "
+                "tests/flow/test_surtunme_gocu.py). "
+                "MODEL VALIDATION BAND (measured in the V5 batch, "
+                "tests/flow/test_sinir_tabakasi.py): laminar flat plate vs "
+                "Blasius c_f +0.90 %, theta +1.01 %, delta* +1.75 %, H "
+                "+0.78 %; turbulent flat plate vs Schultz-Grunow (NACA TM "
+                "986) c_f -2.6 % to -3.9 % (the known systematic sign of "
+                "the Ludwieg-Tillmann closure). The nozzle number carries "
+                "that model uncertainty plus everything in "
+                "boundary_layer.not_modelled (wall roughness and "
+                "relaminarization are the two that push in opposite "
+                "directions).")
+        else:
+            friction_fraction = legacy_fraction
+            friction_source = 'legacy_constant'
+            friction_basis = (
+                "NO MEASUREMENT AVAILABLE, legacy constant used: "
+                "hrma.constants.NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT = "
+                f"{legacy_fraction} (typical band 0.5-2 %, Sutton & Biblarz "
+                "9th ed. Sec. 3.5; Huzel & Huang Ch. 1). This is a "
+                "bookkeeping estimate, NOT a boundary-layer solution. "
+                "Reason it was used: "
+                + (bl_fraction_note if bl_fraction_note else
+                   (f"boundary-layer solver failed ({bl_error})"
+                    if bl_error else
+                    "the boundary-layer solution was not computed "
+                    "(include_boundary_layer=False or unchoked flow)."))
+                + " Since 16 Aug 2026 the constant is only a fallback "
+                  "(migration manifest: tests/flow/test_surtunme_gocu.py).")
+
+        thrust_effective = (lambda_div * (1.0 - friction_fraction)
                             * momentum_thrust) + pressure_thrust
+        # Göçün denetlenebilirliği: eski sabitin ürettiği sayı da yayımlanır
+        # (kullanıcı "sayı neden değişti" diye sorduğunda karşılaştıracağı
+        # taban budur; kaynak 'legacy_constant' iken beyanlı yankıdır).
+        thrust_effective_legacy = (lambda_div * (1.0 - legacy_fraction)
+                                   * momentum_thrust) + pressure_thrust
 
         losses = {
             'method': 'approximate',
@@ -779,20 +1040,78 @@ class NozzleFlow1D:
             'divergence_loss_fraction': float(1.0 - lambda_div),
             'divergence_half_angle_deg': float(np.degrees(theta_exit)),
             'initial_wall_angle_deg': float(np.degrees(theta_n)),
-            'friction_loss_fraction': self.friction_loss_fraction,
+            'friction_loss_fraction': float(friction_fraction),
             # Ayrık terimler (bulgu F143 dürüstlük alanları)
             'momentum_thrust_N': float(momentum_thrust),
             'pressure_thrust_N': float(pressure_thrust),
             'correction_applies_to': 'momentum_term_only',
             'thrust_effective_N': float(thrust_effective),
             'CF_effective': float(thrust_effective / (pc * a_throat_area)),
-            'note': (lambda_note + " Friction/boundary-layer loss is a "
-                     "single bookkeeping fraction (typical 0.5-2 %, Sutton "
-                     "9th ed. Sec. 3.5; Huzel & Huang Ch. 1), NOT a "
-                     "boundary-layer solution. Both corrections scale the "
-                     "MOMENTUM thrust only: F_eff = lambda*(1-f)*mdot*v_e "
-                     "+ (Pe-Pa)*Ae (Sutton & Biblarz 9th ed. Eq. 3-34); the "
-                     "pressure-thrust term is left untouched."),
+            'note': (lambda_note + " Since 16 Aug 2026 the friction loss is "
+                     "the MEASURED momentum-integral boundary-layer value "
+                     "whenever it can be published (see "
+                     "friction_loss_fraction_source and "
+                     "friction_loss_fraction_basis); the 1.5 % bookkeeping "
+                     "constant is only a declared fallback. Both "
+                     "corrections scale the MOMENTUM thrust only: F_eff = "
+                     "lambda*(1-f)*mdot*v_e + (Pe-Pa)*Ae (Sutton & Biblarz "
+                     "9th ed. Eq. 3-34); the pressure-thrust term is left "
+                     "untouched."),
+            # --- V5 ölçümü + 16 Ağu 2026 göçü ------------------------------
+            'friction_loss_fraction_source': friction_source,
+            'friction_loss_fraction_basis': friction_basis,
+            'friction_loss_fraction_legacy_constant': float(legacy_fraction),
+            'thrust_effective_legacy_constant_N': float(thrust_effective_legacy),
+            'CF_effective_legacy_constant': float(
+                thrust_effective_legacy / (pc * a_throat_area)),
+            'friction_loss_fraction_integral_bl': bl_fraction,
+            # Tanım göçten SONRA da SABİTE göredir (ölçüm − 0.015): kaynak
+            # 'integral_bl_measured' iken "kullanılan kesre göre fark" sıfır
+            # olurdu ve alan bilgi taşımazdı. Sayı göç öncesiyle aynıdır.
+            'friction_loss_delta_vs_default': (
+                None if bl_fraction is None
+                else float(bl_fraction - legacy_fraction)),
+            'friction_drag_integral_bl_N': (
+                None if bl_result is None
+                else float(bl_result['friction_drag_N'])),
+            # Kaynak 'integral_bl_measured' iken aşağıdaki iki alan
+            # thrust_effective_N / CF_effective'in BEYANLI YANKISIDIR
+            # (bit-aynı); 'user' ve 'legacy_constant' kaynaklarında ise
+            # "ölçüm kullanılsaydı ne olurdu" sayısıdır.
+            'thrust_effective_integral_bl_N': (
+                None if bl_fraction is None
+                else float(lambda_div * (1.0 - bl_fraction) * momentum_thrust
+                           + pressure_thrust)),
+            'CF_effective_integral_bl': (
+                None if bl_fraction is None
+                else float((lambda_div * (1.0 - bl_fraction) * momentum_thrust
+                            + pressure_thrust) / (pc * a_throat_area))),
+            'boundary_layer': (None if bl_result is None
+                               else _json_safe(bl_result)),
+            'boundary_layer_error': bl_error,
+            'friction_loss_fraction_bl_note': bl_fraction_note,
+            'friction_comparison_basis': (
+                "MIGRATION 16 Aug 2026 (loud, not silent): "
+                "friction_loss_fraction is now the value actually USED for "
+                "thrust_effective_N, and its origin is declared in "
+                "friction_loss_fraction_source ('integral_bl_measured' = "
+                "measured boundary layer, 'user' = explicit argument, "
+                "'legacy_constant' = 1.5 % bookkeeping fallback when no "
+                "measurement can be published). "
+                "friction_loss_fraction_integral_bl is the MEASUREMENT from "
+                "hrma.flow.boundary_layer (Thwaites/Head/Ludwieg-Tillmann + "
+                "Eckert reference temperature), defined as "
+                "F_friction/momentum_thrust with "
+                "F_friction = integral(2*pi*r*tau_w dx) taken over the same "
+                "surface as the momentum thrust; it is None where that "
+                "surface identity breaks (in-nozzle normal shock). "
+                "friction_loss_fraction_legacy_constant and "
+                "thrust_effective_legacy_constant_N keep the PRE-migration "
+                "numbers visible so the change is auditable; "
+                "delta = integral_bl - legacy_constant. Manifest with the "
+                "measured per-case table: tests/flow/test_surtunme_gocu.py "
+                "(policy: docs/mimari/f2-yanma-tepkisi-tasarimi.md Sec. 8.1 "
+                "decision 8)."),
         }
 
         # --- eksenel Bartz coupling (ithal korelasyon; kopya yok) ---
@@ -884,8 +1203,14 @@ class NozzleFlow1D:
                 "ambient-pressure plateau downstream (first order).",
                 "Bartz h_g(x) imported from the heat-transfer module; "
                 "q is the convective design flux only (no radiation here).",
-                "Viscous/divergence losses are approximate bookkeeping "
-                "estimates, not boundary-layer solutions.",
+                "Divergence loss is an approximate bookkeeping estimate "
+                "(equivalent-cone lambda). The friction loss is the "
+                "MEASURED momentum-integral boundary layer when "
+                "losses.friction_loss_fraction_source == "
+                "'integral_bl_measured' (migration 16 Aug 2026), and the "
+                "1.5 % bookkeeping constant when it says 'legacy_constant' "
+                "— the source field is the only honest answer to 'is this "
+                "a solution or an estimate?'.",
                 "In the separated regime the core station arrays keep the "
                 "attached isentropic values (conservative for heat loads); "
                 "wall_pressure_Pa carries the separated wall state.",

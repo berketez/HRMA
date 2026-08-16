@@ -6,12 +6,15 @@ test yeşil kalır, sayı yanlış çıkar. Buradaki teoremler o varsayım sın�
 bir daha sessizce bozulamamasını sağlar; `check.py` kapısı da teorem ↔ Python
 bağının çürümesini engeller.
 
-**Ölçülen durum (14 Ağustos 2026):** `LeanLab/` altında 34 `theorem`/`lemma`
-bildirimi var; bunların 19'u kayıt defterindeki (registry.json) ana teoremlerdir,
+**Ölçülen durum (16 Ağustos 2026):** `LeanLab/` altında 58 `theorem`/`lemma`
+bildirimi var; bunların 39'u kayıt defterindeki (registry.json) ana teoremlerdir,
 kalanı yardımcı lemma/ara adımdır. `lake build` bu depoda çalıştırıldı ve
-`Build completed successfully (8661 jobs)` ile bitti; 19 teoremin tamamının
+`Build completed successfully (8662 jobs)` ile bitti; 39 teoremin tamamının
 `#print axioms` çıktısı `[propext, Classical.choice, Quot.sound]` — hiçbirinde
-`sorryAx` yok.
+`sorryAx` yok. (16 Ağu eklemesi: CFD analitik referans kulvarı,
+`HRMACfdReferans.lean`, 20 teorem — izantropik özdeşlikler, normal şok
+Rankine-Hugoniot türetim tutarlılığı, HLLC ara-durum özdeşlikleri, boğulmuş
+debi türetimi; `docs/mimari/cfd-tasarimi.md` §"Lean biçimsel ayak".)
 
 ## Dizin
 
@@ -20,12 +23,13 @@ kalanı yardımcı lemma/ara adımdır. `lake build` bu depoda çalıştırıld�
 | `lean-toolchain` | Lean sürüm pini: `leanprover/lean4:v4.32.2` |
 | `lakefile.toml` | Lake proje tanımı; Mathlib `v4.32.2` pinli |
 | `lake-manifest.json` | Bağımlılık kilidi (Mathlib rev `905b9581...` dahil) — commit'lenir |
-| `LeanLab.lean` | Kök modül: beş HRMA ispat dosyasını içe aktarır |
+| `LeanLab.lean` | Kök modül: altı HRMA ispat dosyasını içe aktarır |
 | `LeanLab/HRMA.lean` | Alan/Mach bağıntısının süpersonik dalda tekliği |
 | `LeanLab/HRMANozzleBranch.lean` | Subsonik dal ve `brentq` alt sınırının (1.0001) gerekçesi |
 | `LeanLab/HRMAGeometry.lean` | Kesik koni halka hacmi; ince kabuk hatası tam `π·t²·L` |
 | `LeanLab/HRMAAtmosphere.lean` | ISA katman tablosunun sınır sürekliliği ve tepe sıcaklığı |
 | `LeanLab/HRMAInjector.lean` | Nurick kavitasyon sayısının `P_v`'ye göre hata yönü |
+| `LeanLab/HRMACfdReferans.lean` | CFD analitik referansları: izantropik özdeşlikler, normal şok RH türetimi, HLLC ara-durum özdeşlikleri, boğulmuş debi türetimi |
 | `registry.json` | **Kayıt defteri:** her teorem → koruduğu Python satırı (makine-okunur) |
 | `check.py` | **Kapı:** derleme + `sorryAx` + bağ denetimi; çıkış kodu 0/1 |
 | `HRMA_ISPATLARI.md` | 2 Ağustos 2026 tarihli ayrıntılı ispat kaydı (tarihî anlık görüntü) |
@@ -102,10 +106,13 @@ Dürüst sınırlar:
   değildir. İspatlanan, seçilen modelin matematiksel tutarlılığıdır.
 * **Kayan nokta aritmetiğini modellemez.** Teoremler gerçel sayılar (ℝ)
   üzerinde geçerlidir; yuvarlama/taşma davranışı ayrı bir konudur.
-* **Kapsam seçicidir.** 19 teorem, denetimlerde fiilen hata çıkmış üç sınıfı
-  (kök tekliği, hacim formülü, tablo tutarlılığı) ve bir hata-yönü analizini
-  kapsar; HRMA'nın bütün fiziği biçimselleştirilmiş değildir. Yeni varsayımlar
-  yukarıdaki akışla eklenir.
+* **Kapsam seçicidir.** 39 teorem, denetimlerde fiilen hata çıkmış üç sınıfı
+  (kök tekliği, hacim formülü, tablo tutarlılığı), bir hata-yönü analizini ve
+  CFD test merdiveninin analitik referans bağıntılarını (izantropik, normal
+  şok, HLLC ara-durum, boğulmuş debi) kapsar; HRMA'nın bütün fiziği
+  biçimselleştirilmiş değildir. Sayısal çözücünün kendisi (ayrıklaştırma,
+  akı seçimi, zaman ilerletme) ispat konusu değildir — test merdiveni
+  doğrular. Yeni varsayımlar yukarıdaki akışla eklenir.
 
 ## Köken
 

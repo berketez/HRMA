@@ -8667,6 +8667,39 @@ class SolidRocketEngine:
             'pressure': _al('pressure'),
             'burn_area': _al('burn_area'),
             'mass_flow': _al('mass_flow'),
+            # v2.6.27 (parti 26): PORT AKIŞ KESİTİ (m²) yayımlanır. Dizi
+            # çözücünün kendi zaman marşından gelir (A_port =
+            # _port_flow_area(web), :8455) ve erozif kütle akısı G =
+            # mdot/A_port ile TEK ve AYNI seridir — burada yeni bir hesap
+            # YOKTUR, yalnız var olan seri sözleşmeye eklenmiştir.
+            #
+            # Neden eklendi: 3B yanma animasyonu (motor_viz3d.js) port
+            # yarıçapını, bu alan yayımlanmadığı için, çözücünün kütle üretim
+            # özdeşliğinden GERİ TÜRETMEK zorundaydı (w = ∫ mdot/(rho*A_b) dt,
+            # trapez). Yayımlanan dizi o türetmeyi gereksiz kılar: dairesel
+            # eşdeğer port yarıçapı doğrudan sqrt(A_port/pi)'dir.
+            #
+            # ÖLÇÜLDÜ (2026-08-16; APCP, D_kamara=100 mm, L=500 mm,
+            # D_çekirdek=30 mm, Pc=40 bar) — sqrt(A_port/pi) - r_çekirdek ile
+            # istemcinin trapez türetmesi arasındaki fark:
+            #   bates 0,026 mm · star 0,031 mm · wagon_wheel 0,028 mm ·
+            #   finocyl 0,020 mm  (fark trapezin payı; A_port kapalı form)
+            #   slotted 17,3 mm  -> kesit GERÇEKTEN dairesel değil
+            #   end_burner       -> dizi SABİT (port yok, tüm kasa kesiti akar)
+            # Yani bu alan, dairesel port ailesinde web geçmişiyle AYNI bilgiyi
+            # taşır ve onu türetmeden verir; dairesel OLMAYAN ailede ise
+            # animasyonun neden modellenmediğinin ölçülebilir kanıtıdır.
+            'port_area': _al('port_area'),
+            'port_area_basis': (
+                'port flow cross-section A_port(t) in m^2, read from the '
+                'burn-back solver time march (the same series the erosive '
+                'mass flux G = mdot/A_port is divided by). Per grain type '
+                '(SolidRocketEngine._port_flow_area): end_burner = full case '
+                'cross-section (no port, hence constant); slotted = true '
+                'clipped offset-polygon area; all other types = equivalent '
+                'circular port pi*(r_core + w)^2. The equivalent port '
+                'diameter is therefore sqrt(4*A_port/pi); it is a TRUE port '
+                'radius only where the section is circular.'),
             # Eğri kendi temelini BEYAN eder; dışa aktarım (.eng) bunu
             # dosyaya yazar. v2.6.26 öncesinde beyan yoktu ve dışa
             # aktarım etiketi "solid grain burn-back solver" diye SABİT

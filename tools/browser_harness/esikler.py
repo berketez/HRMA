@@ -206,7 +206,232 @@ ROZET_IMZALARI = {
                     '0/192 bozulmuş elemanla kırmızı bağırıyordu. Ekranda '
                     'yeniden görülürse ayrışma geri alınmış demektir.'),
     },
+
+    # =====================================================================
+    # ANALİZ MERKEZİ — CFD kiracısı (panels/cfd_panel.js)
+    # ---------------------------------------------------------------------
+    # Aynı sözleşme: dizge karşılaştırması kaçınılmaz (rozetlerin hepsi tek
+    # ``[data-cfd-badge]`` kabına basılıyor), ama her imza ürünün SÖZLÜK
+    # ANAHTARINA bağlıdır ve iki dilde de sınanır.
+    #
+    # ``haric_varyantlar`` (yalnız burada gerekti): İngilizcede "NOT
+    # CONVERGED" dizesi "CONVERGED"i İÇERİR — dar imzalar (yalnız yakınsayan
+    # hâl, yalnız ayrılma YOK hâli) bu yüzden negatif bağlam ister. Türkçede
+    # gerekmiyor (YAKINSAMADI ⊅ YAKINSADI) ama liste iki dil için de
+    # yazılıdır: dil eklenince kural tek yerde durur.
+    # =====================================================================
+    'cfd_yakinsama_hukmu': {
+        'varyantlar': ('CONVERGED', 'YAKINSADI', 'YAKINSAMADI'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeConverged',
+                               'panel.cfd.badgeNotConverged'),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('GENİŞ imza: çözücünün yakınsama BEYANI ekranda mı? '
+                    'Hangi hâlin çıktığı (yakınsadı/yakınsamadı) tasarım '
+                    'noktasının fiziğidir ve hükme girmez — beyanın '
+                    'YOKLUĞU arayüz kusurudur.'),
+    },
+    'cfd_yakinsadi': {
+        'varyantlar': ('CONVERGED', 'YAKINSADI'),
+        'haric_varyantlar': ('NOT CONVERGED', 'YAKINSAMADI'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeConverged',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('DAR imza: yalnız "yakınsadı" rozeti. Renk kuralının '
+                    '(converged=false iken kabul rengi YASAK) bağlandığı '
+                    'imza budur; geniş imza bu kuralı kuramaz çünkü '
+                    '"NOT CONVERGED" da ona eşleşir.'),
+    },
+    'cfd_ayrilma_hukmu': {
+        'varyantlar': ('SEPARATION', 'AYRILMA'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeSeparated',
+                               'panel.cfd.badgeAttached',
+                               'panel.cfd.badgeSepRefused',
+                               'panel.cfd.badgeSepNotApplicable'),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('Summerfield köprüsünün hükmü — dört daldan biri (ayrıldı '
+                    '/ ayrılmadı / ölçüt uygulanamaz / köprü reddetti) EKRANDA '
+                    'olmalı. Hangi dal çıktığı fiziktir; hiçbirinin çıkmaması '
+                    'hükmün sessizce düşmesi demektir.'),
+    },
+    'cfd_ayrilma_yok': {
+        'varyantlar': ('NO SEPARATION', 'AYRILMA YOK'),
+        'haric_varyantlar': ('NO SEPARATION JUDGEMENT', 'AYRILMA HÜKMÜ YOK'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeAttached',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('DAR imza: "ayrılma yok" KABUL hükmü. Köprü kendi hükmüne '
+                    "'suspect' dediğinde bu rozet yeşil basılamaz (oturmamış "
+                    'alana uygulanmış ölçüt temiz sayılmaz) — kural bu imzaya '
+                    'bağlı. Hariç tutulan "NO SEPARATION JUDGEMENT" köprünün '
+                    'REDDİdir, kabul değil.'),
+    },
+    'cfd_kutle_artigi': {
+        'varyantlar': ('MASS IMBALANCE', 'KÜTLE ARTIĞI'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeMass',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('Korunum artığı beyanı. Ucun yayımladığı bir KABUL EŞİĞİ '
+                    'yok, o yüzden rozet nötr renkte olmak zorunda '
+                    '(MERKEZ_NOTR_ROZET_SINIFLARI).'),
+    },
+    'cfd_enerji_artigi': {
+        'varyantlar': ('ENERGY IMBALANCE', 'ENERJİ ARTIĞI'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeEnergy',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': 'Aynı gerekçe: eşiksiz sayı, nötr renk.',
+    },
+    'cfd_cekirdek': {
+        'varyantlar': ('KERNEL', 'ÇEKİRDEK'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeKernel',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('numba isteğe bağlı bağımlılık: hangi yolun koştuğu '
+                    'ekranda BEYAN edilmeli, yoksa süre künyesi okunamaz.'),
+    },
+    'cfd_sok_sensoru': {
+        'varyantlar': ('SHOCK SENSOR', 'ŞOK SENSÖRÜ'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeShock',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('Basınç tabanlı kolon şok sensörü kaç kolon bayrakladı — '
+                    'sınırlayıcı dondurma kararının okunabilir dayanağı.'),
+    },
+    'cfd_sinirlayici': {
+        'varyantlar': ('LIMITER', 'SINIRLAYICI'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeLimiter',
+                               'panel.cfd.badgeLimiterNever'),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('Sınırlayıcı donduruldu mu, hangi iterasyonda? İki dal da '
+                    'aynı imzayı taşır: "hiç dondurulmadı" da bir beyandır, '
+                    'sessizlik değil.'),
+    },
+    'cfd_sure': {
+        'varyantlar': ('RUNTIME', 'SÜRE'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeRuntime',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('Süreyi UÇ ölçer, panel basar (sahte ilerleme yasağının '
+                    'görünen yüzü: yüzde çubuğu yok, ölçülmüş saniye var).'),
+    },
+    'cfd_butce_uyarisi': {
+        'varyantlar': ('ITERATION BUDGET ADVISORY', 'İTERASYON BÜTÇESİ UYARISI'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeBudgetAdvisoryBand',
+                               'panel.cfd.badgeBudgetAdvisoryLow',
+                               'panel.cfd.badgeBudgetAdvisoryBoth'),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('KOŞULLU imza: yalnız uç ``budget_advisory`` yayımladığında '
+                    'beklenir (bu yüzden sabit beklenen listede DEĞİL, yükle '
+                    'birlikte sorulur). Ateşlediği hâlde ekranda yoksa beyan '
+                    'yutulmuş demektir; ateşlerken koşu YAKINSAYABİLİR — '
+                    'uyarı hüküm değildir, ikisi yan yana durur.'),
+    },
+    'cfd_ayrilma_supheli': {
+        'varyantlar': ('SEPARATION JUDGEMENT SUSPECT', 'AYRILMA HÜKMÜ ŞÜPHELİ'),
+        'sozluk_anahtarlari': ('panel.cfd.badgeSepSuspect',),
+        'kaynak_dosyalar': ('hrma/static/js/panels/cfd_panel.js',),
+        'gerekce': ('KOŞULLU imza: köprü ``judgment_confidence=\'suspect\'`` '
+                    'dediğinde ekranda olmak ZORUNDA. Şüphe etiketi taşıyan '
+                    'bir hüküm, etiketi olmadan gösterilirse kullanıcı '
+                    'oturmamış alana verilmiş hükmü temiz sanır.'),
+    },
+    # --- YASAK imzalar (Merkez / CFD) ------------------------------------
+    'cfd_bayat_giris_uyarisi': {
+        'varyantlar': ('INLET ADVISORY',),
+        'sozluk_anahtarlari': (),          # halefine devredildi
+        'eski_anahtarlar': ('panel.cfd.badgeInletAdvisory',
+                            'panel.cfd.rowInletThreshold',
+                            'panel.cfd.rowAdvisoryFired'),
+        'kaynak_dosyalar': (),
+        'gerekce': ('EMEKLİ rozet: giriş Mach eşiğine (0,15) bakan uyarı. '
+                    'Çözücünün giriş sınır koşulu karakteristik biçime '
+                    'çevrilince eşik ölçülen hiçbir şeyi bildirmez oldu ve '
+                    'SAĞLIKLI koşularda turuncu rozet basıyordu (ölçüm: canlı '
+                    'hibritte M_giriş 0,0605 iken koşu yakınsıyor). Ekranda '
+                    'yeniden görülürse bayat kod geri gelmiş demektir. Tek '
+                    'varyant İngilizce: rozetin TR karşılığı sözlüğe hiç '
+                    'girmedi (bekçi bunu ayrıca sınar) ve tur en-US koşar.'),
+    },
+    'cfd_bayat_mach_esigi': {
+        'varyantlar': ('threshold_mach',),
+        'sozluk_anahtarlari': (),
+        'kaynak_dosyalar': (),
+        'gerekce': ('Aynı emekli sözleşmenin ALAN ADI. Dilden bağımsızdır '
+                    '(JSON anahtarı): panel girdi yankısını ham anahtarlarla '
+                    'bastığı için uç bu alanı yeniden yayımlarsa ekranda '
+                    'GÖRÜNÜR. Ham anahtarın ekranda belirmesi, emekli '
+                    'sözleşmenin döndüğünün en erken işaretidir.'),
+    },
+    'merkez_beyansiz_neden': {
+        'varyantlar': ('but named no reason', 'nedenini adlandırmadı'),
+        'sozluk_anahtarlari': ('ac.reason.unnamed',),
+        'kaynak_dosyalar': ('hrma/static/js/analysis_center.js',),
+        'gerekce': ('Çerçevenin kural 1 emniyet ağı: kiracı "uygulanamaz" '
+                    'deyip nedenini adlandırmazsa Merkez bunu ekranda ilan '
+                    'eder. Turda GÖRÜLMESİ bir kusurdur — gri satırın nedeni '
+                    'ADIYLA yazılmak zorunda.'),
+    },
 }
+
+# ---------------------------------------------------------------------------
+# Analiz Merkezi (analysis_center.js) ve kiracıları
+# ---------------------------------------------------------------------------
+
+#: Merkez'in kabı. Çapa (``#analysis-center-anchor``) şablonda durur, panelin
+#: KENDİSİ JS ile kurulur; tur kurulmuş paneli arar, çapayı değil — çapa
+#: varken panel yoksa kullanıcı ekranında da Merkez yoktur.
+MERKEZ_PANEL_KIMLIGI = 'analysisCenter'
+
+#: Üç sütun (tasarım §3: bileşen ağacı | koşum kartı | sonuç görüntüleyici).
+#: Üçü de kurulmuş OLMALI: biri düşerse Merkez'in workbench mantığı biter.
+MERKEZ_SUTUN_KIMLIKLERI = ('ac_tree', 'ac_card', 'ac_view')
+
+#: Koşum geçmişi şeridi (oturum içi).
+MERKEZ_GECMIS_KIMLIGI = 'ac_history'
+
+#: Koşum kartının düğmesi ve durum satırı. Meşguliyet METİNLE değil düğmenin
+#: ``disabled`` bayrağıyla okunur: metin çevrilebilir, bayrak çevrilmez.
+MERKEZ_KOSUM_DUGMESI_KIMLIGI = 'ac_run'
+MERKEZ_DURUM_KIMLIGI = 'ac_status'
+
+#: Kiracının çizdiği kabın kimliği (``renderViewer`` bunu kurar ve
+#: ``spec.render(data, root)`` içine çizer).
+MERKEZ_GORUNTULEYICI_KOKU = 'ac_view_root'
+
+#: Satır düğmesinin kimlik öneki (``ac_row_`` + componentId_analysisId).
+MERKEZ_SATIR_KIMLIK_ONEKI = 'ac_row_'
+
+#: Koşum düğmesine basıldıktan sonra MEŞGUL hâlinin (düğme ``disabled``)
+#: görülmesi için beklenen süre. ``run()`` bayrağı fetch'ten ÖNCE, aynı çağrı
+#: yığınında kaldırır — gecikme bir basım karesi kadardır. FEA panelleriyle
+#: AYNI sayı kullanılır (``FEA_BASLAMA_ZAMAN_ASIMI_MS``); ikinci bir tanım
+#: yazmak iki kapının sessizce ayrışması demek olurdu.
+MERKEZ_KOSUM_BASLAMA_ZAMAN_ASIMI_MS = FEA_BASLAMA_ZAMAN_ASIMI_MS
+
+#: CFD koşumunun bitmesi için üst sınır. ÖLÇÜLEN (uç künyesi, app.py
+#: ``CFD_RESOLUTION_WORST_CASE_S``, M4 Max): 'coarse' seviyesinde EN KÖTÜ hâl
+#: (bütçe tavanına giden koşu) numba ile 10,2 s, NumPy ile 14,9 s; canlı
+#: hibrit motorun yakınsayan koşusu 12330 iterasyonda ~8-13 s. Tur her sayfada
+#: BİR kez ve 'coarse' varsayılanıyla koşar. 300 s bugünkü süreyi kilitlemek
+#: için değil, takılmış bir koşumun turu süresiz bekletmesini engellemek için
+#: konmuştur; hesap zaman aşımıyla (``HESAP_ZAMAN_ASIMI_MS``) aynı mertebede,
+#: çünkü zincirin halkası yine bir sunucu hesabıdır.
+MERKEZ_KOSUM_ZAMAN_ASIMI_MS = 300_000
+
+#: Kiracı çizimlerinin kabı için en küçük kenar. FEA panelleriyle AYNI eşik
+#: (``FEA_CIZIM_MIN_KENAR_PX``): "kap var ama çizilmedi" ile "çizildi"
+#: ayrımı iki kapıda da aynı sayıya bağlı olsun.
+MERKEZ_CIZIM_MIN_KENAR_PX = FEA_CIZIM_MIN_KENAR_PX
+
+#: Kiracı çizimi için ``svg`` düğümü ARANIR (FEA'da svg VEYA canvas kabul
+#: edilir). Neden daha dar: CFD panelinin üç grafiği de SVG üreten izlerle
+#: çiziliyor — duvar basıncı ve kalıntı ``scatter``, alan haritası
+#: ``carpet`` + ``contourcarpet``, yedek yol ``scatter`` (cfd_panel.js:590,
+#: 672, 679, 713, 736). WebGL'e düşen tek iz yok; bir gün eklenirse bu eşik
+#: gerekçesiyle birlikte gevşetilir.
+MERKEZ_CIZIM_SVG_ZORUNLU = True
+
+#: Korunum artığı rozetlerinde İZİNLİ renk sınıfları. Uç bir KABUL EŞİĞİ
+#: yayımlamıyor; panelin kendi eşiğini uydurması da yasak. Bu yüzden kütle ve
+#: enerji artığı rozetleri nötr kalmak zorundadır: 'ok' yeşili "temiz", 'err'
+#: kırmızısı "kabul dışı" demek olurdu ve ikisi de BEYAN EDİLMEMİŞ hükümdür.
+MERKEZ_NOTR_ROZET_SINIFLARI = ('info', 'dim')
+
+#: Kabul (yeşil) rengi. Renk kurallarının tek yerde durduğu ad.
+MERKEZ_KABUL_ROZET_SINIFI = 'ok'
 
 # ---------------------------------------------------------------------------
 # Konsol ve sızıntı taraması

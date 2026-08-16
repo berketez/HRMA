@@ -124,7 +124,7 @@ KAYNAK DOĞRULAMA DURUMU:
 
 HRMA BAĞLAMINDA GERÇEKÇİ SIRALAMA (proje hibrit/katı/sıvı motor analiz platformu, v2.7 kapsamı 2B eksenel simetrik FEA, CFD v3'e ertelenmiş):
 
-- Hemen yapılabilir (analitik/korelasyon, mevcut girdilerle): #1 (akustik öz kip — kamara geometrisi ve CEA'dan ses hızı zaten var), #7 (chug — enjektör ΔP ve L* zaten hesaplanıyor), #15 (hibrit LFI — geri çekilme hızı yasa
+- Hemen yapılabilir (analitik/korelasyon, mevcut girdilerle): #1 (akustik öz kip — kamara geometrisi ve CEA'dan ses hızı zaten var), #7 (chug — enjektör ΔP ve L* zaten hesaplanıyor), #15 (hibrit LFI — gereken girdilerin tamamı zaten yayımlı: G_o, tane boyu, O/F, P_c, oksitleyici tipi; Karabeyoglu 2005 Eq. 15 korelasyonu kalibre R·T_av sabitiyle F2a partisinde uygulanıyor — bkz. f2-yanma-tepkisi-tasarimi.md §8.1). *(Bu cümle 16 Ağu 2026'da tamamlandı; önceki hâli kesikti — S8 ajan bulgusu.)*
 
 ## Endüstri iş akışları (ANSYS/CAD ekosistemi)
 

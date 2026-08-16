@@ -94,10 +94,31 @@ def differing_paths(before: Dict[str, Any], after: Dict[str, Any],
 #: okuyabilir) — yalnız sayım birimi tekilleştirildi; bit-aynılık şartı
 #: aşağıdaki kopya sözleşmesi geçişiyle her koşuda yeniden ölçülür,
 #: ayrışırsa indirgeme kendiliğinden iptal olur.
+#: v2.6.27 (yirmi altıncı parti) — ÜÇÜNCÜ KOPYANIN İKİ KARDEŞİ.
+#: Bu liste ELLE tutuluyor ve yirmi ikinci parti ``.injector_design``i elle
+#: bulup orada durmuştu. Bu turda liste TARANARAK denetlendi: taban yanıtın
+#: bütün alt ağaçları imzalanıp (göreli yol -> değer) bit-aynı olanlar
+#: eşleştirildi. Tarama, aynı sınıftan iki kopya daha buldu:
+#: ``.design_summary`` (24/24 yaprak ``.motor.design_summary`` ile bit-aynı)
+#: ve ``.grain_design`` (9/9 yaprak ``.motor.grain_design`` ile bit-aynı).
+#: Birlikte-değişme de ÖLÇÜLDÜ (chamber_pressure 20->30, thrust 5000->7500,
+#: of_ratio 2,5->3,5): üç sarsımda da kopya ile kanonik AYNI göreli yaprak
+#: kümesini değiştirdi (15/15, 14/14, 7/7).
+#:
+#: DÜRÜSTLÜK NOTU — bu iki girişin SABİT SAYIMINA katkısı SIFIRDIR: iki
+#: bloğun da sayısal yapraklarının tamamı canlı, yani indirgenecek sabit
+#: yok (ölçüldü). Eklenme sebebi sayım değil SÖZLEŞME KAPSAMI: bu
+#: önekler eklendiği an iki blok da ``yanki_ayristi`` denetimine girer,
+#: yani üst seviye kopya bir gün bayat/varsayılan veriyle beslenirse
+#: (uçuş simülasyonunun eski motor verisiyle beslenmesi sınıfı)
+#: ``test_motor_echo_copies_never_diverge`` kırmızıya döner. Kopya
+#: kapsanmadıkça o kusur sessizce yaşar.
 ECHO_CANONICAL_PREFIXES = (
     ('.trajectory.motor_data', '.motor'),
     ('.openrocket.flight_profile.motor_data', '.motor'),
     ('.injector_design', '.motor.injector_design'),
+    ('.design_summary', '.motor.design_summary'),
+    ('.grain_design', '.motor.grain_design'),
 )
 
 #: BEYAN YANKISI: değeri, kullanıcının GÖNDERDİĞİ sayının birebir kendisi

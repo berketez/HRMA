@@ -3072,7 +3072,9 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
 
     solver = NozzleFlow1D.from_motor_data(
         md, ambient_pressure=float(pa), n_stations=NOZZLE_FIG_N_STATIONS)
-    sol = solver.solve(include_bartz=False)
+    # Mach figürü yalnız akış çekirdeğine bakar; BL/Bartz katmanları
+    # figür başına +26 ms ölçüldü (V5 raporu) ve burada okunmuyor.
+    sol = solver.solve(include_bartz=False, include_boundary_layer=False)
 
     st = sol['stations']
     x_mm = np.asarray(st['x_mm'], dtype=float)

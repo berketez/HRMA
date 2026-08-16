@@ -200,6 +200,180 @@ JS_FEA_BITTI = """
 }
 """
 
+# ---------------------------------------------------------------------------
+# Analiz Merkezi (analysis_center.js) ölçüm betikleri
+# ---------------------------------------------------------------------------
+
+#: Merkez ÇERÇEVESİNİN durumu: panel kuruldu mu, üç sütun ayakta mı, bileşen
+#: ağacındaki satırlar hangi durumda ve nedenleri yazılı mı?
+#:
+#: Satırlar METİNLE değil ÖZNİTELİKLE okunur (``data-ac-row`` /
+#: ``data-ac-state`` / ``data-ac-reason``): durum adı çevrilmez, rozet metni
+#: çevrilir. Nedenin METNİ ayrıca alınır çünkü ölçülen şey "neden ADIYLA
+#: yazılmış mı" — boş bir gri satır tasarımın kural 1'ini ihlal eder.
+JS_MERKEZ_CERCEVE = """
+(c) => {
+  const gorunur = (el, minKenar) => {
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= (minKenar || 1) && r.height >= (minKenar || 1);
+  };
+  const duz = (t) => (t || '').replace(/\\s+/g, ' ').trim();
+  const panel = document.getElementById(c.panel);
+  if (!panel) return { panel: c.panel, panel_var: false, panel_gorunur: false };
+  const sutunlar = {};
+  (c.sutunlar || []).forEach(function (kimlik) {
+    const el = document.getElementById(kimlik);
+    sutunlar[kimlik] = { mevcut: !!el, gorunur: gorunur(el, 1) };
+  });
+  const satirlar = Array.from(panel.querySelectorAll('[data-ac-row]'))
+    .map(function (b) {
+      const n = b.querySelector('[data-ac-reason]');
+      return { anahtar: b.getAttribute('data-ac-row'),
+               durum: b.getAttribute('data-ac-state'),
+               neden: n ? duz(n.textContent) : '',
+               gorunur: gorunur(b, 1) };
+    });
+  const motor = document.getElementById('ac_motor');
+  return {
+    panel: c.panel,
+    panel_var: true,
+    panel_gorunur: gorunur(panel, 1),
+    sutunlar: sutunlar,
+    gecmis_var: !!document.getElementById(c.gecmis),
+    api_var: !!(window.AnalysisCenter
+                && typeof window.AnalysisCenter.history === 'function'),
+    motor_metni: motor ? duz(motor.textContent) : null,
+    satirlar: satirlar,
+    satir_sayisi: satirlar.length,
+    metin: duz(panel.innerText || '')
+  };
+}
+"""
+
+#: Merkez geçmişindeki kayıt sayısı — koşumun BİTTİĞİNİ söyleyen tek dürüst
+#: işaret. ``pushEntry`` hem başarılı hem başarısız koşumda çalışır.
+JS_MERKEZ_GECMIS_UZUNLUGU = """
+() => {
+  const A = window.AnalysisCenter;
+  if (!A || typeof A.history !== 'function') return null;
+  try { return A.history().length; } catch (e) { return null; }
+}
+"""
+
+#: Koşum BAŞLADI mı? Düğmenin ``disabled`` bayrağı metinden bağımsızdır
+#: (``renderStatus`` onu ``busy`` gerçek durumundan yazar).
+JS_MERKEZ_MESGUL = """
+(c) => {
+  const b = document.getElementById(c.dugme);
+  return !!(b && b.disabled);
+}
+"""
+
+#: Koşum BİTTİ mi? İki dürüst çıkış vardır ve ikisi de beklenir:
+#:   1. geçmişe yeni kayıt düştü (istek gönderildi ve cevaplandı/hata verdi),
+#:   2. istek HİÇ gönderilmedi — eksik zorunlu alan hâlinde ``run()`` erken
+#:      döner, meşgul olmaz ve durum satırına gerekçeyi yazar.
+#: İkincisi olmasaydı, alanı boş kalan bir kart turu zaman aşımına kadar
+#: bekletirdi ve kusur "takıldı" diye görünürdü.
+JS_MERKEZ_KOSUM_BITTI = """
+(c) => {
+  const A = window.AnalysisCenter;
+  if (A && typeof A.history === 'function') {
+    try { if (A.history().length > c.gecmis_esigi) return true; } catch (e) {}
+  }
+  const b = document.getElementById(c.dugme);
+  const s = document.getElementById(c.durum);
+  const metin = s ? (s.textContent || '').trim() : '';
+  return !!(b && !b.disabled && metin);
+}
+"""
+
+#: Kiracının koşum SONRASI durumu: geçmiş kaydı, yanıtın kendi alanları,
+#: görüntüleyici kabındaki çizimler ve rozetler.
+#:
+#: Yükten okunan alanlar BİLEREK dardır: hüküm için gereken beyanlar
+#: (yakınsama, ayrılma güveni, bütçe uyarısı) alınır, sayısal alan blokları
+#: alınmaz — rapor tanı içindir, yanıtın kopyası değil.
+JS_MERKEZ_KIRACI = """
+(c) => {
+  const gorunur = (el, minKenar) => {
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= (minKenar || 1) && r.height >= (minKenar || 1);
+  };
+  const duz = (t) => (t || '').replace(/\\s+/g, ' ').trim();
+  const A = window.AnalysisCenter;
+  let gecmis = null;
+  try { gecmis = (A && typeof A.history === 'function') ? A.history() : null; }
+  catch (e) { gecmis = null; }
+  const son = (gecmis && gecmis.length) ? gecmis[gecmis.length - 1] : null;
+  let yuk = null;
+  if (son && son.ok && son.data && son.data.cfd) {
+    const cfd = son.data.cfd;
+    const sep = cfd.separation || {};
+    const inl = cfd.inlet_conditioning || {};
+    yuk = {
+      converged: (typeof cfd.converged === 'boolean') ? cfd.converged : null,
+      iterations: cfd.iterations,
+      kernel: cfd.kernel_backend || null,
+      judgment_confidence: sep.judgment_confidence || null,
+      separated: (typeof sep.separated === 'boolean') ? sep.separated : null,
+      bridge_refused: !!sep.bridge_refused,
+      budget_advisory: !!inl.budget_advisory,
+      budget_advisory_reasons: inl.budget_advisory_reasons || null,
+      contraction_ratio: inl.contraction_ratio,
+      alan_bloklu: !!cfd.field,
+      kalinti_noktalari: (cfd.residual_history && cfd.residual_history.iteration)
+        ? cfd.residual_history.iteration.length : 0,
+      resolution: (cfd.inputs && cfd.inputs.resolution) || null
+    };
+  }
+  const kok = document.getElementById(c.kok);
+  const cizimler = kok
+    ? Array.from(kok.querySelectorAll(c.cizim_secici)).map(function (el) {
+        const r = el.getBoundingClientRect();
+        return { kimlik: el.id,
+                 gorunur: gorunur(el, c.min_kenar),
+                 plotly_kabi: el.classList.contains('js-plotly-plot'),
+                 svg_sayisi: el.querySelectorAll('svg').length,
+                 canvas_sayisi: el.querySelectorAll('canvas').length,
+                 genislik: Math.round(r.width),
+                 yukseklik: Math.round(r.height) };
+      })
+    : [];
+  const rozetler = kok
+    ? Array.from(kok.querySelectorAll(c.rozet_secici)).map(function (b) {
+        return { tur: b.getAttribute(c.rozet_ozniteligi),
+                 metin: duz(b.textContent) };
+      })
+    : [];
+  const durum = document.getElementById(c.durum);
+  return {
+    kok_var: !!kok,
+    kok_gorunur: gorunur(kok, 1),
+    gecmis_uzunlugu: gecmis ? gecmis.length : null,
+    son_kosum: son ? { ok: !!son.ok, seconds: son.seconds,
+                       satir: son.rowKey,
+                       hata: son.errorText || null,
+                       hukum_anahtari: son.verdict ? (son.verdict.key || null) : null,
+                       hukum_sinifi: son.verdict ? (son.verdict.kind || null) : null }
+                   : null,
+    yuk: yuk,
+    cizimler: cizimler,
+    cizim_sayisi: cizimler.length,
+    rozetler: rozetler,
+    rozet_sayisi: rozetler.length,
+    durum_metni: durum ? duz(durum.textContent) : null,
+    metin: kok ? duz(kok.innerText || '') : ''
+  };
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Saf yardımcılar (tarayıcısız sınanabilir)
@@ -284,6 +458,7 @@ class SayfaGezgini:
         piksel: Optional[Dict[str, Any]] = None
         metin: Optional[str] = None
         fea: Dict[str, Any] = {}
+        merkez: Dict[str, Any] = {}
         plume_baslatma = 'yok'
         goruntuler: Dict[str, Optional[str]] = {'tam_sayfa': None, 'uc_boyut': None}
 
@@ -333,6 +508,11 @@ class SayfaGezgini:
             # SONRA okunur — böylece sızıntı taraması FEA panellerinin
             # bastığı metni de kapsar.
             fea = self._fea_panellerini_kostur()
+            # Analiz Merkezi FEA panellerinden SONRA, sayfa metni
+            # okunmadan ÖNCE koşturulur: kiracının bastığı her cümle
+            # sızıntı taramasına da girsin (``[object Object]``/NaN
+            # ekranın hangi köşesinde olursa olsun yakalansın).
+            merkez = self._merkezi_kostur()
 
             metin = self.p.evaluate(JS_SAYFA_METNI)
         except Exception as hata:
@@ -348,7 +528,7 @@ class SayfaGezgini:
                                     % _kisalt(hata, 200))
 
         return self._rapor(sureler, viz, tuval_ham, piksel, metin,
-                           plume_baslatma, goruntuler, fea)
+                           plume_baslatma, goruntuler, fea, merkez)
 
     def _hesabi_tetikle(self, sureler: Dict[str, float]) -> None:
         dugme = self.p.locator(self.tanim.hesapla_secici).first
@@ -518,9 +698,173 @@ class SayfaGezgini:
                olcum['kosum_s']))
         return son
 
+    # -- Analiz Merkezi ---------------------------------------------------
+    def _merkez_yapilandirmasi(self) -> Dict[str, Any]:
+        """Çerçeve betiklerine geçirilen ayar sözlüğü (tek kaynak)."""
+        return {
+            'panel': esikler.MERKEZ_PANEL_KIMLIGI,
+            'sutunlar': list(esikler.MERKEZ_SUTUN_KIMLIKLERI),
+            'gecmis': esikler.MERKEZ_GECMIS_KIMLIGI,
+            'dugme': esikler.MERKEZ_KOSUM_DUGMESI_KIMLIGI,
+            'durum': esikler.MERKEZ_DURUM_KIMLIGI,
+        }
+
+    def _merkez_kiraci_yapilandirmasi(self, kiraci) -> Dict[str, Any]:
+        return {
+            'kok': esikler.MERKEZ_GORUNTULEYICI_KOKU,
+            'cizim_secici': kiraci.cizim_secicisi,
+            'rozet_secici': kiraci.rozet_secicisi,
+            'rozet_ozniteligi': kiraci.rozet_ozniteligi,
+            'dugme': esikler.MERKEZ_KOSUM_DUGMESI_KIMLIGI,
+            'durum': esikler.MERKEZ_DURUM_KIMLIGI,
+            'min_kenar': esikler.MERKEZ_CIZIM_MIN_KENAR_PX,
+        }
+
+    def _merkezi_kostur(self) -> Dict[str, Any]:
+        """Analiz Merkezi'ni ölçer ve kiracılarını sırayla koşturur.
+
+        Bir kiracının patlaması turu KESMEZ: istisna o kiracının ölçümüne
+        yazılır, çerçeve ölçümü elde kalır ve hüküm ``denetimler.py``de
+        verilir.
+        """
+        if not getattr(self.tanim, 'merkez_var', False):
+            return {}
+        sonuc: Dict[str, Any] = {'cerceve': None, 'kiracilar': {}}
+        cfg = self._merkez_yapilandirmasi()
+        try:
+            sonuc['cerceve'] = self.p.evaluate(JS_MERKEZ_CERCEVE, cfg) or {}
+            self.asamalar.append(
+                'Analiz Merkezi ölçüldü: panel=%s, %d satır'
+                % (bool(sonuc['cerceve'].get('panel_var')),
+                   sonuc['cerceve'].get('satir_sayisi', 0)))
+        except Exception as hata:
+            sonuc['cerceve'] = {'panel': esikler.MERKEZ_PANEL_KIMLIGI,
+                                'panel_var': None, 'panel_gorunur': False,
+                                'olcum_hatasi': '%s: %s'
+                                % (type(hata).__name__, _kisalt(hata, 300))}
+            self.asamalar.append('Analiz Merkezi ölçülemedi: %s'
+                                 % _kisalt(hata, 160))
+        for kiraci in getattr(self.tanim, 'merkez_kiracilari', ()):
+            try:
+                sonuc['kiracilar'][kiraci.ad] = self._tek_merkez_kiracisi(
+                    kiraci, sonuc['cerceve'] or {})
+            except Exception as hata:
+                sonuc['kiracilar'][kiraci.ad] = {
+                    'ad': kiraci.ad, 'kok_var': False,
+                    'satir_anahtari': kiraci.satir_anahtari,
+                    'asama': 'olcum_hatasi',
+                    'ayrinti': '%s: %s' % (type(hata).__name__,
+                                           _kisalt(hata, 300)),
+                }
+                self.asamalar.append('Merkez kiracısı ölçülemedi (%s): %s'
+                                     % (kiraci.ad, _kisalt(hata, 160)))
+        return sonuc
+
+    def _tek_merkez_kiracisi(self, kiraci, cerceve: Dict[str, Any]) -> Dict[str, Any]:
+        """Kiracıyı SEÇER, koşturur ve koşum sonrası ekranı ölçer.
+
+        Alanlara DOKUNULMAZ: kart, motorun kendi sonucundan önerilen
+        değerlerle ve panelin kendi çözünürlük varsayılanıyla koşar —
+        kullanıcının gördüğü yol budur.
+        """
+        cfg = self._merkez_kiraci_yapilandirmasi(kiraci)
+        olcum: Dict[str, Any] = {
+            'ad': kiraci.ad,
+            'satir_anahtari': kiraci.satir_anahtari,
+            'satir_secicisi': kiraci.satir_secicisi,
+            'zaman_asimi_ms': kiraci.kosum_zaman_asimi_ms,
+            'basladi': False,
+            'kok_var': False,
+            '_dayanak': {
+                'son_kosum': 'window.AnalysisCenter.history() son kaydı',
+                'yuk': 'aynı kaydın data.cfd bloğundan okunan beyan alanları',
+                'cizimler': ('#%s içindeki %s kapları: görünürlük + '
+                             '.js-plotly-plot + svg düğüm sayısı'
+                             % (esikler.MERKEZ_GORUNTULEYICI_KOKU,
+                                kiraci.cizim_secicisi)),
+                'rozetler': '%s kutularının metni ve %s değeri'
+                            % (kiraci.rozet_secicisi, kiraci.rozet_ozniteligi),
+                'kosum_s': 'düğmeye basımdan geçmişe kayıt düşmesine',
+            },
+        }
+        satir = None
+        for s in (cerceve.get('satirlar') or []):
+            if s.get('anahtar') == kiraci.satir_anahtari:
+                satir = s
+                break
+        if not satir:
+            olcum['asama'] = 'satir_yok'
+            self.asamalar.append('Merkez satırı ağaçta yok: %s'
+                                 % kiraci.satir_anahtari)
+            return olcum
+        olcum['satir_durumu'] = satir.get('durum')
+        olcum['satir_nedeni'] = satir.get('neden')
+        if satir.get('durum') != 'ready':
+            olcum['asama'] = 'satir_hazir_degil'
+            self.asamalar.append('Merkez satırı koşuma hazır değil (%s → %s)'
+                                 % (kiraci.satir_anahtari, satir.get('durum')))
+            return olcum
+
+        satir_dugmesi = self.p.locator(kiraci.satir_secicisi).first
+        if satir_dugmesi.count() == 0:
+            olcum['asama'] = 'satir_yok'
+            return olcum
+        satir_dugmesi.click()
+        self.asamalar.append('Merkez satırı seçildi: %s' % kiraci.satir_secicisi)
+
+        kosum_secici = '#' + esikler.MERKEZ_KOSUM_DUGMESI_KIMLIGI
+        kosum_dugmesi = self.p.locator(kosum_secici).first
+        try:
+            kosum_dugmesi.wait_for(
+                state='visible',
+                timeout=esikler.MERKEZ_KOSUM_BASLAMA_ZAMAN_ASIMI_MS)
+        except Exception:
+            olcum['asama'] = 'dugme_yok'
+            self.asamalar.append('Merkez koşum düğmesi kurulmadı: %s'
+                                 % kosum_secici)
+            return olcum
+
+        gecmis_esigi = self.p.evaluate(JS_MERKEZ_GECMIS_UZUNLUGU)
+        gecmis_esigi = gecmis_esigi if isinstance(gecmis_esigi, int) else 0
+        olcum['gecmis_esigi'] = gecmis_esigi
+        t0 = time.time()
+        kosum_dugmesi.click()
+        self.asamalar.append('Merkez koşum düğmesine basıldı (%s)' % kiraci.ad)
+        try:
+            self.p.wait_for_function(
+                JS_MERKEZ_MESGUL, arg=cfg,
+                timeout=esikler.MERKEZ_KOSUM_BASLAMA_ZAMAN_ASIMI_MS)
+            olcum['basladi'] = True
+        except Exception:
+            # Koşum ya hiç başlamadı (eksik zorunlu alan → istek gönderilmez)
+            # ya da ölçüm penceresinden hızlı bitti. İkisi burada AYIRT
+            # EDİLMEZ; hüküm koşum KAYDINA bakar.
+            self.asamalar.append('Merkez meşgul göstergesi görülmedi (%s)'
+                                 % kiraci.ad)
+        bitti_cfg = dict(cfg)
+        bitti_cfg['gecmis_esigi'] = gecmis_esigi
+        try:
+            self.p.wait_for_function(JS_MERKEZ_KOSUM_BITTI, arg=bitti_cfg,
+                                     timeout=kiraci.kosum_zaman_asimi_ms)
+            olcum['asama'] = 'tamam'
+        except Exception:
+            olcum['asama'] = 'zaman_asimi'
+            self.asamalar.append('Merkez koşumu zaman aşımına uğradı (%s, %d ms)'
+                                 % (kiraci.ad, kiraci.kosum_zaman_asimi_ms))
+        olcum['kosum_s'] = time.time() - t0
+
+        son = self.p.evaluate(JS_MERKEZ_KIRACI, cfg) or {}
+        son.update({k: v for k, v in olcum.items() if k not in son})
+        son_kosum = son.get('son_kosum') or {}
+        self.asamalar.append(
+            'Merkez koşumu bitti (%s): kayıt=%s, %d çizim, %d rozet, %.1f s'
+            % (kiraci.ad, son_kosum.get('ok'), son.get('cizim_sayisi', 0),
+               son.get('rozet_sayisi', 0), olcum['kosum_s']))
+        return son
+
     # -- rapor ------------------------------------------------------------
     def _rapor(self, sureler, viz, tuval_ham, piksel, metin, plume_baslatma,
-               goruntuler, fea=None) -> Dict[str, Any]:
+               goruntuler, fea=None, merkez=None) -> Dict[str, Any]:
         akis_tamam = not self.hatalar
         liste = [
             denetimler.Denetim(
@@ -538,6 +882,8 @@ class SayfaGezgini:
         fea = fea or {}
         for tanim in getattr(self.tanim, 'fea_panelleri', ()):
             liste.extend(denetimler.fea_denetimleri(tanim, fea.get(tanim.ad)))
+        merkez = merkez or {}
+        liste.extend(denetimler.merkez_denetimleri(self.tanim, merkez))
         return {
             'ad': self.tanim.ad,
             'url': self.temel_url + self.tanim.yol,
@@ -550,6 +896,7 @@ class SayfaGezgini:
                 'tuval_hatasi': tuval_ham.get('hata'),
                 'piksel': piksel or {},
                 'fea': fea,
+                'merkez': merkez,
                 'plume_baslatma': plume_baslatma,
                 'http_hatalari': self.http_hatalari[:esikler.RAPOR_ORNEK_UST_SINIRI],
                 'http_hata_sayisi': len(self.http_hatalari),

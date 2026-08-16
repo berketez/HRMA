@@ -1843,6 +1843,13 @@
             <!-- Analysis Dock çapası: güverte JS ile bu çapanın ÖNÜNE kurulur
                  (#results içinde olduğundan hesap bitmeden görünmez) -->
             <div id="analysis-dock-anchor"></div>
+
+            <!-- Analiz Merkezi çapası (dalga B çerçevesi): Merkez JS ile bu
+                 çapanın ÖNÜNE kurulur, yani güvertenin HEMEN ALTINA düşer.
+                 Mevcut güverte YERİNDE KALIR — tasarım §4 gereği paneller
+                 tek tek Merkez'e taşınacak, taşıma doğrulanmadan eski yeri
+                 kaldırılmaz. docs/mimari/analiz-merkezi-tasarimi.md -->
+            <div id="analysis-center-anchor"></div>
         </div>
     </div>
     
@@ -5155,14 +5162,15 @@ Please provide:
                 nozzle_angles: r.nozzle_angles || null,
                 design_summary: r.design_summary || null,
                 grain_design: r.grain_design || null,
-                // --- Yanma animasyonu veri yolu (v2.6.27, B5) ------------
-                // Katı çözücü web ilerlemesini YAYIMLAMIYOR (thrust_curve
-                // time/thrust/pressure/burn_area/mass_flow taşır; motorun
-                // kendi eğrisindeki port_area dizisi dışarı verilmiyor).
-                // MotorViz3D bu yüzden webi çözücünün kendi kütle üretim
-                // özdeşliğinden geri alır: r_b = mdot/(rho_p·A_b), w = ∫r_b dt.
-                // Üçü de çözücü çıktısıdır; hiçbiri burada üretilmez.
-                // Seri ya da yoğunluk eksikse viz portu dondurur.
+                // --- Yanma animasyonu veri yolu (v2.6.27, B5 + parti 26) --
+                // Katı çözücü parti 26'dan beri port_area dizisini de
+                // YAYIMLIYOR (thrust_curve: time/thrust/pressure/burn_area/
+                // mass_flow/port_area[+basis]); MotorViz3D varsa onu
+                // türetmesiz kullanır (r = sqrt(A/π)). port_area taşımayan
+                // eski/kayıtlı sonuçlarda yedek yol: kütle üretim özdeşliği
+                // r_b = mdot/(rho_p·A_b), w = ∫r_b dt. Hangi yolun
+                // kullanıldığı beyan çipinde ayrışır; hiçbiri burada
+                // üretilmez. Seri ya da yoğunluk eksikse viz portu dondurur.
                 thrust_curve: r.thrust_curve || null,
                 propellant_density: firstNum(r.density)    // kg/m³
                 // NOT: heat_transfer_analysis bilinçli olarak geçilmiyor —
@@ -6046,6 +6054,12 @@ Please provide:
          + deneysel korelasyon raporu (CORRELATION) -->
     <script src="/static/js/panels/uncertainty_panel.js"></script>
     <script src="/static/js/panels/correlation_panel.js"></script>
+    <!-- Analiz Merkezi (dalga B çerçevesi): önce çekirdek, sonra kiracılar
+         (kayıt sırası sözleşmesi — kiracı register çağırırken
+         window.AnalysisCenter tanımlı olmalı). cfd_panel.js Merkez'in ilk
+         kiracısıdır; parti 26'da dolduruldu (68 bekçi: tests/test_cfd_panel.py). -->
+    <script src="/static/js/analysis_center.js"></script>
+    <script src="/static/js/panels/cfd_panel.js"></script>
     <script>
         // Analiz güvertesi (thermal/structural/safety) — çapa #results içinde
         // olduğundan hesap bitip sonuç bölümü açılınca görünür olur.
@@ -6055,6 +6069,17 @@ Please provide:
                 motorType: 'solid',
                 resultsProvider: function () { return window.currentResults; },
             });
+            // Analiz Merkezi (dalga B): bileşen ağacı + koşum kartı + sonuç
+            // görüntüleyici. Çapa güvertenin ALTINDA (#analysis-center-anchor).
+            // Merkez sonuç basıcısını kendisi sarar (hookNames varsayılanı);
+            // bu sayfanın basıcısı displayResults (solid.html:4181, ölçüldü).
+            if (window.AnalysisCenter) {
+                AnalysisCenter.init({
+                    anchorId: 'analysis-center-anchor',
+                    motorType: 'solid',
+                    resultsProvider: function () { return window.currentResults; },
+                });
+            }
             // Dalga 3: güverte altına kapsam notu (el hesabı sınırları)
             var adDockEl = document.getElementById('analysisDock');
             if (adDockEl && !document.getElementById('ad-scope-note')) {

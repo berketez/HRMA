@@ -1177,8 +1177,11 @@
             contourBasis: contourSel.basis,
             of0: num(md.of_ratio_initial, num(md.of_ratio, 2)),
             portHist: md.port_history || null,
-            // Katı yolu: web geçmişi çözücünün itki eğrisinden türetilir
-            // (solidWebHistory; veri yoksa null → port donuk kalır).
+            // Katı yolu, ASIL kaynak: çözücünün yayımladığı port akış kesiti
+            // (thrust_curve.port_area). Yoksa null → aşağıdaki yedek geçerli.
+            portAreaHist: solidPortRadiusHistory(md),
+            // Katı yolu, YEDEK: web geçmişi çözücünün itki eğrisinden
+            // türetilir (solidWebHistory; veri yoksa null → port donuk kalır).
             webHist: solidWebHistory(md),
             grainType: (gd.grain_type || md.grain_type || ''),
             // Çözücü uç yüzeylerin de yandığını beyan ediyor mu? BATES'te
@@ -1190,21 +1193,26 @@
     }
 
     // ==================================================================
-    // Tane yanma animasyonu — port gerilemesi (v2.6.27, B5)
+    // Tane yanma animasyonu — port gerilemesi (v2.6.27, B5 · parti 26)
     //
     // SAHTE ANİMASYON YASAĞI: iç yüzey YALNIZ gerçek çözücü serisiyle
-    // gerilir. İki gerçek kaynak vardır, üçüncüsü YOKTUR:
+    // gerilir. ÜÇ gerçek kaynak vardır, dördüncüsü YOKTUR:
     //
     //  1) hibrit — motor sözlüğü ``port_history`` yayımlar
     //     ({time[s], port_diameter[m]}); doğrudan örneklenir.
     //
-    //  2) katı — çözücü web ilerlemesini zaman marşında TUTAR ama
-    //     YAYIMLAMAZ. Ölçüldü (2026-08-15, /calculate_solid
-    //     use_tutorial_defaults): yanıttaki thrust_curve yalnız
-    //     time / thrust / pressure / burn_area / mass_flow taşır (402
-    //     nokta); motorun kendi eğri sözlüğündeki ``port_area`` dizisi
-    //     _published_thrust_curve'de dışarı verilmez. Web geçmişi bu
-    //     yüzden çözücünün KENDİ kütle üretim özdeşliğinden geri alınır:
+    //  2) katı, ASIL — çözücü ``thrust_curve.port_area`` (m²) yayımlar
+    //     (parti 26; solid_rocket_engine.py::_published_thrust_curve).
+    //     Bu dizi çözücünün KENDİ zaman marşından gelir (erozif akı
+    //     G = mdot/A_port ile tek ve aynı seri), dolayısıyla dairesel
+    //     portta eşdeğer yarıçap TÜRETMESİZ okunur: r(t) =
+    //     sqrt(A_port(t)/π). Yayımlanan seri varsa animasyon BUNU
+    //     kullanır (kip 'solid_port_area'); yoksa aşağıdaki (3) yolu
+    //     yedek kalır — eski/bayat yanıtlar kırılmaz.
+    //
+    //  3) katı, YEDEK — port_area taşımayan yanıtlarda (v2.6.27 parti 26
+    //     öncesi kaydedilmiş sonuç dosyaları) web geçmişi çözücünün KENDİ
+    //     kütle üretim özdeşliğinden geri alınır:
     //
     //         ṁ(t) = ρ_p · A_b(t) · r_b(t)   (solid_rocket_engine.py:8420)
     //      →  r_b(t) = ṁ(t) / (ρ_p · A_b(t))
@@ -1226,6 +1234,42 @@
     // (solid.html, "yanma sonunda ince bir kabuk görünsün diye"). Artık
     // gerçek seri yoksa port DONDURULUR ve durum çipi bunu beyan eder.
     // ==================================================================
+
+    // Katı çözücünün YAYIMLADIĞI port akış kesitinden (m²) eşdeğer port
+    // yarıçapı geçmişi (m). Tek işlem sqrt(A/π)'dir: ara değerleme, bitiş
+    // noktası varsayımı ve zaman yasası YOKTUR.
+    //
+    // null döner (ve çağıran yedek yola düşer) şu hâllerde:
+    //   * alan yayımlanmamış (parti 26 öncesi kaydedilmiş sonuç dosyaları),
+    //   * dizi kısa / hizasız / sayısal değil / alan sıfır ya da negatif,
+    //   * zaman sırası bozuk,
+    //   * seri BÜYÜMÜYOR — uç yanmalı tanede A_port sabittir (port yok, tüm
+    //     kasa kesiti akar; ölçüldü: end_burner'da 6157 örneğin tamamı
+    //     7,853982e-3 m²). Sabit seriden animasyon çıkarmak, olmayan bir
+    //     gerilemeyi göstermek olurdu.
+    function solidPortRadiusHistory(md) {
+        var tc = (md && md.thrust_curve) || null;
+        if (!tc) return null;
+        var t = tc.time, ap = tc.port_area;
+        if (!t || !ap) return null;
+        var n = t.length;
+        if (n < 3 || ap.length !== n) return null;
+        var radius = new Array(n);
+        var tPrev = 0, buyudu = false;
+        for (var i = 0; i < n; i++) {
+            var ti = num(t[i], NaN), A = num(ap[i], NaN);
+            if (!isFinite(ti) || !isFinite(A) || A <= 0) return null;
+            if (i > 0 && ti < tPrev) return null;      // sıralı olmayan seri
+            radius[i] = Math.sqrt(A / Math.PI);
+            if (radius[i] > radius[0]) buyudu = true;
+            tPrev = ti;
+        }
+        if (!buyudu) return null;
+        return {
+            time: t, radius: radius, r0: radius[0], rEnd: radius[n - 1],
+            source: 'solid_port_area'
+        };
+    }
 
     // Katı çözücünün itki eğrisinden web ilerlemesi (m). Girdi eksik,
     // kısa, tutarsız uzunlukta ya da sayısal değilse null döner — yarım
@@ -1270,9 +1314,21 @@
 
     // Port gerilemesinin kipi (tek karar noktası; çip metni de bundan).
     //   'port_history'        çözücü port çapı geçmişi yayımladı
+    //   'solid_port_area'     katı çözücü port AKIŞ KESİTİNİ yayımladı
     //   'solid_mass_balance'  katı çözücünün kütle dengesinden türetildi
     //   'not_modelled'        kesit/tane tipi için radyal gerileme geçersiz
     //   'no_data'             gerçek zaman serisi yok → port donuk
+    //
+    // TANE TİPİ KAPISI port_area yayımlansa da AÇILMAZ. Gerekçe ölçüldü
+    // (2026-08-16, solid_rocket_engine.py::_port_flow_area ile çapraz):
+    // yıldız/finocyl/çok portlu tanede yayımlanan A_port, akı bölmesi için
+    // kullanılan EŞDEĞER DAİRESEL porttur — π(r_çekirdek+w)², yani tam
+    // olarak web geçmişinin taşıdığı bilgi (fark ≤ 0,031 mm). Gerçek kesit
+    // ise yüzey normali boyunca ofsetlenmiş bir poligondur; onu tek yarıçap
+    // büyüterek göstermek, yeni alan yayımlandı diye doğru olmaz. 'slotted'
+    // tanede alan GERÇEK poligon alanıdır ama kesit yine dairesel değildir
+    // (eşdeğer yarıçap r0+w'den 17,3 mm sapıyor). Uç yanmalıda dizi sabittir
+    // ve zaten solidPortRadiusHistory tarafından reddedilir.
     function portRegressionMode(spec) {
         spec = spec || {};
         if ((spec.portShape || 'circular') !== 'circular') return 'not_modelled';
@@ -1280,6 +1336,8 @@
         if (spec.hasPortHistory) return 'port_history';
         var gt = String(spec.grainType || '').toLowerCase();
         if (gt && !RADIAL_REGRESSION_GRAINS[gt]) return 'not_modelled';
+        // Yayımlanan port kesiti VARSA türetme yapılmaz; yoksa yedek yol.
+        if (spec.hasPortArea) return 'solid_port_area';
         if (spec.hasWebHistory) return 'solid_mass_balance';
         return 'no_data';
     }
@@ -1292,6 +1350,9 @@
         if (mode === 'port_history') {
             defs.push({ text: T('viz.chip.portRegHistory',
                 'port regression: solver port history'), kind: 'computed' });
+        } else if (mode === 'solid_port_area') {
+            defs.push({ text: T('viz.chip.portRegPortArea',
+                'port regression: solver port area'), kind: 'computed' });
         } else if (mode === 'solid_mass_balance') {
             defs.push({ text: T('viz.chip.portRegMassBalance',
                 'port regression: solver mass balance'), kind: 'computed' });
@@ -1304,7 +1365,8 @@
         }
         // Uç yüzeyler de yanıyorsa (çözücü beyanı) 3B tane bloğu eksenel
         // kısalmayı GÖSTERMEZ; sessiz kalınmaz, ayrı çiple beyan edilir.
-        if (opts.endsBurn && (mode === 'port_history' || mode === 'solid_mass_balance')) {
+        if (opts.endsBurn && (mode === 'port_history' || mode === 'solid_port_area'
+            || mode === 'solid_mass_balance')) {
             defs.push({ text: T('viz.chip.endFaceNotModelled',
                 'end-face regression: not modelled'), kind: 'missing' });
         }
@@ -1321,6 +1383,15 @@
             if (d !== null) return clamp(d * 1000 / 2, dims.rPort0, dims.rGrainOut - 0.5);
             return dims.rPort0;
         }
+        if (mode === 'solid_port_area') {
+            var pah = dims.portAreaHist;
+            var rp = (pah && pah.time && pah.radius)
+                ? sampleSeries(pah.time, pah.radius, t) : null;
+            if (rp !== null) {
+                return clamp(rp * 1000, dims.rPort0, dims.rGrainOut - 0.5);
+            }
+            return dims.rPort0;
+        }
         if (mode === 'solid_mass_balance') {
             var wh = dims.webHist;
             var w = (wh && wh.time && wh.web) ? sampleSeries(wh.time, wh.web, t) : null;
@@ -1335,6 +1406,13 @@
     // Yanan web kalınlığı (mm) — HUD/etiket için; animasyonlu kip yoksa
     // null (ekranda sayı uydurulmaz).
     function burnedWebAt(dims, t, mode) {
+        if (mode === 'solid_port_area' && dims.portAreaHist) {
+            // Serinin KENDİ tabanından ölçülür (r(t) − r(0)): çizim
+            // kırpması (rGrainOut − 0,5) HUD sayısını kısaltmasın.
+            var pah = dims.portAreaHist;
+            var rp = sampleSeries(pah.time, pah.radius, t);
+            return (rp === null) ? null : (rp - pah.r0) * 1000;
+        }
         if (mode === 'solid_mass_balance' && dims.webHist) {
             var w = sampleSeries(dims.webHist.time, dims.webHist.web, t);
             return (w === null) ? null : w * 1000;
@@ -2391,22 +2469,28 @@
             this._grid = grid;
             this._gridCell = cell;
             this._gridSpan = span;
-            // Köşe rozeti: seçilen hücre boyu (mutlak referans beyanı)
+            // Hücre boyu rozeti: mutlak referans beyanı (metin hücreden,
+            // ölçek ve konum MOTORDAN — bkz. gridBadgePositionMm)
             var badge = textSprite(gridBadgeText(cell), {
                 border: 'rgba(20, 111, 128, 0.7)', color: '#7fd4e2'
             });
             badge.material.depthTest = true;   // HUD değil, zemin mobilyası
             badge.renderOrder = 0;
-            var bh = Math.max(cell * 1.1, span * 0.03);
-            badge.scale.set(bh * badge.userData.aspect, bh, 1);
             this._gridBadge = badge;
-            this._gridBadgeH = bh;
             this.scene.add(badge);
         }
         this._grid.position.y = floorY + 0.5;
         this._grid.scale.setScalar(1);   // motorla ölçeklenmez (kalem 5)
-        this._gridBadge.position.set(this._gridSpan * 0.42,
-            floorY + this._gridBadgeH * 0.8, this._gridSpan * 0.42);
+        // Rozetin ölçeği ve konumu HER kurulumda tazelenir: ızgara hücresi
+        // aynı kalsa bile motor boyu değişmiş olabilir (rozet artık ızgaraya
+        // değil motora bağlı; yalnız kurulum anında ayarlanırsa bayatlar —
+        // zemin düzleminde aynı kusur "görev 5a" ile kapatılmıştı).
+        var gbH = chipHeightMm(this._totalLen || 1,
+            2 * (this.dims.rcOut + this.dims.flangeLip));
+        this._gridBadgeH = gbH;
+        this._gridBadge.scale.set(gbH * this._gridBadge.userData.aspect, gbH, 1);
+        var gbP = gridBadgePositionMm(this._totalLen || 1, floorY, gbH);
+        this._gridBadge.position.set(gbP.x, gbP.y, gbP.z);
         // Izgara yeniden kurulduysa CAD nötr stüdyo stili korunur
         if (this.state.cadMode) this._applyCadGridStyle(true);
 
@@ -2453,6 +2537,7 @@
             grainType: d.grainType,
             hasPortHistory: !!(hist && hist.time && hist.port_diameter
                 && hist.time.length > 1),
+            hasPortArea: !!d.portAreaHist,
             hasWebHistory: !!d.webHist
         });
         return this._portRegMode;
@@ -2476,6 +2561,29 @@
     // taşıyordu (ölçüldü 2026-08-15, canlı tarayıcı).
     function chipHeightMm(totalLen, outerDiameter) {
         return labelScaleBase(totalLen, outerDiameter) * 0.62;
+    }
+
+    // Izgara hücre rozetinin yerleşimi (parti 26). ÇİPLERLE AYNI SINIF KUSUR
+    // ve aynı çare: rozet ızgara açıklığının köşesine (±0,42·span) konuyordu,
+    // ızgara ise ~3 motor boyu — kamera MOTORU çerçevelediği için rozet
+    // kadrajın dışında kalıyordu. ÖLÇÜLDÜ (2026-08-16, cameraFrameFit +
+    // izdüşüm matematiği; katı öğretici motoru L = 732,5 mm, R = 54,5 mm,
+    // 800×520 konteyner):
+    //   eski konum (924,0 · −50,7 · 924,0) mm -> NDC u = −0,979, v = +11,47,
+    //   derinlik = −193 mm (NEGATİF: rozet kameranın ARKASINDA),
+    //   yeni konum (−307,6 · −83,6 · +73,3) mm -> NDC u = −0,505, v = +0,045.
+    // Rozet motorun ÖN tarafında (z > 0) durur: arka köşede gövdenin
+    // ardında kalabiliyordu (ölçüldü, kısa-tıknaz motorda eksene NDC
+    // uzaklığı yarıçapın 0,4 katı). Yeni konumda eksene uzaklık en dar
+    // vakada bile yarıçapın 1,7 katı. Tarama (L = 150…6000 mm, R = 15…120 mm,
+    // en-boy 1,0…2,5): en kötü kenar payı |NDC| = 0,737.
+    var GRID_BADGE_Z_FACTOR = 0.10;
+    function gridBadgePositionMm(totalLen, floorY, badgeH) {
+        return {
+            x: -chipAnchorMm(totalLen),
+            y: floorY + badgeH * 0.8,
+            z: totalLen * GRID_BADGE_Z_FACTOR
+        };
     }
 
     // Durum çiplerini zemin üstüne, modelin ön-sol köşesine dizer.

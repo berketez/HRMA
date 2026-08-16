@@ -585,7 +585,15 @@ class TestAkisaBaglanma:
         return tur.SayfaGezgini(None, 'http://127.0.0.1:1',
                                 sayfalar.SAYFALAR[sayfa_adi], '/tmp')
 
-    def _tam_rapor(self, sayfa_adi: str, fea: Dict[str, Any]):
+    def _tam_rapor(self, sayfa_adi: str, fea: Dict[str, Any], merkez=None):
+        """FEA'ya odaklı rapor — Merkez ölçümü SAĞLIKLI varsayılır.
+
+        Üç sayfanın üçünde de Analiz Merkezi kurulu (16 Ağu 2026); ölçümü
+        verilmezse Merkez'in dört denetimi haklı olarak KALIR ve FEA'yı
+        ölçen bu testler onun yüzünden kırmızıya düşerdi. Merkez'in kendi
+        bekçileri ``tests/test_browser_harness_merkez.py``de.
+        """
+        from tests.test_browser_harness_merkez import merkez_olcumu
         gezgin = self._gezgin(sayfa_adi)
         return gezgin._rapor(
             sureler={'yukleme_s': 0.7, 'hesap_s': 3.1},
@@ -596,7 +604,8 @@ class TestAkisaBaglanma:
             piksel={'dolu_oran': 0.19, 'icerik_entropi_bit': 3.07,
                     'parlak_oran': 0.01},
             metin='Chamber Pressure 20.0 bar', plume_baslatma='ui',
-            goruntuler={'tam_sayfa': None, 'uc_boyut': None}, fea=fea)
+            goruntuler={'tam_sayfa': None, 'uc_boyut': None}, fea=fea,
+            merkez=merkez_olcumu() if merkez is None else merkez)
 
     def test_hibrit_raporu_iki_paneli_de_denetler(self):
         rapor = self._tam_rapor('hybrid', {'yapisal': yapisal_olcum(),
@@ -604,9 +613,14 @@ class TestAkisaBaglanma:
         adlar = [d['ad'] for d in rapor['denetimler']]
         assert adlar[:5] == ['akis_tamam', 'tuval_dolu', 'plume_cizildi',
                              'konsol_temiz', 'sizinti_yok']
-        assert adlar[5:] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
-                             'fea_yapisal_rozet', 'fea_termal_kosum',
-                             'fea_termal_cizim', 'fea_termal_rozet']
+        assert adlar[5:11] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
+                               'fea_yapisal_rozet', 'fea_termal_kosum',
+                               'fea_termal_cizim', 'fea_termal_rozet']
+        # NÖBET DEĞİŞİMİ (16 Ağu 2026): FEA üçlülerinden SONRA Analiz
+        # Merkezi'nin dörtlüsü geliyor. Eski sözleşme "adlar[5:] yalnız
+        # FEA" diyordu; Merkez ürüne girince o cümle YALANCI olurdu.
+        assert adlar[11:] == ['merkez_cerceve', 'merkez_cfd_kosum',
+                              'merkez_cfd_cizim', 'merkez_cfd_rozet']
         assert rapor['gecti'] is True
         assert rapor['olcumler']['fea']['termal']['kosum_s'] == 0.12
 
@@ -628,8 +642,8 @@ class TestAkisaBaglanma:
         """
         rapor = self._tam_rapor('liquid', {})
         adlar = [d['ad'] for d in rapor['denetimler']]
-        assert adlar[5:] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
-                             'fea_yapisal_rozet']
+        assert adlar[5:8] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
+                              'fea_yapisal_rozet']
         assert not any(a.startswith(('fea_termal', 'fea_tane'))
                        for a in adlar)
         assert rapor['gecti'] is False

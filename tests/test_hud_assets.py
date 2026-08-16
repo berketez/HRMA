@@ -95,13 +95,27 @@ class TestAssetsServed:
         assert {'structural_panel.js', 'thermal_panel.js',
                 'safety_panel.js'} <= names, f"eksik panel: {names}"
 
+    # panels/ artık İKİ kayıt defterine hizmet ediyor (parti 26): güverte
+    # (AnalysisDock) + Analiz Merkezi (AnalysisCenter). Kiracısı henüz
+    # yazılmamış yer tutucu dosyalar PENDING_TENANTS'ta beyan edilir ve
+    # yer tutucu olduklarını dosya içinde söylemek ZORUNDADIR — istisna
+    # damgasız dosyayı örtmez (bozuk gerçek panel yakalanır).
+    PANEL_REGISTRARS = ('AnalysisDock.register', 'AnalysisCenter.register')
+    PENDING_TENANTS = set()  # S4 (CFD kiracısı) yazıldı — küme boşaldı
+
     @pytest.mark.parametrize('url', PANEL_URLS)
     def test_panel_registers_itself(self, client, url):
-        """Her panel AnalysisDock.register çağrısı içermeli — aksi halde
-        güvertede sekmesi hiç görünmez."""
+        """Her panel güverteye YA DA Analiz Merkezi'ne kaydolmalı — aksi
+        hâlde hiçbir kabukta sekmesi görünmez."""
         body = client.get(url).get_data(as_text=True)
-        assert 'AnalysisDock.register' in body, (
-            f"{url} kendini AnalysisDock'a kaydetmiyor")
+        name = url.rsplit('/', 1)[-1]
+        if name in self.PENDING_TENANTS:
+            assert 'yer tutucu' in body.lower() or 'placeholder' in body.lower(), (
+                f"{url} PENDING_TENANTS'ta ama kendini yer tutucu ilan "
+                f"etmiyor — ya kayıt çağrısı ekle ya da damgala")
+            return
+        assert any(r in body for r in self.PANEL_REGISTRARS), (
+            f"{url} ne güverteye ne Analiz Merkezi'ne kaydoluyor")
 
 
 # ---------------------------------------------------------------------------

@@ -75,9 +75,12 @@ argüman/sunucu hatasında `2`.
 7. Sayfanın **FEA panelleri** koşturulur (aşağıda). FEA, 3B ölçümden
    SONRA gelir: koşum sayfaya büyük çizim kapları ekleyip düzeni
    değiştirir, tuval anlık görüntüsü ondan etkilenmesin.
-8. Sayfa metni okunur ve `<sayfa>_tam.png` (tam sayfa) yazılır. Metin FEA
-   koşumundan sonra okunduğu için sızıntı taraması FEA panellerinin
-   bastığı metni de kapsar.
+8. **Analiz Merkezi** ölçülür ve kiracıları koşturulur (aşağıda). Merkez
+   FEA'dan sonra gelir; koşum GERÇEKTİR ve sayfa başına **bir kez**
+   yapılır (CFD 'coarse' seviyesinde ~2-11 s).
+9. Sayfa metni okunur ve `<sayfa>_tam.png` (tam sayfa) yazılır. Metin FEA
+   ve Merkez koşumundan sonra okunduğu için sızıntı taraması ikisinin de
+   bastığı metni kapsar.
 
 ---
 
@@ -93,6 +96,13 @@ argüman/sunucu hatasında `2`.
 | `fea_<panel>_kosum` | Koşum bitti mi, sonuç yayımlandı mı? | `window.<API>.payload` |
 | `fea_<panel>_cizim` | Beklenen çizimler ekranda mı? | Kap görünürlüğü + `.js-plotly-plot` + kaptaki `svg`/`canvas` |
 | `fea_<panel>_rozet` | Beklenen hüküm basıldı mı, eski kusur geri geldi mi? | `#<panel>_badges` içindeki `[data-badge]` metinleri |
+| `merkez_cerceve` | Analiz Merkezi kurulu mu, gri satırların nedeni yazılı mı? | `#analysisCenter` + üç sütun + `[data-ac-row]` durum/neden öznitelikleri |
+| `merkez_<kiraci>_kosum` | Kiracının koşumu koştu mu, yanıt bloğu geldi mi? | `AnalysisCenter.history()` son kaydı |
+| `merkez_<kiraci>_cizim` | Kiracının çizimleri ekranda mı? | `#ac_view_root` içindeki kapların görünürlüğü + `.js-plotly-plot` + `svg` |
+| `merkez_<kiraci>_rozet` | Beyanlar basıldı mı, renkler dürüst mü, emekli imza döndü mü? | `[data-cfd-badge]` metni + renk sınıfı + yükün kendi alanları |
+
+Sayfa başına: 5 temel + FEA paneli başına 3 + Merkez çerçevesi 1 + kiracı
+başına 3. Bugünkü toplam **39 denetim** (hibrit 15, katı 12, sıvı 12).
 
 Eşiklerin tamamı **tek dosyadadır**: `esikler.py`. Her sabitin yanında
 neden o değer olduğu yazılıdır ve **rapora da kopyalanır** (`esikler`
@@ -143,10 +153,14 @@ denetim aynı gezintiyi kalıcı hâle getirir.
 | `/hybrid` | Termal (geçici) | `#thermalFeaPanel` | `#fea_t_run` | `fea_t_plot_field`, `fea_t_plot_inner`, `fea_t_plot_hist` |
 | `/solid` | Tane kesiti | `#grainFeaPanel` | `#grainfea_run` | `grainfea_plot_vm`, `grainfea_plot_bore`, `grainfea_plot_conv` |
 
-`/liquid` sayfasında FEA denetimi **yoktur ve bu bilinçlidir**: sıvı cidar
-FEA'sı üründe yok (köşe tekilliği yüzünden koşum yakınsamıyor — bulgu
-defterinde gerekçeli açık borç). `sayfalar.py`de boş bir panel listesi
-durur; bu "denetim atlandı" değil, "denetlenecek panel yok" demektir.
+| `/liquid` | Yapısal (cidar) | `#feaPanel` | `#fea_run` | hibritteki dört çizimin aynısı |
+
+**Nöbet değişimi (2026-08-15).** `/liquid` sayfasında eskiden FEA denetimi
+yoktu: sıvı cidar FEA'sı köşe tekilliği yüzünden yakınsamıyordu. Borç
+`mesh_axisym`in dış yüzey eğrilik tabanıyla kapandı ve panel `liquid.html`e
+bağlandı; sayfa artık yapısal üçlüyü denetliyor. Termal ve tane panelleri
+sıvıya **bilerek** eklenmedi (termal zincir bu sayfada yok, tane katıya
+özgü) ve bu, "denetim atlandı" değil "denetlenecek panel yok" demektir.
 
 Termal panelin ortam sıcaklığı alanı `293.15` ön-dolu gelir ve tur ona
 **dokunmaz**: denetlenen şey kullanıcının gördüğü varsayılan yoldur.
@@ -211,6 +225,84 @@ fiziğini anlatır (emniyet katsayısı, yakınsama, erime sınırı), arayüz
 kusurunu değil. Ölçülen örnek: termal panelde `EXCEEDS MELTING POINT`
 rozeti kırmızıdır (3056 K > 1673 K) — bu motorun sonucudur, panelin
 kusuru değil.
+
+---
+
+## Analiz Merkezi ve kiracıları
+
+Merkez (`analysis_center.js`) üç sütunlu bir workbench'tir: **bileşen
+ağacı | koşum kartı | sonuç görüntüleyici** + oturum içi koşum geçmişi.
+Panellerden farkı, kiracının kendi düğmesi/rozet kabı olmamasıdır: tek bir
+`#ac_run` düğmesi ve tek bir `#ac_view_root` kabı vardır, kiracı oraya
+çizer. Bugünkü tek canlı kiracı **CFD**'dir (`panels/cfd_panel.js`,
+`POST /api/cfd/nozzle`) ve üç sayfada da kayıtlıdır.
+
+| Ne | Nerede | Denetim |
+|---|---|---|
+| Çerçeve | `#analysisCenter`, `ac_tree`/`ac_card`/`ac_view`, `#ac_history` | `merkez_cerceve` |
+| Koşum | `#ac_row_nozzle_flow_cfd` → `#ac_run` → `AnalysisCenter.history()` | `merkez_cfd_kosum` |
+| Çizimler | `#ac_view_root` içindeki `cfd_wall_*`, `cfd_field_*`, `cfd_res_*` | `merkez_cfd_cizim` |
+| Rozetler | `[data-cfd-badge]` metni + renk sınıfı + yükün kendi alanları | `merkez_cfd_rozet` |
+
+**Çerçeve neyi ölçer.** Tasarımın kural 1'i: uygulanamayan satır
+**gizlenmez**, gri durur ve nedeni **adıyla** yazılır. Denetim bunu ölçer:
+üç sütun ayakta mı, kiracılı satır `ready` mi, her gri satırın nedeni
+yazılı mı, çerçevenin "nedenini adlandırmadı" emniyet ağı ekranda mı
+(görünüyorsa bir kiracı beyansız ret vermiş demektir).
+
+**Koşum gerçektir.** Sayfa başına bir kez, panelin kendi varsayılanıyla
+(`resolution = coarse`) koşar; tur alanlara **dokunmaz**. Bitiş işareti
+`AnalysisCenter.history()` kaydıdır — kayıt hem başarılı hem başarısız
+koşumda düşer. İkinci bir dürüst çıkış daha beklenir: zorunlu alan boşsa
+`run()` isteği hiç göndermez, meşgul olmaz ve gerekçeyi durum satırına
+yazar; bu yakalanmasaydı kusur "takıldı" diye görünürdü.
+
+**Çizim ölçütü burada daha dar.** FEA'da `svg` VEYA `canvas` kabul
+edilir; CFD'de **`svg` aranır**, çünkü panelin üç grafiğinin izleri de SVG
+üretir (`scatter`, `carpet`, `contourcarpet`). WebGL'e düşmüş bir kap,
+çizimin beklenen yoldan çıktığını söyler.
+
+**Rozet denetimi üç şeyi birden sorar** ve üçü de arayüz kusurunu hedefler,
+fiziği değil:
+
+1. **Beyan varlığı.** Fizikten bağımsız imzalar ekranda olmalı: yakınsama
+   beyanı, ayrılma hükmü, kütle/enerji artığı, çekirdek, şok sensörü,
+   sınırlayıcı, süre. Hangi dalın çıktığı (yakınsadı/yakınsamadı,
+   ayrıldı/ayrılmadı) tasarım noktasının fiziğidir ve hükme girmez.
+2. **Renk dürüstlüğü.** Kabul rengi (yeşil) yalnız oturmuş bir hükme
+   verilebilir: `converged=false` iken yakınsama rozeti, köprü
+   `judgment_confidence='suspect'` derken "ayrılma yok" rozeti yeşil
+   **basılamaz**. Eşiği yayımlanmayan sayılar (kütle/enerji artığı) nötr
+   (`info`/`dim`) kalmak zorundadır — uç bir kabul eşiği yayımlamıyor,
+   panelin kendi eşiğini uydurması da yasak.
+3. **Koşullu beyanlar.** Yanıt `budget_advisory` ya da `suspect`
+   taşıyorsa o beyanın rozeti ekranda olmalı; taşımadığı hâlde
+   görünüyorsa da kusurdur (beyan yankısı uydurulamaz).
+
+Aranan CFD imzaları: `cfd_yakinsama_hukmu`, `cfd_ayrilma_hukmu`,
+`cfd_kutle_artigi`, `cfd_enerji_artigi`, `cfd_cekirdek`, `cfd_sok_sensoru`,
+`cfd_sinirlayici`, `cfd_sure`; koşullu olanlar `cfd_butce_uyarisi` ve
+`cfd_ayrilma_supheli`; renk kurallarının bağlandığı **dar** imzalar
+`cfd_yakinsadi` ve `cfd_ayrilma_yok`.
+
+**Dar imzalar neden negatif bağlam taşır.** İngilizcede `NOT CONVERGED`
+dizesi `CONVERGED`i içerir, `NO SEPARATION JUDGEMENT` de `NO SEPARATION`ı.
+`haric_varyantlar` olmadan renk kuralı yanlış rozete uygulanır ve
+"yakınsamayan koşu yeşil basılmış" hükmü asla ateşlemezdi.
+
+**Yasak imzalar (emekli sözleşme).**
+
+| İmza | Ne söylüyor |
+|---|---|
+| `cfd_bayat_giris_uyarisi` | Giriş Mach eşiğine (0,15) bakan `INLET ADVISORY` rozeti. Çözücünün giriş BC'si karakteristik biçime çevrilince eşik ölçülen hiçbir şeyi bildirmez oldu ve sağlıklı koşularda turuncu rozet basıyordu. Ekranda görülürse bayat kod geri gelmiş demektir |
+| `cfd_bayat_mach_esigi` | Aynı sözleşmenin alan adı (`threshold_mach`). Dilden bağımsızdır ve rozette değil **girdi yankısı tablosunda** döner — bu yüzden tarama panelin görünen metninin tamamı üstünde de yapılır |
+| `merkez_beyansiz_neden` | Çerçevenin "uygulanamaz dedi ama nedenini adlandırmadı" emniyet ağı |
+
+Ölçülen (16 Ağu 2026, üç sayfa canlı): hibrit 16592 iterasyonda yakınsadı
+(10,3 s, `numba`), bütçe uyarısı **ateşledi** ve yeşil yakınsama rozetiyle
+aynı ekranda durdu — "uyarı hüküm değildir" cümlesinin canlı kanıtı. Katı
+5183 iterasyon (3,0 s), sıvı 2915 iterasyon (1,6 s) ve sıvıda ayrılma
+**öngörüldü** (ıraksak bölgenin %29,1'i). Üçünde de yasak imza yok.
 
 ---
 
@@ -326,8 +418,20 @@ diyen bir rapor, kanıt görüntüsü olmadan tanı koydurmaz.
   (uçlar yerelde); zaman aşımları bunun ~1000 katı bir üst sınır olarak
   konuldu. Amaç bugünkü süreyi kilitlemek değil, takılmış bir koşumun turu
   süresiz bekletmesini engellemektir.
-* **Sıvı sayfasında FEA denetimi yok.** Panel üründe olmadığı için; borç
-  kapandığında `sayfalar.py::SAYFALAR['liquid'].fea_panelleri` doldurulur.
+* **Merkez'de tek kiracı denetleniyor.** Bugün CFD dışında kayıtlı kiracı
+  yok; kalan beş matris satırı gri duruyor ve tur yalnız "nedeni yazılı
+  mı" diye soruyor. Satırlar Merkez'e taşındıkça
+  `sayfalar.py::MerkezKiracisi` tanımı eklenmelidir, yoksa yeni kiracı
+  denetimsiz kalır (tur onu "gri satır" sanmaz — `absent` durumu gerekçe
+  taşıdığı sürece yeşil kalır).
+* **CFD koşumu turun en uzun adımıdır.** Sayfa başına bir gerçek çözüm
+  koşuyor (ölçülen 1,6-10,3 s, `coarse`). Varsayılan `standard`a kayarsa
+  süre iki katına çıkar; birim bekçi varsayılanın `coarse` kaldığını
+  sınıyor.
+* **Merkez'in rozet renkleri hükme GİRER.** FEA'nın tersine: burada renk
+  bir kabul beyanıdır (yeşil = "bu hüküm oturmuş"), o yüzden yakınsamayan
+  koşuya ya da şüpheli hükme verilmiş yeşil kapıyı kapatır. Sayının
+  büyüklüğü yine fiziktir ve hükme girmez.
 
 ## Bakım
 
@@ -341,11 +445,26 @@ diyen bir rapor, kanıt görüntüsü olmadan tanı koydurmaz.
   kendiliğinden gelir. `tests/test_browser_harness_fea.py` her kimliğin
   panel kaynağında (`id="…"`) gerçekten durduğunu ve panelin
   `window.<API>.payload` kanalını açtığını sınar.
+* Merkez kiracısı eklemek: `sayfalar.py::MerkezKiracisi` ile bir tanım yaz
+  ve ilgili sayfanın `merkez_kiracilari` demetine koy — satır seçimi,
+  koşum, çizim ve rozet denetimi kendiliğinden gelir.
+  `tests/test_browser_harness_merkez.py` satır seçicisinin ürünün kimlik
+  kuralından (`ac_row_` + `componentId_analysisId`) türediğini ve her
+  imzanın sözlükte iki dilde durduğunu sınar.
 * Hüküm mantığını değiştirmek: `denetimler.py` — tarayıcı gerektirmeyen
   saf fonksiyonlar, hepsi testte kilitli.
 * **Değişikliği kanıtlamak:** bir eşiği/imzayı geçici bozup turun o
   denetimde KALDI dediğini görmek, testin tautoloji olmadığının tek
-  kanıtıdır. Son kanıt: `FEA_CIZIM_MIN_KENAR_PX` 50 → 2000, termal imza
-  `OLMAYAN_ROZET`, yasak imza ekranda duran bir rozete bağlandı → 6 FEA
-  denetiminden 4'ü kırmızı, koşum denetimleri yeşil kaldı (koşum gerçekten
-  olmuştu), eşikler geri alındı.
+  kanıtıdır. Kanıt (FEA turu): `FEA_CIZIM_MIN_KENAR_PX` 50 → 2000, termal
+  imza `OLMAYAN_ROZET`, yasak imza ekranda duran bir rozete bağlandı → 6
+  FEA denetiminden 4'ü kırmızı, koşum denetimleri yeşil kaldı (koşum
+  gerçekten olmuştu), eşikler geri alındı.
+  Kanıt (Merkez turu, 16 Ağu 2026): (a) canlı sayfaya sahte bir
+  `INLET ADVISORY … threshold_mach 0.15` rozeti enjekte edildi →
+  `merkez_cfd_rozet` KIRMIZI, iki yasak imza da adıyla raporlandı, diğer
+  14 denetim yeşil kaldı; (b) aynı sahte rozet dururken
+  `CFD_KIRACISI.yasak_imzalar` boşaltıldı → tur yeşile döndü, yani kırmızıyı
+  veren şey listenin kendisiydi; (c) `cfd_kutle_artigi` imzası sözlükte
+  olmayan bir metne bağlandı → 12 birim bekçi kırmızı; (d) `converged=false`
+  renk kuralı söküldü → `test_yakinsamayan_kosuya_kabul_rengi_yasak`
+  kırmızı. Dördü de geri alındı (md5 doğrulandı).

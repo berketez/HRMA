@@ -108,4 +108,8 @@ UI/uç bağlaması Aşama 1'de YOK — çözücü önce doğrulama merdivenini t
   HLLC ara-durum özdeşlikleri, boğulmuş debi formülü. Sayısal çözücünün kendisi
   ispatlanmaz (ayrıklaştırma testle doğrulanır); ispat, TESTLERİN karşılaştırdığı
   analitik referans formüllerin türetimlerini kilitler.
-- **2:** viskoz/türbülans kararı (RANS-SA vs entegral BL) — ayrı tasarım turu, bu belge güncellenir.
+- **2 — viskoz/türbülans (Berke kararı, 16 Ağu 2026): FINAL KAPSAMINDA.**
+  "Tamamen çalışır vaziyette istiyorum, onları da dahil et" — FINAL, Euler +
+  beyan ile DEĞİL, viskoz/türbülanslı çözücüyle çıkar. Tasarım turu 16 Ağu'da
+  başlatıldı (RANS-SA vs entegral BL kararı dahil; çıktı:
+  `cfd-viskoz-tasarimi.md`); uygulama F2 ile birlikte FINAL öncesi kuyrukta.

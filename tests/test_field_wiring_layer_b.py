@@ -392,6 +392,175 @@ LEGITIMATE_CONSTANTS = (
     # bunu "top of the altitude sweep grid, not an optimum" diye yazar
     # (combustion_analysis.py:2181-2189). Kardeş max_thrust CANLIDIR.
     'thrust_altitude_analysis.max_thrust_altitude',
+    # ==================================================================
+    # v2.6.27 (yirmi altıncı parti — sabit-çıktı borcu 59 -> 4).
+    # Aşağıdaki imlerin TAMAMI TEK YAPRAK imidir; tek istisna 25 noktalı
+    # süpürme ızgarasıdır ve o da alan düzeyinde dardır. Her im iki
+    # kanıttan en az birini taşır:
+    #   (1) KOD KANITI — dosya:satır, sabitin nereden geldiği,
+    #   (2) GEÇİŞ ÖLÇÜMÜ — bandı/kelepçeyi AÇAN bir çalışma noktası:
+    #       "sabit görünüyor ama hesaplanıyor" iddiası, değerin DEĞİŞTİĞİ
+    #       bir koşu gösterilerek kanıtlandı.
+    # Bandı/kelepçesi gösterilemeyen kalemler İMLENMEDİ; onlar gerçek borç
+    # olarak sayımda kaldı (bkz. test_no_fabricated_constant_outputs).
+    # ==================================================================
+    # ISO 2768-1 BANT BASAMAĞI: genel tolerans, nominal ölçünün BASAMAK
+    # fonksiyonudur. Tablonun depodaki tek tanım noktası
+    # liquid_rocket_engine.py:243+ (ISO2768_* + _iso2768_feature);
+    # cad_visualization.py:112-150 o tabloyu ÇAĞIRIR ve tablo okunamazsa
+    # sayı UYDURMAZ ('NOT_AVAILABLE' döner). Yaprağın kendi
+    # tolerance_basis'i "the tolerance is a step function of the nominal
+    # and stays constant while the nominal stays inside one size band"
+    # diye yazar. ÖLÇÜLDÜ (bant geçişi): chamber_diameter_input 150 ve
+    # 400 mm -> 0,2 mm; 900 mm -> 0,3 mm. Kardeş 'length.tolerance_mm'
+    # BİLEREK imlenmedi ve zaten sabit DEĞİL (2,0 mm) — aynı yardımcının
+    # canlı olduğunun bu koşudaki kanıtı.
+    'technical_drawings.chamber.tolerances.diameter.tolerance_mm',
+    'technical_drawings.chamber.tolerances.outer_diameter.tolerance_mm',
+    # ISLAK YÜZEY İNTEGRALİNİN İSTASYON SAYISI: gas_side[
+    # 'wetted_integral_stations'] = int(x.size), yani örneklenmiş kontur
+    # ızgarasının nokta sayısı (heat_transfer_analysis.py:1564) — hesabın
+    # sonucu değil, integralin hangi ÇÖZÜNÜRLÜKLE alındığının beyanı;
+    # 'sampling.max_points' ailesiyle aynı doğa. ÖLÇÜLDÜ: conical/bell x
+    # eps 4..25'te 41'de sabit, kardeş nozzle_wetted_area /
+    # nozzle_heat_rate ise CANLI (ızgara sabitken geometri oynuyor).
+    'gas_side_analysis.wetted_integral_stations',
+    # ENJEKTÖR Cd BANT TABLOSU: Cd, (giriş tipi, L/D bandı) çiftinden
+    # okunur (injector_design.py:51-60; 'sharp', L/D 1-5 -> 0,78) ve
+    # yaprak gerekçesini kendisi taşır (discharge_coefficient_basis /
+    # cd_basis: "keskin giriş, yeniden yapışan (L/D 1-5); L/D=1,22113 ->
+    # Cd=0,78, SP-8089 / Lefebvre & McDonell Böl. 5").
+    # ÖLÇÜLDÜ (bant geçişi): plate_thickness 3 -> 20 mm ile L/D
+    # 1,2211 -> 8,0550 olur ve Cd 0,78 -> 0,84'e ATLAR; sayı sabit
+    # yazılmış değil, bandın içinde duruyor. Kardeş l_over_d /
+    # orifice_d_mm / velocity_m_s CANLIDIR.
+    # DİKKAT — AYNI AD, İKİ TANIM: bu Cd, kullanıcının gönderdiği
+    # 'discharge_coefficient' yükü DEĞİLDİR (yük 0,70 iken model 0,78
+    # kullanır). O yük ölçüldü ve CANLI (0,70 -> 0,45 sarsımı 29 yaprak
+    # oynatıyor), ama hibrit ŞABLONUNDA karşılığı olmadığı için Katman
+    # B'nin sarsım kümesine hiç girmiyor — ayrı bir kalem olarak raporlu.
+    'injector_design.discharge_coefficient',
+    'injector_design_detail.ox_circuit.cd',
+    # MANİFOLD HIZ ORANI HEDEFİ: MANIFOLD_V_RATIO_TARGET modül sabiti
+    # (injector_design.py:943) ve yanıt bunun bir HEDEF olduğunu makine
+    # okur biçimde beyan eder ('v_ratio_target_is_target': True, :944).
+    # Gerçekleşen kardeş 'v_ratio' (0,1399) CANLIDIR; bekçi onu korur.
+    'injector_design_detail.ox_circuit.manifold.v_ratio_target',
+    # AYRILMA ÖLÇÜTÜ KATSAYISI: SUMMERFIELD_FACTOR_DEFAULT
+    # (hrma/flow/separation; hybrid_rocket_engine.py:28 import,
+    # :2248 yayım) — modelin hangi literatür ölçütüyle hüküm verdiğinin
+    # beyanı; mevcut 'hard_min_ratio' / 'pressure_ratio_threshold'
+    # ailesiyle aynı doğa. Kardeş separation_pressure_bar (= katsayı x
+    # ortam basıncı) ve separation_limit_expansion_ratio CANLIDIR.
+    'nozzle_expansion_screen.summerfield_factor',
+    # BOĞAZ İSTASYONUNDA M = 1 ÖZDEŞLİĞİ: boğaz istasyonu alan dizisinin
+    # argmin'idir (quasi1d.py:345) ve boğulmuş çözümde o istasyonun Mach
+    # sayısı TANIMI GEREĞİ 1'dir. ÖLÇÜLDÜ: stations.area_m2[26] =
+    # 0,0018621899299176496, yayımlanan throat_area ile son basamağına
+    # kadar aynı; 26 indeksi örnekleyicinin ızgarasından gelir ve
+    # conical/bell x eps 4..25'te değişmiyor. İm İNDEKSE SABİTLENMİŞTİR:
+    # ızgara değişirse im eşleşmez ve bekçi değişikliği GÖRÜR (6 noktalı
+    # 'thrust_altitude' ızgara imiyle aynı disiplin). Kardeş
+    # mach[0..25] ve mach[27..41] CANLIDIR.
+    'nozzle_flow_quasi1d.stations.mach[26]',
+    # KENETLİ ARTIK OKSİTLEYİCİ: ox_artik = max(0, yüklenen - harcanan)
+    # (hybrid_rocket_engine.py:4953-4955). Yüklenen = mdot_ox x
+    # t_istenen, harcanan = mdot_ox x t_etkin; ikisi de yanıtta yayımlı
+    # ve CANLI. Web erken tükenmedikçe t_etkin = t_istenen olduğundan
+    # artık TAM sıfırdır ve 'oxidizer_mass_basis' bunu açıkça yazar.
+    # ÖLÇÜLDÜ (kelepçe açılıyor): burn_time=200 s, initial_port_diameter
+    # =0,12 m, chamber_diameter_input=170 mm -> web 13,95 s'de tükeniyor,
+    # burn_time_clipped=True ve artık 366,06 kg. Yani bu sıfır,
+    # HESAPLANMIŞ sıfırdır; eksik model değil.
+    'oxidizer_mass_residual_kg',
+    # BEYANLI TANK DOLULUK KESRİ: TANK_FILL_FRACTION_DEFAULT = 0,85
+    # (hybrid_rocket_engine.py:132; :3064-3065 kendi _basis'iyle
+    # yayımlanır, :4127 çalkantı bloğuna girer) — mevcut
+    # 'oxidizer_tank_slosh.tank_ld_ratio' (L/D = 2,5) imiyle İKİZ gerekçe.
+    'oxidizer_tank_slosh.liquid_fill_fraction',
+    # ÇALKANTI IZGARASININ SKALER EKSENİ: h/R = 2 x doluluk x (L/D) =
+    # 2 x 0,85 x 2,5 = 4,25 (ÖLÇÜLDÜ: yayımlanan 4,249999999999999) —
+    # iki çarpan da yukarıdaki beyanlı sabitlerdir. Zaten imli olan
+    # 'fill_sweep.fill_ratio[' ızgara ailesinin skaler kardeşi.
+    'oxidizer_tank_slosh.slosh.fill_ratio',
+    # SP-106 BOYUTSUZ ÇALKANTI KÜTLE ORANI: m_s/m = (2R/(lam1 h
+    # (lam1^2 - 1))) tanh(lam1 h/R) (slosh_analysis.py:164-169) — YALNIZ
+    # h/R'nin fonksiyonudur, h/R ise yukarıdaki iki beyanlı sabitten
+    # türer; bu yüzden tank geometrisi oynasa da oran oynamaz.
+    # ÖLÇÜLDÜ: formül yalnız h/R'den 0,1069396825822474 veriyor,
+    # yayımlanan değer 0,10693968258224738 (1e-16 fark).
+    # Kardeş BOYUTLU 'slosh_mass_kg' (2,104 kg) CANLIDIR ve bekçi onu
+    # korumaya devam eder: sabitlik boyutsuz orandadır, kütlede değil.
+    'oxidizer_tank_slosh.slosh.fill_sweep.slosh_mass_ratio[',
+    'oxidizer_tank_slosh.slosh.slosh_mass_ratio',
+    # KENETLİ NET EKSENEL BASMA: max(F/(2*pi*r*t) - p*r/(2t), 0)
+    # (structural_analysis.py:499-517; kodda zaten "SABİT ÇIKTI BEYANI"
+    # başlıklı yorumla işaretli). İki bileşen de yanıtta ayrı yayımlanır
+    # (axial_compression_force_N, pressure_stabilizing_stress_MPa) ve
+    # kardeş applied_axial_stress_unpressurized_MPa CANLIDIR (2,09 MPa).
+    # ÖLÇÜLDÜ (kelepçe açılıyor, doğrudan _check_buckling çağrısı):
+    # p=20 bar + F=500 kN -> 194,21 MPa (= 209,41 - 15,20). /calculate
+    # ile ulaşılabilen bantta iç basınç çekmesi (15,2 MPa) itki basmasını
+    # (2,09 MPa) daima aştığı için yaprak sıfırda duruyor.
+    'buckling_analysis.applied_axial_stress_pressurized_MPa',
+    # CIVATA İZİN GERİLMESİ = STANDART TABLO KAYDI: ISO 898-1:2013
+    # Table 3 proof gerilmesi, sınıf 8.8 (structural_analysis.py:1264
+    # varsayılan sınıf, :1395 yayım; tablonun tek tanım noktası
+    # hrma/analysis/bolted_joint._bolt_class_props). Yaprak kaynağını
+    # kendisi beyan eder (bolt_property_class '8.8' +
+    # bolt_allowable_stress_basis 'ISO 898-1:2013 Table 3'), yani mevcut
+    # 'material_properties' imiyle aynı doğa: standart kaydı, hesap değil.
+    # ÖLÇÜLDÜ (bant geçişi): thrust 5 kN -> gerekli çap 8,96 mm ve
+    # 580 MPa; thrust 80 kN -> 25,23 mm ve 600 MPa (d > 16 mm bandı).
+    'fastener_analysis.bolt_allowable_stress_MPa',
+    # DIŞA AKTARICI VARSAYILANLARI: bu üç ayar OpenRocket dosyasının
+    # ÇÖZÜCÜ AYARIDIR, bu motorun bir hesabı değil
+    # (openrocket_integration.py:488-513; time_step/max_altitude için kod
+    # yorumu "fiziksel bir iddia değil, OpenRocket'a önerilen çözücü
+    # ayarlarıdır" diyor). Beyan MAKİNE OKUR biçimdedir ve aynı yanıtta
+    # durur: simulation_settings_source.<anahtar> = 'exporter_default' +
+    # simulation_settings_source_labels "no input field feeds this
+    # setting - check it in OpenRocket". Kullanıcının gerçekten
+    # girebildiği ayarlar (launch_altitude, launch_angle, wind_*) bu
+    # yoldan GEÇMEZ; onlar 'request'/'not_supplied' damgası alır ve
+    # sayısal olduklarında bu bekçi tarafından ölçülmeye devam eder.
+    'flight_profile.simulation_settings.launch_rod_length',
+    'flight_profile.simulation_settings.max_altitude',
+    'flight_profile.simulation_settings.time_step',
+    # ÇÖZÜCÜ ZAMAN PENCERELERİ: COASTING_TIME_LIMIT_S = 300,0 ve
+    # DESCENT_TIME_LIMIT_S = 3600,0 (trajectory_analysis.py:87 ve :95),
+    # t_span üst sınırı olarak kullanılıp (:1068, :1188) aynı adla
+    # yayımlanırlar (:1104, :1221). Bunlar entegrasyon PENCERESİNİN
+    # beyanıdır, uçuşun bir sonucu değil; pencere bağlarsa kardeş
+    # 'end_reason' bunu söyler (:1337-1341) — bu koşuda 'apogee' ve
+    # 'ground', yani pencere bağlamıyor.
+    'trajectory.trajectory.phases.coasting.time_limit_s',
+    'trajectory.trajectory.phases.descent.time_limit_s',
+) + tuple(
+    # BAŞLANGIÇ KOŞULU (t = 0): çözücü y0 = [0, launch_altitude, 0, 0,
+    # toplam kütle] ile başlar (trajectory_analysis.py:868) — roket
+    # rampada duruyor, yani x = vx = vz = 0 ve |v| = 0. Faz dizileri
+    # KENDİ YEREL SAATLERİYLE yayımlanır (her faz t_span = (0, limit) ile
+    # entegre edilir: :1068, :1188), bu yüzden coasting/descent zaman
+    # dizileri de 0,0'dan başlar. Mevcut 'wall_temperature_history.
+    # time_s[0]' ve 'thrust_curve.time[0]' imleriyle aynı emsal.
+    # İM DARLIĞININ ÖLÇÜLEN KANITI — aynı fazların ÖTEKİ [0] yaprakları
+    # imlenmedi ve zaten SABİT DEĞİL: altitude[0] ve position_z[0]
+    # launch_altitude girdisiyle oynuyor; coasting.position_x[0] =
+    # 268,31 m, descent.velocity_x[0] = 28,25 m/s gibi faz başlangıç
+    # durumları önceki fazın sonundan miras alınıyor (:1052, :1178) ve
+    # canlı ölçülüyor. Yani bu ailede donan tek şey SIFIR olan başlangıç
+    # koşulu ile faz saatinin sıfırlanmasıdır.
+    'trajectory.trajectory%s.%s[0]' % (faz, alan)
+    for faz, alanlar in (
+        ('', ('time', 'position_x', 'velocity_x', 'velocity_z',
+              'velocity_magnitude')),
+        ('.phases.powered', ('time', 'position_x', 'velocity_x',
+                             'velocity_z')),
+        ('.phases.coasting', ('time',)),
+        ('.phases.descent', ('time',)),
+    )
+    for alan in alanlar
 )
 
 
@@ -558,14 +727,79 @@ def test_no_fabricated_constant_outputs(hybrid_report):
     #     bit-aynı kopyası (11/11 yaprak ölçüldü); tek SABİT yaprağı
     #     discharge_coefficient ikinci kez sayılıyordu.
     #     Karşı-ölçüm: önek kaldırılınca 60.
-    # Kalan 59 kalemin sınıfı değişmedi (yukarıdaki beyanlı sabit aileleri);
-    # eşik ölçülen sayının KENDİSİDİR — yeni bir sabit eklendiği anda kırmızı.
-    # (Sayım HRMA_DUMP_CONSTANTS dökümünden okunacaksa dikkat: döküm son
-    # satırı sonlandırmaz, 'wc -l' bir eksik sayar.)
-    assert len(suspicious) <= 59, (
+    #
+    # v2.6.27 yirmi altıncı parti — eşik 59 -> 4 (ÖLÇÜLDÜ, YASTIKSIZ).
+    # O 59'un TAMAMI tek tek sınıflandırıldı (döküm + kardeş alan + kaynak
+    # kodu) ve 55'i dar imle kapandı. Kapananların hepsi yukarıdaki
+    # v2.6.27 bloğunda kendi kod kanıtıyla ve mümkün olduğunda BANDI/
+    # KELEPÇEYİ AÇAN ölçümüyle duruyor; kabaca:
+    #   * 28 çalkantı: 25 noktalı SP-106 boyutsuz kütle oranı ızgarası +
+    #     h/R ekseni + beyanlı doluluk kesri + skaler oran (hepsi yalnız
+    #     beyanlı sabitlerin fonksiyonu; boyutlu kardeş slosh_mass_kg
+    #     CANLI kaldı),
+    #   * 11 yörünge başlangıç koşulu (y0 = [0, launch_altitude, 0, 0, m]
+    #     ve faz-yerel saatler),
+    #   *  5 tablo/bant basamağı (ISO 2768-1 x2, enjektör Cd x2, ISO 898-1
+    #      cıvata) — beşi de geçiş ölçümüyle CANLI olduğu gösterildi,
+    #   *  3 OpenRocket dışa aktarıcı ayarı (yanıtta 'exporter_default'
+    #      damgalı),
+    #   *  2 kelepçeli sıfır (artık oksitleyici, net eksenel basma) —
+    #      ikisi de kelepçe açılarak sıfırdan çıkarıldı,
+    #   *  6 tekil beyan/özdeşlik (boğazda M=1, ıslak istasyon sayısı,
+    #      Summerfield katsayısı, manifold hedefi, iki zaman penceresi).
+    # Toplam 28+11+5+3+2+6 = 55; 59 - 55 = 4.
+    # GERİYE 4 KALDI ve dördü de BİLEREK imlenmedi — her biri gerçek bir
+    # borcun izidir, im onları görünmez yapardı:
+    #   1-2. heat_transfer_analysis'in ambient_temperature ve
+    #        heat_sink_initial_temperature_K yaprakları: ikisi de
+    #        'ambient_temp' GİRDİSİNİN yankısı (alanların kendi _basis
+    #        metinleri bunu yazıyor) ama hibrit şablonunda ambient_temp
+    #        alanı YOK (templates/index.html'de tek geçiş bile yok;
+    #        app.py:1419 data.get('ambient_temp') ile API'den okuyor).
+    #        Yani kullanıcının 293,15 K'yi oynatacak kapısı yok —
+    #        paraşüt üçlüsünün yirmi beşinci partide kapanan borcuyla
+    #        AYNI sınıf. Alan forma eklenince bu iki yaprak kendiliğinden
+    #        kıpırdar ve eşik 2 düşer.
+    #   3.   nozzle_flow_quasi1d.mass_flow_rel_diff: yaprağın kendi
+    #        mass_flow_check_basis'i bunu "kalorik olarak kusursuz gaz ile
+    #        denge c* zincirinin ÇAPRAZ KONTROLÜ, birkaç yüzde fark
+    #        beklenir" diye satıyor. ÖLÇÜM bu beyanı çürütüyor: fark 55
+    #        alanın hepsinde 1e-16'ya kadar AYNI (0,020408163265306) ve
+    #        tam olarak 1/0,98 - 1'dir; çünkü boğaz alanı
+    #        A_t = mdot x c* / (Pc x CD) ile, CD = 0,98 SABİT KODLU
+    #        (hybrid_rocket_engine.py:1378) kuruluyor ve quasi-1B aynı
+    #        A_t'den CD'siz ideal debiyi hesaplıyor. Yani ölçüm
+    #        termokimyayı değil, o sabit CD'yi geri okuyor: totoloji.
+    #        İmlemek yanlış beyanı kilitlemek olurdu.
+    #   4.   trajectory.warnings[1].params.area: yirmi beşinci partinin
+    #        gerekçesiyle imlenmedi — paraşüt alanı verilince uyarının
+    #        KENDİSİ kaybolduğu için yaprak hiçbir sarsımda 'değişti'
+    #        sayılmıyor. Sayımda kalması muhafazakâr yöndür.
+    # Eşik ölçülen sayının KENDİSİDİR — yeni bir sabit eklendiği anda
+    # kırmızı. (Sayım HRMA_DUMP_CONSTANTS dökümünden okunacaksa dikkat:
+    # döküm son satırı sonlandırmaz, 'wc -l' bir eksik sayar.)
+    assert len(suspicious) <= 4, (
         'Sabit sayisal cikti yapragi beklenenden fazla (%d). Yeni uydurma '
         'sabit eklenmis olabilir. Ilk 25:\n  %s'
         % (len(suspicious), '\n  '.join(suspicious[:25])))
+    # YASTIKSIZ EŞİK İKİ YÖNLÜ OLMAK ZORUNDA (v2.6.27 yirmi altıncı parti).
+    # Üst sınır yalnız YENİ uydurmayı yakalar; borcu BEYAZ LİSTEYE ALARAK
+    # gizlemeyi yakalamaz — bu tur ölçüldü: gerçek borç yapraklarından biri
+    # (mass_flow_rel_diff) LEGITIMATE_CONSTANTS'a eklenince sayı 4 -> 3
+    # düşüyor ve tek yönlü eşik SESSİZ kalıyordu. Yani "im ekleyerek borç
+    # kapatma" tam da bu dosyanın en çok korkması gereken hamleydi ve
+    # mekanik bir bekçisi yoktu. Alt sınır onu kırmızıya çevirir:
+    #   * borç gerçekten ödendiyse (ör. ambient_temp forma eklenirse)
+    #     eşik AYNI commit'te bu satırda düşürülür ve gerekçesi yazılır;
+    #   * bir yaprak sessizce imlendiyse test bunu söyler.
+    # Eşiğin iki yanı da ÖLÇÜLEN sayıdır, tahmin değil.
+    assert len(suspicious) >= 4, (
+        'Sabit yaprak sayisi esigin ALTINA dustu (%d < 4). Bu iyi haber '
+        'olabilir (borc odendi) ama sessiz kalamaz: ya urun kodunda bir '
+        'girdi baglandi -> esigi bu satirda olculen yeni degere indirin ve '
+        'gerekcesini yazin; ya da bir borc yapragi LEGITIMATE_CONSTANTS ile '
+        'ortuldu -> imi geri alin. Kalan liste:\n  %s'
+        % (len(suspicious), '\n  '.join(suspicious)))
 
 
 def test_motor_echo_copies_never_diverge(hybrid_report):
@@ -598,13 +832,18 @@ def test_whitelist_markers_stay_narrow(hybrid_report):
     en kolay yoludur ve bunu talimat değil ölçüm durdurur.
 
     Tavan tautoloji değildir, ÖLÇÜMDEN türedi: bu koşuda en geniş MEŞRU
-    imin yuttuğu yaprak sayısı 25 (fill_sweep.fill_ratio[ — 25 noktalı
-    beyanlı süpürme ızgarası), ardından acoustic_modes.modes 22 ve
+    imler 25'er yaprak yutuyor (fill_sweep.fill_ratio[ ve yirmi altıncı
+    partide eklenen fill_sweep.slosh_mass_ratio[ — aynı 25 noktalı beyanlı
+    süpürme ızgarasının iki sütunu), ardından acoustic_modes.modes 22 ve
     altitude_performance 18; gerisi <= 6. Tavan 30 = en büyük meşru aile
     + küçük pay. Karşı-ölçüm: kasıtlı geniş im 'oxidizer_tank_slosh' aynı
     koşuda 65 yaprak yutuyor ve burada KIRMIZI verir (mutasyonla kanıtlandı).
     Yeni bir ızgara ailesi imlenecekse ya alan düzeyinde imlenir ya da bu
     tavan ölçümüyle birlikte güncellenir — sessizce genişletilemez.
+
+    v2.6.27 yirmi altıncı parti notu: eklenen 31 imin 30'u TEK yaprak
+    yutuyor (ölçüldü), yani bu tavan onlar için bağlayıcı değil; tavanı
+    zorlayan tek aile yukarıdaki süpürme ızgarasıdır (25).
     """
     emilim = {m: sum(1 for p in hybrid_report.constant_outputs if m in p)
               for m in LEGITIMATE_CONSTANTS}

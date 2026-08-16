@@ -113,6 +113,10 @@ from hrma.export.motor_geometry import (
     solid_results_to_motor_geometry,
     liquid_results_to_motor_geometry,
 )
+# NOT (göç, 16 Ağu 2026): NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT buradan
+# KALDIRILDI — /api/flow ucu artık sürtünme kesrini varsayılan olarak
+# GEÇMİYOR (çözücü ölçülen sınır tabakası değerini yayımlıyor). Sabitin
+# tek tanım yeri hrma.constants'tır ve orada yalnız yedek olarak durur.
 from hrma.constants import G_0
 from hrma.visualization.advanced_results import (
     create_cea_style_results, create_altitude_performance_plot,
@@ -8073,6 +8077,954 @@ def api_fea_planar_grain():
     return jsonify({'status': 'success', 'fea': sanitize_json_values(fea)})
 
 
+# ===========================================================================
+# DALGA B — v3 CFD LÜLE UCU: POST /api/cfd/nozzle
+# ---------------------------------------------------------------------------
+# hrma/cfd/ (2B eksenel simetrik Euler çözücüsü + Summerfield ayrılma köprüsü)
+# doğrulanmış hâlde depodaydı ama HİÇBİR kullanıcı yüzü onu çağırmıyordu.
+# Bu uç zinciri kapatır: yayımlanmış lüle konturu + motor gaz durumu →
+# kararlı-hâl çözümü → duvar basıncı → ayrılma hükmü → ÇİZİLEBİLİR ham veri.
+# GRAFİK ÜRETMEZ, KARAR VERMEZ (çizim panelin işi).
+#
+# DÜRÜSTLÜK SÖZLEŞMESİ
+#   * Uydurma varsayılan YOK: kontur, P0, T0, gamma, R ve P_ortam istemciden
+#     gelir; biri eksikse 422 + hangi alanın NEDEN gerekli olduğu.
+#   * Yakınsamayan / ıraksayan koşu 200 döner ama converged=False ve
+#     çözücünün kendi beyanıyla döner (çözücü felsefesi); ayrılma hükmü de
+#     köprünün kendi 'suspect' güven etiketini taşır.
+#   * Çözünürlük SERBEST SAYI DEĞİL, ölçülmüş beyaz listedir: her seviyenin
+#     (ni, nj) değeri ve ÖLÇÜLEN en kötü süresi yanıtta beyan edilir.
+#   * Sürücü ayarları (tolerans, CFL, rampa) uçta YENİDEN TANIMLANMAZ;
+#     çözücünün kendi varsayılanları kullanılır (parametre tutarlılığı).
+#     İterasyon TAVANI da uçta yeniden tanımlanmaz — varsayılanı çözücünün
+#     DEFAULT_MAX_ITERS'idir; yalnız istemci AÇIKÇA bir bütçe verebilir
+#     (max_iterations, bandı beyanlı). Bütçe verilmediğinde aynı ızgarayla
+#     doğrudan çağrı, bu ucun ürettiği sonucun BİT-AYNISINI verir (bekçi:
+#     tests/test_cfd_endpoint.py).
+# ===========================================================================
+
+#: Çözünürlük beyaz listesi: ad → (ni, nj) = (eksenel, radyal) hücre sayısı.
+#: SERBEST SAYI ALINMAZ — uzun koşu riski masaüstü tek-worker sunucuda
+#: gerçektir ve seviyelerin süresi ÖLÇÜLMÜŞTÜR.
+#:
+#: ÖLÇÜM — TAZELENDİ (M4 Max, 2026-08-16 akşamı, parti 26; gerçek
+#: sample_nozzle_inner_contour konturu, P0=2 MPa, T0=3000 K, γ=1,2, R=350).
+#: EN KÖTÜ hâl = bütçe tavanına kadar giden koşu; ölçüm yöntemi tol_res=0 ve
+#: settle_tol=0 ile çözücünün erken çıkışı KAPATILARAK tam DEFAULT_MAX_ITERS
+#: (20000) iterasyon koşturmaktır (numba yolu doğrudan, NumPy yolu
+#: HRMA_CFD_DISABLE_NUMBA=1 ile ayrı süreçte; ikisinde de JIT ısınması
+#: ölçümün dışında):
+#:      seviye     ni×nj    numba     numpy    (yakınsayan koşu, numba)
+#:      coarse     60×12    10,2 s    14,9 s    1,20 s / 2083 iterasyon
+#:      standard  120×24    19,9 s    31,8 s    4,91 s / 4505 iterasyon
+#: NÖBET DEĞİŞİMİ: bir önceki künye (parti 23) 9,4 / 15,0 ve 15,7 / 30,5
+#: diyordu. Aradaki fark ölçüm gürültüsü DEĞİL: parti 25'te çözücüye
+#: basınç-tabanlı şok sensörü ve sınırlayıcı tazelemesi, parti 26'da
+#: karakteristik giriş sınır koşulu girdi — iterasyon başına iş arttı.
+#: Bayat kalan sayı 'standard/numba' idi (15,7 → 19,9 = %27 eksik beyan).
+#: Varsayılan 'coarse'tır: ~10-20 sn cüzdanını numba OLMADAN da tutan tek
+#: seviye odur (numba isteğe bağlı bağımlılıktır — kernel_backend alanı
+#: hangi yolun koştuğunu yanıtta beyan eder). 'standard' istemcinin bilinçli
+#: seçimidir ve cüzdanı yalnız numba ile tutar; bu da beyan edilir.
+CFD_RESOLUTION_LEVELS = {
+    'coarse': (60, 12),
+    'standard': (120, 24),
+}
+CFD_DEFAULT_RESOLUTION = 'coarse'
+
+#: Seviye başına ÖLÇÜLEN en kötü duvar-saati [s] (yukarıdaki ölçüm turu).
+#: Panel bu sayıyı kullanıcıya "bu koşu ne kadar sürebilir" diye gösterebilir;
+#: uydurma bir ilerleme çubuğu ÜRETİLMEZ (sahte animasyon yasağı).
+CFD_RESOLUTION_WORST_CASE_S = {
+    'coarse': {'numba': 10.2, 'numpy': 14.9},
+    'standard': {'numba': 19.9, 'numpy': 31.8},
+}
+
+#: Yanıttaki alan bloğunun hücre tavanı. ÖLÇÜLDÜ (2026-08-16, JSON bayt
+#: sayımı): ham 120×24 alan bloğu (2880 hücre × 4 dizi) 232 KB. Tavan 1200
+#: hücreye çekilince 'standard' seviyesi eksenel yönde 120→50 kolona
+#: inceltilir ve blok 98 KB'ye iner (toplam yanıt 128 KB); 'coarse'
+#: (720 hücre, 58 KB) inceltmesiz geçer. İnceltme oranı ve SEÇİLEN İNDEKSLER
+#: yanıtta BEYAN edilir — panel hangi hücreleri aldığını bilir.
+CFD_FIELD_MAX_CELLS = 1200
+
+#: Kalıntı geçmişi tavanı (nokta). ÖLÇÜLDÜ: yakınsamayan koşunun 20000
+#: noktalık ham geçmişi 388 KB — tek başına yanıtın en büyük parçası olurdu
+#: (inceltilmiş hâli 11 KB). 400 noktaya inceltilir (0. ve son iterasyon HER
+#: ZAMAN içeride); inceltmenin gizleyebileceği iki sayı (son ve en küçük
+#: kalıntı) ayrıca TAM değerle yayımlanır.
+CFD_RESIDUAL_MAX_POINTS = 400
+
+# ---------------------------------------------------------------------------
+# GİRİŞ KOŞULLANDIRMA UYARISI — NÖBET DEĞİŞİMİ (2026-08-16, parti 26)
+# ---------------------------------------------------------------------------
+# EMEKLİYE AYRILAN SÖZLEŞME: ``CFD_INLET_MACH_ADVISORY = 0.15`` ve ona bağlı
+# ``inlet_conditioning.threshold_mach`` / ``inlet_conditioning.advisory``
+# alanları. Eşik, çözücünün ESKİ ses-altı giriş sınır koşulunun ölçülmüş
+# kırılma noktasıydı (o BC iç hücreden statik basınç dışdeğerleyip Mach'ı
+# izantropik p→M bağıntısından çözüyordu; eşleme M→0'da dikleşiyor ve iç
+# basınç gürültüsünü giriş debisine büyüterek yansıtıyordu). Tarihçe olarak
+# duran ESKİ ölçüm tablosu (2026-08-16 sabahı, aynı kontur ailesi):
+#         CR    M_giriş   60×12         120×24
+#         1,78   0,357    YAKINSADI     YAKINSADI
+#         2,78   0,219    YAKINSADI     YAKINSADI
+#         4,00   0,150    YAKINSADI     YAKINSAMADI
+#         5,44   0,110    YAKINSAMADI   YAKINSAMADI
+#         7,11   0,084    YAKINSAMADI   YAKINSAMADI
+#        11,11   0,053    YAKINSAMADI   YAKINSAMADI
+# NEDEN EMEKLİ: çözücünün giriş sınır koşulu KARAKTERİSTİK (Riemann
+# değişmezi) biçime çevrildi (hrma/cfd/euler_core.py: INLET_BC_NAME =
+# 'characteristic_reservoir'). Eşiğin ölçtüğü kusur ORTADAN KALKTI ve eşik
+# yanlış ateşlemeye başladı: canlı hibrit motorun giriş Mach'ı 0,043 (eşiğin
+# çok altında) olduğu hâlde koşu yakınsıyor. Mach'a bakan bir uyarı artık
+# ÖLÇÜLEN hiçbir şeyi bildirmiyordu — yerine geçen sözleşme aşağıdadır.
+#
+# YENİ SÖZLEŞME: uyarı, giriş Mach'ının değil İTERASYON BÜTÇESİNİN uyarısıdır
+# (``budget_advisory``). Kalan gerçek risk yakınsama HIZIDIR: bazı daralma
+# oranlarında koşu bütçenin çoğunu yiyor, bir vaka tavana dayanıyor.
+
+#: ÖLÇÜLEN YAKINSAMA TABLOSU (2026-08-16 akşamı, bu depo, M4 Max, numba).
+#: Ölçüm UÇ ÜZERİNDEN yapıldı (ürün gerçeği): gerçek örnekleyici konturu
+#: (throat 30 mm, exit 75 mm, konik 30°/15°; oda çapı 40→100 mm ile daralma
+#: oranı taranarak), P0=2 MPa, T0=3000 K, γ=1,2, R=350, P_ortam=20 kPa,
+#: çözücü varsayılanları (bütçe tavanı DEFAULT_MAX_ITERS=20000).
+#: 'contraction_ratio' ucun KENDİ ölçtüğü değerdir (yeniden örneklenmiş
+#: düğümlerden), o yüzden seviyeye göre binde mertebesinde ayrışır.
+#: SINIRLAMA (dürüstlük): tablo TEK BİR KONTUR AİLESİDİR (konik, sabit boğaz
+#: ve çıkış çapı, sabit yarı açılar) ve TEK BİR gaz durumudur. Başka bir
+#: kontur ailesi (bell/parabolik), başka γ ya da başka boğaz/çıkış oranı bu
+#: sayıları taşımaz; blok bunu beyan eder ve HÜKÜM VERMEZ.
+CFD_MEASURED_CONVERGENCE = (
+    {'resolution': 'coarse', 'contraction_ratio': 1.768,
+     'inlet_mach_isentropic': 0.3593, 'iterations': 2169, 'converged': True,
+     'residual_last': 9.90e-09, 'mass_balance_rel': 1.75e-10},
+    {'resolution': 'coarse', 'contraction_ratio': 2.771,
+     'inlet_mach_isentropic': 0.2193, 'iterations': 2083, 'converged': True,
+     'residual_last': 2.70e-09, 'mass_balance_rel': 1.49e-10},
+    {'resolution': 'coarse', 'contraction_ratio': 3.996,
+     'inlet_mach_isentropic': 0.1500, 'iterations': 2949, 'converged': True,
+     'residual_last': 3.78e-10, 'mass_balance_rel': 8.36e-11},
+    {'resolution': 'coarse', 'contraction_ratio': 5.412,
+     'inlet_mach_isentropic': 0.1101, 'iterations': 4131, 'converged': True,
+     'residual_last': 5.41e-09, 'mass_balance_rel': 2.00e-10},
+    {'resolution': 'coarse', 'contraction_ratio': 7.079,
+     'inlet_mach_isentropic': 0.0840, 'iterations': 6149, 'converged': True,
+     'residual_last': 9.52e-10, 'mass_balance_rel': 4.54e-11},
+    {'resolution': 'coarse', 'contraction_ratio': 11.106,
+     'inlet_mach_isentropic': 0.0534, 'iterations': 13563, 'converged': True,
+     'residual_last': 2.19e-09, 'mass_balance_rel': 8.74e-10},
+    {'resolution': 'standard', 'contraction_ratio': 1.776,
+     'inlet_mach_isentropic': 0.3573, 'iterations': 5805, 'converged': True,
+     'residual_last': 1.00e-08, 'mass_balance_rel': 1.31e-10},
+    {'resolution': 'standard', 'contraction_ratio': 2.771,
+     'inlet_mach_isentropic': 0.2193, 'iterations': 4505, 'converged': True,
+     'residual_last': 9.99e-09, 'mass_balance_rel': 2.70e-11},
+    {'resolution': 'standard', 'contraction_ratio': 3.996,
+     'inlet_mach_isentropic': 0.1500, 'iterations': 6774, 'converged': True,
+     'residual_last': 9.92e-09, 'mass_balance_rel': 2.60e-10},
+    {'resolution': 'standard', 'contraction_ratio': 5.442,
+     'inlet_mach_isentropic': 0.1095, 'iterations': 13654, 'converged': True,
+     'residual_last': 8.73e-09, 'mass_balance_rel': 2.69e-10},
+    {'resolution': 'standard', 'contraction_ratio': 7.095,
+     'inlet_mach_isentropic': 0.0838, 'iterations': 20000, 'converged': False,
+     'residual_last': 3.41e-06, 'mass_balance_rel': 2.26e-07},
+    {'resolution': 'standard', 'contraction_ratio': 11.106,
+     'inlet_mach_isentropic': 0.0534, 'iterations': 9345, 'converged': True,
+     'residual_last': 4.23e-10, 'mass_balance_rel': 4.83e-10},
+)
+
+#: RİSK KESRİ: bütçenin bu kadarını yiyen ÖLÇÜLEN satır "riskli" sayılır.
+#: 0,5 uydurma değil, tablonun KENDİ komşuluk ölçümünden gelir: ardışık iki
+#: ölçüm noktası arasında iterasyon sayısı 2,2 kata kadar sıçrıyor (coarse
+#: 6149 → 13563 = 2,21×; standard 6774 → 13654 = 2,02×). Tablo ~1,3× CR
+#: adımlarıyla örneklendiği için İKİ ölçüm noktası ARASINDAKİ bir kontur,
+#: hızlı komşusunun iki katını isteyebilir; bütçesinin yarısını çoktan yiyen
+#: bir satırın bu çarpana yeri yoktur.
+CFD_BUDGET_RISK_FRACTION = 0.5
+
+#: Kullanıcının verebileceği iterasyon bütçesinin ALT sınırı. Çözücünün CFL
+#: rampası DEFAULT_RAMP_ITERS=400 iterasyon sürer ve oturma penceresi
+#: DEFAULT_SETTLE_WINDOW=200'dür; bunların altında bir bütçe şemayı hedef
+#: CFL'ine bile ulaştırmadan koşuyu keser. 500 = rampa + 100 pay; ÜST sınır
+#: ayrıca tanımlanmaz, çözücünün kendi DEFAULT_MAX_ITERS'idir (uçta ikinci
+#: bir tavan tanımı yazılmaz — parametre tutarlılığı).
+CFD_MAX_ITERS_MIN = 500
+
+
+def _cfd_iteration_budget_band():
+    """(alt, üst) iterasyon bütçesi bandı — üst sınır ÇÖZÜCÜDEN gelir."""
+    from hrma.cfd.steady import DEFAULT_MAX_ITERS
+    return CFD_MAX_ITERS_MIN, int(DEFAULT_MAX_ITERS)
+
+
+def _cfd_measured_rows(resolution):
+    """Bir çözünürlük seviyesinin ölçüm satırları, CR'ye göre sıralı."""
+    return sorted((dict(r) for r in CFD_MEASURED_CONVERGENCE
+                   if r['resolution'] == resolution),
+                  key=lambda r: r['contraction_ratio'])
+
+
+def _cfd_budget_risk_bands(resolution):
+    """ÖLÇÜM TABLOSUNDAN türetilen riskli daralma oranı bantları.
+
+    Kural (uydurma sayı yok, tablo dışında sabit yok):
+      1. Riskli satır = bütçe tavanına dayanmış (converged False) YA DA
+         ``CFD_BUDGET_RISK_FRACTION`` × bütçe kadar iterasyon istemiş satır.
+      2. Ardışık riskli satırlar tek bant olur.
+      3. Bandın kenarı, riskli satır ile komşu SAĞLAM satırın GEOMETRİK orta
+         noktasıdır (CR çarpımsal bir büyüklüktür ve tablo ~1,3× adımlarla
+         örneklenmiştir; aritmetik orta büyük CR'lerde yanlı olurdu).
+      4. Riskli satır tablonun ucundaysa o uçta bant AÇIKTIR (None) — orası
+         ölçüm DIŞIDIR ve bant üyeliği EKSTRAPOLASYONDUR; blok bunu
+         ``extrapolated`` bayrağıyla beyan eder.
+    Riskli satır yoksa boş liste döner (uyarı bu kuraldan ATEŞLEYEMEZ).
+    """
+    _alt, butce = _cfd_iteration_budget_band()
+    satirlar = _cfd_measured_rows(resolution)
+    riskli = [(not r['converged'])
+              or r['iterations'] >= CFD_BUDGET_RISK_FRACTION * butce
+              for r in satirlar]
+    bantlar = []
+    i = 0
+    while i < len(satirlar):
+        if not riskli[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(satirlar) and riskli[j + 1]:
+            j += 1
+        cr_alt = (math.sqrt(satirlar[i - 1]['contraction_ratio']
+                            * satirlar[i]['contraction_ratio'])
+                  if i > 0 else None)
+        cr_ust = (math.sqrt(satirlar[j]['contraction_ratio']
+                            * satirlar[j + 1]['contraction_ratio'])
+                  if j + 1 < len(satirlar) else None)
+        bantlar.append({
+            'resolution': resolution,
+            'cr_min': cr_alt,
+            'cr_max': cr_ust,
+            'measured_rows': [satirlar[k]['contraction_ratio']
+                              for k in range(i, j + 1)],
+            'open_below': cr_alt is None,
+            'open_above': cr_ust is None,
+        })
+        i = j + 1
+    return bantlar
+
+
+def _cfd_nearest_measured(resolution, contraction_ratio):
+    """CR'ye GEOMETRİK olarak en yakın ölçüm satırı (yoksa None)."""
+    satirlar = _cfd_measured_rows(resolution)
+    if not satirlar or not (contraction_ratio and contraction_ratio > 0.0):
+        return None
+    return min(satirlar,
+               key=lambda r: abs(math.log(r['contraction_ratio']
+                                          / contraction_ratio)))
+
+
+def _cfd_budget_advisory(resolution, contraction_ratio, max_iters):
+    """Koşu öncesi İTERASYON BÜTÇESİ uyarısı — HÜKÜM DEĞİL, koşuyu engellemez.
+
+    Döner: (uyari, gerekceler, bantlar, en_yakin_satir). İki bağımsız gerekçe
+    ölçülür ve ADIYLA yayımlanır:
+      * ``measured_slow_band``          — CR, ölçülen yavaş bantlardan birinde,
+      * ``budget_below_measured_need``  — istenen bütçe, en yakın ölçüm
+        satırının GERÇEKTEN harcadığı iterasyondan az.
+    Gerekçe listesi boşsa uyarı da yoktur (bool, listenin kendisinden türetilir
+    — iki alan asla ayrışamaz).
+    """
+    bantlar = _cfd_budget_risk_bands(resolution)
+    en_yakin = _cfd_nearest_measured(resolution, contraction_ratio)
+    gerekceler = []
+    if contraction_ratio and contraction_ratio > 0.0:
+        for b in bantlar:
+            alt_ok = b['cr_min'] is None or contraction_ratio >= b['cr_min']
+            ust_ok = b['cr_max'] is None or contraction_ratio <= b['cr_max']
+            if alt_ok and ust_ok:
+                gerekceler.append('measured_slow_band')
+                break
+    if en_yakin is not None and max_iters < en_yakin['iterations']:
+        gerekceler.append('budget_below_measured_need')
+    return bool(gerekceler), gerekceler, bantlar, en_yakin
+
+
+class _CfdInputError(Exception):
+    """İstemci girdisi sözleşmeyi taşımıyor (4xx). Alan adı + gerekçe taşır."""
+
+    def __init__(self, field, message, missing=False):
+        super().__init__(message)
+        self.field = field
+        self.message = message
+        self.missing = missing
+
+
+def _cfd_separation_fn():
+    """Ayrılma köprüsünü TAKMA ADLA getirir (sessiz gölgeleme kapısı).
+
+    ``hrma.flow`` da ``assess_separation`` adını dışa verir (yarı-1B sürüm,
+    imzası ``(P0, Pa, gamma, ...)``); aynı modülde ikisi birden bulunursa
+    biri diğerini SESSİZCE gölgeler. Bu ucun tükettiği sözleşme 2B Euler
+    çözümünün duvar basıncıdır, o yüzden köprü tek bir yerde ve takma adla
+    alınır. Kimlik denetimi bekçilidir (tests/test_cfd_endpoint.py: dönen
+    fonksiyon ``hrma.cfd.separation.assess_separation`` olmalı ve
+    ``hrma.flow.assess_separation`` OLMAMALIDIR).
+    """
+    from hrma.cfd.separation import assess_separation as assess_cfd_separation
+    return assess_cfd_separation
+
+
+def _cfd_pick_contour(data):
+    """İstek gövdesinden yayımlanmış lüle konturunu çıkarır → (Nx2 [m], alan).
+
+    Kabul edilen biçimler (motorların YAYIMLADIĞI blokla aynı sözleşme —
+    ``results['nozzle_contour'] = {'points': [[z_m, r_m], ...], '_basis': …}``,
+    üç motorda da ``nozzle_design.sample_nozzle_inner_contour`` örnekleyicisi;
+    parti 25'te wall-profile ekseni de aynı yayına bağlandı):
+      * ``nozzle_contour``  — blok (dict, ``points`` taşır) ya da doğrudan
+        ``[[z_m, r_m], ...]`` listesi,
+      * ``motor_results`` / ``motor`` / ``results`` — motor sonuç sözlüğü;
+        içindeki ``nozzle_contour`` bloğu kullanılır (hibrit sayfadaki
+        ``{'motor': {...}}`` sarmalı da taranır).
+    Kontur UYDURULMAZ: hiçbir alanda bulunamazsa 422 (eksik alan).
+    """
+    adaylar = [('nozzle_contour', data.get('nozzle_contour'))]
+    for alan in ('motor_results', 'motor', 'results'):
+        kap = data.get(alan)
+        if isinstance(kap, dict):
+            adaylar.append((alan + '.nozzle_contour',
+                            kap.get('nozzle_contour')))
+            ic = kap.get('motor')
+            if isinstance(ic, dict):
+                adaylar.append((alan + '.motor.nozzle_contour',
+                                ic.get('nozzle_contour')))
+
+    ham = None
+    kaynak = None
+    for alan, deger in adaylar:
+        if isinstance(deger, dict):
+            noktalar = deger.get('points')
+            if noktalar is not None:
+                ham, kaynak = noktalar, alan + '.points'
+                break
+        elif isinstance(deger, (list, tuple)):
+            ham, kaynak = deger, alan
+            break
+
+    if ham is None:
+        raise _CfdInputError(
+            'nozzle_contour',
+            'The published nozzle contour is required: the CFD grid is built '
+            'from it. Send the solver block '
+            "results['nozzle_contour'] = {'points': [[z_m, r_m], ...]} "
+            '(metres, first point = convergent inlet) either directly as '
+            "'nozzle_contour' or inside 'motor_results'/'motor'/'results'. "
+            'No contour is invented.',
+            missing=True)
+
+    try:
+        pts = np.asarray(ham, dtype=float)
+    except (TypeError, ValueError):
+        raise _CfdInputError(
+            kaynak, 'The nozzle contour must be a list of [z_m, r_m] number '
+                    'pairs; it could not be read as numbers.')
+    if pts.ndim != 2 or pts.shape[1] != 2 or pts.shape[0] < 3:
+        raise _CfdInputError(
+            kaynak, 'The nozzle contour must be [[z_m, r_m], ...] with at '
+                    f'least 3 points; got shape {tuple(pts.shape)}.')
+    if not np.all(np.isfinite(pts)):
+        raise _CfdInputError(
+            kaynak, 'The nozzle contour contains non-finite values (NaN/Inf).')
+    if np.any(np.diff(pts[:, 0]) < 0.0):
+        raise _CfdInputError(
+            kaynak, 'The nozzle contour z coordinate must be non-decreasing '
+                    '(sample_nozzle_inner_contour contract: the first point '
+                    'is the convergent inlet and z increases toward the '
+                    'exit).')
+    if pts[-1, 0] <= pts[0, 0]:
+        raise _CfdInputError(
+            kaynak, 'The nozzle contour has zero axial extent '
+                    f'(z stays at {float(pts[0, 0]):g} m).')
+    if np.any(pts[:, 1] <= 0.0):
+        raise _CfdInputError(
+            kaynak, 'The nozzle wall radius must be positive at every '
+                    'station (r <= 0 would put the wall on or inside the '
+                    'axis).')
+    return pts, kaynak
+
+
+def _cfd_build_grid(points_m, ni, nj):
+    """Yayımlanmış kontur (Nx2, METRE) → eksenel simetrik ızgara.
+
+    ÖRNEKLEME SÖZLEŞMESİ: duvar polilinesi ni+1 DÜZGÜN z istasyonuna
+    doğrusal ara değerle yeniden örneklenir (``grid_axisym.build_nozzle_grid``
+    ile aynı kural; oradaki sürüm milimetre alır, yayımlanan blok metre
+    taşıdığı için birim çevirisi yapılmaz ve kontur METRE olarak geçirilir).
+    Döner: ``(AxisymGrid, z_nodes [m], r_nodes [m])`` — düğüm dizileri
+    çağırana da lazımdır (boğaz istasyonu ve daralma oranı onlardan ölçülür).
+    Bekçi bu yardımcıyı doğrudan çağırır — uç ile test aynı ızgarayı kurar,
+    ayrılma bloğu bit-tutarlılığı ancak böyle ölçülebilir.
+    """
+    from hrma.cfd.grid_axisym import build_grid_from_wall
+    pts = np.asarray(points_m, dtype=float)
+    z_nodes = np.linspace(float(pts[0, 0]), float(pts[-1, 0]), int(ni) + 1)
+    r_nodes = np.interp(z_nodes, pts[:, 0], pts[:, 1])
+    return build_grid_from_wall(z_nodes, r_nodes, int(nj)), z_nodes, r_nodes
+
+
+def _cfd_required_float(data, key, aciklama, minimum=None, maximum=None,
+                        strict=True):
+    """Zorunlu sayısal alan: yoksa 422 (missing), bozuk/bant dışıysa 400."""
+    ham = data.get(key)
+    if ham is None or ham == '':
+        raise _CfdInputError(key, aciklama, missing=True)
+    try:
+        deger = float(ham)
+    except (TypeError, ValueError):
+        raise _CfdInputError(key, f"'{key}' must be a number (got {ham!r}).")
+    if not math.isfinite(deger):
+        raise _CfdInputError(key, f"'{key}' must be finite (got {deger!r}).")
+    if minimum is not None:
+        if (deger <= minimum) if strict else (deger < minimum):
+            raise _CfdInputError(
+                key, f"'{key}' must be "
+                     f"{'>' if strict else '>='} {minimum:g}; got {deger:g}.")
+    if maximum is not None:
+        if (deger >= maximum) if strict else (deger > maximum):
+            raise _CfdInputError(
+                key, f"'{key}' must be "
+                     f"{'<' if strict else '<='} {maximum:g}; got {deger:g}.")
+    return deger
+
+
+def _cfd_decimate_indices(n, hedef):
+    """[0, n-1] aralığından en fazla `hedef` indeks — uçlar HER ZAMAN içeride."""
+    n = int(n)
+    hedef = int(hedef)
+    if hedef >= n or hedef <= 1:
+        return np.arange(n, dtype=int) if hedef >= n else np.array([0, n - 1])
+    return np.unique(np.round(np.linspace(0, n - 1, hedef)).astype(int))
+
+
+@app.route('/api/cfd/nozzle', methods=['POST'])
+def api_cfd_nozzle():
+    """Lüle iç akışının 2B eksenel simetrik Euler çözümü + ayrılma hükmü.
+
+    Girdi (JSON gövde):
+      * ``nozzle_contour``  — ZORUNLU. Motorun yayımladığı blok
+        ``{'points': [[z_m, r_m], ...]}`` (METRE, ilk nokta konverjan girişi)
+        ya da doğrudan aynı liste. ``motor_results`` / ``motor`` / ``results``
+        içinden de okunur.
+      * ``P0_Pa``, ``T0_K``  — ZORUNLU. Kamara durma basıncı [Pa] ve
+        sıcaklığı [K] (motor çözümünden).
+      * ``gamma``, ``R_J_per_kgK`` — ZORUNLU. Kalorik mükemmel gaz sabitleri
+        (motor çözümünden; çözücü varsayılan üretmez, uç da üretmez).
+      * ``P_ambient_Pa`` — ZORUNLU. Ayrılma ölçütü p_w < k·P_ortam ortam
+        basıncına göre tanımlıdır; deniz seviyesi/vakum varsaymak UYDURMA
+        sayılır (bkz. hrma/cfd/separation.py).
+      * ``Pb_Pa`` — İSTEĞE BAĞLI geri basınç. Verilmezse çıkışta tam
+        dışdeğerleme (ses-üstü çıkış) uygulanır ve bu yanıtta beyan edilir.
+      * ``resolution`` — İSTEĞE BAĞLI, ``CFD_RESOLUTION_LEVELS`` beyaz
+        listesinden ('coarse' | 'standard'); serbest sayı ALINMAZ.
+      * ``separation_factor`` — İSTEĞE BAĞLI Summerfield k'sı; verilmezse
+        köprünün ithal ettiği varsayılan (bant denetimi köprüdedir).
+      * ``max_iterations`` — İSTEĞE BAĞLI iterasyon BÜTÇESİ (tam sayı).
+        Bant ``[CFD_MAX_ITERS_MIN, DEFAULT_MAX_ITERS]``; verilmezse
+        çözücünün kendi ``DEFAULT_MAX_ITERS``i (uçta ikinci tavan tanımı
+        yok). "Yakınsamayan koşu dürüstçe raporlanır" sözleşmesi bu AÇIK
+        bütçeye dayanır: koşu tavana dayanırsa ``converged=False`` döner ve
+        etkin bütçe ``max_iterations`` + ``max_iterations_basis`` ile
+        (kullanıcı mı verdi, varsayılan mı) beyan edilir.
+
+    Yanıt 200: ``{'status': 'success', 'cfd': {...}}`` — yakınsama beyanı,
+    kalıntı geçmişi (inceltilmiş, beyanlı), korunum bütçesi, boğaz, kesit
+    ortalamaları, duvar basıncı, çizim için inceltilmiş alan bloğu, ayrılma
+    bloğu (köprüden AYNEN) ve not_modelled/assumptions beyanları.
+    Yakınsamayan ya da ıraksayan koşu da 200 döner: sonuç gizlenmez,
+    ``converged=False`` ve çözücünün kendi gerekçesiyle gelir.
+
+    Hata: eksik zorunlu alan 422 + ``missing_fields``; bozuk/bant dışı değer
+    400 + ``field``; çözücü çökmesi 500 (boş ama 'başarılı' yanıt üretilmez).
+    """
+    import time as _time
+
+    t_baslangic = _time.perf_counter()
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    # --- GİRDİ SÖZLEŞMESİ ------------------------------------------------
+    # Eksik alanların HEPSİ birden bildirilir (panel tek turda düzeltsin);
+    # bozuk/bant dışı değer ilk hatada 400 ile döner.
+    eksikler = []
+    gerekce = {}
+    try:
+        try:
+            kontur_pts, kontur_alani = _cfd_pick_contour(data)
+        except _CfdInputError as e:
+            if not e.missing:
+                raise
+            eksikler.append(e.field)
+            gerekce[e.field] = e.message
+            kontur_pts, kontur_alani = None, None
+
+        # (alan, gerekçe, alt, üst, katı) — bantlar çözücünün KENDİ
+        # bantlarıdır (steady.solve_steady_axisym: P0/T0/R > 0, 1 < γ < 2);
+        # burada yalnız ham ValueError'ın 500'e sızması engellenir. P_ortam'ın
+        # alt sınırı gevşektir: 0 (vakum) GEÇERLİ girdidir ve köprü orada
+        # 'tanımsız' beyanıyla döner — reddedilmez.
+        sayisal = {}
+        for key, aciklama, alt, ust, kati in (
+            ('P0_Pa',
+             'Chamber stagnation pressure [Pa] is required: the solver has no '
+             'default reservoir state (it comes from the engine solution).',
+             0.0, None, True),
+            ('T0_K',
+             'Chamber stagnation temperature [K] is required: the solver has '
+             'no default reservoir state (it comes from the engine solution).',
+             0.0, None, True),
+            ('gamma',
+             'The ratio of specific heats is required: the solver is a '
+             'calorically perfect gas model and takes gamma from the engine '
+             'solution; no default is invented.',
+             1.0, 2.0, True),
+            ('R_J_per_kgK',
+             'The specific gas constant [J/(kg K)] is required: it comes from '
+             'the engine solution (R = R_universal / M); no default is '
+             'invented.',
+             0.0, None, True),
+            ('P_ambient_Pa',
+             'Ambient pressure [Pa] is required: the Summerfield separation '
+             'criterion p_w < k*P_ambient is defined against it, and assuming '
+             'sea level or vacuum would be a fabricated input '
+             '(hrma/cfd/separation.py refuses a missing ambient pressure).',
+             0.0, None, False),
+        ):
+            try:
+                sayisal[key] = _cfd_required_float(
+                    data, key, aciklama, minimum=alt, maximum=ust, strict=kati)
+            except _CfdInputError as e:
+                if not e.missing:
+                    raise
+                eksikler.append(e.field)
+                gerekce[e.field] = e.message
+
+        if eksikler:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_cfd_nozzle_input',
+                'message': ('The nozzle CFD run cannot start without these '
+                            'inputs; none of them has a default.'),
+                'missing_fields': eksikler,
+                'field_reasons': gerekce,
+            }), 422
+
+        # İsteğe bağlı geri basınç: yoksa None (ses-üstü dışdeğerleme).
+        Pb = None
+        if data.get('Pb_Pa') not in (None, ''):
+            Pb = _cfd_required_float(
+                data, 'Pb_Pa', '', minimum=0.0, strict=True)
+
+        # İsteğe bağlı Summerfield k'sı. Bant SABİTLERİ köprüden İTHAL edilir
+        # (ikinci tanım yazılmaz); denetim burada YAPILIR çünkü bant dışı bir
+        # k istemci hatasıdır ve 10 saniyelik koşu harcanmadan 400 dönmelidir
+        # (köprüye bırakılsaydı hata koşudan SONRA çıkardı).
+        from hrma.cfd.separation import (
+            SEPARATION_FACTOR_MAX,
+            SEPARATION_FACTOR_MIN,
+        )
+        sep_faktor = None
+        if data.get('separation_factor') not in (None, ''):
+            sep_faktor = _cfd_required_float(
+                data, 'separation_factor', '',
+                minimum=SEPARATION_FACTOR_MIN, maximum=SEPARATION_FACTOR_MAX,
+                strict=False)
+
+        # İTERASYON BÜTÇESİ (isteğe bağlı, AÇIK sözleşme). Varsayılan
+        # çözücünün kendi tavanıdır — uçta ikinci bir tanım yazılmaz, yalnız
+        # kullanıcının verebileceği bant burada denetlenir (uzun koşu cüzdanı
+        # ucun sorumluluğudur). Tam sayı ISTENİR: JSON tarafı 600.0 gibi
+        # sayısal bir tam değeri de kabul eder ama 600.5 reddedilir —
+        # sessizce yuvarlamak, kullanıcının yazdığından BAŞKA bir bütçeyle
+        # koşmak demek olurdu.
+        iter_alt, iter_ust = _cfd_iteration_budget_band()
+        etkin_tavan = iter_ust
+        tavan_kaynagi = 'default'
+        if data.get('max_iterations') not in (None, ''):
+            ham_tavan = data.get('max_iterations')
+            if isinstance(ham_tavan, bool):
+                raise _CfdInputError(
+                    'max_iterations',
+                    "'max_iterations' must be a whole number of iterations "
+                    f'in [{iter_alt}, {iter_ust}]; got {ham_tavan!r}.')
+            try:
+                sayi_tavan = float(ham_tavan)
+            except (TypeError, ValueError):
+                raise _CfdInputError(
+                    'max_iterations',
+                    "'max_iterations' must be a number (got "
+                    f'{ham_tavan!r}).')
+            if not math.isfinite(sayi_tavan) or sayi_tavan != int(sayi_tavan):
+                raise _CfdInputError(
+                    'max_iterations',
+                    "'max_iterations' must be a WHOLE number of iterations "
+                    '(the solver counts iterations, it cannot run half of '
+                    f'one); got {ham_tavan!r}.')
+            etkin_tavan = int(sayi_tavan)
+            if not (iter_alt <= etkin_tavan <= iter_ust):
+                raise _CfdInputError(
+                    'max_iterations',
+                    f"'max_iterations' must be in [{iter_alt}, {iter_ust}]: "
+                    f'below {iter_alt} the run is cut before the solver CFL '
+                    f'ramp (DEFAULT_RAMP_ITERS=400) completes — and between '
+                    f'{iter_alt} and 599 the ramp finishes but a FULL '
+                    f'settling window (DEFAULT_SETTLE_WINDOW=200) still may '
+                    f'not, which the convergence basis will state — so a '
+                    f'"did not converge" answer at tiny budgets says nothing '
+                    f'about the flow; above {iter_ust} the run leaves the '
+                    f'measured runtime wallet published in '
+                    f'grid.levels.worst_case_s. Got {etkin_tavan}.')
+            tavan_kaynagi = 'caller'
+
+        # Çözünürlük: beyaz liste, serbest sayı yok.
+        seviye = data.get('resolution')
+        if seviye in (None, ''):
+            seviye = CFD_DEFAULT_RESOLUTION
+        seviye = str(seviye)
+        if seviye not in CFD_RESOLUTION_LEVELS:
+            raise _CfdInputError(
+                'resolution',
+                f"'resolution' must be one of "
+                f"{sorted(CFD_RESOLUTION_LEVELS)} (free grid sizes are not "
+                f"accepted: every level's cell count and measured worst-case "
+                f"runtime is published in the response); got {seviye!r}.")
+        ni, nj = CFD_RESOLUTION_LEVELS[seviye]
+
+        # Izgara: yayımlanan kontur ni+1 düzgün istasyona yeniden örneklenir.
+        try:
+            grid, z_nodes, r_nodes = _cfd_build_grid(kontur_pts, ni, nj)
+        except ValueError as e:
+            raise _CfdInputError(
+                kontur_alani,
+                f'The CFD grid could not be built from the published '
+                f'contour: {e}')
+
+        # Boğaz İÇERİDE olmalı: ayrılma ölçütü ıraksak bölgede aranır ve
+        # boğaz son istasyondaysa aranacak istasyon KALMAZ (köprü orada
+        # ValueError yükseltir). 10 saniyelik koşuyu harcamadan reddedilir.
+        i_bogaz = int(np.argmin(r_nodes))
+        if not (0 < i_bogaz < len(r_nodes) - 1):
+            raise _CfdInputError(
+                kontur_alani,
+                'The resampled wall has no interior throat: the minimum '
+                f'radius sits at station {i_bogaz} of {len(r_nodes) - 1} '
+                '(the contour must converge to a throat and then diverge, '
+                'otherwise the separation criterion has no divergent section '
+                'to search).')
+    except _CfdInputError as e:
+        return jsonify({
+            'status': 'error',
+            'error': 'invalid_cfd_nozzle_input',
+            'field': e.field,
+            'message': e.message,
+        }), 400
+
+    # --- KOŞU ------------------------------------------------------------
+    # Sürücü ayarları (tolerans, CFL, rampa) VERİLMEZ: çözücünün kendi
+    # varsayılanları kullanılır, uçta ikinci bir tanım yazılmaz. TEK istisna
+    # iterasyon BÜTÇESİDİR ve o da uçta yeniden TANIMLANMAZ: varsayılanı
+    # çözücünün DEFAULT_MAX_ITERS'idir, yalnız kullanıcı açıkça bir bütçe
+    # verirse (max_iterations, bant denetimi yukarıda) onun sayısı geçirilir.
+    # Böylece bütçe verilmediğinde aynı ızgarayla doğrudan çağrı bu sonucun
+    # BİT-AYNISINI üretmeye devam eder (bekçi: tests/test_cfd_endpoint.py::
+    # test_cozum_uc_disinda_bit_aynisiyla_uretilebiliyor).
+    from hrma.cfd.steady import solve_steady_axisym
+
+    try:
+        sonuc = solve_steady_axisym(
+            grid,
+            P0=sayisal['P0_Pa'], T0=sayisal['T0_K'],
+            gamma=sayisal['gamma'], R=sayisal['R_J_per_kgK'], Pb=Pb,
+            max_iters=etkin_tavan)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'error': 'The axisymmetric Euler solver failed.',
+            'detail': str(e),
+        }), 500
+
+    arka_uc = sonuc['kernel_backend']
+
+    # --- AYRILMA KÖPRÜSÜ -------------------------------------------------
+    # Blok köprüden AYNEN taşınır (tek kaynak). Köprü kendi sözleşmesini
+    # ihlal eden bir sonuca (ıraksamış alan, bozuk eksen) hüküm VERMEZ ve
+    # ValueError yükseltir; bu red 500'e çevrilmez, BEYAN edilerek geçilir.
+    try:
+        ayrilma = _cfd_separation_fn()(
+            sonuc, sayisal['P_ambient_Pa'], separation_factor=sep_faktor)
+    except ValueError as e:
+        ayrilma = {
+            'applicable': False,
+            'bridge_refused': True,
+            'not_applicable_reason': str(e),
+            '_basis': (
+                'hrma.cfd.separation.assess_separation refused to issue a '
+                'judgement for this solution and the refusal is reported as '
+                'is; no separation verdict is invented in its place. The flow '
+                'field above is still returned with its own convergence '
+                'declaration.'),
+        }
+    except Exception as e:
+        # ValueError köprünün BEYAN EDİLMİŞ reddidir (yukarıda). Başka bir
+        # istisna sözleşme ihlalidir (ör. yanlış fonksiyon ithal edilmiş,
+        # imza uyuşmuyor) ve YUTULMAZ — yutulsaydı gölgeleme kusuru "ayrılma
+        # hükmü verilemedi" diye sessizce normalleşirdi. 500 döner, ama
+        # makine-okur JSON olarak (panel HTML hata sayfası ayrıştırmasın).
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'error': 'The separation bridge raised an unexpected exception.',
+            'detail': f'{type(e).__name__}: {e}',
+        }), 500
+
+    # --- İNCELTME (beyanlı) ----------------------------------------------
+    res_hist = np.asarray(sonuc['residual_history'], dtype=float)
+    res_idx = _cfd_decimate_indices(res_hist.size, CFD_RESIDUAL_MAX_POINTS)
+    residual = {
+        'iteration': res_idx.tolist(),
+        'value': res_hist[res_idx].tolist(),
+        'n_total': int(res_hist.size),
+        'n_returned': int(res_idx.size),
+        'decimated': bool(res_idx.size < res_hist.size),
+        'last': float(res_hist[-1]) if res_hist.size else None,
+        'min': float(np.min(res_hist)) if res_hist.size else None,
+        '_basis': (
+            f'density L2 residual history, thinned to at most '
+            f'{CFD_RESIDUAL_MAX_POINTS} points by uniform index selection '
+            f'with the first and last iteration always kept (measured: the '
+            f'raw 20000 point history of a non-converging run is 388 KB of '
+            f'JSON on its own, the thinned block is 11 KB). The two '
+            f'numbers thinning could hide are published exactly: "last" and '
+            f'"min". Scale: rho0*a0/L, see convergence_basis.'),
+    }
+
+    mach2d = np.asarray(sonuc['fields']['mach'], dtype=float)
+    p2d = np.asarray(sonuc['fields']['pressure_Pa'], dtype=float)
+    z2d = np.asarray(sonuc['z_centers_m'], dtype=float)
+    r2d = np.asarray(sonuc['r_centers_m'], dtype=float)
+    # İnceltme YALNIZ eksenel yönde: radyal yön beyaz listede zaten dar
+    # (nj <= 24) ve radyal kırpma duvara komşu hücre sırasını seyrekleştirip
+    # kontur haritasının duvar kenarını bozar. Eksenel hedef, tavanın radyal
+    # sayıya bölümüdür; uçlar (giriş ve çıkış kolonu) her zaman içeride.
+    idx_j = np.arange(nj, dtype=int)
+    idx_i = _cfd_decimate_indices(ni, max(2, CFD_FIELD_MAX_CELLS // nj))
+    kes = np.ix_(idx_i, idx_j)
+    field = {
+        'z_m': z2d[kes].tolist(),
+        'r_m': r2d[kes].tolist(),
+        'mach': mach2d[kes].tolist(),
+        'pressure_Pa': p2d[kes].tolist(),
+        'shape': [int(idx_i.size), int(idx_j.size)],
+        'grid_shape': [int(ni), int(nj)],
+        'axial_indices': idx_i.tolist(),
+        'radial_indices': idx_j.tolist(),
+        'n_cells_total': int(ni * nj),
+        'n_cells_returned': int(idx_i.size * idx_j.size),
+        'decimated': bool(idx_i.size * idx_j.size < ni * nj),
+        '_basis': (
+            f'cell-centred field block for contour plotting: every entry is a '
+            f'[axial][radial] nested list, index 0 on the radial axis is the '
+            f'cell next to the symmetry axis and the last index is the cell '
+            f'next to the wall. Values are the solver cells as returned (no '
+            f'interpolation, no smoothing). If the cell count exceeds '
+            f'{CFD_FIELD_MAX_CELLS} the block is thinned by uniform index '
+            f'selection with both ends kept, and the kept indices are listed '
+            f'here so the client knows exactly which cells it received. '
+            f'Thinning is axial only: the radial direction is never sparsened '
+            f'so the wall-adjacent cell row stays intact. Measured: the raw '
+            f'120x24 block is 232 KB of JSON, the thinned 50x24 block 98 KB; '
+            f'the 60x12 "coarse" block (58 KB) needs no thinning.'),
+    }
+
+    # --- GİRİŞ KOŞULLANDIRMA + İTERASYON BÜTÇESİ (ölçülmüş, hüküm DEĞİL) --
+    # Mach eşikli eski uyarı EMEKLİ (nöbet değişimi künyesi
+    # CFD_MEASURED_CONVERGENCE'ın üstünde). Giriş Mach'ı BİLGİ olarak durur —
+    # okuyucunun konturu tanıması için — ama hiçbir uyarıyı TETİKLEMEZ.
+    from hrma.flow.quasi1d import mach_from_area_ratio
+    daralma = max(float((r_nodes[0] / r_nodes[i_bogaz]) ** 2), 1.0)
+    try:
+        mach_giris = float(mach_from_area_ratio(daralma, sayisal['gamma'],
+                                                supersonic=False))
+    except Exception:
+        mach_giris = None
+    butce_uyari, butce_gerekceleri, risk_bantlari, en_yakin_olcum = (
+        _cfd_budget_advisory(seviye, daralma, etkin_tavan))
+    giris_uyari = {
+        'contraction_ratio': daralma,
+        'inlet_mach_isentropic': mach_giris,
+        'inlet_bc': sonuc['inlet_bc'],
+        'inlet_bc_basis': sonuc['inlet_bc_basis'],
+        'resolution': seviye,
+        'max_iterations': int(etkin_tavan),
+        'budget_advisory': bool(butce_uyari),
+        'budget_advisory_reasons': list(butce_gerekceleri),
+        'budget_advisory_bands': risk_bantlari,
+        'budget_risk_fraction': CFD_BUDGET_RISK_FRACTION,
+        'nearest_measured': en_yakin_olcum,
+        'measured_expectations': [dict(r) for r in CFD_MEASURED_CONVERGENCE],
+        '_basis': (
+            'Pre-run ITERATION BUDGET advisory. RETIRED (2026-08-16): this '
+            'block used to carry an inlet Mach threshold (0.15) measured '
+            'against the solver\'s OLD subsonic inlet boundary condition. '
+            'That condition extrapolated the interior static pressure and '
+            'inverted the isentropic p->M relation, whose slope stiffens as '
+            'M->0; high contraction ratios therefore piled ~99% of the '
+            'residual into the first columns and did not settle. The solver '
+            'inlet is now CHARACTERISTIC (Riemann invariant, see '
+            'inlet_bc/inlet_bc_basis), the Mach threshold no longer measures '
+            'anything, and it was firing on runs that converge (measured: a '
+            'live engine at inlet Mach 0.043 converges). The inlet Mach '
+            'number is kept as INFORMATION only (isentropic subsonic '
+            'solution of the resampled inlet-to-throat area ratio, '
+            'hrma.flow.quasi1d.mach_from_area_ratio) and triggers nothing. '
+            'WHAT IS MEASURED NOW: convergence SPEED. Sweep of this endpoint '
+            '(2026-08-16, M4 Max, numba, real sampled contour with a 30 mm '
+            'throat and a 75 mm exit, conical 30/15 deg, chamber diameter '
+            '40->100 mm, P0=2 MPa, T0=3000 K, gamma=1.2, R=350, default '
+            'budget 20000) is published verbatim in measured_expectations: '
+            'every case converged except standard/CR 7.095, which ran to the '
+            'ceiling. Even that run is USABLE, not garbage: its final '
+            'residual is 3.4e-06 and its mass imbalance 2.3e-07 (the old '
+            'inlet BC left residual 0.33-0.71 and a percent-level mass '
+            'imbalance in the same case). The advisory fires when the '
+            'contraction ratio falls in a band derived from that table '
+            '(budget_advisory_bands: a measured row is "slow" when it did '
+            'not converge or spent at least budget_risk_fraction of the '
+            'budget; band edges are the geometric midpoints to the nearest '
+            'healthy measured rows, and an edge is null where the table '
+            'itself ends - membership beyond it is extrapolation), or when '
+            'the requested budget is below what the nearest measured row '
+            'actually spent (budget_advisory_reasons names which rule '
+            'fired). LIMITS, honestly: the table is ONE conical contour '
+            'family at ONE gas state and TWO resolutions; a bell contour, '
+            'another gamma or another throat-to-exit ratio does not inherit '
+            'these numbers. THIS IS NOT A VERDICT: the verdict is the '
+            'solver\'s own "converged" flag next to it, this advisory only '
+            'states the pre-run expectation with the measurement behind it, '
+            'and it never blocks the run.'),
+    }
+
+    cfd = {
+        'converged': bool(sonuc['converged']),
+        'convergence_basis': sonuc['convergence_basis'],
+        'iterations': int(sonuc['iterations']),
+        'max_iterations': int(etkin_tavan),
+        'max_iterations_basis': (
+            f'Effective iteration budget {etkin_tavan} '
+            + ('(caller supplied "max_iterations")'
+               if tavan_kaynagi == 'caller' else
+               '(the caller did not supply "max_iterations", so the '
+               'solver\'s own DEFAULT_MAX_ITERS is used - the endpoint does '
+               'not define a second ceiling)')
+            + f'. Accepted band [{iter_alt}, {iter_ust}]: below the lower '
+              f'bound the run stops before the CFL ramp and the settling '
+              f'window can complete, above the upper bound it leaves the '
+              f'measured runtime wallet (grid.levels.worst_case_s). A run '
+              f'that reaches this budget returns converged=False with the '
+              f'solver\'s own reason; nothing is hidden and no verdict is '
+              f'invented.'),
+        'max_iterations_source': tavan_kaynagi,
+        'limiter_frozen_at_iter': sonuc['limiter_frozen_at_iter'],
+        'limiter_freeze_count': int(sonuc['limiter_freeze_count']),
+        'residual_history': residual,
+        'shock_sensor_columns': int(sonuc['shock_sensor_columns']),
+        'shock_sensor_basis': sonuc['shock_sensor_basis'],
+        'budget': {
+            'mass_flow_in_kg_s': sonuc['mass_flow_in_kg_s'],
+            'mass_flow_out_kg_s': sonuc['mass_flow_out_kg_s'],
+            'mass_balance_rel': sonuc['mass_balance_rel'],
+            'energy_flux_in_W': sonuc['energy_flux_in_W'],
+            'energy_flux_out_W': sonuc['energy_flux_out_W'],
+            'energy_balance_rel': sonuc['energy_balance_rel'],
+            'wall_mass_flux_kg_s': sonuc['wall_mass_flux_kg_s'],
+            '_basis': sonuc['budget_basis'],
+        },
+        'throat': sonuc['throat'],
+        'section_average': sonuc['section_average'],
+        'wall_pressure': {
+            'z_m': sonuc['wall_pressure_z_m'],
+            'pressure_Pa': sonuc['wall_pressure_Pa'],
+            '_basis': sonuc['wall_pressure_basis'],
+        },
+        'field': field,
+        'separation': ayrilma,
+        'inlet_conditioning': giris_uyari,
+        'grid': {
+            'resolution': seviye,
+            'ni': int(ni),
+            'nj': int(nj),
+            'n_cells': int(ni * nj),
+            'z_inlet_m': float(z_nodes[0]),
+            'z_exit_m': float(z_nodes[-1]),
+            'r_inlet_m': float(r_nodes[0]),
+            'r_throat_m': float(r_nodes[i_bogaz]),
+            'r_exit_m': float(r_nodes[-1]),
+            'levels': {ad: {'ni': a, 'nj': b, 'n_cells': a * b,
+                            'worst_case_s': CFD_RESOLUTION_WORST_CASE_S[ad]}
+                       for ad, (a, b) in CFD_RESOLUTION_LEVELS.items()},
+            'default_resolution': CFD_DEFAULT_RESOLUTION,
+            '_basis': (
+                'H-type structured axisymmetric grid built from the published '
+                'contour: the wall polyline is resampled onto ni+1 uniform '
+                'axial stations by linear interpolation and the radial '
+                'distribution is uniform from axis to wall (stage 1 of the '
+                'CFD design document). Resolution levels are a whitelist, not '
+                'a free number; "worst_case_s" is the MEASURED wall clock of '
+                'a run that never converges (i.e. runs to the solver '
+                'iteration ceiling) on an M4 Max, per kernel backend. '
+                'TWO THROAT RADII, ON PURPOSE: r_throat_m here is the '
+                'smallest resampled NODE radius and it is what this endpoint '
+                'measures the contraction ratio and the pre-flight throat '
+                'gate from, whereas the solver\'s own throat.radius_m is the '
+                'CELL COLUMN wall radius (the mean of the two node radii '
+                'bounding that column). They are close but not equal by '
+                'construction; neither is rewritten to match the other.'),
+        },
+        'inputs': dict(sonuc['inputs'], **{
+            'P_ambient_Pa': sayisal['P_ambient_Pa'],
+            'separation_factor': sep_faktor,
+            'max_iterations': int(etkin_tavan),
+            'max_iterations_source': tavan_kaynagi,
+            'contour_field': kontur_alani,
+            'contour_points': int(kontur_pts.shape[0]),
+            'resolution': seviye,
+            'back_pressure_basis': (
+                'Pb_Pa was supplied, so the outlet applies it wherever the '
+                'face-normal Mach number is subsonic.' if Pb is not None else
+                'Pb_Pa was NOT supplied, so the outlet is a pure zeroth order '
+                'extrapolation. That is the correct treatment for a fully '
+                'supersonic exit, but it means an internal shock driven by a '
+                'back pressure CANNOT appear in this run: send Pb_Pa to look '
+                'for one.'),
+        }),
+        'kernel_backend': arka_uc,
+        'kernel_backend_basis': sonuc['kernel_backend_basis'],
+        'not_modelled': sonuc['not_modelled'],
+        'assumptions': sonuc['assumptions'],
+        'solver_runtime_s': sonuc['runtime_s'],
+        'runtime_s': _time.perf_counter() - t_baslangic,
+        'runtime_basis': (
+            f'solver_runtime_s is the steady driver itself, runtime_s the '
+            f'whole request (validation, grid, solve, separation, thinning). '
+            f'Measured worst case for this level and backend: '
+            f'{CFD_RESOLUTION_WORST_CASE_S[seviye].get(arka_uc)} s.'),
+    }
+    return jsonify({'status': 'success', 'cfd': sanitize_json_values(cfd)})
+
+
 @app.route('/api/chemical-database', methods=['GET'])
 def get_chemical_database():
     """Get chemical species database information"""
@@ -9167,8 +10119,13 @@ def flow_analysis():
         n_stations = int(_flow_float(data, 'n_stations', 45))
         separation_factor = _flow_float(data, 'separation_factor', 0.40)
         wall_temperature = _flow_float(data, 'wall_temperature', 800.0)
-        friction_loss_fraction = _flow_float(
-            data, 'friction_loss_fraction', 0.015)
+        # GÖÇ (16 Ağu 2026): varsayılan ARTIK sabit DEĞİL. Alan gövdede
+        # yoksa None geçilir; çözücü o zaman ölçülen sınır tabakası kesrini
+        # yayımlar (yayımlanamıyorsa 1,5 % sabitine beyanla düşer). Burada
+        # sabiti varsayılan olarak geçmek, her isteği "kullanıcı açıkça
+        # 0.015 istedi" (source='user') hâline getirir ve göçü SESSİZCE
+        # iptal ederdi. Kullanıcı alanı gönderirse üstünlük yine onundur.
+        friction_loss_fraction = _flow_float(data, 'friction_loss_fraction')
     except ValueError as exc:
         return jsonify({'status': 'error', 'error': str(exc)}), 400
 

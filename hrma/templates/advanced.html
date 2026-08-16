@@ -745,6 +745,12 @@
          + deneysel korelasyon raporu (CORRELATION) -->
     <script src="/static/js/panels/uncertainty_panel.js"></script>
     <script src="/static/js/panels/correlation_panel.js"></script>
+    <!-- Analiz Merkezi (dalga B çerçevesi): önce çekirdek, sonra kiracılar
+         (kayıt sırası sözleşmesi — kiracı register çağırırken
+         window.AnalysisCenter tanımlı olmalı). cfd_panel.js Merkez'in ilk
+         kiracısıdır; parti 26'da dolduruldu (68 bekçi: tests/test_cfd_panel.py). -->
+    <script src="/static/js/analysis_center.js"></script>
+    <script src="/static/js/panels/cfd_panel.js"></script>
     <script>
         // =============================================================
         // T12 (2026-08-03) — TEK ARAÇ TANIMI SÖZLEŞMESİ
@@ -875,6 +881,17 @@
                 motorType: 'hybrid',
                 resultsProvider: function () { return window.currentResults; },
             });
+            // Analiz Merkezi (dalga B): bileşen ağacı + koşum kartı + sonuç
+            // görüntüleyici. Çapa güvertenin ALTINDA (#analysis-center-anchor).
+            // Merkez sonuç basıcısını kendisi sarar (hookNames varsayılanı);
+            // her hesaptan sonra uygulanabilirlik yeniden ölçülür.
+            if (window.AnalysisCenter) {
+                AnalysisCenter.init({
+                    anchorId: 'analysis-center-anchor',
+                    motorType: 'hybrid',
+                    resultsProvider: function () { return window.currentResults; },
+                });
+            }
             // Dalga 3: güverte altına kapsam notu (el hesabı sınırları)
             var adDockEl = document.getElementById('analysisDock');
             if (adDockEl && !document.getElementById('ad-scope-note')) {
@@ -2058,6 +2075,13 @@
             <!-- Analysis Dock çapası: güverte JS ile bu çapanın ÖNÜNE kurulur
                  (resultsPanel içinde olduğundan hesap bitmeden görünmez) -->
             <div id="analysis-dock-anchor"></div>
+
+            <!-- Analiz Merkezi çapası (dalga B çerçevesi): Merkez JS ile bu
+                 çapanın ÖNÜNE kurulur, yani güvertenin HEMEN ALTINA düşer.
+                 Mevcut güverte YERİNDE KALIR — tasarım §4 gereği paneller
+                 tek tek Merkez'e taşınacak, taşıma doğrulanmadan eski yeri
+                 kaldırılmaz. docs/mimari/analiz-merkezi-tasarimi.md -->
+            <div id="analysis-center-anchor"></div>
 
             <!-- Export/CAD Actions Panel -->
             <div id="exportActionsPanel" class="panel" style="display: none; margin-top: 20px; clear: both;">

@@ -62,7 +62,7 @@ aynıdır. **Durum sütunu o belgeden değil, bugünkü koddan ölçülmüştür
 | B2 | Enjektör delik deseni | **Çiziliyor** (gerçek delik yerleşimi) |
 | B3 | Lüle konturu gerçek profilden | **Bitti** — üç motor da `sample_nozzle_inner_contour` kullanıyor, bekçi `tests/test_motor_geometri_yayimi.py` |
 | B4 | Kaynağa göre renklendirme | **Bitti** — `SOURCE_COLORS` tablosu; hesaplanan / kullanıcı / varsayım / modellenmemiş yüzeyler ayrı renk |
-| B5 | Katı tane yanma animasyonu | Kısmen (viz3d belgesinde "yanma animasyonu" yazılı; kapsamı ayrıca ölçülmedi) |
+| B5 | Katı tane yanma animasyonu | **Gerçek seriden (parti 25+26):** sahte sqrt-lerp söküldü, kütle-denge özdeşliği bağlandı; parti 26'da `port_area` yayını + türetmesiz kip (BATES-dışı eşdeğer-port gerçeği bekçili). Kalan yalnız B7 render sınıfı süsleme |
 | B6 | Kesit (cutaway) görünümü | **Bitti** — `buildSolid(..., cutaway)`, `CUT_PHI_START/LENGTH` |
 | B7 | Fotogerçekçi render | Açık |
 
@@ -101,20 +101,21 @@ aynıdır. **Durum sütunu o belgeden değil, bugünkü koddan ölçülmüştür
 
 | ID | İş | Ölçülen durum |
 |---|---|---|
-| F1 | CFD (lüle iç akışı, ayrılma, şok) | **Yarı-1B karşılığı var**: `flow/quasi1d.py` + `flow/separation.py`, katı ve hibritte bağlı (101 test). **Gerçek CFD yok** — planlı v3 |
-| F2 | Yanma kararsızlığı | **Akustik mod çekirdeği var** (`acoustic_modes.py`, hibrit 2 / katı 3 çağrı, 36 test). Yanma tepkisi modeli açık |
+| F1 | CFD (lüle iç akışı, ayrılma, şok) | **Gerçek CFD çekirdeği DEPODA** (parti 23+25, `hrma/cfd/`: HLLC+MUSCL axisym Euler, şok yakalama, 36+ bekçi, numba 1,98×); yarı-1B `flow/quasi1d.py` + `flow/separation.py` ayrıca bağlı (101 test). Ürünleşme (dalga B: ayrılma köprüsü + `/api/cfd/nozzle` + Analiz Merkezi) 16 Ağu'da sahada. **Viskoz/türbülans FINAL kapsamında (Berke kararı 16 Ağu)** — tasarım turu başladı |
+| F2 | Yanma kararsızlığı | **F2a ÇEKİRDEK DEPODA (16 Ağu, parti 26):** `hrma/stability/` (Γ²/τ_c, chug gerçek çevrimi + nötr eğri, hibrit LFI Karabeyoglu Eq.15 kalibre sabitli + yayımlanmış test tabloları TAM çaprazlı, Culick&Yang lüle sönümü + R_crit, QSHOD zarf mekanizması) — 233 bekçi, hüküm/eşik ayrımı yapısal. Tasarım + 8 Berke kararı: `f2-yanma-tepkisi-tasarimi.md` §8.1. Akustik mod çekirdeği (`acoustic_modes.py`, 36 test) değişmeden ithal ediliyor. Kalan: F2b motor bağlamaları + sıvı akustik göçü (manifestolu) + künyeli (A,B)/termal tablolar, F2c panel |
 | F3 | Test verisi korelasyonu | Altyapı var (`validation/correlation_runner.py`, `experiment_db.py`, `validation_records/`, `correlation_panel.js`). **Dış kullanıcı verisiyle kapanmış döngü YOK** |
 | F4 | Çok fazlı akış / tanecik yükü | **İki-faz kaybı var** (`two_phase_loss.py`, katıda 3 çağrı, 37 test) |
 
 **Toplu okuma (15 Ağustos akşamı güncellendi):** 3 Ağustos yol haritasının
 v2.7 / v2.8 / v3'e dağıttığı işlerin büyük bölümü **2.6.27 kampanyasında**
 yapıldı; 15 Ağustos partileriyle C3, C5, A11, düzlemsel FEA ve D2'nin
-kullanıcı yüzü de kapandı. Kalan boşluklar adı konabilir durumda:
-**gerçek CFD (v3'ün kendisi — başlamadı)**, **F2 yanma tepkisi modeli**,
-**F3 korelasyon döngüsünün dış veriyle kapanması** (Ayberk), E5 ayrı
-duyarlılık taraması, B5 tam yanma animasyonu + B7 render, sıvı cidar
-FEA'sının ürünleşmesi (dış yüzey eğrilik tabanı — parti 22'de sahada) ve
-`test_no_fabricated_constant_outputs` borcu (parti 22'de sahada).
+kullanıcı yüzü de kapandı. Kalan boşluklar adı konabilir durumda
+(16 Ağu güncellemesi): **viskoz/türbülans CFD (FINAL kapsamında — Berke
+kararı; Euler çekirdek + ürünleşme + entegral BL parti 23-26'da BİTTİ)**,
+**F2b/F2c (çekirdek parti 26'da girdi)**, **F3 dış veriyle kapanma**
+(Ayberk), E5 ayrı duyarlılık taraması, B7 render, sıvı arayüz form
+alanları ve defterin küçük kalemleri. Sabit-çıktı borcu 59→4'e indi
+(parti 26, iki yönlü eşik); sıvı cidar FEA'sı parti 24'te ürünleşti.
 
 ---
 
@@ -201,8 +202,8 @@ dosyalarında/kampanya kaydında açıkça yazılı olanlar:
 | ~~**C5** gerçek-gaz düzeltmesi~~ KAPANDI (15 Ağu, `9e1410b`) | M | ölçülen gerçek hata ~%14'tü; Z uygulandı, mutasyon-denetimli bekçili |
 | **F3** korelasyon döngüsünün kapanması | L | Dış kullanıcı verisi gerekiyor |
 | ~~Katı tanesi için 2B düzlemsel FEA kipi~~ KAPANDI (15 Ağu, `fb55034`) | L | V2.7 Aşama C tamam: Lamé doğrulamalı düzlem şekil değiştirme çözücüsü + uç + panel |
-| **Gerçek CFD** | XL | v3/v3.5; performans kulvarıyla birlikte |
-| Yanma tepkisi modeli (F2 tamamlanması) | XL | Akustik modlar hazır, tepki fonksiyonu yok |
+| **Gerçek CFD** | XL | Euler çekirdek + 1B BİTTİ (parti 23+25); dalga B ürünleşme sahada (16 Ağu); kalan: **viskoz/türbülans — FINAL kapsamında, Berke kararı 16 Ağu** (`cfd-viskoz-tasarimi.md` tasarım turu açıldı) |
+| Yanma tepkisi modeli (F2 tamamlanması) | L (küçüldü) | F2a çekirdek GİRDİ (parti 26, 233 bekçi); kalan F2b bağlamaları + F2c panel |
 | Windows arayüz kalemleri | S | Windows'ta doğrulanmadı, fotoğrafla teyit bekliyor |
 | Isp / ısı-akısı adlandırma tutarlılığı | S | |
 | Sıvı arayüz form alanları (cıvata / vana / hat girdileri) | M | API'de var, formda yok — Katman A kusuru sınıfı |

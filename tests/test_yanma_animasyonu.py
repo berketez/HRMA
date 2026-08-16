@@ -16,11 +16,19 @@ Kapattığı kusur (ölçüldü 2026-08-15, HEAD 09f8ca9):
   Yani kullanıcı, kendi tasarımının yanışını izlediğini sanarken ekranda
   hiçbir hesaba bağlı olmayan bir animasyon dönüyordu.
 
-GERÇEK KAYNAK. Katı çözücü web ilerlemesini zaman marşında tutar ama
-YAYIMLAMAZ (``_published_thrust_curve`` yalnız time/thrust/pressure/
-burn_area/mass_flow verir; motorun kendi eğri sözlüğündeki ``port_area``
-dizisi dışarı çıkmaz). Web geçmişi bu yüzden çözücünün KENDİ kütle üretim
-özdeşliğinin tersinden alınır:
+GERÇEK KAYNAK — İKİ KATMAN (ikincisi parti 26'da eklendi).
+
+  * ASIL: çözücü artık ``thrust_curve.port_area`` (m²) yayımlıyor
+    (``_published_thrust_curve``, parti 26). Dairesel portta eşdeğer
+    yarıçap TÜRETMESİZ okunur: r(t) = sqrt(A_port(t)/π). Kip
+    ``solid_port_area``.
+
+  * YEDEK: alan taşımayan yanıtlarda (parti 26 öncesi kaydedilmiş sonuç
+    dosyaları, bayat istemci) aşağıdaki türetme AYNEN çalışmaya devam
+    eder — kip ``solid_mass_balance``. Bu dosyadaki eski bekçilerin
+    tamamı o yolu kilitlemeye devam ediyor.
+
+Yedek yolun dayanağı, çözücünün KENDİ kütle üretim özdeşliğinin tersidir:
 
     m_dot(t) = rho_p * A_b(t) * r_b(t)     (solid_rocket_engine.py:8420)
  -> r_b(t)   = m_dot(t) / (rho_p * A_b(t))
@@ -94,6 +102,7 @@ def _prelude():
         _extract('num', src),
         _extract('sampleSeries', src),
         _const_block('RADIAL_REGRESSION_GRAINS', src),
+        _extract('solidPortRadiusHistory', src),
         _extract('solidWebHistory', src),
         _extract('portRegressionMode', src),
         _extract('portRadiusAt', src),
@@ -456,6 +465,7 @@ class TestBeyanCipleri:
 
     @pytest.mark.parametrize('mode,kind', [
         ('port_history', 'computed'),
+        ('solid_port_area', 'computed'),
         ('solid_mass_balance', 'computed'),
         ('not_modelled', 'missing'),
         ('no_data', 'missing'),
@@ -468,26 +478,29 @@ class TestBeyanCipleri:
         assert "'%s'" % kind in renkler or '%s:' % kind in renkler
 
     def test_her_kip_bir_cip_uretir(self):
-        for mode in ('port_history', 'solid_mass_balance', 'not_modelled',
-                     'no_data'):
+        for mode in ('port_history', 'solid_port_area', 'solid_mass_balance',
+                     'not_modelled', 'no_data'):
             defs = self._chip_defs(mode)
             assert defs and defs[0]['text'].strip(), mode
 
     def test_uc_yuzey_sinirlamasi_beyan_edilir(self):
         """Uclar yaniyorsa (cozucu beyani) 3B blok eksenel kisalmayi
         GOSTERMEZ; bu sessiz kalmaz, ayri bir 'missing' cip soyler."""
-        defs = self._chip_defs('solid_mass_balance', ends_burn=True)
-        assert len(defs) == 2
-        assert defs[1]['kind'] == 'missing'
-        assert 'end-face' in defs[1]['text']
+        for mode in ('solid_mass_balance', 'solid_port_area'):
+            defs = self._chip_defs(mode, ends_burn=True)
+            assert len(defs) == 2, mode
+            assert defs[1]['kind'] == 'missing'
+            assert 'end-face' in defs[1]['text']
         # Animasyon zaten yokken ikinci cip eklenmez (gurultu yapmaz)
         assert len(self._chip_defs('no_data', ends_burn=True)) == 1
 
     def test_cip_metinleri_i18n_koprusunden_gecer(self):
         govde = _extract('portRegressionChipDefs')
         anahtarlar = re.findall(r"T\('([^']+)',\s*\n?\s*'([^']+)'\)", govde)
-        assert len(anahtarlar) == 5, (
+        assert len(anahtarlar) == 6, (
             'cip metinlerinden bazilari T() koprusunu atliyor: %r' % (anahtarlar,))
+        assert 'viz.chip.portRegPortArea' in dict(anahtarlar), (
+            'yeni kaynak (yayimlanan port alani) icin cip anahtari yok')
         for anahtar, yedek in anahtarlar:
             assert anahtar.startswith('viz.chip.'), anahtar
             assert yedek.isascii(), (
@@ -591,3 +604,318 @@ class TestHudYayini:
             'HUD gerilemenin kaynagini beyan etmiyor')
         assert 'portRadiusAt(d, st.time, this._portRegMode)' in tick, (
             'port yaricapi kipten bagimsiz hesaplaniyor')
+
+
+# ----------------------------------------------------------------------
+# 8. ASIL KAYNAK — çözücünün YAYIMLADIĞI port akış kesiti (parti 26)
+# ----------------------------------------------------------------------
+#
+# Kapanan borç (bulgu defteri): çözücü ``port_area`` dizisini zaman
+# marşında üretiyor ama ``_published_thrust_curve`` dışarı vermiyordu;
+# animasyon bu yüzden webi kütle dengesinden GERİ TÜRETMEK zorundaydı.
+# Alan yayımlandı; animasyon artık türetmesiz yolu kullanır, alan yoksa
+# (eski/bayat yanıt) türetme YEDEK olarak yerinde durur.
+
+
+@pytest.fixture(scope='module')
+def viz_verisi_eski(viz_verisi):
+    """Parti 26 ÖNCESİ yanıtın taklidi: thrust_curve'de port_area yok.
+
+    (Test altyapısı — kullanıcıya gösterilen veri değil; amaç eski sonuç
+    dosyalarının kırılmadığını ÖLÇMEK.)
+    """
+    egri = {k: v for k, v in viz_verisi['thrust_curve'].items()
+            if k not in ('port_area', 'port_area_basis')}
+    return dict(viz_verisi, thrust_curve=egri)
+
+
+class TestPortAlaniSozlesmesi:
+    """Yayımlanan alanın kendisi: hizalı, künyeli, çizilen portla tutarlı."""
+
+    def test_port_alani_yayimlaniyor(self, katilar):
+        tc = katilar['thrust_curve']
+        assert isinstance(tc.get('port_area'), list), (
+            'port_area yayimlanmiyor — animasyon turetmeye geri duser')
+        assert len(tc['port_area']) == len(tc['time'])
+        assert all(isinstance(a, float) and a > 0 for a in tc['port_area'])
+
+    def test_seri_cozucununki_ile_ayni_indeks_kumesinden(self, katilar):
+        """Seyreltme AYNI indekslerden geçmeli; hizasiz seri okunamaz."""
+        tc = katilar['thrust_curve']
+        n = len(tc['time'])
+        for ad in ('thrust', 'pressure', 'burn_area', 'mass_flow', 'port_area'):
+            assert len(tc[ad]) == n, ad
+
+    def test_alan_kunyeli(self, katilar):
+        """Sayının birimi ve tane tipine göre ANLAMI beyan edilir."""
+        temel = katilar['thrust_curve'].get('port_area_basis') or ''
+        assert 'm^2' in temel, 'birim beyani yok'
+        for parca in ('end_burner', 'slotted', 'equivalent circular',
+                      '_port_flow_area'):
+            assert parca in temel, 'kunyede eksik: %s' % parca
+
+    def test_baslangic_yaricapi_cizilen_portla_ayni(self, katilar):
+        """sqrt(A0/pi), 3B sahnenin çizdiği başlangıç yarıçapı olmalı;
+        değilse animasyon t=0'da sıçrar (ölçüldü: fark tam 0,000 mm)."""
+        tc = katilar['thrust_curve']
+        gd = katilar['grain_design']
+        r0 = math.sqrt(tc['port_area'][0] / math.pi) * 1000.0
+        assert r0 == pytest.approx(gd['inner_diameter_mm'] / 2.0, abs=1e-6)
+
+
+class TestPortAlaniAnimasyonu:
+    """Animasyon yayımlanan seriyi KULLANIYOR mu, türetmesiz mi?"""
+
+    def test_kip_yayimlanan_alani_tercih_eder(self, katilar, viz_verisi):
+        cikti = _run(
+            'const md = %s;\n' % json.dumps(viz_verisi) +
+            'const pa = solidPortRadiusHistory(md);\n'
+            'const wh = solidWebHistory(md);\n'
+            'const mode = portRegressionMode({portShape: "circular", '
+            'grainType: md.grain_design.grain_type, hasPortHistory: false, '
+            'hasPortArea: !!pa, hasWebHistory: !!wh});\n'
+            'process.stdout.write(JSON.stringify({mode: mode, '
+            'kaynak: pa && pa.source, n: pa && pa.radius.length, '
+            'r0mm: pa && pa.r0 * 1000, rEndMm: pa && pa.rEnd * 1000}));'
+        )
+        assert cikti['mode'] == 'solid_port_area', (
+            'yayimlanan alan varken yine turetme kullaniliyor')
+        assert cikti['kaynak'] == 'solid_port_area'
+        assert cikti['n'] == len(viz_verisi['thrust_curve']['time'])
+        gd = katilar['grain_design']
+        assert cikti['r0mm'] == pytest.approx(gd['inner_diameter_mm'] / 2.0)
+
+    def test_yaricap_serinin_kendisinden_okunuyor(self, katilar, viz_verisi):
+        """Her örnekte r = sqrt(A/pi): ara değerleme ya da yasa YOK."""
+        cikti = _run(
+            'const pa = solidPortRadiusHistory(%s);\n' % json.dumps(viz_verisi) +
+            'process.stdout.write(JSON.stringify(pa.radius));'
+        )
+        alanlar = viz_verisi['thrust_curve']['port_area']
+        for A, r in zip(alanlar, cikti):
+            assert r == pytest.approx(math.sqrt(A / math.pi), rel=1e-12)
+
+    def test_web_sonu_cozucunun_beyaniyla_ortusuyor(self, katilar, viz_verisi):
+        """dw = r(t_son) − r(0), çözücünün beyan ettiği web_burnout_mm'ye
+        oturur (ölçüldü: 34,954 mm / 35,000 mm = %0,13)."""
+        gd = katilar['grain_design']
+        cikti = _run(
+            'const md = %s;\n' % json.dumps(viz_verisi) +
+            'const dims = %s;\n' % json.dumps(_dims(gd)) +
+            'dims.portAreaHist = solidPortRadiusHistory(md);\n'
+            'const tb = %r;\n' % katilar['burn_time'] +
+            'process.stdout.write(JSON.stringify({'
+            'w0: burnedWebAt(dims, 0, "solid_port_area"), '
+            'wEnd: burnedWebAt(dims, tb, "solid_port_area")}));'
+        )
+        assert cikti['w0'] == pytest.approx(0.0, abs=1e-9)
+        assert cikti['wEnd'] == pytest.approx(gd['web_burnout_mm'], rel=0.005)
+
+    def test_port_geriliyor_ve_dogrusal_degil(self, katilar, viz_verisi):
+        """Gerçek seri: BATES regresif, ilk yarı ikinciden hızlı geriler.
+        Düz ara değer ya da sqrt yasası bu bekçiyi geçemez."""
+        tb = katilar['burn_time']
+        cikti = _run(
+            'const md = %s;\n' % json.dumps(viz_verisi) +
+            'const dims = %s;\n' % json.dumps(_dims(katilar['grain_design'])) +
+            'dims.portAreaHist = solidPortRadiusHistory(md);\n'
+            'const ts = [0, 0.25, 0.5, 0.75, 1].map(f => f * %r);\n' % tb +
+            'process.stdout.write(JSON.stringify('
+            'ts.map(t => portRadiusAt(dims, t, "solid_port_area"))));'
+        )
+        for onceki, simdiki in zip(cikti, cikti[1:]):
+            assert simdiki > onceki, 'port gerilemesi durdu: %r' % (cikti,)
+        ilk_yari = cikti[2] - cikti[0]
+        ikinci_yari = cikti[4] - cikti[2]
+        assert ilk_yari > ikinci_yari * 1.05, (
+            'gerileme dogrusal gorunuyor (%.3f / %.3f mm)'
+            % (ilk_yari, ikinci_yari))
+
+    def test_sahne_yayimlanan_alani_gercekten_okuyor(self):
+        """Kablolama bekçisi: saf fonksiyon doğru olsa da sahneye bağlı
+        değilse animasyon yine türetmeyle sürülürdü (ölü düzeltme)."""
+        src = _source()
+        assert 'portAreaHist: solidPortRadiusHistory(md)' in src, (
+            'yayimlanan alan dims sozlugune bağlanmamış')
+        govde = src[src.index('MotorScene.prototype._resolvePortRegression'):
+                    src.index('function chipAnchorMm(')]
+        assert 'hasPortArea: !!d.portAreaHist' in govde, (
+            'kip karari yayimlanan alani hic sormuyor')
+
+    def test_iki_yol_ayni_egriyi_veriyor(self, katilar, viz_verisi):
+        """ÇAPRAZ KANIT: yayımlanan alandan okunan yarıçap ile kütle
+        dengesinden türetilen yarıçap aynı eğridir (ölçüldü: fark
+        ort 0,008 mm / maks 0,027 mm — kalan pay trapezin payıdır).
+        Ayrışırlarsa ya yayın ya türetme bozulmuştur."""
+        cikti = _run(
+            'const md = %s;\n' % json.dumps(viz_verisi) +
+            'const dims = %s;\n' % json.dumps(_dims(katilar['grain_design'])) +
+            'dims.portAreaHist = solidPortRadiusHistory(md);\n'
+            'dims.webHist = solidWebHistory(md);\n'
+            'const ts = md.thrust_curve.time;\n'
+            'const out = [];\n'
+            'for (let i = 0; i < ts.length; i++) {\n'
+            '  out.push([portRadiusAt(dims, ts[i], "solid_port_area"),\n'
+            '            portRadiusAt(dims, ts[i], "solid_mass_balance")]);\n'
+            '}\n'
+            'process.stdout.write(JSON.stringify(out));'
+        )
+        farklar = [abs(a - b) for a, b in cikti]
+        ort = sum(farklar) / len(farklar)
+        assert ort < 0.02, 'ortalama fark %.4f mm' % ort
+        assert max(farklar) < 0.05, 'en buyuk fark %.4f mm' % max(farklar)
+
+
+class TestPortAlaniYokkenYedekYol:
+    """MUTASYON: yayın geri alınırsa (bayat yanıt) yedek yol devralır."""
+
+    def test_alan_silinince_kutle_dengesine_dusuyor(self, katilar,
+                                                    viz_verisi_eski):
+        cikti = _run(
+            'const md = %s;\n' % json.dumps(viz_verisi_eski) +
+            'const pa = solidPortRadiusHistory(md);\n'
+            'const wh = solidWebHistory(md);\n'
+            'const mode = portRegressionMode({portShape: "circular", '
+            'grainType: md.grain_design.grain_type, hasPortHistory: false, '
+            'hasPortArea: !!pa, hasWebHistory: !!wh});\n'
+            'process.stdout.write(JSON.stringify({mode: mode, pa: pa, '
+            'whVar: !!wh}));'
+        )
+        assert cikti['pa'] is None, 'alan yokken seri UYDURULDU'
+        assert cikti['whVar'] is True, 'yedek turetme calismiyor'
+        assert cikti['mode'] == 'solid_mass_balance', (
+            'eski yanitta animasyon susuyor — bayat sonuc dosyalari kirilir')
+
+    def test_yedek_yol_ayni_gerilemeyi_ciziyor(self, katilar, viz_verisi_eski):
+        """Yedek yol donuk bir port değil, aynı gerilemeyi verir."""
+        gd = katilar['grain_design']
+        tb = katilar['burn_time']
+        cikti = _run(
+            'const md = %s;\n' % json.dumps(viz_verisi_eski) +
+            'const dims = %s;\n' % json.dumps(_dims(gd)) +
+            'dims.webHist = solidWebHistory(md);\n'
+            'const ts = [0, 0.5, 1].map(f => f * %r);\n' % tb +
+            'process.stdout.write(JSON.stringify('
+            'ts.map(t => portRadiusAt(dims, t, "solid_mass_balance"))));'
+        )
+        assert cikti[0] == pytest.approx(gd['inner_diameter_mm'] / 2.0)
+        assert cikti[2] > cikti[1] > cikti[0]
+
+    def test_cip_hangi_yolun_kullanildigini_soyler(self):
+        """Beyan çipi iki yolu AYIRIR: kullanıcı hangi kaynağı gördüğünü
+        bilir (aynı metin çıkarsa yol değişimi ekranda kaybolurdu)."""
+        src = _source()
+        govde = _extract('portRegressionChipDefs', src)
+        assert "mode === 'solid_port_area'" in govde
+        assert 'viz.chip.portRegPortArea' in govde
+        assert 'viz.chip.portRegMassBalance' in govde
+
+
+class TestPortAlaniSahteVeriYasagi:
+    """Yarım/bozuk/sabit alandan seri UYDURULMAZ."""
+
+    @pytest.mark.parametrize('bozma,aciklama', [
+        ('delete md.thrust_curve.port_area', 'alan yok'),
+        ('md.thrust_curve.port_area = null', 'alan null'),
+        ('md.thrust_curve.port_area = md.thrust_curve.port_area.slice(0, 5)',
+         'dizi boylari tutmuyor'),
+        ('md.thrust_curve.port_area = md.thrust_curve.port_area.map(() => 0)',
+         'alan sifir'),
+        ('md.thrust_curve.port_area = md.thrust_curve.port_area.map(() => -1)',
+         'alan negatif'),
+        ('md.thrust_curve.port_area = md.thrust_curve.port_area.map(() => "x")',
+         'sayisal degil'),
+        ('md.thrust_curve.time = md.thrust_curve.time.slice().reverse()',
+         'zaman sirali degil'),
+        ('md.thrust_curve.port_area = md.thrust_curve.port_area.map(() => 1e-3)',
+         'seri sabit (uc yanmali tane)'),
+    ])
+    def test_bozuk_alanda_null_doner(self, viz_verisi, bozma, aciklama):
+        cikti = _run(
+            'const md = %s;\n' % json.dumps(viz_verisi) +
+            '%s;\n' % bozma +
+            'process.stdout.write(JSON.stringify(solidPortRadiusHistory(md)));'
+        )
+        assert cikti is None, '%s — yine de seri uretildi' % aciklama
+
+    def test_alan_varken_de_dairesel_olmayan_kesit_donuk(self, katilar,
+                                                        viz_verisi):
+        """Kip kapısı alan yayımlandı diye AÇILMAZ: yıldız/finocyl/çok
+        portlu tanede ve uç yanmalıda port yine donuk kalır."""
+        for sekil, tane in (('star', 'star'), ('finocyl', 'finocyl'),
+                            ('multiport', 'wagon_wheel'),
+                            ('circular', 'end_burner'),
+                            ('star', 'bates')):
+            cikti = _run(
+                'const md = %s;\n' % json.dumps(viz_verisi) +
+                'const dims = %s;\n' % json.dumps(_dims(katilar['grain_design'])) +
+                'dims.portAreaHist = solidPortRadiusHistory(md);\n'
+                'const mode = portRegressionMode({portShape: %r, '
+                'grainType: %r, hasPortHistory: false, '
+                'hasPortArea: !!dims.portAreaHist, hasWebHistory: true});\n'
+                % (sekil, tane) +
+                'process.stdout.write(JSON.stringify({mode: mode, '
+                'r: [0, 2].map(t => portRadiusAt(dims, t, mode))}));'
+            )
+            assert cikti['mode'] == 'not_modelled', (sekil, tane)
+            assert cikti['r'][0] == cikti['r'][1], (
+                'modellenmemis kesit animasyonlu: %s/%s' % (sekil, tane))
+
+
+# ----------------------------------------------------------------------
+# 9. Kip kapısının ÇÖZÜCÜDEN gelen gerekçesi (Python tarafı ölçümü)
+# ----------------------------------------------------------------------
+
+class TestCozucuPortAlaniAnlami:
+    """Kapı neden yalnız dairesel port ailesine açık? Çözücünün kendi
+    ``_port_flow_area`` tanımı ölçülerek gösterilir — bu ölçüm, defterdeki
+    'yayımlanınca BATES dışı taneler de animasyonlanır' beklentisinin
+    NEDEN karşılanamadığının kanıtıdır.
+    """
+
+    TABAN = dict(propellant_type='apcp', chamber_diameter=100.0,
+                 grain_length=500.0, core_diameter=30.0, chamber_pressure=40)
+
+    @staticmethod
+    def _seri(grain_type, taban):
+        import numpy as np
+        from hrma.engines.solid_rocket_engine import SolidRocketEngine
+        m = SolidRocketEngine(grain_type=grain_type, **taban)
+        c = m.calculate_thrust_curve()
+        A = np.asarray(c['port_area'], dtype=float)
+        t = np.asarray(c['time'], dtype=float)
+        ab = np.asarray(c['burn_area'], dtype=float)
+        mdot = np.asarray(c['mass_flow'], dtype=float)
+        rb = np.where(ab > 0, mdot / (m.rho_p * np.maximum(ab, 1e-30)), 0.0)
+        w = np.concatenate([[0.0],
+                            np.cumsum(0.5 * (rb[1:] + rb[:-1]) * np.diff(t))])
+        return A, w, m.D_core / 2.0
+
+    @pytest.mark.parametrize('grain_type', ['bates', 'star', 'wagon_wheel',
+                                            'finocyl'])
+    def test_dairesel_esdeger_ailede_alan_webi_tekrar_eder(self, grain_type):
+        """A_port = pi*(r_core+w)^2: yayımlanan alan, web geçmişinin
+        taşıdığı bilgiyi tekrar eder (ölçülen sapma <= 0,031 mm, trapezin
+        payı). Yıldız/finocyl'de bu bir GEOMETRİ değil AKI modelidir —
+        gerçek kesit ofsetlenmiş poligondur, o yüzden kip kapalı kalır."""
+        import numpy as np
+        A, w, r0 = self._seri(grain_type, self.TABAN)
+        dw = np.sqrt(A / np.pi) - r0
+        assert float(np.max(np.abs(dw - w))) < 4e-5, grain_type
+
+    def test_uc_yanmalida_alan_sabittir(self):
+        """Port yok: tüm kasa kesiti akar. Sabit seriden animasyon
+        çıkarmak, olmayan bir gerilemeyi göstermek olurdu."""
+        import numpy as np
+        A, _, _ = self._seri('end_burner', self.TABAN)
+        assert float(A.max() - A.min()) == 0.0
+        assert float(A[0]) == pytest.approx(math.pi * 0.05 ** 2, rel=1e-12)
+
+    def test_slotted_kesiti_gercekten_dairesel_degil(self):
+        """Yarıklı tanede alan GERÇEK poligon alanıdır; eşdeğer yarıçap
+        r0+w'den ölçülebilir biçimde ayrışır (17,3 mm) — tek yarıçap
+        büyüterek çizmek uydurma olurdu."""
+        import numpy as np
+        A, w, r0 = self._seri('slotted', self.TABAN)
+        dw = np.sqrt(A / np.pi) - r0
+        assert float(np.max(np.abs(dw - w))) > 1e-2

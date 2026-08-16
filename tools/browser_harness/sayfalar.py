@@ -117,6 +117,77 @@ TANE_FEA = FeaPaneli(
 
 
 @dataclass(frozen=True)
+class MerkezKiracisi:
+    """Analiz Merkezi'ne kayıtlı bir analizin (kiracının) gezinti tarifi.
+
+    FEA panellerinden farkı: kiracının kendi paneli, kendi düğmesi ve kendi
+    rozet kabı YOKTUR. Merkez tek bir koşum kartı (``#ac_run``) ve tek bir
+    görüntüleyici kabı (``#ac_view_root``) sunar; kiracı oraya çizer. Bu
+    yüzden tarif "hangi satır seçilecek" + "kabın içinde ne aranacak"
+    üstünedir.
+
+    ``cizim_onekleri``: kap kimlikleri koşum sayacıyla değişiyor
+    (``cfd_wall_1``, ``cfd_wall_2``, …), o yüzden TAM kimlik yazılamaz —
+    kaplar ``cizim_secicisi`` ile toplanır, ÖNEKLE eşleştirilir. Önek
+    ürünün kimlik ürettiği tek yere bağlıdır (cfd_panel.js:1135-1137).
+    """
+
+    ad: str
+    #: Merkez'in satır anahtarı: ``componentId.analysisId``.
+    satir_anahtari: str
+    #: Satır düğmesinin CSS seçicisi (``#ac_row_<componentId>_<analysisId>``).
+    satir_secicisi: str
+    #: Görüntüleyici kabında çizim kaplarını toplayan seçici.
+    cizim_secicisi: str
+    #: Beklenen çizimlerin kimlik önekleri (her önekten EN AZ bir kap).
+    cizim_onekleri: Tuple[str, ...]
+    #: Rozetleri toplayan seçici (renk sınıfı özniteliğin DEĞERİDİR).
+    rozet_secicisi: str
+    #: Rozet renk sınıfını taşıyan öznitelik adı.
+    rozet_ozniteligi: str
+    #: HER koşumda ekranda olması beklenen imzalar (fizikten bağımsız).
+    beklenen_imzalar: Tuple[str, ...] = ()
+    #: Ekranda GÖRÜLMEMESİ gereken imzalar (emekli sözleşme bekçisi).
+    yasak_imzalar: Tuple[str, ...] = ()
+    #: Nötr renkte kalması gereken rozetler (eşiksiz sayı → renksiz beyan).
+    notr_imzalar: Tuple[str, ...] = ()
+    #: Koşumun bitmesi için üst sınır (ms).
+    kosum_zaman_asimi_ms: int = esikler.MERKEZ_KOSUM_ZAMAN_ASIMI_MS
+    notlar: str = ''
+
+
+#: Merkez'in İLK canlı kiracısı: lüle iç akışı × CFD
+#: (panels/cfd_panel.js — POST /api/cfd/nozzle).
+#:
+#: Tur bu kiracıyı sayfa başına BİR kez koşturur ve alanlara DOKUNMAZ:
+#: çözünürlük varsayılanı 'coarse'tur (cfd_panel.js SPEC.fields), sayısal
+#: alanlar motorun kendi sonucundan önerilir. Kullanıcının gördüğü yol budur.
+#:
+#: Beklenen imzalar BİLEREK fizikten bağımsız seçildi: koşunun yakınsayıp
+#: yakınsamadığı, akışın ayrılıp ayrılmadığı tasarım noktasının fiziğidir —
+#: turun ölçtüğü şey o beyanların EKRANDA olup olmadığıdır. Fizik bağımlı iki
+#: imza (bütçe uyarısı, şüpheli hüküm) yanıtın kendi alanlarına bakılarak
+#: KOŞULLU aranır (bkz. denetimler.merkez_rozet_denetimi).
+CFD_KIRACISI = MerkezKiracisi(
+    ad='cfd',
+    satir_anahtari='nozzle_flow.cfd',
+    satir_secicisi='#ac_row_nozzle_flow_cfd',
+    cizim_secicisi='[data-cfd-plot]',
+    cizim_onekleri=('cfd_wall_', 'cfd_field_', 'cfd_res_'),
+    rozet_secicisi='[data-cfd-badge]',
+    rozet_ozniteligi='data-cfd-badge',
+    beklenen_imzalar=('cfd_yakinsama_hukmu', 'cfd_ayrilma_hukmu',
+                      'cfd_kutle_artigi', 'cfd_enerji_artigi',
+                      'cfd_cekirdek', 'cfd_sok_sensoru',
+                      'cfd_sinirlayici', 'cfd_sure'),
+    yasak_imzalar=('cfd_bayat_giris_uyarisi', 'cfd_bayat_mach_esigi'),
+    notr_imzalar=('cfd_kutle_artigi', 'cfd_enerji_artigi'),
+    notlar=('analysis_center.js domKey: componentId + "_" + analysisId; '
+            'çizim kimlikleri cfd_panel.js:1135-1137 (drawSeq ile artar).'),
+)
+
+
+@dataclass(frozen=True)
 class Sayfa:
     """Tek bir sayfanın gezinti tarifi."""
 
@@ -144,6 +215,14 @@ class Sayfa:
     #: kapandı). Boş liste "denetlenmedi" değil "denetlenecek panel yok"
     #: demek olurdu; bugün öyle bir sayfa kalmadı.
     fea_panelleri: Tuple[FeaPaneli, ...] = field(default_factory=tuple)
+    #: Sayfada Analiz Merkezi kuruluyor mu (``AnalysisCenter.init``)? Üç
+    #: sayfanın üçünde de kuruluyor (advanced.html:889, solid.html:6077,
+    #: liquid.html:6791 — ölçüldü). Kurulmayan bir sayfada çerçeve denetimi
+    #: ÜRETİLMEZ; hayalet denetim "kaldı" demekten daha kötüdür, çünkü
+    #: kusuru olmayan bir sayfayı kırmızıya boyar.
+    merkez_var: bool = False
+    #: Merkez'de koşturulup denetlenecek kiracılar.
+    merkez_kiracilari: Tuple[MerkezKiracisi, ...] = field(default_factory=tuple)
 
 
 #: Sonuç nesnesi üç sayfada da ``currentResults`` adıyla, betiğin en üst
@@ -170,6 +249,9 @@ SAYFALAR: Dict[str, Sayfa] = {
         viz_kap_kimligi='motor_viz3d_viewport',
         notlar='advanced.html — MotorViz3D doğrudan kurulur (güverte yok).',
         fea_panelleri=(YAPISAL_FEA, TERMAL_FEA),
+        # Analiz Merkezi advanced.html:889'da kuruluyor (motorType 'hybrid').
+        merkez_var=True,
+        merkez_kiracilari=(CFD_KIRACISI,),
     ),
     'solid': Sayfa(
         ad='solid',
@@ -185,6 +267,9 @@ SAYFALAR: Dict[str, Sayfa] = {
         # sekmelerin DIŞINDA olduğu için CAD sekmesi açılsa da görünür
         # kalır (solid.html:1785 üst düzey ``.panel``).
         fea_panelleri=(TANE_FEA,),
+        # Analiz Merkezi solid.html:6077'de kuruluyor (motorType 'solid').
+        merkez_var=True,
+        merkez_kiracilari=(CFD_KIRACISI,),
     ),
     'liquid': Sayfa(
         ad='liquid',
@@ -203,6 +288,9 @@ SAYFALAR: Dict[str, Sayfa] = {
         # tane panelleri sıvıya BİLEREK eklenmedi: termal zincir bu sayfada
         # yok, tane paneli katıya özgü.
         fea_panelleri=(YAPISAL_FEA,),
+        # Analiz Merkezi liquid.html:6791'de kuruluyor (motorType 'liquid').
+        merkez_var=True,
+        merkez_kiracilari=(CFD_KIRACISI,),
     ),
 }
 

@@ -37,6 +37,8 @@ import numpy as np
 
 from hrma.cfd import kernels as _kernels
 from hrma.cfd.euler_core import (
+    INLET_BC_BASIS,
+    INLET_BC_NAME,
     cons_to_prim_axisym,
     local_dt_axisym,
     precompute_geometry,
@@ -152,7 +154,8 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
         Diğerleri: sürücü ayarları (modül sabitlerinde beyanlı).
 
     Returns:
-        dict: converged, convergence_basis, iterations, residual_history,
+        dict: converged, convergence_basis, inlet_bc + inlet_bc_basis
+        (giriş sınır koşulunun adı ve künyesi), iterations, residual_history,
         korunum bütçesi (kütle/enerji akıları + bağıl artıklar), fields
         (ρ, u_z, u_r, p, T, M), section_average, throat, wall_pressure_Pa,
         not_modelled, assumptions, inputs, runtime_s. Yakınsamasa da sonuç
@@ -307,7 +310,9 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
             + (f' Sınırlayıcı son olarak {frozen_at}. iterasyonda '
                f'donduruldu (plato tespiti, {freeze_count} dondurma/'
                f'tazeleme; şema minmod).' if frozen_at is not None
-               else ''))
+               else '')
+            + f' Giriş sınır koşulu: {INLET_BC_NAME} (künye: '
+              f'inlet_bc_basis).')
 
     w = cons_to_prim_axisym(U, g)
     temp = w[..., 3] / (Rs * w[..., 0])
@@ -334,6 +339,8 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
     return {
         'converged': converged,
         'convergence_basis': basis,
+        'inlet_bc': INLET_BC_NAME,
+        'inlet_bc_basis': INLET_BC_BASIS,
         'iterations': it,
         'limiter_frozen_at_iter': frozen_at,
         'limiter_freeze_count': freeze_count,

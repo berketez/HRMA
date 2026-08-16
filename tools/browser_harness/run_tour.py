@@ -5,20 +5,31 @@ Ne yapar
 --------
 ``/hybrid``, ``/solid`` ve ``/liquid`` sayfalarını gerçek bir tarayıcıda
 açar, örnek girdilerle hesabı tetikler, 3B sahneyi kurdurur, yanmayı
-başlatır, sayfanın FEA panellerini koşturur ve yedi soruyu ölçer:
+başlatır, sayfanın FEA panellerini ve Analiz Merkezi kiracılarını
+koşturur, on bir soruyu ölçer:
 
-1. 3B tuval boş mu?           (doluluk oranı + içerik entropisi)
-2. Egzoz çiziliyor mu?        (``_plume.geometry.drawRange.count``)
-3. Konsolda hata var mı?
-4. Ekrana iç değer sızmış mı? (``[object Object]`` / ``undefined`` / ``NaN``)
-5. FEA koşumu bitti mi?       (panel ``payload``'u dolu, meşgul kapandı)
-6. FEA çizimleri ekranda mı?  (görünür kapta ``svg``/``canvas``)
-7. FEA hükümleri basıldı mı?  (beklenen rozet imzaları EN+TR; eski kusur
-   imzası — birleşik "kabul dışı" rozeti — YASAK listesinde)
+ 1. 3B tuval boş mu?           (doluluk oranı + içerik entropisi)
+ 2. Egzoz çiziliyor mu?        (``_plume.geometry.drawRange.count``)
+ 3. Konsolda hata var mı?
+ 4. Ekrana iç değer sızmış mı? (``[object Object]`` / ``undefined`` / ``NaN``)
+ 5. FEA koşumu bitti mi?       (panel ``payload``'u dolu, meşgul kapandı)
+ 6. FEA çizimleri ekranda mı?  (görünür kapta ``svg``/``canvas``)
+ 7. FEA hükümleri basıldı mı?  (beklenen rozet imzaları EN+TR; eski kusur
+    imzası — birleşik "kabul dışı" rozeti — YASAK listesinde)
+ 8. Analiz Merkezi kurulu mu?  (panel + üç sütun + geçmiş şeridi; kiracılı
+    satır ``ready``, kiracısız satırlar gri AMA nedeni ADIYLA yazılı)
+ 9. Kiracı koşumu bitti mi?    (``AnalysisCenter.history()`` kaydı + yanıtın
+    çizilebilir bloğu; koşum GERÇEKTİR, sayfa başına bir kez)
+10. Kiracı çizimleri ekranda mı? (``#ac_view_root`` içinde duvar basıncı /
+    alan haritası / kalıntı kapları, üçünde de ``svg``)
+11. Kiracı hükümleri dürüst mü? (beklenen beyan imzaları + renk kuralları:
+    yakınsamayan koşuya kabul rengi YASAK, şüpheli hükme kabul rengi YASAK,
+    eşiksiz sayılar nötr; emekli "INLET ADVISORY"/``threshold_mach``
+    imzaları YASAK listesinde)
 
-FEA panelleri sayfa tanımından gelir (``sayfalar.py``: hibrit 2 panel,
-katı 1, sıvı 0 — sıvı cidar FEA'sı bilinçli olarak üründe yok, bulgu
-defterinde gerekçeli açık borç).
+FEA panelleri ve Merkez kiracıları sayfa tanımından gelir
+(``sayfalar.py``: hibrit 2 FEA paneli, katı 1, sıvı 1; üç sayfanın üçünde
+de Analiz Merkezi ve tek kiracısı CFD).
 
 Kullanım
 --------
