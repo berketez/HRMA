@@ -130,6 +130,82 @@ _LECKNER_T_LITERATURE_MAX = 2500.0  # K (Leckner 1972 bildirilen fit üst sını
 _LECKNER_PAL_MIN = 1e-4   # bar*cm
 _LECKNER_PAL_MAX = 1e3    # bar*cm
 
+
+# ----------------------------------------------------------------------
+# Girdi kapısı (bebek-Scofield F4-1)
+# ----------------------------------------------------------------------
+# ÖLÇÜM (17 Ağustos 2026, HEAD f9d95eb):
+#   ``HeatTransferAnalyzer().analyze_heat_transfer(motor_data={})``
+#   HTTP 200 karşılığı TAM bir sonuç döndürüyordu: 155 yaprağın hepsi dolu,
+#   ``gas_side_analysis.heat_flux = 13 027 380,54 W/m²``,
+#   ``safety_analysis.risk_level = 'HIGH'``. Boş girdi ile DOLU girdi
+#   arasında FARKLI yaprak sayısı SIFIR idi — yani kullanıcı hiçbir şey
+#   vermeden "motorunun" ısı analizini okuyordu.
+#
+# Kök neden sözleşme kırığıydı: fonksiyonun kendi belgesi bu anahtarları
+# "verilmezse FİZİKSEL OLARAK TÜRETİLİR" diye ilan ediyordu, davranış ise
+# altısını da SABİTLE dolduruyordu (20 bar / 3000 K / 0,1 m / 0,5 m / 10 s /
+# 1 kg/s). Bunların hiçbiri türetilmiyordu; uydurulmuş varsayılanlardı.
+#
+# Çözüm deponun kendi desenidir: kardeş uçlar (/analyze_safety,
+# /analyze_structural_safety) aynı durumda 422 + ``missing_fields`` döner ve
+# "A safety assessment cannot be produced from defaults." der. Burada da
+# eksik girdi ADIYLA reddedilir.
+#: Isı analizinin TÜRETEMEYECEĞİ zorunlu girdiler. Her biri yayımlanan bir
+#: sayıyı doğrudan ölçekler: Pc ve Tc Bartz kütle akısını ve kurtarma
+#: sıcaklığını, hazne çapı/boyu ıslak yüzeyi (dolayısıyla toplam ısı
+#: yükünü), yanma süresi toplam ısı enerjisini kurar.
+HEAT_TRANSFER_REQUIRED_FIELDS = (
+    'chamber_pressure',     # bar
+    'chamber_temperature',  # K
+    'chamber_diameter',     # m
+    'chamber_length',       # m
+    'burn_time',            # s
+)
+
+#: Boğaz ölçeği: bunlardan EN AZ BİRİ gerekir. Boğaz alanı verilmediyse
+#: ``A_t = mdot * c* / Pc`` (c* tanımı, tıkalı boğazda süreklilik) ile
+#: GERÇEKTEN türetilir — bu meşru bir türetimdir, varsayılan değildir.
+#: Üçü de yoksa modül eskiden ``A_t = pi*(0,3*D_ch/2)²`` diye bir başparmak
+#: kuralına düşüyordu; kaynaksız bir 0,3 katsayısıyla boğaz uydurmak yasak.
+HEAT_TRANSFER_THROAT_SCALE_FIELDS = ('throat_diameter', 'throat_area',
+                                     'mdot_total')
+
+
+class MissingHeatTransferInput(ValueError):
+    """Isı analizi zorunlu girdisi eksik — hüküm üretilmedi.
+
+    ``ValueError`` alt sınıfıdır: mevcut çağıranların ``except ValueError`` /
+    ``except Exception`` dalları davranışlarını korur. ``missing_fields``
+    makine-okur listedir; uç katmanı bunu 422 gövdesine aynen koyabilir.
+    """
+
+    def __init__(self, missing_fields):
+        self.missing_fields = list(missing_fields)
+        super().__init__(
+            'A heat transfer analysis cannot be produced from defaults. '
+            'Missing required inputs: ' + ', '.join(self.missing_fields)
+            + '. These values set the Bartz mass flux, the recovery '
+              'temperature and the wetted area; they are not assumed on '
+              'your behalf.')
+
+
+def _missing_heat_transfer_inputs(motor_data: Dict) -> List[str]:
+    """Eksik zorunlu ısı-analizi girdilerinin ADLARI (yoksa boş liste).
+
+    Ölçü sözleşmesi bu dosyanın ``_positive_length`` hükmüyle AYNIDIR:
+    ``None`` / ``''`` / 0 / negatif / NaN hepsi "verilmedi" demektir. Sıfır
+    hazne basıncı ya da sıfır yanma süresi bir ölçüm değildir.
+    """
+    data = motor_data if isinstance(motor_data, dict) else {}
+    missing = [key for key in HEAT_TRANSFER_REQUIRED_FIELDS
+               if _positive_length(data.get(key)) is None]
+    if all(_positive_length(data.get(key)) is None
+           for key in HEAT_TRANSFER_THROAT_SCALE_FIELDS):
+        missing.append(' or '.join(HEAT_TRANSFER_THROAT_SCALE_FIELDS))
+    return missing
+
+
 class HeatTransferAnalyzer:
     """Heat transfer analysis for hybrid rocket motor chambers"""
 
@@ -650,13 +726,21 @@ class HeatTransferAnalyzer:
         Complete heat transfer analysis (Bartz-based gas side).
 
         Args:
-            motor_data: Motor performance and geometry data. Recognized optional
-                keys (used when present, otherwise physically derived):
+            motor_data: Motor performance and geometry data.
+
+                REQUIRED (``HEAT_TRANSFER_REQUIRED_FIELDS``, no default is
+                assumed - a missing one raises ``MissingHeatTransferInput``):
                   chamber_pressure [bar], chamber_temperature [K],
-                  chamber_diameter [m], chamber_length [m], burn_time [s],
-                  mdot_total [kg/s], gamma, molecular_weight [g/mol],
+                  chamber_diameter [m], chamber_length [m], burn_time [s].
+                REQUIRED, one of (``HEAT_TRANSFER_THROAT_SCALE_FIELDS``):
+                  mdot_total [kg/s], throat_diameter [m], throat_area [m^2]
+                  - the throat area is genuinely derived from mdot and c*
+                  when it is not supplied.
+                Optional (used when present, otherwise physically derived
+                from the required set and declared in the result):
+                  gamma, molecular_weight [g/mol],
                   gas_constant [J/kg/K], gas_cp, gas_viscosity, gas_conductivity,
-                  prandtl, c_star [m/s], throat_diameter [m], throat_area [m^2],
+                  prandtl, c_star [m/s],
                   throat_radius_curvature [m], cantera_gas (Cantera Solution).
             material: Wall material key (hrma.data.materials_db: steel,
                 steel_4130, ss_304, ss_316, aluminum_6061, titanium_6al4v,
@@ -671,14 +755,27 @@ class HeatTransferAnalyzer:
             heat_transfer_coefficients, gas_side_analysis, wall_analysis,
             cooling_analysis, safety_analysis, material_properties,
             design_parameters.
+
+        Raises:
+            MissingHeatTransferInput: a required input is absent, zero or
+                non-finite. No partial result is published: every number in
+                the result scales with the missing value, so a default would
+                be a fabricated motor, not this one.
         """
-        # Extract motor parameters
-        chamber_pressure = motor_data.get('chamber_pressure', 20.0) * 1e5  # Pa
-        chamber_temperature = motor_data.get('chamber_temperature', 3000)  # K
-        chamber_diameter = motor_data.get('chamber_diameter', 0.1)  # m
-        chamber_length = motor_data.get('chamber_length', 0.5)  # m
-        burn_time = motor_data.get('burn_time', 10)  # s
-        mdot_total = motor_data.get('mdot_total', 1.0)  # kg/s
+        # --- GİRDİ KAPISI (F4-1) — varsayılandan hüküm üretilmez -----------
+        missing = _missing_heat_transfer_inputs(motor_data)
+        if missing:
+            raise MissingHeatTransferInput(missing)
+
+        # Extract motor parameters (hepsi kapıdan geçti: sonlu ve pozitif)
+        chamber_pressure = float(motor_data['chamber_pressure']) * 1e5  # Pa
+        chamber_temperature = float(motor_data['chamber_temperature'])  # K
+        chamber_diameter = float(motor_data['chamber_diameter'])  # m
+        chamber_length = float(motor_data['chamber_length'])  # m
+        burn_time = float(motor_data['burn_time'])  # s
+        # Boğaz ölçeği üçlüsünden biri var; mdot yoksa A_t doğrudan
+        # verilmiştir ve _resolve_throat_conditions onu kullanır.
+        mdot_total = _positive_length(motor_data.get('mdot_total')) or 0.0  # kg/s
 
         # Get material properties (steel_4130 now resolves directly)
         mat_props = self.materials.get(material, self.materials['steel'])

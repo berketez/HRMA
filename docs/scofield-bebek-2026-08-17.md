@@ -1,5 +1,12 @@
 # Bebek-Scofield — ön tarama bulgu sicili (17 Ağustos 2026)
 
+> **DURUM: 25/25 KAPANDI** (aynı gün, parti 31 — 6 ajan, kesişmeyen dosya
+> kümeleri). Kapanışların bekçileri ve öncesi/sonrası sayıları
+> `BULGU_KAYIT_DEFTERI.md` v2.6.27 tablosundadır. Bu dosya **ölçüm geçmişi**
+> olarak durur: aşağıdaki "öncesi" sayıları kusurun gerçekten var olduğunun
+> kaydıdır ve bir daha üretilirse karşılaştırma tabanıdır. Yapılacaklar
+> listesi DEĞİLDİR.
+
 **Ne bu:** Operasyon Scofield'ın (yol haritası §3.5) *öncesinde*, Berke'nin
 isteğiyle yapılmış örneklem tabanlı ön tarama. Scofield'ın **yerine geçmez**;
 Scofield tüm iş kalemleri bittikten sonra, hiçbir hücre atlanmadan yapılır.

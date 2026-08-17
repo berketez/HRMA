@@ -48,9 +48,23 @@ def solid(overrides=None, **ctor):
 
 
 def safety(motor_data=None, **kwargs):
+    # chamber_length + throat_diameter (parti 31 / F4-1): ısı zinciri artık
+    # eksik girdiyle sayı UYDURMUYOR (HEAT_TRANSFER_REQUIRED_FIELDS +
+    # boğaz ölçeği kapısı). Bu iki alan olmadan çağrı reddediliyor ve
+    # safety_analysis kendi BEYANLI yedeğine (ortam sıcaklığı) düşüyordu;
+    # sonuç: cidar sıcaklığı her koşuda 293,15 K çıkıyor ve "soğutma tipi
+    # cidarı değiştirir" gibi bekçiler ölçtüklerini sanıp ölçmüyorlardı.
+    # Kapı GEVŞETİLMEDİ; eksik olan gerçek girdiler verildi (katı motorun
+    # zaten sahip olduğu ölçüler: 100 mm kamara, 500 mm boy, 30 mm boğaz).
     md = dict(chamber_pressure=40.0, chamber_temperature=3000.0, thrust=1000.0,
-              burn_time=10.0, chamber_diameter=0.1, wall_thickness=0.005)
+              burn_time=10.0, chamber_diameter=0.1, chamber_length=0.5,
+              throat_diameter=0.03, wall_thickness=0.005)
     md.update(motor_data or {})
+    # _dus: bir alanın YOKLUĞUNU sınamak isteyen bekçiler için (ör. ışıma
+    # alanı varsayımının beyan edilip edilmediği). Varsayılanı silmek
+    # test-içi bir kaçamak değil, sınanan durumun kendisidir.
+    for _ad in kwargs.pop('_dus', ()):
+        md.pop(_ad, None)
     params = dict(propellant_mass=5.0, propellant_type='composite',
                   material='steel_4130')
     params.update(kwargs)
@@ -450,7 +464,10 @@ class TestRadiantHazardUsesRealArea:
             'radiant_heat_hazard_distance_m']
 
     def test_radiating_area_assumption_is_declared(self):
-        assumed = safety()['thermal_safety']
+        # 'assumed' dalı kamara BOYUNUN YOKLUĞUNU sınar; yardımcının artık
+        # varsayılan bir boyu var (parti 31 / F4-1 ısı zinciri kapısı), o
+        # yüzden burada AÇIKÇA düşürülür — sınanan durum tam olarak budur.
+        assumed = safety(_dus=('chamber_length',))['thermal_safety']
         known = safety({'chamber_length': 0.6})['thermal_safety']
         assert 'ASSUMED' in assumed['radiating_area_basis']
         assert 'ASSUMED' not in known['radiating_area_basis']

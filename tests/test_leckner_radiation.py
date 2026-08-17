@@ -14,6 +14,8 @@ fiziksel değişmezlerini ve entegrasyonun yönünü doğrular:
     %5-30'u mertebesini rapor eder)
 """
 
+import math
+
 import numpy as np
 import pytest
 
@@ -129,18 +131,61 @@ class TestIntegration:
         'throat_diameter': 0.03,      # m
         'mdot_total': 1.2,            # kg/s
         'expansion_ratio': 4.0,
+        # burn_time ARTIK ZORUNLU (parti 31, ısı zinciri girdi kapısı:
+        # `motor_data.get('burn_time', 10)` kaldırıldı — uydurma varsayılan
+        # yasağı). Buraya yazılan 10,0 s, kaldırılan varsayılanın TAM
+        # kendisidir: bu vakanın fiziği değişmedi, örtük olan açık yazıldı.
+        'burn_time': 10.0,            # s
     }
+
+    @staticmethod
+    def _sonlu_olmayan_yapraklar(dugum, yol='sonuc'):
+        """Sonlu OLMAYAN her sayısal yaprağı adıyla toplar.
+
+        T1-1 (parti 31) — eski bekçi şuydu::
+
+            assert 'nan' not in flat.lower() or 'NaN' not in flat
+
+        Python NaN'ı daima ``nan`` yazar, dolayısıyla sağ taraf ('NaN'
+        büyük harfli aranıyor) DAİMA doğrudur ve OR koşulsuz geçer.
+        ÖLÇÜLDÜ: sonucun tüm sayısal yaprakları NaN yapıldığında eski
+        assert HİÇ tepki vermiyordu (1 passed). Ayrıca dize araması
+        ``inf``'i ve dizi içindeki NaN'ları da göremiyordu.
+
+        Yeni bekçi ağacı gezip ``math.isfinite`` ile bakar — aynı dosyadaki
+        ``test_axial_profile_q_finite_positive`` zaten bu deseni (np.isfinite)
+        kullanıyordu.
+        """
+        kotu = []
+        if isinstance(dugum, dict):
+            for k, v in dugum.items():
+                kotu += TestIntegration._sonlu_olmayan_yapraklar(
+                    v, f'{yol}.{k}')
+        elif isinstance(dugum, (list, tuple)):
+            for i, v in enumerate(dugum):
+                kotu += TestIntegration._sonlu_olmayan_yapraklar(
+                    v, f'{yol}[{i}]')
+        elif isinstance(dugum, np.ndarray):
+            if dugum.size and not np.all(np.isfinite(dugum)):
+                kotu.append(f'{yol} (dizi)')
+        elif isinstance(dugum, bool):
+            pass
+        elif isinstance(dugum, (int, float, np.floating, np.integer)):
+            if not math.isfinite(float(dugum)):
+                kotu.append(f'{yol} = {dugum!r}')
+        return kotu
 
     def test_analyze_heat_transfer_runs(self, analyzer):
         res = analyzer.analyze_heat_transfer(dict(self.MOTOR),
                                              material='steel',
                                              cooling_type='natural')
-        gas_side = res.get('gas_side') or res.get('gas_side_analysis') or {}
         # Sema esnek: en azindan sonuc sozlugu bos degil ve icinde
         # sonlu sayisal degerler var.
         assert isinstance(res, dict) and res
-        flat = str(res)
-        assert 'nan' not in flat.lower() or 'NaN' not in flat
+        kotu = self._sonlu_olmayan_yapraklar(res)
+        assert not kotu, (
+            'ısı transferi sonucunda sonlu OLMAYAN sayısal yaprak(lar) var — '
+            'NaN/inf kullanıcıya sayı gibi gider:\n  ' + '\n  '.join(kotu))
 
     def test_axial_profile_q_finite_positive(self, analyzer):
         prof = analyzer.analyze_axial_profile(dict(self.MOTOR),

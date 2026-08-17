@@ -76,6 +76,80 @@ def test_safety_factor_is_not_tautological():
         ca['design_safety_factor_target'] * 1.2, rel=1e-6)
 
 
+def _verify_sf(wall_thickness=0.005, **ezme):
+    """Doğrulama modundaki von Mises SF'si (tek okuma noktası).
+
+    ``ezme`` BASE alanlarını ezer (ör. ``chamber_pressure=40``).
+    """
+    kw = dict(BASE, **ezme)
+    ca = (HybridRocketEngine(**kw, wall_thickness=wall_thickness)
+          .calculate()['structural_analysis']['chamber_analysis'])
+    assert ca['design_mode'] == 'verify', ca['design_mode']
+    return float(ca['von_mises_safety_factor'])
+
+
+def test_safety_factor_gercekten_kullanici_cidarindan_turuyor():
+    """T3-2 (parti 31): totoloji bekçisi ETİKETE değil SAYIYA baksın.
+
+    Ölçülen kusur: yukarıdaki bekçi ``design_mode``, bayrak ve tek bir
+    eşitsizlikle yetiniyordu. Doğrulama modundaki SF kullanıcının cidarının
+    BASINÇ TERİMİNDEN koparılsa (ör. boyutlandırılmış cidardan hesaplansa)
+    adlı bekçi ve dosyası **30/30 YEŞİL** kalıyordu — etiketler doğru
+    kalır çünkü.
+
+    Bu bekçi bağımlılığı SARSARAK ölçer. Ölçülen (BASE hibrit, 20 bar):
+
+    ====== =========
+    t [mm] SF
+    ====== =========
+    3,0    0,9853
+    4,0    1,2558
+    5,0    1,4845
+    6,0    1,6693
+    8,0    1,7309
+    10,0   1,8205
+    ====== =========
+
+    Cidardan koparılmış bir SF bu sütunda SABİT kalır ve bekçi kırılır.
+    """
+    kalinliklar = (0.003, 0.004, 0.005, 0.006, 0.008, 0.010)
+    sfler = [_verify_sf(wall_thickness=t) for t in kalinliklar]
+
+    # (a) Kesinlikle sabit olmamalı — sabitlik "cidar okunmuyor" demektir.
+    assert max(sfler) > min(sfler) * 1.5, (
+        'doğrulama modundaki SF kullanıcının cidarına DUYARSIZ '
+        f'(3-10 mm taramasında {min(sfler):.4f}-{max(sfler):.4f}); '
+        'SF kullanıcının girdisinden değil başka bir kalınlıktan '
+        'hesaplanıyor olabilir — totoloji bekçisinin yakalaması gereken '
+        'kusur budur (parti 31 / T3-2)')
+
+    # (b) Yön doğru: kalın cidar = daha yüksek emniyet katsayısı.
+    assert all(a < b for a, b in zip(sfler, sfler[1:])), (
+        f'SF cidarla monoton artmıyor: {list(zip(kalinliklar, sfler))} — '
+        'işaret ya da terim hatası')
+
+
+def test_safety_factor_basinc_terimini_gercekten_tasiyor():
+    """SF, kullanıcının cidarını BASINÇ yüküne karşı ölçmeli.
+
+    T3-2'nin ikinci ayağı: cidar bağlı ama basınç terimi koparılmışsa
+    (SF yalnız geometriden geliyorsa) yukarıdaki tarama yine geçer. Basıncı
+    sarsmak o kopmayı görür.
+
+    Ölçülen (t = 5 mm): Pc 10 bar -> 2,4992; 20 bar -> 1,4845;
+    40 bar -> 0,8278. İnce cidar zar gerilmesi ~ Pc ile lineer olduğundan
+    SF kabaca 1/Pc gider; ölçülen düşüş çarpanları 1,684 ve 1,793.
+    """
+    sf10 = _verify_sf(chamber_pressure=10, wall_thickness=0.005)
+    sf20 = _verify_sf(chamber_pressure=20, wall_thickness=0.005)
+    sf40 = _verify_sf(chamber_pressure=40, wall_thickness=0.005)
+    assert sf10 > sf20 > sf40, (sf10, sf20, sf40)
+    # Basınç iki katına çıkınca SF en az 1,4 kat düşmeli (ölçülen 1,684 /
+    # 1,793). Basınç terimi koparılırsa oran 1,0'a yapışır ve bekçi kırılır.
+    assert sf10 / sf20 > 1.4, (sf10, sf20)
+    assert sf20 / sf40 > 1.4, (sf20, sf40)
+
+
 def test_constructor_default_is_not_reported_as_user_input():
     """Cidar verilmediğinde modül BOYUTLANDIRMA modunda kalmalı.
 

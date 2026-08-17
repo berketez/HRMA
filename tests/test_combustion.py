@@ -34,6 +34,10 @@ import numpy as np
 import pytest
 
 from hrma.engines.combustion_analysis import CombustionAnalyzer
+# Bağımlılık kapısı + kırık-yol teşhis metni TEK KAYNAKTAN gelir; aynı metin
+# iki dosyada tanımlanmaz (parti 31 / T2-2).
+from tests.bagimlilik_kapisi import kapi
+from tests.test_combustion_cea_validation import CANTERA_YOLU_KIRIK
 
 
 # Ürün türlerinin atom sayıları — element korunumu denetimi için
@@ -336,8 +340,9 @@ class TestIsentropicEfficiency:
         ε=25 -> 0.8738, ε=60 -> 0.8669. Eski kurgu hepsinde 1.0 veriyordu.
         """
         ca = CombustionAnalyzer()
-        if not ca.cantera_available:
-            pytest.skip("Cantera kurulu değil; bu denetim denge çözümü gerektirir")
+        # Bağımlılık kapısı (parti 31 / T2-2): cantera YOKSA atla, KURULU ama
+        # mekanizma zinciri yüklenemiyorsa KIRMIZI — ürün kusuru atlanamaz.
+        kapi('cantera', ca.cantera_available, CANTERA_YOLU_KIRIK)
         etas = [self._eta(ca, expansion_ratio=float(eps)) for eps in (4, 10, 25, 60)]
         assert all(0.5 < e < 1.0 for e in etas), etas
         assert all(a > b for a, b in zip(etas, etas[1:])), etas
@@ -354,9 +359,8 @@ CA_SOURCE_PATH = pathlib.Path(
 def denge():
     """Gerçek Cantera'lı analizör (denge yolu sınanacak)."""
     ca = CombustionAnalyzer()
-    if not ca.cantera_available:
-        pytest.skip('Cantera kurulu değil; denge tabanlı sıcaklık testleri '
-                    'atlanıyor.')
+    # Bağımlılık kapısı (parti 31 / T2-2), yukarıdakiyle aynı gerekçe.
+    kapi('cantera', ca.cantera_available, CANTERA_YOLU_KIRIK)
     return ca
 
 

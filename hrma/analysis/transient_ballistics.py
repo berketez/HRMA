@@ -11,9 +11,14 @@ GERÇEK kamara basıncı ve itki eğrilerini üretir:
   - Yarı-kararlı kamara: P_c = ṁ_toplam · c* / (C_D · A_t)
     (kamara doldurma süresi ~L*/c_ses ≈ ms mertebesi; yanma süresi ~s
     mertebesinde olduğundan yarı-kararlılık geçerlidir)
-  - İtki: F = C_F(P_c) · P_c · A_t. Sabit geometri (ε sabit) ve sabit γ'da
-    P_e/P_c oranı sabittir; C_F'in basınca bağımlılığı yalnız basınç-itki
-    teriminden gelir: C_F = C_F,mom + ε·(P_e/P_c) − ε·P_a/P_c
+  - İtki: F = C_F(P_c) · P_c · (C_D · A_t). Sabit geometri (ε sabit) ve
+    sabit γ'da P_e/P_c oranı sabittir; C_F'in basınca bağımlılığı yalnız
+    basınç-itki teriminden gelir: C_F = C_F,mom + ε·(P_e/P_c) − ε·P_a/P_c.
+    C_D BURADA DA görünür çünkü kamara kapanışıyla AYNI sözleşmedir:
+    C_D·A_t, aynı debiyi geçiren ideal (kayıpsız) lülenin etkin boğaz
+    alanıdır ve c* tanımı gereği P_c·(C_D·A_t) = ṁ·c*'tır. İtkiyi geometrik
+    A_t ile kurmak aynı C_D'yi bir kez daha saymak (1/C_D ≈ %2 şişme)
+    demektir — bkz. aşağıdaki F3-1 künyesi.
 
 Besleme modları:
   'regulated' : ṁ_ox sabit (regülatörlü/süperşarjlı besleme; tasarım değeri)
@@ -59,6 +64,17 @@ DP_RATIO_WARN = CHUG_DP_RATIO_MINIMUM
 # depodaki bir DURDURMA korumasıdır ve öyle beyan edilir. Yukarıdaki
 # 0,15 ile aynı aileden sayılıp tek kaynağa taşınmadı: iki AYRI kavramdır.
 DP_RATIO_UNSTABLE = 0.05  # bunun altında yarı-kararlı model geçersiz → dur
+
+# Boğaz debi katsayısı C_D (tıkalı boğazdan geçen gerçek debinin ideal
+# izentropik debiye oranı). Tasarım çözücüsü boğaz alanını
+# A_t = ṁ·c*/(P_c·C_D) ile boyutlandırır; bu modül aynı sayıyı hem kamara
+# kapanışında (P_c = ṁ·c*/(C_D·A_t)) hem itki denkleminde kullanır, yani
+# TEK C_D sözleşmesi geçerlidir.
+#
+# NOT (tek kaynak borcu): aynı 0,98 hibrit çözücüde de yazılıdır
+# (hybrid_rocket_engine.py, boğaz alanı boyutlandırması). O dosya bu iş
+# kaleminin sahipliği dışındaydı; birleştirme ana modele bildirildi.
+NOZZLE_DISCHARGE_COEFFICIENT = 0.98
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +306,8 @@ class TransientBallistics:
         self._lambda = getattr(engine, 'lambda_divergence', None) or \
             {'conical': 0.983, 'bell': 0.985,
              'parabolic': 0.975}.get(getattr(engine, 'nozzle_type', 'conical'), 0.983)
-        self._cd_nozzle = 0.98  # boğaz debi katsayısı (tasarımla aynı)
+        # Boğaz debi katsayısı — tasarımla AYNI sayı, tek adlandırılmış yerden
+        self._cd_nozzle = NOZZLE_DISCHARGE_COEFFICIENT
 
         # Blowdown tankı + enjektör kalibrasyonu
         self.tank = None
@@ -564,8 +581,26 @@ class TransientBallistics:
                         f"t={t:.2f}s: ΔP/Pc={dp_ratio:.2f} < {DP_RATIO_WARN} "
                         f"— chugging risk (SP-8089)")
 
+            # İtki — C_D SÖZLEŞMESİ TEK (bebek-Scofield F3-1).
+            #
+            # ÖLÇÜM (17 Ağustos 2026, HEAD f9d95eb; 3000 N / 30 bar / O/F=6
+            # N2O-HTPB örnek motoru, blowdown serisi):
+            #   t=0 itki  3061,2245 N  ⟷  tasarım noktası 3000,0 N
+            #   oran      1,020408...  =  1/0,98  =  1/C_D  (tam)
+            # A_t tasarımda A_t = ṁ·c*/(P_c·C_D) ile boyutlandırıldığı için
+            # 1/C_D çarpanını ZATEN içerir. Kamara kapanışı (yukarıda) C_D'ye
+            # bölerek bunu tam olarak götürüyor ve doğru P_c'yi veriyordu;
+            # itki ise şişmiş A_t'yi ham kullandığından çarpan orada AYAKTA
+            # kalıyordu. %2,04'lük fazlalık itki eğrisinden toplam impulse'a
+            # ve teslim-Isp ortalamasına geçiyordu.
+            #
+            # Düzeltme: itki, kamara kapanışıyla AYNI etkin boğaz alanını
+            # kullanır. C_D·A_t = ṁ·c*/P_c (c* tanımı), yani bu çarpım aynı
+            # debiyi geçiren ideal lülenin boğaz alanıdır ve t=0'da seri
+            # tasarım noktasının kendisini verir (ölçüldü: 3000,0000 N /
+            # 30,00 bar).
             F = self._thrust_coefficient(Pc_pa, eps_cur, pe_cur, cfm_cur) \
-                * Pc_pa * At
+                * Pc_pa * (self._cd_nozzle * At)
 
             # --- kayıt ---
             t += dt

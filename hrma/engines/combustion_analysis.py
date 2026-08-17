@@ -69,6 +69,59 @@ MECHANISM_CHAIN = ('gri30.yaml', 'h2o2.yaml')
 # çiftlerinin (H2/F2 dahil) adyabatik alev sıcaklıklarının üstündedir.
 FLAME_T_BRACKET_K = (250.0, 5500.0)
 
+
+# ---------------------------------------------------------------------------
+# Karışım oranı girdi kapısı (bebek-Scofield F4-5)
+# ---------------------------------------------------------------------------
+# ÖLÇÜM (17 Ağustos 2026, HEAD f9d95eb; htpb/N2O, Pc=20 bar):
+#   analyze_combustion(..., of_ratio=-6.0, ...) TAM bir performans sonucu
+#   döndürüyordu: equivalence_ratio = -1,4940, isp = 167,822 s ve
+#   elemental_composition = {C: -0,1779, H: -0,0224, O: 0,4363, N: 0,7640}
+#   — yani NEGATİF kütle kesirleri. of_ratio = -0,5 ise isp = 328,847 s
+#   veriyordu, gerçek optimumun (231,7 s @ O/F=6) ÜSTÜNDE: kusur yalnız
+#   anlamsız değil, kullanıcıyı iyimser yönde yanıltıyordu.
+#   of_ratio = 0 ise ham ZeroDivisionError ile düşüyordu.
+#
+# BANDIN KAYNAĞI — tanımın kendisi (Sutton & Biblarz, "Rocket Propulsion
+# Elements", 9. baskı, Böl. 6, karışım oranı tanımı: r = ṁ_oks / ṁ_yakıt).
+# Bu iki debi de kütle akışıdır ve kütle akışı negatif olamaz; sıfır ise
+# ortada oranlanacak bir akış yoktur. Dolayısıyla geçerli bant SONLU ve
+# KESİN POZİTİF sayılardır. ÜST sınır BİLEREK konmadı: yayımlanmış,
+# yakıt-oksitleyici çiftinden bağımsız bir üst kesme değeri yoktur ve
+# uydurma bir tavan (ör. "10") bu deponun yasakladığı sahte sabit olurdu.
+# Aşırı oksitleyici-zengin bölge fizikte anlamlıdır (yanma zayıflar), model
+# de orada çalışmaya devam eder.
+#: Karışım oranının tanım gereği geçerli bandı (alt sınır DIŞLAYICI).
+OF_RATIO_MIN_EXCLUSIVE = 0.0
+
+
+def _dogrula_karisim_orani(of_ratio):
+    """``of_ratio``yu sonlu-pozitif olarak doğrular; değilse ``ValueError``.
+
+    Kapı gerekçesi ve ölçümü ``OF_RATIO_MIN_EXCLUSIVE`` künyesindedir.
+    """
+    try:
+        deger = float(of_ratio)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"of_ratio must be a finite positive number (got {of_ratio!r}); "
+            f"it is the ratio of two mass flows and no combustion result is "
+            f"produced from an unreadable value")
+    if not np.isfinite(deger):
+        raise ValueError(
+            f"of_ratio must be finite (got {deger!r}); a non-finite mixture "
+            f"ratio is not a measurement and no combustion result is "
+            f"produced from it")
+    if deger <= OF_RATIO_MIN_EXCLUSIVE:
+        raise ValueError(
+            f"of_ratio must be greater than {OF_RATIO_MIN_EXCLUSIVE} "
+            f"(got {deger!r}). O/F is the oxidiser-to-fuel MASS ratio "
+            f"(Sutton & Biblarz 9th ed., Ch. 6); a non-positive value has no "
+            f"physical meaning and previously produced negative elemental "
+            f"mass fractions and a negative equivalence ratio.")
+    return deger
+
+
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
 
@@ -275,7 +328,15 @@ class CombustionAnalyzer:
 
         Returns:
             Complete combustion analysis results
+
+        Raises:
+            ValueError: ``of_ratio`` sonlu-pozitif değilse (F4-5 kapısı,
+                bkz. ``OF_RATIO_MIN_EXCLUSIVE``). Kısmi sonuç YAYIMLANMAZ:
+                elemental bileşimden eşdeğerlik oranına kadar her yaprak bu
+                orandan türer.
         """
+        # --- GİRDİ KAPISI (F4-5) — anahtar kurulmadan ÖNCE ----------------
+        of_ratio = _dogrula_karisim_orani(of_ratio)
 
         # --- Memoizasyon (v2.5.0 UQ): anahtar eta_c_star İÇERMEZ, çünkü
         # eta yalnız iki türetilmiş alanı (eta_c_star, c_star_delivered)
@@ -1776,10 +1837,40 @@ class CombustionAnalyzer:
                 'thrust': row['thrust'],
             })
 
+        # --- VAKUM Isp'si: P_a = 0 LİMİTİ (bebek-Scofield F3-3) -----------
+        # ÖLÇÜM (17 Ağustos 2026, HEAD f9d95eb): burada
+        # ``max(p['isp'] for p in performance_data)`` yazıyordu, yani
+        # "vakum" diye yayımlanan sayı irtifa TABLOSUNUN EN ÜST SATIRIydı
+        # (20 km, P = 0,0547 bar) — vakum değil, yalnızca listenin en
+        # seyrek noktası. Ölçülen fark aynı motorda 268,1262 s (yayımlanan)
+        # ile 269,6207 s (gerçek vakum) arasında 1,495 s idi; p_e = 0,5 bar
+        # koşumunda 283,537 s ⟷ 286,112 s (%0,9). Kusurun ADI yanlıştı:
+        # tablo 10 km'de kesilseydi aynı alan 262,4 s'yi "vakum" diye
+        # basacaktı — yani yayımlanan büyüklük kullanıcının seçtiği irtifa
+        # listesine bağlıydı.
+        #
+        # Doğrusu bu fonksiyonun KENDİ meta sözlüğünde zaten hesaplıydı:
+        # ``thrust_vacuum = eta_v*mdot*v_e + P_e*A_e`` (P_a = 0 limiti,
+        # Sutton & Biblarz 9. baskı Eq. 2-16 / 3-29). Isp tanımından
+        # (Eq. 2-5) I_sp,vac = F_vac / (mdot * g0). Tek kaynak: sayı
+        # ``_fixed_nozzle_altitude_sweep`` metasından okunur, burada
+        # yeniden türetilmez.
+        thrust_vacuum = float(meta.get('thrust_vacuum_n', 0.0))
+        vacuum_isp = (thrust_vacuum / (mdot * G_0)) if mdot > 0 else 0.0
+
         return {
             'altitude_performance': performance_data,
             'sea_level_isp': performance_data[0]['isp'] if performance_data else 0,
-            'vacuum_isp': max([p['isp'] for p in performance_data]) if performance_data else 0,
+            'vacuum_isp': vacuum_isp,
+            #: Vakum Isp'sinin dayanağı: irtifa tablosundan OKUNMAZ, P_a = 0
+            #: limitinden gelir; bu yüzden irtifa listesi kısalsa/uzasa bile
+            #: değişmez.
+            'vacuum_isp_basis': (
+                'vacuum specific impulse from the P_a = 0 thrust limit '
+                '(F_vac = eta_v*mdot*v_e + P_e*A_e, Sutton & Biblarz 9th ed. '
+                'Eq. 2-16/3-29) divided by mdot*g0, NOT the highest row of '
+                'the altitude table: the published value must not depend on '
+                'which altitudes the caller asked for.'),
             # T33: hangi kaybin uygulandigi (ya da uygulanmadigi) beyan edilir
             'nozzle_loss_model': meta,
         }

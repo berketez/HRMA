@@ -86,6 +86,30 @@ jobs:
           node --version
           python -c "import shutil; assert shutil.which('node'), 'node PATH\'te yok — ön yüz testleri sessizce atlanır'"
 
+      # Bilimsel bağımlılıklar da doğrulanır (parti 31 / T2-2, T2-3, T2-4).
+      #
+      # NEDEN: bu üç kütüphaneye kapılı bekçiler "kurulu değil" gerekçesiyle
+      # atlıyordu ve gerekçe DOĞRULANMIYORDU. Ölçüm (17 Ağustos 2026):
+      #   * cantera KURULU ama mekanizma zinciri bozuk (ct.Solution hep
+      #     patlıyor) -> tests/test_combustion*.py + test_kinetic_efficiency.py
+      #     "39 skipped, 2 failed" veriyordu; 39 bekçi "Cantera kurulu değil"
+      #     diyerek ÜRÜN KUSURUNU sessizleştiriyordu.
+      #   * CoolProp'ta aynı desen (test_pressurant.py, 5 bekçi).
+      #   * numba hiçbir requirements dosyasında yoktu; numba<->NumPy
+      #     bit-özdeşliğini kanıtlayan tek bekçi CI'da hiç koşamıyordu.
+      # Testler artık ikisini AYIRIYOR (bağımlılık yok -> atla; bağımlılık var
+      # ama ürün yolu bozuk -> KIRMIZI). Bu adım o ayrımın ön koşulunu
+      # (bağımlılık gerçekten kurulu) mekanik olarak garanti eder: kurulum
+      # düşerse iş burada kırılır, testler sessizce atlanmaz.
+      - name: Bilimsel bağımlılıklar (cantera, CoolProp, numba) gerçekten kurulu mu
+        run: |
+          python - <<'PY'
+          import importlib
+          for ad in ('cantera', 'CoolProp', 'numba'):
+              m = importlib.import_module(ad)
+              print(ad, getattr(m, '__version__', '?'))
+          PY
+
       - name: Test paketi
         env:
           MPLBACKEND: Agg
@@ -132,6 +156,22 @@ jobs:
   # atlanıyordu — Faz 4'ün A1 (STL/DXF 1000× birim), A4 (NaN geometri → katı
   # cisim), A8 (katı cidarı) ve A11 (tank geometrisi) bulgularının bekçileri
   # dahil. "Atlandı" başarı sayılamaz.
+  #
+  # LİSTE ÇÜRÜMESİ (parti 31 / T2-1, 17 Ağustos 2026): yukarıdaki çözüm
+  # doğruydu ama listesi elle yazılmıştı ve çürüdü. Sonradan eklenen
+  # build123d-kapılı üç dosya (test_step_durustluk_kapisi.py,
+  # test_faz5_cizim_birim.py, test_faz6_sivi.py) ne bu listedeydi ne de
+  # release.yml'de. Ölçüm — üç dosya, build123d gizlenmiş ortamda:
+  #     84 passed, 19 skipped        (build123d varken: 102 passed, 1 skipped)
+  # yani 19 bekçi daha CI'da hiçbir yerde koşmuyordu. Sekiz dosyalık YENİ
+  # kümenin ölçümü:
+  #     build123d YOK  : 182 passed, 66 skipped
+  #     build123d VAR  : 245 passed, 1 skipped (ters kapı), 2 xfailed  = 248
+  #
+  # Listenin bir daha çürümemesi ELLE değil BEKÇİYLE sağlanır:
+  #   tests/test_ci_kapsam_kapisi.py — kaynağı tarar, build123d'ye kapılı HER
+  #   test dosyasının aşağıdaki komutta bulunmasını şart koşar. Yeni kapılı
+  #   dosya eklenip buraya yazılmazsa o bekçi KIRMIZI olur.
   #
   # Neden ayrı iş: build123d 0.11.x metadata'sı `numpy<3,>=2` deklare eder ve
   # kurulumu numpy'yi 2.x'e yükseltir; ana pakette numpy<2 pini zorunludur
@@ -194,21 +234,36 @@ jobs:
           MPLBACKEND: Agg
           PYTHONPATH: .
         run: |
+          # KAPILI DOSYA KÜMESİ — tests/test_ci_kapsam_kapisi.py bu listeyi
+          # kaynaktan TÜRETİP karşılaştırır; yeni bir build123d-kapılı dosya
+          # buraya yazılmazsa o bekçi kırmızıya döner (liste çürüyemez).
           pytest tests/test_step_import.py \
                  tests/test_tank_step_units.py \
                  tests/test_faz4_export_geometri.py \
                  tests/test_faz4_app_export.py \
                  tests/test_export_generators.py \
+                 tests/test_step_durustluk_kapisi.py \
+                 tests/test_faz5_cizim_birim.py \
+                 tests/test_faz6_sivi.py \
                  -q -rs --junitxml=step-report.xml
 
       # ATLAMA BÜTÇESİ = 0. xfail atlama sayılmaz (junit XML xfail'i de
       # <skipped> olarak yazar, tipi 'pytest.xfail'dir); yalnız gerçek
       # pytest.skip sayılır.
-      - name: Atlama bütçesi — SIFIR
+      #
+      # TEK İSTİSNA — TERS KAPI (parti 31 / T2-1): kümeye giren
+      # test_faz6_sivi.py iki yönlü kapılıdır. Bir testi tam da build123d
+      # KURULU OLDUĞU için atlanır (STEP üretilebiliyorken "STEP yok"
+      # açıklamasının varlığı sınanamaz). Bu, bütçenin kovaladığı sınıfın
+      # TERSİDİR: o test bu iş atladığı için sınanmamış kalmaz, ana `pytest`
+      # işinde (build123d kurulu DEĞİL) koşar. Bu yüzden istisna yalnız
+      # "build123d kurulu" gerekçeli atlamalara açıktır; "kurulu değil"
+      # gerekçesi bu işte HER ZAMAN kırmızıdır.
+      - name: Atlama bütçesi — SIFIR (ters kapı hariç)
         if: always()
         run: |
           python - <<'PY'
-          import sys, xml.etree.ElementTree as ET
+          import re, sys, xml.etree.ElementTree as ET
           root = ET.parse('step-report.xml').getroot()
           suite = root if root.tag == 'testsuite' else root.find('testsuite')
           toplam = int(suite.get('tests', 0))
@@ -218,20 +273,32 @@ jobs:
           atlanan = [tc for tc in suite.iter('testcase')
                      if (tc.find('skipped') is not None
                          and tc.find('skipped').get('type') == 'pytest.skip')]
-          print(f'toplanan={toplam} gercek_atlanan={len(atlanan)}')
+          # TERS KAPI imzasi: "build123d kurulu" (ama "kurulu degil" DEGIL).
+          ters = re.compile(r'build123d kurulu(?!\s*de[gğ]il)')
+          ters_kapi, gercek = [], []
           for tc in atlanan:
+              mesaj = tc.find('skipped').get('message', '')
+              (ters_kapi if ters.search(mesaj) else gercek).append((tc, mesaj))
+          print(f'toplanan={toplam} atlanan={len(atlanan)} '
+                f'(ters_kapi={len(ters_kapi)} gercek={len(gercek)})')
+          for tc, mesaj in ters_kapi:
+              print(f"  TERS KAPI (ana iste kosar) {tc.get('classname')}::"
+                    f"{tc.get('name')} -> {mesaj[:160]}")
+          for tc, mesaj in gercek:
               print(f"  ATLANDI {tc.get('classname')}::{tc.get('name')} "
-                    f"-> {tc.find('skipped').get('message', '')[:160]}")
+                    f"-> {mesaj[:160]}")
           hata = []
-          if atlanan:
-              hata.append(f'{len(atlanan)} test atlandi — bu iste atlama '
-                          'butcesi SIFIRDIR')
-          # 3 Agustos 2026 olcumu: 145 test toplandi (143 passed + 2 xfailed).
-          # Alt sinir, toplama coktugunde "0 test, 0 atlama" ile yesil kalmayi
-          # engeller.
-          if toplam < 140:
-              hata.append(f'yalnizca {toplam} test toplandi; 3 Agustos 2026 '
-                          'olcumu 145 idi — toplama kirilmis olabilir')
+          if gercek:
+              hata.append(f'{len(gercek)} test atlandi — bu iste atlama '
+                          'butcesi SIFIRDIR (ters kapi disinda)')
+          # 17 Agustos 2026 olcumu (8 dosyalik kume, build123d kurulu):
+          # 248 test toplandi (245 passed + 1 ters-kapi skip + 2 xfailed).
+          # Onceki 5 dosyalik kume 145 idi; alt sinir ayni oranda (~%96,5)
+          # tasindi. Alt sinir, toplama coktugunde "0 test, 0 atlama" ile
+          # yesil kalmayi engeller.
+          if toplam < 240:
+              hata.append(f'yalnizca {toplam} test toplandi; 17 Agustos 2026 '
+                          'olcumu 248 idi — toplama kirilmis olabilir')
           if hata:
               sys.exit('STEP kapisi: ' + '; '.join(hata))
           print('STEP kapisi: TAMAM')

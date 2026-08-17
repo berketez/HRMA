@@ -119,7 +119,11 @@ def _cached_slot_quads(r_port, n_slots, width, depth):
         ]))
     return tuple(quads)
 
-from hrma.constants import (G_0, vacuum_isp_ratio, ISA_LAYERS, M_AIR,
+# v2.6.27 (F2-2): ``vacuum_isp_ratio`` ampirik log-fiti bu motordan
+# ÇIKARILDI — vakum Isp'si artık motorun kendi CF zincirinden türer
+# (bkz. _thrust_coefficient_vacuum). İthal geri gelirse ampirik yol da
+# geri gelmiş demektir.
+from hrma.constants import (G_0, ISA_LAYERS, M_AIR,
                             R_STAR_ICAO, R_UNIVERSAL,
                             ISA_TABLE_TOP_M, isa_temperature, isa_pressure)
 # Yayımlanan eğrinin seyreltmesi: katı ve hibrit AYNI algoritmayı kullanır,
@@ -216,12 +220,57 @@ SOLID_CASE_MATERIAL_EXTRA = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# TEK KAPTA TEK MALZEME KİMLİĞİ (v2.6.27, bebek-Scofield F2-1)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (HEAD f9d95eb, varsayılan katı motor: APCP, D=100 mm, d_çekirdek=
+# 30 mm, L=500 mm, Pc=40 bar): aynı kasa ÜÇ ayrı malzeme kimliği taşıyordu.
+#
+#   etiket   ('case_material')        -> 'steel_4130'  (AISI 4130, 460/730 MPa)
+#   dayanım  (cidar + hoop + SF)      -> 250 MPa       (A36 sınıfı jenerik çelik)
+#   yoğunluk (kuru kütle + maliyet)   -> 7800 kg/m³    (hiçbir kayıtta yok;
+#                                        her iki kayıt da 7850 der)
+#
+# Sonuç ölçüldü: kopma basıncı `PressureVesselAnalyzer`a ETİKETLE gidiyordu,
+# yani cidar 250 MPa ile boyutlandırılıp 4130'un 460/730 MPa'sıyla sınanıyordu:
+#
+#   case_material göndermeden : burst = 341,13 bar   (rho = 7800)
+#   case_material='steel'     : burst = 186,09 bar   (rho = 7850)
+#
+# yani ARAYÜZÜN KENDİ VARSAYILANIYLA (solid.html'deki <select> ilk seçeneği
+# 'steel') aynı motor için 1,833 kat farklı kopma basıncı. Alan gönderilmeyen
+# her yol (doğrudan motor kullanımı, dışa aktarım, UQ, API çağrısı) kazanılmamış
+# 4130 dayanımını görüyordu.
+#
+# DÜZELTME: varsayılan malzeme arayüzün kendi varsayılanına ('steel')
+# eşitlendi ve dayanım/yoğunluk artık BURADA İKİNCİ KEZ TANIMLANMIYOR —
+# materials_db kaydından okunur. Böylece boyutlandırmanın kullandığı dayanım
+# ile kopma basıncının kullandığı dayanım TANIM GEREĞİ aynı kayıttan gelir.
+# 'steel' kaydı ASTM A36 minimumlarıdır (250/400 MPa) ve solid.html'in
+# kullanıcıya beyan ettiği banda ("Steel: 200-400 MPa") oturur.
+#: Kasa varsayılan malzemesi — solid.html `#case_material` <select> ilk
+#: seçeneğiyle (value="steel") BİREBİR aynı olmak zorunda; aksi hâlde alan
+#: gönderilen ve gönderilmeyen yollar farklı malzeme görür.
+SOLID_CASE_DEFAULT_MATERIAL = 'steel'
+
+
+def _solid_case_default_properties():
+    """Varsayılan kasa malzemesinin materials_db kaydı (tek okuma noktası)."""
+    from hrma.data.materials_db import get_material
+    return get_material(SOLID_CASE_DEFAULT_MATERIAL)
+
+
+_SOLID_CASE_DEFAULT_REF = _solid_case_default_properties()
+
 SOLID_CASE_DESIGN = {
-    'material': 'steel_4130',        # materials_db anahtarı
-    'yield_strength_pa': 250e6,      # Pa — geriye uyumlu jenerik çelik tabanı
+    'material': SOLID_CASE_DEFAULT_MATERIAL,   # materials_db anahtarı
+    # Dayanım ve yoğunluk TÜRETİLMİŞTİR — burada ikinci bir tanım YOKTUR.
+    'yield_strength_pa': float(_SOLID_CASE_DEFAULT_REF['yield_strength']),
     'design_safety_factor': 3.0,     # akmaya karşı tasarım katsayısı
     'min_wall_thickness_m': 0.002,   # üretilebilirlik alt sınırı
-    'case_density_kg_m3': 7800.0,    # kg/m³ (çelik) — kütle tahmini tabanı
+    # Yalnız BEYAN amaçlı: hesapta kullanılmaz (``_case_density`` kaydı
+    # doğrudan okur). Türetilmiş olduğu için kayıttan ayrışamaz.
+    'case_density_kg_m3': float(_SOLID_CASE_DEFAULT_REF['density']),
     # Emniyet valfi ayarı: tasarım basıncının bu oranı (API 520 sınıfı
     # pratik). Hesaplanmış bir kap basıncı değil, ÖNERİdir.
     'relief_fraction_of_design': 0.85,
@@ -1776,13 +1825,14 @@ class SolidRocketEngine:
     def _case_density(self):
         """Kasa malzemesi yoğunluğu [kg/m3] — TEK kaynak.
 
-        Varsayılan malzemede geriye uyumlu referans yoğunluk korunur;
-        kullanıcı malzemeyi değiştirdiyse GERÇEK yoğunluk kullanılır ve
-        bilinmeyen malzeme sessizce çeliğe düşmez.
+        v2.6.27 (F2-1): burada varsayılan malzeme için AYRI bir sabit
+        (7800 kg/m³) döndüren bir dal vardı. O sayı hiçbir malzeme kaydında
+        geçmiyordu (materials_db hem 'steel' hem 'steel_4130' için 7850 der),
+        yani aynı kasa dayanımını bir kayıttan, yoğunluğunu başka bir yerden
+        alıyordu. Dal kaldırıldı: yoğunluk DAİMA dayanımla aynı kayıttan
+        okunur. Bilinmeyen malzeme yine sessizce çeliğe düşmez.
         """
         material = getattr(self, 'case_material', SOLID_CASE_DESIGN['material'])
-        if material == SOLID_CASE_DESIGN['material']:
-            return float(SOLID_CASE_DESIGN['case_density_kg_m3'])
         return float(self._case_material_properties(material)['density'])
 
     #: /calculate_solid uç noktasının kurucu varsayılanı. İstemci
@@ -2195,6 +2245,53 @@ class SolidRocketEngine:
         """
         return self._thrust_coefficient_state(P_c_bar)['cf']
 
+    def _cf_momentum_term(self, pressure_ratio):
+        """Sutton & Biblarz Denk. 3-30'un momentum terimi — TEK tanım noktası.
+
+        Verilen ``P_e/P_c`` için ideal itki katsayısının basınç-itki
+        teriminden ARINIK kısmı. Hem ortam basınçlı (deniz seviyesi / irtifa)
+        hem vakum zinciri bu bağıntıyı kullanır; ikisi ayrı yazılırsa aynı
+        motorun iki farklı fiziği olur (v2.6.27, F2-2).
+        """
+        gamma = float(self.gamma)
+        gamma_term = 2 * gamma ** 2 / (gamma - 1)
+        stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
+        genisleme = max(0.0, 1 - float(pressure_ratio) ** ((gamma - 1) / gamma))
+        return float(np.sqrt(gamma_term * stagnation_term * genisleme))
+
+    def _thrust_coefficient_vacuum(self):
+        """Bu motorun KENDİ lülesinin vakum itki katsayısı (verim uygulanmış).
+
+        v2.6.27 (bebek-Scofield F2-2). Vakum Isp'si daha önce
+        ``hrma.constants.vacuum_isp_ratio()`` ampirik log-fitiyle
+        (``0,953 + 0,0405·ln ε``) deniz seviyesi Isp'sinden ölçekleniyordu.
+        O çarpan HAZNE BASINCINI HİÇ GÖRMÜYOR, oysa gerçek oran
+
+            CF_vac / CF_SL = 1 + (P_a/P_c)·ε / CF_SL
+
+        ile doğrudan P_c'ye bağlıdır. ÖLÇÜLDÜ (varsayılan APCP motoru,
+        yanıtın kendi CF zinciriyle karşılaştırma; ``+`` yayımlanan değerin
+        fazlalığı):
+
+            Pc =  20 bar, ε = 3,60 -> yayımlanan 215,77 s, kendi CF'i 242,56 s  (−11,04 %)
+            Pc =  40 bar, ε = 5,93 -> yayımlanan 240,70 s, kendi CF'i 258,01 s  ( −6,71 %)
+            Pc =  80 bar, ε = 9,95 -> yayımlanan 262,83 s, kendi CF'i 270,85 s  ( −2,96 %)
+            Pc = 150 bar, ε = 16,08 -> yayımlanan 281,03 s, kendi CF'i 280,71 s ( +0,11 %)
+
+        yani ampirik çarpan yalnız yüksek basınç / büyük ε köşesinde tutuyor;
+        bu deponun tipik amatör motor rejiminde (40 bar, küçük ε) yanıt kendi
+        fiziğiyle çelişiyordu.
+
+        Vakumda ortam basıncı sıfırdır: akış ayrılması olamaz, lüle her zaman
+        boğulmuştur ve basınç-itki terimi tam ε·P_e/P_c olur.
+        Kaynak: Sutton & Biblarz, Rocket Propulsion Elements 9. baskı,
+        Denk. 3-30/3-31 (P_a = 0 özel hâli).
+        """
+        epsilon = float(self._estimate_expansion_ratio())
+        pe_ratio = float(self._exit_pressure_ratio(epsilon))
+        cf_ideal = self._cf_momentum_term(pe_ratio) + epsilon * pe_ratio
+        return float(cf_ideal * self._total_nozzle_efficiency())
+
     def _thrust_coefficient_state(self, P_c_bar):
         """CF(P_c) ve akış AYRILMASI durumu — TEK hesap, tek tanım noktası.
 
@@ -2265,13 +2362,7 @@ class SolidRocketEngine:
         durum['pe_bar'] = float(pe_bar)
         durum['pe_over_pa'] = float(pe_bar / p_amb)
 
-        gamma_term = 2 * gamma ** 2 / (gamma - 1)
-        stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
-
-        def _cf_momentum(oran):
-            """Sutton Denk. 3-30'un momentum terimi, verilen P_e/P_c için."""
-            genisleme = max(0.0, 1 - oran ** ((gamma - 1) / gamma))
-            return float(np.sqrt(gamma_term * stagnation_term * genisleme))
+        _cf_momentum = self._cf_momentum_term
 
         # Boğulma: P* = Pc·(2/(γ+1))^(γ/(γ−1)) ≥ P_a olmalı.
         sonik_oran = (2 / (gamma + 1)) ** (gamma / (gamma - 1))
@@ -7778,6 +7869,14 @@ class SolidRocketEngine:
         burst_source = 'thin-wall yield pressure (sigma_y*t/r)'
         vessel_status = None
         vessel_warnings = []
+        # F2-1 (v2.6.27): kopma basıncının KULLANDIĞI akma dayanımı yanıtta
+        # adıyla yayımlanır. Boyutlandırmanın kullandığı `sigma_y` ile burada
+        # okunan değer aynı olmak ZORUNDADIR — tek kapta iki malzeme kimliği
+        # bu iki sayının ayrışmasıyla ortaya çıkıyordu (ölçüm: etiket
+        # 'steel_4130' / 460 MPa, boyutlandırma 250 MPa, burst 341,13 vs
+        # 186,09 bar). Sayı yayımlandığı için tutarsızlık bir sonraki sefer
+        # yanıtın kendisinden görülür, yalnız testten değil.
+        burst_yield_pa = None
         try:
             from hrma.analysis.pressure_vessel import PressureVesselAnalyzer
             pv = PressureVesselAnalyzer().analyze(
@@ -7791,9 +7890,24 @@ class SolidRocketEngine:
                             '(hrma.analysis.pressure_vessel)')
             vessel_status = pv['status']
             vessel_warnings = list(pv.get('warnings', []))
+            derating = pv.get('derating') or {}
+            if derating.get('room_temp_yield_strength_Pa') is not None:
+                burst_yield_pa = float(
+                    derating['room_temp_yield_strength_Pa'])
         except Exception as exc:
             vessel_warnings.append(
                 f'Burst pressure fell back to the thin-wall yield estimate: {exc}')
+        if burst_yield_pa is None:
+            # Yedek yolda kopma AYNI sigma_y'den türetildi (yield_pressure_bar).
+            burst_yield_pa = float(sigma_y)
+        material_identity_consistent = bool(
+            abs(burst_yield_pa - float(sigma_y))
+            <= 1e-9 * max(abs(float(sigma_y)), 1.0))
+        if not material_identity_consistent:
+            vessel_warnings.append(
+                'Case material identity split: the wall was sized with '
+                f'{sigma_y / 1e6:.1f} MPa but the burst pressure was computed '
+                f'from {burst_yield_pa / 1e6:.1f} MPa for the same case.')
 
         # --- KAZANILMAMIŞ KAP ONAYI (B2-4, v2.6.27) -----------------------
         # ÖLÇÜLDÜ (cidar GÖNDERİLMEDEN, dört hazne basıncında): 'vessel_status'
@@ -7854,6 +7968,22 @@ class SolidRocketEngine:
                                           else 'sized_by_hrma'),
                 'vessel_status_is_tautological': vessel_tautological,
                 'vessel_status_basis': vessel_status_basis,
+                # --- F2-1 malzeme kimliği (v2.6.27) ---------------------
+                # Kasa cidarını boyutlandıran akma dayanımı ile kopma
+                # basıncını üreten akma dayanımı, TEK kaptaki TEK malzemenin
+                # aynı kaydından gelmek zorundadır.
+                'case_yield_strength_mpa': float(sigma_y / 1e6),
+                'burst_yield_strength_mpa': float(burst_yield_pa / 1e6),
+                'material_identity_consistent': material_identity_consistent,
+                'material_identity_basis': (
+                    'The wall thickness / hoop safety factor and the burst '
+                    'pressure are computed from the same material record '
+                    f"('{material}'), so one case carries one identity."
+                    if material_identity_consistent else
+                    'INCONSISTENT: the sizing strength and the burst strength '
+                    'come from different material properties for the same '
+                    'case; the burst pressure is not earned by the wall that '
+                    'was sized.'),
             },
             'ignition_safety': {
                 'ignition_system': 'Electric match',
@@ -9413,19 +9543,36 @@ class SolidRocketEngine:
         # Sea level specific impulse
         isp_sea_level = total_impulse / (propellant_mass * self.g0)
         
-        # Vakum ozgul itki (mukemmel genisleme nedeniyle yuksek)
-        # Onceden sabit 1.15 carpan kullaniliyordu; bu kucuk motorlar (eps~5)
-        # ve buyuk motorlar (eps~100) icin yanlis sonuc verir.
-        # Dogru yaklasim: oran epsilon (genisleme orani) ve gamma'ya baglidir.
-        # Sutton & Biblarz Tablo 3-2 ile kalibre edilmis ampirik formul
-        # hrma.constants.vacuum_isp_ratio() icinde tanimlandi.
-        try:
-            epsilon_for_vac = self._estimate_expansion_ratio()
-        except Exception:
-            epsilon_for_vac = 10.0  # makul fallback
-        vacuum_thrust_multiplier = vacuum_isp_ratio(epsilon_for_vac, self.gamma)
-        isp_vacuum = isp_sea_level * vacuum_thrust_multiplier
-        
+        # Vakum özgül itkisi — YANITIN KENDİ CF ZİNCİRİNDEN (v2.6.27, F2-2).
+        #
+        # Burada ``hrma.constants.vacuum_isp_ratio()`` ampirik log-fiti
+        # (0,953 + 0,0405·ln ε) deniz seviyesi Isp'sini ölçekliyordu. O çarpan
+        # HAZNE BASINCINI görmez; gerçek oran CF_vac/CF_SL = 1 + (P_a/P_c)·ε/CF_SL
+        # olduğundan P_c'ye doğrudan bağlıdır. Ölçülen çelişki ve gerekçe
+        # ``_thrust_coefficient_vacuum`` docstring'indedir (40 bar'da %6,71).
+        #
+        # Vakum impulsu deniz seviyesi impulsuyla AYNI integralden çıkar,
+        # yalnız itki katsayısı değişir:
+        #     F(t) = CF · P_c(t) · A_t(t)   ->   F_vac(t) = CF_vac · P_c(t) · A_t(t)
+        # CF_vac ortam basıncından bağımsız olduğu için zaman içinde sabittir;
+        # yine de integral nokta nokta alınır ki toplam impulsla aynı sayısal
+        # yol (np.trapz, aynı örnekler) kullanılsın.
+        cf_vacuum = self._thrust_coefficient_vacuum()
+        vacuum_thrust_series = (cf_vacuum
+                                * np.asarray(curve['pressure'], dtype=float)
+                                * 1e5
+                                * np.asarray(curve['throat_area_series'],
+                                             dtype=float))
+        total_impulse_vacuum = float(np.trapz(vacuum_thrust_series,
+                                              curve['time']))
+        isp_vacuum = total_impulse_vacuum / (propellant_mass * self.g0)
+        isp_vacuum_basis = (
+            'CF_vac x Pc x A_t integrated over the same thrust curve as the '
+            'sea-level impulse (Sutton & Biblarz Eq. 3-30/3-31 with Pa = 0); '
+            'this is THIS motor\'s fixed nozzle in vacuum, not a '
+            'vacuum-optimised nozzle. Replaces the empirical log fit that did '
+            'not see chamber pressure.')
+
         # Değer doğrulama — eskiden yalnız stdout'a basılıyordu (kullanıcı
         # arayüzde GÖREMİYORDU). Artık uyarı listesine giriyor: hem görünür
         # hem iki dilli. Eşikler ve koşullar birebir aynı.
@@ -9470,9 +9617,22 @@ class SolidRocketEngine:
         d_exit = d_throat * np.sqrt(epsilon_sea_level)
 
         # Vakum ε'su: pratik üst sınır (ayrılma/kütle sınırı) — deniz
-        # seviyesi değerinin katı olarak, 40'ı aşmayan bir tahmin
+        # seviyesi değerinin katı olarak, 40'ı aşmayan bir tahmin.
+        #
+        # F2-2 AYRIMI (v2.6.27): bu ε ve ondan türeyen çıkış çapı, ÖNERİLEN
+        # bir vakum lülesine aittir — bu motorun İMAL EDİLEN lülesine değil.
+        # 'isp_vacuum' ise bu motorun KENDİ (ε = epsilon_sea_level) lülesinin
+        # vakumdaki performansıdır. İki sayı komşu anahtarlarda durduğu için
+        # ayrım adıyla beyan edilir; aksi hâlde kullanıcı Isp'yi bu ε ile
+        # üretilmiş sanır.
         epsilon_vacuum = min(40.0, max(4.0 * epsilon_sea_level, 25.0))
         d_exit_vacuum = d_throat * np.sqrt(epsilon_vacuum)
+        expansion_ratio_vacuum_basis = (
+            'SUGGESTED vacuum-optimised nozzle (4x the sea-level expansion '
+            'ratio, capped at 40 for separation/mass limits). This motor is '
+            f'not built with it: the delivered nozzle has eps = '
+            f'{epsilon_sea_level:.3f} and isp_vacuum is computed for THAT '
+            'nozzle.')
         
         # Çıkış çapı fiziksel kontrolü
         if d_throat <= 0:
@@ -9863,14 +10023,19 @@ class SolidRocketEngine:
             'specific_impulse': isp_sea_level,
             'isp_sea_level': isp_sea_level,
             'isp_vacuum': isp_vacuum,
+            # F2-2: vakum Isp'sinin türetildiği zincir adıyla yayımlanır.
+            'isp_vacuum_basis': isp_vacuum_basis,
+            'total_impulse_vacuum': total_impulse_vacuum,
+            'thrust_coefficient_vacuum': float(cf_vacuum),
             'propellant_mass': propellant_mass,
-            
+
             # Motor geometry
             'throat_diameter': d_throat * 1000,  # mm
             'exit_diameter': d_exit * 1000,  # mm
             'exit_diameter_vacuum': d_exit_vacuum * 1000,  # mm
             'expansion_ratio': epsilon_sea_level,
             'expansion_ratio_vacuum': epsilon_vacuum,
+            'expansion_ratio_vacuum_basis': expansion_ratio_vacuum_basis,
 
             # Nozul tasarımı + çıkış düzlemi performansı (egzoz/plume şeması;
             # motor_viz3d.js readNozzleExit'in okuduğu adlarla, hibritle aynı)

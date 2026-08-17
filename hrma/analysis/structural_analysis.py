@@ -43,6 +43,17 @@ ASME_SM_UTS_DIVISOR = 3.0
 ASME_SM_YIELD_DIVISOR = 1.5
 ASME_SHAKEDOWN_MULTIPLIER = 3.0
 
+# ---------------------------------------------------------------------------
+# Yapısal hüküm sözlüğü — TEK tanım noktası (v2.6.27, F4-2).
+# Hükmü ÜRETEN yer burasıdır, dolayısıyla sözcükler de burada tanımlanır.
+# ``ONAY`` sayılan hükümler kazanılmamışsa ``NOT_EVALUATED``'e çekilir;
+# 'MARGINAL' / 'UNSAFE' bir TEHLİKE BİLDİRİMİDİR ve asla susturulmaz.
+# ---------------------------------------------------------------------------
+#: Kazanılmamışsa geri çekilen (onay niteliğindeki) hükümler.
+STRUCTURAL_APPROVAL_VERDICTS = ('SAFE', 'ACCEPTABLE')
+#: Onay geri çekildiğinde yazılan tavan hüküm.
+STRUCTURAL_VERDICT_NOT_EVALUATED = 'NOT_EVALUATED'
+
 
 def published_material_record(mat_props):
     """materials_db kaydının YANITA konan biçimi — beyanlarıyla birlikte.
@@ -530,7 +541,9 @@ class StructuralAnalyzer:
     def analyze_structure(self, motor_data: Dict, material: str = 'steel_4130',
                          design_pressure_factor: float = 1.5,
                          design_safety_factor: Optional[float] = None,
-                         actual_wall_thickness: Optional[float] = None) -> Dict:
+                         actual_wall_thickness: Optional[float] = None,
+                         actual_throat_thickness: Optional[float] = None,
+                         actual_end_cap_thickness: Optional[float] = None) -> Dict:
         """
         Complete structural analysis
 
@@ -545,6 +558,15 @@ class StructuralAnalyzer:
             actual_wall_thickness: Kullanıcının GERÇEK cidar kalınlığı [m].
                 Verilirse hazne cidarı DOĞRULAMA modunda değerlendirilir
                 (SF gerçek cidardan); None -> eski boyutlandırma modu.
+            actual_throat_thickness: Kullanıcının GERÇEK boğaz cidarı [m].
+                v2.6.27 (F4-2): ``_analyze_nozzle_structure`` bu argümanı
+                zaten destekliyordu ama BURADAN İLETİLMİYORDU, yani lüle
+                hiçbir girdiyle doğrulama moduna geçemiyordu ve totolojik
+                SF'siyle genel hükmü çiviliyordu. None -> boyutlandırma modu
+                (eski davranış birebir).
+            actual_end_cap_thickness: Kullanıcının GERÇEK kapak kalınlığı [m].
+                Aynı gerekçe; ``_analyze_end_caps`` argümanı destekliyordu,
+                çağrı satırı geçirmiyordu. None -> boyutlandırma modu.
 
         Returns:
             Structural analysis results
@@ -646,15 +668,19 @@ class StructuralAnalyzer:
         # girildiğinde nozzle_analysis.safety_factor ve
         # end_cap_analysis.head_safety_factor 4.0'da SABİT kaldı — tek
         # motorda iki farklı tasarım emniyet katsayısı kullanılıyordu.
+        # v2.6.27 (F4-2): gerçek boğaz cidarı da artık İLETİLİYOR — verilirse
+        # lüle doğrulama moduna geçer ve SF'si totolojik olmaktan çıkar.
         nozzle_analysis = self._analyze_nozzle_structure(
             design_pressure, throat_diameter, chamber_diameter, mat_props,
-            nozzle_type, design_safety_factor=design_safety_factor
+            nozzle_type, design_safety_factor=design_safety_factor,
+            actual_throat_thickness=actual_throat_thickness
         )
 
         # End cap analysis
         end_cap_analysis = self._analyze_end_caps(
             design_pressure, chamber_diameter, mat_props,
-            design_safety_factor=design_safety_factor
+            design_safety_factor=design_safety_factor,
+            actual_thickness=actual_end_cap_thickness
         )
 
         # Bolt/fastener analysis
@@ -1663,10 +1689,63 @@ class StructuralAnalyzer:
             'nozzle': nozzle_analysis['safety_factor'],
             'end_cap': end_cap_analysis['head_safety_factor']
         }
+        # --- F4-2 (v2.6.27, bebek-Scofield): HÜKÜM TOTOLOJİK SF'DEN TÜREMEZ --
+        # Alt analizlerin her biri kendi ``safety_factor_is_tautological``
+        # bayrağını ZATEN yazıyordu; bu fonksiyon onları OKUMUYOR, hepsinin
+        # minimumunu alıp oradan status/risk_level üretiyordu.
+        #
+        # ÖLÇÜLDÜ (HEAD f9d95eb; steel_4130, Pc = 40 bar, D = 100 mm,
+        # d_boğaz = 20 mm, F = 3 kN):
+        #   SF hedefi 2,0 -> minimum_safety_factor = 2,000000, UNSAFE/HIGH
+        #   SF hedefi 3,0 -> minimum_safety_factor = 3,000000, ACCEPTABLE/LOW
+        #   SF hedefi 4,0 -> minimum_safety_factor = 4,000000, ACCEPTABLE/LOW
+        # yani altı basamak boyunca kullanıcının kendi girdisi. Daha ağırı:
+        # kullanıcı GERÇEK cidar verse bile (doğrulama modu) hüküm değişmiyor,
+        # çünkü lüle ve kapak çağrıları gerçek kalınlık ALMIYOR, hep 'size'
+        # modunda kalıyor ve minimumu onlar çiviliyor:
+        #   cidar  2 mm -> hazne SF  3,057 ... minimum_safety_factor = 3,000
+        #   cidar  5 mm -> hazne SF  7,643 ... minimum_safety_factor = 3,000
+        #   cidar 10 mm -> hazne SF 13,783 ... minimum_safety_factor = 3,000
+        # Kullanıcının kazandığı doğrulama, iki totolojik aday tarafından
+        # tamamen maskeleniyordu. app.py'deki uç kapısı bunu göremez: o yalnız
+        # ``chamber_analysis.design_mode``'a bakar ve burada 'verify' yazar.
+        #
+        # SÖZLEŞME (defterdeki vessel_status PASS -> NOT_EVALUATED deseniyle
+        # AYNI): ONAY geri çekilir, UYARI çekilmez. Minimum SF ve sayıların
+        # tamamı KALIR (gerçekten hesaplandılar, ayrıca uyarıları onlar
+        # üretir); yalnız HÜKÜM, minimumu belirleyen adayın kazanılmış olup
+        # olmadığına bağlanır.
+        # Varsayılan True'dur ve bu BİLİNÇLİDİR: bayrağı olmayan bir emniyet
+        # katsayısının kazanıldığı KANITLANAMAZ, dolayısıyla ondan onay
+        # çıkarılamaz. Alt analiz bayrağı düşürürse hüküm geri çekilir —
+        # sessizce kabule dönmez.
+        sf_tautological = {
+            'chamber_hoop': bool(
+                chamber_analysis.get('safety_factor_is_tautological', True)),
+            'chamber_von_mises': bool(
+                chamber_analysis.get('safety_factor_is_tautological', True)),
+            'nozzle': bool(
+                nozzle_analysis.get('safety_factor_is_tautological', True)),
+            'end_cap': bool(
+                end_cap_analysis.get('safety_factor_is_tautological', True)),
+        }
         if buckling_analysis is not None:
             sf_candidates['buckling_axial'] = buckling_analysis['axial_buckling_safety_factor']
+            # Burkulma, hazne cidarının DEĞERLENDİRİLEN kalınlığıyla çözülür;
+            # o kalınlık HRMA tarafından boyutlandırıldıysa burkulma hükmü de
+            # kazanılmamıştır (girdi zinciri aynı).
+            sf_tautological['buckling_axial'] = sf_tautological['chamber_hoop']
 
         min_safety_factor = min(sf_candidates.values())
+
+        # Minimumu belirleyen aday(lar): hepsi totolojikse hüküm kazanılmamış.
+        binding = [k for k, v in sf_candidates.items()
+                   if v <= min_safety_factor * (1.0 + 1e-12)]
+        binding_tautological = bool(
+            binding and all(sf_tautological.get(k, True) for k in binding))
+        earned = {k: v for k, v in sf_candidates.items()
+                  if not sf_tautological.get(k, True)}
+        min_earned_safety_factor = min(earned.values()) if earned else None
 
         # Risk assessment
         if min_safety_factor < 2.0:
@@ -1681,6 +1760,16 @@ class StructuralAnalyzer:
         else:
             risk_level = 'VERY LOW'
             status = 'SAFE'
+
+        # ONAY geri çekilir (UYARI asla): kabul kararı yalnız minimumu
+        # belirleyen aday BAĞIMSIZ bir doğrulamaysa verilir. 'MARGINAL' /
+        # 'UNSAFE' bir tehlike bildirimidir ve NOT_EVALUATED'e çevrilmez —
+        # gerçek bir uyarıyı susturmak, kazanılmamış bir onaydan daha kötüdür.
+        verdict_withheld = bool(binding_tautological
+                                and status in STRUCTURAL_APPROVAL_VERDICTS)
+        if verdict_withheld:
+            status = STRUCTURAL_VERDICT_NOT_EVALUATED
+            risk_level = STRUCTURAL_VERDICT_NOT_EVALUATED
 
         # SICAKLIK MARJI (v2.5.2): gerilme emniyet faktoru tek basina
         # yeterli degil. Sogutmasiz ince metal cidar kesit boyunca neredeyse
@@ -1710,7 +1799,16 @@ class StructuralAnalyzer:
                 severity = ('ACCEPTABLE', 'LOW')
             if severity is not None:
                 rank = {'SAFE': 0, 'ACCEPTABLE': 1, 'MARGINAL': 2, 'UNSAFE': 3}
-                if rank[severity[0]] > rank[status]:
+                if status == STRUCTURAL_VERDICT_NOT_EVALUATED:
+                    # Hüküm geri çekilmişken termal değerlendirme yalnız
+                    # UYARI yönünde konuşabilir. Termal marj cidar
+                    # kalınlığından bağımsızdır, yani totolojik değildir;
+                    # MARGINAL/UNSAFE gerçek bir tehlikedir ve tavanı deler.
+                    # 'ACCEPTABLE' ise bir onaydır ve geri çekilmiş hükmü
+                    # yeniden ayağa kaldıramaz.
+                    if severity[0] in ('MARGINAL', 'UNSAFE'):
+                        status, risk_level = severity
+                elif rank[severity[0]] > rank[status]:
                     status, risk_level = severity
 
         # UNSAFE durumunda hangi yükün domine ettiğini açıkla (Dalga 0):
@@ -1762,6 +1860,36 @@ class StructuralAnalyzer:
             'status': status,
             'explanation': explanation,
             'safety_factors': sf_candidates,
+            # --- F4-2 (v2.6.27): hükmün KAZANILIP kazanılmadığı -----------
+            # Sayılar silinmez; ne oldukları adıyla yazılır.
+            'safety_factor_is_tautological': sf_tautological,
+            'binding_safety_factors': binding,
+            'binding_safety_factor_is_tautological': binding_tautological,
+            'minimum_earned_safety_factor': min_earned_safety_factor,
+            'verdict_withheld': verdict_withheld,
+            # NOT: anahtar adı bilerek ``verdict_basis`` DEĞİL — uç katmanı
+            # (app.py::_withhold_unearned_structural_verdict) o adı kendi
+            # metniyle doldurur ve yalnız hazne moduna bakar. İki metin
+            # çakışırsa okuyucu hangisinin doğru olduğunu bilemez; modülün
+            # gerekçesi kendi adıyla durur.
+            'minimum_safety_factor_verdict_basis': (
+                'No acceptance is issued: the safety factor that sets the '
+                'minimum ('
+                + ', '.join(binding)
+                + ') comes from a section HRMA sized itself, so it is the '
+                  'design target read back (target x allowances), not an '
+                  'independent verification. Supply the real wall / throat / '
+                  'head thickness to earn a verdict. A remaining '
+                  'MARGINAL/UNSAFE status is a warning and is never '
+                  'suppressed.'
+                if verdict_withheld else
+                'The minimum safety factor comes from a section evaluated '
+                'against a user-supplied thickness, so the verdict is an '
+                'independent verification.'
+                if not binding_tautological else
+                'The minimum safety factor is a design-target read back, but '
+                'the resulting status is a warning (MARGINAL/UNSAFE) and is '
+                'never suppressed.'),
             # Cidar sicakligi / malzeme servis siniri. 1.0'i asmasi sicaklik
             # kaynakli yetmezlik demektir; gerilme SF'si yuksek olsa bile.
             # F074: oran TEPE (ic yuz) cidar sicakligindan hesaplanir.

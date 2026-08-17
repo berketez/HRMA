@@ -43,6 +43,13 @@ if os.environ.get('MPLBACKEND') is None:
 import matplotlib.pyplot as plt
 
 from hrma.engines.solid_rocket_engine import SolidRocketEngine
+from hrma.data.propellants_db import PROPELLANTS
+
+# APCP yanma hızı katsayıları — ÜRÜNÜN TEK KAYNAK katalogundan (T1-2, parti
+# 31). Elle yazılan 0.005 birim sözleşmesi hatasıydı; ayrıntı aşağıdaki
+# referans kümesinin notunda.
+_APCP_A = float(PROPELLANTS['apcp']['burn_rate_a'])   # m/s @ (P[bar])^n
+_APCP_N = float(PROPELLANTS['apcp']['burn_rate_n'])   # -
 
 
 class SolidRocketValidationTest:
@@ -101,18 +108,39 @@ class SolidRocketValidationTest:
                 'expected_gamma': 1.1986,
                 'expected_density': 1810,   # kg/m³ (typical AP/Al/HTPB: 1.75-1.85 g/cc, Sutton 9th ed., Ch. 13)
                 'expected_flame_temp': 3614.8,  # K (c* ile Eq. 3-32 üzerinden tutarlı)
-                'burn_rate_a': 0.005,    # m/s/bar^n (typical APCP)
-                'burn_rate_n': 0.35,     # dimensionless (typical APCP)
+                # ------------------------------------------------------------
+                # T1-2 (parti 31) — BİRİM SÖZLEŞMESİ DÜZELTMESİ
+                #
+                # Buradaki değer 0.005 idi ve "typical APCP" diye etiketliydi.
+                # Ölçüldü: ürünün TEK KAYNAK katalogu (propellants_db, apcp)
+                # a = 0.0022334 m/s/bar^0.35 diyor; 0.005 / 0.0022334 = 2.2387
+                # = 10^0.35 = TAM OLARAK 10^n. Yani 0.005, literatürün
+                # r[mm/s] = 5.0*(P[MPa])^0.35 fitinin yalnız /1000 uygulanmış
+                # hâlidir — MPa->bar dönüşümünün 10^n çarpanı atlanmıştır
+                # (deponun bilinen F024 birim kusuru).
+                #
+                # Sonuç ölçüldü: aynı a-n çiftiyle ÜRÜN kullanıcıya
+                # ``warn.solid.burn_rate_off_catalog`` basıyordu (40 bar
+                # referansında 22.00 mm/s ⟷ katalog 9.83 mm/s), doğrulama
+                # süiti ise uyarıyı hiç görmüyordu: süit ürünün kendi
+                # "bu sayı katalog dışı" hükmüyle çelişiyordu.
+                #
+                # Düzeltme: değer artık KATALOGDAN İTHAL edilir (tek kaynak
+                # kuralı). "typical APCP" iddiası kaldırıldı; künye kataloğun
+                # kendi künyesidir (burn_rate_ref).
+                'burn_rate_a': _APCP_A,   # m/s/bar^n — propellants_db['apcp']
+                'burn_rate_n': _APCP_N,   # dimensionless — propellants_db
                 'propellant_type': 'apcp'
             },
+            # expected_rate = a * P^n exactly (Saint-Robert / Vieille law,
+            # Sutton & Biblarz 9th ed., Ch. 12). Katsayı katalogdan gelir;
+            # beklenen hız ANALİTİK ÖZDEŞLİKTEN türetilir, elle yazılmaz —
+            # böylece katalog güncellenirse referans de birlikte taşınır ve
+            # ikisi bir daha ayrışamaz (eski hâlinde 0.005 elle yazılıydı).
             'saint_robert_test_cases': [
-                # expected_rate = a * P^n exactly (Saint-Robert / Vieille law,
-                # Sutton & Biblarz 9th ed., Ch. 12), a=0.005 m/s/bar^n, n=0.35.
-                # Values computed analytically: 0.005 * P^0.35.
-                {'pressure': 10,   'a': 0.005, 'n': 0.35, 'expected_rate': 0.0111936},  # m/s
-                {'pressure': 30,   'a': 0.005, 'n': 0.35, 'expected_rate': 0.0164423},  # m/s
-                {'pressure': 68.9, 'a': 0.005, 'n': 0.35, 'expected_rate': 0.0219962},  # m/s
-                {'pressure': 100,  'a': 0.005, 'n': 0.35, 'expected_rate': 0.0250594},  # m/s
+                {'pressure': P, 'a': _APCP_A, 'n': _APCP_N,
+                 'expected_rate': _APCP_A * P ** _APCP_N}
+                for P in (10, 30, 68.9, 100)
             ],
             'standard_atmosphere': {
                 # U.S. Standard Atmosphere 1976 (NOAA/NASA/USAF), Table I,
@@ -320,15 +348,16 @@ class SolidRocketValidationTest:
         # Create a test motor
         motor = SolidRocketEngine(
             propellant_type='apcp',
-            burn_rate_a=0.005,
-            burn_rate_n=0.35
+            burn_rate_a=_APCP_A,
+            burn_rate_n=_APCP_N
         )
 
         test_cases = self.reference_data['saint_robert_test_cases']
         results = []
 
         print("Saint-Robert's Law: r = a × P^n")
-        print("Test Parameters: a = 0.005 m/s/bar^n, n = 0.35")
+        print(f"Test Parameters (propellants_db['apcp']): "
+              f"a = {_APCP_A:.7f} m/s/bar^n, n = {_APCP_N}")
         print()
 
         for i, case in enumerate(test_cases):
@@ -717,6 +746,52 @@ def test_apcp_reference():
             f"{name}: hata {d['error_percent']:+.2f}% "
             f"(tolerans ±{suite.tolerance_percentage}%, beklenen {d['expected']}, hesaplanan {d['calculated']})"
         )
+
+
+def test_referans_motor_katalog_disi_uyarisi_almiyor():
+    """T1-2 bekçisi: doğrulama süiti ürünün kendi hükmüyle ÇELİŞEMEZ.
+
+    Ölçüldü (17 Ağustos 2026, referans APCP motoru — BATES, D=100 mm,
+    L=500 mm, çekirdek 30 mm, 68,9 bar):
+
+    ============================  =========  =======================================
+    burn_rate_a                   değer      ürünün tasarım uyarıları
+    ============================  =========  =======================================
+    eski, elle yazılmış           0,005      ``['warn.solid.burn_rate_off_catalog']``
+    katalog (propellants_db)      0,0022334  ``[]``
+    ============================  =========  =======================================
+
+    Yani süit, ürünün "bu a-n çifti katalog değerinin 2,24 katı, birim
+    sözleşmesini denetleyin" uyarısını basmasına yol açan bir sayıyı
+    "typical APCP" diye doğruluyordu. 2,2387 = 10^0,35 = 10^n, yani MPa→bar
+    dönüşümünün atlanmış çarpanı (F024 sınıfı).
+
+    Bu bekçi kusurun geri gelmesini yakalar: referans katsayı yeniden
+    katalogdan koparılırsa ürün uyarıyı basar ve test kırılır.
+    """
+    suite = _get_suite()
+    ref = suite.reference_data['apcp_reference']
+    motor = SolidRocketEngine(
+        grain_type='bates',
+        propellant_type=ref['propellant_type'],
+        chamber_diameter=ref['chamber_diameter'],
+        grain_length=ref['grain_length'],
+        core_diameter=ref['core_diameter'],
+        chamber_pressure=ref['chamber_pressure'],
+        burn_rate_a=ref['burn_rate_a'],
+        burn_rate_n=ref['burn_rate_n'],
+    )
+    motor.calculate_performance()
+    kodlar = {w.get('code') for w in (getattr(motor, 'design_warnings', None) or [])
+              if isinstance(w, dict)}
+    assert 'warn.solid.burn_rate_off_catalog' not in kodlar, (
+        'doğrulama süitinin referans motoru ürünün KATALOG DIŞI uyarısını '
+        f'alıyor (uyarılar: {sorted(kodlar)}). Referans a-n çifti ürünün tek '
+        'kaynak katalogundan (hrma/data/propellants_db.py) kopmuş demektir — '
+        'süit, ürünün güvenilmez saydığı bir sayıyı doğrulamış olur.')
+    # Referans katsayı katalogla AYNI kalmalı (tek kaynak kilidi).
+    assert ref['burn_rate_a'] == PROPELLANTS['apcp']['burn_rate_a']
+    assert ref['burn_rate_n'] == PROPELLANTS['apcp']['burn_rate_n']
 
 
 def test_saint_robert():

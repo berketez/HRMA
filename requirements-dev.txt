@@ -25,6 +25,29 @@ pypdf>=5.0.0           # üretilen PDF raporlarının içeriğini doğrulayan te
 #   -> düzeltme öncesi: 24 passed, 4 skipped
 PyYAML>=6.0
 
+# numba — CFD çekirdeğinin derlenmiş yolu. Test bağımlılığı olarak ZORUNLUDUR.
+#
+# Parti 31 / T2-4 ölçümü (17 Ağustos 2026): numba HİÇBİR requirements ya da iş
+# akışı dosyasında yoktu. Sonuç: numba↔NumPy BİT-ÖZDEŞLİĞİNİ kanıtlayan tek
+# bekçi (tests/cfd/test_performans.py::test_numba_numpy_aki_bit_ozdes) CI'da
+# bir kez bile koşamadı. O bekçi, çözücünün iki akı yolunun aynı sayıyı
+# ürettiğinin TEK kanıtıdır; koşmazsa "iki yol eşdeğerdir" iddiası dayanaksız
+# kalır ve CI hangi yolu sınadığını bilmeden yeşil olur.
+#
+# numpy uyumu ÖLÇÜLDÜ (metadata, numba 0.61.0): `numpy<2.2,>=1.24` deklare
+# eder — HRMA'nın `numpy>=1.24,<2` piniyle ÇAKIŞMAZ (build123d'nin aksine;
+# o `numpy>=2` isteyip pini kırdığı için ayrı işte kalır). Aynı ortamda
+# numba 0.61.0 + numpy 1.26.4 kurulu ve 164/164 CFD testi yeşil.
+#
+# Ölçülen etki (tests/cfd, M4 Max):
+#   numba açık  : 164 passed, 105,8 s
+#   numba kapalı: 163 passed + 1 skipped, 150,8 s
+# Yani numba yalnız kapsamı genişletmekle kalmıyor, süiti 45 s KISALTIYOR.
+#
+# NumPy yolu kapsamsız kalmaz: HRMA_CFD_DISABLE_NUMBA=1 ile aynı süit numba'sız
+# koşulabilir (üstteki ölçüm) ve iki yolun bit-özdeşliği zaten bekçilidir.
+numba>=0.59
+
 # NOT: build123d ve OCP (STEP export testleri) bu dosyada YOK — numpy>=2
 # istiyorlar, HRMA ise numpy<2 pinli; buraya konursa `pip install -r
 # requirements-dev.txt` numpy'yi 2.x'e yükseltir ve np.trapz kaybolur

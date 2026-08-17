@@ -366,7 +366,14 @@ ASCII_SLIP = re.compile(
     # doğru yazımında hiç Türkçe harf taşımaz, ortak önek yanlış alarmdı
     # (CI 2026-08-16: adv.label.parachuteDeployDelayS).
     r'baglanti|klasor|ornek|gecis|gecici|gecit|yanlis|artis|degisim|egri|cizim|cizgi|cizel|'
-    r'yaricap|hiz|agir|asagi|yukari|kaydir|kisim|kisa|sinir|sart|sekil|sema|'
+    # 'hiz' kökü 'hız' (sürat) içindir; 'hiza' (aynı doğrultuya getirme)
+    # DOĞRU yazımında hiç Türkçe harf taşımaz ve ortak önek yanlış alarm
+    # veriyordu (parti 30: viz3d.cfd.err.noSolverContour -> 'hizalanamaz').
+    # Kök daraltıldı, heuristik gevşetilMEDİ: 'hizli/hizlan' hâlâ yakalanır.
+    # Bilinen dar kayıp: 'hıza' (hız'ın yönelme hâli) 'hiza' yazılırsa
+    # görünmez — ölçülen alternatif (kökü tümden silmek) 'hızlı' sınıfının
+    # tamamını kör ederdi.
+    r'yaricap|hiz(?!a)|agir|asagi|yukari|kaydir|kisim|kisa|sinir|sart|sekil|sema|'
     r'islem|isaret|cok|tum|hic|acik|kapali|sayi|tasiyici|cevir|kati|sivi'
     r')'
 )

@@ -102,6 +102,42 @@ _MILES_DEFAULT_AMPLITUDE_RATIO = 0.05
 _MILES_AMPLITUDE_MIN, _MILES_AMPLITUDE_MAX = 1e-3, 0.25
 
 
+def _pozitif_sonlu(deger, ad):
+    """Sonlu ve kesin pozitif float döner; değilse ``ValueError``.
+
+    Bebek-Scofield F4-1/F4-4 ölçümü (17 Ağustos 2026, HEAD f9d95eb):
+    ``fluid_density`` ve ``liquid_mass`` için hiçbir kapı yoktu.
+    ``analyze_slosh(radius=0.5, fill_height=1.0, fluid_density=-200)``
+    HTTP 200 karşılığı tam bir sonuç veriyor ve NEGATİF sıvı kütlesi
+    yayımlıyordu: ``liquid_mass_kg = -157,0796``,
+    ``slosh_mass_kg = -35,6507``. Negatif kütle bir ölçüm değildir; onunla
+    hesaplanan çalkalanma kuvveti de değildir.
+
+    ``radius``/``fill_height``/``g_eff`` kapıları vardı ama ``<= 0``
+    biçimindeydi; NaN hiçbir karşılaştırmayı sağlamadığı için SESSİZCE
+    geçiyordu (ölçüldü: ``radius=nan`` -> ``f1_hz = nan`` yayımlanıyordu).
+    Sonluluk denetimi bu yüzden ayrı yazılır.
+
+    Sıfır da reddedilir: sıfır yoğunluklu sıvı ya da sıfır kütleli dolum
+    "verilmedi" demektir, ölçülmüş sıfır değil (deponun ``_positive_length``
+    ölçü sözleşmesiyle aynı hüküm).
+    """
+    try:
+        f = float(deger)
+    except (TypeError, ValueError):
+        raise ValueError(f"{ad} must be a finite positive number "
+                         f"(got {deger!r})")
+    if not np.isfinite(f):
+        raise ValueError(f"{ad} must be finite (got {f!r}); a non-finite "
+                         f"value is not a measurement and no slosh result "
+                         f"is produced from it")
+    if f <= 0.0:
+        raise ValueError(f"{ad} must be positive (got {f!r}); the linear "
+                         f"slosh model has no meaning for a non-positive "
+                         f"value and would publish a negative liquid mass")
+    return f
+
+
 class CylindricalTankSlosh:
     """Linear slosh model of an upright circular cylindrical propellant tank.
 
@@ -124,23 +160,21 @@ class CylindricalTankSlosh:
 
     def __init__(self, radius, fill_height, g_eff=G0,
                  fluid_density=None, liquid_mass=None):
-        radius = float(radius)
-        fill_height = float(fill_height)
-        g_eff = float(g_eff)
-        if radius <= 0.0:
-            raise ValueError("radius must be positive")
-        if fill_height <= 0.0:
-            raise ValueError("fill_height must be positive")
-        if g_eff <= 0.0:
-            raise ValueError("g_eff must be positive (axial acceleration)")
+        # Girdi kapısı (F4-4): sıfır / negatif / NaN hepsi reddedilir.
+        # Gerekçe ve ölçüm _pozitif_sonlu docstring'inde.
+        radius = _pozitif_sonlu(radius, "radius")
+        fill_height = _pozitif_sonlu(fill_height, "fill_height")
+        g_eff = _pozitif_sonlu(g_eff, "g_eff (axial acceleration)")
 
         self.radius = radius
         self.fill_height = fill_height
         self.g_eff = g_eff
-        self.fluid_density = None if fluid_density is None else float(fluid_density)
+        self.fluid_density = (None if fluid_density is None
+                              else _pozitif_sonlu(fluid_density,
+                                                  "fluid_density"))
 
         if liquid_mass is not None:
-            self.liquid_mass = float(liquid_mass)
+            self.liquid_mass = _pozitif_sonlu(liquid_mass, "liquid_mass")
         elif self.fluid_density is not None:
             self.liquid_mass = self.fluid_density * np.pi * radius ** 2 * fill_height
         else:

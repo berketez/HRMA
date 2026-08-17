@@ -3032,6 +3032,10 @@ class LiquidRocketEngine:
         # (kesir = 1 − ṁ_türbin/ṁ_toplam, _apply_cycle_accounting kurar;
         # kapalı çevrimlerde 1.0). Sutton & Biblarz 9th ed., Ch. 6 açık
         # çevrim debi muhasebesi.
+        # F1-1 BEYANI (2026-08-17): _apply_cycle_accounting BİLEREK bağlı
+        # değildir (gerekçesi kendi docstring'inde); kesir bu yüzden bugün
+        # her çevrimde 1.0 kalır ve bu durum sonuçta cycle_isp_accounting
+        # bloğuyla açıkça yayımlanır.
         mc_frac = float(getattr(self, '_main_chamber_flow_fraction', 1.0))
         self.mdot_main_chamber = self.mdot_total * mc_frac
         self.A_t = (self.mdot_main_chamber * self.c_star_effective
@@ -4988,6 +4992,12 @@ class LiquidRocketEngine:
         # Advanced subsystem analysis
         propellant_tanks = self._design_propellant_tanks()
         detailed_feed_system = self._analyze_detailed_feed_system()
+        # F1-1 (bebek-Scofield): başlık Isp'si ile çevrim çözümünün motor
+        # Isp'si aynı yanıtta çelişiyordu ve fark hiçbir yerde beyan
+        # edilmiyordu — ilişki artık adıyla yayımlanır (blok, motorun gerçek
+        # _cycle_isp_applied durumundan türediği için davranıştan kopamaz).
+        cycle_isp_accounting = self._cycle_isp_accounting_block(
+            detailed_feed_system.get('engine_cycle_solution') or {})
         combustion_analysis = self._analyze_combustion_chamber_detailed()
         structural_analysis = self._calculate_structural_loads()
         # Isıl koruma tek kaynak: yukarıdaki GERÇEK soğutma çözümünden türetilir.
@@ -5061,6 +5071,9 @@ class LiquidRocketEngine:
             # Performance
             'isp_sea_level': actual_isp_sl,
             'isp_vacuum': actual_isp_vac,
+            # F1-1: başlık Isp'sinin çevrim çözümüyle ilişkisi — kayıp
+            # uygulanmadıysa fark burada ADIYLA ve ölçülen değerle durur.
+            'cycle_isp_accounting': cycle_isp_accounting,
             'isp_vacuum_optimized': vacuum_optimized_isp,
             'thrust_vacuum': space_thrust_vacuum,
             'c_star': self.c_star,
@@ -5612,7 +5625,15 @@ class LiquidRocketEngine:
                                  line=drops['fuel_line'])
         total_pump_power = (ox['design_power'] + fuel['design_power']) * 1000.0
         eta_turbine = TURBINE_EFFICIENCY_DEFAULT
-        turbine_power_required = total_pump_power / eta_turbine  # W
+        # F5-3 (bebek-Scofield, 2026-08-17): türbin MİL gücü = pompa mil gücü
+        # (kararlı halde mil dengesi; çevrim çözücüsü de tam bu özdeşliği
+        # kapatır — _feed_performance_margins docstring'i: "türbin gücü ≡
+        # pompa gücü"). Eski satır ``total_pump_power / eta_turbine`` mil
+        # gücünü türbin verimine BÖLÜYORDU; verim gaz tarafı boyutlandırmasına
+        # aittir (ṁ_türbin = P_mil/(η·Δh)), mil gücüne değil. Ölçülen: aynı
+        # yanıtta kullanıcıya 169,55 kW (=110,21/0,65) gösterilirken çevrim
+        # kapanışı 110,21 kW diyordu. Bekçi: tests/test_scofield_sivi.py.
+        turbine_shaft_power = total_pump_power  # W (mil dengesi)
         turbine_inlet_temp = float(getattr(self, 'turbine_inlet_temp',
                                            GAS_GENERATOR_TEMP_DEFAULT_K))
         material, mat_key = self._material_record()
@@ -5644,7 +5665,15 @@ class LiquidRocketEngine:
                 'material': 'Stainless Steel 316L'
             },
             'turbine': {
-                'power': turbine_power_required / 1000,  # kW
+                'power': turbine_shaft_power / 1000,  # kW (mil dengesi)
+                'power_basis': (
+                    'shaft power balance: turbine shaft power equals the '
+                    'total pump shaft power (steady state). The turbine '
+                    'efficiency sizes the GAS consumption '
+                    '(mdot = P_shaft/(eta x ideal specific work)), it does '
+                    'not inflate the shaft power. When the cycle power '
+                    'balance converges this is the same closure it reports '
+                    '(engine_cycle_solution.turbine_power_total_W).'),
                 'efficiency': eta_turbine,
                 'inlet_temperature': turbine_inlet_temp,  # K
                 'pressure_ratio': float(getattr(
@@ -6005,6 +6034,20 @@ class LiquidRocketEngine:
         boyutlanır (_main_chamber_flow_fraction). Kapalı çevrimlerde kayıp
         sıfırdır ve hiçbir şey değişmez. Çift sayma kilidi: ana oda Isp'si
         isp_sl_main/isp_vac_main olarak saklanır; çözücüye hep o gider.
+
+        F1-1 BEYANI (bebek-Scofield, 2026-08-17): bu yol BİLEREK başlık
+        zincirine BAĞLI DEĞİLDİR. Başlık Isp/debi/boğaz sayıları ana oda
+        zincirinden gelir ve bu zincirin verim kalibrasyonu, kayıp
+        uygulanmadan, 14 gerçek motorun TESLİM verisine karşı doğrulanmıştır
+        (tests/test_correlation_guards.py: sıvı isp_vac medAPE %0,93 tabanı).
+        Kaybı başlığa işlemek her yayımlanan sayıyı değiştirir ve o
+        korelasyon tabanının yeniden doğrulanmasını gerektirir — kendi
+        partisinin işidir. Çelişki SESSİZ BIRAKILMAZ: fark, ölçülen kayıpla
+        birlikte sonuçta ``cycle_isp_accounting`` bloğunda adıyla yayımlanır
+        (_cycle_isp_accounting_block) ve blok bu metodun GERÇEK durumundan
+        (_cycle_isp_applied) türediği için yalan söyleyemez. Bu yol bir gün
+        bağlanırsa blok applied=True bildirir ve bekçi kimlikleri başlığın
+        motor-Isp'sine eşitlenmesini zorlar (tests/test_scofield_sivi.py).
         """
         cyc = self._solve_cycle_balance()
         if cyc.get('status') != 'converged':
@@ -6041,6 +6084,80 @@ class LiquidRocketEngine:
                 break
         self._cycle_isp_applied = True
         return cyc
+
+    def _cycle_isp_accounting_block(self, cycle_solution):
+        """Başlık Isp'si ↔ çevrim çözümü ilişkisinin BEYANI (F1-1).
+
+        Bebek-Scofield ölçümü (2026-08-17): gaz jeneratörü örneğinde başlık
+        Isp_sl = 277,449 s iken aynı yanıtın yakınsamış çevrim çözümü motor
+        Isp'sini 274,034 s (kayıp 3,415 s, %1,25) raporluyordu ve hangi
+        sayının hangi muhasebeden geldiği HİÇBİR yerde yazmıyordu
+        (_apply_cycle_accounting ölü koddu). Bu blok çelişkiyi adıyla ve
+        ölçülen farkla yayımlar; içeriği motorun GERÇEK durumundan türediği
+        için (``_cycle_isp_applied``) beyan davranıştan kopamaz.
+        """
+        applied = bool(getattr(self, '_cycle_isp_applied', False))
+        block = {
+            'applied': applied,
+            'headline_isp_sl_s': float(self.isp_sl),
+            'headline_isp_vac_s': float(self.isp_vac),
+        }
+        status = (cycle_solution or {}).get('status')
+        if status != 'converged':
+            block['status'] = 'cycle_solution_unavailable'
+            block['headline_isp_basis'] = (
+                'main-chamber delivered chain; the cycle power balance did '
+                'not converge (or is not modelled) for this run, so there is '
+                'no engine-level cycle Isp to reconcile against (see '
+                'detailed_feed_system.engine_cycle_solution.status)')
+            return block
+        block['status'] = 'reconciled'
+        isp_mode = cycle_solution.get('isp_mode')
+        if isp_mode != 'open_cycle_mixture_average':
+            # Kapalı çevrim / basınç beslemeli: türbin debisi ana odaya döner
+            # (ya da hiç yoktur); çevrim kaybı tanım gereği sıfırdır.
+            block['isp_loss_sl_s'] = 0.0
+            block['engine_isp_sl_s'] = float(self.isp_sl)
+            block['engine_isp_vac_s'] = float(self.isp_vac)
+            block['headline_isp_basis'] = (
+                f'closed or pressure-fed cycle ({isp_mode}): no open-cycle '
+                'bleed loss exists, the headline Isp IS the engine-level '
+                'Isp by construction')
+            return block
+        engine_sl = cycle_solution.get('isp_engine_sl_s')
+        engine_vac = cycle_solution.get('isp_engine_vac_s')
+        block.update({
+            'engine_isp_sl_s': engine_sl,
+            'engine_isp_vac_s': engine_vac,
+            'isp_loss_sl_s': cycle_solution.get('isp_loss_sl_s'),
+            'isp_loss_vac_s': cycle_solution.get('isp_loss_vac_s'),
+            'turbine_bleed_kg_s':
+                cycle_solution.get('turbine_mdot_total_kg_s'),
+            'main_chamber_isp_sl_s': cycle_solution.get('isp_main_sl_s'),
+        })
+        if isinstance(engine_sl, (int, float)) and engine_sl > 0:
+            block['headline_minus_engine_sl_s'] = (
+                float(self.isp_sl) - float(engine_sl))
+        if applied:
+            block['headline_isp_basis'] = (
+                'open-cycle mixture-average accounting APPLIED: the headline '
+                'Isp is the engine-level value (main chamber + turbine '
+                'exhaust, flow weighted; Sutton Ch. 6) and matches '
+                'engine_cycle_solution.isp_engine_sl_s')
+        else:
+            block['headline_isp_basis'] = (
+                'main-chamber delivered chain: the open-cycle turbine bleed '
+                'loss reported by the converged cycle solution '
+                '(isp_loss_sl_s) is NOT subtracted from the headline '
+                'thrust/Isp/mass-flow numbers. The headline chain\'s '
+                'efficiency calibration was validated as a whole against '
+                'delivered engine data without this subtraction '
+                '(tests/test_correlation_guards.py, liquid isp_vac cell); '
+                'wiring the loss in changes every downstream number and '
+                'requires that validation to be redone. The engine-level '
+                'Isp and the measured difference are published here so the '
+                'two numbers cannot be silently read as the same quantity.')
+        return block
 
     def _estimate_feed_system_mass(self) -> float:
         """Besleme sistemi kuru kütlesi [kg] — bileşen dökümüyle TEK kaynak.
@@ -7810,8 +7927,56 @@ class LiquidRocketEngine:
         # A11: değer TEK tanım noktasından (_tank_pressure_bar); uyarı
         # eşikleri değişmedi.
         tank_bar, _ = self._tank_pressure_bar()
+        # F1-2 (bebek-Scofield, 2026-08-17): tank basıncı marjı TEK kaynaktan
+        # — çevrim çözücüsünün kendi tanımı (cycle_power_balance:613,
+        # margin = tank − max(req_ox, req_yakıt)). Eski formül
+        # ``tank_bar − pump_discharge_pressure_ox`` YALNIZ oksitleyici
+        # hattına bakıyordu ve rejeneratif ΔP taşıyan YAKIT gereksinimi
+        # bağlayıcıyken marjın İŞARETİNİ ters çeviriyordu (ölçülen: 95 bar
+        # tank, req_ox 90,60 / req_fuel 98,58 → yayımlanan +4,40, çözücü
+        # −3,58 + critical infeasible uyarısı — aynı yanıtta). Buradaki
+        # değer artık çözücünün yayımladığı marjın KENDİSİDİR; ikinci bir
+        # marj formülü tanımlanmaz. Bekçi: tests/test_scofield_sivi.py.
+        tank_margin = None
+        tank_margin_basis = (
+            'turbopump-fed cycle: the tank only pressurises for pump NPSH; '
+            'a pressure-fed tank margin is not defined here')
         if pressure_fed:
-            if tank_bar < drops['pump_discharge_pressure_ox']:
+            _cyc_margin = cycle_solution.get('tank_pressure_margin_bar')
+            if isinstance(_cyc_margin, (int, float)):
+                tank_margin = float(_cyc_margin)
+                tank_margin_basis = (
+                    'engine_cycle_solution.tank_pressure_margin_bar (single '
+                    'source): tank pressure minus the LARGER of the oxidizer '
+                    'and fuel required tank pressures (the fuel side carries '
+                    'the regenerative-jacket pressure drop) — see '
+                    'required_tank_pressure_ox_bar / '
+                    'required_tank_pressure_fuel_bar in the same solution')
+            else:
+                tank_margin_basis = (
+                    'not_modelled: the cycle balance did not publish a tank '
+                    'pressure margin for this run (see '
+                    'engine_cycle_solution.status); no substitute margin is '
+                    'invented from a partial pressure chain')
+        if pressure_fed:
+            # Kapı da AYNI kaynaktan: marj negatifse (yakıt YA DA oksitleyici
+            # tarafı bağlayıcı) kullanıcıya motor seviyesinde de söylenir.
+            # Eski kapı yalnız oksitleyici basma basıncına bakıyordu ve
+            # ölçülen vakada (yakıt tarafı bağlayıcı) hiç ateşlemiyordu.
+            if tank_margin is not None and tank_margin < 0.0:
+                _req = max(
+                    float(cycle_solution.get(
+                        'required_tank_pressure_ox_bar') or 0.0),
+                    float(cycle_solution.get(
+                        'required_tank_pressure_fuel_bar') or 0.0))
+                self._warn('warn.liquid.pressure_fed_tank_too_low', 'critical',
+                           tank_bar=float(tank_bar),
+                           required_bar=round(_req, 1),
+                           chamber_bar=float(self.P_c))
+            elif (tank_margin is None
+                    and tank_bar < drops['pump_discharge_pressure_ox']):
+                # Çözücü marj yayımlayamadıysa eski oksitleyici-alt-sınır
+                # kapısı yedek olarak kalır (marj DEĞİL, alt sınır).
                 self._warn('warn.liquid.pressure_fed_tank_too_low', 'critical',
                            tank_bar=float(tank_bar),
                            required_bar=round(float(
@@ -7839,10 +8004,15 @@ class LiquidRocketEngine:
                                       propellant=self.fuel_type,
                                       line=drops['fuel_line'])
 
-        # Türbin: gerekli güç pompalardan; uç hızı gerçek özgül işten.
+        # Türbin: MİL gücü pompalardan (mil dengesi); uç hızı gerçek özgül
+        # işten. F5-3 (bebek-Scofield, 2026-08-17): buradaki ikinci
+        # ``/ eta_turbine`` kopyası da kaldırıldı — verim mil gücünü
+        # büyütmez, gaz debisi boyutlandırmasına girer (aşağıda
+        # turbine_mdot = P_mil/(Δh·η)). Eski hâliyle mdot P/(η²Δh)
+        # oluyordu (verim iki kez uygulanıyordu).
         eta_turbine = TURBINE_EFFICIENCY_DEFAULT
         turbine_power = (ox_pump['design_power']
-                         + fuel_pump['design_power']) / eta_turbine  # kW
+                         + fuel_pump['design_power'])  # kW (mil dengesi)
         t_in = float(getattr(self, 'turbine_inlet_temp',
                              GAS_GENERATOR_TEMP_DEFAULT_K))
         # Basınç oranı ÖNCELİĞİ kullanıcının doğrudan girdiği türbin genişleme
@@ -7885,7 +8055,12 @@ class LiquidRocketEngine:
         # GG debisi ve genel PR varsayımı yerine kapanan denge — madde 2).
         turbine_card = {
             'type': 'Single-stage axial',
-            'power_output': turbine_power,  # kW
+            'power_output': turbine_power,  # kW (mil dengesi = pompa gücü)
+            'power_output_basis': (
+                'shaft power balance: turbine shaft power equals the total '
+                'pump shaft power; the turbine efficiency sizes the gas '
+                'mass flow (mdot = P_shaft/(eta x ideal specific work)), '
+                'not the shaft power'),
             'inlet_temperature': t_in,  # K
             'inlet_temperature_source': (
                 'user input (gas generator temperature)'
@@ -8003,9 +8178,11 @@ class LiquidRocketEngine:
             },
             'turbopump_required': not pressure_fed,
             'tank_pressure_bar': tank_bar,
-            'tank_pressure_margin_bar': (
-                tank_bar - drops['pump_discharge_pressure_ox']
-                if pressure_fed else None),
+            # F1-2: marj çevrim çözümünün KENDİSİNDEN okunur (yukarıda
+            # kuruldu); eski ``tank_bar − ox basma basıncı`` formülü yakıt
+            # tarafı bağlayıcıyken işareti ters çeviriyordu.
+            'tank_pressure_margin_bar': tank_margin,
+            'tank_pressure_margin_basis': tank_margin_basis,
             'feed_pressure_input_bar': feed_input,
             'required_pump_discharge_bar': drops['pump_discharge_pressure_ox'],
             'performance_margins': margins,
@@ -9685,6 +9862,34 @@ class LiquidRocketEngine:
                       'hydraulics (Sutton & Biblarz 9th ed. Eq. 8-23; '
                       'Darcy-Weisbach with Haaland friction factor)'),
         }
+        # F5-4 (bebek-Scofield, 2026-08-17): yukarıdaki akı/ΔT/çıkış
+        # sıcaklığı/ΔP değerlerinin HANGİ cidar kapanışından geldiği artık
+        # sayının yanında yazar. Süperkritik marş (metan/LH2) soğutma
+        # zincirini zaten TEK kaynağa indirger; RP-1'de ise toplu Bartz
+        # zinciri cidarı TASARIM sıcaklığında TUTULMUŞ varsayar (bir
+        # gereksinim) ve 1B istasyon marşı aynı devreyi kuple ÇÖZER (bir
+        # denge). Ölçülen fark (örnek motor): tepe akı 52,15 ⟷ 10,95 MW/m²
+        # (4,76×), çıkış 820,0 ⟷ 421,9 K — ikisi aynı büyüklük DEĞİLDİR ve
+        # fark channel_circuit_reconciliation bloğunda adıyla yayımlanır.
+        _chain_solved = 'solved' in str(
+            cooling.get('wall_temperature_source', ''))
+        if _chain_solved:
+            _chain_basis = (
+                'coupled 1D supercritical station march (solved wall '
+                'temperature) — the single source for this circuit; see '
+                'cooling_system.wall_temperature_source')
+        else:
+            _chain_basis = (
+                'Bartz chain evaluated AT the design wall temperature '
+                f'({t_hot:g} K, {result["wall_temperature_source"]}): a '
+                'requirement to hold that wall, NOT a solved equilibrium of '
+                'the as-built channels — the solved equilibrium is the '
+                'station_march block; the measured gap between the two is '
+                'published in channel_circuit_reconciliation')
+        result['heat_flux_basis'] = _chain_basis
+        result['temperature_rise_basis'] = _chain_basis
+        result['coolant_exit_temperature_basis'] = _chain_basis
+        result['pressure_drop_basis'] = _chain_basis
         if self.cooling_type in ('ablative', 'radiative'):
             material, _ = self._material_record()
             result['material'] = material.get('name', self.chamber_material)
@@ -9737,6 +9942,13 @@ class LiquidRocketEngine:
                     'warnings': summary['warnings'],
                     'model_note': march['model_note'],
                 }
+                # F5-4: aynı devrenin iki çıktı kümesi arasındaki fark
+                # adıyla ve ölçülen sayılarla yayımlanır; hangi kümenin
+                # fiziksel denge olduğu enerji dengesiyle bloğun içinde
+                # karara bağlanır.
+                result['channel_circuit_reconciliation'] = \
+                    self._channel_circuit_reconciliation(
+                        cooling, summary, march)
             except Exception as exc:
                 result['station_march_status'] = (
                     f'1D station march not run: {exc}')
@@ -9749,6 +9961,109 @@ class LiquidRocketEngine:
         # --- A5 (v2.6.27): ablatif/radyatif ısıl koruma boyutlandırması ----
         result.update(self._passive_thermal_protection(cooling))
         return result
+
+    def _channel_circuit_reconciliation(self, cooling, summary, march):
+        """Aynı soğutma devresinin iki çıktı kümesini ADIYLA mutabık kılar.
+
+        F5-4 (bebek-Scofield, 2026-08-17). Ölçülen çelişki (örnek 25 kN
+        LOX/RP-1, Pc=70 bar): toplu Bartz zinciri tepe akı 52,15 MW/m² /
+        çıkış 820,0 K derken 1B istasyon marşı 10,95 MW/m² / 421,9 K
+        diyordu — aynı yanıtta, aynı devre için, beyansız.
+
+        İki küme aynı büyüklük DEĞİLDİR:
+
+        * ``bulk_chain`` — Bartz gaz tarafı, cidar TASARIM sıcaklığında
+          TUTULMUŞ varsayılarak (gereksinim). Kendi enerji dengesini kurgu
+          gereği kapatır (ΔT := Q/(ṁ·cp)).
+        * ``station_march`` — kanal hidroliğiyle KUPLE çözülmüş denge; kendi
+          enerji dengesi (ṁ·c̄p·ΔT = ∮q dA) ölçülerek yayımlanır.
+
+        Hangisinin fiziksel denge olduğu enerji dengesiyle karara bağlanır:
+        tasarım-cidar akısını kanal filmi taşıyabiliyorsa iki küme yakınsar;
+        taşıyamıyorsa (q_tasarım/h_c gereken film ΔT'si mevcut film ΔT'sini
+        aşar) cidar tasarım sıcaklığında TUTULAMAZ ve çözülmüş denge marştır
+        (ölçülen örnekte cidar 2871,9 K'ye kaçıyor — marş bunu kendi
+        uyarılarıyla beyan eder). Bekçi: tests/test_scofield_sivi.py.
+        """
+        q_design_mw = float(cooling.get('peak_heat_flux', 0.0)) / 1000.0
+        q_solved_mw = float(summary['peak_heat_flux_MW_m2'])
+        mdot_c = float(cooling.get('coolant_flow_rate', 0.0))
+        inlet_K = float(cooling.get('coolant_inlet_temperature',
+                                    COOLANT_INLET_TEMP_DEFAULT_K))
+        t_hot, t_cold = self._wall_temperatures()
+        bulk = {
+            'peak_heat_flux_MW_m2': q_design_mw,
+            'coolant_exit_temperature_K':
+                cooling.get('coolant_exit_temperature'),
+            'temperature_rise_K':
+                cooling.get('coolant_temperature_rise', 0.0),
+            'pressure_drop_bar': cooling.get('cooling_pressure_drop', 0.0),
+            'total_heat_to_coolant_kW':
+                cooling.get('heat_load_to_regen_coolant', 0.0),
+            'wall_temperature_assumed_K': t_hot,
+            'wall_temperature_source':
+                cooling.get('wall_temperature_source'),
+        }
+        march_row = {
+            'peak_heat_flux_MW_m2': q_solved_mw,
+            'coolant_exit_temperature_K': summary['coolant_exit_temp_K'],
+            'temperature_rise_K': summary['coolant_dT_K'],
+            'pressure_drop_bar': summary['total_pressure_drop_bar'],
+            'total_heat_to_coolant_kW': summary['total_heat_kW'],
+            'peak_wall_temperature_K': summary['max_wall_hot_K'],
+        }
+        # Marşın kendi enerji dengesi — ÖLÇÜM, varsayım değil.
+        march_lhs_kw = (mdot_c * float(summary['coolant_cp_mean_J_kgK'])
+                        * float(summary['coolant_dT_K']) / 1000.0)
+        march_rhs_kw = float(summary['total_heat_kW'])
+        # Tasarım-cidar akısını kanal filmi taşıyabilir mi? (h_c marştan)
+        h_c_list = march.get('h_coolant_W_m2K') or []
+        h_c_max = max((float(h) for h in h_c_list), default=0.0)
+        film_dt_required = (q_design_mw * 1e6 / h_c_max
+                            if h_c_max > 0 else None)
+        film_dt_available = max(float(t_cold) - inlet_K, 0.0)
+        supportable = (film_dt_required is not None
+                       and film_dt_required <= film_dt_available)
+        return {
+            '_basis': (
+                'the two rows are NOT the same quantity: bulk_chain '
+                'evaluates the Bartz gas side AT the design wall '
+                'temperature and sizes the coolant temperature rise from '
+                'that load (a requirement); station_march SOLVES the '
+                'coupled gas/wall/coolant balance of the as-built channels '
+                '(an equilibrium). Each closes its own energy balance '
+                'mdot*cp*dT = integral q dA (bulk chain by construction; '
+                'the march closure is measured in march_energy_balance).'),
+            'bulk_chain': bulk,
+            'station_march': march_row,
+            'peak_flux_ratio_bulk_over_march': (
+                q_design_mw / q_solved_mw if q_solved_mw > 0 else None),
+            'exit_temperature_difference_K': (
+                float(bulk['coolant_exit_temperature_K'])
+                - float(march_row['coolant_exit_temperature_K'])
+                if bulk['coolant_exit_temperature_K'] is not None else None),
+            'march_energy_balance': {
+                'mdot_cp_dT_kW': march_lhs_kw,
+                'integral_q_dA_kW': march_rhs_kw,
+                'relative_gap': (abs(march_lhs_kw - march_rhs_kw)
+                                 / march_rhs_kw if march_rhs_kw > 0
+                                 else None),
+            },
+            'design_flux_film_dt_required_K': film_dt_required,
+            'design_film_dt_available_K': film_dt_available,
+            'design_flux_supportable_by_channels': supportable,
+            'verdict': (
+                'the as-built channels CAN hold the wall near its design '
+                'temperature; the two rows should agree closely'
+                if supportable else
+                'the design-wall heat flux CANNOT be carried by the '
+                'as-built coolant channels (the required coolant film '
+                'temperature difference exceeds what the design wall '
+                'allows), so the wall does not stay at its design '
+                'temperature and the physically consistent state of this '
+                'circuit is the station_march equilibrium — see '
+                'station_march.peak_wall_temperature_K and its warnings'),
+        }
 
     def _passive_thermal_protection(self, cooling):
         """Pasif ısıl koruma — hrma.analysis.thermal_protection (yol har. A5).

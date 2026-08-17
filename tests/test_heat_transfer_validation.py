@@ -85,15 +85,50 @@ def test_rs25_gas_side_coefficient_in_literature_band(analyzer):
     assert r['heat_transfer_coefficients']['correlation'].startswith('Bartz')
 
 
+#: RS-25 boğaz ısı akısı literatür bandı [W/m^2]. Dosya başlığındaki
+#: "Reference values" bölümünün TEK KAYNAĞI (Huzel & Huang; NASA SP-8124).
+#: Kapı da hata mesajı da buradan okur — üçünün ayrışması T1-3 kusuruydu.
+RS25_THROAT_FLUX_BAND_W_M2 = (80e6, 160e6)
+
+
 def test_rs25_throat_heat_flux_in_literature_band(analyzer):
-    """RS-25 design throat heat flux should be ~80-160 MW/m^2."""
+    """RS-25 design throat heat flux should be ~80-160 MW/m^2.
+
+    T1-3 (parti 31): the docstring and the failure message both said
+    80-160 MW/m^2 while the gate accepted 80-200e6. Anything in
+    160-200 MW/m^2 passed silently against a band nobody had declared.
+    Measured today: 131.4 MW/m^2 -- inside the declared band, so closing
+    the gate to the declaration does NOT relax or move any number; it
+    removes an undeclared 40 MW/m^2 of slack.
+    """
     r = analyzer.analyze_heat_transfer(
         dict(RS25), material='copper', wall_thickness=0.001, cooling_type='regenerative'
     )
     q = r['gas_side_analysis']['throat_heat_flux']  # W/m^2
-    assert 80e6 <= q <= 200e6, (
-        f"RS-25 throat heat flux q={q/1e6:.0f} MW/m^2 outside band 80-160 MW/m^2"
+    lo, hi = RS25_THROAT_FLUX_BAND_W_M2
+    assert lo <= q <= hi, (
+        f"RS-25 throat heat flux q={q/1e6:.1f} MW/m^2 outside band "
+        f"{lo/1e6:.0f}-{hi/1e6:.0f} MW/m^2"
     )
+
+
+def test_rs25_band_declaration_matches_the_gate():
+    """Beyan ile kapı AYNI bandı söylemeli (T1-3 bekçisi).
+
+    Dosya başlığındaki referans bandı ile kapının kullandığı sabit
+    ayrışırsa bu bekçi kırılır — kapının sessizce genişletilmesi (80-200)
+    tam olarak böyle olmuştu.
+    """
+    import pathlib
+    import re
+    kaynak = pathlib.Path(__file__).read_text(encoding='utf-8')
+    basligi = kaynak.split('"""')[1]
+    eslesme = re.search(r'heat flux ~ (\d+)-(\d+) MW/m\^2', basligi)
+    assert eslesme, 'dosya başlığındaki RS-25 akı bandı beyanı bulunamadı'
+    beyan = (float(eslesme.group(1)) * 1e6, float(eslesme.group(2)) * 1e6)
+    assert beyan == RS25_THROAT_FLUX_BAND_W_M2, (
+        f'başlık {beyan} diyor, kapı {RS25_THROAT_FLUX_BAND_W_M2} '
+        'kullanıyor — beyan ile kapı ayrıştı (T1-3)')
 
 
 # ----------------------------------------------------------------------

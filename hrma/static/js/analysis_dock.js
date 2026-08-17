@@ -954,6 +954,95 @@
         return firstNumber(motorDict(r), WALL_THICKNESS_MM_PATHS[getMotorType()] || []);
     }
 
+    // ==================================================================
+    // CİDAR SICAKLIĞI  (F5-2, 2026-08-17 ölçümü)
+    // ------------------------------------------------------------------
+    // `/analyze_structural_safety` iki anahtarı BİRİNCİ ÖNCELİKLE okuyor
+    // (app.py: `for wall_key in ('wall_temperature_hot',
+    // 'wall_temperature_cold')`), yapısal modül de onları
+    // `_estimate_wall_delta_T` içinde 1. sırada kullanıyor. Güverte paneli
+    // ikisini de HİÇ göndermiyordu, yani ısı zincirinin çözdüğü cidar
+    // sıcaklığı güverteye ulaşmıyor, panel gaz sıcaklığından türetilen
+    // TAHMİN yolunu tetikliyordu. ÖLÇÜLDÜ (örnek hibrit motor, aynı koşu):
+    //
+    //   güverte (bugün, cidar sıcaklığı gönderilmiyor)
+    //       T_iç = 729,9 K  ·  SF_min = 4,000  ·  durum MARGINAL
+    //   motorun kendi zinciri (ısı modülünün çözdüğü cidar)
+    //       T_iç = 3369,3 K ·  SF_min = 2,134
+    //
+    // Yani aynı motor için ekranda 4,6 kat düşük bir cidar sıcaklığı ve
+    // ondan türeyen bir emniyet katsayısı duruyordu.
+    //
+    // SAHTE VERİ KAPISI: her sıcaklık gönderilmez. Çözücü bu iki sayının
+    // NEREDEN geldiğini kendisi beyan ediyor; panel yalnız GERÇEKTEN
+    // çözülmüş (ya da kullanıcının verdiği) değeri taşır:
+    //
+    //   hibrit/katı  structural_analysis.thermal_analysis.
+    //                wall_temperature_source == 'heat_transfer_module'
+    //                (diğer iki değer — 'chamber_temperature_estimate' ve
+    //                'not_evaluated' — zaten tahmin/kapalı demektir; onları
+    //                geri beslemek tahmini ölçüm gibi göstermek olurdu)
+    //   sıvı         cooling_system.wall_temperature_source
+    //                'assumed (cooling-type default)' İSE GÖNDERİLMEZ
+    //                (ölçüldü: örnek sıvı motorda kaynak tam bu, değerler
+    //                800,0 / 350,0 K yuvarlak tasarım varsayımları)
+    //
+    // İkisi de bulunamazsa `{}` döner: alanlar BOŞ kalır, uç kendi
+    // beyanlı tahmin yoluna girer ve panel bunu ekranda söyler.
+    // ==================================================================
+
+    //: Çözülmüş sayılmayan kaynak beyanları (bunlar geri beslenmez).
+    const WALL_TEMP_SOURCE_NOT_SOLVED = ['not_evaluated',
+                                         'chamber_temperature_estimate'];
+
+    //: Motor tipine göre ÖLÇÜLMÜŞ cidar sıcaklığı yolları + kaynak beyanı.
+    const WALL_TEMPERATURE_K_PATHS = {
+        hybrid: {
+            hot: 'structural_analysis.thermal_analysis.wall_temperature_inner_K',
+            cold: 'structural_analysis.thermal_analysis.wall_temperature_outer_K',
+            source: 'structural_analysis.thermal_analysis.wall_temperature_source',
+        },
+        // Katı zincir bugün cidar sıcaklığı YAYIMLAMIYOR (ölçüldü:
+        // structural_analysis = {assembly_integrity, case_analysis,
+        // grain_structural}). Yol yine de hibritle aynı adreste tanımlıdır:
+        // katı zincir bir gün yayımlarsa panel kendiliğinden taşır, ama
+        // yayımlamadığı sürece hiçbir sayı UYDURULMAZ.
+        solid: {
+            hot: 'structural_analysis.thermal_analysis.wall_temperature_inner_K',
+            cold: 'structural_analysis.thermal_analysis.wall_temperature_outer_K',
+            source: 'structural_analysis.thermal_analysis.wall_temperature_source',
+        },
+        liquid: {
+            hot: 'cooling_system.wall_temperature_hot',
+            cold: 'cooling_system.wall_temperature_cold',
+            source: 'cooling_system.wall_temperature_source',
+        },
+    };
+
+    // Çözücünün kaynak beyanı "çözüldü/kullanıcı verdi" mi diyor?
+    function wallTempSourceIsSolved(source) {
+        if (typeof source !== 'string' || source === '') return false;
+        if (WALL_TEMP_SOURCE_NOT_SOLVED.indexOf(source) !== -1) return false;
+        // Sıvı tarafı serbest metin kullanıyor; 'assumed ...' ile başlayan
+        // her beyan VARSAYIMDIR ('solved ...' ve 'user input ...' değildir).
+        return !/^assumed\b/i.test(source);
+    }
+
+    // {hot, cold} (K) döner; beyan çözülmüş demiyorsa ya da ikisinden biri
+    // eksikse BOŞ sözlük döner (yarım çift gönderilmez: yapısal modül iki
+    // sayıyı birlikte ister, tek başına gelen sıcaklık tahmin yolunu açar
+    // ama ucun 'termal koştu' bayrağını da kaldırırdı).
+    function readWallTemperaturesK(r) {
+        const spec = WALL_TEMPERATURE_K_PATHS[getMotorType()];
+        if (!spec) return {};
+        const m = motorDict(r);
+        if (!wallTempSourceIsSolved(deepGet(m, spec.source))) return {};
+        const hot = firstNumber(m, [spec.hot]);
+        const cold = firstNumber(m, [spec.cold]);
+        if (hot === undefined || cold === undefined) return {};
+        return { hot: hot, cold: cold };
+    }
+
     // ------------------------------------------------------------------
     // DOM yardımcıları
     // ------------------------------------------------------------------
@@ -1760,6 +1849,7 @@
             readChamberMaterial: readChamberMaterial,
             readWallThicknessM: readWallThicknessM,
             readWallThicknessMM: readWallThicknessMM,
+            readWallTemperaturesK: readWallTemperaturesK,
         },
         // Test / hata ayıklama için salt-okunur kayıt listesi
         _registry: registry,

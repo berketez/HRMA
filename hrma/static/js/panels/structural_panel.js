@@ -170,6 +170,68 @@
         return html;
     }
 
+    // ------------------------------------------------------------------
+    // CİDAR SICAKLIĞININ KAYNAĞI  (`structural_analysis.thermal_analysis`)
+    // ------------------------------------------------------------------
+    // Uç bu bloğu ZATEN gönderiyordu (`wall_temperature_source`,
+    // `thermal_model_ran`, iki cidar sıcaklığı), panel HİÇ okumuyordu.
+    // Termal gerilme, mukavemet deratingi ve servis sıcaklığı hükmünün
+    // tamamı bu iki sayıdan türüyor; hangisinin ÇÖZÜM hangisinin TAHMİN
+    // olduğu ekranda yazmıyordu. Modülün kendi sözlüğü (structural_analysis
+    // ._wall_temperature_source):
+    //   heat_transfer_module         — ısı modülünün çözdüğü gerçek cidar
+    //   chamber_temperature_estimate — yalnız gaz sıcaklığı verildi, cidar
+    //                                  radyasyon-denge TAHMİNİ
+    //   not_evaluated                — hiç sıcaklık girdisi yok, termal
+    //                                  etki KAPALI (iki cidar da ortam)
+    const WALL_TEMP_SOURCE_KIND = {
+        heat_transfer_module: 'ok',
+        chamber_temperature_estimate: 'warn',
+        not_evaluated: 'warn',
+    };
+
+    function wallTemperatureBlock(th) {
+        if (!th || typeof th !== 'object') return '';
+        const src = th.wall_temperature_source;
+        if (src == null && th.wall_temperature_inner_K == null) return '';
+        const ran = th.thermal_model_ran !== false && src !== 'not_evaluated';
+        const LABELS = {
+            heat_transfer_module: T('panel.structural.wallTempSolved',
+                'WALL TEMPERATURE: SOLVED (heat-transfer module)'),
+            chamber_temperature_estimate: T('panel.structural.wallTempEstimated',
+                'WALL TEMPERATURE: ESTIMATED FROM GAS TEMPERATURE'),
+            not_evaluated: T('panel.structural.wallTempNotEvaluated',
+                'WALL TEMPERATURE: NOT EVALUATED (thermal path did not run)'),
+        };
+        let html = U.sectionTitle(T('panel.structural.secWallTemperature',
+                                    'Wall temperature behind the thermal terms'));
+        html += `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;">`
+            + U.badge(LABELS[src] || (T('panel.structural.wallTempSourceLabel',
+                                        'WALL TEMPERATURE SOURCE') + ': '
+                                      + String(src == null ? '—' : src)),
+                      WALL_TEMP_SOURCE_KIND[src] || 'info')
+            + '</div>';
+        // Hesaplanmamış sıcaklık YAYIMLANMAZ: uç bu durumda alanları
+        // None'a çekiyor, panel de sayı yerine gerekçeyi basar.
+        if (ran) {
+            html += U.kvTable([
+                [T('panel.structural.wallTempHot', 'Hot-side (inner) wall'),
+                 U.fmt(th.wall_temperature_inner_K, 1) + ' K'],
+                [T('panel.structural.wallTempCold', 'Cold-side (outer) wall'),
+                 U.fmt(th.wall_temperature_outer_K, 1) + ' K'],
+                [T('panel.structural.wallTempDelta', 'Through-wall gradient ΔT'),
+                 U.fmt(th.wall_delta_T_K, 1) + ' K'],
+            ]);
+        }
+        // Sunucunun kendi gerekçe metni ham basılır (designBasisBlock deseni).
+        const note = th.basis || th.service_temperature_basis;
+        if (note) {
+            html += `<p style="font-size:0.78rem; color:${U.kindColor(
+                ran ? 'info' : 'warn')};">${note}</p>`;
+        }
+        return html;
+    }
+
     function render(data, root) {
         const sa = data.structural_analysis || {};
         const ca = sa.chamber_analysis || {};
@@ -216,6 +278,10 @@
         // ---- Hükmün dayanağı (rozetlerin HEMEN ardında: kullanıcı sayıları
         // okumadan önce bunun doğrulama mı öneri mi olduğunu görmeli) ----
         html += designBasisBlock(data.design_basis);
+
+        // ---- Cidar sıcaklığının kaynağı (termal terimlerin dayanağı) ----
+        // Gerilme tablosundan ÖNCE: termal kolonun sayıları buradan türüyor.
+        html += wallTemperatureBlock(sa.thermal_analysis);
 
         // ---- Gerilmeler ----
         html += U.sectionTitle(T('panel.structural.secStresses', 'Wall Stresses'));
@@ -361,10 +427,41 @@
             // sonucu "doğrulama" diye damgalardı.
             ['wall_thickness', 'Wall Thickness (m)', 0, 0.001,
              'common.f.wallThicknessM'],
+            // CİDAR SICAKLIĞI (F5-2, 2026-08-17 ölçümü): bu iki alan da
+            // listede YOKTU. Uç ikisini de BİRİNCİ ÖNCELİKLE okuyor
+            // (app.py `for wall_key in ('wall_temperature_hot',
+            // 'wall_temperature_cold')`) ve yapısal modül onları
+            // `_estimate_wall_delta_T`'de 1. sırada kullanıyor. Panel
+            // göndermediği için ısı zincirinin ÇÖZDÜĞÜ cidar sıcaklığı
+            // güverteye hiç ulaşmıyordu; uç gaz sıcaklığından türeyen
+            // TAHMİN yoluna düşüyordu. Aynı örnek hibrit motorda ölçüldü:
+            //     güverte  T_iç = 729,9 K   SF_min = 4,000  (MARGINAL)
+            //     motor    T_iç = 3369,3 K  SF_min = 2,134
+            //
+            // Varsayılan BOŞ dize ('') = isteğe bağlı alan sözleşmesi
+            // (analysis_dock buildPayload: boş alan payload'a KONMAZ,
+            // istek durdurulmaz). 0 varsayılanı KULLANILMAZ: mutlak
+            // sıcaklıkta 0 K fiziksel bir değerdir, "verilmedi" ile
+            // karıştırılamaz — `wall_thickness`/`thrust` alanlarındaki
+            // "0 = atla" sözleşmesi burada geçerli DEĞİLDİR.
+            //
+            // Uydurma bir sıcaklık ENJEKTE EDİLMEZ: fromResults yalnız
+            // çözücünün kendi beyanı "çözüldü / kullanıcı verdi" dediğinde
+            // doldurur (bkz. AnalysisDock.ui.readWallTemperaturesK).
+            ['wall_temperature_hot', 'Hot-side Wall Temperature (K, blank = '
+             + 'let HRMA estimate from gas temperature)', '', 10,
+             'common.f.wallTemperatureHotK'],
+            ['wall_temperature_cold', 'Cold-side Wall Temperature (K, blank = '
+             + 'let HRMA estimate from gas temperature)', '', 10,
+             'common.f.wallTemperatureColdK'],
             ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
         ],
         fromResults: function (r) {
             const m = U.motorDict(r);
+            // Cidar sıcaklığı çifti: yalnız çözücünün kendi kaynak beyanı
+            // "çözüldü / kullanıcı verdi" dediğinde gelir; aksi hâlde boş
+            // sözlüktür ve iki alan BOŞ kalır (tahmin geri beslenmez).
+            const wt = U.readWallTemperaturesK(r);
             // BİRİM (2026-07-30 ölçümü): bu üç uzunluk HAM okunuyordu ve
             // alanlar METRE etiketli. Hibritte doğruydu, ama katı motorda
             // chamber_diameter 75,0 (mm) ve sıvıda 120,0 (mm) geliyor —
@@ -393,6 +490,11 @@
                 // panel aynı cidarla hesaplar. Sonuç yoksa öneri boş kalır
                 // ve alan 0'da (= "sen boyutlandır") durur.
                 wall_thickness: U.readWallThicknessM(r),
+                // CİDAR SICAKLIĞI ÇİFTİ — ikisi birlikte gelir ya da hiç
+                // gelmez (yapısal modül tek başına gelen sıcaklığı zaten
+                // kullanamıyor, ama uç 'termal koştu' bayrağını kaldırırdı).
+                wall_temperature_hot: wt.hot,
+                wall_temperature_cold: wt.cold,
             };
         },
         render: render,

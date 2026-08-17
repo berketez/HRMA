@@ -213,6 +213,20 @@ jobs:
           node --version
           python -c "import shutil; assert shutil.which('node'), 'node PATH icinde yok — on yuz testleri sessizce atlanir'"
 
+      # Parti 31 / T2-2, T2-3, T2-4: cantera / CoolProp / numba bekçileri
+      # "kurulu değil" gerekçesiyle atlıyordu ve gerekçe doğrulanmıyordu.
+      # Testler artık "bağımlılık yok" ile "ürün yolu bozuk"u ayırıyor; bu
+      # adım o ayrımın ön koşulunu (bağımlılık gerçekten kurulu) yayın
+      # hattında da mekanik kılar. tests.yml'deki eşiyle aynı gerekçe.
+      - name: Bilimsel bağımlılıklar (cantera, CoolProp, numba) gerçekten kurulu mu
+        run: |
+          python - <<'PY'
+          import importlib
+          for ad in ('cantera', 'CoolProp', 'numba'):
+              m = importlib.import_module(ad)
+              print(ad, getattr(m, '__version__', '?'))
+          PY
+
       - name: Test paketi
         env:
           MPLBACKEND: Agg
@@ -349,8 +363,16 @@ jobs:
   # Kapının 4/8 adımının TAMAMI burada koşamaz: bu iş akışının kendi koşusu
   # yayın anında "tamamlanmamış" görünür, yani kapının kuralını harfiyen
   # uygulasa kendi kendini kilitlerdi. Burada ölçülen şey `tests` iş akışının
-  # BU SHA'daki durumudur — asıl kanıt odur, çünkü STEP/CAD kolunun 47 bekçisi
+  # BU SHA'daki durumudur — asıl kanıt odur, çünkü STEP/CAD kolunun 66 bekçisi
   # (build123d) yalnız orada koşar; bu iş akışının kendi takımı onları atlar.
+  #
+  # 66 sayısı 17 Ağustos 2026'da SEKİZ dosyalık küme üzerinde ölçüldü
+  # (build123d gizli: 182 passed / 66 skipped). Önceki 47, beş dosyalık ÇÜRÜMÜŞ
+  # listenin sayısıydı (parti 31 / T2-1). Kümenin kendisi artık
+  # tests/test_ci_kapsam_kapisi.py tarafından kaynaktan türetilip denetlenir;
+  # bu iş akışı kendi STEP listesini TUTMAZ — tuttuğu an ikinci bir çürüyen
+  # liste doğar. Devri (delegasyon) fail-closed olmak ZORUNDADIR ve bu şart
+  # da aynı bekçide kilitlidir (test_release_yml_step_kapsamini_devrediyor).
   #
   # `testler` işinden SONRA koşar ki, etiket commit'le birlikte atıldığında
   # tests.yml'ye bitmesi için makul süre tanınmış olsun.
@@ -389,7 +411,7 @@ jobs:
                   "       tests.yml yalnız main'e push ve PR'da tetiklenir; etiket\n"
                   "       push'u onu tetiklemez. Yani etiket, main'e push edilmemiş\n"
                   "       (ya da CI'ı henüz bitmemiş) bir commit'e atılmış olabilir.\n"
-                  "       STEP/CAD kolunun 47 bekçisi SADECE orada koşar; bu iş\n"
+                  "       STEP/CAD kolunun 66 bekçisi SADECE orada koşar; bu iş\n"
                   "       akışının kendi takımı onları atlar. Önce commit'i main'e\n"
                   "       push edip tests.yml'in yeşil bitmesini bekleyin.")
 

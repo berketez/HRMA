@@ -2400,6 +2400,37 @@
             }
         }
         
+        // ==================================================================
+        // TURBOPOMPA GÜVENİLİRLİĞİ HÜCRESİ  (F5-5, 2026-08-17 ölçümü)
+        // ------------------------------------------------------------------
+        // "Turbopump System" kartı `turbopump.reliability` anahtarını okuyup
+        // `(x * 100).toFixed(1)` basıyordu. Çözücü bu anahtarı HİÇ
+        // yayımlamıyor — örnek sıvı motorun yanıtında turbopump sözlüğü şu
+        // anahtarlardan ibaret (ölçüldü): fuel_pump, gas_generator, model,
+        // oxidizer_pump, shaft_architecture_note, total_mass,
+        // total_mass_basis, turbine, type. `undefined * 100` NaN'dır ve
+        // `NaN.toFixed(1)` "NaN" döndürür; ekranda her koşuda
+        // "Reliability: NaN%" yazıyordu.
+        //
+        // Sahte gösterge yasağı: veri yoksa SAYI BASILMAZ ve yokluğun nedeni
+        // ADIYLA yazılır. Uydurma bir güvenilirlik (0,99 gibi) KONMAZ —
+        // HRMA'da turbopompa güvenilirlik modeli yok, olmayan bir modelin
+        // çıktısını yazmak kullanıcıya sayı uydurtmak olurdu.
+        //
+        // Kapı VERİDEN karar verir, sabit listeden değil: çözücü bir gün
+        // sonlu bir güvenilirlik yayımlarsa hücre kendiliğinden yüzdeye
+        // döner. NaN/Infinity de "yayımlanmadı" sayılır (sonluluk sınanır).
+        function _liquidReliabilityCell(tp) {
+            const v = tp ? tp.reliability : undefined;
+            if (typeof v === 'number' && isFinite(v)) {
+                return (v * 100).toFixed(1) + '%';
+            }
+            return '<span class="unwired-badge-informational">'
+                + T('liq.js.reliability_not_published',
+                    'not published - HRMA has no turbopump reliability model')
+                + '</span>';
+        }
+
         function displayResults(results) {
             document.getElementById('results').style.display = 'block';
 
@@ -2523,7 +2554,8 @@
                         <tr><td>${T('liq.js.fuel_pump_power', 'Fuel Pump Power:')}</td><td>${results.feed_system.turbopump.fuel_pump.power.toFixed(1)} kW</td></tr>
                         <tr><td>${T('liq.js.turbine_power', 'Turbine Power:')}</td><td>${results.feed_system.turbopump.turbine.power.toFixed(1)} kW</td></tr>
                         <tr><td>${T('liq.js.rpm', 'RPM:')}</td><td>${results.feed_system.turbopump.oxidizer_pump.rpm.toLocaleString()}</td></tr>
-                        <tr><td>${T('liq.js.reliability', 'Reliability:')}</td><td>${(results.feed_system.turbopump.reliability * 100).toFixed(1)}%</td></tr>
+                        <tr><td>${T('liq.js.reliability', 'Reliability:')}</td><td>${
+                            _liquidReliabilityCell(results.feed_system.turbopump)}</td></tr>
                     </table>
                 </div>
                 ` : ''}

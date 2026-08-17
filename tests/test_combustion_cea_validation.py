@@ -43,6 +43,7 @@ import pytest
 
 from hrma.engines.combustion_analysis import CombustionAnalyzer
 from hrma.constants import G_0
+from tests.bagimlilik_kapisi import kapi
 
 # RocketCEA opsiyonel: kurulu değilse CEA-çapraz testleri atlanır,
 # CEA gerektirmeyen yapı/feature/regresyon testleri yine koşar.
@@ -99,11 +100,23 @@ def _cea_chamber(cea_ox, cea_fuel, Pc_bar, OF):
     return cstar, Tc, float(gamma)
 
 
+#: Ürün yolu kapalıyken basılacak teşhis. Tek kaynak: aşağıdaki fixture ile
+#: ``test_combustion.py``'nin iki fixture'ı aynı metni kullanır.
+CANTERA_YOLU_KIRIK = (
+    'CombustionAnalyzer.cantera_available False döndü: '
+    'hrma/engines/combustion_analysis.py içindeki MECHANISM_CHAIN '
+    'mekanizmalarının HİÇBİRİ ct.Solution ile yüklenemedi. Çözücü ampirik '
+    'yola düşer ve ürün bileşimi itici çiftinden bağımsız hale gelir '
+    '(v2.6.2 F005 kusuru). Bu, atlanacak değil DÜZELTİLECEK bir durumdur.')
+
+
 @pytest.fixture(scope="module")
 def analyzer():
     ca = CombustionAnalyzer()
-    if not ca.cantera_available:
-        pytest.skip("Cantera kurulu değil; denge tabanlı yanma testleri atlanıyor.")
+    # Bağımlılık kapısı: cantera YOKSA atla, KURULU ama yol kapalıysa KIRMIZI.
+    # Eskiden ikisi de "Cantera kurulu değil" gerekçesiyle atlanıyordu
+    # (parti 31 / T2-2; ölçüm: bozuk mekanizma zinciriyle 39 sessiz atlama).
+    kapi('cantera', ca.cantera_available, CANTERA_YOLU_KIRIK)
     return ca
 
 

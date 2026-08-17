@@ -26,6 +26,7 @@ from hrma.constants import (G_0, LAMBDA_BELL, LAMBDA_PARABOLIC,
 # hrma/flow/separation.py ve engines/nozzle_design.py içinde de bu addan
 # türetilir. Buraya sayı KOPYALANMAZ.
 from hrma.flow.separation import SUMMERFIELD_FACTOR_DEFAULT
+from hrma.utils import input_guard
 import warnings
 
 # --- Kamara boyu bölümlendirme katsayıları (v2.5.2 L* modeli) ---
@@ -374,6 +375,34 @@ COOLING_CHANNEL_TO_TYPE = {
 WALL_THICKNESS_INPUT_MIN_M = 0.0005
 WALL_THICKNESS_MAX_M = 0.100
 
+#: Kamara cidarı sabit-nokta boyutlandırması (bebek-Scofield F5-1).
+#: Kullanıcı cidar VERMEDİĞİNDE cidarın tek kaynağı yapısal boyutlandırmadır
+#: ve ısı zinciri onu TÜKETİR: ısı(t) -> cidar sıcaklıkları -> dayanım
+#: derating'i -> boyutlandırılan t. İki zincir bit-eşitliğe (ya da aşağıdaki
+#: bağıl kalıntıya) oturana kadar yinelenir. ÖLÇÜLDÜ (örnek 3 kN N2O/HTPB
+#: motoru): 2. adımda bit-eşit yakınsıyor (doğal soğutmada cidar adyabatik
+#: sıcaklığa kenetlendiği için derating doyuyor). Tavan, doyumsuz
+#: (rejeneratif) durumlar için paylıdır; adım maliyeti ölçüldü ~22 ms.
+WALL_SIZING_MAX_ITERS = 8
+#: Bit-eşitlik yakalanamazsa kabul edilen bağıl kalıntı; üstünde kalırsa
+#: warn.hybrid.wall_sizing_not_converged uyarısı verilir ve kalıntı
+#: chamber_wall_policy bloğunda BEYAN edilir (sessiz kabul yok).
+WALL_SIZING_REL_TOL = 1e-6
+
+#: Boğaz debi katsayısı C_D — TEK SÖZLEŞME (bebek-Scofield F3-1): debiyi
+#: C_D taşır (ṁ = C_D·Pc·At/c*), boğaz alanı GEOMETRİKTİR ve boyutlandırma
+#: At = ṁ·c*/(Pc·C_D) ile kurulur. Debiden Pc GERİ OKUYAN her satır aynı
+#: sabiti kullanmak ZORUNDADIR: Pc = ṁ·c*/(C_D·At). Eskiden thrust_curve
+#: geri okuması C_D'siz yapılıyordu ve t=0 basıncı tasarımın tam 0,98 katı
+#: çıkıyordu (ölçüldü: 29,40 / 30,00 bar). 0,98 keskin kenarlı boğaz için
+#: tipik değerdir (Sutton & Biblarz 9. baskı, Böl. 3).
+#: NOT: hrma/analysis/transient_ballistics.py::NOZZLE_DISCHARGE_COEFFICIENT
+#: aynı sözleşmenin öteki ucudur (o dosyanın sahibi bu partide ayrı ajan;
+#: iki adın TEK tanıma indirilmesi ana modele bildirildi). İki sabitin
+#: eşitliği bekçilidir: tests/test_scofield_hibrit.py::
+#: test_cd_sozlesmesi_iki_uc_ayni_sayi — biri kayarsa test kırmızıya döner.
+THROAT_DISCHARGE_COEFFICIENT = 0.98
+
 #: Tasarım emniyet katsayısı için kabul edilen aralık. Arayüz 2-6 sunar;
 #: API daha geniş kabul eder ama 1.05 altı (fiilen emniyet payı yok) ve
 #: 10 üstü (kütle cezası anlamsız) girdi hatasıdır.
@@ -478,17 +507,27 @@ class HybridRocketEngine:
         # ulaşmıyordu. Ayrıntılı gerekçe o çağrının başındaki yorumda.
         self.chamber_material = self._resolve_chamber_material(chamber_material)
         # v2.6.26 — KURUCU VARSAYILANI "KULLANICI GİRDİSİ" SAYILMAZ.
-        # İmzada `wall_thickness=0.005` yazıyordu ve bu değer yapısal modüle
-        # `actual_wall_thickness` olarak gidiyordu; modül de DOĞRULAMA moduna
-        # geçip "verified against user-supplied wall thickness" diye
-        # raporluyordu. Oysa kimse bir kalınlık vermemişti — 5 mm kurucunun
-        # kendi varsayımıydı. Kullanıcının tasarımı ile motorun varsayımı
-        # arasındaki fark, bu sürümde kapattığımız hata sınıfının ta kendisi.
-        # Artık: değer verilmediyse termal model yine 5 mm ile çalışır (bir
-        # kalınlık olmadan ısı iletimi çözülemez) ama yapısal modüle None
-        # geçilir ve modül BOYUTLANDIRMA modunda kalır.
-        self.wall_thickness_user_supplied = wall_thickness is not None
+        # v2.6.27 (bebek-Scofield F5-1) — CİDARIN TEK KAYNAĞI VARDIR.
+        # Eski durumda değer verilmediğinde ısı zinciri SESSİZCE 0,005 m ile
+        # koşuyor, yapısal/CAD zinciri ise kendi boyutlandırdığı cidarı
+        # (ölçülen örnekte 18,79 mm) çiziyordu: aynı motorda iki cidar, ve
+        # "çizilen cidarda SF" ısı zincirinin HİÇ GÖRMEDİĞİ bir cidara
+        # aitti. Yeni sözleşme:
+        #   * Kullanıcı AÇIKÇA bir cidar verdiyse o kazanır; yapısal taraf
+        #     DOĞRULAMA kipine geçer (verify).
+        #   * Verilmediyse cidarı yapısal boyutlandırma üretir ve ısı zinciri
+        #     onu TÜKETİR (calculate() içindeki sabit-nokta bloğu). Sessiz
+        #     5 mm YOK; boyutlandırma çökerse hesap BEYANLI reddedilir.
+        # Hangi yolun seçildiği chamber_wall_policy bloğunda ADIYLA yayımlanır.
+        # _resolve_wall_thickness geçersiz/aralık dışı girdiyi UYARIP None'a
+        # düşürür — eskiden aralık dışı girdi 0,005 m'ye düşüyor ve üstelik
+        # "kullanıcı verdi" bayrağı düşüşten ÖNCE hesaplandığı için 5 mm
+        # kullanıcının cidarıymış gibi DOĞRULANIYORDU (app.py
+        # _motor_structural_design_basis ölçümü).
         self.wall_thickness = self._resolve_wall_thickness(wall_thickness)
+        self.wall_thickness_user_supplied = self.wall_thickness is not None
+        #: calculate() doldurur: {'policy', 'wall_thickness_m', ...} beyanı.
+        self.wall_thickness_policy = None
         self.cooling_type = self._resolve_cooling_type(cooling_type)
 
         # --- v2.6.26'da bağlanan üç ölü girdi ---------------------------------
@@ -552,6 +591,32 @@ class HybridRocketEngine:
             self._launch_site_raw_invalid = (
                 None if launch_site is None else str(launch_site)[:80])
 
+        # --- Girdi kapısı (bebek-Scofield F4-3): 0 ≠ "verilmedi" -------------
+        # Deponun kendi sözleşmesi (hrma/utils/input_guard.py): yalnız None
+        # ve '' varsayılana düşer. Eski satır ``thrust if thrust else 1000``
+        # tam da input_guard'ın ÖRNEK olarak verdiği hataydı: thrust=0
+        # sessizce 1000 N oluyor, üstelik yanıt supplied=['thrust'] diyerek
+        # atılan değeri "kullanıcı verdi" diye raporluyordu (ölçüldü).
+        # 0 burada fiziksel olarak da geçersizdir (ṁ = F/(g0·Isp) = 0 →
+        # A_t = 0 → bölme hatası); sessizce atılmaz, ADIYLA reddedilir.
+        # input_guard.num() '' ve None'ı varsayılana düşürür, sayı olmayanı
+        # ve NaN/Inf'i InputError (ValueError alt sınıfı → HTTP 400) yapar.
+        _itki_ham = {'thrust': thrust, 'burn_time': burn_time,
+                     'total_impulse': total_impulse}
+        thrust = input_guard.num(_itki_ham, 'thrust', unit='N')
+        burn_time = input_guard.num(_itki_ham, 'burn_time', unit='s')
+        total_impulse = input_guard.num(_itki_ham, 'total_impulse',
+                                        unit='N*s')
+        for _ad, _deger in (('thrust', thrust), ('burn_time', burn_time),
+                            ('total_impulse', total_impulse)):
+            if _deger is not None and _deger <= 0.0:
+                raise input_guard.InputError(
+                    f"'{_ad}' must be a positive number; got {_deger:g}. "
+                    f"Zero or negative is physically meaningless here and "
+                    f"is NOT treated as 'not supplied' - omit the field "
+                    f"entirely to use the declared placeholder design "
+                    f"point instead.")
+
         # --- İtki / süre / toplam impuls: AŞIRI BELİRLENMİŞ GİRDİ ------------
         # I = F · t_b üç bilinmeyenli TEK denklemdir: ikisi verilince üçüncüsü
         # ÇÖZÜLÜR. Kullanıcı üçünü birden gönderirse biri mutlaka ezilir.
@@ -606,8 +671,12 @@ class HybridRocketEngine:
                 self.t_b = 10  # s
                 bagimsiz, turetilen = ('total_impulse',), 'thrust'
         else:
-            self.F = thrust if thrust else 1000  # N
-            self.t_b = burn_time if burn_time else 10  # s
+            # F4-3: 'verilmedi' testi AÇIKÇA ``is None`` iledir. 0 ve ''
+            # buraya ulaşamaz (yukarıdaki input_guard kapısı: '' → None,
+            # 0/negatif → InputError). Yer tutucular beyanlıdır
+            # (_defaults_used yukarıda dolduruldu).
+            self.F = thrust if thrust is not None else 1000  # N
+            self.t_b = burn_time if burn_time is not None else 10  # s
             self.I_total = self.F * self.t_b  # N*s
             bagimsiz, turetilen = ('thrust', 'burn_time'), 'total_impulse'
 
@@ -963,18 +1032,32 @@ class HybridRocketEngine:
             return 'steel_4130'
 
     def _resolve_wall_thickness(self, value):
-        """Cidar kalınlığını [m] doğrular; aralık dışıysa 5 mm'ye düşer."""
+        """Kamara cidarını [m] doğrular. None = 'kullanıcı vermedi'.
+
+        F5-1 (bebek-Scofield): eskiden her geçersiz/boş değer SESSİZCE
+        0,005 m oluyordu ve ısı zinciri bu 5 mm ile koşarken yapısal/CAD
+        zinciri kendi boyutlandırdığı cidarı çiziyordu — aynı motorda iki
+        cidar. Artık buradan sayı uydurulmaz: geçerli bir kullanıcı değeri
+        yoksa None döner ve cidarı calculate() içindeki yapısal
+        boyutlandırma üretir (ısı zinciri onu tüketir). Geçersiz ve aralık
+        dışı girdiler UYARIYLA düşer — sessiz düşüş yok.
+        """
+        if value is None or value == '':
+            return None
         try:
             t = float(value)
         except (TypeError, ValueError):
-            t = 0.005
+            self.design_warnings.append(_w(
+                'warn.hybrid.wall_thickness_invalid', 'warning',
+                requested=str(value)[:40]))
+            return None
         if not (WALL_THICKNESS_INPUT_MIN_M <= t <= WALL_THICKNESS_MAX_M):
             self.design_warnings.append(_w(
                 'warn.hybrid.wall_thickness_out_of_range', 'warning',
                 requested_mm=round(t * 1000.0, 3),
                 min_mm=WALL_THICKNESS_INPUT_MIN_M * 1000.0,
                 max_mm=WALL_THICKNESS_MAX_M * 1000.0))
-            return 0.005
+            return None
         return t
 
     def _resolve_cooling_type(self, value):
@@ -1291,8 +1374,10 @@ class HybridRocketEngine:
                 else 'uncooled heat-sink / radiation-cooled throat'),
             'wall_thickness_mm': self.wall_thickness * 1000.0,
             'wall_thickness_basis': (
-                'chamber wall thickness input (no separate nozzle wall '
-                'thickness field exists)'),
+                'chamber wall thickness - single source: the user input if '
+                'one was supplied, otherwise the structural sizing the '
+                'thermal chain consumed (see chamber_wall_policy). No '
+                'separate nozzle wall thickness field exists.'),
             'warnings': [],
         }
 
@@ -1442,8 +1527,9 @@ class HybridRocketEngine:
         self.mdot_f = self.mdot_total / (1 + self.OF)
         
         # Calculate throat geometry using correct formula
-        # At = mdot * C* / (Pc * CD) where CD is discharge coefficient
-        CD = 0.98  # Typical discharge coefficient
+        # At = mdot * C* / (Pc * CD) — C_D sözleşmesinin boyutlandırma ucu
+        # (tanım ve tek kaynak: THROAT_DISCHARGE_COEFFICIENT künyesi).
+        CD = THROAT_DISCHARGE_COEFFICIENT
         self.At = self.mdot_total * self.C_star / (self.P_c * 1e5 * CD)  # m²
         self.d_t = 2 * np.sqrt(self.At / np.pi)
         
@@ -1796,89 +1882,186 @@ class HybridRocketEngine:
         ht_kwargs = {}
         if self.ambient_temperature is not None:
             ht_kwargs['ambient_temp'] = float(self.ambient_temperature)
-        heat_transfer_results = self.heat_transfer_analyzer.analyze_heat_transfer(
-            ht_input,
-            material=self.chamber_material,
-            wall_thickness=self.wall_thickness,
-            cooling_type=self.cooling_type,
-            **ht_kwargs
-        )
-        
-        # Structural analysis — chamber_temperature GEÇİLMELİ; aksi halde
-        # structural modülü ortam (300 K) varsayıp termal gerilme=0 ve
-        # mukavemet deratingi=yok ile çalışır, emniyet faktörünü tehlikeli
-        # şekilde yüksek gösterir (entegrasyon gap fix). Mümkünse ısı transferi
-        # modülünün hesapladığı gerçek cidar sıcaklıklarını geçir; yoksa T_c'den
-        # konservatif tahmin yapılır.
-        # Ortam sıcaklığı ısı modülünün FİİLEN kullandığı değerden okunur
-        # (tek kaynak; bkz. yukarıdaki not). Isı sonucu yoksa anahtar hiç
-        # gönderilmez ve yapısal modül kendi varsayılanını beyan eder.
-        ambient_used = None
-        try:
-            ambient_used = float(
-                heat_transfer_results['design_parameters']['ambient_temperature'])
-        except (KeyError, TypeError, ValueError):
-            ambient_used = self.ambient_temperature
-        struct_input = {
-            'chamber_pressure': self.P_c,
-            'chamber_temperature': self.T_c,
-            'chamber_diameter': self.D_ch,
-            'chamber_length': self.L,
-            'throat_diameter': self.d_t,
-            'nozzle_type': self.nozzle_type,
-            'burn_time': self.t_b,
-            # v2.6.26: EKSENEL İTKİ YÜKÜ. structural_analysis.py:523 burkulma
-            # kontrolü için bunu `motor_data['thrust']` diye okuyor; anahtar
-            # burada olmadığı için her motorda 0 N geliyordu. Sonuç: uygulanan
-            # eksenel gerilme 0, burkulma emniyet katsayısı SONSUZ ve durum
-            # DAİMA "SAFE" — yani NASA SP-8007 burkulma kontrolü fiilen
-            # kapalıydı. İnce cidarlı uzun bir kamarada burkulma yöneten yük
-            # olabilir; sessizce "güvenli" demek en tehlikeli yanlıştır.
-            'thrust': self.F,
-        }
-        if ambient_used is not None:
-            struct_input['ambient_temperature'] = float(ambient_used)
-        # ISI -> YAPISAL ZİNCİR (Dalga 0, 2026-07-14): Isı analizinin
-        # hesapladığı GERÇEK iç/dış cidar sıcaklıkları yapısal modüle
-        # aktarılır. structural_analysis._estimate_wall_delta_T bu
-        # anahtarları birinci öncelikle okur; verilmezse T_c'den hayali,
-        # aşırı karamsar bir gradyan tahmini yapıyordu (iki modül aynı
-        # motor için farklı cidar sıcaklığı varsayıyordu).
-        try:
-            wall = heat_transfer_results['wall_analysis']
-            t_hot = float(wall['inner_temperature'])
-            t_cold = float(wall['outer_temperature'])
-            if np.isfinite(t_hot) and np.isfinite(t_cold) and t_hot > 0:
-                struct_input['wall_temperature_hot'] = t_hot
-                struct_input['wall_temperature_cold'] = max(t_cold, 0.0)
-        except (KeyError, TypeError, ValueError):
-            pass  # ısı sonucu yoksa eski konservatif T_c tahmini devrede kalır
-        # v2.6.26 — İKİ KOPUKLUK BURADA KAPANDI:
-        #
-        # 1) material='steel_4130' SABİT yazılıydı. Kullanıcının seçtiği kamara
-        #    malzemesi (v2.6.25'te termal modele bağlanmıştı) yapısal modüle
-        #    hâlâ ULAŞMIYORDU: Inconel 718 seçen kullanıcının emniyet katsayısı
-        #    4130 çeliğinden hesaplanıyordu. Termal ve yapısal modüller aynı
-        #    motor için FARKLI malzeme varsayıyordu.
-        #
-        # 2) 'Safety Factor' ve gerçek cidar kalınlığı geçilmiyordu. Yapısal
-        #    modül bu ikisini zaten destekliyor (design_safety_factor,
-        #    actual_wall_thickness) ama çağrı onları vermediği için modül
-        #    BOYUTLANDIRMA modunda kalıyordu; o modda raporlanan SF tanım
-        #    gereği "hedef SF x imalat payı"dır, yani kullanıcının kendi
-        #    girdisinin geri okunmasıdır (bkz. _analyze_chamber_wall F003
-        #    yorumu). Gerçek cidar geçilince modül DOĞRULAMA moduna geçer ve
-        #    SF gerçekten basınç, çap, malzeme ve kalınlıktan çıkar.
-        structural_results = self.structural_analyzer.analyze_structure(
-            struct_input,
-            material=self.chamber_material,
-            design_pressure_factor=1.5,
-            design_safety_factor=self.design_safety_factor,
-            # Yalnız kullanıcı GERÇEKTEN bir kalınlık verdiyse doğrulama modu.
-            actual_wall_thickness=(self.wall_thickness
-                                   if self.wall_thickness_user_supplied
-                                   else None)
-        )
+
+        def _isi_kosumu(cidar_m):
+            """Isı zincirini VERİLEN cidarla koşar (tek çağrı noktası)."""
+            return self.heat_transfer_analyzer.analyze_heat_transfer(
+                ht_input,
+                material=self.chamber_material,
+                wall_thickness=float(cidar_m),
+                cooling_type=self.cooling_type,
+                **ht_kwargs
+            )
+
+        def _yapisal_girdi(isi_sonucu):
+            """Yapısal analiz girdisini kurar; ısı sonucu varsa cidar
+            sıcaklıkları ve FİİLEN kullanılan ortam sıcaklığı ondan okunur.
+
+            chamber_temperature GEÇİLMELİ; aksi halde structural modülü
+            ortam (300 K) varsayıp termal gerilme=0 ve mukavemet
+            deratingi=yok ile çalışır, emniyet faktörünü tehlikeli şekilde
+            yüksek gösterir (entegrasyon gap fix). Isı sonucu yoksa T_c'den
+            konservatif tahmin devrede kalır — o dal artık yalnız cidar
+            boyutlandırmasının TOHUM adımında kullanılır.
+            """
+            girdi = {
+                'chamber_pressure': self.P_c,
+                'chamber_temperature': self.T_c,
+                'chamber_diameter': self.D_ch,
+                'chamber_length': self.L,
+                'throat_diameter': self.d_t,
+                'nozzle_type': self.nozzle_type,
+                'burn_time': self.t_b,
+                # v2.6.26: EKSENEL İTKİ YÜKÜ. structural_analysis.py:523
+                # burkulma kontrolü bunu `motor_data['thrust']` diye okuyor;
+                # anahtar eksikken her motorda 0 N geliyor ve NASA SP-8007
+                # burkulma kontrolü fiilen kapalı kalıyordu.
+                'thrust': self.F,
+            }
+            # Ortam sıcaklığı ısı modülünün FİİLEN kullandığı değerden geri
+            # okunur (tek kaynak; eskiden burada 300,0 K SABİT yazılıydı ve
+            # tek motor sonucunda iki farklı ortam sıcaklığı dolaşıyordu).
+            ortam = None
+            try:
+                ortam = float(
+                    isi_sonucu['design_parameters']['ambient_temperature'])
+            except (KeyError, TypeError, ValueError):
+                ortam = self.ambient_temperature
+            if ortam is not None:
+                girdi['ambient_temperature'] = float(ortam)
+            # ISI -> YAPISAL ZİNCİR (Dalga 0, 2026-07-14): ısı analizinin
+            # hesapladığı GERÇEK iç/dış cidar sıcaklıkları geçirilir;
+            # structural_analysis._estimate_wall_delta_T bunları birinci
+            # öncelikle okur.
+            try:
+                cidar = isi_sonucu['wall_analysis']
+                t_hot = float(cidar['inner_temperature'])
+                t_cold = float(cidar['outer_temperature'])
+                if np.isfinite(t_hot) and np.isfinite(t_cold) and t_hot > 0:
+                    girdi['wall_temperature_hot'] = t_hot
+                    girdi['wall_temperature_cold'] = max(t_cold, 0.0)
+            except (KeyError, TypeError, ValueError):
+                pass
+            return girdi
+
+        def _yapisal_kosumu(isi_sonucu, gercek_cidar_m):
+            """Yapısal analizi koşar (tek çağrı noktası).
+
+            v2.6.26 — iki kopukluk burada kapalı kalır: kullanıcının kamara
+            malzemesi ve tasarım SF hedefi her koşuda geçirilir;
+            ``actual_wall_thickness`` verilirse modül DOĞRULAMA (verify)
+            kipinde, verilmezse BOYUTLANDIRMA (size) kipindedir.
+            """
+            return self.structural_analyzer.analyze_structure(
+                _yapisal_girdi(isi_sonucu),
+                material=self.chamber_material,
+                design_pressure_factor=1.5,
+                design_safety_factor=self.design_safety_factor,
+                actual_wall_thickness=gercek_cidar_m,
+            )
+
+        # --- CİDAR SÖZLEŞMESİ (bebek-Scofield F5-1): TEK KAYNAK -------------
+        # Eski akış ısı zincirini sessiz 0,005 m ile koşuyor, yapısal zincir
+        # ise kendi boyutlandırdığı cidarı (ölçülen örnekte 18,79 mm)
+        # çiziyordu; "çizilen cidarda SF = 2,152" ısı zincirinin hiç
+        # görmediği bir cidara aitti. Ölçülen gerçek: aynı örnekte çizilen
+        # cidar KENDİ termal durumuyla değerlendirilince SF_total 0,941'e
+        # düşüyor — eski çift-cidar durumu tehlikeyi MASKELİYORDU.
+        if self.wall_thickness_user_supplied:
+            # YOL A — kullanıcının AÇIKÇA verdiği cidar kazanır: ısı zinciri
+            # onunla koşar, yapısal taraf DOĞRULAMA kipine geçer.
+            heat_transfer_results = _isi_kosumu(self.wall_thickness)
+            structural_results = _yapisal_kosumu(heat_transfer_results,
+                                                 self.wall_thickness)
+            self.wall_thickness_policy = {
+                'policy': 'user_supplied',
+                'wall_thickness_m': float(self.wall_thickness),
+                'wall_thickness_mm': float(self.wall_thickness) * 1000.0,
+                'sizing_iterations': None,
+                'sizing_residual_rel': None,
+                'converged': True,
+            }
+        else:
+            # YOL B — cidarın TEK kaynağı yapısal boyutlandırmadır ve ısı
+            # zinciri onu TÜKETİR. İki zincir birbirine bağlıdır (ısı(t) →
+            # cidar sıcaklıkları → dayanım derating'i → boyutlandırılan t),
+            # bu yüzden sabit noktaya YİNELENİR. Sessiz 5 mm yok.
+            #
+            # Tohum: ısı verisi OLMADAN boyutlandırma (yapısal modülün kendi
+            # beyanlı konservatif T_c tahmini). Tohum yalnız ilk ısı
+            # koşumunun cidarını verir; yayımlanan sonuç döngünün son
+            # (ısı, yapısal) çiftidir.
+            tohum = _yapisal_kosumu(None, None)
+            try:
+                cidar_m = float(
+                    tohum['chamber_analysis']['recommended_thickness']) / 1000.0
+            except (KeyError, TypeError, ValueError):
+                cidar_m = float('nan')
+            if not (np.isfinite(cidar_m) and cidar_m > 0):
+                # BEYANLI RET: boyutlandırma yoksa ısı zinciri 0,005 m'ye
+                # düşmez — bir cidar uydurmak bu bulgunun ta kendisiydi.
+                raise ValueError(
+                    'chamber wall thickness could not be determined: no '
+                    'wall_thickness was supplied and the structural sizing '
+                    'did not produce a usable thickness. Supply '
+                    'wall_thickness (m) explicitly; the thermal chain does '
+                    'NOT fall back to a silent 5 mm default.')
+            yineleme = 0
+            kalinti_rel = None
+            heat_transfer_results = None
+            structural_results = None
+            for yineleme in range(1, WALL_SIZING_MAX_ITERS + 1):
+                heat_transfer_results = _isi_kosumu(cidar_m)
+                structural_results = _yapisal_kosumu(heat_transfer_results,
+                                                     None)
+                cidar_yeni_m = float(
+                    structural_results['chamber_analysis']
+                    ['recommended_thickness']) / 1000.0
+                if not (np.isfinite(cidar_yeni_m) and cidar_yeni_m > 0):
+                    raise ValueError(
+                        'chamber wall sizing produced a non-physical '
+                        f'thickness ({cidar_yeni_m!r} m) at iteration '
+                        f'{yineleme}; the run is rejected instead of '
+                        'falling back to an invented wall.')
+                kalinti_rel = abs(cidar_yeni_m - cidar_m) / cidar_m
+                if cidar_yeni_m == cidar_m:
+                    # Bit-eşit sabit nokta: yayımlanan ısı ve yapısal
+                    # cidarları AYNI sayıdır (ölçüldü: örnek motor 2. adımda
+                    # bit-eşit oturuyor).
+                    break
+                cidar_m = cidar_yeni_m
+            if kalinti_rel is not None and kalinti_rel > WALL_SIZING_REL_TOL:
+                # Sessiz kabul yok: kalıntı beyan edilir ve uyarılır.
+                self.design_warnings.append(_w(
+                    'warn.hybrid.wall_sizing_not_converged', 'warning',
+                    residual_rel=float(kalinti_rel),
+                    iterations=int(yineleme),
+                    wall_mm=round(cidar_m * 1000.0, 3)))
+            # Tek sayı: ısı zincirinin tükettiği / yapısalın boyutlandırdığı
+            # cidar bundan sonra motorun cidarıdır (lüle termal profili,
+            # heat-sink bloğu ve CAD hepsi bunu okur).
+            self.wall_thickness = cidar_m
+            self.wall_thickness_policy = {
+                'policy': 'sized_by_structural_analysis',
+                'wall_thickness_m': float(cidar_m),
+                'wall_thickness_mm': float(cidar_m) * 1000.0,
+                'sizing_iterations': int(yineleme),
+                'sizing_residual_rel': (float(kalinti_rel)
+                                        if kalinti_rel is not None else None),
+                'converged': bool(kalinti_rel == 0.0),
+            }
+        self.wall_thickness_policy['basis'] = (
+            'SINGLE-SOURCE wall contract (F5-1): the chamber wall thickness '
+            'has exactly one owner. If the user supplies wall_thickness, '
+            'that value wins - the thermal chain runs with it and the '
+            'structural module verifies it (design_mode=verify). If not, '
+            'the structural sizing is the source and the thermal chain '
+            'CONSUMES it: heat(t) -> wall temperatures -> strength derating '
+            '-> sized t, iterated to a fixed point, so the published '
+            'thermal, structural and CAD walls are the same number. The '
+            'former silent 0.005 m thermal default is gone; if the sizing '
+            'cannot produce a wall, the run is rejected with this reason '
+            'instead of inventing one.')
 
         # Lüle/boğaz malzemesinin termal + erozyon değerlendirmesi (v2.6.26'da
         # bağlanan üçüncü ölü girdi).
@@ -2694,7 +2877,7 @@ class HybridRocketEngine:
         # durumundan gelir.
         #     ṁ_toplam(t) = ṁ_ox + ṁ_yakıt(t)          (süreklilik)
         #     F(t)        = ṁ_toplam(t)·Isp(t)·g0       (itki tanımı)
-        #     Pc(t)       = ṁ_toplam(t)·c*(t)/At        (c* tanımı)
+        #     Pc(t)       = ṁ_toplam(t)·c*(t)/(C_D·At)  (debi C_D taşır)
         # Hibritte ṁ_ox sabit, ṁ_yakıt port çapıyla değişir; eğrinin
         # regresif/progresif biçimi bu fizikten çıkar, elle çizilmez.
         self._mdot_total_history = []
@@ -2749,9 +2932,15 @@ class HybridRocketEngine:
                 # sözleşmesi bar kullanıyor (ölçüldü) ve tek bir çizim kodu
                 # üç sayfayı da beslediği için birimler AYNI olmak zorunda.
                 # c* tanımı Pa verir; 1e5'e bölünür.
+                # F3-1 (bebek-Scofield): geri okuma C_D SÖZLEŞMESİYLE —
+                # boyutlandırma At = ṁ·c*/(Pc·C_D) olduğundan geri okuma
+                # Pc = ṁ·c*/(C_D·At) olmak zorundadır. C_D'siz okuma t=0
+                # basıncını tasarımın 0,98 katına düşürüyordu (ölçüldü:
+                # 29,40 / 30,00 bar).
                 at = getattr(self, 'At', None)
                 self._pc_history.append(
-                    mdot_total_inst * cstar_inst / at / 1e5
+                    mdot_total_inst * cstar_inst
+                    / (THROAT_DISCHARGE_COEFFICIENT * at) / 1e5
                     if at and at > 0 else float('nan'))
 
             # Port yarıçapını artır (çap artışı = 2 · yarıçap artışı)
@@ -2815,8 +3004,10 @@ class HybridRocketEngine:
             self._mdot_f_history.append(self.mdot_f_final)
             self._thrust_history.append(mdot_toplam_son * isp_son * self.g0)
             at_son = getattr(self, 'At', None)
+            # F3-1: son nokta da AYNI C_D sözleşmesiyle (yukarıdaki not).
             self._pc_history.append(
-                mdot_toplam_son * cstar_son / at_son / 1e5
+                mdot_toplam_son * cstar_son
+                / (THROAT_DISCHARGE_COEFFICIENT * at_son) / 1e5
                 if at_son and at_son > 0 else float('nan'))
 
         # --- Ortalama regresyon hızı (v2.6.2 FİZİK DENETİMİ, bulgu F045) ---
@@ -5980,8 +6171,12 @@ class HybridRocketEngine:
                 'pressure': _seyrelt(self._pc_history),
                 'mass_flow': _seyrelt(self._mdot_total_history),
                 'basis': ('time-marching solution: F = mdot_total(t)*Isp(t)*g0, '
-                          'Pc = mdot_total(t)*c_star(t)/At; oxidiser flow is '
-                          'constant, fuel flow follows the regressing port'),
+                          'Pc = mdot_total(t)*c_star(t)/(Cd*At) with the same '
+                          'throat discharge coefficient the throat was sized '
+                          'with (single C_D contract: the mass flow carries '
+                          'Cd, the throat area is geometric); oxidiser flow '
+                          'is constant, fuel flow follows the regressing '
+                          'port'),
                 'sampling': _ornekleme_blogu(
                     len(_seyrelt(self._time_history)), _yayin_n,
                     _cozucu_adim_s,
@@ -6207,7 +6402,20 @@ class HybridRocketEngine:
                     break
         except (TypeError, ValueError, AttributeError):
             dry_mass_est = None
-        total_mass = (self.m_total + dry_mass_est
+        # F3-2 (bebek-Scofield): KÜTLE bütçesi YÜKLENEN değerlerle kurulur.
+        # Eski satır self.m_total (= yüklenen oksitleyici + YANAN yakıt)
+        # kullanıyordu: yanmayan sliver (grain'in kamara cidarına dökülen ama
+        # web tükenince yanmadan kalan kısmı) araçta UÇAR ama toplam kütlede
+        # SAYILMIYORDU — ölçüldü (örnek 3 kN motor): 97,2327 kg yayımlanırken
+        # gerçek yüklü kütle 102,4798 kg (fark 5,247 kg = sliver, %5,1).
+        # Aynı yanıtın oxidizer_mass_basis alanı kuralı zaten yazıyordu:
+        # "The mass budget must use the loaded value, the performance budget
+        # the consumed one." dry_mass_basis bu alanı uçuş zinciri (T/W, araç
+        # bütçesi) için YETKİLİ ilan ettiğinden yüklenen taraf seçildi;
+        # yanan-yakıt bütçesi fuel_mass / propellant_mass_total alanlarında
+        # ayrıca durur.
+        _m_f_yuklu = float(getattr(self, 'm_f_loaded', self.m_f))
+        total_mass = (float(self.m_ox) + _m_f_yuklu + dry_mass_est
                       if dry_mass_est is not None else None)
 
         # --- T60 kalıntısı (v2.6.27): "toplam motor boyu" İKİ tanımla
@@ -6318,6 +6526,16 @@ class HybridRocketEngine:
                        'analysis is unavailable in this run; the length is '
                        'not fabricated.')),
                 'total_mass_kg': total_mass,
+                # F3-2: kütle bütçesi tanımı ADIYLA — tüketici (T/W, araç
+                # bütçesi, rapor) hangi kütleyi okuduğunu bilmek zorunda.
+                'total_mass_basis': (
+                    'LOADED lift-off mass: dry mass + LOADED oxidizer '
+                    '(oxidizer_mass) + LOADED fuel grain (fuel_mass_loaded, '
+                    'which includes the unburnt sliver that flies as dead '
+                    'weight). The mass budget uses loaded values; the '
+                    'performance budget uses the consumed ones (fuel_mass, '
+                    'oxidizer_mass_consumed_kg) - same rule as '
+                    'oxidizer_mass_basis.'),
                 'dry_mass_estimate_kg': dry_mass_est,
                 # Kütlenin nereden geldiği görünür olmalı: eskiden bu alan
                 # bir başparmak kuralıydı ve kullanıcı bunu bilmiyordu.
@@ -6373,6 +6591,13 @@ class HybridRocketEngine:
         
         if structural_results:
             basic_results['structural_analysis'] = structural_results
+
+        # F5-1 (bebek-Scofield): cidarın TEK kaynağı ve seçilen yol ADIYLA
+        # yayımlanır — ısı, yapısal ve CAD zincirleri hangi cidarı
+        # paylaşıyor, kim seçti, boyutlandırma kaç adımda oturdu.
+        if getattr(self, 'wall_thickness_policy', None):
+            basic_results['chamber_wall_policy'] = dict(
+                self.wall_thickness_policy)
 
         if nozzle_material_results:
             basic_results['nozzle_material_analysis'] = nozzle_material_results

@@ -22,9 +22,37 @@ from hrma.analysis.pressurant_sizing import (
     regulated_pressurant, blowdown_pressurant, analyze_pressurant,
     gas_properties, compressibility_factor, GAS_PROPERTIES, R_UNIVERSAL,
 )
+from tests.bagimlilik_kapisi import kurulu_mu
 
-# CoolProp kuruluysa gerçek gaz yolu aktif; değilse Z=1 + beyan (skip nedeni).
-HAS_COOLPROP = compressibility_factor('helium', 300e5, 293.15)[1]
+# ---------------------------------------------------------------------------
+# Bağımlılık kapısı (parti 31 / T2-3)
+#
+# ESKİSİ: HAS_COOLPROP = compressibility_factor('helium', 300e5, 293.15)[1]
+# Bu bayrak İKİ ayrı durumu tek değere sıkıştırıyordu ve atlama gerekçesi
+# ("CoolProp kurulu değil") ikincisinde YALAN oluyordu:
+#   (1) CoolProp kurulu değil            -> (1.0, False)
+#   (2) CoolProp KURULU, çağrı patlıyor  -> (1.0, False)   [ÜRÜN KUSURU]
+# compressibility_factor'ün gövdesindeki `except Exception: return 1.0, False`
+# ikinci durumu yutuyor.
+#
+# ÖLÇÜM (17 Ağustos 2026) — CoolProp kurulu, PropsSI patlatıldı:
+#   düzeltme öncesi: 35 passed, **5 skipped** ("CoolProp kurulu değil")
+#   CoolProp gerçekten yokken de: 35 passed, 5 skipped -> ikisi AYIRT EDİLEMEZ
+# Düzeltme sonrası aynı mutasyonda: 37 passed, **4 failed**, 0 skipped
+# (iki 300 bar farkı bekçisi + Z alanları bekçisi + yeni gerçek-gaz yolu
+# bekçisi). Kalan iki bekçi Z=1 altında da sağlanan bantlara baktığı için
+# kırmızıya dönmez — ölçülen sayı budur, yuvarlanmadı.
+# CoolProp GERÇEKTEN yokken: 35 passed, 6 skipped (dürüst atlama korundu).
+#
+# YENİSİ: kurulum sorusu ithal edilebilirlikle (find_spec) yanıtlanır; ürün
+# yolunun açık olması AYRI bir bekçiyle sınanır.
+# ---------------------------------------------------------------------------
+
+#: CoolProp bu ortamda ithal edilebiliyor mu? (ürün durumu DEĞİL, kurulum)
+COOLPROP_KURULU = kurulu_mu('CoolProp')
+
+#: Ürünün gerçek-gaz yolu fiilen açık mı? (kurulum DEĞİL, ürün durumu)
+GERCEK_GAZ_YOLU_ACIK = compressibility_factor('helium', 300e5, 293.15)[1]
 
 
 class TestGasConstants:
@@ -251,19 +279,31 @@ class TestBlowdownRealGas:
     KW_300BAR = dict(propellant_volume=0.040, initial_ullage_volume=0.010,
                      initial_pressure=300e5, initial_temperature=293.15)
 
-    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    @pytest.mark.skipif(
+        not COOLPROP_KURULU,
+        reason="CoolProp kurulu değil — isteğe bağlı bağımlılık "
+               "(gerekçe find_spec ile DOĞRULANDI; kuruluyken ürün "
+               "yolu kapalıysa bu testler atlanmaz, KIRILIR)")
     def test_300bar_helium_ideal_vs_real_measurable(self):
         b = blowdown_pressurant(gas='helium', **self.KW_300BAR)
         rel = (b['gas_mass_ideal_gas_kg'] - b['gas_mass_kg']) / b['gas_mass_kg']
         assert 0.10 < rel < 0.18  # ölçülen: 0.1413
 
-    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    @pytest.mark.skipif(
+        not COOLPROP_KURULU,
+        reason="CoolProp kurulu değil — isteğe bağlı bağımlılık "
+               "(gerekçe find_spec ile DOĞRULANDI; kuruluyken ürün "
+               "yolu kapalıysa bu testler atlanmaz, KIRILIR)")
     def test_300bar_nitrogen_ideal_vs_real_measurable(self):
         b = blowdown_pressurant(gas='nitrogen', **self.KW_300BAR)
         rel = (b['gas_mass_ideal_gas_kg'] - b['gas_mass_kg']) / b['gas_mass_kg']
         assert 0.10 < rel < 0.18  # ölçülen: 0.1401
 
-    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    @pytest.mark.skipif(
+        not COOLPROP_KURULU,
+        reason="CoolProp kurulu değil — isteğe bağlı bağımlılık "
+               "(gerekçe find_spec ile DOĞRULANDI; kuruluyken ürün "
+               "yolu kapalıysa bu testler atlanmaz, KIRILIR)")
     def test_z_fields_present_and_physical(self):
         b = blowdown_pressurant(gas='helium', **self.KW_300BAR)
         assert b['real_gas'] is True
@@ -272,12 +312,20 @@ class TestBlowdownRealGas:
         assert 'CoolProp' in b['real_gas_model']
         assert 'Z=' in b['model_note']
 
-    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    @pytest.mark.skipif(
+        not COOLPROP_KURULU,
+        reason="CoolProp kurulu değil — isteğe bağlı bağımlılık "
+               "(gerekçe find_spec ile DOĞRULANDI; kuruluyken ürün "
+               "yolu kapalıysa bu testler atlanmaz, KIRILIR)")
     def test_z_final_physical_for_nitrogen(self):
         b = blowdown_pressurant(gas='nitrogen', **self.KW_300BAR)
         assert 0.90 < b['compressibility_factor_final'] < 1.20    # ölçülen 0.9337
 
-    @pytest.mark.skipif(not HAS_COOLPROP, reason="CoolProp kurulu değil")
+    @pytest.mark.skipif(
+        not COOLPROP_KURULU,
+        reason="CoolProp kurulu değil — isteğe bağlı bağımlılık "
+               "(gerekçe find_spec ile DOĞRULANDI; kuruluyken ürün "
+               "yolu kapalıysa bu testler atlanmaz, KIRILIR)")
     def test_low_pressure_ideal_and_real_agree(self):
         # 20 bar'da ideal ile gerçek gaz farkı küçük olmalı.
         kw = dict(self.KW_300BAR, initial_pressure=20e5)
@@ -318,6 +366,35 @@ class TestBlowdownRealGas:
             b['gas_mass_ideal_gas_kg'], rel=1e-12)
         assert 'ideal gas' in b['real_gas_model']
         assert 'CoolProp unavailable' in b['model_note']
+
+    def test_coolprop_kuruluysa_gercek_gaz_yolu_ACIK(self):
+        """T2-3 bekçisi: kurulum VAR ama yol KAPALI = ürün kusuru, atlama değil.
+
+        ``compressibility_factor`` gövdesindeki ``except Exception: return
+        1.0, False`` her arızayı "ideal gaz" gibi gösteriyor. Kütüphane yoksa
+        bu doğru davranıştır; KURULUYKEN aynı sonucu vermek, 200-400 bar
+        bandında şişe hacmini %5-28 EKSİK boyutlandıran sessiz bir düşüştür
+        (modülün kendi ölçümü).
+
+        ÖLÇÜM (17 Ağustos 2026): CoolProp kurulu + ``PropsSI`` patlatılmış
+        ortamda düzeltmeden önce bu dosya "35 passed, 5 skipped" veriyordu ve
+        atlama gerekçesi "CoolProp kurulu değil" idi — YALAN. Bu bekçiyle
+        aynı mutasyon kırmızıya döner.
+        """
+        if not COOLPROP_KURULU:
+            pytest.skip('CoolProp kurulu değil — isteğe bağlı bağımlılık '
+                        '(gerekçe find_spec ile DOĞRULANDI)')
+        assert GERCEK_GAZ_YOLU_ACIK, (
+            'CoolProp KURULU ama compressibility_factor gerçek-gaz yolunu '
+            'kullanmıyor (real_gas=False döndü). Bu bir ÜRÜN KUSURUDUR: '
+            'hrma/analysis/pressurant_sizing.py::compressibility_factor '
+            'içindeki `except Exception: return 1.0, False` dalı arızayı '
+            'yutuyor ve sonuç sessizce ideal gaza düşüyor. Yukarıdaki beş '
+            'gerçek-gaz bekçisi eskiden bu durumda "CoolProp kurulu değil" '
+            'gerekçesiyle ATLANIYORDU (parti 31 / T2-3).')
+        z, gercek = compressibility_factor('helium', 300e5, 293.15)
+        assert gercek is True and 1.05 < z < 1.25, (
+            f'gerçek-gaz yolu açık görünüyor ama Z={z} beklenen bantta değil')
 
 
 class TestDispatch:

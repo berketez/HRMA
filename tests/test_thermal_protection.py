@@ -556,6 +556,62 @@ class TestContract:
 # hâlâ DEĞİLDİR (T_c bir varsayımdır, bkz. test docstring'i).
 TM107041_ORDER_TOLERANCE = 2.0
 
+# ---------------------------------------------------------------------------
+# T3-1 (parti 31) — MERTEBE KİLİDİ İKİ YÖNLÜ OLMALI
+#
+# Ölçülen kusur: yukarıdaki kilit yalnız YUKARI bakıyordu
+# (rate <= band_hi * 2.0) ve alt uç ayrı, çok gevşek bir sabite
+# (MX2600 tabanı 0.00452) bağlıydı. Bu yüzden TARİHÎ KUSURUN KENDİSİ —
+# Tablo 2 sütunundaki x10^-2 çarpanının unutulması, yani bandın TAMAMININ
+# 10 kat yukarı kayması — geri geldiğinde dosya 48/48 YEŞİL kalıyordu:
+#   band x10 -> tavan 0.0601*10*2 = 1.202 (0.0779 geçer)
+#              taban 0.00452*10   = 0.0452 (0.0779 yine geçer)
+# Ölçüldü, sayı budur.
+#
+# İki yönlü kilit iki ayaklıdır:
+#   (1) SABİTLERİN KENDİSİ bir ONDALIK KUŞAKTA kilitlenir (aşağıdaki
+#       kuşaklar birincil kaynağın okunmuş değerlerini içerir, x10 ya da
+#       x0.1 kayma kuşağın dışına çıkar).
+#   (2) MODELİN SAYISI ile bandın üst ucu arasındaki ORAN iki yönlü
+#       kilitlenir. Oran, bandın uniform kaymasına DUYARLIDIR: ölçülen
+#       0.0779/0.0601 = 1.296; band x10 kayarsa oran 0.1296'ya düşer ve
+#       aynı TM107041_ORDER_TOLERANCE eşiği aşağıdan kırılır.
+# ---------------------------------------------------------------------------
+
+#: Birincil kaynağın (NASA TM-107041 Tablo 2, sütun çarpanı x10^-2) okunmuş
+#: değerlerini içeren ondalık kuşaklar [mm/s]. Ölçülen değerler:
+#: tüm örnekler 0.00017-0.0601; yüksek yoğunluklu uçuş sınıfı 0.00452-0.00822.
+TM107041_DECADE_ALL_MM_S = (1e-4, 1e-1)
+TM107041_DECADE_MX2600_MM_S = (1e-3, 1e-2)
+
+
+def test_tm107041_bandlari_ondalik_kusakta():
+    """Tarihî 10x okuma hatası GERİ GELİRSE bu bekçi kırılır (T3-1).
+
+    Bant sabitleri modülde tek tanım noktasındadır; buradaki kilit onların
+    BÜYÜKLÜK MERTEBESİNİ birincil kaynağın okumasına çapalar. x10 kayma
+    (çarpanın unutulması) da x0.1 kayma (iki kez uygulanması) da kuşağın
+    dışına çıkar.
+    """
+    kusaklar = (
+        ('TM107041_TABLE2_ALL_MM_S', TM107041_TABLE2_ALL_MM_S,
+         TM107041_DECADE_ALL_MM_S),
+        ('TM107041_TABLE2_MX2600_MM_S', TM107041_TABLE2_MX2600_MM_S,
+         TM107041_DECADE_MX2600_MM_S),
+    )
+    for ad, bant, (k_lo, k_hi) in kusaklar:
+        for uc in bant:
+            assert k_lo <= uc <= k_hi, (
+                f'{ad} ucu {uc} mm/s, birincil kaynağın ondalık kuşağı '
+                f'[{k_lo}, {k_hi}] dışında — Tablo 2 sütunundaki x10^-2 '
+                'çarpanı atlanmış (ya da iki kez uygulanmış) olabilir')
+    # İç tutarlılık: uçuş sınıfı bandı tüm-örnekler bandının İÇİNDE.
+    assert (TM107041_TABLE2_ALL_MM_S[0] <= TM107041_TABLE2_MX2600_MM_S[0]
+            <= TM107041_TABLE2_MX2600_MM_S[1]
+            <= TM107041_TABLE2_ALL_MM_S[1]), (
+        'MX2600 bandı tüm-örnekler bandının içinde değil — bantlardan biri '
+        'kaymış olabilir')
+
 
 class TestAblationSurfaceEnergyBalance:
 
@@ -655,6 +711,18 @@ class TestAblationSurfaceEnergyBalance:
             'throat_diameter': 0.0254,      # m  — raporun boğaz çapı
             'burn_time': 164.0,             # s  — raporun birikimli süresi
             'mdot_total': 0.3,              # kg/s (h_g'ye girmez)
+            # Kamara geometrisi ARTIK ZORUNLU (parti 31, ısı zinciri girdi
+            # kapısı: chamber_diameter/chamber_length varsayılanları
+            # kaldırıldı). Aşağıdaki 0,1 m / 0,5 m, kaldırılan örtük
+            # varsayılanların TAM kendisidir — bu testin ölçüm çapası
+            # (h_g = 4637 W/m²K) böylece bit-aynı kalır.
+            # DİKKAT: bunlar TM-107041 test motorunun kamara ölçüleri DEĞİL;
+            # rapor bu testte kullanılmıyor. Boğaz Bartz zinciri bu ikisine
+            # DUYARSIZ — ölçüldü (D = 0,05 / 0,0762 / 0,1 / 0,2 m taramasında
+            # h_g, T_aw ve c_p 6 anlamlı hanede AYNI; boğaz akısı yalnız
+            # %1,7 oynadı, cidar sıcaklığı çözümü üzerinden).
+            'chamber_diameter': 0.1,        # m — eski örtük varsayılan
+            'chamber_length': 0.5,          # m — eski örtük varsayılan
         }
         ht = HeatTransferAnalyzer().analyze_heat_transfer(
             motor, material='ablative', wall_thickness=0.010)
@@ -684,10 +752,20 @@ class TestAblationSurfaceEnergyBalance:
         assert out['thickness_status'] == 'sized'
 
         band_hi = TM107041_TABLE2_ALL_MM_S[1]
-        assert out['recession_rate_mm_s'] <= band_hi * TM107041_ORDER_TOLERANCE, (
+        oran = out['recession_rate_mm_s'] / band_hi
+        # İKİ YÖNLÜ mertebe kilidi (T3-1): ölçülen oran 1.296. Aynı tolerans
+        # hem yukarı hem aşağı uygulanır; bandın 10x kayması oranı 0.1296'ya
+        # düşürür ve alt eşik kırılır (tek yönlü eski kilit bunu göremiyordu).
+        assert oran <= TM107041_ORDER_TOLERANCE, (
             f"new path recession {out['recession_rate_mm_s']:.4f} mm/s is more "
             f"than {TM107041_ORDER_TOLERANCE:g}x the measured band top "
             f"{band_hi} mm/s")
+        assert oran >= 1.0 / TM107041_ORDER_TOLERANCE, (
+            f"new path recession {out['recession_rate_mm_s']:.4f} mm/s is "
+            f"less than 1/{TM107041_ORDER_TOLERANCE:g} of the measured band "
+            f"top {band_hi} mm/s (ölçülen oran 1.296; bu kadar düşmesi ya "
+            f"fiziğin ya da BANDIN kaydığını söyler — TM-107041 Tablo 2 "
+            f"x10^-2 çarpanı hatası tam olarak böyle görünür)")
         # Alt mertebe kilidi: uçuş sınıfı (MX2600) bandın alt ucu. Sabit
         # psi=0.5 kusuru bu noktada no_net_heating/0 mm/s verirdi — ölçülen
         # 0.0779 mm/s bu alt ucun 17 katı, kırılırsa fizik değişmiş demektir.

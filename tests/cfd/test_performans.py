@@ -47,6 +47,7 @@ from .conftest import (
     LULE_GAMMA, LULE_P0, LULE_R, LULE_T0,
     LULE_L_CONV, LULE_L_DIV, lule_duvar_yaricapi,
 )
+from tests.bagimlilik_kapisi import kurulu_mu
 
 
 def _kucuk_vaka():
@@ -104,9 +105,32 @@ def test_hoist_bit_ozdesligi():
         assert a1[k] == a2[k], f'hoist aux alanını değiştirdi: {k}'
 
 
+#: numba bu ortamda ithal EDİLEBİLİR mi? (ürün bayrağı değil, kurulum)
+#: kernels.NUMBA_AVAILABLE üç ayrı durumu tek bayrakta topluyor: kurulu değil /
+#: ortam değişkeniyle kapatılmış / kurulu ve açık. Atlama gerekçesi eskiden
+#: hepsine "numba kurulu değil" diyordu — ölçüldü (17 Ağustos 2026):
+#: HRMA_CFD_DISABLE_NUMBA=1 ile numba KURULUYKEN atlama gerekçesi yine
+#: "numba kurulu değil" çıkıyordu (tests/cfd: 163 passed, 1 skipped).
+NUMBA_KURULU = kurulu_mu('numba')
+
+
+def _numba_atlama_gerekcesi():
+    """Atlamanın GERÇEK sebebi. Üç durum ayrı ayrı adlandırılır."""
+    if not NUMBA_KURULU:
+        return ('numba kurulu değil (find_spec ile DOĞRULANDI) — isteğe bağlı '
+                'bağımlılık, NumPy yolu diğer bekçilerle sınanıyor')
+    if kernels.NUMBA_DISABLED_BY_ENV:
+        return ('HRMA_CFD_DISABLE_NUMBA=1 ile BİLEREK kapatıldı; numba '
+                'KURULU — kurulum sorunu YOK')
+    return ('numba KURULU ve açık; bu atlama hiç tetiklenmemeli — '
+            'tetiklendiyse kernels.NUMBA_AVAILABLE yalan söylüyor')
+
+
+NUMBA_ATLAMA_GEREKCESI = _numba_atlama_gerekcesi()
+
+
 @pytest.mark.skipif(not kernels.NUMBA_AVAILABLE,
-                    reason='numba kurulu değil — isteğe bağlı bağımlılık, '
-                           'NumPy yolu diğer bekçilerle sınanıyor (beyan)')
+                    reason=NUMBA_ATLAMA_GEREKCESI)
 def test_numba_numpy_aki_bit_ozdes():
     """Derlenmiş çekirdek == saf NumPy akısı, tüm HLLC dallarını gezen
     rastgele durum kümesinde (tohumlu; ölçülen fark tam 0,0)."""
@@ -130,6 +154,48 @@ def test_numba_numpy_aki_bit_ozdes():
         f'{fark.max():.3e} ({int(np.sum(fark > 0))} yüzde) — işlem sırası '
         f'veya fastmath sözleşmesi bozulmuş; eşik ancak YENİDEN ölçümle '
         f'gevşetilebilir (dosya başı beyanı)')
+
+
+def test_atlama_gerekcesi_kurulumla_tutarli():
+    """Gerekçe "kurulu değil" diyorsa numba GERÇEKTEN kurulu olmamalı.
+
+    Parti 31 / T2-4: gerekçe SABİT bir dizeydi ve üç durumun üçüne de
+    "numba kurulu değil" diyordu. HRMA_CFD_DISABLE_NUMBA=1 ile ölçüldü —
+    numba kuruluyken bile atlama gerekçesi kurulum yokluğunu iddia ediyordu.
+    Bu bekçi, gerekçenin ORTAMDAN türetilmesini zorunlu kılar: sabit dizeye
+    dönülürse en az bir ortamda kırmızı verir.
+    """
+    iddia_kurulu_degil = 'kurulu değil' in NUMBA_ATLAMA_GEREKCESI
+    assert iddia_kurulu_degil == (not NUMBA_KURULU), (
+        f'atlama gerekçesi ortamla çelişiyor: numba kurulu={NUMBA_KURULU}, '
+        f'gerekçe={NUMBA_ATLAMA_GEREKCESI!r}')
+
+
+def test_numba_kuruluysa_arka_uc_gercekten_acik():
+    """T2-4 bekçisi: kurulum VAR + ortam kapatmamış ⇒ yol AÇIK olmalı.
+
+    ``kernels.NUMBA_AVAILABLE`` üç durumu tek bayrakta topluyordu ve
+    üstteki bit-özdeşlik bekçisi üçünde de aynı gerekçeyle ("numba kurulu
+    değil") atlanıyordu. Bu bekçi üçüncü durumu — numba KURULU, ortam
+    değişkeni kapatMAMIŞ, ama içe aktarma yine de başarısız — atlanacak
+    değil KIRILACAK hâle getirir.
+
+    Not: numba'nın kendisi CI'da kurulu OLMAK ZORUNDADIR (requirements-dev.txt
+    gerekçesine bakınız); aksi hâlde numba↔NumPy bit-özdeşliğini kanıtlayan
+    tek bekçi hiçbir yerde koşmaz.
+    """
+    if not NUMBA_KURULU:
+        pytest.skip('numba kurulu değil — isteğe bağlı bağımlılık '
+                    '(gerekçe find_spec ile DOĞRULANDI)')
+    if kernels.NUMBA_DISABLED_BY_ENV:
+        pytest.skip('HRMA_CFD_DISABLE_NUMBA=1 — numba BİLEREK kapatıldı, '
+                    'kurulum sorunu değil')
+    assert kernels.NUMBA_AVAILABLE, (
+        'numba KURULU ve HRMA_CFD_DISABLE_NUMBA kapatmamış olmasına rağmen '
+        'kernels.NUMBA_AVAILABLE False — `from numba import njit, prange` '
+        'ImportError verdi. Bu bir ÜRÜN/ORTAM KUSURUDUR: çözücü sessizce '
+        'NumPy yoluna düşer ve numba↔NumPy bit-özdeşlik bekçisi atlanır '
+        '(parti 31 / T2-4).')
 
 
 def test_env_degiskeni_numbayi_kapatir():
