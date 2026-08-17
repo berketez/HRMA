@@ -570,6 +570,422 @@
         return { source: 'local', points: null, basis: null };
     }
 
+    // ==================================================================
+    // CFD alan katmanı saf fonksiyonları (2026-08-17, parti 30 — A2)
+    //
+    // /api/cfd/nozzle yanıtındaki hücre-merkezli r-z alanını (Mach /
+    // statik basınç / statik sıcaklık) sahnenin ZATEN açık olan kesit
+    // kamasına ANSYS tarzı renkli kesit olarak bağlayan matematik.
+    // THREE'siz saf fonksiyonlardır; bekçi testleri
+    // (tests/test_viz3d_cfd_alan.py) metinden çıkarıp node ile izole
+    // sınar.
+    //
+    // Veri sözleşmesi (hrma/app.py::api_cfd_nozzle yanıtı, data.cfd):
+    //   field: { z_m, r_m, mach, pressure_Pa, temperature_K?, shape,
+    //            grid_shape, axial_indices, radial_indices, decimated }
+    //     — her dizi [eksenel][radyal] iç içe liste; radyal indeks 0
+    //     eksene komşu hücre, son indeks duvara komşu hücre; değerler
+    //     HÜCRE MERKEZLİ çözücü hücreleri, enterpolasyonsuz. İnceltme
+    //     YALNIZ eksenel (radyal yön hiç seyrelmez).
+    //   grid:  { ni, nj, z_inlet_m, z_exit_m, r_throat_m, r_exit_m, ... }
+    // ==================================================================
+
+    // --- Hizalama toleransları (ÖLÇÜLDÜ, 2026-08-17) -------------------
+    // Uç, duvar polilinesini ni+1 DÜZGÜN eksenel istasyona doğrusal ara
+    // değerle yeniden örnekler (hrma/app.py::_cfd_build_grid →
+    // hrma.cfd.grid_axisym.build_grid_from_wall). Bu yeniden örneklemenin
+    // geometri çapalarında yarattığı GERÇEK sapma Python'da ölçüldü
+    // (gerçek sample_nozzle_inner_contour konturları: konik 40/60/100 mm
+    // oda + bell hibrit + 8 mm boğazlı küçük konik; yayımlı çözünürlük
+    // beyaz listesinin İKİ seviyesinde — coarse 60×12, standard 120×24):
+    //   * z_inlet / z_exit / r_exit: sapma TAM 0 — linspace uçları ve
+    //     np.interp'in uç değeri kontur ucunu bit-aynı korur, JSON double
+    //     gidiş-dönüşü kayıpsızdır. 1e-9 bağıl tolerans saf float
+    //     emniyetidir (ölçülen sinyalin 0 olduğu yerde bağ değildir).
+    //   * r_throat: yeniden örnekleme istasyonu gerçek boğaz noktasını
+    //     ıskalayabilir; ölçülen en kötü bağıl sapma 4,27e-3 (coarse,
+    //     küçük konik). Tolerans = 2× en kötü ölçüm → 8,6e-3. Yanlış
+    //     kontur (gerçek uyumsuzluk) yüzde-onlarca sapar — ayrım payı
+    //     en az bir dekad.
+    var CFD_ALIGN_EXACT_REL_TOL = 1e-9;
+    var CFD_ALIGN_R_THROAT_REL_TOL = 8.6e-3;
+    // Radyal düzgünlük eşiği: yükün kendi beyanı "the radial distribution
+    // is uniform from axis to wall" (grid._basis). Düzgün dağılımda bir
+    // istasyondaki ardışık hücre-merkez farkları eşittir; ölçülen float
+    // gürültüsü <= 5,2e-12 bağıl (grid_axisym r_centers, coarse+standard).
+    // 1e-8 = gürültünün ~2000 katı; gerçek sıkıştırılmış (Aşama 2 sınır
+    // tabakası) dağılımın yüzde-mertebe farkının 6 dekad altı.
+    var CFD_RADIAL_UNIFORM_REL_TOL = 1e-8;
+
+    // Kontur z'sinden sahne z'sine dönüşümün TEK KAYNAĞI. Çözücü konturu
+    // mm'ye çevrilmiş hâliyle dims.contourPoints'te durur (z origin'i
+    // çözücünün kendi origin'idir); sahnede konverjan başlangıcı
+    // dims.Lch'ye oturtulur. nozzleInnerContour ve CFD alan katmanı AYNI
+    // fonksiyonu çağırır — ikinci bir ofset formülü yazılmaz (refaktor
+    // bit-aynılığı bekçili: tests/test_viz3d_cfd_alan.py).
+    function contourZToScene(dims, zMm) {
+        if (!dims || !dims.contourPoints || !dims.contourPoints.length) {
+            return NaN;
+        }
+        return dims.Lch + (zMm - dims.contourPoints[0].z);
+    }
+
+    // Geometri çapa denetimi: CFD ızgarası sahnede çizilen konturla aynı
+    // geometriden mi kuruldu? Sahne konturu yerel üretimse (contourSource
+    // !== 'solver') ızgara başka geometridir — yanlış hizalanmış alan
+    // çizmektense reddedilir. Çapalar: giriş/çıkış z'si, boğaz ve çıkış
+    // yarıçapı (uç yanıtındaki grid bloğu vs sahne kontur noktaları).
+    function cfdFieldAlignment(cfd, dims) {
+        var grid = cfd && cfd.grid;
+        if (!grid || typeof grid !== 'object') {
+            return { ok: false, code: 'bad_field_block',
+                     params: { missing: 'grid' } };
+        }
+        var pts = dims && dims.contourPoints;
+        if (!pts || pts.length < 3 || dims.contourSource !== 'solver') {
+            return { ok: false, code: 'no_solver_contour', params: {} };
+        }
+        var zi = num(grid.z_inlet_m, NaN) * 1000;
+        var ze = num(grid.z_exit_m, NaN) * 1000;
+        var rt = num(grid.r_throat_m, NaN) * 1000;
+        var rx = num(grid.r_exit_m, NaN) * 1000;
+        if (!isFinite(zi) || !isFinite(ze) || !isFinite(rt)
+            || !isFinite(rx)) {
+            return { ok: false, code: 'bad_field_block',
+                     params: { missing: 'grid anchors' } };
+        }
+        var cz0 = pts[0].z, cz1 = pts[pts.length - 1].z;
+        var minR = Infinity;
+        for (var i = 0; i < pts.length; i++) {
+            if (pts[i].r < minR) minR = pts[i].r;
+        }
+        var cRx = pts[pts.length - 1].r;
+        var axLen = Math.max(cz1 - cz0, 1e-9);
+        var meas = {
+            dz_inlet_mm: Math.abs(zi - cz0),
+            dz_exit_mm: Math.abs(ze - cz1),
+            dr_throat_mm: Math.abs(rt - minR),
+            dr_exit_mm: Math.abs(rx - cRx)
+        };
+        var mismatch =
+            meas.dz_inlet_mm > CFD_ALIGN_EXACT_REL_TOL * axLen ||
+            meas.dz_exit_mm > CFD_ALIGN_EXACT_REL_TOL * axLen ||
+            meas.dr_exit_mm > CFD_ALIGN_EXACT_REL_TOL * cRx ||
+            meas.dr_throat_mm > CFD_ALIGN_R_THROAT_REL_TOL * minR;
+        if (mismatch) {
+            return { ok: false, code: 'contour_mismatch', params: meas };
+        }
+        return { ok: true, dz_inlet_mm: meas.dz_inlet_mm,
+                 dz_exit_mm: meas.dz_exit_mm,
+                 dr_throat_mm: meas.dr_throat_mm,
+                 dr_exit_mm: meas.dr_exit_mm };
+    }
+
+    // Her eksenel istasyonun duvar yarıçapı [m] — yükün kendi beyanından
+    // TÜRETİLİR, uydurulmaz: "the radial distribution is uniform from
+    // axis to wall" (grid._basis) ise hücre merkezi r_c[j] =
+    // (j+0,5)·r_duvar/nj olur → r_duvar = r_c[nj-1]·nj/(nj-0,5). Türetme
+    // öncesi düzgünlük VERİDEN doğrulanır (ardışık merkez farkları eşit
+    // mi, ilk merkez yarım adımda mı — eksene komşuluk beyanı); değilse
+    // null döner ve çağıran 'bad_field_block' ile reddeder.
+    //
+    // NE KADAR "DUVAR"? (ölçüldü 2026-08-17, parti 30 denetimi) — bu
+    // türetme ETKİN bir yarıçap verir, iki düğüm yarıçapının aritmetik
+    // ortası DEĞİL. Sebep ızgaranın kendi sözleşmesidir: r_centers hücre
+    // merkezi olarak DÜZLEMSEL AĞIRLIK MERKEZİNİ yayımlar
+    // (grid_axisym.AxisymGrid docstring), eğimli duvarda yamuk hücrenin
+    // ağırlık merkezi orta noktadan kayar ve kayma bir sütun boyunca SAF
+    // ÖLÇEK olduğu için düzgünlük denetimini bozmaz. ÖLÇÜLDÜ, ürünün
+    // KENDİ örnekleyicisiyle (nozzle_design.sample_nozzle_inner_contour;
+    // 3 kontur — konik / bell / geniş oda — × yayımlı iki seviye, düğüm
+    // ortasına göre bağıl): en kötü 7,54e-4, geniş odalı koniğin 60×12
+    // ızgarasında, mutlak 0,0171 mm. Sapma KONTUR BİÇİMİNE bağlıdır,
+    // evrensel bir tavan değildir: aynı ölçüm keskin köşeli elle yazılmış
+    // bir poligonla 4,06e-3'e (0,070 mm) çıktı — örnekleyici köşeleri
+    // yumuşattığı için üründe o rejim görülmüyor. Türetilen değer HER
+    // ölçümde istasyonu sınırlayan iki düğüm yarıçapının BANDININ
+    // İÇİNDE kaldı; korunan değişmez budur ve bekçisi vardır
+    // (tests/test_viz3d_cfd_alan.py::TestDuvarYaricapi). Render
+    // ölçeğinde görünmez, ama sayı beyansız bırakılmaz.
+    function cfdWallRadii(field) {
+        var rm = field && field.r_m;
+        if (!Array.isArray(rm) || rm.length < 2) return null;
+        var out = [];
+        for (var i = 0; i < rm.length; i++) {
+            var row = rm[i];
+            if (!Array.isArray(row) || row.length < 2) return null;
+            var d0 = num(row[1], NaN) - num(row[0], NaN);
+            if (!isFinite(d0) || d0 <= 0) return null;
+            for (var j = 0; j + 1 < row.length; j++) {
+                var dj = num(row[j + 1], NaN) - num(row[j], NaN);
+                if (!isFinite(dj)
+                    || Math.abs(dj - d0) > CFD_RADIAL_UNIFORM_REL_TOL * d0) {
+                    return null;
+                }
+            }
+            // Eksene komşuluk: ilk hücre merkezi yarım adımda durmalı
+            if (Math.abs(num(row[0], NaN) - 0.5 * d0)
+                > CFD_RADIAL_UNIFORM_REL_TOL * d0) {
+                return null;
+            }
+            var n = row.length;
+            out.push(row[n - 1] * n / (n - 0.5));
+        }
+        return out;
+    }
+
+    // Eksenel hücre YÜZLERİ [m]: kalan (inceltilmiş) istasyon
+    // merkezlerinin orta noktaları; iki uç grid.z_inlet_m / z_exit_m'e
+    // oturur. İnceltilmiş veride kalan her istasyon, atlanan komşularını
+    // da kapsayan bir BANT olarak çizilir — bu gerçeğin
+    // basitleştirilmesidir ve colorbar'da beyan edilir ("N / M eksenel
+    // istasyon"). İstasyon z'si satırın ilk hücresinden okunur (ölçüldü:
+    // z_centers'ın j-yayılımı <= 1,3e-13 bağıl — istasyon içinde sabit).
+    function cfdCellEdges(field, grid) {
+        var zm = field && field.z_m;
+        if (!Array.isArray(zm) || zm.length < 2) return null;
+        var zi = num(grid && grid.z_inlet_m, NaN);
+        var ze = num(grid && grid.z_exit_m, NaN);
+        if (!isFinite(zi) || !isFinite(ze)) return null;
+        var centers = [];
+        for (var i = 0; i < zm.length; i++) {
+            var row = zm[i];
+            var v = Array.isArray(row) ? num(row[0], NaN) : num(row, NaN);
+            if (!isFinite(v)) return null;
+            centers.push(v);
+        }
+        var edges = [zi];
+        for (var k = 1; k < centers.length; k++) {
+            edges.push(0.5 * (centers[k - 1] + centers[k]));
+        }
+        edges.push(ze);
+        for (var e = 0; e + 1 < edges.length; e++) {
+            if (!(edges[e + 1] > edges[e])) return null;
+        }
+        return edges;
+    }
+
+    // 0..1 → '#rrggbb' (sRGB): durak listesi üstünde doğrusal ara renk.
+    // Duraklar CFD_COLORSCALES biçimindedir: [[t, '#rrggbb'], ...].
+    function cfdColorLookup(stops, t) {
+        var tt = clamp(num(t, 0), 0, 1);
+        function hexByte(h, k) { return parseInt(h.slice(k, k + 2), 16); }
+        function toHex(v) {
+            var s = Math.round(clamp(v, 0, 255)).toString(16);
+            return s.length < 2 ? '0' + s : s;
+        }
+        if (tt <= stops[0][0]) return stops[0][1];
+        var last = stops[stops.length - 1];
+        if (tt >= last[0]) return last[1];
+        for (var i = 1; i < stops.length; i++) {
+            if (tt <= stops[i][0]) {
+                var f = (tt - stops[i - 1][0])
+                    / (stops[i][0] - stops[i - 1][0]);
+                var a = stops[i - 1][1], b = stops[i][1];
+                return '#'
+                    + toHex(lerp(hexByte(a, 1), hexByte(b, 1), f))
+                    + toHex(lerp(hexByte(a, 3), hexByte(b, 3), f))
+                    + toHex(lerp(hexByte(a, 5), hexByte(b, 5), f));
+            }
+        }
+        return last[1];
+    }
+
+    // Okunaklı tik değerleri (1-2-5 kuralı): [min, max] aralığına en
+    // fazla ~n tik, adım {1,2,5}·10^k kademesinden. min==max tek değer
+    // döner; bozuk girdi boş liste.
+    function cfdColorbarTicks(min, max, n) {
+        if (!isFinite(min) || !isFinite(max)) return [];
+        if (max <= min) return [min];
+        var count = (n >= 2) ? Math.floor(n) : 5;
+        var raw = (max - min) / (count - 1);
+        var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+        var norm = raw / mag;
+        var step = mag * (norm < 1.5 ? 1 : (norm < 3.5 ? 2
+            : (norm < 7.5 ? 5 : 10)));
+        var k0 = Math.ceil(min / step - 1e-9);
+        var k1 = Math.floor(max / step + 1e-9);
+        var out = [];
+        for (var k = k0; k <= k1; k++) out.push(k * step);
+        return out;
+    }
+
+    // Tik/uç değer metni: yuvarlak tikler kısa ondalıkla, çok büyük/küçük
+    // büyüklükler (Pa mertebesi) üstel gösterimle yazılır.
+    function cfdTickLabel(v) {
+        if (!isFinite(v)) return '';
+        if (v === 0) return '0';
+        var a = Math.abs(v);
+        if (a >= 1e5 || a < 1e-3) {
+            return v.toExponential(2).replace('e+', 'e');
+        }
+        return String(Math.round(v * 1e6) / 1e6);
+    }
+
+    // '{ad}' yer tutucularını doldurur (i18n şablon deseni — anahtar
+    // metinleri {shown}/{total} taşır, sözlük sırasına bağımlı değildir).
+    function cfdFormatTemplate(text, params) {
+        return String(text).replace(/\{(\w+)\}/g, function (m, k) {
+            return (params && params[k] !== undefined) ? String(params[k]) : m;
+        });
+    }
+
+    // --- Renk skalaları: vendor Plotly tanımlarından BİREBİR -----------
+    // Duraklar hrma/static/vendor/plotly-1.58.5.min.js içindeki Viridis /
+    // Portland / Blackbody tanımlarından AYNEN alındı (rgb() değerleri
+    // kayıpsız hex'e çevrildi; kesir konumları vendor'ın kendi ondalık
+    // metnidir). 2B panel aynı tablodan beslenir — iki görünüm aynı
+    // büyüklüğe aynı rengi gösterir. Bekçi: tests/test_viz3d_cfd_alan.py
+    // tabloyu vendor dosyasından ayrıştırıp birebir karşılaştırır.
+    var CFD_COLORSCALES = {
+        mach: [
+            [0, '#440154'], [0.06274509803921569, '#48186a'],
+            [0.12549019607843137, '#472d7b'], [0.18823529411764706, '#424086'],
+            [0.25098039215686274, '#3b528b'], [0.3137254901960784, '#33638d'],
+            [0.3764705882352941, '#2c728e'], [0.4392156862745098, '#26828e'],
+            [0.5019607843137255, '#21918c'], [0.5647058823529412, '#1fa088'],
+            [0.6274509803921569, '#28ae80'], [0.6901960784313725, '#3fbc73'],
+            [0.7529411764705882, '#5ec962'], [0.8156862745098039, '#84d44b'],
+            [0.8784313725490196, '#addc30'], [0.9411764705882353, '#d8e219'],
+            [1, '#fde725']
+        ],
+        pressure: [
+            [0, '#0c3383'], [0.25, '#0a88ba'], [0.5, '#f2d338'],
+            [0.75, '#f28f38'], [1, '#d91e1e']
+        ],
+        temperature: [
+            [0, '#000000'], [0.2, '#e60000'], [0.4, '#e6d200'],
+            [0.7, '#ffffff'], [1, '#a0c8ff']
+        ]
+    };
+
+    // --- Metrik tablosu (sözleşme: id / payloadKey / unit / label) -----
+    var CFD_METRICS = [
+        { id: 'mach', payloadKey: 'mach', unit: '',
+          labelKey: 'viz3d.cfd.metric.mach', labelFallback: 'Mach number' },
+        { id: 'pressure', payloadKey: 'pressure_Pa', unit: 'Pa',
+          labelKey: 'viz3d.cfd.metric.pressure',
+          labelFallback: 'Static pressure' },
+        { id: 'temperature', payloadKey: 'temperature_K', unit: 'K',
+          labelKey: 'viz3d.cfd.metric.temperature',
+          labelFallback: 'Static temperature' }
+    ];
+
+    // --- RED kodları (sözleşmedeki TAM küme — başka kod üretilmez) -----
+    // Her red { ok:false, reason: {code, key, fallback, params} } döner;
+    // key i18n anahtarıdır, fallback İngilizce tam metindir (T() deseni:
+    // ekrana anahtar adı asla yazılmaz).
+    var CFD_REASONS = {
+        no_scene: { key: 'viz3d.cfd.err.noScene',
+            fallback: 'The 3D scene is not mounted (WebGL unavailable or '
+                + 'no motor loaded)' },
+        no_solver_contour: { key: 'viz3d.cfd.err.noSolverContour',
+            fallback: 'The scene contour is locally generated (no solver '
+                + 'contour) - the CFD grid cannot be aligned to it' },
+        contour_mismatch: { key: 'viz3d.cfd.err.contourMismatch',
+            fallback: 'The CFD grid anchors deviate from the scene contour '
+                + 'beyond the measured resampling tolerance' },
+        missing_metric: { key: 'viz3d.cfd.err.missingMetric',
+            fallback: 'The requested quantity is not present in the field '
+                + 'payload' },
+        bad_field_block: { key: 'viz3d.cfd.err.badFieldBlock',
+            fallback: 'The CFD field block is missing or malformed' },
+        no_field: { key: 'viz3d.cfd.err.noField',
+            fallback: 'No CFD field is loaded - load a field before '
+                + 'switching metrics' }
+    };
+
+    function cfdReason(code, params) {
+        var r = CFD_REASONS[code];
+        return { ok: false, reason: { code: code, key: r.key,
+                 fallback: r.fallback, params: params || {} } };
+    }
+
+    // Alan bloğunun yapısal denetimi: null = sağlam, aksi hâlde kusuru
+    // adlandıran params sözlüğü ('bad_field_block' gerekçesi olur).
+    function cfdFieldBlockDefect(field) {
+        if (!field || typeof field !== 'object') {
+            return { missing: 'field' };
+        }
+        if (!Array.isArray(field.z_m) || !Array.isArray(field.r_m)) {
+            return { missing: 'z_m/r_m' };
+        }
+        if (field.z_m.length !== field.r_m.length || field.z_m.length < 2) {
+            return { missing: 'station rows' };
+        }
+        var hasMetric = false;
+        for (var i = 0; i < CFD_METRICS.length; i++) {
+            var arr = field[CFD_METRICS[i].payloadKey];
+            if (Array.isArray(arr) && arr.length === field.z_m.length) {
+                hasMetric = true;
+            }
+        }
+        if (!hasMetric) return { missing: 'metric arrays' };
+        return null;
+    }
+
+    // Yükte verilen metrik dizisi var mı? (id → payloadKey → dizi)
+    function cfdFieldHasMetric(field, id) {
+        for (var i = 0; i < CFD_METRICS.length; i++) {
+            if (CFD_METRICS[i].id === id) {
+                var arr = field && field[CFD_METRICS[i].payloadKey];
+                return Array.isArray(arr) && arr.length > 0;
+            }
+        }
+        return false;
+    }
+
+    // Metrik değerlerini [eksenel][radyal] düzeninden hücre sırasına açar
+    // ve min/max ölçer. Sonlu olmayan değer → null (bozuk blok; uydurma
+    // renk basılmaz).
+    function cfdMetricValues(field, payloadKey) {
+        var arr = field[payloadKey];
+        if (!Array.isArray(arr) || arr.length !== field.z_m.length) {
+            return null;
+        }
+        var nRad = field.r_m[0].length;
+        var out = [], min = Infinity, max = -Infinity;
+        for (var i = 0; i < arr.length; i++) {
+            var row = arr[i];
+            if (!Array.isArray(row) || row.length !== nRad) return null;
+            for (var j = 0; j < nRad; j++) {
+                var v = row[j];
+                if (typeof v !== 'number' || !isFinite(v)) return null;
+                out.push(v);
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+        }
+        return { values: out, min: min, max: max };
+    }
+
+    // Parıltı silindirinin lathe-z aralığı — TEK KAYNAK: _rebuildGlow
+    // geometriyi BU değerlerle kurar, CFD örtüşme ölçümü de aynı aralığı
+    // okur (ikinci formül kopyası yazılmaz). İfade _rebuildGlow'un eski
+    // satırlarının bire bir taşınmışıdır (bit-aynı).
+    function glowZSpan(d) {
+        var height = d.zg1 - d.zg0 + 0.6 * (d.Lch - d.zg1);
+        var center = (d.zg0 + d.Lch) / 2;
+        return { center: center, height: height,
+                 lo: center - height / 2, hi: center + height / 2 };
+    }
+
+    // Dekoratif katman örtüşme ÖLÇÜMÜ (kod yolu): alan aktifken hangi
+    // süs katmanları alanın sahne-z aralığıyla kesişiyor? Ölçülen gerçek
+    // (varsayılan hibrit): parıltı silindiri z<=0,8·Lch+0,2·zg1 < Lch'de
+    // biter, alan Lch'de başlar → parıltı KESİŞMEZ; boğaz alev diski
+    // z=Lch+Lc alan aralığının içindedir → KESİŞİR ve alan aktifken
+    // gizlenir (additive sprite alan renklerinin üstüne binerse colorbar
+    // yalan söylerdi). Karar veriden: aralık kesişimi burada hesaplanır.
+    function cfdOverlayConflicts(dims, z0SceneMm, z1SceneMm) {
+        var span = glowZSpan(dims);
+        var flameZ = dims.Lch + dims.Lc;
+        return {
+            throatFlame: flameZ > z0SceneMm && flameZ < z1SceneMm,
+            glow: span.lo < z1SceneMm && span.hi > z0SceneMm
+        };
+    }
+
     // --- CAD kipi: ortografik görünüş preset'leri (kalem 4a) ----------
     // Teknik resim görünüşleri; bakış yönleri DÜNYA uzayında (motor ekseni
     // dünya +X). 'front' yan profili (alın görünüş), 'top' üstten, 'side'
@@ -1672,9 +2088,10 @@
         // selectNozzleContour'da çevrildi). Yerel üretim yalnız veri yokken
         // çalışır ve sahnede 'kontur: yerel üretim' çipiyle beyan edilir.
         if (dims.contourPoints && dims.contourPoints.length >= 3) {
-            var zRef = dims.contourPoints[0].z;
+            // Ofset TEK kaynaktan: contourZToScene (CFD alan katmanı da
+            // aynı fonksiyonla hizalanır; refaktor bit-aynılığı bekçili)
             return dims.contourPoints.map(function (cp) {
-                return { z: dims.Lch + (cp.z - zRef), r: cp.r };
+                return { z: contourZToScene(dims, cp.z), r: cp.r };
             });
         }
         var pts = [];
@@ -2500,6 +2917,10 @@
         //  * sıvı motorda soğutma kanalı verisi yoksa 'veri yok' çipi
         this._floorY = floorY;
         this._buildStatusChips(this._statusChipDefs(), floorY);
+
+        // CFD alan katmanı varsa süs örtüşme kararları yeni kuruluma
+        // yeniden uygulanır (kesit/patlatma/kalite geçişleri buradan geçer)
+        if (this._cfdLayer) this._syncCfdDecor();
     };
 
     // Durum çipi tanımları TEK yerde üretilir: hem zemin kurulumunda hem
@@ -2725,10 +3146,16 @@
         var rBase = (this._portInscribed !== undefined) ? this._portInscribed : rPort;
         if (d.motorType === 'liquid') rBase = d.rc * 0.85; // kamara hacmi parıltısı
         var r = Math.max(rBase - 0.6, 1);
-        var geo = new THREE.CylinderGeometry(r, r, d.zg1 - d.zg0 + 0.6 * (d.Lch - d.zg1), 40, 1, true);
+        // Silindirin z-aralığı TEK kaynaktan (glowZSpan): CFD alan katmanı
+        // örtüşme ölçümü aynı aralığı okur — formül kopyası yok
+        var span = glowZSpan(d);
+        var geo = new THREE.CylinderGeometry(r, r, span.height, 40, 1, true);
         this._glowMesh = new THREE.Mesh(geo, this._glowMat);
-        this._glowMesh.position.y = (d.zg0 + d.Lch) / 2; // portu + art odasını kapla
+        this._glowMesh.position.y = span.center; // portu + art odasını kapla
         this.assembly.add(this._glowMesh);
+        // CFD alanı aktifse örtüşme kararı yeni mesh'e yeniden uygulanır
+        // (yeni mesh visible=true doğar; gizleme kararı katmandan gelir)
+        if (this._cfdLayer) this._syncCfdDecor();
         // Radyal ölçek animasyonu referansı: oynatma sırasında geometri
         // yeniden kurulmaz, mevcut silindir rP/rBuilt oranıyla ölçeklenir
         this._glowBuiltPort = Math.max(rPort, 1e-3);
@@ -3316,6 +3743,8 @@
         this._langHandler = function () {
             if (self._disposed) return;
             self._refreshStatusChips();
+            // Colorbar metinleri de dil değişiminde tazelenir
+            if (self._cfdLayer) self._cfdUpdateColorbar();
         };
         document.addEventListener('hrma:langchange', this._langHandler);
     };
@@ -3527,6 +3956,382 @@
     };
     MotorScene.prototype.getHeatInfo = function () { return this.dims.heat; };
 
+    // ------------------------------------------------------------------
+    // CFD alan katmanı (parti 30 — A2): /api/cfd/nozzle r-z alanı, kesit
+    // kamasının iki düz r-z yüzünde ANSYS tarzı renkli kesit.
+    //
+    // Kama parametreleri: phiStart = CUT_PHI_START + CUT_PHI_LENGTH,
+    // phiLength = TAU − CUT_PHI_LENGTH — yani metalin AÇIK bıraktığı tam
+    // 90°'lik kama. Alan yalnız kamanın İKİ DÜZ YÜZÜNE (φ=45° ve φ=315°
+    // r-z düzlemleri) çizilir; kamanın eğri dış kabuğu BİLEREK çizilmez:
+    // kabuk duvar yarıçapında kamayı kaplar ve kamera φ=0 yönünden
+    // bakarken iki kesit düzleminin ÖNÜNDE durur — çizilseydi kesit
+    // alanını örterdi (geometrik ölçüm: kabuk r=r_duvar'da, düzlemler
+    // r<=r_duvar'da; açıklık kameraya bakar).
+    // ------------------------------------------------------------------
+
+    // Katman geometrisi: hücre başına DÜZ (flat) karo. Hücre-merkezli
+    // FVM'de hücre değeri hücre boyunca sabittir; köşelerde renk
+    // ENTERPOLE EDİLMEZ (Gouraud yumuşatma var olmayan ara değerler
+    // uydururdu). Karolar beyan edilen düzgün radyal dağılımın GERÇEK
+    // hücre uzanımlarıdır: j. sıra [j·rw/nj, (j+1)·rw/nj] bandını kendi
+    // sabit değeriyle kaplar — ilk sıra eksene (r=0), son sıra duvara
+    // (cfdWallRadii) kendiliğinden dayanır, yeni değer üretilmez.
+    // Bant kenarlarındaki duvar yarıçapı komşu istasyon değerlerinin
+    // doğrusal ara değeridir (ızgaranın kendi η-çizgileri de duvarla
+    // doğrusal ölçeklenir); uçlarda en yakın istasyon değeri sürer.
+    MotorScene.prototype._cfdBuildLayer = function (cfd, field, walls, edges) {
+        var d = this.dims;
+        var nAx = field.z_m.length;
+        var nRad = field.r_m[0].length;
+        var k, j;
+
+        var wallEdges = [walls[0]];
+        for (k = 1; k < nAx; k++) {
+            wallEdges.push(0.5 * (walls[k - 1] + walls[k]));
+        }
+        wallEdges.push(walls[nAx - 1]);
+
+        var zEdgesMm = [], wallEdgesMm = [];
+        for (k = 0; k <= nAx; k++) {
+            zEdgesMm.push(contourZToScene(d, edges[k] * 1000));
+            wallEdgesMm.push(wallEdges[k] * 1000);
+            if (!isFinite(zEdgesMm[k]) || !isFinite(wallEdgesMm[k])) {
+                return null;
+            }
+        }
+
+        var phiA = CUT_PHI_START + CUT_PHI_LENGTH;            // 315° düzlemi
+        var phiB = phiA + (TAU - CUT_PHI_LENGTH);             // 45° düzlemi
+        var phis = [phiA, phiB];
+        var nCells = nAx * nRad;
+        var pos = new Float32Array(nCells * 12 * 3);
+        var p = 0;
+        function push(r, z, s, c) {
+            pos[p++] = r * s; pos[p++] = z; pos[p++] = r * c;
+        }
+        for (k = 0; k < nAx; k++) {
+            var z0 = zEdgesMm[k], z1 = zEdgesMm[k + 1];
+            var w0 = wallEdgesMm[k], w1 = wallEdgesMm[k + 1];
+            for (j = 0; j < nRad; j++) {
+                var fl = j / nRad, fh = (j + 1) / nRad;
+                for (var f = 0; f < 2; f++) {
+                    var s = Math.sin(phis[f]), c = Math.cos(phis[f]);
+                    // Karo köşeleri (trapez): (z0,fl·w0)-(z1,fl·w1)-
+                    // (z1,fh·w1)-(z0,fh·w0); iki üçgen
+                    push(fl * w0, z0, s, c); push(fl * w1, z1, s, c);
+                    push(fh * w1, z1, s, c);
+                    push(fl * w0, z0, s, c); push(fh * w1, z1, s, c);
+                    push(fh * w0, z0, s, c);
+                }
+            }
+        }
+
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(
+            new Float32Array(nCells * 12 * 3), 3));
+        // MALZEME IŞIKSIZ (MeshBasicMaterial) ve toneMapped:false —
+        // ışıklı malzeme rengi aydınlatmayla, ACES ton eşleme rengi
+        // pozlamayla çarpar; ikisi de ekran rengini colorbar'dan
+        // koparırdı (colorbar yalan söylerdi). Vertex renkleri sRGB→
+        // lineer çevrilerek yazılır; outputEncoding=sRGB çıkışta geri
+        // çevirir → ekran pikseli = skala hex'i. polygonOffset: kesit
+        // düzlemleri metal kapaklarla aynı düzlemde (φ=45°/315°) durur,
+        // duvar kenarındaki ince şeritte z-çakışması önlenir.
+        var mat = new THREE.MeshBasicMaterial({
+            vertexColors: true, side: THREE.DoubleSide, toneMapped: false,
+            polygonOffset: true, polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1
+        });
+        var mesh = new THREE.Mesh(geo, mat);
+        var group = new THREE.Group();
+        group.add(mesh);
+        this.model.add(group);
+
+        return {
+            cfd: cfd, field: field, group: group, mesh: mesh,
+            geometry: geo, material: mat,
+            nAx: nAx, nRad: nRad, nCells: nCells,
+            zSceneLo: zEdgesMm[0], zSceneHi: zEdgesMm[nAx],
+            stationsShown: (Array.isArray(field.axial_indices)
+                ? field.axial_indices.length : nAx),
+            stationsTotal: (Array.isArray(field.grid_shape)
+                ? num(field.grid_shape[0], nAx)
+                : num(cfd.grid && cfd.grid.ni, nAx)),
+            decimated: !!field.decimated,
+            metric: null, range: null,
+            alignment: null, cutawayForced: false, decorHidden: [],
+            colorbarEl: null
+        };
+    };
+
+    // Metrik uygula: GEOMETRİ YENİDEN KURULMAZ, yalnız renk özniteliği
+    // ve colorbar güncellenir (sözleşme). Dönen değer ok sözlüğü değil
+    // ara sonuçtur; dışa açık biçim _cfdResult'tan çıkar.
+    MotorScene.prototype._cfdApplyMetric = function (id) {
+        var L = this._cfdLayer;
+        if (!L) return cfdReason('no_field', { metric: id });
+        var m = null;
+        for (var i = 0; i < CFD_METRICS.length; i++) {
+            if (CFD_METRICS[i].id === id) m = CFD_METRICS[i];
+        }
+        if (!m || !cfdFieldHasMetric(L.field, id)) {
+            return cfdReason('missing_metric', { metric: id });
+        }
+        var vals = cfdMetricValues(L.field, m.payloadKey);
+        if (!vals) {
+            return cfdReason('bad_field_block',
+                { missing: 'finite ' + m.payloadKey });
+        }
+        var stops = CFD_COLORSCALES[id];
+        var attr = L.geometry.getAttribute('color');
+        var span = vals.max - vals.min;
+        var col = new THREE.Color();
+        for (var c = 0; c < L.nCells; c++) {
+            // span=0 (sabit alan): tüm hücreler aynı değerde — skala
+            // ortası; colorbar min=max'ı zaten beyan eder
+            var t = span > 0 ? (vals.values[c] - vals.min) / span : 0.5;
+            col.set(cfdColorLookup(stops, t));
+            col.convertSRGBToLinear();
+            for (var v = 0; v < 12; v++) {
+                var base = (c * 12 + v) * 3;
+                attr.array[base] = col.r;
+                attr.array[base + 1] = col.g;
+                attr.array[base + 2] = col.b;
+            }
+        }
+        attr.needsUpdate = true;
+        L.metric = id;
+        L.range = { min: vals.min, max: vals.max };
+        this._cfdPreferredMetric = id;
+        this._cfdUpdateColorbar();
+        return { ok: true };
+    };
+
+    // Dışa açık sonuç sözlüğü (sözleşme biçimi). decor_hidden: örtüşme
+    // ölçümüyle gizlenen süs katmanlarının beyanı (görev 3. kalem).
+    MotorScene.prototype._cfdResult = function () {
+        var L = this._cfdLayer;
+        var m = null;
+        for (var i = 0; i < CFD_METRICS.length; i++) {
+            if (CFD_METRICS[i].id === L.metric) m = CFD_METRICS[i];
+        }
+        return {
+            ok: true,
+            metric: L.metric,
+            range: { min: L.range.min, max: L.range.max },
+            unitLabel: m ? m.unit : '',
+            cells: { axial: L.nAx, radial: L.nRad },
+            stations: { shown: L.stationsShown, total: L.stationsTotal },
+            decimated: L.decimated,
+            alignment: L.alignment,
+            cutaway_forced: !!L.cutawayForced,
+            decor_hidden: L.decorHidden.slice()
+        };
+    };
+
+    MotorScene.prototype.setCfdField = function (cfd) {
+        var field = cfd && cfd.field;
+        var defect = cfdFieldBlockDefect(field);
+        if (defect) return cfdReason('bad_field_block', defect);
+        var align = cfdFieldAlignment(cfd, this.dims);
+        if (!align.ok) return cfdReason(align.code, align.params);
+        var walls = cfdWallRadii(field);
+        if (!walls) {
+            return cfdReason('bad_field_block',
+                { missing: 'uniform radial distribution' });
+        }
+        var edges = cfdCellEdges(field, cfd.grid);
+        if (!edges) {
+            return cfdReason('bad_field_block',
+                { missing: 'monotonic axial stations' });
+        }
+        // Metrik seçimi: kullanıcının son seçimi yeni yükte de varsa o,
+        // yoksa tablodaki ilk mevcut metrik
+        var metricId = null;
+        if (this._cfdPreferredMetric
+            && cfdFieldHasMetric(field, this._cfdPreferredMetric)) {
+            metricId = this._cfdPreferredMetric;
+        }
+        for (var i = 0; !metricId && i < CFD_METRICS.length; i++) {
+            if (cfdFieldHasMetric(field, CFD_METRICS[i].id)) {
+                metricId = CFD_METRICS[i].id;
+            }
+        }
+        // Eski katman (varsa) sökülür — yeniden kurulum
+        this._cfdDisposeLayer();
+        // Alan metalin ardında görünmez kalırdı: kesit kipi kapalıysa
+        // zorla açılır ve bu dönüşte beyan edilir (cutaway_forced)
+        var forced = false;
+        if (!this.state.cutaway) {
+            forced = true;
+            this.setCutaway(true);
+        }
+        var layer = this._cfdBuildLayer(cfd, field, walls, edges);
+        if (!layer) {
+            return cfdReason('bad_field_block',
+                { missing: 'finite geometry' });
+        }
+        this._cfdLayer = layer;
+        layer.cutawayForced = forced;
+        layer.alignment = {
+            dz_inlet_mm: align.dz_inlet_mm, dz_exit_mm: align.dz_exit_mm,
+            dr_throat_mm: align.dr_throat_mm, dr_exit_mm: align.dr_exit_mm
+        };
+        var applied = this._cfdApplyMetric(metricId);
+        if (!applied.ok) {
+            this._cfdDisposeLayer();
+            return applied;
+        }
+        this._syncCfdDecor();
+        return this._cfdResult();
+    };
+
+    MotorScene.prototype.setCfdMetric = function (id) {
+        if (!this._cfdLayer) return cfdReason('no_field', { metric: id });
+        var applied = this._cfdApplyMetric(id);
+        if (!applied.ok) return applied;
+        return this._cfdResult();
+    };
+
+    MotorScene.prototype.getCfdField = function () {
+        var L = this._cfdLayer;
+        if (!L) return null;
+        return {
+            metric: L.metric,
+            range: { min: L.range.min, max: L.range.max },
+            cells: { axial: L.nAx, radial: L.nRad },
+            stations: { shown: L.stationsShown, total: L.stationsTotal },
+            decimated: L.decimated
+        };
+    };
+
+    MotorScene.prototype._cfdDisposeLayer = function () {
+        var L = this._cfdLayer;
+        if (!L) return false;
+        this.model.remove(L.group);
+        if (L.geometry) L.geometry.dispose();
+        if (L.material) L.material.dispose();
+        if (L.colorbarEl && L.colorbarEl.parentNode) {
+            L.colorbarEl.parentNode.removeChild(L.colorbarEl);
+        }
+        this._cfdLayer = null;
+        return true;
+    };
+
+    MotorScene.prototype.clearCfdField = function () {
+        var had = this._cfdDisposeLayer();
+        // Gizlenen süs katmanları geri gelir (örtüşme kalktı)
+        if (had) this._syncCfdDecor();
+        return had;
+    };
+
+    // Süs katmanı / görünürlük eşitlemesi. Kararlar veriden:
+    //  * Patlatılmış görünümde gaz alanı MONTAJLI geometriye bağlıdır —
+    //    parçalar ayrılırken alanı yerinde bırakmak yalan hizalama olurdu;
+    //    alan gizlenir, patlatma kapanınca geri gelir.
+    //  * Kesit kipi kullanıcı tarafından kapatılırsa alan mesh'i SİLİNMEZ
+    //    ve görünürlüğü de kapatılmaz: fiziksel olarak metalin içindedir,
+    //    opak metal onu KENDİSİ örter (derinlik tamponu) — lüle çıkış
+    //    deliğinden görünen kısım gerçekten oradadır, yalan yok.
+    //  * Örtüşen additive süsler (cfdOverlayConflicts ölçümü) alan
+    //    aktifken gizlenir; ölçüm sonucu decor_hidden ile beyan edilir.
+    MotorScene.prototype._syncCfdDecor = function () {
+        var L = this._cfdLayer;
+        var active = !!L && !this.state.exploded;
+        if (L) L.group.visible = !this.state.exploded;
+        var conflicts = L
+            ? cfdOverlayConflicts(this.dims, L.zSceneLo, L.zSceneHi)
+            : { throatFlame: false, glow: false };
+        var hidden = [];
+        if (active && conflicts.throatFlame) hidden.push('throat_flame');
+        if (active && conflicts.glow) hidden.push('glow');
+        if (this._throatFlame) {
+            this._throatFlame.visible = hidden.indexOf('throat_flame') === -1;
+        }
+        if (this._glowMesh) {
+            this._glowMesh.visible = hidden.indexOf('glow') === -1;
+        }
+        if (L) L.decorHidden = hidden;
+    };
+
+    // Colorbar (DOM katmanı, viewport üstünde). Alan yokken HİÇ
+    // oluşmaz — boş/kukla colorbar çizilmez (sahte veri yasağı). Min/max
+    // ve tikler VERİDEN; örnekleme beyanı yalnız inceltilmiş yükte.
+    // Kimlik: araç çubuğuyla aynı mono font + camgöbeği çerçeve (sayfa
+    // kimliği değişmez, yalnız yeni katman).
+    MotorScene.prototype._cfdUpdateColorbar = function () {
+        var L = this._cfdLayer;
+        if (!L) return;
+        if (!L.colorbarEl) {
+            var el = document.createElement('div');
+            el.style.cssText = [
+                'position:absolute', 'left:8px', 'top:50%',
+                'transform:translateY(-50%)', 'z-index:5',
+                'pointer-events:none',
+                'font:600 10px "SF Mono","JetBrains Mono",Consolas,monospace',
+                'color:#9beaf7', 'background:rgba(4,12,20,0.78)',
+                'border:1px solid rgba(0,229,255,0.45)',
+                'border-radius:8px', 'padding:8px', 'max-width:170px'
+            ].join(';');
+            this.container.appendChild(el);
+            L.colorbarEl = el;
+        }
+        var m = null;
+        for (var i = 0; i < CFD_METRICS.length; i++) {
+            if (CFD_METRICS[i].id === L.metric) m = CFD_METRICS[i];
+        }
+        var stops = CFD_COLORSCALES[L.metric];
+        var grad = [];
+        for (i = 0; i < stops.length; i++) {
+            grad.push(stops[i][1] + ' ' + (stops[i][0] * 100) + '%');
+        }
+        var mn = L.range.min, mx = L.range.max;
+        var ticks = (mx > mn) ? cfdColorbarTicks(mn, mx, 5) : [];
+        var barH = 150;
+        var tickHtml = '';
+        for (i = 0; i < ticks.length; i++) {
+            var frac = (ticks[i] - mn) / (mx - mn);
+            // Uç etiketleriyle (min/max) çakışan tikler atlanır
+            if (frac < 0.07 || frac > 0.93) continue;
+            tickHtml += '<span style="position:absolute;left:0;bottom:'
+                + (frac * 100) + '%;transform:translateY(50%);color:#7fd4e2">'
+                + cfdTickLabel(ticks[i]) + '</span>';
+        }
+        var label = T(m.labelKey, m.labelFallback)
+            + (m.unit ? ' [' + m.unit + ']' : '');
+        var decl = '';
+        if (L.decimated) {
+            decl += '<div style="margin-top:6px;color:#ffb347">'
+                + cfdFormatTemplate(
+                    T('viz3d.cfd.stations',
+                      '{shown} / {total} axial stations'),
+                    { shown: L.stationsShown, total: L.stationsTotal })
+                + '</div>';
+        }
+        decl += '<div style="margin-top:' + (L.decimated ? 2 : 6)
+            + 'px;color:#8a93a0">'
+            + T('viz3d.cfd.flatNote', 'cell-centred, flat tiles') + '</div>';
+        L.colorbarEl.innerHTML =
+            '<div style="margin-bottom:6px;letter-spacing:0.4px">'
+            + label + '</div>'
+            + '<div style="display:flex;gap:7px;align-items:stretch;height:'
+            + barH + 'px">'
+            + '<div style="width:12px;height:100%;border-radius:3px;'
+            + 'border:1px solid rgba(0,229,255,0.45);'
+            + 'background:linear-gradient(to top,' + grad.join(',') + ')">'
+            + '</div>'
+            + '<div style="position:relative;flex:1;min-width:56px">'
+            + '<span style="position:absolute;left:0;top:0;color:#e8f9ff">'
+            + cfdTickLabel(mx) + '</span>'
+            + tickHtml
+            + '<span style="position:absolute;left:0;bottom:0;color:#e8f9ff">'
+            + cfdTickLabel(mn) + '</span>'
+            + '</div></div>'
+            + decl;
+    };
+
     // Canlı tasarım modu: yeni motor sözlüğüyle sahneyi yerinde güncelle
     // (renderer/kamera korunur; boyut belirgin değiştiyse kamera yeniden oturur)
     MotorScene.prototype.update = function (motorData) {
@@ -3564,13 +4369,28 @@
                 this._camDist, this.container.clientHeight || 520);
             for (var i = 0; i < this._plumeN; i++) this._resetParticle(i, true);
         }
+        // CFD alan katmanı ESKİ geometriye/kontura göre kurulmuştu:
+        // yeni boyutlara karşı yeniden doğrulanıp yeniden kurulur; yeni
+        // kontur artık hizalanmıyorsa alan DÜŞER (setCfdField reddeder,
+        // eski katman zaten söküldü) — yanlış hizalı alan bırakılmaz,
+        // panel isterse yeni /api/cfd/nozzle koşusuyla geri yükler.
+        if (this._cfdLayer) {
+            var cfdSaved = this._cfdLayer.cfd;
+            this._cfdDisposeLayer();
+            this._syncCfdDecor();
+            this.setCfdField(cfdSaved);
+        }
     };
     MotorScene.prototype.setLabels = function (on) {
         this.state.labels = !!on;
         if (this._labelGroup) this._labelGroup.visible = this.state.labels;
     };
     MotorScene.prototype.setPlume = function (on) { this.state.plume = !!on; };
-    MotorScene.prototype.setExploded = function (on) { this.state.exploded = !!on; };
+    MotorScene.prototype.setExploded = function (on) {
+        this.state.exploded = !!on;
+        // Gaz alanı montajlı geometriye bağlıdır — patlatmada gizlenir
+        if (this._cfdLayer) this._syncCfdDecor();
+    };
     MotorScene.prototype.setAutoRotate = function (on) { this.state.autoRotate = !!on; };
     MotorScene.prototype.play = function () {
         if (this.state.time >= this.dims.burnTime - 1e-3) this.state.time = 0;
@@ -3896,6 +4716,9 @@
     };
     MotorScene.prototype.dispose = function () {
         this._disposed = true;
+        // CFD alan katmanı: geometri + malzeme + colorbar DOM'u bırakılır
+        // (colorbar sahne grafiğinde değildir, traverse onu görmez)
+        this._cfdDisposeLayer();
         if (this._raf) cancelAnimationFrame(this._raf);
         if (this._ro) this._ro.disconnect();
         if (this._langHandler) {
@@ -3966,6 +4789,24 @@
         // Kaynak-renk eşlemesi dışa açık: sayfa/deck çipleri aynı tabloyu
         // kullanabilir (tasarım dili tek gerçeklik)
         SOURCE_COLORS: SOURCE_COLORS,
+        // CFD alan katmanı (parti 30 — A2): /api/cfd/nozzle data.cfd
+        // sözlüğü AYNEN verilir; sahne yoksa (mount edilmedi / WebGL yok)
+        // sözleşmedeki 'no_scene' reddi döner
+        setCfdField: function (cfd) {
+            return viz ? viz.setCfdField(cfd) : cfdReason('no_scene', {});
+        },
+        clearCfdField: function () {
+            return viz ? viz.clearCfdField() : false;
+        },
+        setCfdMetric: function (id) {
+            return viz ? viz.setCfdMetric(id)
+                : cfdReason('no_scene', { metric: id });
+        },
+        getCfdField: function () { return viz ? viz.getCfdField() : null; },
+        // Metrik + renk skalası tabloları dışa açık: 2B panel aynı
+        // tablodan beslenir (iki görünüm aynı büyüklüğe aynı renk)
+        CFD_METRICS: CFD_METRICS,
+        CFD_COLORSCALES: CFD_COLORSCALES,
         setQuality: function (mode) { return viz ? viz.setQuality(mode) : null; },
         // Görünür karenin PNG data-URL'i (indirme butonları için)
         snapshot: function () { return viz ? viz.snapshot() : null; },

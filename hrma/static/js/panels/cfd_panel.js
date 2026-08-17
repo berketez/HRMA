@@ -92,9 +92,37 @@
     //: aynı tanımın istemci tarafındaki uygulanışıdır.
     const R_UNIVERSAL = 8314.462618;
 
+    //: ALAN HARİTASININ BÜYÜKLÜKLERİ (parti 30 — üçüncü büyüklük eklendi).
+    //: `id` ve `payloadKey` sütunları motor_viz3d.js'in CFD_METRICS
+    //: tablosuyla ve ucun (hrma/app.py) 'field' sözlüğündeki GERÇEK
+    //: anahtarlarla KÜME EŞİTLİĞİ bekçisine bağlıdır
+    //: (tests/test_cfd_alan_koprusu.py) — üç yerden biri kayarsa kırmızı.
+    //: Buradaki EK sütun 2B sunuma aittir: panel basıncı bar'a çevirir
+    //: (3B sahne Pa gösterir), bu yüzden ölçek/etiket YALNIZ burada durur.
+    const FIELD_METRICS = [
+        { id: 'mach', payloadKey: 'mach', scale: 1,
+          labelKey: 'panel.cfd.metricMach',
+          labelFallback: 'Mach number [-]' },
+        { id: 'pressure', payloadKey: 'pressure_Pa', scale: 1 / PA_PER_BAR,
+          labelKey: 'panel.cfd.metricPressure',
+          labelFallback: 'Static pressure [bar]' },
+        { id: 'temperature', payloadKey: 'temperature_K', scale: 1,
+          labelKey: 'panel.cfd.metricTemperature',
+          labelFallback: 'Static temperature [K]' },
+    ];
+
+    //: 3B sahnenin üretebildiği RED kodlarının TAM kümesi. Panel bu listeyi
+    //: YALNIZ "bu kodu tanıyor muyum" denetimi için tutar: kullanıcıya
+    //: basılan METİN sahnenin kendi reason.key/fallback çiftinden gelir,
+    //: yani mesajın ikinci bir tanımı burada YOKTUR. Tanınmayan kod gelirse
+    //: panel bunu adıyla beyan eder (sessiz "olmadı" mesajı yasak).
+    //: Küme eşitliği bekçisi: tests/test_cfd_alan_koprusu.py.
+    const VIZ3D_REASON_CODES = ['no_scene', 'no_solver_contour',
+        'contour_mismatch', 'missing_metric', 'bad_field_block', 'no_field'];
+
     //: Çizim kimliklerinin çakışmaması için koşum sayacı (her çizimde artar).
     let drawSeq = 0;
-    //: Alan haritasında gösterilen büyüklük ('mach' | 'pressure').
+    //: Alan haritasında gösterilen büyüklük (FIELD_METRICS kimliklerinden).
     let fieldMetric = 'mach';
     //: En son GÖNDERİLEN kontur (duvar çizgisi ancak bununla eşleşen
     //: yanıtlarda çizilir; geçmişten gelen koşuya bugünkü kontur giydirilmez).
@@ -413,8 +441,47 @@
         });
     }
 
-    function toBar2d(grid) {
-        return (grid || []).map(toBar);
+    //: (toBar2d kaldırıldı: alan ızgarasının ölçeklenmesi artık
+    //: FIELD_METRICS'in kendi `scale` sütunundan geçen scale2d ile yapılır —
+    //: büyüklük başına ikinci bir dönüşüm yolu bırakılmadı.)
+
+    //: Ölçek çarpanı 1 ise ızgara AYNEN döner (yeni dizi bile kurulmaz);
+    //: yalnız basınçta (Pa → bar) gerçek bir bölme olur.
+    function scale2d(grid, k) {
+        if (!Array.isArray(grid)) return null;
+        if (k === 1) return grid;
+        return grid.map(function (row) {
+            return (row || []).map(function (v) {
+                return isNum(v) ? v * k : null;
+            });
+        });
+    }
+
+    function metricById(id) {
+        for (let i = 0; i < FIELD_METRICS.length; i++) {
+            if (FIELD_METRICS[i].id === id) return FIELD_METRICS[i];
+        }
+        return null;
+    }
+
+    //: Bilinmeyen kimlik tabloya düşer (ilk metrik) — uydurma bir büyüklük
+    //: adı ekrana çıkmaz.
+    function normalizeMetric(id) {
+        return metricById(id) ? id : FIELD_METRICS[0].id;
+    }
+
+    //: RENK SKALASI TEK KAYNAK: duraklar 3B sahnenin yayımladığı
+    //: MotorViz3D.CFD_COLORSCALES tablosundan gelir (Plotly açık durak
+    //: dizisi kabul eder). Panelde Plotly skala ADI ('Viridis' gibi)
+    //: KULLANILMAZ — ad kullanılsaydı aynı büyüklük 2B'de ve 3B'de farklı
+    //: renklenirdi ve tablonun iki tanımı olurdu. Tablo yüklenmemişse
+    //: yedek tanım YAZILMAZ: null döner, çağıran nedeni ekrana yazar.
+    //: Yükleme sırası bekçisi (üç şablonda motor_viz3d.js ÖNCE):
+    //: tests/test_cfd_alan_koprusu.py.
+    function metricColorscale(id) {
+        const tablo = window.MotorViz3D && window.MotorViz3D.CFD_COLORSCALES;
+        const duraklar = tablo ? tablo[id] : null;
+        return Array.isArray(duraklar) && duraklar.length ? duraklar : null;
     }
 
     //: Duvar poliçizgisi ancak bu koşuya GÖNDERİLEN kontur olduğu
@@ -493,14 +560,22 @@
             wallLine: wallPolyline(cfd),
         };
         const x = transpose(field.z_m), y = transpose(field.r_m);
-        const mach = transpose(field.mach), pres = transpose(field.pressure_Pa);
-        if (x && y && mach && pres) {
+        //: Her büyüklük AYNI ızgarada taşınır (ucun _basis beyanı): bir
+        //: büyüklüğün yokluğu ötekileri düşürmez. Yükte OLMAYAN büyüklük
+        //: null kalır ve 'available' listesine girmez — türetilmez.
+        const values = {}, available = [];
+        FIELD_METRICS.forEach(function (m) {
+            const g = transpose(field[m.payloadKey]);
+            values[m.id] = g ? scale2d(g, m.scale) : null;
+            if (values[m.id]) available.push(m.id);
+        });
+        if (x && y && available.length) {
             vm.field = {
                 a: Array.isArray(field.axial_indices)
                     ? field.axial_indices : x[0].map(function (_v, i) { return i; }),
                 b: Array.isArray(field.radial_indices)
                     ? field.radial_indices : x.map(function (_v, j) { return j; }),
-                x: x, y: y, mach: mach, pressureBar: toBar2d(pres),
+                x: x, y: y, values: values, available: available,
                 shape: field.shape, gridShape: field.grid_shape,
                 decimated: !!field.decimated,
                 nReturned: field.n_cells_returned, nTotal: field.n_cells_total,
@@ -522,8 +597,6 @@
         info: 'var(--hd-cyan, #00e5ff)',
         dim: 'var(--hd-ink-dim, #7d97a5)',
     };
-    const MACH_COLORSCALE = 'Viridis';
-    const PRESSURE_COLORSCALE = 'Portland';
     const WALL_COLOR = 'rgba(200,215,230,0.85)';
     const THRESHOLD_COLOR = '#ff8c33';
     const SEP_COLOR = '#ff5d73';
@@ -633,15 +706,26 @@
         };
     }
 
-    function fieldValues(vm) {
-        return (fieldMetric === 'pressure') ? vm.field.pressureBar : vm.field.mach;
+    //: Ekranda GÖSTERİLEBİLEN büyüklük: kullanıcının seçtiği büyüklük bu
+    //: yanıtta yoksa (eski uç: temperature_K yok) yükte GERÇEKTEN olan ilk
+    //: büyüklüğe düşülür. Düşüş sessiz değildir — `metricNotesHtml` nedeni
+    //: adıyla yazar ve uydurma sıcaklık üretilmez.
+    function activeMetric(vm) {
+        const av = (vm.field && vm.field.available) || [];
+        if (av.indexOf(fieldMetric) >= 0) return fieldMetric;
+        return av.length ? av[0] : FIELD_METRICS[0].id;
     }
 
-    function fieldTitles() {
-        const metric = (fieldMetric === 'pressure')
-            ? T('panel.cfd.metricPressure', 'Static pressure [bar]')
-            : T('panel.cfd.metricMach', 'Mach number [-]');
+    function fieldValues(vm) {
+        return vm.field.values[activeMetric(vm)];
+    }
+
+    function fieldTitles(vm) {
+        const id = activeMetric(vm);
+        const m = metricById(id);
+        const metric = T(m.labelKey, m.labelFallback);
         return {
+            id: id,
             metric: metric,
             // Başlık BİLEREK kısa: Merkez'in görüntüleyici sütunu dar ve
             // uzun başlık kırpılıyordu (ölçüldü, canlı hibrit sayfası).
@@ -649,8 +733,7 @@
             // bloğunun kendi _basis cümlesi grafiğin ALTINDA aynen basılıyor.
             title: TF('panel.cfd.chartField', { metric: metric },
                 'Flow field on the solver cells — {metric}'),
-            colorscale: (fieldMetric === 'pressure')
-                ? PRESSURE_COLORSCALE : MACH_COLORSCALE,
+            colorscale: metricColorscale(id),
         };
     }
 
@@ -666,8 +749,18 @@
 
     function fieldFigure(vm) {
         const f = vm.field;
-        const t = fieldTitles();
+        const t = fieldTitles(vm);
         const carpetId = 'cfdFieldCarpet' + drawSeq;
+        const kontur = {
+            type: 'contourcarpet', carpet: carpetId,
+            a: f.a, b: f.b, z: fieldValues(vm),
+            contours: { coloring: 'fill', showlines: false },
+            colorbar: { title: t.metric, titleside: 'right' },
+            name: t.metric,
+        };
+        // Paylaşılan durak tablosu yüklü değilse `colorscale` HİÇ verilmez
+        // (yedek tablo yazmak ikinci tanım olurdu); nedeni ekrana yazılır.
+        if (t.colorscale) kontur.colorscale = t.colorscale;
         const traces = [{
             type: 'carpet', carpet: carpetId,
             a: f.a, b: f.b, x: f.x, y: f.y,
@@ -675,14 +768,7 @@
                      showticksuffix: 'none', smoothing: 0, title: '' },
             baxis: { showgrid: false, showticklabels: 'none',
                      showticksuffix: 'none', smoothing: 0, title: '' },
-        }, {
-            type: 'contourcarpet', carpet: carpetId,
-            a: f.a, b: f.b, z: fieldValues(vm),
-            contours: { coloring: 'fill', showlines: false },
-            colorscale: t.colorscale,
-            colorbar: { title: t.metric, titleside: 'right' },
-            name: t.metric,
-        }];
+        }, kontur];
         const wl = wallLineTrace(vm);
         if (wl) traces.push(wl);
         return {
@@ -701,7 +787,7 @@
     //: haritası (fea_panel.js ile aynı yedek). Değerler AYNI, gösterim farklı.
     function fieldFallbackFigure(vm) {
         const f = vm.field;
-        const t = fieldTitles();
+        const t = fieldTitles(vm);
         const values = fieldValues(vm);
         const x = [], y = [], c = [];
         for (let j = 0; j < f.x.length; j++) {
@@ -709,10 +795,12 @@
                 x.push(f.x[j][i]); y.push(f.y[j][i]); c.push(values[j][i]);
             }
         }
+        const marker = { color: c, size: 6,
+                         colorbar: { title: t.metric, titleside: 'right' } };
+        if (t.colorscale) marker.colorscale = t.colorscale;
         const traces = [{
             x: x, y: y, mode: 'markers', type: 'scatter',
-            marker: { color: c, colorscale: t.colorscale, size: 6,
-                      colorbar: { title: t.metric, titleside: 'right' } },
+            marker: marker,
             name: t.metric,
         }];
         const wl = wallLineTrace(vm);
@@ -1119,6 +1207,248 @@
     }
 
     // ------------------------------------------------------------------
+    // Alan büyüklüğü seçici + yokluk beyanları
+    // ------------------------------------------------------------------
+
+    //: Üç büyüklük de HER ZAMAN listelenir. Yükte olmayan büyüklük
+    //: `disabled` (gri) gelir ve nedeni ADIYLA altta yazılır — seçenek
+    //: sessizce GİZLENMEZ ve o büyüklük Mach'tan/basınçtan TÜRETİLMEZ.
+    function metricSelectHtml(vm, selId) {
+        const aktif = activeMetric(vm);
+        const av = vm.field.available;
+        const secenekler = FIELD_METRICS.map(function (m) {
+            const yok = av.indexOf(m.id) < 0;
+            return '<option value="' + esc(m.id) + '"'
+                + (m.id === aktif ? ' selected' : '')
+                + (yok ? ' disabled' : '')
+                + ' data-cfd-metric-option="' + esc(m.id) + '"'
+                + ' data-i18n="' + esc(m.labelKey) + '">'
+                + esc(T(m.labelKey, m.labelFallback)) + '</option>';
+        }).join('');
+        return '<label for="' + esc(selId) + '" style="font-size:0.68rem;'
+            + ' color:var(--hd-ink-dim, #7d97a5); margin-right:6px;"'
+            + ' data-i18n="panel.cfd.toggleField">'
+            + esc(T('panel.cfd.toggleField', 'Field variable')) + '</label>'
+            + '<select id="' + esc(selId) + '" data-cfd-metric="1"'
+            + ' style="font-size:0.7rem;">' + secenekler + '</select>';
+    }
+
+    //: Seçicinin altındaki beyanlar: (a) yükte olmayan her büyüklük ADIYLA
+    //: ve yük anahtarıyla, (b) seçili büyüklük yoksa hangisine düşüldüğü,
+    //: (c) renk duraklarının kaynağı (paylaşılan tablo) ya da yokluğu.
+    function metricNotesHtml(vm) {
+        let html = '';
+        const av = vm.field.available;
+        FIELD_METRICS.forEach(function (m) {
+            if (av.indexOf(m.id) >= 0) return;
+            html += note(TF('panel.cfd.metricUnavailable',
+                { label: T(m.labelKey, m.labelFallback), key: m.payloadKey },
+                'This response carries no "{key}" array, so "{label}" is '
+                + 'offered greyed out. It is NOT rebuilt from the other '
+                + 'quantities: reconstructing it would be a different number '
+                + 'than the solver\'s own field.'), 'warn');
+        });
+        const aktif = activeMetric(vm);
+        if (aktif !== fieldMetric) {
+            const secili = metricById(fieldMetric);
+            html += note(TF('panel.cfd.metricFellBack',
+                { wanted: secili ? T(secili.labelKey, secili.labelFallback)
+                                 : fieldMetric,
+                  shown: T(metricById(aktif).labelKey,
+                           metricById(aktif).labelFallback) },
+                'The selected quantity "{wanted}" is not in this response, so '
+                + '"{shown}" is drawn instead.'), 'warn');
+        }
+        if (metricColorscale(aktif)) {
+            html += note(T('panel.cfd.colorSource',
+                'The colour stops are the table published by the 3D scene '
+                + '(MotorViz3D.CFD_COLORSCALES), so the same value gets the '
+                + 'same colour in this map and in the 3D section.'), 'dim');
+        } else {
+            html += note(T('panel.cfd.colorSourceMissing',
+                'The shared colour table (motor_viz3d.js) is not loaded on '
+                + 'this page, so the map is drawn without an explicit colour '
+                + 'scale and its colours will NOT match the 3D section. No '
+                + 'second copy of the table is kept here.'), 'warn');
+        }
+        return html;
+    }
+
+    // ------------------------------------------------------------------
+    // 3B KÖPRÜSÜ — aynı yanıtı 3B sahnenin kesit kamasına bindirir
+    // ------------------------------------------------------------------
+
+    //: Sahnenin köprü için hazır olup olmadığı. Hazır değilse eylem
+    //: KAPALI gösterilir ve nedeni yazılır (görünmez düğme = sessiz kusur).
+    function viz3dReadiness() {
+        const V = window.MotorViz3D;
+        if (!V || typeof V.setCfdField !== 'function') {
+            return { ok: false, key: 'panel.cfd.viz3dNoModule',
+                fallback: 'The 3D scene module (motor_viz3d.js) is not loaded '
+                    + 'on this page, so the field cannot be sent to it.' };
+        }
+        if (typeof V.isSupported === 'function' && !V.isSupported()) {
+            return { ok: false, key: 'panel.cfd.viz3dNoWebgl',
+                fallback: 'This browser reports no WebGL support, so the 3D '
+                    + 'scene cannot show the field.' };
+        }
+        return { ok: true, key: '', fallback: '' };
+    }
+
+    //: RED sözlüğünü okunur metne çevirir. METİN SAHNENİN KENDİSİNDEN gelir
+    //: (reason.key + reason.fallback) — panelde ikinci bir mesaj tanımı yok.
+    //: Kod ayrıca AÇIKÇA basılır; tanınmayan kod ADIYLA beyan edilir.
+    function viz3dReasonText(reason) {
+        if (!reason || typeof reason !== 'object') {
+            return T('panel.cfd.viz3dNoReason',
+                'The 3D scene refused the field but returned no reason block.');
+        }
+        const kod = String(reason.code == null ? '' : reason.code);
+        let metin = reason.key
+            ? T(reason.key, reason.fallback || kod)
+            : String(reason.fallback || kod);
+        if (VIZ3D_REASON_CODES.indexOf(kod) < 0) {
+            metin = TF('panel.cfd.viz3dUnknownCode', { code: kod || '?' },
+                'The 3D scene returned a refusal code this panel does not '
+                + 'know ({code}); its own text follows.') + ' ' + metin;
+        }
+        const p = reason.params;
+        const parcalar = [];
+        if (p && typeof p === 'object') {
+            Object.keys(p).forEach(function (k) {
+                parcalar.push(k + '=' + String(p[k]));
+            });
+        }
+        return '[' + (kod || '?') + '] ' + metin
+            + (parcalar.length ? ' (' + parcalar.join(', ') + ')' : '');
+    }
+
+    //: Başarılı bindirmenin beyanı — NE gösterildiği sahnenin KENDİ dönüş
+    //: sözlüğünden okunur (panel hiçbir sayıyı yeniden hesaplamaz).
+    function viz3dOkLines(res) {
+        const m = metricById(res.metric);
+        const satirlar = [TF('panel.cfd.viz3dShown',
+            { metric: m ? T(m.labelKey, m.labelFallback) : String(res.metric),
+              min: sig(res.range && res.range.min),
+              max: sig(res.range && res.range.max),
+              unit: String(res.unitLabel || ''),
+              shown: res.stations ? res.stations.shown : '—',
+              total: res.stations ? res.stations.total : '—',
+              nz: res.cells ? res.cells.axial : '—',
+              nr: res.cells ? res.cells.radial : '—' },
+            'The 3D section now carries {metric}: {min} … {max} {unit}, '
+            + '{nz}x{nr} solver cells over {shown} of {total} axial stations.')];
+        if (res.metric === 'pressure') {
+            satirlar.push(T('panel.cfd.viz3dUnitNote',
+                'The 3D scene labels pressure in the payload unit (Pa); the '
+                + '2D map above divides the same numbers by 1 bar.'));
+        }
+        if (res.decimated) {
+            satirlar.push(T('panel.cfd.viz3dDecimated',
+                'The field was thinned by the endpoint before it was sent, and '
+                + 'the 3D section shows exactly the cells that arrived.'));
+        }
+        if (res.cutaway_forced) {
+            satirlar.push(T('panel.cfd.viz3dCutaway',
+                'Cutaway view was switched on: the field lies inside opaque '
+                + 'metal and would not be visible otherwise.'));
+        }
+        if (Array.isArray(res.decor_hidden) && res.decor_hidden.length) {
+            satirlar.push(TF('panel.cfd.viz3dDecorHidden',
+                { list: res.decor_hidden.join(', ') },
+                'Decorative layers that overlap the field were hidden while it '
+                + 'is shown: {list}.'));
+        }
+        if (res.alignment) {
+            satirlar.push(TF('panel.cfd.viz3dAlignment',
+                { dzi: sig(res.alignment.dz_inlet_mm),
+                  dze: sig(res.alignment.dz_exit_mm),
+                  drt: sig(res.alignment.dr_throat_mm),
+                  dre: sig(res.alignment.dr_exit_mm) },
+                'Measured anchor deviation against the scene contour [mm]: '
+                + 'inlet z {dzi}, exit z {dze}, throat r {drt}, exit r {dre}.'));
+        }
+        return satirlar;
+    }
+
+    function viz3dHtml(vm, btnId, clearId, statusId) {
+        const hazir = viz3dReadiness();
+        let html = sectionTitle('panel.cfd.secViz3d',
+            'Show this field in the 3D scene');
+        const kapali = hazir.ok ? '' : ' disabled';
+        html += '<button type="button" id="' + esc(btnId) + '"'
+            + ' data-cfd-viz3d="show"' + kapali
+            + ' style="font-size:0.7rem; margin-right:6px;"'
+            + ' data-i18n="panel.cfd.viz3dShowBtn">'
+            + esc(T('panel.cfd.viz3dShowBtn', 'Show in the 3D scene'))
+            + '</button>';
+        html += '<button type="button" id="' + esc(clearId) + '"'
+            + ' data-cfd-viz3d="clear"' + kapali
+            + ' style="font-size:0.7rem;"'
+            + ' data-i18n="panel.cfd.viz3dClearBtn">'
+            + esc(T('panel.cfd.viz3dClearBtn', 'Remove it from the 3D scene'))
+            + '</button>';
+        html += '<p data-cfd-viz3d-status="1" id="' + esc(statusId) + '"'
+            + ' style="font-family:var(--hd-mono, monospace);'
+            + ' font-size:0.66rem; line-height:1.45; margin:6px 0; color:'
+            + (hazir.ok ? COLORS.dim : COLORS.warn) + ';">'
+            + esc(hazir.ok
+                ? T('panel.cfd.viz3dIdle',
+                    'The field is drawn in 2D above. Pressing the button sends '
+                    + 'the SAME response to the 3D section; nothing is '
+                    + 'recomputed.')
+                : T(hazir.key, hazir.fallback))
+            + '</p>';
+        return html;
+    }
+
+    //: Köprü düğmelerinin kablosu. Sahne dönüşü NE İSE o yazılır; "olmadı"
+    //: gibi uydurma bir mesaj üretilmez.
+    function bindViz3d(root, cfd, vm, btnId, clearId, statusId) {
+        const durumEl = document.getElementById(statusId);
+        const yaz = function (metin, kind) {
+            if (!durumEl) return;
+            durumEl.textContent = metin;
+            durumEl.style.color = kindColor(kind);
+        };
+        const goster = document.getElementById(btnId);
+        const temizle = document.getElementById(clearId);
+        if (!viz3dReadiness().ok) return;
+        if (goster && goster.addEventListener) {
+            goster.addEventListener('click', function () {
+                const V = window.MotorViz3D;
+                let res = V.setCfdField(cfd);
+                if (res && res.ok) {
+                    // 2B'de seçili büyüklük yükte varsa 3B de ONU göstersin:
+                    // iki görünüm aynı büyüklüğe aynı rengi verir.
+                    const istenen = activeMetric(vm);
+                    if (res.metric !== istenen) {
+                        const ikinci = V.setCfdMetric(istenen);
+                        if (ikinci && ikinci.ok) res = ikinci;
+                    }
+                }
+                if (res && res.ok) {
+                    yaz(viz3dOkLines(res).join(' '), 'ok');
+                } else {
+                    yaz(viz3dReasonText(res && res.reason), 'warn');
+                }
+            });
+        }
+        if (temizle && temizle.addEventListener) {
+            temizle.addEventListener('click', function () {
+                const kalkti = window.MotorViz3D.clearCfdField();
+                yaz(kalkti
+                    ? T('panel.cfd.viz3dCleared',
+                        'The field layer was removed from the 3D scene and the '
+                        + 'decorative layers came back.')
+                    : T('panel.cfd.viz3dNothingToClear',
+                        'The 3D scene carried no field layer, so nothing was '
+                        + 'removed.'), 'dim');
+            });
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Çizim — Merkez'in görüntüleyici kabına
     // ------------------------------------------------------------------
     function purge(root) {
@@ -1136,6 +1466,9 @@
         const fieldId = 'cfd_field_' + drawSeq;
         const resId = 'cfd_res_' + drawSeq;
         const selId = 'cfd_metric_' + drawSeq;
+        const viz3dBtnId = 'cfd_viz3d_show_' + drawSeq;
+        const viz3dClearId = 'cfd_viz3d_clear_' + drawSeq;
+        const viz3dStatusId = 'cfd_viz3d_status_' + drawSeq;
 
         let html = '<div data-cfd-badges="1">' + badgesHtml(vm) + '</div>';
 
@@ -1175,21 +1508,9 @@
         html += sectionTitle('panel.cfd.secField',
             'Flow field on the solver cells');
         if (vm.field) {
-            html += '<label for="' + selId + '" style="font-size:0.68rem;'
-                + ' color:var(--hd-ink-dim, #7d97a5); margin-right:6px;"'
-                + ' data-i18n="panel.cfd.toggleField">'
-                + esc(T('panel.cfd.toggleField', 'Field variable')) + '</label>'
-                + '<select id="' + selId + '" data-cfd-metric="1"'
-                + ' style="font-size:0.7rem;">'
-                + '<option value="mach"' + (fieldMetric === 'mach' ? ' selected' : '')
-                + ' data-i18n="panel.cfd.metricMach">'
-                + esc(T('panel.cfd.metricMach', 'Mach number [-]')) + '</option>'
-                + '<option value="pressure"'
-                + (fieldMetric === 'pressure' ? ' selected' : '')
-                + ' data-i18n="panel.cfd.metricPressure">'
-                + esc(T('panel.cfd.metricPressure', 'Static pressure [bar]'))
-                + '</option></select>';
+            html += metricSelectHtml(vm, selId);
             html += plotBox(fieldId, 320);
+            html += metricNotesHtml(vm);
             if (vm.field.decimated) {
                 html += note(TF('panel.cfd.fieldDecimated',
                     { n: vm.field.nReturned, total: vm.field.nTotal },
@@ -1206,6 +1527,8 @@
                     + 'cells above are drawn as returned.'), 'dim');
             }
             html += basisText(vm.field.basis);
+            // 2a) Aynı yanıtı 3B sahneye bindirme köprüsü
+            html += viz3dHtml(vm, viz3dBtnId, viz3dClearId, viz3dStatusId);
         } else {
             html += note(T('panel.cfd.fieldMissing',
                 'This response carries no field block, so no field map is '
@@ -1257,9 +1580,12 @@
         const sel = document.getElementById(selId);
         if (sel && sel.addEventListener) {
             sel.addEventListener('change', function () {
-                fieldMetric = (sel.value === 'pressure') ? 'pressure' : 'mach';
+                fieldMetric = normalizeMetric(sel.value);
                 drawInto(root, cfd);
             });
+        }
+        if (vm.field) {
+            bindViz3d(root, cfd, vm, viz3dBtnId, viz3dClearId, viz3dStatusId);
         }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
     }
@@ -1346,8 +1672,14 @@
         _viewModel: viewModel,
         _render: render,
         _setFieldMetric: function (m) {
-            fieldMetric = (m === 'pressure') ? 'pressure' : 'mach';
+            fieldMetric = normalizeMetric(m);
         },
+        _getFieldMetric: function () { return fieldMetric; },
+        _metrics: FIELD_METRICS,
+        _reasonCodes: VIZ3D_REASON_CODES,
+        _colorscale: metricColorscale,
+        _viz3dReasonText: viz3dReasonText,
+        _viz3dReadiness: viz3dReadiness,
         _sources: SUGGESTION_SOURCES,
         PA_PER_BAR: PA_PER_BAR,
         R_UNIVERSAL: R_UNIVERSAL,

@@ -199,6 +199,8 @@ kısaltılmak içindir; uzuyorsa bir şey yanlış gidiyordur.
 | analysis_center.css şablon `<link>`'i YOK — analysis_center.js init() head'e enjekte ediyor (parti 29'da şablon dosyaları A3'ün kapsam dışıydı; A2'nin ölü-link bekçisi bu köprüyle tutarlı) | Şablonlara gerçek `<link>` girecek partide A2'nin bekçisi halefine çevrilir ve enjeksiyon sökülür — tarif A3 raporunda | bu defter; parti 29 A2+A3 raporları |
 | Merkez içindekiler şeridi kiracı başlıklarını üç idiomla tarar (h1-h6 / data-ac-section / uppercase-div): YENİ bir kiracı farklı başlık deseni kullanırsa şeritte görünmez; bağ iki kiracı için bekçili ama sözleşme metnine yazılmadı. Canlı sticky-sütun turu da browser_harness denetimlerine eklenmedi (fixture bekçileri yeşil) | Kiracı kayıt sözleşmesine idiom notu + tur genişletmesi — dokümantasyon partisinde | bu defter; parti 29 A3 raporu |
 
+| **Bebek-Scofield ön taraması (17 Ağu 2026): 25 doğrulanmış bulgu açık** — ürün 18 (1 kritik: hibritte ısı zinciri 5,0 mm ⟷ yapısal/CAD 18,79 mm cidar, üstelik "çizilen cidarda SF=2,152" yayımlanıyor) + bekçi 7 (en ağırı: 17 STEP/CAD bekçisi CI'da hiçbir yerde koşmuyor — `step-export` işinin elle yazılmış 5 dosyalık listesi çürüdü, ölçüldü: build123d gizliyken 30 passed/17 skipped, açıkken 47 passed) | Tarama örneklem tabanlıdır ve Operasyon Scofield'ın (yol haritası §3.5) yerine geçmez; bulguların bir kısmı motor sayılarını değiştiren fizik düzeltmeleridir ve kendi partilerini ister. Her bulgunun ölçümü, komutu ve dosya:satırı kayıtlı | [`docs/scofield-bebek-2026-08-17.md`](scofield-bebek-2026-08-17.md) |
+
 ## Kural
 
 Bu defterde bir satırın "kapandı" tarafına geçmesi için tek ölçüt vardır:

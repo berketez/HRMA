@@ -47,6 +47,11 @@ NE KİLİTLENİR
      Mach'ına DEĞİL, ölçülmüş iterasyon maliyetine bakar; blok tetiklediği
      kuralı adıyla (``budget_advisory_reasons``) ve dayandığı ölçüm tablosunu
      (``measured_expectations``) yayımlar.
+ 10. ALAN BLOĞU ÜÇ BÜYÜKLÜK TAŞIR (parti 30): mach, pressure_Pa ve
+     ``temperature_K``. Sıcaklık ÇÖZÜCÜNÜN KENDİ alanıdır (bit-aynılık
+     bekçili), istemcide izentropik olarak yeniden kurulmaz ve üç dizi TEK
+     inceltme diliminden gelir (kimlik bekçisi 'standard' seviyede ölçer —
+     'coarse' inceltilmediği için orada kör kalırdı). Ayrıntı §2b.
 
 ÖLÇÜM YÖNTEMİ
 -------------
@@ -119,6 +124,14 @@ MUTASYON DÜŞÜNCESİ — bağlama geri alınırsa hangi test kırılır
   * Uyarı bayrağı gerekçe listesinden AYRIŞTIRILIRSA (ör. "her koşuda
     turuncu" davranışına dönülürse) -> test_uyari_bayragi_gerekceyle_ayrisamaz
     + test_iyi_kosullanmis_vakada_uyari_yok.
+  * ``temperature_K`` alan bloğundan çıkarılırsa -> §2b'nin beş bekçisinden
+    dördü + test_alan_blogu_sekli_ve_indeksleri (ÖLÇÜLDÜ, parti 30: satır
+    silinince 5 kırmızı).
+  * Sıcaklık çözücüden alınmak yerine Mach'tan/basınçtan türetilirse ->
+    test_sicaklik_uc_disinda_bit_aynisiyla_uretilebiliyor (ölçülen sapma
+    %1,50 ve %4,03, rtol=0 karşılaştırmasının çok üstünde).
+  * Sıcaklığa AYRI bir inceltme dilimi uygulanırsa ->
+    test_sicaklik_ayni_inceltme_diliminden ('standard' seviyede).
 """
 
 import contextlib
@@ -252,6 +265,40 @@ def yerel_cozum(kontur_iyi, yanit_iyi):
     grid, _z, _r = _cfd_build_grid(
         np.asarray(kontur_iyi['points'], dtype=float),
         yanit_iyi['cfd']['grid']['ni'], yanit_iyi['cfd']['grid']['nj'])
+    return _sessiz(solve_steady_axisym, grid,
+                   P0=GAZ['P0_Pa'], T0=GAZ['T0_K'], gamma=GAZ['gamma'],
+                   R=GAZ['R_J_per_kgK'], Pb=None)
+
+
+@pytest.fixture(scope='module')
+def yanit_standard(client, kontur_iyi):
+    """İNCELTİLMİŞ vaka: aynı kontur, 'standard' seviye (120×24).
+
+    Alan bloğunun inceltme kimliğini ölçmenin TEK yolu budur: tavan 1200
+    hücre olduğu için 'coarse' (60×12 = 720) inceltilmez ve yanlış bir dilim
+    orada görünmez kalır. Burada 120 kolon 50'ye iner. (~4,8 s ölçüldü)
+    """
+    r = _sessiz(client.post, UC, json=govde(
+        nozzle_contour=kontur_iyi, resolution='standard'))
+    assert r.status_code == 200, r.get_data(as_text=True)[:800]
+    return r.get_json()
+
+
+@pytest.fixture(scope='module')
+def yerel_cozum_standard(kontur_iyi, yanit_standard):
+    """``yerel_cozum``un 'standard' ikizi — uç DIŞINDA, aynı ızgara kuralı.
+
+    Izgara yine ucun kendi yardımcısıyla kurulur (test kuralı yeniden
+    TÜRETMEZ, aynı kuralı ÇAĞIRIR); ölçülen şey alan bloğunun taşınması ve
+    inceltme diliminin kimliğidir. (~4,8 s ölçüldü)
+    """
+    from hrma.app import _cfd_build_grid
+    from hrma.cfd.steady import solve_steady_axisym
+
+    grid, _z, _r = _cfd_build_grid(
+        np.asarray(kontur_iyi['points'], dtype=float),
+        yanit_standard['cfd']['grid']['ni'],
+        yanit_standard['cfd']['grid']['nj'])
     return _sessiz(solve_steady_axisym, grid,
                    P0=GAZ['P0_Pa'], T0=GAZ['T0_K'], gamma=GAZ['gamma'],
                    R=GAZ['R_J_per_kgK'], Pb=None)
@@ -628,7 +675,7 @@ class TestIcTutarlilik:
         assert alan['radial_indices'][-1] == nj - 1
         assert alan['n_cells_total'] == ni * nj
         assert alan['n_cells_returned'] == n_i * n_j
-        for ad in ('z_m', 'r_m', 'mach', 'pressure_Pa'):
+        for ad in ('z_m', 'r_m', 'mach', 'pressure_Pa', 'temperature_K'):
             dizi = alan[ad]
             assert len(dizi) == n_i, ad
             assert all(len(satir) == n_j for satir in dizi), ad
@@ -686,6 +733,139 @@ class TestIcTutarlilik:
         cfd = yanit_iyi['cfd']
         assert cfd['solver_runtime_s'] > 0.0
         assert cfd['runtime_s'] >= cfd['solver_runtime_s']
+
+
+# ---------------------------------------------------------------------------
+# §2b — SICAKLIK ALANI (parti 30): alan bloğunun ÜÇÜNCÜ büyüklüğü
+# ---------------------------------------------------------------------------
+# NE KAPANDI: çözücü ``fields['temperature_K']`` üretiyordu (steady.py ~474:
+# ``temp = w[..., 3] / (Rs * w[..., 0])``, yani ideal gaz yasası p/(ρ·R)) ama
+# uç yalnız mach + pressure_Pa yayımlıyordu. 3B alan katmanı ile 2B panel
+# üçüncü büyüklük olarak sıcaklığı gösterecek; istemcide türetme YAPILMAZ.
+#
+# NEDEN TÜRETİLEMEZ — ÖLÇÜLDÜ (yakınsamış 60×12 taban koşusu, aynı gaz durumu):
+#   * toplam sıcaklık yolu  T0/(1+(γ−1)/2·M²)  → çözücü alanından en çok
+#     %1,50 bağıl sapma;
+#   * izentropik basınç yolu T0·(p/P0)^((γ−1)/γ) → en çok %4,03 bağıl sapma,
+#     ve bu yol şok geçildikten SONRA geçersizdir (kullandığı P0 durgunluk
+#     basıncı orada çoktan düşmüştür).
+# Yani "istemci zaten hesaplar" YANLIŞ öncüldü; ölçüm bunu çürüttü.
+#
+# HAZNE SINIRI YALNIZ YAKINSAMIŞ KOŞUNUNDUR — ÖLÇÜLDÜ: taban koşusunda
+# max T = 0,99891·T0 (pay %0,109), ama aynı kontur Pb=1,2 MPa ile sürülüp
+# iterasyon tavanına dayandığında (converged=False) max T = 1,0535·T0.
+# Bu yüzden aşağıdaki fizik bekçisi ``converged`` bayrağına AÇIKÇA koşulludur.
+
+class TestSicaklikAlani:
+    def test_sicaklik_yukte_var_ve_mach_ile_ayni_sekilli(self, yanit_iyi):
+        """(a) Alan bloğunda temperature_K var; şekli mach ile BİREBİR aynı,
+        değerlerin tamamı sonlu ve pozitif (mutlak sıcaklık)."""
+        alan = yanit_iyi['cfd']['field']
+        assert 'temperature_K' in alan, (
+            'üçüncü büyüklük yayımlanmıyor — 3B/2B katmanı sıcaklığı '
+            'istemcide türetmek zorunda kalırdı')
+        t = np.asarray(alan['temperature_K'], dtype=float)
+        m = np.asarray(alan['mach'], dtype=float)
+        p = np.asarray(alan['pressure_Pa'], dtype=float)
+        assert t.shape == m.shape == p.shape == tuple(alan['shape'])
+        assert np.all(np.isfinite(t)), 'sonlu olmayan sıcaklık hücresi var'
+        assert np.all(t > 0.0), 'mutlak sıcaklık pozitif olmalı'
+
+    def test_sicaklik_uc_disinda_bit_aynisiyla_uretilebiliyor(self,
+                                                              yerel_cozum,
+                                                              yanit_iyi):
+        """(b) BİT-AYNILIK: uçtaki sıcaklık, aynı ızgarayla doğrudan
+        ``solve_steady_axisym`` çağrılıp AYNI dilim alındığında elde edilenin
+        birebir aynısı olmalı (rtol=0, atol=0).
+
+        Kardeşi ``test_cozum_uc_disinda_bit_aynisiyla_uretilebiliyor`` duvar
+        basıncını ölçer; bu bekçi alan bloğunun kendisini ölçer. Uç sıcaklığı
+        yeniden hesaplarsa, yuvarlarsa ya da başka bir bağıntıdan türetirse
+        (ör. Mach'tan) burada kırmızıya döner — ölçülen sapma %1,50, yani
+        yuvarlama gürültüsünün çok üstünde, kaçamaz.
+        """
+        alan = yanit_iyi['cfd']['field']
+        idx_i = np.asarray(alan['axial_indices'], dtype=int)
+        idx_j = np.asarray(alan['radial_indices'], dtype=int)
+        kes = np.ix_(idx_i, idx_j)
+        beklenen = np.asarray(yerel_cozum['fields']['temperature_K'],
+                              dtype=float)[kes]
+        gelen = np.asarray(alan['temperature_K'], dtype=float)
+        assert gelen.shape == beklenen.shape
+        assert np.allclose(gelen, beklenen, rtol=0, atol=0), (
+            'sıcaklık alanı çözücünün kendi alanı DEĞİL')
+
+    def test_yakinsamis_kosuda_statik_T_hazne_sicakliginin_altinda(
+            self, yanit_iyi):
+        """(c) Fiziksel akıl sağlaması: yakınsamış, adyabatik akışta statik
+        sıcaklık HER hücrede hazne sıcaklığının altında kalmalı (eşitlik
+        yalnız gerçek durgunluk noktasında olurdu, hücre merkezi oraya
+        düşmez).
+
+        ÖLÇÜLDÜ (bu taban koşusu): max T / T0 = 0,99891 — yani pay yalnız
+        %0,109; sınır GEVŞEK DEĞİL, akış girişte neredeyse durgun.
+        En düşük hücre 0,5409·T0 (çıkış konisi), yani alan gerçekten
+        genişliyor ve bekçi sabit bir alanda boş yere yeşil kalmıyor.
+
+        KOŞULLU, bilerek: bu sınır YAKINSAMIŞ koşunundur. Ölçüldü — aynı
+        kontur Pb=1,2 MPa ile iterasyon tavanına dayandığında (converged=
+        False) max T = 1,0535·T0 olur. O yüzden burada önce bayrak ölçülür;
+        yakınsamamış koşuya bu bekçi hüküm vermez.
+        """
+        cfd = yanit_iyi['cfd']
+        assert cfd['converged'] is True, cfd['convergence_basis']
+        T0 = float(cfd['inputs']['T0_K'])
+        t = np.asarray(cfd['field']['temperature_K'], dtype=float)
+        assert float(np.max(t)) < T0, (
+            f'statik T hazneyi aştı: max {np.max(t):.2f} K >= T0 {T0} K')
+        assert float(np.min(t)) < float(np.max(t)), (
+            'alan sabit — bekçi boş yere yeşil kalıyor olurdu')
+
+    def test_sicaklik_ayni_inceltme_diliminden(self, yanit_standard,
+                                               yerel_cozum_standard):
+        """(d) İNCELTME KİMLİĞİ: sıcaklık, bloğun BEYAN ETTİĞİ
+        ``axial_indices``/``radial_indices`` diliminden gelmeli — ikinci bir
+        inceltme kuralı tanımlanmış olmamalı.
+
+        'coarse' seviyesinde inceltme YOKTUR (60×12 = 720 hücre, tavan 1200),
+        yani orada yanlış bir dilim GÖRÜNMEZ kalır. Bu yüzden bekçi bilerek
+        'standard' seviyesini kullanır: 120 kolon 50'ye inceltilir ve yanlış
+        indeks kümesi (ör. ilk 50 kolon) burada hemen ayrışır. Aynı dilimin
+        mach ve pressure_Pa için de geçerli olduğu yanında ölçülür — üç dizi
+        TEK bir dilimden çıkmalı, [i][j] hepsinde aynı hücre demek.
+        """
+        alan = yanit_standard['cfd']['field']
+        assert alan['decimated'] is True, (
+            'standard seviyesi inceltilmiyorsa bu bekçi kör kalır')
+        idx_i = np.asarray(alan['axial_indices'], dtype=int)
+        idx_j = np.asarray(alan['radial_indices'], dtype=int)
+        assert idx_i.size < alan['grid_shape'][0]
+        kes = np.ix_(idx_i, idx_j)
+        for ad, cozucu_ad in (('temperature_K', 'temperature_K'),
+                              ('mach', 'mach'),
+                              ('pressure_Pa', 'pressure_Pa')):
+            beklenen = np.asarray(
+                yerel_cozum_standard['fields'][cozucu_ad], dtype=float)[kes]
+            gelen = np.asarray(alan[ad], dtype=float)
+            assert np.allclose(gelen, beklenen, rtol=0, atol=0), ad
+        # Koordinatlar da AYNI dilimden: üç büyüklük ile aynı hücreleri
+        # adresliyor olmalı (panel [i][j] ile konum eşler).
+        for ad, cozucu_ad in (('z_m', 'z_centers_m'), ('r_m', 'r_centers_m')):
+            beklenen = np.asarray(yerel_cozum_standard[cozucu_ad],
+                                  dtype=float)[kes]
+            assert np.allclose(np.asarray(alan[ad], dtype=float), beklenen,
+                               rtol=0, atol=0), ad
+
+    def test_sicaklik_beyani_turetme_olmadigini_soyluyor(self, yanit_iyi):
+        """Beyan kapısı: blok, sıcaklığın çözücünün KENDİ alanı olduğunu ve
+        izentropik bir yeniden kurulum OLMADIĞINI açıkça söylemeli. Beyan
+        düşerse panel yazarı sayının nereden geldiğini bilemez."""
+        beyan = yanit_iyi['cfd']['field']['_basis']
+        assert 'temperature_K' in beyan
+        assert 'isentropic' in beyan.lower()
+        assert 'p / (rho * R)' in beyan
+        for sayi in ('1.50%', '4.03%', '0.9989', '1.0535'):
+            assert sayi in beyan, f'ölçülen sayı beyandan düştü: {sayi}'
 
 
 class TestGirdiYankisi:

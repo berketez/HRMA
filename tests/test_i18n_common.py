@@ -141,9 +141,21 @@ TR = dict_block('tr')
 CALL_RE = re.compile(r"(?:\bT|\bTF|U\.t|U\.tf|window\.I18N\.t|window\.I18N\.tf)"
                      r"\(\s*'([\w. ]+)'")
 ATTR_RE = re.compile(r'data-i18n(?:-title|-placeholder)?="([\w. ]+)"')
+# 2026-08-17 (parti 30): 'viz3d' ön eki listede YOKTU. 3B sahnenin CFD alan
+# katmanı anahtarlarını TABLOLARDA tutar (motor_viz3d.js CFD_METRICS.labelKey
+# ve CFD_REASONS[kod].key) ve çalışma anında DEĞİŞKENLE çözer:
+#   sahne   motor_viz3d.js:4283  T(m.labelKey, m.labelFallback)
+#   tüketen motor_viz_deck.js:153 / cfd_panel.js:1307
+#           T(reason.key, reason.fallback)  — anahtar sahneden GELİR
+# Yani anahtar çağrı yerinde literal olarak geçmez; CALL_RE onu yapısal olarak
+# göremez. ÖLÇÜLDÜ: 9 canlı anahtar (6 red kodu + 3 metrik etiketi) "ölü
+# çeviri" diye işaretleniyordu. Bu, 'status' öneki için 2026-08-03'te ölçülen
+# kusurun aynısıdır: ön ek listesi ürünün GERÇEKTEN kullandığı ad alanlarını
+# yansıtmalı, yoksa bekçi doğru eklemeyi engeller. Ölü çeviri koruması
+# zayıflamaz — hiçbir kaynakta literal olarak geçmeyen anahtar hâlâ yakalanır.
 FIELD_RE = re.compile(r"'((?:common|panel|inj|sixdof|sch|out|uq|tps|vessel|joint|"
                       r"nzl|fuel|fluid|gas|coolant|cool|fac|motor|prop|press|mat|"
-                      r"transient|update|app|dock|risk|chartCap|ac)\.[\w.]+)'")
+                      r"transient|update|app|dock|risk|chartCap|ac|viz3d)\.[\w.]+)'")
 
 
 # FIELD_RE yalnız yardımcı bir tarayıcıdır (alan dizilerindeki çıplak anahtar

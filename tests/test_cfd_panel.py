@@ -101,6 +101,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 STATIC_JS = REPO_ROOT / 'hrma' / 'static' / 'js'
 CENTER_JS = STATIC_JS / 'analysis_center.js'
 PANEL_JS = STATIC_JS / 'panels' / 'cfd_panel.js'
+VIZ3D_JS = STATIC_JS / 'motor_viz3d.js'
 
 NODE = shutil.which('node')
 needs_node = pytest.mark.skipif(NODE is None, reason='node kurulu değil')
@@ -184,6 +185,24 @@ def strip_js_comments(text):
             i += 1
         out.append(line if cut is None else line[:cut] + ' ' * (len(line) - cut))
     return '\n'.join(out)
+
+
+def viz3d_tablo_bildirimleri():
+    """``motor_viz3d.js``'in KENDİ tablo bildirimlerini kaynaktan çıkarır.
+
+    Koşum ortamı 3B sahnenin metrik ve renk tablolarını GERÇEK kaynaktan
+    alır; testte ikinci bir tablo YAZILMAZ (yazılsaydı bekçi, panelin
+    paylaşılan tabloyu kullandığını değil, testin kendi kopyasını
+    kullandığını ölçerdi). ``[^;]+`` biçimi A2'nin bekçisiyle aynı
+    varsayıma dayanır: bu bildirimlerin literalleri ';' içermez.
+    """
+    src = read(VIZ3D_JS)
+    parcalar = []
+    for ad in ('CFD_COLORSCALES', 'CFD_METRICS'):
+        m = re.search(r'var %s = [^;]+;' % ad, src)
+        assert m, f'motor_viz3d.js icinde {ad} bildirimi bulunamadi'
+        parcalar.append(m.group(0))
+    return '\n'.join(parcalar)
 
 
 @pytest.fixture(scope='module')
@@ -361,6 +380,105 @@ global.fetch = function (url, opts) {
     });
 };
 
+// --- 3B sahne yerine geçen koşum ortamı -------------------------------
+// TABLOLAR GERÇEK: aşağıdaki iki bildirim motor_viz3d.js kaynağından
+// AYNEN enjekte edilir (testin kendi kopyası YOK). Sahnenin kendisi WebGL
+// ister ve node'da kurulamaz; bu yüzden YALNIZ davranış taklit edilir ve
+// dönüş sözlükleri GERÇEK yanıttan ölçülür (uydurma sayı yok). Sahtenin
+// sözleşmeden kaymadığını tests/test_cfd_alan_koprusu.py denetler.
+/*VIZ3D_TABLES*/
+const vizCfg = payload.viz3d || {};
+const viz3dCalls = [];
+
+function metricByIdStub(id) {
+    for (let i = 0; i < CFD_METRICS.length; i++) {
+        if (CFD_METRICS[i].id === id) return CFD_METRICS[i];
+    }
+    return null;
+}
+
+function payloadRange(cfd, id) {
+    const m = metricByIdStub(id);
+    const arr = cfd && cfd.field ? cfd.field[m.payloadKey] : null;
+    if (!Array.isArray(arr)) return null;
+    let min = Infinity, max = -Infinity;
+    arr.forEach(function (row) {
+        row.forEach(function (v) {
+            if (v < min) min = v;
+            if (v > max) max = v;
+        });
+    });
+    return { min: min, max: max };
+}
+
+let vizLoaded = null;        // yüklü alanın metrik kimliği (null = yok)
+let vizCfd = null;
+
+function vizOk(cfd, id) {
+    const m = metricByIdStub(id);
+    const rng = payloadRange(cfd, id);
+    const f = cfd.field;
+    return {
+        ok: true, metric: id, range: rng, unitLabel: m.unit,
+        cells: { axial: f.shape[0], radial: f.shape[1] },
+        stations: { shown: f.shape[0], total: f.grid_shape[0] },
+        decimated: !!f.decimated,
+        alignment: vizCfg.alignment || null,
+        cutaway_forced: !!vizCfg.cutawayForced,
+        decor_hidden: vizCfg.decorHidden || [],
+    };
+}
+
+function vizRed(code, params) {
+    // Metin ve anahtar SAHNENİN sözleşmesindendir; koşum ortamı yalnız
+    // kodu ve params'ı taşır (mesajın ikinci tanımı burada da yok).
+    return { ok: false, reason: { code: code,
+        key: 'viz3d.cfd.err.' + code, fallback: 'stub:' + code,
+        params: params || {} } };
+}
+
+if (!vizCfg.absent) {
+    global.MotorViz3D = {
+        isSupported: function () { return vizCfg.supported !== false; },
+        CFD_METRICS: CFD_METRICS,
+        CFD_COLORSCALES: CFD_COLORSCALES,
+        setCfdField: function (cfd) {
+            viz3dCalls.push({ fn: 'setCfdField',
+                              sameObject: cfd === (payload.response || {}).cfd });
+            if (vizCfg.setRed) return vizRed(vizCfg.setRed, vizCfg.redParams);
+            vizCfd = cfd;
+            // Sahnenin kuralı: yükte GERÇEKTEN olan ilk metrik seçilir
+            vizLoaded = null;
+            for (let i = 0; !vizLoaded && i < CFD_METRICS.length; i++) {
+                const k = CFD_METRICS[i].payloadKey;
+                if (cfd.field && Array.isArray(cfd.field[k])) {
+                    vizLoaded = CFD_METRICS[i].id;
+                }
+            }
+            return vizOk(cfd, vizCfg.forceMetric || vizLoaded);
+        },
+        setCfdMetric: function (id) {
+            viz3dCalls.push({ fn: 'setCfdMetric', id: id });
+            if (!vizLoaded) return vizRed('no_field', { metric: id });
+            const m = metricByIdStub(id);
+            if (!m || !vizCfd.field || !Array.isArray(vizCfd.field[m.payloadKey])) {
+                return vizRed('missing_metric', { metric: id });
+            }
+            vizLoaded = id;
+            return vizOk(vizCfd, id);
+        },
+        clearCfdField: function () {
+            viz3dCalls.push({ fn: 'clearCfdField' });
+            const vardi = vizLoaded !== null;
+            vizLoaded = null; vizCfd = null;
+            return vardi;
+        },
+        getCfdField: function () {
+            return vizLoaded ? { metric: vizLoaded } : null;
+        },
+    };
+}
+
 require(centerPath);
 require(panelPath);
 const AC = window.AnalysisCenter;
@@ -411,6 +529,29 @@ function dumpModel() {
         if (releaseFetch) { releaseFetch(); releaseFetch = null; }
         await p;
     }
+    // Köprü düğmeleri: kayıtlı click kancası ÇAĞRILIR (id öneki ile bulunur)
+    if (payload.click) {
+        payload.click.forEach(function (onek) {
+            const id = Object.keys(nodes).filter(function (k) {
+                return k.indexOf(onek) === 0;
+            }).pop();
+            const n = id ? nodes[id] : null;
+            if (n && n.handlers && n.handlers.click) n.handlers.click();
+            out.clicked = (out.clicked || []).concat([id || null]);
+        });
+    }
+    out.viz3dCalls = viz3dCalls;
+    out.metrics = CP._metrics;
+    // Sahnenin KENDİ tablosu (motor_viz3d.js kaynağından enjekte edildi):
+    // seçicinin bununla karşılaştırılması gerekir — panelin kendi
+    // tablosuyla karşılaştırmak kendine bakan (kör) bir ölçüm olurdu.
+    out.sceneMetricIds = CFD_METRICS.map(function (m) { return m.id; });
+    out.reasonCodes = CP._reasonCodes;
+    out.activeMetric = CP._getFieldMetric();
+    out.colorscales = {};
+    CP._metrics.forEach(function (m) {
+        out.colorscales[m.id] = CP._colorscale(m.id);
+    });
     // Saf model katmanı ölçümleri (DOM'suz da geçerli)
     out.suggest = CP._suggest(payload.results || null);
     out.applicability = CP._applicability(payload.results || null);
@@ -442,10 +583,15 @@ function dumpModel() {
 """
 
 
+def harness_kaynagi():
+    """Koşum ortamı + motor_viz3d.js'ten çıkarılan GERÇEK tablolar."""
+    return HARNESS.replace('/*VIZ3D_TABLES*/', viz3d_tablo_bildirimleri())
+
+
 def kos_panel(tmp_path, **payload):
     """Merkez + CFD kiracısını node'da koşturur; model/DOM/Plotly döner."""
     script = tmp_path / 'kos_cfd_panel.js'
-    script.write_text(HARNESS, encoding='utf-8')
+    script.write_text(harness_kaynagi(), encoding='utf-8')
     girdi = tmp_path / 'girdi.json'
     girdi.write_text(json.dumps(payload), encoding='utf-8')
     proc = subprocess.run(
@@ -1009,7 +1155,8 @@ class TestCizim:
     def test_plotly_yokken_cizim_yerine_beyan(self, tmp_path, motor_hibrit,
                                               yanit_yakinsayan):
         """Grafik kitaplığı yoksa panel çökmez; nedenini yazar."""
-        harness = HARNESS.replace('global.Plotly = {', 'global._Plotly = {')
+        harness = harness_kaynagi().replace('global.Plotly = {',
+                                            'global._Plotly = {')
         script = tmp_path / 'kos_noplotly.js'
         script.write_text(harness, encoding='utf-8')
         girdi = tmp_path / 'girdi.json'
@@ -1221,6 +1368,289 @@ class TestDurustluk:
         assert 'RUNNING' in durum.upper(), f'koşum beyanı değil: {durum!r}'
         assert '%' not in durum and not re.search(r'\d', durum), (
             f'koşum beyanında sayı/yüzde var: {durum!r}')
+
+
+# ---------------------------------------------------------------------------
+# 8. ÜÇÜNCÜ BÜYÜKLÜK + RENK TEK KAYNAK + 3B KÖPRÜSÜ  (parti 30)
+# ---------------------------------------------------------------------------
+
+def _viz3d_durum(out):
+    """Köprünün durum satırının metni (id öneki koşum sayacı taşır)."""
+    for k in out['nodes']:
+        if k.startswith('cfd_viz3d_status_'):
+            return out['nodes'][k]['text']
+    return None
+
+
+def _kontur_izi(out):
+    cagri = cizim(out, 'cfd_field')
+    for t in cagri['traces']:
+        if t.get('type') == 'contourcarpet':
+            return t
+    return None
+
+
+def _yanit_sicakliksiz(yanit):
+    """GERÇEK yanıttan sıcaklık dizisi ÇIKARILMIŞ kopya (eski uç taklidi).
+
+    Uydurma bir yanıt kurulmaz: alan bloğunun geri kalanı aynen kalır,
+    yalnız parti 30'da eklenen dizi düşürülür.
+    """
+    kopya = copy.deepcopy(yanit)
+    assert 'temperature_K' in kopya['cfd']['field'], (
+        'vaka değişmiş: uç zaten sıcaklık yayımlamıyor')
+    del kopya['cfd']['field']['temperature_K']
+    return kopya
+
+
+@needs_node
+class TestUcuncuBuyukluk:
+    def test_secicide_uc_secenek_var(self, tmp_path, motor_hibrit,
+                                     yanit_yakinsayan):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        secenekler = set(re.findall(r'data-cfd-metric-option="(\w+)"', html))
+        # Karşılaştırma SAHNENİN tablosuyla: panelin kendi tablosuyla
+        # karşılaştırmak, tablodan bir metrik düşerse sessiz kalırdı.
+        assert secenekler == set(out['sceneMetricIds']), (
+            f'seçici sahnenin CFD_METRICS tablosuyla ayrışmış: '
+            f'{sorted(secenekler)} != {sorted(out["sceneMetricIds"])}')
+
+    def test_sicaklik_haritasi_yanittaki_hucreler(self, tmp_path, motor_hibrit,
+                                                  yanit_yakinsayan):
+        """Sıcaklık çizimi, ucun temperature_K dizisinin KENDİSİDİR."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan, fieldMetric='temperature',
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        f = yanit_yakinsayan['cfd']['field']
+        kontur = _kontur_izi(out)
+        # x[j][i] = field.z_m[i][j] (devrik) — hücreler AYNEN, ölçek YOK
+        assert kontur['z'][2][3] == f['temperature_K'][3][2], (
+            'sıcaklık yeniden örneklenmiş/ölçeklenmiş')
+        assert kontur['z'][0][0] == f['temperature_K'][0][0]
+
+    def test_sicaklik_mach_ya_da_basinctan_turetilmiyor(self, tmp_path,
+                                                        motor_hibrit,
+                                                        yanit_yakinsayan):
+        """Negatif kanıt: çizilen sıcaklık, izentropik yeniden kurulumun
+        sayısı DEĞİLDİR. (Ucun kendi beyanı bu iki yolun %1,50 ve %4,03
+        saptığını ölçüyor; burada bit düzeyinde ayrık olduğu doğrulanır.)"""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan, fieldMetric='temperature',
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        cfd = yanit_yakinsayan['cfd']
+        f = cfd['field']
+        g = cfd['inputs']
+        gamma, t0 = float(g['gamma']), float(g['T0_K'])
+        kontur = _kontur_izi(out)
+        farkli = 0
+        for i in range(len(f['mach'])):
+            for j in range(len(f['mach'][i])):
+                toplamdan = t0 / (1.0 + 0.5 * (gamma - 1.0)
+                                  * f['mach'][i][j] ** 2)
+                if not yakin(kontur['z'][j][i], toplamdan, 1e-6):
+                    farkli += 1
+        assert farkli > 0, (
+            'çizilen sıcaklık Mach\'tan toplam-sıcaklık yoluyla YENİDEN '
+            'KURULMUŞ — çözücünün kendi alanı değil')
+
+    def test_sicakliksiz_yanitta_secenek_kapali_ve_gerekce_yazili(
+            self, tmp_path, motor_hibrit, yanit_yakinsayan):
+        eski = _yanit_sicakliksiz(yanit_yakinsayan)
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=eski, select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        # Seçenek DURUYOR ama kapalı
+        m = re.search(r'<option value="temperature"([^>]*)>', html)
+        assert m, 'sıcaklık seçeneği sessizce gizlenmiş'
+        assert 'disabled' in m.group(1), 'yokken seçenek açık bırakılmış'
+        # Nedeni ADIYLA (yük anahtarı) yazılı
+        assert 'temperature_K' in html, (
+            'eksik dizinin adı ekranda yok — kullanıcı nedenini göremez')
+
+    def test_sicakliksiz_yanitta_sicaklik_cizilmez(self, tmp_path,
+                                                  motor_hibrit,
+                                                  yanit_yakinsayan):
+        """Seçili büyüklük yükte yoksa panel UYDURMAZ: mevcut ilk büyüklüğe
+        düşer ve düşüşü beyan eder."""
+        eski = _yanit_sicakliksiz(yanit_yakinsayan)
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=eski, fieldMetric='temperature',
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        kontur = _kontur_izi(out)
+        f = eski['cfd']['field']
+        assert kontur['z'][2][3] == f['mach'][3][2], (
+            'sıcaklık yokken başka bir büyüklüğe düşülmemiş')
+        html = gorunum(out)
+        assert 'is not in this response' in html or 'bu yanıtta yok' in html, (
+            'düşüş sessiz yapılmış — beyan yok')
+
+    def test_sicaklik_secenegi_acikken_disabled_degil(self, tmp_path,
+                                                      motor_hibrit,
+                                                      yanit_yakinsayan):
+        """Ters yön: sıcaklık GERÇEKTEN varken seçenek gri olmamalı."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        m = re.search(r'<option value="temperature"([^>]*)>', gorunum(out))
+        assert m and 'disabled' not in m.group(1), (
+            'sıcaklık yükte varken seçenek kapalı gösterilmiş')
+
+
+@needs_node
+class TestRenkTekKaynak:
+    def test_cizimdeki_duraklar_paylasilan_tablonun_kendisi(
+            self, tmp_path, motor_hibrit, yanit_yakinsayan):
+        """Plotly'ye giden `colorscale` 3B sahnenin tablosunun KENDİSİ
+        (ad değil, durak dizisi) — iki görünüm aynı rengi verir."""
+        for metrik in ('mach', 'pressure', 'temperature'):
+            out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                            response=yanit_yakinsayan, fieldMetric=metrik,
+                            select=['nozzle_flow', 'cfd'], runs=1)
+            kontur = _kontur_izi(out)
+            assert isinstance(kontur['colorscale'], list), (
+                f'{metrik}: skala hâlâ ad (string) olarak veriliyor')
+            assert kontur['colorscale'] == out['colorscales'][metrik], (
+                f'{metrik}: çizime giden duraklar paylaşılan tablo değil')
+
+    def test_tablo_yokken_skala_verilmez_ve_beyan_edilir(
+            self, tmp_path, motor_hibrit, yanit_yakinsayan):
+        """Yedek tablo YAZILMAZ: sahne modülü yoksa `colorscale` hiç
+        verilmez ve nedeni ekrana yazılır."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan, viz3d={'absent': True},
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        kontur = _kontur_izi(out)
+        assert 'colorscale' not in kontur, (
+            'tablo yokken uydurma bir skala verilmiş')
+        assert out['colorscales']['mach'] is None
+        assert 'not loaded on this page' in gorunum(out), (
+            'renk tablosunun yokluğu beyan edilmemiş')
+
+
+@needs_node
+class TestViz3dKoprusu:
+    def test_ok_yolu_ne_gosterildigini_beyan_eder(self, tmp_path, motor_hibrit,
+                                                  yanit_yakinsayan):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        select=['nozzle_flow', 'cfd'], runs=1,
+                        click=['cfd_viz3d_show_'])
+        cagrilar = [c['fn'] for c in out['viz3dCalls']]
+        assert 'setCfdField' in cagrilar, 'düğme sahneye alanı göndermemiş'
+        durum = _viz3d_durum(out)
+        f = yanit_yakinsayan['cfd']['field']
+        # Büyüklük, aralık ve istasyon sayısı EKRANDA
+        assert 'Mach' in durum, f'gösterilen büyüklük beyan edilmemiş: {durum}'
+        duz = [v for row in f['mach'] for v in row]
+        assert str(_sig6(min(duz))) in durum and str(_sig6(max(duz))) in durum, (
+            f'aralık yanıttan gelen min/max değil: {durum}')
+        assert '%d of %d' % (f['shape'][0], f['grid_shape'][0]) in durum, (
+            f'N/M istasyon beyanı yok: {durum}')
+
+    def test_2b_secili_buyukluk_3b_ye_tasiniyor(self, tmp_path, motor_hibrit,
+                                                yanit_yakinsayan):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan, fieldMetric='temperature',
+                        select=['nozzle_flow', 'cfd'], runs=1,
+                        click=['cfd_viz3d_show_'])
+        metrik_cagrilari = [c for c in out['viz3dCalls']
+                            if c['fn'] == 'setCfdMetric']
+        assert metrik_cagrilari and metrik_cagrilari[-1]['id'] == 'temperature', (
+            '2B\'de seçili büyüklük 3B sahneye taşınmamış — iki görünüm '
+            'farklı büyüklük gösterir')
+        assert 'temperature' in _viz3d_durum(out).lower()
+
+    @pytest.mark.parametrize('kod', ['no_solver_contour', 'contour_mismatch',
+                                     'bad_field_block', 'missing_metric',
+                                     'no_field'])
+    def test_red_kodu_adiyla_yaziliyor(self, tmp_path, motor_hibrit,
+                                       yanit_yakinsayan, kod):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        viz3d={'setRed': kod, 'redParams': {'dr_throat_mm': 4}},
+                        select=['nozzle_flow', 'cfd'], runs=1,
+                        click=['cfd_viz3d_show_'])
+        durum = _viz3d_durum(out)
+        assert kod in durum, f'red kodu ADIYLA yazılmamış: {durum!r}'
+        assert 'dr_throat_mm=4' in durum, (
+            f'ölçüm parametreleri gizlenmiş: {durum!r}')
+        assert 'does not know' not in durum, (
+            f'bilinen kod "tanınmıyor" diye işaretlenmiş: {durum!r}')
+
+    def test_tanimayan_kod_beyan_ediliyor(self, tmp_path, motor_hibrit,
+                                          yanit_yakinsayan):
+        """Sözleşme dışı bir kod gelirse panel bunu SESSİZCE yutmaz."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        viz3d={'setRed': 'webgl_lost'},
+                        select=['nozzle_flow', 'cfd'], runs=1,
+                        click=['cfd_viz3d_show_'])
+        durum = _viz3d_durum(out)
+        assert 'webgl_lost' in durum and 'does not know' in durum, (
+            f'tanınmayan kod adıyla beyan edilmemiş: {durum!r}')
+
+    def test_sahne_yokken_dugme_kapali_ve_nedeni_yazili(self, tmp_path,
+                                                        motor_hibrit,
+                                                        yanit_yakinsayan):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan, viz3d={'absent': True},
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        m = re.search(r'<button[^>]*data-cfd-viz3d="show"([^>]*)>', html)
+        assert m, '3B köprüsü eylemi hiç basılmamış'
+        assert 'disabled' in m.group(1), 'sahne yokken düğme açık bırakılmış'
+        assert 'not loaded on this page' in html, (
+            'eylemin neden kapalı olduğu yazılmamış')
+
+    def test_webgl_yokken_dugme_kapali(self, tmp_path, motor_hibrit,
+                                       yanit_yakinsayan):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan, viz3d={'supported': False},
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        m = re.search(r'<button[^>]*data-cfd-viz3d="show"([^>]*)>', html)
+        assert m and 'disabled' in m.group(1)
+        assert 'no WebGL support' in html
+
+    def test_kapatma_dugmesi_katmani_soker(self, tmp_path, motor_hibrit,
+                                           yanit_yakinsayan):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        select=['nozzle_flow', 'cfd'], runs=1,
+                        click=['cfd_viz3d_show_', 'cfd_viz3d_clear_'])
+        cagrilar = [c['fn'] for c in out['viz3dCalls']]
+        assert 'clearCfdField' in cagrilar
+        assert 'removed' in _viz3d_durum(out)
+
+    def test_alan_bloğu_yokken_kopru_hic_basilmaz(self, tmp_path, motor_hibrit,
+                                                  yanit_yakinsayan):
+        """Gönderilecek alan yoksa köprü eylemi de olmamalı (boş düğme)."""
+        alansiz = copy.deepcopy(yanit_yakinsayan)
+        del alansiz['cfd']['field']
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=alansiz, select=['nozzle_flow', 'cfd'], runs=1)
+        assert 'data-cfd-viz3d' not in gorunum(out), (
+            'alan yokken 3B köprüsü düğmesi basılmış')
+
+    def test_kopru_yeni_istek_gondermez(self, tmp_path, motor_hibrit,
+                                        yanit_yakinsayan):
+        """Köprü AYNI yanıtı taşır: ikinci bir uç çağrısı YOK."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        select=['nozzle_flow', 'cfd'], runs=1,
+                        click=['cfd_viz3d_show_'])
+        assert len(out['fetchCalls']) == 1, (
+            f'köprü fazladan istek gönderdi: {len(out["fetchCalls"])}')
+
+
+def _sig6(v):
+    """Panelin sigFig yedeği: 6 anlamlı basamak (AnalysisDock yoksa)."""
+    if v == 0:
+        return v
+    return float('%.6g' % v)
 
 
 if __name__ == '__main__':

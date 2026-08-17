@@ -62,6 +62,30 @@
     var HUD_THROTTLE_MS = 80;              // telemetri yazma sıklığı (~12 Hz)
     var PA_PER_BAR = 1e5;
 
+    /* --- CFD alanı denetim grubu (parti 30) ---------------------------
+       Güverte CFD KOŞTURMAZ: alanı Analiz Merkezi'ndeki CFD kiracısı
+       sahneye bindirir (panels/cfd_panel.js -> MotorViz3D.setCfdField).
+       Güverte yalnız YÜKLÜ alanı sürer; alan yokken grup gri durur ve
+       nedenini yazar (sahte düğme yok).
+
+       Düğmelerin kimlikleri motor_viz3d.js'in CFD_METRICS tablosundan
+       gelir; buradaki tek ek bilgi güvertenin dar araç çubuğuna sığan
+       SEMBOLDÜR (etiketin tamamı düğmenin title'ında durur). Sembol
+       kümesinin metrik kümesiyle eşitliği bekçilidir:
+       tests/test_cfd_alan_koprusu.py */
+    var CFD_METRIC_SYMBOLS = { mach: 'M', pressure: 'p', temperature: 'T' };
+
+    /* Sahnenin üretebildiği RED kodlarının TAM kümesi. Panelde de bir
+       kopyası var; iki dosya birbirini ithal edemez (cfd_panel.js yalnız
+       Merkez sayfalarında, güverte katı/sıvı sayfalarında yüklü) ve
+       motor_viz3d.js kod listesini DIŞA AÇMIYOR. İkisi de üreticinin
+       KENDİ kaynağına küme eşitliği bekçisiyle bağlıdır — liste burada
+       kaymışsa test kırmızı döner. Kullanıcıya basılan METİN yine
+       sahnenin reason.key/fallback çiftinden gelir; mesajın ikinci bir
+       tanımı yoktur. */
+    var CFD_REASON_CODES = ['no_scene', 'no_solver_contour',
+        'contour_mismatch', 'missing_metric', 'bad_field_block', 'no_field'];
+
     function el(id) { return document.getElementById(id); }
 
     // i18n köprüsü — i18n.js yoksa İngilizce yedek metin döner
@@ -92,6 +116,56 @@
     }
 
     function isNum(v) { return typeof v === 'number' && isFinite(v); }
+
+    /* 3B sahnenin yayımladığı metrik tablosu (tek kaynak). Sahne yoksa
+       güverte zaten kurulmaz (create() MotorViz3D'yi şart koşuyor). */
+    function cfdMetrics() {
+        var t = window.MotorViz3D && window.MotorViz3D.CFD_METRICS;
+        return Array.isArray(t) ? t : [];
+    }
+
+    function cfdMetricById(id) {
+        var t = cfdMetrics();
+        for (var i = 0; i < t.length; i++) {
+            if (t[i].id === id) return t[i];
+        }
+        return null;
+    }
+
+    /* Aralık uçları: büyüklüğü önceden bilinmiyor (Mach ~1, basınç ~1e6),
+       bant dışına çıkınca üstel biçime geçilir — sayı kırpılmaz. */
+    function cfdNum(v) {
+        if (!isNum(v)) return '—';
+        var a = Math.abs(v);
+        if (a !== 0 && (a >= 1e4 || a < 1e-2)) return v.toExponential(3);
+        return v.toFixed(3);
+    }
+
+    /* RED sözlüğü -> okunur metin. Metin SAHNENİN kendi anahtar/yedek
+       çiftinden gelir; kod açıkça basılır, tanınmayan kod adıyla beyan
+       edilir (sessiz "olmadı" mesajı yasak). */
+    function cfdReasonText(reason) {
+        if (!reason || typeof reason !== 'object') {
+            return T('viz.cfd.noReason',
+                'The 3D scene refused, but returned no reason block.');
+        }
+        var kod = String(reason.code == null ? '' : reason.code);
+        var metin = reason.key ? T(reason.key, reason.fallback || kod)
+                               : String(reason.fallback || kod);
+        if (CFD_REASON_CODES.indexOf(kod) < 0) {
+            metin = T('viz.cfd.unknownCode',
+                'Refusal code unknown to this deck:') + ' ' + (kod || '?')
+                + ' — ' + metin;
+        }
+        var p = reason.params, ek = [];
+        if (p && typeof p === 'object') {
+            Object.keys(p).forEach(function (k) {
+                ek.push(k + '=' + String(p[k]));
+            });
+        }
+        return '[' + (kod || '?') + '] ' + metin
+            + (ek.length ? ' (' + ek.join(', ') + ')' : '');
+    }
 
     function firstNum() {
         for (var i = 0; i < arguments.length; i++) {
@@ -184,6 +258,33 @@
         return ctrls;
     }
 
+    /* CFD alanı denetim grubu — sahnenin ALTINDA, tasarım panelinin
+       ardında. Görsel kimlik mevcut sınıflardan gelir (.viz-design /
+       .viz-dctrl / .viz-toolbar / .viz-btn / .viz-dstatus); yeni renk
+       paleti ya da tipografi UYDURULMAZ. Alan yüklü değilken düğmeler
+       disabled ve durum satırı nedenini yazar. */
+    function cfdGroupHtml(p) {
+        var dugmeler = cfdMetrics().map(function (m) {
+            return '<button class="viz-btn" id="' + p + '_cfd_m_' + m.id +
+                '" data-cfd-metric="' + m.id + '" title="' +
+                T(m.labelKey, m.labelFallback) + '" disabled>' +
+                (CFD_METRIC_SYMBOLS[m.id] || m.id) + '</button>';
+        }).join('');
+        return '' +
+            '  <div class="viz-design" id="' + p + '_cfd">' +
+            '    <div class="viz-dctrl">' +
+            '      <div class="dk"><span id="' + p + '_cfd_k">' +
+                     T('viz.cfd.group', 'CFD FIELD') + '</span>' +
+            '        <b id="' + p + '_cfd_range">—</b></div>' +
+            '      <div class="viz-toolbar">' + dugmeler +
+            '        <button class="viz-btn warn" id="' + p + '_cfd_off" ' +
+                       'disabled>' + T('viz.cfd.close', 'Close') + '</button>' +
+            '      </div>' +
+            '    </div>' +
+            '    <div class="viz-dstatus" id="' + p + '_cfd_status"></div>' +
+            '  </div>';
+    }
+
     function deckHtml(p, opts, chips, ctrls) {
         // Port kesiti YALNIZ sıvıda anlamsızdır (yakıt grain'i yoktur);
         // katı ve hibritte port şekli döngüsü sunulur
@@ -251,6 +352,7 @@
             '    </div>' +
             '  </div>' +
             designHtml +
+            cfdGroupHtml(p) +
             '  <div class="viz-timeline">' +
             '    <button class="viz-play" id="' + p + '_play">&#9654;</button>' +
             '    <input type="range" id="' + p + '_slider" min="0" max="1000" value="0">' +
@@ -291,6 +393,10 @@
         var epsValue = expansionRatio(motorData);
 
         var hudLast = 0;
+        // CFD grubu ancak sahne kurulup grup kablolandıktan SONRA
+        // tazelenir: mount sırasında düşen ilk kareler `viz` daha
+        // atanmamışken onTick'i çağırabiliyor.
+        var cfdSyncArmed = false;
         var viz = MotorViz3D.mount(p + '_viewport', motorData, {
             onTick: function (s) {
                 var now = performance.now();
@@ -326,6 +432,9 @@
                 var pcBar = isNum(s.pc) ? s.pc / PA_PER_BAR : staticPcBar;
                 setChip(p + '_pc', isNum(pcBar) ? pcBar.toFixed(1) : '—', 'bar',
                         s.burning && isNum(s.pc));
+                // CFD alanı Merkez'den bindirilebilir; grubu sahnenin
+                // GERÇEK durumundan tazele (imza değişmediyse yazmaz).
+                if (cfdSyncArmed) cfdSyncFromScene();
             },
             // Kalite değişimi (otomatik perf düşüşü dahil) HQ butonuna yansır
             onQualityChange: function (mode) {
@@ -458,6 +567,132 @@
                 }
             }
         };
+
+        /* --- CFD alanı denetim grubu --------------------------------------
+           Güverte alanı KENDİ yüklemez (CFD koşumu Analiz Merkezi'nin CFD
+           kiracısında yapılır ve oradan sahneye bindirilir). Buradaki
+           denetimler YALNIZ sahnede GERÇEKTEN yüklü bir alanı sürer:
+           sahnenin getCfdField() beyanı okunur, alan yoksa grup gri kalır
+           ve nedeni yazılır. Hiçbir sayı burada hesaplanmaz; aralık
+           sahnenin döndürdüğü sözlükten gelir. */
+        var cfdSig = null;               // son yazılan durumun imzası
+        var cfdMissing = {};             // ÖLÇÜLEN 'missing_metric' kimlikleri
+
+        function cfdSetStatus(text) {
+            var e = el(p + '_cfd_status');
+            if (e) e.textContent = text;
+        }
+
+        function cfdStateSig(st) {
+            if (!st) return '';
+            return [st.metric, st.range && st.range.min, st.range && st.range.max,
+                    st.stations && st.stations.shown,
+                    st.stations && st.stations.total,
+                    st.decimated ? 1 : 0,
+                    Object.keys(cfdMissing).sort().join('+')].join('|');
+        }
+
+        function cfdDefaultStatus(st) {
+            if (!st) {
+                return T('viz.cfd.none',
+                    'No CFD field is loaded into the scene. Run the CFD '
+                    + 'analysis in the Analysis Centre and press "Show in the '
+                    + '3D scene" there; these controls stay disabled until '
+                    + 'then.');
+            }
+            var m = cfdMetricById(st.metric);
+            var txt = T('viz.cfd.showing', 'Showing') + ' '
+                + (m ? T(m.labelKey, m.labelFallback) : String(st.metric))
+                + ' — ' + st.cells.axial + 'x' + st.cells.radial + ' '
+                + T('viz.cfd.cells', 'solver cells') + ', '
+                + st.stations.shown + '/' + st.stations.total + ' '
+                + T('viz.cfd.stations', 'axial stations');
+            if (st.decimated) {
+                txt += '. ' + T('viz.cfd.decimated',
+                    'The endpoint thinned the field before it was sent; the '
+                    + 'scene shows exactly the cells that arrived.');
+            }
+            return txt;
+        }
+
+        /* Düğmeler + aralık yazısı. Durum satırına DOKUNMAZ (tıklama
+           sonucu metni ezilmesin); varsayılan metni yazmak için
+           `writeStatus` verilir. */
+        function cfdRefresh(writeStatus) {
+            var st = (viz && typeof viz.getCfdField === 'function')
+                ? viz.getCfdField() : null;
+            if (!st) cfdMissing = {};
+            var grup = el(p + '_cfd');
+            if (grup) grup.classList.toggle('active', !!st);
+            var m = st ? cfdMetricById(st.metric) : null;
+            var rng = el(p + '_cfd_range');
+            if (rng) {
+                rng.textContent = st
+                    ? (cfdNum(st.range.min) + ' … ' + cfdNum(st.range.max)
+                       + (m && m.unit ? ' ' + m.unit : ''))
+                    : '—';
+            }
+            cfdMetrics().forEach(function (mm) {
+                var b = el(p + '_cfd_m_' + mm.id);
+                if (!b) return;
+                b.disabled = !st || !!cfdMissing[mm.id];
+                b.classList.toggle('active', !!st && st.metric === mm.id);
+                b.title = T(mm.labelKey, mm.labelFallback)
+                    + (cfdMissing[mm.id]
+                        ? ' — ' + T('viz.cfd.notInPayload',
+                            'not present in the loaded field') : '');
+            });
+            var off = el(p + '_cfd_off');
+            if (off) off.disabled = !st;
+            cfdSig = cfdStateSig(st);
+            if (writeStatus) cfdSetStatus(cfdDefaultStatus(st));
+            return st;
+        }
+
+        /* Sahne durumu DEĞİŞTİYSE grubu tazele. onTick her karede çağrılır
+           (HUD_THROTTLE_MS ile seyreltilmiş); imza aynıysa DOM'a yazılmaz —
+           dönen bir gösterge ya da sahte ilerleme yoktur, yalnız gerçek
+           durum yansıtılır. */
+        function cfdSyncFromScene() {
+            var st = (viz && typeof viz.getCfdField === 'function')
+                ? viz.getCfdField() : null;
+            if (cfdStateSig(st) === cfdSig) return;
+            cfdRefresh(true);
+        }
+
+        cfdMetrics().forEach(function (mm) {
+            var b = el(p + '_cfd_m_' + mm.id);
+            if (!b) return;
+            b.onclick = function () {
+                var res = viz.setCfdMetric(mm.id);
+                if (res && res.ok) {
+                    cfdMissing[mm.id] = false;
+                    cfdRefresh(false);
+                    cfdSetStatus(cfdDefaultStatus(viz.getCfdField()));
+                } else {
+                    var reason = res && res.reason;
+                    if (reason && reason.code === 'missing_metric') {
+                        cfdMissing[mm.id] = true;
+                    }
+                    cfdRefresh(false);
+                    cfdSetStatus(cfdReasonText(reason));
+                }
+            };
+        });
+        var cfdOff = el(p + '_cfd_off');
+        if (cfdOff) cfdOff.onclick = function () {
+            var kalkti = viz.clearCfdField();
+            cfdRefresh(false);
+            cfdSetStatus(kalkti
+                ? T('viz.cfd.cleared',
+                    'The field layer was removed from the scene and the '
+                    + 'decorative layers came back.')
+                : T('viz.cfd.nothingToClear',
+                    'The scene carried no field layer, so nothing was '
+                    + 'removed.'));
+        };
+        cfdRefresh(true);
+        cfdSyncArmed = true;
 
         // --- Tasarım modu: slider → geometri önizlemesi (istemci tarafı) -----
         // Katı/sıvı için hibritteki /api/quick-geometry karşılığı YOKTUR; bu
@@ -597,6 +832,12 @@
                 var lab = el(p + '_dl_' + c.key);
                 if (lab) lab.innerHTML = TX(c.label);
             });
+            // CFD grubu: başlık + düğme title'ları + durum satırı yeni
+            // dilde yeniden yazılır (durum satırının kaynağı sahnenin
+            // GERÇEK durumudur, metin donmaz).
+            setText(p + '_cfd_k', T('viz.cfd.group', 'CFD FIELD'));
+            setText(p + '_cfd_off', T('viz.cfd.close', 'Close'));
+            cfdRefresh(true);
         }
 
         if (window.I18N && typeof window.I18N.onChange === 'function') {

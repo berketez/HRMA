@@ -8465,12 +8465,18 @@ CFD_RESOLUTION_WORST_CASE_S = {
     'standard': {'numba': 19.9, 'numpy': 31.8},
 }
 
-#: Yanıttaki alan bloğunun hücre tavanı. ÖLÇÜLDÜ (2026-08-16, JSON bayt
-#: sayımı): ham 120×24 alan bloğu (2880 hücre × 4 dizi) 232 KB. Tavan 1200
-#: hücreye çekilince 'standard' seviyesi eksenel yönde 120→50 kolona
-#: inceltilir ve blok 98 KB'ye iner (toplam yanıt 128 KB); 'coarse'
-#: (720 hücre, 58 KB) inceltmesiz geçer. İnceltme oranı ve SEÇİLEN İNDEKSLER
-#: yanıtta BEYAN edilir — panel hangi hücreleri aldığını bilir.
+#: Yanıttaki alan bloğunun hücre tavanı. TAZELENDİ (2026-08-17, parti 30 —
+#: alan bloğu ÜÇÜNCÜ büyüklüğü, temperature_K'yi taşımaya başladı; eski künye
+#: 4 dizilik blokla ölçülmüştü: 232 / 98 / 58 KB). YENİDEN ÖLÇÜLDÜ (gerçek uç
+#: yanıtından, JSON bayt sayımı, 1 KB = 1024 B): ham 120×24 alan bloğu
+#: (2880 hücre × 5 dizi) 291 KB. Tavan 1200 hücreye çekilince 'standard'
+#: seviyesi eksenel yönde 120→50 kolona inceltilir ve blok 123 KB'ye iner
+#: (toplam yanıt 166 KB); 'coarse' (720 hücre, 75 KB — toplam yanıt 112 KB)
+#: inceltmesiz geçer. TAVAN DEĞİŞMEDİ: 1200 HÜCRE sayısıdır, dizi sayısı
+#: değil — sıcaklık eklenmesi hücre bütçesini harcamaz, yalnız hücre başına
+#: bayt maliyetini büyütür (ölçülen: +55,5 / +23,1 / +14,0 KB). İnceltme
+#: oranı ve SEÇİLEN İNDEKSLER yanıtta BEYAN edilir — panel hangi hücreleri
+#: aldığını bilir.
 CFD_FIELD_MAX_CELLS = 1200
 
 #: Kalıntı geçmişi tavanı (nokta). ÖLÇÜLDÜ: yakınsamayan koşunun 20000
@@ -9138,6 +9144,12 @@ def api_cfd_nozzle():
 
     mach2d = np.asarray(sonuc['fields']['mach'], dtype=float)
     p2d = np.asarray(sonuc['fields']['pressure_Pa'], dtype=float)
+    # ÜÇÜNCÜ BÜYÜKLÜK (parti 30): çözücünün KENDİ sıcaklık alanı. İstemci
+    # tarafında Mach'tan ya da basınçtan türetme YAPILMAZ — türetmenin
+    # çözücünün ayrık alanını ne kadar ıskaladığı ölçüldü ve aşağıdaki
+    # beyanda sayısıyla duruyor. İkinci bir inceltme kuralı TANIMLANMAZ:
+    # aynı 'kes' dilimi, aynı [axial][radial] sırası.
+    t2d = np.asarray(sonuc['fields']['temperature_K'], dtype=float)
     z2d = np.asarray(sonuc['z_centers_m'], dtype=float)
     r2d = np.asarray(sonuc['r_centers_m'], dtype=float)
     # İnceltme YALNIZ eksenel yönde: radyal yön beyaz listede zaten dar
@@ -9152,6 +9164,7 @@ def api_cfd_nozzle():
         'r_m': r2d[kes].tolist(),
         'mach': mach2d[kes].tolist(),
         'pressure_Pa': p2d[kes].tolist(),
+        'temperature_K': t2d[kes].tolist(),
         'shape': [int(idx_i.size), int(idx_j.size)],
         'grid_shape': [int(ni), int(nj)],
         'axial_indices': idx_i.tolist(),
@@ -9163,15 +9176,47 @@ def api_cfd_nozzle():
             f'cell-centred field block for contour plotting: every entry is a '
             f'[axial][radial] nested list, index 0 on the radial axis is the '
             f'cell next to the symmetry axis and the last index is the cell '
-            f'next to the wall. Values are the solver cells as returned (no '
-            f'interpolation, no smoothing). If the cell count exceeds '
+            f'next to the wall. THREE quantities are carried on that one '
+            f'grid: mach, pressure_Pa and temperature_K. Values are the '
+            f'solver cells as returned (no interpolation, no smoothing), and '
+            f'all three come out of the SAME sliced cells, so index [i][j] '
+            f'means the same cell in every array. '
+            f'temperature_K IS THE SOLVER\'S OWN FIELD, NOT AN ISENTROPIC '
+            f'RECONSTRUCTION: hrma/cfd/steady.py takes the converged '
+            f'conservative state, converts it to primitives '
+            f'(cons_to_prim_axisym) and forms the STATIC temperature from the '
+            f'ideal gas law of that same primitive vector, T = p / (rho * R) '
+            f'- the identical p that is published here as pressure_Pa, and '
+            f'the identical state whose sound speed sets the published mach. '
+            f'It is published because the client cannot rebuild it from what '
+            f'was already here. MEASURED on the converged 60x12 base run of '
+            f'this endpoint (real sampled conical contour, P0=2 MPa, T0=3000 '
+            f'K, gamma=1.2, R=350): rebuilding T from the published mach '
+            f'through the total-temperature relation T0/(1+(gamma-1)/2*M^2) '
+            f'misses the solver field by up to 1.50% relative, and rebuilding '
+            f'it from the published pressure through the isentropic relation '
+            f'T0*(p/P0)^((gamma-1)/gamma) misses by up to 4.03%; the second '
+            f'route is not merely inaccurate but INVALID once a shock has '
+            f'been crossed, because the stagnation pressure it assumes has '
+            f'dropped there while it keeps using P0. '
+            f'THESE ARE STATIC TEMPERATURES and the reservoir bound belongs '
+            f'to CONVERGED runs only: measured max on the converged base run '
+            f'is 0.9989*T0, whereas a run that does not settle can overshoot '
+            f'it (measured: driving the same contour with Pb=1.2 MPa runs to '
+            f'the iteration ceiling and peaks at 1.0535*T0). Read the '
+            f'"converged" flag next to this block before trusting the field. '
+            f'If the cell count exceeds '
             f'{CFD_FIELD_MAX_CELLS} the block is thinned by uniform index '
             f'selection with both ends kept, and the kept indices are listed '
             f'here so the client knows exactly which cells it received. '
             f'Thinning is axial only: the radial direction is never sparsened '
-            f'so the wall-adjacent cell row stays intact. Measured: the raw '
-            f'120x24 block is 232 KB of JSON, the thinned 50x24 block 98 KB; '
-            f'the 60x12 "coarse" block (58 KB) needs no thinning.'),
+            f'so the wall-adjacent cell row stays intact. Measured JSON bytes '
+            f'of this block as the endpoint returns it (this declaration '
+            f'included, 1 KB = 1024 B): the raw 120x24 block is 291 KB, the '
+            f'thinned 50x24 block 123 KB; the 60x12 "coarse" block (75 KB) '
+            f'needs no thinning. Carrying temperature cost 55.5 / 23.1 / 14.0 '
+            f'KB of those three figures respectively (the same blocks without '
+            f'it measured 235, 100 and 61 KB).'),
     }
 
     # --- GİRİŞ KOŞULLANDIRMA + İTERASYON BÜTÇESİ (ölçülmüş, hüküm DEĞİL) --
