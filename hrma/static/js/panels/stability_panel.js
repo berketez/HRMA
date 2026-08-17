@@ -351,9 +351,18 @@
                             'Feed line flow area [m2] — optional group'],
         feed_line_mass_flow_kg_s: ['panel.stab.fieldFeedMdot',
                                    'Feed line mass flow [kg/s] — optional group'],
+        // Uç sözleşmesi (parti 28 A2, gerekçeli sapma): τ_f = L·ṁ/(2A·ΔP_inj)
+        // — ΔP_inj grubun ZORUNLU üyesidir (J oranından türetilemez, uç onsuz
+        // 422 döner); yoğunluk ise birinci mertebe atalet formülüne HİÇ
+        // girmez, uç onu yalnız YANKI olarak taşır. Bu yüzden ΔP_inj zorunlu,
+        // yoğunluk isteğe bağlı: etkisiz bir alanı zorunlu tutmak kullanıcıya
+        // sonucu değiştirmeyen sayı girdirtmek olurdu.
+        feed_line_dp_injector_Pa: ['panel.stab.fieldFeedDp',
+                                   'Injector pressure drop dP_inj [Pa] — '
+                                   + 'required with the feed-line group'],
         feed_line_density_kg_m3: ['panel.stab.fieldFeedRho',
                                   'Propellant density in the line [kg/m3] — '
-                                  + 'optional group'],
+                                  + 'optional, echoed only'],
     };
     function fieldLabel(id) {
         const rec = FIELD_LABELS[id];
@@ -398,6 +407,7 @@
     //: Besleme hattı grubunun üyeleri (kesit: alan VEYA çap).
     const FEED_FIELDS = ['feed_line_length_m', 'feed_line_diameter_mm',
                          'feed_line_area_m2', 'feed_line_mass_flow_kg_s',
+                         'feed_line_dp_injector_Pa',
                          'feed_line_density_kg_m3'];
 
     //: Son koşuya GÖNDERİLEN motor durumu anlık görüntüsü: mod haritası ve
@@ -473,8 +483,11 @@
             if (!isNum(v.feed_line_mass_flow_kg_s)) {
                 groupMissing.push('feed_line_mass_flow_kg_s');
             }
-            if (!isNum(v.feed_line_density_kg_m3)) {
-                groupMissing.push('feed_line_density_kg_m3');
+            // ΔP_inj zorunlu (uç sözleşmesi: τ_f = L·ṁ/(2A·ΔP_inj), uç onsuz
+            // 422 missing_fields döner); yoğunluk BİLEREK burada yok — uç onu
+            // yalnız yankılar, eksikliği isteği durdurmaz.
+            if (!isNum(v.feed_line_dp_injector_Pa)) {
+                groupMissing.push('feed_line_dp_injector_Pa');
             }
             if (groupMissing.length) {
                 throw new Error(TF('panel.stab.feedIncomplete',
@@ -485,7 +498,10 @@
             }
             const line = { length_m: v.feed_line_length_m,
                            mass_flow_kg_s: v.feed_line_mass_flow_kg_s,
-                           density_kg_m3: v.feed_line_density_kg_m3 };
+                           dp_injector_Pa: v.feed_line_dp_injector_Pa };
+            if (isNum(v.feed_line_density_kg_m3)) {
+                line.density_kg_m3 = v.feed_line_density_kg_m3;
+            }
             if (isNum(v.feed_line_area_m2)) line.area_m2 = v.feed_line_area_m2;
             else line.diameter_mm = v.feed_line_diameter_mm;
             body.feed_line = line;
@@ -1245,8 +1261,14 @@
             ['feed_line_mass_flow_kg_s',
              'Feed line mass flow [kg/s] — optional group', '', 'any',
              'panel.stab.fieldFeedMdot'],
+            // Parti 28 artçısı: ΔP_inj grubun ZORUNLU üyesi (uç sözleşmesi
+            // τ_f = L·ṁ/(2A·ΔP_inj)); yoğunluk isteğe bağlı, uçta yalnız
+            // yankılanır — buildChugBody'deki grup kapısıyla aynı sözleşme.
+            ['feed_line_dp_injector_Pa',
+             'Injector pressure drop dP_inj [Pa] — required with the '
+             + 'feed-line group', '', 'any', 'panel.stab.fieldFeedDp'],
             ['feed_line_density_kg_m3',
-             'Propellant density in the line [kg/m3] — optional group',
+             'Propellant density in the line [kg/m3] — optional, echoed only',
              '', 'any', 'panel.stab.fieldFeedRho'],
         ],
 

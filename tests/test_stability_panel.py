@@ -861,8 +861,13 @@ class TestIstekGovdesi:
             'yarım besleme grubuyla istek gönderilmiş — eksik üyeler '
             'uydurulamaz')
         durum = out['nodes']['ac_status']['text']
-        assert 'mass_flow' in durum and 'density' in durum, (
+        # Parti 28 artçısı: uç sözleşmesi dp_injector_Pa'yı ZORUNLU yaptı,
+        # yoğunluğu yankıya düşürdü — eksik listesi de o sözleşmeyi izler.
+        assert 'mass_flow' in durum and 'dp_injector' in durum, (
             f'grubun eksik üyeleri adıyla yazılmamış: {durum!r}')
+        assert 'density' not in durum, (
+            'yoğunluk eksik SAYILMAMALI — uç onu yalnız yankılar; etkisiz '
+            f'alanı zorunlu göstermek kullanıcıya sayı uydurtur: {durum!r}')
 
     def test_tau_f_ile_grup_cakisirsa_gonderilmez(self, tmp_path, motor_sivi):
         dp, tau, tau_c = sivi_chug_girdileri(motor_sivi)
@@ -883,12 +888,16 @@ class TestIstekGovdesi:
                         editFields=[['feed_line_length_m', 2.5],
                                     ['feed_line_diameter_mm', 25],
                                     ['feed_line_mass_flow_kg_s', 3.2],
+                                    ['feed_line_dp_injector_Pa', 2.0e6],
                                     ['feed_line_density_kg_m3', 810]],
                         runs=1)
         govde = out['fetchCalls'][0]['body']
         hat = govde.get('feed_line')
+        # Parti 28 artçısı: dp_injector_Pa grubun zorunlu üyesi (uç
+        # sözleşmesi); yoğunluk isteğe bağlı ve verildiyse yankı için taşınır.
         assert hat == {'length_m': 2.5, 'diameter_mm': 25,
-                       'mass_flow_kg_s': 3.2, 'density_kg_m3': 810}, (
+                       'mass_flow_kg_s': 3.2, 'dp_injector_Pa': 2.0e6,
+                       'density_kg_m3': 810}, (
             f'besleme grubu sözleşme biçiminde gitmemiş: {hat!r}')
         assert 'tau_f_s' not in govde
 
@@ -1232,6 +1241,82 @@ class TestCanliUc:
                         runs=1)
         assert out['history'][0]['ok'] is True
         assert cizim(out, 'stab_neutral') is not None
+
+
+# ===========================================================================
+# Parti 28 artçısı — panel feed grubu ↔ uç sözleşmesi SÜRÜKLENME bekçisi.
+#
+# ÖLÇÜLEN sınıf: dalga içinde uç sözleşmesi gerekçeyle değişti
+# (dp_injector_Pa zorunlu oldu, yoğunluk yankıya düştü) ama workflow
+# ajanına SendMessage ulaşmadığı için panel eski sözleşmeyle indi — feed
+# grubu yolu her koşuda 422 yiyecekti. El birleştirmesi kapattı; bu iki
+# bekçi aynı sürüklenmenin bir daha SESSİZ kalmamasını sağlar.
+# ===========================================================================
+APP_PY = REPO_ROOT / 'hrma' / 'app.py'
+
+
+def _uc_feed_zorunlulari():
+    """app.py'nin feed_line ayrıştırıcısındaki missing.append adları."""
+    kaynak = read(APP_PY)
+    adlar = set(re.findall(r"missing\.append\('feed_line\.([^']+)'\)", kaynak))
+    assert adlar, 'app.py feed_line zorunlu üye listesi bulunamadı — bekçi kör'
+    return adlar
+
+
+def _panel_feed_zorunlulari():
+    """Panelin groupMissing.push adları (feed_line_ öneki düşürülmüş)."""
+    kaynak = strip_js_comments(read(PANEL_JS))
+    adlar = set(re.findall(r"groupMissing\.push\('feed_line_([^']+)'\)",
+                           kaynak))
+    assert adlar, 'panel groupMissing listesi bulunamadı — bekçi kör'
+    return adlar
+
+
+def test_panel_feed_grubu_uc_zorunlulariyla_ayni():
+    """Ucun zorunlu saydığı her feed alt alanı panelde de zorunlu olmalı.
+
+    Normalizasyon: uç 'length_m' der, panel 'feed_line_length_m' toplar;
+    alternatifli üye (area_m2 | diameter_mm) iki tarafta da tek kayıttır.
+    """
+    uc = {a.replace(' | feed_line.', ' | ') for a in _uc_feed_zorunlulari()}
+    panel = {a.replace(' | feed_line_', ' | ')
+             for a in _panel_feed_zorunlulari()}
+    assert uc == panel, (
+        'Panel feed grubu uç sözleşmesinden SÜRÜKLENMİŞ:\n'
+        f'  uç zorunluları : {sorted(uc)}\n'
+        f'  panel zorunluları: {sorted(panel)}\n'
+        'İki taraftan biri değiştiyse diğeri AYNI kalemde güncellenir.')
+
+
+def test_panel_gibi_kurulan_feed_istegi_ucta_200(client):
+    """CANLI kanıt: panelin kurduğu biçimdeki feed_line gövdesi 200 alır.
+
+    Gövde stability_panel.js buildChugBody'nin ürettiği ŞEKİLDE kurulur
+    (length_m + diameter_mm + mass_flow_kg_s + dp_injector_Pa; yoğunluk
+    bilerek YOK — uçta yalnız yankı). 200 + inertance_included beklenir.
+    """
+    yanit = client.post(UC, json={
+        'mode': 'chug', 'dp_ratio_j': 0.2, 'tau_s': 0.002, 'tau_c_s': 0.004,
+        'feed_line': {'length_m': 1.5, 'diameter_mm': 12.0,
+                      'mass_flow_kg_s': 3.4, 'dp_injector_Pa': 2.0e6},
+    })
+    assert yanit.status_code == 200, yanit.get_data(as_text=True)[:300]
+    govde = yanit.get_json()
+    assert govde['assessment']['inertance_included'] is True
+    assert isinstance(govde['assessment']['tau_f_s'], float)
+
+
+def test_dp_eksikken_uc_422_ve_alan_adiyla(client):
+    """Negatif kanıt: dp_injector_Pa'sız grup (SÜRÜKLENMENİN ta kendisi)
+    422 + makine-okur alan adı döner — panel bu alana sahip olmasaydı bu
+    istek kullanıcı yolunda her seferinde patlardı."""
+    yanit = client.post(UC, json={
+        'mode': 'chug', 'dp_ratio_j': 0.2, 'tau_s': 0.002, 'tau_c_s': 0.004,
+        'feed_line': {'length_m': 1.5, 'diameter_mm': 12.0,
+                      'mass_flow_kg_s': 3.4},
+    })
+    assert yanit.status_code == 422
+    assert 'feed_line.dp_injector_Pa' in yanit.get_json()['missing_fields']
 
 
 if __name__ == '__main__':
