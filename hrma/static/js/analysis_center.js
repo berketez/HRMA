@@ -227,7 +227,17 @@
           titleKey: 'ac.an.acousticModes',
           title: 'Acoustic mode table',
           plannedEndpoint: 'acoustic_modes',
-          motorTypes: ['hybrid', 'solid'] },
+          // 'liquid' F2b-2 göçüyle eklendi (parti 27): sıvı çözücü artık
+          // merkezî hrma.analysis.acoustic_modes modülünü GERÇEKTEN çağırıyor
+          // (liquid_rocket_engine.py üst-düzey import'u). Kod kanıtı bekçisi:
+          // tests/test_stability_panel.py — import satırı kaybolursa buradaki
+          // 'liquid' de kırmızı yanar.
+          motorTypes: ['hybrid', 'solid', 'liquid'] },
+        { componentId: 'chamber_acoustics', analysisId: 'combustion_stability',
+          titleKey: 'ac.an.combustionStability',
+          title: 'Combustion stability (feed-coupled chug loop)',
+          plannedEndpoint: '/api/analysis/combustion-stability',
+          motorTypes: ['hybrid', 'solid', 'liquid'] },
     ];
 
     const MOTOR_LABEL_KEYS = {

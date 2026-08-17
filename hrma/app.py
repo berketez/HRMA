@@ -1385,6 +1385,16 @@ def calculate():
         # Create engine instance with support for total impulse
         # Only pass user-provided values, let the engine use fuel-specific defaults
         engine = HybridRocketEngine(
+            # v2.6.27 parti 28: chug atalet kapıları — form kapıları
+            # advanced.html'de, motor _feed_line_inertance_inputs ikiziyle
+            # okur (uzunluk m, iç çap mm; bant dışı girdi _defaults_used
+            # beyanıyla düşer). Geçilmezse chug çevrimi ataletsiz koşar ve
+            # bunu beyan eder — sessiz varsayılan yok. Bekçiler:
+            # tests/test_stability_hibrit_chug.py (skip-armed uçtan uca) +
+            # tests/test_field_wiring_layer_b.py (ölü girdi taraması).
+            feed_line_length_m=data.get('feed_line_length_m'),
+            feed_line_inner_diameter_mm=data.get(
+                'feed_line_inner_diameter_mm'),
             thrust=data.get('thrust'),
             burn_time=data.get('burn_time'),
             total_impulse=data.get('total_impulse'),
@@ -2862,6 +2872,321 @@ def bolted_joint_analysis():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Yanma kararlılığı ucu (F2 API bağlaması, parti 28 / A2) — desen:
+# thermal_protection_analysis İKİZİ (mode kapısı + zorunlu alan kapısı +
+# 422 ``missing_fields`` + ValueError → 400). Çekirdek:
+# hrma/stability/{chug,damping}.py — bu katman HİÇBİR fizik hesabı yapmaz ve
+# kendi eklediği anahtarlarda hüküm TAŞIMAZ: ``assessment`` içindeki
+# ``verdict`` çekirdekten kapsam etiketiyle gelir (make_verdict), uç katmanın
+# kabuğunda 'verdict' bulunmadığı tests/test_api_combustion_stability.py'de
+# ``forbid_verdict_key`` bekçisiyle kilitlidir.
+# ---------------------------------------------------------------------------
+
+#: Mod bazlı ZORUNLU alanlar (uç sözleşmesi). Çekirdek imzalarının
+#: varsayılansız karşılığı — ölçüldü (``inspect.signature``):
+#:   assess_chug                 -> ['dp_ratio_j', 'tau_s', 'tau_c_s']
+#:   nozzle_damping_quasi_steady -> ['sound_speed_m_s', 'chamber_length_m',
+#:                                   'gamma', 'nozzle_entrance_mach']
+#: (``hrma/stability/chug.py`` ve ``hrma/stability/damping.py``.)
+#: Termal-koruma ucundan bilinçli fark: mode'un VARSAYILANI YOKTUR — iki mod
+#: tamamen ayrı fizik sorularıdır, sessizce birini seçmek uydurma varsayılan
+#: olurdu; mode'suz istek 400 alır.
+_CS_MODE_REQUIRED = {
+    'chug': ('dp_ratio_j', 'tau_s', 'tau_c_s'),
+    'damping': ('sound_speed_m_s', 'chamber_length_m', 'gamma',
+                'nozzle_entrance_mach'),
+}
+
+#: Nötr eğri örnekleme ızgarası: J ∈ [0,02, 0,48], 93 nokta (adım 0,005 —
+#: sözleşmenin "en az 60 örnek" şartının üstünde). Bant uçları çekirdeğin
+#: kendi tanım bandından: J > 0 (``_positive`` kapısı) ve
+#: J < CHUG_GAIN_J_MAX = 0,5 (nötr çözümün varlık şartı, ``chug.py``);
+#: 0,02/0,48 uçları iki tekilliğe (J → 0⁺'da τ/τ_c → 0, J → 0,5⁻'de +∞)
+#: yaklaşmadan durur. Yeni fizik eşiği DEĞİL, çizim bandıdır.
+_CS_NEUTRAL_J_MIN = 0.02
+_CS_NEUTRAL_J_MAX = 0.48
+_CS_NEUTRAL_N = 93
+
+#: Kök yeri taraması: işletme J'si çevresinde ±0,10 pencere, 41 nokta.
+#: Pencere merkezi [0,12, 0,38] bandına kıstırılır ki tarama daima nötr eğri
+#: bandının ([0,02, 0,48]) İÇİNDE kalsın — sözleşmedeki "[0,02, 0,48]
+#: kesişimi" böyle uygulanır (pencere bandın dışına taşacaksa kaydırılır,
+#: nokta atılmaz).
+_CS_LOCUS_HALF_WIDTH = 0.10
+_CS_LOCUS_N = 41
+
+
+def _combustion_stability_feed_tau(feed_line):
+    """``feed_line`` sözlüğünden τ_f + yankı beyanı türetir.
+
+    Uç sözleşmesinin alan adları: ``length_m``, ``area_m2`` |
+    ``diameter_mm``, ``mass_flow_kg_s`` (+ yalnız-yankı ``density_kg_m3``).
+    τ_f = ℓ·ṁ/(2·A·ΔP_inj) formülü ΔP_inj'siz KAPANMAZ
+    (``hrma.stability.chug.feed_inertance_time_constant`` imzası dördünü de
+    ister) ve ΔP burada başka hiçbir girdiden türetilemez: uç J = ΔP/P_c
+    oranını alır ama P_c'yi almaz, yoğunluk da birinci mertebe atalet formuna
+    girmez. Uydurma varsayılan yasağı gereği ``dp_injector_Pa`` bu yüzden
+    feed_line içinde ZORUNLU alınır (sözleşme listesinden gerekçeli sapma —
+    raporda beyanlı). Dairesel kesit çevirisi motor tarafıyla birebir aynı
+    formüldür (``liquid_rocket_engine._feed_line_inertance_inputs``:
+    A = π·(d/1000)²/4).
+
+    Returns:
+        (tau_f_s, echo, missing): eksik alan varsa (None, None, [adlar]).
+    """
+    if not isinstance(feed_line, dict):
+        raise ValueError(
+            "'feed_line' must be a JSON object with the line geometry "
+            "(length_m, area_m2 or diameter_mm, mass_flow_kg_s, "
+            "dp_injector_Pa).")
+    missing = []
+    length = _json_float(feed_line, 'length_m')
+    if length is None:
+        missing.append('feed_line.length_m')
+    area_given = _json_float(feed_line, 'area_m2')
+    d_mm = _json_float(feed_line, 'diameter_mm')
+    area = area_given
+    if area is None:
+        if d_mm is not None:
+            area = math.pi * (d_mm / 1000.0) ** 2 / 4.0
+        else:
+            missing.append('feed_line.area_m2 | feed_line.diameter_mm')
+    mdot = _json_float(feed_line, 'mass_flow_kg_s')
+    if mdot is None:
+        missing.append('feed_line.mass_flow_kg_s')
+    dp_pa = _json_float(feed_line, 'dp_injector_Pa')
+    if dp_pa is None:
+        missing.append('feed_line.dp_injector_Pa')
+    if missing:
+        return None, None, missing
+
+    from hrma.stability.chug import feed_inertance_time_constant
+    tau_f = feed_inertance_time_constant(
+        line_length_m=length, line_area_m2=area,
+        mass_flow_kg_s=mdot, dp_injector_Pa=dp_pa)
+    echo = {
+        'line_length_m': length,
+        'line_area_m2': area,
+        'mass_flow_kg_s': mdot,
+        'dp_injector_Pa': dp_pa,
+        '_basis': (
+            'Feed line geometry supplied by the API caller; tau_f = '
+            'l*mdot/(2*A*dP_inj) via '
+            'hrma.stability.chug.feed_inertance_time_constant. Where area_m2 '
+            'was not given, the flow area was derived from the circular '
+            'inner diameter (A = pi*d^2/4, same conversion as the liquid '
+            'engine). density_kg_m3, if echoed, is NOT used by this '
+            'first-order inertance form; it is echoed for the record only.'),
+    }
+    if area_given is None and d_mm is not None:
+        echo['line_diameter_mm'] = d_mm
+    density = _json_float(feed_line, 'density_kg_m3')
+    if density is not None:
+        echo['density_kg_m3'] = density   # yalnız yankı — hesaba girmez
+    return tau_f, echo, []
+
+
+def _combustion_stability_chug(data):
+    """chug modu gövdesi: assessment AYNEN + nötr eğri + kök yeri taraması."""
+    from hrma.stability.chug import (
+        assess_chug,
+        chug_neutral_tau_ratio,
+        chug_rightmost_root,
+    )
+
+    dp_ratio_j = _json_float(data, 'dp_ratio_j')
+    tau_s = _json_float(data, 'tau_s')
+    tau_c_s = _json_float(data, 'tau_c_s')
+
+    tau_f_s = _json_float(data, 'tau_f_s')
+    feed_line_raw = data.get('feed_line')
+    feed_echo = None
+    if tau_f_s is not None:
+        # τ_f doğrudan verildi; feed_line (varsa) türetimde KULLANILMAZ ve
+        # bu, yankının kendi beyanında açıkça yazılır.
+        if feed_line_raw is not None:
+            if not isinstance(feed_line_raw, dict):
+                raise ValueError("'feed_line' must be a JSON object.")
+            feed_echo = dict(feed_line_raw)
+            feed_echo['_basis'] = (
+                'Echo only: tau_f_s was supplied directly by the caller, so '
+                'this feed_line block was NOT used to derive it.')
+    elif feed_line_raw is not None:
+        tau_f_s, feed_echo, missing = _combustion_stability_feed_tau(
+            feed_line_raw)
+        if missing:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_combustion_stability_input',
+                'message': ("Mode 'chug' cannot derive the feed line "
+                            'inertance time constant without these inputs; '
+                            'they have no default.'),
+                'mode': 'chug',
+                'missing_fields': missing,
+            }), 422
+
+    assessment = assess_chug(dp_ratio_j=dp_ratio_j, tau_s=tau_s,
+                             tau_c_s=tau_c_s, tau_f_s=tau_f_s,
+                             feed_line=feed_echo)
+
+    # Nötr eğri — çekirdek fonksiyonun bire bir örneklenmesi. Ara katman
+    # hesabı yok: her nokta chug_neutral_tau_ratio(J) çağrısının kendisidir
+    # (bit-aynılık bekçisi tests/test_api_combustion_stability.py'de).
+    step = (_CS_NEUTRAL_J_MAX - _CS_NEUTRAL_J_MIN) / (_CS_NEUTRAL_N - 1)
+    curve_j = [_CS_NEUTRAL_J_MIN + i * step for i in range(_CS_NEUTRAL_N)]
+    neutral_curve = {
+        'dp_ratio_j': curve_j,
+        'tau_over_tau_c': [chug_neutral_tau_ratio(j) for j in curve_j],
+    }
+
+    # Kök yeri: işletme J'si çevresinde tarama — τ, τ_c, τ_f işletme
+    # noktasının DEĞERLERİYLE sabit tutulur, yalnız J taranır. Çekirdeğin
+    # reddettiği (ValueError) ya da kalıntı denetimini geçemeyen (None)
+    # nokta ATLANIR ve skipped_points'te adıyla beyan edilir; uydurma sayı
+    # yayımlanmaz.
+    j_op = assessment['dp_ratio_j']
+    tau = assessment['tau_s']
+    tau_c = assessment['tau_c_s']
+    tau_f = assessment['tau_f_s'] if assessment['tau_f_s'] else 0.0
+    center = min(max(j_op, _CS_NEUTRAL_J_MIN + _CS_LOCUS_HALF_WIDTH),
+                 _CS_NEUTRAL_J_MAX - _CS_LOCUS_HALF_WIDTH)
+    locus_step = 2.0 * _CS_LOCUS_HALF_WIDTH / (_CS_LOCUS_N - 1)
+    locus_j, locus_sigma, locus_freq, skipped = [], [], [], []
+    for i in range(_CS_LOCUS_N):
+        j = center - _CS_LOCUS_HALF_WIDTH + i * locus_step
+        try:
+            root = chug_rightmost_root(j, tau, tau_c, tau_f)
+        except ValueError as exc:
+            skipped.append({'dp_ratio_j': j, 'reason': str(exc)})
+            continue
+        if root is None:
+            skipped.append({'dp_ratio_j': j, 'reason': (
+                'the continued root did not meet the residual check '
+                '(chug_rightmost_root returned None); no number is '
+                'fabricated for this point.')})
+            continue
+        locus_j.append(j)
+        locus_sigma.append(float(root.real))
+        locus_freq.append(abs(float(root.imag)) / (2.0 * math.pi))
+
+    return jsonify(sanitize_json_values({
+        'status': 'ok',
+        'mode': 'chug',
+        'assessment': assessment,
+        'neutral_curve': neutral_curve,
+        'root_locus': {
+            'dp_ratio_j': locus_j,
+            'sigma_1_s': locus_sigma,
+            'frequency_hz': locus_freq,
+            'skipped_points': skipped,
+            '_basis': (
+                'Rightmost characteristic root traced over a J window of '
+                f'+/-{_CS_LOCUS_HALF_WIDTH:g} around the operating point '
+                f'(window centre clamped into [{_CS_NEUTRAL_J_MIN + _CS_LOCUS_HALF_WIDTH:g}, '
+                f'{_CS_NEUTRAL_J_MAX - _CS_LOCUS_HALF_WIDTH:g}] so the sweep '
+                f'stays inside the neutral-curve band '
+                f'[{_CS_NEUTRAL_J_MIN:g}, {_CS_NEUTRAL_J_MAX:g}]), with tau, '
+                'tau_c and tau_f held at their operating values. Points the '
+                'core rejects or cannot resolve are listed in '
+                'skipped_points, never fabricated.'),
+        },
+        'operating_point': {
+            'dp_ratio_j': assessment['dp_ratio_j'],
+            'tau_over_tau_c': assessment['tau_over_tau_c'],
+        },
+    }))
+
+
+def _combustion_stability_damping(data):
+    """damping modu gövdesi: lüle terimi + bütçe, çekirdek sözlükleri AYNEN."""
+    from hrma.stability.damping import (
+        damping_budget,
+        nozzle_damping_quasi_steady,
+    )
+    nozzle = nozzle_damping_quasi_steady(
+        sound_speed_m_s=_json_float(data, 'sound_speed_m_s'),
+        chamber_length_m=_json_float(data, 'chamber_length_m'),
+        gamma=_json_float(data, 'gamma'),
+        nozzle_entrance_mach=_json_float(data, 'nozzle_entrance_mach'))
+    budget = damping_budget([nozzle])
+    return jsonify(sanitize_json_values({
+        'status': 'ok',
+        'mode': 'damping',
+        'nozzle': nozzle,
+        'budget': budget,
+    }))
+
+
+@app.route('/api/combustion-stability', methods=['POST'])
+@app.route('/api/analysis/combustion-stability', methods=['POST'])
+def combustion_stability_analysis():
+    """Yanma kararlılığı analizi (iki mod: chug + damping).
+
+    Girdi (JSON): {'mode': 'chug' | 'damping', ...mod parametreleri}.
+
+    mode='chug' (ZORUNLU: dp_ratio_j, tau_s, tau_c_s):
+      Opsiyonel tau_f_s VEYA feed_line {length_m, area_m2 | diameter_mm,
+      mass_flow_kg_s, dp_injector_Pa (+ yalnız-yankı density_kg_m3)} —
+      τ_f, hrma.stability.chug.feed_inertance_time_constant ile türetilir
+      ve yankısı beyanlı taşınır.
+      Yanıt 200: {status:'ok', mode:'chug',
+        assessment: assess_chug() sözlüğü AYNEN (yeniden adlandırma yok;
+        içindeki verdict çekirdekten kapsam etiketli gelir, bu uç kendi
+        hüküm alanı EKLEMEZ),
+        neutral_curve: {dp_ratio_j, tau_over_tau_c} (93 örnek,
+        chug_neutral_tau_ratio bire bir),
+        root_locus: {dp_ratio_j, sigma_1_s, frequency_hz, skipped_points}
+        (chug_rightmost_root, işletme J'si çevresinde tarama),
+        operating_point: {dp_ratio_j, tau_over_tau_c}}.
+
+    mode='damping' (ZORUNLU: sound_speed_m_s, chamber_length_m, gamma,
+    nozzle_entrance_mach):
+      Yanıt 200: {status:'ok', mode:'damping',
+        nozzle: nozzle_damping_quasi_steady() sözlüğü AYNEN,
+        budget: damping_budget([lüle terimi]) sözlüğü AYNEN}.
+
+    Eksik zorunlu alanda 422 + ``missing_fields`` (termal-koruma ucunun
+    sözleşmesi); bilinmeyen/eksik mode ve çekirdeğin her ValueError'ı 400.
+    Mode'un varsayılanı BİLEREK yoktur (iki ayrı fizik sorusu; sessiz seçim
+    uydurma varsayılan olurdu).
+    """
+    try:
+        data = request.json or {}
+        mode = data.get('mode')
+        if mode not in _CS_MODE_REQUIRED:
+            raise ValueError(
+                f"Unknown mode {mode!r}. "
+                f"Available: {sorted(_CS_MODE_REQUIRED)}")
+
+        # --- ZORUNLU ALAN KAPISI (termal-koruma deseni) -------------------
+        # Eksik zorunlu girdi ham çekirdek ValueError'ı olarak 400'e
+        # düşmesin; bu makine-okur bir istemci hatasıdır (422) ve panel
+        # missing_fields listesini alanlara eşler.
+        missing = [key for key in _CS_MODE_REQUIRED[mode]
+                   if data.get(key) in (None, '')]
+        if missing:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_combustion_stability_input',
+                'message': (f"Mode '{mode}' cannot be analysed without these "
+                            'inputs; they have no default.'),
+                'mode': mode,
+                'missing_fields': missing,
+            }), 422
+
+        if mode == 'chug':
+            return _combustion_stability_chug(data)
+        return _combustion_stability_damping(data)
+    except ValueError as e:
+        # Çekirdeğin geçerlilik beyanı (J/τ/γ kapıları, sayısal menzil
+        # kapısı) — metin aynen iletilir ki kullanıcı NEDENİ görsün.
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 # ---------------------------------------------------------------------------

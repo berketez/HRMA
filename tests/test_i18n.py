@@ -317,6 +317,10 @@ TECH_TOKENS = (
     'HTPB', 'APCP', 'LOX', 'RP-1', 'LH2', 'N2O', 'H2O2', 'PMMA', 'ABS',
     'Isp', 'c*', 'CF', 'Kn', 'L*', 'STL', 'STEP', 'DXF', 'PDF', 'CSV',
     'JSON', 'CAD', '3D', '2D', '3B', 'HRMA', 'CFD', 'RPA', 'ISA', 'SI',
+    # Parti 28 (kararlılık paneli): eksen/satır etiketleri saf sembol —
+    # iki dilde de aynı yazılır, çevrilirse yanlış olur. Uzun olan önce
+    # (replace alt-dizi çalışır; 'tau_c' 'tau'dan önce elenmeli).
+    'alpha_N', 'dP_inj', 'R_crit', 'tau_c', 'tau', 'Pc',
 )
 
 # İki dilde aynı yazılan sık kelimeler (çeviri hatası değil).
@@ -495,6 +499,10 @@ def _looks_translated(en_value, tr_value):
     if en_value != tr_value:
         return True
     text = tr_value
+    # {yer_tutucu} şablon alanları görüntü metni değil biçim sözleşmesidir
+    # ('{verdict} — {scope}' gibi): içindeki ad çalışma anında değerle
+    # değiştirilir, çevrilirse biçimleyici anahtarı bulamaz. Taramadan düş.
+    text = re.sub(r'\{[a-zA-Z_][a-zA-Z_0-9]*\}', ' ', text)
     for token in TECH_TOKENS:
         text = text.replace(token, ' ')
     words = [w for w in re.findall(r'[A-Za-zÇĞİÖŞÜçğıöşü]{3,}', text)

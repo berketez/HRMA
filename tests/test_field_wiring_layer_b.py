@@ -79,6 +79,18 @@ HYBRID_CONTEXTS = {
     # oynatmaz ve alan YALANCI "yalnız-yankı" görünür. Dal kurulmadan ölçülen
     # alan yanlış hüküm verir — star_points / slot_width ile aynı sınıf.
     'wind_direction': {'wind_speed': 15.0, 'wind_direction': 90.0},
+    # v2.6.27 yirmi sekizinci parti — chug atalet kapıları ÇİFT hâlde
+    # canlıdır: τ_f = L·ṁ/(2A·ΔP) hem hat uzunluğu hem iç çapı (kesiti)
+    # ister (hybrid_rocket_engine._feed_line_inertance_inputs; çekirdek
+    # hrma/stability/chug.feed_inertance_time_constant). Taban yükte ikisi
+    # de boş olduğundan alanı TEK başına sarsmak chug çevrimini ataletsiz
+    # bırakır ve alan YALANCI ölü görünür — wind_direction ile aynı sınıf.
+    # Ölçüldü (parti 28): 1,5 m + 12 mm → chug_loop.tau_f_s = 8,507e-4 s,
+    # inertance_included=true; tek alan → değişen yaprak sıfır.
+    'feed_line_length_m': {'feed_line_length_m': 1.5,
+                           'feed_line_inner_diameter_mm': 12.0},
+    'feed_line_inner_diameter_mm': {'feed_line_length_m': 1.5,
+                                    'feed_line_inner_diameter_mm': 12.0},
     'outer_diameter': {'injector_type': 'pintle', 'pintle_diameter': 25,
                        'outer_diameter': 50},
     'pintle_diameter': {'injector_type': 'pintle', 'pintle_diameter': 25,
@@ -787,7 +799,27 @@ def test_no_fabricated_constant_outputs(hybrid_report):
     # Eşik ölçülen sayının KENDİSİDİR — yeni bir sabit eklendiği anda
     # kırmızı. (Sayım HRMA_DUMP_CONSTANTS dökümünden okunacaksa dikkat:
     # döküm son satırı sonlandırmaz, 'wc -l' bir eksik sayar.)
-    assert len(suspicious) <= 4, (
+    #
+    # v2.6.27 yirmi sekizinci parti — eşik 4 -> 8 (ÖLÇÜLDÜ, gerekçeli):
+    # hibrit chug çevrimi bağlanınca (combustion_stability.chug_loop) dört
+    # YENİ sabit yaprak classical_rule_cross_check'ten geldi, ADIYLA
+    # (HRMA_DUMP_CONSTANTS dökümünden, ölçüldü):
+    #   * rule_min_ratio = 0,15 ve rule_recommended_ratio = 0,20 — klasik
+    #     oran kuralının YAYIMLANMIŞ eşikleri (acoustic_modes tek kaynağı,
+    #     künye CHUG_THRESHOLD_SOURCE: Sutton & Biblarz RPE 9. baskı
+    #     %15-25 bandı). Eşik sabiti eşik sabitidir: girdiyle oynamaması
+    #     kusur değil sözleşmedir.
+    #   * model_neutral_tau_over_tau_c_at_rule_min ve
+    #     model_neutral_tau_over_tau_c_at_rule_recommended — nötr eğrinin
+    #     TAM O eşiklerdeki kapalı-form değerleri; girdileri yukarıdaki iki
+    #     sabit olduğu için tanım gereği sabittirler. Çekirdek assess_chug
+    #     sözlüğü AYNEN taşınır (yeniden adlandırma yasağı).
+    # Dördü de sıvı motorun /calculate_liquid çıktısında AYNI adlarla zaten
+    # yayımlanıyor (parti 27 F2b-2); hibritte görünmeleri yeni uydurma
+    # değil, aynı beyanlı ailenin ikinci motora bağlanması. İm (marker)
+    # eklenMEDİ: ime taşımak alt-sınır bekçisini köreltirdi; sayımda
+    # kalmaları muhafazakâr yöndür.
+    assert len(suspicious) <= 8, (
         'Sabit sayisal cikti yapragi beklenenden fazla (%d). Yeni uydurma '
         'sabit eklenmis olabilir. Ilk 25:\n  %s'
         % (len(suspicious), '\n  '.join(suspicious[:25])))
@@ -802,8 +834,8 @@ def test_no_fabricated_constant_outputs(hybrid_report):
     #     eşik AYNI commit'te bu satırda düşürülür ve gerekçesi yazılır;
     #   * bir yaprak sessizce imlendiyse test bunu söyler.
     # Eşiğin iki yanı da ÖLÇÜLEN sayıdır, tahmin değil.
-    assert len(suspicious) >= 4, (
-        'Sabit yaprak sayisi esigin ALTINA dustu (%d < 4). Bu iyi haber '
+    assert len(suspicious) >= 8, (
+        'Sabit yaprak sayisi esigin ALTINA dustu (%d < 8). Bu iyi haber '
         'olabilir (borc odendi) ama sessiz kalamaz: ya urun kodunda bir '
         'girdi baglandi -> esigi bu satirda olculen yeni degere indirin ve '
         'gerekcesini yazin; ya da bir borc yapragi LEGITIMATE_CONSTANTS ile '

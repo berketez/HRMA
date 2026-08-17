@@ -38,6 +38,11 @@
             'adv.js.ofDefaultOtherPair': 'This default belongs to {defaultOxidizer} + {defaultFuel}, but {oxidizer} + {fuel} is selected. Use Find Optimum.',
             'adv.help.ofDependsOnPropellants': 'Optimum O/F depends on the fuel and oxidizer selected above. Pick both first, then use Find Optimum - the value is computed on the server for that pair.',
             'adv.label.parachuteAreaM2': 'Parachute Area (m2)',
+            // --- parti 28: chug atalet kapilari ---
+            'adv.label.feedLineInnerDiameter': 'Oxidizer Feed Line Inner Diameter',
+            'adv.label.feedLineLength': 'Oxidizer Feed Line Length',
+            'adv.tip.feedLineInnerDiameter': 'Inner diameter of the oxidizer feed line. The flow area for the feed-line inertance is derived from it as a circular duct. Leave empty if unknown - the chug analysis then runs without line inertia and declares that assumption.',
+            'adv.tip.feedLineLength': 'Oxidizer feed-line length from the tank outlet to the injector manifold. Together with the inner diameter it sets the feed-line inertance, which switches the chug (low-frequency) stability loop to its second-order form. Leave empty if unknown - the chug analysis then runs without line inertia and declares that assumption instead of guessing a layout.',
             'adv.label.parachuteCd': 'Parachute Cd',
             'adv.label.parachuteDeployDelayS': 'Deploy Delay after Apogee (s)',
             'adv.tip.parachuteAreaM2': 'Projected (canopy) area of the recovery parachute. Descent velocity scales as 1/sqrt(area). Leave empty to keep the solver assumption, which is reported as an assumption in the results.',
@@ -716,6 +721,11 @@
             'adv.js.ofDefaultOtherPair': 'Bu varsayılan {defaultOxidizer} + {defaultFuel} çiftine aittir, oysa {oxidizer} + {fuel} seçili. Find Optimum\'u kullanın.',
             'adv.help.ofDependsOnPropellants': 'Optimum O/F, yukarıda seçilen yakıt ve oksitleyiciye bağlıdır. Önce ikisini seçin, sonra Find Optimum\'u kullanın — değer o çift için sunucuda hesaplanır.',
             'adv.label.parachuteAreaM2': 'Paraşüt Alanı (m2)',
+            // --- parti 28: chug atalet kapilari ---
+            'adv.label.feedLineInnerDiameter': 'Oksitleyici Besleme Hattı İç Çapı',
+            'adv.label.feedLineLength': 'Oksitleyici Besleme Hattı Uzunluğu',
+            'adv.tip.feedLineInnerDiameter': 'Oksitleyici besleme hattının iç çapı. Hat ataleti için akış kesiti bu çaptan dairesel kanal kabulüyle türetilir. Bilinmiyorsa boş bırakın - chug analizi hat ataletsiz koşar ve bu varsayımı beyan eder.',
+            'adv.tip.feedLineLength': 'Tank çıkışından enjektör manifolduna kadar oksitleyici besleme hattı uzunluğu. İç çapla birlikte hat ataletini belirler; bu da chug (alçak frekans) kararlılık çevrimini ikinci mertebe formuna geçirir. Bilinmiyorsa boş bırakın - chug analizi hat ataletsiz koşar ve yerleşim uydurmak yerine bu varsayımı beyan eder.',
             'adv.label.parachuteCd': 'Paraşüt Cd',
             'adv.label.parachuteDeployDelayS': 'Tepe Sonrası Açılma Gecikmesi (s)',
             'adv.tip.parachuteAreaM2': 'Kurtarma paraşütünün izdüşüm (kubbe) alanı. İniş hızı 1/√alan ile ölçeklenir. Boş bırakılırsa çözücü varsayımı sürer ve sonuçlarda varsayım olarak beyan edilir.',

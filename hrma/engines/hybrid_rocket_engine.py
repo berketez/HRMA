@@ -184,6 +184,18 @@ CLOSURE_JOINT_DEFAULTS = {
 # İstasyon dizisi yanıt boyutu tavanı (port_history/blowdown deseni).
 NOZZLE_FLOW_MAX_POINTS = 120
 
+# --- Chug atalet kapıları (F2b hibrit ayağı, parti 28 ikizi) ---------------
+# Anahtar adları hibritin YAYIMLANMIŞ adlarıdır (feed_water_hammer bloğunun
+# required_inputs listesi bu adları 2026-08-05'ten beri duyuruyor):
+# feed_line_length_m + feed_line_inner_diameter_mm. Sıvı motorun aynı kanalı
+# feed_line_diameter_mm adını taşır — AD AYRIŞMASI bilinçli olarak korunur
+# (yayımlanmış sözleşme kırılmaz; birleştirme ayrı bir karar, bkz. defter).
+# Bantlar sıvıdaki _override_val çağrılarıyla BİREBİR aynıdır
+# (liquid_rocket_engine._feed_line_inertance_inputs: 0,05-50 m; 0,5-500 mm);
+# çapraz eşitlik bekçisi tests/test_stability_hibrit_chug.py içindedir.
+FEED_LINE_LENGTH_RANGE_M = (0.05, 50.0)
+FEED_LINE_INNER_DIAMETER_RANGE_MM = (0.5, 500.0)
+
 
 # ---------------------------------------------------------------------------
 # TASARIM ÖZETİ DURUM SÖZLÜĞÜ (Faz 4B, bulgu B1/B2/A3)
@@ -447,7 +459,8 @@ class HybridRocketEngine:
                  safety_factor=None, chamber_length_override=None,
                  nozzle_material=None, ambient_temperature=None,
                  plate_thickness=None, orifice_inlet=None,
-                 launch_site=None, closure_bolt_count=None):
+                 launch_site=None, closure_bolt_count=None,
+                 feed_line_length_m=None, feed_line_inner_diameter_mm=None):
         
         # Tasarım uyarıları (v2.6.2): kullanıcıya ULAŞAN kanal. Liste her
         # şeyden ÖNCE kurulur; aksi hâlde erken üretilen uyarılar kaybolur
@@ -511,6 +524,17 @@ class HybridRocketEngine:
         # NOT_MODELLED beyanıyla eksik girdinin ADINI söyler.
         self.closure_bolt_count = self._resolve_closure_bolt_count(
             closure_bolt_count)
+
+        # --- Besleme hattı atalet kapıları (v2.6.27, F2b hibrit chug) ------
+        # Sıvıdaki karar 5'in ikizi: hat uzunluğu/çapı ÇÖZÜLMEZ ve
+        # VARSAYILANI YOKTUR. İkisi de verilirse chug çevrimi ikinci mertebe
+        # (hat ataletli) forma geçer; verilmezse ataletsiz koşar ve bunu
+        # beyan eder (uydurma yerleşim yasak). Anahtar adları hibritin
+        # yayımlanmış adlarıdır — gerekçe FEED_LINE_LENGTH_RANGE_M yorumunda.
+        self.feed_line_length_m = self._resolve_feed_line_length(
+            feed_line_length_m)
+        self.feed_line_inner_diameter_mm = \
+            self._resolve_feed_line_inner_diameter(feed_line_inner_diameter_mm)
 
         # --- Fırlatma sahası girdisi (v2.6.27, yol haritası A8) -------------
         # resolve_launch_site() çıktısı ya da en az {'elevation_m'} veya
@@ -1066,6 +1090,50 @@ class HybridRocketEngine:
                 f'closure_bolt_count(out_of_range:{n})')
             return None
         return n
+
+    def _resolve_feed_line_length(self, value):
+        """Besleme hattı uzunluğunu [m] doğrular; verilmezse/geçersizse None.
+
+        None dönmesi hata değil BEYAN sebebidir: chug çevrimi ataletsiz
+        koşar ve bunu söyler. Bant dışı değer sessizce kırpılmaz —
+        ``_defaults_used`` kaydıyla düşürülür (closure_bolt_count deseni).
+        """
+        if value is None or value == '':
+            return None
+        try:
+            length = float(value)
+        except (TypeError, ValueError):
+            self._defaults_used.append(
+                f'feed_line_length_m(invalid:{value!r})')
+            return None
+        lo, hi = FEED_LINE_LENGTH_RANGE_M
+        if not (np.isfinite(length) and lo <= length <= hi):
+            self._defaults_used.append(
+                f'feed_line_length_m(out_of_range:{length!r})')
+            return None
+        return length
+
+    def _resolve_feed_line_inner_diameter(self, value):
+        """Besleme hattı iç çapını [mm] doğrular; verilmezse/geçersizse None.
+
+        Akış kesiti bu çaptan DAİRESEL kesitle türetilir; dairesel olmayan
+        kanal için ikinci bir alan (m²) BİLEREK açılmadı (sıvıdaki
+        feed_line_area_m2 kanalının hibritte açılmaması ayrı karardır).
+        """
+        if value is None or value == '':
+            return None
+        try:
+            d_mm = float(value)
+        except (TypeError, ValueError):
+            self._defaults_used.append(
+                f'feed_line_inner_diameter_mm(invalid:{value!r})')
+            return None
+        lo, hi = FEED_LINE_INNER_DIAMETER_RANGE_MM
+        if not (np.isfinite(d_mm) and lo <= d_mm <= hi):
+            self._defaults_used.append(
+                f'feed_line_inner_diameter_mm(out_of_range:{d_mm!r})')
+            return None
+        return d_mm
 
     def _resolve_chamber_length_override(self, value):
         """Kullanıcının kamara boyu ezmesini [m] doğrular.
@@ -4412,7 +4480,13 @@ class HybridRocketEngine:
                 'diameter, no line velocity and no line length are computed '
                 'anywhere (the only feed element solved is the injector '
                 'orifice plan). Without a line there is no wave speed, no '
-                'Joukowsky pressure rise and no closure regime to report.'),
+                'Joukowsky pressure rise and no closure regime to report. '
+                'The chug loop (combustion_stability.chug_loop) can accept a '
+                'USER-SUPPLIED feed_line_length_m and '
+                'feed_line_inner_diameter_mm for its lumped inertance, but '
+                'water hammer additionally needs the wall thickness and the '
+                'valve closure time, which have no input channel in this '
+                'solver.'),
             'required_inputs': [
                 'feed_line_length_m',
                 'feed_line_inner_diameter_mm',
@@ -4906,25 +4980,258 @@ class HybridRocketEngine:
         return forbid_verdict_key(
             blok, 'hybrid combustion_stability.acoustic_response_threshold')
 
-    def _combustion_stability_block(self, basic_results):
-        """Yanma kararlılığı bloğu (F2b-1 hibrit ayağı) — iki yol, tek çekirdek.
+    def _feed_line_inertance_inputs(self, basic_results):
+        """Besleme hattı ataleti girdileri — sıvıdaki KARAR 5'in hibrit ikizi.
 
-        İki ayak birbirinden YAPISAL olarak farklıdır ve bu ayrım tasarım
+        Hat uzunluğu ve iç çapı ÇÖZÜLMEZ; kullanıcı ikisini de verirse chug
+        çevrimi ikinci mertebe (ataletli) forma geçer, vermezse ataletsiz
+        koşar ve bunu beyan eder. Hiçbir yerleşim varsayımı buraya
+        KOPYALANMAZ — uydurma varsayılan yasağı.
+
+        Sıvıdan İKİ bilinçli fark:
+          * debi TOPLAM değil OKSİTLEYİCİ debisidir — hibritte hattan yalnız
+            oksitleyici akar, yakıt katıdır ve grenden gelir;
+          * feed_line_area_m2 kanalı AÇILMAZ (sıvıda API kanalı olarak var);
+            kesit iç çaptan dairesel kesitle türetilir.
+
+        Returns:
+            (tau_f_s veya None, beyan sözlüğü veya None)
+        """
+        length = self.feed_line_length_m
+        d_mm = self.feed_line_inner_diameter_mm
+        if length is None or d_mm is None:
+            return None, None
+        area = np.pi * (float(d_mm) / 1000.0) ** 2 / 4.0
+        mdot_ox = basic_results.get('mdot_ox')
+        inj = basic_results.get('injector_design') or {}
+        dp_bar = inj.get('injection_pressure_drop_bar')
+        try:
+            dp_bar = float(dp_bar)
+        except (TypeError, ValueError):
+            dp_bar = None
+        if not (mdot_ox and np.isfinite(mdot_ox) and mdot_ox > 0) or \
+                not (dp_bar and np.isfinite(dp_bar) and dp_bar > 0):
+            return None, None
+        from hrma.stability.chug import feed_inertance_time_constant
+        tau_f = feed_inertance_time_constant(
+            line_length_m=float(length), line_area_m2=float(area),
+            mass_flow_kg_s=float(mdot_ox), dp_injector_Pa=dp_bar * 1e5)
+        return tau_f, {
+            'line_length_m': float(length),
+            'line_inner_diameter_mm': float(d_mm),
+            'line_area_m2': float(area),
+            'mass_flow_kg_s': float(mdot_ox),
+            'dp_injector_Pa': dp_bar * 1e5,
+            '_basis': (
+                'Feed line length and inner diameter supplied by the caller '
+                '(published hybrid input names feed_line_length_m / '
+                'feed_line_inner_diameter_mm; no layout default exists). The '
+                'flow area is the circular section of that diameter. The '
+                'mass flow is the OXIDIZER flow of this run — in a hybrid '
+                'only the oxidizer travels through a feed line, the fuel is '
+                'solid — and the pressure drop is the injector circuit drop '
+                'of the SAME run, consistent with the ratio J the chug '
+                'report uses.'),
+        }
+
+    def _oxidizer_atomisation_time(self, basic_results):
+        """(t_atomizasyon [s] | None, gerekçe) — sıvıdaki ikincil parçalanma ikizi.
+
+        Duyarlı zaman gecikmesi τ için hibrit çözümünde MEVCUT olan zaman
+        ölçeği, enjektör devre çözümünün kendi jetinden türeyen ikincil
+        (aerodinamik) parçalanma süresidir:
+
+            t_b = T*·d_jet/v_jet·√(ρ_sıvı/ρ_gaz)
+
+        Sıvı motordaki ``_atomisation_time`` ile AYNI bağıntı ve AYNI sabit
+        (T* = DROPLET_BREAKUP_TIME_CONST, Pilch & Erdman 1987; Nicholls
+        1972) — sabit oradan İTHAL edilir, ikinci bir kopya yazılmaz.
+        Jet çapı/hızı enjektör tasarım modelinin KENDİ çözümünden gelir;
+        çözüm yoksa süre uydurulmaz, None döner ve çağıran NOT_EVALUATED
+        beyanına düşer.
+        """
+        inj = basic_results.get('injector_design') or {}
+        d_jet_mm = inj.get('orifice_diameter_mm')
+        v_jet = inj.get('injection_velocity_m_s')
+        if not d_jet_mm or not v_jet:
+            return None, ('not_modelled: the injector circuit did not solve '
+                          'a jet diameter/velocity on this run, so the '
+                          'atomisation time scale is not resolved')
+        rho_l = getattr(self, '_inj_rho_ox', None)
+        if not (rho_l and np.isfinite(rho_l) and rho_l > 0):
+            return None, 'not_modelled: liquid oxidizer density unavailable'
+        mw = basic_results.get('molecular_weight')
+        t_c = basic_results.get('chamber_temperature')
+        p_c = basic_results.get('chamber_pressure')
+        try:
+            rho_gas = (float(p_c) * 1e5
+                       / ((8314.462618 / float(mw)) * float(t_c)))
+        except (TypeError, ValueError, ZeroDivisionError):
+            rho_gas = None
+        if not (rho_gas and np.isfinite(rho_gas) and rho_gas > 0):
+            return None, ('not_modelled: the chamber gas state (P_c, T_c, '
+                          'MW) did not produce a usable gas density')
+        from hrma.engines.liquid_rocket_engine import (
+            DROPLET_BREAKUP_TIME_CONST,
+        )
+        t_b = (DROPLET_BREAKUP_TIME_CONST * (float(d_jet_mm) * 1e-3)
+               / float(v_jet) * np.sqrt(float(rho_l) / rho_gas))
+        return float(t_b), (
+            f'secondary (aerodynamic) breakup time t = T*·d_jet/v_jet·'
+            f'sqrt(rho_l/rho_gas) with T* = {DROPLET_BREAKUP_TIME_CONST:g} '
+            f'(Pilch & Erdman 1987; Nicholls 1972 — the same constant the '
+            f'liquid engine imports, not a second copy); d_jet = '
+            f'{float(d_jet_mm):.3f} mm and v_jet = {float(v_jet):.1f} m/s '
+            f'come from the injector circuit solution of THIS run, the '
+            f'liquid density is the oxidizer injection density and the gas '
+            f'density is P_c/(R*T_c) of the same run')
+
+    def _chug_loop_block(self, basic_results):
+        """Gerçek chug çevrimi (hrma.stability.chug) + oran kuralıyla İLİŞKİ.
+
+        Sıvı motordaki ``_chug_loop_block`` deseninin hibrit ikizi. Oran
+        kuralı (ΔP/Pc eşiği, acoustic_modes.stability_report.chug — TEK
+        KAYNAK, burada tekrarlanmaz) yalnız enjektör kazancına bakar;
+        gecikmeyi (τ) ve kamara zaman sabitini (τ_c) HİÇ görmez. Çevrim
+        üçünü birden kullanır. İkisi çeliştiğinde HRMA birini diğerine
+        EZDİRMEZ: ikisi de yayımlanır ve ilişki ``rule_vs_loop`` alanında
+        ölçülür.
+
+        J değeri oran kuralının KENDİ ölçtüğü orandır (aynı sözlükten
+        okunur): kural ile çevrim aynı büyüklüğe iki ayrı sayı veremez.
+        """
+        rule = ((basic_results.get('acoustic_modes') or {})
+                .get('stability_report') or {}).get('chug') or {}
+        missing = []
+        dp_pc = rule.get('injector_dp_ratio') if rule.get('evaluated') else None
+        if not (dp_pc and np.isfinite(dp_pc) and dp_pc > 0):
+            dp_pc = None
+            missing.append('injector_dp_over_pc (J = dP_inj/Pc, from '
+                           'acoustic_modes.stability_report.chug)')
+        tau, tau_basis = self._oxidizer_atomisation_time(basic_results)
+        if tau is None:
+            missing.append(f'sensitive time lag tau ({tau_basis})')
+        l_star = basic_results.get('l_star_achieved')
+        if not (l_star and np.isfinite(l_star) and l_star > 0):
+            missing.append('l_star_achieved')
+            l_star = None
+        c_star = basic_results.get('c_star')
+        if not (c_star and np.isfinite(c_star) and c_star > 0):
+            missing.append('c_star_m_s')
+            c_star = None
+        gamma = basic_results.get('gamma')
+        if not (gamma and np.isfinite(gamma) and 1.0 < gamma < 2.0):
+            missing.append('gamma')
+            gamma = None
+        if missing:
+            return {
+                'status': 'NOT_EVALUATED',
+                'missing_inputs': missing,
+                '_basis': (
+                    'The oxidizer feed-coupled chug loop needs J, the '
+                    'sensitive time lag tau, L* and c*. One or more were not '
+                    'solved on this run, so no loop result is fabricated.'),
+            }
+
+        from hrma.stability.chamber import chamber_time_constant
+        from hrma.stability.chug import assess_chug
+
+        try:
+            tau_c = chamber_time_constant(l_star_m=float(l_star),
+                                          c_star_m_s=float(c_star),
+                                          gamma=float(gamma))
+            tau_f, feed_echo = self._feed_line_inertance_inputs(basic_results)
+            loop = assess_chug(dp_ratio_j=float(dp_pc), tau_s=tau,
+                               tau_c_s=tau_c['tau_c_s'], tau_f_s=tau_f,
+                               feed_line=feed_echo)
+        except Exception as exc:
+            return {
+                'status': 'NOT_EVALUATED',
+                'reason': f'the chug loop rejected the inputs: {exc}',
+                '_basis': ('No number is fabricated when the core refuses an '
+                           'input.'),
+            }
+
+        loop = dict(loop)
+        loop['status'] = 'modelled'
+        loop['chamber_time_constant'] = tau_c
+        loop['tau_c_source'] = (
+            'tau_c = L*/(c* Gamma^2) with the ACHIEVED L* of this run '
+            '(l_star_achieved = actual free chamber volume / throat area, '
+            'the volume the lumped chamber balance actually fills), the '
+            'delivered c* and the equilibrium gamma of the same run.')
+        loop['tau_source'] = (
+            'atomisation (secondary breakup) time of this run\'s OXIDIZER '
+            'injector solution, used as the sensitive time lag; its own '
+            'uncertainty propagates DIRECTLY into the verdict. This is a '
+            'CONSERVATIVE choice with a known direction: the sensitive lag '
+            'is only the pressure-sensitive part of the total delay, while '
+            'the breakup time is the full time scale, so substituting it '
+            'can only move the verdict toward "unstable", never away from '
+            'it (Crocco & Cheng, AGARDograph 8, 1956). ' + tau_basis)
+        # --- LFI ile ÇİFT SAYIM YOK beyanı (mekanizma kapsamı) -------------
+        loop['mechanism_scope'] = (
+            'oxidizer feed-coupled chug; the fuel-vaporisation LFI '
+            'mechanism is assessed separately in combustion_stability.lfi')
+        loop['mechanism_scope_basis'] = (
+            'Two DIFFERENT low-frequency mechanisms are published side by '
+            'side and neither includes the other: this loop closes through '
+            'the oxidizer feed line and injector (delta_mdot_ox responding '
+            'to delta_Pc through the orifice gain 1/(2J)), while the hybrid '
+            'LFI of Karabeyoglu et al. closes through the thermal lag of '
+            'fuel vaporisation in the port boundary layer and involves no '
+            'feed-line quantity. Both verdicts are scope-labelled so '
+            'neither can be read as covering the other mechanism.')
+        # --- oran kuralı ile çevrimin İLİŞKİSİ (ölçülür, varsayılmaz) ------
+        rule_status = rule.get('status')
+        rule_says_safe = rule_status in ('OK', 'MARGINAL')
+        loop_says_stable = loop.get('verdict') == 'stable'
+        loop['rule_vs_loop'] = {
+            'ratio_rule_status': rule_status,
+            'ratio_rule_source': 'acoustic_modes.stability_report.chug '
+                                 '(single source; not repeated here)',
+            'loop_verdict': loop.get('verdict'),
+            'agreement': ('agree' if rule_says_safe == loop_says_stable
+                          else 'disagree'),
+            'interpretation': (
+                'The classical ratio rule tests ONLY the injector gain '
+                'J = dP_inj/Pc; it is blind to the sensitive time lag tau '
+                'and to the chamber time constant tau_c, so it cannot '
+                'distinguish a fast-burning large chamber from a '
+                'slow-burning small one. The loop uses all three. Where the '
+                'two disagree, HRMA publishes BOTH and lets neither '
+                'override the other: the loop is the model with more '
+                'physics, but its verdict is only as good as tau (an '
+                'atomisation correlation, not a measurement), while the '
+                'rule is an engineering rule of thumb with decades of '
+                'practice behind it and no explicit validity envelope.'),
+        }
+        return loop
+
+    def _combustion_stability_block(self, basic_results):
+        """Yanma kararlılığı bloğu (F2b-1 hibrit ayağı) — üç yol, tek çekirdek.
+
+        Ayaklar birbirinden YAPISAL olarak farklıdır ve bu ayrım tasarım
         belgesi §3.0'ın kendisidir:
 
           * ``lfi`` — çevrimin KAPANDIĞI yer: gecikme de kazanç da çözücünün
             kendi büyüklüklerinden gelir, bu yüzden burada HÜKÜM verilir
             (kapsam etiketiyle, çekirdekten olduğu gibi taşınarak).
+          * ``chug_loop`` — çevrimin KAPANDIĞI ikinci yer (v2.6.27, sıvı
+            ayağının ikizi): oksitleyici besleme kuplajı; hüküm kapsam
+            etiketlidir ve LFI'den AYRI bir mekanizmayı bağlar
+            (``mechanism_scope`` beyanı çift sayımı reddeder).
           * ``acoustic_response_threshold`` — çevrimin kapanMADIĞI yer: yanma
             tepki fonksiyonu ölçülür, HRMA'da yok. Bu yolda yalnız EŞİK
             vardır ve 'verdict' anahtarı yapısal olarak yasaktır.
 
-        Chug BU PARTİDE BAĞLANMADI: klasik enjektör basınç düşümü oranı
-        marjı ZATEN ``acoustic_modes.stability_report.chug`` içinde
-        yayımlanıyor (tek kaynak); konsantre-parametreli chug çevriminin
-        eşiği tekleştirilmiş hâlde bağlanması sıvı ayağıyla birlikte
-        yürüyen ayrı bir kalemdir. Aynı büyüklük iki blokta iki ayrı
-        tanımla yayımlanmaz.
+        CHUG ÇEVRİMİ BAĞLANDI (v2.6.27, sıvı ayağının ikizi): klasik
+        enjektör basınç düşümü oranı marjı ``acoustic_modes.
+        stability_report.chug`` içinde kalır ve TEK KAYNAK odur; buradaki
+        ``chug_loop`` o oranı AYNI sözlükten okuyarak konsantre-parametreli
+        çevrimi (τ, τ_c, J birlikte — hrma.stability.chug) kurar. Aynı
+        büyüklük iki blokta iki ayrı tanımla yayımlanmaz; kural ile
+        çevrimin ilişkisi ``chug_loop.rule_vs_loop`` alanında ölçülür.
         """
         from hrma.stability import STABILITY_NOT_MODELLED
 
@@ -4936,10 +5243,14 @@ class HybridRocketEngine:
                 'here: it stays in the acoustic_modes block and is read from '
                 'there. Two paths with different epistemic status are '
                 'published side by side: a VERDICT where the feedback loop '
-                'closes from solver quantities (hybrid LFI) and a THRESHOLD '
-                'where it does not (acoustic critical response). The classical '
-                'chug margin is not repeated here; it stays in '
-                'acoustic_modes.stability_report.chug (single source).'),
+                'closes from solver quantities (hybrid LFI and the oxidizer '
+                'feed-coupled chug loop) and a THRESHOLD where it does not '
+                '(acoustic critical response). The classical chug RATIO RULE '
+                'is not repeated here; it stays in '
+                'acoustic_modes.stability_report.chug (single source) and '
+                'chug_loop reads its ratio from that very dictionary — the '
+                'relation between rule and loop is measured in '
+                'chug_loop.rule_vs_loop.'),
             'operating_point': 'design_instant_t0',
             'operating_point_basis': (
                 'Both paths are evaluated at the design instant (t = 0): the '
@@ -4950,6 +5261,11 @@ class HybridRocketEngine:
             'lfi': self._hybrid_lfi_block(basic_results),
             'acoustic_response_threshold':
                 self._acoustic_response_threshold_block(basic_results),
+            # Oksitleyici besleme kuplajlı chug çevrimi (sıvı ayağının
+            # ikizi). Oran KURALI burada tekrarlanmaz — çevrim, kuralın
+            # kendi ölçtüğü J'yi acoustic_modes.stability_report.chug
+            # sözlüğünden okur ve ilişkiyi rule_vs_loop ile ölçer.
+            'chug_loop': self._chug_loop_block(basic_results),
             'not_modelled': {
                 ad: STABILITY_NOT_MODELLED[ad] for ad in (
                     'detailed_flame_dynamics', 'vortex_shedding', 'pogo',
