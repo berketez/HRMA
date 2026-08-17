@@ -20,6 +20,23 @@ from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, LAMBDA_BELL,
 from hrma.analysis.turbopump_sizing import (SPEED_DERATE_DEFAULT,
                                             m3s_to_gpm, m_to_ft,
                                             npsh_available_m)
+# F2b-2 (v2.6.27): kamara akustiği ve chug eşikleri TEK KAYNAKTAN gelir.
+# Bu modül eskiden kendi 1L/1T'sini ve kendi eşik çiftini taşıyordu; hibrit
+# ve katı motorlar zaten merkezî modülü çağırıyordu (üç motorun üçüncüsü
+# ayrı hesaplıyordu). acoustic_modes yalnız math/scipy'ye bağlıdır, döngüsel
+# import yoktur. Chug ÇEVRİMİ (nötr eğri, kök yeri) hrma.stability.chug
+# içindedir ve _stability_assessment içinde GEÇ (lazy) ithal edilir:
+# hrma.stability scipy.special.lambertw yükler, motor import zincirini
+# ağırlaştırmamak için çağrı noktasında ithal edilir.
+from hrma.analysis.acoustic_modes import (
+    CHUG_DP_RATIO_MINIMUM,
+    CHUG_DP_RATIO_RECOMMENDED,
+    CHUG_THRESHOLD_SOURCE,
+    AcousticModeAnalyzer,
+    longitudinal_frequency,
+    transverse_frequency,
+    transverse_root,
+)
 # v2.6.2: buradaki ``warnings.filterwarnings('ignore')`` KALDIRILDI.
 # Argümansız çağrı SÜREÇ GENELİNDE catch-all filtre kurar — kapsam bu modül
 # değil, tüm Python süreci. Yani sıvı motor modülünü içe aktarmak (app.py her
@@ -447,15 +464,21 @@ INJECTOR_TYPE_DP_FRACTION = {
 }
 INJECTOR_TYPE_DP_FRACTION_DEFAULT = 0.20
 
-# Sıvı enjektörde chug (düşük frekans) kararlılık alt sınırı ΔP/Pc
-# (NASA SP-8089 "Liquid Rocket Engine Injectors": %15-20 bandı).
-CHUG_DP_PC_MIN_LIQUID = 0.15
-CHUG_DP_PC_RECOMMENDED_LIQUID = 0.20
+# Sıvı enjektörde chug (düşük frekans) kararlılık eşikleri ΔP/Pc.
+# F2b-2 (17 Ağu 2026): bu iki sayı burada YENİDEN TANIMLIYDU (künyesi
+# "SP-8089"), aynı çift acoustic_modes'ta da tanımlıydı (künyesi "Sutton +
+# SP-194") — aynı sayı, iki künye. Artık merkezî tanımın TAKMA ADIDIR;
+# sayı değişmedi, künye hükmü CHUG_THRESHOLD_SOURCE içindedir. Adlar
+# korunur (bu dosyanın içinde ve dışında bu adlarla okunuyorlar).
+CHUG_DP_PC_MIN_LIQUID = CHUG_DP_RATIO_MINIMUM
+CHUG_DP_PC_RECOMMENDED_LIQUID = CHUG_DP_RATIO_RECOMMENDED
 
-# İlk enine (tanjansiyel) akustik mod katsayısı: f_1T = alpha * a / (pi * D_c),
-# alpha = 1.8412 (J1' Bessel türevinin ilk sıfırı; Harrje & Reardon,
-# NASA SP-194 "Liquid Propellant Rocket Combustion Instability").
-FIRST_TANGENTIAL_MODE_COEFF = 1.8412
+# İlk enine (tanjansiyel) mod katsayısı BURADA TANIMLI DEĞİLDİR (F2b-2).
+# Eskiden `FIRST_TANGENTIAL_MODE_COEFF = 1.8412` diye elle yazılıydı; merkez
+# modül aynı sayıyı J'_1'in ilk sıfırından scipy.special.jnp_zeros ile
+# ÜRETİYOR (1,8411837813406593). Yuvarlanmış kopya öldürüldü; _stability_
+# assessment kökü acoustic_modes.transverse_root(1, 0)'dan alır. Göç farkı
+# ölçüldü ve beyanlı: tests/test_sivi_akustik_gocu.py (manifest tablosu).
 
 # Kısma (throttle) taraması: %40-100 itki bandı (denetim raporu madde 8).
 THROTTLE_SCAN_FRACTIONS = (0.40, 0.55, 0.70, 0.85, 1.00)
@@ -8476,11 +8499,13 @@ class LiquidRocketEngine:
                 'momentum_criterion_basis': momentum_basis,
             },
             'stability_analysis': self._stability_assessment(
-                a_chamber, chamber_length, chamber_diameter, mixing_time)
+                a_chamber, chamber_length, chamber_diameter, mixing_time,
+                l_star_m=L_star, residence_time_s=residence_time)
         }
-    
+
     def _stability_assessment(self, a_chamber, chamber_length, chamber_diameter,
-                              mixing_time):
+                              mixing_time, l_star_m=None,
+                              residence_time_s=None):
         """Yanma kararlılığı: HESAPLANABİLİR ölçütler + dürüst 'unknown'.
 
         SAHA HATASI (2026-07-23 denetimi): burada 'stability_rating' HER motor
@@ -8490,19 +8515,39 @@ class LiquidRocketEngine:
 
         Artık yalnız hesaplanabilir olan hesaplanır:
           - 1L (boyuna) mod: f = a / (2·L)          [açık-açık boru yaklaşımı]
-          - 1T (ilk teğetsel) mod: f = 1.8412·a/(π·D)
-            (Harrje & Reardon, NASA SP-194; Bessel J1' ilk sıfırı)
-          - chug (düşük frekans) marjı: ΔP_enjektör / Pc, NASA SP-8089'un
-            %15-20 bandına göre
+          - 1T (ilk teğetsel) mod: f = α·a/(π·D), α = J'_1'in ilk sıfırı
+          - kamara akustik mod TABLOSU (merkezî modül, F2b-2)
+          - chug (düşük frekans) marjı: ΔP_enjektör / Pc oran kuralı
+          - chug ÇEVRİMİ: nötr eğri + baskın kök (hrma.stability.chug)
         Yüksek frekanslı akustik kararlılık (akustik-yanma bağlaşımı) bu
         modelde ÇÖZÜLMÜYOR; 'acoustic_analysis' alanı bunu açıkça söyler ve
-        genel hüküm ancak chug ölçütünden türetilir — belirlenemiyorsa
-        'unknown' döner. Sönümleme mekanizmaları da tasarım TAVSİYESİDİR,
-        motorda var oldukları iddia edilmez.
+        GENEL hüküm hâlâ 'unknown'dır — chug çevriminin hükmü KAPSAM
+        ETİKETLİDİR ve yalnız kendi mekanizmasını bağlar. Sönümleme
+        mekanizmaları da tasarım TAVSİYESİDİR, motorda var oldukları iddia
+        edilmez.
+
+        F2b-2 GÖÇÜ (17 Ağu 2026) — kopya akustik öldü
+        ---------------------------------------------
+        Bu metot 1L ve 1T'yi KENDİ İÇİNDE hesaplıyordu (``a/(2L)`` ve elle
+        yazılmış ``1.8412``); hibrit ve katı motorlar aynı sayıları merkezî
+        ``hrma.analysis.acoustic_modes``ten alıyordu. Üç motordan biri ayrı
+        hesaplıyordu, yani depoda akustiğin İKİ tanımı vardı. Artık üçü de
+        merkezden okur. ÖLÇÜLEN FARK (manifest:
+        ``tests/test_sivi_akustik_gocu.py``): 1L bit-özdeş (aynı formül, aynı
+        girdi); 1T'de bağıl −8,81e-06 — çünkü merkez, kökü
+        ``scipy.special.jnp_zeros`` ile ÜRETİYOR (1,8411837813406593) ve eski
+        yerel sabit onun 5 haneye yuvarlanmışıydı (1,8412). Fark beklenen
+        model farkıdır ve manifestte adıyla kayıtlıdır; beklenmeyen bir fark
+        çıksa test kırmızı olur.
         """
-        f_1l = a_chamber / (2.0 * chamber_length) if chamber_length > 0 else None
-        f_1t = (FIRST_TANGENTIAL_MODE_COEFF * a_chamber
-                / (np.pi * chamber_diameter)) if chamber_diameter > 0 else None
+        # 1L / 1T ARTIK MERKEZDEN: aynı formüller, tek tanım yeri.
+        # (Merkezin 1T'si f = a·α/(π·D), α = jnp_zeros(1,1)[0]; 1L'i
+        #  f = q·a/(2L), q = 1 — eski yerel ifadelerle cebirsel olarak aynı.)
+        alpha_1t = transverse_root(1, 0)
+        f_1l = (longitudinal_frequency(a_chamber, chamber_length, 1)
+                if chamber_length > 0 else None)
+        f_1t = (transverse_frequency(a_chamber, chamber_diameter, alpha_1t)
+                if chamber_diameter > 0 else None)
         # ΔP/Pc tek kaynaktan gelir: kullanıcı girdisi varsa o, yoksa enjektör
         # tipinin tablo değeri (_injector_dp_fraction — çevrim çözücüsü de
         # aynı fonksiyonu kullanır, iki ayrı doğru olmaz).
@@ -8515,8 +8560,8 @@ class LiquidRocketEngine:
                 'Enjektör basınç düşümü bilinmiyor; chug marjı hesaplanamadı.')
         elif dp_pc >= CHUG_DP_PC_RECOMMENDED_LIQUID:
             rating, reason = 'chug_margin_ok', (
-                'ΔP/Pc = %.3f, NASA SP-8089 tavsiye eşiğinin (%.2f) üstünde.'
-                % (dp_pc, CHUG_DP_PC_RECOMMENDED_LIQUID))
+                'ΔP/Pc = %.3f, klasik tasarım kuralının tavsiye eşiğinin '
+                '(%.2f) üstünde.' % (dp_pc, CHUG_DP_PC_RECOMMENDED_LIQUID))
         elif dp_pc >= CHUG_DP_PC_MIN_LIQUID:
             rating, reason = 'chug_margin_marginal', (
                 'ΔP/Pc = %.3f, alt sınır (%.2f) ile tavsiye eşiği (%.2f) '
@@ -8524,9 +8569,17 @@ class LiquidRocketEngine:
                                CHUG_DP_PC_RECOMMENDED_LIQUID))
         else:
             rating, reason = 'chug_risk', (
-                'ΔP/Pc = %.3f, NASA SP-8089 alt sınırının (%.2f) altında — '
-                'düşük frekanslı (chug) kararsızlık riski.'
+                'ΔP/Pc = %.3f, klasik tasarım kuralının alt sınırının (%.2f) '
+                'altında — düşük frekanslı (chug) kararsızlık riski.'
                 % (dp_pc, CHUG_DP_PC_MIN_LIQUID))
+
+        # --- MERKEZÎ mod tablosu (F2b-2): hibrit/katı ile AYNI modül -------
+        modes_block = self._acoustic_modes_block(
+            chamber_diameter, chamber_length, dp_pc)
+        # --- chug ÇEVRİMİ (F2b-2): oran kuralı değil, gerçek kök yeri ------
+        chug_loop = self._chug_loop_block(dp_pc, mixing_time, l_star_m, rating,
+                                          residence_time_s)
+
         return {
             'acoustic_frequency': f_1l,                 # Hz (1L modu)
             'first_longitudinal_hz': f_1l,
@@ -8551,17 +8604,246 @@ class LiquidRocketEngine:
             'injector_dp_over_pc': dp_pc,
             'chug_rating': rating,
             'chug_basis': reason,
+            'chug_threshold_source': CHUG_THRESHOLD_SOURCE,
+            # 1L/1T'nin hangi modülden geldiği ADIYLA yazılır: bu alan
+            # olmadan "merkezî modüle geçildi" iddiası çıktıdan okunamaz.
+            'mode_source': (
+                'hrma.analysis.acoustic_modes (longitudinal_frequency, '
+                'transverse_frequency, transverse_root) — the same module '
+                'the hybrid and solid solvers call. The first tangential '
+                'root is computed from the Bessel derivative zero '
+                '(scipy.special.jnp_zeros), not from a hand-written '
+                'constant.'),
+            'first_tangential_alpha': float(alpha_1t),
+            # Merkezî mod TABLOSU (10 en düşük mod, bant sınıfları, chug
+            # raporu). Bu blok F2c panelinin veri kaynağıdır.
+            'acoustic_modes': modes_block,
+            # Gerçek chug çevrimi (hrma.stability.chug) — oran kuralı ile
+            # ilişkisi 'rule_vs_loop' alanında ÖLÇÜLÜ olarak beyanlı.
+            'chug_loop': chug_loop,
             # Genel kararlılık hükmü VERİLMEZ: yüksek frekanslı akustik
             # bağlaşım modellenmiyor, dolayısıyla "kararlı" denemez.
+            # chug_loop.verdict bir hükümdür ama KAPSAM ETİKETLİDİR ve
+            # yalnız kendi mekanizmasını bağlar (F2a karar 1).
             'stability_rating': 'unknown',
+            'stability_rating_basis': (
+                'No overall stability verdict is issued: high-frequency '
+                'combustion-acoustic coupling is not solved. The chug loop '
+                'below DOES issue a verdict, but it is scope-labelled '
+                '(verdict_scope) and binds only the feed-coupled '
+                'low-frequency mechanism.'),
             'acoustic_analysis': 'not_modelled',
             'acoustic_analysis_note': (
                 'Akustik-yanma bağlaşımı (yüksek frekanslı kararsızlık) bu '
-                'modelde çözülmüyor; yalnız mod frekansları ve chug marjı '
-                'raporlanır.'),
+                'modelde çözülmüyor; yalnız mod frekansları (merkezî akustik '
+                'modülden) ve chug çevrimi raporlanır.'),
             'damping_recommendations': ['Acoustic liners', 'Baffles',
                                         'Injector face pattern'],
         }
+
+    # ------------------------------------------------------------------
+    # F2b-2 yardımcıları: merkezî akustik tablo + gerçek chug çevrimi
+    # ------------------------------------------------------------------
+    def _acoustic_modes_block(self, chamber_diameter, chamber_length, dp_pc):
+        """Kamara akustik mod tablosu — hibrit/katı ile AYNI merkezî modül.
+
+        Geometri, ses hızı ve gaz özellikleri bu koşunun KENDİ çözümünden
+        gelir (uydurma yok). Modül girdiyi reddederse sayı üretilmez, gerekçe
+        döner (hibritteki ``_acoustic_modes_block`` deseninin aynısı).
+        """
+        basis = (
+            'Rigid-wall closed-closed cylindrical cavity modes from '
+            'hrma.analysis.acoustic_modes. Geometry is the solved chamber '
+            'inner diameter and the solved chamber length (V_c/A_c); the gas '
+            'is the equilibrium chamber state (gamma, T_c, R = R_u/MW) of '
+            'this run. The cavity is idealised as a plain cylinder: the '
+            'injector face cavity, the convergent nozzle volume and any '
+            'baffle are NOT part of the acoustic model.')
+        try:
+            res = AcousticModeAnalyzer().analyze(
+                chamber_temperature=float(self.T_c),
+                gamma=float(self.gamma),
+                gas_constant=float(R_UNIVERSAL / self.mw),
+                chamber_diameter=float(chamber_diameter),
+                chamber_length=float(chamber_length),
+                chamber_pressure=float(self.P_c),
+                injector_dp_ratio=(float(dp_pc) if dp_pc and
+                                   np.isfinite(dp_pc) and dp_pc > 0
+                                   else None))
+        except Exception as exc:
+            return {
+                'status': 'NOT_MODELLED',
+                '_basis': basis,
+                'reason': (f'the acoustic-mode analyser rejected the chamber '
+                           f'state: {exc}'),
+            }
+        res = dict(res)
+        res['status'] = 'modelled'
+        res['_basis'] = basis
+        return res
+
+    def _feed_line_inertance_inputs(self):
+        """Besleme hattı ataleti girdileri — KARAR 5: FORMA ALAN EKLENMEDİ.
+
+        Çözücü tarafı hazırdır: kullanıcı (şimdilik yalnız API/override
+        yoluyla) gerçek hat uzunluğunu ve kesitini verirse chug çevrimi
+        ikinci mertebe (ataletli) forma geçer. Vermezse ataletsiz koşar ve
+        bunu beyan eder. Hiçbir yerleşim varsayımı (ör. 2,5 m hat) buraya
+        KOPYALANMAZ — uydurma varsayılan yasağı.
+
+        Returns:
+            (tau_f_s veya None, beyan sözlüğü veya None)
+        """
+        length = self._override_val('feed_line_length_m', 0.05, 50.0,
+                                    'Feed line length', ' m')
+        if length is None:
+            return None, None
+        area = self._override_val('feed_line_area_m2', 1e-8, 1.0,
+                                  'Feed line flow area', ' m²')
+        if area is None:
+            d_mm = self._override_val('feed_line_diameter_mm', 0.5, 500.0,
+                                      'Feed line inner diameter', ' mm')
+            if d_mm is not None:
+                area = np.pi * (float(d_mm) / 1000.0) ** 2 / 4.0
+        if area is None:
+            return None, None
+        mdot = getattr(self, 'mdot_total', None)
+        dp_bar = None
+        try:
+            dp_bar = float(self._injector_dp_fraction()) * float(self.P_c)
+        except Exception:
+            dp_bar = None
+        if not (mdot and np.isfinite(mdot) and mdot > 0) or \
+                not (dp_bar and np.isfinite(dp_bar) and dp_bar > 0):
+            return None, None
+        from hrma.stability.chug import feed_inertance_time_constant
+        tau_f = feed_inertance_time_constant(
+            line_length_m=float(length), line_area_m2=float(area),
+            mass_flow_kg_s=float(mdot), dp_injector_Pa=dp_bar * PA_PER_BAR)
+        return tau_f, {
+            'line_length_m': float(length),
+            'line_area_m2': float(area),
+            'mass_flow_kg_s': float(mdot),
+            'dp_injector_Pa': dp_bar * PA_PER_BAR,
+            '_basis': (
+                'Feed line length/area supplied by the caller; the mass flow '
+                'is this run\'s TOTAL propellant flow and the pressure drop '
+                'is the lumped injector drop, consistent with the single '
+                'lumped injector used for J. Separate oxidiser/fuel line '
+                'dynamics are NOT modelled (that is a coupled two-line '
+                'problem).'),
+        }
+
+    def _chug_loop_block(self, dp_pc, mixing_time, l_star_m, rule_rating,
+                         residence_time_s=None):
+        """Gerçek chug çevrimi (hrma.stability.chug) + oran kuralıyla İLİŞKİ.
+
+        Oran kuralı (ΔP/Pc ≥ 0,20) yalnız enjektör kazancına bakar; gecikmeyi
+        (τ) ve kamara zaman sabitini (τ_c) HİÇ görmez. Çevrim üçünü birden
+        kullanır. İkisi çeliştiğinde HRMA birini diğerine EZDİRMEZ: ikisi de
+        yayımlanır ve çelişki adıyla beyan edilir (``rule_vs_loop``).
+        """
+        missing = []
+        if not (dp_pc and np.isfinite(dp_pc) and dp_pc > 0):
+            missing.append('injector_dp_over_pc (J = dP_inj/Pc)')
+        tau_s = (float(mixing_time)
+                 if mixing_time and np.isfinite(mixing_time)
+                 and mixing_time > 0 else None)
+        if tau_s is None:
+            missing.append('sensitive time lag tau (atomisation time)')
+        l_star = (float(l_star_m) if l_star_m and np.isfinite(l_star_m)
+                  and l_star_m > 0 else None)
+        if l_star is None:
+            missing.append('l_star_m')
+        c_star = getattr(self, 'c_star', None)
+        if not (c_star and np.isfinite(c_star) and c_star > 0):
+            missing.append('c_star_m_s')
+            c_star = None
+        if missing:
+            return {
+                'status': 'NOT_EVALUATED',
+                'missing_inputs': missing,
+                '_basis': (
+                    'The feed-coupled chug loop needs J, the sensitive time '
+                    'lag tau, L* and c*. One or more were not solved on this '
+                    'run, so no loop result is fabricated.'),
+            }
+
+        from hrma.stability.chamber import chamber_time_constant
+        from hrma.stability.chug import assess_chug
+
+        try:
+            tau_c = chamber_time_constant(l_star_m=l_star,
+                                          c_star_m_s=float(c_star),
+                                          gamma=float(self.gamma))
+            tau_f, feed_echo = self._feed_line_inertance_inputs()
+            loop = assess_chug(dp_ratio_j=float(dp_pc), tau_s=tau_s,
+                               tau_c_s=tau_c['tau_c_s'], tau_f_s=tau_f,
+                               feed_line=feed_echo)
+        except Exception as exc:
+            return {
+                'status': 'NOT_EVALUATED',
+                'reason': f'the chug loop rejected the inputs: {exc}',
+                '_basis': ('No number is fabricated when the core refuses an '
+                           'input.'),
+            }
+
+        loop = dict(loop)
+        loop['status'] = 'modelled'
+        loop['chamber_time_constant'] = tau_c
+        loop['tau_source'] = (
+            'atomisation (secondary breakup) time of this run\'s injector '
+            'solution, used as the Crocco-Cheng sensitive time lag; its own '
+            'uncertainty propagates DIRECTLY into the verdict below. This is '
+            'a CONSERVATIVE choice and its direction is known: Crocco\'s tau '
+            'is only the pressure-SENSITIVE part of the total delay, while '
+            'the breakup time is the full time scale, so substituting it can '
+            'only move the verdict toward "unstable", never away from it '
+            '(Crocco & Cheng, AGARDograph 8, 1956).')
+        # τ_c'nin İKİNCİ yolu: bu koşunun kendi kalış süresi. Cebirsel olarak
+        # AYNI büyüklüktür (ρV/ṁ = L*/(c*Γ²), çünkü ṁ = P_c A_t/c* ve
+        # ρ = P_c/(RT), R·T = (c*Γ)²). Eşit ÇIKMIYORSA fark motorun kendi
+        # ṁ ↔ c* tutarlılığındandır ve SESSİZ KALMAZ: ölçülüp yayımlanır.
+        if (residence_time_s and np.isfinite(residence_time_s)
+                and residence_time_s > 0):
+            ratio = float(residence_time_s) / tau_c['tau_c_s']
+            loop['tau_c_vs_residence_time'] = {
+                'tau_c_s': tau_c['tau_c_s'],
+                'residence_time_s': float(residence_time_s),
+                'ratio': ratio,
+                'interpretation': (
+                    'Two independent routes to the SAME physical time: '
+                    'tau_c = L*/(c* Gamma^2) and the chamber residence time '
+                    'rho_gas*V_c/mdot. They are algebraically identical when '
+                    'mdot = Pc*A_t/c* holds exactly. The residual measured '
+                    'here is the liquid chain\'s own mdot-vs-c* consistency '
+                    '(the mass flow comes from the thrust/Isp chain, not '
+                    'from the choked-throat identity); it is reported, not '
+                    'silently absorbed.'),
+            }
+        # --- oran kuralı ile çevrimin İLİŞKİSİ (ölçülür, varsayılmaz) ---
+        rule_says_safe = rule_rating in ('chug_margin_ok',
+                                         'chug_margin_marginal')
+        loop_says_stable = loop.get('verdict') == 'stable'
+        loop['rule_vs_loop'] = {
+            'ratio_rule_rating': rule_rating,
+            'loop_verdict': loop.get('verdict'),
+            'agreement': ('agree' if rule_says_safe == loop_says_stable
+                          else 'disagree'),
+            'interpretation': (
+                'The classical ratio rule tests ONLY the injector gain '
+                'J = dP_inj/Pc; it is blind to the sensitive time lag tau '
+                'and to the chamber time constant tau_c, so it cannot '
+                'distinguish a fast-burning large chamber from a '
+                'slow-burning small one. The loop uses all three. Where the '
+                'two disagree, HRMA publishes BOTH and lets neither '
+                'override the other: the loop is the model with more '
+                'physics, but its verdict is only as good as tau (an '
+                'atomisation correlation, not a measurement), while the rule '
+                'is an engineering rule of thumb with decades of practice '
+                'behind it and no explicit validity envelope.'),
+        }
+        return loop
 
     def solve_throttle_map(self, fractions=THROTTLE_SCAN_FRACTIONS):
         """Kısma haritası: %40-100 itki bandında çalışma noktaları.

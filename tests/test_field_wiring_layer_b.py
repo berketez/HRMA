@@ -239,6 +239,15 @@ LEGITIMATE_CONSTANTS = (
     # yani bekçi hâlâ gerçek bir sözleşmeyi koruyor.
     'hard_min_ratio', 'recommended_min_ratio', 'screech_band_min_hz',
     'pressure_ratio_threshold',
+    # v2.6.27 parti 27 (F2b-1 hibrit LFI yayını): Karabeyoglu 2005 Eq. 15
+    # korelasyonunun KÜNYELİ literatür sabitleri — hesabın sonucu değil,
+    # hangi kalibre katsayıyla konuştuğunun beyanı (0,2341 = 0,48/2,050;
+    # kaynak: hybrid_lfi.py modül sabitleri, motor dosyasına kopyalanmadığı
+    # test_stability_baglamalar.py'de kaynak-kanıtlı). rt_corr BİLEREK
+    # imlenmedi: oksitleyiciyle değişiyor (n2o 4,47e5 / lox 6,38e5 — canlı,
+    # F2b-1 sarsımla ölçtü). Önek 'combustion_stability.lfi.' ile DAR.
+    'combustion_stability.lfi.coefficient',
+    'combustion_stability.lfi.delay_constant_c_prime',
     # v2.6.27 (Cantera beyanı): mekanizmanın termo verisi geçerlilik tavanı
     # (gri30 için min(species.max_temp) = 3000 K — ÖLÇÜLÜYOR, uydurulmuyor).
     # Yukarıdaki ölçüt-eşiği ailesiyle aynı doğa: modelin hangi sınıra kadar

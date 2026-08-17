@@ -40,9 +40,24 @@ from hrma.data.materials_db import get_material
 # Ayrılma eşiği TEK tanım noktasından okunur (sayı kopyalanmaz); aynı sabiti
 # hibrit motor da bu addan alır.
 from hrma.flow.separation import SUMMERFIELD_FACTOR_DEFAULT
+# Chug (besleme kuplajlı alçak frekans) tasarım kuralının eşiği de TEK tanım
+# noktasından okunur. F2b-2 ÖNCESİ burada `DP_RATIO_WARN = 0.15` yazıyordu ve
+# künyesi "SP-8089" idi; aynı sayı acoustic_modes'ta "Sutton + SP-194"
+# künyesiyle duruyordu (aynı sayı, iki künye — parametre tutarlılığı ihlali).
+# Sayı DEĞİŞMEDİ, tanım yeri tekleşti; künye hükmü ithal edilen yerdedir.
+from hrma.analysis.acoustic_modes import CHUG_DP_RATIO_MINIMUM
 
-# SP-8089 enjektör kararlılık eşikleri (ΔP/P_c)
-DP_RATIO_WARN = 0.15      # bunun altında chugging riski uyarısı
+# Chugging uyarı eşiği (ΔP/P_c): merkezî tanımın takma adı — burada YENİDEN
+# TANIMLANMAZ. Ad korunur çünkü bu dosyanın uyarı metni ve i18n eşleşmesi
+# (static/js/i18n_charts.js MSG_PATTERNS) bu değeri basıyor.
+DP_RATIO_WARN = CHUG_DP_RATIO_MINIMUM
+
+# ÇÖZÜCÜ GEÇERLİLİK TABANI — chug tasarım kuralı DEĞİLDİR (F2b-2 ayrımı):
+# bu oranın altında enjektör kamara basıncından fiilen kopar, yarı-kararlı
+# akış modeli geçersizleşir ve çözüm durur. Ne SP-8089'da ne başka bir
+# kaynakta "0,05" diye yayımlanmış bir eşik olarak doğrulanmıştır; bu
+# depodaki bir DURDURMA korumasıdır ve öyle beyan edilir. Yukarıdaki
+# 0,15 ile aynı aileden sayılıp tek kaynağa taşınmadı: iki AYRI kavramdır.
 DP_RATIO_UNSTABLE = 0.05  # bunun altında yarı-kararlı model geçersiz → dur
 
 
@@ -527,7 +542,12 @@ class TransientBallistics:
                     f"stopped")
                 break
 
-            # SP-8089 enjektör kararlılığı (yalnız blowdown'da anlamlı)
+            # Enjektör kararlılığı (yalnız blowdown'da anlamlı). Uyarı
+            # METNİ "(SP-8089)" der ve i18n_charts.js MSG_PATTERNS bu metne
+            # regex ile bağlıdır; künye hükmü (bandın dayanağı Sutton Böl. 8
+            # + SP-194 Böl. 5-6'dır, SP-8089 sayfa düzeyinde doğrulanmadı)
+            # CHUG_THRESHOLD_SOURCE içindedir. Metin ve i18n deseni BİRLİKTE
+            # değişmelidir — F2c'ye devredildi.
             if self.feed_mode == 'blowdown':
                 dp_ratio = (self.tank.pressure - Pc_pa) / Pc_pa
                 if dp_ratio < DP_RATIO_UNSTABLE:

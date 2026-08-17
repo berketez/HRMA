@@ -4203,6 +4203,508 @@ class SolidRocketEngine:
         })
         return blok
 
+    # ------------------------------------------------------------------
+    # F2b-1 — yanma kararlılığı bağlaması (hrma/stability çekirdeği)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _pure_longitudinal_modes(acoustic_block):
+        """Akustik tablodan SAF BOYUNA modlar (m = n = 0, q >= 1).
+
+        Bağlanan iki kapalı form da (Culick & Yang lüle sönümü + basınç
+        kuplajlı kazanç) ψ_q = cos(qπz/L) mod şekliyle türetilmiştir; enine
+        ve karma modlarda geçerli değildir. O modlara eşik YAZILMAZ,
+        gerekçesiyle listelenir.
+        """
+        modlar = []
+        for mod in (acoustic_block.get('modes') or []):
+            idx = mod.get('indices') or {}
+            if (idx.get('tangential_m') == 0 and idx.get('radial_n') == 0
+                    and int(idx.get('longitudinal_q') or 0) >= 1):
+                modlar.append(mod)
+        return modlar
+
+    def _combustion_stability_block(self, results, curve):
+        """Yanma kararlılığı (F2b-1 katı ayağı) — hrma.stability çekirdeği.
+
+        ÜÇ AYAK, FARKLI BİLGİ DURUMLARI (tasarım belgesi §3.0):
+
+          * ``bulk_mode`` — çevrimin KAPANDIĞI yer. Yarı-kararlı yanma hızı
+            kuplajı konsantre kamara dengesine konunca kararsızlık ölçütü
+            gecikmesiz limitte tam olarak n >= 1'dir; burada HÜKÜM verilir
+            (kapsam etiketiyle, çekirdekten olduğu gibi). Bu ölçüt çözücüde
+            ZATEN kapılıdır (``warn.solid.burn_rate_exponent_ge_one``) —
+            blok o kapıyla TUTARLILIĞINI ölçüp yayımlar; iki yer aynı
+            fiziği söyleyip farklı sonuca varamaz.
+          * ``acoustic_response_threshold`` — çevrimin kapanMADIĞI yer:
+            yanma tepki fonksiyonu ölçülür (T-burner), HRMA'da yok. Yalnız
+            EŞİK; 'verdict' anahtarı yapısal olarak yasaktır.
+          * ``qshod_response_band`` — KAPILI yol. (A, B) parametre bandı ve
+            yakıtın termal yayınırlığı çözücüde YOKTUR (tasarım belgesi
+            §1.1-4 bunu ölçtü); ikisi de verilmedikçe blok NOT_EVALUATED
+            döner ve eksik girdiyi ADIYLA söyler. Varsayılan (A, B)
+            UYDURULMAZ.
+
+        Chug katıda YAPISAL olarak uygulanamaz (enjektör/besleme yok); bu
+        beyan ``acoustic_modes.chug_applicability`` içinde zaten duruyor ve
+        burada tekrarlanmaz.
+        """
+        from hrma.stability import STABILITY_NOT_MODELLED
+
+        surum = _hrma_version()
+        akustik = results.get('acoustic_modes') or {}
+        tau_blok = self._chamber_time_constant_block(curve)
+        return {
+            'model': 'hrma.stability F2b solid binding',
+            '_basis': (
+                'Combustion stability binding of the hrma/stability core to '
+                'the solid solver (HRMA ' + surum + '). The acoustic mode '
+                'table is NOT reproduced here: it stays in the '
+                'acoustic_modes block and is read from there. A VERDICT is '
+                'issued only where the feedback loop closes from solver '
+                'quantities (the zero-lag bulk/L* mode); everywhere else a '
+                'THRESHOLD is published instead, because the combustion '
+                'response function is measured, not derived, and this solver '
+                'does not have that measurement.'),
+            'cavity_state': 'ignition',
+            'cavity_state_basis': (
+                'Every path is evaluated at the t = 0 (ignition) state, the '
+                'same state the acoustic_modes block uses: the free gas '
+                'volume, the burning surface and the mass flow of the first '
+                'thrust-curve sample. The cavity grows as the grain '
+                'regresses, so tau_c rises and the damping budget moves '
+                'during the burn; no time history is claimed here.'),
+            'chamber_time_constant': tau_blok,
+            'bulk_mode': self._bulk_mode_block(results, tau_blok),
+            'acoustic_response_threshold':
+                self._acoustic_response_threshold_block(akustik, curve),
+            'qshod_response_band': self._qshod_band_block(akustik, curve),
+            'not_modelled': {
+                ad: STABILITY_NOT_MODELLED[ad] for ad in (
+                    'detailed_flame_dynamics', 'vortex_shedding', 'pogo',
+                    'three_dimensional_acoustics', 'damping_devices')
+            },
+            'not_modelled_basis': (
+                'Scope-level declarations carried verbatim from '
+                'hrma.stability.STABILITY_NOT_MODELLED. Limits belonging to a '
+                'single mechanism (solid-phase thermal lag, nonlinear '
+                'triggering, the missing response measurement, the damping '
+                'terms outside the budget) are declared INSIDE the sub-block '
+                'they belong to and are not repeated here.'),
+        }
+
+    def _chamber_time_constant_block(self, curve):
+        """Kamara doldurma/boşaltma zaman sabiti τ_c = L*/(c*·Γ²).
+
+        L* = V_serbest/A_t: hacim kasa geometrisinden (_case_free_volume),
+        boğaz alanı basınç çözücüsünün KULLANDIĞI etkin alandır
+        (``curve['throat_area']``) — kütle dengesi ṁ_çıkış = P·A_t/c*
+        o alanla kuruludur, raporlanan geometrik alanla değil (Cd verilmişse
+        ikisi ayrışır ve bu fark burada beyanlıdır).
+        """
+        basis = (
+            'tau_c = L*/(c* * Gamma^2) from hrma/stability/chamber.py '
+            '(isothermal lumped chamber mass balance; Karabeyoglu, AA284a '
+            'Stanford lecture notes, chamber gas dynamic model). L* = '
+            'V_free/A_t uses the case free gas volume at ignition and the '
+            'EFFECTIVE throat area the pressure solver itself integrates '
+            'with (mdot_out = Pc*A_t/c*), not the geometric throat that is '
+            'reported for manufacturing; the two differ only when a throat '
+            'discharge coefficient is supplied.')
+        eksik = []
+        try:
+            v_free = float(self._case_free_volume())
+        except Exception:
+            v_free = 0.0
+        a_t = float((curve or {}).get('throat_area', 0.0) or 0.0)
+        c_star = float(getattr(self, 'c_star', 0.0) or 0.0)
+        gamma = float(getattr(self, 'gamma', 0.0) or 0.0)
+        if not (v_free > 0):
+            eksik.append('case_free_volume')
+        if not (a_t > 0):
+            eksik.append('throat_area')
+        if not (c_star > 0):
+            eksik.append('c_star')
+        if not (1.0 < gamma < 2.0):
+            eksik.append('gamma')
+        if eksik:
+            return {'status': 'NOT_MODELLED', 'missing_inputs': eksik,
+                    '_basis': basis,
+                    'reason': ('the chamber time constant is not evaluated '
+                               f'and no value is assumed; missing: {eksik}')}
+        from hrma.stability import tau_c_from_volume
+        try:
+            sonuc = dict(tau_c_from_volume(v_free, a_t, c_star, gamma))
+        except ValueError as exc:
+            return {'status': 'NOT_MODELLED', 'missing_inputs': [],
+                    '_basis': basis,
+                    'reason': f'the chamber core rejected this state: {exc}'}
+        sonuc['status'] = 'modelled'
+        sonuc['_basis'] = basis
+        sonuc['throat_area_source'] = 'effective (pressure solver) throat area'
+        return sonuc
+
+    def _bulk_mode_block(self, results, tau_blok):
+        """Katı bulk (L*) modu — gecikmesiz limit + çözücü kapısı çaprazı.
+
+        Çekirdek hükmü OLDUĞU GİBİ taşınır (motorda yeniden hükümleştirme
+        yok). Üstüne tek şey eklenir: aynı fiziği çözücünün kendi kritik
+        uyarısı (``warn.solid.burn_rate_exponent_ge_one``) da kapılıyor;
+        ikisinin AYNI şeyi söylediği ölçülüp yayımlanır. Ayrışırlarsa bu bir
+        SAPMADIR ve sessiz kalmaz — bekçisi
+        ``tests/test_stability_baglamalar.py`` içindedir.
+        """
+        basis = (
+            'Zero thermal-lag bulk (L*) mode from hrma/stability/chamber.py: '
+            'substituting the quasi-steady burning rate law rdot = a*P^n into '
+            'the lumped chamber balance gives tau_c d(dP)/dt + (1-n) dP = 0, '
+            'so the mode grows if and only if n >= 1 (Beckstead & Price, '
+            '"Nonacoustic Combustion Instability", AIAA Journal 5(11), 1967). '
+            'The verdict is carried verbatim from the core with its scope '
+            'label; the solver already gates the same criterion as a critical '
+            'warning, and the agreement between the two is measured and '
+            'published here rather than assumed.')
+        tau_c = tau_blok.get('tau_c_s') if isinstance(tau_blok, dict) else None
+        from hrma.stability import bulk_mode_zero_lag
+        try:
+            sonuc = dict(bulk_mode_zero_lag(float(self.n), tau_c_s=tau_c))
+        except ValueError as exc:
+            return {'status': 'NOT_MODELLED', 'missing_inputs': [],
+                    '_basis': basis,
+                    'reason': f'the bulk-mode core rejected n: {exc}'}
+        kod = 'warn.solid.burn_rate_exponent_ge_one'
+        uyari_var = any(
+            isinstance(k, dict) and k.get('code') == kod
+            for k in (results.get('warnings') or []))
+        sonuc['status'] = 'modelled'
+        sonuc['_basis'] = basis
+        sonuc['solver_gate_consistency'] = {
+            'warning_code': kod,
+            'warning_present': bool(uyari_var),
+            'criterion_met': bool(sonuc.get('criterion_met')),
+            'consistent': bool(uyari_var) == bool(sonuc.get('criterion_met')),
+            'basis': (
+                'The solid solver raises the critical warning above exactly '
+                'when n >= 1; the stability core reaches the same conclusion '
+                'from the lumped chamber pole. The two are cross-checked on '
+                'every run: if they ever disagree, one of them has drifted '
+                'and this flag says so instead of hiding it. Note what this '
+                'verdict can and cannot be in a PUBLISHED result: the solver '
+                'already fails closed for n >= 1 (the damped fixed-point '
+                'pressure iteration is not a contraction there, so the run '
+                'returns an error and no performance result at all), so a '
+                'published run reaching this block is necessarily in the '
+                'n < 1 branch. The verdict is still computed from n rather '
+                'than asserted, and the same criterion applied to an n >= 1 '
+                'motor returns "unstable" — it simply never gets published, '
+                'because that motor has no results to publish.'),
+        }
+        if tau_c is None:
+            sonuc['growth_rate_basis'] = (
+                'The growth rate (n-1)/tau_c is not reported because the '
+                'chamber time constant could not be formed on this run; the '
+                'criterion itself does not need it.')
+        else:
+            sonuc['growth_rate_basis'] = (
+                'Growth rate (n-1)/tau_c [1/s] of the lumped chamber pole, '
+                'with tau_c from the chamber_time_constant block of this run '
+                '(single source; it is not recomputed here).')
+        return sonuc
+
+    def _acoustic_response_threshold_block(self, akustik, curve):
+        """Mod başına KRİTİK YANMA TEPKİSİ eşiği R_crit (HÜKÜM YOK).
+
+        Kazanç tarafı ters çevrilir: "bu mod nötr olsun diye basınç kuplajlı
+        yanma tepkisi NE KADAR olmalıydı?". Büyüklükler bu koşunun kendi
+        çözümünden gelir:
+
+          * ā ve mod tablosu: acoustic_modes bloğu (ikinci tablo üretilmez),
+          * eşdeğer kavite: aynı bloğun BEYAN ETTİĞİ silindir (boy + serbest
+            hacim korunur), yani mod şekli normalizasyonu S_c·L/2 ile
+            yayımlanan modlar aynı kaviteye oturur,
+          * ρ_c = P_c/(R·T_c), R = R_evrensel/MW_egzoz — akustik bloğun
+            kullandığı AYNI gaz kaydı,
+          * M_N = ṁ/(ρ_c·ā·S_c) ve M_b = ṁ/(ρ_c·ā·S_b): ikisi de kütle-akısı
+            oranıdır (Culick'in M_N = M_b·S_b/S_c tanımı). Katıda tüm kütle
+            yanan yüzeyden girdiği için ikisinde de AYNI ṁ kullanılır —
+            hibritten farkı budur (orada oksitleyici baş taraftan girer).
+
+        ⟨ψ²⟩ = 1/2 alınır ve bu bir varsayılan DEĞİL, beyanlı bir
+        idealleştirmedir: yanan yüzeyin kavite ekseni boyunca dağılımı
+        (grain yığınının kasa içindeki konumu, segman uç yüzeylerinin
+        eksenel yeri) çözücüde yayımlanmıyor, bu yüzden yüzey eşdeğer
+        kavitenin TAMAMINA düzgün yayılmış sayılır — o hâlde cos²'nin tam
+        ortalaması 1/2'dir (matematiksel özdeşlik, uydurma sayı değil).
+        """
+        basis = (
+            'Per-mode critical combustion response threshold R_crit: the '
+            'quasi-steady short-nozzle damping of Culick & Yang (AIAA '
+            'Progress in Astronautics and Aeronautics Vol. 143, 1990, '
+            'Eq. 100) is inverted against their pressure-coupled driving gain '
+            '(Eq. 99), giving the response the combustion WOULD have to '
+            'deliver for the mode to be neutral. It is a threshold, never a '
+            'verdict: HRMA does not measure the response function (design doc '
+            'section 3.0), so no verdict key exists anywhere on this path '
+            '(structurally enforced by hrma.stability.forbid_verdict_key). '
+            'Particle (condensed phase) damping is NOT in the budget even '
+            'though this motor may carry aluminium: the core has no particle '
+            'term yet, and every missing loss biases the threshold LOW '
+            '(pessimistic).')
+        eksik = []
+        if (akustik or {}).get('status') != 'computed':
+            eksik.append('acoustic_modes (mode table and sound speed)')
+        kavite = (akustik or {}).get('equivalent_cavity') or {}
+        a_ses = float((akustik or {}).get('sound_speed_m_s') or 0.0)
+        l_kavite = float(kavite.get('length_m') or 0.0)
+        v_free = float(kavite.get('free_gas_volume_m3') or 0.0)
+        gamma = float(getattr(self, 'gamma', 0.0) or 0.0)
+        mw = float(getattr(self, 'mw_exhaust', 0.0) or 0.0)
+        t_c = float(getattr(self, 'T_c', 0.0) or 0.0)
+        p_c = float(getattr(self, 'P_c', 0.0) or 0.0)
+        yuzeyler = np.asarray((curve or {}).get('burn_area', []), dtype=float)
+        debiler = np.asarray((curve or {}).get('mass_flow', []), dtype=float)
+        s_b = float(yuzeyler[0]) if yuzeyler.size else 0.0
+        mdot = float(debiler[0]) if debiler.size else 0.0
+        for ad, deger in (('sound_speed', a_ses), ('cavity_length', l_kavite),
+                          ('free_gas_volume', v_free), ('gamma', gamma),
+                          ('molecular_weight', mw),
+                          ('chamber_temperature', t_c),
+                          ('chamber_pressure', p_c),
+                          ('burn_area', s_b), ('mass_flow', mdot)):
+            if not (deger > 0):
+                eksik.append(ad)
+        if eksik:
+            return {'status': 'NOT_MODELLED', 'missing_inputs': eksik,
+                    '_basis': basis,
+                    'reason': ('no damping budget and no critical response '
+                               'threshold are reported; missing solver '
+                               f'output(s): {eksik}')}
+
+        from hrma.stability import (
+            critical_response_real,
+            damping_budget,
+            forbid_verdict_key,
+            nozzle_damping_quasi_steady,
+            response_gain_uniform_chamber,
+        )
+        from hrma.stability.damping import DAMPING_NOT_MODELLED
+
+        r_gaz = R_UNIVERSAL / mw
+        rho_c = p_c * 1e5 / (r_gaz * t_c)
+        s_c = v_free / l_kavite          # eşdeğer silindirin kesiti (= piD²/4)
+        mach_n = mdot / (rho_c * a_ses * s_c)
+        mach_b = mdot / (rho_c * a_ses * s_b)
+        try:
+            lule = nozzle_damping_quasi_steady(a_ses, l_kavite, gamma, mach_n)
+            butce = damping_budget([lule])
+        except ValueError as exc:
+            return {'status': 'NOT_MODELLED', 'missing_inputs': [],
+                    '_basis': basis,
+                    'reason': (f'the damping core rejected this chamber '
+                               f'state: {exc}')}
+
+        boyuna = self._pure_longitudinal_modes(akustik)
+        boyuna_etiketleri = {mod.get('label') for mod in boyuna}
+        satirlar = []
+        atlanan = []
+        esik_beyanlari = {}
+        for mod in boyuna:
+            try:
+                kazanc = response_gain_uniform_chamber(
+                    a_ses, l_kavite, s_b, s_c, mach_b, gamma)
+                satir = critical_response_real(butce['total_damping_1_s'],
+                                               kazanc['gain_1_s'])
+            except ValueError as exc:
+                atlanan.append({'label': mod.get('label'),
+                                'reason': f'the response core refused: {exc}'})
+                continue
+            # Uzun beyanlar blok düzeyinde TEK KEZ (metin kaybolmaz).
+            esik_beyanlari.update(satir.pop('not_modelled', None) or {})
+            satir.pop('interpretation_basis', None)
+            satir['label'] = mod.get('label')
+            satir['frequency_hz'] = float(mod.get('frequency_hz'))
+            satir['mode_shape_mean_square'] = float(
+                kazanc['mode_shape_mean_square'])
+            satir['damping'] = dict(butce['terms'])
+            satirlar.append(satir)
+
+        if not satirlar:
+            # "NOT_MODELLED ama sayılar var" hâli tutarsızdır: tek satır bile
+            # kurulamadıysa blok sayı taşımaz.
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': [],
+                '_basis': basis,
+                'reason': ('no longitudinal mode produced a usable threshold '
+                           f'on this run: {atlanan}'),
+            }
+        blok = {
+            'status': 'modelled',
+            '_basis': basis,
+            'model': 'nozzle_damping_budget_inverted_to_critical_response',
+            'interpretation': 'threshold_not_verdict',
+            'interpretation_basis': (
+                'R_crit is the response the combustion WOULD have to deliver '
+                'for the mode to be neutral — a comparison yardstick, never a '
+                'stability verdict.'),
+            'sound_speed_m_s': a_ses,
+            'chamber_gas_density_kg_m3': float(rho_c),
+            'acoustic_cavity_area_m2': float(s_c),
+            'burning_surface_area_m2': float(s_b),
+            'mass_flow_kg_s': float(mdot),
+            'mean_flow_mach_M_N': float(mach_n),
+            'surface_mach_M_b': float(mach_b),
+            'mach_basis': (
+                'M_N = mdot/(rho_c*a*S_c) and M_b = mdot/(rho_c*a*S_b) are '
+                'mass-flux ratios, exactly as Culick & Yang define them '
+                '(their M_N = M_b*S_b/S_c). In a solid motor the whole mass '
+                'flow enters through the burning surface, so both use the '
+                'same mdot. S_c is the cross-section of the equivalent '
+                'cylinder the mode table is built on (free gas volume divided '
+                'by cavity length), because the mode-shape normalisation '
+                'E_n^2 = S_c*L/2 must match the published modes. The '
+                'quasi-steady short-nozzle limit assumes a SMALL mean-flow '
+                'Mach number; M_N is published so that assumption can be '
+                'checked against this motor (a smeared cavity of a heavily '
+                'loaded grain can push it far from small). It cancels out of '
+                'R_crit — it divides both the damping and the gain — but not '
+                'out of the individual alpha and gain values printed here.'),
+            'mode_shape_basis': (
+                'The burning surface is treated as uniformly distributed '
+                'along the equivalent cavity, so the mean square of '
+                'cos(q*pi*z/L) over it is exactly 1/2 for every mode. This is '
+                'a DECLARED idealisation, not a default: the axial position '
+                'of the grain stack inside the case and the axial location of '
+                'the segment end faces are not published by this solver, so '
+                'no window average can be formed from solved geometry. With a '
+                'real axial distribution the mean square differs per mode and '
+                'R_crit moves with it.'),
+            'damping': {
+                'terms': dict(butce['terms']),
+                'total_damping_1_s': butce['total_damping_1_s'],
+                'total_loss_1_s': butce['total_loss_1_s'],
+                'sign_convention': butce['sign_convention'],
+                'bias_basis': butce['bias_basis'],
+                'nozzle_term': {
+                    'damping_1_s': lule['damping_1_s'],
+                    'admittance_real': lule['admittance_real'],
+                    'basis': lule['basis'],
+                },
+                'not_modelled': dict(DAMPING_NOT_MODELLED),
+            },
+            'modes': satirlar,
+            'modes_not_evaluated': atlanan,
+            'transverse_modes_not_evaluated': [
+                mod.get('label') for mod in ((akustik or {}).get('modes') or [])
+                if mod.get('label') not in boyuna_etiketleri],
+            'transverse_modes_basis': (
+                'Only pure longitudinal modes carry a threshold: both closed '
+                'forms bound here are derived for psi = cos(q*pi*z/L). For '
+                'tangential/radial modes neither the nozzle admittance '
+                'integral nor the surface mean square holds, and no number is '
+                'fabricated for them.'),
+            'not_modelled': esik_beyanlari,
+        }
+        return forbid_verdict_key(
+            blok, 'solid combustion_stability.acoustic_response_threshold')
+
+    def _qshod_band_block(self, akustik, curve):
+        """QSHOD/Denison-Baum (A, B) bandı — KAPILI yol (varsayılan YOK).
+
+        Bant ve termal yayınırlık çözücüde üretilmez; ikisi de dışarıdan
+        verilmedikçe bu blok sayı İÇERMEZ. Kapının iki anahtarı:
+
+          * ``self.combustion_response_band`` — ``hrma.stability.QSHODBand``
+            örneği. Bant üstverisiz kurulamaz (formülasyon sınıfı, basınç ve
+            sıcaklık zarfı, kaynak künyesi ZORUNLU); çalışma noktası zarfın
+            dışındaysa çekirdek sonucu 'extrapolated_low' rozetiyle döner.
+          * ``self.propellant_thermal_diffusivity_m2_s`` — κ = k/(ρ·c_p).
+            Katı çözücüde yakıtın k ve c_p'si YOKTUR (tasarım belgesi
+            §1.1-4 ölçtü), bu yüzden κ uydurulmaz.
+
+        Bu partide bantların KÜNYELİ TABLOSU yazılmadı (ayrı kalem): burada
+        yalnız yol uçtan uca kuruludur ve bekçisi sentetik bantla geçer.
+        """
+        basis = (
+            'QSHOD / Denison-Baum pressure-coupled response Re(R_p) evaluated '
+            'at the corners of a supplied (A, B) band '
+            '(hrma/stability/response.py; Denison & Baum, ARS Journal 31(8), '
+            '1961; Culick & Yang 1990, Eqs. 94-95). A and B are propellant '
+            'parameters that are MEASURED, not derived, and this solver '
+            'produces neither them nor the propellant thermal diffusivity '
+            'kappa = k/(rho*c_p) they need. Nothing is defaulted: without '
+            'both inputs the block reports no number at all. When a band is '
+            'supplied it must carry its validity envelope (formulation class, '
+            'pressure and temperature range, source), and an operating point '
+            'outside that envelope comes back flagged as extrapolated.')
+        band = getattr(self, 'combustion_response_band', None)
+        kappa = getattr(self, 'propellant_thermal_diffusivity_m2_s', None)
+        eksik = []
+        if band is None:
+            eksik.append('combustion_response_band (QSHODBand with envelope)')
+        if not (isinstance(kappa, (int, float)) and not isinstance(kappa, bool)
+                and float(kappa) > 0):
+            eksik.append('propellant_thermal_diffusivity_m2_s')
+        yuzeyler = np.asarray((curve or {}).get('burn_area', []), dtype=float)
+        debiler = np.asarray((curve or {}).get('mass_flow', []), dtype=float)
+        s_b = float(yuzeyler[0]) if yuzeyler.size else 0.0
+        mdot = float(debiler[0]) if debiler.size else 0.0
+        rho_p = float(getattr(self, 'rho_p', 0.0) or 0.0)
+        if not (s_b > 0 and mdot > 0 and rho_p > 0):
+            eksik.append('burn_area / mass_flow / propellant density')
+        boyuna = self._pure_longitudinal_modes(akustik or {})
+        if not boyuna:
+            eksik.append('acoustic_modes (longitudinal mode table)')
+        if eksik:
+            return {'status': 'NOT_EVALUATED', 'missing_inputs': eksik,
+                    '_basis': basis,
+                    'reason': ('no response function is evaluated and no (A, '
+                               'B) pair is assumed; missing input(s): '
+                               f'{eksik}')}
+
+        from hrma.stability.response import qshod_response_band
+
+        # Etkin (erozif düzeltmeli) gerileme hızı, çözücünün KENDİ kütle
+        # dengesinden: ṁ = ρ_p·ṙ·S_b. İkinci bir yanma hızı modeli
+        # kurulmaz; a·P^n yeniden hesaplanmaz.
+        r_b = mdot / (rho_p * s_b)
+        t_c = float(getattr(self, 'T_c', 0.0) or 0.0)
+        p_pa = float(getattr(self, 'P_c', 0.0) or 0.0) * 1e5
+        satirlar = []
+        for mod in boyuna:
+            omega = 2.0 * np.pi * float(mod.get('frequency_hz') or 0.0)
+            try:
+                sonuc = qshod_response_band(band, omega, float(kappa), r_b,
+                                            p_pa, t_c)
+            except ValueError as exc:
+                satirlar.append({'label': mod.get('label'),
+                                 'status': 'NOT_EVALUATED',
+                                 'reason': f'the response core refused: {exc}'})
+                continue
+            satirlar.append({
+                'label': mod.get('label'),
+                'frequency_hz': float(mod.get('frequency_hz')),
+                'omega_nondim': sonuc['omega_nondim'],
+                'response_real_min': sonuc['response_real_min'],
+                'response_real_max': sonuc['response_real_max'],
+                'confidence': sonuc['confidence'],
+                'confidence_basis': sonuc['confidence_basis'],
+                'corners': sonuc['corners'],
+            })
+        return {
+            'status': 'modelled',
+            '_basis': basis,
+            'band': band.as_dict(),
+            'regression_rate_m_s': float(r_b),
+            'regression_rate_basis': (
+                'Effective regression rate implied by the solver\'s own mass '
+                'balance at t = 0: rdot = mdot/(rho_p*S_b). It is read back '
+                'from the published thrust curve rather than recomputed from '
+                'a*P^n, so any erosive correction the solver applied is '
+                'already inside it and the two cannot disagree.'),
+            'thermal_diffusivity_m2_s': float(kappa),
+            'modes': satirlar,
+        }
+
     def _nozzle_flow_field_report(self, contour_points_m):
         """Lüle iç akışı (yarı-1B) + ayrılma — hrma.flow.quasi1d / separation.
 
@@ -9543,6 +10045,14 @@ class SolidRocketEngine:
         # 2) Kamara akustik modları. Katıda enjektör yok: chug marjı yerine
         #    yalnız mod tablosu + tehlike bandı, uygulanabilirlik beyanıyla.
         results['acoustic_modes'] = self._acoustic_mode_report()
+
+        # 2b) F2b-1 — yanma kararlılığı (hrma/stability). Akustik bloktan
+        #     SONRA: kritik tepki eşiği onun mod tablosunu ve eşdeğer
+        #     kavitesini okur (ikinci bir mod tablosu üretilmez). Bulk mod
+        #     hükmü çözücünün n >= 1 kapısıyla çapraz denetlenir. Rapor
+        #     katmanıdır: itki/basınç/geometri sonucuna geri BESLENMEZ.
+        results['combustion_stability'] = self._combustion_stability_block(
+            results, curve)
 
         # 3) Lüle iç akışı (rejim, şok konumu) + ayrılma. Alan profili, bir
         #    satır yukarıda YAYIMLANAN konturdan kurulur — kontur

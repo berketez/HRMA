@@ -4509,6 +4509,462 @@ class HybridRocketEngine:
         })
         return res
 
+    # ------------------------------------------------------------------
+    # F2b-1 — yanma kararlılığı bağlaması (hrma/stability çekirdeği)
+    # ------------------------------------------------------------------
+    def _pure_longitudinal_modes(self, acoustic_block):
+        """Akustik blok tablosundan SAF BOYUNA modlar (m = n = 0, q >= 1).
+
+        Neden yalnız boyuna: bağlanan iki kapalı form da boyuna modda
+        türetilmiştir — lüle sönümü ψ_n = cos(nπz/L) ve ψ_n²(L) = 1 ile
+        (Culick & Yang 1990, Denk. 100 yarı-kararlı limiti; modülün kendi
+        ``mode_dependence`` alanı bunu yazıyor) ve tepki kazancı aynı mod
+        şekliyle. Enine/karma modlarda ne lüle admitans integrali ne de
+        yanma yüzeyi üstündeki ⟨ψ²⟩ bu kapanışla geçerlidir; o modlar
+        eşik tablosuna KONMAZ ve gerekçesiyle listelenir (uydurma yok).
+        """
+        modlar = []
+        for mod in (acoustic_block.get('modes') or []):
+            idx = mod.get('indices') or {}
+            if (idx.get('tangential_m') == 0 and idx.get('radial_n') == 0
+                    and int(idx.get('longitudinal_q') or 0) >= 1):
+                modlar.append(mod)
+        return modlar
+
+    @staticmethod
+    def _mode_shape_mean_square(q, cavity_length_m, z_start_m, z_end_m):
+        """⟨ψ²⟩: cos²(qπz/L)'nin [z1, z2] penceresindeki TAM ortalaması.
+
+        Kapalı-kapalı kavitede mod şekli ψ_q = cos(qπz/L)'dir (akustik
+        modülün kendi tablosu). Yanma yüzeyi kavitenin TAMAMINI kaplamıyorsa
+        (hibritte yakıt portu ön/art yanma odalarını kapsamaz) kazanç
+        integralindeki ortalama 1/2 DEĞİLDİR; kapalı formu:
+
+            ⟨ψ²⟩ = 1/2 + L·[sin(2qπz2/L) − sin(2qπz1/L)] / (4qπ(z2 − z1))
+
+        Pencere tüm kaviteyse (z1 = 0, z2 = L) sonuç tam olarak 1/2'dir —
+        yani çekirdeğin varsayılanı bu formülün özel hâlidir, ikinci bir
+        tanım değil. Uydurma yok: pencere çözücünün YAYIMLADIĞI ön/art
+        yanma odası boylarından gelir.
+        """
+        length = float(cavity_length_m)
+        z1 = float(z_start_m)
+        z2 = float(z_end_m)
+        if not (length > 0 and z2 > z1):
+            return None
+        span = z2 - z1
+        katsayi = length / (4.0 * np.pi * int(q) * span)
+        deger = 0.5 + katsayi * (np.sin(2.0 * np.pi * int(q) * z2 / length)
+                                 - np.sin(2.0 * np.pi * int(q) * z1 / length))
+        deger = float(deger)
+        if not (np.isfinite(deger) and 0.0 < deger <= 1.0):
+            return None
+        return deger
+
+    def _hybrid_lfi_block(self, basic_results):
+        """Hibrit alçak frekans kararsızlığı (LFI) — Karabeyoglu ve ark. 2005.
+
+        ÇÖZÜCÜ YENİ GİRDİ İSTEMEZ (ölçüldü, bu koşunun kendi yayınından):
+        ``g_ox_initial`` [kg/(m²·s)], ``grain_length`` [m],
+        ``chamber_pressure`` [bar], ``of_ratio_initial`` ve motorun
+        ``oxidizer_type``'ı. Beşi de tasarım anının (t = 0) büyüklükleridir;
+        akı ile O/F aynı ANDAN alınır, karışık bir çift kurulmaz.
+
+        R·T_av KORELASYONUN KALİBRE SABİTİDİR (tasarım kararı 2): çözücünün
+        kendi R·T_c'si YERİNE KONMAZ, yalnızca tanı oranı olarak yanında
+        yayımlanır. Desteklenmeyen oksitleyicide (H₂O₂, N₂O₄, nytrox...)
+        sabit UYDURULMAZ: blok NOT_EVALUATED döner ve nedenini söyler.
+
+        HÜKÜM ÇEKİRDEKTEN GELDİĞİ GİBİ TAŞINIR: motor katmanı yeniden
+        hükümleştirmez. Çekirdek kapsam etiketli 'marginal' verir (mekanizma
+        VARLIĞI + frekansı modellenir, GENLİĞİ modellenmez) — bu, kaynağın
+        kendi sonuçlarının okumasıdır, burada gevşetilemez.
+        """
+        basis = (
+            'Hybrid low-frequency instability from hrma/stability/'
+            'hybrid_lfi.py: the TCG-coupled universal scaling law of '
+            'Karabeyoglu, De Zilwa, Cantwell & Zilliac, "Modeling of Hybrid '
+            'Rocket Low Frequency Instabilities", J. Propulsion and Power '
+            '21(6), 2005, Eq. 15, fitted to 43 motor tests. Every input is a '
+            'quantity THIS run already publishes at its design instant '
+            '(t = 0): initial oxidizer port flux g_ox_initial, grain_length, '
+            'chamber_pressure, of_ratio_initial and the motor oxidizer type. '
+            'The verdict is carried verbatim from the core; the engine layer '
+            'does not re-judge it.')
+        gerekli = {
+            'grain_length': basic_results.get('grain_length'),
+            'chamber_pressure': basic_results.get('chamber_pressure'),
+            'g_ox_initial': basic_results.get('g_ox_initial'),
+            'of_ratio_initial': basic_results.get('of_ratio_initial'),
+        }
+        eksik = [ad for ad, deger in gerekli.items()
+                 if not (isinstance(deger, (int, float))
+                         and np.isfinite(float(deger)) and float(deger) > 0)]
+        ox = getattr(self, 'oxidizer_type', None)
+        if not (isinstance(ox, str) and ox.strip()):
+            eksik.append('oxidizer_type')
+        if eksik:
+            return {
+                'status': 'NOT_EVALUATED',
+                'missing_inputs': eksik,
+                '_basis': basis,
+                'reason': ('no low-frequency mode is reported and no '
+                           'frequency is invented; missing solver '
+                           f'output(s): {eksik}'),
+            }
+
+        # Tanı oranı için çözücünün kendi R·T_c'si (varsa). Korelasyona
+        # GİRMEZ — çekirdek onu ayrı alanda tanı olarak taşır. Evrensel gaz
+        # sabiti akustik modülün TEK tanımından gelir (sayı kopyalanmaz).
+        from hrma.analysis.acoustic_modes import R_UNIVERSAL_J_KMOL_K
+        rt_thermo = None
+        mw = basic_results.get('molecular_weight')
+        t_c = basic_results.get('chamber_temperature')
+        try:
+            if (mw and t_c and float(mw) > 0 and float(t_c) > 0):
+                rt_thermo = (R_UNIVERSAL_J_KMOL_K / float(mw)) * float(t_c)
+        except (TypeError, ValueError):
+            rt_thermo = None
+
+        # 1L akustik mod (varsa): ayrışma dekadı için. Akustik blok
+        # çözülmediyse alan hiç kurulmaz (uydurma frekans yok).
+        f_1l = None
+        akustik = basic_results.get('acoustic_modes') or {}
+        for mod in self._pure_longitudinal_modes(akustik):
+            if int((mod.get('indices') or {}).get('longitudinal_q') or 0) == 1:
+                f_1l = float(mod.get('frequency_hz') or 0.0) or None
+                break
+
+        try:
+            from hrma.stability import assess_hybrid_lfi
+            sonuc = assess_hybrid_lfi(
+                oxidizer_type=ox,
+                grain_length_m=float(gerekli['grain_length']),
+                chamber_pressure_Pa=float(gerekli['chamber_pressure']) * 1e5,
+                oxidizer_flux_kg_m2_s=float(gerekli['g_ox_initial']),
+                of_ratio=float(gerekli['of_ratio_initial']),
+                rt_thermo_m2_s2=rt_thermo,
+                acoustic_first_longitudinal_hz=f_1l)
+        except ValueError as exc:
+            return {
+                'status': 'NOT_EVALUATED',
+                'missing_inputs': [f'calibrated R*Tav for oxidizer {ox!r}'],
+                '_basis': basis,
+                'reason': (f'the hybrid LFI correlation refused this operating '
+                           f'point: {exc}'),
+            }
+
+        sonuc = dict(sonuc)
+        sonuc['status'] = 'modelled'
+        sonuc['_basis'] = basis
+        sonuc['input_source'] = (
+            'g_ox_initial / grain_length / chamber_pressure / '
+            'of_ratio_initial of this run (design instant t = 0) and the '
+            'motor oxidizer_type; the first longitudinal acoustic frequency '
+            'comes from the acoustic_modes block of the SAME run, so the two '
+            'blocks cannot disagree about where 1L sits.')
+        return sonuc
+
+    def _acoustic_response_threshold_block(self, basic_results):
+        """Mod başına KRİTİK YANMA TEPKİSİ eşiği R_crit (HÜKÜM YOK).
+
+        Tasarım belgesi §3.0'ın F2 omurgası: sönüm tarafı hesaplanır, kazanç
+        tarafı TERS ÇEVRİLİR — "bu mod nötr olsun diye basınç kuplajlı yanma
+        tepkisi NE KADAR olmalıydı?". Tepki fonksiyonu ölçülür (T-burner),
+        türetilmez; HRMA'nın elinde o ölçüm yoktur, bu yüzden bu yolda
+        hüküm YASAKTIR ve blok ``forbid_verdict_key`` ile taranır.
+
+        BÜYÜKLÜKLERİN KAYNAĞI (hepsi bu koşunun kendi çözümünden):
+          * ā, mod tablosu: acoustic_modes bloğu (ikinci bir tablo üretilmez),
+          * ρ_c = P_c/(R·T_c), R = R_u/MW: akustik bloğun kullandığı AYNI çift,
+          * M_N = ṁ_toplam/(ρ_c·ā·S_c) — Culick'in M_N'i zaten kütle-akısı
+            oranıdır (M_b·S_b/S_c), yani bu bir yeniden tanım değil özdeşlik,
+          * M_b = ṁ_yakıt/(ρ_c·ā·S_b): kazanç YALNIZ yanan yüzeyden giren
+            kütleye aittir. Hibritte oksitleyici baş taraftan girer, yakıt
+            port cidarından gelir; toplam debiyi kazanca koymak tepkiyi
+            (1 + O/F) katı abartırdı.
+
+        ÖLÇÜLEN ÖZDEŞLİK: yalnız lüle sönümü modellendiğinde
+        R_crit = ((γ+1)/γ)·(ṁ_toplam/ṁ_yakıt)·(1/2)/⟨ψ²⟩ — kavite
+        idealleştirmesi (S_c) pay ve paydada birlikte gittiği için eşikten
+        DÜŞER. Eksik kayıp terimleri (partikül, viskoz, yapısal) eşiği
+        KÖTÜMSER yapar; yön beyan alanındadır.
+        """
+        basis = (
+            'Per-mode critical combustion response threshold R_crit from '
+            'hrma/stability: the quasi-steady short-nozzle damping of Culick '
+            '& Yang (AIAA Progress in Astronautics and Aeronautics Vol. 143, '
+            '1990, Eq. 100) is inverted against the pressure-coupled driving '
+            'gain of their Eq. 99, giving the response the combustion WOULD '
+            'have to deliver for the mode to be neutral. This is a threshold, '
+            'never a verdict: HRMA does not measure the response function '
+            '(design doc section 3.0), so no stability judgement is issued on '
+            'this path and the block is scanned for a forbidden "verdict" '
+            'key. Sound speed and the mode table are read from the '
+            'acoustic_modes block of this run; the mean-flow group M_N is the '
+            'mass-flux ratio mdot/(rho*a*S_c) — Culick\'s own definition of '
+            'M_N = M_b*S_b/S_c — and the driving gain uses the FUEL mass flow '
+            'only, because in a hybrid the oxidizer does not enter through '
+            'the responding surface.')
+        akustik = basic_results.get('acoustic_modes') or {}
+        eksik = []
+        if akustik.get('status') != 'modelled':
+            eksik.append('acoustic_modes (mode table and sound speed)')
+        alanlar = {
+            'chamber_length': basic_results.get('chamber_length'),
+            'chamber_diameter': basic_results.get('chamber_diameter'),
+            'gamma': basic_results.get('gamma'),
+            'molecular_weight': basic_results.get('molecular_weight'),
+            'chamber_temperature': basic_results.get('chamber_temperature'),
+            'chamber_pressure': basic_results.get('chamber_pressure'),
+            'mdot_total': basic_results.get('mdot_total'),
+            'mdot_f': basic_results.get('mdot_f'),
+            'port_diameter_initial': basic_results.get('port_diameter_initial'),
+            'grain_length': basic_results.get('grain_length'),
+        }
+        for ad, deger in alanlar.items():
+            if not (isinstance(deger, (int, float))
+                    and np.isfinite(float(deger)) and float(deger) > 0):
+                eksik.append(ad)
+        if eksik:
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': eksik,
+                '_basis': basis,
+                'reason': ('no damping budget and no critical response '
+                           'threshold are reported; missing solver '
+                           f'output(s): {eksik}'),
+            }
+
+        from hrma.analysis.acoustic_modes import R_UNIVERSAL_J_KMOL_K
+        from hrma.stability import (
+            critical_response_real,
+            damping_budget,
+            forbid_verdict_key,
+            nozzle_damping_quasi_steady,
+            response_gain_uniform_chamber,
+        )
+        from hrma.stability.damping import DAMPING_NOT_MODELLED
+
+        a_ses = float(akustik.get('sound_speed_m_s') or 0.0)
+        l_kamara = float(alanlar['chamber_length'])
+        d_kamara = float(alanlar['chamber_diameter'])
+        gamma = float(alanlar['gamma'])
+        r_gaz = R_UNIVERSAL_J_KMOL_K / float(alanlar['molecular_weight'])
+        rho_c = (float(alanlar['chamber_pressure']) * 1e5
+                 / (r_gaz * float(alanlar['chamber_temperature'])))
+        s_c = np.pi * d_kamara ** 2 / 4.0
+        s_b = np.pi * float(alanlar['port_diameter_initial']) \
+            * float(alanlar['grain_length'])
+        if not (a_ses > 0 and rho_c > 0 and s_c > 0 and s_b > 0):
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': ['chamber gas state'],
+                '_basis': basis,
+                'reason': ('the chamber gas state produced a non-physical '
+                           'density or cavity area, so no damping budget is '
+                           'formed'),
+            }
+        mach_n = float(alanlar['mdot_total']) / (rho_c * a_ses * s_c)
+        mach_b = float(alanlar['mdot_f']) / (rho_c * a_ses * s_b)
+
+        try:
+            lule = nozzle_damping_quasi_steady(a_ses, l_kamara, gamma, mach_n)
+            butce = damping_budget([lule])
+        except ValueError as exc:
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': [],
+                '_basis': basis,
+                'reason': (f'the damping core rejected this chamber state: '
+                           f'{exc}'),
+            }
+
+        z1 = float(basic_results.get('pre_chamber_length') or 0.0)
+        z2 = z1 + float(alanlar['grain_length'])
+        boyuna = self._pure_longitudinal_modes(akustik)
+        boyuna_etiketleri = {mod.get('label') for mod in boyuna}
+        satirlar = []
+        atlanan = []
+        esik_beyanlari = {}
+        for mod in boyuna:
+            q = int((mod.get('indices') or {}).get('longitudinal_q') or 0)
+            psi2 = self._mode_shape_mean_square(q, l_kamara, z1, z2)
+            if psi2 is None:
+                atlanan.append({
+                    'label': mod.get('label'),
+                    'reason': ('the mean square of the mode shape over the '
+                               'fuel port window is not a usable average for '
+                               'this mode (non-positive or non-finite), so no '
+                               'threshold is fabricated for it'),
+                })
+                continue
+            try:
+                kazanc = response_gain_uniform_chamber(
+                    a_ses, l_kamara, s_b, s_c, mach_b, gamma,
+                    mode_shape_mean_square=psi2)
+                satir = critical_response_real(butce['total_damping_1_s'],
+                                               kazanc['gain_1_s'])
+            except ValueError as exc:
+                atlanan.append({'label': mod.get('label'),
+                                'reason': f'the response core refused: {exc}'})
+                continue
+            # Uzun beyan metinleri blok düzeyinde TEK KEZ taşınır (satır
+            # başına tekrarlanmaz): aynı cümle mod sayısı kadar kopyalanırsa
+            # yanıt şişer ve tek kaynak ilkesi bozulur. Metin KAYBOLMAZ —
+            # çekirdeğin sözlüğü olduğu gibi bloğa taşınır.
+            esik_beyanlari.update(satir.pop('not_modelled', None) or {})
+            satir.pop('interpretation_basis', None)
+            satir['label'] = mod.get('label')
+            satir['frequency_hz'] = float(mod.get('frequency_hz'))
+            satir['mode_shape_mean_square'] = psi2
+            satir['damping'] = dict(butce['terms'])
+            satirlar.append(satir)
+
+        if not satirlar:
+            # Tek bir eşik satırı bile kurulamadıysa blok SAYI TAŞIMAZ:
+            # "NOT_MODELLED ama sayılar var" hâli tutarsızdır.
+            return {
+                'status': 'NOT_MODELLED',
+                'missing_inputs': [],
+                '_basis': basis,
+                'reason': ('no longitudinal mode produced a usable threshold '
+                           f'on this run: {atlanan}'),
+            }
+        blok = {
+            'status': 'modelled',
+            '_basis': basis,
+            'model': 'nozzle_damping_budget_inverted_to_critical_response',
+            'interpretation': 'threshold_not_verdict',
+            'interpretation_basis': (
+                'R_crit is the response the combustion WOULD have to deliver '
+                'for the mode to be neutral — a comparison yardstick, never a '
+                'stability verdict. No verdict key exists anywhere on this '
+                'path (structurally enforced by '
+                'hrma.stability.forbid_verdict_key).'),
+            'sound_speed_m_s': a_ses,
+            'chamber_gas_density_kg_m3': float(rho_c),
+            'acoustic_cavity_area_m2': float(s_c),
+            'burning_surface_area_m2': float(s_b),
+            'mean_flow_mach_M_N': float(mach_n),
+            'surface_mach_M_b': float(mach_b),
+            'mach_basis': (
+                'M_N = mdot_total/(rho_c*a*S_c) and M_b = mdot_fuel/'
+                '(rho_c*a*S_b) are mass-flux ratios, which is exactly how '
+                'Culick & Yang define them (their M_N = M_b*S_b/S_c). S_c is '
+                'the cross-section of the SAME idealised cylinder the mode '
+                'table uses (chamber inner diameter), because the mode-shape '
+                'normalisation E_n^2 = S_c*L/2 must match the published '
+                'modes; the real gas cross-section is the fuel port, which is '
+                'smaller. That idealisation cancels out of R_crit (it divides '
+                'both the damping and the gain) but it does NOT cancel out of '
+                'the individual alpha and gain values printed here. The '
+                'quasi-steady short-nozzle limit assumes a small mean-flow '
+                'Mach number; M_N is published so that assumption can be '
+                'checked against this motor.'),
+            'burning_surface_basis': (
+                'S_b = pi * initial port diameter * grain length, the fuel '
+                'port wall at the design instant. Only the FUEL mass flow is '
+                'injected through it (mdot_f), so the driving gain uses '
+                'mdot_f while the nozzle damping uses the total mdot.'),
+            'mode_shape_basis': (
+                'The pressure-coupled gain integrates the mode shape over the '
+                'BURNING surface. The fuel port does not span the whole '
+                'acoustic cavity (pre- and post-combustion chambers are gas '
+                'only), so <psi^2> is the exact mean of cos^2(q*pi*z/L) over '
+                'the published port window [pre_chamber_length, '
+                'pre_chamber_length + grain_length] rather than the '
+                'full-length value 1/2. It is mode dependent, so R_crit is '
+                'too.'),
+            'damping': {
+                'terms': dict(butce['terms']),
+                'total_damping_1_s': butce['total_damping_1_s'],
+                'total_loss_1_s': butce['total_loss_1_s'],
+                'sign_convention': butce['sign_convention'],
+                'bias_basis': butce['bias_basis'],
+                'nozzle_term': {
+                    'damping_1_s': lule['damping_1_s'],
+                    'admittance_real': lule['admittance_real'],
+                    'basis': lule['basis'],
+                },
+                'not_modelled': dict(DAMPING_NOT_MODELLED),
+            },
+            'modes': satirlar,
+            'modes_not_evaluated': atlanan,
+            'transverse_modes_not_evaluated': [
+                mod.get('label') for mod in (akustik.get('modes') or [])
+                if mod.get('label') not in boyuna_etiketleri],
+            'transverse_modes_basis': (
+                'Only pure longitudinal modes carry a threshold: both closed '
+                'forms bound here (nozzle admittance integral and the '
+                'burning-surface gain) are derived for psi = cos(q*pi*z/L). '
+                'For tangential/radial modes neither the nozzle integral nor '
+                'the mean square over the burning surface holds, and no '
+                'number is fabricated for them.'),
+            'not_modelled': esik_beyanlari,
+        }
+        return forbid_verdict_key(
+            blok, 'hybrid combustion_stability.acoustic_response_threshold')
+
+    def _combustion_stability_block(self, basic_results):
+        """Yanma kararlılığı bloğu (F2b-1 hibrit ayağı) — iki yol, tek çekirdek.
+
+        İki ayak birbirinden YAPISAL olarak farklıdır ve bu ayrım tasarım
+        belgesi §3.0'ın kendisidir:
+
+          * ``lfi`` — çevrimin KAPANDIĞI yer: gecikme de kazanç da çözücünün
+            kendi büyüklüklerinden gelir, bu yüzden burada HÜKÜM verilir
+            (kapsam etiketiyle, çekirdekten olduğu gibi taşınarak).
+          * ``acoustic_response_threshold`` — çevrimin kapanMADIĞI yer: yanma
+            tepki fonksiyonu ölçülür, HRMA'da yok. Bu yolda yalnız EŞİK
+            vardır ve 'verdict' anahtarı yapısal olarak yasaktır.
+
+        Chug BU PARTİDE BAĞLANMADI: klasik enjektör basınç düşümü oranı
+        marjı ZATEN ``acoustic_modes.stability_report.chug`` içinde
+        yayımlanıyor (tek kaynak); konsantre-parametreli chug çevriminin
+        eşiği tekleştirilmiş hâlde bağlanması sıvı ayağıyla birlikte
+        yürüyen ayrı bir kalemdir. Aynı büyüklük iki blokta iki ayrı
+        tanımla yayımlanmaz.
+        """
+        from hrma.stability import STABILITY_NOT_MODELLED
+
+        return {
+            'model': 'hrma.stability F2b hybrid binding',
+            '_basis': (
+                'Combustion stability binding of the hrma/stability core to '
+                'the hybrid solver. The mode table itself is NOT reproduced '
+                'here: it stays in the acoustic_modes block and is read from '
+                'there. Two paths with different epistemic status are '
+                'published side by side: a VERDICT where the feedback loop '
+                'closes from solver quantities (hybrid LFI) and a THRESHOLD '
+                'where it does not (acoustic critical response). The classical '
+                'chug margin is not repeated here; it stays in '
+                'acoustic_modes.stability_report.chug (single source).'),
+            'operating_point': 'design_instant_t0',
+            'operating_point_basis': (
+                'Both paths are evaluated at the design instant (t = 0): the '
+                'initial oxidizer flux with the initial O/F, the ignition '
+                'chamber geometry and the design chamber pressure. The port '
+                'grows during the burn, so both the LFI frequency and the '
+                'damping budget move with it; no time history is claimed.'),
+            'lfi': self._hybrid_lfi_block(basic_results),
+            'acoustic_response_threshold':
+                self._acoustic_response_threshold_block(basic_results),
+            'not_modelled': {
+                ad: STABILITY_NOT_MODELLED[ad] for ad in (
+                    'detailed_flame_dynamics', 'vortex_shedding', 'pogo',
+                    'injection_coupled_hf', 'three_dimensional_acoustics',
+                    'damping_devices')
+            },
+            'not_modelled_basis': (
+                'Scope-level declarations carried verbatim from '
+                'hrma.stability.STABILITY_NOT_MODELLED. Limits that belong to '
+                'a single mechanism (oscillation amplitude, nonlinear '
+                'triggering, the missing response measurement, the damping '
+                'terms that are not in the budget) are declared INSIDE the '
+                'sub-block they belong to and are not repeated here.'),
+        }
+
     def _nozzle_flow_block(self, basic_results):
         """Yarı-1B lüle iç akışı + ayrılma denetimi (hrma.flow).
 
@@ -4877,14 +5333,28 @@ class HybridRocketEngine:
             # sönümleme yok) bloğun KENDİ not_modelled sözlüğündedir — tek
             # kaynak ilkesi; hibride özgü düşük frekanslı (sınır tabaka
             # kuplajlı) kararsızlık ise aşağıdaki ayrı kalemde beyanlıdır.
+            # v2.6.27 F2b-1 bağlaması: bu beyan DARALDI. Hibride özgü alçak
+            # frekanslı mod artık KONUMLANIYOR (combustion_stability.lfi:
+            # Karabeyoglu ve ark. 2005 Denk. 15, kalibre sabitle) — eski
+            # metnin ilk cümlesi ("modellenmiyor") o bağlamayla YALAN hâline
+            # gelirdi. Geriye ÖLÇÜLMÜŞ bir yokluk kalıyor: yakıt sınır
+            # tabakasının yanma TEPKİ FONKSİYONU hâlâ hiçbir yerde
+            # çözülmüyor, dolayısıyla büyüme oranı ve genlik yok.
             'hybrid_boundary_layer_instability': (
-                'NOT_MODELLED: the hybrid-specific low-frequency instability '
-                'driven by the fuel boundary-layer combustion response '
-                '(thermal lag of the regressing surface) is not modelled. '
-                'The acoustic_modes block locates the chamber acoustic modes '
-                'and screens the classical feed-coupled chug ratio, but no '
-                'combustion response function is solved anywhere in this '
-                'solver, so no growth rate can be reported.'),
+                'NOT_MODELLED: the combustion RESPONSE FUNCTION of the fuel '
+                'boundary layer (thermal lag of the regressing surface) is '
+                'not solved anywhere in this solver, so neither a growth rate '
+                'nor an oscillation amplitude is reported for the hybrid '
+                'low-frequency instability. What IS modelled is where the '
+                'mode sits: combustion_stability.lfi predicts its frequency '
+                'from the calibrated scaling law of Karabeyoglu et al. (2005) '
+                'and carries that correlation\'s own scope-limited verdict, '
+                'while acoustic_modes locates the chamber acoustic modes and '
+                'screens the classical feed-coupled chug ratio. The missing '
+                'piece is the measured response that would turn those '
+                'frequencies into a growth rate; the critical response '
+                'THRESHOLD published beside them is a yardstick, not that '
+                'measurement.'),
             # v2.6.27 A5 bağlaması: 'thermal_protection_liner' beyanı
             # KALDIRILDI — astar boyutlandırma ve cidar sıcaklık geçmişi
             # artık thermal_protection bloğunda GERÇEKTEN hesaplanıyor;
@@ -5787,6 +6257,14 @@ class HybridRocketEngine:
         # _not_modelled_declarations'tan kaldırıldı (bkz. oradaki not).
         basic_results['acoustic_modes'] = self._acoustic_modes_block(
             basic_results)
+
+        # F2b-1 — yanma kararlılığı (hrma/stability çekirdeği). Akustik
+        # bloktan SONRA çağrılır: hem LFI'nin ayrışma dekadı hem de kritik
+        # tepki eşiği o bloğun mod tablosunu ve ses hızını okur (ikinci bir
+        # mod tablosu üretilmez). Bu blok da rapor katmanıdır: itki, Isp ya
+        # da geometri sonucuna geri BESLENMEZ.
+        basic_results['combustion_stability'] = \
+            self._combustion_stability_block(basic_results)
 
         # Yarı-1B lüle iç akışı (rejim, şok konumu) + ayrılma denetimi.
         # Ayrılma sonucu bloğun İÇİNDE ('separation') taşınır; katı motorun

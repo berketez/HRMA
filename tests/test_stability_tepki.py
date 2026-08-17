@@ -383,13 +383,42 @@ def test_ciplak_ab_ciftiyle_bant_cagrilamaz():
                             CY_BURN_RATE_M_S, 1.0e7, 3500.0)
 
 
-def test_f2a_hazir_bant_tablosu_tasimaz():
-    """F2a'da künyeli (A, B) tablosu YOKTUR — modül sabiti olarak bant yok."""
-    import hrma.stability.response as response_module
-    band_constants = [name for name in dir(response_module)
-                      if name.isupper() and isinstance(
-                          getattr(response_module, name), QSHODBand)]
-    assert band_constants == []
+def test_bant_tablosu_yalniz_bands_modulunde_yasar():
+    """F2b-3 (2026-08-17): künyeli tablo geldi — bu bekçi, F2a döneminin
+    ``test_f2a_hazir_bant_tablosu_tasimaz`` bekçisinin HALEFİDİR (nöbetçi
+    sözleşmesi: geçici durumu kilitleyen bekçi, durum değişince halefine
+    çevrilir — silinmez).
+
+    Eski hüküm KORUNUR: mekanizma modülleri (response/chamber/chug/damping/
+    hybrid_lfi) modül sabiti olarak bant TAŞIMAZ. Yeni hüküm: künyeli tablo
+    YALNIZ ``hrma.stability.bands``'te yaşar; her dolu kaydın zarf üstverisi
+    eksiksizdir ve kaynaksız kayıt yoktur. Derin ölçüm
+    ``tests/test_stability_tablolar.py``'dedir.
+    """
+    import hrma.stability.chamber
+    import hrma.stability.chug
+    import hrma.stability.damping
+    import hrma.stability.hybrid_lfi
+    import hrma.stability.response
+    for module in (hrma.stability.response, hrma.stability.chamber,
+                   hrma.stability.chug, hrma.stability.damping,
+                   hrma.stability.hybrid_lfi):
+        band_constants = [name for name in dir(module)
+                          if isinstance(getattr(module, name), QSHODBand)]
+        assert band_constants == [], (
+            f'{module.__name__}: mekanizma modülü bant sabiti taşıyor — '
+            f'tablonun tek evi hrma.stability.bands')
+
+    from hrma.stability import bands
+    dolu = {rid: rec for rid, rec in bands.QSHOD_BAND_RECORDS.items()
+            if isinstance(rec, bands.QSHODBandRecord)}
+    assert dolu, 'bands.py tablosu boş — halef bekçinin nesnesi kayıp'
+    for rid, rec in bands.QSHOD_BAND_RECORDS.items():
+        if isinstance(rec, bands.QSHODBandRecord):
+            assert rec.band.source.strip(), f'{rid}: kaynaksız kayıt'
+            assert rec.band.formulation_class.strip(), rid
+        else:
+            assert rec.reason.strip(), f'{rid}: gerekçesiz boş kayıt'
 
 
 # ===========================================================================

@@ -88,6 +88,20 @@ from hrma.stability import (
 from hrma.stability.chamber import _positive
 
 __all__ = [
+    # Eşik çifti BURADA TANIMLI DEĞİLDİR — yukarıda acoustic_modes'ten ithal
+    # edilir ve buradan yalnız YENİDEN YAYIMLANIR. Gerekçe (F2b-2, 17 Ağu
+    # 2026): paketin dondurulmuş tip sözleşmesi (``hrma/stability/__init__``
+    # §5) sayısal tanımın acoustic_modes'ta olduğunu YAZAR ve chug.py o
+    # modülü zaten ithal eder; tanımı buraya taşımak (a) o sözleşme cümlesini
+    # yalanlar, (b) katman yönünü ters çevirir (analysis -> stability), çünkü
+    # eşiği acoustic_modes'un geri ithal etmesi gerekirdi. Bu yüzden tanım
+    # yerinde bırakıldı; chug fiziğinin evinden okumak isteyen çağıran
+    # ``from hrma.stability.chug import CHUG_DP_RATIO_MINIMUM`` yazabilir ve
+    # ALDIĞI NESNE aynı nesnedir (kimlik bekçisi:
+    # tests/test_stability_sivi.py::test_chug_esigi_tek_kaynak).
+    'CHUG_DP_RATIO_MINIMUM',
+    'CHUG_DP_RATIO_RECOMMENDED',
+    'CHUG_THRESHOLD_SOURCE',
     'CHUG_GAIN_J_MAX',
     'chug_neutral_tau_ratio',
     'chug_neutral_frequency_hz',

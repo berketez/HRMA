@@ -7,7 +7,11 @@ YÖNTEM
 - Yerel zaman adımı: Δt_c = CFL·V_c / Σ_yüzey (|u·n̂|+a)|S| (hücre başına;
   zaman doğruluğu YOK — kararlı hâle en dik iniş; not_modelled beyanında).
 - CFL rampası: 0,5 → 0,9 (tasarım belgesi §2), ramp_iters boyunca doğrusal.
-- Zaman entegrasyonu: SSP-RK2 (euler_core ile aynı kalıntı).
+- Zaman entegrasyonu: SSP-RK2 (euler_core ile aynı kalıntı). Opt-in:
+  time_integrator='line_implicit_j' → j-yönü satır-örtük gevşetme
+  (relax_implicit.py; viskoz tasarım belgesi §4.2/§5.6). Hüküm-nötr:
+  kararlı hâl kökü kalıntı=0 ile tanımlıdır, yol seçimi kökü değiştirmez
+  (bekçi: tests/cfd/test_satir_ortuk.py).
 - Başlangıç tahmini: kolon bazlı izantropik alan-Mach çözümü. Alan-Mach
   terslemesi hrma.flow.quasi1d.mach_from_area_ratio'dan ÇAĞRILIR (parametre
   tutarlılığı: aynı bağıntı ikinci kez yazılmaz). Bu yalnız BAŞLANGIÇ
@@ -46,11 +50,13 @@ from hrma.cfd.euler_core import (
     residual_axisym,
     shock_column_flag,
 )
+from hrma.cfd.relax_implicit import line_implicit_delta, local_dt_axial
 from hrma.flow.quasi1d import isentropic_ratios, mach_from_area_ratio
 
 __all__ = ['solve_steady_axisym', 'DEFAULT_CFL_START', 'DEFAULT_CFL_MAX',
            'DEFAULT_RAMP_ITERS', 'DEFAULT_MAX_ITERS', 'DEFAULT_TOL_RES',
-           'DEFAULT_SETTLE_WINDOW', 'DEFAULT_SETTLE_TOL']
+           'DEFAULT_SETTLE_WINDOW', 'DEFAULT_SETTLE_TOL',
+           'DEFAULT_CFL_IMPLICIT_MAX', 'TIME_INTEGRATORS']
 
 # Sürücü varsayılanları (tasarım belgesi §2: CFL 0,5→0,9). tol/settle
 # değerleri tests/cfd ölçümleriyle sabitlendi (korunum artığı 1e-10 sınıfına
@@ -62,6 +68,41 @@ DEFAULT_MAX_ITERS = 20000
 DEFAULT_TOL_RES = 1e-8
 DEFAULT_SETTLE_WINDOW = 200
 DEFAULT_SETTLE_TOL = 1e-9
+
+# Zaman ilerletme seçenekleri (viskoz tasarım belgesi §4.2/§5.6). Varsayılan
+# AÇIK yol: mevcut 149 tests/cfd bekçisi Euler yolunun bit-özdeşliğini bu
+# varsayılan üstünden korur; satır-örtük katman opt-in'dir (V0 kararı —
+# örtük varsayılan yapılacaksa bit-özdeşlik sözleşmesi §11.3 dondurulmuş
+# referans alanlarla yeniden kurulmalıdır; bu partide yapılmadı, beyanlı).
+TIME_INTEGRATORS = ('ssp_rk2', 'line_implicit_j')
+
+# Satır-örtük yol CFL tavanı — ÖLÇÜMDEN (V0 turu, M4 Max, 2026-08-17;
+# CFL, i-YALNIZ Δt üstündedir: relax_implicit.local_dt_axial — j kısıtı
+# örtük katmanla kalkar, belge §4.2). conftest lülesi 60×12, ürün tol:
+#   1.mrt : cfl 2→1473, 5→1309, 10→1243, 25→1198, 50→1182, 100→1174 it
+#           (tekdüze düşüş + ~25'te doyum; hepsi yeşil)
+#   MUSCL : cfl 25→4452, 50→5727, 100→8707 it (hepsi yeşil; 25 üstünde
+#           iterasyon ARTIYOR — oturma-donması yüksek CFL'de geç ateşliyor)
+# 25 seçildi: 1.mrt doyum noktası + MUSCL minimumu. Üstü/altı çağıranın
+# bilinçli seçimidir; aşırı değerde fiziksel olmayan duruma giden koşu
+# Δt-sonluluk kapısında 'diverged' beyanıyla döner (istisna sızmaz).
+DEFAULT_CFL_IMPLICIT_MAX = 25.0
+
+# Satır-örtük yolda MUSCL eğim TAZELEME aralığı [iterasyon] — ÖLÇÜMDEN
+# (V0 turu, 60×12 MUSCL, tablolar test_satir_ortuk.py):
+# canlı eğim (her adım) örtük büyük adımlarla limit döngüsüne kilitleniyor
+# (60000 iterde kalıntı 0,66 — HİÇ yakınsamıyor); tek kalıcı dondurma ise
+# bayat köke iniyor (analitik debiden %1,47 sapma ÖLÇÜLDÜ). Çare mevcut
+# tazeleme fikrinin (steady docstring, Picard) periyodik hâli: eğimler her
+# K iterasyonda güncel durumdan yeniden alınır; durum oturdukça tazeleme
+# öz-tutarlılaşır ve GERÇEK MUSCL köküne iner (hüküm-nötrlük bekçisi bunu
+# ölçer). K taraması (ürün tol, 60×12): K=2 limit döngüsü (kırmızı), K=5
+# 1,5e-4'te asılı, K=10 12300 it, K=25 3605 it, K=100 12306 it, K=200+
+# Picard bacağı israfı — optimum 25. 60×48 MUSCL: K=25 oturma-donmasıyla
+# 4143 iterasyonda yeşil; K=100/200 40000'de geveleme tabanında asılı
+# (2,9e-8/1,8e-8) — K=25 varsayılanı orada da ölçümle doğrulandı; K
+# çağırana açıktır.
+DEFAULT_IMPLICIT_SLOPE_REFRESH = 25
 
 _ASSUMPTIONS = (
     'steady',                    # kararlı hâl (yerel Δt, zaman doğru değil)
@@ -142,7 +183,10 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
                         tol_res=DEFAULT_TOL_RES,
                         settle_window=DEFAULT_SETTLE_WINDOW,
                         settle_tol=DEFAULT_SETTLE_TOL,
-                        second_order=True):
+                        second_order=True,
+                        time_integrator='ssp_rk2',
+                        cfl_implicit_max=DEFAULT_CFL_IMPLICIT_MAX,
+                        implicit_slope_refresh=DEFAULT_IMPLICIT_SLOPE_REFRESH):
     """Lüle iç akışını kararlı hâle sürer; beyanlı sonuç sözlüğü döndürür.
 
     Args:
@@ -151,6 +195,21 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
         gamma, R: kalorik mükemmel gaz sabitleri (motor çözücüsünden;
             varsayılan yok, eksikse çağıran reddetmeli).
         Pb: geri basınç [Pa]; None → çıkışta tam dışdeğerleme (süpersonik).
+        time_integrator: 'ssp_rk2' (varsayılan — AÇIK yol, bugünkü kodla
+            bit-özdeş) | 'line_implicit_j' (j-yönü satır-örtük gevşetme,
+            relax_implicit.py; viskoz tasarım belgesi §4.2/§5.6).
+            HÜKÜM-NÖTRLÜK SÖZLEŞMESİ: seçim yalnız köke gidiş YOLUNU
+            değiştirir, yakınsanan çözümü ve hüküm ölçütlerini (aşağıdaki
+            üçlü) DEĞİŞTİRMEZ — bekçisi tests/cfd/test_satir_ortuk.py.
+        cfl_implicit_max: satır-örtük yol CFL rampası tavanı (yalnız
+            time_integrator='line_implicit_j' iken kullanılır; varsayılan
+            ölçümden, DEFAULT_CFL_IMPLICIT_MAX tanımı yanında).
+        implicit_slope_refresh: satır-örtük yolda MUSCL eğimlerinin
+            periyodik tazeleme aralığı [iterasyon] (yalnız örtük +
+            second_order iken; gerekçe ve ölçüm
+            DEFAULT_IMPLICIT_SLOPE_REFRESH tanımı yanında). Açık yolun
+            plato-dondurma sezgisi örtük dalda KULLANILMAZ (ölçülen
+            yanlış tetikleme: kalıntı 0,93'te donup kökü %1,47 saptırdı).
         Diğerleri: sürücü ayarları (modül sabitlerinde beyanlı).
 
     Returns:
@@ -170,6 +229,10 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
         raise ValueError('P0, T0 ve R pozitif olmalı (uydurma yedek yok).')
     if not (1.0 < g < 2.0):
         raise ValueError('gamma (1, 2) aralığında olmalı (mükemmel gaz).')
+    if time_integrator not in TIME_INTEGRATORS:
+        raise ValueError(f'time_integrator {TIME_INTEGRATORS} içinden '
+                         f'olmalı; gelen: {time_integrator!r} (sessiz '
+                         'varsayılana düşme yok).')
 
     U, i_throat = _isentropic_initial_state(grid, P0, T0, g, Rs, Pb=Pb)
     # Izgara sabiti yüzey geometrisi BİR kez (hoist; bit-özdeşlik bekçili —
@@ -221,13 +284,49 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
         return (len(hist) >= settle_window and ref > 0.0
                 and (max(band) - min(band)) / ref < settle_tol)
 
+    # Satır-örtük yolun eğim durumu (periyodik Picard tazelemesi —
+    # DEFAULT_IMPLICIT_SLOPE_REFRESH gerekçesi). Açık yolda kullanılmaz.
+    #
+    # OTURMA-TETİKLİ KALICI DONDURMA (ölçülen gerekçe, V0 turu 2026-08-17):
+    # periyodik tazeleme minmod gevelemesini her K iterasyonda yeniden
+    # enjekte eder; 60×48 MUSCL'de kalıntı bu geveleme tabanında (3e-8,
+    # tol'ün hemen üstü) asılı kaldı — hüküm büyüklükleri (debi/Mach)
+    # ÇOKTAN OTURMUŞKEN. Tedavi mevcut hüküm makinesinden: üç oturma bandı
+    # sağlanmış ama kalıntı eşiği aşılamamışsa eğimler O OTURMUŞ durumdan
+    # KALICI dondurulur (Picard'ın vardığı öz-tutarlı nokta; açık yolun
+    # plato-dondurmasının hüküm-tabanlı kardeşi). Erken yanlış tetikleme
+    # yapısal olarak imkânsız: oturma bandı (200 iter, settle_tol) geçiş
+    # rejiminin O(1) salınımında sağlanamaz — açık yol plato sezgisinin
+    # örtük dalda ölçülen yanlış tetiklemesi (kalıntı 0,93'te donma) bu
+    # tetikleyicide olamaz. Dondurma anı ve sebebi çıktıda beyanlıdır.
+    implicit_slopes = None
+    implicit_frozen = False
+    refresh_every = max(1, int(implicit_slope_refresh))
+    freeze_reason = 'plato tespiti'
+
     it = 0
     while it < max_iters:
         cfl = cfl_start + (cfl_max - cfl_start) * min(1.0,
                                                      it / float(ramp_iters))
-        r1, aux = residual_axisym(U, grid, g, Rs, P0, T0, Pb=Pb,
-                                  second_order=second_order,
-                                  slopes=frozen_slopes, geom=geom)
+        if time_integrator == 'line_implicit_j' and second_order:
+            # Tazeleme anı: eğimler güncel durumdan (canlı) alınır ve K
+            # iterasyon boyunca donuk taşınır — canlı eğim limit döngüsü
+            # ile bayat-kök sapması arasındaki ölçülmüş orta yol. Kalıcı
+            # dondurmadan sonra tazeleme durur (beyan yukarıda).
+            if (not implicit_frozen) and it % refresh_every == 0:
+                r1, aux, implicit_slopes = residual_axisym(
+                    U, grid, g, Rs, P0, T0, Pb=Pb,
+                    second_order=second_order, return_slopes=True,
+                    geom=geom)
+            else:
+                r1, aux = residual_axisym(U, grid, g, Rs, P0, T0, Pb=Pb,
+                                          second_order=second_order,
+                                          slopes=implicit_slopes,
+                                          geom=geom)
+        else:
+            r1, aux = residual_axisym(U, grid, g, Rs, P0, T0, Pb=Pb,
+                                      second_order=second_order,
+                                      slopes=frozen_slopes, geom=geom)
         res_norm = float(np.sqrt(np.sum(r1[..., 0] ** 2 * vol) / vol_sum)
                          / res_scale)
         _, m_sec, _ = _section_averages(U, grid, g)
@@ -247,10 +346,37 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
                 and _settled(mach_throat_hist)):
             break
 
+        # Satır-örtük yol: oturma-tetikli KALICI dondurma (beyan döngü
+        # öncesinde). Hüküm büyüklükleri oturmuş ama kalıntı eşiği minmod
+        # geveleme tabanında aşılamıyorsa eğimler bu oturmuş durumdan
+        # dondurulur; tetik hüküm bantlarının kendisidir, yeni eşik yok.
+        if (time_integrator == 'line_implicit_j' and second_order
+                and not implicit_frozen and res_norm >= tol_res
+                and _settled(mdot_in_hist) and _settled(mdot_out_hist)
+                and _settled(mach_throat_hist)):
+            _, _, implicit_slopes = residual_axisym(
+                U, grid, g, Rs, P0, T0, Pb=Pb,
+                second_order=second_order, return_slopes=True, geom=geom)
+            implicit_frozen = True
+            frozen_at = it
+            freeze_count += 1
+            freeze_reason = ('oturma tespiti: hüküm bantları oturdu, '
+                             'kalıntı geveleme tabanında')
+
         # Plato tespiti: rampa bitmiş + iki ardışık pencerede kalıntı
         # anlamlı düşmüyor → eğimleri dondur; donmuşken plato SÜRÜYORSA
         # güncel durumdan TAZELE (beyan yukarıda; şoklu vaka gerekçesi).
-        if (second_order and it > ramp_iters + 2 * plateau_window
+        #
+        # YALNIZ AÇIK YOL (V0 ölçümü, 2026-08-17): dondurma sezgisi açık
+        # yolun minmod stall'ı içindir ve eşiği açık inişin tarihçesine
+        # göre ayarlıdır. Örtük yolun geçiş rejimi farklıdır — ÖLÇÜLDÜ
+        # (60×12 MUSCL, CFL 25): sezgi 1001. iterasyonda kalıntı 0,93
+        # iken tetiklendi, bayat eğim kökü debide analitikten %1,47
+        # saptırdı (açık yol dondurmadan %0,066'ya iner). Örtük yol
+        # dondurmasız derin yakınsıyor (ölçüm tabloları
+        # tests/cfd/test_satir_ortuk.py); dondurma örtük dalda kapalı.
+        if (second_order and time_integrator == 'ssp_rk2'
+                and it > ramp_iters + 2 * plateau_window
                 and (frozen_at is None
                      or it >= frozen_at + 2 * plateau_window)):
             recent = min(res_hist[-plateau_window:])
@@ -263,13 +389,38 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
                 frozen_at = it
                 freeze_count += 1
 
-        # SSP-RK2 (yerel Δt)
-        dt = local_dt_axisym(U, grid, g, cfl, area_i, area_j)
-        u1 = U + dt[..., None] * r1
-        r2, _ = residual_axisym(u1, grid, g, Rs, P0, T0, Pb=Pb,
-                                second_order=second_order,
-                                slopes=frozen_slopes, geom=geom)
-        U = 0.5 * (U + u1 + dt[..., None] * r2)
+        if time_integrator == 'line_implicit_j':
+            # j-yönü satır-örtük gevşetme (relax_implicit.py; hüküm-nötr —
+            # yalnız yol değişir). CFL rampası aynı biçim, tavan ölçülen
+            # örtük tavandır: Δt'nin j-kısıtı örtük katmanla kalkar, açık
+            # kararlılık sınırının üstüne çıkılır (tasarım belgesi §4.2).
+            cfl_imp = cfl_start + (cfl_implicit_max - cfl_start) * min(
+                1.0, it / float(ramp_iters))
+            # Δt YALNIZ i-yüzlerinden: j yönü örtük olduğundan adımı
+            # kısıtlamaz (belge §4.2; local_dt_axial docstring'inde
+            # ölçülen gerekçe — tam toplam + büyük CFL nj merdiveninde
+            # ıraksadı).
+            dt = local_dt_axial(U, grid, g, cfl_imp, area_i)
+            # Fiziksel olmayan durum kapısı (ölçülen vaka: aşırı CFL'de
+            # p<0 → a=NaN; kütle kalıntısı normu HLLC'nin np.where
+            # seçimleriyle sonlu kalabildiğinden yukarıdaki res_norm
+            # kapısı bunu her zaman yakalamaz — ölçüldü, CFL=100
+            # taramasında implicit.py giriş kapısına düştü). Δt, ses hızı
+            # üstünden aynı NaN sinyalini taşır: sonlu değilse koşu
+            # 'diverged' beyanıyla döner (sürücü sözleşmesi; sessiz
+            # yutma yok, hüküm de yok).
+            if not np.all(np.isfinite(dt)):
+                diverged = True
+                break
+            U = U + line_implicit_delta(U, r1, grid, geom, g, dt)
+        else:
+            # SSP-RK2 (yerel Δt)
+            dt = local_dt_axisym(U, grid, g, cfl, area_i, area_j)
+            u1 = U + dt[..., None] * r1
+            r2, _ = residual_axisym(u1, grid, g, Rs, P0, T0, Pb=Pb,
+                                    second_order=second_order,
+                                    slopes=frozen_slopes, geom=geom)
+            U = 0.5 * (U + u1 + dt[..., None] * r2)
         if not np.all(np.isfinite(U)):
             diverged = True
             break
@@ -277,10 +428,15 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
     if diverged:
         U = U_last_finite
 
-    # Nihai durum bütçesi (son duruma ait akılar — geçmişin son kaydı değil)
+    # Nihai durum bütçesi (son duruma ait akılar — geçmişin son kaydı
+    # değil). Eğimler yürüyüşün bittiği sistemden: açık yolda frozen_slopes
+    # (varsa), örtük yolda son taşınan implicit_slopes (dondurulmuşsa
+    # donmuş, değilse son tazelenen; 1. mertebede ikisi de None).
+    _son_egimler = (implicit_slopes if time_integrator == 'line_implicit_j'
+                    else frozen_slopes)
     _, aux_final = residual_axisym(U, grid, g, Rs, P0, T0, Pb=Pb,
                                    second_order=second_order,
-                                   slopes=frozen_slopes, geom=geom)
+                                   slopes=_son_egimler, geom=geom)
     mdot_in = aux_final['mass_flow_in_kg_s']
     mdot_out = aux_final['mass_flow_out_kg_s']
     e_in = aux_final['energy_flux_in_W']
@@ -308,7 +464,7 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
             f'{"<" if res_ok else ">="} tol {tol_res:g} (ölçek ρ0·a0/L). '
             f'{it} iterasyon.'
             + (f' Sınırlayıcı son olarak {frozen_at}. iterasyonda '
-               f'donduruldu (plato tespiti, {freeze_count} dondurma/'
+               f'donduruldu ({freeze_reason}, {freeze_count} dondurma/'
                f'tazeleme; şema minmod).' if frozen_at is not None
                else '')
             + f' Giriş sınır koşulu: {INLET_BC_NAME} (künye: '
@@ -341,6 +497,20 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
         'convergence_basis': basis,
         'inlet_bc': INLET_BC_NAME,
         'inlet_bc_basis': INLET_BC_BASIS,
+        'time_integrator': time_integrator,
+        'time_integrator_basis': (
+            'Zaman ilerletme yolu beyanı: ssp_rk2 = açık SSP-RK2 + yerel '
+            'Δt (varsayılan; Euler yolu bit-özdeşliğinin taşıyıcısı); '
+            'line_implicit_j = j-yönü satır-örtük blok üç-köşegen gevşetme '
+            '(relax_implicit.py; Jameson & Yoon 1987 spektral yarıçap '
+            'bölmeli yaklaşık Jacobian + DPLR tarzı yön-dışı köşegen '
+            'sönüm; MUSCL eğimleri periyodik Picard tazelemesiyle taşınır '
+            've açık yolun plato-dondurması bu dalda kullanılmaz — '
+            'gerekçeler DEFAULT_IMPLICIT_SLOPE_REFRESH tanımında, '
+            'ölçümle). HÜKÜM-NÖTR: seçim yalnız köke gidiş yolunu '
+            'değiştirir; hüküm üçlüsü (debi bandı + boğaz Mach bandı + '
+            'kalıntı eşiği) iki yolda AYNIDIR ve yakınsanan alanların '
+            'eşitliği bekçilidir (tests/cfd/test_satir_ortuk.py).'),
         'iterations': it,
         'limiter_frozen_at_iter': frozen_at,
         'limiter_freeze_count': freeze_count,
@@ -411,6 +581,9 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
             'grid_ni': grid.ni, 'grid_nj': grid.nj,
             'cfl_start': float(cfl_start), 'cfl_max': float(cfl_max),
             'tol_res': float(tol_res), 'settle_tol': float(settle_tol),
+            'time_integrator': time_integrator,
+            'cfl_implicit_max': float(cfl_implicit_max),
+            'implicit_slope_refresh': int(implicit_slope_refresh),
             '_basis': 'Çağıranın verdiği girdilerin yankısı (SI).',
         },
         'runtime_s': time.perf_counter() - t_start,

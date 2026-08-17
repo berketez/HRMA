@@ -98,9 +98,36 @@ __all__ = [
 R_UNIVERSAL_J_KMOL_K = 8314.462618
 
 # ---------------------------------------------------------------------------
-# Kararlılık eşikleri — TEK YERDE tanımlı, kaynak künyeli. Başka dosyada
-# bu sayıları tekrar YAZMA; buradan ithal et (parametre tutarlılık kuralı).
-# ---------------------------------------------------------------------------
+# Kararlılık eşikleri — DEPODAKİ TEK SAYISAL TANIM, kaynak künyeli. Başka
+# dosyada bu sayıları tekrar YAZMA; buradan ithal et (parametre tutarlılık
+# kuralı). Bekçi: tests/test_stability_sivi.py::test_chug_esigi_tek_kaynak
+# (dosya tarar; yeni kopya eklenirse KIRMIZI).
+#
+# F2b-2 ÖLÇÜMÜ (17 Ağu 2026) — aynı sayı çifti depoda DÖRT yerde tanımlıydı
+# ve İKİ ayrı künyeyle savunuluyordu:
+#   1. burası                                    0.20/0.15  Sutton + SP-194
+#   2. engines/liquid_rocket_engine.py:452-453   0.15/0.20  SP-8089
+#   3. engines/injector_design.py:62-63          0.15/0.20  SP-8089
+#   4. analysis/transient_ballistics.py:45       0.15       SP-8089
+# (Beşinci site utils/injector_design.py:187'de bir uyarı METNİNİN içinde
+# "recommends >=15%" olarak gömülüdür — sabit değil, dize.)
+#
+# KÜNYE HÜKMÜ (kaynağa inilerek, F2b-2): iki künye ÇELİŞMİYOR, aynı klasik
+# tasarım kuralının iki farklı yerde anılmasıdır; ama taşıdıkları kanıt eşit
+# DEĞİLDİR ve HRMA'nın künye standardı ikisini ayırmayı gerektirir:
+#   * Mekanizmanın kaynağı NASA SP-194 Böl. 5-6'dır (besleme kuplajlı alçak
+#     frekans kararsızlığının kendisi orada türetilir) — "neden".
+#   * Sayı bandının kaynağı tasarım pratiğidir (Sutton & Biblarz 9. baskı
+#     Böl. 8) — "kaç".
+#   * NASA SP-8089 (Gill & Nurick, "Liquid Rocket Engine Injectors", Mart
+#     1976) bu depoda BELGE olarak doğrulanmıştır (docs/STANDART_ATIFLARI.md,
+#     NTRS 19760023196) ama %15-20/%15-25 bandının SP-8089 içinde SAYFA
+#     düzeyinde geçtiği bu depoda doğrulanmamıştır. Defterin kendi kuralı
+#     ("doğrulayamıyorsan atfı koyma") gereği tek künye SP-8089'a
+#     DAYANDIRILMAZ; atıf aşağıda anılır, bandın dayanağı yapılmaz.
+# Sayı DEĞİŞMEDİ (0,20/0,15); değişen, dört yerde dört künye yerine tek
+# yerde tek künye olmasıdır.
+#
 # Enjektör basınç düşümü oranı (dP_inj / P_c) tasarım kuralı:
 # oran >= 0.20 -> besleme sistemi dekuplajı için tavsiye edilen değer;
 # 0.15 <= oran < 0.20 -> marjinal (klasik aralığın alt ucu);
@@ -113,7 +140,17 @@ CHUG_THRESHOLD_SOURCE = (
     'oscillations (Sutton & Biblarz, "Rocket Propulsion Elements", 9th ed., '
     'Ch. 8 injector design; NASA SP-194, Harrje & Reardon eds., 1972, '
     'Ch. 5-6 feed-system-coupled low-frequency instability). Engineering '
-    'rule of thumb, approximate — not a sharp physical boundary.')
+    'rule of thumb, approximate — not a sharp physical boundary. '
+    'This pair (0.20 / 0.15) is the ONLY numeric definition of the chug '
+    'design rule in HRMA: the liquid engine, the injector-driven transient '
+    'solver and hrma.stability.chug all import it from here. Other parts of '
+    'the repository cite NASA SP-8089 (Gill & Nurick, "Liquid Rocket Engine '
+    'Injectors", March 1976) for the same band; that document is verified to '
+    'exist and to be about injectors (NTRS 19760023196), but the band has '
+    'NOT been verified page-by-page inside it in this repository, so the '
+    'threshold is not attributed to it. Where this rule falls on the solved '
+    'chug neutral curve is measured, not assumed: see '
+    'hrma.stability.chug.assess_chug -> classical_rule_cross_check.')
 
 # Frekans bandı sınırları [Hz] — gösterge niteliğinde sınıflandırma.
 FREQ_BAND_CHUG_MAX_HZ = 400.0
