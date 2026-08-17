@@ -57,9 +57,11 @@ I18N_ADVANCED = REPO_ROOT / 'hrma' / 'static' / 'js' / 'i18n_advanced.js'
 
 LOCAL_HOST = {'Host': '127.0.0.1:8080'}
 
-#: A5 ile eklenen alanlar: id == payload anahtarı.
+#: A5 (+ parti 28 chug atalet kapıları) ile eklenen alanlar:
+#: id == payload anahtarı.
 YENI_SAYISAL_ALANLAR = ('closure_bolt_count', 'feed_line_wall_thickness',
-                        'valve_closure_time_ms')
+                        'valve_closure_time_ms', 'feed_line_length_m',
+                        'feed_line_diameter_mm')
 YENI_SECIM_ALANLARI = ('closure_bolt_size', 'closure_bolt_class',
                        'feed_line_material', 'pressurization_type')
 
@@ -72,6 +74,13 @@ BILINCLI_ISTISNALAR = {
     # yüklemesi için açık tutulur ama sayfada kapısı bilinçli olarak yok.
     'of_max_isp',
     'of_max_thrust',
+    # Parti 28: hat ataleti için formda İÇ ÇAP sorulur
+    # (feed_line_diameter_mm) ve akış alanı motorda ondan dairesel kesitle
+    # türetilir (liquid_rocket_engine._feed_line_inertance_inputs). Aynı
+    # büyüklük için ikinci bir alan (alan m²) formda dursaydı iki girdi
+    # birbiriyle çelişebilirdi; bu kanal dairesel olmayan kanallar için
+    # API/proje yüklemesine açık tutulur ama sayfada kapısı bilinçli yok.
+    'feed_line_area_m2',
 }
 
 
@@ -256,6 +265,7 @@ BOS_FORM = {
     'closure_bolt_class': '8.8', 'feed_line_wall_thickness': '',
     'valve_closure_time_ms': '', 'feed_line_material': '',
     'pressurization_type': '',
+    'feed_line_length_m': '', 'feed_line_diameter_mm': '',
 }
 
 
@@ -364,6 +374,25 @@ def test_hat_malzemesi_okunuyor(client):
     assert any('aluminum_6061' in str(v)
                for v in _leaves(_su_kocu(sonra)).values()), (
         'seçilen hat malzemesi yanıtta adıyla görünmüyor')
+
+
+def test_hat_atalet_kapilari_chug_cevrimine_ulasiyor(client, taban):
+    """feed_line_length_m + feed_line_diameter_mm chug çevrimini oynatır.
+
+    Parti 28 kapıları süs değildir: dolu alan, çevrimi ikinci mertebe (hat
+    ataletli) forma geçirmeli ve çıktıda yaprak oynatmalıdır. Örnek değerler
+    tests/test_stability_sivi.py'nin motor-tarafı bekçisiyle aynıdır
+    (1,5 m / 12 mm).
+    """
+    yuk = copy.deepcopy(BASE_PAYLOAD)
+    yuk['feed_line_length_m'] = 1.5
+    yuk['feed_line_diameter_mm'] = 12.0
+    sonra = _calculate(client, yuk)
+    degisen = _changed(_leaves(taban), _leaves(sonra))
+    assert degisen, ('hat uzunluğu + iç çapı girildi ama hiçbir yaprak '
+                     'oynamadı — kanal kopuk')
+    assert any('chug' in p or 'feed_line' in p for p in degisen), (
+        'değişim chug/hat bloklarında görünmüyor: %s' % degisen[:10])
 
 
 def test_basinclandirma_gazi_emniyet_vanasina_ulasiyor(client, taban):

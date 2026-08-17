@@ -960,6 +960,37 @@
                     </label>
                     <input type="number" id="valve_closure_time_ms" value="" step="1" min="0.1" max="600000" placeholder="—">
                 </div>
+                <!-- Parti 28: chug atalet kapıları (feed_line_length_m,
+                     feed_line_diameter_mm) — motor bu ikisini okuyup chug
+                     çevrimini ikinci mertebe (hat ataletli) forma geçiriyordu
+                     ama formda kapıları yoktu (kanal var kapı yok; CI
+                     32003781095'te bekçi yakaladı). min/max sınırları
+                     liquid_rocket_engine._override_val çağrılarıyla birebir
+                     aynıdır (uzunluk 0,05-50 m; iç çap 0,5-500 mm). Boş alan
+                     payload'a girmez: chug ataletsiz koşar ve bunu beyan
+                     eder. feed_line_area_m2 kanalı BİLEREK formsuz kaldı —
+                     gerekçesi tests/test_sivi_form_alanlari.py
+                     BILINCLI_ISTISNALAR kaydında. -->
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.feed_line_length">Feed Line Length</span> <span class="unit">(m)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.feed_line_length_tip">Feed-line length from the tank outlet to the injector manifold. Together with the inner diameter it sets the feed-line inertance, which switches the chug (low-frequency) stability loop to its second-order form. Leave empty if unknown - the chug analysis then runs without line inertia and declares that assumption instead of guessing a layout.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="feed_line_length_m" value="" step="0.1" min="0.05" max="50" placeholder="—">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <span data-i18n="liq.ui.feed_line_diameter">Feed Line Inner Diameter</span> <span class="unit">(mm)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.feed_line_diameter_tip">Inner diameter of the feed line. The flow area for the feed-line inertance is derived from it as a circular duct. Leave empty if unknown - the chug analysis then runs without line inertia and declares that assumption. For a non-circular duct the flow area can be supplied directly through the API key feed_line_area_m2.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="feed_line_diameter_mm" value="" step="0.5" min="0.5" max="500" placeholder="—">
+                </div>
                 <div class="form-group">
                     <label>
                         <span data-i18n="liq.ui.feed_line_material">Feed Line Material</span>
@@ -4170,6 +4201,10 @@
                 })(),
                 feed_line_wall_thickness: optNum('feed_line_wall_thickness'),
                 valve_closure_time_ms: optNum('valve_closure_time_ms'),
+                // Parti 28 — chug atalet kapıları: boş bırakılırsa anahtar
+                // GÖNDERİLMEZ, chug ataletsiz koşar ve bunu beyan eder.
+                feed_line_length_m: optNum('feed_line_length_m'),
+                feed_line_diameter_mm: optNum('feed_line_diameter_mm'),
                 feed_line_material: optChoice('feed_line_material'),
                 pressurization_type: optChoice('pressurization_type')
             };

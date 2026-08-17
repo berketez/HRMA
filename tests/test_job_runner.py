@@ -218,8 +218,17 @@ class TestConcurrency:
                    for n in range(8)]
         for t in threads:
             t.start()
+        # join(timeout) süre dolunca SESSİZCE döner; thread hâlâ koşuyorken
+        # aşağıdaki sayım eksik okunur ve hata yanlış yere (JobRunner'a)
+        # işaret eder. Yüklü CI runner'ında ölçüldü: 32003781095 koşusunda
+        # 8 submitter'dan 3 append 5 sn'ye sığmadı -> 37 == 40 kırmızısı.
+        # Pay 6x + is_alive bekçisi: yavaşlık artık adıyla raporlanır.
         for t in threads:
-            t.join(POLL_TIMEOUT)
+            t.join(POLL_TIMEOUT * 6)
+        for t in threads:
+            assert not t.is_alive(), (
+                'submitter thread join penceresinde bitmedi — sayım eksik '
+                'okunurdu; JobRunner değil zamanlama yavaş')
         assert len(all_ids) == 40
         assert len({jid for jid, _ in all_ids}) == 40  # kimlik çakışması yok
         for jid, expected in all_ids:

@@ -148,13 +148,30 @@ def manifest_satiri(ad, anahtar, eski, yeni):
 # ===========================================================================
 # 1) Bit-özdeş kalması GEREKEN yapraklar
 # ===========================================================================
+# Platform gürültü tabanı: ESKI_YEREL anlık görüntüsü arm64/Darwin'de ölçüldü
+# (HEAD 9946c70); CI x86_64/Linux'ta aynı ifadeler libm/FMA/BLAS son-bit
+# farkıyla değişik yuvarlanıyor. Ölçülen en büyük sapma 3,1e-13 bağıl
+# (CI koşumu 32003781095: 6398,1396323450135 -> ...347029). Eşik o gürültünün
+# ~3 katı, gerçek bir göç kaçağının (>=1e-6 sınıfı: çap kaynağı, ses hızı,
+# formül değişimi) ise 6 dekad altındadır — bekçi ısırmaya devam eder
+# (mutasyonla ölçüldü: 1,6e-5'lik oynama 2 testi kırmızı yakıyor).
+# repr() tam eşitliği yalnız AYNI makinede anlamlıdır; platformlar arası
+# sözleşme bu taban üzerinden kurulur.
+PLATFORM_GURULTU_TABANI_REL = 1e-12
+
+
 @pytest.mark.parametrize('ad', sorted(ESKI_YEREL))
 @pytest.mark.parametrize('anahtar', sorted(BIT_OZDES))
 def test_gocte_bit_ozdes_kalan_yapraklar(yeni_merkez, ad, anahtar):
-    """Bu yapraklar DEĞİŞMEMELİ; değişirse sebebi manifestte yoktur."""
-    eski = ESKI_YEREL[ad][anahtar]
-    yeni = yeni_merkez[ad][anahtar]
-    assert repr(float(yeni)) == repr(float(eski)), (
+    """Bu yapraklar DEĞİŞMEMELİ; değişirse sebebi manifestte yoktur.
+
+    'Değişmedi' platformlar arası son-bit gürültü tabanına kadar tanımlıdır
+    (PLATFORM_GURULTU_TABANI_REL); onun üstündeki her fark manifestte adı
+    konmuş bir sebep ister.
+    """
+    eski = float(ESKI_YEREL[ad][anahtar])
+    yeni = float(yeni_merkez[ad][anahtar])
+    assert yeni == pytest.approx(eski, rel=PLATFORM_GURULTU_TABANI_REL), (
         'GÖÇ MANİFESTOSU İHLALİ (beklenmeyen fark)\n'
         + manifest_satiri(ad, anahtar, eski, yeni)
         + f'\nbeklenen sebep: {BIT_OZDES[anahtar]}\n'
@@ -182,7 +199,12 @@ def test_1t_farki_yalnizca_bessel_kokunden(yeni_merkez, ad):
     eski = ESKI_YEREL[ad]['first_tangential_hz']
     yeni = yeni_merkez[ad]['first_tangential_hz']
     d_rel = (yeni - eski) / eski
-    assert d_rel == pytest.approx(BEKLENEN_1T_DREL, rel=1e-9, abs=1e-15), (
+    # abs taban: yeni/eski'deki platform son-bit gürültüsü (<=3,1e-13 bağıl,
+    # bkz. PLATFORM_GURULTU_TABANI_REL) d_rel'e ~1e-12 MUTLAK oynama taşır;
+    # rel=1e-9 payı ise (BEKLENEN_1T_DREL ~ 8,8e-6 iken) 8,8e-15'te kalır ve
+    # bunu örtmez. Gerçek bir kaçak d_rel'i >=1e-6 oynatır — bekçi ısırır.
+    assert d_rel == pytest.approx(BEKLENEN_1T_DREL, rel=1e-9,
+                                  abs=PLATFORM_GURULTU_TABANI_REL), (
         'GÖÇ MANİFESTOSU İHLALİ (fark beklenen sebeple açıklanmıyor)\n'
         + manifest_satiri(ad, 'first_tangential_hz', eski, yeni)
         + f'\nbeklenen drel={BEKLENEN_1T_DREL:.6g} '
@@ -190,16 +212,23 @@ def test_1t_farki_yalnizca_bessel_kokunden(yeni_merkez, ad):
 
 
 def test_1t_farki_motordan_bagimsiz(yeni_merkez):
-    """Aynı bağıl fark ÜÇ vakada da aynı çıkmalı (sebep tek: kök)."""
+    """Aynı bağıl fark ÜÇ vakada da aynı çıkmalı (sebep tek: kök).
+
+    'Aynı' platform gürültü tabanına kadar: round(v, 12) kova sınırı motor
+    başına ~1e-12'lik bağımsız son-bit gürültüsüyle iki motoru farklı kovaya
+    düşürebilirdi (CI x86_64'te ölçülen sapma sınıfı); yayılım eşiği bu
+    kırılganlığı taşımaz. Gerçek bir motor-bağımlı kaçak yayılımı >=1e-6
+    sınıfına iter — bekçi ısırır.
+    """
     farklar = {
         ad: (yeni_merkez[ad]['first_tangential_hz']
              - ESKI_YEREL[ad]['first_tangential_hz'])
         / ESKI_YEREL[ad]['first_tangential_hz']
         for ad in ESKI_YEREL}
-    benzersiz = {round(v, 12) for v in farklar.values()}
-    assert len(benzersiz) == 1, (
+    yayilim = max(farklar.values()) - min(farklar.values())
+    assert yayilim <= 2 * PLATFORM_GURULTU_TABANI_REL, (
         f'1T farkı motora göre değişiyor -> sebep yalnız kök yuvarlaması '
-        f'değil: {farklar}')
+        f'değil: {farklar} (yayılım {yayilim:.3g})')
 
 
 def test_yuvarlanmis_kok_sabiti_geri_gelmesin():
