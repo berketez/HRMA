@@ -76,6 +76,26 @@
        çekirdekte yapısal). Kiracının verdict() işlevi null döner; çerçeve
        "hüküm beyan edilmedi" rozetini basar, sahte 'ok' üretilmez.
 
+   KULLANILABİLİRLİK (parti 29 A1 — ekran görüntüsünden ölçülen 4 kusur)
+     * K1: mod haritası etiketleri iz metni DEĞİL, layoutModeLabels() saf
+       yerleşim fonksiyonunun kademelendirdiği kısa yönlendirme çizgili
+       Plotly notlarıdır — aynı x-komşuluğuna düşen etiket kutuları
+       (ÖLÇÜLEN metin genişliğiyle) kesişmez; tam üst üste düşen imlerin
+       etiketleri de farklı kademelere ayrılır. İzin x/y/text dizileri
+       motor tablosunun KENDİSİ olarak kalır (dondurulmuş bekçi sözleşmesi:
+       im frekansın kendisinde durur, oynatmak sahte veri olurdu).
+     * K2: eksen marjları ve sütun genişlikleri ÖLÇÜLEN metinden türetilir
+       (measureLabelPx: tarayıcıda gerçek canvas measureText, testte fontun
+       kendi 0,6 em ilerleme metriği); uzun y-ekseni başlıkları kullanılan
+       yüksekliğe göre satırlara sarılır. Sabit piksel tahmini yok.
+     * K3: beyan/dayanak metin duvarları VARSAYILAN KAPALI <details>
+       bloklarındadır; <summary> başlık + VERİDEN türeyen tek satır özet
+       taşır. İçerik DOM'da AYNEN durur (kaynak-tarama bekçileri
+       etkilenmez); hüküm rozetleri ve sayı tabloları KATLANMAZ.
+     * K4: veri metni (sayılar, mod adları, birimler) --hd-ink; yalnız
+       ikincil açıklama metni --hd-ink-dim kalır. WCAG bekçisi kontrastı
+       theme.css jetonlarından hesaplar (veri >= 7:1, açıklama >= 4.5:1).
+
    Bekçiler: tests/test_stability_panel.py
    ==================================================================== */
 
@@ -555,6 +575,195 @@
     // ==================================================================
 
     // ------------------------------------------------------------------
+    // GÖRSEL METRİKLER (K1/K2) — yerleşim ve marjlar ölçülen metinden.
+    // Sayılar tipografi metrikleridir, VERİ DEĞİLDİR (sahte veri yasağı
+    // göstergeleri kapsar); bekçi testleri bu sözlüğü okuyup marj
+    // formülünü aynen yeniden hesaplar.
+    // ------------------------------------------------------------------
+    const AXIS_METRICS = {
+        titleFontPx: 11,        // y-ekseni başlık puntosu (çizimle aynı)
+        tickFontPx: 10,         // tik etiketi puntosu (çizimle aynı)
+        labelFontPx: 10,        // mod haritası etiket puntosu
+        kvFontPx: 11.2,         // kvTable 0.7rem × 16px kök punto
+        lineHeight: 1.35,       // başlık satır yüksekliği çarpanı
+        padPx: 14,              // eksen çizgisi ↔ başlık tamponu
+        tickPadPx: 6,           // tik etiketi ↔ eksen tamponu
+        labelGapPx: 6,          // K1: etiket kutuları arası asgari boşluk
+        labelTierStepPx: 14,    // K1: kademeler arası dikey adım (> punto)
+        labelBaseOffsetPx: 16,  // K1: im ↔ ilk kademe etiketi mesafesi
+        //: clientWidth ölçülemeyen ortamda (ilk çizim öncesi / test DOM'u)
+        //: Plotly'nin kendi varsayılan çizim genişliği — yerleşim bandı
+        //: ölçüsüdür, ekrana basılan bir veri değildir.
+        defaultPlotWidthPx: 700,
+        monoFamily: "'JetBrains Mono', 'SF Mono', Consolas, monospace",
+    };
+
+    //: JetBrains Mono'nun kendi ilerleme genişliği 0,6 em'dir (fontun
+    //: metriği). Tarayıcıda GERÇEK canvas measureText ile ölçülür; canvas
+    //: olmayan ortamda (node bekçi koşumu) bu metrikten hesaplanır —
+    //: iki yol da deterministiktir, testler node yolunu ölçer.
+    const MONO_ADVANCE_EM = 0.6;
+    let measureCtx;
+    function measureLabelPx(text, fontPx) {
+        const s = String(text == null ? '' : text);
+        const f = isNum(fontPx) && fontPx > 0 ? fontPx : AXIS_METRICS.labelFontPx;
+        try {
+            if (measureCtx === undefined) {
+                measureCtx = null;
+                const cv = (typeof document !== 'undefined'
+                            && document.createElement)
+                    ? document.createElement('canvas') : null;
+                if (cv && typeof cv.getContext === 'function') {
+                    measureCtx = cv.getContext('2d') || null;
+                }
+            }
+            if (measureCtx && typeof measureCtx.measureText === 'function') {
+                measureCtx.font = f + 'px ' + AXIS_METRICS.monoFamily;
+                const w = measureCtx.measureText(s).width;
+                if (isNum(w) && w > 0) return w;
+            }
+        } catch (err) { /* ölçüm düşerse font metriğine inilir */ }
+        return s.length * f * MONO_ADVANCE_EM;
+    }
+
+    //: K2 — uzun eksen başlığını kullanılabilir uzunluğa göre satırlara
+    //: sarar (kelime sınırında; her satırın ÖLÇÜLEN genişliği sığar).
+    function wrapAxisTitle(text, availablePx, fontPx) {
+        const words = String(text == null ? '' : text)
+            .split(/\s+/).filter(Boolean);
+        const lines = [];
+        let line = '';
+        words.forEach(function (w) {
+            const aday = line ? line + ' ' + w : w;
+            if (line && measureLabelPx(aday, fontPx) > availablePx) {
+                lines.push(line);
+                line = w;
+            } else {
+                line = aday;
+            }
+        });
+        if (line) lines.push(line);
+        return lines.length ? lines : [''];
+    }
+
+    //: K2 — tik etiketi genişliği: eksene düşecek değerlerin ekranda
+    //: basılan biçiminin (sigFig) ölçülen en genişi. Plotly kendi tiklerini
+    //: kısaltabilir; bu üst sınırdır — marj küçük değil geniş yanılır.
+    function maxTickWidthPx(values, fontPx) {
+        let w = 0;
+        (values || []).forEach(function (v) {
+            if (!isNum(v)) return;
+            const m = measureLabelPx(String(sigFig(v)), fontPx);
+            if (m > w) w = m;
+        });
+        return w;
+    }
+
+    //: K2 — sayısal y-ekseni sol marjı: ölçülen tik genişliği + başlık
+    //: satır sayısı × satır yüksekliği + tamponlar. Bekçi bu formülü
+    //: AXIS_METRICS ile aynen yeniden hesaplayıp eşitliği ölçer.
+    function yAxisLeftMarginPx(values, titleLineCount) {
+        return Math.ceil(maxTickWidthPx(values, AXIS_METRICS.tickFontPx)
+            + AXIS_METRICS.tickPadPx
+            + titleLineCount * AXIS_METRICS.titleFontPx * AXIS_METRICS.lineHeight
+            + AXIS_METRICS.padPx);
+    }
+
+    //: K2 — kategori (bant/satır adı) ekseni sol marjı: en geniş ölçülen
+    //: etiket + tamponlar; çizim alanı yutulmasın diye %45 tavanlı.
+    function categoryLeftMarginPx(catLabels, widthPx) {
+        let w = 0;
+        (catLabels || []).forEach(function (s) {
+            const m = measureLabelPx(String(s), AXIS_METRICS.tickFontPx);
+            if (m > w) w = m;
+        });
+        const marj = Math.ceil(w + AXIS_METRICS.tickPadPx + AXIS_METRICS.padPx);
+        return Math.max(Math.min(marj, Math.floor(widthPx * 0.45)), 40);
+    }
+
+    //: K1 — MOD HARİTASI ETİKET YERLEŞİMİ (SAF fonksiyon: DOM/Plotly yok,
+    //: aynı girdi → aynı çıktı; bekçi birim-testi doğrudan koşturur).
+    //:
+    //: Girdi:  items = [{x: frekans_hz, row: bant/satır, label: metin}]
+    //:         opts  = {plotWidthPx, fontPx, minGapPx, tierStepPx,
+    //:                  baseOffsetPx, measure(fn)}
+    //: Çıktı:  her öğe için {index, row, label, xPx, widthPx, leftPx,
+    //:         rightPx, tier, ayPx}
+    //:
+    //: Algoritma: satır (bant) başına, x-piksel sırasında açgözlü kademe
+    //: seçimi. Bir etiket, sol kenarı o kademede en son yerleşen kutunun
+    //: sağ kenarı + boşluktan İLERİDEYSE o kademeye girer; değilse bir üst
+    //: kademeye çıkar. Kademe içi sağ kenar tekdüze arttığından aynı
+    //: kademedeki HER kutu çifti ayrıktır (kesişimsizlik yapısal olarak
+    //: kanıtlı); farklı kademeler dikeyde tierStepPx (> punto) ayrıktır.
+    //: Aynı noktaya düşen imlerin etiketleri tam örtüştüğünden zorunlu
+    //: olarak farklı kademelere düşer.
+    function layoutModeLabels(items, opts) {
+        const o = opts || {};
+        const plotW = isNum(o.plotWidthPx) && o.plotWidthPx > 0
+            ? o.plotWidthPx : AXIS_METRICS.defaultPlotWidthPx;
+        const fontPx = isNum(o.fontPx) && o.fontPx > 0
+            ? o.fontPx : AXIS_METRICS.labelFontPx;
+        const gap = isNum(o.minGapPx) ? o.minGapPx : AXIS_METRICS.labelGapPx;
+        const step = isNum(o.tierStepPx) ? o.tierStepPx
+            : AXIS_METRICS.labelTierStepPx;
+        const base = isNum(o.baseOffsetPx) ? o.baseOffsetPx
+            : AXIS_METRICS.labelBaseOffsetPx;
+        const measure = typeof o.measure === 'function'
+            ? o.measure
+            : function (s) { return measureLabelPx(s, fontPx); };
+
+        const xs = [];
+        (items || []).forEach(function (it) {
+            if (it && isNum(it.x) && it.x > 0) xs.push(it.x);
+        });
+        if (!xs.length) return [];
+        const lo = Math.log10(Math.min.apply(null, xs));
+        const hi = Math.log10(Math.max.apply(null, xs));
+        const span = (hi - lo) || 1;
+
+        const placed = [];
+        (items || []).forEach(function (it, idx) {
+            if (!it || !isNum(it.x) || it.x <= 0) return;
+            const xPx = (Math.log10(it.x) - lo) / span * plotW;
+            const w = measure(String(it.label));
+            if (!isNum(xPx) || !isNum(w)) return;
+            placed.push({ index: idx, row: String(it.row),
+                          label: String(it.label), xPx: xPx, widthPx: w,
+                          leftPx: xPx - w / 2, rightPx: xPx + w / 2,
+                          tier: 0, ayPx: base });
+        });
+
+        const rows = {};
+        placed.forEach(function (p) {
+            (rows[p.row] = rows[p.row] || []).push(p);
+        });
+        Object.keys(rows).forEach(function (r) {
+            const sirali = rows[r].slice().sort(function (a, b) {
+                return a.xPx - b.xPx || a.index - b.index;
+            });
+            const sonSag = [];   // kademe -> o kademede son yerleşen sağ kenar
+            sirali.forEach(function (p) {
+                let t = 0;
+                while (t < sonSag.length && p.leftPx < sonSag[t] + gap) t += 1;
+                p.tier = t;
+                sonSag[t] = p.rightPx;
+                p.ayPx = base + t * step;
+            });
+        });
+        return placed;
+    }
+
+    //: Çizim kabının gerçek genişliği; ölçülemiyorsa Plotly varsayılanı.
+    function plotContainerWidth(id) {
+        const el = (typeof document !== 'undefined'
+                    && document.getElementById) ? document.getElementById(id)
+            : null;
+        const w = el && isNum(el.clientWidth) ? el.clientWidth : 0;
+        return w > 0 ? w : AXIS_METRICS.defaultPlotWidthPx;
+    }
+
+    // ------------------------------------------------------------------
     // Görsel dil — Merkez/cfd_panel ile aynı değişken sözlüğü
     // (plotly_dark paletiyle uyumlu düz renkler).
     // ------------------------------------------------------------------
@@ -577,6 +786,10 @@
     const POINT_COLOR = '#ff5d73';
     const BAR_COLOR = '#2dd4a8';
     const LOCUS_COLOR = '#2dd4a8';
+    //: K4 — Plotly düzeni CSS var() çözmez: theme.css jetonlarının HEX
+    //: ikizleri (bekçi test theme.css ile birebir eşitliği ölçer).
+    const INK_HEX = '#cfe8f2';       // --hd-ink   (veri metni, >= 7:1)
+    const INK_DIM_HEX = '#7d97a5';   // --hd-ink-dim (açıklama, >= 4.5:1)
 
     function kindColor(kind) {
         return COLORS[kind] || COLORS.info;
@@ -620,12 +833,24 @@
             + ' font-size:0.7rem;">' + reasonHtmlSafeText + '</div>';
     }
 
-    function kvTable(rows) {
+    //: K4 — İKİ hücre de veri metnidir (sayılar, mod adları, birimler):
+    //: --hd-ink (>= 7:1). Soluk sınıflar (--hd-ink-dim/faint) veri
+    //: hücresine UYGULANMAZ; onlar yalnız ikincil açıklama metninindir.
+    //: K2b — opts.labelNowrap + opts.labelMinWidthPx: satır başları
+    //: ölçülen metin genişliği kadar yer ayırır, kırpılmaz (R_crit tablosu).
+    function kvTable(rows, opts) {
+        const o = opts || {};
+        let labelStyle = 'padding:2px 8px 2px 0; color:var(--hd-ink, #cfe8f2);'
+            + ' vertical-align:top;';
+        if (o.labelNowrap) labelStyle += ' white-space:nowrap;';
+        if (isNum(o.labelMinWidthPx)) {
+            labelStyle += ' min-width:' + Math.ceil(o.labelMinWidthPx) + 'px;';
+        }
         const body = rows.map(function (r) {
-            return '<tr><td style="padding:2px 8px 2px 0; color:'
-                + 'var(--hd-ink-dim, #7d97a5); vertical-align:top;">' + esc(r[0])
+            return '<tr><td style="' + labelStyle + '">' + esc(r[0])
                 + '</td><td style="padding:2px 0; color:var(--hd-ink, #cfe8f2);'
-                + ' font-family:var(--hd-mono, monospace);">' + esc(r[1])
+                + ' font-family:var(--hd-mono, monospace);'
+                + ' overflow-wrap:anywhere;">' + esc(r[1])
                 + '</td></tr>';
         }).join('');
         return '<table style="border-collapse:collapse; font-size:0.7rem;'
@@ -645,6 +870,70 @@
             }));
         }
         return '';
+    }
+
+    // ------------------------------------------------------------------
+    // K3 — METİN DUVARI KATLAYICI: beyan/dayanak blokları VARSAYILAN
+    // KAPALI <details> içine alınır. İçerik AYNEN DOM'da durur (beyan
+    // disiplini ve kaynak-tarama bekçileri etkilenmez); <summary> başlık +
+    // VERİDEN türeyen tek satırlık özet taşır. Hüküm rozetleri ve sayı
+    // tabloları (R_crit, sönüm bütçesi, assessment) bu katlayıcıya
+    // SOKULMAZ — onlar ana bilgidir.
+    // ------------------------------------------------------------------
+    function foldTitle(key, fallback) {
+        return '<strong data-i18n="' + esc(key) + '" style="font-size:0.68rem;'
+            + ' color:var(--hd-ink-dim, #7d97a5); letter-spacing:0.05em;'
+            + ' text-transform:uppercase;">' + esc(T(key, fallback))
+            + '</strong>';
+    }
+
+    function fold(which, titleHtml, previewText, bodyHtml) {
+        return '<details data-stab-fold="' + esc(which) + '" style="border:'
+            + '1px solid var(--hd-line, rgba(0,229,255,0.14));'
+            + ' border-radius:8px; padding:4px 10px; margin:8px 0;">'
+            + '<summary style="cursor:pointer; font-family:'
+            + 'var(--hd-mono, monospace); font-size:0.66rem; line-height:1.5;'
+            + ' color:var(--hd-ink-dim, #7d97a5); padding:2px 0;">'
+            + titleHtml
+            + (previewText
+                ? ' <span style="letter-spacing:0; text-transform:none;">— '
+                    + esc(previewText) + '</span>'
+                : '')
+            + '</summary>' + bodyHtml + '</details>';
+    }
+
+    //: Liste/sözlük özeti: kalem SAYISI + ilk adlar (veriden, uydurma yok).
+    function listPreview(value) {
+        let adlar = [];
+        if (Array.isArray(value)) {
+            adlar = value.map(function (v) { return SRV(String(v)); });
+        } else if (value && typeof value === 'object') {
+            adlar = Object.keys(value);
+        }
+        if (!adlar.length) return T('panel.stab.foldEmpty', 'nothing declared');
+        const gosterilen = adlar.slice(0, 3).map(function (s) {
+            return s.length > 42 ? s.slice(0, 42) + '…' : s;
+        });
+        let ozet = TF('panel.stab.foldCount', { n: adlar.length },
+                      '{n} item(s):') + ' ' + gosterilen.join(', ');
+        if (adlar.length > gosterilen.length) ozet += ', …';
+        return ozet;
+    }
+
+    //: Düz metin özeti: ilk cümle (ya da ilk 120 karakter) — metnin kendisi.
+    function prosePreview(text) {
+        const s = String(text == null ? '' : text).trim();
+        if (!s) return '';
+        const nokta = s.indexOf('. ');
+        if (nokta !== -1 && nokta < 120) return s.slice(0, nokta + 1);
+        return s.length > 120 ? s.slice(0, 120) + '…' : s;
+    }
+
+    //: Tek düz metnin katlanmış hâli (metin yoksa hiç blok basılmaz).
+    function foldProse(which, key, fallback, text) {
+        if (!text) return '';
+        return fold(which, foldTitle(key, fallback),
+                    prosePreview(SRV(text)), basisText(text));
     }
 
     function plotBox(id, height) {
@@ -682,14 +971,60 @@
     // ------------------------------------------------------------------
     // Çizimler — her sayı yanıttan ya da koşum anlık görüntüsünden.
     // ------------------------------------------------------------------
-    function modeMapFigure(snap) {
+    function modeMapFigure(snap, widthPx) {
         const modes = snap.modes;
+        const w = isNum(widthPx) && widthPx > 0
+            ? widthPx : AXIS_METRICS.defaultPlotWidthPx;
+        const lfiRowLabel = T('panel.stab.rowLfi', 'hybrid LFI (modelled)');
+        const chugRowLabel = T('panel.stab.rowChugLoop', 'chug loop (modelled)');
+        const hasLfi = !!(snap.lfi && isNum(snap.lfi.frequency_hz));
+        const loop = snap.chugLoop && snap.chugLoop.block;
+        // Frekans imi yalnız POZİTİFKEN: f = 0 salınımsız (gerçel) kök
+        // demektir ve logaritmik frekans ekseninde gösterilemez; sayı
+        // gizlenmez, chug kiracısının kendi tablosunda durur.
+        const hasLoop = !!(loop && isNum(loop.frequency_hz)
+                           && loop.frequency_hz > 0);
+
+        // K2 — sol marj kategori etiketlerinin ÖLÇÜLEN genişliğinden
+        // (bant adları + im satır adları); sabit tahmin değil.
+        const catLabels = modes.map(function (m) { return String(m.band); });
+        if (hasLfi) catLabels.push(lfiRowLabel);
+        if (hasLoop) catLabels.push(chugRowLabel);
+        const marginL = categoryLeftMarginPx(catLabels, w);
+        const marginR = 12;
+
+        // K1 — etiketler iz metni olarak DEĞİL, saf yerleşim fonksiyonunun
+        // kademelendirdiği kısa yönlendirme çizgili notlar olarak çizilir:
+        // aynı x-komşuluğuna düşen etiket kutuları (ölçülen genişlikle)
+        // kesişmez. İzin x/y/text dizileri motor tablosunun KENDİSİ olarak
+        // kalır (bekçi: test_mod_haritasi_anlik_goruntunun_kendisi — im
+        // frekansın kendisinde durur; onu oynatmak sahte veri olurdu).
+        const placed = layoutModeLabels(
+            modes.map(function (m) {
+                return { x: m.frequency_hz, row: String(m.band),
+                         label: String(m.label) };
+            }),
+            { plotWidthPx: Math.max(w - marginL - marginR, 60) });
+        const annotations = placed.map(function (p) {
+            const m = modes[p.index];
+            return {
+                // Log eksende Plotly not koordinatı log10(değer) ister.
+                x: Math.log10(m.frequency_hz),
+                y: String(m.band),
+                text: esc(String(m.label)),
+                showarrow: true, arrowhead: 0, arrowwidth: 1,
+                arrowcolor: INK_DIM_HEX,
+                ax: 0, ay: -p.ayPx,
+                font: { size: AXIS_METRICS.labelFontPx,
+                        family: AXIS_METRICS.monoFamily, color: INK_HEX },
+            };
+        });
+
         const traces = [{
             x: modes.map(function (m) { return m.frequency_hz; }),
             y: modes.map(function (m) { return String(m.band); }),
             text: modes.map(function (m) { return String(m.label); }),
-            mode: 'markers+text', type: 'scatter', textposition: 'top center',
-            textfont: { size: 10 },
+            mode: 'markers', type: 'scatter',
             marker: { size: 10, symbol: 'diamond',
                       color: modes.map(function (m) {
                           return BAND_COLORS[m.band] || BAND_FALLBACK_COLOR;
@@ -697,24 +1032,20 @@
             name: T('panel.stab.traceModes',
                     'Cavity modes (acoustic table of this run)'),
         }];
-        if (snap.lfi && isNum(snap.lfi.frequency_hz)) {
+        if (hasLfi) {
             traces.push({
                 x: [snap.lfi.frequency_hz],
-                y: [T('panel.stab.rowLfi', 'hybrid LFI (modelled)')],
+                y: [lfiRowLabel],
                 mode: 'markers', type: 'scatter',
                 marker: { size: 13, symbol: 'x', color: POINT_COLOR },
                 name: T('panel.stab.traceLfi',
                         'Hybrid LFI frequency (combustion_stability.lfi)'),
             });
         }
-        const loop = snap.chugLoop && snap.chugLoop.block;
-        // Frekans imi yalnız POZİTİFKEN: f = 0 salınımsız (gerçel) kök
-        // demektir ve logaritmik frekans ekseninde gösterilemez; sayı
-        // gizlenmez, chug kiracısının kendi tablosunda durur.
-        if (loop && isNum(loop.frequency_hz) && loop.frequency_hz > 0) {
+        if (hasLoop) {
             traces.push({
                 x: [loop.frequency_hz],
-                y: [T('panel.stab.rowChugLoop', 'chug loop (modelled)')],
+                y: [chugRowLabel],
                 mode: 'markers', type: 'scatter',
                 marker: { size: 13, symbol: 'x', color: POINT_COLOR },
                 name: T('panel.stab.traceChugLoop',
@@ -728,10 +1059,13 @@
                          'Chamber mode map on the frequency axis'),
                 xaxis: { title: T('panel.stab.axisFreq', 'Frequency [Hz] (log)'),
                          type: 'log' },
-                yaxis: { title: '' },
+                yaxis: { title: '',
+                         tickfont: { size: AXIS_METRICS.tickFontPx,
+                                     family: AXIS_METRICS.monoFamily } },
+                annotations: annotations,
                 height: 300,
                 legend: { orientation: 'h', y: -0.34 },
-                margin: { t: 40, r: 12, b: 60, l: 150 },
+                margin: { t: 40, r: marginR, b: 60, l: marginL },
             },
         };
     }
@@ -757,19 +1091,38 @@
                 name: name,
             };
         });
+        // K2a (ölçülen kusur): eski sabit l:70 marj + tek satır başlık,
+        // dikey y-ekseni başlığını çizim yüksekliğinde kırpıyordu
+        // ("...-rate contribution alpha [1/s] (negative..." yarım). Başlık
+        // kullanılabilir yüksekliğe ÖLÇÜLEREK sarılır, marj ölçülen tik +
+        // satır sayısından türetilir.
+        const H = 280, mT = 40, mB = 60;
+        const yVals = [];
+        traces.forEach(function (t) {
+            t.y.forEach(function (v) { if (isNum(v)) yVals.push(v); });
+        });
+        const titleLines = wrapAxisTitle(
+            T('panel.stab.axisAlpha',
+              'Growth-rate contribution alpha [1/s] (negative = damping)'),
+            H - mT - mB, AXIS_METRICS.titleFontPx);
         return {
             traces: traces,
             layout: {
                 title: T('panel.stab.chartDamping',
                          'Damping budget per longitudinal mode'),
                 barmode: 'relative',
-                xaxis: { title: T('panel.stab.axisMode', 'Mode') },
-                yaxis: { title: T('panel.stab.axisAlpha',
-                                  'Growth-rate contribution alpha [1/s] '
-                                  + '(negative = damping)') },
-                height: 280,
+                xaxis: { title: T('panel.stab.axisMode', 'Mode'),
+                         tickfont: { size: AXIS_METRICS.tickFontPx,
+                                     family: AXIS_METRICS.monoFamily } },
+                yaxis: { title: { text: titleLines.join('<br>'),
+                                  font: { size: AXIS_METRICS.titleFontPx,
+                                          family: AXIS_METRICS.monoFamily } },
+                         tickfont: { size: AXIS_METRICS.tickFontPx,
+                                     family: AXIS_METRICS.monoFamily } },
+                height: H,
                 legend: { orientation: 'h', y: -0.3 },
-                margin: { t: 40, r: 12, b: 60, l: 70 },
+                margin: { t: mT, r: 12, b: mB,
+                          l: yAxisLeftMarginPx(yVals, titleLines.length) },
             },
         };
     }
@@ -793,6 +1146,17 @@
                         'Operating point of this run'),
             });
         }
+        // K2 — uzun dikey başlık ölçülerek sarılır, sol marj ölçülen
+        // tiklerden türetilir (sönüm çubuğu grafiğiyle aynı kural).
+        const H = 300, mT = 40, mB = 60;
+        const yVals = (Array.isArray(nc.tau_over_tau_c)
+            ? nc.tau_over_tau_c.filter(isNum) : [])
+            .concat(isNum(op.tau_over_tau_c) ? [op.tau_over_tau_c] : []);
+        const titleLines = wrapAxisTitle(
+            T('panel.stab.axisTauRatio',
+              'tau/tau_c [-] (above the curve = unstable within this '
+              + 'mechanism)'),
+            H - mT - mB, AXIS_METRICS.titleFontPx);
         return {
             traces: traces,
             layout: {
@@ -800,12 +1164,15 @@
                          'Chug neutral curve and the operating point'),
                 xaxis: { title: T('panel.stab.axisJ',
                                   'Injector gain J = dP_inj/Pc [-]') },
-                yaxis: { title: T('panel.stab.axisTauRatio',
-                                  'tau/tau_c [-] (above the curve = unstable '
-                                  + 'within this mechanism)') },
-                height: 300,
+                yaxis: { title: { text: titleLines.join('<br>'),
+                                  font: { size: AXIS_METRICS.titleFontPx,
+                                          family: AXIS_METRICS.monoFamily } },
+                         tickfont: { size: AXIS_METRICS.tickFontPx,
+                                     family: AXIS_METRICS.monoFamily } },
+                height: H,
                 legend: { orientation: 'h', y: -0.3 },
-                margin: { t: 40, r: 12, b: 60, l: 60 },
+                margin: { t: mT, r: 12, b: mB,
+                          l: yAxisLeftMarginPx(yVals, titleLines.length) },
             },
         };
     }
@@ -832,6 +1199,14 @@
                         'Dominant root at the operating J'),
             });
         }
+        // K2 — sol marj ölçülen tiklerden; kısa başlık gerekirse sarılır.
+        const H = 300, mT = 40, mB = 60;
+        const yVals = (Array.isArray(rl.frequency_hz)
+            ? rl.frequency_hz.filter(isNum) : [])
+            .concat(isNum(a.frequency_hz) ? [a.frequency_hz] : []);
+        const titleLines = wrapAxisTitle(
+            T('panel.stab.axisLocusFreq', 'Frequency [Hz]'),
+            H - mT - mB, AXIS_METRICS.titleFontPx);
         return {
             traces: traces,
             layout: {
@@ -840,10 +1215,15 @@
                 xaxis: { title: T('panel.stab.axisSigma',
                                   'Dominant root growth rate sigma [1/s] '
                                   + '(sigma > 0 = growing)') },
-                yaxis: { title: T('panel.stab.axisLocusFreq', 'Frequency [Hz]') },
-                height: 300,
+                yaxis: { title: { text: titleLines.join('<br>'),
+                                  font: { size: AXIS_METRICS.titleFontPx,
+                                          family: AXIS_METRICS.monoFamily } },
+                         tickfont: { size: AXIS_METRICS.tickFontPx,
+                                     family: AXIS_METRICS.monoFamily } },
+                height: H,
                 legend: { orientation: 'h', y: -0.3 },
-                margin: { t: 40, r: 12, b: 60, l: 60 },
+                margin: { t: mT, r: 12, b: mB,
+                          l: yAxisLeftMarginPx(yVals, titleLines.length) },
             },
         };
     }
@@ -924,14 +1304,26 @@
         const th = matches && snap.threshold ? snap.threshold : null;
         if (th && th.block) {
             html += plotBox(barsId, 280);
-            html += kvTable(th.block.modes.map(function (r) {
+            const rcritRows = th.block.modes.map(function (r) {
                 return [String(r.label) + ' @ ' + sig(r.frequency_hz) + ' Hz',
                         T('panel.stab.rowRcrit', 'R_crit') + ' '
                             + sig(r.critical_response_real) + ' · '
                             + T('panel.stab.rowTotalDamping', 'total damping')
                             + ' ' + sig(r.damping_total_1_s) + ' 1/s'];
-            }));
-            html += basisText(th.block.interpretation_basis);
+            });
+            // K2b (ölçülen kusur): satır başları ("1L @ 959.391 Hz")
+            // kırpılıyordu — sol sütuna en uzun başlığın ÖLÇÜLEN metin
+            // genişliği kadar yer ayrılır, satır kırılmaz.
+            const labelW = rcritRows.reduce(function (mx, row) {
+                return Math.max(mx,
+                    measureLabelPx(row[0], AXIS_METRICS.kvFontPx));
+            }, 0);
+            html += '<div data-stab-block="rcrit-table">'
+                + kvTable(rcritRows, { labelNowrap: true,
+                                       labelMinWidthPx: labelW }) + '</div>';
+            html += foldProse('threshold-basis',
+                'panel.stab.foldThresholdBasis', 'INTERPRETATION BASIS',
+                th.block.interpretation_basis);
         } else {
             let why;
             if (!matches) {
@@ -966,7 +1358,9 @@
             [T('panel.stab.rowModeDependence', 'Mode dependence'),
              String(noz.mode_dependence == null ? '—' : noz.mode_dependence)],
         ]) + '</div>';
-        html += basisText(noz.basis);
+        // K3 — dayanak düz metni varsayılan kapalı katlanır (içerik AYNEN).
+        html += foldProse('nozzle-basis', 'panel.stab.foldNozzleBasis',
+                          'NOZZLE DAMPING BASIS', noz.basis);
 
         html += sectionTitle('panel.stab.secBudget',
             'Damping budget declared by the endpoint');
@@ -978,20 +1372,34 @@
         termRows.push([T('panel.stab.rowBudgetLoss', 'Total loss magnitude'),
                        sig(bud.total_loss_1_s) + ' 1/s']);
         html += '<div data-stab-block="budget">' + kvTable(termRows) + '</div>';
-        html += basisText(bud.sign_convention);
-        html += basisText(bud.bias_basis);
-        html += '<div data-stab-block="not-modelled">'
-            + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5);"'
-            + ' data-i18n="panel.stab.declNotModelled">'
-            + esc(T('panel.stab.declNotModelled', 'NOT MODELLED')) + '</strong>'
-            + listBlock(bud.not_modelled) + '</div>';
+        // K3 — işaret sözleşmesi + yanlılık dayanağı tek katlanır blokta.
+        const budgetProse = [bud.sign_convention, bud.bias_basis]
+            .filter(function (tx) { return !!tx; });
+        if (budgetProse.length) {
+            html += fold('budget-basis',
+                foldTitle('panel.stab.foldBudgetBasis',
+                          'SIGN CONVENTION & BIAS BASIS'),
+                prosePreview(SRV(budgetProse[0])),
+                budgetProse.map(function (tx) { return basisText(tx); })
+                    .join(''));
+        }
+        // K3 — NOT MODELLED metin duvarı: özet (kalem sayısı + adlar)
+        // VERİDEN; içerik details gövdesinde AYNEN durur.
+        html += fold('not-modelled',
+            foldTitle('panel.stab.declNotModelled', 'NOT MODELLED'),
+            listPreview(bud.not_modelled),
+            '<div data-stab-block="not-modelled">'
+                + listBlock(bud.not_modelled) + '</div>');
 
         root.innerHTML = html;
 
         if (!window.Plotly || typeof window.Plotly.react !== 'function') {
             noPlotlyNote(root);
         } else {
-            if (matches) drawFigure(mapId, modeMapFigure(snap));
+            if (matches) {
+                drawFigure(mapId,
+                           modeMapFigure(snap, plotContainerWidth(mapId)));
+            }
             if (th && th.block) drawFigure(barsId, dampingBarsFigure(th.block));
         }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
@@ -1086,7 +1494,9 @@
             [T('panel.stab.rowFreq', 'Oscillation frequency [Hz]'),
              sig(a.frequency_hz)],
         ]);
-        if (a.root_dominance_note) html += basisText(a.root_dominance_note);
+        // K3 — kök baskınlığı açıklaması katlanır (rozeti zaten yukarıda).
+        html += foldProse('root-dominance', 'panel.stab.foldDominance',
+                          'TRACKED ROOT NOTE', a.root_dominance_note);
         const skipped = Array.isArray(data.skipped_points)
             ? data.skipped_points : [];
         if (skipped.length) {
@@ -1122,60 +1532,79 @@
                    'Model neutral tau/tau_c at the rule recommendation'),
                  sig(cls.model_neutral_tau_over_tau_c_at_rule_recommended)],
             ]) + '</div>';
-            html += basisText(cls.interpretation);
+            // K3 — kural yorumu düz metni katlanır (sayı tablosu açık kalır).
+            html += foldProse('classical-basis', 'panel.stab.foldClassicalBasis',
+                              'RULE INTERPRETATION', cls.interpretation);
         }
 
         // 4) Beyanlar: modellenmeyenler, varsayımlar, girdi yankısı.
+        // K3 (ölçülen kusur): bu beyan blokları varsayılan AÇIK ham düz
+        // metin duvarıydı (panel ~2400px'e şişiyordu). Hepsi VARSAYILAN
+        // KAPALI <details> içinde; özet satırı veriden türetilir, içerik
+        // DOM'da AYNEN durur. Hüküm rozetleri ve sayı tabloları katlanmaz.
         html += sectionTitle('panel.stab.secDecl',
             'Declarations — not modelled, assumptions, echoed inputs');
-        html += '<div data-stab-block="not-modelled">'
-            + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5);"'
-            + ' data-i18n="panel.stab.declNotModelled">'
-            + esc(T('panel.stab.declNotModelled', 'NOT MODELLED')) + '</strong>'
-            + listBlock(a.not_modelled) + '</div>';
-        html += '<div data-stab-block="assumptions" style="margin-top:8px;">'
-            + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5);"'
-            + ' data-i18n="panel.stab.declAssumptions">'
-            + esc(T('panel.stab.declAssumptions', 'ASSUMPTIONS')) + '</strong>'
-            + listBlock(a.assumptions) + '</div>';
+        html += fold('not-modelled',
+            foldTitle('panel.stab.declNotModelled', 'NOT MODELLED'),
+            listPreview(a.not_modelled),
+            '<div data-stab-block="not-modelled">'
+                + listBlock(a.not_modelled) + '</div>');
+        html += fold('assumptions',
+            foldTitle('panel.stab.declAssumptions', 'ASSUMPTIONS'),
+            listPreview(a.assumptions),
+            '<div data-stab-block="assumptions">'
+                + listBlock(a.assumptions) + '</div>');
         const inp = a.inputs || {};
-        html += '<div data-stab-block="inputs" style="margin-top:8px;">'
-            + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5);"'
-            + ' data-i18n="panel.stab.declInputs">'
-            + esc(T('panel.stab.declInputs', 'INPUTS ECHOED BY THE ENDPOINT'))
-            + '</strong>'
-            + kvTable(Object.keys(inp).filter(function (k) {
-                return k !== '_basis';
-            }).map(function (k) {
-                const val = inp[k];
-                return [k, val === null
-                    ? T('panel.stab.notSupplied', 'not supplied')
-                    : (isNum(val) ? sig(val) : String(val))];
-            })) + '</div>';
+        const inpKeys = Object.keys(inp).filter(function (k) {
+            return k !== '_basis';
+        });
+        html += fold('inputs',
+            foldTitle('panel.stab.declInputs', 'INPUTS ECHOED BY THE ENDPOINT'),
+            TF('panel.stab.foldFields', { n: inpKeys.length },
+               '{n} field(s) echoed'),
+            '<div data-stab-block="inputs">'
+                + kvTable(inpKeys.map(function (k) {
+                    const val = inp[k];
+                    return [k, val === null
+                        ? T('panel.stab.notSupplied', 'not supplied')
+                        : (isNum(val) ? sig(val) : String(val))];
+                })) + '</div>');
         if (a.feed_line && typeof a.feed_line === 'object') {
-            html += '<div data-stab-block="feed-line" style="margin-top:8px;">'
-                + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim,'
-                + ' #7d97a5);" data-i18n="panel.stab.declFeedLine">'
-                + esc(T('panel.stab.declFeedLine',
-                        'FEED LINE ECHO (tau_f derivation inputs)'))
-                + '</strong>' + listBlock(a.feed_line) + '</div>';
+            html += fold('feed-line',
+                foldTitle('panel.stab.declFeedLine',
+                          'FEED LINE ECHO (tau_f derivation inputs)'),
+                listPreview(a.feed_line),
+                '<div data-stab-block="feed-line">'
+                    + listBlock(a.feed_line) + '</div>');
         }
         // Öneri kaynakları: hangi sayı motorun neresinden geldi.
         const sug = lastSuggestion.chug;
         if (sug && Object.keys(sug.sources).length) {
-            html += '<div data-stab-block="suggestions" style="margin-top:8px;">'
-                + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim,'
-                + ' #7d97a5);" data-i18n="panel.stab.declSuggest">'
-                + esc(T('panel.stab.declSuggest',
-                        'WHERE THE PRE-FILLED VALUES CAME FROM')) + '</strong>'
-                + kvTable(Object.keys(sug.sources).map(function (f) {
-                    return [fieldLabel(f), sug.sources[f].path];
-                })) + '</div>';
+            html += fold('suggestions',
+                foldTitle('panel.stab.declSuggest',
+                          'WHERE THE PRE-FILLED VALUES CAME FROM'),
+                TF('panel.stab.foldFields',
+                   { n: Object.keys(sug.sources).length },
+                   '{n} field(s) echoed'),
+                '<div data-stab-block="suggestions">'
+                    + kvTable(Object.keys(sug.sources).map(function (f) {
+                        return [fieldLabel(f), sug.sources[f].path];
+                    })) + '</div>');
         }
-        html += basisText(a.model_basis);
-        html += basisText(a.root_basis);
-        html += basisText(a.inertance_basis);
-        html += basisText(a.verdict_basis);
+        // K3 — dört dayanak beyanı tek katlanır blokta (içerik AYNEN).
+        const basisProse = [a.model_basis, a.root_basis, a.inertance_basis,
+                            a.verdict_basis]
+            .filter(function (tx) { return !!tx; });
+        if (basisProse.length) {
+            html += fold('basis',
+                foldTitle('panel.stab.foldBasis',
+                          'MODEL & VERDICT BASIS DECLARATIONS'),
+                TF('panel.stab.foldStatements', { n: basisProse.length },
+                   '{n} statement(s)') + ' — '
+                    + prosePreview(SRV(basisProse[0])),
+                basisProse.map(function (tx) { return basisText(tx); })
+                    .join(''));
+        }
 
         root.innerHTML = html;
 
@@ -1314,5 +1743,12 @@
         _lastSentAcoustic: function () { return lastSentAcoustic; },
         _dampingSources: DAMPING_SOURCES,
         _chugSources: CHUG_SOURCES,
+        // K1/K2 görsel metrik yüzeyi — bekçiler yerleşimi ve marj
+        // formülünü bu SAF fonksiyonlarla yeniden hesaplayıp ölçer.
+        _layoutModeLabels: layoutModeLabels,
+        _measureLabelPx: measureLabelPx,
+        _wrapAxisTitle: wrapAxisTitle,
+        _maxTickWidthPx: maxTickWidthPx,
+        _axisMetrics: AXIS_METRICS,
     };
 })();

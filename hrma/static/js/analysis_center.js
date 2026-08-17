@@ -12,8 +12,11 @@
    katmandır; tasarım §4 gereği paneller tek tek buraya TAŞINACAK, ama
    taşıma görsel tur denetimiyle doğrulanmadan eski yerinden kaldırılmaz.
    Bu dosya çerçevedir: bileşen ağacı, kayıt sözleşmesi, koşum kartı,
-   görüntüleyici kabı ve geçmiş şeridi. İLK kiracı CFD panelidir
-   (panels/cfd_panel.js — ayrı dosya, ayrı sahip).
+   görüntüleyici kabı (+ K5b içindekiler şeridi: kiracı çıktısındaki
+   GERÇEK bölüm başlıklarından kurulan kaydırma bağları) ve geçmiş
+   şeridi. Yerleşim stilleri (yapışkan sütun/şerit) ayrı dosyada:
+   /static/css/analysis_center.css (init() enjekte eder). İLK kiracı
+   CFD panelidir (panels/cfd_panel.js — ayrı dosya, ayrı sahip).
 
    --------------------------------------------------------------------
    KURULUM SÖZLEŞMESİ (şablon tarafı — DEĞİŞTİRME)
@@ -609,13 +612,18 @@
             + '<div id="ac_columns" style="display:grid; gap:12px; margin-top:12px;'
             + ' grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));'
             + ' align-items:start;">'
-            + column('ac_tree', 'ac.col.tree', 'Component tree')
-            + column('ac_card', 'ac.col.card', 'Run card')
-            + column('ac_view', 'ac.col.view', 'Result viewer')
+            + column('ac_tree', 'ac.col.tree', 'Component tree', 'tree')
+            + column('ac_card', 'ac.col.card', 'Run card', 'card')
+            + column('ac_view', 'ac.col.view', 'Result viewer', 'view')
             + '</div>'
-            + '<div id="ac_history_box" style="border:' + PANEL_BORDER + '; border-radius:'
-            + 'var(--hd-radius-sm, 8px); padding:10px 14px; margin-top:12px; background:'
-            + INSET + ';">'
+            /* Geçmiş kutusunun arka planı analysis_center.css'tedir
+               (.ac-history-box, parti 29): kutu yapışkan-alt olunca içerik
+               ÜSTÜNE binebilir, yarı saydam INSET altta akanı geçirirdi —
+               CSS opak --hd-panel-solid basar. Kalan inline kurallar
+               (kenarlık/dolgu) kimliktir, yerinde durur. */
+            + '<div id="ac_history_box" class="ac-history-box" style="border:'
+            + PANEL_BORDER + '; border-radius:'
+            + 'var(--hd-radius-sm, 8px); padding:10px 14px; margin-top:12px;">'
             + '<div style="font-family:var(--hd-mono, monospace); font-size:0.68rem;'
             + ' letter-spacing:0.08em; color:var(--hd-ink-dim, #7d97a5);"'
             + ' data-i18n="ac.history.title">'
@@ -625,8 +633,12 @@
             + '</div></div>';
     }
 
-    function column(id, key, fallback) {
-        return '<div style="border:' + PANEL_BORDER + '; border-radius:'
+    // mod: 'tree'|'card'|'view' — yerleşim sınıfı (analysis_center.css,
+    // parti 29 K5a: ağaç + kart sütunları geniş ekranda yapışkan; kimlik
+    // stilleri inline kalır, SADECE konumlama CSS'ten gelir).
+    function column(id, key, fallback, mod) {
+        return '<div class="ac-col ac-col--' + mod + '" style="border:'
+            + PANEL_BORDER + '; border-radius:'
             + 'var(--hd-radius-sm, 8px); padding:10px 12px; background:' + INSET + ';">'
             + '<div style="font-family:var(--hd-mono, monospace); font-size:0.68rem;'
             + ' letter-spacing:0.08em; color:var(--hd-ink-dim, #7d97a5);'
@@ -772,6 +784,85 @@
         el.style.color = kindColor(statusState.kind || 'dim');
     }
 
+    // --- Sütun 3: içindekiler şeridi (parti 29, K5b) -------------------
+    // Şerit SABİT LİSTE TAŞIMAZ: kiracının GERÇEK render çıktısı taranır,
+    // bulunan bölüm başlıkları kaydırma bağına çevrilir. Kiracı değişirse
+    // şerit kendiliğinden o kiracının başlıklarını gösterir; başlık yoksa
+    // şerit boş kalır (CSS :empty gizler) — uydurma liste yasağı.
+    // Bekçi: tests/test_analysis_center_contract.py::TestViewerToc
+    // (mutasyon: buraya sabit başlık dizisi konursa "boş çıktı → boş
+    // şerit" ve "kiracıya göre değişen şerit" bekçileri kırmızı yanar).
+    //
+    // Seçici ÜÇ imzayı tanır — üçü de bugün sahada olan gerçek desenler:
+    //   1. h1–h6           : düz HTML başlıkları,
+    //   2. [data-ac-section]: kiracının açıkça işaretlediği bölüm,
+    //   3. div[style*="text-transform:uppercase"]: iki mevcut kiracının
+    //      (cfd_panel.js / stability_panel.js) sectionTitle idiomu —
+    //      mono + uppercase inline stilli bölüm başlığı divi. İdiom
+    //      kiracılarda değişirse buradaki bağ bekçisi kırmızı yanar
+    //      (test_toc_selector_matches_tenant_idiom).
+    const TOC_SELECTOR = 'h1, h2, h3, h4, h5, h6, [data-ac-section], '
+        + 'div[style*="text-transform:uppercase"]';
+    let tocTargets = [];             // şerit bağı -> başlık elemanı (kapanış)
+
+    function buildViewerToc(rootEl) {
+        const toc = document.getElementById('ac_view_toc');
+        if (!toc) return;
+        tocTargets = [];
+        toc.innerHTML = '';
+        // Taklit DOM'larda querySelectorAll olmayabilir — şerit o zaman
+        // boş kalır (çizim yolu bozulmaz).
+        if (!rootEl || typeof rootEl.querySelectorAll !== 'function') return;
+        let found = [];
+        try { found = rootEl.querySelectorAll(TOC_SELECTOR); } catch (e) { return; }
+        const items = [];
+        for (let i = 0; i < found.length; i++) {
+            const label = String(found[i].textContent || '').trim();
+            if (!label) continue;               // boş başlığa bağ üretilmez
+            const n = tocTargets.length;
+            tocTargets.push(found[i]);
+            // title = başlığın TAM metni (çip CSS'te üç noktayla kırpılır).
+            // Metin kiracının kendi — çoğu zaman çevrilmiş — başlığıdır;
+            // çerçeve buraya kendi metnini KOYMAZ (yeni i18n anahtarı yok).
+            items.push('<button type="button" class="ac-toc-link"'
+                + ' id="ac_toc_' + n + '"'
+                + ' data-ac-toc-item="' + esc(label) + '"'
+                + ' title="' + esc(label) + '">' + esc(label) + '</button>');
+        }
+        if (!items.length) return;
+        toc.innerHTML = items.join('');
+        tocTargets.forEach(function (el, idx) {
+            const btn = document.getElementById('ac_toc_' + idx);
+            if (btn && btn.addEventListener) {
+                btn.addEventListener('click', function () {
+                    // Yapışkan şeridin ÖRTME payı (tarayıcı ölçümü,
+                    // 2026-08-17): başlığı viewport tepesine (top=0)
+                    // getirmek onu şeridin ARKASINA sokar (şerit top:8 +
+                    // kendi yüksekliği). Pay şeridin GERÇEK ölçülen
+                    // yüksekliğidir (offsetHeight; 6 sarılmış çipte 158 px
+                    // ölçüldü), uydurma sabit değil. +16: şerit top
+                    // ofseti (8) + nefes payı (8). scroll-margin-top
+                    // BİLEREK kullanılmıyor: el.style'a yazmak kiracının
+                    // style özniteliğini yeniden serileştirir (ölçüldü:
+                    // "text-transform:uppercase" → ": uppercase") — çerçeve
+                    // kiracı DOM'una yazı yazmaz.
+                    const pay = (typeof toc.offsetHeight === 'number'
+                                 && isFinite(toc.offsetHeight))
+                        ? toc.offsetHeight + 16 : 0;
+                    if (typeof el.getBoundingClientRect === 'function'
+                            && typeof window.scrollTo === 'function') {
+                        const y = el.getBoundingClientRect().top
+                            + (window.scrollY || 0) - pay;
+                        window.scrollTo(0, y);
+                    } else if (typeof el.scrollIntoView === 'function') {
+                        // Taklit DOM / eski ortam: kaba kaydırma yedeği.
+                        el.scrollIntoView();
+                    }
+                });
+            }
+        });
+    }
+
     // --- Sütun 3: sonuç görüntüleyici ----------------------------------
     function viewingEntry() {
         if (viewingEntryId != null) {
@@ -830,7 +921,11 @@
             if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(host);
             return;
         }
-        host.innerHTML = head + '<div id="ac_view_root"></div>';
+        // İçindekiler şeridi kabı kiracı kökünün ÜSTÜNDE durur (K5b);
+        // içi buildViewerToc ile, kiracı çizdikten SONRA dolar.
+        host.innerHTML = head
+            + '<div id="ac_view_toc" class="ac-toc" data-ac-toc="1"></div>'
+            + '<div id="ac_view_root"></div>';
         const root = document.getElementById('ac_view_root');
         try {
             spec.render(entry.data, root);
@@ -846,6 +941,10 @@
             }
         }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(host);
+        // Şerit ÇEVİRİDEN SONRA kurulur: bağ metni başlığın ekrandaki
+        // (gerekiyorsa çevrilmiş) hâlinden okunur; çipin kendisi data-i18n
+        // taşımaz, applyTo ona dokunmaz.
+        buildViewerToc(root);
     }
 
     // Hüküm rozeti: kiracı beyan etmezse "beyan edilmedi" der — uydurma
@@ -1102,10 +1201,35 @@
         return true;
     }
 
+    // Parti 29 yerleşim stilleri (yapışkan sütunlar K5a, içindekiler
+    // şeridi K5b, yapışkan geçmiş K5c) /static/css/analysis_center.css
+    // dosyasındadır. Şablonlarda <link> YOK (A2 ölçümü: ac-* kimlik
+    // stillerinin tek kaynağı bu dosyanın inline stilleri; şablonlar o
+    // partinin dosya kapsamı dışındaydı, ölü link de bekçiyle yasak) —
+    // link buradan enjekte edilir ki üç motor sayfası tek kuraldan
+    // beslensin. Şablonlara gerçek <link> girdiği gün (A2 halef bekçisi:
+    // dosya var + üç şablonda link) bu enjeksiyon sökülür. Defter kalemi.
+    const LAYOUT_CSS_HREF = '/static/css/analysis_center.css';
+
+    function injectLayoutCss() {
+        // Taklit DOM'larda head yoktur — enjeksiyon sessizce atlanır
+        // (yerleşim stili taklit ortamda zaten anlamsız).
+        if (!document.head || typeof document.head.appendChild !== 'function') return;
+        if (typeof document.querySelector === 'function'
+                && document.querySelector('link[href="' + LAYOUT_CSS_HREF + '"]')) {
+            return;                      // ikinci init/link tekrarı üretmez
+        }
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = LAYOUT_CSS_HREF;
+        document.head.appendChild(link);
+    }
+
     function init(options) {
         if (inited) return;
         cfg = options || {};
         cfg.motorType = cfg.motorType || 'hybrid';
+        injectLayoutCss();
 
         const anchor = cfg.anchorId ? document.getElementById(cfg.anchorId) : null;
         const host = document.createElement('div');

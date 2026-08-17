@@ -28,6 +28,10 @@ Kapsam
      değiştirilen alanın korunması, zorunlu alan boşken isteğin HİÇ
      gönderilmemesi, geçmiş kaydının saat/bileşen/analiz/hüküm rozeti
      taşıması, eski kaydın "geçmişten" beyanıyla geri gösterilmesi.
+  6. PARTİ 29 YERLEŞİM (A3, 2026-08-17): yapışkan sütunlar + içindekiler
+     şeridi + yapışkan geçmiş — yerleşim kuralları analysis_center.css'te
+     (init() enjekte eder), şerit kiracının GERÇEK çıktısından taranır
+     (sabit başlık listesi yasak; mutasyon bekçileri TestViewerToc'ta).
 
 Ölçüm yöntemi
 -------------
@@ -206,6 +210,88 @@ class TestTemplateContract:
 
 
 # ---------------------------------------------------------------------------
+# 1b. ac-* stil tek-kaynak bekçisi (A2 ölçümü, 2026-08-17)
+# ---------------------------------------------------------------------------
+
+#: Merkez'in sayfaya bastığı ac-* sınıf adları (analysis_center.js üretir).
+AC_CLASSES = ['ac-row', 'ac-comp', 'ac-field']
+
+#: <style> bloğu içinde .ac- önekli seçici — kopya stil kuralının imzası.
+AC_RULE_RE = re.compile(r'\.ac-[a-zA-Z]')
+
+#: Üç motor sayfasının şablon dosyaları (PAGE_MOTOR_TYPE'ın dosya karşılığı).
+MOTOR_TEMPLATES = ['advanced.html', 'liquid.html', 'solid.html']
+
+CENTER_CSS_SRC = '/static/css/analysis_center.css'
+
+
+def style_blocks(template_name):
+    """Şablondaki <style>...</style> bloklarının içeriklerini döndürür."""
+    html = read(TEMPLATES / template_name)
+    return re.findall(r'<style[^>]*>(.*?)</style>', html, flags=re.S | re.I)
+
+
+class TestAcStyleSingleSource:
+    """ac-* stilinin TEK kaynağı ``analysis_center.js``'tir (ölçüm, 2026-08-17).
+
+    A2 görev öncülü "ac-* stilleri üç şablonda KOPYA duruyor" idi; ölçüm
+    aksini gösterdi: üç şablonun <style> bloklarında ``.ac-`` seçicili tek
+    kural yok ve git geçmişinde de hiç olmamış
+    (``git log --all -S "ac-row" -- hrma/templates/`` boş). Stiller,
+    Merkez'in ürettiği elemanların inline ``style="..."`` özniteliklerinde,
+    tek dosyada (analysis_center.js) yaşıyor — yani taşınacak kopya yok,
+    tek-kaynak zaten kurulu. Uydurma bir analysis_center.css üretmek sahte
+    iş olurdu: JS'in inline stilleri her kuralı ezer, dosya ölü ağırlık
+    kalırdı.
+
+    Bu sınıf ölçülen gerçeği KİLİTLER: birisi şablon <style> bloklarına
+    .ac-* kuralı kopyalarsa (görevin korkuttuğu sürüklenme) bekçi kırmızı
+    olur. Gün gelir stiller gerçekten CSS dosyasına taşınırsa (bu,
+    analysis_center.js'ten inline stillerin de sökülmesini gerektirir),
+    bu bekçi "dosya var + üç şablonda link + link theme.css'ten ÖNCE"
+    halefine çevrilir — sözleşme: theme.css sayfa stilinden sonra yüklenip
+    ezer (theme.css baş yorumu).
+    """
+
+    @pytest.mark.parametrize('template', MOTOR_TEMPLATES)
+    def test_templates_carry_no_inline_ac_rules(self, template):
+        blocks = style_blocks(template)
+        assert blocks, f'{template}: <style> bloğu bulunamadı — tarama kör'
+        for block in blocks:
+            m = AC_RULE_RE.search(block)
+            assert m is None, (
+                f'{template}: <style> içinde ac-* kuralı kopyalanmış '
+                f'({block[max(0, m.start() - 20):m.start() + 30]!r}) — '
+                'tek kaynak analysis_center.js; kopya stil sürüklenme üretir')
+
+    def test_ac_classes_live_in_center_js(self, center_code):
+        """Bekçi 1b'nin ölçtüğü sınıflar GERÇEKTEN Merkez'de üretiliyor.
+
+        analysis_center.js bu sınıfları üretmeyi bırakırsa tek-kaynak
+        bekçisinin konusu kaybolmuş demektir — bekçi güncellenmeli.
+        """
+        for cls in AC_CLASSES:
+            assert f'class="{cls}"' in center_code, (
+                f'{cls}: analysis_center.js artık bu sınıfı üretmiyor — '
+                'tek-kaynak bekçisini yeni duruma taşı')
+
+    @pytest.mark.parametrize('page', sorted(PAGE_MOTOR_TYPE))
+    def test_no_dead_center_css_link(self, client, page):
+        """Sayfa, var olmayan bir analysis_center.css'e link vermez.
+
+        Taşıma yapılmadan böyle bir link her sayfa yüklemesinde 404 konsol
+        hatası üretir. Taşıma gününde link meşrulaşır; o zaman bu test
+        varlık + kaskad-sırası bekçisine çevrilir (sınıf yorumuna bakınız).
+        """
+        html = client.get(page).get_data(as_text=True)
+        if CENTER_CSS_SRC in html:
+            css = REPO_ROOT / 'hrma' / 'static' / 'css' / 'analysis_center.css'
+            assert css.exists(), (
+                f'{page}: {CENTER_CSS_SRC} linkli ama dosya yok — her '
+                'yüklemede 404')
+
+
+# ---------------------------------------------------------------------------
 # 2. Kayıt sözleşmesi: belge ile kod ayrışamaz
 # ---------------------------------------------------------------------------
 
@@ -311,14 +397,47 @@ const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const centerPath = process.argv[3];
 
 const nodes = {};
-function makeNode(id) {
+const scrolls = [];   // parti 29: hangi başlığa kaydırıldığının kaydı
+function makeNode(id, tag) {
     return {
-        id: id, innerHTML: '', textContent: '', style: {}, attrs: {},
-        value: '', disabled: false, options: [],
+        id: id, tagName: String(tag || 'div').toUpperCase(),
+        innerHTML: '', textContent: '', style: {}, attrs: {},
+        value: '', disabled: false, options: [], children: [],
         setAttribute(k, v) { this.attrs[k] = String(v); },
         getAttribute(k) { return (k in this.attrs) ? this.attrs[k] : null; },
-        appendChild(c) { (this.children = this.children || []).push(c); return c; },
+        appendChild(c) { this.children.push(c); return c; },
         addEventListener(type, fn) { (this.handlers = this.handlers || {})[type] = fn; },
+        // Parti 29 (K5b içindekiler şeridi): DAR querySelectorAll — yalnız
+        // Merkez'in TOC seçicisindeki üç imzayı karşılar (etiket adı,
+        // [data-ac-section], etiket[style*="..."]). innerHTML dizgileri
+        // AYRIŞTIRILMAZ (taklit DOM ilkesi); yalnız appendChild ile
+        // eklenen gerçek düğümler yürünür.
+        querySelectorAll(sel) {
+            const parts = String(sel).split(',').map(function (s) { return s.trim(); });
+            const out = [];
+            const seen = new Set();
+            (function walk(n) {
+                (n.children || []).forEach(function (c) {
+                    for (const p of parts) {
+                        let hit = false;
+                        const attrOnly = p.match(/^\[([\w-]+)\]$/);
+                        const styleSub = p.match(/^(\w+)\[style\*="(.+)"\]$/);
+                        if (/^h[1-6]$/i.test(p)) {
+                            hit = (c.tagName === p.toUpperCase());
+                        } else if (attrOnly) {
+                            hit = (c.getAttribute(attrOnly[1]) != null);
+                        } else if (styleSub) {
+                            hit = (c.tagName === styleSub[1].toUpperCase()
+                                && String(c.attrs.style || '').indexOf(styleSub[2]) !== -1);
+                        }
+                        if (hit && !seen.has(c)) { seen.add(c); out.push(c); break; }
+                    }
+                    walk(c);
+                });
+            })(this);
+            return out;
+        },
+        scrollIntoView() { scrolls.push(String(this.textContent)); },
     };
 }
 global.document = {
@@ -327,7 +446,7 @@ global.document = {
         if (!(id in nodes)) nodes[id] = makeNode(id);
         return nodes[id];
     },
-    createElement() { return makeNode(null); },
+    createElement(tag) { return makeNode(null, tag); },
     querySelector() { return null; },
     addEventListener() {},
 };
@@ -381,6 +500,30 @@ if (payload.registerTenant) {
         render: function (data, root) {
             tenantRenders.push(data);
             root.innerHTML = '<div id="tenant_out">' + JSON.stringify(data) + '</div>';
+            // Parti 29 (K5b): taklit DOM innerHTML'i ayrıştırmadığı için
+            // bölüm başlıkları GERÇEK düğüm olarak eklenir — çerçevenin
+            // querySelectorAll taraması onları tarayıcıdaki gibi bulur.
+            // payload.sectionHeadings: dizge ('h4' varsayılır) ya da
+            // {tag:'h4'|'divUpper'|'section', text} nesnesi. 'divUpper'
+            // gerçek kiracıların sectionTitle idiomudur (mono + uppercase
+            // inline stilli div), 'section' [data-ac-section] imzasıdır.
+            root.children.length = 0;    // gerçek DOM'da innerHTML sıfırlar
+            (payload.sectionHeadings || []).forEach(function (s) {
+                const conf = (typeof s === 'string') ? { tag: 'h4', text: s } : s;
+                let el;
+                if (conf.tag === 'divUpper') {
+                    el = document.createElement('div');
+                    el.setAttribute('style', 'font-family:var(--hd-mono, monospace);'
+                        + ' text-transform:uppercase; color:var(--hd-ink-dim, #7d97a5);');
+                } else if (conf.tag === 'section') {
+                    el = document.createElement('section');
+                    el.setAttribute('data-ac-section', '1');
+                } else {
+                    el = document.createElement(conf.tag || 'h4');
+                }
+                el.textContent = conf.text;
+                root.appendChild(el);
+            });
         },
         verdict: (payload.verdict === false) ? null : function (data) {
             return { kind: 'ok', key: 'panel.cfd.converged', fallback: 'CONVERGED' };
@@ -431,6 +574,14 @@ function dumpModel() {
     }
     if (payload.showHistoryEntry) AC.showHistoryEntry(payload.showHistoryEntry);
 
+    // Parti 29 (K5b): içindekiler şeridindeki bir bağa tıklama taklidi —
+    // bağın kaydırdığı başlık scrolls dizisine düşer.
+    if (payload.clickToc != null) {
+        const btn = nodes['ac_toc_' + payload.clickToc];
+        if (btn && btn.handlers && btn.handlers.click) btn.handlers.click();
+    }
+
+    out.scrolls = scrolls.slice();
     out.model = dumpModel();
     out.selection = AC.getSelection();
     out.fetchCalls = fetchCalls;
@@ -667,6 +818,278 @@ class TestRunCardAndHistory:
         assert 'grid too coarse' in out['nodes']['ac_view']['html'], (
             'hata görüntüleyicide görünmüyor — kullanıcı boş ekran görür')
         assert 'RUN FAILED' in out['nodes']['ac_history']['html']
+
+
+# ---------------------------------------------------------------------------
+# 6. Parti 29 yerleşim (A3, 2026-08-17): yapışkan sütunlar (K5a),
+#    içindekiler şeridi (K5b), yapışkan geçmiş şeridi (K5c)
+# ---------------------------------------------------------------------------
+# A2'nin bekçilerine (1b, TestAcStyleSingleSource) DOKUNULMADI: kimlik
+# stillerinin tek kaynağı analysis_center.js inline stilleridir ve öyle
+# kalır. Buradaki bekçiler yalnız YERLEŞİM katmanını kilitler —
+# analysis_center.css kimlik kuralı taşımaz, konumlama taşır.
+
+LAYOUT_CSS = REPO_ROOT / 'hrma' / 'static' / 'css' / 'analysis_center.css'
+
+TENANT_PANEL_FILES = [STATIC_JS / 'panels' / 'cfd_panel.js',
+                      STATIC_JS / 'panels' / 'stability_panel.js']
+
+
+@pytest.fixture(scope='module')
+def layout_css():
+    assert LAYOUT_CSS.exists(), (
+        'analysis_center.css yok — analysis_center.js init() bu dosyayı '
+        '<link> olarak enjekte eder; dosya yoksa her sayfa yüklemesi 404 '
+        'konsol hatası üretir (A2 ölü-link bekçisinin çalışma-zamanı eşi)')
+    return read(LAYOUT_CSS)
+
+
+def css_rule(css, selector_re):
+    """İlk eşleşen seçicinin kural gövdesini döndürür (yoksa None)."""
+    m = re.search(selector_re + r'[^{]*\{([^}]*)\}', css, flags=re.S)
+    return m.group(1) if m else None
+
+
+class TestLayoutStickyContract:
+    """K5a + K5c: yapışkan yerleşim kuralları CSS'te, sınıflar JS'te.
+
+    Sözleşme: kimlik (renk/çerçeve/mono) inline'da kalır; analysis_center.css
+    YALNIZ konumlama taşır ve analysis_center.js init() onu enjekte eder.
+    """
+
+    def test_css_defines_no_identity_tokens(self, layout_css):
+        """Yerleşim dosyası --hd-* TANIMLAMAZ, yalnız var() ile TÜKETİR.
+
+        Tanım buraya sızarsa tema tek-kaynağı (theme.css) bölünür — kimlik
+        dokunulmazlığının CSS tarafı budur.
+        """
+        defs = re.findall(r'--hd-[\w-]+\s*:', layout_css)
+        assert not defs, (
+            f'analysis_center.css --hd-* değişkeni tanımlıyor: {defs} — '
+            'tanım yeri theme.css, burada yalnız var() tüketimi olabilir')
+
+    def test_sticky_columns_rule_present(self, layout_css):
+        """K5a: ağaç + kart sütunları yapışkan (ekran ölçümü: ağaç ~600 px,
+        görüntüleyici ~2400 px — sütunlar yapışmazsa kullanıcı ağaçsız
+        2 ekran boşluk kaydırır)."""
+        body = css_rule(layout_css, r'\.ac-col--tree')
+        assert body is not None, '.ac-col--tree kuralı CSS\'te yok'
+        assert re.search(r'position:\s*sticky', body), 'sütun kuralı sticky değil'
+        assert re.search(r'top:', body), 'sticky sütunun üst ofseti yok'
+        assert '.ac-col--card' in layout_css, '.ac-col--card kuralı CSS\'te yok'
+
+    def test_sticky_columns_are_gated_by_min_width(self, layout_css):
+        """Dar ekranda (sütunlar alt alta) yapışkanlık kapalı olmalı —
+        tek kolonda yapışan ağaç, altındaki kartın üstüne perde olur."""
+        media = layout_css.find('@media (min-width')
+        tree = layout_css.find('.ac-col--tree')
+        assert media != -1, 'min-width medya kapısı yok'
+        assert media < tree, (
+            'sticky sütun kuralı medya kapısının DIŞINDA — dar ekranda '
+            'ağaç kartın üstüne yapışır')
+
+    def test_sticky_columns_self_scroll_not_ancestor(self, layout_css):
+        """Sütunun kendi taşması kendi içinde kayar (max-height +
+        overflow-y). Elemanın KENDİ overflow'u sticky'yi bozmaz; bozan
+        ATA overflow'udur — o ayrı bekçide."""
+        assert re.search(r'max-height:\s*calc\(100vh', layout_css), (
+            'sticky sütuna viewport tavanı verilmemiş — uzun ağaç '
+            'viewport dışında erişilmez kalır')
+        assert re.search(r'overflow-y:\s*auto', layout_css), (
+            'sticky sütun kendi içinde kaymıyor')
+
+    def test_sticky_history_rule_present(self, layout_css):
+        """K5c: geçmiş şeridi yapışkan-alt + OPAK zemin (yarı saydam zemin
+        altta akan metni hayalet gibi geçirir)."""
+        body = css_rule(layout_css, r'\.ac-history-box')
+        assert body is not None, '.ac-history-box kuralı CSS\'te yok'
+        assert re.search(r'position:\s*sticky', body), 'geçmiş kutusu sticky değil'
+        assert re.search(r'bottom:', body), 'geçmiş kutusu alt kenara bağlı değil'
+        assert re.search(r'background:\s*var\(--hd-panel-solid', body), (
+            'yapışkan geçmiş kutusunun zemini opak panel jetonu değil — '
+            'içerik altından geçer')
+
+    def test_toc_strip_rules_present(self, layout_css):
+        """K5b: şerit görüntüleyici içinde yapışkan; boşken yerden kalkar
+        (boş şerit = başlıksız çıktı — çerçeve başlık uydurmaz)."""
+        body = css_rule(layout_css, r'\.ac-toc\b')
+        assert body is not None, '.ac-toc kuralı CSS\'te yok'
+        assert re.search(r'position:\s*sticky', body), 'içindekiler şeridi sticky değil'
+        assert re.search(r'\.ac-toc:empty\s*\{[^}]*display:\s*none', layout_css), (
+            'boş şerit gizlenmiyor — başlıksız kiracıda boş kutu kalır')
+
+    def test_center_emits_layout_classes(self, center_code):
+        """JS, CSS'in adreslediği sınıfları GERÇEKTEN basıyor (ölü CSS
+        yasağı — sınıf üretimi durursa kurallar boşa oynar)."""
+        assert "ac-col ac-col--' + mod" in center_code, (
+            'column() yerleşim sınıfını basmıyor — sticky kuralların '
+            'tutunacağı sınıf yok')
+        for mod in ('tree', 'card', 'view'):
+            assert re.search(r"column\('ac_%s'[^)]*'%s'\)" % (mod, mod),
+                             center_code), (
+                f'{mod} sütunu yerleşim kipiyle çağrılmıyor — CSS\'in '
+                f'.ac-col--{mod} kuralı boşa oynar')
+        assert 'class="ac-history-box"' in center_code, (
+            'geçmiş kutusu .ac-history-box sınıfını taşımıyor')
+        assert 'class="ac-toc"' in center_code, (
+            'içindekiler şeridi kabı .ac-toc sınıfını taşımıyor')
+
+    def test_center_injects_the_layout_css(self, center_code):
+        """Şablonlarda <link> yok (A2 tek-kaynak ölçümü + o partinin dosya
+        kapsamı); üç sayfanın tek kuraldan beslenmesi için linki init()
+        enjekte eder. Şablonlara gerçek <link> girdiği gün (A2 halef
+        bekçisi) bu bekçi 'enjeksiyon söküldü + üç şablonda link' halefine
+        çevrilir."""
+        assert CENTER_CSS_SRC in center_code, (
+            'analysis_center.js yerleşim CSS\'ini adreslemiyor — kurallar '
+            'hiçbir sayfada yüklenmez')
+        assert 'document.head' in center_code, (
+            'CSS linki head\'e enjekte edilmiyor')
+        assert LAYOUT_CSS.exists(), 'enjekte edilen dosya diskte yok — her sayfada 404'
+
+    @pytest.mark.parametrize('template', MOTOR_TEMPLATES)
+    def test_sticky_ancestors_carry_no_overflow(self, template):
+        """Sticky'nin ölüm şartı: ATA elemanda overflow (visible dışı).
+
+        Ölçüm (2026-08-17, üç şablonda HTML ağaç yürüyüşü): Merkez'in ata
+        zinciri html > body > .container > .results. Bu bekçi o zincirin
+        şablon stillerinde overflow BİLDİRİMİ olmadığını kilitler — biri
+        .results'a overflow:hidden yazarsa sticky üç sayfada birden ölür
+        ve başka hiçbir test bunu görmez.
+        """
+        html = read(TEMPLATES / template)
+        for sel in (r'\.results', r'\.container'):
+            for body in re.findall(sel + r'\s*\{([^}]*)\}', html):
+                assert not re.search(r'overflow\s*:', body), (
+                    f'{template}: {sel} kuralında overflow bildirimi var '
+                    f'({body.strip()!r}) — sticky sütunlar ölür')
+
+    def test_center_inline_styles_carry_no_overflow(self, center_code):
+        """Merkez'in kendi bastığı inline stillerde de overflow yok
+        (overflow-wrap sayılmaz — o satır kırma kuralıdır, taşma kabı
+        kurmaz). Sticky zincirinin JS tarafı."""
+        assert not re.search(r'[^-]overflow\s*:', center_code), (
+            'analysis_center.js inline stilinde overflow var — sticky '
+            'sütunların ata zinciri bozulmuş olabilir')
+
+    def test_history_box_dom_order_unchanged(self, center_code):
+        """K5c ÖLÇÜLEN KARAR: yapışkan-alt seçildi, DOM sırası KORUNDU.
+
+        İki aday vardı: (a) geçmişi viewer üstüne kompakt taşımak,
+        (b) yerinde bırakıp sticky-alt yapmak. Ölçüm: sözleşme bekçileri
+        ve tarayıcı-tur bekçileri (esikler.MERKEZ_GECMIS_KIMLIGI) şeridi
+        KİMLİKLE adresler, konumla değil — iki aday da bekçi kırmazdı;
+        ama (a) hem DOM sırasını oynatır hem K5b içindekiler şeridiyle
+        aynı üst alanı paylaşırdı. (b) sıfır DOM oynamasıyla aynı görünür
+        kalma kazancını verdi. Bu bekçi kararı kilitler: kutu kaynakta
+        sütunlardan SONRA durur, ekranda sticky-alt ile görünür kalır.
+        """
+        assert center_code.index('ac_columns') < center_code.index('ac_history_box'), (
+            'geçmiş kutusu DOM\'da sütunların önüne taşınmış — K5c kararı '
+            '(yapışkan-alt, sıfır DOM oynaması) bozulmuş')
+
+
+@needs_node
+class TestViewerToc:
+    """K5b: içindekiler şeridi kiracının GERÇEK çıktısından kurulur.
+
+    Mutasyon sözleşmesi: buildViewerToc'a sabit başlık dizisi konursa
+    (görev K5b'nin korkuttuğu kusur) iki bekçi birden kırmızı yanar —
+    test_toc_empty_without_headings (boş çıktıda şerit DOLU olur) ve
+    test_toc_mirrors_the_current_tenant (şerit kiracıyla değişmez olur).
+    """
+
+    HEADINGS = ['INLET BLOCK',
+                {'tag': 'divUpper', 'text': 'Wall pressure against separation'},
+                {'tag': 'section', 'text': 'CONVERGENCE BUDGET'}]
+    LABELS = ['INLET BLOCK', 'Wall pressure against separation',
+              'CONVERGENCE BUDGET']
+
+    def test_toc_lists_real_headings_in_dom_order(self, tmp_path):
+        """Üç imza da (h4 / kiracı sectionTitle idiomu / data-ac-section)
+        şeride girer, sırası kiracının DOM sırasıdır."""
+        out = run_center(tmp_path, motorType='hybrid', results=SONUC,
+                         registerTenant=True, select=['nozzle_flow', 'cfd'],
+                         runs=1, sectionHeadings=self.HEADINGS)
+        toc = out['nodes']['ac_view_toc']['html']
+        pos = []
+        for label in self.LABELS:
+            assert f'data-ac-toc-item="{label}"' in toc, (
+                f'{label!r} başlığı şeritte yok — tarama o imzayı görmüyor')
+            pos.append(toc.index(f'data-ac-toc-item="{label}"'))
+        assert pos == sorted(pos), 'şerit sırası kiracının DOM sırası değil'
+        assert toc.count('ac-toc-link') == len(self.LABELS), (
+            'şeritte başlık sayısından farklı bağ var — uydurma/kayıp bağ')
+
+    def test_toc_mirrors_the_current_tenant_not_a_fixed_list(self, tmp_path):
+        """Kiracı farklı başlık çizerse şerit ONU gösterir (sabit dizi
+        mutasyonunun birinci kırmızısı)."""
+        out = run_center(tmp_path, motorType='hybrid', results=SONUC,
+                         registerTenant=True, select=['nozzle_flow', 'cfd'],
+                         runs=1, sectionHeadings=['ALPHA BLOCK', 'BETA BLOCK'])
+        toc = out['nodes']['ac_view_toc']['html']
+        assert 'data-ac-toc-item="ALPHA BLOCK"' in toc
+        assert 'data-ac-toc-item="BETA BLOCK"' in toc
+        assert toc.count('ac-toc-link') == 2, (
+            'şerit kiracının çizdiğinden farklı sayıda bağ taşıyor — '
+            'sabit liste şüphesi')
+        for eski in self.LABELS:
+            assert eski not in toc, (
+                f'{eski!r} bu kiracı çıktısında yok ama şeritte duruyor — '
+                'şerit DOM\'dan değil sabit listeden besleniyor')
+
+    def test_toc_empty_without_headings(self, tmp_path):
+        """Başlıksız çıktıda şerit BOŞ kalır (sabit dizi mutasyonunun
+        ikinci kırmızısı: uydurma liste boş çıktıda da dolu görünürdü).
+        CSS tarafında .ac-toc:empty şeridi yerden kaldırır."""
+        out = run_center(tmp_path, motorType='hybrid', results=SONUC,
+                         registerTenant=True, select=['nozzle_flow', 'cfd'],
+                         runs=1)
+        assert out['nodes']['ac_view_toc']['html'] == '', (
+            'kiracı başlık çizmedi ama şerit dolu — başlıklar DOM\'dan '
+            'değil sabit listeden geliyor')
+
+    def test_toc_click_scrolls_to_the_real_heading(self, tmp_path):
+        """Bağa tıklamak O başlığa kaydırır (scrollIntoView) — bağ süs
+        değil, gerçek gezinmedir."""
+        out = run_center(tmp_path, motorType='hybrid', results=SONUC,
+                         registerTenant=True, select=['nozzle_flow', 'cfd'],
+                         runs=1, sectionHeadings=self.HEADINGS, clickToc=1)
+        assert out['scrolls'] == ['Wall pressure against separation'], (
+            f'tıklanan bağ yanlış/eksik kaydırdı: {out["scrolls"]!r}')
+
+    def test_toc_scans_only_the_tenant_root(self, center_code):
+        """Tarama kiracı köküyle sınırlı: buildViewerToc, renderViewer'ın
+        #ac_view_root elemanını alır — çerçevenin kendi sütun başlıkları
+        şeride sızmaz."""
+        assert 'buildViewerToc(root)' in center_code, (
+            'şerit kurucusu görüntüleyici köküyle çağrılmıyor')
+        assert re.search(r"getElementById\('ac_view_root'\)", center_code), (
+            'görüntüleyici kökü kaybolmuş')
+
+    def test_toc_selector_matches_tenant_idiom(self, center_code):
+        """Seçici üç imzayı TANIMALI ve idiom imzası kiracılarda GERÇEKTEN
+        var olmalı — kiracılar sectionTitle idiomunu değiştirirse bu bekçi
+        kırmızı yanar ve seçici güncellenir (bağ koptuğunda şerit sessizce
+        boşalırdı; bu bekçi o sessizliği yasaklar)."""
+        for imza in ('h1, h2, h3', '[data-ac-section]',
+                     'text-transform:uppercase'):
+            assert imza in center_code, f'TOC seçicisinde {imza!r} imzası yok'
+        for panel in TENANT_PANEL_FILES:
+            assert panel.exists(), f'{panel.name} yok — kiracı listesi bayat'
+            src = read(panel)
+            m = re.search(r'function sectionTitle[^{]*\{(.*?)\n    \}', src, re.S)
+            assert m, f'{panel.name}: sectionTitle idiomu bulunamadı'
+            assert 'text-transform:uppercase' in m.group(1), (
+                f'{panel.name}: sectionTitle artık uppercase inline stil '
+                'basmıyor — Merkez\'in TOC seçicisi bu kiracının '
+                'başlıklarını GÖREMEZ; seçiciyi yeni idioma taşı')
+
+    def test_toc_strip_container_precedes_view_root(self, center_code):
+        """Şerit kabı görüntüleyici kökünün ÜSTÜNDE basılır (K5b: 'viewer
+        üstünde yatay')."""
+        assert center_code.index('ac_view_toc') < center_code.index('ac_view_root'), (
+            'içindekiler şeridi görüntüleyici kökünün altına düşmüş')
 
 
 if __name__ == '__main__':

@@ -1,0 +1,133 @@
+/* ====================================================================
+   HRMA Analiz Merkezi — YERLEŞİM stilleri (parti 29, A3)
+   --------------------------------------------------------------------
+   DURUM BEYANI (2026-08-17): A2 ölçümü, ac-* KİMLİK stillerinin (renk,
+   çerçeve, mono başlık) tek kaynağının analysis_center.js inline
+   stilleri olduğunu gösterdi; şablonlarda kopya YOKTU, taşınacak kural
+   da yoktu (bekçi: tests/test_analysis_center_contract.py::
+   TestAcStyleSingleSource — o sınıfın yorumunda ölçümün kendisi yazılı).
+   Bu dosya o ölçümle ÇELİŞMEZ: burada kimlik kuralı YAZILMAZ — yalnız
+   parti 29'un YERLEŞİM kuralları (yapışkan sütunlar K5a, içindekiler
+   şeridi K5b, yapışkan geçmiş K5c) yaşar. Renkler yalnız theme.css'in
+   --hd-* değişkenleri üzerinden TÜKETİLİR; burada hiçbir --hd-*
+   değişkeni TANIMLANMAZ (bekçi: TestLayoutStickyContract::
+   test_css_defines_no_identity_tokens).
+
+   YÜKLENME: şablonlarda <link> yok (şablonlar bu partinin dosya
+   kapsamı dışında; A2 bekçisi ölü linki ayrıca yasaklar). Dosyayı
+   analysis_center.js init() sırasında <link> olarak enjekte eder — üç
+   motor sayfası tek kuraldan beslenir. Şablonlara gerçek <link>
+   girdiği gün (A2 halef bekçisi: dosya var + üç şablonda link +
+   theme.css'ten önce) enjeksiyon sökülür. Defter kalemi raporda.
+   ==================================================================== */
+
+/* ------------------- parti 29 yerleşim (A3) ------------------- */
+
+/* K5a — SOL SÜTUN DENGESİZLİĞİ: bileşen ağacı ~600 px'te biter, sonuç
+   görüntüleyici 2400 px'e uzar (parti 29 kusur envanteri, ekran ölçümü).
+   Ağaç ve koşum kartı sütunları YAPIŞKAN: görüntüleyici kayarken ikisi
+   görünür kalır. Ata zinciri ölçüldü (2026-08-17, üç şablonda HTML
+   yürüyüşü): html > body > .container > .results > (Merkez paneli) —
+   hiçbir atada overflow bildirimi yok; advanced.html .panel'i AÇIKÇA
+   overflow:visible. overflow'lu ATA sticky'yi öldürür; bekçi
+   TestLayoutStickyContract::test_sticky_ancestors_carry_no_overflow o
+   zinciri kilitler. Dar ekranda (auto-fit sütunları alt alta düşürünce)
+   yapışkanlık KAPALI: tek kolonda yapışan ağaç, altındaki kartın
+   üstüne perde olurdu. Eşik 900 px ölçümle: 3 × 250 px minmax tabanı
+   + 2 × 12 px boşluk + panel dolgusu 50 px + container dolgusu 40 px
+   = 864 px — 900 px altında grid zaten üç sütunu taşıyamıyor. */
+@media (min-width: 900px) {
+    #ac_columns > .ac-col--tree,
+    #ac_columns > .ac-col--card {
+        position: sticky;
+        top: 12px;
+        /* Grid hücresinde boyuna uzamasın — kısa kalmak sticky'nin
+           çalışma şartı (#ac_columns zaten align-items:start taşıyor;
+           buradaki align-self o kural yerinden oynarsa da tutar). */
+        align-self: start;
+        /* Sütunun KENDİ taşması: viewport'tan uzunsa içinde kayar.
+           Elemanın kendi overflow'u sticky'yi bozmaz; bozan ATA
+           overflow'udur (yukarıdaki ölçüm). */
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+    }
+}
+
+/* K5b — İÇİNDEKİLER ŞERİDİ (.ac-toc): görüntüleyicinin üstünde yatay,
+   bölüm başlıklarına kaydırma bağları. İçerik SABİT LİSTE DEĞİL:
+   analysis_center.js şeridi kiracının GERÇEK render çıktısını tarayarak
+   doldurur (buildViewerToc — kiracı değişirse şerit kendiliğinden o
+   kiracının başlıklarını gösterir); başlık yoksa şerit boş kalır ve
+   :empty ile yerden kalkar (uydurma liste yasağı; bekçi: TestViewerToc).
+   Şerit görüntüleyici sütununun İÇİNDE yapışkandır: 2400 px'lik çıktıda
+   kaydırırken bağlar elde kalır. Arka plan OPAK (--hd-panel-solid):
+   yarı saydam zemin, altından akan metni hayalet gibi geçirirdi. */
+.ac-toc {
+    position: sticky;
+    top: 8px;
+    z-index: 3;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+    margin: 0 0 8px;
+    background: var(--hd-panel-solid, #0a1524);
+    border: 1px solid var(--hd-line, rgba(0, 229, 255, 0.14));
+    border-radius: var(--hd-radius-sm, 8px);
+}
+.ac-toc:empty { display: none; }
+
+/* Bağ çipleri: mevcut mono/uppercase bölüm-başlığı kimliğinin aynısı
+   (yeni renk yok, yalnız mevcut --hd-* jetonları). Kırpılma ölçümü
+   (2026-08-17, iki kiracının 15 GERÇEK sectionTitle metni üzerinde):
+   0,66 rem mono = 10,56 px punto, JetBrains Mono ilerleme ≈ 0,6 em +
+   0,06 em harf aralığı → ≈ 6,97 px/karakter. 240 px tavan − 16 px dolgu
+   − 2 px kenarlık = 222 px ≈ 31 görünür karakter. Gerçek başlıklar tam
+   cümle (30-79 karakter): 14/15 çip üç noktayla kırpılır AMA aynı
+   kiracının çip ön-ekleri 31 karakterde İSTİSNASIZ ayrışık (ölçüldü:
+   CFD 7/7, kararlılık 8/8 — çakışan ön-ek yok); TAM metin çipin
+   title'ında durur (kiracının kendi çevrilmiş metni — çerçeve metin
+   uydurmaz, yeni i18n anahtarı da almaz). */
+.ac-toc-link {
+    cursor: pointer;
+    flex: 0 1 auto;
+    border: 1px solid var(--hd-line, rgba(0, 229, 255, 0.14));
+    background: transparent;
+    color: var(--hd-ink-dim, #7d97a5);
+    font-family: var(--hd-mono, monospace);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 6px;
+    padding: 2px 8px;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ac-toc-link:hover,
+.ac-toc-link:focus-visible {
+    color: var(--hd-ink, #cfe8f2);
+    border-color: var(--hd-line-strong, rgba(0, 229, 255, 0.42));
+}
+
+/* K5c — KOŞUM GEÇMİŞİ ŞERİDİ: yapışkan-alt. Ölçülen karar (parti 29):
+   sözleşme bekçileri (tests/test_analysis_center_contract.py) ve
+   tarayıcı-tur bekçileri (tools/browser_harness/esikler.py
+   MERKEZ_GECMIS_KIMLIGI) şeridi KİMLİKLE (#ac_history/#ac_history_box)
+   adresler, DOM konumuyla değil; yine de "viewer üstüne kompakt taşıma"
+   seçeneği hem DOM sırasını bozar hem K5b şeridiyle aynı üst alanı
+   paylaşırdı. Yapışkan-alt, SIFIR DOM oynamasıyla aynı kazancı verir:
+   kutu kaynakta olduğu yerde durur (bekçi:
+   test_history_box_dom_order_unchanged), panel altı viewport dışına
+   taşarken ekranın altında görünür kalır. Arka plan buraya taşındı
+   (JS inline'dan): yapışkan şerit içeriğin ÜSTÜNE binebilir, yarı
+   saydam INSET altta akan metni ~%15 geçirirdi. CSS yüklenmezse kutu
+   saydam kalır ama .panel zemini zaten aynı --hd-panel-solid rengidir
+   (görünür fark yok). */
+.ac-history-box {
+    position: sticky;
+    bottom: 8px;
+    z-index: 3;
+    background: var(--hd-panel-solid, #0a1524);
+}

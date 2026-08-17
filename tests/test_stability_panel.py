@@ -68,6 +68,7 @@ Koşum hedeflidir (süit disiplini):
 """
 
 import copy
+import itertools
 import json
 import math
 import pathlib
@@ -445,6 +446,30 @@ function dumpModel() {
         out.nodes[id] = { html: nodes[id].innerHTML, text: nodes[id].textContent,
                           value: String(nodes[id].value), attrs: nodes[id].attrs };
     });
+    // K1/K2 görsel metrik yüzeyi: testler yerleşimi/ölçümü panelin KENDİ
+    // saf fonksiyonlarıyla yeniden hesaplar (Python'da formül kopyası yok).
+    out.axisMetrics = SP._axisMetrics;
+    if (payload.probes) {
+        const pb = payload.probes;
+        out.probes = {};
+        if (pb.layoutModeLabels) {
+            out.probes.layoutModeLabels = SP._layoutModeLabels(
+                pb.layoutModeLabels.items, pb.layoutModeLabels.opts);
+        }
+        if (pb.measure) {
+            out.probes.measure = pb.measure.map(function (p) {
+                return SP._measureLabelPx(p[0], p[1]);
+            });
+        }
+        if (pb.wrapTitle) {
+            out.probes.wrapTitle = SP._wrapAxisTitle(
+                pb.wrapTitle.text, pb.wrapTitle.availablePx, pb.wrapTitle.fontPx);
+        }
+        if (pb.tickWidth) {
+            out.probes.tickWidth = SP._maxTickWidthPx(
+                pb.tickWidth.values, pb.tickWidth.fontPx);
+        }
+    }
     process.stdout.write(JSON.stringify(out));
 })();
 """
@@ -1317,6 +1342,441 @@ def test_dp_eksikken_uc_422_ve_alan_adiyla(client):
     })
     assert yanit.status_code == 422
     assert 'feed_line.dp_injector_Pa' in yanit.get_json()['missing_fields']
+
+
+# ===========================================================================
+# 10. KULLANILABİLİRLİK BEKÇİLERİ (parti 29 A1) — ekran görüntüsünden
+#     ölçülen dört kusur bir daha SESSİZ dönemesin:
+#       K1 mod haritası etiket/im çakışması ("2134567T8L" yığını),
+#       K2 kırpılmalar (y-ekseni başlığı + R_crit satır başları),
+#       K3 varsayılan açık metin duvarları (~2400px panel),
+#       K4 düşük kontrast (veri metnine dim/faint sınıfları).
+#     Ölçüm yöntemi: yerleşim/marj/metin genişliği panelin KENDİ saf
+#     fonksiyonlarıyla (harness probe yüzeyi) yeniden hesaplanır — Python'da
+#     formül kopyası tutulmaz, sürüklenme yapısal olarak imkânsız.
+# ===========================================================================
+THEME_CSS = REPO_ROOT / 'hrma' / 'static' / 'css' / 'theme.css'
+
+DETAILS_RE = re.compile(r'<details\b[^>]*>.*?</details>', re.S)
+FOLD_AD_RE = re.compile(r'<details\b[^>]*data-stab-fold="([^"]+)"')
+
+
+def _theme_token(ad):
+    """theme.css'ten HEX jeton değeri — renkler TEK kaynaktan okunur."""
+    kaynak = read(THEME_CSS)
+    e = re.search(r'--' + re.escape(ad) + r':\s*(#[0-9a-fA-F]{6})', kaynak)
+    assert e, f'theme.css --{ad} jetonu bulunamadı'
+    return e.group(1).lower()
+
+
+def _dogrusal(c):
+    """sRGB kanalı → doğrusal parlaklık bileşeni (WCAG 2.x tanımı)."""
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _parlaklik(hexrenk):
+    h = hexrenk.lstrip('#')
+    r, g, b = (_dogrusal(int(h[i:i + 2], 16) / 255.0) for i in (0, 2, 4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _kontrast(renk1, renk2):
+    """WCAG kontrast oranı (L1+0.05)/(L2+0.05), L1 >= L2."""
+    l1, l2 = sorted((_parlaklik(renk1), _parlaklik(renk2)), reverse=True)
+    return (l1 + 0.05) / (l2 + 0.05)
+
+
+def _js_fonksiyon(code, ad):
+    """Panel kodundan bir fonksiyonun gövdesini kabaca keser (girinti
+    sözleşmesi: modül fonksiyonları 4 boşlukta başlar)."""
+    b = code.find('function ' + ad + '(')
+    assert b != -1, f'{ad} fonksiyonu panelde yok'
+    s = code.find('\n    function ', b + 1)
+    return code[b:s if s != -1 else len(code)]
+
+
+def _katlar(html):
+    """data-stab-fold adlarının listesi (details blokları)."""
+    return FOLD_AD_RE.findall(html)
+
+
+def _kat_disi(html):
+    """details bloklarının DIŞINDA kalan görünüm (ana bilgi katmanı)."""
+    return DETAILS_RE.sub('', html)
+
+
+def _kutu(ann_x, lo, span, plot_w, genislik):
+    """Bir etiketin yatay piksel kutusu (panelin yerleşim eşlemesiyle aynı:
+    log10 konum → doğrusal piksel)."""
+    x_px = (ann_x - lo) / span * plot_w
+    return x_px - genislik / 2.0, x_px + genislik / 2.0
+
+
+@needs_node
+class TestKullanilabilirlikK1:
+    """K1 — mod haritası etiket yerleşimi: kutular ÖLÇÜLEN metin
+    genişliğiyle hesaplanır ve kesişmez (göz kararı yok)."""
+
+    def test_yerlesim_saf_fonksiyon_cakisma_kumesinde_kesisimsiz(
+            self, tmp_path, motor_hibrit):
+        """Ekrandaki yığının birebir kurgusu: log eksende %3 aralıklarla
+        dizilmiş '2L'..'6L','1T' + uzakta bir '1L'. Yerleşim fonksiyonu
+        aynı satır + aynı kademedeki HER kutu çiftini ayrık bırakmalı ve
+        çakışan küme için EN AZ bir üst kademe açmalı."""
+        etiketler = ['2L', '3L', '4L', '5L', '6L', '1T']
+        items = [{'x': 3000.0 * (1.03 ** i), 'row': 'screech_range',
+                  'label': ad} for i, ad in enumerate(etiketler)]
+        items.insert(0, {'x': 500.0, 'row': 'chug_range', 'label': '1L'})
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        probes={'layoutModeLabels': {
+                            'items': items,
+                            'opts': {'plotWidthPx': 420, 'fontPx': 10}}})
+        yer = out['probes']['layoutModeLabels']
+        assert len(yer) == len(items), 'yerleşim öğe düşürdü'
+        for a, b in itertools.combinations(yer, 2):
+            if a['row'] == b['row'] and a['tier'] == b['tier']:
+                ayrik = (a['rightPx'] <= b['leftPx']
+                         or b['rightPx'] <= a['leftPx'])
+                assert ayrik, (
+                    f"etiket kutuları KESİŞİYOR: {a['label']} "
+                    f"[{a['leftPx']:.1f},{a['rightPx']:.1f}] ile {b['label']} "
+                    f"[{b['leftPx']:.1f},{b['rightPx']:.1f}] aynı kademede")
+        assert max(p['tier'] for p in yer) >= 1, (
+            'çakışma kümesi tek kademede kalmış — ekrandaki yığın kusuru '
+            'geri dönerdi')
+        # Kademeler dikeyde de ayrık: ofset farkı en az punto + 2 px.
+        kademe_ay = {}
+        for p in yer:
+            kademe_ay.setdefault(p['tier'], p['ayPx'])
+            assert kademe_ay[p['tier']] == p['ayPx'], (
+                'aynı kademeye iki farklı dikey ofset — yerleşim tutarsız')
+        sirali = sorted(kademe_ay)
+        for t1, t2 in zip(sirali, sirali[1:]):
+            assert kademe_ay[t2] - kademe_ay[t1] >= 10 + 2, (
+                'kademeler dikeyde punto kadar ayrılmıyor — etiketler '
+                'düşeyde üst üste biner')
+
+    def test_ayni_noktaya_dusen_imlerin_etiketleri_ayrisir(
+            self, tmp_path, motor_hibrit):
+        """İmler AYNI (bant, frekans) noktasına düşerse etiket kutuları tam
+        örtüşür → yerleşim onları zorunlu olarak farklı kademelere atar.
+        (İmin kendisi frekans ekseninde OYNATILMAZ: im konumu veridir,
+        jitter sahte veri olurdu — ayrışma etiket katmanında.)"""
+        items = [{'x': 4000.0, 'row': 'screech_range', 'label': '7L'},
+                 {'x': 4000.0, 'row': 'screech_range', 'label': '1T'},
+                 {'x': 800.0, 'row': 'buzz_range', 'label': '1L'}]
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        probes={'layoutModeLabels': {
+                            'items': items,
+                            'opts': {'plotWidthPx': 420, 'fontPx': 10}}})
+        yer = {p['label']: p for p in out['probes']['layoutModeLabels']}
+        assert yer['7L']['tier'] != yer['1T']['tier'], (
+            'tam örtüşen imlerin etiketleri aynı kademede — okunmaz yığın')
+        assert yer['7L']['ayPx'] != yer['1T']['ayPx']
+
+    def test_gercek_mod_haritasi_etiketleri_kesisimsiz(self, tmp_path,
+                                                       motor_hibrit):
+        """GERÇEK hibrit koşumunun mod haritası: etiketler artık iz metni
+        değil, yönlendirme çizgili Plotly notları; ölçülen kutularla
+        yeniden hesaplanan kesişim testi — yatayda kesişen her çift farklı
+        dikey ofsette olmalı."""
+        a, L, g, mach = sonum_girdileri(motor_hibrit)
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=sonum_yaniti(a, L, g, mach),
+                        select=['chamber_acoustics', 'acoustic_modes'],
+                        runs=1)
+        harita = cizim(out, 'stab_map')
+        assert harita, 'mod haritası çizilmemiş'
+        lay = harita['layout']
+        ann = lay.get('annotations') or []
+        blok, _ = akustik_blok(motor_hibrit)
+        assert len(ann) == len(blok['modes']), (
+            'her modun bir etiket notu olmalı (ne eksik ne uydurma)')
+        assert [n['text'] for n in ann] == \
+            [str(m['label']) for m in blok['modes']]
+        # Ana iz çift etiket ÇİZMİYOR (etiket yalnız not katmanında; iz
+        # 'text' alanı hover/bekçi için motor tablosunun kendisi kalır).
+        modlar = iz(harita, 'Cavity modes')
+        assert modlar['mode'] == 'markers', (
+            "iz 'markers+text'e dönmüş — etiketler yeniden üst üste "
+            'binerdi (K1 kusuru geri geldi)')
+        m = out['axisMetrics']
+        plot_w = max(m['defaultPlotWidthPx'] - lay['margin']['l']
+                     - lay['margin']['r'], 60)
+        gen = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        probes={'measure': [[n['text'], m['labelFontPx']]
+                                            for n in ann]})['probes']['measure']
+        xs = [n['x'] for n in ann]
+        lo = min(xs)
+        span = (max(xs) - lo) or 1
+        for (i, ni), (j, nj) in itertools.combinations(enumerate(ann), 2):
+            if ni['y'] != nj['y']:
+                continue
+            l1, r1 = _kutu(ni['x'], lo, span, plot_w, gen[i])
+            l2, r2 = _kutu(nj['x'], lo, span, plot_w, gen[j])
+            if min(r1, r2) - max(l1, l2) > 0:  # yatayda kesişiyorlar
+                assert ni['ay'] != nj['ay'], (
+                    f"{ni['text']} ile {nj['text']} yatayda kesişiyor ama "
+                    'aynı dikey ofsette — okunmaz yığın geri döndü')
+                assert abs(ni['ay'] - nj['ay']) >= m['labelFontPx'], (
+                    'dikey ayrışma punto altında — etiketler yine değer')
+        for n in ann:
+            assert n['ay'] < 0, 'etiket imin üstünde durmalı (ay negatif)'
+            assert n.get('showarrow') is True, (
+                'yönlendirme çizgisi kalkmış — kademeli etiket imiyle '
+                'eşleştirilemez')
+
+
+@needs_node
+class TestKullanilabilirlikK2:
+    """K2 — kırpılmalar: marjlar/sütunlar ölçülen metinden türetilir."""
+
+    @pytest.fixture(scope='class')
+    def sonum_gorunumu(self, tmp_path_factory, motor_hibrit):
+        a, L, g, mach = sonum_girdileri(motor_hibrit)
+        yanit = sonum_yaniti(a, L, g, mach)
+        out = kos_panel(tmp_path_factory.mktemp('k2_sonum'),
+                        motorType='hybrid', results=motor_hibrit,
+                        response=yanit,
+                        select=['chamber_acoustics', 'acoustic_modes'],
+                        runs=1)
+        return out, yanit
+
+    def _marj_dogrula(self, tmp_path, motor_hibrit, cagri, eksen='yaxis'):
+        """Bir çizimin y-marjını panelin KENDİ fonksiyonlarıyla yeniden
+        hesaplar: sarılmış başlık satırları sığmalı, margin.l birebir
+        formülden çıkmalı."""
+        lay = cagri['layout']
+        m_ = cagri.get('axisMetrics')
+        baslik = lay[eksen]['title']
+        assert isinstance(baslik, dict), (
+            'y-başlığı ölçülü sarma nesnesi değil — kırpılma bekçisi kör')
+        satirlar_ = baslik['text'].split('<br>')
+        avail = lay['height'] - lay['margin']['t'] - lay['margin']['b']
+        y_degerleri = []
+        for t in cagri['traces']:
+            for v in (t.get('y') or []):
+                if isinstance(v, (int, float)):
+                    y_degerleri.append(v)
+        probe = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                          probes={
+                              'wrapTitle': {
+                                  'text': ' '.join(satirlar_),
+                                  'availablePx': avail,
+                                  'fontPx': m_['titleFontPx']},
+                              'measure': [[s, m_['titleFontPx']]
+                                          for s in satirlar_],
+                              'tickWidth': {'values': y_degerleri,
+                                            'fontPx': m_['tickFontPx']}})
+        p = probe['probes']
+        assert p['wrapTitle'] == satirlar_, (
+            'çizimdeki satırlar panelin kendi sarma fonksiyonundan '
+            'ayrışmış — formül iki yerde yaşayamaz')
+        for s, gen in zip(satirlar_, p['measure']):
+            assert gen <= avail, (
+                f'başlık satırı {s!r} ölçülen genişliğiyle ({gen:.0f}px) '
+                f'kullanılabilir yüksekliğe ({avail}px) sığmıyor — kırpılır')
+        beklenen = math.ceil(p['tickWidth'] + m_['tickPadPx']
+                             + len(satirlar_) * m_['titleFontPx']
+                             * m_['lineHeight'] + m_['padPx'])
+        assert lay['margin']['l'] == beklenen, (
+            f"margin.l={lay['margin']['l']} ölçülen formülden ({beklenen}) "
+            'ayrışmış — sabit piksel tahmini geri gelmiş olabilir')
+
+    def test_sonum_cubugu_y_basligi_sarili_ve_marj_olculu(
+            self, tmp_path, motor_hibrit, sonum_gorunumu):
+        """K2a kusurunun bekçisi: '...alpha [1/s] (negative = damping)'
+        başlığı eskiden tek satırda plot yüksekliğini aşıp kırpılıyordu."""
+        out, _yanit = sonum_gorunumu
+        cagri = cizim(out, 'stab_bars')
+        assert cagri, 'sönüm çubukları çizilmemiş'
+        cagri = dict(cagri, axisMetrics=out['axisMetrics'])
+        baslik = cagri['layout']['yaxis']['title']
+        assert '<br>' in baslik['text'], (
+            'uzun y-başlığı sarılmamış — 180px kullanılabilir yüksekliğe '
+            '~380px ölçülen metin sığmaz, kırpılma (K2a) geri döner')
+        self._marj_dogrula(tmp_path, motor_hibrit, cagri)
+
+    def test_notr_egri_y_basligi_sarili_ve_marj_olculu(self, tmp_path,
+                                                       motor_hibrit,
+                                                       motor_sivi):
+        dp, tau, tau_c = sivi_chug_girdileri(motor_sivi)
+        out = kos_panel(tmp_path, motorType='liquid',
+                        results=motor_sivi,
+                        response=chug_yaniti(dp, tau, tau_c),
+                        select=['chamber_acoustics', 'combustion_stability'],
+                        runs=1)
+        cagri = cizim(out, 'stab_neutral')
+        assert cagri, 'nötr eğri çizilmemiş'
+        cagri = dict(cagri, axisMetrics=out['axisMetrics'])
+        assert '<br>' in cagri['layout']['yaxis']['title']['text']
+        # Aynı tmp_path yeniden kullanılabilir: kos_panel dosyaları sıralı
+        # koşumda üstüne yazar, çakışma yok.
+        self._marj_dogrula(tmp_path, motor_hibrit, cagri)
+
+    def test_rcrit_satir_baslari_olculu_min_genislik_ile_kirpilmaz(
+            self, tmp_path, motor_hibrit, sonum_gorunumu):
+        """K2b kusurunun bekçisi: '1L @ 959.391 Hz' satır başları dar
+        sütunda kırpılıyor/taşıyordu. Sol sütun artık en uzun başlığın
+        ÖLÇÜLEN genişliği kadar yer ayırıp tek satırda kalır."""
+        out, _yanit = sonum_gorunumu
+        html = gorunum(out)
+        blok = re.search(r'<div data-stab-block="rcrit-table">(.*?)</div>',
+                         html, re.S)
+        assert blok, 'R_crit tablosu kayıp'
+        hucreler = re.findall(r'<tr><td style="([^"]*)">([^<]*)</td>',
+                              blok.group(1))
+        assert hucreler, 'R_crit satır başı hücresi yok'
+        genislikler = set()
+        etiketler = []
+        for stil, metin in hucreler:
+            assert 'white-space:nowrap' in stil, (
+                f'satır başı {metin!r} sarılabilir kalmış — dar sütunda '
+                'kırpılma/karışma (K2b) geri döner')
+            e = re.search(r'min-width:(\d+)px', stil)
+            assert e, f'satır başı {metin!r} ölçülü min-width taşımıyor'
+            genislikler.add(int(e.group(1)))
+            etiketler.append(metin)
+            assert ' @ ' in metin and metin.endswith(' Hz')
+        assert len(genislikler) == 1, 'sütun tek genişlikte olmalı'
+        m = out['axisMetrics']
+        olcumler = kos_panel(tmp_path, motorType='hybrid',
+                             results=motor_hibrit,
+                             probes={'measure': [[t, m['kvFontPx']]
+                                                 for t in etiketler]}
+                             )['probes']['measure']
+        assert genislikler.pop() == math.ceil(max(olcumler)), (
+            'min-width en uzun başlığın ölçülen genişliğinden ayrışmış — '
+            'sabit piksel tahmini yasak')
+
+
+@needs_node
+class TestKullanilabilirlikK3:
+    """K3 — metin duvarları varsayılan KAPALI <details> içinde; içerik
+    DOM'da AYNEN durur, ana bilgi (rozet + sayı tabloları) katlanmaz."""
+
+    @pytest.fixture(scope='class')
+    def chug_gorunumu(self, tmp_path_factory, motor_sivi):
+        dp, tau, tau_c = sivi_chug_girdileri(motor_sivi)
+        yanit = chug_yaniti(dp, tau, tau_c)
+        out = kos_panel(tmp_path_factory.mktemp('k3_chug'),
+                        motorType='liquid', results=motor_sivi,
+                        response=yanit,
+                        select=['chamber_acoustics', 'combustion_stability'],
+                        runs=1)
+        return out, yanit
+
+    @pytest.fixture(scope='class')
+    def sonum_gorunumu(self, tmp_path_factory, motor_hibrit):
+        a, L, g, mach = sonum_girdileri(motor_hibrit)
+        yanit = sonum_yaniti(a, L, g, mach)
+        out = kos_panel(tmp_path_factory.mktemp('k3_sonum'),
+                        motorType='hybrid', results=motor_hibrit,
+                        response=yanit,
+                        select=['chamber_acoustics', 'acoustic_modes'],
+                        runs=1)
+        return out, yanit
+
+    def test_chug_metin_duvarlari_varsayilan_kapali(self, chug_gorunumu):
+        out, yanit = chug_gorunumu
+        html = gorunum(out)
+        adlar = set(_katlar(html))
+        beklenen = {'not-modelled', 'assumptions', 'inputs', 'basis',
+                    'suggestions'}
+        if yanit['assessment'].get('classical_rule_cross_check'):
+            beklenen.add('classical-basis')
+        assert beklenen <= adlar, (
+            f'katlanması gereken beyan blokları eksik: {beklenen - adlar}')
+        assert not re.search(r'<details\b[^>]*\bopen\b', html), (
+            'details AÇIK basılmış — metin duvarı (K3) geri döndü')
+        # İçerik DOM'da AYNEN duruyor (beyan disiplini bozulmadı).
+        for isaret in ('data-stab-block="not-modelled"',
+                       'data-stab-block="assumptions"',
+                       'data-stab-block="inputs"'):
+            assert isaret in html, f'katlama içeriği düşürmüş: {isaret}'
+
+    def test_chug_ana_bilgi_katlanmaz(self, chug_gorunumu):
+        out, yanit = chug_gorunumu
+        html = gorunum(out)
+        dis = _kat_disi(html)
+        assert 'data-stab-badges' in dis, 'rozet şeridi katlanmış'
+        assert 'data-stab-block="assessment"' in dis, (
+            'assessment sayı tablosu katlanmış — ana bilgi görünür kalmalı')
+        assert 'data-stab-block="classical"' in dis, (
+            'klasik kural SAYI tablosu katlanmış (yalnız yorumu katlanır)')
+        # Hüküm rozeti katlanmamış görünümde kapsamıyla duruyor.
+        assert any('UNSTABLE — feed-coupled chug' in t
+                   for _k, t in rozetler(dis))
+        if yanit['skipped_points']:
+            assert 'data-stab-block="skipped"' in dis, (
+                'atlanan nokta beyanı katlanmış — dürüstlük beyanı görünür '
+                'kalmalı')
+
+    def test_damping_metin_duvarlari_varsayilan_kapali(self, sonum_gorunumu):
+        out, _yanit = sonum_gorunumu
+        html = gorunum(out)
+        adlar = set(_katlar(html))
+        assert {'nozzle-basis', 'budget-basis', 'not-modelled',
+                'threshold-basis'} <= adlar, (
+            f'sönüm görünümünde katlanmamış beyan kalmış: {adlar}')
+        assert not re.search(r'<details\b[^>]*\bopen\b', html)
+        dis = _kat_disi(html)
+        for isaret in ('data-stab-block="nozzle"', 'data-stab-block="budget"',
+                       'data-stab-block="rcrit-table"'):
+            assert isaret in dis, f'sayı tablosu katlanmış: {isaret}'
+        assert 'R_crit' in dis, 'R_crit değerleri ana katmandan düşmüş'
+
+    def test_katlama_ozetleri_veriden(self, sonum_gorunumu):
+        """<summary> özeti UYDURMA değil: kalem sayısı ve ilk adlar yanıtın
+        not_modelled sözlüğünün kendisinden."""
+        out, yanit = sonum_gorunumu
+        html = gorunum(out)
+        kat = re.search(r'<details\b[^>]*data-stab-fold="not-modelled"[^>]*>'
+                        r'\s*<summary\b[^>]*>(.*?)</summary>', html, re.S)
+        assert kat, 'not-modelled katlama bloğu yok'
+        ozet = kat.group(1)
+        kalemler = list(yanit['budget']['not_modelled'])
+        assert f'{len(kalemler)} item(s):' in ozet, (
+            'özet kalem sayısını veriden taşımıyor')
+        for ad in kalemler[:3]:
+            kisa = ad if len(ad) <= 42 else ad[:42] + '…'
+            assert kisa in ozet, f'özet ilk kalemleri adıyla saymıyor: {ad}'
+
+
+class TestKontrastK4:
+    """K4 — WCAG kontrastı theme.css jetonlarından HESAPLANIR (göz kararı
+    yasak): veri metni çifti >= 7:1, açıklama çifti >= 4.5:1."""
+
+    def test_wcag_kontrast_theme_jetonlarindan(self):
+        zemin = _theme_token('hd-bg1')       # panel zemini #0a1322
+        veri = _theme_token('hd-ink')        # veri metni
+        aciklama = _theme_token('hd-ink-dim')  # ikincil açıklama
+        k_veri = _kontrast(veri, zemin)
+        k_aciklama = _kontrast(aciklama, zemin)
+        assert k_veri >= 7.0, (
+            f'veri metni kontrastı {k_veri:.2f} < 7:1 ({veri} / {zemin})')
+        assert k_aciklama >= 4.5, (
+            f'açıklama kontrastı {k_aciklama:.2f} < 4.5:1 '
+            f'({aciklama} / {zemin})')
+
+    def test_veri_metni_ink_aciklama_dim(self, panel_code):
+        """K4 kusurunun bekçisi: R_crit/assessment tablolarının hücreleri
+        (kvTable) --hd-ink-dim ile basılıyordu (5.9:1). Veri hücrelerine
+        artık yalnız --hd-ink; dim yalnız açıklama metninde (basisText)."""
+        kv = _js_fonksiyon(panel_code, 'kvTable')
+        assert kv.count('var(--hd-ink, #cfe8f2)') >= 2, (
+            'kvTable hücreleri --hd-ink değil — veri metni soluklaştı')
+        assert '--hd-ink-dim' not in kv and '--hd-ink-faint' not in kv, (
+            'veri hücresine soluk sınıf dönmüş (K4 kusuru geri geldi)')
+        bt = _js_fonksiyon(panel_code, 'basisText')
+        assert '--hd-ink-dim' in bt, (
+            'açıklama metni dim olmalı (hiyerarşi: veri > açıklama)')
+        # Çizim içi HEX ikizleri theme jetonlarıyla birebir (Plotly CSS
+        # var() çözmediği için paneldeki kopyalar buradan kilitlenir).
+        assert _theme_token('hd-ink') == '#cfe8f2'
+        assert _theme_token('hd-ink-dim') == '#7d97a5'
+        assert "INK_HEX = '#cfe8f2'" in panel_code
+        assert "INK_DIM_HEX = '#7d97a5'" in panel_code
 
 
 if __name__ == '__main__':
