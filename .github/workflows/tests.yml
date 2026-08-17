@@ -15,7 +15,11 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 → 90 (17 Ağu 2026): parti 26 koşumu 45 dk sınırına takılıp İPTAL
+    # edildi (koşum 31967626457, 45m20s) — parti 23-26 ~1500 bekçi ekledi
+    # (CFD çözücü + uç + panel + stability + BL). Önceki tam koşum 44 dk
+    # idi; 90 dk ölçülen büyümeye pay bırakır, gerçek takılmayı yine keser.
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
