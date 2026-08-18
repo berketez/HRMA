@@ -473,8 +473,20 @@ if (!vizCfg.absent) {
             vizLoaded = null; vizCfd = null;
             return vardi;
         },
+        // getCfdField sözleşmesi (motor_viz3d.js): yüklü alanın metriği +
+        // yükte GERÇEKTEN bulunan metriklerin ölçülü listesi. Sahnede süzgeç
+        // cfdFieldHasMetric'tir; taklitte aynı ölçüm yükün KENDİSİNDEN
+        // (payloadKey dizisi var mı?) yapılır — uydurma liste yok.
         getCfdField: function () {
-            return vizLoaded ? { metric: vizLoaded } : null;
+            if (!vizLoaded) return null;
+            return {
+                metric: vizLoaded,
+                metrics: CFD_METRICS.filter(function (m) {
+                    const arr = vizCfd && vizCfd.field
+                        ? vizCfd.field[m.payloadKey] : null;
+                    return Array.isArray(arr) && arr.length > 0;
+                }).map(function (m) { return m.id; }),
+            };
         },
     };
 }

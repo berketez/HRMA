@@ -567,10 +567,17 @@
     const PANEL_BORDER = '1px solid var(--hd-line, rgba(0,229,255,0.14))';
     const INSET = 'var(--hd-inset, rgba(6,14,26,0.85))';
 
-    function badge(text, kind, titleAttr, key) {
+    // params: parametreli anahtarın TF girdileri. data-i18n-params ile
+    // taşınır ki applyTo/dil değişimi tf'i AYNI parametrelerle yeniden
+    // doldurabilsin — yoksa translateElement parametresiz t(key) ile ezip
+    // çiğ "{iters}" şablonunu basıyordu (canlı turda ölçüldü, 18 Ağu).
+    function badge(text, kind, titleAttr, key, params) {
         const c = kindColor(kind);
+        const paramAttr = (params && Object.keys(params).length)
+            ? ' data-i18n-params="' + esc(JSON.stringify(params)) + '"'
+            : '';
         return '<span data-ac-badge="' + esc(kind) + '" title="' + esc(titleAttr || '') + '"'
-            + i18nAttr(key)
+            + i18nAttr(key) + paramAttr
             + ' style="border:1px solid ' + c + '; color:' + c + '; border-radius:6px;'
             + ' padding:1px 8px; font-family:var(--hd-mono, monospace); font-size:0.66rem;'
             + ' letter-spacing:0.06em; white-space:nowrap; display:inline-block;">'
@@ -963,7 +970,7 @@
         }
         const text = v.key ? TF(v.key, v.params || {}, v.fallback || v.key)
                            : SRV(String(v.text == null ? v.fallback || '' : v.text));
-        return badge(text, v.kind || 'info', '', v.key || '');
+        return badge(text, v.kind || 'info', '', v.key || '', v.params || null);
     }
 
     // --- Koşum geçmişi şeridi ------------------------------------------

@@ -110,7 +110,11 @@ def bildirim(path, ad, anahtar_kelime='var'):
 def js_degeri(prelude, ifade):
     """Çıkarılan bildirimleri node'da değerlendirip JSON olarak döner."""
     betik = prelude + '\nprocess.stdout.write(JSON.stringify(%s));\n' % ifade
-    p = subprocess.run([NODE, '-e', betik], capture_output=True, text=True,
+    # Betik argv ile DEĞİL stdin ile verilir: Linux'ta tek argümanın tavanı
+    # MAX_ARG_STRLEN = 131072 bayt; büyük gömülü yükte argv biçimi OSError
+    # [Errno 7] ile koşmadan ölür. Gerekçenin tamamı ve bekçisi:
+    # tests/test_viz3d_cfd_alan.py::_run, tests/test_node_cagri_sozlesmesi.py
+    p = subprocess.run([NODE], input=betik, capture_output=True, text=True,
                        timeout=60)
     assert p.returncode == 0, p.stderr[:1500]
     return json.loads(p.stdout)
@@ -617,7 +621,10 @@ const nodes = {};
 function makeNode(id) {
     const n = {
         id: id, innerHTML: '', textContent: '', title: '', value: '',
-        disabled: false, style: {}, attrs: {}, classes: {}, onclick: null,
+        disabled: false, attrs: {}, classes: {}, onclick: null,
+        // onTick slider'a CSS değişkeni yazıyor: style.setProperty gerçek
+        // DOM'da vardır, taklitte de olmalı (yoksa kanca çöker)
+        style: { setProperty(k, v) { this[k] = v; } },
         setAttribute(k, v) { this.attrs[k] = String(v); },
         getAttribute(k) { return (k in this.attrs) ? this.attrs[k] : null; },
         appendChild(c) { return c; },
@@ -642,17 +649,29 @@ global.document = {
     addEventListener() {},
 };
 global.window = global;
-global.performance = { now: function () { return 0; } };
+let nowMs = 0;                              // onTick kısıtı için ilerletilir
+global.performance = { now: function () { return nowMs; } };
 
 // --- taklit sahne ------------------------------------------------------
 let yuklu = senaryo.loadedMetric || null;   // sahnede yüklü alanın metriği
+// Yükte GERÇEKTEN bulunan metrikler (sahnede cfdFieldHasMetric ölçümü;
+// burada senaryonun beyanı). Verilmezse yük tam kabul edilir.
+let payloadMetrics = senaryo.payloadMetrics || null;
 const cagrilar = [];
+let vizOpts = null;                         // mount() kancaları (onTick)
 function metricOf(id) {
     for (let i = 0; i < CFD_METRICS.length; i++) {
         if (CFD_METRICS[i].id === id) return CFD_METRICS[i];
     }
     return null;
 }
+function yuktekiler() {
+    return payloadMetrics
+        ? payloadMetrics.slice()
+        : CFD_METRICS.map(function (m) { return m.id; });
+}
+// _cfdResult biçimi (setCfdMetric/setCfdField dönüşü) — metrics ALANI YOK:
+// yükteki metrik listesi YALNIZ getCfdField() sözleşmesinde yayımlanır.
 function durum(id) {
     return { metric: id, range: senaryo.range || { min: 0.115, max: 2.912 },
              cells: { axial: 60, radial: 12 },
@@ -665,7 +684,13 @@ const viz = {
              heatMap: false },
     dims: { burnTime: 10 },
     getHeatInfo() { return null; },
-    getCfdField() { return yuklu ? durum(yuklu) : null; },
+    // getCfdField sözleşmesi: _cfdResult alanlarına EK olarak `metrics`
+    // (yükte gerçekten bulunan metrik kimlikleri) yayımlar
+    getCfdField() {
+        return yuklu
+            ? Object.assign(durum(yuklu), { metrics: yuktekiler() })
+            : null;
+    },
     setCfdMetric(id) {
         cagrilar.push({ fn: 'setCfdMetric', id: id });
         if (!yuklu) {
@@ -695,7 +720,9 @@ const viz = {
 };
 global.MotorViz3D = {
     isSupported() { return true; },
-    mount() { return viz; },
+    // mount kancaları saklanır: onTick güvertenin sahneden tazeleme yolunu
+    // (cfdSyncFromScene) tetikleyen GERÇEK yoldur
+    mount(id, md, opts) { vizOpts = opts || {}; return viz; },
     update() {},
     CFD_METRICS: CFD_METRICS,
     CFD_COLORSCALES: CFD_COLORSCALES,
@@ -735,6 +762,26 @@ const out = { before: dump() };
     if (n && n.onclick) n.onclick();
 });
 out.after = dump();
+
+/* Kare kancası: sahne durumu DEĞİŞTİKTEN sonra güverte kendiliğinden
+   tazeleniyor mu? (Merkez yeni bir alan bindirdiğinde olan tam olarak
+   budur — güverteye tıklanmaz.) senaryo.tick sahnenin yeni durumunu
+   kurar, sonra mount'a verilen GERÇEK onTick çağrılır. */
+if (senaryo.tick) {
+    if (senaryo.tick.payloadMetrics !== undefined) {
+        payloadMetrics = senaryo.tick.payloadMetrics;
+    }
+    if (senaryo.tick.loadedMetric !== undefined) {
+        yuklu = senaryo.tick.loadedMetric;
+    }
+    nowMs += 1000;             // HUD seyreltmesinin üstüne çık
+    if (vizOpts && vizOpts.onTick) {
+        vizOpts.onTick({ playing: false, burning: false, time: 0,
+                         burnTime: 10, portDiameter: 40, webRemaining: 1,
+                         of: 5, isp: 250, thrust: 5000, pc: null });
+    }
+    out.tick = dump();
+}
 process.stdout.write(JSON.stringify(out));
 """
 

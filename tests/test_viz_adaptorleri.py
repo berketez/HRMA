@@ -61,7 +61,11 @@ def _extract(source_path, func_name):
 
 
 def _run_node(script):
-    result = subprocess.run([NODE, '-e', script], capture_output=True,
+    # Betik argv ile DEĞİL stdin ile verilir: Linux'ta tek argümanın tavanı
+    # MAX_ARG_STRLEN = 131072 bayt; büyük gömülü yükte argv biçimi OSError
+    # [Errno 7] ile koşmadan ölür. Gerekçenin tamamı ve bekçisi:
+    # tests/test_viz3d_cfd_alan.py::_run, tests/test_node_cagri_sozlesmesi.py
+    result = subprocess.run([NODE], input=script, capture_output=True,
                             text=True, timeout=60)
     assert result.returncode == 0, result.stderr[:600]
     return json.loads(result.stdout)

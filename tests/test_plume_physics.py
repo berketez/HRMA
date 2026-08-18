@@ -58,7 +58,7 @@ def _run_read_nozzle_exit(motor_data):
         + 'const out = readNozzleExit(%s);\n' % json.dumps(motor_data)
         + 'process.stdout.write(JSON.stringify(out));\n'
     )
-    result = subprocess.run([NODE, '-e', script], capture_output=True,
+    result = subprocess.run([NODE], input=script, capture_output=True,
                             text=True, timeout=60)
     assert result.returncode == 0, result.stderr[:600]
     return json.loads(result.stdout)

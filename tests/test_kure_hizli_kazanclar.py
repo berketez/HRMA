@@ -144,7 +144,7 @@ def test_kure_cerceveye_sigiyor(aspect):
         'var cam = { fov: 38, aspect: %r };' % aspect,
         'process.stdout.write(JSON.stringify(globalViewDist(cam)));',
     ])
-    r = subprocess.run([NODE, '-e', script], capture_output=True, text=True, timeout=60)
+    r = subprocess.run([NODE], input=script, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr[:800]
     dist = json.loads(r.stdout)
 

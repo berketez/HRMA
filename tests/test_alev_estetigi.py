@@ -75,7 +75,7 @@ def _consts(*names):
 
 
 def _run(script):
-    result = subprocess.run([NODE, '-e', script], capture_output=True,
+    result = subprocess.run([NODE], input=script, capture_output=True,
                             text=True, timeout=60)
     assert result.returncode == 0, result.stderr[:800]
     return json.loads(result.stdout)

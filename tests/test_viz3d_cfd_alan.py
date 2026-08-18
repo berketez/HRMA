@@ -104,7 +104,19 @@ def _consts(*names):
 
 
 def _run(script):
-    result = subprocess.run([NODE, '-e', script], capture_output=True,
+    """Betiği node'a STDIN ile verir (argv ile DEĞİL).
+
+    Neden stdin: argv'de tek bir argümanın çekirdek tavanı Linux'ta
+    MAX_ARG_STRLEN = 131072 bayttır (ARG_MAX'tan bağımsız, argüman BAŞINA).
+    Bu dosyanın 'standard' seviye (120x24) yükleri betiğe ~187 KB gerçek CFD
+    JSON'u gömüyor; argv biçimi Linux CI'da OSError [Errno 7] Argument list
+    too long ile ÇALIŞMADAN ölüyordu (macOS'ta tavan toplam 1 MiB olduğu için
+    yerelde görünmüyordu — kusur platformun değil mekanizmanın kusuru).
+    stdin TTY değilken node programı stdin'den okur ve CommonJS olarak koşar;
+    require/JSON.stringify davranışı aynıdır. Sözleşme bekçisi:
+    tests/test_node_cagri_sozlesmesi.py
+    """
+    result = subprocess.run([NODE], input=script, capture_output=True,
                             text=True, timeout=60)
     assert result.returncode == 0, result.stderr[:800]
     return json.loads(result.stdout)

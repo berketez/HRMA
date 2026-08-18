@@ -574,7 +574,10 @@
            denetimler YALNIZ sahnede GERÇEKTEN yüklü bir alanı sürer:
            sahnenin getCfdField() beyanı okunur, alan yoksa grup gri kalır
            ve nedeni yazılır. Hiçbir sayı burada hesaplanmaz; aralık
-           sahnenin döndürdüğü sözlükten gelir. */
+           sahnenin döndürdüğü sözlükten gelir. Hangi büyüklüğün yükte
+           bulunduğu da ÖLÇÜMDÜR: beyanın metrics listesi (sahnenin
+           cfdFieldHasMetric süzgeci) — bu sayede yükte olmayan metriğin
+           düğmesi TIKLANMADAN önce gri durur. */
         var cfdSig = null;               // son yazılan durumun imzası
         var cfdMissing = {};             // ÖLÇÜLEN 'missing_metric' kimlikleri
 
@@ -583,12 +586,33 @@
             if (e) e.textContent = text;
         }
 
+        /* Yükte GERÇEKTEN bulunan metrikler. ÖLÇÜM SAHNEDE yapılır
+           (getCfdField().metrics — motor_viz3d.js'in cfdFieldHasMetric
+           süzgeci); güvertede süzgecin kopyası YOKTUR, burada yalnız
+           yayımlanan listeye bakılır. Sahne listeyi yayımlamıyorsa ölçüm
+           yoktur: o durumda hiçbir düğme ölçümsüz gerekçeyle kapatılmaz
+           ("ölçüm yok" ile "yok ölçüldü" ayrı şeylerdir) — sahnenin listeyi
+           yayımladığını tests/test_cfd_deck_ongri.py ölçer. */
+        function cfdPayloadMetrics(st) {
+            return (st && Array.isArray(st.metrics)) ? st.metrics : null;
+        }
+
+        // Yükte olmadığı ÖLÇÜLMÜŞ metrik mi? (liste yoksa iddia yok)
+        function cfdNotInPayload(st, id) {
+            var list = cfdPayloadMetrics(st);
+            return !!list && list.indexOf(id) < 0;
+        }
+
         function cfdStateSig(st) {
             if (!st) return '';
             return [st.metric, st.range && st.range.min, st.range && st.range.max,
                     st.stations && st.stations.shown,
                     st.stations && st.stations.total,
                     st.decimated ? 1 : 0,
+                    // Yüklü alanın metrik kümesi imzaya girer: alan
+                    // değişince (ör. sıcaklıksız yükten sıcaklıklı yüke)
+                    // düğmelerin gri/açık durumu tazelenmeli
+                    (cfdPayloadMetrics(st) || []).join(','),
                     Object.keys(cfdMissing).sort().join('+')].join('|');
         }
 
@@ -635,10 +659,18 @@
             cfdMetrics().forEach(function (mm) {
                 var b = el(p + '_cfd_m_' + mm.id);
                 if (!b) return;
-                b.disabled = !st || !!cfdMissing[mm.id];
+                /* İki ölçümün BİRLEŞİMİ:
+                   yukDisi  — sahnenin yayımladığı listede yok (tıklamadan
+                              ÖNCE bilinir),
+                   redYedi  — tıklandığında sahne 'missing_metric' döndürdü
+                              (koşum ölçümü; liste yayımlanmayan bir sahnede
+                              tek kanıt budur, bu yüzden kalır). */
+                var yukDisi = cfdNotInPayload(st, mm.id);
+                var redYedi = !!cfdMissing[mm.id];
+                b.disabled = !st || yukDisi || redYedi;
                 b.classList.toggle('active', !!st && st.metric === mm.id);
                 b.title = T(mm.labelKey, mm.labelFallback)
-                    + (cfdMissing[mm.id]
+                    + ((yukDisi || redYedi)
                         ? ' — ' + T('viz.cfd.notInPayload',
                             'not present in the loaded field') : '');
             });

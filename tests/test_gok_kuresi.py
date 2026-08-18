@@ -258,7 +258,7 @@ def test_gmst_js_fonksiyonu_python_ile_ayni():
         'var out = %s.map(gmstDeg);' % json.dumps(ornekler),
         'process.stdout.write(JSON.stringify(out));',
     ])
-    r = subprocess.run([NODE, '-e', script], capture_output=True, text=True, timeout=60)
+    r = subprocess.run([NODE], input=script, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr[:800]
     js = json.loads(r.stdout)
     assert abs(js[0] - J2000_GMST_DEG) < 1e-6, \

@@ -4198,8 +4198,23 @@
     MotorScene.prototype.getCfdField = function () {
         var L = this._cfdLayer;
         if (!L) return null;
+        // metrics: YÜKLÜ alanda GERÇEKTEN bulunan büyüklüklerin kimlikleri.
+        // Ölçüm cfdFieldHasMetric'in KENDİSİNDEN geçer (_cfdApplyMetric'in
+        // 'missing_metric' kapısıyla tek kaynak); süzgecin ikinci bir
+        // kopyası yazılmaz. Yayımlanma sebebi: güverte/panel bir metriğin
+        // yükte olmadığını ancak KULLANICI tıklayıp red yedikten sonra
+        // öğrenebiliyordu — bu liste ile tıklanmadan önce gri yapabilir.
+        // Sıra CFD_METRICS tablosunun sırasıdır; liste ÖLÇÜMDÜR, varsayılan
+        // ya da tahmin değildir (alan yoksa sözlüğün kendisi null döner).
+        var metrics = [];
+        for (var i = 0; i < CFD_METRICS.length; i++) {
+            if (cfdFieldHasMetric(L.field, CFD_METRICS[i].id)) {
+                metrics.push(CFD_METRICS[i].id);
+            }
+        }
         return {
             metric: L.metric,
+            metrics: metrics,
             range: { min: L.range.min, max: L.range.max },
             cells: { axial: L.nAx, radial: L.nRad },
             stations: { shown: L.stationsShown, total: L.stationsTotal },

@@ -352,17 +352,52 @@
        DOM uygulaması
        --------------------------------------------------------------- */
 
+    /* data-i18n-params: JS'in TF ile doldurup bastığı düğüm, parametrelerini
+       bu öznitelikte JSON olarak taşır; dil değişince tf aynı parametrelerle
+       yeniden doldurur. Öznitelik bozuksa null döner (aşağıdaki ezme koruması
+       devreye girer). */
+    function elementParams(el) {
+        var raw = el.getAttribute('data-i18n-params');
+        if (!raw) return null;
+        try {
+            var parsed = JSON.parse(raw);
+            return (parsed && typeof parsed === 'object') ? parsed : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /* Parametreli şablon, parametresi olmadan DOM'a BASILMAZ ({yer_tutucu}
+       kuralı): çeviri hâlâ yer tutucu taşıyorsa eldeki dolu metin korunur —
+       ham "{iters}" basmaktansa eski dilde kalmış doğru sayı yeğdir.
+       (Ölçülen kusur: Analiz Merkezi hüküm rozeti TF ile doğru basılıyor,
+       ardından applyTo parametresiz t(key) ile ezip çiğ şablonu yazıyordu.) */
+    function hasBarePlaceholder(text) {
+        return typeof text === 'string' && /\{\w+\}/.test(text);
+    }
+
     function translateElement(el) {
         if (!el || el.nodeType !== 1 || !el.getAttribute) return;
 
         var key = el.getAttribute('data-i18n');
-        if (key) el.textContent = I18N.t(key, firstSeen(el, 'text', el.textContent));
+        if (key) {
+            var params = elementParams(el);
+            var fb = firstSeen(el, 'text', el.textContent);
+            var text = params ? I18N.tf(key, params, fb) : I18N.t(key, fb);
+            if (params || !hasBarePlaceholder(text)) el.textContent = text;
+        }
 
         var tk = el.getAttribute('data-i18n-title');
-        if (tk) el.setAttribute('title', I18N.t(tk, firstSeen(el, 'title', el.getAttribute('title'))));
+        if (tk) {
+            var tt = I18N.t(tk, firstSeen(el, 'title', el.getAttribute('title')));
+            if (!hasBarePlaceholder(tt)) el.setAttribute('title', tt);
+        }
 
         var pk = el.getAttribute('data-i18n-placeholder');
-        if (pk) el.setAttribute('placeholder', I18N.t(pk, firstSeen(el, 'placeholder', el.getAttribute('placeholder'))));
+        if (pk) {
+            var pt = I18N.t(pk, firstSeen(el, 'placeholder', el.getAttribute('placeholder')));
+            if (!hasBarePlaceholder(pt)) el.setAttribute('placeholder', pt);
+        }
     }
 
     /* root (verilmezse document) altındaki işaretli düğümleri çevirir.

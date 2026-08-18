@@ -113,7 +113,7 @@ def _prelude():
 def _run(body):
     """Prelude + verilen govdeyi node ile kosturur, JSON sonucu doner."""
     script = _prelude() + '\n' + body
-    out = subprocess.run([NODE, '-e', script], capture_output=True,
+    out = subprocess.run([NODE], input=script, capture_output=True,
                          text=True, timeout=120)
     assert out.returncode == 0, out.stderr[:800]
     return json.loads(out.stdout)
@@ -458,7 +458,7 @@ class TestBeyanCipleri:
             'portRegressionChipDefs(%r, {endsBurn: %s})));'
             % (mode, 'true' if ends_burn else 'false'),
         ])
-        out = subprocess.run([NODE, '-e', script], capture_output=True,
+        out = subprocess.run([NODE], input=script, capture_output=True,
                              text=True, timeout=60)
         assert out.returncode == 0, out.stderr[:600]
         return json.loads(out.stdout)
@@ -509,10 +509,10 @@ class TestBeyanCipleri:
 
     def test_i18n_koprusu_sozluk_yokken_ingilizce_doner(self):
         src = _source()
-        out = subprocess.run(
-            [NODE, '-e', 'global.window = {};\n' + _extract('T', src) +
-             '\nprocess.stdout.write(T("viz.chip.yok", "english fallback"));'],
-            capture_output=True, text=True, timeout=60)
+        script = ('global.window = {};\n' + _extract('T', src) +
+                  '\nprocess.stdout.write(T("viz.chip.yok", "english fallback"));')
+        out = subprocess.run([NODE], input=script, capture_output=True,
+                             text=True, timeout=60)
         assert out.returncode == 0, out.stderr[:400]
         assert out.stdout == 'english fallback'
 
@@ -554,7 +554,7 @@ class TestCipGorunurlugu:
             _extract('chipHeightMm', src),
             'process.stdout.write(JSON.stringify(%s));' % ifade,
         ])
-        out = subprocess.run([NODE, '-e', script], capture_output=True,
+        out = subprocess.run([NODE], input=script, capture_output=True,
                              text=True, timeout=60)
         assert out.returncode == 0, out.stderr[:600]
         return json.loads(out.stdout)
