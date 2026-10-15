@@ -88,10 +88,14 @@
             ax.spikemode = 'across';
         }
         // HUD ek 4: tick etiketleri JetBrains Mono (sayfa fontu öncelikli)
-        ax.tickfont = Object.assign({ size: 11, family: MONO }, ax.tickfont, { color: INK_DIM });
+        // v3.0.0 (15 Eki): tik ve eksen başlığı INK_DIM'den INK'e — koyu
+        // zeminde 11/12 px soluk gri okunması zor bulundu (Berke). Boyut
+        // DEĞİŞMEDİ: çok panelli figürlerin satır aralıkları 11/12 px'e göre
+        // hesaplı (test_grafik_yerlesimi), büyütme ayrı yerleşim turu ister.
+        ax.tickfont = Object.assign({ size: 11, family: MONO }, ax.tickfont, { color: INK });
         if (typeof ax.title === 'string') ax.title = { text: ax.title };
         if (ax.title) {
-            ax.title.font = Object.assign({ size: 12 }, ax.title.font, { color: INK_DIM });
+            ax.title.font = Object.assign({ size: 12 }, ax.title.font, { color: INK });
             // Eksen başlığı ile tick etiketleri arasına nefes payı
             if (ax.title.standoff === undefined) ax.title.standoff = 8;
         }

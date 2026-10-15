@@ -1439,6 +1439,11 @@
         [/^Conical divergent: (.+)$/, 'Konik ıraksak: $1'],
         [/^Bell contour: (.+)$/, 'Çan kontur: $1'],
         [/^Impinging pairs \((.+)\)$/, 'Çarpışmalı çiftler ($1)'],
+        /* v3.0.0 (15 Eki): visualization.py kesit ölçüsü, bölümlü tanede
+           'Grain stack = 364 mm (3 x 120 + 2 x 2 gap)' basıyor; TR'de
+           İngilizce kalıyordu (ekran görüntüsünde ölçüldü). */
+        [/^Grain stack = (\S+ mm) \((\d+) x (\S+) \+ (\d+) x (\S+) gap\)$/,
+         'Yakıt blokları = $1 ($2 × $3 + $4 × $5 boşluk)'],
         [/^Grain = (.+)$/, 'Yakıt bloğu = $1'],
         /* Faz 6 / T43 (3 Ağustos 2026): sonek kuralı GENEL kuraldan ÖNCE
            gelmeli — applyPatterns ilk eşleşmeyi uygular. visualization.py:3527
