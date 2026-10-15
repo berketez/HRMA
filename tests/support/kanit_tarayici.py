@@ -10,7 +10,7 @@ Bir *tohum*, test kodunda (docstring ve yalnız-dize ifadeleri hariç) docs/
 kanıt ağacını gösteren değerdir:
 
 * ``'docs/scofield/...'`` biçiminde bir dize sabiti (``docs/arastirma``,
-  ``docs/tasarim`` dahil),
+  ``docs/tasarim``, ``docs/kabul`` dahil),
 * ``os.path.join(KOK, 'docs', 'scofield', ...)`` / ``KOK / 'docs' / 'scofield'``
   gibi parça dizisi,
 * ``kanit_yolu(...)`` çağrısı.
@@ -34,7 +34,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-HARIC = ('docs/scofield', 'docs/arastirma', 'docs/tasarim')
+HARIC = ('docs/scofield', 'docs/arastirma', 'docs/tasarim', 'docs/kabul')
 _ALT = frozenset(h.split('/', 1)[1] for h in HARIC)
 _DIZE = re.compile(r'(?:^|[/\\])docs[/\\](?:%s)(?:[/\\]|$)'
                    % '|'.join(sorted(_ALT)))

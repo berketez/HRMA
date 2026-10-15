@@ -3,7 +3,7 @@
 NEDEN VAR
 ---------
 Yayın dalı ``packaging/yayin_dali_uret.sh`` ile ``docs/scofield``,
-``docs/arastirma`` ve ``docs/tasarim`` ÇIKARILARAK üretilir (Berke kuralı,
+``docs/arastirma``, ``docs/tasarim`` ve ``docs/kabul`` ÇIKARILARAK üretilir (Berke kuralı,
 15 Eylül 2026: iç dokümanlar yayımlanmaz). Test süitinin bir kısmı ölçüm
 kanıtını bu dizinlerden okur. Ölçüldü (23 Eylül 2026, HEAD bb7ee57c, docs'suz
 kopya): ``tests/test_d23_bekci_cevirisi_a1.py`` kanıtı İTHAL anında okuyordu ve
@@ -58,7 +58,9 @@ KOK = pathlib.Path(__file__).resolve().parents[2]
 
 #: Yayın dalından ÇIKARILAN dizinler — ``packaging/yayin_dali_uret.sh``
 #: içindeki ``HARIC`` varsayılanıyla aynı küme (bekçi ikisini karşılaştırır).
-HARIC = ('docs/scofield', 'docs/arastirma', 'docs/tasarim')
+#: ``docs/kabul`` 15 Eki 2026'da eklendi (v3.0.0 yayın kapısı: kabul turu
+#: kanıtları iç dokümandır).
+HARIC = ('docs/scofield', 'docs/arastirma', 'docs/tasarim', 'docs/kabul')
 
 #: Geliştirme ağacı ölçütü: bu dizin VARSA kapı hiçbir koşulda atlamaz.
 GELISTIRME_ISARETI = 'docs/scofield'
