@@ -31,8 +31,19 @@ import pytest
 
 from hrma.app import app
 from hrma.constants import ISA_TABLE_BOTTOM_M, ISA_TABLE_TOP_M
+from tests.bagimlilik_kapisi import kurulu_mu
 
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 
 def _quiet(fn, *a, **kw):
@@ -520,7 +531,11 @@ def _sarsim(**degistir):
 
 class TestCurutulenIhracatKalemleri:
 
-    @pytest.mark.parametrize('uc', _EXPORT_UCLAR)
+    # Uç kümesi _EXPORT_UCLAR'ın AYNISI; build123d yoksa YALNIZ STEP ucu
+    # atlanır (o uç 422'den önce 501 "build123d kurulu değil" döner).
+    @pytest.mark.parametrize('uc', [
+        pytest.param(u, marks=_STEP_GEREKLI) if u == '/api/export-step'
+        else u for u in _EXPORT_UCLAR])
     def test_p16b410_negatif_kamara_boyu_imalat_dosyasi_uretmez(
             self, client, uc):
         r = _quiet(client.post, uc, json=_sarsim(chamber_length=-0.30))

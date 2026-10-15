@@ -34,11 +34,22 @@ import re
 
 import pytest
 
+from tests.bagimlilik_kapisi import kurulu_mu
 from tests.support.form_defaults import form_yuku
 from tests.test_example_projects import (ENDPOINTS, HEADERS, NAMES,
                                          calculate_payload, load_example_doc)
 
 KOK = pathlib.Path(__file__).resolve().parents[1]
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 #: API ⟷ FORM yolu bağıl toleransı. İki yol aynı motoru anlatır; fark
 #: yuvarlamadan büyük olamaz. %0,5 kaba ağdır — ölçülen kusur %10,5'ti.
@@ -181,6 +192,7 @@ def kati_step(client, tmp_path_factory):
     return dosyalar
 
 
+@_STEP_GEREKLI
 def test_step_yakit_tanesi_segment_basina_ayri_kati_uretiyor(client,
                                                              kati_step):
     """Analiz N segment yayımlıyorsa STEP'te N ayrı katı olmalı.
@@ -208,6 +220,7 @@ def test_step_yakit_tanesi_segment_basina_ayri_kati_uretiyor(client,
     assert sum(1 for _ in katilar) * 2 == 2 * n
 
 
+@_STEP_GEREKLI
 def test_step_yakit_tanesi_hacmi_analizin_itici_kutlesiyle_uyusuyor(
         client, kati_step):
     """Katıların toplam hacmi = itici kütlesi / yoğunluk (%1 içinde).
@@ -226,6 +239,7 @@ def test_step_yakit_tanesi_hacmi_analizin_itici_kutlesiyle_uyusuyor(
         f'{beklenen_mm3:.1f} mm³')
 
 
+@_STEP_GEREKLI
 def test_step_kunyesi_segment_beyani_tasiyor(kati_step):
     """STEP künyesi segment sayısını ve boşluk hükmünü ADIYLA söylemeli.
 

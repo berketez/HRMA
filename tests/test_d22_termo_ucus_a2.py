@@ -30,6 +30,7 @@ import math
 
 import numpy as np
 import pytest
+from tests.support.platform_capa import capa_rel
 
 import hrma.analysis.trajectory_analysis as TA
 from hrma.analysis.trajectory_analysis import (
@@ -289,7 +290,10 @@ class TestOHD1805MesruYolBozulmadi:
         """
         v = _kos(parachute_area=DEFAULT_PARACHUTE_AREA_M2)[
             'performance']['trajectory_metrics']['landing_velocity']
-        assert v == pytest.approx(self.D25_CAPASI, rel=1e-9)
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 1,3e-7 (ODE, uyarlamalı adım) bağıl sapma verdi (koşum 38770162288). Tolerans
+        # referans platformda aynen; başkasında 1e-6 (tests/support/platform_capa.py).
+        assert v == pytest.approx(self.D25_CAPASI, rel=capa_rel(1e-9, 1e-6))
 
         # Kaymanın KAYNAĞI: OH-D23-07 öncesi kırpma geri konunca D22 çapası
         # birebir geri gelmeli (bit-aynı: rel=0).

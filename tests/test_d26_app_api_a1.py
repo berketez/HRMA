@@ -11,6 +11,7 @@ biçimde yazılmıştır (ters-mutasyonla doğrulandı).
 import json
 
 import pytest
+from tests.support.platform_capa import capa_rel
 
 
 @pytest.fixture(scope='module')
@@ -129,8 +130,11 @@ class TestOHD2519OkunmayanKanonikAd:
         # (docs/scofield/raw/OH/KITAP/p1a/kanit/tur2b/kahin_cea.json) +
         # önce/sonra (p1a rapor §12). Tolerans DEĞİŞMEDİ.
         #   d_c 0,15303556849392624 -> 0,15401759407429375
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 2,5e-12 mutlak bağıl sapma verdi (koşum 38770162288). Tolerans
+        # referans platformda aynen; başkasında 1e-10 mutlak (tests/support/platform_capa.py).
         assert r.get_json()['motor']['chamber_diameter'] == pytest.approx(
-            0.15401759407429375, abs=1e-12)
+            0.15401759407429375, abs=capa_rel(1e-12, 1e-10))
 
     def test_None_alan_yok_sayilir(self, client):
         """``chamber_diameter: null`` "alan gönderilmedi" demektir."""

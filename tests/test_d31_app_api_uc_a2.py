@@ -16,6 +16,7 @@ import io
 import os
 
 import pytest
+from tests.support.platform_capa import capa_rel
 
 from hrma.app import app
 
@@ -373,7 +374,11 @@ class TestP7B203HavaBolmesiSokuldu:
             g = istemci.post('/api/oxidizer-properties',
                              json={'oxidizer_type': ad,
                                    'temperature': 298.15}).get_json()
-            assert g['properties']['density'] == rho, (
+            # v3.0.0 (15 Eki) — referans platformda BİT-AYNI; CI
+            # linux/x86_64'te N₂O (CoolProp) 1,4e-12 bağıl sapma verdi
+            # (koşum 38770162288). Orada 1e-10 bağıl.
+            assert g['properties']['density'] == pytest.approx(
+                rho, rel=capa_rel(0.0, 1e-10), abs=0.0), (
                 '%s yoğunluğu değişti: %r != %r'
                 % (ad, g['properties']['density'], rho))
 

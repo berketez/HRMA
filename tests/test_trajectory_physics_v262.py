@@ -24,6 +24,7 @@ F082 — ``wind_direction`` docstring'de "rüzgârın ESTİĞİ yön" deniyordu 
 
 import numpy as np
 import pytest
+from tests.support.platform_capa import capa_rel
 
 from hrma.analysis.trajectory_analysis import (
     DEFAULT_PARACHUTE_AREA_M2, TrajectoryAnalyzer,
@@ -204,7 +205,11 @@ class TestParachuteInput:
         # adımları ISA tablosunun troposfer uzantısını (daha yoğun hava)
         # görüyor. Kırpma kalkmadan iki ISA okuması aynı irtifada %4,61
         # ayrışıyordu (a2/once.json K1).
-        assert v_explicit == pytest.approx(10.697066025270114, rel=1e-9)
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 1,5e-7 (ODE, uyarlamalı adım) bağıl sapma verdi (koşum 38770162288). Tolerans
+        # referans platformda aynen; başkasında 1e-6 (tests/support/platform_capa.py).
+        assert v_explicit == pytest.approx(10.697066025270114,
+                                           rel=capa_rel(1e-9, 1e-6))
 
     def test_invalid_area_withholds_instead_of_falling_back(self):
         """Geçersiz alan (negatif) SESSİZCE varsayıma düşmez.

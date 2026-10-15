@@ -8,7 +8,7 @@ Her iddia ters mutasyonla kırmızı kanıtlıdır; kanıt
 import ast
 import json
 import pathlib
-import platform
+import re
 import sys
 import warnings
 
@@ -51,9 +51,13 @@ class TestP13B103BantEmekliye:
         assert kapsam, 'kapsam boş — referans envanteri okunamadı'
         # Bugünkü envanter: hepsi TEK platformda (ölçüldü: 5/5 darwin/arm64).
         assert len(kapsam) == 1, kapsam
-        assert kapsam == {f'{sys.platform}/{platform.machine()}'}, (
-            'bu makine referans kapsamının dışında — kapsam künyeden '
-            f'okundu: {kapsam}')
+        # v3.0.0 (15 Eki) — "bu makine kapsamda" eşitliği SÖKÜLDÜ: CI
+        # (linux/x86_64) kapsamın DIŞINDADIR ve bu beklenen durumdur; orada
+        # vakalar not_evaluated dalına gider (aşağıdaki test). Eşitlik
+        # yalnız referans makinede tutuyordu, yani soruyu değil makineyi
+        # sınıyordu. Kapsamın künyeden geldiği biçim + teklikle sınanır.
+        assert all(re.fullmatch(r'[a-z0-9]+/[A-Za-z0-9_]+', k) for k in kapsam), (
+            f'kapsam künyesi platform/mimari biçiminde değil: {kapsam}')
         # Kapsam KOD İÇİNDE literal olarak yazılmamalı (kayarsa kendiliğinden
         # kaysın); 'darwin/arm64' dizesi kaynakta geçmemeli.
         kaynak = (KOK / 'tests/cfd/test_euler_bit_ozdesligi.py').read_text(

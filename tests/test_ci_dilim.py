@@ -112,3 +112,67 @@ class TestIsAkisi:
         assert 'tools/ci_dilim.py birlestir' in komutlar
         assert 'tools/atlama_kapisi.py pytest-report.xml' in komutlar
         assert 'needs.pytest.result' in komutlar
+
+
+# ---------------------------------------------------------------------------
+# STEP işine devredilen atlama (tools/atlama_kapisi.STEP_DEVIR_DESENI) —
+# araç ve tests.yml gövdesi AYNI hükmü vermeli; devir yalnız gövde içi,
+# build123d-yokluğu gerekçeli ve dosyası `step-export` komutunda olan
+# atlamaya tanınır.
+# ---------------------------------------------------------------------------
+from tests.test_d37_atlama_butcesi import _arac, _tezgah, _yaml  # noqa: E402
+
+STEP_AKISI = """jobs:
+  pytest:
+    steps: []
+  step-export:
+    steps:
+      - run: |
+          # tests/test_yorum.py yorumda anılıyor, koşulmuyor
+          pytest tests/test_s.py
+  sonraki:
+    steps:
+      - run: pytest tests/test_baska.py
+"""
+B3D_YOK = "could not import 'build123d': No module named 'build123d'"
+
+
+def _devir_junit(adet, classname='tests.test_s', tip='pytest.skip',
+                 mesaj=B3D_YOK):
+    kok = ET.Element('testsuites')
+    s = ET.SubElement(kok, 'testsuite', name='pytest', tests='9500')
+    for i in range(adet):
+        tc = ET.SubElement(s, 'testcase', classname=classname, name='t%d' % i)
+        nitelik = {'message': mesaj}
+        if tip:
+            nitelik['type'] = tip
+        ET.SubElement(tc, 'skipped', **nitelik)
+    return ET.tostring(kok, encoding='unicode')
+
+
+@pytest.mark.parametrize('ad,classname,tip,mesaj,beklenen', [
+    ('listede_devredilir', 'tests.test_s.TestA', 'pytest.skip', B3D_YOK, True),
+    ('liste_disi_sayilir', 'tests.test_x', 'pytest.skip', B3D_YOK, False),
+    ('yorumdaki_dosya_sayilir', 'tests.test_yorum', 'pytest.skip', B3D_YOK, False),
+    ('baska_isteki_dosya_sayilir', 'tests.test_baska', 'pytest.skip', B3D_YOK, False),
+    ('ters_kapi_sayilir', 'tests.test_s', 'pytest.skip',
+     'build123d kurulu — .step sınanıyor', False),
+    ('modul_duzeyi_devredilmez', 'tests.test_s', None, B3D_YOK, False),
+])
+def test_step_devri_iki_govdede_ayni(tmp_path, ad, classname, tip, mesaj,
+                                     beklenen):
+    xml = _devir_junit(100, classname, tip, mesaj)
+    sonuc = []
+    for alt, kos in (('a', _arac), ('y', _yaml)):
+        kok = _tezgah(tmp_path / alt)
+        (kok / '.github' / 'workflows').mkdir(parents=True)
+        (kok / '.github' / 'workflows' / 'tests.yml').write_text(
+            STEP_AKISI, encoding='utf-8')
+        acik, cikti = kos(kok, xml)
+        sonuc.append((acik, cikti))
+    (a_acik, a_cikti), (y_acik, y_cikti) = sonuc
+    assert a_acik == y_acik, (ad, a_cikti[-500:], y_cikti[-500:])
+    assert a_acik is beklenen, (ad, a_cikti[-500:])
+    beklenen_devir = 100 if beklenen else 0
+    for cikti in (a_cikti, y_cikti):
+        assert 'step_devri=%d ' % beklenen_devir in cikti, (ad, cikti[-400:])

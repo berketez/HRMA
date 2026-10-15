@@ -71,6 +71,25 @@ TOPLANAN_TABANI = 9000
 #: gerekçesi geçersizdir: modül DEPONUN KENDİSİDİR (P13B1-05 / P14 §3.2-e).
 DEPO_KOKLERI = ('hrma', 'app', 'tools', 'data')
 
+#: v3.0.0 (15 Eki 2026) — STEP İŞİNE DEVREDİLEN ATLAMA. Ana `pytest` işi
+#: build123d'yi BİLEREK kurmaz (ters kapı testleri build123d YOKKEN davranışı
+#: orada sınar); build123d isteyen testler orada gerekçeli atlanır ve AYNI
+#: dosyalar `step-export` işinde build123d KURULU, SIFIR atlama bütçesiyle
+#: koşar (dosya listesinin eksiksizliğini tests/test_ci_kapsam_kapisi.py
+#: kilitler). ÖLÇÜLDÜ (ilk tam Linux koşumu 38770162288): ana işte 236
+#: atlamanın 180'i bu sınıftandı; bütçe (76) onları ayrı saymadığı için
+#: kapı, devredilmiş ve başka işte koşan testleri "sessiz atlama" sayıyordu.
+#: Kural (iki gövdede AYNI): gövde içi atlama (``type='pytest.skip'``),
+#: gerekçesi aşağıdaki desene uyar VE dosyası `step-export` işinin komutunda
+#: geçiyorsa bütçeye SAYILMAZ, ayrı listelenir. Modül düzeyi atlama bu
+#: sınıfa GİREMEZ (toplama düzeyi kuralı aynen). İş akışı okunamazsa küme
+#: boştur: hiçbir atlama devredilmiş sayılmaz (fail-closed).
+STEP_DEVIR_DESENI = (r"build123d (kurulu de[gğ]il|yok)"
+                     r"|could not import 'build123d'"
+                     r"|No module named 'build123d'")
+STEP_IS_AKISI = '.github/workflows/tests.yml'
+STEP_IS_ADI = 'step-export'
+
 #: Kanıt atlaması sözleşmesinin kaynağı (depo köküne göre). Önek
 #: (``GEREKCE_ONEKI``) ve geliştirme ağacı işareti (``GELISTIRME_ISARETI``)
 #: BURADA YAZILMAZ — o dosyadan AST ile okunur (ÖH D37 / YB-15).
@@ -184,6 +203,37 @@ def atlamalari_ayikla(rapor_yolu, kanit_oneki):
     return atlanan, toplama_duzeyi, kanit, toplam
 
 
+def step_devir_dosyalari(kok='.'):
+    """`step-export` işinin komutlarında geçen test dosyaları (kümesi).
+
+    YAML ayrıştırıcısı GEREKMEZ (birleştirme işi yalnız stdlib ile koşar):
+    iş, iki boşluk girintili ``<STEP_IS_ADI>:`` satırından bir sonraki aynı
+    girintili iş adına kadar okunur; yorum satırları sayılmaz.
+    """
+    yol = pathlib.Path(kok) / STEP_IS_AKISI
+    try:
+        metin = yol.read_text(encoding='utf-8')
+    except OSError:
+        return frozenset()
+    m = re.search(r'(?m)^  ' + re.escape(STEP_IS_ADI) + r':\s*$', metin)
+    if not m:
+        return frozenset()
+    son = re.search(r'(?m)^  [A-Za-z0-9_-]+:\s*$', metin[m.end():])
+    blok = metin[m.end():m.end() + son.start()] if son else metin[m.end():]
+    satirlar = [x for x in blok.splitlines() if not x.lstrip().startswith('#')]
+    return frozenset(re.findall(r'tests/[\w/]+\.py', '\n'.join(satirlar)))
+
+
+def step_devri_mi(kayit, dosyalar):
+    """``(ad, mesaj, tip)`` kaydı STEP işine devredilmiş bir atlama mı?"""
+    ad, mesaj, tip = kayit
+    if tip != 'pytest.skip' or not re.search(STEP_DEVIR_DESENI, mesaj):
+        return False
+    parcalar = ad.split('::', 1)[0].split('.')
+    return any('/'.join(parcalar[:k]) + '.py' in dosyalar
+               for k in range(len(parcalar), 0, -1))
+
+
 def _kanit_ozeti(kanit):
     """Kanıt atlamalarını dosya başına toplar (yüzlerce satır basmamak için)."""
     moduller, testler = [], {}
@@ -256,8 +306,14 @@ def kapi(rapor_yolu, butce=ATLAMA_BUTCESI, tests_dizini='tests',
         return [f'{rapor_yolu} ayristirilamadi ({exc}) — atlama sayisi '
                 'OLCULEMIYOR']
 
+    devir_dosyalari = step_devir_dosyalari(kok)
+    devredilen = [k for k in atlanan if step_devri_mi(k, devir_dosyalari)]
+    atlanan = [k for k in atlanan if not step_devri_mi(k, devir_dosyalari)]
+
     yaz(f'toplanan={toplam} atlanan={len(atlanan)} '
         f'(toplama_duzeyi={len(toplama_duzeyi)}) butce={butce}')
+    yaz(f'step_devri={len(devredilen)} ({STEP_IS_ADI} isinde koşan '
+        f'{len(devir_dosyalari)} dosyadan; butceye sayilmaz)')
     for ad, mesaj, tip in atlanan:
         yaz(f"  {'MODUL DUSTU' if tip is None else 'ATLANDI'} {ad} "
             f'-> {mesaj[:160]}')

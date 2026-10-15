@@ -579,7 +579,12 @@ class TestTarayiciVeSurucu:
 
         tarayici = ikiz.SahteTarayici(sayfa_uret)
         chromium = ikiz.SahteChromium(lambda: tarayici, acilabilir_kanallar=('',))
-        import playwright.sync_api as pw_api
+        # v3.0.0 (15 Eki): CI'da playwright paketi yok (requirements-dev'de
+        # değil; tarayıcı katmanı yerel kapıdadır) — test_d37_piksel_bekci_a1
+        # deyimiyle gerekçeli atlama.
+        pw_api = pytest.importorskip(
+            'playwright.sync_api',
+            reason='playwright paketi bu ortamda yok: sahte sürücü yamanamaz')
         monkeypatch.setattr(pw_api, 'sync_playwright',
                             ikiz.sahte_sync_playwright(chromium))
 
@@ -606,7 +611,12 @@ class TestTarayiciVeSurucu:
 
         tarayici = ikiz.SahteTarayici(sayfa_uret)
         chromium = ikiz.SahteChromium(lambda: tarayici, acilabilir_kanallar=('',))
-        import playwright.sync_api as pw_api
+        # v3.0.0 (15 Eki): CI'da playwright paketi yok (requirements-dev'de
+        # değil; tarayıcı katmanı yerel kapıdadır) — test_d37_piksel_bekci_a1
+        # deyimiyle gerekçeli atlama.
+        pw_api = pytest.importorskip(
+            'playwright.sync_api',
+            reason='playwright paketi bu ortamda yok: sahte sürücü yamanamaz')
         monkeypatch.setattr(pw_api, 'sync_playwright',
                             ikiz.sahte_sync_playwright(chromium))
         with pytest.raises(RuntimeError):

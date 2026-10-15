@@ -60,12 +60,24 @@ from pathlib import Path
 
 import pytest
 
+from tests.bagimlilik_kapisi import kurulu_mu
+
 warnings.filterwarnings('ignore')
 
 KOK = Path(__file__).resolve().parents[1]
 STATIK = KOK / 'hrma' / 'static' / 'js'
 SABLON = KOK / 'hrma' / 'templates'
 NODE = shutil.which('node')
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 pytestmark = pytest.mark.filterwarnings('ignore::RuntimeWarning')
 
@@ -1368,6 +1380,7 @@ def ihrac_ciftleri(hibrit, kati, sivi_sureli):
                           ignore_errors=True)
 
 
+@_STEP_GEREKLI
 class TestP17S1_01EngStepCapEsitligi:
 
     @pytest.mark.parametrize('tip', ['hybrid', 'solid', 'liquid'])

@@ -24,6 +24,7 @@ import pathlib
 
 import numpy as np
 import pytest
+from tests.support.platform_capa import capa_rel
 
 from hrma.analysis.structural_analysis import (
     MANUFACTURING_ALLOWANCE_FACTOR, THIN_WALL_T_OVER_R_LIMIT,
@@ -899,7 +900,11 @@ def test_tarama_izgarasi_noktasal_bit_esit():
                          + s * A._thermal_scale(t, ref) for _iz, s, _y in cs]
             oran = min(iz / tp for (iz, _s, _y), tp in zip(cs, toplamlar))
             ok = not any(tp > iz for (iz, _s, _y), tp in zip(cs, toplamlar))
-            assert (oranlar[i] == oran
+            # v3.0.0 (15 Eki) — referans platformda BİT-EŞİT (rel_tol 0 =
+            # eşitlik). CI linux/x86_64'te vektör (numpy SIMD) ile skaler yol
+            # 5 ulp ayrıştı (koşum 38770162288); orada 1e-12 bağıl.
+            assert (math.isclose(oranlar[i], oran,
+                                 rel_tol=capa_rel(0.0, 1e-12), abs_tol=0.0)
                     or (math.isnan(oranlar[i]) and math.isnan(oran))), (
                 (P, r, ref, i, float(oranlar[i]).hex(), float(oran).hex()))
             assert bool(uygun[i]) is ok, (P, r, ref, i)

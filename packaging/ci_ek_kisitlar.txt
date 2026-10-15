@@ -1,0 +1,13 @@
+# CI EK KISITLARI (v3.0.0, 15 Eki 2026) — tests.yml kurulumunda
+# `-c packaging/requirements_bundle.txt` ile BİRLİKTE kullanılır.
+#
+# Neden: CI sürümsüz kurulumda en yeni sürümleri çekiyordu ve SINANAN ortam
+# GÖNDERİLEN ortamdan ayrışmıştı. Ölçüldü (koşum 38770162288, dilim 9):
+# rocketcea 1.2.3 `set_rocketcea_data_dir`'i kaldırmış, CoolProp 8.0 geçersiz
+# sıvı sıcaklığını reddetmiyor, plotly 7.1 kaleido >= 1 istiyor (depo 0.2.1).
+# Paketteki sürümlerin TEK KAYNAĞI requirements_bundle.txt'dir; bu dosya
+# yalnız o listenin DIŞINDA kalan iki bilimsel bağımlılığı sabitler:
+#   rocketcea — paket build_win_payload.sh ile 1.2.1 gönderir
+#   numba     — pakette yok; numba⟷NumPy bekçilerinin doğrulandığı sürüm
+rocketcea==1.2.1
+numba==0.61.0

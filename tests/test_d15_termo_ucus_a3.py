@@ -11,6 +11,7 @@ Ters-mutasyon kanıtı: her bekçi, onarımın geçici olarak geri alındığı
 import math
 
 import pytest
+from tests.support.platform_capa import capa_rel
 
 from hrma.analysis.nozzle_flow_1d import (
     C_STAR_CONSISTENCY_REL_TOL, NozzleFlow1D,
@@ -506,7 +507,11 @@ class TestP4B3_10IrtifaTelafisi:
     def test_A_e_yokken_davranis_bit_ayni_ve_uyari_var(self):
         s = _arac(nozzle_exit_area=None)
         r = s.solve(t_max=400.0)
-        assert r['apogee'] == pytest.approx(self.TABAN_APOJE, rel=1e-12)
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 1,0e-10 bağıl sapma verdi (koşum 38770162288). Tolerans
+        # referans platformda aynen; başkasında 1e-8 (tests/support/platform_capa.py).
+        assert r['apogee'] == pytest.approx(self.TABAN_APOJE,
+                                            rel=capa_rel(1e-12, 1e-8))
         kodlar = [w['code'] for w in r['warnings']]
         assert 'warn.sixdof.thrust_not_altitude_compensated' in kodlar
 

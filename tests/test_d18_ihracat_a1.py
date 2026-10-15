@@ -31,7 +31,19 @@ import re
 
 import pytest
 
+from tests.bagimlilik_kapisi import kurulu_mu
+
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 
 def _sessiz(fn, *a, **kw):
@@ -127,6 +139,7 @@ class TestP16B402BirimKapisi:
             assert (j or {}).get('status') != 'unresolved_geometry_units', (
                 f'{yol}: sağlıklı gövde birim gerekçesiyle reddedildi: {j}')
 
+    @_STEP_GEREKLI
     def test_step_eksik_girdiyi_500_degil_adli_422_ile_reddeder(self, client):
         """ŞART: "export-step'in 500'ü adlı 422'ye dönsün".
 

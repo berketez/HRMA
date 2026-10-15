@@ -1440,8 +1440,8 @@
         [/^Bell contour: (.+)$/, 'Çan kontur: $1'],
         [/^Impinging pairs \((.+)\)$/, 'Çarpışmalı çiftler ($1)'],
         /* v3.0.0 (15 Eki): visualization.py kesit ölçüsü, bölümlü tanede
-           'Grain stack = 364 mm (3 x 120 + 2 x 2 gap)' basıyor; TR'de
-           İngilizce kalıyordu (ekran görüntüsünde ölçüldü). */
+           'Grain stack = 364 mm (3 x 120 + 2 x 2 gap)' basıyor; Türkçe
+           arayüzde İngilizce kalıyordu (ekran görüntüsünde ölçüldü). */
         [/^Grain stack = (\S+ mm) \((\d+) x (\S+) \+ (\d+) x (\S+) gap\)$/,
          'Yakıt blokları = $1 ($2 × $3 + $4 × $5 boşluk)'],
         [/^Grain = (.+)$/, 'Yakıt bloğu = $1'],

@@ -10,6 +10,7 @@ import io
 
 import numpy as np
 import pytest
+from tests.support.platform_capa import capa_rel
 
 from hrma.analysis.heat_transfer_analysis import (
     DEFAULT_X_CO2, DEFAULT_X_H2O, HeatTransferAnalyzer,
@@ -359,7 +360,11 @@ class TestOHD1611CalculateItkiEgrisi:
         # sabitlenince apoje 6481,69696338075 m; birleşik ağaçla bağıl fark
         # 0. Denetçinin birleşik ağaç ölçümüyle (6481,69696338075 m) aynı.
         # Tolerans DEĞİŞMEDİ; bekçinin sorusu değişmedi.
-        assert apoje == pytest.approx(6481.69696338075, rel=1e-6)
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 1,8e-6 bağıl sapma verdi (koşum 38770162288, ODE).
+        # Tolerans referans platformda aynen; başkasında 1e-5.
+        assert apoje == pytest.approx(6481.69696338075,
+                                      rel=capa_rel(1e-6, 1e-5))
         assert apoje != pytest.approx(5656.753349589398, rel=1e-6)
 
 
@@ -593,8 +598,11 @@ class TestP4B314RuzgarBoyutu:
                     {'launch_angle': 85.0, 'wind_speed': 0.0,
                      'parachute_area': 2.0})
         tm = r['performance']['trajectory_metrics']
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 3,6e-7 bağıl sapma verdi (koşum 38770162288, ODE).
+        # Tolerans referans platformda aynen; başkasında 1e-6.
         assert tm['range_distance'] == pytest.approx(735.3229283656397,
-                                                     rel=1e-9)
+                                                     rel=capa_rel(1e-9, 1e-6))
         assert 'range_distance_is_lower_bound' not in tm
 
 
@@ -632,8 +640,11 @@ class TestP4B315InisHiziDatumu:
     def test_deniz_seviyesinde_bit_ayni(self):
         r = self._kos(0.0)
         rec = r['recovery']
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 3,9e-8 bağıl sapma verdi (koşum 38770162288, ODE).
+        # Tolerans referans platformda aynen; başkasında 1e-6.
         assert rec['mean_descent_rate_m_s'] == pytest.approx(
-            12.012425595851562, rel=1e-9)
+            12.012425595851562, rel=capa_rel(1e-9, 1e-6))
 
     def test_datum_apojenin_ustunde_ise_sayi_uydurulmaz(self):
         """Yükseklik pozitif değilse hız YAYIMLANMAZ (sıfır/negatif değil)."""

@@ -14,6 +14,17 @@ from hrma.export.openrocket_integration import OpenRocketExporter
 from hrma.export.pdf_generator import (
     IDENTITY_NOT_SUPPLIED, PDFReportGenerator, SOLVER_IDENTITY_ALIASES,
     resolve_report_identity)
+from tests.bagimlilik_kapisi import kurulu_mu
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 
 # Katı çözücünün GERÇEKTEN yayımladığı şekilde bir sonuç (mm tabanlı,
@@ -70,6 +81,7 @@ class TestP15B4_06_UydurmaYok:
                 f'{alan} künyesi NEREYE bakıldığını söylemiyor: '
                 f'{beyan[alan]!r}')
 
+    @_STEP_GEREKLI
     def test_imalat_kapisi_artik_atesleniyor(self):
         """step_export'un kendi kapısı 'çözülemedi' hâlini GÖRÜR."""
         from hrma.export import step_export  # düz ithal (P13B1-05: depo-içi importorskip yasak; build123d yoksa modül yine yüklenir, kapı RuntimeError'ı kendi verir)

@@ -26,7 +26,19 @@ import subprocess
 
 import pytest
 
+from tests.bagimlilik_kapisi import kurulu_mu
+
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 
 def _sessiz(fn, *a, **kw):
@@ -100,6 +112,7 @@ class TestP15B404KatiUreticiParcaListesi:
     "[OK]" yazıyordu.
     """
 
+    @_STEP_GEREKLI
     def test_complete_zip_enjektoru_hem_stl_hem_step_ciziyor(
             self, istemci, kati_sonuc):
         yuk = dict(kati_sonuc)

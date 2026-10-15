@@ -31,11 +31,22 @@ import tempfile
 
 import pytest
 
+from tests.bagimlilik_kapisi import kurulu_mu
 from tests.test_example_projects import (ENDPOINTS, HEADERS,
                                          calculate_payload, load_example_doc)
 
 KOK = pathlib.Path(__file__).resolve().parents[1]
 STATIC_JS = KOK / 'hrma' / 'static' / 'js'
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 
 def _sessiz(fn, *a, **kw):
@@ -417,6 +428,7 @@ class TestDV3605BoslukKunyesi:
         assert p['gap_published'] is False
         assert 'absent_in_response' in p['source']
 
+    @_STEP_GEREKLI
     def test_gercek_kati_sifir_bosluk_step_kunyesinde(self, istemci,
                                                       tmp_path):
         """Uçtan uca: grain_gap=0 girilen katı örneğin STEP başlığı."""

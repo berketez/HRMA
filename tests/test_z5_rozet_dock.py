@@ -51,6 +51,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from tests.support.platform_capa import capa_rel
 
 warnings.filterwarnings('ignore')
 
@@ -1031,7 +1032,12 @@ def test_c5_hibrit_isi_zinciri_bit_ayni(hibrit_cidarli):
     """
     gas = ((hibrit_cidarli.get('heat_transfer_analysis') or {})
            .get('gas_side_analysis') or {})
-    assert gas.get('throat_heat_flux') == HIBRIT_BOGAZ_AKISI_W_M2, (
+    # v3.0.0 (15 Eki) — referans platformda (darwin/arm64) BİT-AYNI; CI
+    # linux/x86_64'te AYNI kod 8,6e-10 bağıl sapma verdi (koşum
+    # 38770162288). Orada 1e-8 bağıl (çapa yenilemeleri 1e-5 – 4e-2).
+    akis = gas.get('throat_heat_flux')
+    assert akis == pytest.approx(HIBRIT_BOGAZ_AKISI_W_M2,
+                                 rel=capa_rel(0.0, 1e-8), abs=0.0), (
         'hibrit boğaz ısı akısı değişti: '
         f'{gas.get("throat_heat_flux")!r} != {HIBRIT_BOGAZ_AKISI_W_M2!r}')
 

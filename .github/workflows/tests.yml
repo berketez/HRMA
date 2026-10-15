@@ -41,6 +41,10 @@ jobs:
       fail-fast: false
       matrix:
         dilim: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    # İŞ düzeyinde: test adımı (eklenti) VE atlama bütçesi adımı (toplama
+    # tabanını dilimde ertelemek için) aynı değeri görür.
+    env:
+      HRMA_CI_DILIM: "${{ matrix.dilim }}/${{ strategy.job-total }}"
 
     steps:
       - uses: actions/checkout@v4
@@ -86,10 +90,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # requirements-dev.txt zaten requirements.txt'i içeriyor (-r ile).
-          pip install -r requirements-dev.txt
+          # SINANAN = GÖNDERİLEN (v3.0.0, 15 Eki): sürümler paketin pin
+          # dosyasıyla kısıtlanır; ek iki bağımlılık packaging/ci_ek_kisitlar.txt.
+          pip install -r requirements-dev.txt \
+            -c packaging/requirements_bundle.txt -c packaging/ci_ek_kisitlar.txt
           # Cantera OPSİYONELDİR (kurulu değilse çözücü ampirik yola düşer),
           # ama denge kimyası testlerinin gerçekten koşması için kuruluyor.
-          pip install cantera
+          pip install cantera \
+            -c packaging/requirements_bundle.txt -c packaging/ci_ek_kisitlar.txt
 
       # build123d (STEP export) bu işte BİLEREK kurulmuyor: 0.11.x numpy>=2
       # istiyor ve kurulduğunda numpy'yi 1.26'dan 2.5'e yükseltip tüm paketi
@@ -212,8 +220,8 @@ jobs:
           # Tek satır: ``${{ }}`` içine YAML katlamasından newline girmesin.
           HRMA_ISARET_SUZGECI: "${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'not agir_canli_uc' || '' }}"
           # Dilimleme (yukarıdaki iş notu). Komut metni değişmez; eklenti
-          # PYTEST_ADDOPTS ile yüklenir, HRMA_CI_DILIM yoksa hiçbir şey yapmaz.
-          HRMA_CI_DILIM: "${{ matrix.dilim }}/${{ strategy.job-total }}"
+          # PYTEST_ADDOPTS ile yüklenir, HRMA_CI_DILIM (iş ortamı) yoksa
+          # hiçbir şey yapmaz.
           PYTEST_ADDOPTS: "-p tools.ci_dilim"
           # Kapsam verisi dilim başına ayrı dosyaya yazılır; eşik
           # (.coveragerc fail_under) TAM kümeye aittir ve `pytest-birlesik`
@@ -437,8 +445,43 @@ jobs:
               if tip is None:
                   toplama_duzeyi.append((tc, mesaj, tip))
 
+          # v3.0.0 (15 Eki) — STEP İŞİNE DEVREDİLEN ATLAMA. Kural, desen,
+          # iş akışı yolu ve iş adı tools/atlama_kapisi.py'den AST ile okunur
+          # (gerekçe orada); iki gövde AYNI hükmü verir. Gövde içi atlama,
+          # gerekçesi build123d yokluğu VE dosyası `step-export` işinin
+          # komutunda geçiyorsa bütçeye sayılmaz. İş akışı okunamazsa küme
+          # boştur (hiçbir atlama devredilmiş sayılmaz).
+          _STEP_DESEN = re.compile(_esik('STEP_DEVIR_DESENI'))
+          def _step_dosyalari():
+              try:
+                  _m = pathlib.Path(_esik('STEP_IS_AKISI')).read_text(
+                      encoding='utf-8')
+              except OSError:
+                  return frozenset()
+              _b = re.search(r'(?m)^  ' + re.escape(_esik('STEP_IS_ADI'))
+                             + r':\s*$', _m)
+              if not _b:
+                  return frozenset()
+              _son = re.search(r'(?m)^  [A-Za-z0-9_-]+:\s*$', _m[_b.end():])
+              _blok = (_m[_b.end():_b.end() + _son.start()] if _son
+                       else _m[_b.end():])
+              _sat = [x for x in _blok.splitlines()
+                      if not x.lstrip().startswith('#')]
+              return frozenset(re.findall(r'tests/[\w/]+\.py', '\n'.join(_sat)))
+          STEP_DOSYALARI = _step_dosyalari()
+          def _step_devri_mi(tc, mesaj, tip):
+              if tip != 'pytest.skip' or not _STEP_DESEN.search(mesaj):
+                  return False
+              _p = (tc.get('classname') or '').split('.')
+              return any('/'.join(_p[:k]) + '.py' in STEP_DOSYALARI
+                         for k in range(len(_p), 0, -1))
+          devredilen = [k for k in atlanan if _step_devri_mi(*k)]
+          atlanan = [k for k in atlanan if not _step_devri_mi(*k)]
+
           print(f'toplanan={toplam} atlanan={len(atlanan)} '
                 f'(toplama_duzeyi={len(toplama_duzeyi)}) butce={BUTCE}')
+          print(f'step_devri={len(devredilen)} (step-export isinde koşan '
+                f'{len(STEP_DOSYALARI)} dosyadan; butceye sayilmaz)')
           for tc, mesaj, tip in atlanan:
               etiket = 'MODUL DUSTU' if tip is None else 'ATLANDI'
               print(f"  {etiket} {tc.get('classname')}::{tc.get('name')} "
@@ -684,7 +727,9 @@ jobs:
       - name: Python bağımlılıkları
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          # SINANAN = GÖNDERİLEN — pytest işindeki kısıtların aynısı.
+          pip install -r requirements-dev.txt \
+            -c packaging/requirements_bundle.txt -c packaging/ci_ek_kisitlar.txt
 
       - name: build123d + numpy pinini geri alma
         run: |
@@ -721,6 +766,10 @@ jobs:
           MPLBACKEND: Agg
           PYTHONPATH: .
         run: |
+          # v3.0.0 (15 Eki): test_d30_ihracat_a1 ve test_z5guard_urun_tur DÜĞÜM
+          # düzeyinde seçilir — iki dosyanın öteki hücreleri build123d VARKEN
+          # 'uygulanamaz' diye atlanır ve bu işin sıfır-atlama bütçesini
+          # boşuna kırardı (ölçüldü: 8 + 1 hücre); o hücreler ana işte koşar.
           # KAPILI DOSYA KÜMESİ — tests/test_ci_kapsam_kapisi.py bu listeyi
           # kaynaktan TÜRETİP karşılaştırır; yeni bir build123d-kapılı dosya
           # buraya yazılmazsa o bekçi kırmızıya döner (liste çürüyemez).
@@ -739,6 +788,21 @@ jobs:
                  tests/test_v3_cad_duzeltme.py \
                  tests/test_cad_montaj_a1.py \
                  tests/step_d37_sivi_a1.py \
+                 tests/test_d17_ihracat_a1.py \
+                 tests/test_d18_ihracat_a1.py \
+                 tests/test_d23_ihracat_a2.py \
+                 tests/test_d24_bekci_cevirisi_a1.py \
+                 tests/test_d24_ihracat_a1.py \
+                 tests/test_d25_app_api_a4.py \
+                 tests/test_d25_ihracat_a1.py \
+                 tests/test_d30_ihracat_a1.py::TestOHD2909StepAlaniAdiylaVerir \
+                 'tests/test_d30_ihracat_a1.py::TestOHD2909ReddinYoluIZLENEBILIR::test_reddin_adlandirdigi_yolu_dolduran_govde_200_alir[/api/export-step]' \
+                 tests/test_d35_onemli_kati_cad_a1.py \
+                 tests/test_d37_pdf_a1.py \
+                 tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_iki_dosya_ayni_kasa_capini_yaziyor \
+                 tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_capin_kaynagi_uydurma_degil \
+                 'tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_cidar_kunyesi_iki_dosyada_da_ayni[hybrid]' \
+                 'tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_cidar_kunyesi_iki_dosyada_da_ayni[liquid]' \
                  -q -rs --junitxml=step-report.xml
 
       # ATLAMA BÜTÇESİ = 0. xfail atlama sayılmaz (junit XML xfail'i de

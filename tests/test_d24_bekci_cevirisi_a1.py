@@ -30,9 +30,20 @@ import pytest
 
 import tests.test_d16_kati_a1 as d16
 import tests.test_d18_bekci_cevirisi_a1 as d18
+from tests.bagimlilik_kapisi import kurulu_mu
 from tests.support.kanit import kanit_gerekli
 
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 
 # ===========================================================================
@@ -466,6 +477,16 @@ def _hafif_uclar():
             if y not in AGIR_UCLAR]
 
 
+def _hafif_uc_parametreleri():
+    """``_hafif_uclar`` aynen; YALNIZ ``/api/export-step`` build123d'ye kapılı.
+
+    O ucun sarsım matrisinin taban çağrısı STEP üretir: build123d yoksa uç
+    501 döner ve matris koşamaz. Öteki uçların hepsi her ortamda koşar.
+    """
+    return [pytest.param(y, marks=_STEP_GEREKLI) if y == '/api/export-step'
+            else y for y in _hafif_uclar()]
+
+
 class TestP15B310SarsimKapsami:
 
     @pytest.fixture(scope='class')
@@ -505,7 +526,7 @@ class TestP15B310SarsimKapsami:
             'ağır uç listesi katalogda olmayan uç taşıyor (bayat): %s'
             % yabanci)
 
-    @pytest.mark.parametrize('yol', _hafif_uclar())
+    @pytest.mark.parametrize('yol', _hafif_uc_parametreleri())
     def test_ucun_sarsim_matrisi_kosuyor(self, istemci, yol):
         """Her hafif uçta matris koşar ve ÖLÜ GİRDİ envanteri aşılmaz."""
         import contextlib

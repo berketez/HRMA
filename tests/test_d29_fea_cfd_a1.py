@@ -46,6 +46,7 @@ import sys
 
 import numpy as np
 import pytest
+from tests.support.platform_capa import capa_rel
 
 KOK = pathlib.Path(__file__).resolve().parents[1]
 if str(KOK) not in sys.path:
@@ -167,8 +168,11 @@ class TestOHD2802KosuKapanisi:
         bu turlarda hiçbir istasyon EKLEMEZ, geometri bit-özdeş kalır.
         """
         tb = _taban(_mesh(sivi_girdiler, na))
-        assert tb['dis_egri_ornek_taban_orani'] == pytest.approx(oran,
-                                                                 rel=1e-12)
+        # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
+        # AYNI kod 1,4e-10 bağıl sapma verdi (koşum 38770162288). Tolerans
+        # referans platformda aynen; başkasında 1e-8 (tests/support/platform_capa.py).
+        assert tb['dis_egri_ornek_taban_orani'] == pytest.approx(
+            oran, rel=capa_rel(1e-12, 1e-8))
         assert tb['duzeltilen_istasyon'] == duzeltilen
 
     def test_pay_ve_kalinlik_esigi_GEVSEMEDI(self):

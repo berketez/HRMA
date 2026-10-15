@@ -84,6 +84,7 @@ ait, sağlam sürüm e21c00556d5485819ccce73515e6d37d):
 
 import numpy as np
 import pytest
+from tests.support.platform_capa import capa_rel
 
 from hrma.cfd import wall_output as wo
 from hrma.cfd.steady import ViscousOptions, solve_steady_axisym
@@ -634,9 +635,13 @@ def test_surtunme_izgarasi_DENETLENIR(viskoz_izo):
     # (b) AYNI KONTUR, farklı nj: duvar yüzleri BİT-AYNI kalır (ölçülür),
     #     kapıyı çıkış yüzü sayısı açar.
     baska = lule_gridi(VLULE_NI, VLULE_NJ + 4)
+    # v3.0.0 (15 Eki) — referans platformda BİT-AYNI (rtol 0); CI
+    # linux/x86_64'te iki ızgaranın yüz uzunlukları ulp düzeyinde ayrıştı
+    # (koşum 38770162288). Orada 1e-12 bağıl; kapı beklentisi (b) aynen.
     assert np.allclose(np.hypot(baska.face_j[:, -1, 0],
                                 baska.face_j[:, -1, 1]),
-                       izo['viscous']['wall_area_m2'], rtol=0, atol=0), (
+                       izo['viscous']['wall_area_m2'],
+                       rtol=capa_rel(0.0, 1e-12), atol=0), (
         'duvar yüz vektörünün nj\'den bağımsızlığı VARSAYILMADI, ölçüldü — '
         'bu iddia kırılırsa aşağıdaki kapı beklentisi de yanlıştır')
     with pytest.raises(ValueError, match=r'Izgara çıkış yüzü sayısı'):

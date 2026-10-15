@@ -25,6 +25,17 @@ import pytest
 from hrma.export import cad_visualization as CV
 from hrma.export.step_export import (
     STEP_MOTOR_TYPES, normalise_step_motor_type)
+from tests.bagimlilik_kapisi import kurulu_mu
+
+#: STEP üreten düğümlerin kapısı. CI'ın ana ``pytest`` işi build123d'yi
+#: BİLEREK kurmaz; bu düğümler orada atlanır, ``step-export`` işinde koşar.
+#: Kurulum sorusu find_spec ile sorulur (``tests/bagimlilik_kapisi.py``):
+#: ``step_export.BUILD123D_AVAILABLE`` ``except Exception`` ile kurulduğu
+#: için "kurulu değil" gerekçesine dayanak olamaz
+#: (``test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust``).
+_STEP_GEREKLI = pytest.mark.skipif(
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır)')
 
 
 def _sessiz(fn, *a, **kw):
@@ -217,6 +228,7 @@ class TestP15B404MotorTipiIstekten:
         tip, hata = normalise_step_motor_type(7)
         assert tip is None and hata
 
+    @_STEP_GEREKLI
     def test_tip_verilince_iki_uc_AYNI_parca_kumesini_uretir(
             self, cli, kati_sonuc):
         govde = self._panelli(kati_sonuc)
@@ -228,6 +240,7 @@ class TestP15B404MotorTipiIstekten:
         assert a, 'katı ucu STEP üretmedi — bekçi inert olurdu'
         assert a == b, f'katı ucu {a}, komple paket {b}'
 
+    @_STEP_GEREKLI
     def test_export_step_ucu_tipi_okuyor(self, cli, kati_sonuc):
         govde = self._panelli(kati_sonuc)
         r = _sessiz(cli.post, '/api/export-step',
@@ -244,6 +257,7 @@ class TestP15B404MotorTipiIstekten:
             assert j['error'] == 'invalid_motor_type'
             assert j['invalid_fields'][0]['field'] == 'motor_type'
 
+    @_STEP_GEREKLI
     def test_tipsiz_istek_davranisi_DEGISMEDI(self, cli, kati_sonuc):
         """Tip verilmeyen sağlıklı katı gövde eskisi gibi paketlenir."""
         r = _sessiz(cli.post, '/api/export-complete-zip',
