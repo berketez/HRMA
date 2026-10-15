@@ -300,7 +300,12 @@ class TestOHD1805MesruYolBozulmadi:
         monkeypatch.setattr(TA, 'ISA_TABLE_BOTTOM_M', 0.0)
         eski = _kos(parachute_area=DEFAULT_PARACHUTE_AREA_M2)[
             'performance']['trajectory_metrics']['landing_velocity']
-        assert eski == self.D22_CAPASI, (
+        # v3.0.0 (15 Eki) — ATIF yalnız referans platformda (darwin/arm64)
+        # KARARLAŞTIRILIR: atfedilen kayma 8,87e-9, CI linux/x86_64'ün
+        # platform sapması ise 1,3e-7 (koşum 38782530435) — etki gürültünün
+        # altında kalır. Orada yalnız tutarlılık (1e-6) sınanır.
+        assert eski == pytest.approx(self.D22_CAPASI,
+                                     rel=capa_rel(0.0, 1e-6), abs=0.0), (
             'eski 0 m kırpmasıyla D22 çapası geri gelmedi (%r != %r) — kayma '
             'OH-D23-07 atmosfer tabanından DEĞİL, paraşüt yolundaki gerçek '
             'bir gerilemeden geliyor' % (eski, self.D22_CAPASI))
