@@ -60,6 +60,9 @@ formal/build/
 # ortama kurar; ortam depoya girmez.
 .venv/
 .coverage
+# v3.0.0 CI dilimleme (tools/ci_dilim.py): dilim künyesi ve dilim kapsam verisi
+ci-dilim-kunye.json
+.coverage.dilim*
 
 # ÖH D35 katı devir 4: HRMA_PROJECTS_DIR=examples damgası (mutlak yol içerir)
 examples/.seeded_v1

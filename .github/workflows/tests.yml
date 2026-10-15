@@ -21,12 +21,26 @@ on:
 
 jobs:
   pytest:
+    name: pytest (dilim ${{ matrix.dilim }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     # 45 → 90 (17 Ağu 2026): parti 26 koşumu 45 dk sınırına takılıp İPTAL
     # edildi (koşum 31967626457, 45m20s) — parti 23-26 ~1500 bekçi ekledi
     # (CFD çözücü + uç + panel + stability + BL). Önceki tam koşum 44 dk
     # idi; 90 dk ölçülen büyümeye pay bırakır, gerçek takılmayı yine keser.
     timeout-minutes: 90
+    # v3.0.0 (15 Eki 2026) — DİLİMLİ İŞ. Tek süreç 90 dk'ya artık sığmıyor:
+    # v3.0 ağacının iki push koşumu (38753576200, 38757753775) `Test paketi`
+    # adımında zaman aşımıyla İPTAL edildi; aynı takım yerelde 26 522 test,
+    # junit süreleri toplamı 141,7 dk. Her dilim AYNI `pytest tests/`
+    # komutunu koşar; `tools/ci_dilim.py` eklentisi toplanan kümeyi ölçülen
+    # dosya sürelerine göre dengeli böler ve dilim dışını SEÇMEZ (atlama
+    # değil). Birleşik rapor ve TAM küme atlama bütçesi `pytest-birlesik`
+    # işindedir. Dilim sayısının TEK kaynağı aşağıdaki listedir
+    # (`strategy.job-total`); başka yerde elle yazılmaz.
+    strategy:
+      fail-fast: false
+      matrix:
+        dilim: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     steps:
       - uses: actions/checkout@v4
@@ -197,6 +211,14 @@ jobs:
           HRMA_FUZZ_KIP: hizli  # V3 SG-1: tests/test_v3_fuzz.py hızlı kip; tam kip elle (HRMA_FUZZ_KIP=tam)
           # Tek satır: ``${{ }}`` içine YAML katlamasından newline girmesin.
           HRMA_ISARET_SUZGECI: "${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'not agir_canli_uc' || '' }}"
+          # Dilimleme (yukarıdaki iş notu). Komut metni değişmez; eklenti
+          # PYTEST_ADDOPTS ile yüklenir, HRMA_CI_DILIM yoksa hiçbir şey yapmaz.
+          HRMA_CI_DILIM: "${{ matrix.dilim }}/${{ strategy.job-total }}"
+          PYTEST_ADDOPTS: "-p tools.ci_dilim"
+          # Kapsam verisi dilim başına ayrı dosyaya yazılır; eşik
+          # (.coveragerc fail_under) TAM kümeye aittir ve `pytest-birlesik`
+          # işinde birleşik veriye uygulanır.
+          COVERAGE_FILE: ".coverage.dilim${{ matrix.dilim }}"
         run: |
           if [ -n "$HRMA_ISARET_SUZGECI" ]; then
             echo "İşaret süzgeci: $HRMA_ISARET_SUZGECI (olay: $GITHUB_EVENT_NAME)"
@@ -211,8 +233,10 @@ jobs:
             # olarak uyardığı şeyi yapardı: kapı ilk gün kırmızıyla açılır.
             # ``--cov`` argümansızdır: kaynak listesi .coveragerc'de, TEK
             # KAYNAK. Eşik aşılmazsa pytest çıkış kodu 1 verir (ölçüldü).
+            # Dilimde eşik UYGULANMAZ (alt küme eşiği kaldıramaz); birleşik
+            # veri `pytest-birlesik` işinde `coverage report` ile kapıdan geçer.
             pytest tests/ -q -rs --junitxml=pytest-report.xml \
-              --cov --cov-report=term-missing:skip-covered
+              --cov --cov-report= --cov-fail-under=0
           fi
 
       # -----------------------------------------------------------------------
@@ -474,7 +498,16 @@ jobs:
                           'kanit kapisi ATLAMAZ; atlama goruldu ise kanit '
                           'sessizce kaybolmustur (HRMA_KANIT_ZORUNLU '
                           'sozlesmesi)')
-          if toplam < TOPLANAN_TABANI:
+          # v3.0.0 (15 Eki) — DİLİMLİ İŞ: diğer kurallar (bütçe, modül düzeyi,
+          # kanıt, depo-içi importorskip) dilimin alt kümesinde de geçerlidir
+          # ve burada uygulanır. Toplama TABANI tam kümenin sayısıdır; dilimde
+          # anlamsızdır — `pytest-birlesik` işi birleşik raporda AYNI kuralı
+          # (tools/atlama_kapisi.py) tam kümeye uygular.
+          DILIM = os.environ.get('HRMA_CI_DILIM', '').strip()
+          if DILIM:
+              print(f'dilim {DILIM}: toplama tabani birlesik raporda olculur '
+                    f'(bu dilim {toplam} test)')
+          if toplam < TOPLANAN_TABANI and not DILIM:
               hata.append(f'yalnizca {toplam} test toplandi; 27 Agustos 2026 '
                           'olcumu 9497 idi (taban {}) — toplama kirilmis '
                           'olabilir'.format(TOPLANAN_TABANI))
@@ -507,14 +540,15 @@ jobs:
       # sıfırdan büyükse adım KIRMIZI. `if: always()` ile test adımı
       # düşse de koşar (kapıyı test sonucuna bağlamak onu kör eder).
       - name: Euler bit-özdeşliği — CI platformunda sözleşme kuruluyor mu
-        if: always()
+        # Platform sözleşmesidir, dilim başına tekrar gerekmez: dilim 1 koşar.
+        if: always() && matrix.dilim == 1
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python3 tools/cfd_ci_bit_ozdeslik.py --rapor euler-bit-ozdeslik.json
 
       - name: Euler bit-özdeşlik hükmü (raporu yükle)
-        if: always()
+        if: always() && matrix.dilim == 1
         uses: actions/upload-artifact@v4
         with:
           name: euler-bit-ozdeslik
@@ -525,9 +559,75 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          name: pytest-report-dilim-${{ matrix.dilim }}
+          # Künye: dilimin kaç test toplayıp kaçını seçtiği — birleştirici
+          # eksik dilimi buradan yakalar. .coverage.* gizli dosyadır.
+          path: |
+            pytest-report.xml
+            ci-dilim-kunye.json
+            .coverage.dilim*
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------
+  # v3.0.0 (15 Eki 2026) — DİLİMLERİN BİRLEŞİMİ. `pytest` matrisinin bütün
+  # dilim raporları tek junit'te toplanır; atlama bütçesi ve toplama tabanı
+  # TAM kümeye burada, `release.yml`in de çağırdığı aynı kuralla
+  # (tools/atlama_kapisi.py) uygulanır. FAIL-CLOSED: eksik ya da raporsuz
+  # dilim, kümeyi örtmeyen bölümleme veya yeşil bitmeyen bir dilim bu işi
+  # KIRMIZI yapar — `tests` iş akışının sonucu bu işe bağlıdır.
+  # -------------------------------------------------------------------------
+  pytest-birlesik:
+    name: pytest (birleşik rapor + tam atlama bütçesi)
+    needs: pytest
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Dilim raporlarını indir
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pytest-report-dilim-*
+          path: dilim-raporlari
+
+      - name: Dilim raporlarını birleştir (eksik dilim KIRMIZI)
+        run: python3 tools/ci_dilim.py birlestir --dizin dilim-raporlari --cikti pytest-report.xml
+
+      - name: Atlama bütçesi + toplama tabanı (tam küme)
+        env:
+          PYTHONPATH: .
+        run: python3 tools/atlama_kapisi.py pytest-report.xml
+
+      # Kapsam kapısı yalnız tam süit dalında (gecelik / elle) vardır.
+      - name: Kapsam kapısı (birleşik veri)
+        if: github.event_name != 'push' && github.event_name != 'pull_request'
+        run: |
+          python -m pip install --upgrade pip
+          pip install "coverage>=7.10"
+          coverage combine $(find dilim-raporlari -name '.coverage.dilim*')
+          coverage report --skip-covered
+
+      - name: Birleşik test raporu
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
           name: pytest-report
           path: pytest-report.xml
           if-no-files-found: ignore
+
+      - name: Bütün dilimler yeşil mi
+        if: always()
+        run: |
+          echo "pytest dilimleri: ${{ needs.pytest.result }}"
+          test "${{ needs.pytest.result }}" = "success"
 
   # -------------------------------------------------------------------------
   # STEP/CAD export testleri — AYRI iş (Faz 5 / H5-2)
@@ -589,8 +689,13 @@ jobs:
       - name: build123d + numpy pinini geri alma
         run: |
           # build123d numpy'yi 2.x'e yükseltir; hemen ardından pin geri alınır.
-          pip install build123d
-          pip install "numpy>=1.24,<2"
+          # Sürümler PAKETLE AYNIDIR (packaging/requirements_bundle.txt):
+          # sınanan, gönderilenle aynı olmalı. Sürümsüz kurulum 15 Eki'de
+          # scipy 1.18'i çekti (numpy 2 ister, `np.long`); numpy 1.x'e
+          # dönünce scipy, onunla build123d içe aktarılamadı ve iş kırıldı.
+          pip install build123d==0.11.1
+          pip install "numpy>=1.24,<2" "scipy==1.13.1"
+          pip install --no-deps "ocp-gordon==0.2.0"
 
       # FAIL-CLOSED: ikisinden biri sağlanmazsa iş burada kırmızı olur.
       # Aksi hâlde testler yine sessizce atlanır ve hiçbir şey sınanmamış
