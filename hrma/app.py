@@ -17508,8 +17508,21 @@ def export_step_files():
                          download_name=f'{name}_STEP_package.zip',
                          mimetype='application/zip')
     except RuntimeError as e:
-        # build123d yok — kullanıcıya açık mesaj (sessiz düşüş yasak)
-        return jsonify({'status': 'error', 'error': str(e)}), 501
+        # build123d yok — kullanıcıya açık mesaj (sessiz düşüş yasak).
+        # v3.0.0 (15 Eki) — AİLE RET KODU (ÖH D30 / OH-D29-09): ``error``
+        # makine-okur koddur, insan cümlesi ``message``dadır; arayüz
+        # (reject_body.js) önce message'ı basar, kullanıcının gördüğü metin
+        # DEĞİŞMEZ. Ölçüldü (CI 38770162288, build123d'siz ortam): bu gövde
+        # cümleyi error alanında taşıyordu — kardeş 501'ler (ör.
+        # cad_not_modelled) kod taşırken. Modül ithal EDİLMEZ (H3-B14:
+        # yalnız zaten yüklüyse okunur); başka RuntimeError adıyla ayrılır.
+        _se = sys.modules.get('hrma.export.step_export')
+        _kod = ('step_backend_unavailable'
+                if _se is not None and not getattr(_se, 'BUILD123D_AVAILABLE',
+                                                   True)
+                else 'step_export_failed')
+        return jsonify({'status': 'error', 'error': _kod,
+                        'message': str(e)}), 501
     except Exception as e:
         traceback.print_exc()
         return jsonify({'status': 'error', 'error': str(e)}), 500

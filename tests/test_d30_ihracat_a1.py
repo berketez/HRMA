@@ -30,14 +30,6 @@ _STEP_GEREKLI = pytest.mark.skipif(
     not kurulu_mu('build123d'),
     reason='build123d kurulu değil (STEP üretimi atlanır)')
 
-#: BORÇ imi — TestOHD2909AileRetKodu [saglikli-/api/export-step] hücresinin
-#: notuna bakın. Modül düzeyinde: sınıf gövdesindeki liste ifadesi sınıf
-#: adlarını göremez.
-_STEP_URETIM_501_BORCU = pytest.mark.xfail(
-    not kurulu_mu('build123d'), strict=True,
-    reason=('BORÇ v3.0.1: build123d yokken /api/export-step 501 '
-            'gövdesinin error alanı cümle, makine kodu değil'))
-
 #: D29 app-api-uc a2 K5'in ihracat ailesi — olcut degistirilmedi.
 IHRACAT_UCLARI = (
     '/api/export-stl', '/api/export-dxf', '/api/export-step',
@@ -106,20 +98,13 @@ class TestOHD2909AileRetKodu:
         'motor_data_metin': {'motor_data': 'abc'},
     }
 
-    # Hücreler eski iki yığılı parametrize ile AYNI: aynı sıra, aynı düğüm
-    # kimlikleri ("etiket-yol"). Tek ek: [saglikli-/api/export-step] hücresi
-    # build123d YOKKEN bilinen bir sözleşme ihlalini ölçer ve sıkı xfail ile
-    # BORÇ olarak imlenir (atlanmaz): o ortamda uç 501 döner ve ``error``
-    # alanına makine kodu yerine cümle yazar ("build123d kurulu değil — …").
-    # Paketlenen uygulamada build123d her zaman vardır (ihlal yalnız
-    # build123d'siz kaynak kurulumunda görülür). Borç ödenince XPASS strict
-    # imi kırar ve imi kaldırtır. build123d VARKEN hücre 200 alır ve
-    # "kabul ediliyor" diye atlanır (eskisi gibi).
-    @pytest.mark.parametrize('etiket,yol', [
-        pytest.param(etiket, yol, marks=_STEP_URETIM_501_BORCU)
-        if (etiket, yol) == ('saglikli', '/api/export-step')
-        else (etiket, yol)
-        for etiket in sorted(GOVDELER) for yol in IHRACAT_UCLARI])
+    # v3.0.0 (15 Eki): [saglikli-/api/export-step] hücresi build123d YOKKEN
+    # uçun 501 gövdesini ölçer — CI'da (38770162288) error alanı cümleydi;
+    # ürün düzeltildi (app.py export_step_files: error = makine kodu,
+    # cümle message'da). build123d VARKEN hücre 200 alır ve "kabul
+    # ediliyor" diye atlanır.
+    @pytest.mark.parametrize('yol', IHRACAT_UCLARI)
+    @pytest.mark.parametrize('etiket', sorted(GOVDELER))
     def test_ret_govdesinde_error_kod_biciminde(self, istemci, yol, etiket):
         cevap, govde = _post(istemci, yol, dict(self.GOVDELER[etiket]))
         if cevap.status_code < 400:
