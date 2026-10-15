@@ -1,0 +1,7 @@
+{
+  "tag": "v2.6.26 (DMG) + v3.0.0 ilk derleme (EXE)",
+  "dmg_bytes": 551578035,
+  "exe_bytes": 276117439,
+  "_source": "dmg_bytes: gh release view v2.6.26 --json assets (HRMA-Setup-2.6.26-macOS.dmg), 15 Eki 2026. exe_bytes: v3.0.0 ilk Windows derlemesi, commit 5fb243cc3, makensis 15 Eki 2026 17:18 (HRMA-Setup-3.0.0.exe), ölçüldü.",
+  "_note": "v3.0.0 EXE'si 2.6.26'ya göre +%21,3 (sınır ±%20). Büyüme içerik olarak doğrulandı (15 Eki, 2.6.26 payload ağacıyla du karşılaştırması, MiB): app/ 31,1 -> 96,6; hrma/static/map +29,4 (çevrimdışı harita: bm_pyr 17,3, vectors_10m.bin 10,4), hrma/static/docs +19,6 (uygulama içi kullanma kılavuzları TR 10,5 + EN 12,0), js + img +3,9; libs +3,0 (cloudpickle); python 0. DMG tabanı 2.6.26'da kalır (beklenen sapma sınırın içinde). Sonraki yayında bu dosya v3.0.0'ın gerçek varlık boyutlarıyla güncellenir ya da silinir (silinirse kapı önceki yayını gh api'den okur)."
+}

@@ -5,6 +5,13 @@ B="$(cd "$(dirname "$0")" && pwd)"
 RES="$B/mac/build.noindex/HRMA.app/Contents/Resources"
 PY="$RES/python/bin/python3.12"
 export RES
+# Duman testi denediği paketi DEĞİŞTİRMEZ. ÖLÇÜLDÜ (15 Eki, v3.0.0): 2.
+# bölüm paketin python'unu launcher'sız koşturuyor ve stdlib için __pycache__
+# yazıyordu (zoneinfo, ctypes, unittest, ...); codesign "a sealed resource is
+# missing or invalid" dedi. DMG bu ağaçtan üretildiği için bozuk mühür
+# kullanıcıya giderdi. Kurulu uygulamada launcher.py (_muhru_koru) aynı kapıyı
+# zaten kapatıyor; test de aynı koşulda koşar.
+export PYTHONDONTWRITEBYTECODE=1
 
 if curl -s -o /dev/null --max-time 2 http://127.0.0.1:8085/; then
   echo "HATA: 8085 portunda zaten bir sunucu var, test sağlıklı olmaz. Önce onu kapat."

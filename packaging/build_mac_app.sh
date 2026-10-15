@@ -254,9 +254,25 @@ python3 -m pip install --target "$RES/libs" --no-deps --only-binary=:all: \
 python3 -m pip install --target "$RES/libs" --no-deps --upgrade \
     proxy_tools==0.1.0 --no-warn-script-location
 
+# build123d + ocp-gordon: requirements_bundle.txt "2. AŞAMA" beyanı (numpy>=2
+# deklare ediyorlar, 1.26.4 ile çalışıyorlar) → --no-deps; Windows'ta
+# build_win_payload.sh [3/6] aynı pinlerle kuruyor.
+# ÖLÇÜLDÜ (15 Eki, v3.0.0 derlemesi): bu adım macOS'ta HİÇ YOKTU.
+# test_bundle_mac.sh "No module named 'build123d'" ile durdu; 2.6.26'nın
+# .app'inde de build123d yok (yalnız OCP/ocpsvg). Eksiklik SESSİZDİ:
+# step_export.py içe aktarımı try/except ile sarıyor, BUILD123D_AVAILABLE
+# False oluyor ve macOS'ta STEP dışa aktarımı devre dışı kalıyordu.
+# tools/bundle_kapisi.py beyanı iki betiğin BİRLEŞİK metniyle çaprazladığı
+# için tek platformdaki eksiği göremiyordu.
+python3 -m pip install --target "$RES/libs" --no-deps --only-binary=:all: \
+    --upgrade build123d==0.11.1 ocp-gordon==0.2.0 --no-warn-script-location
+
 # Doğrulama: pywebview'in JS varlıkları olmadan pencere açılışta çöker
 # (OC_PythonException: Cannot find JS directory — 2026-07-14 vakası)
 [ -d "$RES/libs/webview/js" ] || { echo "HATA: webview/js eksik!"; exit 1; }
+# build123d: yokluğu SESSİZ (STEP dışa aktarımı kapanır; yukarıdaki not)
+[ -d "$RES/libs/build123d" ] || { echo "HATA: build123d eksik!"; exit 1; }
+[ -d "$RES/libs/ocp_gordon" ] || { echo "HATA: ocp_gordon eksik!"; exit 1; }
 [ -d "$RES/libs/reportlab" ] || { echo "HATA: reportlab eksik!"; exit 1; }
 # openpyxl: /api/export-xlsx — saha hatası 2026-07-20 (bundle'da yoktu)
 [ -d "$RES/libs/openpyxl" ] || { echo "HATA: openpyxl eksik!"; exit 1; }
